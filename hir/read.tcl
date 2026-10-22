@@ -6,10 +6,11 @@
 # HIR text is exactly what hir::format prints (with or without -origins),
 # optionally with comment lines starting with # and blank lines. It states
 # the semantic facts explicitly: binding ids, scopes, types, captures,
-# refinements, call targets and flags. Parsing rebuilds a complete HIR
-# program from them (including what the text implies but does not print:
-# binding kinds and types, scope structure, closures, root symbols,
-# diagnostics, origins), so it can be lowered, formatted or compiled.
+# refinements, call targets and flags, and a program's module sections.
+# Parsing rebuilds a complete HIR program from them (including what the text
+# implies but does not print: binding kinds and types, scope structure,
+# closures, root symbols, diagnostics, origins, the coroutine protocols), so
+# it can be lowered, formatted or compiled.
 #
 # Parsing checks the text is well-formed and internally consistent (ids
 # declared once, references to visible bindings, a block's type naming the
@@ -210,8 +211,11 @@ proc hir::read::TypeDecls {lines} {
 
 # The `traits` entry hir::format::TraitDecl's line CONTENT states.
 proc hir::read::TraitLine {content number} {
-    if {![regexp {^trait (\S+)( context)? owner (\S+) requires (.+)$} $content -> id context owner reqsText]} {
-        Fail $number "expected \"trait ID ?context? owner NS requires REQ ; ...\""
+    if {![regexp {^trait (\S+)( context)?( intrinsic)? owner (\S+) requires (.+)$} $content -> id context intrinsic owner reqsText]} {
+        Fail $number "expected \"trait ID ?context? ?intrinsic? owner NS requires REQ ; ...\""
+    }
+    if {$intrinsic ne "" && ![hir::traits::isIntrinsicName $id]} {
+        Fail $number "\"$id\" is not an intrinsic trait of this front end"
     }
     set requirements {}
     foreach text [split [string map {" ; " \x01} $reqsText] \x01] {
@@ -252,7 +256,7 @@ proc hir::read::TraitLine {content number} {
     }
     return [dict create id $id name [lindex [split [string map {:: \x01} $id] \x01] end] \
         namespace [if {$owner eq "-"} {string cat ""} else {set owner}] requirements $requirements \
-        context [expr {$context ne ""}]]
+        context [expr {$context ne ""}] intrinsic [expr {$intrinsic ne ""}]]
 }
 
 # The `kind enum` declaration (hir::enums::apply's input) of the enum line
@@ -467,8 +471,36 @@ proc hir::read::Program {text} {
 
     set roots {}
     set index 0
+    set ownStatements 0
     while {[dict get $hir pos] < [llength $lines]} {
+        lassign [Peek $hir] lineIndent content number
+        if {$lineIndent == 0 && [regexp {^module (\S+) (s[0-9]+)(?: binds (.*))?$} $content -> ns s sectionBinds]} {
+            # A module section (hir::format::Sections): its own "program"-
+            # kind scope, a sibling of the program's under the root, and its
+            # statements one level below the line. Module sections come
+            # before the program's own statements, as they run.
+            if {$mode ne "program"} {
+                Fail $number "a module section belongs to a program, not to an ambient sequence"
+            }
+            if {$ownStatements} {
+                Fail $number "module section $ns follows the program's own statements: module sections come first"
+            }
+            if {[dict exists $hir modules $ns]} {
+                Fail $number "module $ns has two sections"
+            }
+            NewScope hir $s program $root "" "" {ir {}} $number
+            Declare hir $s $sectionBinds local $number
+            dict set hir modules $ns $s
+            dict set hir moduleScopeIds $s 1
+            dict incr hir pos
+            while {[dict get $hir pos] < [llength $lines] && [lindex [Peek $hir] 0] > 0} {
+                lappend roots [Expr hir 1 $s [list $index] ""]
+                incr index
+            }
+            continue
+        }
         lappend roots [Expr hir 0 $top [list $index] ""]
+        set ownStatements 1
         incr index
     }
     dict set hir roots $roots
@@ -497,6 +529,11 @@ proc hir::read::Program {text} {
         dict set hir traitFunctions $lastTraitFunctions
     }
     Finish hir
+    # The coroutine protocols (hir/coroutines.tcl), which the text does not
+    # print, are a function of the HIR alone (hir::check): inferred here as
+    # a build infers them. Native lowering types a coroutine's resumes and
+    # yields from them.
+    hir::coroutines::analyze hir
     hir::declarations::stamp hir
     return $hir
 }
@@ -630,7 +667,13 @@ proc hir::read::Referenced {hirVar b name s number} {
         if {[dict get $binding name] ne $name} {
             Fail $number "binding $b is named \"[dict get $binding name]\", not \"$name\""
         }
-        if {![hir::scopeWithin $hir $s [dict get $binding scope]]} {
+        # A module section's binding has program lifetime and is named,
+        # qualified, from the program and from other modules' sections as
+        # resolution lets them (hir::resolve's qualified references):
+        # visible from every scope, and still held to its declaration's
+        # order by Finish's forward-reference check.
+        if {![hir::scopeWithin $hir $s [dict get $binding scope]]
+                && ![dict exists $hir moduleScopeIds [dict get $binding scope]]} {
             Fail $number "binding $b is not visible here"
         }
         return
@@ -703,6 +746,18 @@ proc hir::read::ParseType {text number} {
         }
         return [hir::types::MakeFn $argTypes [ParseType $returnText $number] $errors]
     }
+    set applied [hir::refinements::ParseApplied $text]
+    if {$applied ne ""} {
+        # A scalar refinement of an applied type (LIST-CARDINALITY-
+        # REFINEMENTS.md): hir::types::show's spelling, the base read back
+        # like any type, then refined.
+        lassign $applied family baseText facts
+        set type [hir::types::Refine [ParseType $baseText $number] $family $facts]
+        if {![hir::types::IsRefinedApplied $type]} {
+            Fail $number "bad scalar refinement \"$text\": the base states other facts, or none can be refined"
+        }
+        return $type
+    }
     if {[hir::refinements::isFamily [lindex [split $text "\{"] 0]] && [string index $text end] eq "\}"} {
         # A scalar refinement (hir/refinements.tcl, DECIMAL-ROUNDED-
         # MILESTONE-1.md): hir::types::show's source spelling.
@@ -770,6 +825,12 @@ proc hir::read::ParseType {text number} {
     if {[regexp {^NativeEdit\[(\S+)\]$} $text -> layout] && [hir::layouts::declared $layout]} {
         # A native edit (NATIVE-LAYOUT-WRITES.md), likewise.
         return [hir::layouts::editType $layout]
+    }
+    set floating [hir::cabi::FloatingOfExpr $text]
+    if {$floating ne ""} {
+        # A C floating type (C-FLOAT-FFI-MILESTONE-1.md): hir::types::show
+        # prints {cfloat NAME} by its C spelling, and never a Float64 so.
+        return $floating
     }
     if {[regexp {^std::ffi::c::Ptr\[(.+)\]$} $text -> inner]} {
         # A C data pointer (C-ABI-TYPES.md): its pointee identity, as
@@ -1048,11 +1109,14 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?variadic N? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
+            }
+            if {$variadic ne ""} {
+                SetField hir $e variadic $variadic
             }
             if {$contexts ne ""} {
                 SetField hir $e directContexts [lindex $contexts 0]
@@ -1107,7 +1171,12 @@ proc hir::read::Expr {hirVar level s path block} {
                 SetField hir $e coroutineEffect $effectText
             }
             if {[dict exists $cloneText views]} {
-                SetField hir $e traitClone [dict get $hir bindings [lindex $paramIds 0] name]
+                # The clone's key (hir::traits' plan: its function and the
+                # views it was cloned for) is not in the text, and nothing
+                # reads it from a built HIR but hir::format, for its
+                # presence. A clone may have no parameter at all (a context
+                # trait's clone of a parameterless function).
+                SetField hir $e traitClone {}
                 foreach item [if {[dict get $cloneText views] eq ""} {string cat {}} else {split [string map {", " \x01} [dict get $cloneText views]] \x01}] {
                     if {![regexp {^(b[0-9]+) \S+: (\S+)$} $item -> vb vtrait] || [lsearch -exact $paramIds $vb] < 0} {
                         Fail $number "expected \"BINDING NAME: TRAIT\" in a clone's views"
@@ -1144,8 +1213,13 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         call {
-            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?(?: imprint \[(.+?)\])?(?: (trait|contexttrait) (\S+)\.(\S+) witness (.+))?$} $head -> native target generic known installs imprintText traitWord traitId requirement witnessText]} {
-                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID? ?imprint \[TYPE, ...\]? ?trait|contexttrait TRAIT.OP witness TYPE?\""
+            if {![regexp {^(?:native\((.+?)\)|block\((e[0-9]+)\)|(generic))(?: = (true|false))?(?: installs (\S+))?(?: imprint \[(.+?)\])?(?: variadic ([0-9]+) ([0-9]+))?(?: (trait|contexttrait) (\S+)\.(\S+) witness (.+))?$} $head -> native target generic known installs imprintText variadicFixed variadicCount traitWord traitId requirement witnessText]} {
+                Fail $number "expected \"call native(NAME)|block(EXPR)|generic ?= true|false? ?installs ID? ?imprint \[TYPE, ...\]? ?variadic FIXED COUNT? ?trait|contexttrait TRAIT.OP witness TYPE?\""
+            }
+            if {$variadicFixed ne ""} {
+                # A call of a variadic function (hir/variadic.tcl): its last
+                # argument collects COUNT trailing arguments.
+                SetField hir $e variadic [dict create fixed $variadicFixed count $variadicCount]
             }
             if {$imprintText ne ""} {
                 # Explicit imprints (hir/imprint.tcl), as hir::format wrote
@@ -1490,7 +1564,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1513,6 +1587,15 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {[regexp {^ nomethod(.*)$} $rest -> after]} {
         set nomethod 1
         set rest $after
+    }
+    # A variadic function's fixed parameter count (VARIADICS-VERTICAL-
+    # SLICE-1.md), as hir::format prints it.
+    if {$variadicVar ne ""} {
+        upvar 1 $variadicVar variadic
+        set variadic ""
+        if {[regexp {^ variadic ([0-9]+)(.*)$} $rest -> variadic after]} {
+            set rest $after
+        }
     }
     # A trait clone's parameter views and a declared trait result
     # (TRAITS.md), as hir::format prints them.
@@ -1607,6 +1690,10 @@ proc hir::read::CanonicalType {hir type} {
             return [hir::types::blockType $hir $e $arity $result]
         }
         return [lreplace $type 3 3 $result]
+    }
+    if {[hir::types::IsRefinedApplied $type]} {
+        return [hir::types::Refine [CanonicalType $hir [hir::refinements::Base $type]] \
+            [hir::refinements::Family $type] [hir::refinements::Facts $type]]
     }
     if {[hir::types::IsList $type]} {
         set out [lreplace $type 1 1 [CanonicalType $hir [lindex $type 1]]]

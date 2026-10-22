@@ -264,7 +264,7 @@ if {[catch {string trim [exec git -C $auditRoot rev-parse HEAD]} commit]} {
     set commit "unknown (not a git checkout)"
     set dirty ""
 } else {
-    set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench lib]]
+    set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench stdlib]]
 }
 puts "# MANY-BOOLEAN-ARGUMENTS corpus audit: tclsh9.0 audit/many-boolean-arguments/tools/corpus.tcl"
 puts "# commit $commit (corpus paths [expr {$dirty eq "" ? "clean" : "MODIFIED: $dirty"}])"

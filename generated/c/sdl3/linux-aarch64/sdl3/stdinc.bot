@@ -502,6 +502,9 @@ extern c fn SDL_ulltoa(
 # C: int SDL_atoi(const char *str)
 extern c fn SDL_atoi(str: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 
+# C: double SDL_atof(const char *str)
+extern c fn SDL_atof(str: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Double
+
 # C: long SDL_strtol(const char *str, char **endp, int base)
 extern c fn SDL_strtol(
     str: std::ffi::c::Ptr[std::ffi::c::Char],
@@ -529,6 +532,12 @@ extern c fn SDL_strtoull(
     endp: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]],
     base: std::ffi::c::Int
 ) -> std::ffi::c::ULongLong
+
+# C: double SDL_strtod(const char *str, char **endp)
+extern c fn SDL_strtod(
+    str: std::ffi::c::Ptr[std::ffi::c::Char],
+    endp: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]
+) -> std::ffi::c::Double
 
 # C: int SDL_strcmp(const char *str1, const char *str2)
 extern c fn SDL_strcmp(
@@ -580,11 +589,44 @@ extern c fn SDL_UCS4ToUTF8(
     dst: std::ffi::c::Ptr[std::ffi::c::Char]
 ) -> std::ffi::c::Ptr[std::ffi::c::Char]
 
+# C: int SDL_sscanf(const char *text, const char *fmt, ...)
+extern c fn SDL_sscanf(
+    text: std::ffi::c::Ptr[std::ffi::c::Char],
+    fmt: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Int
+
+# C: int SDL_snprintf(char *text, size_t maxlen, const char *fmt, ...)
+extern c fn SDL_snprintf(
+    text: std::ffi::c::Ptr[std::ffi::c::Char],
+    maxlen: std::ffi::c::ULong,
+    fmt: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Int
+
+# C: int SDL_swprintf(wchar_t *text, size_t maxlen, const wchar_t *fmt, ...)
+extern c fn SDL_swprintf(
+    text: std::ffi::c::Ptr[std::ffi::c::UInt],
+    maxlen: std::ffi::c::ULong,
+    fmt: std::ffi::c::Ptr[std::ffi::c::UInt],
+    variadic
+) -> std::ffi::c::Int
+
+# C: int SDL_asprintf(char **strp, const char *fmt, ...)
+extern c fn SDL_asprintf(
+    strp: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]],
+    fmt: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Int
+
 # C: void SDL_srand(Uint64 seed)
 extern c fn SDL_srand(seed: std::ffi::c::ULong) -> unit
 
 # C: Sint32 SDL_rand(Sint32 n)
 extern c fn SDL_rand(n: std::ffi::c::Int) -> std::ffi::c::Int
+
+# C: float SDL_randf(void)
+extern c fn SDL_randf() -> std::ffi::c::Float
 
 # C: Uint32 SDL_rand_bits(void)
 extern c fn SDL_rand_bits() -> std::ffi::c::UInt
@@ -595,8 +637,191 @@ extern c fn SDL_rand_r(
     n: std::ffi::c::Int
 ) -> std::ffi::c::Int
 
+# C: float SDL_randf_r(Uint64 *state)
+extern c fn SDL_randf_r(state: std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::Float
+
 # C: Uint32 SDL_rand_bits_r(Uint64 *state)
 extern c fn SDL_rand_bits_r(state: std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::UInt
+
+# C: double SDL_acos(double x)
+extern c fn SDL_acos(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_acosf(float x)
+extern c fn SDL_acosf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_asin(double x)
+extern c fn SDL_asin(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_asinf(float x)
+extern c fn SDL_asinf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_atan(double x)
+extern c fn SDL_atan(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_atanf(float x)
+extern c fn SDL_atanf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_atan2(double y, double x)
+extern c fn SDL_atan2(
+    y: std::ffi::c::Double,
+    x: std::ffi::c::Double
+) -> std::ffi::c::Double
+
+# C: float SDL_atan2f(float y, float x)
+extern c fn SDL_atan2f(
+    y: std::ffi::c::Float,
+    x: std::ffi::c::Float
+) -> std::ffi::c::Float
+
+# C: double SDL_ceil(double x)
+extern c fn SDL_ceil(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_ceilf(float x)
+extern c fn SDL_ceilf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_copysign(double x, double y)
+extern c fn SDL_copysign(
+    x: std::ffi::c::Double,
+    y: std::ffi::c::Double
+) -> std::ffi::c::Double
+
+# C: float SDL_copysignf(float x, float y)
+extern c fn SDL_copysignf(
+    x: std::ffi::c::Float,
+    y: std::ffi::c::Float
+) -> std::ffi::c::Float
+
+# C: double SDL_cos(double x)
+extern c fn SDL_cos(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_cosf(float x)
+extern c fn SDL_cosf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_exp(double x)
+extern c fn SDL_exp(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_expf(float x)
+extern c fn SDL_expf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_fabs(double x)
+extern c fn SDL_fabs(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_fabsf(float x)
+extern c fn SDL_fabsf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_floor(double x)
+extern c fn SDL_floor(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_floorf(float x)
+extern c fn SDL_floorf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_trunc(double x)
+extern c fn SDL_trunc(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_truncf(float x)
+extern c fn SDL_truncf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_fmod(double x, double y)
+extern c fn SDL_fmod(
+    x: std::ffi::c::Double,
+    y: std::ffi::c::Double
+) -> std::ffi::c::Double
+
+# C: float SDL_fmodf(float x, float y)
+extern c fn SDL_fmodf(
+    x: std::ffi::c::Float,
+    y: std::ffi::c::Float
+) -> std::ffi::c::Float
+
+# C: int SDL_isinf(double x)
+extern c fn SDL_isinf(x: std::ffi::c::Double) -> std::ffi::c::Int
+
+# C: int SDL_isinff(float x)
+extern c fn SDL_isinff(x: std::ffi::c::Float) -> std::ffi::c::Int
+
+# C: int SDL_isnan(double x)
+extern c fn SDL_isnan(x: std::ffi::c::Double) -> std::ffi::c::Int
+
+# C: int SDL_isnanf(float x)
+extern c fn SDL_isnanf(x: std::ffi::c::Float) -> std::ffi::c::Int
+
+# C: double SDL_log(double x)
+extern c fn SDL_log(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_logf(float x)
+extern c fn SDL_logf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_log10(double x)
+extern c fn SDL_log10(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_log10f(float x)
+extern c fn SDL_log10f(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_modf(double x, double *y)
+extern c fn SDL_modf(
+    x: std::ffi::c::Double,
+    y: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Double
+
+# C: float SDL_modff(float x, float *y)
+extern c fn SDL_modff(
+    x: std::ffi::c::Float,
+    y: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Float
+
+# C: double SDL_pow(double x, double y)
+extern c fn SDL_pow(
+    x: std::ffi::c::Double,
+    y: std::ffi::c::Double
+) -> std::ffi::c::Double
+
+# C: float SDL_powf(float x, float y)
+extern c fn SDL_powf(
+    x: std::ffi::c::Float,
+    y: std::ffi::c::Float
+) -> std::ffi::c::Float
+
+# C: double SDL_round(double x)
+extern c fn SDL_round(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_roundf(float x)
+extern c fn SDL_roundf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: long SDL_lround(double x)
+extern c fn SDL_lround(x: std::ffi::c::Double) -> std::ffi::c::Long
+
+# C: long SDL_lroundf(float x)
+extern c fn SDL_lroundf(x: std::ffi::c::Float) -> std::ffi::c::Long
+
+# C: double SDL_scalbn(double x, int n)
+extern c fn SDL_scalbn(
+    x: std::ffi::c::Double,
+    n: std::ffi::c::Int
+) -> std::ffi::c::Double
+
+# C: float SDL_scalbnf(float x, int n)
+extern c fn SDL_scalbnf(
+    x: std::ffi::c::Float,
+    n: std::ffi::c::Int
+) -> std::ffi::c::Float
+
+# C: double SDL_sin(double x)
+extern c fn SDL_sin(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_sinf(float x)
+extern c fn SDL_sinf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_sqrt(double x)
+extern c fn SDL_sqrt(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_sqrtf(float x)
+extern c fn SDL_sqrtf(x: std::ffi::c::Float) -> std::ffi::c::Float
+
+# C: double SDL_tan(double x)
+extern c fn SDL_tan(x: std::ffi::c::Double) -> std::ffi::c::Double
+
+# C: float SDL_tanf(float x)
+extern c fn SDL_tanf(x: std::ffi::c::Float) -> std::ffi::c::Float
 
 # C: SDL_iconv_t SDL_iconv_open(const char *tocode, const char *fromcode)
 extern c fn SDL_iconv_open(

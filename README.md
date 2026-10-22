@@ -1,8 +1,35 @@
-<p align=center>
-    <img src="./robot.transparent.svg" style="width: 10vw;">
+<div align="center">
+
+<img src="./docs/assets/readme-banner.svg" alt="Botlish: a language for humans and agents alike" width="100%" />
+
+<img src="./robot.cyan.svg" alt="Botlish robot" width="96" />
+
+<br />
+
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the+language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adopts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adopts to local conventions." />
+
+<br />
+
+<p>
+  <a href="#download-the-single-file-compiler"><img src="./docs/assets/download-badge.svg" alt="Download" /></a>
+  <a href="#why-botlish"><img src="https://img.shields.io/badge/why_botlish-0e7490?style=for-the-badge" alt="Why Botlish" /></a>
+  <a href="#a-tour"><img src="https://img.shields.io/badge/a_tour-0e7490?style=for-the-badge" alt="A tour" /></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/getting_started-0e7490?style=for-the-badge" alt="Getting started" /></a>
+  <a href="#how-it-is-built"><img src="https://img.shields.io/badge/how_it_is_built-0e7490?style=for-the-badge" alt="How it is built" /></a>
+  <a href="docs/INDEX.md"><img src="https://img.shields.io/badge/docs-0e7490?style=for-the-badge" alt="Docs" /></a>
 </p>
 
-# Botlish
+<p>
+  <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/mwagner-webdev/botlish/tests.yml?branch=main&style=flat-square&label=tests&labelColor=164e63&color=0e7490&logo=githubactions&logoColor=white" alt="tests" /></a>
+  <a href="#why-tcl"><img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" /></a>
+  <img src="https://img.shields.io/badge/Rust-1.95%2B-0e7490?style=flat-square&labelColor=164e63&logo=rust&logoColor=white" alt="Rust 1.95+" />
+  <img src="https://img.shields.io/badge/native-Cranelift-0e7490?style=flat-square&labelColor=164e63" alt="Cranelift" />
+  <img src="https://img.shields.io/badge/Linux-x86--64%20%C2%B7%20arm64-0e7490?style=flat-square&labelColor=164e63&logo=linux&logoColor=white" alt="Linux x86-64 and arm64" />
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&labelColor=164e63&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  <img src="https://img.shields.io/badge/license-MIT-0e7490?style=flat-square&labelColor=164e63" alt="MIT" />
+</p>
+
+</div>
 
 **A high-level, native-capable, safe and friendly language for building
 applications, designed to be written and read by humans and agents alike.**
@@ -56,7 +83,73 @@ into a direct call of `std::linux::io::write_text`, which is one `write(2)` syst
 call: no dispatch, no hidden argument, no libc in the path. The one way
 `hello` can fail, `std::io::WriteFailed`, is part of its signature, and its caller
 handles it. ([examples/io/hello.bot](examples/io/hello.bot),
-[CONTEXT-TRAITS.md](docs/CONTEXT-TRAITS.md))
+[CONTEXT-TRAITS.md](docs/CONTEXT-TRAITS.md)) On macOS the same `hello`
+runs with `std::darwin::io::create()` installed instead, and the write is
+libSystem's `write(2)`, called through the C FFI
+([examples/io/hello-darwin.bot](examples/io/hello-darwin.bot),
+[MACOS-AARCH64-MILESTONE-8.md](docs/MACOS-AARCH64-MILESTONE-8.md)).
+
+## Download the single-file compiler
+
+<p align="center">
+  <a href="https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64"><img src="./docs/assets/download-linux.svg" alt="Download Botlish: the single-file compiler for Linux x86-64" width="460" /></a>
+</p>
+
+The whole compiler is one Linux x86-64 executable: the command line, the
+standard library, every backend and the native code generator, in a single
+file that needs nothing but glibc (2.39 or newer). There is no Tcl, Rust, C
+compiler or linker to install, and the standalone executables it builds need
+nothing else either. CI builds it from `main` on every push and publishes
+each build that passes its smoke tests, run in stock Ubuntu containers, as
+the [`single-latest` release](https://github.com/mwagner-webdev/botlish/releases/tag/single-latest),
+with its SHA-256 checksum. Save the program above as `hello.bot`, then:
+
+```sh
+curl -fLo botlish https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64
+chmod +x botlish
+./botlish -backend cranelift hello.bot                   # run natively, just in time
+./botlish -emit-native-executable hello.bot && ./hello   # build a standalone executable
+./botlish -help                                          # Compilerpedia, the built-in reference
+```
+
+**No C calls yet.** A program that calls C (`extern c fn`,
+[C-FFI.md](docs/C-FFI.md)) compiles, but its native link is refused
+(`NATIVE LINK`): the single-file compiler links with its own stub linker,
+which links no C library. FFI support is coming to it soon; until then such a
+program needs a checkout with the native backend built
+([Getting started](#getting-started)). How the single file is built and what
+it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
+
+## Icy Tower, a game in Botlish
+
+<p align="center">
+  <img src="./audit/icy-tower/screenshots/xvfb-x11.png" alt="Three frames of Icy Tower in an X11 window: the start, floor 26, and a restarted game" width="100%" />
+</p>
+
+[examples/games/icy-tower/](examples/games/icy-tower/) is a small real-time
+game in the style of Icy Tower: about 1,300 lines of ordinary Botlish over
+the [generated SDL3 binding](docs/C-BINDGEN.md). It opens a window, reads the
+keyboard, bounces the player off platforms under gravity, generates the
+tower forever, scrolls the camera up, keeps the score, and restarts. It
+compiles to one native Linux x86-64 executable of under 1 MB, with no assets
+beside it.
+
+<p align="center">
+  <a href="https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower"><img src="./docs/assets/download-icy-tower.svg" alt="Download Icy Tower: a game written in Botlish, for Linux x86-64" width="460" /></a>
+</p>
+
+```sh
+curl -fLo icy-tower https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower
+chmod +x icy-tower
+./icy-tower      # Left/A and Right/D move, R restarts, Escape quits
+```
+
+It needs SDL 3 (`libSDL3.so.0`, from your distribution's SDL 3 package) and
+glibc 2.34 or newer. The game calls C, so the single-file compiler cannot
+link it yet; `examples/games/icy-tower/build.sh` builds it from a checkout.
+Its rules run headless on all four backends, the executable agrees with an
+independent oracle, and valgrind finds no leaks
+([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).
 
 ## Botlish and Rust
 
@@ -446,8 +539,8 @@ tclsh9.0 tests/local.tcl                                      # the whole test s
 
 `single/build.sh` packs the compiler, both native executables and the
 standard library into one Linux x86-64 executable that needs nothing but
-glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)); CI publishes it
-as the `botlish-linux-x86_64` artifact.
+glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)), the one
+[the download button](#download-the-single-file-compiler) above fetches.
 
 ## How it is built
 
@@ -487,6 +580,48 @@ reference.
 Contributors, human or not, start with [AGENTS.md](AGENTS.md): how to run
 the tests, and what to re-run when you change a given part of the compiler.
 
+## Why Tcl
+
+The front end, the reference interpreter, the Tcl compiler, the lowering to
+NIR and the tools around them (the C binding generator, Compilerpedia, the
+test harness) are written in Tcl 9. This is a deliberate long-term choice.
+It is not a prototype waiting to be rewritten.
+
+* **Tcl is small enough to replace.** Its syntax is a dozen rules, and small
+  teams have reimplemented it several times: [Jim Tcl](https://jim.tcl-lang.org)
+  in C, [Eagle](https://eagle.to) for .NET, and TH1, a cut-down Tcl from the
+  SQLite project that now lives in Fossil. If Tcl ever died, or moved in a
+  direction Botlish cannot follow, the part of it the compiler uses could be
+  reimplemented in Botlish the same way. Botlish does not depend on Tcl's
+  upstream staying what it is.
+* **Tcl is the glue.** Compiler orchestration stays in Tcl, and so will
+  plugin orchestration: the coming plugin infrastructure is being built on
+  it. Tcl is not the only glue language, nor the most featureful, but it has
+  the best balance of size, features and development speed. The C binding
+  generator is an early sign that this works.
+  [`tools/c-bindgen.tcl`](tools/c-bindgen.tcl) drives a C toolchain, parses
+  real headers, probes the target's ABI, and emits Botlish source and C
+  thunks. It binds SDL3 (1217 functions), BoringSSL (3978), Win32 (3304) and
+  Tcl's own C API (829) ([C-BINDGEN.md](docs/C-BINDGEN.md)).
+* **Tcl is a good language to bootstrap a compiler in.** It is not very
+  opinionated and has the quality of a construction kit: lists, dicts,
+  namespaces, `uplevel`, `eval` and coroutines are general mechanisms that
+  combine well. It also fits Botlish's value orientation. Tcl's lists and
+  dicts are values, compared by content and copied on write; its integers
+  are arbitrary precision; Tcl 9's strings hold every Unicode character.
+  So HIR is a plain Tcl dict, which
+  [HIR interchange](docs/HIR-INTERCHANGE.md) writes as text and reads back
+  in another process. On the Tcl backends, each Botlish coroutine is one Tcl
+  coroutine ([COROUTINES.md](docs/COROUTINES.md)). The interpreter's and the
+  compiler's internals may be rewritten in Botlish one day, but only when
+  that is actually needed.
+* **Tcl core only.** The Tcl in Botlish's compiler infrastructure will only
+  ever depend on the Tcl core and on extensions written in Botlish itself:
+  no third-party extensions, not even Tcllib. Today that means `Tcl` and
+  `tcltest`, which ships with Tcl. The core is all there is to keep working,
+  so the code stays future-proof, and a Botlish reimplementation of Tcl
+  would only ever need to cover the core.
+
 ## Status
 
 Botlish is young and changes quickly; most of its features arrived as
@@ -499,3 +634,9 @@ backends run wherever Tcl 9 does.
 ## License
 
 [MIT](LICENSE)
+
+<div align="center">
+
+<img src="./docs/assets/readme-footer.svg" alt="" width="100%" />
+
+</div>

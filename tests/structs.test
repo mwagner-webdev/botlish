@@ -307,7 +307,7 @@ test struct-named-field-authoritative {a named struct field has its declared typ
 
 test struct-named-in-containers {named structs are ordinary element types} -body {
     structTypes "import std::list\n${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = std::list::at(ps, 0)\nn = p0.name"
-} -result {ps:List[Person] | p0:Person | n:str}
+} -result {ps:List[Person]{length: 1} | p0:Person | n:str}
 
 test struct-named-recursive-declaration {a struct may name itself: the type exists though no finite value constructs it} -body {
     structRun "struct Node:\n    next: Node\n    label: str\nfn follow(n: Node) -> Node:\n    n.next\n1"
@@ -460,7 +460,7 @@ test struct-type-nominal-lub {named structs join only with themselves; shape coi
 
 test struct-list-of-anonymous {anonymous structs of one field set infer List[struct]} -body {
     structTypes "import std::list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = std::list::at(xs, 1)\nn = second.name"
-} -result {xs:List[struct{age: int, name: str}] | second:struct{age: int, name: str} | n:str}
+} -result {xs:List[struct{age: int, name: str}]{length: 2} | second:struct{age: int, name: str} | n:str}
 
 test struct-list-of-anonymous-run {std::list::at of List[struct] keeps the struct type for a dynamic index} -body {
     structRun "import std::list\nxs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i) errors IndexNotFound:\n    std::list::at(xs, i).name\n\[at(0), at(1)\]"
@@ -735,8 +735,8 @@ q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
         set hir [surface::readProgramFile $path]
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         native::executable $hir [file rootname $path]
-        set plain [exec env PATH= [file rootname $path]]
-        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        set plain [runStandalone [file rootname $path]]
+        set stressed [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
     } finally {
         removeDirectory struct-exe
@@ -749,7 +749,7 @@ test struct-executable-module {a module-declared struct works in a standalone ex
         writeFile [file join $dir main.bot] "import geo\np = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
         set hir [surface::readProgramFile [file join $dir main.bot]]
         native::executable $hir [file join $dir main]
-        list [exec env PATH= [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
+        list [runStandalone [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
     }
 } -result {{[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]} {[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]}}
 

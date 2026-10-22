@@ -177,7 +177,7 @@ test loop-counted-natural-exhaustion-type {the loop's static type is List of the
 v}]
     set e [lindex [dict get $hir roots] end]
     hir::types::show [hir::typeOf $hir $e]
-} -result {List[int]}
+} -result {List[int]{length: 3}}
 
 test loop-counted-natural-exhaustion-parity {natural exhaustion agrees on every backend} -body {
     loopParity {loop i from 0 to 3:

@@ -643,7 +643,9 @@ proc hir::warnings::MethodEligible {hir} {
 # spelling (hir::resolve::CandidateIdentity: `binding:B` / `native:NAME`),
 # TARGET like a call's `target` ({block ExprId} / {native NAME}), PARAMS its
 # ordinary parameter count (flags are a separate category and not counted;
-# a variadic native has no fixed count and is not a candidate), METHOD the
+# a variadic native, and a variadic function -- VARIADICS-VERTICAL-SLICE-1.md,
+# whose call's arguments are its collected List, not what was written --,
+# has no fixed count and is not a candidate), METHOD the
 # name its method spelling would carry, SHOWN the callee as the diagnostic
 # names it. "" for anything else: a call through
 # a function value (a parameter, an alias, a call result, a projection) never
@@ -691,7 +693,7 @@ proc hir::warnings::NamedCallee {hir node} {
                 return ""
             }
             set block [dict get $hir exprs $d value]
-            if {[dict get $hir exprs $block kind] ne "block"} {
+            if {[dict get $hir exprs $block kind] ne "block" || [dict exists $hir exprs $block variadic]} {
                 return ""
             }
             set params [expr {[llength [dict get $hir exprs $block params]] - [llength [dict get $hir exprs $block flags]]}]

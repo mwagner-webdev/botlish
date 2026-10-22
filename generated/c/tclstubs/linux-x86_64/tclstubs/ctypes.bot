@@ -14,7 +14,7 @@ opaque struct Tcl_RegExpIndices:
 opaque struct Tcl_RegExpInfo:
     tag: unit
 
-# struct Tcl_Obj (generic/tcl.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct Tcl_Obj (generic/tcl.h), a complete C type: its layout is tclstubs::layouts::Tcl_Obj
 opaque struct Tcl_Obj:
     tag: unit
 
@@ -22,7 +22,7 @@ opaque struct Tcl_Obj:
 opaque struct Tcl_ObjType:
     tag: unit
 
-# union Tcl_ObjInternalRep (generic/tcl.h), a complete C type whose layout is blocked (layouts.tsv)
+# union Tcl_ObjInternalRep (generic/tcl.h), a complete C type: its layout is tclstubs::layouts::Tcl_ObjInternalRep
 opaque struct Tcl_ObjInternalRep:
     tag: unit
 

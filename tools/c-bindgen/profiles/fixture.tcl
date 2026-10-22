@@ -27,6 +27,8 @@ dict create \
         bgf_open {name {read noescape} result independent}
         bgf_digest {data {read noescape} out {write noescape} result {alias out}}
         bgf_fill {out {write noescape}}
+        bgf_printf {format {read noescape}}
+        bgf_print {format {read noescape}}
     } \
     groups {
         {name handles functions {bgf_close bgf_window_of bgf_walk bgf_handle_id} facts {handle noescape}}

@@ -6,16 +6,28 @@
  * (libbotlish_cffi_fixture.a) in a private directory and link Botlish
  * programs against it with `extern c library "botlish_cffi_fixture"` and
  * -L. Nothing in the compiler, the runtime or the libraries depends on it.
- * Every function is a plain fixed-signature C function of the ABI universe
- * extern c fn supports: integer scalars, C _Bool, data and function
- * pointers, void.
+ * Every function is a plain C function of the ABI universe extern c fn
+ * supports: integer scalars, C _Bool, data and function pointers, void.
+ * The variadic ones (VARIADICS-VERTICAL-SLICE-1.md, at the end) are genuine
+ * C variadic functions, reading their trailing arguments with <stdarg.h>.
  *
  * A few functions are assembly, where C cannot observe what the ABI
  * promises (a result register's bits beyond its width, the registers and
- * stack slots an argument arrives in): one text per instruction set, spelled
- * for the object format through BCF_FUNCTION (ELF's bare symbol and `.type`,
- * Mach-O's `_` user label prefix).
+ * stack slots an argument arrives in): one text per instruction set and
+ * calling convention, spelled for the object format through BCF_FUNCTION
+ * (ELF's bare symbol and `.type`, Mach-O's `_` user label prefix). On
+ * Windows x86-64 the C is compiled by MSVC's cl, which has no inline
+ * assembly for x64: the Win64 assembly is fixture-win64.asm (MASM, ml64),
+ * archived with this file's object (tests/ctoolchain.tcl,
+ * WINDOWS-X86-64-MILESTONE-2.md).
+ *
+ * `long` is the target's: 64 bits on LP64 (Linux, macOS), 32 on LLP64
+ * (Windows). The few values that need 64 bits of a `long` take the target's
+ * width from BCF_LONG_64 (the tests pass the same values).
  */
+#include <errno.h>
+#include <limits.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -29,6 +41,33 @@
 #elif defined(__aarch64__)
 #define BCF_FUNCTION(name) ".globl " #name "\n.type " #name ",%function\n.p2align 2\n" #name ":\n"
 #define BCF_CALL(name) #name
+#endif
+
+/* This file's GNU-syntax assembly: ELF on x86-64 (SysV) and AArch64, Mach-O
+ * on Apple AArch64; never Windows (fixture-win64.asm is its Win64 text). */
+#if defined(__x86_64__) && !defined(__APPLE__) && !defined(_WIN32)
+#define BCF_ASM_X86_64_SYSV 1
+#else
+#define BCF_ASM_X86_64_SYSV 0
+#endif
+#if defined(__aarch64__) && !defined(_WIN32)
+#define BCF_ASM_AARCH64 1
+#else
+#define BCF_ASM_AARCH64 0
+#endif
+
+/* Whether a C long is 64 bits (LP64) or 32 (LLP64: Windows). */
+#if LONG_MAX > 2147483647L
+#define BCF_LONG_64 1
+#else
+#define BCF_LONG_64 0
+#endif
+
+/* A function the compiler must not inline (bcf_deep). */
+#if defined(_MSC_VER)
+#define BCF_NOINLINE __declspec(noinline)
+#else
+#define BCF_NOINLINE __attribute__((noinline))
 #endif
 
 /* Scalars: each returns its argument, so a round trip shows the transport
@@ -102,6 +141,106 @@ void bcf_fill(unsigned char *out, unsigned long count, unsigned char seed) {
     }
 }
 
+/* C error state (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): POSIX's convention, as
+ * read(2) has it. Each writes its buffers first, then -- when ERR is not 0 --
+ * fails: errno ERR (the standard errno, the calling thread's) and the result
+ * -1, the bytes written before the failure left in place. ERR 0 succeeds with
+ * the count, leaving errno at STALE when that is not 0 (a successful call may
+ * change errno: its value means nothing then). Nothing in Botlish reads errno
+ * for them: tests/c-ffi-error-capture.test's binding reads it through
+ * __errno_location() (glibc) or __error() (Darwin) and a native view. */
+long bcf_fill_errno(unsigned char *out, unsigned long count, unsigned char seed, int err, int stale) {
+    bcf_fill(out, count, seed);
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    if (stale != 0) {
+        errno = stale;
+    }
+    return (long)count;
+}
+
+/* Two written buffers: A filled from seed 1, B from seed 2. */
+long bcf_fill2_errno(unsigned char *a, unsigned long na, unsigned char *b, unsigned long nb, int err) {
+    bcf_fill(a, na, 1);
+    bcf_fill(b, nb, 2);
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return (long)(na + nb);
+}
+
+/* Reads SRC (COUNT bytes), writes them reversed into DST. */
+long bcf_reverse_errno(const unsigned char *src, unsigned long count, unsigned char *dst, int err) {
+    for (unsigned long i = 0; i < count; i++) {
+        dst[i] = src[count - 1 - i];
+    }
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return (long)count;
+}
+
+/* 64-bit results outside Botlish's small-Int range (|v| >= 2^62; C-FFI-
+ * ERROR-CAPTURE-MILESTONE-2.md). bcf_large_error is iconv(3)'s convention:
+ * failing (FAIL not 0), errno FAIL and (size_t)-1; succeeding, the count 42.
+ * bcf_unsigned_errno and bcf_signed_errno return entry WHICH of a table of
+ * the small-Int boundary, setting errno to ERR when ERR is not 0 (a failure
+ * with that sentinel) and leaving it alone otherwise. */
+size_t bcf_large_error(int fail) {
+    if (fail != 0) {
+        errno = fail;
+        return (size_t)-1;
+    }
+    return 42;
+}
+
+/* bcf_fill_errno's shape with a size_t result: OUT filled from SEED, then,
+ * when ERR is not 0, errno ERR and (size_t)-1 -- a write-back value whose
+ * result is outside the small-Int range. */
+size_t bcf_fill_size(unsigned char *out, unsigned long count, unsigned char seed, int err) {
+    bcf_fill(out, count, seed);
+    if (err != 0) {
+        errno = err;
+        return (size_t)-1;
+    }
+    return count;
+}
+
+static const uint64_t bcf_unsigned_words[] = {
+    0, 5, 4611686018427387903u /* 2^62 - 1, the largest small Int */,
+    4611686018427387904u /* 2^62 */, 9223372036854775808u /* 2^63 */,
+    18446744073709551614u, 18446744073709551615u /* the largest 64-bit word */,
+};
+
+unsigned long bcf_unsigned_errno(int which, int err) {
+    if (err != 0) {
+        errno = err;
+    }
+    return (unsigned long)bcf_unsigned_words[which];
+}
+
+static const int64_t bcf_signed_words[] = {
+    0, -1, 4611686018427387903 /* 2^62 - 1 */, 4611686018427387904 /* 2^62 */,
+    INT64_MAX, -4611686018427387904 /* -2^62, the smallest small Int */,
+    -4611686018427387904 - 1 /* -2^62 - 1 */, INT64_MIN,
+};
+
+long bcf_signed_errno(int which, int err) {
+    if (err != 0) {
+        errno = err;
+    }
+    return (long)bcf_signed_words[which];
+}
+
+/* A counter, 1, 2, 3, ... on successive calls: how often and in what order
+ * a call's arguments are evaluated. */
+static unsigned char bcf_ticks;
+unsigned char bcf_tick(void) { return ++bcf_ticks; }
+
 /* SHA256's shape: reads DATA, writes OUT, returns OUT. */
 unsigned char *bcf_reverse(const unsigned char *data, unsigned long count, unsigned char *out) {
     for (unsigned long i = 0; i < count; i++) {
@@ -139,7 +278,7 @@ int bcf_apply(bcf_callback f, int x) { return f(x); }
  * so a caller must extend the result itself. These return 0x80 (as unsigned
  * char), -128 (as signed char), 0x8000 and -32768 with every higher bit of
  * the result register set the other way. */
-#if defined(__x86_64__) && !defined(__APPLE__)
+#if BCF_ASM_X86_64_SYSV
 __asm__(
     ".text\n"
     ".globl bcf_dirty_uchar\n.type bcf_dirty_uchar,@function\nbcf_dirty_uchar:\n"
@@ -154,7 +293,7 @@ __asm__(
     "    movabsq $0x55555555fffffff0, %rax\n    ret\n"
     ".globl bcf_dirty_int\n.type bcf_dirty_int,@function\nbcf_dirty_int:\n"
     "    movabsq $0x55555555fffffff0, %rax\n    ret\n");
-#elif defined(__aarch64__)
+#elif BCF_ASM_AARCH64
 __asm__(
     ".text\n"
     BCF_FUNCTION(bcf_dirty_uchar)
@@ -195,7 +334,7 @@ bcf_predicate bcf_predicate_odd(void) { return bcf_odd; }
  * platform ABIs have the caller zero-extend it as an unsigned char), and
  * _Bool results with dirty bits above the byte (valid: the bits are
  * unspecified) or a byte that is no _Bool (2: the call must fail). */
-#if defined(__x86_64__) && !defined(__APPLE__)
+#if BCF_ASM_X86_64_SYSV
 __asm__(
     ".text\n"
     ".globl bcf_bool_register\n.type bcf_bool_register,@function\nbcf_bool_register:\n"
@@ -206,7 +345,7 @@ __asm__(
     "    movabsq $0x5555555555555500, %rax\n    ret\n"
     ".globl bcf_invalid_bool\n.type bcf_invalid_bool,@function\nbcf_invalid_bool:\n"
     "    movl $2, %eax\n    ret\n");
-#elif defined(__aarch64__)
+#elif BCF_ASM_AARCH64
 __asm__(
     ".text\n"
     BCF_FUNCTION(bcf_bool_register)
@@ -230,29 +369,54 @@ unsigned long bcf_count(void) { return ++bcf_calls; }
  * in. */
 
 /* What a call of bcf_capture arrived in: the integer argument registers
- * (x0-x7 on AArch64; rdi, rsi, rdx, rcx, r8, r9 on x86-64), all 64 bits of
- * each, and the first 128 bytes at the stack pointer the caller left, where
- * its stack-passed arguments start. bcf_capture is assembly (below): it
- * saves the registers before any compiled code can touch them and hands
- * them to bcf_capture_record, which keeps them here. Declared with any
- * signature (each Botlish binding gives it one), it reads the arguments of
- * that signature without interpreting them, and returns 0. */
+ * (x0-x7 on AArch64; rdi, rsi, rdx, rcx, r8, r9 on x86-64 System V; rcx,
+ * rdx, r8, r9 on Win64), all 64 bits of each; on Win64 also the low 64 bits
+ * of the four floating-point argument registers (xmm0-xmm3), which Win64
+ * assigns by position beside the integer ones; and the first 256 bytes at
+ * the stack pointer the caller left, where its stack-passed arguments start
+ * (on Win64 after the 32 bytes of shadow space the caller reserves there).
+ * bcf_capture is assembly (below; fixture-win64.asm on Windows): it saves
+ * the registers before any compiled code can touch them and hands them to
+ * bcf_capture_record (bcf_capture_record_win64), which keeps them here.
+ * Declared with any signature (each Botlish binding gives it one), it reads
+ * the arguments of that signature without interpreting them, and returns
+ * 0. */
 static unsigned long long bcf_regs[8];
-static unsigned char bcf_stack[128];
+static unsigned long long bcf_fregs[4];
+static unsigned char bcf_stack[256];
 static unsigned long long bcf_ref_regs[8];
-static unsigned char bcf_ref_stack[128];
+static unsigned long long bcf_ref_fregs[4];
+static unsigned char bcf_ref_stack[256];
+/* The stack pointer at the call, modulo 16 (every ABI here aligns it to 16
+ * bytes at a call). */
+static int bcf_alignment;
 
 int bcf_capture_record(const unsigned long long *regs, const unsigned char *stack, int count) {
     for (int i = 0; i < 8; i++) {
         bcf_regs[i] = i < count ? regs[i] : 0;
     }
+    memset(bcf_fregs, 0, sizeof bcf_fregs);
     memcpy(bcf_stack, stack, sizeof bcf_stack);
+    bcf_alignment = (int)((uintptr_t)stack % 16);
+    return 0;
+}
+
+/* Win64's: SAVED holds rcx, rdx, r8, r9, then xmm0-xmm3's low 64 bits. */
+int bcf_capture_record_win64(const unsigned long long *saved, const unsigned char *stack) {
+    for (int i = 0; i < 8; i++) {
+        bcf_regs[i] = i < 4 ? saved[i] : 0;
+    }
+    for (int i = 0; i < 4; i++) {
+        bcf_fregs[i] = saved[4 + i];
+    }
+    memcpy(bcf_stack, stack, sizeof bcf_stack);
+    bcf_alignment = (int)((uintptr_t)stack % 16);
     return 0;
 }
 
 int bcf_capture(void);
 
-#if defined(__x86_64__) && !defined(__APPLE__)
+#if BCF_ASM_X86_64_SYSV
 __asm__(
     ".text\n"
     ".globl bcf_capture\n.type bcf_capture,@function\nbcf_capture:\n"
@@ -262,7 +426,7 @@ __asm__(
     "    movq %rsp, %rdi\n    leaq 16(%rbp), %rsi\n    movl $6, %edx\n"
     "    call bcf_capture_record@PLT\n"
     "    leave\n    ret\n");
-#elif defined(__aarch64__)
+#elif BCF_ASM_AARCH64
 __asm__(
     ".text\n"
     BCF_FUNCTION(bcf_capture)
@@ -274,20 +438,25 @@ __asm__(
     "    ldp x29, x30, [sp], #80\n    ret\n");
 #endif
 
-/* The last capture: register I's 64 bits and its low 32, stack byte I. */
+/* The last capture: register I's 64 bits and its low 32, floating-point
+ * register I's 64 bits (Win64; 0 elsewhere), stack byte I. */
 unsigned long long bcf_captured_register(int i) { return bcf_regs[i & 7]; }
 unsigned int bcf_captured_register32(int i) { return (unsigned int)bcf_regs[i & 7]; }
-unsigned char bcf_captured_stack_byte(int i) { return bcf_stack[i & 127]; }
+unsigned long long bcf_captured_float(int i) { return bcf_fregs[i & 3]; }
+unsigned char bcf_captured_stack_byte(int i) { return bcf_stack[i & 255]; }
+int bcf_captured_alignment(void) { return bcf_alignment; }
 
 /* The same, of the reference call bcf_reference_* made: the call this C
  * compiler makes of bcf_capture with the same prototype and values as a
  * Botlish binding's, its own answer to where each argument goes. */
 unsigned int bcf_reference_register32(int i) { return (unsigned int)bcf_ref_regs[i & 7]; }
 unsigned long long bcf_reference_register(int i) { return bcf_ref_regs[i & 7]; }
-unsigned char bcf_reference_stack_byte(int i) { return bcf_ref_stack[i & 127]; }
+unsigned long long bcf_reference_float(int i) { return bcf_ref_fregs[i & 3]; }
+unsigned char bcf_reference_stack_byte(int i) { return bcf_ref_stack[i & 255]; }
 
 static void bcf_keep_reference(void) {
     memcpy(bcf_ref_regs, bcf_regs, sizeof bcf_regs);
+    memcpy(bcf_ref_fregs, bcf_fregs, sizeof bcf_fregs);
     memcpy(bcf_ref_stack, bcf_stack, sizeof bcf_stack);
 }
 
@@ -315,6 +484,22 @@ int bcf_reference_d8n8(void) {
     volatile bcf_d8n8_fn f = (bcf_d8n8_fn)bcf_capture;
     int r = f(0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5,
               -2, 253, -1234, 65244, -123456789, 4275878552u, true, (char)-3);
+    bcf_keep_reference();
+    return r;
+}
+
+/* Doubles and integers interleaved, ten of them: Win64 assigns the first
+ * four by position (xmm0, rdx, xmm2, r9: each parameter's own register of
+ * its position, the other one unused) and passes the rest on the stack, a
+ * double in its 8-byte slot like any other; System V and AAPCS64 count the
+ * kinds apart (the doubles in xmm0-xmm4 or v0-v4, the integers in the first
+ * five integer registers), every one in a register. */
+typedef int (*bcf_mixed_fn)(double, int, double, long long, double, signed char, double,
+                            unsigned short, double, int);
+
+int bcf_reference_mixed(void) {
+    volatile bcf_mixed_fn f = (bcf_mixed_fn)bcf_capture;
+    int r = f(0.5, -7, -1.25, -81985529216486895LL, 6.0, -100, -0.375, 65000, 2.5, 123456789);
     bcf_keep_reference();
     return r;
 }
@@ -360,10 +545,18 @@ long long bcf_pick(BCF_PICK_PARAMS) {
 
 typedef int (*bcf_pick_fn)(BCF_PICK_PARAMS);
 
+/* The pick prototype's one long (s15): a value that needs all 64 bits of an
+ * LP64 long, or all 32 of an LLP64 one (c-ffi.test's ::pickValues). */
+#if BCF_LONG_64
+#define BCF_PICK_LONG (-81985529216486895L)
+#else
+#define BCF_PICK_LONG (-1985229329L)
+#endif
+
 int bcf_reference_pick(void) {
     volatile bcf_pick_fn f = (bcf_pick_fn)bcf_capture;
     int r = f(0, -2, 253, -1234, 65244, -123456789, 4275878552u, (char)-3,
-              -4, 247, -30000, -128, 48879, -2000000000, 127, -81985529216486895L,
+              -4, 247, -30000, -128, 48879, -2000000000, 127, BCF_PICK_LONG,
               128, -2, 2147483649u, -1);
     bcf_keep_reference();
     return r;
@@ -397,6 +590,14 @@ void *bcf_user_top(void) { return (void *)(uintptr_t)0x00007ffffffffff0ull; }
 void *bcf_high_address(void) { return (void *)(uintptr_t)0xfffffffffffffff0ull; }
 int bcf_needs_64_bits(void *p) { return ((uintptr_t)p >> 32) != 0; }
 
+/* The pointer mix's long: beyond 32 bits on LP64, a 32-bit long's own
+ * extreme on LLP64 (c-ffi.test's cf-pointer-mix). */
+#if BCF_LONG_64
+#define BCF_MIX_LONG (-1234567890123L)
+#else
+#define BCF_MIX_LONG (-1234567890L)
+#endif
+
 int bcf_pointer_mix(void *a, signed char b, void *c, unsigned short d, long e, void *f, int g,
                     void *h, void *s0, signed char s1, void *s2, short s3) {
     int mask = 0;
@@ -404,7 +605,7 @@ int bcf_pointer_mix(void *a, signed char b, void *c, unsigned short d, long e, v
     mask |= (b == -5) << 1;
     mask |= (c == NULL) << 2;
     mask |= (d == 65000) << 3;
-    mask |= (e == -1234567890123L) << 4;
+    mask |= (e == BCF_MIX_LONG) << 4;
     mask |= (f == (void *)bcf_cell2) << 5;
     mask |= (g == -7) << 6;
     mask |= (h == bcf_high_address()) << 7;
@@ -423,7 +624,7 @@ int bcf_checked_div(int a, int b) { return b == 0 ? -1 : a / b; }
  * buffer it reads after the recursive call (so the call is no tail call),
  * and a large N exhausts the stack it runs on (the native worker thread's
  * or a coroutine's) inside C. */
-__attribute__((noinline)) long bcf_deep(long n) {
+BCF_NOINLINE long bcf_deep(long n) {
     volatile unsigned char pad[256];
     pad[0] = (unsigned char)n;
     if (n <= 0) {
@@ -442,5 +643,289 @@ int bcf_available(void) {
         return 1;
     }
     return 0;
+}
+#endif
+
+/* ---------------------------------------------------------------------------
+ * Byte borrowing through real C (tests/c-byte-borrowing.test,
+ * MACOS-AARCH64-MILESTONE-7.md): what C reads and writes through a
+ * temporary exposure of Botlish byte storage, and the address it is given. */
+
+/* Two sums of DATA's COUNT bytes in one word: the plain sum (low 32 bits)
+ * and the position-weighted sum of (i + 1) * byte i (high 32 bits), each
+ * mod 2^32 -- a byte read wrong, skipped, read twice or out of order
+ * changes it. */
+unsigned long long bcf_checksum(const unsigned char *data, unsigned long count) {
+    uint32_t plain = 0, weighted = 0;
+    for (unsigned long i = 0; i < count; i++) {
+        plain += data[i];
+        weighted += (uint32_t)(i + 1) * data[i];
+    }
+    return ((unsigned long long)weighted << 32) | plain;
+}
+
+/* The address C was given, as an integer: never dereferenced. */
+unsigned long long bcf_address_of(const void *p) { return (unsigned long long)(uintptr_t)p; }
+
+/* BYTE at offsets [FROM, TO) of OUT; every other byte as it was. */
+void bcf_fill_range(unsigned char *out, unsigned long from, unsigned long to, unsigned char byte) {
+    for (unsigned long i = from; i < to; i++) {
+        out[i] = byte;
+    }
+}
+
+/* Two outputs of one call: A gets DATA's COUNT bytes, B their complements. */
+void bcf_split(const unsigned char *data, unsigned long count, unsigned char *a, unsigned char *b) {
+    for (unsigned long i = 0; i < count; i++) {
+        a[i] = data[i];
+        b[i] = (unsigned char)~data[i];
+    }
+}
+
+/* A C failure sentinel after a partial write: bcf_fill's pattern into the
+ * first min(COUNT, LIMIT) bytes of OUT, then -1 when COUNT exceeds LIMIT
+ * (some bytes written, the request refused), else COUNT. */
+long bcf_fill_upto(unsigned char *out, unsigned long count, unsigned long limit, unsigned char seed) {
+    unsigned long n = count < limit ? count : limit;
+    bcf_fill(out, n, seed);
+    return count > limit ? -1 : (long)count;
+}
+
+/* ---------------------------------------------------------------------------
+ * Variadic C functions (VARIADICS-VERTICAL-SLICE-1.md): genuine variadic
+ * callees, compiled by the host's own C compiler, reading every trailing
+ * argument with va_arg as the type their fixed arguments say -- the
+ * semantic oracle of a variadic call -- and the machine state a variadic
+ * call arrives in, beside this compiler's own variadic calls of the same
+ * prototype with the same values. */
+
+/* What bcf_vrecord last read: each trailing argument's bits (an integer
+ * sign- or zero-extended to 64 bits by its type, a double's IEEE bits, a
+ * pointer's address). */
+#define BCF_VMAX 32
+static unsigned long long bcf_vseen[BCF_VMAX];
+
+/* Reads COUNT (at most 32) trailing arguments, argument I of the type whose
+ * 4-bit code is nibble I of KINDS (I < 16) or of KINDS2 (I >= 16), low
+ * nibble first: 1 int, 2 unsigned int, 3 long, 4 unsigned long, 5 long
+ * long, 6 unsigned long long, 7 double, 8 void *. Every type is one a
+ * default argument promotion makes: a char, short or _Bool argument is read
+ * as the int it was promoted to. Returns COUNT, or -1 for a code it does not
+ * know (it stops reading there). */
+int bcf_vrecord(int count, unsigned long long kinds, unsigned long long kinds2, ...) {
+    va_list ap;
+    va_start(ap, kinds2);
+    for (int i = 0; i < count && i < BCF_VMAX; i++) {
+        unsigned code = (unsigned)((i < 16 ? kinds >> (4 * i) : kinds2 >> (4 * (i - 16))) & 15);
+        unsigned long long bits;
+        switch (code) {
+        case 1: bits = (unsigned long long)(long long)va_arg(ap, int); break;
+        case 2: bits = va_arg(ap, unsigned int); break;
+        case 3: bits = (unsigned long long)(long long)va_arg(ap, long); break;
+        case 4: bits = va_arg(ap, unsigned long); break;
+        case 5: bits = (unsigned long long)va_arg(ap, long long); break;
+        case 6: bits = va_arg(ap, unsigned long long); break;
+        case 7: {
+            double d = va_arg(ap, double);
+            memcpy(&bits, &d, sizeof bits);
+            break;
+        }
+        case 8: bits = (unsigned long long)(uintptr_t)va_arg(ap, void *); break;
+        default:
+            va_end(ap);
+            return -1;
+        }
+        bcf_vseen[i] = bits;
+    }
+    va_end(ap);
+    return count;
+}
+
+/* Trailing argument I of the last bcf_vrecord call, as its 64 bits. */
+unsigned long long bcf_vseen_bits(int i) { return bcf_vseen[i & (BCF_VMAX - 1)]; }
+
+/* The sum of COUNT trailing ints: none, one, more than the argument
+ * registers hold. */
+long long bcf_vsum(int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    long long sum = 0;
+    for (int i = 0; i < count; i++) {
+        sum += va_arg(ap, int);
+    }
+    va_end(ap);
+    return sum;
+}
+
+/* FACTOR times the sum of COUNT trailing doubles: a fixed double before the
+ * variadic boundary, then doubles past the floating-point registers. */
+double bcf_vscale(double factor, int count, ...) {
+    va_list ap;
+    va_start(ap, count);
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) {
+        sum += va_arg(ap, double);
+    }
+    va_end(ap);
+    return factor * sum;
+}
+
+/* The trailing pointers up to the first null one, a sentinel-terminated
+ * list as real C APIs take (Tcl_AppendResult's interp, ..., NULL): how many
+ * there are before it; each is kept for bcf_vseen_bits (at most 32). */
+int bcf_vsentinel(int tag, ...) {
+    va_list ap;
+    va_start(ap, tag);
+    int n = 0;
+    for (;;) {
+        void *p = va_arg(ap, void *);
+        if (p == NULL) {
+            break;
+        }
+        if (n < BCF_VMAX) {
+            bcf_vseen[n] = (unsigned long long)(uintptr_t)p;
+        }
+        n++;
+    }
+    va_end(ap);
+    return n;
+}
+
+/* A second static cell, whose address a sentinel list can pass, and its
+ * address as a number (what a capture of it shows). */
+static unsigned char bcf_vcell[8];
+void *bcf_vaddress(void) { return bcf_vcell; }
+unsigned long long bcf_vaddress_bits(void) { return (unsigned long long)(uintptr_t)bcf_vcell; }
+
+/* What a call of bcf_vcapture (or its alias bcf_vcapture_d) arrived in: the
+ * eight integer argument registers (x0-x7; on x86-64 rdi, rsi, rdx, rcx, r8,
+ * r9, then two zeros), %rax (x86-64, where a variadic call's %al states how
+ * many vector registers it uses; 0 on AArch64), the low 64 bits of the
+ * eight floating-point argument registers (v0-v7, xmm0-xmm7) and the first
+ * 256 bytes of the caller's stack arguments (Apple's convention puts every
+ * trailing argument there: the mixed scenario's eighteen take 144). Assembly
+ * saves them before any compiled code can touch them; declared with any
+ * prototype, it returns 0. */
+static unsigned long long bcf_vregs[8], bcf_vfregs[8], bcf_vrax;
+static unsigned char bcf_vstack[256];
+static unsigned long long bcf_vref_regs[8], bcf_vref_fregs[8], bcf_vref_rax;
+static unsigned char bcf_vref_stack[256];
+
+/* REGS: eight integer registers, %rax, eight floating-point registers. */
+int bcf_vcapture_record(const unsigned long long *regs, const unsigned char *stack) {
+    memcpy(bcf_vregs, regs, sizeof bcf_vregs);
+    bcf_vrax = regs[8];
+    memcpy(bcf_vfregs, regs + 9, sizeof bcf_vfregs);
+    memcpy(bcf_vstack, stack, sizeof bcf_vstack);
+    return 0;
+}
+
+int bcf_vcapture(int n, ...);
+int bcf_vcapture_d(double x, int n, ...);
+
+#if BCF_ASM_X86_64_SYSV
+__asm__(
+    ".text\n"
+    ".globl bcf_vcapture\n.type bcf_vcapture,@function\n"
+    ".globl bcf_vcapture_d\n.type bcf_vcapture_d,@function\n"
+    "bcf_vcapture:\nbcf_vcapture_d:\n"
+    "    pushq %rbp\n    movq %rsp, %rbp\n    subq $144, %rsp\n"
+    "    movq %rdi, 0(%rsp)\n    movq %rsi, 8(%rsp)\n    movq %rdx, 16(%rsp)\n"
+    "    movq %rcx, 24(%rsp)\n    movq %r8, 32(%rsp)\n    movq %r9, 40(%rsp)\n"
+    "    movq $0, 48(%rsp)\n    movq $0, 56(%rsp)\n    movq %rax, 64(%rsp)\n"
+    "    movsd %xmm0, 72(%rsp)\n    movsd %xmm1, 80(%rsp)\n    movsd %xmm2, 88(%rsp)\n"
+    "    movsd %xmm3, 96(%rsp)\n    movsd %xmm4, 104(%rsp)\n    movsd %xmm5, 112(%rsp)\n"
+    "    movsd %xmm6, 120(%rsp)\n    movsd %xmm7, 128(%rsp)\n"
+    "    movq %rsp, %rdi\n    leaq 16(%rbp), %rsi\n"
+    "    call bcf_vcapture_record@PLT\n"
+    "    leave\n    ret\n");
+#elif BCF_ASM_AARCH64
+__asm__(
+    ".text\n"
+    BCF_FUNCTION(bcf_vcapture)
+    BCF_FUNCTION(bcf_vcapture_d)
+    "    stp x29, x30, [sp, #-160]!\n    mov x29, sp\n"
+    "    stp x0, x1, [sp, #16]\n    stp x2, x3, [sp, #32]\n"
+    "    stp x4, x5, [sp, #48]\n    stp x6, x7, [sp, #64]\n"
+    "    str xzr, [sp, #80]\n"
+    "    stp d0, d1, [sp, #88]\n    stp d2, d3, [sp, #104]\n"
+    "    stp d4, d5, [sp, #120]\n    stp d6, d7, [sp, #136]\n"
+    "    add x0, sp, #16\n    add x1, sp, #160\n"
+    "    bl " BCF_CALL(bcf_vcapture_record) "\n"
+    "    ldp x29, x30, [sp], #160\n    ret\n");
+#endif
+
+/* The last capture, and the reference call's: integer register I, the low
+ * 8 bits of %rax (%al), floating-point register I's 64 bits, stack byte I. */
+unsigned long long bcf_vcaptured_register(int i) { return bcf_vregs[i & 7]; }
+unsigned int bcf_vcaptured_al(void) { return (unsigned int)(bcf_vrax & 0xff); }
+unsigned long long bcf_vcaptured_float(int i) { return bcf_vfregs[i & 7]; }
+unsigned char bcf_vcaptured_stack_byte(int i) { return bcf_vstack[i & 255]; }
+unsigned long long bcf_vreference_register(int i) { return bcf_vref_regs[i & 7]; }
+unsigned int bcf_vreference_al(void) { return (unsigned int)(bcf_vref_rax & 0xff); }
+unsigned long long bcf_vreference_float(int i) { return bcf_vref_fregs[i & 7]; }
+unsigned char bcf_vreference_stack_byte(int i) { return bcf_vref_stack[i & 255]; }
+
+/* Not on Windows: Botlish lowers no variadic call for the Win64 convention
+ * (a codegen error there: c-ffi.test's cf-va-win64-refused), so there is no
+ * Win64 capture of one to compare with. */
+#if !defined(_WIN32)
+static void bcf_vkeep_reference(void) {
+    memcpy(bcf_vref_regs, bcf_vregs, sizeof bcf_vregs);
+    memcpy(bcf_vref_fregs, bcf_vfregs, sizeof bcf_vfregs);
+    bcf_vref_rax = bcf_vrax;
+    memcpy(bcf_vref_stack, bcf_vstack, sizeof bcf_vstack);
+}
+
+/* This compiler's own variadic calls of the capture, through a volatile
+ * pointer of the variadic prototype (so the call is a variadic call the
+ * compiler lowers itself), with c-ffi.test's cf-va-abi-* values:
+ *
+ *   none     n = 0 and no trailing argument
+ *   small    two trailing arguments, an int and a double: every register
+ *            free (Apple: still on the stack)
+ *   ints     twelve ints: past the integer registers everywhere
+ *   mixed    ints, longs, pointers and doubles interleaved, ten doubles
+ *            (past the floating-point registers) and eight integers
+ *   fixedd   bcf_vcapture_d: a fixed double and a fixed int, then doubles
+ *            and ints */
+typedef int (*bcf_vcapture_fn)(int, ...);
+typedef int (*bcf_vcapture_d_fn)(double, int, ...);
+
+
+int bcf_vreference_none(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(0);
+    bcf_vkeep_reference();
+    return r;
+}
+
+int bcf_vreference_small(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(2, -5, 2.5);
+    bcf_vkeep_reference();
+    return r;
+}
+
+int bcf_vreference_ints(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(12, -1, 2, -3, 4, -5, 6, -7, 8, -9, 10, -11, 2147483647);
+    bcf_vkeep_reference();
+    return r;
+}
+
+int bcf_vreference_mixed(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(18, 7, 0.5, -9000000000L, 1.25, (void *)bcf_vcell, -2.0, 4000000000u, 3.5,
+              -1, 4.75, 18446744073709551615ULL, 5.0, (void *)0, 6.125, 42, 7.5, 8.25, 9.0);
+    bcf_vkeep_reference();
+    return r;
+}
+
+int bcf_vreference_fixedd(void) {
+    volatile bcf_vcapture_d_fn f = bcf_vcapture_d;
+    int r = f(0.75, 3, 1.5, -6, 2.5);
+    bcf_vkeep_reference();
+    return r;
 }
 #endif

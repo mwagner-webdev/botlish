@@ -1,0 +1,691 @@
+# c-byte-borrowing.test -- C byte borrowing through real C calls, on every
+# host that links them (MACOS-AARCH64-MILESTONE-7.md; the contract is
+# C-POINTER-BORROWING.md's, C-FFI.md section 6).
+#
+# A std::abi::bytes::Bytes or MutableBytes given to a C pointer parameter whose
+# contract says `read noescape` is exposed for the call as it is: C reads the
+# owner's own storage through its payload address. One given to a `write
+# noescape` parameter is detached into a private copy, C writes the copy, and
+# the call's value is the write-back struct {result: R, NAME: MutableBytes};
+# the caller's value never changes. tests/c-pointer-borrowing.test pins the
+# decision and its lowering against the in-process borrow fixture; this file
+# runs the same contract against C the host's own compiler built
+# (tests/cffi/fixture.c) and against the system C library (libSystem on
+# macOS, glibc on Linux), and checks what C actually saw:
+#
+#   * the bytes, by a checksum C computes, against an oracle written here in
+#     Tcl (never by C or Botlish): sizes from 0 to 1 MiB, across the
+#     allocator's size classes, zero bytes and bytes above 127;
+#   * the address: the one the raw address bridge (std::abi::ARCH::from_bytes)
+#     reports for the same storage, 16-byte aligned (the storage's
+#     BYTES_ALIGN), the same for every read exposure of one owner (no copy),
+#     another for a write exposure (the detach) -- the one the write-back
+#     value holds;
+#   * what a write leaves: the bytes C wrote and only those, shown by the
+#     runtime's own reveal of the storage;
+#   * that nothing changes under a collection at every allocation, inside
+#     coroutines, in a standalone executable, and (macOS) under Guard Malloc,
+#     which faults on a read one byte past a storage.
+#
+# Programs run on both native backends (cranelift, cranelift-generic), which
+# must agree; a C call never runs on the Tcl backends (NATIVE-ONLY). The
+# tests need a host that links C calls (nativeCCalls: Linux x86-64 and
+# AArch64, macOS AArch64, Windows x86-64), its C toolchain
+# (tests/ctoolchain.tcl) and the rustc linker -- never Linux as such.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint cCompiler [testConstraint cToolchain]
+set ::hostTarget [core::cabi::hostTarget]
+set ::hostArch [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : "x86_64"}]
+set ::appCounter 0
+
+# The fixture library, built once in a private directory (c-ffi.test's).
+set ::fixtureDir ""
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
+    set ::fixtureDir [makeDirectory bb-fixture-[pid]]
+    if {[catch {
+        set sources [list [file join $::projectRoot tests cffi fixture.c]]
+        if {$::tcl_platform(platform) eq "windows"} {
+            lappend sources [file join $::projectRoot tests cffi fixture-win64.asm]
+        }
+        ctool::staticLibrary $::fixtureDir botlish_cffi_fixture {*}$sources
+    } message]} {
+        puts stderr "c-byte-borrowing.test: the fixture library did not build: $message"
+        set ::fixtureDir ""
+    }
+}
+testConstraint bbFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+
+# A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}).
+proc app {files} {
+    set dir [makeDirectory bb-app-[pid]-[incr ::appCounter]]
+    foreach {relative text} $files {
+        set channel [open [file join $dir $relative] w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+proc removeApps {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] bb-app-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc appHir {dir {strict 1}} {
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -strict $strict]
+}
+
+# The one outcome of DIR's program on both native backends, which must agree:
+# {value TEXT} or {error CODE MESSAGE}.
+proc appOutcome {dir {strict 1}} {
+    set hir [appHir $dir $strict]
+    set outcomes [native::withLinkDirs [list $::fixtureDir] {
+        lmap backend {cranelift cranelift-generic} {
+            lrange [outcomeUnderHir $backend $hir] 0 end-1
+        }
+    }]
+    if {[lindex $outcomes 0] ne [lindex $outcomes 1]} {
+        error "cranelift and cranelift-generic disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The value of DIR's program on both native backends (an error is a test
+# failure, with its message).
+proc appValue {dir} {
+    set outcome [appOutcome $dir]
+    if {[lindex $outcome 0] ne "value"} {
+        error "the program failed: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# What DIR's program prints as a standalone executable (its value line),
+# built with ENVIRONMENT ({NAME VALUE ...}) for the run. Raises when the
+# executable exits with a non-zero status or is killed by a signal; what it
+# writes to its standard error (Guard Malloc's banner) is kept in DIR's
+# `stderr`, never taken for a failure.
+proc appExecutable {dir {environment {}}} {
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+    if {$::tcl_platform(platform) eq "windows"} {
+        # Windows has no env(1).
+        return [string trim [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]]
+    }
+    # env(1) gives the variables to the executable alone. How they reach it
+    # does not decide what Guard Malloc catches: bb-guard-malloc's former
+    # control, a one-byte over-read of a 4080-byte storage, did not fault
+    # through env(1) either (macOS run 39603310734) -- the page after that
+    # storage's 4096-byte block was mapped (MACOS-AARCH64-MILESTONE-7.md,
+    # section 8), which is why the test now exposes 16-byte storages.
+    return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2> [file join $dir stderr]]]
+}
+
+# Runs SCRIPT in the caller with BOTLISH_NATIVE_GC_STRESS=1 (a collection
+# attempt at every allocation site), restoring the variable afterwards.
+proc underGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    if {$had} { set old $::env(BOTLISH_NATIVE_GC_STRESS) }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} { set ::env(BOTLISH_NATIVE_GC_STRESS) $old } else { unset ::env(BOTLISH_NATIVE_GC_STRESS) }
+    }
+}
+
+# The binding of the fixture's byte functions (an application module `bb`).
+set bbModule {import std::ffi::c
+
+extern c library "botlish_cffi_fixture"
+
+extern c fn checksum named "bcf_checksum"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong) -> std::ffi::c::ULongLong
+extern c fn address_of named "bcf_address_of"(p: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::ULongLong
+extern c fn write_address_of named "bcf_address_of"(p: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::ULongLong
+extern c fn fill named "bcf_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit
+extern c fn fill_range named "bcf_fill_range"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, from: std::ffi::c::ULong, to: std::ffi::c::ULong, byte: std::ffi::c::UChar) -> unit
+extern c fn split named "bcf_split"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong, a: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, b: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape) -> unit
+extern c fn reverse named "bcf_reverse"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong, out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape) -> std::ffi::c::Ptr[std::ffi::c::UChar] alias out
+extern c fn fill_upto named "bcf_fill_upto"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, limit: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> std::ffi::c::Long
+}
+
+# The system C library's byte functions (libSystem on macOS, glibc on Linux,
+# the C runtime linked into every executable on Windows: no library
+# declared). size_t is the target's: std::ffi::c::ULong on every LP64 target,
+# std::ffi::c::ULongLong on LLP64 (Windows, where unsigned long is 32 bits); the
+# results are exactly DST (alias dst).
+set sysModule {import std::ffi::c
+
+extern c fn memcmp(a: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, b: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::Int
+extern c fn memcpy(dst: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, src: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void] alias dst
+extern c fn memmove(dst: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, src: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void] alias dst
+extern c fn memset(dst: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, c: std::ffi::c::Int, n: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void] alias dst
+}
+set ::bbLongBits [dict get [core::cabi::target [core::cabi::hostTarget]] long]
+if {$::bbLongBits < 64} {
+    set sysModule [string map {"n: std::ffi::c::ULong)" "n: std::ffi::c::ULongLong)"} $sysModule]
+}
+
+# The entry program's prelude: owners of known bytes, their C counts, and
+# the raw address bridge of the host's architecture (the storage's payload
+# address as an Int, from the runtime's own address operation).
+set bbPrelude [string map [list ARCH $::hostArch] {import std::abi
+import std::abi::bytes
+import std::abi::ARCH
+import std::byte
+import std::coroutine
+import std::ffi::c
+import std::list
+import std::str
+import bb
+import sys
+
+# (i * STEP + 3) mod 256 for i < N: every byte value when STEP is odd, zero
+# and the bytes above 127 among them.
+fn pattern(n: int, step: int):
+    loop i from 0 to n:
+        std::byte::from_int(mod(i * step + 3, 256))
+
+fn mk(n: int, step: int) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(pattern(n, step))
+
+fn mmk(n: int, step: int) -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::from_bytes(mk(n, step))
+
+fn len(d: std::abi::bytes::Bytes) -> std::ffi::c::ULong:
+    std::abi::bytes::length(d).value
+
+fn mlen(d: std::abi::bytes::MutableBytes) -> std::ffi::c::ULong:
+    std::abi::bytes::mutable_length(d).value
+
+fn bridge(d: std::abi::bytes::Bytes) -> int:
+    std::abi::ARCH::to_int(std::abi::ARCH::from_bytes(d))
+
+fn mbridge(d: std::abi::bytes::MutableBytes) -> int:
+    std::abi::ARCH::to_int(std::abi::ARCH::from_mutable_bytes(d))
+
+}]
+# A storage length is a Usize, 64 bits; a C count a std::ffi::c::ULong, the
+# target's unsigned long. Where that is 32 bits (Windows, LLP64) len and
+# mlen prove it with a mod -- a no-op for any storage a test makes -- on the
+# same line, so no location after the prelude moves (c-pointer-borrowing.test
+# does the same).
+if {$::bbLongBits < 64} {
+    set bbPrelude [string map [list \
+        "    std::abi::bytes::length(d).value\n" "    mod(std::abi::bytes::length(d).value, [expr {2 ** $::bbLongBits}])\n" \
+        "    std::abi::bytes::mutable_length(d).value\n" "    mod(std::abi::bytes::mutable_length(d).value, [expr {2 ** $::bbLongBits}])\n"] $bbPrelude]
+}
+
+# An application of the fixture binding, the system binding and MAIN (the
+# entry program's statements after the prelude).
+proc bbApp {main} {
+    return [app [list main.bot "$::bbPrelude$main" bb.bot $::bbModule sys.bot $::sysModule]]
+}
+
+# ---------------------------------------------------------------------------
+# The oracle, independent of C and of Botlish
+
+# The bytes of the prelude's pattern(N, STEP).
+proc bbPattern {n step} {
+    set bytes {}
+    for {set i 0} {$i < $n} {incr i} {
+        lappend bytes [expr {($i * $step + 3) % 256}]
+    }
+    return $bytes
+}
+
+# bcf_checksum of BYTES: the weighted sum's 32 bits above the plain sum's.
+proc bbChecksum {bytes} {
+    set plain 0
+    set weighted 0
+    set i 0
+    foreach b $bytes {
+        set plain [expr {($plain + $b) & 0xffffffff}]
+        set weighted [expr {($weighted + ($i + 1) * $b) & 0xffffffff}]
+        incr i
+    }
+    return [expr {($weighted << 32) | $plain}]
+}
+
+# bcf_checksum of pattern(N, STEP), without the list.
+proc bbPatternChecksum {n step} {
+    set plain 0
+    set weighted 0
+    for {set i 0} {$i < $n} {incr i} {
+        set b [expr {($i * $step + 3) % 256}]
+        set plain [expr {($plain + $b) & 0xffffffff}]
+        set weighted [expr {($weighted + ($i + 1) * $b) & 0xffffffff}]
+    }
+    return [expr {($weighted << 32) | $plain}]
+}
+
+# bcf_fill's bytes: (SEED + 37 i) mod 256 for i < N.
+proc bbFill {n seed} {
+    set bytes {}
+    for {set i 0} {$i < $n} {incr i} {
+        lappend bytes [expr {($seed + 37 * $i) % 256}]
+    }
+    return $bytes
+}
+
+# The runtime's reveal of a MutableBytes holding BYTES (how every backend
+# shows its storage).
+proc bbMutable {bytes} {
+    set hex [binary encode hex [binary format cu* $bytes]]
+    return "std::abi::bytes::MutableBytes {storage: <mutbytes [llength $bytes]: $hex>}"
+}
+
+# BYTES with offsets [FROM, TO) set to BYTE.
+proc bbRange {bytes from to byte} {
+    for {set i $from} {$i < $to} {incr i} {
+        lset bytes $i $byte
+    }
+    return $bytes
+}
+
+# The sign (-1, 0, 1) of memcmp of A and B over their first N bytes.
+proc bbCompare {a b n} {
+    for {set i 0} {$i < $n} {incr i} {
+        set x [lindex $a $i]
+        set y [lindex $b $i]
+        if {$x != $y} {
+            return [expr {$x < $y ? -1 : 1}]
+        }
+    }
+    return 0
+}
+
+# A Botlish List display of Tcl list XS.
+proc bbList {xs} {
+    return "\[[join $xs {, }]\]"
+}
+
+# Sizes across the allocator's size classes and page boundaries (the storage
+# is 16 header bytes plus the payload): empty, one byte, around 16, around
+# macOS's tiny/small boundary (1008), a 4 KiB and a 16 KiB page, 64 KiB, 128
+# KiB and 1 MiB.
+set bbSizes {0 1 15 16 17 255 992 1008 1024 4096 16368 16384 65536 131072 1048576}
+
+# ---------------------------------------------------------------------------
+# Read exposures
+
+test bb-read-sizes {a Bytes, and a MutableBytes, at a read/noescape parameter: C reads exactly the owner's bytes, every size from 0 to 1 MiB across the allocator's size classes and page boundaries, zero bytes and bytes above 127 among them -- C's checksum equals the oracle's for each} -constraints bbFixture -body {
+    set sizes [bbList $::bbSizes]
+    set dir [bbApp "loop n in $sizes:\n    d = mk(n, 7)\n    m = std::abi::bytes::from_bytes(d)\n    \[bb::checksum(d, len(d)), bb::checksum(m, mlen(m))\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [lmap n $::bbSizes {
+    set c [bbPatternChecksum $n 7]
+    bbList [list $c $c]
+}]]
+
+test bb-read-zero-and-high-bytes {all-zero storage (std::abi::bytes::zeroed, 4096 bytes), all-0xff storage, and a short one holding 0x00, 0x7f, 0x80 and 0xff: C reads each byte unsigned, exactly} -constraints bbFixture -body {
+    set dir [bbApp "fn ff(n: int):\n    loop i from 0 to n:\n        std::byte::from_int(255)\n\nzeros = std::abi::bytes::zeroed(std::abi::usize(4096))\nones = std::abi::bytes::from_list(ff(4096))\nedge = std::abi::bytes::from_list(\[std::byte::from_int(0), std::byte::from_int(127), std::byte::from_int(128), std::byte::from_int(255)\])\n\[bb::checksum(zeros, mlen(zeros)), bb::checksum(ones, len(ones)), bb::checksum(edge, len(edge))\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbChecksum [lrepeat 4096 0]] [bbChecksum [lrepeat 4096 255]] [bbChecksum {0 127 128 255}]]]
+
+test bb-read-address {the address C receives is the storage's payload address, exactly the one the runtime's raw address bridge reports for it (all 64 bits), 16-byte aligned (BYTES_ALIGN); every read exposure of one owner -- again, through a List or a struct holding it, a MutableBytes as it is -- is that same storage, no copy; a write exposure is another storage (the detach), the very one the write-back value holds} -constraints bbFixture -body {
+    set dir [bbApp "struct Holder:\n    data: std::abi::bytes::Bytes\n\nd = mk(64, 7)\nm = std::abi::bytes::from_bytes(d)\nheld = \[d, mk(3, 1)\]\nh = Holder {data: d}\na = bb::address_of(d)\nw = bb::write_address_of(m)\n\[a == bridge(d), mod(a, 16), bb::address_of(d) == a, bb::address_of(std::list::at(held, 0)) == a, bb::address_of(h.data) == a, bb::address_of(m) == mbridge(m), w.result == mbridge(m), w.result == mbridge(w.p), bb::checksum(d, len(d)) == bb::checksum(w.p, mlen(w.p))\]\n"]
+    appValue $dir
+} -cleanup removeApps -result {[true, 0, true, true, true, true, false, true, true]}
+
+# On macOS arm64 every heap and data address is above 4 GiB (the 4 GiB
+# __PAGEZERO below every executable): there an exposure demonstrably carries
+# a pointer wider than 32 bits. Not asserted elsewhere: no address layout is
+# promised (only that an address is never truncated: the runtime refuses one
+# outside the small-Int range, ops.rs's rt_bytes_addr).
+test bb-read-address-above-4gib {on macOS, the addresses C receives for a heap storage and a constant one are above 4 GiB, and still exactly the bridge's: the transport carries every bit of a pointer wider than 32 bits} -constraints {bbFixture} -body {
+    set dir [bbApp "d = mk(100, 3)\nc = std::abi::bytes::from_list(\[std::byte::from_int(1), std::byte::from_int(2)\])\n\[bb::address_of(d) == bridge(d), bb::address_of(c) == bridge(c), bb::address_of(d) >= 4294967296, bb::address_of(c) >= 4294967296\]\n"]
+    set value [appValue $dir]
+    expr {$::tcl_platform(os) eq "Darwin" ? $value : [string map {", false" ", true"} $value]}
+} -cleanup removeApps -result {[true, true, true, true]}
+
+test bb-read-repeated-nested {one owner exposed a thousand times, while a List, a struct and a closure hold it, and at every level of a hundred nested Botlish calls, each exposing its own owner and its caller's: C reads the same bytes every time} -constraints bbFixture -body {
+    set dir [bbApp "struct Holder:\n    data: std::abi::bytes::Bytes\n\nfn nested(depth: int, outer: std::abi::bytes::Bytes, expected: int) -> int:\n    mine = mk(depth + 1, 5)\n    here = bb::checksum(outer, len(outer)) == expected\n    if depth == 0:\n        if here:\n            return 1\n        return 0\n    below = nested(depth - 1, mine, bb::checksum(mine, len(mine)))\n    if here and bb::checksum(mine, len(mine)) == bb::checksum(mk(depth + 1, 5), len(mine)):\n        return below + 1\n    below\n\nfn holder(d: std::abi::bytes::Bytes):\n    fn get() -> std::abi::bytes::Bytes:\n        d\n    get\n\nd = mk(40, 3)\nheld = \[d, d\]\nh = Holder {data: d}\nf = holder(d)\nsums = loop i from 0 to 1000:\n    bb::checksum(d, len(d))\nfn every(xs: List\[bool\]) -> bool:\n    loop x in xs:\n        if not x:\n            return false\n    true\n\nsame = loop s in sums:\n    s == bb::checksum(std::list::at(held, 1), len(h.data))\n\[std::list::length(sums), every(same), bb::checksum(f(), 40) == std::list::at(sums, 0), bb::checksum(h.data, 40) == std::list::at(sums, 999), nested(99, d, bb::checksum(d, len(d)))\]\n"]
+    appValue $dir
+} -cleanup removeApps -result {[1000, true, true, true, 100]}
+
+# ---------------------------------------------------------------------------
+# Write exposures: the detach and the write-back value
+
+test bb-write-shapes {a MutableBytes at a write/noescape parameter: C writes a private copy, which comes back as the call's value -- an empty buffer, a full overwrite, a prefix, a suffix and a middle range, each keeping every byte C did not write -- and the caller's value, and a copy of it, never change} -constraints bbFixture -body {
+    set dir [bbApp "m = mmk(32, 5)\nkept = m\nempty = bb::fill(std::abi::bytes::zeroed(std::abi::usize(0)), 0, 9)\nfull = bb::fill(m, 32, 9)\nprefix = bb::fill_range(m, 0, 10, 255)\nsuffix = bb::fill_range(m, 22, 32, 0)\nmiddle = bb::fill_range(m, 10, 22, 128)\n\[empty.out, full.out, prefix.out, suffix.out, middle.out, m, kept, full.result\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbMutable {}] [bbMutable [bbFill 32 9]] \
+    [bbMutable [bbRange [bbPattern 32 5] 0 10 255]] [bbMutable [bbRange [bbPattern 32 5] 22 32 0]] \
+    [bbMutable [bbRange [bbPattern 32 5] 10 22 128]] [bbMutable [bbPattern 32 5]] [bbMutable [bbPattern 32 5]] unit]]
+
+test bb-write-large {a 1 MiB write exposure comes back exactly as C wrote it, read back by C through a read exposure of the write-back value; the caller's zeroed value is still all zeros} -constraints bbFixture -body {
+    set dir [bbApp "m = std::abi::bytes::zeroed(std::abi::usize(1048576))\nr = bb::fill(m, mlen(m), 11)\n\[bb::checksum(r.out, mlen(r.out)), bb::checksum(m, mlen(m)), mlen(r.out)\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbChecksum [bbFill 1048576 11]] 0 1048576]]
+
+test bb-write-two-outputs {two write exposures in one call are two private copies, each its own field of the write-back struct; given the same owner twice they are still two copies, neither seeing the other's writes, and the owner unchanged} -constraints bbFixture -body {
+    set dir [bbApp "d = mk(8, 3)\na = std::abi::bytes::zeroed(std::abi::usize(8))\nb = std::abi::bytes::zeroed(std::abi::usize(8))\nr = bb::split(d, 8, a, b)\nm = mmk(8, 9)\ns = bb::split(d, 8, m, m)\n\[r.a, r.b, a, s.a, s.b, m, r.result\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbMutable [bbPattern 8 3]] [bbMutable [lmap x [bbPattern 8 3] {expr {255 - $x}}]] \
+    [bbMutable [lrepeat 8 0]] [bbMutable [bbPattern 8 3]] [bbMutable [lmap x [bbPattern 8 3] {expr {255 - $x}}]] [bbMutable [bbPattern 8 9]] unit]]
+
+test bb-read-write-one-owner {one owner exposed for reading and, in the same call, for writing: C reads the owner's own storage and writes a private copy of it, so reversing a buffer onto itself gives its reverse in the write-back value and leaves the owner as it was} -constraints bbFixture -body {
+    set dir [bbApp "m = mmk(16, 7)\nr = bb::reverse(m, 16, m)\n\[r.out, m, r.result\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbMutable [lreverse [bbPattern 16 7]]] [bbMutable [bbPattern 16 7]] unit]]
+
+test bb-write-chain {calls on the returned value: each write-back value is exposed to the next call, which writes its own copy of it -- the chain's last value holds every write, every earlier value only its own and its predecessors'} -constraints bbFixture -body {
+    set dir [bbApp "m = std::abi::bytes::zeroed(std::abi::usize(12))\nr1 = bb::fill_range(m, 0, 4, 1)\nr2 = bb::fill_range(r1.out, 4, 8, 2)\nr3 = bb::fill_range(r2.out, 8, 12, 3)\n\[r3.out, r2.out, r1.out, m\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbMutable {1 1 1 1 2 2 2 2 3 3 3 3}] [bbMutable {1 1 1 1 2 2 2 2 0 0 0 0}] \
+    [bbMutable {1 1 1 1 0 0 0 0 0 0 0 0}] [bbMutable [lrepeat 12 0]]]]
+
+test bb-write-retained-references {managed values held across a write call -- the owner in a List and a struct, a String, other byte storage -- are intact after it, and the owner they hold unchanged} -constraints bbFixture -body {
+    set dir [bbApp "struct Holder:\n    data: std::abi::bytes::MutableBytes\n    name: str\n\nm = mmk(6, 1)\nxs = \[m, m\]\nh = Holder {data: m, name: \"held\".concat(\"-value\")}\nother = mk(5, 2)\nr = bb::fill(m, 6, 200)\n\[r.out, std::list::at(xs, 1), h.data, h.name, bb::checksum(other, len(other)) == bb::checksum(mk(5, 2), 5)\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list [bbMutable [bbFill 6 200]] [bbMutable [bbPattern 6 1]] [bbMutable [bbPattern 6 1]] {"held-value"} true]]
+
+test bb-write-failure-sentinel {a C function that writes part of its output and then reports failure (-1): the write-back value holds exactly the bytes C wrote before failing -- the foreign-call contract publishes the private copy whatever C's result says, no rollback -- and the caller's value is unchanged; a Botlish wrapper that turns the sentinel into a declared error leaves its handler the untouched original, and on success returns the full write} -constraints bbFixture -body {
+    set dir [bbApp "error Refused\n\nfn checked(m: std::abi::bytes::MutableBytes, n: std::ffi::c::ULong) -> std::abi::bytes::MutableBytes errors Refused:\n    r = bb::fill_upto(m, n, 4, 50)\n    if r.result < 0:\n        fail Refused\n    r.out\n\nfn attempt(m: std::abi::bytes::MutableBytes, n: std::ffi::c::ULong) -> std::abi::bytes::MutableBytes:\n    checked(m, n):\n        on Refused:\n            return m\n\nm = mmk(8, 3)\npartial = bb::fill_upto(m, 8, 4, 50)\n\[partial.result, partial.out, m, attempt(m, 8), attempt(m, 4)\]\n"]
+    appValue $dir
+} -cleanup removeApps -result [bbList [list -1 [bbMutable [concat [bbFill 4 50] [lrange [bbPattern 8 3] 4 end]]] \
+    [bbMutable [bbPattern 8 3]] [bbMutable [bbPattern 8 3]] [bbMutable [concat [bbFill 4 50] [lrange [bbPattern 8 3] 4 end]]]]]
+
+# ---------------------------------------------------------------------------
+# What is refused, on every target alike
+
+# Every refusal: the declarations or functions of an application module `r`
+# and the entry program's statement using them (empty when the module's own
+# code is refused).
+set bbRefusals {
+    retained     {extern c fn keep named "bcf_keep"(p: std::ffi::c::Ptr[std::ffi::c::UChar] read captures) -> unit} {r::keep(mk(3, 1))}
+    unknown      {extern c fn keep named "bcf_keep"(p: std::ffi::c::Ptr[std::ffi::c::UChar] read) -> unit} {r::keep(mk(3, 1))}
+    noaccess     {extern c fn sum named "bcf_sum"(p: std::ffi::c::Ptr[std::ffi::c::UChar] noescape, n: std::ffi::c::ULong) -> std::ffi::c::ULong} {r::sum(mk(3, 1), 3)}
+    immutable    {extern c fn fill named "bcf_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, n: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit} {r::fill(mk(3, 1), 3, 1)}
+    wide         {extern c fn sum named "bcf_sum"(p: std::ffi::c::Ptr[std::ffi::c::Int] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::ULong} {r::sum(mk(4, 1), 1)}
+    pointer2     {extern c fn sum named "bcf_sum"(p: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UChar]] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::ULong} {r::sum(mk(8, 1), 1)}
+    variadic     {extern c fn vsum named "bcf_vsum"(count: std::ffi::c::Int, variadic) -> std::ffi::c::LongLong} {r::vsum(1, mk(3, 1))}
+    unknownptr   {extern c fn find named "bcf_find"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong, byte: std::ffi::c::UChar) -> std::ffi::c::Ptr[std::ffi::c::UChar]} {p = r::find(mk(3, 1), 3, 1)}
+    ptrvalue     {fn keep(p: std::ffi::c::Ptr[std::ffi::c::UChar]) -> unit:
+    unit} {r::keep(mk(3, 1))}
+    returned     {fn leak(d: std::abi::bytes::Bytes) -> std::ffi::c::Ptr[std::ffi::c::UChar]:
+    d} {}
+    field        {struct S:
+    p: std::ffi::c::Ptr[std::ffi::c::UChar]
+
+fn store(d: std::abi::bytes::Bytes) -> S:
+    S {p: d}} {}
+    list         {fn pointers(d: std::abi::bytes::Bytes) -> List[std::ffi::c::Ptr[std::ffi::c::UChar]]:
+    [d]} {}
+    closure      {fn hold(d: std::abi::bytes::Bytes):
+    fn get() -> std::ffi::c::Ptr[std::ffi::c::UChar]:
+        d
+    get} {}
+    clone        {} {std::ffi::c::clone(mk(3, 1))}
+}
+
+# {KIND MESSAGE} of the first diagnostic of refusal DECLS / STATEMENT
+# compiled for TARGET (its location removed), or accepted.
+proc bbRefusal {decls statement target} {
+    set dir [app [list main.bot "[string map [list "import sys\n" "import sys\nimport r\n"] $::bbPrelude]$statement\n1\n" \
+        bb.bot $::bbModule sys.bot $::sysModule r.bot "import std::abi\nimport std::abi::bytes\nimport std::ffi::c\n\n$decls\n"]]
+    try {
+        surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target
+        return accepted
+    } on error {message options} {
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    } finally {
+        file delete -force $dir
+    }
+}
+
+test bb-refusals {byte storage never reaches C outside the exposure model, and never becomes a pointer value: a parameter that may retain it (captures, or no escape fact: unknown), one whose access nobody declared, an immutable Bytes for writing, a pointee that is not byte-sized (Int, a pointer), a trailing argument of a variadic call (no contract), a pointer result of unknown provenance beside an exposure (FOREIGN-BORROW); an ordinary Ptr parameter, a returned Ptr, a struct field, a List element, a closure's result and clone (TYPE) -- the same kind and message for linux-x86_64, linux-aarch64 and macos-aarch64} -constraints bbFixture -body {
+    set results {}
+    foreach {name decls statement} $::bbRefusals {
+        set outcomes [lmap target {linux-x86_64 linux-aarch64 macos-aarch64} {bbRefusal $decls $statement $target}]
+        lappend results $name [lindex $outcomes 0 0] [llength [lsort -unique $outcomes]]
+    }
+    set results
+} -result {retained FOREIGN-BORROW 1 unknown FOREIGN-BORROW 1 noaccess FOREIGN-BORROW 1 immutable FOREIGN-BORROW 1 wide FOREIGN-BORROW 1 pointer2 FOREIGN-BORROW 1 variadic FOREIGN-BORROW 1 unknownptr FOREIGN-BORROW 1 ptrvalue TYPE 1 returned TYPE 1 field TYPE 1 list TYPE 1 closure TYPE 1 clone TYPE 1}
+
+test bb-strict0-replay {an unchecked (-strict 0) program keeps a refused exposure a run-time error: both native backends evaluate the arguments, then raise the refusal (TYPE, the diagnostic's message) instead of calling C -- the C call before it ran, the one after it never does} -constraints bbFixture -body {
+    set dir [app [list main.bot "import std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport r\n\nd = std::abi::bytes::from_list(\[std::byte::from_int(1)\])\nfirst = r::sum(d, 1)\nr::keep(d)\nr::sum(d, 1)\n" \
+        r.bot "import std::ffi::c\n\nextern c library \"botlish_cffi_fixture\"\n\nextern c fn keep named \"bcf_keep\"(p: std::ffi::c::Ptr\[std::ffi::c::UChar\] read captures) -> unit\nextern c fn sum named \"bcf_sum\"(p: std::ffi::c::Ptr\[std::ffi::c::UChar\] read noescape, n: std::ffi::c::ULong) -> std::ffi::c::ULong\n"]]
+    set outcome [appOutcome $dir 0]
+    list [lindex $outcome 0] [lindex $outcome 1 end] [string match {*argument 1 of r::keep*may retain it*} [lindex $outcome 2]]
+} -cleanup removeApps -result {error TYPE 1}
+
+# ---------------------------------------------------------------------------
+# Liveness: collections, coroutines, executables
+
+# A round of allocation around exposures: garbage before them, owners built
+# inline as arguments (allocated while the call's arguments are prepared),
+# several values live across each call, garbage after.
+set bbChurn {fn garbage(k: int) -> int:
+    xs = loop i from 0 to k:
+        "g".concat("arbage")
+    std::list::length(xs)
+
+fn round(i: int) -> List[int]:
+    g1 = garbage(8)
+    d = mk(64 + i, 3)
+    held = [d, mk(5, 1)]
+    m = std::abi::bytes::zeroed(std::abi::usize(32))
+    s = bb::checksum(d, len(d))
+    w = bb::fill(m, 32, mod(i, 256))
+    inline = bb::checksum(mk(50, i), 50)
+    r = bb::reverse(std::list::at(held, 0), len(d), std::abi::bytes::zeroed(std::abi::bytes::length(d)))
+    g2 = garbage(4)
+    [s, bb::checksum(w.out, 32), inline, bb::checksum(r.out, mlen(r.out)), bb::checksum(std::list::at(held, 1), 5), g1 + g2]
+
+rounds = loop i from 0 to 120:
+    round(i)
+[std::list::length(rounds), std::list::at(rounds, 0), std::list::at(rounds, 119)]
+}
+
+# The oracle of round I of bbChurn.
+proc bbChurnRound {i} {
+    set d [bbPattern [expr {64 + $i}] 3]
+    list [bbChecksum $d] [bbChecksum [bbFill 32 [expr {$i % 256}]]] \
+        [bbChecksum [bbPattern 50 [expr {$i}]]] [bbChecksum [lreverse $d]] [bbChecksum [bbPattern 5 1]] 12
+}
+
+test bb-gc-stress {under a collection attempt at every allocation site, read and write exposures through real C stay exact on both backends and in a standalone executable: owners allocated before the exposures and inline among the call's arguments, several values live across each call, garbage after -- the oracle's values, and the same as without the stress} -constraints bbFixture -body {
+    set dir [bbApp $::bbChurn]
+    set plain [appValue $dir]
+    set stressed [underGcStress {list [appValue $dir] [appExecutable $dir {BOTLISH_NATIVE_GC_STRESS 1}]}]
+    list [expr {$plain eq [lindex $stressed 0] && $plain eq [lindex $stressed 1]}] $plain
+} -cleanup removeApps -result [list 1 [bbList [list 120 [bbList [bbChurnRound 0]] [bbList [bbChurnRound 119]]]]]
+
+set bbCoroutines {struct Event:
+    value: int
+
+fn worker(d: std::abi::bytes::Bytes, m: std::abi::bytes::MutableBytes) -> Event:
+    first = bb::checksum(d, len(d))
+    yield Event {value: first}
+    w = bb::fill(m, mlen(m), 7)
+    yield Event {value: bb::checksum(w.out, mlen(w.out))}
+    r = bb::reverse(d, len(d), m)
+    return Event {value: bb::checksum(r.out, mlen(r.out)) + bb::checksum(d, len(d))}
+
+fn run(i: int) -> List[int]:
+    d1 = mk(32 + i, 3)
+    coroutine {step: s1, first: a1} = worker(d1, std::abi::bytes::zeroed(std::abi::bytes::length(d1)))
+    coroutine {step: s2, first: a2} = worker(mk(16, 5), std::abi::bytes::zeroed(std::abi::usize(16)))
+    coroutine {step: s3, first: a3} = worker(mk(8, 7), std::abi::bytes::zeroed(std::abi::usize(8)))
+    b2 = s2()
+    b1 = s1()
+    c3 = s3()
+    b3 = s3()
+    c1 = s1()
+    c2 = s2()
+    [a1.value, b1.value, c1.value, a2.value, b2.value, c2.value, a3.value, b3.value, c3.value]
+
+runs = loop i from 0 to 40:
+    run(i)
+[std::list::length(runs), std::list::at(runs, 0), std::list::at(runs, 39)]
+}
+
+# The oracle of run I of bbCoroutines.
+proc bbCoroutineRun {i} {
+    set out {}
+    foreach {n step} [list [expr {32 + $i}] 3 16 5 8 7] {
+        set d [bbPattern $n $step]
+        lappend out [bbChecksum $d] [bbChecksum [bbFill $n 7]] [expr {[bbChecksum [lreverse $d]] + [bbChecksum $d]}]
+    }
+    # s3's second and third steps run in the other order: b3 is its second
+    # yield, c3 the first resumed.
+    return [lmap k {0 1 2 3 4 5 6 8 7} {lindex $out $k}]
+}
+
+test bb-coroutines {exposures inside coroutine bodies -- before the first yield, after a resume, from owners held across two suspensions -- with three coroutines suspended at once holding byte storage, resumed out of order, under GC stress: on both backends and in an executable, the oracle's values} -constraints {bbFixture nativeCoroutines} -body {
+    set dir [bbApp $::bbCoroutines]
+    underGcStress {list [appValue $dir] [appExecutable $dir {BOTLISH_NATIVE_GC_STRESS 1}]}
+} -cleanup removeApps -result [lrepeat 2 [bbList [list 40 [bbList [bbCoroutineRun 0]] [bbList [bbCoroutineRun 39]]]]]
+
+# ---------------------------------------------------------------------------
+# A real byte-consuming library: the system C library
+
+# Wrappers that derive every count from the storage it describes, as a
+# binding should: the program never states a length of its own.
+set bbSystem {fn lesser(a: std::ffi::c::ULong, b: std::ffi::c::ULong) -> std::ffi::c::ULong:
+    if a < b:
+        a
+    else:
+        b
+
+# memcmp's sign over the common prefix, then the shorter first.
+fn compare(a: std::abi::bytes::Bytes, b: std::abi::bytes::Bytes) -> int:
+    c = sys::memcmp(a, b, lesser(len(a), len(b)))
+    if c < 0:
+        return -1
+    if c > 0:
+        return 1
+    if len(a) < len(b):
+        return -1
+    if len(a) > len(b):
+        return 1
+    0
+
+# A copy of SRC made by memcpy into fresh storage of its length.
+fn copy(src: std::abi::bytes::Bytes) -> std::abi::bytes::MutableBytes:
+    sys::memcpy(std::abi::bytes::zeroed(std::abi::bytes::length(src)), src, len(src)).dst
+
+# M with every byte VALUE, by memset.
+fn set_all(m: std::abi::bytes::MutableBytes, value: std::byte::Byte) -> std::abi::bytes::MutableBytes:
+    sys::memset(m, value, mlen(m)).dst
+
+# M moved onto its own copy by memmove: the source is M's storage, the
+# destination a private copy of it (the detach), so they never overlap.
+fn moved(m: std::abi::bytes::MutableBytes) -> std::abi::bytes::MutableBytes:
+    sys::memmove(m, m, mlen(m)).dst
+
+big = mk(1048576, 7)
+other = mk(1048576, 7)
+last = std::abi::bytes::freeze(set_all(std::abi::bytes::from_bytes(mk(1, 1)), std::byte::from_int(255)))
+small = mk(16, 3)
+[compare(mk(16, 3), mk(16, 3)), compare(mk(16, 3), mk(16, 5)), compare(mk(16, 5), mk(16, 3)),
+ compare(std::abi::bytes::from_list([std::byte::from_int(127)]), std::abi::bytes::from_list([std::byte::from_int(128)])),
+ compare(std::abi::bytes::from_list([]), small), compare(small, std::abi::bytes::from_list([])),
+ compare(mk(15, 3), small), compare(big, other),
+ std::abi::bytes::freeze(copy(big)) == big, bb::checksum(copy(small), 16), std::abi::bytes::freeze(copy(std::abi::bytes::from_list([]))) == std::abi::bytes::from_list([]),
+ bb::checksum(set_all(std::abi::bytes::zeroed(std::abi::usize(16)), std::byte::from_int(165)), 16), std::abi::bytes::freeze(set_all(std::abi::bytes::zeroed(std::abi::usize(1048576)), std::byte::from_int(1))) == mk(1048576, 0),
+ bb::checksum(moved(std::abi::bytes::from_bytes(small)), 16), last == std::abi::bytes::from_list([std::byte::from_int(255)])]
+}
+
+# The oracle's values of bbSystem.
+proc bbSystemExpected {} {
+    set small [bbPattern 16 3]
+    bbList [list 0 [bbCompare $small [bbPattern 16 5] 16] [bbCompare [bbPattern 16 5] $small 16] -1 -1 1 -1 0 \
+        true [bbChecksum $small] true [bbChecksum [lrepeat 16 165]] false [bbChecksum $small] true]
+}
+
+test bb-system-library {the system C library's own byte functions -- memcmp, memcpy, memmove and memset, libSystem's on macOS, glibc's on Linux -- through wrappers that derive every count from the storage: comparisons (unsigned bytes, a shared prefix, the empty buffer), a 1 MiB comparison and copy, a fill, and a move whose source and destination are one owner; every value the oracle's} -constraints bbFixture -body {
+    appValue [bbApp $::bbSystem]
+} -cleanup removeApps -result [bbSystemExpected]
+
+test bb-system-library-gc-stress {the same calls of the system C library under a collection at every allocation site, on both backends and in a standalone executable} -constraints bbFixture -body {
+    set dir [bbApp [string map {1048576 65536} $::bbSystem]]
+    underGcStress {list [appValue $dir] [appExecutable $dir {BOTLISH_NATIVE_GC_STRESS 1}]}
+} -cleanup removeApps -result [lrepeat 2 [bbSystemExpected]]
+
+# The system library's functions an executable imports, as the host's tools
+# name them: nm -m on macOS ("(undefined) external _NAME (from libSystem)"),
+# nm -D on Linux ("U NAME@GLIBC_...").
+test bb-system-symbols {the executable imports memcmp, memcpy, memmove and memset from the system C library (libSystem on macOS, glibc on Linux): none is defined in it, so the calls above are the system's own code} -constraints {bbFixture dynamicSystemCLibrary} -body {
+    set dir [bbApp $::bbSystem]
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+    if {$::tcl_platform(os) eq "Darwin"} {
+        set table [exec nm -m $exe]
+        lmap name {memcmp memcpy memmove memset} {
+            regexp [format {\(undefined\) external _%s \(from libSystem\)} $name] $table
+        }
+    } else {
+        set table [exec nm -D $exe]
+        lmap name {memcmp memcpy memmove memset} {
+            regexp -line [format {^\s+U %s(@\S+)?$} $name] $table
+        }
+    }
+} -cleanup removeApps -result {1 1 1 1}
+
+# Guard Malloc (libgmalloc, macOS's own malloc debugging library): every
+# allocation on pages of its own, its end against the page after it, so a
+# read one byte past a block whose size is a multiple of 16 faults -- when
+# that page is unmapped, which libgmalloc does not guarantee for every block
+# (MACOS-AARCH64-MILESTONE-7.md, section 8: a one-byte overrun of a 4096-byte
+# storage read the next page's zero instead). So the test claims no more than
+# its own controls show: the storages it exposes are of the size whose
+# one-byte overruns it shows faulting. A probe C program shows the detector
+# works on this host: its one-byte over-read of a 16-byte block faults under
+# libgmalloc and not without. A run is judged by its exit status alone:
+# libgmalloc writes a banner to standard error, which goes to a file (exec
+# would take it for a failure).
+proc guardMallocWorks {} {
+    if {$::tcl_platform(os) ne "Darwin" || ![testConstraint cCompiler]} {
+        return 0
+    }
+    set dir [makeDirectory bb-gmalloc-probe-[pid]]
+    set channel [open [file join $dir probe.c] w]
+    puts $channel "#include <stdlib.h>\nint main(void) { volatile unsigned char *p = malloc(16); return p\[16\] == 0x5a; }"
+    close $channel
+    set works 0
+    if {![catch {exec cc -O0 [file join $dir probe.c] -o [file join $dir probe]}]} {
+        set plain [catch {exec [file join $dir probe] 2> [file join $dir stderr]}]
+        set guarded [catch {exec env DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib [file join $dir probe] 2> [file join $dir stderr]} message options]
+        # Killed by the fault's signal, not merely a non-zero exit.
+        set guarded [expr {$guarded && [lindex [dict get $options -errorcode] 0] eq "CHILDKILLED"}]
+        set works [expr {!$plain && $guarded}]
+    }
+    file delete -force $dir
+    return $works
+}
+testConstraint guardMalloc [guardMallocWorks]
+
+# 1 when DIR's executable, run with ENVIRONMENT, is killed by a signal (a
+# fault), 0 when it exits, whatever its status.
+proc appFaults {dir {environment {}}} {
+    if {[catch {appExecutable $dir $environment} message options]} {
+        return [expr {[lindex [dict get $options -errorcode] 0] eq "CHILDKILLED"}]
+    }
+    return 0
+}
+
+test bb-guard-malloc {(macOS) under Guard Malloc, a standalone executable making read and write exposures of 16-byte storages (32-byte blocks) -- the fixture's and the system library's -- runs to the same value: no C call reads or writes past an exposed storage; and each kind of exposure one byte too long (a fixture read, a fixture write into the detach copy, libSystem's memcpy) is killed by a signal there, and the read not without it, so the detector sees an overrun of exactly such storages} -constraints {bbFixture guardMalloc} -body {
+    set main "d = mk(16, 7)\nm = std::abi::bytes::zeroed(std::abi::usize(16))\nw = bb::fill(m, mlen(m), 3)\nc = sys::memcpy(std::abi::bytes::zeroed(std::abi::usize(16)), d, len(d))\n\[bb::checksum(d, len(d)), bb::checksum(w.out, mlen(w.out)), sys::memcmp(c.dst, d, len(d))\]\n"
+    # The positive controls, one exposure each with a literal count one past
+    # its 16 bytes (len(d) + 1 is not provably a size_t, and a program that
+    # does not compile must never pass for a fault: appFaults counts only a
+    # kill by a signal), made right after its storage.
+    set overruns [list \
+        "d = mk(16, 7)\n\[bb::checksum(d, 17)\]\n" \
+        "m = std::abi::bytes::zeroed(std::abi::usize(16))\nw = bb::fill(m, 17, 3)\n\[mlen(w.out)\]\n" \
+        "d = mk(16, 7)\nc = sys::memcpy(std::abi::bytes::zeroed(std::abi::usize(16)), d, 17)\n\[mlen(c.dst)\]\n"]
+    set gmalloc {DYLD_INSERT_LIBRARIES /usr/lib/libgmalloc.dylib}
+    list [appExecutable [bbApp $main] $gmalloc] [lmap overrun $overruns {appFaults [bbApp $overrun] $gmalloc}] \
+        [appFaults [bbApp [lindex $overruns 0]]]
+} -cleanup removeApps -result [list [bbList [list [bbPatternChecksum 16 7] [bbChecksum [bbFill 16 3]] 0]] {1 1 1} 0]
+
+cleanupTests

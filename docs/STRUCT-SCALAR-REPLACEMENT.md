@@ -207,6 +207,21 @@ fixed candidate set, representation planning cannot oscillate.
   dropped together, and share one root for materialization.
 * **Direct projections**: `{...}.f` and `call(...).f` read the field of a
   recognized construction without a binding.
+* **Constructions that are no literal** are recognized the same way where
+  native lowering builds the struct from registers it already has: a
+  syscall's Register64, the address bridge's, `std::binary::parse`'s
+  LayoutStruct, a layout write's MutableBytes and -- since
+  C-FFI-ERROR-CAPTURE-MILESTONE-1.md -- a foreign call's write-back value
+  `{result: R, NAME: MutableBytes}` (`WriteBackResult`), its MutableBytes
+  opened to the private copy's storage (VALUE-TRANSPORT-MATERIALIZATION.md,
+  "Independent nested lifetime"), so a C call's result is read before
+  anything is built. That one is no optimization (C-FFI-ERROR-CAPTURE-
+  MILESTONE-2.md): `-struct-opt 0` turns off the analysis, not the
+  write-back value's transport -- native lowering holds a write-back value
+  the analysis does not take as fields all the same (`MandatoryWriteBack`),
+  because building it right after the C call may change the C function's
+  error state. What `-struct-opt 0` still builds is every ordinary struct,
+  a struct literal holding a write-back value included.
 
 ## Materialization model
 

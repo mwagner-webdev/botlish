@@ -70,3 +70,12 @@ extern c fn SDL_GetRectEnclosingPointsFloat(
     clip: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
     result: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect]
 ) -> std::ffi::c::Bool
+
+# C: _Bool SDL_GetRectAndLineIntersectionFloat(const SDL_FRect *rect, float *X1, float *Y1, float *X2, float *Y2)
+extern c fn SDL_GetRectAndLineIntersectionFloat(
+    rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect],
+    X1: std::ffi::c::Ptr[std::ffi::c::Float],
+    Y1: std::ffi::c::Ptr[std::ffi::c::Float],
+    X2: std::ffi::c::Ptr[std::ffi::c::Float],
+    Y2: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Bool

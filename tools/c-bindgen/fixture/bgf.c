@@ -91,9 +91,32 @@ double bgf_scale(double x, float y) { return x * y; }
 
 bgf_pair bgf_swap(bgf_pair p) { bgf_pair q = {p.b, p.a}; return q; }
 
-int bgf_printf(const char *format, ...) { (void)format; return 0; }
+/* A variadic callee that reads its trailing arguments as FORMAT says: each
+ * `d` an int, `l` a long, `f` a double (its whole part), `p` a pointer
+ * (counted when non-null); the sum of what it read
+ * (VARIADICS-VERTICAL-SLICE-1.md). */
+int bgf_printf(const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    long sum = 0;
+    for (const char *c = format; *c; c++) {
+        switch (*c) {
+        case 'd': sum += va_arg(ap, int); break;
+        case 'l': sum += va_arg(ap, long); break;
+        case 'f': sum += (long)va_arg(ap, double); break;
+        case 'p': sum += va_arg(ap, void *) != 0; break;
+        default: break;
+        }
+    }
+    va_end(ap);
+    return (int)sum;
+}
 
 int bgf_vprintf(const char *format, va_list args) { (void)format; (void)args; return 0; }
+
+int (bgf_vshadow)(int n, ...) { return n; }
+
+int bgf_vother(int n, ...) { return n; }
 
 void bgf_set_measure(bgf_measure measure) { saved_measure = measure; }
 
@@ -139,3 +162,17 @@ int __attribute__((stdcall)) bgf_stdcall(int x) { return x + 1; }
 #if defined(__x86_64__)
 int bgf_take_ms(bgf_ms_callback cb) { return cb == 0; }
 #endif
+
+/* C float and double (bgf.h's last section, C-FLOAT-FFI-MILESTONE-1.md). */
+bgf_real32 bgf_scale32(bgf_scalar32 x, bgf_scalar64 k) { return (float)(x * k); }
+double bgf_dot(const float *xs, const double *ys, size_t n) {
+    double s = 0.0;
+    for (size_t i = 0; i < n; i++) s += (double)xs[i] * ys[i];
+    return s;
+}
+float bgf_apply_float(bgf_float_fn f, float x) { return f(x); }
+static float halve(float x) { return x / 2.0f; }
+bgf_float_fn bgf_halver(void) { return halve; }
+double bgf_sum_mixed(const bgf_mixed_floats *m) { return m->tag + m->a + m->b + m->c; }
+long double bgf_long_scale(long double x) { return x * 2; }
+double bgf_long_ptr(long double *x) { return (double)*x; }

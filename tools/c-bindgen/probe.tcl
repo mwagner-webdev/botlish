@@ -226,6 +226,49 @@ proc ::cbind::probe::symbols {config hprofile names prefix} {
     return $out
 }
 
+# Whether the compiler's own type of each variadic function is the
+# prototype the header parser read (VARIADICS-VERTICAL-SLICE-1.md): REQUESTS
+# {NAME RENDERED} pairs, RENDERED the parsed function type spelled back in C
+# (::cir::render: its fixed parameters, then `...`). A dict NAME -> {ok} or
+# {error MESSAGE}: one translation unit asserting __builtin_types_compatible_p
+# of __typeof__(NAME) and RENDERED for every NAME, so a `va_list` parameter
+# read as `...` -- or a `...` lost -- can never become a binding: the C
+# compiler, not the parser, says the function is variadic.
+proc ::cbind::probe::prototypes {config hprofile requests} {
+    set out [dict create]
+    if {[llength $requests] == 0} {
+        return $out
+    }
+    set prelude [Prelude $hprofile]
+    set make [list ::cbind::probe::PrototypeSource $prelude $requests]
+    set live [lsearch -all [lmap r $requests {expr 1}] 1]
+    lassign [Assemble $config $hprofile $make $live] asm rejected command
+    set i 0
+    foreach request $requests {
+        set name [lindex $request 0]
+        if {[dict exists $rejected $i]} {
+            dict set out $name [list error [dict get $rejected $i]]
+        } else {
+            dict set out $name [list ok]
+        }
+        incr i
+    }
+    return $out
+}
+
+proc ::cbind::probe::PrototypeSource {prelude requests live} {
+    set text $prelude
+    set line [llength [split $prelude \n]]
+    set lines [dict create]
+    foreach i $live {
+        lassign [lindex $requests $i] name rendered
+        append text "_Static_assert(__builtin_types_compatible_p(__typeof__($name), $rendered), \"variadic prototype of $name\");\n"
+        dict set lines $line $i
+        incr line
+    }
+    return [list $text $lines]
+}
+
 proc ::cbind::probe::SymbolSource {prelude names live} {
     set text $prelude
     set line [llength [split $prelude \n]]

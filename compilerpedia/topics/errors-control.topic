@@ -1046,6 +1046,52 @@ fn now(context clock: Clock, flags :fast) -> int:
 @at 4:30
 @end
 
+@topic error.malformed-variadic-section
+title: MALFORMED-VARIADIC-SECTION: a parameter list's variadic section is malformed
+summary: The variadic section `variadic NAME: List[T]` is the last parameter binding, at most once; anything after it but a resume clause, or an untyped entry, is a syntax error.
+index: errors
+alias: variadic parameter must be the last; at most one variadic parameter; needs its List type
+keywords: variadic, parameter list, section order, List, trait requirement, syntax
+related: concept.variadics concept.flags error.malformed-flag-section error.malformed-context-section error.surface-syntax
+docs: VARIADICS-VERTICAL-SLICE-1.md FLAGS.md
+code: MALFORMED-VARIADIC-SECTION
+match: SURFACE SYNTAX | MALFORMED-VARIADIC-SECTION: *
+
+== MEANING
+A parameter list is a sequence of sections in one order: ordinary
+parameters, flags, the context section, then the variadic parameter, which
+only a resume clause may follow. The section opens with the word
+`variadic` followed by a name, and its one entry is `NAME: List[T]` or
+`NAME: List`. The parser reports, at the offender (printed as SURFACE
+SYNTAX, the message starting with the code):
+
+    the variadic parameter "xs" must be the last parameter of the list,
+    found ... after it (a parameter list is ordinary parameters, then
+    flags, then context, then the variadic parameter)
+    a function declares at most one variadic parameter
+    variadic parameter "xs" needs its List type: write "variadic xs:
+    List[T]" (or "List" for an element type each call imprints)
+    requirement "f" of trait "T" declares a variadic parameter: a trait
+    requirement is a fixed signature
+
+`variadic` alone (`fn f(variadic)`) or with a colon (`fn f(variadic: int)`)
+is an ordinary parameter named variadic, as everywhere else.
+
+== WHAT TO DO
+Write `fn f(a, flags :q, context io: Log, variadic xs: List[int])`: one
+variadic section, last, its entry typed as a List. A declared type that is
+no List (`variadic xs: int`) is a TYPE error of the resolver instead.
+
+@example reject
+fn f(variadic xs: List[int], y: int) -> int:
+    y
+
+0
+@caption An ordinary parameter after the variadic section
+@error SURFACE SYNTAX
+@at 1:30
+@end
+
 @topic error.direct
 title: DIRECT: a module uses direct authority without acknowledging it
 summary: A call into a direct module (linux, a raw syscall transport, a retaining C function) is made by a function that requires no context of its own module, and the module is not declared `direct module`.
@@ -1312,8 +1358,11 @@ The parser reports each malformed form at the offender, for example:
     duplicate "named": an extern c fn has one link symbol
 
 Also reported: a library given as a path or a linker option, a symbol that
-is not a valid link symbol, `fn` or `library` missing after `extern c`,
-varargs, and a fact stated twice.
+is not a valid link symbol, `fn` or `library` missing after `extern c`, a
+fact stated twice, and a malformed variadic marker -- C's `...` (written
+`variadic` here), `variadic` with no fixed parameter before it, anything
+after it, or a name or type on it (C's trailing arguments have none; each
+call passes its own C types, concept.variadics).
 
 == WHAT TO DO
 Follow the grammar in concept.c-ffi: `c` is the only ABI, the library is

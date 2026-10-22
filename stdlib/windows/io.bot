@@ -1,0 +1,131 @@
+# io.bot -- the "std::windows::io" namespace: the process's standard output and
+# error on Windows as one execution-environment context (CONTEXTS.md;
+# WINDOWS-X86-64-MILESTONE-2.md).
+#
+#   with context std::windows::io::create()  install it (entry program)
+#   std::windows::io::write(data)            WriteFile to the context's
+#                                            standard output: a
+#                                            std::windows::WriteResult
+#   std::windows::io::write_error(data)      the same to its standard error
+#
+# WindowsIO is std::linux::io::LinuxIO's and std::darwin::io::DarwinIO's Windows
+# sibling: ONE context, the process's output environment. A function that
+# uses it says so once (`context io: WindowsIO`) and is called with its
+# ordinary arguments; code between the entry program and it declares nothing
+# (the compiler derives the requirement), and a call before `with context
+# std::windows::io::create()` is MISSING-CONTEXT at compile time.
+#
+# What the context holds is the process's standard *devices* -- its output
+# and its error -- never a handle: a Windows standard handle is the process's
+# slot, read with GetStdHandle when a write needs it (windows::
+# standard_handle), and a C pointer cannot live in a context anyway (an
+# installed context is erased: AFFINE-ERASURE-UNSUPPORTED, C-ABI-TYPES.md).
+# So every write uses the handle the process has at that moment -- a
+# console, a file or a pipe, whatever the launcher redirected it to -- and
+# the context owns nothing: no handle is opened, duplicated or closed here.
+#
+# Representation authority. WindowsIO is opaque (OPAQUE-STRUCTS.md): only
+# this module may construct it or look inside; a WindowsIO a function
+# receives as its context can be held and passed but not taken apart.
+#
+# WindowsIO implements the portable std::io::IO context trait (CONTEXT-TRAITS.md)
+# with write_text and write_error_text below: ordinary functions of this
+# module whose one context parameter is a WindowsIO and whose signatures
+# match std::io::IO's requirements. Nothing registers them: where a call needs
+# std::io::IO and WindowsIO is the one installed context that implements it, the
+# compiler binds `io.write_text(...)` to a direct call of std::windows::io::
+# write_text -- no dispatch, no hidden argument, no provider table at run
+# time.
+#
+# The completion policy is LinuxIO's and DarwinIO's, so std::io::IO means the
+# same on every platform: all of the text, or std::io::WriteFailed. A short write
+# is completed by writing the rest; a write WriteFile reports failed
+# (whatever its last-error code: no retry), one that makes no progress, and
+# a device the process has no handle for (GetStdHandle's NULL) are
+# std::io::WriteFailed; no count, handle or error code escapes. The text is
+# written as its UTF-8 bytes, exactly: no UTF-16 conversion, no console
+# code page applied, no newline translation (a redirected output receives
+# the bytes; a console shows them through its output code page, which
+# WINDOWS-X86-64-MILESTONE-2.md's "Text and encoding" describes).
+#
+# Not here (deliberately): input, files, the error code beyond
+# std::io::WriteFailed (the raw std::windows::write_file and std::windows::io::write keep
+# it), console modes, WriteConsoleW, buffering.
+import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::io
+import std::list
+import std::str
+import type std::byte::Byte
+import std::windows
+
+# The process's output environment: its standard output and standard error
+# devices (never their handles). One context.
+opaque context struct WindowsIO:
+    stdout: std::windows::StandardDevice
+    stderr: std::windows::StandardDevice
+
+# The standard process output environment. An ordinary constructor; `with
+# context std::windows::io::create()` installs its value.
+fn create() -> WindowsIO:
+    WindowsIO {stdout: std::windows::StandardDevice::Output, stderr: std::windows::StandardDevice::Error}
+
+# WriteFile of DATA to the context's standard output: ONE kernel32 call,
+# std::windows::write_file's result unchanged (stdlib/windows.bot). With no standard
+# output handle (NULL) WriteFile refuses the call: ERROR_INVALID_HANDLE.
+fn write(data: std::abi::bytes::Bytes, context io: WindowsIO) -> std::windows::WriteResult:
+    std::windows::standard_handle(io.stdout).write_file(data)
+
+# WriteFile of DATA to the context's standard error.
+fn write_error(data: std::abi::bytes::Bytes, context io: WindowsIO) -> std::windows::WriteResult:
+    std::windows::standard_handle(io.stderr).write_file(data)
+
+# ---------------------------------------------------------------------------
+# std::io::IO (CONTEXT-TRAITS.md)
+
+# The progress one WriteFile made: the bytes it wrote, none when it failed.
+fn progress(r: std::windows::WriteResult) -> int:
+    if r.ok:
+        return r.count
+    0
+
+# How many of BYTES one WriteFile wrote to DEVICE's current handle: 0 when
+# the process has no handle for it (GetStdHandle's NULL) or WriteFile
+# reported a failure.
+fn write_some(device: std::windows::StandardDevice, bytes: List[Byte]) -> int:
+    handle = std::windows::standard_handle(device)
+    if handle.null?():
+        return 0
+    progress(handle.write_file(std::abi::bytes::from_list(bytes)))
+
+# Writes every byte of BYTES to DEVICE's current handle. One WriteFile of
+# the whole text in the common case; a short write (fewer bytes than asked,
+# but some) is completed by writing the rest, again and again, so the caller
+# only ever sees all or std::io::WriteFailed. A device with no handle, a failed
+# write and one that makes no progress are std::io::WriteFailed; no count or
+# error code escapes.
+fn write_all(device: std::windows::StandardDevice, bytes: List[Byte]) -> unit errors std::io::WriteFailed:
+    n = std::list::length(bytes)
+    if n == 0:
+        return unit
+    written = device.write_some(bytes)
+    if written <= 0:
+        fail std::io::WriteFailed
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+        # prove are inside BYTES.
+        remaining = loop i from written to n:
+            bytes.at(i)
+        return device.write_all(remaining)
+    unit
+
+# All of TEXT, UTF-8 encoded, on the context's standard output;
+# std::io::WriteFailed when Windows reports an error, the write stops making
+# progress or the process has no standard output. Never a byte count.
+fn write_text(text: str, context io: WindowsIO) -> unit errors std::io::WriteFailed:
+    io.stdout.write_all(std::str::encode_utf8(text))
+
+# All of TEXT, UTF-8 encoded, on the context's standard error.
+fn write_error_text(text: str, context io: WindowsIO) -> unit errors std::io::WriteFailed:
+    io.stderr.write_all(std::str::encode_utf8(text))

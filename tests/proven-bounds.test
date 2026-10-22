@@ -508,14 +508,22 @@ test bounds-vector-snapshots-rejected {a List collected over a MutableVector has
     }
 } -result {{local-counted UNHANDLED-ERROR {IndexNotFound 0}} {local-mod UNHANDLED-ERROR {IndexNotFound 0}} {local-mask UNHANDLED-ERROR {IndexNotFound 0}} {local-guard UNHANDLED-ERROR {IndexNotFound 0}} {local-pop UNHANDLED-ERROR {IndexNotFound 0}} {local-clear UNHANDLED-ERROR {IndexNotFound 0}} {parameter UNHANDLED-ERROR {IndexNotFound 0}} {field-path UNHANDLED-ERROR {IndexNotFound 0}} {context-callee UNHANDLED-ERROR {IndexNotFound 0}} {copy-then-copy UNHANDLED-ERROR {IndexNotFound 0}} {through-copy UNHANDLED-ERROR {IndexNotFound 0}} {loop-body UNHANDLED-ERROR {IndexNotFound 0}} {handler UNHANDLED-ERROR {IndexNotFound 0}} {branch UNHANDLED-ERROR {IndexNotFound 0}} {loop-encloses-later UNHANDLED-ERROR {IndexNotFound 0}} {own-body UNHANDLED-ERROR {IndexNotFound 0}} {copies-each-pushed UNHANDLED-ERROR {IndexNotFound 0}} {context-branch-callee UNHANDLED-ERROR {IndexNotFound 0}} {branch-push-then-read UNHANDLED-ERROR {IndexNotFound 0}} {condition-site UNHANDLED-ERROR {IndexNotFound 0}} {context-transitive UNHANDLED-ERROR {IndexNotFound 0}} {context-resume UNHANDLED-ERROR {IndexNotFound 0}} {context-resume-value UNHANDLED-ERROR {IndexNotFound 0}}}
 
+# The two shapes that resume a coroutine run natively only where the native
+# backend runs coroutines; on a host without (nativeCoroutines) this test
+# leaves exactly them out, as a test needing coroutines throughout carries
+# the constraint, and checks the others on every backend.
+set coroutineSnapshots {context-resume context-resume-value}
+
 test bounds-vector-snapshots-fail {each snapshot shape the prover leaves checked really reads past the end of the earlier List: declared and handled, every backend fails the read with IndexNotFound and runs the handler -- the rejection is necessary, not only conservative} -body {
     lmap {name body h} $vectorSnapshots {
+        if {$name in $::coroutineSnapshots && ![testConstraint nativeCoroutines]} continue
         set hir [boundsHir [vectorSnapshotProgram $body $h IndexNotFound ":\n    on IndexNotFound:\n        -424242"]]
         set nir [native::nir $hir]
         list $name [lmap b $::boundsBackends {lindex [outcomeUnderHir $b $hir] 1}] \
             [expr {[opCount $nir listget] > 0}] [opCount $nir listgetproven]
     }
 } -result [lmap name {local-counted local-mod local-mask local-guard local-pop local-clear parameter field-path context-callee copy-then-copy through-copy loop-body handler branch loop-encloses-later own-body copies-each-pushed context-branch-callee branch-push-then-read condition-site context-transitive context-resume context-resume-value} {
+    if {$name in $::coroutineSnapshots && ![testConstraint nativeCoroutines]} continue
     list $name {-424242 -424242 -424242 -424242} 1 0
 }]
 
@@ -916,7 +924,7 @@ test bounds-vector-mutated-operand {a lockstep loop's domains run in written ord
     list [strictKind $before] [agreedValue $before] [strictKind $after] [agreedValue $counts]
 } -result {{} {[11, 22, 33]} LOCKSTEP-UNPROVEN {[3, 2]}}
 
-test bounds-vector-context-yield {a yield of a coroutine body is a mutation of the context members it reads: the resumer runs before the body goes on, and may grow one through its own context parameter -- two loops over a member around a yield are unrelated (rejected without `errors`; declared and handled, every backend fails the read), and around a yield over a local vector they are one length} -body {
+test bounds-vector-context-yield {a yield of a coroutine body is a mutation of the context members it reads: the resumer runs before the body goes on, and may grow one through its own context parameter -- two loops over a member around a yield are unrelated (rejected without `errors`; declared and handled, every backend fails the read), and around a yield over a local vector they are one length} -constraints nativeCoroutines -body {
     set decl "${vectorDecls}fn body(h: int, context log: Log) -> int%s:\n    ys = loop x in log.items:\n        x * 10\n    yield 0\n    zs = loop x in log.items:\n        x\n    ys.at(h.mod(std::list::length(zs)))\nfn f(context log: Log) -> int%s:\n    coroutine {step, first} = body(3)\n    add(7)\n    add(8)\n    step()\nwith context Log {items: std::mutable_vector::from_list(\[1, 2\])}\nf()%s\n"
     set local "${vectorDecls}fn body(h: int) -> int:\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    v.push(4)\n    ys = loop x in v:\n        x * 10\n    yield 0\n    zs = loop x in v:\n        x\n    ys.at(h.mod(std::list::length(zs)))\nfn f() -> int:\n    coroutine {step, first} = body(5)\n    step()\nf()\n"
     set handled [format $decl " errors IndexNotFound" " errors IndexNotFound" ":\n    on IndexNotFound:\n        -424242"]

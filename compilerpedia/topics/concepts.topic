@@ -392,6 +392,8 @@ with the declared error NonFiniteFloat. There is no negative zero either:
     < <= > >= == !=     comparisons
     std::float64::from_int(n)    Int -> nearest Float64 (import std::float64)
     std::float64::truncate(x)    Float64 -> Int, toward zero
+    std::float64::min(a, b)  std::float64::max(a, b)  x.abs()  x.clamp(low, high)
+                        bounds (stdlib/float64.bot); they never fail
 
 == RULES
   * A literal with a decimal point is a Float64, except where a
@@ -419,9 +421,12 @@ with the declared error NonFiniteFloat. There is no negative zero either:
   * 1.0 == 1 is false: values of different kinds are never equal.
   * A Float64 prints as the shortest decimal that reads back to the same
     number, always with a point (3.0, 0.1, 1.0e100).
-  * extern c fn declarations pass Float64 as C `double`
-    (std::ffi::c::Double); a NaN or an infinity coming back from C fails
-    with NonFiniteFloat.
+  * C's float and double are C representations of Float64 values,
+    std::ffi::c::Float (binary32) and std::ffi::c::Double (binary64): a
+    Float64 a C float receives is rounded to nearest, ties to even, and one
+    too large for it fails with NonFiniteFloat before C runs; a NaN or an
+    infinity coming back from C, or read from a layout's bytes, fails with
+    NonFiniteFloat (concept.c-floats).
 
 == WHY
 Finite values keep == an equivalence (no NaN that differs from itself)
@@ -477,9 +482,9 @@ x * 1.0e300
 title: DecimalRounded: a decimal-rounding guarantee, not a representation
 summary: DecimalRounded{minDecimalsPreserved: N}: a number whose type guarantees that rounding it to N places (half to even) gives the intended decimal, proven by the compiler, observed at N places.
 index: concepts
-alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal; scalar refinement
+alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal
 keywords: decimal, rounding, round, half even, precision, places, guarantee, refinement, money, Float64, from_decimal_rounded, quantize, exact, ExactDecimal, observation, ceiling
-related: concept.floats stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round stdlib.module.std::decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
+related: concept.scalar-refinements concept.floats stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round stdlib.module.std::decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
 docs: DECIMAL-ROUNDED-MILESTONE-1.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC EQUALITY | *of a DecimalRounded value needs the precision of its type*
 match: CORE SEMANTIC TYPE | *DecimalRounded*
@@ -629,6 +634,52 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
 @error CORE SEMANTIC DECIMAL-GUARANTEE-LOST
 @at 2:5
 @end
+
+@topic concept.scalar-refinements
+title: Scalar refinements: compiler-known facts in braces
+summary: A scalar refinement, written TYPE{param: N, ...}, adds facts the compiler proves to a type without changing its values: DecimalRounded{minDecimalsPreserved: N} and List[T]{length: N} are the families.
+index: concepts
+alias: scalar refinement; scalar refinements; refinement parameters; refinement in braces; refinement family
+keywords: refinement, braces, parameter, fact, guarantee, family, length, minDecimalsPreserved, decay, forget, subtype, join
+related: concept.decimal-rounded concept.list-length concept.refinements concept.integer-domains error.refinement-parameter proof.types
+docs: DECIMAL-ROUNDED-MILESTONE-1.md LIST-CARDINALITY-REFINEMENTS.md
+
+== WHAT IT IS
+A scalar refinement is a type of a compiler-known family with integer
+parameters, written in braces after the type it refines:
+
+    DecimalRounded{minDecimalsPreserved: 2}    a decimal guarantee
+    List[int]{length: 4}                       an exact length
+
+The parameters are part of the type and the compiler owns their meaning.
+A refinement strengthens what is known about a value; it never changes what
+the value is: a List[int]{length: 4} is an ordinary List[int], with the
+same representation on every backend and no tag or check at run time.
+
+== RULES
+  * Forgetting is always valid and free: a refined value stands wherever
+    its family's weaker type is expected (a List[T]{length: 4} where a
+    List[T] is), with no conversion.
+  * Recovering a fact takes a proof (a literal, a guard, a declared contract
+    the compiler checks) or an explicit, fallible validation
+    (std::decimal_rounded::round, std::list::with_length). Admission never
+    inserts a check.
+  * Each parameter has an order: minDecimalsPreserved is a lower bound (4
+    places imply 2), an exact length implies only itself. Two branches
+    keep what both state and forget the rest.
+  * A family's parameters are checked where the type is written
+    (REFINEMENT-PARAMETER). These are not the predicate refinements of
+    `refined type` (concept.refinements), and not integer domains
+    (concept.integer-domains).
+
+== WHY
+One mechanism carries every compiler-known scalar fact, so a new kind of
+guarantee needs a schema row, not a type system of its own, and every fact
+decays, joins and prints the same way.
+
+== MORE
+concept.decimal-rounded, concept.list-length;
+DECIMAL-ROUNDED-MILESTONE-1.md, LIST-CARDINALITY-REFINEMENTS.md.
 
 @topic concept.integer-domains
 title: Integer domains: `type Name = Int in LO..HI`
@@ -873,14 +924,15 @@ summary: List[T] is an immutable sequence written [a, b]; its operations need `i
 index: concepts
 alias: List type; list literal; immutable list; sequence
 keywords: list, List, at, get, append, length, find, any?, all?, IndexNotFound, element, index, empty list
-related: concept.loops concept.values concept.destructuring proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
+related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
 docs: README.md STDLIB-NAMESPACES.md RETURNING-ITERABLE-LOOPS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import
 std::list`: length, at, append (a new List with one more element), get (with
 a default), find, any?, all?, none?. Element types are inferred; a parameter
-or result may declare `List[T]`.
+or result may declare `List[T]`, or `List[T]{length: N}` for a List of a
+proven exact length (concept.list-length).
 
 == RULES
   * `xs.at(i)` fails with the declared error IndexNotFound unless the
@@ -923,6 +975,154 @@ a
 
 == MORE
 STDLIB-NAMESPACES.md (at and get); RETURNING-ITERABLE-LOOPS.md.
+
+@topic concept.list-length
+title: List[T]{length: N}: a List of a proven exact length
+summary: List[T]{length: N} is an ordinary List whose length is proven to be exactly N: it decays to List[T] freely, is minted by proofs or std::list::with_length, and removes bounds and extent checks.
+index: concepts
+alias: list length refinement; exact length list; fixed length list; List length; length refinement; known length list; list cardinality; LengthMismatch
+keywords: List, length, exact, cardinality, refinement, with_length, LengthMismatch, decay, guard, fixed array, extent, bounds, tuple, IndexNotFound, LayoutExtentMismatch
+related: concept.scalar-refinements concept.lists stdlib.std::list::with_length stdlib.std::list::length proof.list-bounds concept.binary-layouts principle.name-the-parts warning.fixed-arity-list-return error.refinement-parameter
+docs: LIST-CARDINALITY-REFINEMENTS.md
+match: CORE SEMANTIC TYPE | *states no exact length*
+match: CORE SEMANTIC TYPE | *element(s) is never one of*
+match: CORE SEMANTIC TYPE | *std::list::with_length*
+
+== WHAT IT IS
+`List[int]{length: 4}` is the List family of scalar refinements
+(concept.scalar-refinements): a List[int] whose length is proven to be
+exactly 4. The length is a non-negative integer literal; it is knowledge,
+not representation -- the value is the same List as a List[int], with no
+inline array, tuple or fixed-size object behind it, and nothing checks it
+at run time.
+
+    fn sum3(r: List[int]{length: 3}) -> int:
+        r.at(0) + r.at(1) + r.at(2)      # no IndexNotFound to handle
+
+== RULES
+  * Decay is free: a List[T]{length: N} stands wherever a List[T] does.
+    The reverse needs the fact: a List[T] argument, field or result where
+    a length is required is a TYPE error ("states no exact length"), and a
+    List of another length is one too ("is never one of N"): an exact
+    length implies no other.
+  * What mints it: a List literal (`[1, 2, 3]` is List[int]{length: 3}; `[]`
+    has length 0); a declared parameter, struct field or result type;
+    std::list::append (one more than its List); a collecting loop with no
+    break or continue over a List of known length or a counted range; the
+    copy of a fixed layout array (std::binary::parse, std::binary::load,
+    std::binary::read: `array 2 of array 3 of E` copies to
+    List[List[E]{length: 3}]{length: 2}); a guard `if xs.length() == N:`
+    (either operand order, or `!=` with an early return); and
+    std::list::with_length[List[T]{length: N}](xs), which checks once and
+    fails with LengthMismatch.
+  * What does not: `xs.length() >= N` (an exact length is an equality),
+    a filtering loop (`continue`), a MutableVector or MutableArray (their
+    length can change: they have no length refinement).
+  * A declared refined result is a contract the compiler holds every exit
+    to, and callers see it. An undeclared result forgets lengths its body
+    happens to have, and so do a generic function's instances, handlers'
+    admission and mutable containers' element types: an accident of the
+    implementation is never an API.
+  * Two branches of different lengths join to List[T] (equal lengths keep
+    theirs). Nothing is ever specialized by length.
+  * The proofs read it: std::list::at with an index in range needs no
+    handler (an index out of range is KNOWN-ERROR), std::list::length of it
+    is the constant N, and a write of it into a fixed layout array of N
+    elements loses its LayoutExtentMismatch path (a List of no known length
+    keeps the run-time check).
+  * It is not a tuple: a fixed group of different values is still a struct
+    (principle.name-the-parts), and FIXED-ARITY-LIST-RETURN warns exactly
+    as it would for List[T] (warning.fixed-arity-list-return). A declared
+    `-> List[T]{length: N}` is a list result type like `-> List[T]`.
+
+== WHY
+Exact lengths were known in several places -- literals, fixed arrays,
+loops -- but each proof kept its own copy. As a type, the fact crosses a
+function boundary by declaration, is checked once where it enters, and
+removes the checks it makes redundant, without making a List anything but
+a sequence.
+
+== EXAMPLES
+@example accept
+import std::list
+
+fn sum3(r: List[int]{length: 3}) -> int:
+    r.at(0) + r.at(1) + r.at(2)
+
+fn total(xs: List[int]) -> int:
+    if xs.length() != 3:
+        return -1
+    xs.sum3()
+
+[total([1, 2, 3]), total([4]), [7, 8, 9].sum3()]
+@caption A literal and a length guard mint the fact; the parameter needs no handler
+@value [6, -1, 24]
+@end
+
+@example accept
+import std::list
+
+fn row(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    std::list::with_length[List[int]{length: 3}](xs)
+
+fn safe(xs: List[int]) -> List[int]{length: 3}:
+    xs.row():
+        on LengthMismatch:
+            [0, 0, 0]
+
+[safe([1, 2, 3]), safe([1, 2])]
+@caption Validated once, explicitly
+@value [[1, 2, 3], [0, 0, 0]]
+@end
+
+@example accept
+import std::abi::bytes
+import std::binary
+import std::list
+
+layout Row:
+    size 3
+    align 1
+    field cells: array 3 of std::binary::U8 at 0
+
+fn ends(r: List[std::binary::U8]{length: 3}) -> int:
+    r.at(0) + r.at(2)
+
+fn total(data: std::abi::bytes::Bytes) -> int errors LayoutLengthMismatch:
+    std::binary::parse(Row, data).cells.ends()
+
+std::binary::layout_length(Row)
+@caption A fixed array's copy states its extent
+@value 3
+@end
+
+@example reject
+import std::list
+
+fn sum3(r: List[int]{length: 3}) -> int:
+    r.at(0) + r.at(1) + r.at(2)
+
+fn total(xs: List[int]) -> int:
+    xs.sum3()
+
+0
+@caption A List[int] states no length, and admission inserts no check
+@error CORE SEMANTIC TYPE
+@at 7:5
+@end
+
+@example reject
+fn pair() -> List[int]{length: 2}:
+    [1, 2, 3]
+
+pair()
+@caption A declared length is a contract on every exit
+@error CORE SEMANTIC TYPE
+@at 1:8
+@end
+
+== MORE
+LIST-CARDINALITY-REFINEMENTS.md; concept.scalar-refinements.
 
 @topic concept.structs
 title: Structs: named and anonymous records of fields
@@ -1294,10 +1494,12 @@ a function may declare flags (concept.flags) and context parameters
 (concept.contexts).
 
 == RULES
-  * Arity is exact: no default arguments, no variadic functions, no
-    keyword arguments other than flags. A call with the wrong number of
-    arguments fails with ARITY (statically for a function with flags; for
-    other functions the check is currently made when the call runs).
+  * Arity is exact: no default arguments and no keyword arguments other
+    than flags; a variadic function (concept.variadics) takes its fixed
+    arguments and any number of trailing ones. A call with the wrong
+    number of arguments fails with ARITY (statically for a function with
+    flags or a variadic section; for other functions the check is
+    currently made when the call runs).
   * Postfix binds tighter than unary minus: `-3.clamp(0, 10)` is
     `-(3.clamp(0, 10))`; write `(-3).clamp(0, 10)`.
   * Typed parameters and results are contracts proven at every call and
@@ -1681,6 +1883,145 @@ label(1, :shout)
 
 == MORE
 FLAGS.md.
+
+@topic concept.variadics
+title: Variadic parameters: `variadic NAME: List[T]`
+summary: `fn sum(variadic xs: List[int])` takes any number of trailing arguments as one immutable List; `extern c fn f(fixed, variadic)` is a variadic C function.
+index: concepts
+alias: variadic function; variadic parameter; varargs; variable arguments; rest parameter; C varargs; printf
+keywords: variadic, varargs, trailing arguments, List, imprint, extern c fn, va_arg, default argument promotions, MALFORMED-VARIADIC-SECTION
+related: concept.functions concept.flags concept.c-ffi error.malformed-variadic-section error.arity error.extern-syntax
+docs: VARIADICS-VERTICAL-SLICE-1.md FLAGS.md C-FFI.md
+
+== WHAT IT IS
+    fn sum(variadic numbers: List[int]) -> int:
+    fn log(level: int, variadic parts: List[str]) -> int:
+
+The variadic section is a function's last parameter binding: after the
+ordinary parameters, the flags and the context section (only a resume
+clause follows it), at most once, `variadic NAME: List[T]` -- or a bare
+`variadic NAME: List`, whose element type each call imprints. A call
+passes its fixed arguments, then any number of trailing ones, then its
+flags: `sum()` is `sum([])`, `sum(1, 2, 3)` is `sum([1, 2, 3])`,
+`log(1, "a", "b")` is `log(1, ["a", "b"])`.
+
+== RULES
+  * The body receives an ordinary immutable List. There is no variadic
+    value, type or run-time representation: the call is an ordinary call
+    whose last argument is the List construction, every argument
+    evaluated once, in written order.
+  * Each trailing argument is proven in the element type by its own proof:
+    a `variadic xs: List[Small]` takes `smalls(1, 9)` (where the literal
+    `[1, 9]`, a List[int], would not be admitted), and a trailing argument
+    outside it is a TYPE error at that argument.
+  * A call passes at least the fixed arguments (ARITY, at compile time).
+  * Method syntax and aliases collect the trailing arguments too
+    (`(2).log("a")`, `g = sum` then `g(1, 2)`). Used as a value, a
+    variadic function is the ordinary function of its List parameter: a
+    call through the value passes the List itself (`apply(sum, [1, 2])`).
+    A List written as a trailing argument is one element: there is no
+    spread.
+  * A bare `List` makes the function imprinted (an empty call collects
+    List[never], or an explicit imprint names the element: `f[int]()`), so
+    it is called, never passed as a value. A variadic function implements
+    no trait requirement or context-trait operation.
+  * C: `extern c fn printf(format: std::ffi::c::Ptr[std::ffi::c::Char] read
+    noescape, variadic) -> std::ffi::c::Int` -- the bare word `variadic`,
+    last, after at least one fixed parameter (C's `...`, never written
+    `...`). Each trailing argument has exactly one C ABI type: a C integer
+    scalar, std::ffi::c::Bool, Float64 (a C double), a std::ffi::c::Ptr or
+    an std::ffi::c::FnPtr. A plain Int (which says no C type), a String, a
+    List, a struct, byte storage and an erased value are refused. C's
+    default argument promotions apply (an integer narrower than int, and
+    _Bool, are passed as int). A trailing pointer has no contract, so the
+    call is direct authority (concept.direct-modules). The call's machine
+    signature is built per call: x86-64 System V (with its %al count of
+    vector registers), Linux AArch64 (AAPCS64) and Apple AArch64 (every
+    trailing argument on the stack, in an 8-byte slot). Windows x86-64 has
+    no variadic lowering yet: such a call is a NATIVE CODEGEN error there
+    (error.native-codegen), while the front end and every other call take
+    the program.
+
+== WHY
+A function of "any number of values of one type" is a List parameter whose
+caller does not write the brackets. Keeping the body's view an ordinary
+List keeps every analysis, ownership rule and backend unchanged; only the
+call collects. A C variadic function is a different thing -- each call has
+its own C signature -- so its trailing arguments must each say which C type
+they are, which a Botlish integer does not.
+
+== EXAMPLES
+@example accept
+import std::list
+
+fn sum_from(xs: List[int], i: int, acc: int) -> int:
+    if i == xs.length():
+        acc
+    else:
+        x = xs.at(i):
+            on IndexNotFound:
+                0
+        xs.sum_from(i + 1, acc + x)
+
+fn sum(variadic numbers: List[int]) -> int:
+    numbers.sum_from(0, 0)
+
+fn weighted(weight: int, variadic numbers: List[int]) -> int:
+    weight * numbers.sum_from(0, 0)
+
+[sum(), sum(1, 2, 3), weighted(2, 4, 5), (3).weighted(1)]
+@value [0, 6, 18, 3]
+@end
+
+@example accept
+import std::list
+
+fn count(variadic values: List) -> int:
+    std::list::length(values)
+
+[count(), count("ab", "cd"), count(true, 2, 3)]
+@caption A bare List: each call imprints its element type
+@value [0, 2, 3]
+@end
+
+@example reject
+type Small = Int in 0..9
+
+fn smalls(variadic xs: List[Small]) -> List[Small]:
+    xs
+
+smalls(1, 9, 10)
+@caption Each trailing argument is proven in the element type
+@error CORE SEMANTIC TYPE
+@at 6:14
+@end
+
+@example accept
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::list
+import std::str
+
+extern c fn printf(format: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, variadic) -> std::ffi::c::Int
+
+fn nul() -> std::byte::Byte:
+    0
+
+fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(text.encode_utf8().append(nul()))
+
+fn c_long(n: std::ffi::c::Long) -> std::ffi::c::Long:
+    n
+
+printf(cstring("%ld %.1f\n"), c_long(-7), 2.5)
+@caption C's printf: a C long and a double, the characters it wrote
+@backends cranelift-generic cranelift
+@value 7
+@end
+
+== MORE
+VARIADICS-VERTICAL-SLICE-1.md; FLAGS.md (the section order); C-FFI.md.
 
 @topic concept.function-types
 title: Function types: `Fn{args, return, errors}` and `Coroutine{...}`
@@ -2549,7 +2890,7 @@ summary: A `trait` declares operations; a trait-typed parameter accepts any valu
 index: concepts
 alias: trait; traits; interface; type class; protocol
 keywords: trait, interface, structural, conformance, view, witness, monomorphization, TRAIT-NOT-SATISFIED, TRAIT-VIEW-MISUSE, polymorphism, dispatch, vtable
-related: concept.context-traits concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
+related: concept.context-traits concept.hashable concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
 docs: TRAITS.md
 
 == WHAT IT IS
@@ -2573,6 +2914,9 @@ on which only the trait's operations are allowed (as method calls).
     Nothing of the trait exists at run time.
   * A trait is declared at top level and needs at least one requirement;
     requirements are signatures only.
+  * The built-in trait Hashable (concept.hashable) is used the same way,
+    but its witnesses come from the language, not from a module's
+    functions.
 
 == WHY
 Traits abstract over values without a run-time cost or a second dispatch
@@ -2616,6 +2960,96 @@ describe(Pet {species: "cat"})
 
 == MORE
 TRAITS.md.
+
+@topic concept.hashable
+title: Hashable: values with total equality and total hashing
+summary: Hashable is a built-in trait, used like any trait, whose witnesses the language supplies: exactly the types whose every value has total equality and a hash.
+index: concepts
+alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
+keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
+related: concept.traits stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
+docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md
+
+== WHAT IT IS
+    fn fingerprint(x: Hashable) -> int:
+        hash(x)
+
+Hashable is a trait like any other to the code that uses it: a parameter,
+a result or a function of it is monomorphized per concrete type, and
+`x.hash()` is its one operation (the public hash). What differs is who
+supplies the witnesses: no module implements Hashable, and no source
+declaration can make a type satisfy it. A type is Hashable exactly when
+every value of it has total equality (== with it never stops with
+EQUALITY) and a hash, and so equal values always hash equally:
+
+  * Int and every integer domain, String, Bool, unit, UnicodeChar,
+    Float64, enum cases;
+  * a List or ImmutableSet of Hashable elements;
+  * a struct (also an opaque one) whose every field is Hashable.
+
+Not Hashable: a function (functions have no equality), a coroutine handle,
+a MutableArray or MutableVector, a C pointer or native view, a
+DecimalRounded value, and any struct, List or set that holds one; `any`
+and an untyped field, whose values are not known (one may hold a
+function); a view of another trait; an imprint variable.
+
+== RULES
+  * A value enters Hashable at a Hashable parameter or result, like any
+    trait: a type that is not Hashable is TRAIT-NOT-SATISFIED there, with
+    the field or element that is not, never later.
+  * hash(x) and x == y never stop with EQUALITY when the operands are
+    Hashable; the compiler drops the failure path.
+  * hash(x) of a value statically known not to be Hashable (a function,
+    a struct with a function field) is TRAIT-NOT-SATISFIED at compile time.
+    hash of a value of unknown type (an untyped parameter) is still
+    checked when it runs (EQUALITY), as before.
+  * Hashable cannot be declared, implemented or named by a type, struct,
+    enum, layout or trait of a program: the name is reserved.
+
+== WHY
+Hash-based collections need keys whose equality and hash agree and never
+fail; a function's equality is not total, so a function is no key. Making
+that a trait lets a function demand it of its arguments statically. The
+standard library's hash structures place keys with a separate,
+collision-hardened hash: SipHash-1-3 of the key under a secret the runtime
+draws once per process, which no program can read, pass or print. Unlike
+the public hash, its numbers differ from run to run, so keys chosen to
+collide under the public hash do not collide there; no program observes
+them.
+
+== EXAMPLES
+@example accept
+struct Point:
+    x: int
+    y: int
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+[fingerprint(Point {x: 1, y: 2}) == hash(Point {x: 1, y: 2}), fingerprint("apple") == "apple".hash()]
+@caption fingerprint is compiled for Point and for String; both hashes are total
+@value [true, true]
+@end
+
+@example reject
+struct Handler:
+    name: str
+    run: Fn{args: [int], return: int}
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn twice(n: int) -> int:
+    n * 2
+
+fingerprint(Handler {name: "double", run: twice})
+@caption Handler's field run is a function, which has no total equality
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 11:13
+@end
+
+== MORE
+HASHABLE-AND-KEYED-HASH.md; concept.traits.
 
 @topic concept.affine
 title: Affine values: one owner, moved, released
@@ -3315,8 +3749,8 @@ summary: `extern c fn` declares a C function by its ABI signature and pointer co
 index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, std::ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
-related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts backend.native-only backend.native-executable error.native-only
-docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md
+related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats backend.native-only backend.native-executable error.native-only
+docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -3325,10 +3759,12 @@ docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md
 
 A truthful C declaration with no body. Types come from `std::ffi::c`: the C
 integer scalars (`std::ffi::c::Int`, `std::ffi::c::ULong`, ... -- integer
-domains whose ranges are the compilation target's), `std::ffi::c::Void`,
-pointers `std::ffi::c::Ptr[T]` and `std::ffi::c::FnPtr[...]`. A pointer
-parameter may borrow existing Bytes or MutableBytes storage for the one call
-when its contract says `read noescape` or `write noescape`.
+domains whose ranges are the compilation target's), C's float and double
+(`std::ffi::c::Float`, `std::ffi::c::Double`: Float64 values,
+concept.c-floats), `std::ffi::c::Void`, pointers `std::ffi::c::Ptr[T]` and
+`std::ffi::c::FnPtr[...]`. A pointer parameter may borrow existing Bytes or
+MutableBytes storage for the one call when its contract says `read noescape`
+or `write noescape`.
 
 == RULES
   * The Tcl backends refuse a C call at run time (NATIVE-ONLY): run with
@@ -3345,6 +3781,9 @@ when its contract says `read noescape` or `write noescape`.
     fields) and passed by the borrowing contract.
   * A retaining call (a pointer that may escape) is direct authority
     (concept.direct-modules).
+  * A variadic C function ends its parameters with the bare word
+    `variadic` (C's `...`); each call's trailing arguments are C ABI
+    values, promoted as C promotes them (concept.variadics).
   * tools/c-bindgen.tcl generates such declarations from real headers,
     and a layout for every C record a layout represents, as the target's C
     compiler lays it out (concept.c-bindgen-layouts).
@@ -3368,6 +3807,124 @@ abs(-5)
 
 == MORE
 C-FFI.md; C-ABI-TYPES.md; C-POINTER-BORROWING.md; C-BINDGEN.md.
+
+@topic concept.c-floats
+title: C float and C double: std::ffi::c::Float and std::ffi::c::Double
+summary: C's float (binary32) and double (binary64) are C representations of Float64 values, rounded to a float on the way out and never NaN or an infinity on the way in.
+index: concepts
+alias: C float; C double; std::ffi::c::Float; std::ffi::c::Double; float32; binary32; single precision
+keywords: float, double, std::ffi::c::Float, std::ffi::c::Double, binary32, binary64, NonFiniteFloat, round to nearest, ties to even, subnormal, negative zero, long double, layout, extern
+related: concept.floats concept.c-ffi concept.binary-layouts concept.c-bindgen-layouts error.known-error
+docs: C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
+
+== WHAT IT IS
+    import std::ffi::c
+    extern c fn scale(x: std::ffi::c::Float, k: std::ffi::c::Double) -> std::ffi::c::Float
+
+    layout Sample:
+        size 16
+        align 8
+        field f: std::ffi::c::Float at 0
+        field d: std::ffi::c::Double at 8
+
+std::ffi::c::Float is C's float and std::ffi::c::Double C's double, the IEEE
+754 binary32 and binary64 on every target. They are written only where a C
+type is: an extern c fn's parameters and result, a function pointer's
+signature, a pointee (std::ffi::c::Ptr[std::ffi::c::Float]) and a layout
+field or array element. Their values are Float64s: a float crosses as a
+Float64, and Botlish has no binary32 number of its own.
+
+== RULES
+  * Leaving Botlish for a float, a Float64 is rounded to nearest, ties to
+    even (a subnormal float stays one; a negative number too small for a
+    float is +0). One whose rounding is an infinity -- from 2^128 - 2^103
+    up -- fails with NonFiniteFloat of its sign before C runs (or before a
+    byte is written), never clamped to the largest float. A double
+    receives the Float64 exactly.
+  * Entering Botlish, a float or a double that is NaN (any payload) or an
+    infinity fails with NonFiniteFloat {result: NotANumber,
+    PositiveInfinity or NegativeInfinity}; negative zero becomes 0.0; every
+    finite float widens exactly.
+  * A call declares NonFiniteFloat only where it can fail through one: an
+    extern with a float parameter or a floating result, a layout read of a
+    float or a double, a write or emit of a float (never of a double, and
+    never an operation of a layout without floats). When the compiler
+    knows a float argument exactly it applies the same rule while
+    compiling: an overflow is KNOWN-ERROR, one that fits needs no handler.
+  * A field read through a view (v.f) cannot carry its own handler: read
+    a float field in a function that declares NonFiniteFloat, or copy the
+    record with std::binary::load, a call a handler may follow.
+  * std::ffi::c::Float and std::ffi::c::Double are distinct types, never
+    Float64: Ptr[std::ffi::c::Float] is not Ptr[std::ffi::c::Double], an
+    array of floats strides 4 bytes, and a value type (a parameter of a
+    Botlish function) is written Float64 (std::ffi::c::Double means Float64
+    there; std::ffi::c::Float is a TYPE error). Nothing converts implicitly,
+    and a DecimalRounded value is never a C float or double (decay it with
+    std::float64::from_decimal_rounded).
+  * C long double and the other floating types (_Float16, __float128) have
+    no FFI type: tools/c-bindgen.tcl reports them unsupported. Botlish has
+    no indirect call, so a C callback of a float signature is a function
+    pointer C calls, never Botlish.
+
+== WHY
+A binary32 is a representation, not a number Botlish computes with: the
+one Float64 type keeps arithmetic, equality and proofs as they are, and
+the rounding and the finiteness rules apply exactly where C's bits cross,
+the same at compile time and at run time on every backend.
+
+== EXAMPLES
+@example accept
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::ffi::c
+
+layout Sample:
+    size 16
+    align 8
+    field f: std::ffi::c::Float at 0
+    field d: std::ffi::c::Double at 8
+
+fn round_trip(x: Float64) -> list errors LayoutLengthMismatch, NonFiniteFloat:
+    m = std::binary::write(std::binary::write(std::abi::bytes::zeroed(std::abi::usize(16)), Sample.f, x), Sample.d, x)
+    s = std::binary::parse(Sample, std::abi::bytes::freeze(m))
+    [s.f, s.d]
+
+r = round_trip(0.1):
+    on LayoutLengthMismatch:
+        []
+    on NonFiniteFloat:
+        []
+r
+@caption 0.1 rounded to the nearest float, and kept exactly by a double
+@value [0.10000000149011612, 0.1]
+@end
+
+@example reject
+import std::ffi::c
+
+fn half(x: std::ffi::c::Float) -> Float64:
+    x / 2.0
+
+half(1.0)
+@caption A Botlish parameter holds a Float64: no value is a binary32
+@error CORE SEMANTIC TYPE
+@at 3:8
+@end
+
+@example reject
+import std::ffi::c
+
+extern c fn takes(x: std::ffi::c::Float) -> std::ffi::c::Int
+
+takes(1.0e39)
+@caption A known Float64 too large for a float: the call can never complete
+@error CORE SEMANTIC KNOWN-ERROR
+@at 5:1
+@end
+
+== MORE
+C-FLOAT-FFI-MILESTONE-1.md; C-FFI.md; FLOAT64-MILESTONE-1.md.
 
 @topic concept.c-bindgen-layouts
 title: Generated C record layouts: a target's and a toolchain's facts
@@ -3439,7 +3996,8 @@ layout FILETIME:
     field dwHighDateTime: std::ffi::c::ULong at 4
 
 std::binary::layout_length(FILETIME)
-@caption Win32's FILETIME, generated for windows-x86_64-gnu, compiled for this host (a 64-bit unsigned long)
+@caption Win32's FILETIME, generated for windows-x86_64-gnu, compiled for linux-x86_64 (a 64-bit unsigned long)
+@target linux-x86_64
 @error CORE SEMANTIC LAYOUT-FIELD-BOUNDS
 @at 8:49
 @end
@@ -3479,7 +4037,11 @@ also be built directly: `LayoutStruct[Header] {magic: 7, count: -2}`.
     `Int in 0..65535`); nested layouts are allowed by value. Byte order is
     the target's (little-endian).
   * std::binary::parse fails with LayoutLengthMismatch unless the input has
-    exactly the layout's size; emit cannot fail.
+    exactly the layout's size. A field may be a C float or double
+    (std::ffi::c::Float, 4 bytes; std::ffi::c::Double, 8): its bytes holding
+    a NaN or an infinity fail a read with NonFiniteFloat, and a Float64 too
+    large for a float fails a write or an emit (concept.c-floats); nothing
+    else makes emit fail.
   * A layout is not a value or a type: it is named only as the static
     operand of the binary operations, in LayoutStruct[L], NativeView[L]
     and NativeEdit[L], and as the root of a field designator (L.field).

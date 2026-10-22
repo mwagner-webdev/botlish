@@ -91,6 +91,13 @@ extern c fn SDL_WriteIO(
     size: std::ffi::c::ULong
 ) -> std::ffi::c::ULong
 
+# C: size_t SDL_IOprintf(SDL_IOStream *context, const char *fmt, ...)
+extern c fn SDL_IOprintf(
+    context: std::ffi::c::Ptr[sdl3::ctypes::SDL_IOStream],
+    fmt: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::ULong
+
 # C: _Bool SDL_FlushIO(SDL_IOStream *context)
 extern c fn SDL_FlushIO(
     context: std::ffi::c::Ptr[sdl3::ctypes::SDL_IOStream]

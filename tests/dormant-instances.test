@@ -371,11 +371,11 @@ test dormant-aot-readiness {AOT readiness ignores a dormant instance's guards: t
             dict get $options -errorcode
         }]
         native::executable $hir $path
-        set on [exec env PATH= $path]
-        set gc [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        set on [runStandalone $path]
+        set gc [runStandalone $path BOTLISH_NATIVE_GC_STRESS 1]
         file delete $path
         native::executable $hir $path -block-escape-opt 0
-        list $off $on $gc [exec env PATH= $path]
+        list $off $on $gc [runStandalone $path]
     } finally {
         removeDirectory {dormant executable test}
     }

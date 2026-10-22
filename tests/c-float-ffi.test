@@ -1,0 +1,832 @@
+# c-float-ffi.test -- C float and C double across the C FFI
+# (C-FLOAT-FFI-MILESTONE-1.md).
+#
+# std::ffi::c::Float and std::ffi::c::Double are C representations -- IEEE 754
+# binary32 and binary64 on every target -- whose Botlish carrier is Float64.
+# This file pins the type model (two distinct C types, never Float64 and
+# never one another), the boundary rules every crossing obeys (a C value is
+# admitted only when finite, negative zero is zero, a binary32 widens
+# exactly; a Float64 leaving for a binary32 is rounded to nearest, ties to
+# even, and an overflow is NonFiniteFloat before C runs), their static
+# decisions, and every place they cross: C calls (registers and the stack),
+# pointers, layouts read from bytes and from native memory, fixed arrays,
+# unions and function pointer types. Values are checked bit for bit against
+# C itself (tests/cffi/cfloat-fixture.c) and against an exact rounding
+# oracle written here with integer arithmetic only.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint cCompiler [testConstraint cToolchain]
+
+# The C fixture, built where C calls run (nativeCCalls).
+set ::cflFixtureDir ""
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt]} {
+    set ::cflFixtureDir [makeDirectory cfloat-cffi-[pid]]
+    if {[catch {
+        ctool::staticLibrary $::cflFixtureDir botlish_cfloat_fixture [file join $::projectRoot tests cffi cfloat-fixture.c]
+    } message]} {
+        puts stderr "c-float-ffi.test: the C fixture did not build: $message"
+        set ::cflFixtureDir ""
+    }
+}
+testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint rustcLinker]}]
+
+# The HIR of source TEXT (warnings off).
+proc cflHir {text args} {
+    return [surface::compile $text t.bot -warnings off {*}$args]
+}
+
+# "KIND: MESSAGE" of the first diagnostic of source TEXT (its location
+# dropped), or accepted.
+proc cflReject {text args} {
+    if {[catch {surface::compile $text t.bot -warnings off {*}$args} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        regsub {^t\.bot:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return "[lindex $code end]: $message"
+    }
+    return accepted
+}
+
+# The outcome {value V} / {error KIND} of HIR on BACKEND, with the C
+# fixture's archive on the link path.
+proc cflRun {hir backend} {
+    native::withLinkDirs [list $::cflFixtureDir] {
+        set outcome [outcomeUnderHir $backend $hir]
+    }
+    if {[lindex $outcome 0] eq "value"} {
+        return [lrange $outcome 0 1]
+    }
+    return [list error [lindex $outcome 1 end]]
+}
+
+# The outcome of source TEXT on both native backends, which must agree.
+proc cflNative {text} {
+    set hir [cflHir $text]
+    set outcomes [lmap backend {cranelift cranelift-generic} {cflRun $hir $backend}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "the native backends disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The outcome of source TEXT on all four backends, which must agree.
+proc cflAll {text} {
+    set hir [cflHir $text]
+    set outcomes [lmap backend {interp compile cranelift-generic cranelift} {
+        set o [outcomeUnderHir $backend $hir]
+        if {[lindex $o 0] eq "value"} {lrange $o 0 1} else {list error [lindex $o 1 end]}
+    }]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "the backends disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The bits of the binary32 nearest the finite double X, rounded to nearest,
+# ties to even, by integer arithmetic on X's own bits alone -- never a
+# floating-point conversion (the oracle the boundary's rule is checked
+# against) -- or "" when it rounds to an infinity. A zero of either sign is
+# 0 (the boundary's one zero).
+proc cflOracleBinary32 {x} {
+    binary scan [binary format q $x] wu bits
+    set negative [expr {$bits >> 63}]
+    set e [expr {($bits >> 52) & 0x7ff}]
+    set f [expr {$bits & 0xfffffffffffff}]
+    if {$e == 0} {
+        set m $f
+        set exp -1074
+    } else {
+        set m [expr {$f | (1 << 52)}]
+        set exp [expr {$e - 1075}]
+    }
+    if {$m == 0} {
+        return 0
+    }
+    # X = M * 2^EXP; its binary32 quantum is 2^Q, Q = max(floor(log2 X) -
+    # 23, -149) (a subnormal's below 2^-126).
+    set length 0
+    for {set t $m} {$t > 0} {set t [expr {$t >> 1}]} {
+        set length [expr {$length + 1}]
+    }
+    set q [expr {max($exp + $length - 1 - 23, -149)}]
+    set shift [expr {$q - $exp}]
+    if {$shift <= 0} {
+        set k [expr {$m << -$shift}]
+    } else {
+        set k [expr {$m >> $shift}]
+        set rest [expr {$m - ($k << $shift)}]
+        set half [expr {1 << ($shift - 1)}]
+        if {$rest > $half || ($rest == $half && ($k & 1))} {
+            set k [expr {$k + 1}]
+        }
+    }
+    if {$k == (1 << 24)} {
+        set k [expr {1 << 23}]
+        set q [expr {$q + 1}]
+    }
+    if {$k == 0} {
+        return 0
+    }
+    if {$q > 104} {
+        return ""
+    }
+    if {$k < (1 << 23)} {
+        set out $k
+    } else {
+        set out [expr {(($q + 150) << 23) | ($k - (1 << 23))}]
+    }
+    return [expr {($negative << 31) | $out}]
+}
+
+# The double whose binary64 bits are BITS, and the float of binary32 bits.
+proc cflDouble {bits} {
+    binary scan [binary format wu $bits] q x
+    return $x
+}
+proc cflFloat32 {bits} {
+    binary scan [binary format iu $bits] r x
+    return $x
+}
+
+# Deterministic doubles around every region a binary32 narrowing has: zero,
+# subnormal binary32s and their midpoints, normal ones and their ties, the
+# overflow threshold, both signs (a 64-bit LCG over seed SEED).
+proc cflSampleDoubles {count seed} {
+    set state $seed
+    set out {}
+    for {set i 0} {$i < $count} {incr i} {
+        set state [expr {($state * 6364136223846793005 + 1442695040888963407) % 18446744073709551616}]
+        set r [expr {$state >> 11}]
+        switch -- [expr {$i % 6}] {
+            0 {
+                # A binary32 tie: an odd binary32 significand and a half quantum.
+                set k [expr {(1 << 23) | (($r & 0x3fffff) << 1) | 1}]
+                set x [expr {($k + 0.5) * 2.0 ** (($r >> 30) % 200 - 140)}]
+            }
+            1 {
+                # Around a subnormal binary32's midpoint.
+                set k [expr {$r % 64}]
+                set x [expr {($k + 0.5) * 2.0 ** -149 + (($r >> 7) % 3 - 1) * 2.0 ** -170}]
+            }
+            2 {
+                # Near the overflow threshold, 2^128 - 2^103.
+                set x [expr {340282356779733661637539395458142568448.0 + (($r % 2001) - 1000) * 2.0 ** 85}]
+            }
+            default {
+                # An arbitrary double of a binary32's range.
+                set x [cflDouble [expr {((($r % 330) + 820) << 52) | ($state & 0xfffffffffffff)}]]
+            }
+        }
+        if {$r & (1 << 40)} {
+            set x [expr {-$x}]
+        }
+        lappend out $x
+    }
+    return $out
+}
+
+# The fixture's declarations, every program's prefix.
+set ::cflBindings [string cat \
+    "import std::ffi::c\n" \
+    "extern c library \"botlish_cfloat_fixture\"\n" \
+    "extern c fn echo_float(x: std::ffi::c::Float) -> std::ffi::c::Float\n" \
+    "extern c fn echo_double(x: std::ffi::c::Double) -> std::ffi::c::Double\n" \
+    "extern c fn add_float(a: std::ffi::c::Float, b: std::ffi::c::Float) -> std::ffi::c::Float\n" \
+    "extern c fn add_double(a: std::ffi::c::Double, b: std::ffi::c::Double) -> std::ffi::c::Double\n" \
+    "extern c fn float_from_double(x: std::ffi::c::Double) -> std::ffi::c::Float\n" \
+    "extern c fn double_from_float(x: std::ffi::c::Float) -> std::ffi::c::Double\n" \
+    "extern c fn return_float_nan() -> std::ffi::c::Float\n" \
+    "extern c fn return_float_pos_inf() -> std::ffi::c::Float\n" \
+    "extern c fn return_float_neg_inf() -> std::ffi::c::Float\n" \
+    "extern c fn return_double_nan() -> std::ffi::c::Double\n" \
+    "extern c fn return_double_pos_inf() -> std::ffi::c::Double\n" \
+    "extern c fn return_double_neg_inf() -> std::ffi::c::Double\n" \
+    "extern c fn float_bits named \"cff_float_bits\"(x: std::ffi::c::Float) -> std::ffi::c::UInt\n" \
+    "extern c fn double_bits named \"cff_double_bits\"(x: std::ffi::c::Double) -> std::ffi::c::ULongLong\n" \
+    "extern c fn float_of_bits named \"cff_float_of_bits\"(u: std::ffi::c::UInt) -> std::ffi::c::Float\n" \
+    "extern c fn double_of_bits named \"cff_double_of_bits\"(u: std::ffi::c::ULongLong) -> std::ffi::c::Double\n" \
+    "extern c fn float_signbit named \"cff_float_signbit\"(x: std::ffi::c::Float) -> std::ffi::c::Int\n" \
+    "extern c fn double_signbit named \"cff_double_signbit\"(x: std::ffi::c::Double) -> std::ffi::c::Int\n" \
+    "extern c fn counted named \"cff_counted\"(x: std::ffi::c::Float) -> std::ffi::c::Int\n" \
+    "extern c fn count named \"cff_count\"() -> std::ffi::c::Int\n"]
+
+# A Float64 the analyses cannot know: X times 10 N times, behind recursion.
+set ::cflOpaque "fn grow(x: Float64, n: int) -> Float64 errors NonFiniteFloat:\n    if n == 0:\n        x\n    else:\n        grow(x * 10.0, n - 1)\n"
+
+# ---------------------------------------------------------------------------
+# The type model
+
+test cfl-types-distinct {std::ffi::c::Float and std::ffi::c::Double are two C representations, {cfloat Float} and {cfloat Double}, wherever a C type is named: an extern's parameters and result, a pointee, a function pointer's signature; neither is Float64 nor the other, and both carry Float64 values} -body {
+    set hir [cflHir "import std::ffi::c\nextern c fn f(a: std::ffi::c::Float, b: std::ffi::c::Double, p: std::ffi::c::Ptr\[std::ffi::c::Float\], q: std::ffi::c::Ptr\[std::ffi::c::Double\], g: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float, std::ffi::c::Double\], return: std::ffi::c::Float}\]) -> std::ffi::c::Double\n0\n"]
+    set record [dict get [hir::foreign::declarations $hir] f]
+    set contract [dict get $record contract]
+    list [lmap p [dict get $contract params] {dict get $p type}] [dict get $contract result] \
+        [lmap p [dict get $contract params] {hir::types::show [dict get $p type]}] \
+        [lmap t {{cfloat Float} {cfloat Double}} {hir::cabi::Carrier $t}] \
+        [expr {[list cptr {cfloat Float}] ne [list cptr {cfloat Double}]}]
+} -result {{{cfloat Float} {cfloat Double} {cptr {cfloat Float}} {cptr {cfloat Double}} {cfnptr {fn {args {{cfloat Float} {cfloat Double}} return {cfloat Float} errors {}}}}} {cfloat Double} {std::ffi::c::Float std::ffi::c::Double {std::ffi::c::Ptr[std::ffi::c::Float]} {std::ffi::c::Ptr[std::ffi::c::Double]} {std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float, std::ffi::c::Double], return: std::ffi::c::Float}]}} {Float64 Float64} 1}
+
+test cfl-type-facts {each C floating type's facts are its own on every target -- its C spelling, IEEE 754 format, size, alignment and ABI class -- never read from the Float64 carrier the two share; C long double is no C type of the FFI} -body {
+    set out {}
+    foreach target [core::cabi::targetNames] {
+        lappend out [lmap name {Float Double} {
+            set info [core::cabi::floatingInfo $name $target]
+            list [dict get $info c] [dict get $info format] [dict get $info bytes] [dict get $info align] [dict get $info class] [dict get $info carrier]
+        }]
+    }
+    list [lsort -unique $out] [core::cabi::floatingNames] [core::cabi::isFloating LongDouble] \
+        [cflReject "import std::ffi::c\nextern c fn f(x: std::ffi::c::LongDouble) -> unit\n"]
+} -result {{{{float binary32 4 4 f32 Float64} {double binary64 8 8 f64 Float64}}} {Float Double} 0 {UNKNOWN-SYMBOL: namespace "std::ffi::c" has no type "LongDouble" (it declares: Char, Int, Long, LongLong, SChar, Short, UChar, UInt, ULong, ULongLong, UShort)}}
+
+test cfl-value-positions {where a type of Botlish values is written, std::ffi::c::Double is Float64 (its values' type) and std::ffi::c::Float is a TYPE error: no Botlish value is a binary32; Float64 is never a C type (an extern parameter, a pointee), nor is a DecimalRounded type} -body {
+    list [cflReject "import std::ffi::c\nfn f(x: std::ffi::c::Float) -> Float64:\n    x\n"] \
+        [hir::types::show [hir::bindingType [cflHir "import std::ffi::c\nfn f(x: std::ffi::c::Double) -> Float64:\n    x\ny = f(2.5)\ny\n"] [hir::lookup [cflHir "import std::ffi::c\nfn f(x: std::ffi::c::Double) -> Float64:\n    x\ny = f(2.5)\ny\n"] [hir::top [cflHir "import std::ffi::c\nfn f(x: std::ffi::c::Double) -> Float64:\n    x\ny = f(2.5)\ny\n"]] y]]] \
+        [cflReject "import std::ffi::c\nextern c fn f(x: Float64) -> unit\n"] \
+        [cflReject "import std::ffi::c\nextern c fn f(x: std::ffi::c::Ptr\[Float64\]) -> unit\n"] \
+        [cflReject "import std::ffi::c\nextern c fn f() -> DecimalRounded{minDecimalsPreserved: 2}\n"]
+} -result {{TYPE: unknown or invalid type std::ffi::c::Float for parameter "x": std::ffi::c::Float is C's float, a foreign representation (IEEE 754 binary32) that only a C type names -- an extern c fn's parameter or result, a function pointer's signature, a pointee (std::ffi::c::Ptr[std::ffi::c::Float]) or a layout field: Botlish has no binary32 number, and a C float's value is a Float64 here (write Float64)} Float64 {TYPE: parameter "x" of extern c fn "f": Float64 is not a C ABI value type (a C integer scalar such as std::ffi::c::Int, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Double, std::ffi::c::Ptr[...] or std::ffi::c::FnPtr[...]): Float64 is Botlish's number type, not a C representation; C's double is std::ffi::c::Double and C's float std::ffi::c::Float, whose values are Float64s} {TYPE: unknown or invalid type std::ffi::c::Ptr[Float64] for parameter "x" of extern c fn "f": invalid pointee in std::ffi::c::Ptr[Float64]: Float64 has no C representation: a pointee is std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Double, an opaque struct or another pointer: Float64 is Botlish's number type, not a C representation; C's double is std::ffi::c::Double and C's float std::ffi::c::Float, whose values are Float64s} {TYPE: the result of extern c fn "f": DecimalRounded{minDecimalsPreserved: 2} is not a C ABI value type (a C integer scalar such as std::ffi::c::Int, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Double, std::ffi::c::Ptr[...] or std::ffi::c::FnPtr[...]): a scalar refinement is a Botlish guarantee about values, not a C representation; C's double is std::ffi::c::Double and C's float std::ffi::c::Float, whose values are Float64s (std::float64::from_decimal_rounded decays a DecimalRounded value to one)}}
+
+test cfl-decimal-rounded {a DecimalRounded value is no C float or double: passed where std::ffi::c::Float or std::ffi::c::Double is declared it is a TYPE error until decayed explicitly (std::float64::from_decimal_rounded), and a C result -- a Float64 -- never becomes a DecimalRounded value by being returned where one is declared} -body {
+    set decls "import std::ffi::c\nimport std::float64\nextern c fn takes(x: std::ffi::c::Float) -> std::ffi::c::Int\nextern c fn takesd(x: std::ffi::c::Double) -> std::ffi::c::Int\nextern c fn back(x: std::ffi::c::Float) -> std::ffi::c::Float\nextern c fn backd() -> std::ffi::c::Double\n"
+    lmap body [list \
+        "fn f(d: DecimalRounded{minDecimalsPreserved: 2}) -> std::ffi::c::Int errors NonFiniteFloat:\n    takes(d)\n0\n" \
+        "fn f(d: DecimalRounded{minDecimalsPreserved: 2}) -> std::ffi::c::Int:\n    takesd(d)\n0\n" \
+        "fn f(d: DecimalRounded{minDecimalsPreserved: 2}) -> std::ffi::c::Int errors NonFiniteFloat:\n    takes(std::float64::from_decimal_rounded(d))\n0\n" \
+        "fn f(d: DecimalRounded{minDecimalsPreserved: 2}) -> std::ffi::c::Int:\n    takesd(std::float64::from_decimal_rounded(d))\n0\n" \
+        "fn g() -> DecimalRounded{minDecimalsPreserved: 2} errors NonFiniteFloat:\n    back(1.5)\n0\n" \
+        "fn g() -> DecimalRounded{minDecimalsPreserved: 2} errors NonFiniteFloat:\n    backd()\n0\n"] {
+        cflReject "$decls$body"
+    }
+} -result {{TYPE: argument 1 of takes cannot be proven to satisfy std::ffi::c::Float, whose values are Float64s (argument type: DecimalRounded{minDecimalsPreserved: 2}); a DecimalRounded value is no Float64, and nothing converts one implicitly (std::float64::from_decimal_rounded decays one to the Float64 nearest its guaranteed decimal)} {TYPE: argument 1 of takesd cannot be proven to satisfy std::ffi::c::Double, whose values are Float64s (argument type: DecimalRounded{minDecimalsPreserved: 2}); a DecimalRounded value is no Float64, and nothing converts one implicitly (std::float64::from_decimal_rounded decays one to the Float64 nearest its guaranteed decimal)} accepted accepted {TYPE: function result does not prove declared type DecimalRounded{minDecimalsPreserved: 2}; a Float64 is no DecimalRounded value, and nothing converts one implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal where a DecimalRounded type is expected is one)} {TYPE: function result does not prove declared type DecimalRounded{minDecimalsPreserved: 2}; a Float64 is no DecimalRounded value, and nothing converts one implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal where a DecimalRounded type is expected is one)}}
+
+test cfl-pointer-identities {Ptr[std::ffi::c::Float] and Ptr[std::ffi::c::Double] are distinct pointer types, as are function pointers of float and double signatures: one is never passed for the other; null, retype and erase imprint them like any pointee, and an imprint where values exist refuses a C floating type} -body {
+    set decls "import std::ffi::c\nextern c fn takes_float_ptr(p: std::ffi::c::Ptr\[std::ffi::c::Float\]) -> unit\nextern c fn takes_halver(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float\], return: std::ffi::c::Float}\]) -> unit\n"
+    list [cflReject "${decls}fn f(p: std::ffi::c::Ptr\[std::ffi::c::Double\]) -> unit:\n    takes_float_ptr(p)\n"] \
+        [cflReject "${decls}fn f(g: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Double\], return: std::ffi::c::Double}\]) -> unit:\n    takes_halver(g)\n"] \
+        [hir::types::show [hir::typeOf [set h [cflHir "import std::ffi::c\nn = std::ffi::c::null\[std::ffi::c::Float\]()\nn.null?()\n"]] [lindex [hirFind $h call] 0]]] \
+        [lindex [cflAll "import std::ffi::c\nfn f() -> bool:\n    n = std::ffi::c::null\[std::ffi::c::Double\]()\n    v = std::ffi::c::erase(n)\n    d = std::ffi::c::retype\[std::ffi::c::Float\](v)\n    d.null?()\nf()\n"] 1] \
+        [cflReject "import std::ffi::c\nimport std::decimal_rounded\nx = std::decimal_rounded::round\[std::ffi::c::Float\](1.5)\n"]
+} -result {{TYPE: argument 1 of takes_float_ptr cannot be proven to satisfy std::ffi::c::Ptr[std::ffi::c::Float] (argument type: std::ffi::c::Ptr[std::ffi::c::Double])} {TYPE: argument 1 of takes_halver cannot be proven to satisfy std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float], return: std::ffi::c::Float}] (argument type: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Double], return: std::ffi::c::Double}])} {std::ffi::c::Ptr[std::ffi::c::Float]} true {IMPRINT: std::decimal_rounded::round: T is imprinted as std::ffi::c::Float, a C representation, but values of T exist here: the values of std::ffi::c::Float are Float64s (imprint Float64)}}
+
+test cfl-abi-classes {an extern's ABI classes are its C types' (f32 for C float, f64 for C double, by the target's format, never the carrier), and NIR's foreign table carries them; a C float parameter or a C floating result declares NonFiniteFloat, a C double parameter alone does not} -body {
+    set hir [cflHir "import std::ffi::c\nextern c library \"m\"\nextern c fn mix(a: std::ffi::c::Float, b: std::ffi::c::Double, n: std::ffi::c::Int) -> std::ffi::c::Float\nextern c fn exact(b: std::ffi::c::Double) -> std::ffi::c::Int\nextern c fn narrow(a: std::ffi::c::Float) -> std::ffi::c::Int\n0\n"]
+    set foreign [hir::foreign::declarations $hir]
+    list [lmap key {mix exact narrow} {dict get $foreign $key abi}] \
+        [lmap key {mix exact narrow} {dict get [core::native::metadata [dict get $foreign $key native]] errors}] \
+        [lmap key {mix exact narrow} {dict get [core::native::metadata [dict get $foreign $key native]] paramTypes}]
+} -result {{{params {f32 f64 i32} result f32} {params f64 result i32} {params f32 result i32}} {NonFiniteFloat {} NonFiniteFloat} {{Float64 Float64 int} Float64 Float64}}
+
+# ---------------------------------------------------------------------------
+# The boundary rules (core/cabi.tcl), against an exact oracle
+
+test cfl-narrow-boundaries {Narrow to binary32 rounds to nearest, ties to even, at every boundary: zero, the smallest subnormal and the tie half of it (to zero), just above that tie, the smallest normal, a tie between two normals (to the even one), the largest finite, the midpoint below the overflow threshold (to the largest), the threshold itself and beyond (NonFiniteFloat with the infinity's sign, never clamped); a negative number too small for a binary32 is zero, never negative zero} -body {
+    set values [list 0.0 [expr {2.0 ** -149}] [expr {2.0 ** -150}] [expr {2.0 ** -150 + 2.0 ** -180}] \
+        [expr {2.0 ** -126}] [expr {1.0 + 2.0 ** -24}] [expr {1.0 + 3 * 2.0 ** -24}] [expr {1.0 + 2.0 ** -24 + 2.0 ** -50}] \
+        3.4028234663852886e38 [expr {2.0 ** 128 - 2.0 ** 103 - 2.0 ** 75}] [expr {2.0 ** 128 - 2.0 ** 103}] 1.0e39 \
+        [expr {-(2.0 ** 128 - 2.0 ** 103)}] -1.0e-50 -0.1]
+    lmap x $values {
+        list [core::cabi::NarrowBits binary32 $x] [cflOracleBinary32 $x] [core::cabi::Narrow binary32 $x]
+    }
+} -result {{0 0 {ok 0.0}} {1 1 {ok 1.401298464324817e-45}} {0 0 {ok 0.0}} {1 1 {ok 1.401298464324817e-45}} {8388608 8388608 {ok 1.1754943508222875e-38}} {1065353216 1065353216 {ok 1.0}} {1065353218 1065353218 {ok 1.000000238418579}} {1065353217 1065353217 {ok 1.0000001192092896}} {2139095039 2139095039 {ok 3.4028234663852886e+38}} {2139095039 2139095039 {ok 3.4028234663852886e+38}} {{} {} {error NonFiniteFloat PositiveInfinity}} {{} {} {error NonFiniteFloat PositiveInfinity}} {{} {} {error NonFiniteFloat NegativeInfinity}} {0 0 {ok 0.0}} {3184315597 3184315597 {ok -0.10000000149011612}}}
+
+test cfl-narrow-oracle {the boundary's binary32 narrowing equals the exact integer-arithmetic oracle on thousands of doubles around ties, subnormal midpoints and the overflow threshold, both signs} -body {
+    set bad {}
+    foreach x [cflSampleDoubles 6000 17] {
+        if {[core::cabi::NarrowBits binary32 $x] ne [cflOracleBinary32 $x]} {
+            lappend bad $x
+        }
+    }
+    lrange $bad 0 4
+} -result {}
+
+test cfl-admit-bits {Admit: NaN (any payload, either sign) is NonFiniteFloat NotANumber, an infinity NonFiniteFloat of its sign, negative zero zero, a subnormal or the largest finite value exactly what it is -- for binary32 and binary64} -body {
+    list [lmap bits {0x7fc00000 0xffc00001 0x7f800001 0x7f800000 0xff800000 0x80000000 0x00000001 0x807fffff 0x7f7fffff 0x3dcccccd} {
+            core::cabi::AdmitBits binary32 [expr {$bits}]
+        }] \
+        [lmap bits {0x7ff8000000000000 0xfff0000000000001 0x7ff0000000000000 0xfff0000000000000 0x8000000000000000 0x0000000000000001 0x7fefffffffffffff} {
+            core::cabi::AdmitBits binary64 [expr {$bits}]
+        }]
+} -result {{{error NonFiniteFloat NotANumber} {error NonFiniteFloat NotANumber} {error NonFiniteFloat NotANumber} {error NonFiniteFloat PositiveInfinity} {error NonFiniteFloat NegativeInfinity} {ok 0.0} {ok 1.401298464324817e-45} {ok -1.1754942106924411e-38} {ok 3.4028234663852886e+38} {ok 0.10000000149011612}} {{error NonFiniteFloat NotANumber} {error NonFiniteFloat NotANumber} {error NonFiniteFloat PositiveInfinity} {error NonFiniteFloat NegativeInfinity} {ok 0.0} {ok 5e-324} {ok 1.7976931348623157e+308}}}
+
+test cfl-widening-exact {every finite binary32 widens exactly to a Float64: admitting its bits and narrowing the value back gives the same bits, for every exponent and sampled significands (negative zero excepted: it is zero)} -body {
+    set bad {}
+    for {set top 0} {$top < 512} {incr top} {
+        if {($top & 0xff) == 0xff} continue
+        foreach low {0 1 0x2aaaaa 0x400000 0x7fffff} {
+            set bits [expr {($top << 23) | $low}]
+            if {$bits == 0x80000000} continue
+            set admitted [core::cabi::AdmitBits binary32 $bits]
+            if {[lindex $admitted 0] ne "ok" || [core::cabi::NarrowBits binary32 [lindex $admitted 1]] != $bits
+                    || [lindex $admitted 1] != [cflFloat32 $bits]} {
+                lappend bad $bits
+            }
+        }
+    }
+    llength $bad
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Static decisions and the Tcl backends
+
+test cfl-decided-narrowing {a C float argument the analysis knows exactly is narrowed by the boundary's own rule at compile time: one that overflows makes the call KNOWN-ERROR (handled or not); one that fits leaves a call with no floating result no NonFiniteFloat to handle; a C floating result is always C's and may be NaN; a C double argument is never narrowed} -body {
+    set decls "import std::ffi::c\nextern c fn takes(x: std::ffi::c::Float) -> std::ffi::c::Int\nextern c fn back(x: std::ffi::c::Float) -> std::ffi::c::Float\nextern c fn exact(x: std::ffi::c::Double) -> std::ffi::c::Int\n"
+    list [cflReject "${decls}takes(1.5)\n"] [cflReject "${decls}takes(3.4028235677973362e38)\n"] \
+        [cflReject "${decls}takes(3.4028235677973366e38)\n"] \
+        [cflReject "${decls}x = takes(1.0e39):\n    on NonFiniteFloat:\n        0\nx\n"] \
+        [cflReject "${decls}back(1.5)\n"] [cflReject "${decls}exact(1.0e300)\n"] \
+        [cflReject "${decls}fn f(y: Float64) -> std::ffi::c::Int:\n    takes(y)\n"] \
+        [cflReject "${decls}fn f(y: Float64) -> std::ffi::c::Int:\n    exact(y)\n"]
+} -result {accepted accepted {KNOWN-ERROR: this call of "takes" can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) NonFiniteFloat; a handler does not make a statically known failure legal} {KNOWN-ERROR: this call of "takes" can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) NonFiniteFloat; a handler does not make a statically known failure legal} {UNHANDLED-ERROR: this call of "back" may produce the declared error "NonFiniteFloat", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} accepted {UNHANDLED-ERROR: this call of "takes" may produce the declared error "NonFiniteFloat", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} accepted}
+
+test cfl-decided-equals-run {the compile-time narrowing and the run-time one are one rule: a value decided finite at compile time is passed with exactly the bits a run computes, and one decided an overflow fails at run time on every backend when the analysis cannot see it} -constraints cfloatFixture -body {
+    set main [string cat $::cflOpaque \
+        "fn probe(x: Float64, n: int) -> int:\n    y = grow(x, n):\n        on NonFiniteFloat:\n            return -1\n    z = float_bits(y):\n        on NonFiniteFloat {result}:\n            if result == NonFiniteResult::PositiveInfinity:\n                return -2\n            return -3\n    z\n" \
+        "\[float_bits(3.4028235677973362e38), probe(3.4028235677973362e37, 1), probe(3.4028235677973366e37, 1), probe(-3.4028235677973366e37, 1), float_bits(0.1), probe(0.01, 1)\]\n"]
+    cflNative "$::cflBindings$main"
+} -result {value {[2139095039, 2139095039, -2, -3, 1036831949, 1036831949]}}
+
+test cfl-tcl-backends {the Tcl backends refuse a C call (NATIVE-ONLY) -- after the boundary's own narrowing, which they apply as every backend does, so a C float argument that overflows fails with NonFiniteFloat {result: PositiveInfinity} everywhere} -body {
+    set decls "import std::ffi::c\nextern c fn takes(x: std::ffi::c::Float) -> std::ffi::c::Int\nextern c fn exact(x: std::ffi::c::Double) -> std::ffi::c::Int\n"
+    set fine [cflHir "${decls}x = takes(1.5):\n    on NonFiniteFloat:\n        0\nx\n"]
+    set huge [cflHir "${decls}$::cflOpaque\nfn f() -> int:\n    y = grow(1.0e38, 1):\n        on NonFiniteFloat:\n            return -1\n    takes(y):\n        on NonFiniteFloat {result}:\n            if result == NonFiniteResult::PositiveInfinity:\n                -2\n            else:\n                -3\nf()\n"]
+    set double [cflHir "${decls}$::cflOpaque\nfn f() -> int:\n    y = grow(1.0e38, 1):\n        on NonFiniteFloat:\n            return -1\n    exact(y)\nf()\n"]
+    lmap backend {interp compile} {
+        list [lindex [outcomeUnderHir $backend $fine] 1 end] [lrange [outcomeUnderHir $backend $huge] 0 1] [lindex [outcomeUnderHir $backend $double] 1 end]
+    }
+} -result {{NATIVE-ONLY {value -2} NATIVE-ONLY} {NATIVE-ONLY {value -2} NATIVE-ONLY}}
+
+test cfl-counted-before-call {a C float argument that cannot be narrowed fails before C is called: C's side effect does not happen} -constraints cfloatFixture -body {
+    set main [string cat $::cflOpaque \
+        "fn call(x: Float64) -> int:\n    counted(x):\n        on NonFiniteFloat:\n            -1\n" \
+        "fn f() -> List\[int\]:\n    big = grow(1.0e38, 1):\n        on NonFiniteFloat:\n            return \[\]\n    \[call(1.0), call(big), call(2.0), count()\]\n" \
+        "f()\n"]
+    cflNative "$::cflBindings$main"
+} -result {value {[1, -1, 2, 2]}}
+
+# ---------------------------------------------------------------------------
+# C calls (tests/cffi/cfloat-fixture.c)
+
+test cfl-c-values {floats and doubles cross a C call in both directions on both native backends: C computes on the binary32 or binary64 it receives, and every finite result comes back exactly (a float widened)} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn calls() -> List\[Float64\] errors NonFiniteFloat:\n" \
+        "    \[echo_float(1.5), echo_float(0.1), echo_double(0.1), add_float(0.1, 0.2), add_double(0.1, 0.2), float_from_double(0.1), double_from_float(0.1), echo_float(3.4028234663852886e38), echo_float(1.401298464324817e-45), echo_double(5.0e-324)\]\n" \
+        "calls():\n    on NonFiniteFloat:\n        \[\]\n"]
+    cflNative "$::cflBindings$main"
+} -result {value {[1.5, 0.10000000149011612, 0.1, 0.30000001192092896, 0.30000000000000004, 0.10000000149011612, 0.10000000149011612, 3.4028234663852886e38, 1.401298464324817e-45, 5.0e-324]}}
+
+test cfl-c-narrowing-is-c {the bits C receives for a C float argument are exactly the boundary's narrowing of the Float64, which is exactly C's own (float) conversion of the double, and the exact oracle's, for ties, subnormal midpoints and values near the overflow threshold (the overflowing ones are NonFiniteFloat, never C's infinity)} -constraints cfloatFixture -body {
+    set values [lrange [cflSampleDoubles 600 41] 0 299]
+    set calls [lmap x $values {
+        set text [core::float::text [core::value::float Float64 $x]]
+        string cat "probe(" $text ")"
+    }]
+    set main [string cat \
+        "fn probe(x: Float64) -> List\[int\]:\n" \
+        "    b = float_bits(x):\n        on NonFiniteFloat:\n            return \[-1, -1\]\n" \
+        "    n = float_from_double(x):\n        on NonFiniteFloat:\n            return \[b, -2\]\n" \
+        "    c = float_bits(n):\n        on NonFiniteFloat:\n            return \[b, -3\]\n" \
+        "    \[b, c\]\n" \
+        "\[[join $calls {, }]\]\n"]
+    set outcome [cflNative "$::cflBindings$main"]
+    set got [string map {[ "" ] "" , ""} [lindex $outcome 1]]
+    set bad {}
+    foreach x $values {b c} $got {
+        set want [cflOracleBinary32 $x]
+        if {$want eq ""} {
+            # C's (float) of such a double is an infinity, which never
+            # becomes a Float64: the narrowing failed first.
+            if {$b != -1} { lappend bad [list $x $b $c] }
+        } elseif {$b != $want || $c != $want} {
+            lappend bad [list $x $b $c $want]
+        }
+    }
+    list [lindex $outcome 0] [llength $values] [lrange $bad 0 3]
+} -result {value 300 {}}
+
+test cfl-c-nonfinite-results {a NaN or an infinity C returns, as a float or a double, never becomes a Float64: the call fails with NonFiniteFloat whose payload names it; any NaN payload is NotANumber; negative zero becomes zero, and a zero Botlish passes is positive} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn which(n: int) -> NonFiniteResult errors NonFiniteFloat:\n" \
+        "    x = if n == 0:\n        return_float_nan()\n    elif n == 1:\n        return_float_pos_inf()\n    elif n == 2:\n        return_float_neg_inf()\n    elif n == 3:\n        return_double_nan()\n    elif n == 4:\n        return_double_pos_inf()\n    elif n == 5:\n        return_double_neg_inf()\n    elif n == 6:\n        float_of_bits(4290772993)\n    else:\n        double_of_bits(18442240474082181121)\n" \
+        "    NonFiniteResult::NotANumber\n" \
+        "fn probe(n: int) -> NonFiniteResult:\n    which(n):\n        on NonFiniteFloat {result}:\n            return result\n    NonFiniteResult::NotANumber\n" \
+        "fn zeros() -> List\[int\] errors NonFiniteFloat:\n" \
+        "    z = float_of_bits(2147483648)\n    d = double_of_bits(9223372036854775808)\n" \
+        "    \[float_signbit(z), double_signbit(d), float_bits(z), float_signbit(0.0 * -1.0), float_bits(-1.0e-50), double_signbit(-1.0e-320 * 1.0e-10)\]\n" \
+        "r = zeros():\n    on NonFiniteFloat:\n        \[\]\n" \
+        "\[probe(0), probe(1), probe(2), probe(3), probe(4), probe(5), probe(6), probe(7), r\]\n"]
+    cflNative "$::cflBindings$main"
+} -result {value {[NonFiniteResult::NotANumber, NonFiniteResult::PositiveInfinity, NonFiniteResult::NegativeInfinity, NonFiniteResult::NotANumber, NonFiniteResult::PositiveInfinity, NonFiniteResult::NegativeInfinity, NonFiniteResult::NotANumber, NonFiniteResult::NotANumber, [0, 0, 0, 0, 0, 0]]}}
+
+test cfl-c-subnormals {subnormal floats and doubles cross both ways unchanged -- never flushed to zero -- and a float result is widened exactly} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn calls() -> list errors NonFiniteFloat:\n" \
+        "    \[float_bits(1.401298464324817e-45), float_bits(1.1754942106924411e-38), float_of_bits(1), float_of_bits(8388607), double_bits(5.0e-324), double_of_bits(4503599627370495), echo_float(-2.802596928649634e-45)\]\n" \
+        "calls():\n    on NonFiniteFloat:\n        \[\]\n"]
+    cflNative "$::cflBindings$main"
+} -result {value {[1, 8388607, 1.401298464324817e-45, 1.1754942106924411e-38, 1, 2.225073858507201e-308, -2.802596928649634e-45]}}
+
+set ::cflPickBindings [string cat \
+    "import std::ffi::c\n" \
+    "extern c library \"botlish_cfloat_fixture\"\n" \
+    "extern c fn pick named \"cff_pick_float\"(w: std::ffi::c::Int, a0: std::ffi::c::Float, a1: std::ffi::c::Float, a2: std::ffi::c::Float, a3: std::ffi::c::Float, a4: std::ffi::c::Float, a5: std::ffi::c::Float, a6: std::ffi::c::Float, a7: std::ffi::c::Float, a8: std::ffi::c::Float, a9: std::ffi::c::Float, a10: std::ffi::c::Float, a11: std::ffi::c::Float) -> std::ffi::c::Double\n" \
+    "extern c fn mixed named \"cff_pick_mixed\"(w: std::ffi::c::Int, f0: std::ffi::c::Float, d0: std::ffi::c::Double, i0: std::ffi::c::Int, f1: std::ffi::c::Float, d1: std::ffi::c::Double, i1: std::ffi::c::Long, f2: std::ffi::c::Float, d2: std::ffi::c::Double, i2: std::ffi::c::Short, f3: std::ffi::c::Float, d3: std::ffi::c::Double, i3: std::ffi::c::Int, f4: std::ffi::c::Float, d4: std::ffi::c::Double, i4: std::ffi::c::LongLong, f5: std::ffi::c::Float, d5: std::ffi::c::Double, i5: std::ffi::c::UChar, f6: std::ffi::c::Float, d6: std::ffi::c::Double) -> std::ffi::c::Double\n" \
+    "extern c fn sum16 named \"cff_sum16f\"(a: std::ffi::c::Float, b: std::ffi::c::Float, c: std::ffi::c::Float, d: std::ffi::c::Float, e: std::ffi::c::Float, f: std::ffi::c::Float, g: std::ffi::c::Float, h: std::ffi::c::Float, i: std::ffi::c::Float, j: std::ffi::c::Float, k: std::ffi::c::Float, l: std::ffi::c::Float, m: std::ffi::c::Float, n: std::ffi::c::Float, o: std::ffi::c::Float, p: std::ffi::c::Float) -> std::ffi::c::Float\n" \
+    "extern c fn bits9 named \"cff_float_bits9\"(w: std::ffi::c::Int, a0: std::ffi::c::Float, a1: std::ffi::c::Float, a2: std::ffi::c::Float, a3: std::ffi::c::Float, a4: std::ffi::c::Float, a5: std::ffi::c::Float, a6: std::ffi::c::Float, a7: std::ffi::c::Float, a8: std::ffi::c::Float) -> std::ffi::c::UInt\n"]
+
+test cfl-c-register-exhaustion {more C floats than there are floating-point argument registers on any target, then the stack; floats, doubles and integers of every width interleaved, each class in its own registers before the stack; every argument arrives as exactly the value (or the bits) it was (the long a value of every target's long: 32 bits on Windows, LLP64; long long carries the 64-bit one)} -constraints cfloatFixture -body {
+    set floats {0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5}
+    set picks [lmap i {0 1 2 3 4 5 6 7 8 9 10 11} {string cat "pick($i, $floats)"}]
+    set margs "0.25, 1.0e300, -3, -0.75, 2.5e-300, -1234567890, 1.0e-30, 3.0e150, -321, 1.0e30, -7.0e-200, 2147483647, 65504.0, 1.25, -9223372036854775807, 0.125, 6.0, 255, 3.0e38, -1.0e-310"
+    set mixed [lmap i [lsearch -all [lrepeat 20 x] x] {string cat "mixed($i, $margs)"}]
+    set bits [lmap i {0 1 2 3 4 5 6 7 8} {string cat "bits9($i, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.401298464324817e-45, 3.4028234663852886e38)"}]
+    set main [string cat \
+        "fn calls() -> list errors NonFiniteFloat:\n" \
+        "    \[\[[join $picks {, }]\], \[[join $mixed {, }]\], sum16(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0), \[[join $bits {, }]\]\]\n" \
+        "calls():\n    on NonFiniteFloat:\n        \[\]\n"]
+    cflNative "$::cflPickBindings$main"
+} -result {value {[[0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5], [0.25, 1.0e300, -3.0, -0.75, 2.5e-300, -1234567890.0, 1.0000000031710769e-30, 3.0e150, -321.0, 1.0000000150474662e30, -7.0e-200, 2147483647.0, 65504.0, 1.25, -9.223372036854776e18, 0.125, 6.0, 255.0, 3.0000000054977558e38, -1.0e-310], 136.0, [1036831949, 1045220557, 1050253722, 1053609165, 1056964608, 1058642330, 1060320051, 1, 2139095039]]}}
+
+test cfl-c-variadic-fixed-floats {a variadic C function whose fixed parameters include C floats (SDL_RenderDebugTextFormat's shape): each fixed float is narrowed and takes a floating-point register as a double would, so the trailing ints and doubles C reads with va_arg -- past the registers, onto the stack -- are exactly the ones passed, on every target's placement (System V's %al counts the fixed floats, Apple's padding starts after them; Windows has no variadic lowering: nativeCVariadics)} -constraints {cfloatFixture nativeCVariadics} -body {
+    set pairs [join [lmap i {0 1 2 3 4 5 6 7 8} {string cat "c_int([expr {10 + $i}]), $i.25"}] {, }]
+    set picks [lmap w {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19} {string cat "vpick($w, 0.1, 1.5, 9, $pairs)"}]
+    set main [string cat \
+        "import std::ffi::c\n" \
+        "extern c library \"botlish_cfloat_fixture\"\n" \
+        "extern c fn vpick named \"cff_vpick\"(which: std::ffi::c::Int, x: std::ffi::c::Float, y: std::ffi::c::Float, count: std::ffi::c::Int, variadic) -> std::ffi::c::Double\n\n" \
+        "fn c_int(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    n\n\n" \
+        "fn calls() -> list errors NonFiniteFloat:\n" \
+        "    \[\[[join $picks {, }]\], vpick(1, 0.5, 3.0e38, 0), vpick(0, 1.0e-45, 0.0, 1, c_int(-1), -2.5)\]\n" \
+        "calls():\n    on NonFiniteFloat:\n        \[\]\n"]
+    cflNative $main
+} -result {value {[[0.10000000149011612, 1.5, 10.0, 0.25, 11.0, 1.25, 12.0, 2.25, 13.0, 3.25, 14.0, 4.25, 15.0, 5.25, 16.0, 6.25, 17.0, 7.25, 18.0, 8.25], 3.0000000054977558e38, 1.401298464324817e-45]}}
+
+# ---------------------------------------------------------------------------
+# Pointers, layouts, arrays and unions over native memory C owns
+
+set ::cflMemoryBindings [string cat \
+    "direct module\n" \
+    "import std::ffi::c\nimport std::binary\nimport std::binary::native\n" \
+    "extern c library \"botlish_cfloat_fixture\"\n" \
+    "layout MIXED:\n    size 24\n    align 8\n    field tag: std::ffi::c::UChar at 0\n    field a: std::ffi::c::Float at 4\n    field b: std::ffi::c::Double at 8\n    field c: std::ffi::c::Float at 16\n" \
+    "layout FLOATS:\n    size 64\n    align 4\n    field xs: array 16 of std::ffi::c::Float at 0\n" \
+    "layout DOUBLES:\n    size 128\n    align 8\n    field ys: array 16 of std::ffi::c::Double at 0\n" \
+    "union layout NUMBER:\n    size 8\n    align 8\n    alternative f: std::ffi::c::Float\n    alternative d: std::ffi::c::Double\n    alternative u: std::ffi::c::UInt\n" \
+    "extern c fn record named \"cff_mixed_record\"() -> std::ffi::c::Ptr\[std::ffi::c::Void\] independent\n" \
+    "extern c fn mixed_size named \"cff_mixed_size\"() -> std::ffi::c::ULong\n" \
+    "extern c fn mixed_align named \"cff_mixed_align\"() -> std::ffi::c::ULong\n" \
+    "extern c fn mixed_offset named \"cff_mixed_offset\"(which: std::ffi::c::Int) -> std::ffi::c::ULong\n" \
+    "extern c fn float_size named \"cff_float_size\"() -> std::ffi::c::ULong\n" \
+    "extern c fn float_align named \"cff_float_align\"() -> std::ffi::c::ULong\n" \
+    "extern c fn double_size named \"cff_double_size\"() -> std::ffi::c::ULong\n" \
+    "extern c fn double_align named \"cff_double_align\"() -> std::ffi::c::ULong\n" \
+    "extern c fn fill named \"cff_fill_mixed\"(m: std::ffi::c::Ptr\[std::ffi::c::Void\], tag: std::ffi::c::UChar, a: std::ffi::c::Float, b: std::ffi::c::Double, c: std::ffi::c::Float) -> unit\n" \
+    "extern c fn mixed_bits named \"cff_mixed_bits\"(m: std::ffi::c::Ptr\[std::ffi::c::Void\], which: std::ffi::c::Int) -> std::ffi::c::ULongLong\n" \
+    "extern c fn fbuf named \"cff_float_buffer\"() -> std::ffi::c::Ptr\[std::ffi::c::Float\] independent\n" \
+    "extern c fn dbuf named \"cff_double_buffer\"() -> std::ffi::c::Ptr\[std::ffi::c::Double\] independent\n" \
+    "extern c fn poke_float named \"cff_poke_float_bits\"(p: std::ffi::c::Ptr\[std::ffi::c::Float\], i: std::ffi::c::Int, u: std::ffi::c::UInt) -> unit\n" \
+    "extern c fn peek_float named \"cff_peek_float_bits\"(p: std::ffi::c::Ptr\[std::ffi::c::Float\], i: std::ffi::c::Int) -> std::ffi::c::UInt\n" \
+    "extern c fn poke_double named \"cff_poke_double_bits\"(p: std::ffi::c::Ptr\[std::ffi::c::Double\], i: std::ffi::c::Int, u: std::ffi::c::ULongLong) -> unit\n" \
+    "extern c fn peek_double named \"cff_peek_double_bits\"(p: std::ffi::c::Ptr\[std::ffi::c::Double\], i: std::ffi::c::Int) -> std::ffi::c::ULongLong\n" \
+    "extern c fn mutate_float(x: std::ffi::c::Ptr\[std::ffi::c::Float\]) -> unit\n" \
+    "extern c fn mutate_double(x: std::ffi::c::Ptr\[std::ffi::c::Double\]) -> unit\n" \
+    "extern c fn dot(xs: std::ffi::c::Ptr\[std::ffi::c::Float\], ys: std::ffi::c::Ptr\[std::ffi::c::Double\], n: std::ffi::c::ULong) -> std::ffi::c::Double\n"]
+
+test cfl-layout-matches-c {the brief's struct MixedFloats as a layout: its size, alignment and offsets are C's on this target (a float aligned to 4, a double to 8), and so are a float's and a double's own size and alignment, which core/cabi.tcl's table states} -constraints cfloatFixture -body {
+    set target [core::cabi::hostTarget]
+    set main "\[mixed_size(), mixed_align(), mixed_offset(0), mixed_offset(1), mixed_offset(2), mixed_offset(3), float_size(), float_align(), double_size(), double_align()\]\n"
+    list [cflNative "[string map {"direct module\n" ""} $::cflMemoryBindings]$main"] \
+        [lmap n {Float Double} {list [dict get [core::cabi::floatingInfo $n $target] bytes] [dict get [core::cabi::floatingInfo $n $target] align]}]
+} -result {{value {[24, 8, 0, 4, 8, 16, 4, 4, 8, 8]}} {{4 4} {8 8}}}
+
+test cfl-views-and-edits {C's float and double fields read through a native view are the values C stored (a float widened exactly); stores through a native edit narrow a Float64 into a float field (C reads exactly its binary32, a tiny negative number as +0) and put a double's bits as they are; std::binary::load copies every field} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NonFiniteFloat, NativeViewNull, NativeEditNull:\n" \
+        "    p = record()\n" \
+        "    fill(p, 7, 1.5, 0.1, -2.5)\n" \
+        "    v = std::binary::native::view(MIXED, p)\n" \
+        "    first = \[v.tag, v.a, v.b, v.c\]\n" \
+        "    e = std::binary::native::edit(MIXED, p)\n" \
+        "    std::binary::store(e, MIXED.a, 0.1)\n" \
+        "    std::binary::store(e, MIXED.b, 0.1)\n" \
+        "    std::binary::store(e, MIXED.c, -1.0e-50)\n" \
+        "    after = \[mixed_bits(p, 1), mixed_bits(p, 2), mixed_bits(p, 3), v.a, v.c\]\n" \
+        "    whole = std::binary::load(v)\n" \
+        "    \[first, after, \[whole.tag, whole.a, whole.b, whole.c\]\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n"]
+    cflNative "$::cflMemoryBindings$main"
+} -result {value {[[7, 1.5, 0.1, -2.5], [1036831949, 4591870180066957722, 0, 0.10000000149011612, 0.0], [7, 0.10000000149011612, 0.1, 0.0]]}}
+
+test cfl-memory-nonfinite {foreign memory may hold any bits: a NaN or an infinity read through a view, an element access or a whole copy is NonFiniteFloat with its payload -- never a value -- and negative zero reads as zero; a store whose Float64 overflows a float writes nothing} -constraints cfloatFixture -body {
+    set main [string cat $::cflOpaque \
+        "fn go() -> list errors NonFiniteFloat, NativeViewNull, NativeEditNull, IndexNotFound:\n" \
+        "    p = record()\n    f = fbuf()\n    fp = std::ffi::c::erase(std::ffi::c::clone(f))\n" \
+        "    fill(p, 1, 2.0, 3.0, 4.0)\n" \
+        "    e = std::binary::native::edit(MIXED, p)\n" \
+        "    pe = std::binary::native::edit(FLOATS, fp)\n" \
+        "    std::binary::store(pe, FLOATS.xs, \[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0\])\n" \
+        "    poke_float(f, 0, 2143289344)\n    poke_float(f, 1, 2139095040)\n    poke_float(f, 2, 4286578688)\n    poke_float(f, 3, 2147483648)\n" \
+        "    fv = std::binary::native::view(FLOATS, fp)\n" \
+        "    elements = loop i in \[0, 1, 2, 3\]:\n        x = std::binary::element(fv.xs, i):\n            on NonFiniteFloat {result}:\n                if result == NonFiniteResult::NotANumber:\n                    -1.0\n                elif result == NonFiniteResult::PositiveInfinity:\n                    -2.0\n                else:\n                    -3.0\n        x\n" \
+        "    copy = std::binary::load(fv.xs):\n        on NonFiniteFloat {result}:\n            \[-9.0\]\n" \
+        "    big = grow(1.0e38, 1):\n        on NonFiniteFloat:\n            return \[\]\n" \
+        "    stored = std::binary::store(e, MIXED.a, big):\n        on NonFiniteFloat {result}:\n            unit\n" \
+        "    v = std::binary::native::view(MIXED, p)\n" \
+        "    \[elements, copy, mixed_bits(p, 1), v.a\]\n" \
+        "r = go():\n    on NonFiniteFloat:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n" \
+        "r\n"]
+    cflNative "$::cflMemoryBindings$main"
+} -result {value {[[-1.0, -2.0, -3.0, 0.0], [-9.0], 1073741824, 2.0]}}
+
+test cfl-arrays-and-pointers {an array of floats strides 4 bytes, the C type's width (never the carrier's 8): C reads each element Botlish stored at its own place, mutate_float and mutate_double write through Ptr[std::ffi::c::Float] and Ptr[std::ffi::c::Double], and dot reads both arrays; elements are read and stored one at a time, never copying the array} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NonFiniteFloat, NativeViewNull, NativeEditNull, IndexNotFound:\n" \
+        "    f = fbuf()\n    d = dbuf()\n    fp = std::ffi::c::erase(std::ffi::c::clone(f))\n    dp = std::ffi::c::erase(std::ffi::c::clone(d))\n" \
+        "    fe = std::binary::native::edit(FLOATS, fp)\n    de = std::binary::native::edit(DOUBLES, dp)\n" \
+        "    std::binary::store(fe, FLOATS.xs, \[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0\])\n" \
+        "    std::binary::store(de, DOUBLES.ys, \[0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.25\])\n" \
+        "    std::binary::store_element(fe.xs, 2, 0.1)\n" \
+        "    std::binary::store_element(de.ys, 3, 0.1)\n" \
+        "    seen = \[peek_float(f, 0), peek_float(f, 2), peek_float(f, 15), peek_double(d, 3), peek_double(d, 15)\]\n" \
+        "    s = dot(f, d, 16)\n" \
+        "    mutate_float(f)\n    mutate_double(d)\n" \
+        "    fv = std::binary::native::view(FLOATS, fp)\n    dv = std::binary::native::view(DOUBLES, dp)\n" \
+        "    \[seen, s, std::binary::element(fv.xs, 0), std::binary::element(dv.ys, 0), std::binary::element(fv.xs, 2), std::binary::load(fv.xs)\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n"]
+    cflNative "$::cflMemoryBindings$main"
+} -result {value {[[1065353216, 1036831949, 1098907648, 4591870180066957722, 4598175219545276416], 60.95000000074506, 2.25, 1.25, 0.10000000149011612, [2.25, 2.0, 0.10000000149011612, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0]]}}
+
+test cfl-unions {a union's C float and C double alternatives overlay the same bytes: a float alternative is the low 4 bytes (every target is little-endian), a store through it writes those 4 bytes alone and leaves the double's other half as it was, and a NaN the float alternative holds is NonFiniteFloat while the double alternative reading the same bits is the subnormal they are} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn float_of(v: NativeView\[NUMBER\]) -> Float64 errors NonFiniteFloat:\n    v.f\n" \
+        "fn go() -> list errors NonFiniteFloat, NativeViewNull, NativeEditNull:\n" \
+        "    d = dbuf()\n    dp = std::ffi::c::erase(std::ffi::c::clone(d))\n" \
+        "    poke_double(d, 0, 4609434218613702656)\n" \
+        "    v = std::binary::native::view(NUMBER, dp)\n    e = std::binary::native::edit(NUMBER, dp)\n" \
+        "    first = \[v.d, v.f, v.u\]\n" \
+        "    std::binary::store(e, NUMBER.f, 2.5)\n" \
+        "    second = \[peek_double(d, 0), v.u, v.f\]\n" \
+        "    poke_double(d, 0, 2143289344)\n" \
+        "    nan = float_of(v):\n        on NonFiniteFloat {result}:\n            if result == NonFiniteResult::NotANumber:\n                -1.0\n            else:\n                -2.0\n" \
+        "    \[first, second, \[nan, v.d, v.u\]\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n"]
+    cflNative "$::cflMemoryBindings$main"
+} -result {value {[[1.5, 0.0, 0], [4609434219689541632, 1075838976, 2.5], [-1.0, 1.058925634e-314, 2143289344]]}}
+
+# ---------------------------------------------------------------------------
+# Function pointers
+
+set ::cflFnPtrBindings [string cat \
+    "direct module\n" \
+    "import std::ffi::c\n" \
+    "extern c library \"botlish_cfloat_fixture\"\n" \
+    "extern c fn halver named \"cff_halver\"() -> std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float\], return: std::ffi::c::Float}\]\n" \
+    "extern c fn squarer named \"cff_squarer\"() -> std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Double\], return: std::ffi::c::Double}\]\n" \
+    "extern c fn scaler named \"cff_scaler\"() -> std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float, std::ffi::c::Double\], return: std::ffi::c::Double}\]\n" \
+    "extern c fn apply_float named \"cff_apply_float\"(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float\], return: std::ffi::c::Float}\], x: std::ffi::c::Float) -> std::ffi::c::Float\n" \
+    "extern c fn apply_double named \"cff_apply_double\"(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Double\], return: std::ffi::c::Double}\], x: std::ffi::c::Double) -> std::ffi::c::Double\n" \
+    "extern c fn apply_mixed named \"cff_apply_mixed\"(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Float, std::ffi::c::Double\], return: std::ffi::c::Double}\], x: std::ffi::c::Float, k: std::ffi::c::Double) -> std::ffi::c::Double\n"]
+
+test cfl-function-pointers {a C function pointer of a float or double signature crosses the boundary as an ordinary FnPtr whose signature keeps its C types: C hands one out and calls it when Botlish passes it back, with every argument narrowed and every result admitted by the same rules (2^-149 halved is a tie, to even: zero); Botlish itself has no indirect call (C-FFI.md), so a callback is C's to call} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NonFiniteFloat:\n" \
+        "    h = halver()\n" \
+        "    h2 = std::ffi::c::clone(h)\n    a = apply_float(h2, 3.0)\n" \
+        "    b = apply_float(h, 1.0e-45)\n" \
+        "    q = squarer()\n" \
+        "    c = apply_double(q, 1.5)\n" \
+        "    k = scaler()\n" \
+        "    d = apply_mixed(k, 0.1, 10.0)\n" \
+        "    \[a, b, c, d\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n"]
+    cflNative "$::cflFnPtrBindings$main"
+} -result {value {[1.5, 0.0, 2.25, 1.0000000149011612]}}
+
+test cfl-function-pointer-identities {a function pointer's C floating types are part of its type: one of a float signature is never passed where one of a double signature is expected, nor the other way round} -body {
+    list [cflReject "${::cflFnPtrBindings}apply_double(halver(), 1.0)\n"] \
+        [cflReject "${::cflFnPtrBindings}apply_float(squarer(), 1.0)\n"]
+} -result {{TYPE: argument 1 of apply_double cannot be proven to satisfy std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Double], return: std::ffi::c::Double}] (argument type: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float], return: std::ffi::c::Float}])} {TYPE: argument 1 of apply_float cannot be proven to satisfy std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float], return: std::ffi::c::Float}] (argument type: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Double], return: std::ffi::c::Double}])}}
+
+# ---------------------------------------------------------------------------
+# Layouts over byte storage (every backend)
+
+set ::cflBytesPrelude [string cat \
+    "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::byte\nimport std::ffi::c\n" \
+    "layout MIXED:\n    size 24\n    align 8\n    field tag: std::ffi::c::UChar at 0\n    field a: std::ffi::c::Float at 4\n    field b: std::ffi::c::Double at 8\n    field c: std::ffi::c::Float at 16\n" \
+    "layout FLOATS:\n    size 16\n    align 4\n    field xs: array 4 of std::ffi::c::Float at 0\n" \
+    "union layout NUMBER:\n    size 8\n    align 8\n    alternative f: std::ffi::c::Float\n    alternative d: std::ffi::c::Double\n    alternative u: std::ffi::c::UInt\n" \
+    "layout RAW24:\n    size 24\n    align 1\n    field bs: array 24 of std::binary::U8 at 0\n" \
+    "layout RAW16:\n    size 16\n    align 1\n    field bs: array 16 of std::binary::U8 at 0\n" \
+    "layout RAW8:\n    size 8\n    align 1\n    field bs: array 8 of std::binary::U8 at 0\n" \
+    "fn bytes_of(values: List\[int\]) -> std::abi::bytes::Bytes:\n    bs = loop v in values:\n        b = std::byte::from_int(v):\n            on std::byte::BelowRange:\n                0\n            on std::byte::AboveRange:\n                255\n        b\n    std::abi::bytes::from_list(bs)\n" \
+    "fn mutable(values: List\[int\]) -> std::abi::bytes::MutableBytes:\n    std::abi::bytes::from_bytes(bytes_of(values))\n" \
+    "fn raw24(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:\n    std::binary::parse(RAW24, d).bs\n" \
+    "fn raw16(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:\n    std::binary::parse(RAW16, d).bs\n" \
+    "fn raw8(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:\n    std::binary::parse(RAW8, d).bs\n" \
+    $::cflOpaque]
+
+# The bytes of a little-endian binary32 / binary64 of bits BITS.
+proc cflLe32 {bits} {
+    binary scan [binary format iu $bits] cu* out
+    return [join $out {, }]
+}
+proc cflLe64 {bits} {
+    binary scan [binary format wu $bits] cu* out
+    return [join $out {, }]
+}
+
+test cfl-bytes-parse {std::binary::parse, std::binary::read and std::binary::element of copied data read C floats and doubles from their own bytes (4 and 8, little-endian), on every backend: a float widened exactly, a subnormal as it is, negative zero as zero} -body {
+    set record "7, 0, 0, 0, [cflLe32 0x3fc00000], [cflLe64 0x3fb999999999999a], [cflLe32 0x80000000], 0, 0, 0, 0"
+    set floats "[cflLe32 1], [cflLe32 0x00800000], [cflLe32 0x7f7fffff], [cflLe32 0x3dcccccd]"
+    cflAll [string cat $::cflBytesPrelude \
+        "fn go() -> list errors LayoutLengthMismatch, NonFiniteFloat:\n" \
+        "    d = bytes_of(\[$record\])\n" \
+        "    s = std::binary::parse(MIXED, d)\n" \
+        "    f = std::binary::parse(FLOATS, bytes_of(\[$floats\]))\n" \
+        "    n = bytes_of(\[[cflLe64 0x3ff8000000000000]\])\n" \
+        "    \[s.tag, s.a, s.b, s.c, std::binary::read(d, MIXED.a), std::binary::read(d, MIXED.c), f.xs, std::binary::read(n, NUMBER.d), std::binary::read(n, NUMBER.f), std::binary::read(n, NUMBER.u)\]\n" \
+        "go():\n    on LayoutLengthMismatch:\n        \[\]\n    on NonFiniteFloat:\n        \[\]\n"]
+} -result {value {[7, 1.5, 0.1, 0.0, 1.5, 0.0, [1.401298464324817e-45, 1.1754943508222875e-38, 3.4028234663852886e38, 0.10000000149011612], 1.5, 0.0, 0]}}
+
+test cfl-bytes-emit {std::binary::emit and std::binary::write narrow a Float64 into a C float's 4 bytes by the boundary's rule (to nearest, ties to even; a subnormal kept; a tiny negative number +0) and write a C double's 8 bytes as they are, on every backend; a union alternative's write touches its own bytes alone} -body {
+    cflAll [string cat $::cflBytesPrelude \
+        "fn go(t: Float64, u: Float64, sub: Float64) -> list errors LayoutLengthMismatch, NonFiniteFloat:\n" \
+        "    m = LayoutStruct\[MIXED\] {tag: 1, a: 0.1, b: 0.25, c: -1.0e-50}\n" \
+        "    e = raw24(std::binary::emit(m))\n" \
+        "    w = std::abi::bytes::freeze(std::binary::write(std::binary::write(std::binary::write(std::binary::write(mutable(\[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0\]), FLOATS.xs\[0\], t), FLOATS.xs\[1\], u), FLOATS.xs\[2\], sub), FLOATS.xs\[3\], 3.4028235e38))\n" \
+        "    n = std::abi::bytes::freeze(std::binary::write(mutable(\[1, 2, 3, 4, 5, 6, 7, 8\]), NUMBER.f, 1.0))\n" \
+        "    \[e, raw16(w), raw8(n), std::binary::parse(FLOATS, w).xs\]\n" \
+        "go(1.0000000596046448, 1.0000001788139343, 2.1019476964872256e-45):\n    on LayoutLengthMismatch:\n        \[\]\n    on NonFiniteFloat:\n        \[\]\n"]
+} -result {value {[[1, 0, 0, 0, 205, 204, 204, 61, 0, 0, 0, 0, 0, 0, 208, 63, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 128, 63, 2, 0, 128, 63, 2, 0, 0, 0, 255, 255, 127, 127], [0, 0, 128, 63, 5, 6, 7, 8], [1.0, 1.000000238418579, 2.802596928649634e-45, 3.4028234663852886e38]]}}
+
+test cfl-bytes-nonfinite {bytes may hold any bits: a NaN (any payload) or an infinity of a float or a double is NonFiniteFloat with its payload when parsed, read or copied -- never a value -- on every backend; a Float64 that overflows a float is NonFiniteFloat of its sign when emitted or written, never clamped to the largest float} -body {
+    set nan32 [cflLe32 0x7fc00001]
+    set ninf64 [cflLe64 0xfff0000000000000]
+    cflAll [string cat $::cflBytesPrelude \
+        "fn kind(r: NonFiniteResult) -> int:\n    if r == NonFiniteResult::NotANumber:\n        1\n    elif r == NonFiniteResult::PositiveInfinity:\n        2\n    else:\n        3\n" \
+        "fn attempt(n: int, big: Float64) -> int errors LayoutLengthMismatch, NonFiniteFloat:\n" \
+        "    d = bytes_of(\[7, 0, 0, 0, $nan32, $ninf64, 0, 0, 0, 0, 0, 0, 0, 0\])\n" \
+        "    m = mutable(\[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0\])\n" \
+        "    x = if n == 0:\n        std::binary::parse(MIXED, d).tag\n" \
+        "    elif n == 1:\n        y = std::binary::read(d, MIXED.a)\n        0\n" \
+        "    elif n == 2:\n        y = std::binary::read(d, MIXED.b)\n        0\n" \
+        "    elif n == 3:\n        y = std::binary::read(d, MIXED.c)\n        0\n" \
+        "    elif n == 4:\n        e = std::binary::emit(LayoutStruct\[MIXED\] {tag: 0, a: big, b: 0.0, c: 0.0})\n        0\n" \
+        "    elif n == 5:\n        e = std::binary::emit(LayoutStruct\[MIXED\] {tag: 0, a: 0.0, b: 0.0, c: -big})\n        0\n" \
+        "    elif n == 6:\n        w = std::binary::write(m, FLOATS.xs\[2\], big)\n        0\n" \
+        "    else:\n        w = std::binary::write(m, FLOATS.xs, \[0.0, 0.0, 0.0, big\])\n        0\n" \
+        "    x\n" \
+        "fn one(n: int, big: Float64) -> int errors LayoutLengthMismatch:\n    attempt(n, big):\n        on NonFiniteFloat {result}:\n            -kind(result)\n" \
+        "fn go() -> list errors LayoutLengthMismatch, NonFiniteFloat:\n" \
+        "    big = grow(3.4028235677973367e37, 1)\n" \
+        "    loop n from 0 to 8:\n        one(n, big)\n" \
+        "go():\n    on LayoutLengthMismatch:\n        \[\]\n    on NonFiniteFloat:\n        \[\]\n"]
+} -result {value {[-1, -1, -3, 0, -2, -3, -2, -2]}}
+
+test cfl-layout-declarations {a layout field of a C floating type is checked with that type's own width and alignment facts (a float 4 bytes, a double 8): past the end of the layout, overlapping a neighbour; Float64 and a DecimalRounded type are no field types, nor array elements (a Botlish value type has no representation)} -body {
+    set head "import std::ffi::c\nimport std::binary\n"
+    lmap body {
+        "layout L:\n    size 24\n    align 8\n    field a: std::ffi::c::Float at 0\n    field b: std::ffi::c::Double at 8\n"
+        "layout L:\n    size 8\n    align 4\n    field a: std::ffi::c::Float at 6\n"
+        "layout L:\n    size 16\n    align 8\n    field a: std::ffi::c::Double at 12\n"
+        "layout L:\n    size 16\n    align 8\n    field a: std::ffi::c::Float at 0\n    field b: std::ffi::c::Double at 2\n"
+        "layout L:\n    size 8\n    align 8\n    field a: Float64 at 0\n"
+        "layout L:\n    size 8\n    align 8\n    field a: DecimalRounded{minDecimalsPreserved: 2} at 0\n"
+        "layout L:\n    size 8\n    align 8\n    field a: array 2 of Float64 at 0\n"
+    } {
+        cflReject "$head${body}0\n"
+    }
+} -result {accepted {LAYOUT-FIELD-BOUNDS: field "a" of layout "L" occupies bytes 6..9 (offset 6, width 4), outside the layout's size 8} {LAYOUT-FIELD-BOUNDS: field "a" of layout "L" occupies bytes 12..19 (offset 12, width 8), outside the layout's size 16} {LAYOUT-FIELD-OVERLAP: field "b" of layout "L" (bytes 2..9) overlaps field "a" (bytes 0..3): the fields of a layout never share a byte (bytes several interpretations share are declared by a union layout, `union layout NAME:`, held by value in one field)} {LAYOUT-FIELD-TYPE: field "a" of layout "L" cannot have type Float64: Float64 is a type of Botlish values, not a binary representation: a floating field names the representation it holds, std::ffi::c::Float (IEEE 754 binary32) or std::ffi::c::Double (binary64), whose values are Float64s} {LAYOUT-FIELD-TYPE: field "a" of layout "L" cannot have type DecimalRounded{minDecimalsPreserved: 2}: DecimalRounded{minDecimalsPreserved: 2} is a type of Botlish values, not a binary representation: a floating field names the representation it holds, std::ffi::c::Float (IEEE 754 binary32) or std::ffi::c::Double (binary64), whose values are Float64s} {LAYOUT-FIELD-TYPE: the elements of field "a" of layout "L" cannot have type Float64: Float64 is a type of Botlish values, not a binary representation: a floating field names the representation it holds, std::ffi::c::Float (IEEE 754 binary32) or std::ffi::c::Double (binary64), whose values are Float64s}}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, isolation
+
+# A program over a layout M whose field a is the C type A (Float or Double):
+# it writes 0.1 into a and reads it back.
+proc cflRoundTripProgram {a} {
+    return [string cat "import std::ffi::c\nimport std::binary\nimport std::abi\nimport std::abi::bytes\n" \
+        "layout M:\n    size 16\n    align 8\n    field a: std::ffi::c::$a at 0\n    field b: std::ffi::c::Double at 8\n" \
+        "union layout U:\n    size 8\n    align 8\n    alternative f: std::ffi::c::Float\n    alternative d: std::ffi::c::Double\n" \
+        "layout A:\n    size 8\n    align 4\n    field xs: array 2 of std::ffi::c::Float at 0\n" \
+        "extern c fn f(x: std::ffi::c::$a, p: std::ffi::c::Ptr\[std::ffi::c::Double\]) -> std::ffi::c::Float\n" \
+        "fn g(m: std::abi::bytes::MutableBytes, x: Float64) -> std::abi::bytes::MutableBytes errors NonFiniteFloat, LayoutLengthMismatch:\n    std::binary::write(m, M.a, x)\n" \
+        "fn go() -> Float64 errors NonFiniteFloat, LayoutLengthMismatch:\n    r = g(std::abi::bytes::zeroed(std::abi::usize(16)), 0.1)\n    std::binary::parse(M, std::abi::bytes::freeze(r)).a\n" \
+        "go():\n    on NonFiniteFloat:\n        -1.0\n    on LayoutLengthMismatch:\n        -2.0\n"]
+}
+
+test cfl-hir-text {HIR text names each field's and alternative's C type (std::ffi::c::Float, std::ffi::c::Double), never Float64, and a float field read through a view is NonFiniteFloat-fallible; formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome} -constraints nativeBuilt -body {
+    set source [string cat "direct module\nimport std::binary::native\nimport std::ffi::c\n" \
+        "layout M:\n    size 16\n    align 8\n    field a: std::ffi::c::Float at 0\n    field b: std::ffi::c::Double at 8\n" \
+        "union layout U:\n    size 8\n    align 8\n    alternative f: std::ffi::c::Float\n    alternative d: std::ffi::c::Double\n" \
+        "layout A:\n    size 8\n    align 4\n    field xs: array 2 of std::ffi::c::Float at 0\n" \
+        "fn a_of(v: NativeView\[M\]) -> Float64 errors NonFiniteFloat:\n    v.a\n" \
+        "fn run() -> Float64 errors NativeViewNull, NonFiniteFloat:\n    p = std::ffi::c::null\[std::ffi::c::Void\]()\n    v = std::binary::native::view(M, p)\n    a_of(v)\n" \
+        "r = run():\n    on NativeViewNull:\n        -1.0\n    on NonFiniteFloat:\n        -2.0\nr\n"]
+    set hir [cflHir $source]
+    set text [hir::format $hir]
+    set again [hir::parse $text]
+    list [regexp -all {layout M ns - size 16 align 8 fields a: std::ffi::c::Float at 0, b: std::ffi::c::Double at 8} $text] \
+        [regexp -all {union layout U ns - size 8 align 8 alternatives f: std::ffi::c::Float, d: std::ffi::c::Double} $text] \
+        [regexp -all {layout A ns - size 8 align 4 fields xs: array 2 of std::ffi::c::Float at 0} $text] \
+        [regexp -all {block s[0-9]+ \(b[0-9]+ v:NativeView\[M\]\) captures \(\) declares Float64 errors NonFiniteFloat} $text] \
+        [expr {[hir::format $again] eq $text}] [lmap backend {interp cranelift} {cflRun $again $backend}]
+} -result {1 1 1 1 1 {{value -1.0} {value -1.0}}}
+
+test cfl-interchange-isolation {HIR interchange keeps the C floating types apart -- a layout's float and double fields, an extern's contract and ABI classes -- and compilation isolation keeps them the HIR's own: a program read back after another compilation declared the same layout with a double field still narrows its write to a float, on every backend, and its extern still passes an f32} -body {
+    set dir [makeDirectory cfl-interchange-[pid]]
+    set path [file join $dir float.hirx]
+    set float [cflHir [cflRoundTripProgram Float]]
+    hir::interchange::writeFile $path $float
+    set double [cflHir [cflRoundTripProgram Double]]
+    set read [hir::interchange::readFile $path]
+    set outcomes [lmap h [list $read $double] {
+        lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {outcomeUnderHir $backend $h}]
+    }]
+    list $outcomes [lmap h [list $read $double] {
+        hir::activate $h
+        dict get [core::native::metadata extern#[dict get [hir::foreign::declarations $h] f key]] extern abi params
+    }] [expr {[native::nir $read] eq [native::nir $float]}]
+} -cleanup {removeDirectory cfl-interchange-[pid]} -result {{{{value 0.10000000149011612 {}}} {{value 0.1 {}}}} {{f32 ptr} {f64 ptr}} 1}
+
+# ---------------------------------------------------------------------------
+# Native code, executables, the collector
+
+test cfl-nir-clif {natively a C float is an f32 and a C double an f64 in NIR's foreign table and in the platform C signature (Cranelift's own types, the target's convention, no extension attribute); a float argument is narrowed by one fdemote checked against the largest float, a float result widened by one fpromote, then held to finiteness like a double's -- inline, with no helper call or table} -constraints nativeBuilt -body {
+    set hir [cflHir "import std::ffi::c\nextern c library \"m\"\nextern c fn h(x: std::ffi::c::Float, y: std::ffi::c::Double) -> std::ffi::c::Float\nfn go(a: Float64) -> Float64 errors NonFiniteFloat:\n    h(a, a)\ngo(1.5):\n    on NonFiniteFloat:\n        0.0\n"]
+    set clif [native::clif $hir]
+    set convention [dict get [native::targetFacts [dict get [core::cabi::target [core::cabi::hostTarget]] triple]] c-call-conv]
+    list [lsearch -inline -regexp [split [native::nir $hir] \n] {^foreign }] \
+        [regexp -all "sig\\d+ = \\(f32, f64\\) -> f32 $convention" $clif] \
+        [regexp -all {= fdemote\.f32 } $clif] [regexp -all {f32const 0x1\.fffffep127} $clif] [regexp -all {= fpromote\.f64 } $clif]
+} -result {{foreign 0 "h" params="f32 f64" result=f32 name="h"} 1 1 1 2}
+
+test cfl-executable {a program that passes and receives C floats and doubles links as a standalone executable and runs with no Tcl and an empty environment, with the same values as under the driver: narrowing, widening, the stack-passed ninth float, a NaN result's NonFiniteFloat} -constraints {cfloatFixture executableAot} -body {
+    set source [string cat $::cflBindings [string map [list "import std::ffi::c\n" "" "extern c library \"botlish_cfloat_fixture\"\n" ""] $::cflPickBindings] \
+        "fn kind() -> int:\n    x = return_float_nan():\n        on NonFiniteFloat {result}:\n            if result == NonFiniteResult::NotANumber:\n                return 1\n            return 2\n    0\n" \
+        "fn go() -> list errors NonFiniteFloat:\n    \[echo_float(0.1), add_double(0.1, 0.2), float_bits(16777217.0), pick(8, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5), bits9(8, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0e-45), kind()\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n"]
+    set hir [cflHir $source]
+    set dir [makeDirectory cfl-exe-[pid]]
+    set exe [native::withLinkDirs [list $::cflFixtureDir] {native::executable $hir [file join $dir program]}]
+    list [string trim [runBare $exe]] [lindex [cflRun $hir cranelift] 1]
+} -cleanup {file delete -force [file join [temporaryDirectory] cfl-exe-[pid]]} -result {{[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]} {[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]}}
+
+test cfl-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at every allocation site) every float crossing keeps its value: C results widened into fresh Float64s, a NonFiniteFloat payload, view reads, element reads and whole copies of float arrays, edits, all in a loop that allocates throughout} -constraints cfloatFixture -body {
+    set main [string cat \
+        "fn safe_nan() -> int:\n    x = return_double_nan():\n        on NonFiniteFloat {result}:\n            return 1\n    0\n" \
+        "fn go() -> list errors NonFiniteFloat, NativeViewNull, NativeEditNull, IndexNotFound:\n" \
+        "    f = fbuf()\n    fp = std::ffi::c::erase(std::ffi::c::clone(f))\n" \
+        "    fe = std::binary::native::edit(FLOATS, fp)\n    fv = std::binary::native::view(FLOATS, fp)\n" \
+        "    d = dbuf()\n" \
+        "    rounds = loop k from 0 to 4:\n        loop i from 0 to 16:\n" \
+        "            x = echo_float(add_double(0.1, 0.2))\n" \
+        "            std::binary::store_element(fe.xs, i, x + 1.0)\n" \
+        "            \[x, std::binary::element(fv.xs, i), safe_nan(), std::list::length(std::binary::load(fv.xs))\]\n" \
+        "    \[std::list::length(rounds), std::list::at(std::list::at(rounds, 0), 0), std::list::at(std::list::at(rounds, 3), 15), dot(f, d, 0)\]\n" \
+        "go():\n    on NonFiniteFloat:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n"]
+    set bindings [string map [list "import std::binary::native\n" "import std::binary::native\nimport std::list\n"] $::cflMemoryBindings]
+    set bindings [string cat $bindings [string map [list "import std::ffi::c\n" "" "extern c library \"botlish_cfloat_fixture\"\n" ""] $::cflBindings]]
+    set plain [cflNative "$bindings$main"]
+    set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [cflNative "$bindings$main"]
+    } finally {
+        if {$saved eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
+    }
+    list [expr {$plain eq $stressed}] $stressed
+} -result {1 {value {[4, [0.30000001192092896, 1.2999999523162842, 1, 16], [0.30000001192092896, 1.2999999523162842, 1, 16], 0.0]}}}
+
+# ---------------------------------------------------------------------------
+# Which operations declare NonFiniteFloat
+
+test cfl-layout-errors {a layout operation declares NonFiniteFloat exactly where a floating value can fail to cross, per call: a read of a float or a double (bytes may hold NaN or an infinity), a write or emit of a float (a Float64 may overflow it), never a write of a double (every Float64 fits) and never an operation of an integer-only layout, whose calls declare exactly what they did before C floating types existed; a field read through a view has no handler of its own, so a float field read stands where NonFiniteFloat is declared} -constraints nativeBuilt -body {
+    set layouts [string cat "import std::ffi::c\nimport std::binary\nimport std::binary::native\nimport std::abi\nimport std::abi::bytes\n" \
+        "layout M:\n    size 16\n    align 8\n    field a: std::ffi::c::Float at 0\n    field b: std::ffi::c::Double at 8\n" \
+        "layout I:\n    size 8\n    align 4\n    field x: std::ffi::c::Int at 0\n    field y: std::ffi::c::UInt at 4\n"]
+    set calls {
+        {std::binary::parse(M, d)} {std::binary::parse(I, d)} {std::binary::read(d, M.a)} {std::binary::read(d, M.b)} {std::binary::read(d, I.x)}
+        {std::binary::write(m, M.a, x)} {std::binary::write(m, M.b, x)} {std::binary::write(m, I.x, 1)}
+        {std::binary::emit(LayoutStruct[M] {a: x, b: x})} {std::binary::emit(LayoutStruct[I] {x: 1, y: 2})}
+    }
+    set out [lmap call $calls {
+        set hir [cflHir "${layouts}fn f(d: std::abi::bytes::Bytes, m: std::abi::bytes::MutableBytes, x: Float64) -> any:\n    $call\n0\n" -strict 0]
+        set problems [lmap d [dict getdef $hir diagnostics {}] {
+            if {[string match *NonFiniteFloat* [dict get $d message]]} {string cat NonFiniteFloat} else {continue}
+        }]
+        list $call [lsort -unique $problems]
+    }]
+    lappend out [cflReject "${layouts}fn f(v: NativeView\[M\]) -> Float64:\n    v.a\n0\n"] \
+        [cflReject "${layouts}fn f(v: NativeView\[M\]) -> Float64 errors NonFiniteFloat:\n    v.b\n0\n"] \
+        [cflReject "${layouts}fn f(v: NativeView\[I\]) -> int:\n    v.x\n0\n"]
+} -result {{{std::binary::parse(M, d)} NonFiniteFloat} {{std::binary::parse(I, d)} {}} {{std::binary::read(d, M.a)} NonFiniteFloat} {{std::binary::read(d, M.b)} NonFiniteFloat} {{std::binary::read(d, I.x)} {}} {{std::binary::write(m, M.a, x)} NonFiniteFloat} {{std::binary::write(m, M.b, x)} {}} {{std::binary::write(m, I.x, 1)} {}} {{std::binary::emit(LayoutStruct[M] {a: x, b: x})} NonFiniteFloat} {{std::binary::emit(LayoutStruct[I] {x: 1, y: 2})} {}} {UNHANDLED-ERROR: this read of the C floating field "a" through NativeView[M] may produce the declared error "NonFiniteFloat" -- native memory may hold a NaN or an infinity, which no Float64 is -- which is not admitted by the enclosing function's own "errors" declaration (a field read has no handler of its own: read it in a function that declares the error, or copy the record with std::binary::load, a call a handler may follow)} accepted accepted}
+
+cleanupTests

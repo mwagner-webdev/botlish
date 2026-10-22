@@ -21,6 +21,10 @@ _Bool botlish_sdl3_SDL_size_add_check_overflow_builtin(size_t botlish_a, size_t 
     return SDL_size_add_check_overflow_builtin(botlish_a, botlish_b, botlish_ret);
 }
 
+float botlish_sdl3_SDL_SwapFloat(float botlish_x) {
+    return SDL_SwapFloat(botlish_x);
+}
+
 int botlish_sdl3_SDL_MostSignificantBitIndex32(Uint32 botlish_x) {
     return SDL_MostSignificantBitIndex32(botlish_x);
 }
@@ -51,6 +55,10 @@ _Bool botlish_sdl3_SDL_PointInRectFloat(const SDL_FPoint *botlish_p, const SDL_F
 
 _Bool botlish_sdl3_SDL_RectEmptyFloat(const SDL_FRect *botlish_r) {
     return SDL_RectEmptyFloat(botlish_r);
+}
+
+_Bool botlish_sdl3_SDL_RectsEqualEpsilon(const SDL_FRect *botlish_a, const SDL_FRect *botlish_b, float botlish_epsilon) {
+    return SDL_RectsEqualEpsilon(botlish_a, botlish_b, botlish_epsilon);
 }
 
 _Bool botlish_sdl3_SDL_RectsEqualFloat(const SDL_FRect *botlish_a, const SDL_FRect *botlish_b) {

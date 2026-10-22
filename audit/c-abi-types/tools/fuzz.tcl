@@ -23,7 +23,9 @@
 #   scalar   a C integer scalar on a random target with a value at or just
 #            past one of its bounds or inside it: admitted exactly when the
 #            model's range (the target's data model, independently written
-#            here) contains it, and then returned unchanged by every backend.
+#            here) contains it, and then returned unchanged by every backend
+#            that runs the target's programs on this host (backendsFor: all
+#            four for the host's target, the Tcl backends for another).
 #   imprint  a user function with imprint variables called with or without
 #            explicit imprints, valid or not by the model's rules.
 #
@@ -214,7 +216,11 @@ for {set k 0} {$k < [dict get $options -n]} {incr k} {
         set code [dict get $caught -errorcode]
         set got [expr {[lindex $code 0] in {CORE SURFACE} ? "reject" : "error: $hir"}]
     } else {
-        set outcomes [lsort -unique [lmap b $backends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+        # A program built for another target runs on the Tcl backends only:
+        # the native driver refuses it (NATIVE TARGET).
+        set outcomes [lsort -unique [lmap b [backendsFor [hir::cabi::targetOf $hir] $backends] {
+            lrange [outcomeUnderHir $b $hir] 0 1
+        }]]
         set got [expr {[llength $outcomes] == 1 ? [lindex $outcomes 0] : "backends disagree: $outcomes"}]
     }
     if {$got ne $expect} {

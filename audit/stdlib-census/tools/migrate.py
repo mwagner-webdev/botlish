@@ -38,16 +38,17 @@ import sys
 # (audit/stdlib-census/before.tsv: abi, abi::x86_64, linux::abi::x86_64, ...).
 SEGMENTS = [
     "abi", "ascii", "binary", "byte", "byte_store", "char", "compiler",
-    "coroutine", "decimal_rounded", "ffi", "float64", "immutable_set", "io",
-    "linux", "list", "mathish", "mutable_array", "mutable_byte_store",
-    "mutable_vector", "str", "test", "web",
+    "coroutine", "darwin", "decimal_rounded", "ffi", "float64",
+    "immutable_set", "io", "linux", "list", "mathish", "mutable_array",
+    "mutable_byte_store", "mutable_vector", "str", "table_hash", "test",
+    "web", "windows",
 ]
 # Longest first: `byte_store` before `byte`.
 SEG = "|".join(sorted(SEGMENTS, key=len, reverse=True))
 
 # The top-level entries of lib/ (files and directories), for absolute and
 # glob paths into it (`*/lib/list.bot`).
-LIBRARY_ENTRIES = "abi|ascii|binary|byte|compiler|ffi|io|linux|list|mathish|mutable_array|test|web"
+LIBRARY_ENTRIES = "abi|ascii|binary|byte|compiler|darwin|ffi|float64|io|linux|list|mathish|mutable_array|test|web|windows"
 
 # A name may follow a Tcl string's escaped line break or tab ("...\nlist::at"):
 # the escape's letter is no identifier character there.

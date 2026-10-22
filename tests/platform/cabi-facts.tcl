@@ -12,8 +12,10 @@
 # row a compilation for this host uses when it imports std::ffi::c. It also
 # checks that the compiler's own target (COMPILER -dumpmachine: arm64-apple-
 # darwin24.6.0 on a Mac) is the host target's operating system and
-# architecture: the host default is the toolchain's host, not an
-# architecture's other system. Prints both and exits 1 on any difference, or
+# architecture -- and on Windows its environment: windows-x86_64 is MSVC's
+# (clang's x86_64-pc-windows-msvc; MinGW's gcc would check another row) --:
+# the host default is the toolchain's host, not an architecture's other
+# system. On Windows COMPILER is clang (CC=clang: cl has no -dumpmachine). Prints both and exits 1 on any difference, or
 # when the host is not one of the table's targets. It reads the table; it
 # changes nothing. Never an oracle of another target: it runs on, and
 # checks, its own host's row only.
@@ -42,7 +44,7 @@ set table [core::cabi::target $host]
 
 set work [file tempdir botlish-cabi-facts]
 try {
-    set program [file join $work cabi-facts]
+    set program [file join $work cabi-facts[expr {$::tcl_platform(platform) eq "windows" ? ".exe" : ""}]]
     exec $cc -o $program [file join $here cabi-facts.c] 2>@ stderr
     set measured [exec $program]
 } finally {
@@ -94,6 +96,13 @@ dict for {key value} $measured {
 }
 if {$machineOs ne [dict get $table os] || $machineArch ne [dict get $table arch]} {
     lappend differences "target: the C compiler's is $machine ($machineOs $machineArch), the host default $host ([dict get $table os] [dict get $table arch])"
+} elseif {$machineOs eq "windows"} {
+    # The C toolchain's ABI family: the triple's environment.
+    set machineEnv [expr {[string match *msvc* $machine] ? "msvc" : [string match *mingw* $machine] || [string match *gnu* $machine] ? "gnu" : ""}]
+    set tableEnv [lindex [split [dict get $table triple] -] end]
+    if {$machineEnv ne $tableEnv} {
+        lappend differences "target: the C compiler's is $machine (environment [expr {$machineEnv eq "" ? "unknown" : $machineEnv}]), the host default $host's is $tableEnv"
+    }
 }
 if {$differences ne ""} {
     puts "FAIL: core::cabi's $host row disagrees with the C toolchain: [join $differences {; }]"

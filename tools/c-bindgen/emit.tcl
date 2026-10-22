@@ -103,6 +103,11 @@ proc ::cbind::emit::Extern {entry} {
         set words [concat [list "[dict get $p name]: [Type [dict get $p type]]"] [ParamFacts $p]]
         lappend params [join $words " "]
     }
+    if {[dict getdef $entry variadic 0]} {
+        # C's `...` (VARIADICS-VERTICAL-SLICE-1.md): the bare marker after
+        # the fixed parameters; each call passes its own trailing C types.
+        lappend params variadic
+    }
     set result [Type [dict get $entry result type]]
     set tail ") -> [join [concat [list $result] [ResultFacts [dict get $entry result]]] { }]"
     set one "$head\([join $params {, }]$tail"

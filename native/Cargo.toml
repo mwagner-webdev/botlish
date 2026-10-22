@@ -23,6 +23,14 @@ target-lexicon = "0.13"
 [profile.release]
 debug = 1
 
+[features]
+# The GC root plan of a host without native-frame roots -- the shadow stack,
+# leaf frames published through Vm::native_roots_ptr, no frame walk
+# (runtime::framewalk's NATIVE_FRAME_ROOTS false), Windows' plan -- built on
+# a host that has them, to test that plan where the whole suite runs
+# (WINDOWS-X86-64-MILESTONE-1.md, section 3). A test build, never shipped.
+fallback-roots = []
+
 # The host's native stack bounds and guards, and the runtime's overflow
 # handling (MACOS-AARCH64-MILESTONE-4.md): its own main runs on the process's
 # main thread, and every check that faults on purpose runs in a child

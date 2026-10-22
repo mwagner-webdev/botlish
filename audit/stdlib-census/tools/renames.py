@@ -5,7 +5,7 @@
     python3 audit/stdlib-census/tools/renames.py > audit/stdlib-census/renames.tsv
 
 Joins audit/stdlib-census/before.tsv and after.tsv: every program-visible
-entity of the standard library (role api or demo) with its flat name before
+entity of the standard library (role api, demo or std-internal) with its flat name before
 the migration and its canonical std:: name after it. Root primitives,
 internal natives and runtime builtins kept their names and are not listed.
 Exits 1 if an entity of either census has no partner in the other.
@@ -34,7 +34,7 @@ def main():
     seen = set()
     lost = []
     for (name, kind), fields in sorted(before.items()):
-        if fields[3] not in ("api", "demo"):
+        if fields[3] not in ("api", "demo", "std-internal"):
             if (name, kind) not in after:
                 lost.append(name)
             seen.add((name, kind))

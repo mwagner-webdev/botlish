@@ -89,6 +89,7 @@
 //! value and the cached failure's values are traced like any field.
 use super::error::RtError;
 use super::native_stack::{NativeStack, StackState};
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 use super::ops::GenericEntry;
 use super::value::*;
 use super::vm::Vm;
@@ -165,8 +166,10 @@ pub struct CoStack {
     guard: usize,
 }
 
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 const GUARD_BYTES: usize = 64 * 1024;
 const POOL_LIMIT: usize = 32;
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 const DEFAULT_STACK_BYTES: usize = 8 << 20;
 
 thread_local! {
@@ -217,6 +220,7 @@ impl CoStack {
         }
     }
 
+    #[cfg_attr(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))), allow(dead_code))]
     fn top(&self) -> usize {
         self.base + self.size
     }
@@ -445,6 +449,7 @@ unsafe fn bl_co_switch(_save: *mut usize, _load: usize, _transfer: usize) -> usi
 /// The first frame of every coroutine stack (entered from bl_co_trampoline):
 /// runs the body to its end, records the terminal state, and switches back
 /// to the resumer of the final segment for good.
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 extern "C" fn co_body(p: *mut Vm, co: *mut CoroutineObj) -> ! {
     // SAFETY: CO is the running coroutine (rooted through Vm::co_current for
     // as long as it runs); P is the Vm every frame shares.

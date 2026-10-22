@@ -128,24 +128,27 @@ faster.
 
 @topic backend.native-executable
 title: Standalone native executables
-summary: -emit-native-executable FILE.bot compiles the program into a standalone executable (ELF, or Mach-O on macOS) that runs without Tcl, Rust or a checkout and prints its output, then its value.
+summary: -emit-native-executable FILE.bot compiles the program into a standalone executable (ELF, Mach-O or PE) that runs without Tcl, Rust or a checkout and prints its output, then its value.
 index: backends
 alias: native executable; standalone executable; emit-native-executable; compile to binary
-keywords: executable, ELF, Mach-O, AOT, stub linker, rustc, emit, macOS
+keywords: executable, ELF, Mach-O, PE, exe, AOT, stub linker, rustc, emit, macOS, Windows, MSVC
 related: backend.cranelift backend.single-executable backend.platforms cli.exit-status concept.argv
-docs: README.md SINGLE-EXECUTABLE.md ARGV.md MACOS-AARCH64-MILESTONE-5.md
+docs: README.md SINGLE-EXECUTABLE.md ARGV.md MACOS-AARCH64-MILESTONE-5.md WINDOWS-X86-64-MILESTONE-1.md
 
 == WHAT IT IS
 `-emit-native-executable game.bot` writes ./game (the input's name without
-its extension) and does not run the program. The executable prints what the
-program prints, then the program's final value on its own line (`unit` for
-a program ending in unit), and exits 0; a run-time error goes to stderr with
-a nonzero exit status. Its argv() is its real process arguments. It is an
+its extension; game.exe on Windows) and does not run the program. The
+executable prints what the program prints, then the program's final value
+on its own line (`unit` for a program ending in unit), and exits 0; a
+run-time error goes to stderr with a nonzero exit status. Its argv() is its
+real process arguments. It is an
 ordinary command-line program of the host: an ELF executable linked
 against glibc on Linux, a Mach-O arm64 executable linked against libSystem
-(and signed ad hoc by the linker, as every arm64 executable is) on macOS.
-It needs no source file, Botlish checkout or compiler to run, only the
-system's own libraries.
+(and signed ad hoc by the linker, as every arm64 executable is) on macOS, a
+PE x86-64 console executable linked by Microsoft's link.exe, with the C
+runtime linked into it, on Windows. It needs no source file, Botlish
+checkout or compiler to run, only the system's own libraries (on Windows
+no Visual C++ runtime either).
 
 == REQUIREMENTS
 Every function instance the program uses must be closed (fully known to the
@@ -153,11 +156,13 @@ ahead-of-time compiler); otherwise NATIVE AOT NOT-READY names the cause
 (-aot-spec explains). A .ir file is rejected (NATIVE AOT INPUT): executables
 are built from .bot, .hir or .hirx. Linking: in a checkout the default
 linker uses rustc and the system C linker (BOTLISH_NATIVE_LINKER=rustc),
-on Linux x86-64 and AArch64 and on macOS AArch64; the `stub` linker
-(BOTLISH_NATIVE_LINKER=stub, what the single executable uses) needs no
-toolchain and is Linux x86-64 only. A program that calls C links with the
-rustc linker on every one of those hosts, its declared libraries passed to
-the platform linker (the stub linker refuses it: NATIVE LINK). The
+on Linux x86-64 and AArch64, on macOS AArch64 and on Windows x86-64
+(MSVC's toolchain: Visual Studio's C++ build tools and the Windows SDK,
+which rustc finds itself); the `stub` linker (BOTLISH_NATIVE_LINKER=stub,
+what the single executable uses) needs no toolchain and is Linux x86-64
+only. A program that calls C links with the rustc linker on Linux and
+macOS, its declared libraries passed to the platform linker; on Windows
+not yet, and the stub linker never (NATIVE LINK). The
 executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
@@ -219,33 +224,44 @@ every backend prints (backend.io).
 
 @topic backend.io
 title: Which forms of I/O work on which backend
-summary: The program's value is printed on every backend; printing (std::io::print_line) and reading stdin (std::linux::io::read) need a native backend or an executable; there is no file or exit-status API.
+summary: The program's value is printed on every backend; printing (std::io::print_line) and reading stdin need a native backend or an executable; there is no portable file or exit-status API.
 index: backends stdlib
 alias: input output; io backends; printing on interp; output on every backend
 keywords: io, print, print_line, stdout, stderr, value, native, interp
-related: task.print-output backend.native-only stdlib.module.std::io stdlib.std::io::print_line capability.input capability.files capability.process-exit-status concept.program-value concept.context-traits
-docs: CONTEXT-TRAITS.md POST-2048-PRODUCT-FIXES.md
+related: task.print-output backend.native-only stdlib.module.std::io stdlib.std::io::print_line stdlib.module.std::darwin::io stdlib.module.std::windows::io capability.input capability.files capability.process-exit-status concept.program-value concept.context-traits
+docs: CONTEXT-TRAITS.md POST-2048-PRODUCT-FIXES.md MACOS-AARCH64-MILESTONE-8.md WINDOWS-X86-64-MILESTONE-2.md
 
 == OUTPUT, BY BACKEND
     the program's value          every backend: the compiler prints it
                                  after "value:"; an executable prints it last
-    std::io::print, print_line,       cranelift, cranelift-generic and native
+    std::io::print, print_line,  cranelift, cranelift-generic and native
     write_error(_line)           executables; interp and compile refuse the
                                  underlying system call (NATIVE-ONLY)
-    std::linux::write, std::linux::io      the same: native only
+    std::linux::write,           the same: native only
+    std::linux::io
+    std::darwin::write,          the same: native only (C calls)
+    std::darwin::io
+    std::windows::write_file,    the same: native only (C calls)
+    std::windows::io
 
-io's operations need an installed context implementing std::io::IO; the one
-the standard library provides is std::linux::io::LinuxIO (`with context
-std::linux::io::create()`), which makes raw Linux system calls -- hence
-native only, on Linux.
+io's operations need an installed context implementing std::io::IO; the
+standard library provides three, one per platform: std::linux::io::LinuxIO
+(`with context std::linux::io::create()`), which makes raw Linux system
+calls; on macOS std::darwin::io::DarwinIO (`with context
+std::darwin::io::create()`), which calls libSystem's write(2) through C; and
+on Windows std::windows::io::WindowsIO (`with context
+std::windows::io::create()`), which calls kernel32's GetStdHandle and
+WriteFile through C (the text's UTF-8 bytes, exactly: no code page, no
+newline translation) -- hence native only. The function that prints is the
+same on all three; only the installed context differs.
 
 == INPUT
     argv()                       every backend (concept.argv)
     std::linux::io::read(buffer)      standard input, raw bytes: cranelift,
-                                 cranelift-generic and native executables
+    std::darwin::io::read(buffer)     cranelift-generic and native executables
                                  (capability.input)
 
-There is no text or line input in io, and no file or directory API
+There is no text or line input in io, and no portable file or directory API
 (capability.files).
 
 == EXIT STATUS
@@ -254,47 +270,68 @@ A program cannot set its process exit status
 
 @topic backend.platforms
 title: Platforms and what runs where
-summary: The Tcl backends need only Tcl 9; the native backend runs on Linux x86-64 and AArch64 and macOS AArch64, C calls included; syscalls are Linux-only; stub linking is Linux x86-64 only.
+summary: The Tcl backends need only Tcl 9; the native backend runs on Linux, macOS AArch64 and Windows x86-64, C calls too (variadic ones not on Windows); syscalls are Linux's; stub linking Linux x86-64's.
 index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
-keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, Tcl 9, coroutines, stub
+keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
 related: backend.targets backend.overview backend.native-executable backend.single-executable
-docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md
+docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md MACOS-AARCH64-MILESTONE-8.md
 
 == WHAT IS TESTED
 The repository's continuous integration runs every test on Linux x86-64 and
 Linux AArch64 (the Tcl backends, the native backends, the golden suites)
 and builds the single executable on Linux x86-64. A separate workflow runs
 the native JIT, native coroutines, the native stack guard, standalone
-executables and C calls on Apple Silicon macOS. Nothing here is a promise
-about other platforms.
+executables, C calls and Darwin I/O on Apple Silicon macOS, and
+another the native JIT, standalone executables, C calls (against
+libraries MSVC's cl builds), Windows I/O and the collector under GC
+stress, and every Tcl test file and golden suite on the Tcl backends, on
+Windows x86-64 with MSVC's toolchain. Nothing here is a promise about
+other platforms.
 
 == PER COMPONENT
     interp, compile          Tcl 9.0 or newer (Unicode-correct strings);
                              no machine-specific code
     cranelift(-generic)      the native executables (Rust, Cranelift);
-                             Linux x86-64 and AArch64; the in-process
-                             native run also on macOS AArch64
+                             Linux x86-64 and AArch64, macOS AArch64,
+                             Windows x86-64 (MSVC's toolchain; MinGW's
+                             windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
                              (hand-written stack switching); elsewhere
-                             NATIVE UNSUPPORTED; the Tcl backends run
-                             coroutines everywhere
+                             (Windows) NATIVE UNSUPPORTED; the Tcl
+                             backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and
-                             AArch64 and macOS AArch64
-                             (error.native-limit-stack)
+                             AArch64 and macOS AArch64; on Windows only
+                             for Botlish recursion the shadow stack's
+                             depth check stops, otherwise the process
+                             ends (error.native-limit-stack)
     Linux system calls, io   Linux; x86-64 through std::linux::abi::x86_64,
                              AArch64 through std::linux::abi::aarch64 (one
                              portable surface: linux, std::linux::io, io);
                              the linux namespaces compile for Linux
                              targets only (error.unsupported-platform)
+    Darwin I/O, io           macOS AArch64: libSystem's read, write,
+                             open, close and errno through C calls
+                             (darwin, std::darwin::io, std::darwin::path; no raw
+                             Darwin system call); the darwin namespaces
+                             compile for macOS targets only
+    Windows I/O, io          Windows x86-64: kernel32's GetStdHandle,
+                             WriteFile and GetLastError through C calls
+                             (windows, std::windows::io: standard output and
+                             error only); the windows namespaces compile
+                             for Windows targets only
     executables              Linux, glibc, ELF: rustc linker on x86-64
                              and AArch64, stub linker x86-64 only; macOS
-                             AArch64, Mach-O: rustc linker
+                             AArch64, Mach-O: rustc linker; Windows
+                             x86-64, PE (NAME.exe): rustc and link.exe
     C calls (extern c fn)    Linux, glibc (GNU ld's link plan, the SysV
-                             and AAPCS64 C ABIs) and macOS AArch64
-                             (Apple's ld, Apple's arm64 C ABI); never
-                             with the stub linker
+                             and AAPCS64 C ABIs), macOS AArch64 (Apple's
+                             ld, Apple's arm64 C ABI) and Windows x86-64
+                             (link.exe: /LIBPATH and NAME.lib, the Win64
+                             C ABI, the static C runtime); variadic C
+                             calls not on Windows (NATIVE CODEGEN);
+                             never with the stub linker
     single executable        Linux x86-64
 
 @topic backend.targets
@@ -323,7 +360,8 @@ The target decides:
   * which file an architecture-specific module comes from (std::linux::sys
     is stdlib/linux/sys.x86_64.bot or stdlib/linux/sys.aarch64.bot);
   * whether a platform namespace is available: linux and everything
-    under it exist for Linux targets only (error.unsupported-platform);
+    under it exist for Linux targets only, darwin for macOS's and windows
+    for Windows' (error.unsupported-platform);
   * the C calling convention of foreign calls (Apple's on macOS AArch64).
 A HIR built with any of these records its target, and is never taken for
 another's: a .hirx file of another target is refused

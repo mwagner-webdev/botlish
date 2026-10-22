@@ -1,5 +1,11 @@
 # BINARY-LAYOUT.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: a field may be
+> `std::ffi::c::Float` (4 bytes) or `std::ffi::c::Double` (8), C's float and double,
+> its copied value a Float64 -- a read of a NaN or an infinity, and a write
+> of a Float64 too large for a float, are `NonFiniteFloat` (item 31's
+> `float`/`double`).
+
 > Partially superseded by FIXED-LAYOUT-ARRAYS.md: a field may be a fixed
 > array (`field name: array N of E at OFFSET`), whose copied value is a List
 > of exactly N elements -- items 32 and 66 and "The fixed-layout limitation"

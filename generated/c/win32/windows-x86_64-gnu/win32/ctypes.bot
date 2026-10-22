@@ -538,7 +538,7 @@ opaque struct ACTCTX_SECTION_KEYED_DATA:
 opaque struct FILE_ID_DESCRIPTOR:
     tag: unit
 
-# struct tagXFORM (wingdi.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct tagXFORM (wingdi.h), a complete C type: its layout is win32::layouts::XFORM
 opaque struct XFORM:
     tag: unit
 
@@ -662,7 +662,7 @@ opaque struct RGNDATA:
 opaque struct ABC:
     tag: unit
 
-# struct _ABCFLOAT (wingdi.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct _ABCFLOAT (wingdi.h), a complete C type: its layout is win32::layouts::ABCFLOAT
 opaque struct ABCFLOAT:
     tag: unit
 
@@ -740,6 +740,10 @@ opaque struct DOCINFOW:
 
 # struct tagKERNINGPAIR (wingdi.h), a complete C type: its layout is win32::layouts::KERNINGPAIR
 opaque struct KERNINGPAIR:
+    tag: unit
+
+# struct _GLYPHMETRICSFLOAT (wingdi.h), a complete C type: its layout is win32::layouts::GLYPHMETRICSFLOAT
+opaque struct GLYPHMETRICSFLOAT:
     tag: unit
 
 # struct tagLAYERPLANEDESCRIPTOR (wingdi.h), a complete C type: its layout is win32::layouts::LAYERPLANEDESCRIPTOR

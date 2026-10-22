@@ -182,6 +182,8 @@ compiler::DiagnosticCode::FlagCalleeUnknown	std::compiler::DiagnosticCode::FlagC
 compiler::DiagnosticCode::FlagFunctionValue	std::compiler::DiagnosticCode::FlagFunctionValue	enum-case	std::compiler::DiagnosticCode	source
 compiler::DiagnosticCode::ForeignBorrow	std::compiler::DiagnosticCode::ForeignBorrow	enum-case	std::compiler::DiagnosticCode	source
 compiler::DiagnosticCode::Imprint	std::compiler::DiagnosticCode::Imprint	enum-case	std::compiler::DiagnosticCode	source
+compiler::DiagnosticCode::InternalIntrinsicValue	std::compiler::DiagnosticCode::InternalIntrinsicValue	enum-case	std::compiler::DiagnosticCode	source
+compiler::DiagnosticCode::InternalNamespace	std::compiler::DiagnosticCode::InternalNamespace	enum-case	std::compiler::DiagnosticCode	source
 compiler::DiagnosticCode::KnownError	std::compiler::DiagnosticCode::KnownError	enum-case	std::compiler::DiagnosticCode	source
 compiler::DiagnosticCode::LayoutArrayExtent	std::compiler::DiagnosticCode::LayoutArrayExtent	enum-case	std::compiler::DiagnosticCode	source
 compiler::DiagnosticCode::LayoutArrayIndex	std::compiler::DiagnosticCode::LayoutArrayIndex	enum-case	std::compiler::DiagnosticCode	source
@@ -242,12 +244,66 @@ compiler::DiagnosticCode::YieldOutsideFunction	std::compiler::DiagnosticCode::Yi
 compiler::SourceLocation	std::compiler::SourceLocation	struct	std::compiler	source
 coroutine	std::coroutine	namespace		intrinsic
 coroutine::done?	std::coroutine::done?	intrinsic	std::coroutine	intrinsic
+darwin	std::darwin	namespace		source
+darwin::Access	std::darwin::Access	enum	std::darwin	source
+darwin::Access::ReadOnly	std::darwin::Access::ReadOnly	enum-case	std::darwin::Access	source
+darwin::Access::ReadWrite	std::darwin::Access::ReadWrite	enum-case	std::darwin::Access	source
+darwin::Access::WriteOnly	std::darwin::Access::WriteOnly	enum-case	std::darwin::Access	source
+darwin::AccessBits	std::darwin::AccessBits	type	std::darwin	source
+darwin::CloseResult	std::darwin::CloseResult	struct	std::darwin	source
+darwin::ErrnoCell	std::darwin::ErrnoCell	layout	std::darwin	source
+darwin::OpenResult	std::darwin::OpenResult	struct	std::darwin	source
+darwin::ReadResult	std::darwin::ReadResult	struct	std::darwin	source
+darwin::WriteResult	std::darwin::WriteResult	struct	std::darwin	source
+darwin::access_flags	std::darwin::access_flags	function	std::darwin	source
+darwin::c_close	std::darwin::c_close	extern-fn	std::darwin	source
+darwin::c_errno_location	std::darwin::c_errno_location	extern-fn	std::darwin	source
+darwin::c_open	std::darwin::c_open	extern-fn	std::darwin	source
+darwin::c_read	std::darwin::c_read	extern-fn	std::darwin	source
+darwin::c_string	std::darwin::c_string	function	std::darwin	source
+darwin::c_write	std::darwin::c_write	extern-fn	std::darwin	source
+darwin::close	std::darwin::close	function	std::darwin	source
+darwin::create	std::darwin::create	function	std::darwin	source
+darwin::create_new	std::darwin::create_new	function	std::darwin	source
+darwin::errno	std::darwin::errno	function	std::darwin	source
+darwin::io	std::darwin::io	namespace		source
+darwin::io::DarwinIO	std::darwin::io::DarwinIO	context-struct	std::darwin::io	source
+darwin::io::FileDescriptor	std::darwin::io::FileDescriptor	opaque-struct	std::darwin::io	source
+darwin::io::create	std::darwin::io::create	function	std::darwin::io	source
+darwin::io::read	std::darwin::io::read	function	std::darwin::io	source
+darwin::io::write	std::darwin::io::write	function	std::darwin::io	source
+darwin::io::write_all	std::darwin::io::write_all	function	std::darwin::io	source
+darwin::io::write_error	std::darwin::io::write_error	function	std::darwin::io	source
+darwin::io::write_error_text	std::darwin::io::write_error_text	function	std::darwin::io	source
+darwin::io::write_text	std::darwin::io::write_text	function	std::darwin::io	source
+darwin::o_cloexec	std::darwin::o_cloexec	binding	std::darwin	source
+darwin::o_creat	std::darwin::o_creat	binding	std::darwin	source
+darwin::o_excl	std::darwin::o_excl	binding	std::darwin	source
+darwin::o_rdonly	std::darwin::o_rdonly	binding	std::darwin	source
+darwin::o_rdwr	std::darwin::o_rdwr	binding	std::darwin	source
+darwin::o_trunc	std::darwin::o_trunc	binding	std::darwin	source
+darwin::o_wronly	std::darwin::o_wronly	binding	std::darwin	source
+darwin::open	std::darwin::open	function	std::darwin	source
+darwin::open_mode	std::darwin::open_mode	function	std::darwin	source
+darwin::open_with	std::darwin::open_with	function	std::darwin	source
+darwin::path	std::darwin::path	namespace		source
+darwin::path::DarwinPath	std::darwin::path::DarwinPath	refined-type	std::darwin::path	source
+darwin::path::concat	std::darwin::path::concat	function	std::darwin::path	source
+darwin::path::ends_with_slash?	std::darwin::path::ends_with_slash?	function	std::darwin::path	source
+darwin::path::nul_free?	std::darwin::path::nul_free?	function	std::darwin::path	source
+darwin::path::text	std::darwin::path::text	function	std::darwin::path	source
+darwin::path::valid?	std::darwin::path::valid?	function	std::darwin::path	source
+darwin::path::validate	std::darwin::path::validate	function	std::darwin::path	source
+darwin::read	std::darwin::read	function	std::darwin	source
+darwin::terminator	std::darwin::terminator	function	std::darwin	source
+darwin::write	std::darwin::write	function	std::darwin	source
 decimal_rounded	std::decimal_rounded	namespace		intrinsic
 decimal_rounded::round	std::decimal_rounded::round	intrinsic	std::decimal_rounded	intrinsic
 ffi::c	std::ffi::c	namespace		source+intrinsic
 ffi::c::Bool	std::ffi::c::Bool	intrinsic-type	std::ffi::c	intrinsic
 ffi::c::Char	std::ffi::c::Char	c-scalar-type	std::ffi::c	intrinsic
 ffi::c::Double	std::ffi::c::Double	intrinsic-type	std::ffi::c	intrinsic
+ffi::c::Float	std::ffi::c::Float	intrinsic-type	std::ffi::c	intrinsic
 ffi::c::FnPtr	std::ffi::c::FnPtr	intrinsic-type	std::ffi::c	intrinsic
 ffi::c::Int	std::ffi::c::Int	c-scalar-type	std::ffi::c	intrinsic
 ffi::c::Long	std::ffi::c::Long	c-scalar-type	std::ffi::c	intrinsic
@@ -266,9 +322,13 @@ ffi::c::erase	std::ffi::c::erase	intrinsic	std::ffi::c	intrinsic
 ffi::c::null	std::ffi::c::null	intrinsic	std::ffi::c	intrinsic
 ffi::c::null?	std::ffi::c::null?	intrinsic	std::ffi::c	intrinsic
 ffi::c::retype	std::ffi::c::retype	intrinsic	std::ffi::c	intrinsic
-float64	std::float64	namespace		intrinsic
+float64	std::float64	namespace		source+intrinsic
+float64::abs	std::float64::abs	function	std::float64	source
+float64::clamp	std::float64::clamp	function	std::float64	source
 float64::from_decimal_rounded	std::float64::from_decimal_rounded	intrinsic	std::float64	intrinsic
 float64::from_int	std::float64::from_int	intrinsic	std::float64	intrinsic
+float64::max	std::float64::max	function	std::float64	source
+float64::min	std::float64::min	function	std::float64	source
 float64::truncate	std::float64::truncate	intrinsic	std::float64	intrinsic
 immutable_set	std::immutable_set	namespace		intrinsic
 immutable_set::contains	std::immutable_set::contains	intrinsic	std::immutable_set	intrinsic
@@ -323,6 +383,7 @@ list::find	std::list::find	function	std::list	source
 list::get	std::list::get	function	std::list	source
 list::length	std::list::length	intrinsic	std::list	intrinsic
 list::none?	std::list::none?	function	std::list	source
+list::with_length	std::list::with_length	intrinsic	std::list	intrinsic
 mathish	std::mathish	namespace		source
 mathish::inc	std::mathish::inc	function	std::mathish	source
 mutable_array	std::mutable_array	namespace		source+intrinsic
@@ -365,6 +426,8 @@ str::is_tcl_alpha	std::str::is_tcl_alpha	intrinsic	std::str	intrinsic
 str::length	std::str::length	intrinsic	std::str	intrinsic
 str::lowercase	std::str::lowercase	intrinsic	std::str	intrinsic
 str::substring	std::str::substring	intrinsic	std::str	intrinsic
+table_hash	std::table_hash	namespace		intrinsic
+table_hash::of	std::table_hash::of	intrinsic	std::table_hash	intrinsic
 test	std::test	namespace		source
 test::Erased	std::test::Erased	struct	std::test	source
 test::Match	std::test::Match	struct	std::test	source
@@ -419,3 +482,29 @@ web::is_unreserved	std::web::is_unreserved	function	std::web	source
 web::local_extra_chars	std::web::local_extra_chars	binding	std::web	source
 web::uri_escape_text	std::web::uri_escape_text	function	std::web	source
 web::uri_query_value?	std::web::uri_query_value?	function	std::web	source
+windows	std::windows	namespace		source
+windows::StandardDevice	std::windows::StandardDevice	enum	std::windows	source
+windows::StandardDevice::Error	std::windows::StandardDevice::Error	enum-case	std::windows::StandardDevice	source
+windows::StandardDevice::Input	std::windows::StandardDevice::Input	enum-case	std::windows::StandardDevice	source
+windows::StandardDevice::Output	std::windows::StandardDevice::Output	enum-case	std::windows::StandardDevice	source
+windows::WriteResult	std::windows::WriteResult	struct	std::windows	source
+windows::Written	std::windows::Written	layout	std::windows	source
+windows::c_get_last_error	std::windows::c_get_last_error	extern-fn	std::windows	source
+windows::c_get_std_handle	std::windows::c_get_std_handle	extern-fn	std::windows	source
+windows::c_write_file	std::windows::c_write_file	extern-fn	std::windows	source
+windows::io	std::windows::io	namespace		source
+windows::io::WindowsIO	std::windows::io::WindowsIO	context-struct	std::windows::io	source
+windows::io::create	std::windows::io::create	function	std::windows::io	source
+windows::io::progress	std::windows::io::progress	function	std::windows::io	source
+windows::io::write	std::windows::io::write	function	std::windows::io	source
+windows::io::write_all	std::windows::io::write_all	function	std::windows::io	source
+windows::io::write_error	std::windows::io::write_error	function	std::windows::io	source
+windows::io::write_error_text	std::windows::io::write_error_text	function	std::windows::io	source
+windows::io::write_some	std::windows::io::write_some	function	std::windows::io	source
+windows::io::write_text	std::windows::io::write_text	function	std::windows::io	source
+windows::last_error	std::windows::last_error	function	std::windows	source
+windows::request	std::windows::request	function	std::windows	source
+windows::selector	std::windows::selector	function	std::windows	source
+windows::standard_handle	std::windows::standard_handle	function	std::windows	source
+windows::write_file	std::windows::write_file	function	std::windows	source
+windows::written	std::windows::written	function	std::windows	source

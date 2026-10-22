@@ -5265,6 +5265,17 @@ layout PSFEATURE_CUSTPAPER:
     field lWidthOffset: std::ffi::c::Long at 12   # LONG lWidthOffset
     field lHeightOffset: std::ffi::c::Long at 16  # LONG lHeightOffset
 
+# struct tagXFORM, typedef XFORM (wingdi.h:452): sizeof 24, _Alignof 4
+layout XFORM:
+    size 24
+    align 4
+    field eM11: std::ffi::c::Float at 0   # FLOAT eM11
+    field eM12: std::ffi::c::Float at 4   # FLOAT eM12
+    field eM21: std::ffi::c::Float at 8   # FLOAT eM21
+    field eM22: std::ffi::c::Float at 12  # FLOAT eM22
+    field eDx: std::ffi::c::Float at 16   # FLOAT eDx
+    field eDy: std::ffi::c::Float at 20   # FLOAT eDy
+
 # struct tagBITMAP, typedef BITMAP (wingdi.h:461): sizeof 32, _Alignof 8
 layout BITMAP:
     size 32
@@ -6097,6 +6108,14 @@ layout ABC:
     field abcB: std::ffi::c::UInt at 4  # UINT abcB
     field abcC: std::ffi::c::Int at 8   # int abcC
 
+# struct _ABCFLOAT, typedef ABCFLOAT (wingdi.h:2445): sizeof 12, _Alignof 4
+layout ABCFLOAT:
+    size 12
+    align 4
+    field abcfA: std::ffi::c::Float at 0  # FLOAT abcfA
+    field abcfB: std::ffi::c::Float at 4  # FLOAT abcfB
+    field abcfC: std::ffi::c::Float at 8  # FLOAT abcfC
+
 # struct _OUTLINETEXTMETRICA, typedef OUTLINETEXTMETRICA (wingdi.h:2455): sizeof 232, _Alignof 8
 layout OUTLINETEXTMETRICA:
     size 232
@@ -6517,6 +6536,13 @@ layout EMRSELECTCLIPPATH:
     field emr: EMR at 0                   # EMR emr
     field iMode: std::ffi::c::ULong at 8  # DWORD iMode
 
+# struct tagEMRSETMITERLIMIT, typedef EMRSETMITERLIMIT (wingdi.h:3700): sizeof 12, _Alignof 4
+layout EMRSETMITERLIMIT:
+    size 12
+    align 4
+    field emr: EMR at 0                         # EMR emr
+    field eMiterLimit: std::ffi::c::Float at 8  # FLOAT eMiterLimit
+
 # struct tagEMRRESTOREDC, typedef EMRRESTOREDC (wingdi.h:3705): sizeof 12, _Alignof 4
 layout EMRRESTOREDC:
     size 12
@@ -6653,6 +6679,21 @@ layout EMRSCALEVIEWPORTEXTEX:
     field yNum: std::ffi::c::Long at 16    # LONG yNum
     field yDenom: std::ffi::c::Long at 20  # LONG yDenom
 
+# struct tagEMRSETWORLDTRANSFORM, typedef EMRSETWORLDTRANSFORM (wingdi.h:3806): sizeof 32, _Alignof 4
+layout EMRSETWORLDTRANSFORM:
+    size 32
+    align 4
+    field emr: EMR at 0      # EMR emr
+    field xform: XFORM at 8  # XFORM xform
+
+# struct tagEMRMODIFYWORLDTRANSFORM, typedef EMRMODIFYWORLDTRANSFORM (wingdi.h:3811): sizeof 36, _Alignof 4
+layout EMRMODIFYWORLDTRANSFORM:
+    size 36
+    align 4
+    field emr: EMR at 0                    # EMR emr
+    field xform: XFORM at 8                # XFORM xform
+    field iMode: std::ffi::c::ULong at 32  # DWORD iMode
+
 # struct tagEMRSETPIXELV, typedef EMRSETPIXELV (wingdi.h:3817): sizeof 20, _Alignof 4
 layout EMRSETPIXELV:
     size 20
@@ -6693,6 +6734,16 @@ layout EMRARC:
     field rclBox: RECTL at 8      # RECTL rclBox
     field ptlStart: POINTL at 24  # POINTL ptlStart
     field ptlEnd: POINTL at 32    # POINTL ptlEnd
+
+# struct tagEMRANGLEARC, typedef EMRANGLEARC (wingdi.h:3848): sizeof 28, _Alignof 4
+layout EMRANGLEARC:
+    size 28
+    align 4
+    field emr: EMR at 0                          # EMR emr
+    field ptlCenter: POINTL at 8                 # POINTL ptlCenter
+    field nRadius: std::ffi::c::ULong at 16      # DWORD nRadius
+    field eStartAngle: std::ffi::c::Float at 20  # FLOAT eStartAngle
+    field eSweepAngle: std::ffi::c::Float at 24  # FLOAT eSweepAngle
 
 # struct tagEMRPOLYLINE, typedef EMRPOLYLINE, EMRPOLYBEZIER, EMRPOLYGON, EMRPOLYBEZIERTO, EMRPOLYLINETO (wingdi.h:3856): sizeof 36, _Alignof 4
 layout EMRPOLYLINE:
@@ -6792,6 +6843,127 @@ layout EMREXTSELECTCLIPRGN:
     field cbRgnData: std::ffi::c::ULong at 8            # DWORD cbRgnData
     field iMode: std::ffi::c::ULong at 12               # DWORD iMode
     field RgnData: array 1 of std::ffi::c::UChar at 16  # BYTE RgnData[1]
+
+# struct tagEMREXTTEXTOUTA, typedef EMREXTTEXTOUTA, EMREXTTEXTOUTW (wingdi.h:3935): sizeof 76, _Alignof 4
+layout EMREXTTEXTOUTA:
+    size 76
+    align 4
+    field emr: EMR at 0                            # EMR emr
+    field rclBounds: RECTL at 8                    # RECTL rclBounds
+    field iGraphicsMode: std::ffi::c::ULong at 24  # DWORD iGraphicsMode
+    field exScale: std::ffi::c::Float at 28        # FLOAT exScale
+    field eyScale: std::ffi::c::Float at 32        # FLOAT eyScale
+    field emrtext: EMRTEXT at 36                   # EMRTEXT emrtext
+
+# struct tagEMRPOLYTEXTOUTA, typedef EMRPOLYTEXTOUTA, EMRPOLYTEXTOUTW (wingdi.h:3944): sizeof 80, _Alignof 4
+layout EMRPOLYTEXTOUTA:
+    size 80
+    align 4
+    field emr: EMR at 0                            # EMR emr
+    field rclBounds: RECTL at 8                    # RECTL rclBounds
+    field iGraphicsMode: std::ffi::c::ULong at 24  # DWORD iGraphicsMode
+    field exScale: std::ffi::c::Float at 28        # FLOAT exScale
+    field eyScale: std::ffi::c::Float at 32        # FLOAT eyScale
+    field cStrings: std::ffi::c::Long at 36        # LONG cStrings
+    field aemrtext: array 1 of EMRTEXT at 40       # EMRTEXT aemrtext[1]
+
+# struct tagEMRBITBLT, typedef EMRBITBLT (wingdi.h:3954): sizeof 100, _Alignof 4
+layout EMRBITBLT:
+    size 100
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field xDest: std::ffi::c::Long at 24          # LONG xDest
+    field yDest: std::ffi::c::Long at 28          # LONG yDest
+    field cxDest: std::ffi::c::Long at 32         # LONG cxDest
+    field cyDest: std::ffi::c::Long at 36         # LONG cyDest
+    field dwRop: std::ffi::c::ULong at 40         # DWORD dwRop
+    field xSrc: std::ffi::c::Long at 44           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 48           # LONG ySrc
+    field xformSrc: XFORM at 52                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 76  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 80     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 84     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 88      # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 92    # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 96     # DWORD cbBitsSrc
+
+# struct tagEMRSTRETCHBLT, typedef EMRSTRETCHBLT (wingdi.h:3973): sizeof 108, _Alignof 4
+layout EMRSTRETCHBLT:
+    size 108
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field xDest: std::ffi::c::Long at 24          # LONG xDest
+    field yDest: std::ffi::c::Long at 28          # LONG yDest
+    field cxDest: std::ffi::c::Long at 32         # LONG cxDest
+    field cyDest: std::ffi::c::Long at 36         # LONG cyDest
+    field dwRop: std::ffi::c::ULong at 40         # DWORD dwRop
+    field xSrc: std::ffi::c::Long at 44           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 48           # LONG ySrc
+    field xformSrc: XFORM at 52                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 76  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 80     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 84     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 88      # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 92    # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 96     # DWORD cbBitsSrc
+    field cxSrc: std::ffi::c::Long at 100         # LONG cxSrc
+    field cySrc: std::ffi::c::Long at 104         # LONG cySrc
+
+# struct tagEMRMASKBLT, typedef EMRMASKBLT (wingdi.h:3994): sizeof 128, _Alignof 4
+layout EMRMASKBLT:
+    size 128
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field xDest: std::ffi::c::Long at 24          # LONG xDest
+    field yDest: std::ffi::c::Long at 28          # LONG yDest
+    field cxDest: std::ffi::c::Long at 32         # LONG cxDest
+    field cyDest: std::ffi::c::Long at 36         # LONG cyDest
+    field dwRop: std::ffi::c::ULong at 40         # DWORD dwRop
+    field xSrc: std::ffi::c::Long at 44           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 48           # LONG ySrc
+    field xformSrc: XFORM at 52                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 76  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 80     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 84     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 88      # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 92    # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 96     # DWORD cbBitsSrc
+    field xMask: std::ffi::c::Long at 100         # LONG xMask
+    field yMask: std::ffi::c::Long at 104         # LONG yMask
+    field iUsageMask: std::ffi::c::ULong at 108   # DWORD iUsageMask
+    field offBmiMask: std::ffi::c::ULong at 112   # DWORD offBmiMask
+    field cbBmiMask: std::ffi::c::ULong at 116    # DWORD cbBmiMask
+    field offBitsMask: std::ffi::c::ULong at 120  # DWORD offBitsMask
+    field cbBitsMask: std::ffi::c::ULong at 124   # DWORD cbBitsMask
+
+# struct tagEMRPLGBLT, typedef EMRPLGBLT (wingdi.h:4020): sizeof 140, _Alignof 4
+layout EMRPLGBLT:
+    size 140
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field aptlDest: array 3 of POINTL at 24       # POINTL aptlDest[3]
+    field xSrc: std::ffi::c::Long at 48           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 52           # LONG ySrc
+    field cxSrc: std::ffi::c::Long at 56          # LONG cxSrc
+    field cySrc: std::ffi::c::Long at 60          # LONG cySrc
+    field xformSrc: XFORM at 64                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 88  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 92     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 96     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 100     # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 104   # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 108    # DWORD cbBitsSrc
+    field xMask: std::ffi::c::Long at 112         # LONG xMask
+    field yMask: std::ffi::c::Long at 116         # LONG yMask
+    field iUsageMask: std::ffi::c::ULong at 120   # DWORD iUsageMask
+    field offBmiMask: std::ffi::c::ULong at 124   # DWORD offBmiMask
+    field cbBmiMask: std::ffi::c::ULong at 128    # DWORD cbBmiMask
+    field offBitsMask: std::ffi::c::ULong at 132  # DWORD offBitsMask
+    field cbBitsMask: std::ffi::c::ULong at 136   # DWORD cbBitsMask
 
 # struct tagEMRSETDIBITSTODEVICE, typedef EMRSETDIBITSTODEVICE (wingdi.h:4044): sizeof 76, _Alignof 4
 layout EMRSETDIBITSTODEVICE:
@@ -7011,6 +7183,29 @@ layout EMRCOLORCORRECTPALETTE:
     field nPalEntries: std::ffi::c::ULong at 16  # DWORD nPalEntries
     field nReserved: std::ffi::c::ULong at 20    # DWORD nReserved
 
+# struct tagEMRALPHABLEND, typedef EMRALPHABLEND (wingdi.h:4226): sizeof 108, _Alignof 4
+layout EMRALPHABLEND:
+    size 108
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field xDest: std::ffi::c::Long at 24          # LONG xDest
+    field yDest: std::ffi::c::Long at 28          # LONG yDest
+    field cxDest: std::ffi::c::Long at 32         # LONG cxDest
+    field cyDest: std::ffi::c::Long at 36         # LONG cyDest
+    field dwRop: std::ffi::c::ULong at 40         # DWORD dwRop
+    field xSrc: std::ffi::c::Long at 44           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 48           # LONG ySrc
+    field xformSrc: XFORM at 52                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 76  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 80     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 84     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 88      # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 92    # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 96     # DWORD cbBitsSrc
+    field cxSrc: std::ffi::c::Long at 100         # LONG cxSrc
+    field cySrc: std::ffi::c::Long at 104         # LONG cySrc
+
 # struct tagEMRGRADIENTFILL, typedef EMRGRADIENTFILL (wingdi.h:4247): sizeof 52, _Alignof 4
 layout EMRGRADIENTFILL:
     size 52
@@ -7021,6 +7216,46 @@ layout EMRGRADIENTFILL:
     field nTri: std::ffi::c::ULong at 28    # DWORD nTri
     field ulMode: std::ffi::c::ULong at 32  # ULONG ulMode
     field Ver: array 1 of TRIVERTEX at 36   # TRIVERTEX Ver[1]
+
+# struct tagEMRTRANSPARENTBLT, typedef EMRTRANSPARENTBLT (wingdi.h:4256): sizeof 108, _Alignof 4
+layout EMRTRANSPARENTBLT:
+    size 108
+    align 4
+    field emr: EMR at 0                           # EMR emr
+    field rclBounds: RECTL at 8                   # RECTL rclBounds
+    field xDest: std::ffi::c::Long at 24          # LONG xDest
+    field yDest: std::ffi::c::Long at 28          # LONG yDest
+    field cxDest: std::ffi::c::Long at 32         # LONG cxDest
+    field cyDest: std::ffi::c::Long at 36         # LONG cyDest
+    field dwRop: std::ffi::c::ULong at 40         # DWORD dwRop
+    field xSrc: std::ffi::c::Long at 44           # LONG xSrc
+    field ySrc: std::ffi::c::Long at 48           # LONG ySrc
+    field xformSrc: XFORM at 52                   # XFORM xformSrc
+    field crBkColorSrc: std::ffi::c::ULong at 76  # COLORREF crBkColorSrc
+    field iUsageSrc: std::ffi::c::ULong at 80     # DWORD iUsageSrc
+    field offBmiSrc: std::ffi::c::ULong at 84     # DWORD offBmiSrc
+    field cbBmiSrc: std::ffi::c::ULong at 88      # DWORD cbBmiSrc
+    field offBitsSrc: std::ffi::c::ULong at 92    # DWORD offBitsSrc
+    field cbBitsSrc: std::ffi::c::ULong at 96     # DWORD cbBitsSrc
+    field cxSrc: std::ffi::c::Long at 100         # LONG cxSrc
+    field cySrc: std::ffi::c::Long at 104         # LONG cySrc
+
+# struct _POINTFLOAT, typedef POINTFLOAT (wingdi.h:4302): sizeof 8, _Alignof 4
+layout POINTFLOAT:
+    size 8
+    align 4
+    field x: std::ffi::c::Float at 0  # FLOAT x
+    field y: std::ffi::c::Float at 4  # FLOAT y
+
+# struct _GLYPHMETRICSFLOAT, typedef GLYPHMETRICSFLOAT (wingdi.h:4307): sizeof 24, _Alignof 4
+layout GLYPHMETRICSFLOAT:
+    size 24
+    align 4
+    field gmfBlackBoxX: std::ffi::c::Float at 0  # FLOAT gmfBlackBoxX
+    field gmfBlackBoxY: std::ffi::c::Float at 4  # FLOAT gmfBlackBoxY
+    field gmfptGlyphOrigin: POINTFLOAT at 8      # POINTFLOAT gmfptGlyphOrigin
+    field gmfCellIncX: std::ffi::c::Float at 16  # FLOAT gmfCellIncX
+    field gmfCellIncY: std::ffi::c::Float at 20  # FLOAT gmfCellIncY
 
 # struct tagLAYERPLANEDESCRIPTOR, typedef LAYERPLANEDESCRIPTOR (wingdi.h:4323): sizeof 32, _Alignof 4
 layout LAYERPLANEDESCRIPTOR:
@@ -8549,6 +8784,40 @@ layout INPUT_MESSAGE_SOURCE:
     align 4
     field deviceType: std::ffi::c::UInt at 0  # INPUT_MESSAGE_DEVICE_TYPE deviceType
     field originId: std::ffi::c::UInt at 4    # INPUT_MESSAGE_ORIGIN_ID originId
+
+# the anonymous struct member INPUT_TRANSFORM.member1.member1 (struct tagINPUT_TRANSFORM) (winuser.h:6771): sizeof 64, _Alignof 4
+layout INPUT_TRANSFORM_member1_member1:
+    size 64
+    align 4
+    field _11: std::ffi::c::Float at 0   # float _11
+    field _12: std::ffi::c::Float at 4   # float _12
+    field _13: std::ffi::c::Float at 8   # float _13
+    field _14: std::ffi::c::Float at 12  # float _14
+    field _21: std::ffi::c::Float at 16  # float _21
+    field _22: std::ffi::c::Float at 20  # float _22
+    field _23: std::ffi::c::Float at 24  # float _23
+    field _24: std::ffi::c::Float at 28  # float _24
+    field _31: std::ffi::c::Float at 32  # float _31
+    field _32: std::ffi::c::Float at 36  # float _32
+    field _33: std::ffi::c::Float at 40  # float _33
+    field _34: std::ffi::c::Float at 44  # float _34
+    field _41: std::ffi::c::Float at 48  # float _41
+    field _42: std::ffi::c::Float at 52  # float _42
+    field _43: std::ffi::c::Float at 56  # float _43
+    field _44: std::ffi::c::Float at 60  # float _44
+
+# the anonymous union member INPUT_TRANSFORM.member1 (struct tagINPUT_TRANSFORM) (winuser.h:6770): sizeof 64, _Alignof 4
+union layout INPUT_TRANSFORM_member1:
+    size 64
+    align 4
+    alternative member1: INPUT_TRANSFORM_member1_member1     # struct {...}
+    alternative m: array 4 of array 4 of std::ffi::c::Float  # float m[4][4]
+
+# struct tagINPUT_TRANSFORM, typedef INPUT_TRANSFORM (winuser.h:6769): sizeof 64, _Alignof 4
+layout INPUT_TRANSFORM:
+    size 64
+    align 4
+    field member1: INPUT_TRANSFORM_member1 at 0  # union {...}
 
 # struct _cpinfo, typedef CPINFO (winnls.h:673): sizeof 20, _Alignof 4
 layout CPINFO:

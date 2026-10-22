@@ -1,7 +1,7 @@
 c-bindgen manifest (C-BINDGEN.md, "Manifest")
 generator_version 2
 profile bgf
-profile_file tools/c-bindgen/profiles/fixture.tcl 17ec5b10
+profile_file tools/c-bindgen/profiles/fixture.tcl dfe5a8ab
 target linux-x86_64
 library bgf
 source {local tools/c-bindgen/fixture}
@@ -18,58 +18,57 @@ toolchain_target x86_64-linux-gnu
 toolchain_sysroot none
 user_label_prefix {}
 evidence llvm {Ubuntu clang version 18.1.3 (1ubuntu1)}
-preprocessed_tokens 2195
-header include/bgf/bgf.h 49359c5b
-header include/bgf/bgf_records.h Inf
-header include/bgf/bgf_types.h 7f558d1b
-shim_library botlish_shim_bgf_143debf5
-file bgf/bgf.bot 147 30fd41af
-file bgf/ctypes.bot 71 3181613e
-file bgf/layouts.bot 502 e5334e19
+preprocessed_tokens 2422
+header include/bgf/bgf.h 23845d95
+header include/bgf/bgf_records.h 439c85f0
+header include/bgf/bgf_types.h 416c8cf5
+shim_library botlish_shim_bgf_1bd12a8a
+file bgf/bgf.bot 203 9d2a33ab
+file bgf/ctypes.bot 75 4a8591d6
+file bgf/layouts.bot 565 b750f832
 file bgf/records.bot 37 2604673c
-file bgf/thunks/bgf.bot 29 b25e3fa0
+file bgf/thunks/bgf.bot 32 b5b3e721
 file bgf/types.bot 12 c422e8f9
-file layouts-check.c 344 cfd1901d
-file layouts.tsv 323 424bdc24
-file report.tsv 329 036c2347
-file report.txt 172 c3746225
-file shim.c 26 143debf5
+file layouts-check.c 391 09ac86fe
+file layouts.tsv 350 ccb720d0
+file report.tsv 359 96a2f50e
+file report.txt 163 eb368da2
+file shim.c 30 1bd12a8a
 libraries bgf/bgf.bot bgf
 libraries bgf/records.bot bgf
-libraries bgf/thunks/bgf.bot {botlish_shim_bgf_143debf5 bgf}
+libraries bgf/thunks/bgf.bot {botlish_shim_bgf_1bd12a8a bgf}
 libraries bgf/types.bot bgf
-count alias 2
-count aliases 2
+count alias 3
+count aliases 3
 count bool 2
 count boolOnly 2
-count callbacks 2
-count complete 69
+count callbacks 3
+count complete 74
 count constants 16
 count constantsSeen 13
-count declared 43
-count direct 32
+count declared 52
+count direct 41
 count enumerators 7
 count excluded 0
 count fnmacros 3
-count fnptrTypedefs 4
+count fnptrTypedefs 5
 count inline 3
-count manual 9
+count manual 11
 count opaque 5
 count proven 1
-count ptrParams 22
+count ptrParams 29
 count ptrResults 6
 count resultAlias 1
 count resultIndependent 1
 count resultUnknown 4
 count tablestubs 1
-count thunk 5
-count unknownParams 12
-count unknownRetention 9
-count unsupported 12
-count views 7
+count thunk 6
+count unknownParams 17
+count unknownRetention 13
+count unsupported 11
+count views 8
 blocked by-value-aggregate 1
-blocked double 2
-blocked float 2
+blocked long-double 2
 blocked macro-needs-signature 1
 blocked no-prototype 1
 blocked typedef-abi-mismatch 1
@@ -79,33 +78,31 @@ blocked va-list 1
 blocked variadic 1
 convention_default stdcall 1
 layout_abi linux-x86_64 clang x86_64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
-layout_count anonymous 16
-layout_count blocked 19
-layout_count blockedDirect 14
-layout_count blockedStructs 15
+layout_count anonymous 17
+layout_count blocked 17
+layout_count blockedDirect 12
+layout_count blockedStructs 13
 layout_count blockedTransitive 5
 layout_count blockedUnions 4
-layout_count emitted 65
-layout_count emittedSynthetic 11
-layout_count emittedUnions 16
+layout_count emitted 73
+layout_count emittedSynthetic 12
+layout_count emittedUnions 18
 layout_count incomplete 5
 layout_count promoted 2
-layout_count public 85
-layout_count structs 64
-layout_count synthetic 13
+layout_count public 91
+layout_count structs 68
+layout_count synthetic 14
 layout_count system 0
 layout_count unheld 1
-layout_count unions 21
+layout_count unions 23
 layout_blocked bitfield 2
 layout_blocked c-bool 2
-layout_blocked double 1
 layout_blocked flexible-array 1
-layout_blocked float 3
-layout_blocked long-double 1
+layout_blocked long-double 3
 layout_blocked nested-layout-blocked 5
 layout_blocked typedef-abi-mismatch 1
 layout_blocked unsupported-calling-convention 1
-layout_blocked unsupported-pointer 2
+layout_blocked unsupported-pointer 1
 layout_blocked volatile 1
 contract bgf_handle_id handle {escape declared-noescape} manual {group handles}
 contract bgf_length text {access read escape declared-noescape} manual {contract bgf_length}
@@ -118,4 +115,6 @@ contract bgf_fill out {access write escape declared-noescape} manual {contract b
 contract bgf_digest data {access read escape declared-noescape} manual {contract bgf_digest}
 contract bgf_digest out {access write escape declared-noescape} manual {contract bgf_digest}
 contract bgf_digest result {alias out} manual {contract bgf_digest}
+contract bgf_printf format {access read escape declared-noescape} manual {contract bgf_printf}
 contract bgf_point_x p {escape proven-noescape access read} compiler {nocapture readonly}
+contract bgf_print format {access read escape declared-noescape} manual {contract bgf_print}

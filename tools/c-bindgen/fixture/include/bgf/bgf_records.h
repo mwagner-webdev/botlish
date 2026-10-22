@@ -273,12 +273,12 @@ typedef struct bgf_two_anon { union { char a; int b; }; union { short c; long lo
  * directly, through a record, an array or an anonymous member; and a
  * representable anonymous union its record's bitfield blocks (not emitted:
  * nothing reaches it). */
-typedef union bgf_num { int i; float f; } bgf_num;
+typedef union bgf_num { int i; long double f; } bgf_num;
 typedef union bgf_flagu { int i; bool b; } bgf_flagu;
 typedef union bgf_bitsu { bgf_bits bits; int i; } bgf_bitsu;
 typedef struct bgf_holds_bitsu { int n; bgf_bitsu u; } bgf_holds_bitsu;
 typedef struct bgf_nums2 { bgf_num nums[2]; } bgf_nums2;
-typedef struct bgf_anon_float { int k; union { int i; float f; }; } bgf_anon_float;
+typedef struct bgf_anon_float { int k; union { int i; long double f; }; } bgf_anon_float;
 typedef struct bgf_bits_overlay { unsigned int flag : 1; union { int i; char c; }; } bgf_bits_overlay;
 
 /* Functions pointing to records (the API pressure the report counts). */
@@ -288,5 +288,16 @@ extern int bgf_frames(bgf_frame **out);
 extern bgf_node *bgf_node_first(void);
 extern int bgf_chars_length(const bgf_chars *c);
 extern bgf_secret *bgf_secret_open(void);
+
+/* C float and double fields (C-FLOAT-FFI-MILESTONE-1.md): the brief's mixed
+ * record (sizeof 24, a float aligned to 4, a double to 8), one with float
+ * typedef fields, fixed arrays of each (a float's stride is 4), a union of
+ * both with an int, an anonymous union of a float; the compiler gives every
+ * size, alignment and offset. */
+typedef struct bgf_mixed_floats { uint8_t tag; float a; double b; float c; } bgf_mixed_floats;
+typedef struct bgf_mixed_real { float x; double y; bgf_scalar32 z; bgf_real32 w; bgf_scalar64 v; } bgf_mixed_real;
+typedef struct bgf_samples { float xs[4]; double ys[2][2]; int n; } bgf_samples;
+typedef union bgf_fnum { int i; float f; double d; } bgf_fnum;
+typedef struct bgf_anon_fnum { int k; union { unsigned int u; float f; }; } bgf_anon_fnum;
 
 #endif

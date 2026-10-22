@@ -26,14 +26,14 @@ header generic/tclOODecls.h 112ed1e0
 header generic/tclPlatDecls.h c8603094
 header generic/tclTomMathDecls.h 1ebc0288
 shim_library botlish_shim_tcl_47be8309
-file layouts-check.c 363 7cb833ad
-file layouts.tsv 1103 03c226a0
-file report.tsv 1497 d74adad5
-file report.txt 170 19e07d04
+file layouts-check.c 384 301ffa2e
+file layouts.tsv 1103 1c6b4b24
+file report.tsv 1497 fa0bffd1
+file report.txt 159 b227f2c2
 file shim.c 72 47be8309
-file tcl/ctypes.bot 255 7fbc7eca
-file tcl/decls.bot 3708 547148f4
-file tcl/layouts.bot 427 f409fe3a
+file tcl/ctypes.bot 255 53365774
+file tcl/decls.bot 3811 27b12dca
+file tcl/layouts.bot 449 8d59b078
 file tcl/oo.bot 14 87752fc2
 file tcl/oodecls.bot 233 9075ad5f
 file tcl/platdecls.bot 25 6f35c44d
@@ -41,7 +41,7 @@ file tcl/tcl.bot 322 76c7974c
 file tcl/thunks/decls.bot 84 7772ee3c
 file tcl/thunks/oo.bot 16 dc91a24d
 file tcl/thunks/tcl.bot 25 137a29d4
-file tcl/tommathdecls.bot 926 55c17528
+file tcl/tommathdecls.bot 950 28a9c070
 libraries tcl/decls.bot tcl9.0
 libraries tcl/oodecls.bot tcl9.0
 libraries tcl/platdecls.bot tcl9.0
@@ -50,7 +50,7 @@ libraries tcl/thunks/decls.bot {botlish_shim_tcl_47be8309 tcl9.0}
 libraries tcl/thunks/oo.bot {botlish_shim_tcl_47be8309 tcl9.0}
 libraries tcl/thunks/tcl.bot {botlish_shim_tcl_47be8309 tcl9.0}
 libraries tcl/tommathdecls.bot tcl9.0
-count alias 84
+count alias 86
 count aliases 81
 count bool 0
 count boolOnly 0
@@ -59,7 +59,7 @@ count complete 29
 count constants 219
 count constantsSeen 221
 count declared 753
-count direct 720
+count direct 738
 count enumerators 13
 count excluded 0
 count fnmacros 78
@@ -68,33 +68,31 @@ count inline 1
 count manual 5
 count opaque 27
 count proven 8
-count ptrParams 1590
-count ptrResults 206
+count ptrParams 1620
+count ptrResults 209
 count resultAlias 0
 count resultIndependent 1
-count resultUnknown 205
+count resultUnknown 208
 count tablestubs 0
 count thunk 16
-count unknownParams 1577
-count unknownRetention 752
-count unsupported 93
-count views 454
-blocked double 9
+count unknownParams 1607
+count unknownRetention 771
+count unsupported 73
+count views 466
 blocked macro-needs-signature 63
 blocked thunk-rejected 2
 blocked unsupported-callback-signature 1
 blocked unsupported-macro 7
-blocked variadic 11
 layout_abi linux-aarch64 clang aarch64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 9
-layout_count blocked 4
-layout_count blockedDirect 3
-layout_count blockedStructs 3
-layout_count blockedTransitive 1
-layout_count blockedUnions 1
-layout_count emitted 34
+layout_count blocked 2
+layout_count blockedDirect 2
+layout_count blockedStructs 2
+layout_count blockedTransitive 0
+layout_count blockedUnions 0
+layout_count emitted 36
 layout_count emittedSynthetic 0
-layout_count emittedUnions 1
+layout_count emittedUnions 2
 layout_count incomplete 27
 layout_count promoted 0
 layout_count public 38
@@ -103,8 +101,6 @@ layout_count synthetic 0
 layout_count system 0
 layout_count unheld 0
 layout_count unions 2
-layout_blocked double 1
-layout_blocked nested-layout-blocked 1
 layout_blocked unsupported-pointer 2
 contract Tcl_CreateInterp result independent manual {contract Tcl_CreateInterp}
 contract Tcl_DeleteInterp interp {escape declared-noescape} manual {contract Tcl_DeleteInterp}

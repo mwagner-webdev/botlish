@@ -1,0 +1,504 @@
+# Mutants of Hashable, the total lowerings and the private table hash
+# (audit/hashable/tools/mutate.tcl; HASHABLE-AND-KEYED-HASH.md, "Mutation
+# testing"): the mutants the milestone brief names, each a deliberate bug in
+# the witness predicate (hir/types.tcl, hir/traits.tcl), the hashes'
+# admission (hir/range.tcl), the visibility boundary (surface/modules.tcl,
+# hir/internal.tcl, core/hashing.tcl's registration), native lowering
+# (native/lower.tcl), or the hashes themselves (core/hashing.tcl,
+# native/src/runtime/ops.rs). A runtime defect of both implementations is
+# two mutants, one per runtime.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it. Lines starting with # outside an edit are comments.
+
+@@ callables-become-hashable callables become Hashable: a function type, and the function kinds, count as total
+## hir/types.tcl
+<<<<
+    if {[IsFn $type]} {
+        return [list none [NoTotality $operation block]]
+    }
+====
+    if {[IsFn $type]} {
+        return {total ""}
+    }
+>>>>
+## hir/types.tcl
+<<<<
+    if {$kind in $refused} {
+        return [list none [NoTotality $operation $kind]]
+    }
+====
+    if {$kind in $refused && $kind ni {block native}} {
+        return [list none [NoTotality $operation $kind]]
+    }
+>>>>
+
+@@ any-becomes-hashable any becomes Hashable: a value of unknown type counts as total
+## hir/types.tcl
+<<<<
+    if {$kind eq "" || $kind in {list immutableSet struct result}} {
+====
+    if {$kind in {list immutableSet struct result}} {
+>>>>
+
+@@ struct-ignores-non-hashable-field a struct ignores a field that is not Hashable
+## hir/types.tcl
+<<<<
+        if {$class eq "none"} {
+            return [list none "$what ([show $t]): $why"]
+        }
+====
+        if {$class eq "none" && ![string match field* $what]} {
+            return [list none "$what ([show $t]): $why"]
+        }
+>>>>
+
+@@ witness-ignores-equality-totality the Hashable witness predicate ignores equality totality (only the hash column)
+## hir/types.tcl
+<<<<
+    lassign [Totality equality $type] e ewhy
+====
+    set e total
+    set ewhy ""
+>>>>
+
+@@ witness-ignores-hash-support the Hashable witness predicate ignores hash support (only the equality column)
+## hir/types.tcl
+<<<<
+    lassign [Totality hash $type] h hwhy
+====
+    set h total
+    set hwhy ""
+>>>>
+
+@@ recursive-struct-not-hashable a struct met again through its own fields is taken as not known, so a recursive Hashable struct is lost
+## hir/types.tcl
+<<<<
+                if {$id in $seen} {
+                    return {total ""}
+                }
+====
+                if {$id in $seen} {
+                    return [list unknown "recursive"]
+                }
+>>>>
+
+@@ public-hash-output-changes-tcl the public hash changes its output: texts are length-prefixed in the public walk too (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+    if {$mode eq "table"} {
+        lappend out {*}[LeBytes [llength $bytes]]
+    }
+====
+    if {$mode ne "never"} {
+        lappend out {*}[LeBytes [llength $bytes]]
+    }
+>>>>
+
+@@ public-hash-output-changes-native the public hash changes its output: texts are length-prefixed in the public walk too (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.0 = fnv1a(self.0, b);
+    }
+====
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.0 = fnv1a(fnv1a(self.0, &(b.len() as u64).to_le_bytes()), b);
+    }
+>>>>
+
+@@ public-hash-routed-through-keyed-tcl the public hash is routed through the keyed hash (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+proc core::hashing::hash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {[Fold public $v] & $Mask61}]]
+====
+proc core::hashing::hash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {[Fold table $v] & $Mask61}]]
+>>>>
+
+@@ public-hash-routed-through-keyed-native the public hash is routed through a keyed hash (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    let mut sink = Fnv(FNV_OFFSET);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.0 & HASH_MASK) as i64),
+====
+    let mut sink = Sip13::new(1, 2);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.finish() & HASH_MASK) as i64),
+>>>>
+
+@@ hashable-hash-keeps-equality-edge a hash of a Hashable operand keeps the fallible op and its EQUALITY edge (both hashes)
+## native/lower.tcl
+<<<<
+                return [list $name $total]
+====
+                return [list $name $generic]
+>>>>
+
+@@ hashtotal-is-fallible-native the total hash op is classified may_error (native effects)
+## native/src/runtime/ops.rs
+<<<<
+        | TableHash
+        // A segment ends with the body's unhandled error;
+====
+        | TableHash | HashTotal
+        // A segment ends with the body's unhandled error;
+>>>>
+
+@@ veqtotal-not-selected equality of equality-total operands keeps the fallible veq
+## native/lower.tcl
+<<<<
+                set op veqtotal
+====
+                set op veq
+>>>>
+
+@@ veqtotal-unsound veqtotal is chosen when only one operand is equality-total
+## native/lower.tcl
+<<<<
+            } elseif {[hir::types::IsEqualityTotal [hir::typeOf $hir $a]]
+                    && [hir::types::IsEqualityTotal [hir::typeOf $hir $b]]} {
+====
+            } elseif {[hir::types::IsEqualityTotal [hir::typeOf $hir $a]]
+                    || [hir::types::IsEqualityTotal [hir::typeOf $hir $b]]} {
+>>>>
+
+@@ equal-values-hash-differently equal values can hash differently: a set folds its members in order (both hashes)
+## core/hashing.tcl
+<<<<
+                set combined [expr {($combined ^ [Fold $mode $item]) & $Mask64}]
+====
+                set combined [expr {(($combined * 31) ^ [Fold $mode $item]) & $Mask64}]
+>>>>
+
+@@ keyed-different-for-equal-constructions equal values constructed differently get different table hashes: the table hash folds a set in order
+## core/hashing.tcl
+<<<<
+                set combined [expr {($combined ^ [Fold $mode $item]) & $Mask64}]
+====
+                set combined [expr {$mode eq "table" ? ((($combined * 31) ^ [Fold $mode $item]) & $Mask64) : (($combined ^ [Fold $mode $item]) & $Mask64)}]
+>>>>
+
+@@ keyed-is-hash-xor-secret-tcl the table hash is hash(x) xor the secret (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+proc core::hashing::tableHash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {[Fold table $v] & $Mask61}]]
+====
+proc core::hashing::tableHash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {([Fold public $v] ^ [lindex [TableKey] 0]) & $Mask61}]]
+>>>>
+
+@@ keyed-is-hash-xor-secret-native the table hash is hash(x) xor the secret (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.finish() & HASH_MASK) as i64),
+====
+    let mut sink = Fnv(FNV_OFFSET);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int(((sink.0 ^ key.0) & HASH_MASK) as i64),
+>>>>
+
+@@ keyed-is-keyed-mix-of-hash-tcl the table hash is a keyed mix of the public hash, keyed_mix(hash(x)) (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+proc core::hashing::tableHash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {[Fold table $v] & $Mask61}]]
+====
+proc core::hashing::tableHash {v} {
+    variable Mask61
+    return [core::value::intFromNumber [expr {[SipHash13 {*}[TableKey] [LeBytes [Fold public $v]]] & $Mask61}]]
+>>>>
+
+@@ keyed-is-keyed-mix-of-hash-native the table hash is a keyed mix of the public hash, keyed_mix(hash(x)) (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+====
+    let mut sink = Sip13::new(key.0, key.1);
+    let mut public = Fnv(FNV_OFFSET);
+    let walked = walk(p, &mut public, v);
+    sink.write(&public.0.to_le_bytes());
+    match walked {
+>>>>
+
+@@ keyed-omits-kind-tag-tcl the table hash omits the kind tag (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+    set out [list [dict get $KindTag $kind]]
+====
+    set out [expr {$mode eq "table" ? {} : [list [dict get $KindTag $kind]]}]
+>>>>
+
+@@ keyed-omits-kind-tag-native the table hash omits the kind tag (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    sink.bytes(&[tag]);
+====
+    if std::any::type_name::<S>().contains("Fnv") {
+        sink.bytes(&[tag]);
+    }
+>>>>
+
+@@ keyed-struct-skips-a-field-tcl the table hash of a struct skips its last field (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+            foreach field $fields item [core::value::structValues $v] {
+                Text out $mode [Utf8Bytes $field]
+====
+            foreach field $fields item [core::value::structValues $v] {
+                if {$mode eq "table" && $field eq [lindex $fields end]} continue
+                Text out $mode [Utf8Bytes $field]
+>>>>
+
+@@ keyed-struct-skips-a-field-native the table hash of a struct skips its last field (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+                for (field, item) in shape.fields.iter().zip(obj.fields().iter()) {
+                    sink.text(field.as_bytes());
+====
+                let n = if std::any::type_name::<S>().contains("Sip") { shape.fields.len().saturating_sub(1) } else { shape.fields.len() };
+                for (field, item) in shape.fields.iter().zip(obj.fields().iter()).take(n) {
+                    sink.text(field.as_bytes());
+>>>>
+
+@@ keyed-nested-uses-public-hash-tcl the table hash folds a nested value as its public sub-hash (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+    if {$mode eq "table"} {
+        lappend out {*}[Encode table $v]
+    } else {
+====
+    if {$mode eq "table"} {
+        lappend out {*}[LeBytes [Fold public $v]]
+    } else {
+>>>>
+
+@@ keyed-nested-uses-public-hash-native the table hash folds a nested value as its public sub-hash (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        walk(p, self, v)
+    }
+====
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        let mut sub = Fnv(FNV_OFFSET);
+        walk(p, &mut sub, v)?;
+        self.write(&sub.0.to_le_bytes());
+        Ok(())
+    }
+>>>>
+
+@@ secret-exposed-as-value the table hash key is exposed as a value: a native returns it
+## core/hashing.tcl
+<<<<
+core::native::declareInternalNamespace std::table_hash
+====
+core::native::declareInternalNamespace std::table_hash
+proc core::hashing::TableKeyValue {} {
+    return [core::value::list [lmap w [TableKey] {core::value::intFromNumber $w}]]
+}
+core::native::register table_key -arity 0 -impl core::hashing::TableKeyValue -result-type list
+>>>>
+
+@@ ordinary-code-can-import ordinary code can import the internal namespace
+## surface/modules.tcl
+<<<<
+    if {$own ne "" && ![dict exists $state application $own]} {
+        return
+    }
+====
+    if {1} {
+        return
+    }
+>>>>
+
+@@ ordinary-code-can-fully-qualify ordinary code can name the private hash fully qualified (only the import is refused)
+## surface/modules.tcl
+<<<<
+    CheckInternal $state $own $namespaceName $span
+    if {$namespaceName ni $imported} {
+====
+    if {$namespaceName ni $imported} {
+>>>>
+
+@@ internal-namespace-undeclared table_hash is not declared internal: ordinary code can import and call it
+## core/hashing.tcl
+<<<<
+core::native::declareInternalNamespace std::table_hash
+====
+
+>>>>
+
+@@ private-hash-escapes-as-value the private hash can escape as a function value (no value check)
+## hir/internal.tcl
+<<<<
+    if {[core::native::internalNamespaces] eq {}} {
+        return
+    }
+====
+    if {1} {
+        return
+    }
+>>>>
+
+@@ private-hash-may-error the private hash of a Hashable argument keeps the fallible op (may_error)
+## native/lower.tcl
+<<<<
+        std::table_hash::of {hashing tablehash tablehashtotal} \
+====
+        std::table_hash::of {hashing tablehash tablehash} \
+>>>>
+
+@@ private-hash-context-free the private hash is -context-free, so it may be evaluated before run time
+## core/hashing.tcl
+<<<<
+-runtime table-hash -ownership {equality} -hashing {0 required} -nomethod 1
+====
+-runtime table-hash -ownership {equality} -hashing {0 required} -nomethod 1 -context-free 1
+>>>>
+
+@@ private-hash-allocates-temporary the private hash allocates a temporary heap object (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
+    let mut sink = Sip13::new(key.0, key.1);
+====
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
+    let _scratch = vm(p).new_int(i64::MAX);
+    let mut sink = Sip13::new(key.0, key.1);
+>>>>
+
+@@ secret-regenerated-every-call-native the process key is drawn again on every table hash (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+fn table_hash_key() -> (u64, u64) {
+    *TABLE_HASH_KEY.get_or_init(draw_table_hash_key)
+}
+====
+fn table_hash_key() -> (u64, u64) {
+    let _ = TABLE_HASH_KEY.get_or_init(draw_table_hash_key);
+    draw_table_hash_key()
+}
+>>>>
+
+@@ secret-regenerated-every-call-tcl the process key is drawn again on every table hash (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+    if {$tableKey eq ""} {
+        set tableKey [DrawKey]
+    }
+====
+    if {1} {
+        set tableKey [DrawKey]
+    }
+>>>>
+
+@@ secret-constant-native the process key is a constant, not drawn from the system (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+    (word(0x7461626c65), word(0x6861736820))
+====
+    let _ = word;
+    (1, 2)
+>>>>
+
+@@ sip-rounds-wrong-native the table hash uses other SipHash round counts (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+type Sip13 = Sip<1, 3>;
+====
+type Sip13 = Sip<2, 4>;
+>>>>
+
+@@ sip-rounds-wrong-tcl the table hash runs two finalization rounds, not three (Tcl runtimes)
+## core/hashing.tcl
+<<<<
+    set v2 [expr {$v2 ^ 0xFF}]
+    SipRound v0 v1 v2 v3
+    SipRound v0 v1 v2 v3
+    SipRound v0 v1 v2 v3
+====
+    set v2 [expr {$v2 ^ 0xFF}]
+    SipRound v0 v1 v2 v3
+    SipRound v0 v1 v2 v3
+>>>>
+
+@@ trait-typed-hashable-argument-cannot-hash a value seen through Hashable is taken as not Hashable: hash of a Hashable parameter is rejected
+## hir/types.tcl
+<<<<
+        if {$operation in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
+            # A view of a trait whose witnesses guarantee the operation (the
+            # intrinsic trait Hashable): total whatever the witness is.
+            return {total ""}
+        }
+====
+        if {$operation in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
+            return [list none "a trait view"]
+        }
+>>>>
+
+@@ concrete-hashable-constraint-rejected a concrete struct is rejected by the Hashable constraint
+## hir/traits.tcl
+<<<<
+        if {$class eq "total"} {
+            dict set result ok 1
+====
+        if {$class eq "total" && ![hir::types::IsStructLike $type]} {
+            dict set result ok 1
+>>>>
+
+@@ hashable-structural Hashable is satisfied structurally, like a source trait: by an owner module's function `hash`
+## hir/traits.tcl
+<<<<
+    } elseif {[isIntrinsic $id]} {
+====
+    } elseif {0} {
+>>>>
+
+@@ hash-static-rejection-dropped the public hash no longer rejects a value statically known not to be Hashable
+## hir/range.tcl
+<<<<
+    if {$class eq "total" || ($mode eq "checked" && $class eq "unknown")} {
+====
+    if {$class eq "total" || $mode eq "checked"} {
+>>>>
+
+@@ hash-dynamic-path-rejected the public hash rejects a statically unknown value (the dynamic path is gone)
+## hir/range.tcl
+<<<<
+    if {$class eq "total" || ($mode eq "checked" && $class eq "unknown")} {
+====
+    if {$class eq "total"} {
+>>>>
+
+@@ reserved-name-free a program may declare a struct named Hashable
+## hir/structs.tcl
+<<<<
+                || [hir::traits::isIntrinsicName $name]} {
+            Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct
+====
+                || 0} {
+            Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct
+>>>>

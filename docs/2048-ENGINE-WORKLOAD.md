@@ -194,6 +194,16 @@ largest tile: 316 moves, score 3888, largest tile 256. It prints through
 main.tcl showed only its value until S15's fix); as an executable it takes
 10 ms.
 
+Since MACOS-AARCH64-MILESTONE-8.md (section 22) the demo is the application
+module `demo_play.bot` -- everything above, its functions requiring
+`std::io::IO` and naming no platform -- and one three-line entry per platform:
+`demo.bot` installs Linux's context (`std::linux::io::create()`),
+`demo-darwin.bot` macOS's (`std::darwin::io::create()`), and both call
+`demo_play::main()`. The output is the same; on Linux the demo's NIR has
+the same functions, instructions and registers as before, qualified by
+`demo_play::`. The engine and the benchmark did not change (they do no
+IO), and the workarounds the demo records stay.
+
 ### Size
 
 | file | lines | code (no comments/blank) |

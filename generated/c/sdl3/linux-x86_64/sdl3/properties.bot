@@ -62,6 +62,13 @@ extern c fn SDL_SetNumberProperty(
     value: std::ffi::c::Long
 ) -> std::ffi::c::Bool
 
+# C: _Bool SDL_SetFloatProperty(SDL_PropertiesID props, const char *name, float value)
+extern c fn SDL_SetFloatProperty(
+    props: std::ffi::c::UInt,
+    name: std::ffi::c::Ptr[std::ffi::c::Char],
+    value: std::ffi::c::Float
+) -> std::ffi::c::Bool
+
 # C: _Bool SDL_SetBooleanProperty(SDL_PropertiesID props, const char *name, _Bool value)
 extern c fn SDL_SetBooleanProperty(
     props: std::ffi::c::UInt,
@@ -101,6 +108,13 @@ extern c fn SDL_GetNumberProperty(
     name: std::ffi::c::Ptr[std::ffi::c::Char],
     default_value: std::ffi::c::Long
 ) -> std::ffi::c::Long
+
+# C: float SDL_GetFloatProperty(SDL_PropertiesID props, const char *name, float default_value)
+extern c fn SDL_GetFloatProperty(
+    props: std::ffi::c::UInt,
+    name: std::ffi::c::Ptr[std::ffi::c::Char],
+    default_value: std::ffi::c::Float
+) -> std::ffi::c::Float
 
 # C: _Bool SDL_GetBooleanProperty(SDL_PropertiesID props, const char *name, _Bool default_value)
 extern c fn SDL_GetBooleanProperty(

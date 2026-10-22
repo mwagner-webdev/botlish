@@ -1,0 +1,604 @@
+# windows-io.test -- Windows I/O through kernel32: the Windows platform
+# namespace `windows` (stdlib/windows.bot, stdlib/windows/io.bot) and the portable
+# std::io::IO through its WindowsIO context (WINDOWS-X86-64-MILESTONE-2.md):
+#
+#   import std::io
+#   import std::windows::io
+#
+#   fn hello() errors std::io::WriteFailed:
+#       std::io::print_line("Hello, world!")
+#
+#   with context std::windows::io::create()
+#   hello()
+#
+# hello is examples/io/hello.bot's function, unchanged; only the installed
+# context differs. std::io::print_line requires std::io::IO, WindowsIO is the one
+# installed context implementing it, and the call compiles to a direct call
+# of std::windows::io::write_text, whose writes are C calls of kernel32's
+# GetStdHandle and WriteFile -- no C runtime function, no compiler knowledge
+# of I/O. Failures come back as Windows reports them: FALSE and the thread's
+# last-error code (GetLastError), read right after the call.
+#
+# Two kinds of test:
+#
+#   * the front end, on every host (programs compiled for windows-x86_64):
+#     the platform rule, the C contracts, the static context selection, the
+#     authority boundary, the Tcl backends' NATIVE-ONLY;
+#   * execution, where the windows platform is the host's and C calls link
+#     (windowsIO: Windows x86-64 today): standalone PE executables and the
+#     native backends' linked runs, writing to real files and pipes, with
+#     two MSVC-built fixtures (tests/ctoolchain.tcl) where Windows would not
+#     fail on demand: tests/cffi/writefile-inject.c, an injector of the
+#     program's own WriteFile import (short writes, stalls, failures, and
+#     CloseHandle counted), and tests/cffi/win-launch.c, a launcher that gives
+#     a program a standard output Windows refuses to write (read-only, a
+#     closed pipe, NULL, INVALID_HANDLE_VALUE) in a process of its own.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+set ::hostTarget [core::cabi::hostTarget]
+# Windows I/O runs (tests/helpers.tcl's windowsIO), with the native backend
+# built and its executables linked by rustc.
+testConstraint windowsIO [expr {[testConstraint windowsIO] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+
+# The fixtures, built once with MSVC where Windows I/O runs.
+set ::wiFixtureDir ""
+set ::wiLauncher ""
+if {[testConstraint windowsIO] && [testConstraint cToolchain]} {
+    set ::wiFixtureDir [makeDirectory windows-io-fixture-[pid]]
+    if {[catch {
+        ctool::staticLibrary $::wiFixtureDir botlish_writefile_inject [file join $::projectRoot tests cffi writefile-inject.c]
+        set ::wiLauncher [ctool::executable $::wiFixtureDir win-launch [file join $::projectRoot tests cffi win-launch.c]]
+    } message]} {
+        puts stderr "windows-io.test: the fixtures did not build: $message"
+        set ::wiFixtureDir ""
+    }
+}
+testConstraint wiFixtures [expr {$::wiFixtureDir ne ""}]
+
+set scratch [makeDirectory windows-io-[pid]]
+set programCounter 0
+set runCounter 0
+
+proc readBinary {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+proc writeText {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# Text as UTF-8 bytes, for comparing with an output's bytes.
+proc utf8 {text} {
+    return [encoding convertto utf-8 $text]
+}
+
+# The HIR of program TEXT, written as a program file in its own directory
+# (so library modules load, and application modules FILES beside it:
+# {NAME TEXT ...}), compiled for TARGET (windows-x86_64: the windows
+# platform's target on every host).
+proc wiHir {text {target windows-x86_64} {files {}}} {
+    set dir [file join $::scratch app[incr ::programCounter]]
+    file mkdir $dir
+    foreach {name body} $files {
+        writeText [file join $dir $name] $body
+    }
+    writeText [file join $dir main.bot] $text
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target]
+}
+
+# {KIND MESSAGE} of the first diagnostic compiling TEXT for TARGET (its
+# location removed), or accepted.
+proc wiRejection {text {target windows-x86_64} {files {}}} {
+    if {[catch {wiHir $text $target $files} message options]} {
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    }
+    return accepted
+}
+
+# The fixtures' directory as linker search directories (none without it).
+proc wiLinkDirs {} {
+    return [expr {$::wiFixtureDir ne "" ? [list $::wiFixtureDir] : {}}]
+}
+
+# The standalone executable of TEXT (with application modules FILES): its
+# path.
+proc wiExecutable {text {files {}}} {
+    set hir [wiHir $text $::hostTarget $files]
+    set path [file join $::scratch exe[incr ::programCounter]]
+    return [native::withLinkDirs [wiLinkDirs] {native::executable $hir $path}]
+}
+
+# {STDOUT STDERR STATUS} (bytes as binary strings; STATUS the exit status)
+# of one run of COMMAND with the environment variables ENVIRONMENT ({NAME
+# VALUE ...}) set, its standard output and error each a file of its own.
+proc wiRun {command {environment {}}} {
+    set n [incr ::runCounter]
+    set out [file join $::scratch out.$n]
+    set err [file join $::scratch err.$n]
+    set status 0
+    withEnvironment $environment {
+        if {[catch {exec {*}$command >$out 2>$err} message options]} {
+            set code [dict get $options -errorcode]
+            set status [expr {[lindex $code 0] eq "CHILDSTATUS" ? [lindex $code end] : $message}]
+        }
+    }
+    return [list [readBinary $out] [readBinary $err] $status]
+}
+
+# One run of COMMAND under the driver protocol (BOTLISH_NATIVE_RESULT: the
+# program's value goes to a file, never to its standard output, which a test
+# may have broken): {VALUE STDOUT STDERR STATUS}, VALUE the program's value as
+# Botlish shows it, or the protocol's error line.
+proc wiProtocolRun {command {environment {}}} {
+    set result [file join $::scratch result.[incr ::runCounter]]
+    file delete -force $result
+    lassign [wiRun $command [concat $environment [list BOTLISH_NATIVE_RESULT $result]]] out err status
+    set lines {}
+    if {[file exists $result]} {
+        set channel [open $result r]
+        fconfigure $channel -encoding utf-8
+        set lines [split [string trim [read $channel]] \n]
+        close $channel
+    }
+    set value [lsearch -inline $lines {value *}]
+    set shown [lsearch -inline $lines {error *}]
+    if {$value ne ""} {
+        set shown [core::value::show [native::HostVectors [lindex $value 1]] 1 1]
+    }
+    return [list $shown $out $err $status]
+}
+
+# The calls the injector logged (BCFW_LOG): {ASKED RESULT ERROR} each.
+proc wiLog {path} {
+    if {![file exists $path]} {
+        return {}
+    }
+    return [lmap line [split [string trim [readBinary $path]] \n] {expr {$line eq "" ? [continue] : $line}}]
+}
+
+# The NIR body of function NAME (instruction lines, origins removed).
+proc nirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+set helloLinux [core::ReadFile [file join $::projectRoot examples io hello.bot]]
+set helloWindows [core::ReadFile [file join $::projectRoot examples io hello-windows.bot]]
+
+# Every portable operation, UTF-8 beyond ASCII, routed to stdout and stderr;
+# the program's value says whether a WriteFailed reached it.
+set routingText {import std::io
+import std::windows::io
+
+fn emit_all() -> str errors std::io::WriteFailed:
+    std::io::print("out:")
+    std::io::print_line(" é 𝄞")
+    std::io::write_error("err:")
+    std::io::write_error_line(" done")
+    "ok"
+
+with context std::windows::io::create()
+
+emit_all():
+    on std::io::WriteFailed:
+        "failed"
+}
+
+# The Hello World whose value says whether the write failed.
+set statusText {import std::io
+import std::windows::io
+
+fn hello() -> str errors std::io::WriteFailed:
+    std::io::print_line("Hello, world!")
+    "ok"
+
+with context std::windows::io::create()
+
+hello():
+    on std::io::WriteFailed:
+        "failed"
+}
+
+# The same, with the WriteFile injector installed first (the program's
+# value: whether any import slot now goes through it, the portable outcome,
+# and how many CloseHandle calls would have closed a standard handle), and
+# the message on standard error when ERROR is "error".
+proc injectText {{stream output}} {
+    set write [expr {$stream eq "error" ? "std::io::write_error_line" : "std::io::print_line"}]
+    return "import std::ffi::c
+import std::io
+import std::windows::io
+
+extern c library \"botlish_writefile_inject\"
+
+extern c fn install named \"bcfw_install\"() -> std::ffi::c::Int
+extern c fn std_closes named \"bcfw_std_closes\"() -> std::ffi::c::Long
+
+fn hello() -> str errors std::io::WriteFailed:
+    ${write}(\"Hello, world!\")
+    \"ok\"
+
+with context std::windows::io::create()
+
+patched = install()
+outcome = hello():
+    on std::io::WriteFailed:
+        \"failed\"
+\[patched > 0, outcome, std_closes()\]
+"
+}
+
+# The raw layer's report of one WriteFile of "raw" to the standard output,
+# after the portable print of "portable": the portable outcome, then
+# WriteResult's ok, count and last_error (stdlib/windows.bot), then whether the
+# process had a standard output handle at all.
+set rawText {import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::io
+import std::str
+import std::windows
+import std::windows::io
+
+fn portable() -> str errors std::io::WriteFailed:
+    std::io::print_line("portable")
+    "ok"
+
+with context std::windows::io::create()
+
+outcome = portable():
+    on std::io::WriteFailed:
+        "failed"
+r = std::windows::io::write(std::abi::bytes::from_list(std::str::encode_utf8("raw")))
+h = std::windows::standard_handle(std::windows::StandardDevice::Output)
+[outcome, r.ok, r.count, r.last_error, h.null?()]
+}
+
+# The same raw report, with the injector installed first.
+set injectRawText {import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::str
+import std::windows::io
+
+extern c library "botlish_writefile_inject"
+
+extern c fn install named "bcfw_install"() -> std::ffi::c::Int
+
+patched = install()
+with context std::windows::io::create()
+r = std::windows::io::write(std::abi::bytes::from_list(std::str::encode_utf8("Hello, world!\n")))
+[patched > 0, r.ok, r.count, r.last_error]
+}
+
+# A text of 2^N * 16 bytes, by doubling (no repetition operation is needed).
+set bigText {import std::io
+import std::str
+import std::windows::io
+
+fn doubled(s: str, n: int) -> str:
+    if n <= 0:
+        return s
+    doubled(s.concat(s), n - 1)
+
+fn big() -> str errors std::io::WriteFailed:
+    std::io::print(doubled("0123456789abcdef", COUNT))
+    "ok"
+
+with context std::windows::io::create()
+
+big():
+    on std::io::WriteFailed:
+        "failed"
+}
+
+# ---------------------------------------------------------------------------
+# The platform namespace (core/cabi.tcl's platforms, surface/modules.tcl's
+# PlatformCheck)
+
+test wi-platform-rule {windows and every namespace under it are the Windows platform's, by the target table's designation: they compile for windows-x86_64 and for windows-x86_64-gnu (MinGW's environment is a Windows target too), and are UNSUPPORTED-PLATFORM for every Linux and macOS target, naming the namespace root; the other platforms' namespaces stay refused for Windows} -body {
+    set results {}
+    foreach import {windows std::windows::io} {
+        foreach target {windows-x86_64 windows-x86_64-gnu linux-x86_64 linux-aarch64 macos-aarch64} {
+            lappend results $import $target [lindex [wiRejection "import $import\n1\n" $target] 0]
+        }
+    }
+    foreach import {linux std::linux::io darwin std::darwin::io} {
+        lappend results $import std::windows-x86_64 [lindex [wiRejection "import $import\n1\n" windows-x86_64] 0]
+    }
+    list [core::cabi::platformOf std::windows::io] [core::cabi::platformOf win32] $results \
+        [lindex [wiRejection "import std::windows::io\n1\n" linux-x86_64] 1]
+} -result [list windows "" {windows windows-x86_64 accepted windows windows-x86_64-gnu accepted windows linux-x86_64 UNSUPPORTED-PLATFORM windows linux-aarch64 UNSUPPORTED-PLATFORM windows macos-aarch64 UNSUPPORTED-PLATFORM std::windows::io windows-x86_64 accepted std::windows::io windows-x86_64-gnu accepted std::windows::io linux-x86_64 UNSUPPORTED-PLATFORM std::windows::io linux-aarch64 UNSUPPORTED-PLATFORM std::windows::io macos-aarch64 UNSUPPORTED-PLATFORM linux windows-x86_64 UNSUPPORTED-PLATFORM std::linux::io windows-x86_64 UNSUPPORTED-PLATFORM darwin windows-x86_64 UNSUPPORTED-PLATFORM std::darwin::io windows-x86_64 UNSUPPORTED-PLATFORM} {namespace "std::windows::io" belongs to the Windows platform (the standard namespace windows and every namespace under it), which is unavailable for target linux-x86_64 (Linux on x86_64): a Windows module is never chosen for, mapped to or substituted on another operating system, whatever the architecture; compile for a Windows target (-target windows-x86_64) or import no Windows namespace}]
+
+test wi-platform-no-way-around {a Windows program reaches no other target by another route: its HIR records windows-x86_64 and its interchange text is refused for any other target, the MinGW environment's included (HIR INTERCHANGE TARGET), and a native backend refuses to run it on a host of another target (NATIVE TARGET) -- here, unless the host is Windows x86-64} -body {
+    set hir [wiHir $::helloWindows]
+    set text [hir::interchange::encode $hir]
+    set refused [lmap target {linux-x86_64 windows-x86_64-gnu macos-aarch64} {
+        catch {hir::interchange::decode $text -target $target} message options
+        lindex [dict get $options -errorcode] end
+    }]
+    set own [hir::cabi::targetOf [hir::interchange::decode $text -target windows-x86_64]]
+    set native [expr {$::hostTarget eq "windows-x86_64" || ![testConstraint nativeBuilt] ? "TARGET" :
+        [lindex [lindex [outcomeUnderHir cranelift $hir] 1] end]}]
+    list [hir::cabi::targetOf $hir] $refused $own $native
+} -result {windows-x86_64 {TARGET TARGET TARGET} windows-x86_64 TARGET}
+
+# ---------------------------------------------------------------------------
+# The kernel32 declarations (stdlib/windows.bot)
+
+test wi-c-declarations {stdlib/windows.bot declares kernel32's GetStdHandle, WriteFile and GetLastError by their documented prototypes for Windows x86-64 (LLP64: DWORD u32, BOOL i32, HANDLE and every other pointer 64 bits), links kernel32's import library and nothing else, and gives WriteFile's buffer read noescape and its byte count write noescape (byte storage, exposed for the call), the handle and the overlapped structure noescape; every link symbol the C name} -body {
+    set hir [wiHir $::rawText]
+    set nir [native::nir $hir]
+    set foreign [lsort [lmap line [split $nir \n] {
+        if {![regexp {^foreign \d+ "(\S+)" params="([^"]*)" result=(\S+)} $line -> symbol params result]} continue
+        list $symbol $params $result
+    }]]
+    set contracts [lmap name {std::windows::c_get_std_handle std::windows::c_write_file std::windows::c_get_last_error} {
+        set c [dict get [core::native::metadata extern#$name] foreign]
+        list $name [lmap p [dict get $c params] {list [dict get $p name] [dict getdef $p access -] [dict getdef $p escape -]}] [dict getdef $c provenance -]
+    }]
+    list $foreign [hir::foreign::links $hir] $contracts
+} -result {{{GetLastError {} u32} {GetStdHandle u32 ptr} {WriteFile {ptr ptr u32 ptr ptr} i32}} kernel32 {{std::windows::c_get_std_handle {{which - -}} unknown} {std::windows::c_write_file {{file unknown declared-noescape} {buffer read declared-noescape} {count - -} {written write declared-noescape} {overlapped unknown declared-noescape}} unknown} {std::windows::c_get_last_error {} unknown}}}
+
+test wi-last-error-read-first {a failed WriteFile's last-error code is read before anything else can change it: in std::windows::write_file nothing runs between the WriteFile call and GetLastError but the keepalives of its exposures (no machine code), the result's unboxing and the test of WriteFile's BOOL -- no allocation, no other C call, no Botlish call: the byte count's write-back value is built only after GetLastError (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)} -body {
+    set nir [native::nir [wiHir $::rawText]]
+    set body [nirBody $nir std::windows::write_file]
+    set from [lsearch -glob $body "*foreigncall 1 *"]
+    set to [lsearch -glob $body "*foreigncall 2*"]
+    lmap line [lrange $body [expr {$from + 1}] [expr {$to - 1}]] {
+        if {[regexp {= (op (\S+)|(structnew|call|callmulti|structget|foreigncall))} $line -> - op word]} {
+            expr {$op ne "" ? $op : $word}
+        } elseif {[regexp {^br } $line]} {
+            string cat br
+        } else {
+            continue
+        }
+    }
+} -result {keepalive keepalive runbox rieq br}
+
+test wi-request-is-a-dword {WriteFile is asked for at most a DWORD's worth of bytes: the count is DATA's length when it fits 32 bits and 4294967295 otherwise, proven a std::ffi::c::ULong (LLP64's unsigned long, 32 bits) with no run-time check; a longer Bytes is a short write by construction} -body {
+    set nir [native::nir [wiHir $::rawText]]
+    set body [nirBody $nir std::windows::request]
+    list [llength [lsearch -all -glob $body "*fail*"]] [expr {[lsearch -glob $body "*4294967295*"] >= 0}]
+} -result {0 1}
+
+test wi-pure-parts {the parts of stdlib/windows.bot that call no C run on the Tcl backends of every host, for windows-x86_64: GetStdHandle's selectors are (DWORD)-10, -11 and -12 for the input, output and error devices, and a request is the whole length of what it is asked to write (a Bytes beyond 4 GiB is no test's)} -body {
+    set hir [wiHir "import std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::windows\n\nseven = std::abi::bytes::from_list(\[std::byte::from_int(1), std::byte::from_int(2), std::byte::from_int(3), std::byte::from_int(4), std::byte::from_int(5), std::byte::from_int(6), std::byte::from_int(7)\])\n\[std::windows::selector(std::windows::StandardDevice::Input), std::windows::selector(std::windows::StandardDevice::Output), std::windows::selector(std::windows::StandardDevice::Error), std::windows::request(seven), std::windows::request(std::abi::bytes::from_list(\[\]))\]\n"]
+    lmap backend {interp compile} {lindex [outcomeUnderHir $backend $hir] 1}
+} -result {{[4294967286, 4294967285, 4294967284, 7, 0]} {[4294967286, 4294967285, 4294967284, 7, 0]}}
+
+# ---------------------------------------------------------------------------
+# The context and its selection (stdlib/windows/io.bot)
+
+test wi-context-holds-devices {WindowsIO holds the process's standard devices, never a handle: a C pointer cannot live in a context (an installed context is erased: AFFINE-ERASURE-UNSUPPORTED), so a write reads the device's current handle (GetStdHandle) when it needs it; WindowsIO is opaque outside its module} -body {
+    set handleContext [wiRejection "import std::ffi::c\n\ncontext struct Holder:\n    h: std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nfn f(context c: Holder) -> int:\n    1\n\nwith context Holder {h: std::ffi::c::null\[std::ffi::c::Void\]()}\nf()\n"]
+    set opaque [wiRejection "import std::io\nimport std::windows::io\n\nfn peek(context io: std::windows::io::WindowsIO) -> bool:\n    io.stdout == io.stderr\n\nwith context std::windows::io::create()\npeek()\n"]
+    list [lindex $handleContext 0] [lindex $opaque 0]
+} -result {AFFINE-ERASURE-UNSUPPORTED OPAQUE-REPRESENTATION}
+
+test wi-same-function-two-platforms {examples/io/hello.bot and hello-windows.bot are one program on two platforms: their statements differ only in the platform import and the installed context, and each compiles hello to a clone over its own context's write_text, called directly -- no dispatch, no hidden argument} -body {
+    set strip {apply {{text} {
+        lmap line [split $text \n] {expr {[string match #* $line] || $line eq "" ? [continue] : $line}}
+    }}}
+    set linux [{*}$strip $::helloLinux]
+    set windows [{*}$strip $::helloWindows]
+    set differences [lmap a $linux b $windows {expr {$a eq $b ? [continue] : [list $a $b]}}]
+    set nir [native::nir [wiHir $::helloWindows]]
+    set clone [lsearch -inline -regexp [split $nir \n] {^func \d+ "hello<std::io::IO=std::windows::io::WindowsIO>"}]
+    set printLine [nirBody $nir "std::io::print_line<std::io::IO=std::windows::io::WindowsIO>"]
+    regexp {^func (\d+) "std::windows::io::write_text"} [lsearch -inline -regexp [split $nir \n] {"std::windows::io::write_text"}] -> writeText
+    list $differences [expr {$clone ne ""}] [expr {[lsearch -regexp $printLine "= call $writeText %\\d+\$"] >= 0}] [regexp {callvalue} $nir]
+} -result {{{{import std::linux::io} {import std::windows::io}} {{with context std::linux::io::create()} {with context std::windows::io::create()}}} 1 1 0}
+
+test wi-selection-diagnostics {the static selection stays exact: a portable call with no installed context is MISSING-CONTEXT, WindowsIO beside another installed context implementing std::io::IO is AMBIGUOUS-CONTEXT-IMPLEMENTATION (never ranked)} -body {
+    set missing [wiRejection "import std::io\nimport std::windows::io\n\nfn hello() errors std::io::WriteFailed:\n    std::io::print_line(\"x\")\n\nhello():\n    on std::io::WriteFailed:\n        unit\n"]
+    set other "import std::io\nimport std::windows::io\n\ncontext struct Quiet:\n    quiet: bool\n\nfn write_text(text: str, context q: Quiet) -> unit errors std::io::WriteFailed:\n    unit\n\nfn write_error_text(text: str, context q: Quiet) -> unit errors std::io::WriteFailed:\n    unit\n\nfn hello() errors std::io::WriteFailed:\n    std::io::print_line(\"x\")\n\nwith context Quiet {quiet: true}\nwith context std::windows::io::create()\n\nhello():\n    on std::io::WriteFailed:\n        unit\n"
+    list [lindex $missing 0] [lindex [wiRejection $other] 0]
+} -result {MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+
+test wi-authority {no Windows module uses direct authority: every kernel32 call of stdlib/windows.bot retains nothing (each pointer parameter noescape), so windows, std::windows::io and a program using them are ordinary modules -- a program marked `direct module` for using them is STALE-DIRECT-MODULE} -body {
+    set hir [wiHir $::rawText]
+    set statuses {}
+    dict for {unit u} [dict get $hir direct units] {
+        if {$unit in {windows std::windows::io ""}} { lappend statuses $unit [dict get $u status] }
+    }
+    list [lsort -stride 2 $statuses] [lindex [wiRejection "direct module\n\n$::statusText"] 0]
+} -result {{{} ordinary windows ordinary std::windows::io ordinary} STALE-DIRECT-MODULE}
+
+test wi-tcl-backends {the Tcl backends have no kernel32 to call: a Windows program's first C call is NATIVE-ONLY on interp and compile, never imitated with a Tcl channel} -body {
+    set hir [wiHir $::statusText]
+    lmap backend {interp compile} {lindex [lindex [outcomeUnderHir $backend $hir] 1] end}
+} -result {NATIVE-ONLY NATIVE-ONLY}
+
+test wi-execution-programs-compile {every program the Windows execution tests below run compiles for windows-x86_64 and lowers to NIR on every host, so a mistake in one is found here too, not only on Windows} -body {
+    set texts [list $::helloWindows $::routingText $::statusText [injectText] [injectText error] $::rawText $::injectRawText [string map {COUNT 14} $::bigText]]
+    lmap text $texts {regexp -line {^func 0 } [native::nir [wiHir $text]]}
+} -result {1 1 1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Standard output and error (Windows)
+
+test wi-hello-executable {examples/io/hello-windows.bot as a standalone executable, moved out of the source tree, the source deleted, run with nothing on PATH (no Tcl, no compiler, no source): standard output receives exactly "Hello, world!\n", then the executable's own result line (unit: printed by the runner after the program); nothing on standard error; the same under GC stress; its imports are the system's DLLs only, KERNEL32.dll among them, and no C runtime DLL} -constraints windowsIO -body {
+    set dir [file join $::scratch hello-src]
+    file mkdir $dir
+    writeText [file join $dir hello.bot] $::helloWindows
+    set exe [native::executable [surface::readProgramFile [file join $dir hello.bot] -warnings off -cache ""] [file join $dir hello]]
+    set moved [file join $::scratch "moved hello.exe"]
+    file rename -force $exe $moved
+    file delete -force $dir
+    set plain [wiRun [list $moved] {PATH {}}]
+    set stressed [wiRun [list $moved] {PATH {} BOTLISH_NATIVE_GC_STRESS 1}]
+    set imports [dict get [peFacts $moved] imports]
+    list $plain [expr {$stressed eq $plain}] [binaryHeader $moved] \
+        [expr {"KERNEL32.DLL" in [lmap i $imports {string toupper $i}]}] \
+        [lsearch -all -inline -regexp -nocase $imports {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}]
+} -result [list [list "Hello, world!\nunit\n" "" 0] 1 {pe x86_64 executable} 1 {}]
+
+test wi-routing-utf8 {print, print_line, write_error and write_error_line route to standard output and error as UTF-8 bytes, exactly -- é in two bytes, 𝄞 in four, the newline one LF byte, no code page applied and no CRLF translation -- into files} -constraints windowsIO -body {
+    lassign [wiRun [list [wiExecutable $::routingText]]] out err status
+    list [expr {$out eq [utf8 "out: é 𝄞\n\"ok\"\n"]}] [expr {$err eq [utf8 "err: done\n"]}] $status [string length $out] [string length $err]
+} -result {1 1 0 18 10}
+
+test wi-text-edges {the empty String writes nothing (no WriteFile at all), a carriage return and a tab are ordinary bytes (a CR LF the program writes stays one, an LF alone is never made one), an empty line is one newline, on both streams} -constraints windowsIO -body {
+    set text "import std::io\nimport std::windows::io\n\nfn edges() -> str errors std::io::WriteFailed:\n    std::io::print(\"\")\n    std::io::print(\"a\\r\\nb\\n\")\n    std::io::print_line(\"\")\n    std::io::print_line(\"line\")\n    std::io::write_error(\"\")\n    std::io::write_error_line(\"e\\t\")\n    \"ok\"\n\nwith context std::windows::io::create()\n\nedges():\n    on std::io::WriteFailed:\n        \"failed\"\n"
+    lassign [wiRun [list [wiExecutable $text]]] out err status
+    list [binary encode hex $out] [binary encode hex $err] $status
+} -result [list [binary encode hex "a\r\nb\n\nline\n\"ok\"\n"] [binary encode hex "e\t\n"] 0]
+
+test wi-pipes {output through pipes: a program's standard output read by its parent through an anonymous pipe (Tcl's exec captures it so), and a 256 KiB write through a pipe whose reader takes it in pieces -- WriteFile blocks until the reader has room, so every byte arrives, in order} -constraints windowsIO -body {
+    set small [exec [wiExecutable $::statusText] 2>@1]
+    set exe [wiExecutable [string map {COUNT 14} $::bigText]]
+    set channel [open |[list $exe] rb]
+    set data ""
+    while {![eof $channel]} {
+        append data [read $channel 4096]
+    }
+    set ok [expr {![catch {close $channel}]}]
+    set expected [string repeat 0123456789abcdef [expr {2 ** 14}]]
+    list $small [string length $data] [expr {$data eq "$expected\"ok\"\n"}] $ok
+} -result [list "Hello, world!\n\"ok\"" [expr {16 * 2 ** 14 + 5}] 1 1]
+
+test wi-large-write {a 1 MiB text is one portable print: one WriteFile of all of it into a file, byte for byte} -constraints windowsIO -body {
+    lassign [wiRun [list [wiExecutable [string map {COUNT 16} $::bigText]]]] out err status
+    list [string length $out] [expr {$out eq "[string repeat 0123456789abcdef [expr {2 ** 16}]]\"ok\"\n"}] $err $status
+} -result [list [expr {2 ** 20 + 5}] 1 {} 0]
+
+test wi-repeated-writes {two thousand consecutive print_line calls are two thousand WriteFiles, each a whole line, in order: the file holds exactly the lines} -constraints {windowsIO wiFixtures} -body {
+    set text "import std::ffi::c\nimport std::io\nimport std::list\nimport std::windows::io\n\nextern c library \"botlish_writefile_inject\"\n\nextern c fn install named \"bcfw_install\"() -> std::ffi::c::Int\n\nfn lines(n: int) -> int errors std::io::WriteFailed:\n    done = loop i from 0 to n:\n        std::io::print_line(\"line\")\n    std::list::length(done)\n\nwith context std::windows::io::create()\n\ninstall()\nlines(2000):\n    on std::io::WriteFailed:\n        -1\n"
+    set log [file join $::scratch repeated.log]
+    lassign [wiProtocolRun [list [wiExecutable $text]] [list BCFW_LOG $log]] value out err status
+    set calls [wiLog $log]
+    list $value [expr {$out eq [string repeat "line\n" 2000]}] [llength $calls] [lsort -unique $calls] $status
+} -result {2000 1 2000 {{5 5 0}} 0}
+
+# ---------------------------------------------------------------------------
+# Short writes and failures (Windows): the injector of the program's own
+# WriteFile import (tests/cffi/writefile-inject.c)
+
+test wi-short-write-completed {a short WriteFile (fewer bytes than asked) is completed by writing the rest, again and again, until all of the text is written: plan 5 writes the 9-byte suffix next; plan 3,4,2 four calls; the same under GC stress; the standard output handle never closed} -constraints {windowsIO wiFixtures} -body {
+    set exe [wiExecutable [injectText]]
+    set results {}
+    foreach {plan stress} {5 0 3,4,2 0 5 1} {
+        set log [file join $::scratch short-$plan-$stress.log]
+        lassign [wiProtocolRun [list $exe] [list BCFW_PLAN $plan BCFW_LOG $log BOTLISH_NATIVE_GC_STRESS $stress]] value out err status
+        lappend results [list $value $out [wiLog $log]]
+    }
+    set results
+} -result [list \
+    [list {[true, "ok", 0]} "Hello, world!\n" {{14 5 0} {9 9 0}}] \
+    [list {[true, "ok", 0]} "Hello, world!\n" {{14 3 0} {11 4 0} {7 2 0} {5 5 0}}] \
+    [list {[true, "ok", 0]} "Hello, world!\n" {{14 5 0} {9 9 0}}]]
+
+test wi-write-failures {a WriteFile that fails -- whatever its last-error code: ERROR_ACCESS_DENIED, ERROR_NO_DATA, ERROR_BROKEN_PIPE -- and one that makes no progress are std::io::WriteFailed, the portable handler runs, nothing is retried; after a short write the failure of the rest is the same, the prefix written} -constraints {windowsIO wiFixtures} -body {
+    set exe [wiExecutable [injectText]]
+    lmap plan {-5 -232 -109 0 5,-5 5,0} {
+        set log [file join $::scratch fail-$plan.log]
+        lassign [wiProtocolRun [list $exe] [list BCFW_PLAN $plan BCFW_LOG $log]] value out err status
+        list $plan $value $out [wiLog $log]
+    }
+} -result {{-5 {[true, "failed", 0]} {} {{14 -1 5}}} {-232 {[true, "failed", 0]} {} {{14 -1 232}}} {-109 {[true, "failed", 0]} {} {{14 -1 109}}} {0 {[true, "failed", 0]} {} {{14 0 0}}} {5,-5 {[true, "failed", 0]} Hello {{14 5 0} {9 -1 5}}} {5,0 {[true, "failed", 0]} Hello {{14 5 0} {9 0 0}}}}
+
+test wi-stderr-short-and-failed {standard error follows the same policy through its own handle: a short write completed, a failure the portable handler's -- and standard output's writes are not affected} -constraints {windowsIO wiFixtures} -body {
+    set exe [wiExecutable [injectText error]]
+    lmap plan {3 -5} {
+        set log [file join $::scratch err-$plan.log]
+        lassign [wiProtocolRun [list $exe] [list BCFW_TARGET error BCFW_PLAN $plan BCFW_LOG $log]] value out err status
+        list $value $err [wiLog $log]
+    }
+} -result {{{[true, "ok", 0]} {Hello, world!
+} {{14 3 0} {11 11 0}}} {{[true, "failed", 0]} {} {{14 -1 5}}}}
+
+test wi-raw-results {the raw layer reports one WriteFile as Windows does and completes nothing: a success its count, a short write its count (7 of 14), a failure FALSE, no count and its last-error code exactly (5, 232) -- never folded into the count} -constraints {windowsIO wiFixtures} -body {
+    set exe [wiExecutable $::injectRawText]
+    lmap plan {{} 7 -5 -232} {
+        lassign [wiProtocolRun [list $exe] [list BCFW_PLAN $plan]] value out
+        list $value $out
+    }
+} -result {{{[true, true, 14, 0]} {Hello, world!
+}} {{[true, true, 7, 0]} {Hello, }} {{[true, false, 0, 5]} {}} {{[true, false, 0, 232]} {}}}
+
+test wi-steady-completion {a 256 KiB print whose every WriteFile on standard output writes at most 4 KiB (BCFW_LIMIT): sixty-four calls, each the rest of the text, the file exactly the text} -constraints {windowsIO wiFixtures} -body {
+    set text [string map [list "import std::io\n" "import std::ffi::c\nimport std::io\n" "with context std::windows::io::create()\n" "extern c library \"botlish_writefile_inject\"\n\nextern c fn install named \"bcfw_install\"() -> std::ffi::c::Int\n\nwith context std::windows::io::create()\n\ninstall()\n" COUNT 14] $::bigText]
+    set log [file join $::scratch steady.log]
+    lassign [wiProtocolRun [list [wiExecutable $text]] [list BCFW_LIMIT 4096 BCFW_LOG $log]] value out err status
+    set calls [wiLog $log]
+    list $value [expr {$out eq [string repeat 0123456789abcdef [expr {2 ** 14}]]}] [llength $calls] [lindex $calls 0] [lindex $calls end]
+} -result {{"ok"} 1 64 {262144 4096 0} {4096 4096 0}}
+
+# ---------------------------------------------------------------------------
+# Real failures (Windows): the program's standard output as the launcher
+# makes it (tests/cffi/win-launch.c), in a process of its own
+
+test wi-real-failures {Windows' own refusals, in a process of the launcher's: a standard output opened read-only (ERROR_ACCESS_DENIED), the write end of a pipe whose reader is gone (ERROR_NO_DATA), no handle at all (NULL: the portable write refuses it before any WriteFile, the raw one is WriteFile's ERROR_INVALID_HANDLE) and INVALID_HANDLE_VALUE (ERROR_INVALID_HANDLE) are std::io::WriteFailed for the portable print and the exact last-error code for the raw write; the inherited control writes both} -constraints {windowsIO wiFixtures} -body {
+    set exe [wiExecutable $::rawText]
+    set file [file join $::scratch readonly.txt]
+    writeText $file ""
+    lmap mode {inherit readonly closed-pipe null invalid} {
+        lassign [wiProtocolRun [list $::wiLauncher $mode [file nativename $file] [file nativename $exe]]] value out err status
+        list $mode $value $out $status
+    }
+} -result {{inherit {["ok", true, 3, 0, false]} {portable
+raw} 0} {readonly {["failed", false, 0, 5, false]} {} 0} {closed-pipe {["failed", false, 0, 232, false]} {} 0} {null {["failed", false, 0, 6, true]} {} 0} {invalid {["failed", false, 0, 6, false]} {} 0}}
+
+test wi-borrowed-handles {the standard handles are borrowed, never closed: across the portable writes, the short ones completed and a failure, no CloseHandle names a standard handle (the injector counts them), and the output written before and after a failure reaches the same handle: plan 2,4,-5 completes the first line in two writes and fails the second} -constraints {windowsIO wiFixtures} -body {
+    set text "import std::ffi::c\nimport std::io\nimport std::windows::io\n\nextern c library \"botlish_writefile_inject\"\n\nextern c fn install named \"bcfw_install\"() -> std::ffi::c::Int\nextern c fn std_closes named \"bcfw_std_closes\"() -> std::ffi::c::Long\n\nfn say(text: str) -> str errors std::io::WriteFailed:\n    std::io::print_line(text)\n    \"ok\"\n\nfn attempt(text: str) -> str:\n    r = say(text):\n        on std::io::WriteFailed:\n            \"failed\"\n    r\n\nwith context std::windows::io::create()\n\ninstall()\nfirst = attempt(\"first\")\nsecond = attempt(\"second\")\nthird = attempt(\"third\")\n\[first, second, third, std_closes()\]\n"
+    lassign [wiProtocolRun [list [wiExecutable $text]] {BCFW_PLAN 2,4,-5}] value out
+    list $value $out
+} -result {{["ok", "failed", "ok", 0]} {first
+third
+}}
+
+# ---------------------------------------------------------------------------
+# The native backends' linked runs and main.tcl (Windows)
+
+test wi-native-backends {a program that writes through WindowsIO runs on both native backends as a linked executable (C-FFI.md), its output the driver's own, and main.tcl -backend cranelift passes it through to its standard output before its own value line} -constraints windowsIO -body {
+    set hir [wiHir $::statusText $::hostTarget]
+    set values [lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}]
+    set dir [file join $::scratch main-tcl]
+    file mkdir $dir
+    writeText [file join $dir hello.bot] $::helloWindows
+    set main [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend cranelift -warnings off [file join $dir hello.bot]]
+    list $values [string map {\r ""} $main]
+} -result {{{"ok"} {"ok"}} {== hello.bot (cranelift)
+Hello, world!
+   value: unit}}
+
+test wi-gc-stress {the routing program and a 64 KiB print under a collection at every allocation site, as executables: the same bytes} -constraints windowsIO -body {
+    set routing [wiExecutable $::routingText]
+    set big [wiExecutable [string map {COUNT 12} $::bigText]]
+    list [expr {[wiRun [list $routing] {BOTLISH_NATIVE_GC_STRESS 1}] eq [wiRun [list $routing]]}] \
+        [expr {[wiRun [list $big] {BOTLISH_NATIVE_GC_STRESS 1}] eq [wiRun [list $big]]}]
+} -result {1 1}
+
+removeDirectory windows-io-[pid]
+if {$::wiFixtureDir ne ""} {
+    removeDirectory windows-io-fixture-[pid]
+}
+cleanupTests

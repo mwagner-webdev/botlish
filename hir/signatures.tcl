@@ -854,6 +854,7 @@ proc hir::signatures::Meet {a b} {
 # placeholder -- no `any`, no bare aggregate kind (an element type `any`),
 # no callable (which also keeps inferred Fn types first-order: finite).
 proc hir::signatures::Concrete {type} {
+    set type [hir::types::Unrefined $type]
     if {$type in {any never list immutableSet mutarray mutvec block native}} {
         return 0
     }
@@ -1067,6 +1068,10 @@ proc hir::signatures::CallableContract {hir AVar contracts p} {
         }
         set admitted $kept
     }
+    # (What the body's calls pass is the body's: a List length a literal
+    # argument has is no part of the callable contract a caller must honor,
+    # LIST-CARDINALITY-REFINEMENTS.md.)
+    set args [lmap a $args {hir::types::ForgetInferred $a}]
     foreach a $args call [lrepeat $arity [lindex $calls 0]] {
         if {![Concrete $a]} {
             return [list note [list relational [dict get $call expr] \

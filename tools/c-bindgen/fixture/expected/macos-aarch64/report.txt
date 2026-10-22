@@ -3,142 +3,133 @@ the synthetic fixture: every shape the generator decides about, in one small hea
 (report.tsv has one row per name; `tclsh9.0 tools/c-bindgen.tcl report fixture -target macos-aarch64 -why NAME` explains one)
 
 Inventory (public headers, as this target's preprocessor sees them)
-  public declared functions                                                   42
+  public declared functions                                                   51
   static inline callable APIs                                                  3
   function-like macros                                                         3
-  object-like macros naming a function (aliases)                               2
-  API names in all                                                            50
+  object-like macros naming a function (aliases)                               3
+  API names in all                                                            60
   opaque (incomplete) struct types                                             5
-  complete struct and union types                                             69
-  function-pointer typedefs                                                    3
+  complete struct and union types                                             74
+  function-pointer typedefs                                                    4
   object-like constant macros                                                 13
   enumerators                                                                  7
 
 Bound (of the API names)
-  directly linked externs                                                     33    66.0%
-  aliases (externs of the symbol a macro names)                                2     4.0%
-  thunks (C wrappers in the shim)                                              5    10.0%
+  directly linked externs                                                     42    70.0%
+  aliases (externs of the symbol a macro names)                                3     5.0%
+  thunks (C wrappers in the shim)                                              6    10.0%
     of them table-redirected names (stubs)                                     1
-  bound in all                                                                40    80.0%
-  unsupported                                                                 10    20.0%
+  bound in all                                                                51    85.0%
+  unsupported                                                                  9    15.0%
   excluded by the profile                                                      0     0.0%
   constants generated                                                         16    80.0%
 
 Unsupported API names by blocker (an API may have several)
-  double                                                                       2     4.0%
-  float                                                                        2     4.0%
-  by-value-aggregate                                                           1     2.0%
-  macro-needs-signature                                                        1     2.0%
-  no-prototype                                                                 1     2.0%
-  typedef-abi-mismatch                                                         1     2.0%
-  unsupported-callback-signature                                               1     2.0%
-  va-list                                                                      1     2.0%
-  variadic                                                                     1     2.0%
+  long-double                                                                  2     3.3%
+  by-value-aggregate                                                           1     1.7%
+  macro-needs-signature                                                        1     1.7%
+  no-prototype                                                                 1     1.7%
+  typedef-abi-mismatch                                                         1     1.7%
+  unsupported-callback-signature                                               1     1.7%
+  va-list                                                                      1     1.7%
+  variadic                                                                     1     1.7%
 
 Pointer contracts (bound APIs)
-  pointer parameters                                                          22
-    with a favorable manual fact (the profile)                                 9    40.9%
-    with a compiler-proven fact                                                1     4.5%
-    unknown (no fact: no exposure, retains)                                   12    54.5%
+  pointer parameters                                                          29
+    with a favorable manual fact (the profile)                                11    37.9%
+    with a compiler-proven fact                                                1     3.4%
+    unknown (no fact: no exposure, retains)                                   17    58.6%
   pointer results                                                              6
     independent                                                                1    16.7%
     alias of a parameter                                                       1    16.7%
     unknown                                                                    4    66.7%
 
 Capability pressure (API names a missing FFI capability blocks or limits)
-  C _Bool in the signature (blocked without std::ffi::c::Bool)                 2     4.0%
-    of them bound now, bool their only blocker                                 2     4.0%
-  float/double                                                                 3     6.0%
-  aggregates by value (struct, union)                                          1     2.0%
-  varargs (..., va_list)                                                       2     4.0%
-  callback signature outside the ABI universe                                  1     2.0%
+  C _Bool in the signature (blocked without std::ffi::c::Bool)                 2     3.3%
+    of them bound now, bool their only blocker                                 2     3.3%
+  long double and the other floating types (C float and double are bound)       2     3.3%
+  aggregates by value (struct, union)                                          1     1.7%
+  varargs (..., va_list)                                                       2     3.3%
+  callback signature outside the ABI universe                                  1     1.7%
   explicit calling convention (one the target does not take as its default)       0     0.0%
-  macro without a signature                                                    1     2.0%
-  bound, declaring a convention the target takes as its default                1     2.0%
-  bound, taking a callback (no Botlish function can be one yet)                2     4.0%
-  bound, pointing to a complete C struct (needs memory views)                  7    14.0%
-  bound, a pointer parameter that may be retained (direct)                     9    18.0%
+  macro without a signature                                                    1     1.7%
+  bound, declaring a convention the target takes as its default                1     1.7%
+  bound, taking a callback (no Botlish function can be one yet)                3     5.0%
+  bound, pointing to a complete C struct (needs memory views)                  8    13.3%
+  bound, a pointer parameter that may be retained (direct)                    13    21.7%
 
 Records and layouts (complete C records of the public headers and every record they hold by value)
-  complete structs                                                            64
-  complete unions                                                             21
+  complete structs                                                            68
+  complete unions                                                             23
     of them in a system header (held by value by a public record)              0
-    of them anonymous                                                         16
-    of them anonymous members laid out as records of their own                13
+    of them anonymous                                                         17
+    of them anonymous members laid out as records of their own                14
   incomplete struct and union tags (pointee identities only)                   5
   anonymous struct members promoted into their record                          2
-  layouts emitted                                                             65    76.5%
-    union layouts                                                             16    18.8%
-    synthetic layouts of anonymous members                                    11    12.9%
-  anonymous members representable but held by a blocked record (not emitted)       1     1.2%
-  records whose layout is blocked                                             19    22.4%
-    structs                                                                   15    17.6%
-    unions                                                                     4     4.7%
-    with a direct blocker of their own                                        14    16.5%
-    only through a record they hold by value                                   5     5.9%
+  layouts emitted                                                             73    80.2%
+    union layouts                                                             18    19.8%
+    synthetic layouts of anonymous members                                    12    13.2%
+  anonymous members representable but held by a blocked record (not emitted)       1     1.1%
+  records whose layout is blocked                                             17    18.7%
+    structs                                                                   13    14.3%
+    unions                                                                     4     4.4%
+    with a direct blocker of their own                                        12    13.2%
+    only through a record they hold by value                                   5     5.5%
 
 Layout blockers (records blocked; a record may have several)
-  nested-layout-blocked                                                        5     5.9%
-  float                                                                        3     3.5%
-  bitfield                                                                     2     2.4%
-  c-bool                                                                       2     2.4%
-  unsupported-pointer                                                          2     2.4%
-  double                                                                       1     1.2%
-  flexible-array                                                               1     1.2%
-  long-double                                                                  1     1.2%
-  typedef-abi-mismatch                                                         1     1.2%
-  unsupported-calling-convention                                               1     1.2%
-  volatile                                                                     1     1.2%
+  nested-layout-blocked                                                        5     5.5%
+  long-double                                                                  3     3.3%
+  bitfield                                                                     2     2.2%
+  c-bool                                                                       2     2.2%
+  flexible-array                                                               1     1.1%
+  typedef-abi-mismatch                                                         1     1.1%
+  unsupported-calling-convention                                               1     1.1%
+  unsupported-pointer                                                          1     1.1%
+  volatile                                                                     1     1.1%
   records blocked only transitively, by the direct reasons below them:
-      bitfield                                                                 2     2.4%
-      float                                                                    2     2.4%
-      c-bool                                                                   1     1.2%
+      bitfield                                                                 2     2.2%
+      long-double                                                              2     2.2%
+      c-bool                                                                   1     1.1%
 
 Layout pressure (blocked records a missing feature would make layouts: directly + transitively)
-  std::ffi::c::Bool fields                                                     3     3.5%  2 + 1
-  float fields                                                                 4     4.7%  2 + 2
-  double fields                                                                0     0.0%  0 + 0
-  float and double fields                                                      5     5.9%  3 + 2
-  long double fields                                                           1     1.2%  1 + 0
-  bitfields                                                                    4     4.7%  2 + 2
-  flexible array members                                                       1     1.2%  1 + 0
-  explicit calling conventions                                                 1     1.2%  1 + 0
-  float, double and Bool                                                       8     9.4%  5 + 3
-  all of the above                                                            15    17.6%  10 + 5
+  std::ffi::c::Bool fields                                                     3     3.3%  2 + 1
+  long double fields                                                           5     5.5%  3 + 2
+  other floating fields (_Float16, __float128, ...)                            0     0.0%  0 + 0
+  bitfields                                                                    4     4.4%  2 + 2
+  flexible array members                                                       1     1.1%  1 + 0
+  explicit calling conventions                                                 1     1.1%  1 + 0
+  all of the above                                                            14    15.4%  9 + 5
 
 API pressure (bound APIs pointing to C records)
-  bound APIs with a pointer to a C record (parameter or result)               15    30.0%
-    to a record with an emitted layout                                         7    46.7%
+  bound APIs with a pointer to a C record (parameter or result)               16    26.7%
+    to a record with an emitted layout                                         8    50.0%
     to a complete record whose layout is blocked                               0     0.0%
-    only to incomplete records (or complete ones outside the headers)          8    53.3%
+    only to incomplete records (or complete ones outside the headers)          8    50.0%
   pointers by shape and record (layout / blocked / incomplete / outside):
     param T *                2 / 0 / 6 / 0
-    param const T *          4 / 0 / 0 / 0
+    param const T *          5 / 0 / 0 / 0
     param T **               1 / 0 / 0 / 0
     result T *               1 / 0 / 3 / 0
     result T **              0 / 0 / 1 / 0
-  records bound signatures point to                                           10
-    complete                                                                   5    50.0%
-      with an emitted layout                                                   5    50.0%
+  records bound signatures point to                                           11
+    complete                                                                   6    54.5%
+      with an emitted layout                                                   6    54.5%
       whose layout is blocked                                                  0     0.0%
       outside the profile's records (a system header's)                        0     0.0%
-    incomplete (opaque only)                                                   5    50.0%
+    incomplete (opaque only)                                                   5    45.5%
   bound APIs a missing feature would give a layout of a record they point to:
       std::ffi::c::Bool fields                                                 0     0.0%  0 records
-      float fields                                                             0     0.0%  0 records
-      double fields                                                            0     0.0%  0 records
-      float and double fields                                                  0     0.0%  0 records
       long double fields                                                       0     0.0%  0 records
+      other floating fields (_Float16, __float128, ...)                        0     0.0%  0 records
       bitfields                                                                0     0.0%  0 records
       flexible array members                                                   0     0.0%  0 records
       explicit calling conventions                                             0     0.0%  0 records
-      float, double and Bool                                                   0     0.0%  0 records
       all of the above                                                         0     0.0%  0 records
 
 Macro APIs (apparent callables that are macros, and what each became)
-  declared functions a function-like macro shadows (thunked: the macro)        1
+  declared functions a function-like macro shadows (thunked: the macro)        2
   declared functions with a self-naming macro (bound as declared)              0
-  object-like aliases of a function (bound: its symbol, named)                 1
+  object-like aliases of a function (bound: its symbol, named)                 2
   function-like renames of a function (bound: its symbol, named)               1
   stub-table redirections (thunked: the C call goes through the table)         1
   stub-table redirections not bound (a blocker, or no stub policy)             0
@@ -150,11 +141,11 @@ Macros
   object: constant: integer literal                                            5
   object: empty                                                                4
   object: constant: expression with casts                                      3
+  function: call wrapper: computed arguments                                   2
   function: expression                                                         2
+  object: alias: function                                                      2
   object: constant: string literal                                             2
-  function: call wrapper: computed arguments                                   1
   function: call wrapper: rename                                               1
-  object: alias: function                                                      1
   object: alias: undeclared identifier                                         1
   object: constant: char literal                                               1
   object: constant: floating literal                                           1
@@ -163,9 +154,9 @@ Macros
 
 Generated source
   Botlish files                                                                6
-  lines                                                                      801
-  extern c fn declarations                                                    40
-  opaque types                                                                11
+  lines                                                                      927
+  extern c fn declarations                                                    51
+  opaque types                                                                12
   constants                                                                   16
-  layouts                                                                     49
-  shim thunks                                                                  5
+  layouts                                                                     55
+  shim thunks                                                                  6

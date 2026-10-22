@@ -41,14 +41,16 @@ ordinary parameter, an enum, a struct value, ...
 
 **Section order.** A parameter list is a sequence of *sections* in one
 canonical order, `ordinary* -> flags? -> context? -> variadic?`; `ordinary`,
-`flags` and (since CONTEXTS.md) `context` exist. The parser (`surface/parser.tcl`,
+`flags`, (since CONTEXTS.md) `context` and (since VARIADICS-VERTICAL-SLICE-1.md)
+`variadic` exist. The parser (`surface/parser.tcl`,
 `ParamSections`) reads one entry at a time and each entry knows its section
 (`paramSectionOrder`, `EnterSection`); `flags` does not swallow the rest of the
 signature, so `context` after it (CONTEXTS.md: `fn f(x, flags :q, context io:
 LinuxIO)`, its own `MALFORMED-CONTEXT-SECTION` diagnostics), and a terminal
 `variadic`, are one more marker and one more rank. An ordinary parameter after the flag section, a
 second `flags` section, or a flag outside the section is
-`MALFORMED-FLAG-SECTION`.
+`MALFORMED-FLAG-SECTION`; anything after the variadic section but a resume
+clause is `MALFORMED-VARIADIC-SECTION`.
 
 **`flags` is contextual, not reserved.** It opens the flag section only where
 an entry is spelled `flags :NAME`: the word, a colon *separated from it by
@@ -92,8 +94,9 @@ wrapper that wants a callee's flag declares it in its own signature
 enlarges a wrapper's API.
 
 An ordinary argument after the flags is `ARGUMENT-AFTER-FLAG` (`f(a, :q, b)`);
-this keeps the flag section distinguishable from a future variadic argument
-list. `f(:a, :a)` is `DUPLICATE-FLAG` (a set spelled twice is an error, never
+this keeps the flag section distinguishable from a variadic call's trailing
+arguments, which come before it (`report(10, 1, 2, :loud)`,
+VARIADICS-VERTICAL-SLICE-1.md). `f(:a, :a)` is `DUPLICATE-FLAG` (a set spelled twice is an error, never
 idempotent).
 
 ## Diagnostics

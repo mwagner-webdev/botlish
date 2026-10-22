@@ -525,7 +525,7 @@ summary: The structural hash of any value that has equality, an Int in 0..2^61-1
 index: stdlib
 symbol: hash
 keywords: hash code; hashing; hash table; bucket; fingerprint
-related: stdlib.module.root stdlib.== stdlib.mod concept.values
+related: stdlib.module.root stdlib.== stdlib.mod concept.values concept.hashable
 
 == SIGNATURE
     hash(any) -> int
@@ -541,14 +541,22 @@ hash(v) is a language primitive, exactly as general as ==: Ints, Strings,
 Bools, unit, characters, Lists, structs, enum cases, ImmutableSets and
 byte storage all hash, and two values that are == hash to the same Int.
 The result is nonnegative and below 2^61, so hash(key).mod(capacity) is a
-valid table slot.
+valid table slot. It is also the one operation of the built-in trait
+Hashable (concept.hashable): `x.hash()` on a Hashable value.
 
 The value is deterministic: the same on every backend, in every run and
 every process, with no random seed. It is not promised across compiler
 versions, and it is not cryptographic: never persist it or use it for
-security. A function, MutableArray or MutableVector has no hash (the
-EQUALITY error when the call runs), and an affine value is rejected at
-compile time (AFFINE-EQUALITY-UNSUPPORTED).
+security, and do not rely on it against keys an adversary chooses (the
+standard library's hash structures use a separate, collision-hardened hash
+for that, which no program sees).
+
+A function, MutableArray or MutableVector has no hash. Where the argument's
+type shows it is not Hashable (a function, a struct with a function field)
+the call is rejected at compile time (TRAIT-NOT-SATISFIED); an argument of
+unknown type (an untyped parameter) is checked when the call runs (the
+EQUALITY error); an affine value is rejected at compile time
+(AFFINE-EQUALITY-UNSUPPORTED). The hash of a Hashable value never fails.
 
 == EXAMPLES
 @example accept
@@ -3147,7 +3155,7 @@ related: stdlib.module.std::binary stdlib.std::binary::store_element stdlib.std:
     std::binary::element(any, int) -> any
 
 == ERRORS
-    IndexNotFound
+    IndexNotFound, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3211,7 +3219,7 @@ related: stdlib.module.std::binary concept.binary-layouts stdlib.std::binary::pa
     std::binary::emit(struct) -> struct
 
 == ERRORS
-    LayoutExtentMismatch
+    LayoutExtentMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3339,6 +3347,12 @@ related: stdlib.module.std::binary concept.binary-layouts stdlib.std::binary::na
 == SIGNATURE
     std::binary::load(any) -> any
 
+== ERRORS
+    NonFiniteFloat
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
 == USE
 An intrinsic of namespace std::binary: import std::binary, then write
 std::binary::load. Method syntax: receiver.load(...) is the same call.
@@ -3369,7 +3383,7 @@ related: stdlib.module.std::binary concept.binary-layouts stdlib.std::binary::em
     std::binary::parse(str, struct) -> struct
 
 == ERRORS
-    LayoutLengthMismatch
+    LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3432,7 +3446,7 @@ related: stdlib.module.std::binary stdlib.std::binary::write stdlib.std::binary:
     std::binary::read(struct, str) -> any
 
 == ERRORS
-    LayoutLengthMismatch
+    LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3494,7 +3508,7 @@ related: stdlib.module.std::binary stdlib.std::binary::native::edit stdlib.std::
     std::binary::store(any, str, any) -> unit
 
 == ERRORS
-    LayoutExtentMismatch
+    LayoutExtentMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3537,7 +3551,7 @@ related: stdlib.module.std::binary stdlib.std::binary::element stdlib.std::binar
     std::binary::store_element(any, int, any) -> unit
 
 == ERRORS
-    IndexNotFound
+    IndexNotFound, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3572,7 +3586,7 @@ related: stdlib.module.std::binary stdlib.std::binary::write_foreign stdlib.std:
     std::binary::write(struct, str, any) -> struct
 
 == ERRORS
-    LayoutExtentMismatch, LayoutLengthMismatch
+    LayoutExtentMismatch, LayoutLengthMismatch, NonFiniteFloat
 
 A call must handle each (on NAME:), admit it in its function's errors
 clause, or be proven unable to raise it (rule.unhandled-errors).
@@ -3759,17 +3773,26 @@ a field. The layout is static: it is named at a parse or a query and read
 from the value's type at an emit, never a runtime value. A field may be a
 fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N elements of
 any representation (a scalar, a pointer, a nested layout, another array),
-element i at the field's offset plus i times the element's width; its copied
-value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md). There are no
-unions, bitfields, variable-length tails, zero-length arrays or floats in a
-layout.
+element i at the field's offset plus i times the element's width; its
+copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
+There are no bitfields, variable-length tails or zero-length arrays in a
+layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
 
-A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of
-the target's pointer width). Such a layout is native-only: bytes never
-become a pointer, so std::binary::parse and std::binary::emit of it are
-LAYOUT-NATIVE-ONLY, and it is read from live native memory through a
-NativeView[L] (std::binary::native::view, then its fields or
-std::binary::load).
+A field may be C's float or double (std::ffi::c::Float, 4 bytes; std::ffi::c::Double,
+8), its value a Float64. A read of one -- std::binary::parse, std::binary::read,
+std::binary::load, std::binary::element, a view's field -- fails with the declared
+NonFiniteFloat when its bits are a NaN or an infinity (negative zero reads
+as 0.0); a write, store or emit of a float rounds the Float64 to nearest,
+ties to even, and fails with NonFiniteFloat when it overflows the float,
+before a byte is written. A call is charged NonFiniteFloat only when it
+reads a float or a double or writes a float: the errors listed below
+include it for those calls alone (concept.c-floats).
+
+A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of the
+target's pointer width). Such a layout is native-only: bytes never become
+a pointer, so std::binary::parse and std::binary::emit of it are LAYOUT-NATIVE-ONLY,
+and it is read from live native memory through a NativeView[L]
+(std::binary::native::view, then its fields or std::binary::load).
 
 Writes name their field statically, LAYOUT.FIELD or a path through nested
 layouts (Header.origin.x). A record in byte storage the program owns is
@@ -4644,12 +4667,13 @@ keywords: compile error; diagnostic; static compile
 related: concept.static-compile concept.testing
 
 == DESCRIPTION
-  std::compiler::CompilerError       the one error a `static compile:` block whose
-                                body the compiler rejects completes with
-  std::compiler::DiagnosticCode      which diagnostic rejected it: the stable,
-                                typed identity of a compiler diagnostic
-  std::compiler::SourceLocation      a line and column of the source file the
-                                block is written in
+  std::compiler::CompilerError   the one error a `static compile:` block
+                                 whose body the compiler rejects completes
+                                 with
+  std::compiler::DiagnosticCode  which diagnostic rejected it: the stable,
+                                 typed identity of a compiler diagnostic
+  std::compiler::SourceLocation  a line and column of the source file the
+                                 block is written in
 
   import std::compiler
 
@@ -4756,6 +4780,1082 @@ file. A coroutine is made by the `coroutine {step, first} = f(args)`
 binding, suspends at `yield`, and is resumed by calling its handle
 (concept.coroutines); the operations behind them are internal
 coroutine#... natives no source can name.
+
+@topic stdlib.std::darwin::c_errno_location
+title: std::darwin::c_errno_location -- Externfn of module std::darwin
+summary: int *__error(void)
+index: stdlib
+symbol: std::darwin::c_errno_location
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    extern c fn c_errno_location named "__error"() -> std::ffi::c::Ptr[std::ffi::c::Int] independent
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write
+std::darwin::c_errno_location.
+
+== DESCRIPTION
+int *__error(void): the address of the calling thread's errno.
+
+@topic stdlib.std::darwin::c_write
+title: std::darwin::c_write -- Externfn of module std::darwin
+summary: ssize_t write(int fd, const void *buf, size_t nbyte)
+index: stdlib
+symbol: std::darwin::c_write
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::c_write.
+
+== DESCRIPTION
+ssize_t write(int fd, const void *buf, size_t nbyte)
+
+@topic stdlib.std::darwin::c_read
+title: std::darwin::c_read -- Externfn of module std::darwin
+summary: ssize_t read(int fd, void *buf, size_t nbyte)
+index: stdlib
+symbol: std::darwin::c_read
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    extern c fn c_read named "read"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::c_read.
+
+== DESCRIPTION
+ssize_t read(int fd, void *buf, size_t nbyte)
+
+@topic stdlib.std::darwin::c_open
+title: std::darwin::c_open -- Externfn of module std::darwin
+summary: int open(const char *path, int oflag, ...)
+index: stdlib
+symbol: std::darwin::c_open
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    extern c fn c_open named "open"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, oflag: std::ffi::c::Int, variadic) -> std::ffi::c::Int
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::c_open.
+
+== DESCRIPTION
+int open(const char *path, int oflag, ...)
+
+@topic stdlib.std::darwin::c_close
+title: std::darwin::c_close -- Externfn of module std::darwin
+summary: int close(int fd)
+index: stdlib
+symbol: std::darwin::c_close
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    extern c fn c_close named "close"(fd: std::ffi::c::Int) -> std::ffi::c::Int
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::c_close.
+
+== DESCRIPTION
+int close(int fd)
+
+@topic stdlib.std::darwin::ErrnoCell
+title: std::darwin::ErrnoCell -- Layout of module std::darwin
+summary: The int errno is
+index: stdlib
+symbol: std::darwin::ErrnoCell
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    layout ErrnoCell:
+        size 4
+        align 4
+        field value: std::ffi::c::Int at 0
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::ErrnoCell.
+
+== DESCRIPTION
+The int errno is: what __error() points to.
+
+@topic stdlib.std::darwin::o_rdonly
+title: std::darwin::o_rdonly -- Value of module std::darwin
+summary: <fcntl.h>'s open flags on macOS.
+index: stdlib
+symbol: std::darwin::o_rdonly
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_rdonly = 0
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_rdonly.
+
+== DESCRIPTION
+<fcntl.h>'s open flags on macOS.
+
+@topic stdlib.std::darwin::o_wronly
+title: std::darwin::o_wronly -- Value of module std::darwin
+summary: The value std::darwin::o_wronly of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_wronly
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_wronly = 1
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_wronly.
+
+@topic stdlib.std::darwin::o_rdwr
+title: std::darwin::o_rdwr -- Value of module std::darwin
+summary: The value std::darwin::o_rdwr of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_rdwr
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_rdwr = 2
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_rdwr.
+
+@topic stdlib.std::darwin::o_creat
+title: std::darwin::o_creat -- Value of module std::darwin
+summary: The value std::darwin::o_creat of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_creat
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_creat = 512
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_creat.
+
+@topic stdlib.std::darwin::o_trunc
+title: std::darwin::o_trunc -- Value of module std::darwin
+summary: The value std::darwin::o_trunc of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_trunc
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_trunc = 1024
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_trunc.
+
+@topic stdlib.std::darwin::o_excl
+title: std::darwin::o_excl -- Value of module std::darwin
+summary: The value std::darwin::o_excl of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_excl
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_excl = 2048
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_excl.
+
+@topic stdlib.std::darwin::o_cloexec
+title: std::darwin::o_cloexec -- Value of module std::darwin
+summary: The value std::darwin::o_cloexec of the standard module std::darwin.
+index: stdlib
+symbol: std::darwin::o_cloexec
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    o_cloexec = 16777216
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::o_cloexec.
+
+@topic stdlib.std::darwin::AccessBits
+title: std::darwin::AccessBits -- Type of module std::darwin
+summary: The access bits of open(2)'s flags (O_ACCMODE's values).
+index: stdlib
+symbol: std::darwin::AccessBits
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    type AccessBits = Int in 0..2
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::AccessBits.
+
+== DESCRIPTION
+The access bits of open(2)'s flags (O_ACCMODE's values).
+
+@topic stdlib.std::darwin::Access
+title: std::darwin::Access -- Enum of module std::darwin
+summary: How a descriptor open(2) makes may be used
+index: stdlib
+symbol: std::darwin::Access
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    enum Access:
+        ReadOnly,
+        WriteOnly,
+        ReadWrite,
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::Access.
+
+== DESCRIPTION
+How a descriptor open(2) makes may be used: O_RDONLY, O_WRONLY or O_RDWR.
+
+@topic stdlib.std::darwin::WriteResult
+title: std::darwin::WriteResult -- Struct of module std::darwin
+summary: What one write(2) did
+index: stdlib
+symbol: std::darwin::WriteResult
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    struct WriteResult:
+        count: int
+        errno: int
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write
+std::darwin::WriteResult.
+
+== DESCRIPTION
+What one write(2) did: COUNT bytes written (>= 0; fewer than asked is a
+short write, not an error), or COUNT -1 when it failed, ERRNO the errno it
+left. ERRNO is 0 exactly when COUNT >= 0.
+
+@topic stdlib.std::darwin::ReadResult
+title: std::darwin::ReadResult -- Struct of module std::darwin
+summary: What one read(2) did
+index: stdlib
+symbol: std::darwin::ReadResult
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    struct ReadResult:
+        count: int
+        errno: int
+        data: std::abi::bytes::MutableBytes
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::ReadResult.
+
+== DESCRIPTION
+What one read(2) did: COUNT bytes read (> 0), 0 at end of file, or -1 when
+it failed (ERRNO the errno it left; 0 otherwise), and DATA, the buffer as C
+left it: its first COUNT bytes read, the rest as they were.
+
+@topic stdlib.std::darwin::OpenResult
+title: std::darwin::OpenResult -- Struct of module std::darwin
+summary: What one open(2) did
+index: stdlib
+symbol: std::darwin::OpenResult
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    struct OpenResult:
+        fd: std::ffi::c::Int
+        errno: int
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::OpenResult.
+
+== DESCRIPTION
+What one open(2) did: the new descriptor (>= 0), or -1 when it failed, ERRNO
+the errno it left (0 otherwise).
+
+@topic stdlib.std::darwin::CloseResult
+title: std::darwin::CloseResult -- Struct of module std::darwin
+summary: What one close(2) did
+index: stdlib
+symbol: std::darwin::CloseResult
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    struct CloseResult:
+        status: int
+        errno: int
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write
+std::darwin::CloseResult.
+
+== DESCRIPTION
+What one close(2) did: 0, or -1 when it failed, ERRNO the errno it left (0
+otherwise).
+
+@topic stdlib.std::darwin::errno
+title: std::darwin::errno -- Function of module std::darwin
+summary: The calling thread's errno, as it is now
+index: stdlib
+symbol: std::darwin::errno
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn errno() -> int:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::errno or,
+as a method, receiver.errno(...).
+
+== DESCRIPTION
+The calling thread's errno, as it is now: the int *__error() points to.
+Meaningful only right after a C call that reported a failure.
+
+@topic stdlib.std::darwin::write
+title: std::darwin::write -- Function of module std::darwin
+summary: write(2)
+index: stdlib
+symbol: std::darwin::write
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn write(fd: std::ffi::c::Int, data: std::abi::bytes::Bytes) -> WriteResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::write or,
+as a method, receiver.write(...).
+
+== DESCRIPTION
+write(2): DATA's bytes to descriptor FD, by one libSystem call.
+
+@topic stdlib.std::darwin::read
+title: std::darwin::read -- Function of module std::darwin
+summary: read(2) from descriptor FD into a logical copy of DATA, by one libSystem call
+index: stdlib
+symbol: std::darwin::read
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn read(fd: std::ffi::c::Int, data: std::abi::bytes::MutableBytes) -> ReadResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::read or, as
+a method, receiver.read(...).
+
+== DESCRIPTION
+read(2) from descriptor FD into a logical copy of DATA, by one libSystem
+call: DATA itself never changes (MUTABLE-BYTES.md); the bytes read are in
+the result's `data`, which keeps DATA's length. Take the bytes read with
+std::abi::bytes::freeze_prefix(result.data, std::abi::usize(result.count)).
+
+@topic stdlib.std::darwin::terminator
+title: std::darwin::terminator -- Function of module std::darwin
+summary: The byte that terminates a C string.
+index: stdlib
+symbol: std::darwin::terminator
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn terminator() -> std::byte::Byte:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::terminator
+or, as a method, receiver.terminator(...).
+
+== DESCRIPTION
+The byte that terminates a C string.
+
+@topic stdlib.std::darwin::c_string
+title: std::darwin::c_string -- Function of module std::darwin
+summary: PATH as the C string open(2) reads
+index: stdlib
+symbol: std::darwin::c_string
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn c_string(path: std::darwin::path::DarwinPath) -> std::abi::bytes::Bytes:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::c_string
+or, as a method, receiver.c_string(...).
+
+== DESCRIPTION
+PATH as the C string open(2) reads: its UTF-8 bytes and a terminating NUL
+(PATH holds no U+0000, so the NUL is the only one and ends it).
+
+@topic stdlib.std::darwin::access_flags
+title: std::darwin::access_flags -- Function of module std::darwin
+summary: The O_RDONLY / O_WRONLY / O_RDWR bits of ACCESS.
+index: stdlib
+symbol: std::darwin::access_flags
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn access_flags(access: Access) -> AccessBits:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write
+std::darwin::access_flags or, as a method, receiver.access_flags(...).
+
+== DESCRIPTION
+The O_RDONLY / O_WRONLY / O_RDWR bits of ACCESS.
+
+@topic stdlib.std::darwin::open_with
+title: std::darwin::open_with -- Function of module std::darwin
+summary: One open(2) with OFLAG and no creation mode, read as an OpenResult.
+index: stdlib
+symbol: std::darwin::open_with
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn open_with(path: std::darwin::path::DarwinPath, oflag: std::ffi::c::Int) -> OpenResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::open_with
+or, as a method, receiver.open_with(...).
+
+== DESCRIPTION
+One open(2) with OFLAG and no creation mode, read as an OpenResult.
+
+@topic stdlib.std::darwin::open_mode
+title: std::darwin::open_mode -- Function of module std::darwin
+summary: One open(2) with OFLAG and the creation mode MODE, its variadic argument.
+index: stdlib
+symbol: std::darwin::open_mode
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn open_mode(path: std::darwin::path::DarwinPath, oflag: std::ffi::c::Int, mode: std::ffi::c::UShort) -> OpenResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::open_mode
+or, as a method, receiver.open_mode(...).
+
+== DESCRIPTION
+One open(2) with OFLAG and the creation mode MODE, its variadic argument.
+
+@topic stdlib.std::darwin::open
+title: std::darwin::open -- Function of module std::darwin
+summary: open(2) of the existing file PATH for ACCESS
+index: stdlib
+symbol: std::darwin::open
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn open(path: std::darwin::path::DarwinPath, access: Access) -> OpenResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::open or, as
+a method, receiver.open(...).
+
+== DESCRIPTION
+open(2) of the existing file PATH for ACCESS: no O_CREAT, so no mode.
+
+@topic stdlib.std::darwin::create
+title: std::darwin::create -- Function of module std::darwin
+summary: open(2) of PATH for ACCESS, creating it with permissions MODE (before the process's umask) when it does not exist and truncating it when it does.
+index: stdlib
+symbol: std::darwin::create
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn create(path: std::darwin::path::DarwinPath, access: Access, mode: std::ffi::c::UShort) -> OpenResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::create or,
+as a method, receiver.create(...).
+
+== DESCRIPTION
+open(2) of PATH for ACCESS, creating it with permissions MODE (before the
+process's umask) when it does not exist and truncating it when it does.
+
+@topic stdlib.std::darwin::create_new
+title: std::darwin::create_new -- Function of module std::darwin
+summary: open(2) of PATH for ACCESS, creating it with permissions MODE
+index: stdlib
+symbol: std::darwin::create_new
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn create_new(path: std::darwin::path::DarwinPath, access: Access, mode: std::ffi::c::UShort) -> OpenResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::create_new
+or, as a method, receiver.create_new(...).
+
+== DESCRIPTION
+open(2) of PATH for ACCESS, creating it with permissions MODE; it fails with
+EEXIST when PATH exists (O_EXCL).
+
+@topic stdlib.std::darwin::close
+title: std::darwin::close -- Function of module std::darwin
+summary: close(2) of descriptor FD.
+index: stdlib
+symbol: std::darwin::close
+related: stdlib.module.std::darwin
+
+== DECLARATION
+    fn close(fd: std::ffi::c::Int) -> CloseResult:
+
+== MODULE
+stdlib/darwin.bot: import std::darwin, then write std::darwin::close or,
+as a method, receiver.close(...).
+
+== DESCRIPTION
+close(2) of descriptor FD.
+
+@topic stdlib.module.std::darwin
+title: std::darwin -- standard namespace
+summary: The macOS (Darwin) platform's low-level I/O operations, thin ordinary-Botlish wrappers over Apple's public C library, libSystem (MACOS-AARCH64-MILE.
+index: stdlib
+symbol: std::darwin
+
+== DESCRIPTION
+  std::darwin::write(fd, data)     write(2): ONE libSystem call; a
+                                   WriteResult
+  std::darwin::read(fd, data)      read(2): ONE call into a logical copy of
+                                   DATA; a ReadResult holding the copy
+  std::darwin::open(path, access)  open(2) of an existing file; an OpenResult
+  std::darwin::create(path, access, mode)
+                                   open(2) with O_CREAT and O_TRUNC, MODE the
+                                   new file's permissions; an OpenResult
+  std::darwin::create_new(path, access, mode)
+                                   the same with O_EXCL instead of O_TRUNC: it
+                                   fails (EEXIST) when the file exists
+  std::darwin::close(fd)           close(2); a CloseResult
+  std::darwin::errno()             the calling thread's errno, as it is now
+
+libSystem is the boundary. Darwin's kernel interface is private and changes
+between releases; its stable interface is the C library, so this module
+calls the C functions -- write, read, open, close and __error -- through
+ordinary `extern c fn` declarations of their prototypes (C-FFI.md), linked
+from the system library every macOS executable links: no syscall number, no
+`svc #0x80`, no transport of its own, and no compiler knowledge of I/O. It
+is the Linux module's sibling in shape (stdlib/linux.bot: one call, the raw
+outcome, a logical copy for read) but not in convention:
+
+* Darwin reports a failure as C does -- the call returns -1 and the reason
+  is in errno -- where Linux's raw syscall returns -errno in the result
+  register. A result here never encodes an errno: each one holds the C
+  result (count, descriptor or status, -1 on failure) and, separately, the
+  errno a failed call left (0 when it succeeded: errno is never read after a
+  success, where its value means nothing).
+* errno is per thread: the C macro is `(*__error())`, a function returning
+  the address of the calling thread's int. errno() reads it through a
+  native view of a one-field layout (NATIVE-LAYOUT-VIEWS.md) of that
+  address: no pointer arithmetic, no dereference operator, the pointer
+  never kept. A wrapper reads it right after the failed call returns,
+  before it calls anything else (a later C call could change it), on the
+  same thread (a Botlish program runs on one native thread: coroutines
+  switch stacks, never threads) and with no possible suspension between
+  (a yield is a statement of the coroutine's own body, never inside these
+  functions). Nothing the compiler inserts runs between the call and the
+  read either: read's write-back value is fields, its MutableBytes built
+  only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md), so no
+  allocation, collection or runtime call can disturb errno there.
+
+Byte storage reaches C only through the borrowing contract
+(C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it
+is, no copy), read's `write noescape` (a private copy C writes, returned as
+the result's `data`; the caller's MutableBytes never changes). Address and
+count come from the ONE value -- there is no count parameter -- and the
+count is proven a size_t (a std::abi::Usize's value is a std::ffi::c::ULong
+on macOS, LP64) with no run-time check. A path is a
+std::darwin::path::DarwinPath (non-empty, no U+0000), given to open(2) as
+its UTF-8 bytes and a terminating NUL, built for the call and exposed for it
+alone.
+
+open(2) is a genuine C variadic function, `int open(const char *, int,
+...)`, and is declared so (VARIADICS-VERTICAL-SLICE-1.md: on Apple arm64 a
+variadic call's trailing arguments travel on the stack, so a fixed
+three-parameter declaration would pass the mode where open never reads it).
+The creation mode is its one trailing argument, a std::ffi::c::UShort --
+macOS's mode_t is unsigned 16 bits -- which C's default argument promotion
+passes as an int (what open's va_arg reads). Only create and create_new pass
+it, and they always do: a creation (O_CREAT) can never omit its mode, and
+open passes no flag that would need one. Every descriptor is opened
+close-on-exec (O_CLOEXEC).
+
+Thin by design: ONE C call per operation, no loop, no retry (EINTR is a
+failure like any other: std::io::IO's completion policy, std::darwin::io,
+decides), no buffering, no descriptor ownership (closing is the caller's;
+nothing is closed for it), no text. The standard streams as a context and
+the portable std::io::IO implementation are std::darwin::io's.
+
+A direct module (DIRECT-MODULES.md): its operations take any descriptor and
+any path -- raw process authority -- with no context, and errno() makes a
+native view (std::binary::native, designated direct). Code that calls them
+is calling into a direct module and either mediates them through a context
+of its own (std::darwin::io's DarwinIO does) or is declared direct itself.
+The constants below are the macOS SDK's (<fcntl.h>), never Linux's:
+tests/darwin-io.test compares each with the host's headers on macOS.
+
+== SOURCE
+stdlib/darwin.bot (import std::darwin). A direct module
+(DIRECT-MODULES.md): it exercises raw authority.
+
+== MEMBERS
+    std::darwin::Access            enum -- How a descriptor open(2) makes m...
+    std::darwin::AccessBits        type -- The access bits of open(2)'s fla...
+    std::darwin::CloseResult       struct -- What one close(2) did
+    std::darwin::ErrnoCell         layout -- The int errno is
+    std::darwin::OpenResult        struct -- What one open(2) did
+    std::darwin::ReadResult        struct -- What one read(2) did
+    std::darwin::WriteResult       struct -- What one write(2) did
+    std::darwin::access_flags      function -- The O_RDONLY / O_WRONLY / O_...
+    std::darwin::c_close           externfn -- int close(int fd)
+    std::darwin::c_errno_location  externfn -- int *__error(void)
+    std::darwin::c_open            externfn -- int open(const char *path, i...
+    std::darwin::c_read            externfn -- ssize_t read(int fd, void *b...
+    std::darwin::c_string          function -- PATH as the C string open(2)...
+    std::darwin::c_write           externfn -- ssize_t write(int fd, const ...
+    std::darwin::close             function -- close(2) of descriptor FD.
+    std::darwin::create            function -- open(2) of PATH for ACCESS, ...
+    std::darwin::create_new        function -- open(2) of PATH for ACCESS, ...
+    std::darwin::errno             function -- The calling thread's errno, ...
+    std::darwin::o_cloexec         value
+    std::darwin::o_creat           value
+    std::darwin::o_excl            value
+    std::darwin::o_rdonly          value -- <fcntl.h>'s open flags on macOS.
+    std::darwin::o_rdwr            value
+    std::darwin::o_trunc           value
+    std::darwin::o_wronly          value
+    std::darwin::open              function -- open(2) of the existing file...
+    std::darwin::open_mode         function -- One open(2) with OFLAG and t...
+    std::darwin::open_with         function -- One open(2) with OFLAG and n...
+    std::darwin::read              function -- read(2) from descriptor FD i...
+    std::darwin::terminator        function -- The byte that terminates a C...
+    std::darwin::write             function -- write(2)
+
+Each member is a topic: -help NAME (e.g. -help std::darwin::Access).
+
+@topic stdlib.std::darwin::io::FileDescriptor
+title: std::darwin::io::FileDescriptor -- Opaque struct of module std::darwin::io
+summary: A Darwin file-descriptor token minted by this module.
+index: stdlib
+symbol: std::darwin::io::FileDescriptor
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    opaque struct FileDescriptor:
+        raw: std::ffi::c::Int
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::FileDescriptor.
+
+== DESCRIPTION
+A Darwin file-descriptor token minted by this module.
+
+@topic stdlib.std::darwin::io::DarwinIO
+title: std::darwin::io::DarwinIO -- Opaque context struct of module std::darwin::io
+summary: The process I/O environment
+index: stdlib
+symbol: std::darwin::io::DarwinIO
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    opaque context struct DarwinIO:
+        stdin: FileDescriptor
+        stdout: FileDescriptor
+        stderr: FileDescriptor
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::DarwinIO.
+
+== DESCRIPTION
+The process I/O environment: the standard input, output and error
+descriptors of the process. One context.
+
+@topic stdlib.std::darwin::io::create
+title: std::darwin::io::create -- Function of module std::darwin::io
+summary: The standard process I/O environment
+index: stdlib
+symbol: std::darwin::io::create
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn create() -> DarwinIO:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard process I/O environment: descriptors 0, 1 and 2. An ordinary
+constructor; `with context std::darwin::io::create()` installs its value.
+
+@topic stdlib.std::darwin::io::write
+title: std::darwin::io::write -- Function of module std::darwin::io
+summary: write(2) of DATA to the context's standard output
+index: stdlib
+symbol: std::darwin::io::write
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn write(data: std::abi::bytes::Bytes, context io: DarwinIO) -> std::darwin::WriteResult:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::write or, as a method, receiver.write(...).
+
+== DESCRIPTION
+write(2) of DATA to the context's standard output: ONE libSystem call,
+std::darwin::write's result unchanged (stdlib/darwin.bot).
+
+@topic stdlib.std::darwin::io::write_error
+title: std::darwin::io::write_error -- Function of module std::darwin::io
+summary: write(2) of DATA to the context's standard error.
+index: stdlib
+symbol: std::darwin::io::write_error
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn write_error(data: std::abi::bytes::Bytes, context io: DarwinIO) -> std::darwin::WriteResult:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::write_error or, as a method, receiver.write_error(...).
+
+== DESCRIPTION
+write(2) of DATA to the context's standard error.
+
+@topic stdlib.std::darwin::io::read
+title: std::darwin::io::read -- Function of module std::darwin::io
+summary: read(2) from the context's standard input into a logical copy of DATA
+index: stdlib
+symbol: std::darwin::io::read
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn read(data: std::abi::bytes::MutableBytes, context io: DarwinIO) -> std::darwin::ReadResult:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::read or, as a method, receiver.read(...).
+
+== DESCRIPTION
+read(2) from the context's standard input into a logical copy of DATA:
+std::darwin::read's semantics exactly (one call; the caller's buffer is
+unchanged; the count -- 0 at end of file, -1 on failure with its errno --
+and the buffer as C left it come back in a std::darwin::ReadResult).
+
+@topic stdlib.std::darwin::io::write_all
+title: std::darwin::io::write_all -- Function of module std::darwin::io
+summary: Writes every byte of BYTES to FD.
+index: stdlib
+symbol: std::darwin::io::write_all
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn write_all(fd: FileDescriptor, bytes: List[Byte], context io: DarwinIO) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::write_all or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes every byte of BYTES to FD. One write(2) of the whole text in the
+common case; a short write (fewer bytes than asked, but some) is completed
+by writing the rest, again and again, so the caller only ever sees all or
+std::io::WriteFailed. A failed write and one that makes no progress are
+std::io::WriteFailed; no count or errno escapes.
+
+It requires DarwinIO although it reads only FD: it makes the direct call
+(std::darwin::write, a callable of the direct module darwin), and a direct
+call is mediated by a context of this module in the function that makes it
+(DIRECT-MODULES.md), never by its callers' contexts. Its callers have it.
+
+@topic stdlib.std::darwin::io::write_text
+title: std::darwin::io::write_text -- Function of module std::darwin::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard output
+index: stdlib
+symbol: std::darwin::io::write_text
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn write_text(text: str, context io: DarwinIO) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::write_text or, as a method, receiver.write_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard output;
+std::io::WriteFailed when libSystem reports an error or the write stops
+making progress. Never a byte count.
+
+@topic stdlib.std::darwin::io::write_error_text
+title: std::darwin::io::write_error_text -- Function of module std::darwin::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard error.
+index: stdlib
+symbol: std::darwin::io::write_error_text
+related: stdlib.module.std::darwin::io
+
+== DECLARATION
+    fn write_error_text(text: str, context io: DarwinIO) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/darwin/io.bot: import std::darwin::io, then write
+std::darwin::io::write_error_text or, as a method,
+receiver.write_error_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard error.
+
+@topic stdlib.module.std::darwin::io
+title: std::darwin::io -- standard namespace
+summary: The process's standard I/O on macOS as one execution-environment context (CONTEXTS.md.
+index: stdlib
+symbol: std::darwin::io
+
+== DESCRIPTION
+  with context std::darwin::io::create()  install it (entry program)
+  std::darwin::io::write(data)            write(2) to the context's stdout
+  std::darwin::io::write_error(data)      write(2) to the context's stderr
+  std::darwin::io::read(buffer)           read(2) from the context's stdin
+
+DarwinIO is std::linux::io::LinuxIO's macOS sibling: ONE context, the
+process I/O environment, holding the three standard descriptors. A function
+that uses it says so once (`context io: DarwinIO`) and is called with its
+ordinary arguments; code between the entry program and it declares nothing
+(the compiler derives the requirement), and a call before `with context
+std::darwin::io::create()` is MISSING-CONTEXT at compile time.
+
+Capability boundary (DIRECT-MODULES.md). `darwin` is a direct module: its
+write and read take any descriptor. This module is not: every function here
+that calls into `darwin` requires DarwinIO, the context it defines itself,
+so the raw authority reaches its callers only as that capability -- and
+nothing above std::darwin::io is direct for using it. Every external effect
+flows
+
+  std::darwin::io::write --> std::darwin::write --> libSystem's write(3)
+
+through ordinary C calls (C-FFI.md): no syscall, no compiler knowledge of
+I/O. The low-level layer stays as it is: code that wants an explicit
+descriptor calls std::darwin::write(fd, data) / std::darwin::read(fd,
+buffer).
+
+Representation authority. FileDescriptor and DarwinIO are opaque
+(OPAQUE-STRUCTS.md): only this module may construct them or look inside; a
+DarwinIO a function receives as its context can be held and passed but not
+taken apart. The descriptor token is a std::ffi::c::Int, the C int every
+libSystem descriptor is; create() mints the three standard ones, 0, 1 and 2.
+The token does not claim the descriptor is open or stays open.
+
+DarwinIO implements the portable std::io::IO context trait
+(CONTEXT-TRAITS.md) with write_text and write_error_text below: ordinary
+functions of this module whose one context parameter is a DarwinIO and whose
+signatures match std::io::IO's requirements. Nothing registers them: where a
+call needs std::io::IO and DarwinIO is the one installed context that
+implements it, the compiler binds `io.write_text(...)` to a direct call of
+std::darwin::io::write_text -- no dispatch, no hidden argument, no provider
+table at run time.
+
+The completion policy is LinuxIO's, so std::io::IO means the same on both
+platforms: all of the text, or std::io::WriteFailed. A short positive write
+is completed by writing the rest; a failed write (-1, whatever the errno --
+EINTR and EAGAIN included: no retry) and a write that makes no progress are
+std::io::WriteFailed; no count, descriptor or errno escapes.
+
+Not here (deliberately): errno mapping beyond std::io::WriteFailed (the raw
+std::darwin::write/read keep it), buffering, text input, close/ownership
+(the standard descriptors need no application cleanup), other descriptors.
+
+== SOURCE
+stdlib/darwin/io.bot (import std::darwin::io).
+
+== MEMBERS
+    std::darwin::io::DarwinIO      opaque context struct -- The process I/O...
+    std::darwin::io::FileDescriptor opaque struct -- A Darwin file-descript...
+    std::darwin::io::create        function -- The standard process I/O env...
+    std::darwin::io::read          function -- read(2) from the context's s...
+    std::darwin::io::write         function -- write(2) of DATA to the cont...
+    std::darwin::io::write_all     function -- Writes every byte of BYTES t...
+    std::darwin::io::write_error   function -- write(2) of DATA to the cont...
+    std::darwin::io::write_error_text function -- All of TEXT, UTF-8 encode...
+    std::darwin::io::write_text    function -- All of TEXT, UTF-8 encoded, ...
+
+Each member is a topic: -help NAME (e.g. -help std::darwin::io::DarwinIO).
+
+@topic stdlib.std::darwin::path::DarwinPath
+title: std::darwin::path::DarwinPath -- Type of module std::darwin::path
+summary: The type std::darwin::path::DarwinPath of the standard module std::darwin::path.
+index: stdlib
+symbol: std::darwin::path::DarwinPath
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    refined type DarwinPath = str
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::DarwinPath.
+
+@topic stdlib.std::darwin::path::nul_free?
+title: std::darwin::path::nul_free? -- Function of module std::darwin::path
+summary: true when no character of VALUE is U+0000.
+index: stdlib
+symbol: std::darwin::path::nul_free?
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn nul_free?(value: str) -> bool:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::nul_free? or, as a method, receiver.nul_free?(...).
+
+== DESCRIPTION
+true when no character of VALUE is U+0000.
+
+@topic stdlib.std::darwin::path::valid?
+title: std::darwin::path::valid? -- Function of module std::darwin::path
+summary: true when VALUE is a valid textual Darwin path (non-empty, no U+0000), which proves it a DarwinPath
+index: stdlib
+symbol: std::darwin::path::valid?
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn valid?(value: str) -> bool proves value: DarwinPath:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::valid? or, as a method, receiver.valid?(...).
+
+== DESCRIPTION
+true when VALUE is a valid textual Darwin path (non-empty, no U+0000), which
+proves it a DarwinPath; false proves nothing.
+
+@topic stdlib.std::darwin::path::validate
+title: std::darwin::path::validate -- Function of module std::darwin::path
+summary: Completes normally only when VALUE is a valid textual Darwin path, which proves it a DarwinPath for the rest of the caller's path
+index: stdlib
+symbol: std::darwin::path::validate
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn validate(value: str) -> unit proves value: DarwinPath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::validate or, as a method, receiver.validate(...).
+
+== DESCRIPTION
+Completes normally only when VALUE is a valid textual Darwin path, which
+proves it a DarwinPath for the rest of the caller's path; fails with
+std::io::path::NotAPath otherwise.
+
+@topic stdlib.std::darwin::path::text
+title: std::darwin::path::text -- Function of module std::darwin::path
+summary: The path's canonical String form
+index: stdlib
+symbol: std::darwin::path::text
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn text(path: DarwinPath) -> str:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::text or, as a method, receiver.text(...).
+
+== DESCRIPTION
+The path's canonical String form: exactly the carrier String (lossless; no
+escaping, quoting or display conversion).
+
+@topic stdlib.std::darwin::path::ends_with_slash?
+title: std::darwin::path::ends_with_slash? -- Function of module std::darwin::path
+summary: true when TEXT's last character is "/".
+index: stdlib
+symbol: std::darwin::path::ends_with_slash?
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn ends_with_slash?(text: str) -> bool:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::ends_with_slash? or, as a method,
+receiver.ends_with_slash?(...).
+
+== DESCRIPTION
+true when TEXT's last character is "/".
+
+@topic stdlib.std::darwin::path::concat
+title: std::darwin::path::concat -- Function of module std::darwin::path
+summary: PATH joined with COMPONENT
+index: stdlib
+symbol: std::darwin::path::concat
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn concat(path: DarwinPath, component: str) -> DarwinPath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::concat or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with COMPONENT: one "/" between them unless PATH already ends
+with one. COMPONENT is a relative path fragment -- non-empty, without
+U+0000, not starting with "/" (an absolute component would replace PATH,
+which joining never does) -- and may itself contain "/", "." or "..";
+nothing is normalized and no filesystem is observed. Fails with
+std::io::path::NotAPath for any other COMPONENT. The result is a DarwinPath
+by validation, the ordinary owner proof.
+
+@topic stdlib.module.std::darwin::path
+title: std::darwin::path -- standard namespace
+summary: Textual macOS (Darwin) paths (CONTEXT-TRAITS.md, "Paths".
+index: stdlib
+symbol: std::darwin::path
+
+== DESCRIPTION
+  std::darwin::path::validate(value)     proves VALUE a DarwinPath, or
+                                         std::io::path::NotAPath
+  std::darwin::path::valid?(value)       true proves VALUE a DarwinPath
+  std::darwin::path::concat(path, part)  PATH joined with PART: a DarwinPath
+  std::darwin::path::text(path)          PATH's String form (the carrier)
+
+DarwinPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
+be a non-empty String without U+0000 -- text that may be handed to libSystem
+as an ordinary C pathname once it is encoded as UTF-8 and given its
+terminating NUL (std::darwin::open and std::darwin::create do that, for the
+one call). It is the same String, with the String's representation, so a
+validated value keeps being used as text with no conversion. It is
+std::linux::path::LinuxPath's sibling, not a shared type: each platform owns
+its textual path, and std::io::path::Path is what portable code names.
+
+The proposition is textual eligibility and nothing more. It does NOT claim
+that the path exists, is readable or writable, is a file or a directory,
+resolves through symlinks, is canonical, is shorter than PATH_MAX or a
+filesystem's name limit, is normalized the way APFS compares names, or is
+meaningful relative to the current working directory: those are facts about
+the environment at some moment, never about the String, and validation
+observes no filesystem. Nor does it claim to represent every Darwin
+directory entry: Darwin names are bytes, and arbitrary-byte paths belong to
+a lower-level abstraction. Validation does not normalize: ".", "..", "./a",
+"../a", "a//b" and "/a/b" are valid exactly as written.
+
+DarwinPath satisfies the portable std::io::path::Path trait through this
+module's own `concat` and `text` (TRAITS.md: the owner's declarations,
+nothing else), so a function over std::io::path::Path specializes to direct
+calls of them.
+
+== SOURCE
+stdlib/darwin/path.bot (import std::darwin::path).
+
+== MEMBERS
+    std::darwin::path::DarwinPath  type
+    std::darwin::path::concat      function -- PATH joined with COMPONENT
+    std::darwin::path::ends_with_slash? function -- true when TEXT's last c...
+    std::darwin::path::nul_free?   function -- true when no character of VA...
+    std::darwin::path::text        function -- The path's canonical String ...
+    std::darwin::path::valid?      function -- true when VALUE is a valid t...
+    std::darwin::path::validate    function -- Completes normally only when...
+
+Each member is a topic: -help NAME (e.g. -help
+std::darwin::path::DarwinPath).
 
 @topic stdlib.std::decimal_rounded::round
 title: std::decimal_rounded::round -- intrinsic of namespace std::decimal_rounded
@@ -5041,22 +6141,32 @@ promotion, no wrapping); an Int becomes one only where its range proves it
 fits. std::ffi::c::Int and std::ffi::c::Long stay two types where their
 ranges agree.
 
-C double (an intrinsic type of this namespace, FLOAT64-MILESTONE-1.md):
+C floating types (intrinsic types of this namespace,
+C-FLOAT-FFI-MILESTONE-1.md): C representations whose values are Float64s.
 
-  std::ffi::c::Double            Botlish's Float64 under its C ABI name: the
-                            same values, carried as the target's IEEE 754
-                            binary64 in its floating-point register class.
-                            Every Float64 is a double; a double C returns
-                            is a Float64 only when it is finite -- a NaN or
-                            an infinity is the call's NonFiniteFloat (an
-                            extern c fn returning one declares it), and
-                            negative zero is zero.
+  std::ffi::c::Double       C's double, IEEE 754 binary64 (8 bytes): every
+                            Float64 is one, exactly
+  std::ffi::c::Float        C's float, IEEE 754 binary32 (4 bytes): a
+                            Float64 leaving for one is rounded to nearest,
+                            ties to even, and one that rounds to an
+                            infinity is NonFiniteFloat before C runs (never
+                            clamped); a float entering widens exactly
+
+They name C types only -- an extern c fn's parameters and result, a function
+pointer's signature, a pointee, a layout field -- and stay two types
+(Ptr[std::ffi::c::Float] is no Ptr[std::ffi::c::Double]). A float or double
+entering Botlish is a Float64 only when it is finite: a NaN or an infinity
+is NonFiniteFloat (the call, or the layout read, declares it), and negative
+zero is zero. Where a value type is written, std::ffi::c::Double means
+Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number.
+C long double has no type.
 
 Pointers (intrinsic types and operations of this namespace):
 
-  std::ffi::c::Void              the C void: an incomplete pointee, no values
-  std::ffi::c::Ptr[T]            a C data pointer whose pointee identity is T:
-                            std::ffi::c::Void, a C integer scalar, an opaque
+  std::ffi::c::Void         the C void: an incomplete pointee, no values
+  std::ffi::c::Ptr[T]       a C data pointer whose pointee identity is T:
+                            std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool,
+                            std::ffi::c::Float or std::ffi::c::Double, an opaque
                             struct (an incomplete C tag's identity), or
                             another pointer
   std::ffi::c::FnPtr[Fn{args: [A, ...], return: R}]
@@ -5082,12 +6192,12 @@ parameter, that C does not keep the pointer (noescape) and whether C reads
 or writes through it, and its pointee is a byte-sized C type
 (std::ffi::c::Char, SChar, UChar) or std::ffi::c::Void:
 
-  std::abi::bytes::Bytes          read access only: C sees the bytes
-  std::abi::bytes::MutableBytes   read: its bytes as they are; write: a private
-                             copy C may modify, which the call returns as
-                             the parameter's updated value (the caller's
-                             own value never changes: a MutableBytes is a
-                             value)
+  std::abi::bytes::Bytes         read access only: C sees the bytes
+  std::abi::bytes::MutableBytes  read: its bytes as they are; write: a
+                                 private copy C may modify, which the call
+                                 returns as the parameter's updated value
+                                 (the caller's own value never changes: a
+                                 MutableBytes is a value)
 
 A parameter that may keep the pointer, or about which nothing is known,
 never admits it: `const` is not noescape, and unknown is not "probably
@@ -5119,6 +6229,60 @@ storing it moves it), owns nothing, is never dereferenced, and has no
 arithmetic, ordering, equality or conversion to or from an Int. Calling C
 itself is `extern c fn` (concept.c-ffi), which runs only on the native
 backends.
+
+@topic stdlib.std::float64::min
+title: std::float64::min -- Function (nomethod) of module std::float64
+summary: The function (nomethod) std::float64::min of the standard module std::float64.
+index: stdlib
+symbol: std::float64::min
+related: stdlib.module.std::float64
+
+== DECLARATION
+    nomethod fn min(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+stdlib/float64.bot: import std::float64, then write std::float64::min.
+
+@topic stdlib.std::float64::max
+title: std::float64::max -- Function (nomethod) of module std::float64
+summary: The function (nomethod) std::float64::max of the standard module std::float64.
+index: stdlib
+symbol: std::float64::max
+related: stdlib.module.std::float64
+
+== DECLARATION
+    nomethod fn max(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+stdlib/float64.bot: import std::float64, then write std::float64::max.
+
+@topic stdlib.std::float64::abs
+title: std::float64::abs -- Function of module std::float64
+summary: The function std::float64::abs of the standard module std::float64.
+index: stdlib
+symbol: std::float64::abs
+related: stdlib.module.std::float64
+
+== DECLARATION
+    fn abs(x: Float64) -> Float64:
+
+== MODULE
+stdlib/float64.bot: import std::float64, then write std::float64::abs or,
+as a method, receiver.abs(...).
+
+@topic stdlib.std::float64::clamp
+title: std::float64::clamp -- Function of module std::float64
+summary: The function std::float64::clamp of the standard module std::float64.
+index: stdlib
+symbol: std::float64::clamp
+related: stdlib.module.std::float64
+
+== DECLARATION
+    fn clamp(x: Float64, low: Float64, high: Float64) -> Float64:
+
+== MODULE
+stdlib/float64.bot: import std::float64, then write std::float64::clamp
+or, as a method, receiver.clamp(...).
 
 @topic stdlib.std::float64::from_decimal_rounded
 title: std::float64::from_decimal_rounded -- intrinsic of namespace std::float64
@@ -5235,31 +6399,61 @@ big = 1.0e20
 
 @topic stdlib.module.std::float64
 title: std::float64 -- standard namespace
-summary: The explicit conversions of Float64: from and to Int (std::float64::from_int, std::float64::truncate) and from DecimalRounded (std::float64::from_decimal_rounded).
+summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
 index: stdlib
 symbol: std::float64
-keywords: float functions; float conversion; int to float; float to int; decimal to float
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
 related: concept.floats stdlib./ concept.decimal-rounded
 
+== DESCRIPTION
+The namespace's intrinsics are root natives registered under their qualified
+names -- std::float64::from_int, std::float64::truncate,
+std::float64::from_decimal_rounded (core/float.tcl, FLOAT64-MILESTONE-1.md)
+-- and this module may never define a member of the same name
+(surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md). Below are the
+comparisons every program that bounds a Float64 writes, added by the Icy
+Tower workload (ICY-TOWER-VERTICAL-SLICE-1.md, "Stdlib additions"):
+
+  std::float64::min(a, b)            the smaller of A and B (A when they
+                                     are equal)
+  std::float64::max(a, b)            the larger of A and B (A when they
+                                     are equal)
+  std::float64::abs(x)               X without its sign
+  std::float64::clamp(x, low, high)  X bounded to LOW..HIGH: LOW when X is
+                                     below it, else HIGH when X is above
+                                     that, else X
+
+Each is a comparison and at most a negation, so none can fail: there is no
+arithmetic that could leave the finite Float64s (no NonFiniteFloat), and a
+Float64 has no NaN for a comparison to be unordered with. min and max are
+`nomethod`: their operands are symmetric, and neither is a receiver (the
+bit_and precedent, REFACTOR-WARNINGS-CLEAN.md).
+
 == SOURCE
-Compiler intrinsics only, no module file (import std::float64).
+stdlib/float64.bot (import std::float64).
 
 == MEMBERS
+    std::float64::abs              function
+    std::float64::clamp            function
     std::float64::from_decimal_rounded intrinsic -- The Float64 nearest rou...
     std::float64::from_int         intrinsic -- The Float64 nearest the Int...
+    std::float64::max              function (nomethod)
+    std::float64::min              function (nomethod)
     std::float64::truncate         intrinsic -- The Int part of the Float64...
 
-Each member is a topic: -help NAME (e.g. -help
-std::float64::from_decimal_rounded).
+Each member is a topic: -help NAME (e.g. -help std::float64::abs).
 
 == NOTES
-`float64` has no module file: its members are intrinsics, reached with
-`import std::float64`. They are the only conversions between Float64 and the
-other number types: Botlish never converts implicitly, so an expression
-mixing an Int and a Float64 is rejected until one side is converted (and
-so is one mixing a Float64 and a DecimalRounded value). There is no
+The conversions are intrinsics and the bounds (min, max, abs, clamp) the
+ordinary Botlish of stdlib/float64.bot, all reached with `import std::float64`.
+The conversions are the only ones between Float64 and the other number
+types: Botlish never converts implicitly, so an expression mixing an Int
+and a Float64 is rejected until one side is converted (and so is one
+mixing a Float64 and a DecimalRounded value). The bounds never fail: they
+compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, and no bit-level access to a Float64.
+result, no math library beyond these, and no bit-level access to a
+Float64.
 
 @topic stdlib.std::immutable_set::contains
 title: std::immutable_set::contains -- intrinsic of namespace std::immutable_set
@@ -6816,13 +8010,67 @@ import std::list
 @value [3, 0, 1]
 @end
 
+@topic stdlib.std::list::with_length
+title: std::list::with_length -- intrinsic of namespace std::list
+summary: std::list::with_length[List[T]{length: N}](xs): xs itself, now known to have exactly N elements, when it has; otherwise the declared error LengthMismatch, after `import std::list`.
+index: stdlib
+symbol: std::list::with_length
+keywords: check length; validate length; exact length; assert length; fixed length; LengthMismatch
+related: stdlib.module.std::list concept.list-length concept.scalar-refinements stdlib.std::list::length stdlib.std::decimal_rounded::round rule.unhandled-errors
+
+== SIGNATURE
+    std::list::with_length(list) -> list
+
+== ERRORS
+    LengthMismatch
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::list: import std::list, then write
+std::list::with_length. Method syntax: receiver.with_length(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The explicit way to mint a List length refinement (concept.list-length)
+from a List whose length is not known statically. It compares the length
+once and returns its argument unchanged -- no copy, no new List -- with the
+type of its imprint; any other length completes with the builtin declared
+error LengthMismatch. The imprint is explicit and must be a refined List
+type (std::list::with_length[List[int]](xs) is a TYPE error, and without [T]
+it is IMPRINT); the argument must already be a List of the imprint's
+element type, since the check proves a length, never elements. Where a
+guard reads better, `if xs.length() == N:` refines xs in its branch
+without a call. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import std::list
+
+fn triple(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    std::list::with_length[List[int]{length: 3}](xs)
+
+fn middle(xs: List[int]) -> int:
+    t = xs.triple():
+        on LengthMismatch:
+            return -1
+    t.at(1)
+
+[middle([4, 5, 6]), middle([4, 5])]
+@value [5, -1]
+@end
+
 @topic stdlib.module.std::list
 title: std::list -- standard namespace
 summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
 index: stdlib
 symbol: std::list
 keywords: list functions; array functions; sequence operations
-related: concept.lists task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter
 
 == DESCRIPTION
 The namespace's intrinsics are root natives registered under their qualified
@@ -6910,16 +8158,17 @@ stdlib/list.bot (import std::list).
     std::list::get                 function
     std::list::length              intrinsic -- The number of elements of a...
     std::list::none?               function
+    std::list::with_length         intrinsic -- std::list::with_length[List...
 
 Each member is a topic: -help NAME (e.g. -help std::list::NotFound).
 
 == NOTES
-Three intrinsics (std::list::length, std::list::at, std::list::append) and
-the ordinary Botlish functions of stdlib/list.bot built on them. `import
-std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
-methods (xs.at(0)). A List is immutable: append returns a new List and
-nothing changes one in place (a MutableVector is the growable mutable
-alternative).
+Four intrinsics (std::list::length, std::list::at, std::list::append and the length
+validator std::list::with_length) and the ordinary Botlish functions of
+stdlib/list.bot built on them. `import std::list` makes both
+callable, qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List
+is immutable: append returns a new List and nothing changes one in place
+(a MutableVector is the growable mutable alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
 concatenation of two Lists or index-of: a collecting loop
@@ -9398,7 +10647,7 @@ their results.
 
   with context std::test::suite()
   register_arithmetic_tests()
-  std::test::report()          # ["PASS adds", "PASS unbound", "2 passed, 0 failed"]
+  std::test::report()     # ["PASS adds", "PASS unbound", "2 passed, 0 failed"]
 
 The suite. `std::test::suite()` is the value a program installs with `with
 context`: a Suite whose one field is the MutableVector of registered cases.
@@ -9760,3 +11009,559 @@ Ordinary Botlish. A program that imports web also prints the module's own
 ONE-CHAR-STRING-LITERAL findings (its tables of one-character Strings),
 which are listed in the warning gate's manifest; they are not about the
 importing program.
+
+@topic stdlib.std::windows::c_get_std_handle
+title: std::windows::c_get_std_handle -- Externfn of module std::windows
+summary: HANDLE GetStdHandle(DWORD nStdHandle)
+index: stdlib
+symbol: std::windows::c_get_std_handle
+related: stdlib.module.std::windows
+
+== DECLARATION
+    extern c fn c_get_std_handle named "GetStdHandle"(which: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::c_get_std_handle.
+
+== DESCRIPTION
+HANDLE GetStdHandle(DWORD nStdHandle)
+
+@topic stdlib.std::windows::c_write_file
+title: std::windows::c_write_file -- Externfn of module std::windows
+summary: BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,                LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlappe...
+index: stdlib
+symbol: std::windows::c_write_file
+related: stdlib.module.std::windows
+
+== DECLARATION
+    extern c fn c_write_file named "WriteFile"(file: std::ffi::c::Ptr[std::ffi::c::Void] noescape, buffer: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, count: std::ffi::c::ULong, written: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, overlapped: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::c_write_file.
+
+== DESCRIPTION
+BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,
+               LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped)
+
+lpNumberOfBytesWritten is a DWORD *: byte storage, so its pointee is
+declared void (an exposure's pointee is byte-sized or void), and the four
+bytes are read back by the Written layout. lpOverlapped is always NULL:
+synchronous I/O.
+
+@topic stdlib.std::windows::c_get_last_error
+title: std::windows::c_get_last_error -- Externfn of module std::windows
+summary: DWORD GetLastError(void)
+index: stdlib
+symbol: std::windows::c_get_last_error
+related: stdlib.module.std::windows
+
+== DECLARATION
+    extern c fn c_get_last_error named "GetLastError"() -> std::ffi::c::ULong
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::c_get_last_error.
+
+== DESCRIPTION
+DWORD GetLastError(void)
+
+@topic stdlib.std::windows::StandardDevice
+title: std::windows::StandardDevice -- Enum of module std::windows
+summary: The process's standard devices
+index: stdlib
+symbol: std::windows::StandardDevice
+related: stdlib.module.std::windows
+
+== DECLARATION
+    enum StandardDevice:
+        Input,
+        Output,
+        Error,
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::StandardDevice.
+
+== DESCRIPTION
+The process's standard devices: GetStdHandle's nStdHandle.
+
+@topic stdlib.std::windows::Written
+title: std::windows::Written -- Layout of module std::windows
+summary: The DWORD WriteFile reports its count in.
+index: stdlib
+symbol: std::windows::Written
+related: stdlib.module.std::windows
+
+== DECLARATION
+    layout Written:
+        size 4
+        align 4
+        field count: std::binary::U32 at 0
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write std::windows::Written.
+
+== DESCRIPTION
+The DWORD WriteFile reports its count in.
+
+@topic stdlib.std::windows::WriteResult
+title: std::windows::WriteResult -- Struct of module std::windows
+summary: What one WriteFile did
+index: stdlib
+symbol: std::windows::WriteResult
+related: stdlib.module.std::windows
+
+== DECLARATION
+    struct WriteResult:
+        ok: bool
+        count: int
+        last_error: int
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::WriteResult.
+
+== DESCRIPTION
+What one WriteFile did: OK its BOOL (WriteFile returned TRUE), COUNT the
+bytes it reported written (fewer than asked is a short write, not an error;
+0 when it failed), LAST_ERROR the thread's last-error code when it failed,
+read right after it (0 exactly when OK).
+
+@topic stdlib.std::windows::selector
+title: std::windows::selector -- Function of module std::windows
+summary: STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+index: stdlib
+symbol: std::windows::selector
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn selector(device: StandardDevice) -> std::ffi::c::ULong:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write std::windows::selector
+or, as a method, receiver.selector(...).
+
+== DESCRIPTION
+STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE: (DWORD)-10, -11, -12.
+
+@topic stdlib.std::windows::standard_handle
+title: std::windows::standard_handle -- Function of module std::windows
+summary: The process's standard handle of DEVICE, as it is now (GetStdHandle reads the process's slot each time
+index: stdlib
+symbol: std::windows::standard_handle
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn standard_handle(device: StandardDevice) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::standard_handle or, as a method,
+receiver.standard_handle(...).
+
+== DESCRIPTION
+The process's standard handle of DEVICE, as it is now (GetStdHandle reads
+the process's slot each time: SetStdHandle may have changed it): NULL when
+the process has none, INVALID_HANDLE_VALUE when GetStdHandle failed.
+Borrowed: never close it.
+
+@topic stdlib.std::windows::last_error
+title: std::windows::last_error -- Function of module std::windows
+summary: The calling thread's last-error code, as it is now.
+index: stdlib
+symbol: std::windows::last_error
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn last_error() -> int:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::last_error or, as a method, receiver.last_error(...).
+
+== DESCRIPTION
+The calling thread's last-error code, as it is now. Meaningful only right
+after a call that reported a failure.
+
+@topic stdlib.std::windows::request
+title: std::windows::request -- Function of module std::windows
+summary: How many of DATA's bytes one WriteFile asks for
+index: stdlib
+symbol: std::windows::request
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn request(data: std::abi::bytes::Bytes) -> std::ffi::c::ULong:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write std::windows::request
+or, as a method, receiver.request(...).
+
+== DESCRIPTION
+How many of DATA's bytes one WriteFile asks for: all of them, or a DWORD's
+maximum.
+
+@topic stdlib.std::windows::written
+title: std::windows::written -- Function of module std::windows
+summary: The count WriteFile wrote into CELL.
+index: stdlib
+symbol: std::windows::written
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn written(cell: std::abi::bytes::MutableBytes) -> int:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write std::windows::written
+or, as a method, receiver.written(...).
+
+== DESCRIPTION
+The count WriteFile wrote into CELL.
+
+@topic stdlib.std::windows::write_file
+title: std::windows::write_file -- Function of module std::windows
+summary: WriteFile of DATA's bytes to HANDLE, by one kernel32 call (synchronous
+index: stdlib
+symbol: std::windows::write_file
+related: stdlib.module.std::windows
+
+== DECLARATION
+    fn write_file(handle: std::ffi::c::Ptr[std::ffi::c::Void], data: std::abi::bytes::Bytes) -> WriteResult:
+
+== MODULE
+stdlib/windows.bot: import std::windows, then write
+std::windows::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+WriteFile of DATA's bytes to HANDLE, by one kernel32 call (synchronous: no
+overlapped structure).
+
+@topic stdlib.module.std::windows
+title: std::windows -- standard namespace
+summary: The Windows platform's low-level output operations, thin ordinary-Botlish wrappers over kernel32 (WINDOWS-X86-64-MILESTONE-2.md).
+index: stdlib
+symbol: std::windows
+
+== DESCRIPTION
+  std::windows::standard_handle(device)   GetStdHandle: the process's
+                                          standard handle of DEVICE, as it is
+                                          now
+  std::windows::write_file(handle, data)  WriteFile: ONE kernel32 call, all
+                                          of DATA asked (or a DWORD's worth);
+                                          a WriteResult
+  std::windows::last_error()              GetLastError: the calling thread's
+                                          last-error code, as it is now
+
+kernel32 is the boundary: the Windows system interface is its DLLs' exports,
+which this module calls through ordinary `extern c fn` declarations of their
+documented prototypes (C-FFI.md), linked through kernel32's import library
+(`extern c library "kernel32"`): no system call number, no C runtime
+function, and no compiler knowledge of I/O.
+
+A HANDLE is an opaque pointer-sized value, `void *` -- a std::ffi::c::Ptr[
+std::ffi::c::Void] here, never an integer or a POSIX descriptor. A standard
+handle is the process's (its STD_INPUT_HANDLE, STD_OUTPUT_HANDLE and
+STD_ERROR_HANDLE slots), *borrowed*: this module never closes one, and has
+no CloseHandle. GetStdHandle documents two results that are no usable
+handle: NULL when the process has no handle for the device (a process
+started without one), and INVALID_HANDLE_VALUE when the call itself failed.
+NULL is told apart (`null?`); INVALID_HANDLE_VALUE is a pointer value
+Botlish cannot compare with (a C pointer has no equality, C-ABI-TYPES.md),
+and is left to WriteFile, which refuses it with ERROR_INVALID_HANDLE (6),
+the error a WriteResult then carries.
+
+Windows reports a failure as its API does: the call returns FALSE and the
+reason is the thread's last-error code (GetLastError), which a later call
+may change. write_file reads it right after WriteFile returns, before any
+other call: nothing runs between the two but the test of WriteFile's BOOL,
+and the byte count's write-back value is built only after it
+(C-FFI-ERROR-CAPTURE-MILESTONE-1.md); neither the allocator nor the
+collector makes a Win32 call that sets the code. A result never encodes the
+code in its count: it holds WriteFile's own success, the count it reported,
+and, separately, the code a failed call left (`last_error`) (0 when it
+succeeded: the code is never read after a success, where it means nothing).
+
+Byte storage reaches C only through the borrowing contract
+(C-POINTER-BORROWING.md): the buffer is `read noescape` (exposed as it is,
+no copy) and its count derived from the ONE value -- there is no count
+parameter; the DWORD WriteFile writes its count into is a 4-byte
+MutableBytes, `write noescape` (a private copy C writes, read back as a
+binary layout). A DWORD holds at most 4294967295, so a larger Bytes is asked
+for in part: a short write by construction, which the count says.
+
+Thin by design: ONE kernel32 call per operation, no loop, no retry, no
+console mode, code page or UTF-16 conversion (the bytes are written as they
+are: WriteFile writes bytes to a console, a file or a pipe alike), no
+buffering, no overlapped I/O, no handle ownership. The standard streams as a
+context and the portable std::io::IO implementation are std::windows::io's.
+
+An ordinary module (DIRECT-MODULES.md): every C call here retains nothing --
+every pointer parameter is noescape -- so none is a direct edge. Any code
+may ask the process for its standard handles; a handle authorizes only the
+writes its device takes.
+
+== SOURCE
+stdlib/windows.bot (import std::windows).
+
+== MEMBERS
+    std::windows::StandardDevice   enum -- The process's standard devices
+    std::windows::WriteResult      struct -- What one WriteFile did
+    std::windows::Written          layout -- The DWORD WriteFile reports it...
+    std::windows::c_get_last_error externfn -- DWORD GetLastError(void)
+    std::windows::c_get_std_handle externfn -- HANDLE GetStdHandle(DWORD nS...
+    std::windows::c_write_file     externfn -- BOOL WriteFile(HANDLE hFile,...
+    std::windows::last_error       function -- The calling thread's last-er...
+    std::windows::request          function -- How many of DATA's bytes one...
+    std::windows::selector         function -- STD_INPUT_HANDLE, STD_OUTPUT...
+    std::windows::standard_handle  function -- The process's standard handl...
+    std::windows::write_file       function -- WriteFile of DATA's bytes to...
+    std::windows::written          function -- The count WriteFile wrote in...
+
+Each member is a topic: -help NAME (e.g. -help
+std::windows::StandardDevice).
+
+@topic stdlib.std::windows::io::WindowsIO
+title: std::windows::io::WindowsIO -- Opaque context struct
+summary: The process's output environment
+index: stdlib
+symbol: std::windows::io::WindowsIO
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    opaque context struct WindowsIO:
+        stdout: std::windows::StandardDevice
+        stderr: std::windows::StandardDevice
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::WindowsIO.
+
+== DESCRIPTION
+The process's output environment: its standard output and standard error
+devices (never their handles). One context.
+
+@topic stdlib.std::windows::io::create
+title: std::windows::io::create -- Function of module std::windows::io
+summary: The standard process output environment.
+index: stdlib
+symbol: std::windows::io::create
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn create() -> WindowsIO:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard process output environment. An ordinary constructor; `with
+context std::windows::io::create()` installs its value.
+
+@topic stdlib.std::windows::io::write
+title: std::windows::io::write -- Function of module std::windows::io
+summary: WriteFile of DATA to the context's standard output
+index: stdlib
+symbol: std::windows::io::write
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write(data: std::abi::bytes::Bytes, context io: WindowsIO) -> std::windows::WriteResult:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write or, as a method, receiver.write(...).
+
+== DESCRIPTION
+WriteFile of DATA to the context's standard output: ONE kernel32 call,
+std::windows::write_file's result unchanged (stdlib/windows.bot). With no
+standard output handle (NULL) WriteFile refuses the call:
+ERROR_INVALID_HANDLE.
+
+@topic stdlib.std::windows::io::write_error
+title: std::windows::io::write_error -- Function of module std::windows::io
+summary: WriteFile of DATA to the context's standard error.
+index: stdlib
+symbol: std::windows::io::write_error
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write_error(data: std::abi::bytes::Bytes, context io: WindowsIO) -> std::windows::WriteResult:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write_error or, as a method, receiver.write_error(...).
+
+== DESCRIPTION
+WriteFile of DATA to the context's standard error.
+
+@topic stdlib.std::windows::io::progress
+title: std::windows::io::progress -- Function of module std::windows::io
+summary: The progress one WriteFile made
+index: stdlib
+symbol: std::windows::io::progress
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn progress(r: std::windows::WriteResult) -> int:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::progress or, as a method, receiver.progress(...).
+
+== DESCRIPTION
+The progress one WriteFile made: the bytes it wrote, none when it failed.
+
+@topic stdlib.std::windows::io::write_some
+title: std::windows::io::write_some -- Function of module std::windows::io
+summary: How many of BYTES one WriteFile wrote to DEVICE's current handle
+index: stdlib
+symbol: std::windows::io::write_some
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write_some(device: std::windows::StandardDevice, bytes: List[Byte]) -> int:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write_some or, as a method, receiver.write_some(...).
+
+== DESCRIPTION
+How many of BYTES one WriteFile wrote to DEVICE's current handle: 0 when the
+process has no handle for it (GetStdHandle's NULL) or WriteFile reported a
+failure.
+
+@topic stdlib.std::windows::io::write_all
+title: std::windows::io::write_all -- Function of module std::windows::io
+summary: Writes every byte of BYTES to DEVICE's current handle.
+index: stdlib
+symbol: std::windows::io::write_all
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write_all(device: std::windows::StandardDevice, bytes: List[Byte]) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write_all or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes every byte of BYTES to DEVICE's current handle. One WriteFile of the
+whole text in the common case; a short write (fewer bytes than asked, but
+some) is completed by writing the rest, again and again, so the caller only
+ever sees all or std::io::WriteFailed. A device with no handle, a failed
+write and one that makes no progress are std::io::WriteFailed; no count or
+error code escapes.
+
+@topic stdlib.std::windows::io::write_text
+title: std::windows::io::write_text -- Function of module std::windows::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard output
+index: stdlib
+symbol: std::windows::io::write_text
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write_text(text: str, context io: WindowsIO) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write_text or, as a method, receiver.write_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard output;
+std::io::WriteFailed when Windows reports an error, the write stops making
+progress or the process has no standard output. Never a byte count.
+
+@topic stdlib.std::windows::io::write_error_text
+title: std::windows::io::write_error_text -- Function of module std::windows::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard error.
+index: stdlib
+symbol: std::windows::io::write_error_text
+related: stdlib.module.std::windows::io
+
+== DECLARATION
+    fn write_error_text(text: str, context io: WindowsIO) -> unit errors std::io::WriteFailed:
+
+== MODULE
+stdlib/windows/io.bot: import std::windows::io, then write
+std::windows::io::write_error_text or, as a method,
+receiver.write_error_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard error.
+
+@topic stdlib.module.std::windows::io
+title: std::windows::io -- standard namespace
+summary: The process's standard output and error on Windows as one execution-environment context (CONTEXTS.md.
+index: stdlib
+symbol: std::windows::io
+
+== DESCRIPTION
+  with context std::windows::io::create()  install it (entry program)
+  std::windows::io::write(data)            WriteFile to the context's
+                                           standard output: a
+                                           std::windows::WriteResult
+  std::windows::io::write_error(data)      the same to its standard error
+
+WindowsIO is std::linux::io::LinuxIO's and std::darwin::io::DarwinIO's
+Windows sibling: ONE context, the process's output environment. A function
+that uses it says so once (`context io: WindowsIO`) and is called with its
+ordinary arguments; code between the entry program and it declares nothing
+(the compiler derives the requirement), and a call before `with context
+std::windows::io::create()` is MISSING-CONTEXT at compile time.
+
+What the context holds is the process's standard *devices* -- its output and
+its error -- never a handle: a Windows standard handle is the process's
+slot, read with GetStdHandle when a write needs it (windows::
+standard_handle), and a C pointer cannot live in a context anyway (an
+installed context is erased: AFFINE-ERASURE-UNSUPPORTED, C-ABI-TYPES.md). So
+every write uses the handle the process has at that moment -- a console, a
+file or a pipe, whatever the launcher redirected it to -- and the context
+owns nothing: no handle is opened, duplicated or closed here.
+
+Representation authority. WindowsIO is opaque (OPAQUE-STRUCTS.md): only this
+module may construct it or look inside; a WindowsIO a function receives as
+its context can be held and passed but not taken apart.
+
+WindowsIO implements the portable std::io::IO context trait
+(CONTEXT-TRAITS.md) with write_text and write_error_text below: ordinary
+functions of this module whose one context parameter is a WindowsIO and
+whose signatures match std::io::IO's requirements. Nothing registers them:
+where a call needs std::io::IO and WindowsIO is the one installed context
+that implements it, the compiler binds `io.write_text(...)` to a direct call
+of std::windows::io:: write_text -- no dispatch, no hidden argument, no
+provider table at run time.
+
+The completion policy is LinuxIO's and DarwinIO's, so std::io::IO means the
+same on every platform: all of the text, or std::io::WriteFailed. A short
+write is completed by writing the rest; a write WriteFile reports failed
+(whatever its last-error code: no retry), one that makes no progress, and a
+device the process has no handle for (GetStdHandle's NULL) are
+std::io::WriteFailed; no count, handle or error code escapes. The text is
+written as its UTF-8 bytes, exactly: no UTF-16 conversion, no console code
+page applied, no newline translation (a redirected output receives the
+bytes; a console shows them through its output code page, which
+WINDOWS-X86-64-MILESTONE-2.md's "Text and encoding" describes).
+
+Not here (deliberately): input, files, the error code beyond
+std::io::WriteFailed (the raw std::windows::write_file and
+std::windows::io::write keep it), console modes, WriteConsoleW, buffering.
+
+== SOURCE
+stdlib/windows/io.bot (import std::windows::io).
+
+== MEMBERS
+    std::windows::io::WindowsIO    opaque context struct -- The process's o...
+    std::windows::io::create       function -- The standard process output ...
+    std::windows::io::progress     function -- The progress one WriteFile made
+    std::windows::io::write        function -- WriteFile of DATA to the con...
+    std::windows::io::write_all    function -- Writes every byte of BYTES t...
+    std::windows::io::write_error  function -- WriteFile of DATA to the con...
+    std::windows::io::write_error_text function -- All of TEXT, UTF-8 encod...
+    std::windows::io::write_some   function -- How many of BYTES one WriteF...
+    std::windows::io::write_text   function -- All of TEXT, UTF-8 encoded, ...
+
+Each member is a topic: -help NAME (e.g. -help
+std::windows::io::WindowsIO).

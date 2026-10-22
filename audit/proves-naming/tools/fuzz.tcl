@@ -402,13 +402,19 @@ proc compileMode {source mode} {
     return [surface::compile $source fuzz.bot -warnings $mode -warning-channel ""]
 }
 
+# The source file path of the warning location ORIGIN: its location text
+# without the trailing :LINE:COL (a Windows path has a colon of its own).
+proc PathOf {hir origin} {
+    regsub {:[0-9]+:[0-9]+$} [hir::originLocation $hir $origin] {}
+}
+
 # {FILE LINE COL NAME KIND} of each PROVES-NAMING warning of HIR.
 proc namingOf {hir} {
     set result {}
     foreach w [hir::warnings::of $hir] {
         if {[dict get $w code] ne "PROVES-NAMING"} continue
         set at [lrange [dict get $w primary] 2 end]
-        set file [file tail [lindex [split [hir::originLocation $hir [dict get $w primary]] :] 0]]
+        set file [file tail [PathOf $hir [dict get $w primary]]]
         lappend result [list $file [dict get $at line] [dict get $at column] \
             [dict get $w data functionName] [dict get $w data kind]]
     }
@@ -438,7 +444,7 @@ proc literalsOf {hir} {
     foreach w [hir::warnings::of $hir] {
         if {[dict get $w code] ne "ONE-CHAR-STRING-LITERAL"} continue
         set at [lrange [dict get $w primary] 2 end]
-        set file [file tail [lindex [split [hir::originLocation $hir [dict get $w primary]] :] 0]]
+        set file [file tail [PathOf $hir [dict get $w primary]]]
         lappend result [list $file [dict get $at line] [dict get $at column]]
     }
     return [lsort -dictionary $result]

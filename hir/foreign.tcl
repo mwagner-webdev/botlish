@@ -80,9 +80,11 @@ proc hir::foreign::Location {span} {
 # The ABI transport class of the C value type TYPE (a resolved type): i8 ..
 # u64 for a C integer scalar by its registry metadata's width and
 # signedness (never its name), bool for C _Bool (std::ffi::c::Bool, Botlish's
-# bool: one byte, 0 or 1), f64 for C double (std::ffi::c::Double, Botlish's
-# Float64: an IEEE 754 binary64), ptr for a data or function pointer, void
-# for unit (a result only).
+# bool: one byte, 0 or 1), f32 or f64 for a C floating type by the IEEE 754
+# format the compilation's target gives it (core::cabi::floatingInfo: C
+# float is binary32, C double binary64 -- never read from their Float64
+# carrier, C-FLOAT-FFI-MILESTONE-1.md), ptr for a data or function pointer,
+# void for unit (a result only).
 proc hir::foreign::AbiClass {type} {
     if {$type eq "unit"} {
         return void
@@ -90,8 +92,8 @@ proc hir::foreign::AbiClass {type} {
     if {$type eq "bool"} {
         return bool
     }
-    if {$type eq "Float64"} {
-        return f64
+    if {[hir::cabi::IsFloating $type]} {
+        return [dict get [hir::cabi::FloatingInfo $type] class]
     }
     if {[hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type]} {
         return ptr
@@ -194,15 +196,38 @@ proc hir::foreign::apply {decls linkDecls} {
         set contract [dict create params $params result $result provenance $provenance]
         set native [nativeName $key]
         set abi [dict create params $abiParams result [AbiClass $result]]
+        # A variadic C function (VARIADICS-VERTICAL-SLICE-1.md): its
+        # declaration is its fixed parameters, and a native of any arity;
+        # each call's trailing arguments carry their own C types
+        # (hir::borrow's `cvarargs`).
+        set variadic [dict getdef $decl variadic 0]
+        if {$variadic} {
+            dict set contract variadic 1
+            dict set abi variadic 1
+        }
         set kinds [lmap p $params {
             set t [dict get $p type]
-            if {[hir::types::IsCPtr $t] || [hir::types::IsCFnPtr $t]} {string cat "any"} elseif {$t in {bool Float64}} {set t} else {string cat "int"}
+            if {[hir::types::IsCPtr $t] || [hir::types::IsCFnPtr $t]} {
+                string cat "any"
+            } elseif {[hir::cabi::IsFloating $t]} {
+                hir::cabi::Carrier $t
+            } elseif {$t eq "bool"} {
+                set t
+            } else {
+                string cat "int"
+            }
         }]
         set extern [dict create key $key namespace $ns name $name symbol $symbol abi $abi]
-        # A double C returns is a Float64 only when it is finite: the call
-        # completes with NonFiniteFloat otherwise (FLOAT64-MILESTONE-1.md).
-        set errors [expr {$result eq "Float64" ? "NonFiniteFloat" : ""}]
-        core::native::register $native -arity [llength $params] \
+        # A C floating value C returns is a Float64 only when it is finite,
+        # and a Float64 narrowed to a C float may round to an infinity: the
+        # call completes with NonFiniteFloat then (FLOAT64-MILESTONE-1.md,
+        # C-FLOAT-FFI-MILESTONE-1.md) -- after C returned, or before C is
+        # called. A double argument is exact: every Float64 is a double.
+        set errors ""
+        if {[hir::cabi::IsFloating $result] || [NarrowedParameters $abi] ne ""} {
+            set errors NonFiniteFloat
+        }
+        core::native::register $native -arity [expr {$variadic ? "*" : [llength $params]}] \
             -impl [list core::cabi::ExternImpl $key] \
             -param-types $kinds -result-type any -errors $errors \
             -ownership [lrepeat [llength $params] observe] \
@@ -226,10 +251,19 @@ proc hir::foreign::apply {decls linkDecls} {
     set links $plan
 }
 
+# The indices of the parameters of the ABI signature ABI ({params CLASSES
+# result CLASS}) whose argument is narrowed on the way to C: a C float's
+# (f32), which a Float64 may overflow (core::cabi::Narrow).
+proc hir::foreign::NarrowedParameters {abi} {
+    return [lsearch -all -exact [dict get $abi params] f32]
+}
+
 # The resolved C value type (or unit) TYPEEXPR denotes in namespace NS, for
-# WHAT at SPAN, or a located semantic error.
+# WHAT at SPAN, or a located semantic error. A C type is named here, so
+# std::ffi::c::Float and std::ffi::c::Double are C floating types (hir::cabi::
+# ResolveCType).
 proc hir::foreign::ResolveCType {typeExpr ns span what} {
-    if {[catch {hir::resolve::ResolveTypeExpr $typeExpr $ns} type options]} {
+    if {[catch {hir::cabi::ResolveCType $typeExpr $ns} type options]} {
         core::semanticError [hir::resolve::TypeErrorKind $options TYPE] \
             "[Location $span]unknown or invalid type [hir::resolve::ShowTypeExpr $typeExpr] for $what: $type"
     }

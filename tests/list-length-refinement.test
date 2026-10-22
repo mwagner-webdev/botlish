@@ -1,0 +1,797 @@
+# list-length-refinement.test -- List[T]{length: N}, the exact List
+# cardinality refinement (LIST-CARDINALITY-REFINEMENTS.md): the second
+# family of the scalar-refinement schema DecimalRounded established
+# (hir/refinements.tcl), an equality-ordered fact about an ordinary List.
+#
+# The file pins the syntax and its validation, the canonical form (one
+# representation, {srefined List FACTS BASE}) and its text, implication,
+# decay and joins, the sources that mint the fact (literals, declared
+# contracts, guards, std::list::with_length, std::list::append, collecting loops,
+# copies of fixed layout arrays) and the boundaries that forget it
+# (undeclared results, semantic instance keys, mutable element contracts),
+# admission without a run-time check, the proofs that consume it (bounds,
+# fixed-array extents, std::list::length), FIXED-ARITY-LIST-RETURN's independence
+# of it, HIR text, interchange, the front-end cache, compilation isolation,
+# the unchanged runtime representation, and parity of all four backends.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+# The HIR of source TEXT (warnings off).
+proc llrHir {text} {
+    return [surface::compile $text t.bot -warnings off]
+}
+
+# The raw outcome of HIR under BACKEND: {value V} or {error CODE MESSAGE}.
+proc llrRun {backend hir} {
+    set saved [core::useBackend]
+    resetEffects
+    try {
+        if {[catch {
+            switch -- $backend {
+                interp {
+                    core::useBackend interp
+                    core::evalProgram [hir::lower $hir]
+                }
+                compile { core::compiler::evalHir $hir }
+                cranelift-generic { native::evalHir $hir -specialize 0 }
+                cranelift { native::evalHir $hir }
+            }
+        } result options]} {
+            return [list error [lrange [dict get $options -errorcode] 0 2] $result]
+        }
+        return [list value [core::value::show $result]]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# The outcome of HIR, agreed by every backend: {value V} or {error CODE ...}.
+proc llrOutcome {hir {backends {interp compile cranelift-generic cranelift}}} {
+    if {![testConstraint nativeBuilt]} {
+        set backends [lsearch -all -inline -not -glob $backends cranelift*]
+    }
+    set outcomes [lmap b $backends {
+        set o [llrRun $b $hir]
+        if {[lindex $o 0] eq "error"} {
+            # (The message of a run-time error is the backend's own.)
+            set o [lrange $o 0 1]
+        }
+        set o
+    }]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "mismatch across $backends: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The value of source TEXT, agreed by every backend.
+proc llrValue {text} {
+    set outcome [llrOutcome [llrHir $text]]
+    if {[lindex $outcome 0] ne "value"} {
+        error "not a value: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# "KIND: MESSAGE" of the first diagnostic of source TEXT's compilation (its
+# location dropped), or accepted.
+proc rejection {text} {
+    if {[catch {surface::compile $text t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        if {[lrange $code 0 1] eq {SURFACE SYNTAX}} {
+            set code SYNTAX
+        }
+        regsub {^t\.bot:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return "[lindex $code end]: $message"
+    }
+    return accepted
+}
+
+# The diagnostic kind of source TEXT's compilation (the first one's), or
+# accepted.
+proc rejectionKind {text} {
+    set r [rejection $text]
+    return [lindex [split $r :] 0]
+}
+
+# The type the annotation TEXT resolves to, or "KIND: error".
+proc llrType {text} {
+    if {[catch {surface::parse "fn f(x: $text) -> int:\n    1\n" t.bot} ast]} {
+        return "syntax: $ast"
+    }
+    set expr [lindex [dict get [lindex [dict get $ast body] 0] params] 0 2]
+    if {[catch {hir::resolve::ResolveTypeExpr $expr} type]} {
+        return "[lindex $::errorCode end]: $type"
+    }
+    return $type
+}
+
+# The static type of top-level binding NAME of HIR, as it is spelled.
+proc llrBindingType {hir name} {
+    return [hir::types::show [hir::bindingType $hir [hir::lookup $hir [hir::top $hir] $name]]]
+}
+
+# The NIR text of HIR's native lowering.
+proc llrNir {hir} {
+    return [native::lowered $hir]
+}
+
+# The NIR operations (op NAME) of function NAME in NIR text TEXT.
+proc llrOps {text name} {
+    set ops {}
+    set in 0
+    foreach line [split $text \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fn]} {
+            set in [expr {$fn eq $name}]
+            continue
+        }
+        if {$in && [regexp {= op (\S+)} $line -> op]} {
+            lappend ops $op
+        }
+        if {$in && [regexp {^\s+faildeclared [0-9]+ "([^"]+)"} $line -> err]} {
+            lappend ops "fail:$err"
+        }
+    }
+    return $ops
+}
+
+set prelude "import std::list\n"
+
+# ---------------------------------------------------------------------------
+# Syntax and the scalar-refinement schema
+
+test llr-parse-forms {List[T]{length: N} is the scalar-refinement grammar after an applied type: the base before the braces, the fields as DecimalRounded's (comma or line separated); the AST is {refine List FIELDS BASE}} -body {
+    set ast [surface::parse "fn f(x: List\[int\]{length: 4}, y: List\[List\[str\]{length: 2}\]{\n    length: 3\n}) -> int:\n    1\n" t.bot]
+    set params [dict get [lindex [dict get $ast body] 0] params]
+    list [lindex $params 0 2] [lindex $params 1 2] [surface::ast::showType [lindex $params 1 2]]
+} -result {{refine List {{length 4}} {List int}} {refine List {{length 3}} {List {refine List {{length 2}} {List str}}}} {List[List[str]{length: 2}]{length: 3}}}
+
+test llr-parameters-validated {length is a non-negative compile-time integer, the List family's one parameter, written once, after an applied List; no other constructor has refinements (no MutableVector or MutableArray length, no ImmutableSet size), and no family takes the wrong form} -body {
+    lmap type [list "List\[int\]{length: -1}" "List\[int\]{size: 4}" "List\[int\]{}" "List{length: 4}" \
+            "MutableVector\[int\]{length: 4}" "MutableArray\[int\]{length: 4}" "ImmutableSet\[int\]{length: 4}" \
+            "DecimalRounded\[int\]{minDecimalsPreserved: 2}" "List\[int\]{length: 0}" "List\[int\]{length: 1000000}"] {
+        rejection "fn f(x: $type) -> int:\n    1\nf\n"
+    }
+} -result {{REFINEMENT-PARAMETER: unknown or invalid type List[int]{length: -1} for parameter "x": List[T]'s "length" must be at least 0, not -1} {REFINEMENT-PARAMETER: unknown or invalid type List[int]{size: 4} for parameter "x": "size" is not a parameter of List[T] (its parameters: length); List[T] requires "length" (write List[T]{length: N})} {REFINEMENT-PARAMETER: unknown or invalid type List[int]{} for parameter "x": List[T] requires "length" (write List[T]{length: N})} {REFINEMENT-PARAMETER: unknown or invalid type List{length: 4} for parameter "x": List[T]{...} refines an applied type: write its type argument before the refinement (List[T]{length: N})} {REFINEMENT-PARAMETER: unknown or invalid type MutableVector[int]{length: 4} for parameter "x": "MutableVector" has no scalar refinements: NAME{...} refines one of DecimalRounded, List[T]} {REFINEMENT-PARAMETER: unknown or invalid type MutableArray[int]{length: 4} for parameter "x": "MutableArray" has no scalar refinements: NAME{...} refines one of DecimalRounded, List[T]} {REFINEMENT-PARAMETER: unknown or invalid type ImmutableSet[int]{length: 4} for parameter "x": "ImmutableSet" has no scalar refinements: NAME{...} refines one of DecimalRounded, List[T]} {REFINEMENT-PARAMETER: unknown or invalid type DecimalRounded[int]{minDecimalsPreserved: 2} for parameter "x": DecimalRounded takes no type argument: write DecimalRounded{minDecimalsPreserved: N}} accepted accepted}
+
+test llr-parse-errors {a malformed field is a syntax error where it is written, as for every scalar refinement: a non-integer, a repeat, a missing colon} -body {
+    lmap type [list "List\[int\]{length: 2.5}" "List\[int\]{length: 2, length: 3}" "List\[int\]{length 2}" "List\[int\]{length: n}"] {
+        rejectionKind "fn f(x: $type) -> int:\n    1\nf\n"
+    }
+} -result {SYNTAX SYNTAX SYNTAX SYNTAX}
+
+test llr-canonical-form {a refined List is {srefined List FACTS BASE}: one canonical form, the base the List type it refines; its text is the source spelling, read back by HIR text; an empty List[never] states length 0 by its own form and stays that one type} -body {
+    set a [llrType "List\[int\]{length: 4}"]
+    set b [llrType "List\[int\]{\n    length: 4\n}"]
+    set nested [llrType "List\[List\[int\]{length: 2}\]{length: 3}"]
+    list $a [expr {$a eq $b}] [hir::types::show $a] [hir::types::show $nested] \
+        [hir::types::Refine {list never} List {length 0}] [hir::types::Refine {list never} List {length 2}] \
+        [hir::types::LengthOf {list never}] [hir::types::LengthOf {list int}] [hir::types::LengthOf $nested] \
+        [hir::types::Unrefined $a]
+} -result {{srefined List {length 4} {list int}} 1 {List[int]{length: 4}} {List[List[int]{length: 2}]{length: 3}} {list never} never 0 {} 3 {list int}}
+
+test llr-schema-generic {List is a row of the scalar-refinement schema: its base kind, an applied base, the one parameter of order exactly, the declared interface; no procedure of hir/refinements.tcl names the parameter} -body {
+    set schema [hir::refinements::Schema List]
+    list [hir::refinements::Families] [dict get $schema base] [dict get $schema applied] [dict get $schema interface] \
+        [dict get $schema params length order] \
+        [llength [regexp -all -inline {\mlength\M} [join [lmap p [info procs ::hir::refinements::*] {info body $p}]]]]
+} -result {{DecimalRounded List} list 1 declared exactly 0}
+
+# ---------------------------------------------------------------------------
+# The lattice: implication, decay, joins
+
+test llr-implication {exact length is an equality fact: a List of 4 is a List of 4 and a List, never one of 3 or 5; the element follows List's rules (covariant as a subtype); forgetting the length is subtyping; an unrefined List implies no length; the empty List[never] is a List of length 0} -body {
+    set types [list [llrType "List\[int\]{length: 4}"] [llrType "List\[int\]{length: 3}"] [llrType "List\[int\]"] \
+        [llrType "List\[int\]{length: 0}"] {list never}]
+    lmap a $types {
+        join [lmap b $types {hir::types::subtype $a $b}] {}
+    }
+} -result {10100 01100 00100 00110 00111}
+
+test llr-joins {the join of two refined Lists keeps the length when both state the same one and forgets it otherwise (no range is invented); the meet of two lengths is none; a guard's fact narrows a List's element type not at all, and contradicts another length (never)} -body {
+    set l4 [llrType "List\[int\]{length: 4}"]
+    set l5 [llrType "List\[int\]{length: 5}"]
+    set s4 [llrType "List\[str\]{length: 4}"]
+    set plain [llrType "List\[int\]"]
+    set guard [hir::types::Refine list List {length 4}]
+    list [hir::types::show [hir::types::lub $l4 $l4]] [hir::types::show [hir::types::lub $l4 $l5]] \
+        [hir::types::show [hir::types::lub $l4 $plain]] [hir::types::show [hir::types::lub $l4 $s4]] \
+        [hir::types::show [hir::types::lub $l4 int]] [hir::types::show [hir::types::lub $l4 {list never}]] \
+        [hir::types::glb $l4 $l5] [hir::types::show [hir::types::narrow $plain $guard]] \
+        [hir::types::narrow $l5 $guard] [hir::types::show [hir::types::lub [llrType "List\[int\]{length: 0}"] {list never}]]
+} -result {{List[int]{length: 4}} {List[int]} {List[int]} {list{length: 4}} any {List[int]} {} {List[int]{length: 4}} never {List[int]{length: 0}}}
+
+test llr-decimal-rounded-unchanged {the second family changes no DecimalRounded fact: its canonical form keeps three words (no carried base), its order stays atLeast, and an undeclared result keeps a guarantee (its interface is inferred)} -body {
+    set d2 [hir::refinements::Resolve DecimalRounded {{minDecimalsPreserved 2}}]
+    set d4 [hir::refinements::Resolve DecimalRounded {{minDecimalsPreserved 4}}]
+    list $d2 [hir::types::subtype $d4 $d2] [hir::types::subtype $d2 $d4] [hir::types::show [hir::types::lub $d2 $d4]] \
+        [hir::types::ForgetInferred $d2] [hir::types::ForgetInferred [list list $d2]] \
+        [hir::types::ForgetInferred [hir::types::Refine [list list $d2] List {length 2}]]
+} -result {{srefined DecimalRounded {minDecimalsPreserved 2}} 1 0 {DecimalRounded{minDecimalsPreserved: 2}} {srefined DecimalRounded {minDecimalsPreserved 2}} {list {srefined DecimalRounded {minDecimalsPreserved 2}}} {list {srefined DecimalRounded {minDecimalsPreserved 2}}}}
+
+# ---------------------------------------------------------------------------
+# Minting
+
+test llr-literals-mint {a List literal's type states its length with no annotation: [] is the empty List[never] (length 0), [a] length 1, nested literals at every depth, a heterogeneous literal the bare List} -body {
+    set hir [llrHir "e = \[\]\none = \[7\]\nfour = \[1, 2, 3, 4\]\nrows = \[\[1, 2\], \[3, 4\], \[5, 6\]\]\nragged = \[\[1\], \[2, 3\]\]\nmixed = \[1, \"a\"\]\n1\n"]
+    lmap name {e one four rows ragged mixed} {llrBindingType $hir $name}
+} -result {{List[never]} {List[int]{length: 1}} {List[int]{length: 4}} {List[List[int]{length: 2}]{length: 3}} {List[List[int]]{length: 2}} {list{length: 2}}}
+
+test llr-declared-contracts {a refined parameter's length is the body's fact (no IndexNotFound for an index below it), a declared refined result the callers' (a caller indexes it without a handler), and a struct field's both ways -- on every backend} -body {
+    llrValue [string cat $prelude {
+fn block_sum(xs: List[int]{length: 16}) -> int:
+    xs.at(0) + xs.at(15)
+
+fn make() -> List[int]{length: 16}:
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+struct Digest:
+    bytes: List[int]{length: 4}
+
+fn last(d: Digest) -> int:
+    d.bytes.at(3)
+
+b = make()
+d = Digest{bytes: [9, 8, 7, 6]}
+[block_sum(b), b.at(15), last(d), d.bytes.at(0), last(Digest{bytes: d.bytes})]
+}]
+} -result {[15, 15, 6, 9, 6]}
+
+test llr-admission-static {admission is the refinement's: a List of another length, or of no known length, is rejected where a length is required -- never checked at run time -- with a message naming what is missing; the element type is held to List's own (invariant) rule} -body {
+    list [rejection "fn four(xs: List\[int\]{length: 4}) -> int:\n    1\nfour(\[1, 2, 3\])\n"] \
+        [rejection "fn four(xs: List\[int\]{length: 4}) -> int:\n    1\nfn g(ys: List\[int\]) -> int:\n    four(ys)\ng(\[1\])\n"] \
+        [rejection "type Small = Int in 0..9\nfn s() -> Small:\n    1\nfn four(xs: List\[int\]{length: 2}) -> int:\n    1\nfour(\[s(), s()\])\n"] \
+        [rejection "fn four(xs: List\[int\]) -> int:\n    1\nfour(\[\"a\", \"b\"\])\n"]
+} -result {{TYPE: argument for parameter "xs" cannot be proven to satisfy List[int]{length: 4} (argument type: List[int]{length: 3}); a List of exactly 3 element(s) is never one of 4: an exact length is an equality fact, implied by no other length} {TYPE: argument for parameter "xs" cannot be proven to satisfy List[int]{length: 4} (argument type: List[int]); List[int] states no exact length: a List's length is known only where its type states it (a List literal, a declared parameter, field or result, a guard such as `std::list::length(xs) == 4`, or std::list::with_length), and admission inserts no length check} {TYPE: argument for parameter "xs" cannot be proven to satisfy List[int]{length: 2} (argument type: List[int[Small]]{length: 2})} {TYPE: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[str])}}
+
+test llr-decay-free {forgetting a length is implicit and free: a refined List is admitted where a List[T] is, as the same value, with no operation in the NIR between it and the call} -constraints nativeBuilt -body {
+    set hir [llrHir [string cat $prelude "fn count(xs: List\[int\]) -> int:\n    std::list::length(xs)\nfn make() -> List\[int\]{length: 3}:\n    \[1, 2, 3\]\nfn pass() -> int:\n    count(make())\npass()\n"]]
+    list [llrOutcome $hir] [llrOps [llrNir $hir] pass]
+} -result {{value 3} {}}
+
+test llr-return-contract {every successful return must prove a declared refined result: a literal of the length, a guard's refinement, a declared refined value; a List of no known length (or of another) is rejected, whatever the implementation happens to return} -body {
+    list [rejection [string cat $prelude "fn f(xs: List\[int\]) -> List\[int\]{length: 2}:\n    if std::list::length(xs) == 2:\n        return xs\n    \[0, 0\]\nf(\[1\])\n"]] \
+        [rejection "fn f(xs: List\[int\]) -> List\[int\]{length: 2}:\n    xs\nf(\[1, 2\])\n"] \
+        [rejection "fn f(c: bool) -> List\[int\]{length: 2}:\n    if c:\n        return \[1, 2, 3\]\n    \[1, 2\]\nf(true)\n"]
+} -result {accepted {TYPE: function result does not prove declared type List[int]{length: 2}; List[int] states no exact length: a List's length is known only where its type states it (a List literal, a declared parameter, field or result, a guard such as `std::list::length(xs) == 2`, or std::list::with_length), and admission inserts no length check} {TYPE: function result does not prove declared type List[int]{length: 2}; List[int] states no exact length: a List's length is known only where its type states it (a List literal, a declared parameter, field or result, a guard such as `std::list::length(xs) == 2`, or std::list::with_length), and admission inserts no length check}}
+
+test llr-undeclared-result-forgets {an undeclared result is the implementation's: what inference minted is forgotten at the function boundary (its callers see List[int], and an index into it needs its handler), while the body's own analysis keeps it (inferredResultType)} -body {
+    set hir [llrHir "fn implicit():\n    \[1, 2, 3, 4\]\nfn declared() -> List\[int\]{length: 4}:\n    \[1, 2, 3, 4\]\nimplicit()\n"]
+    set block [lindex [hirFind $hir block] 0]
+    list [hir::types::show [hir::type $hir [dict get $hir exprs $block resultType]]] \
+        [hir::types::show [hir::type $hir [dict get $hir exprs $block inferredResultType]]] \
+        [llrBindingType $hir implicit] [llrBindingType $hir declared] \
+        [rejectionKind [string cat $prelude "fn implicit():\n    \[1, 2, 3, 4\]\nimplicit().at(3)\n"]] \
+        [rejectionKind [string cat $prelude "fn declared() -> List\[int\]{length: 4}:\n    \[1, 2, 3, 4\]\ndeclared().at(3)\n"]]
+} -result {{List[int]} {List[int]{length: 4}} {block(e2)/0 -> List[int]} {block(e10)/0 -> List[int]{length: 4}} UNHANDLED-ERROR accepted}
+
+test llr-guard-narrowing {std::list::length(xs) == N refines xs to List[T]{length: N} where it holds -- either operand order, an alias of the condition, through the else of a != early return -- and nowhere else; on every backend} -body {
+    llrValue [string cat $prelude {
+fn four(xs: List[int]{length: 4}) -> int:
+    xs.at(3)
+
+fn then(xs: List[int]) -> int:
+    if std::list::length(xs) == 4:
+        four(xs)
+    else:
+        -1
+
+fn swapped(xs: List[int]) -> int:
+    if 4 == std::list::length(xs):
+        four(xs)
+    else:
+        -1
+
+fn aliased(xs: List[int]) -> int:
+    ok = std::list::length(xs) == 4
+    if ok:
+        four(xs)
+    else:
+        -1
+
+fn early(xs: List[int]) -> int:
+    if std::list::length(xs) != 4:
+        return -1
+    four(xs) + xs.at(0)
+
+[then([1, 2, 3, 4]), then([1]), swapped([5, 6, 7, 8]), aliased([1, 2, 3, 9]), aliased([]), early([1, 2, 3, 4]), early([1, 2])]
+}]
+} -result {[4, -1, 8, 9, -1, 5, -1]}
+
+test llr-guard-scopes {a guard's refinement holds only where the guard does: not in the else branch, not after an if both of whose branches complete, and an inequality (>=) mints no exact length -- while the bounds a lower bound proves stay proven} -body {
+    set four "fn four(xs: List\[int\]{length: 4}) -> int:\n    1\n"
+    list [rejectionKind [string cat $prelude $four "fn f(xs: List\[int\]) -> int:\n    if std::list::length(xs) == 4:\n        0\n    else:\n        four(xs)\nf(\[1\])\n"]] \
+        [rejectionKind [string cat $prelude $four "fn f(xs: List\[int\]) -> int:\n    if std::list::length(xs) == 4:\n        0\n    else:\n        1\n    four(xs)\nf(\[1\])\n"]] \
+        [rejectionKind [string cat $prelude $four "fn f(xs: List\[int\]) -> int:\n    if std::list::length(xs) >= 4:\n        four(xs)\n    else:\n        0\nf(\[1\])\n"]] \
+        [rejectionKind [string cat $prelude "fn f(xs: List\[int\]) -> int:\n    if std::list::length(xs) >= 4:\n        xs.at(3)\n    else:\n        0\nf(\[1\])\n"]]
+} -result {TYPE TYPE TYPE accepted}
+
+test llr-validator {std::list::with_length[T](xs) mints the refinement at run time: xs itself when it has T's length, the declared LengthMismatch when not (a handler takes it); its result is T, so what follows needs no further check -- on every backend} -body {
+    llrValue [string cat $prelude {
+fn four(xs: List[int]{length: 4}) -> int:
+    xs.at(0) + xs.at(3)
+
+fn check(xs: List[int]) -> int:
+    ys = std::list::with_length[List[int]{length: 4}](xs):
+        on LengthMismatch:
+            return -1
+    four(ys) + ys.at(1)
+
+fn strict(xs: List[int]) -> List[int]{length: 2} errors LengthMismatch:
+    std::list::with_length[List[int]{length: 2}](xs)
+
+safe = strict([1]):
+    on LengthMismatch:
+        [0, 0]
+fine = strict([5, 6]):
+    on LengthMismatch:
+        [0, 0]
+[check([1, 2, 3, 4]), check([1, 2]), check([]), safe.at(1), fine.at(1)]
+}]
+} -result {[7, -1, -1, 0, 6]}
+
+test llr-validator-misuse {std::list::with_length is imprinted with a refined List type, and its argument held to the imprint's base: it proves a length, never the elements; unimprinted it does not bind} -body {
+    list [rejection [string cat $prelude "fn f(xs: List\[int\]) -> List\[int\] errors LengthMismatch:\n    std::list::with_length\[List\[int\]\](xs)\nf(\[1\])\n"]] \
+        [rejection [string cat $prelude "fn f(xs: List\[str\]) -> int errors LengthMismatch:\n    ys = std::list::with_length\[List\[int\]{length: 1}\](xs)\n    1\nf(\[\"a\"\])\n"]] \
+        [rejectionKind [string cat $prelude "fn f(xs: List\[int\]) -> int errors LengthMismatch:\n    ys = std::list::with_length(xs)\n    1\nf(\[1\])\n"]]
+} -result {{TYPE: std::list::with_length checks a List against the exact length its imprint states, so it is imprinted with a List[T]{length: N} type (std::list::with_length[List[int]{length: 4}](xs)), not List[int]} {TYPE: the argument of std::list::with_length cannot be proven to satisfy List[int], the base of its imprint List[int]{length: 1} (argument type: List[str]): the check proves a List's length, never its elements} IMPRINT}
+
+test llr-validator-once {a validated List is checked once: list#with_length is the only length test, every read after it is listgetproven, and the check returns its operand (no copy: one List allocation in all)} -constraints nativeBuilt -body {
+    set hir [llrHir [string cat $prelude {
+fn check(xs: List[int]) -> int errors LengthMismatch:
+    ys = std::list::with_length[List[int]{length: 3}](xs)
+    ys.at(0) + ys.at(1) + ys.at(2)
+
+check([1, 2, 3]):
+    on LengthMismatch:
+        0
+}]]
+    set ops [llrOps [llrNir $hir] check]
+    list [llrOutcome $hir] [lsearch -all -inline $ops list*] \
+        [dict get [native::allocationReport $hir summary] byKind List allocations]
+} -result {{value 6} {listwithlen listgetproven listgetproven listgetproven} 1}
+
+test llr-append {std::list::append of a List of known length N has length N + 1 (its registered -result-length); a List of unknown length stays unknown} -body {
+    set hir [llrHir [string cat $prelude "a = std::list::append(\[1, 2\], 3)\nb = std::list::append(a, 4)\nfn g(xs: List\[int\]) -> List\[int\]:\n    std::list::append(xs, 0)\nc = g(\[1\])\n1\n"]]
+    lmap name {a b c} {llrBindingType $hir $name}
+} -result {{List[int]{length: 3}} {List[int]{length: 4}} {List[int]}}
+
+test llr-collecting-loops {a collecting loop mints its result's exact length exactly where COLLECTING-LOOPS.md proves it: no break or continue targets it, and a domain of known cardinality (constant bounds, a List whose type states its length); a filtering loop decays} -body {
+    set hir [llrHir [string cat $prelude {
+xs = [1, 2, 3]
+squares = loop i from 0 to 5:
+    i * i
+through = loop i from 1 through 3:
+    i
+mapped = loop x in xs:
+    x + 1
+lock = loop x in xs and i from 0 to 3:
+    x + i
+filtered = loop x in xs:
+    if x == 2:
+        continue
+    x
+cut = loop i from 0 to 5:
+    if i == 3:
+        break
+    i
+1
+}]]
+    lmap name {squares through mapped lock filtered cut} {llrBindingType $hir $name}
+} -result {{List[int]{length: 5}} {List[int]{length: 3}} {List[int]{length: 3}} {List[int]{length: 3}} {List[int]} {List[int]}}
+
+# ---------------------------------------------------------------------------
+# Proofs that consume the refinement
+
+test llr-bounds {a refined List's length feeds the index proof: an index below it designates an element (every std::list::at's bounds verdict is proven, which lowers it to listgetproven with no IndexNotFound edge), one at or above it is a statically known failure, and a loop over its length reads without a handler} -constraints nativeBuilt -body {
+    set hir [llrHir [string cat $prelude {
+fn ends(xs: List[int]{length: 4}) -> int:
+    xs.at(0) + xs.at(3)
+
+fn total(xs: List[int]{length: 4}) -> List[int]{length: 4}:
+    loop i from 0 to std::list::length(xs):
+        xs.at(i)
+
+fn use(ys: List[int]) -> int:
+    zs = std::list::with_length[List[int]{length: 4}](ys):
+        on LengthMismatch:
+            return 0
+    ends(zs) + std::list::length(total(zs))
+
+use([1, 2, 3, 4])
+}]]
+    set proven [lmap e [hirFind $hir call] {
+        if {[hir::decimal::CalledNative $hir $e] ne "std::list::at" || ![string match t.bot:* [hir::originLocation $hir [hir::get $hir $e origin]]]} continue
+        hir::completions::BoundsProven $hir $e
+    }]
+    set nir [llrNir $hir]
+    list $proven [lsearch -all -inline [llrOps $nir ends] list*] [lsearch -all -inline [llrOps $nir total] list*] [llrOutcome $hir] \
+        [rejectionKind [string cat $prelude "fn past(xs: List\[int\]{length: 4}) -> int:\n    xs.at(4)\npast(\[1, 2, 3, 4\])\n"]] \
+        [rejectionKind [string cat $prelude "fn unknown(xs: List\[int\]) -> int:\n    xs.at(3)\nunknown(\[1, 2, 3, 4\])\n"]]
+} -result {{1 1 1} {listgetproven listgetproven} {listlen listnew listgetproven} {value 9} KNOWN-ERROR UNHANDLED-ERROR}
+
+test llr-bounds-every-source {every source whose type states a length gives the index proof that length, through a binding or directly: a declared result, std::list::with_length, std::list::append, a collecting loop, a fixed array's copy -- an index below it is proven (no handler), the index at it a statically known failure, and the proven reads run alike on every backend} -body {
+    set sources {
+        result {fn src(a: int) -> int:
+    xs = four(a)
+    xs.at(@)}
+        direct {fn src(a: int) -> int:
+    four(a).at(@)}
+        validator {fn src(ys: List[int]) -> int:
+    xs = std::list::with_length[List[int]{length: 4}](ys):
+        on LengthMismatch:
+            return 0
+    xs.at(@)}
+        append {fn src(ys: List[int]{length: 3}) -> int:
+    xs = ys.append(9)
+    xs.at(@)}
+        loop {fn src(ys: List[int]{length: 4}) -> int:
+    xs = loop y in ys:
+        y * 2
+    xs.at(@)}
+        copy {fn src(d: std::abi::bytes::Bytes) -> int errors LayoutLengthMismatch:
+    xs = std::binary::parse(ROW, d).cells
+    xs.at(@)}
+    }
+    set head "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::list\n\nlayout ROW:\n    size 4\n    align 1\n    field cells: array 4 of std::binary::U8 at 0\n\nfn four(a: int) -> List\[int\]{length: 4}:\n    \[a, a + 1, a + 2, a + 3\]\n\n"
+    set verdicts {}
+    foreach {name text} $sources {
+        lappend verdicts $name [rejectionKind "$head[string map {@ 3} $text]\n\n0\n"] \
+            [rejectionKind "$head[string map {@ 4} $text]\n\n0\n"]
+    }
+    set run $head
+    foreach {name text} [lrange $sources 0 end-2] {
+        append run [string map [list @ 3 "fn src" "fn src_$name"] $text] \n\n
+    }
+    append run "\[src_result(1), src_direct(5), src_validator(\[1, 2, 3, 4\]), src_append(\[1, 2, 3\]), src_loop(\[1, 2, 3, 4\])\]\n"
+    list $verdicts [llrValue $run]
+} -result {{result accepted KNOWN-ERROR direct accepted KNOWN-ERROR validator accepted KNOWN-ERROR append accepted KNOWN-ERROR loop accepted KNOWN-ERROR copy accepted KNOWN-ERROR} {[4, 8, 4, 9, 8]}}
+
+test llr-length-known {std::list::length of a List whose type states its length is that Int: the range analysis decides a comparison with it, so a decided branch is lowered without the other arm} -constraints nativeBuilt -body {
+    set hir [llrHir [string cat $prelude "fn f(xs: List\[int\]{length: 2}) -> int:\n    if std::list::length(xs) == 2:\n        10\n    else:\n        20\nf(\[1, 2\])\n"]]
+    set nir [llrNir $hir]
+    list [llrOutcome $hir] [regexp {func [0-9]+ "f"[^\n]*\n(?:[^\n]*\n)*?\s+ret %[0-9]+\nend} $nir] \
+        [regexp -all {\mbr\M|\mbrif\M|\mjmp\M} [lindex [regexp -inline {func [0-9]+ "f".*?\nend} $nir] 0]]
+} -result {{value 10} 1 0}
+
+# ---------------------------------------------------------------------------
+# Fixed layout arrays (FIXED-LAYOUT-ARRAYS.md)
+
+set layoutPrelude {import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::list
+
+layout GRID:
+    size 24
+    align 4
+    field cells: array 2 of array 3 of std::binary::U32 at 0
+
+layout ROW:
+    size 4
+    align 1
+    field b: array 4 of std::binary::U8 at 0
+
+fn bytes_of(n: int) -> std::abi::bytes::Bytes:
+    bs = loop v from 0 to n:
+        b = std::byte::from_int(v):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                255
+        b
+    std::abi::bytes::from_list(bs)
+}
+
+test llr-array-copies {a copied fixed array is a List of exactly its extent, recursively: a field of what std::binary::parse made, std::binary::read of an array designator; a LayoutStruct the program constructs keeps its declared (unrefined) field type, whose length its emission checks} -body {
+    set hir [llrHir [string cat $layoutPrelude {
+fn copies() -> int:
+    g = std::binary::parse(GRID, bytes_of(24)):
+        on LayoutLengthMismatch:
+            return 0
+    cells = g.cells
+    row = cells.at(1)
+    r = std::binary::read(bytes_of(24), GRID.cells):
+        on LayoutLengthMismatch:
+            return 0
+    p = std::binary::parse(ROW, bytes_of(4)):
+        on LayoutLengthMismatch:
+            return 0
+    made = LayoutStruct[ROW]{b: p.b}
+    field = made.b
+    1
+copies()
+}]]
+    lmap name {cells row r field} {hir::types::show [hir::typeOf $hir [lindex [hirFind $hir bind $name] 0]]}
+} -result {{List[List[int[std::binary::U32]]{length: 3}]{length: 2}} {List[int[std::binary::U32]]{length: 3}} {List[List[int[std::binary::U32]]{length: 3}]{length: 2}} {List[int[std::binary::U8]]}}
+
+test llr-array-copies-run {the lengths a copy's type states are its run-time lengths, and its reads need no handler, on every backend} -body {
+    llrValue [string cat $layoutPrelude {
+fn last() -> int:
+    g = std::binary::parse(GRID, bytes_of(24)):
+        on LayoutLengthMismatch:
+            return -1
+    g.cells.at(1).at(2) + std::list::length(g.cells) + std::list::length(g.cells.at(0))
+
+last()
+}]
+} -result 387323161
+
+test llr-array-writes {a refined List written into a fixed array of its extent needs no LayoutExtentMismatch path (emit, write); one of another length is a statically known failure; an unrefined List keeps the run-time check its handler takes} -constraints nativeBuilt -body {
+    set proven [llrHir [string cat $layoutPrelude {
+fn emitted(xs: List[std::binary::U8]{length: 4}) -> std::abi::bytes::Bytes:
+    std::binary::emit(LayoutStruct[ROW]{b: xs})
+
+fn checked(xs: List[std::binary::U8]) -> std::abi::bytes::Bytes errors LayoutExtentMismatch:
+    std::binary::emit(LayoutStruct[ROW]{b: xs})
+
+fn run():
+    r = std::binary::parse(ROW, bytes_of(4)):
+        on LayoutLengthMismatch:
+            return 0
+    c = checked(r.b):
+        on LayoutExtentMismatch:
+            return 0
+    [std::abi::bytes::length(emitted(r.b)), std::abi::bytes::length(c)]
+run()
+}]]
+    set nir [llrNir $proven]
+    list [llrOutcome $proven] [lsearch -all -inline -regexp [llrOps $nir emitted] {^fail:|^listlen}] [lsearch -all -inline -regexp [llrOps $nir checked] {^fail:|^listlen}] \
+        [rejectionKind [string cat $layoutPrelude "fn short(xs: List\[std::binary::U8\]{length: 3}) -> std::abi::bytes::Bytes errors LayoutExtentMismatch:\n    std::binary::emit(LayoutStruct\[ROW\]{b: xs})\n1\n"]] \
+        [rejectionKind [string cat $layoutPrelude "fn bare(xs: List\[std::binary::U8\]) -> std::abi::bytes::Bytes:\n    std::binary::emit(LayoutStruct\[ROW\]{b: xs})\n1\n"]]
+} -result {{value {[std::abi::Usize {value: 4}, std::abi::Usize {value: 4}]}} {} {listlen fail:LayoutExtentMismatch} KNOWN-ERROR UNHANDLED-ERROR}
+
+test llr-array-copy-agrees {every copy source states one length in two places that agree: the refined type (hir::layouts::CopyType) and the exact copy the extent proof reads (hir::completions::ExactCopy); a union array still has no copied value} -body {
+    set hir [llrHir [string cat $layoutPrelude {
+fn copy() -> int:
+    g = std::binary::parse(GRID, bytes_of(24)):
+        on LayoutLengthMismatch:
+            return 0
+    cells = g.cells
+    1
+copy()
+}]]
+    set bind [lindex [hirFind $hir bind cells] 0]
+    set value [dict get $hir exprs $bind value]
+    set copy [hir::completions::ExactCopy $hir $value]
+    list [dict get $copy extent] [hir::types::LengthOf [hir::typeOf $hir $value]] \
+        [dict get $copy element extent] [hir::types::LengthOf [hir::types::elementOf [hir::typeOf $hir $value]]] \
+        [rejectionKind "import std::abi\nimport std::abi::bytes\nimport std::binary\nunion layout U:\n    size 4\n    align 4\n    alternative w: std::binary::U32\nlayout A:\n    size 8\n    align 4\n    field us: array 2 of U at 0\nfn f(d: std::abi::bytes::Bytes) -> int:\n    a = std::binary::parse(A, d):\n        on LayoutLengthMismatch:\n            return 0\n    1\n1\n"]
+} -result {2 2 3 3 LAYOUT-UNION}
+
+# ---------------------------------------------------------------------------
+# Where the refinement travels
+
+test llr-captures-contexts-coroutines {a refined immutable List keeps its refinement captured by a nested function, as a context's field, and through a coroutine's construction -- immutable, so nothing invalidates it -- on the Tcl backends (the native backends lower no top-level context installation)} -body {
+    llrOutcome [llrHir [string cat $prelude {
+context struct Table:
+    row: List[int]{length: 3}
+
+fn inner(xs: List[int]{length: 3}) -> int:
+    fn read() -> int:
+        xs.at(2)
+    read()
+
+fn lookup(context t: Table) -> int:
+    t.row.at(2)
+
+fn gen(xs: List[int]{length: 2}) -> int:
+    yield xs.at(1)
+    xs.at(0)
+
+with context Table{row: [7, 8, 9]}
+coroutine {step, first} = gen([4, 5])
+[inner([1, 2, 3]), lookup(), first]
+}]] {interp compile}
+} -result {value {[3, 9, 5]}}
+
+test llr-handlers-branches {through handlers and branches a refinement survives exactly where every completing path agrees: same lengths keep it, different lengths forget it, a branch that never completes contributes nothing} -body {
+    set hir [llrHir [string cat $prelude {
+fn may(c: bool) -> List[int]{length: 2} errors LengthMismatch:
+    if c:
+        fail LengthMismatch
+    [1, 2]
+
+same = may(true):
+    on LengthMismatch:
+        [0, 0]
+other = may(true):
+    on LengthMismatch:
+        [0]
+fn pick(c: bool):
+    xs = if c:
+        [1, 2]
+    else:
+        [3, 4]
+    ys = if c:
+        [1, 2]
+    else:
+        return [0]
+    zs = if c:
+        [1]
+    else:
+        [1, 2]
+    [xs, ys, zs]
+1
+}]]
+    set f [lindex [hirFind $hir bind pick] 0]
+    set types {}
+    foreach name {xs ys zs} {
+        set b [lindex [hirFind $hir bind $name] 0]
+        lappend types [hir::types::show [hir::typeOf $hir $b]]
+    }
+    list [llrBindingType $hir same] [llrBindingType $hir other] {*}$types
+} -result {{List[int]{length: 2}} {List[int]} {List[int]{length: 2}} {List[int]{length: 2}} {List[int]}}
+
+test llr-no-monomorphization {Lists of different lengths share an untyped function's semantic instance and its codegen instance: a length selects nothing (entry types forget it), and the function's result forgets it too} -constraints nativeBuilt -body {
+    set hir [llrHir [string cat $prelude "fn count(xs) -> int:\n    std::list::length(xs)\nfn same(xs):\n    xs\na = count(\[1, 2, 3\])\nb = count(\[1, 2, 3, 4\])\nc = same(\[1, 2\])\n\[a, b, c\]\n"]]
+    set instances [lsort -unique [lmap {k v} [dict get $hir semantic instances] {lindex [dict get $v key] 1}]]
+    set nir [llrNir $hir]
+    list [llrOutcome $hir] $instances [regexp -all {func [0-9]+ "count"} $nir] [llrBindingType $hir c]
+} -result {{value {[3, 4, [1, 2]]}} {{{list int}}} 1 {List[int]}}
+
+test llr-mutable-element-contracts {a mutable container's element contract forgets what inference minted about its first elements (a vector of [[1, 2]] takes any List[int]); there is no MutableVector or MutableArray length refinement} -body {
+    set hir [llrHir "import std::mutable_vector\nimport std::mutable_array\nv = std::mutable_vector::from_list(\[\[1, 2\]\])\na = std::mutable_array::from_list(\[\[1, 2\]\])\n1\n"]
+    list [llrBindingType $hir v] [llrBindingType $hir a]
+} -result {{MutableVector[List[int]]} {MutableArray[List[int]]}}
+
+test llr-runtime-representation {a refined List is an ordinary List at run time: a function over a refined List and one over an unrefined List perform the same List operations on the same representation (no header, tag, check or allocation of its own), and the codegen instance is the List[int] one; the only difference is what the fact proves (here: std::list::length is a known small Int, so the sum is raw arithmetic)} -constraints nativeBuilt -body {
+    set refined [llrNir [llrHir [string cat $prelude "fn f(xs: List\[int\]{length: 2}) -> int:\n    std::list::length(xs) + std::list::length(xs)\nf(\[1, 2\])\n"]]]
+    set plain [llrNir [llrHir [string cat $prelude "fn f(xs: List\[int\]) -> int:\n    std::list::length(xs) + std::list::length(xs)\nf(\[1, 2\])\n"]]]
+    list [lsearch -all -inline [llrOps $refined f] list*] [lsearch -all -inline [llrOps $plain f] list*] \
+        [expr {[llrOps $refined <program>] eq [llrOps $plain <program>]}] [regexp {instance="List\[int\]"} $refined]
+} -result {{listlen listlen} {listlen listlen} 1 1}
+
+# ---------------------------------------------------------------------------
+# FIXED-ARITY-LIST-RETURN is not weakened
+
+test llr-fixed-arity-unchanged {changing only List[T] to List[T]{length: N} never changes whether FIXED-ARITY-LIST-RETURN fires: a declared List result is the author's voice with or without a length (two- and four-position products, nested), an unannotated product warns whatever its operands' or parameters' lengths, and a sequence of mismatched arities, a call exit and every existing exemption stay as they were -- the refinement is no suppression} -body {
+    set results {}
+    foreach {plain refined} {
+        "fn bounds(a: int, b: int) -> List[int]:\n    [a, b]\nbounds(1, 2)\n"
+        "fn bounds(a: int, b: int) -> List[int]{length: 2}:\n    [a, b]\nbounds(1, 2)\n"
+        "fn rgba(r: int) -> List[int]:\n    [r, 2, 3, 4]\nrgba(1)\n"
+        "fn rgba(r: int) -> List[int]{length: 4}:\n    [r, 2, 3, 4]\nrgba(1)\n"
+        "fn nested() -> List[List[int]]:\n    [[1, 2], [3, 4]]\nnested()\n"
+        "fn nested() -> List[List[int]{length: 2}]{length: 2}:\n    [[1, 2], [3, 4]]\nnested()\n"
+        "fn pair(xs: List[int], a: int):\n    [a, xs]\npair([1, 2], 3)\n"
+        "fn pair(xs: List[int]{length: 2}, a: int):\n    [a, xs]\npair([1, 2], 3)\n"
+        "fn quad(a: List[int]):\n    [a, a, a, a]\nquad([1])\n"
+        "fn quad(a: List[int]{length: 1}):\n    [a, a, a, a]\nquad([1])\n"
+        "fn seq(c: bool, xs: List[int]):\n    if c:\n        return [1, 2]\n    [1, 2, 3]\nseq(true, [1])\n"
+        "fn seq(c: bool, xs: List[int]{length: 1}):\n    if c:\n        return [1, 2]\n    [1, 2, 3]\nseq(true, [1])\n"
+        "fn two() -> List[int]:\n    [1, 2]\nfn exits(c: bool):\n    if c:\n        return two()\n    [3, 4]\nexits(true)\n"
+        "fn two() -> List[int]{length: 2}:\n    [1, 2]\nfn exits(c: bool):\n    if c:\n        return two()\n    [3, 4]\nexits(true)\n"
+        "error Bad\nfn guarded(c: bool, a: List[int]) errors Bad:\n    if c:\n        fail Bad\n    [a, a]\ng = guarded(false, [1]):\n    on Bad:\n        []\n"
+        "error Bad\nfn guarded(c: bool, a: List[int]{length: 1}) errors Bad:\n    if c:\n        fail Bad\n    [a, a]\ng = guarded(false, [1]):\n    on Bad:\n        []\n"
+    } {
+        set pair {}
+        foreach source [list $plain $refined] {
+            set hir [surface::compile $source t.bot -warnings default -warning-channel ""]
+            lappend pair [lmap w [hir::warnings::of $hir] {
+                if {[dict get $w code] ne "FIXED-ARITY-LIST-RETURN"} continue
+                dict get $w data arity
+            }]
+        }
+        lappend results $pair
+    }
+    set results
+} -result {{{} {}} {{} {}} {{} {}} {2 2} {4 4} {{} {}} {{} {}} {2 2}}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, the cache, isolation
+
+test llr-hir-text {HIR text writes a refined List in its source spelling -- parameters, results, struct fields, literals, nested and bare (list{length: N}) -- and reads it back exactly} -body {
+    set hir [llrHir [string cat {
+struct Digest:
+    bytes: List[int]{length: 4}
+
+fn make(xs: List[List[int]{length: 2}]{length: 2}) -> List[int]{length: 4}:
+    [1, 2, 3, 4]
+
+d = Digest{bytes: make([[1, 2], [3, 4]])}
+m = [1, "a"]
+[d, m]
+}]]
+    set text [hir::format $hir]
+    set back [hir::format [hir::parse $text]]
+    list [expr {$text eq $back}] [expr {[string first "fields bytes: List\[int\]{length: 4}" $text] >= 0}] \
+        [expr {[string first "xs:List\[List\[int\]{length: 2}\]{length: 2}" $text] >= 0}] [expr {[string first ": list{length: 2}" $text] >= 0}]
+} -result {1 1 1 1}
+
+test llr-interchange {HIR interchange holds the canonical refined types themselves; a decoded HIR equals the built one and runs alike} -body {
+    set hir [llrHir [string cat $prelude "fn f(xs: List\[int\]{length: 3}) -> List\[int\]{length: 3}:\n    xs\nf(\[1, 2, 3\]).at(2)\n"]]
+    set text [hir::interchange::encode $hir]
+    set back [hir::interchange::decode $text]
+    list [expr {[dict get $back exprs] eq [dict get $hir exprs]}] [expr {[dict get $back types] eq [dict get $hir types]}] \
+        [string match {*srefined List {length 3} {list int}*} $text] [llrOutcome $back]
+} -result {1 1 1 {value 3}}
+
+test llr-cache-and-isolation {two programs that differ only in a length are two front-end cache entries, each read back as built, and compiling one never changes the other's HIR (no registry holds a refinement)} -body {
+    set dir [file join [::tcltest::temporaryDirectory] llr-cache]
+    file delete -force $dir
+    file mkdir $dir
+    set results {}
+    foreach n {3 4} {
+        set path [file join $dir p$n.bot]
+        set f [open $path w]
+        puts $f "fn f() -> List\[int\]{length: $n}:\n    \[[join [lrepeat $n 1] {, }]\]\nf()"
+        close $f
+    }
+    set first [surface::readProgramFile [file join $dir p3.bot] -warnings off -cache $dir]
+    set second [surface::readProgramFile [file join $dir p4.bot] -warnings off -cache $dir]
+    set again [surface::readProgramFile [file join $dir p3.bot] -warnings off -cache $dir]
+    set entries [llength [glob -nocomplain -directory $dir -type f *.hirc]]
+    set shown [lmap h [list $first $second $again] {
+        hir::types::show [hir::type $h [dict get $h exprs [lindex [hirFind $h block] 0] resultType]]
+    }]
+    file delete -force $dir
+    list $entries $shown [expr {[dict get $first exprs] eq [dict get $again exprs]}]
+} -result {2 {{List[int]{length: 3}} {List[int]{length: 4}} {List[int]{length: 3}}} 1}
+
+# ---------------------------------------------------------------------------
+# Static compile blocks
+
+test llr-static-compile {a refinement diagnostic is a recoverable one: a static compile block reifies a wrong length (Type) and a bad parameter (RefinementParameter)} -body {
+    set hir [llrHir [string cat "import std::compiler\n" {
+fn four(xs: List[int]{length: 4}) -> int:
+    1
+
+fn wrong() -> int errors std::compiler::CompilerError:
+    static compile:
+        four([1, 2, 3])
+
+fn bad() -> int errors std::compiler::CompilerError:
+    static compile:
+        fn g(xs: List[int]{length: -2}) -> int:
+            1
+        g
+
+fn code(f) -> int:
+    f():
+        on std::compiler::CompilerError:
+            return 1
+    0
+
+[code(wrong), code(bad)]
+}]]
+    llrOutcome $hir {interp compile}
+} -result {value {[1, 1]}}
+
+test llr-projection-of-a-handled-call {a field read, in a condition, of a struct bound from a handled call whose handler has several statements types and runs: the exact-copy chase reads a handler body's last statement, never the body's statement list as one expression (a TCL LOOKUP DICT crash once List length inference reached the chase from every projection; the Icy Tower slice's command line found it, ICY-TOWER-VERTICAL-SLICE-1.md)} -body {
+    llrValue {
+error Bad
+
+struct Settings:
+    help: bool
+
+fn parse(n: int) -> Settings errors Bad:
+    if n < 0:
+        fail Bad
+    Settings {help: n > 3}
+
+fn main(n: int) -> int:
+    o = parse(n):
+        on Bad:
+            x = 7
+            return x
+    if o.help:
+        return 1
+    0
+
+[main(5), main(1), main(-1)]
+}
+} -result {[1, 0, 7]}
+
+cleanupTests

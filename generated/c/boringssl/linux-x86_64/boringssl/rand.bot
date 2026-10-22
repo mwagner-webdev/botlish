@@ -53,6 +53,13 @@ extern c fn RAND_file_name named "botlish_bssl_RAND_file_name"(
     num: std::ffi::c::ULong
 ) -> std::ffi::c::Ptr[std::ffi::c::Char]
 
+# C: void RAND_add(const void *buf, int num, double entropy)
+extern c fn RAND_add named "botlish_bssl_RAND_add"(
+    buf: std::ffi::c::Ptr[std::ffi::c::Void],
+    num: std::ffi::c::Int,
+    entropy: std::ffi::c::Double
+) -> unit
+
 # C: int RAND_egd(const char *)
 extern c fn RAND_egd named "botlish_bssl_RAND_egd"(
     arg1: std::ffi::c::Ptr[std::ffi::c::Char]

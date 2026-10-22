@@ -143,13 +143,13 @@ fn raw_getpid():
 # ---------------------------------------------------------------------------
 # Namespaces and registration
 
-test linux-syscall-native-registered {std::linux::abi::x86_64::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free; the only qualified natives outside the standard value-family namespaces (STDLIB-NAMESPACES.md) are this one and its AArch64 sibling, the byte-storage / address-bridge natives of ABI-BYTES.md and MUTABLE-BYTES.md, the binary operations of BINARY-LAYOUT.md, NATIVE-LAYOUT-VIEWS.md, NATIVE-LAYOUT-WRITES.md, FIXED-LAYOUT-ARRAYS.md and LAYOUT-UNIONS.md (std::binary::read), and the C pointer operations of C-ABI-TYPES.md} -body {
+test linux-syscall-native-registered {std::linux::abi::x86_64::syscall is one root native under its qualified name: arity 1, a struct argument, a Register64 result shape, no declared errors, never context-free; the only qualified natives outside the standard value-family namespaces (STDLIB-NAMESPACES.md) are this one and its AArch64 sibling, the byte-storage / address-bridge natives of ABI-BYTES.md and MUTABLE-BYTES.md, the binary operations of BINARY-LAYOUT.md, NATIVE-LAYOUT-VIEWS.md, NATIVE-LAYOUT-WRITES.md, FIXED-LAYOUT-ARRAYS.md and LAYOUT-UNIONS.md (std::binary::read), the C pointer operations of C-ABI-TYPES.md, and the private table hash of HASHABLE-AND-KEYED-HASH.md (internal to the standard library)} -body {
     set meta [core::native::metadata std::linux::abi::x86_64::syscall]
     list [dict get $meta arity] [dict get $meta paramTypes] [dict get $meta resultType] \
         [dict get $meta resultShape] [dict get $meta errors] [dict get $meta contextFree] \
         [dict get $meta runtime] [core::native::isQualifiedNative std::linux::abi::x86_64::syscall] \
         [lsearch -all -inline -not -regexp [lsearch -all -inline [core::native::names] *::*] {^std::(list|str|char|float64|decimal_rounded|mutable_array|immutable_set|coroutine|mutable_vector)::}]
-} -result {1 struct struct {named-struct std::abi::x86_64::Register64} {} 0 raw-syscall 1 {std::linux::abi::x86_64::syscall std::linux::abi::aarch64::syscall std::byte_store::from_list std::byte_store::byte_count std::mutable_byte_store::zeroed std::mutable_byte_store::from_storage std::mutable_byte_store::count std::mutable_byte_store::replace std::mutable_byte_store::detach std::mutable_byte_store::freeze std::mutable_byte_store::freeze_prefix std::abi::x86_64::from_bytes std::abi::x86_64::from_mutable_bytes std::abi::aarch64::from_bytes std::abi::aarch64::from_mutable_bytes std::binary::parse std::binary::emit std::binary::read std::binary::layout_length std::binary::layout_alignment std::binary::native::view std::binary::load std::binary::native::edit std::binary::store std::binary::write std::binary::write_foreign std::binary::element std::binary::store_element std::ffi::c::null std::ffi::c::null? std::ffi::c::clone std::ffi::c::erase std::ffi::c::retype}}
+} -result {1 struct struct {named-struct std::abi::x86_64::Register64} {} 0 raw-syscall 1 {std::table_hash::of std::linux::abi::x86_64::syscall std::linux::abi::aarch64::syscall std::byte_store::from_list std::byte_store::byte_count std::mutable_byte_store::zeroed std::mutable_byte_store::from_storage std::mutable_byte_store::count std::mutable_byte_store::replace std::mutable_byte_store::detach std::mutable_byte_store::freeze std::mutable_byte_store::freeze_prefix std::abi::x86_64::from_bytes std::abi::x86_64::from_mutable_bytes std::abi::aarch64::from_bytes std::abi::aarch64::from_mutable_bytes std::binary::parse std::binary::emit std::binary::read std::binary::layout_length std::binary::layout_alignment std::binary::native::view std::binary::load std::binary::native::edit std::binary::store std::binary::write std::binary::write_foreign std::binary::element std::binary::store_element std::ffi::c::null std::ffi::c::null? std::ffi::c::clone std::ffi::c::erase std::ffi::c::retype}}
 
 test linux-syscall-no-syscall-specific-intrinsics {the compiler knows the transports, not syscalls: no getpid/write/read/open native, no other linux or abi native -- the only other natives in an abi namespace are the raw address bridges ABI::from_bytes and from_mutable_bytes of each architecture, which know no syscall either (ABI-BYTES.md, MUTABLE-BYTES.md)} -body {
     lsearch -all -inline -regexp [core::native::names] {(?i)pid|^write|^read|^open|^close|linux|abi|errno}
@@ -520,7 +520,7 @@ test linux-syscall-nir-generic-op {NIR: one generic op over seven register words
         [regexp -nocase {getpid} $nir] [llength [regexp -all -inline {= int 39\M} $nir]]
 } -result {{w39 w1 0 0 0 w8 0} {8 1 39} 0 1}
 
-test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the runtime helper rt_linux_x86_64_syscall (a GC safepoint with its result checked) -- never inline code Cranelift could merge, hoist or delete; two calls stay two calls, a discarded one stays} -body {
+test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the runtime helper rt_linux_x86_64_syscall (a GC safepoint with its result checked) -- never inline code Cranelift could merge, hoist or delete; two calls stay two calls, a discarded one stays; each call carries a stack map where native frames hold the roots (nativeFrameRoots)} -body {
     set clif [native::clif [syscallHir "direct module\nimport std::abi::x86_64\nimport std::linux::abi::x86_64\nfn f():\n    std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(39)})\n    std::linux::abi::x86_64::syscall({rax: std::abi::x86_64::register64(39)})\n    1\nf()"]]
     regexp {; (u0:[0-9]+) = rt_linux_x86_64_syscall} $clif -> helper
     regexp {; function [0-9]+ "f": botlish_fn_[0-9]+} $clif header
@@ -528,7 +528,7 @@ test linux-syscall-clif-is-a-helper-call {CLIF: the op is a real call of the run
     set block [string range $clif $start [string first "\n\}" $clif $start]]
     regexp "(fn\[0-9\]+) = $helper " $block -> ref
     list [regexp -all "call $ref\\(" $block] [regexp -all "call $ref\\(\[^\n\]*stack_map" $block]
-} -result {2 2}
+} -result [list 2 [expr {[testConstraint nativeFrameRoots] ? 2 : 0}]]
 
 # The kernel registers the boundary function botlish_linux_x86_64_syscall
 # (runtime/syscall.rs) holds when it executes `syscall`, by simulating its

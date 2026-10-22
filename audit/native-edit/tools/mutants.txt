@@ -62,7 +62,7 @@ proc core::binary::writeForeign {data path pointer} {
 @@ width-widened-runtime a store writes all eight bytes of its encoding, whatever the field's width
 ## native/src/runtime/nview.rs
 <<<<
-    store_at(address, &bytes[..width]);
+    store_at(address, &bytes[..encoding.width]);
 ====
     store_at(address, &bytes[..8]);
 >>>>
@@ -80,17 +80,17 @@ proc core::binary::writeForeign {data path pointer} {
 @@ width-widened-byte-write the byte write copies one byte past its field
 ## native/src/runtime/nview.rs
 <<<<
-    let bytes = match super::ops::bin_encode(p, value, width, signed, big, CONTEXT) {
+    let bytes = match super::ops::bin_encode(p, value, encoding, CONTEXT) {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
-    mbytes_written(p, m, offset, &bytes[..width], CONTEXT)
+    mbytes_written(p, m, offset, &bytes[..encoding.width], CONTEXT)
 ====
-    let bytes = match super::ops::bin_encode(p, value, width, signed, big, CONTEXT) {
+    let bytes = match super::ops::bin_encode(p, value, encoding, CONTEXT) {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
-    mbytes_written(p, m, offset, &bytes[..(width + 1).min(8)], CONTEXT)
+    mbytes_written(p, m, offset, &bytes[..(encoding.width + 1).min(8)], CONTEXT)
 >>>>
 
 # --- signed/unsigned encoder confused -----------------------------------------
@@ -106,11 +106,13 @@ proc core::binary::writeForeign {data path pointer} {
 @@ signed-as-unsigned-interp the reference byte write encodes every scalar as unsigned
 ## core/binary.tcl
 <<<<
-    set bytes [RecordBytes std::binary::write $data $path]
+        return [MutableBytesValue [string replace $bytes $offset [expr {$offset + $width - 1}] $piece]]
+    }
     set n [core::value::intOf $value]
     set piece [ScalarPiece $n $sign $width $endian]
 ====
-    set bytes [RecordBytes std::binary::write $data $path]
+        return [MutableBytesValue [string replace $bytes $offset [expr {$offset + $width - 1}] $piece]]
+    }
     set n [core::value::intOf $value]
     set piece [ScalarPiece $n u $width $endian]
 >>>>
@@ -164,9 +166,9 @@ proc core::binary::writeForeign {data path pointer} {
 @@ padding-overwritten-runtime a store writes one byte past its field (padding, or the next field)
 ## native/src/runtime/nview.rs
 <<<<
-    store_at(address, &bytes[..width]);
+    store_at(address, &bytes[..encoding.width]);
 ====
-    store_at(address, &bytes[..(width + 1).min(8)]);
+    store_at(address, &bytes[..(encoding.width + 1).min(8)]);
 >>>>
 
 @@ unrelated-bytes-lost-byte-write a byte write builds its fresh storage from zeros, not from its operand
@@ -181,10 +183,10 @@ proc core::binary::writeForeign {data path pointer} {
 ## core/binary.tcl
 <<<<
     set bytes [RecordBytes std::binary::write $data $path]
-    set n [core::value::intOf $value]
+    if {$sign eq "f"} {
 ====
     set bytes [binary format x[string length [RecordBytes std::binary::write $data $path]]]
-    set n [core::value::intOf $value]
+    if {$sign eq "f"} {
 >>>>
 
 @@ pointer-width-wrong a pointer store writes four bytes, whatever the target's pointer width

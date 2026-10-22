@@ -295,8 +295,16 @@ test app-interchange-without-sources {the analyzed HIR of an application (.hirx)
 
 test app-main-from-elsewhere {main.tcl runs an application from any working directory, on every backend} -constraints nativeBuilt -body {
     set dir [app [list main.bot "import counter\n\ncounter::count_down(300)\n" counter.bot $counterModule]]
-    lmap backend {interp compile cranelift-generic cranelift} {
-        lindex [regexp -inline -line {^   value: .*$} [exec sh -c {cd / && exec "$0" "$@"} [info nameofexecutable] $::mainScript -backend $backend [file join $dir main.bot]]] 0
+    # From the file system's root (the current drive's, on Windows), with
+    # no shell: Tcl's own working directory, restored.
+    set here [pwd]
+    cd /
+    try {
+        lmap backend {interp compile cranelift-generic cranelift} {
+            lindex [regexp -inline -line {^   value: .*$} [exec [info nameofexecutable] $::mainScript -backend $backend [file join $dir main.bot]]] 0
+        }
+    } finally {
+        cd $here
     }
 } -cleanup removeApps -result {{   value: 300} {   value: 300} {   value: 300} {   value: 300}}
 

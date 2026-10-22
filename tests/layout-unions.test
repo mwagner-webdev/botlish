@@ -29,10 +29,8 @@ source [file join $::projectRoot native native.tcl]
 core::cabi::installTestFixture
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set luBackends {interp compile cranelift-generic cranelift}
 set luNative {cranelift-generic cranelift}
@@ -861,7 +859,7 @@ test lu-native-nir {native code of a union alternative is the code of that repre
         [regexp -all {structnew|listnew|alloc} [luNir $program rd][luNir $program el][luNir $program last]]
 } -cleanup {unset -nocomplain many i program el} -result {{nativeload runbox} {{int 20}} nativestore {{int 16}} {nativeloadptr cptrisnull} {ige ilt imul iadd cptroffset risub nativeload runbox} 1 1 {nativeload runbox} {nativeload runbox} 0}
 
-test lu-native-allocations {natively, reading and storing union alternatives allocates nothing -- a scalar alternative, a record alternative's field, an alternative of an array element, a store through a union inside a record, switching between interpretations: 1000 of each costs what a loop doing nothing does -- and a copy of a record alternative allocates exactly its LayoutStruct} -constraints nativeLinux -body {
+test lu-native-allocations {natively, reading and storing union alternatives allocates nothing -- a scalar alternative, a record alternative's field, an alternative of an array element, a store through a union inside a record, switching between interpretations: 1000 of each costs what a loop doing nothing does -- and a copy of a record alternative allocates exactly its LayoutStruct} -constraints {nativeBuilt nativeCoroutines} -body {
     set loop "fn run(n: int) -> int errors NativeViewNull, NativeEditNull:\n    p = memory(ramp(40))\n    v = std::binary::native::view(ARRS, p)\n    e = std::binary::native::edit(OVL, p)\n    w = std::binary::native::view(WIDE, p)\n    k = loop i from 0 to n:\n        f(v, e, w)\n    0\nr = run(1000):\n    on NativeViewNull:\n        0\n    on NativeEditNull:\n        0\nr\n"
     set head "fn f(v: NativeView\[ARRS\], e: NativeEdit\[OVL\], w: NativeView\[WIDE\]) -> int:\n"
     lmap body [list \
@@ -984,11 +982,11 @@ test lu-direct {making a view or an edit is raw authority (std::binary::native i
         [luKinds "${layouts}fn f(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> int errors NativeViewNull:\n    v = std::binary::native::view(U, p)\n    v.w\n0\n" 1]
 } -cleanup {unset -nocomplain layouts use} -result {accepted STALE-DIRECT-MODULE DIRECT}
 
-test lu-registrations {std::binary::read is a root native whose -layout role every layer reads (never a name): its bytes operand (input), its designator (path) and its op; its result is the designated representation's copied type (layout-read), an array's extent its length (-result-length path), LayoutLengthMismatch its one error; it is not context-free, every argument is observed, and it has no method form} -body {
+test lu-registrations {std::binary::read is a root native whose -layout role every layer reads (never a name): its bytes operand (input), its designator (path) and its op; its result is the designated representation's copied type (layout-read), an array's extent its length (-result-length path), LayoutLengthMismatch its error (and NonFiniteFloat, a C floating representation's: C-FLOAT-FFI-MILESTONE-1.md); it is not context-free, every argument is observed, and it has no method form} -body {
     set meta [core::native::metadata std::binary::read]
     list [dict get $meta layout] [dict get $meta contextFree] [dict get $meta ownership] [dict get $meta resultShape] \
         [dict get $meta errors] [dict get $meta resultLength] [dict get $meta nomethod]
-} -cleanup {unset -nocomplain meta} -result {{input 0 path 1 op read} 0 {observe observe} {layout-read 1} LayoutLengthMismatch {path 1} 1}
+} -cleanup {unset -nocomplain meta} -result {{input 0 path 1 op read} 0 {observe observe} {layout-read 1} {LayoutLengthMismatch NonFiniteFloat} {path 1} 1}
 
 test lu-not-a-sum-type {a union is no tagged sum: it has no case, tag or active alternative -- a case-style spelling U::alt is no value (a union is no namespace), an alternative is no constructor (an unbound name), and nothing records which alternative was written: writing one and reading another is the other's interpretation of the same bytes, as is reading one never written} -body {
     list \
@@ -1012,7 +1010,7 @@ test lu-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [expr {"value {[exec $path]}" eq $direct}] [lindex $direct 0]
 } -cleanup {unset -nocomplain source hir path direct} -result {1 value}
 
-test lu-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live unions stay exact: copies of record and array alternatives building LayoutStructs and Lists, 64-bit alternatives that are BigInts stored and loaded, byte reads and writes through alternatives each allocating -- every operand stays rooted while the next allocation runs} -constraints nativeLinux -body {
+test lu-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live unions stay exact: copies of record and array alternatives building LayoutStructs and Lists, 64-bit alternatives that are BigInts stored and loaded, byte reads and writes through alternatives each allocating -- every operand stays rooted while the next allocation runs} -constraints {nativeBuilt nativeCoroutines} -body {
     set source [luProgram "fn many(k: int) -> List\[any\] errors NativeEditNull, NativeViewNull, LayoutLengthMismatch:\n    p = memory(fill(24, 0))\n    e = std::binary::native::edit(SANDWICH, p)\n    v = std::binary::native::view(SANDWICH, p)\n    rs = loop i from 0 to k:\n        std::binary::store(e, SANDWICH.w.q, 18446744073709551615)\n        std::binary::store(e.w, WIDE.large.parts.high, -9)\n        a = std::binary::write(mutable(fill(24, 0)), SANDWICH.w.q, v.w.q)\n        b = std::binary::read(frozen(a), SANDWICH.w.large.parts)\n        \[std::binary::load(v.w.large.parts), std::binary::load(v.w.words), std::binary::load(v.w.word.halves), b, v.w.q, std::binary::read(frozen(a), SANDWICH.w.bytes)\]\n    std::list::at(rs, k - 1):\n        on IndexNotFound:\n            \[\]\nr = many(40):\n    on NativeEditNull:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\nr\n"]
     set hir [surface::compile $source unions.bot -warnings off]
     set plain [luOutcome cranelift $hir]
@@ -1052,8 +1050,7 @@ set ::luFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
     set ::luFixtureDir [makeDirectory nunion-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi nunion-fixture.c] -o [file join $::luFixtureDir fixture.o]
-        exec ar rcs [file join $::luFixtureDir libbotlish_nunion_fixture.a] [file join $::luFixtureDir fixture.o]
+        ctool::staticLibrary $::luFixtureDir botlish_nunion_fixture [file join $::projectRoot tests cffi nunion-fixture.c]
     } message]} {
         puts stderr "layout-unions.test: the C fixture did not build: $message"
         set ::luFixtureDir ""

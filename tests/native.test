@@ -773,10 +773,11 @@ test native-aot-1 {the same lowering emits an object file} -body {
 } -result {object 1 1 1}
 
 testConstraint readelf [expr {[auto_execok readelf] ne ""}]
-# The relocation types below are the x86-64 psABI's: on AArch64 the AOT
-# object reaches runtime helpers through the GOT (codegen::clif's
-# `direct_helpers` is x86-64 only).
-testConstraint x86_64Host [expr {$::tcl_platform(machine) in {x86_64 amd64}}]
+# The relocation types below are the x86-64 psABI's, in an ELF object: on
+# AArch64 the AOT object reaches runtime helpers through the GOT
+# (codegen::clif's `direct_helpers` is x86-64 only), and a Windows x86-64
+# object is COFF, whose relocations readelf cannot read.
+testConstraint x86_64Host [expr {[hostBinaryHeader object] eq {elf x86_64 relocatable}}]
 
 # codegen/clif.rs's Symbols::direct_helpers: a call to a statically known
 # runtime helper is relocated exactly like a recursive/direct Botlish call

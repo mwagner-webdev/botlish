@@ -45,7 +45,7 @@ proc caError {source args} {
         # The first diagnostic (a program may have others, DIAGNOSTIC-RECOVERY.md).
         set message [dict get [lindex [dict get $options -diagnostics] 0] message]
     }
-    regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+    regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
     return [list $kind $message]
 }
 
@@ -407,7 +407,7 @@ test ca-affine-payload {an error payload may carry a pointer: the handler destru
     caAgree "import std::ffi::c\nimport ffi_fixture\n${::caOpaque}error Failed:\n    handle: std::ffi::c::Ptr\[SSL\]\n\nfn open(n: int) -> int errors Failed:\n    if n > 0:\n        fail Failed {handle: ffi_fixture::address\[SSL\](n)}\n    1\n\nfn f(n: int) -> int:\n    r = open(n):\n        on Failed {handle}:\n            ffi_fixture::address_of(handle)\n    r\n\nf(7)\n"
 } -result {value 7}
 
-test ca-affine-coroutines {a coroutine may own a pointer it was given, but no coroutine segment ends with one (a completed coroutine returns its cached result again)} -body {
+test ca-affine-coroutines {a coroutine may own a pointer it was given, but no coroutine segment ends with one (a completed coroutine returns its cached result again)} -constraints nativeCoroutines -body {
     list [caAgree "import std::ffi::c\n${::caOpaque}fn work(p: std::ffi::c::Ptr\[SSL\]) -> int:\n    yield 1\n    if p.null?():\n        2\n    else:\n        3\n\nfn f() -> int:\n    coroutine {step} = work(std::ffi::c::null\[SSL\]())\n    a = step()\n    b = step()\n    a + b\n\nf()\n"] \
         [lindex [caError "import std::ffi::c\n${::caOpaque}fn gen() -> std::ffi::c::Ptr\[SSL\]:\n    yield std::ffi::c::null\[SSL\]()\n    std::ffi::c::null\[SSL\]()\n\nfn f() -> bool:\n    coroutine {step} = gen()\n    true\n\nf()\n"] 0]
 } -result {{value 4} COROUTINE-CONTRACT}
@@ -565,7 +565,7 @@ test ca-imprint-same-path {a user function and an intrinsic go through one bindi
     list [lmap e $calls {list [hir::types::show [hir::typeOf $hir $e]] [dict get $hir exprs $e imprint] [dict get $hir exprs $e imprintBinding]}] \
         [lindex [caError "import std::ffi::c\n${::caOpaque}fn mynull() -> std::ffi::c::Ptr\[T\]:\n    std::ffi::c::null\[T\]()\n\nmynull\[int\]()\n"] 1] \
         [lindex [caError "import std::ffi::c\nstd::ffi::c::null\[int\]()\n"] 1]
-} -cleanup {unset -nocomplain hir calls e} -result {{{{std::ffi::c::Ptr[T]} {{imprint T}} {T {imprint T}}} {{std::ffi::c::Ptr[SSL]} {{nstruct SSL}} {T {nstruct SSL}}} {{std::ffi::c::Ptr[SSL]} {{nstruct SSL}} {T {nstruct SSL}}}} {mynull: T is imprinted as int, which cannot be a pointee: int has no C representation: a pointee is std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool, an opaque struct or another pointer} {std::ffi::c::null: T is imprinted as int, which cannot be a pointee: int has no C representation: a pointee is std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool, an opaque struct or another pointer}}
+} -cleanup {unset -nocomplain hir calls e} -result {{{{std::ffi::c::Ptr[T]} {{imprint T}} {T {imprint T}}} {{std::ffi::c::Ptr[SSL]} {{nstruct SSL}} {T {nstruct SSL}}} {{std::ffi::c::Ptr[SSL]} {{nstruct SSL}} {T {nstruct SSL}}}} {mynull: T is imprinted as int, which cannot be a pointee: int has no C representation: a pointee is std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Double, an opaque struct or another pointer} {std::ffi::c::null: T is imprinted as int, which cannot be a pointee: int has no C representation: a pointee is std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Double, an opaque struct or another pointer}}
 
 test ca-imprint-method {method sugar takes explicit imprints too: v.retype[T]()} -body {
     caAgree "import std::ffi::c\n${::caOpaque}fn f() -> bool:\n    v = std::ffi::c::null\[std::ffi::c::Void\]()\n    q = v.retype\[SSL\]()\n    q.null?()\n\nf()\n"
@@ -597,7 +597,7 @@ test ca-native-code {natively, null is a constant word, null? one comparison wit
     set ops [lsort -unique [regexp -all -inline {op cptr[a-z]+} $nir]]
     set clif [native::clif $hir]
     set f [string range $clif [string first {; function 1 "f"} $clif] end]
-    list $ops [regexp -all {call } $f] [regexp -all {iconst.i64 14} $f] [regexp -all {icmp eq} $f] \
+    list $ops [regexp -all {\mcall } $f] [regexp -all {iconst.i64 14} $f] [regexp -all {icmp eq} $f] \
         [native::assertAllocations $hir 0]
 } -cleanup {unset -nocomplain hir nir ops clif f} -result {{{op cptrisnull} {op cptrnull} {op cptrsame}} 0 2 1 {}}
 

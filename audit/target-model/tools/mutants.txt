@@ -24,17 +24,17 @@
 @@ macos-plain-char-unsigned macOS AArch64's plain char is unsigned, as Linux AArch64's
 ## core/cabi.tcl
 <<<<
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
 ====
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin floating IEEE} \
 >>>>
 
 @@ macos-reduced-to-linux-identity the macos-aarch64 row is Linux AArch64's: one identity for one architecture
 ## core/cabi.tcl
 <<<<
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
 ====
-        macos-aarch64   {os linux arch aarch64 model LP64 charSigned 0 triple aarch64-unknown-linux-gnu} \
+        macos-aarch64   {os linux arch aarch64 model LP64 charSigned 0 triple aarch64-unknown-linux-gnu floating IEEE} \
 >>>>
 
 @@ host-darwin-is-linux the host's operating system is not read: Darwin is taken for Linux
@@ -167,8 +167,18 @@
 <<<<
     target.architecture == host.architecture
         && os_family(target.operating_system) == os_family(host.operating_system)
+        && target.environment == host.environment
 ====
     target.architecture == host.architecture
+>>>>
+
+@@ windows-environments-one-target the C toolchain environment is no part of the target: a driver built for MSVC's Windows runs code built for MinGW's (WINDOWS-X86-64-MILESTONE-1.md)
+## native/src/codegen/target.rs
+<<<<
+        && target.environment == host.environment
+}
+====
+}
 >>>>
 
 @@ foreign-calls-generic-convention a foreign C call uses the generic SystemV convention on every target, Apple AArch64's included

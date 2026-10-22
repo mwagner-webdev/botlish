@@ -157,11 +157,24 @@ extern c fn SDL_GetNaturalDisplayOrientation(displayID: std::ffi::c::UInt) -> st
 # C: SDL_DisplayOrientation SDL_GetCurrentDisplayOrientation(SDL_DisplayID displayID)
 extern c fn SDL_GetCurrentDisplayOrientation(displayID: std::ffi::c::UInt) -> std::ffi::c::UInt
 
+# C: float SDL_GetDisplayContentScale(SDL_DisplayID displayID)
+extern c fn SDL_GetDisplayContentScale(displayID: std::ffi::c::UInt) -> std::ffi::c::Float
+
 # C: SDL_DisplayMode **SDL_GetFullscreenDisplayModes(SDL_DisplayID displayID, int *count)
 extern c fn SDL_GetFullscreenDisplayModes(
     displayID: std::ffi::c::UInt,
     count: std::ffi::c::Ptr[std::ffi::c::Int]
 ) -> std::ffi::c::Ptr[std::ffi::c::Ptr[sdl3::ctypes::SDL_DisplayMode]]
+
+# C: _Bool SDL_GetClosestFullscreenDisplayMode(SDL_DisplayID displayID, int w, int h, float refresh_rate, _Bool include_high_density_modes, SDL_DisplayMode *closest)
+extern c fn SDL_GetClosestFullscreenDisplayMode(
+    displayID: std::ffi::c::UInt,
+    w: std::ffi::c::Int,
+    h: std::ffi::c::Int,
+    refresh_rate: std::ffi::c::Float,
+    include_high_density_modes: std::ffi::c::Bool,
+    closest: std::ffi::c::Ptr[sdl3::ctypes::SDL_DisplayMode]
+) -> std::ffi::c::Bool
 
 # C: const SDL_DisplayMode *SDL_GetDesktopDisplayMode(SDL_DisplayID displayID)
 extern c fn SDL_GetDesktopDisplayMode(
@@ -187,6 +200,16 @@ extern c fn SDL_GetDisplayForRect(
 extern c fn SDL_GetDisplayForWindow(
     window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> std::ffi::c::UInt
+
+# C: float SDL_GetWindowPixelDensity(SDL_Window *window)
+extern c fn SDL_GetWindowPixelDensity(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> std::ffi::c::Float
+
+# C: float SDL_GetWindowDisplayScale(SDL_Window *window)
+extern c fn SDL_GetWindowDisplayScale(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> std::ffi::c::Float
 
 # C: _Bool SDL_SetWindowFullscreenMode(SDL_Window *window, const SDL_DisplayMode *mode)
 extern c fn SDL_SetWindowFullscreenMode(
@@ -312,6 +335,20 @@ extern c fn SDL_GetWindowSize(
 extern c fn SDL_GetWindowSafeArea(
     window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
     rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
+) -> std::ffi::c::Bool
+
+# C: _Bool SDL_SetWindowAspectRatio(SDL_Window *window, float min_aspect, float max_aspect)
+extern c fn SDL_SetWindowAspectRatio(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    min_aspect: std::ffi::c::Float,
+    max_aspect: std::ffi::c::Float
+) -> std::ffi::c::Bool
+
+# C: _Bool SDL_GetWindowAspectRatio(SDL_Window *window, float *min_aspect, float *max_aspect)
+extern c fn SDL_GetWindowAspectRatio(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    min_aspect: std::ffi::c::Ptr[std::ffi::c::Float],
+    max_aspect: std::ffi::c::Ptr[std::ffi::c::Float]
 ) -> std::ffi::c::Bool
 
 # C: _Bool SDL_GetWindowBordersSize(SDL_Window *window, int *top, int *left, int *bottom, int *right)
@@ -498,6 +535,17 @@ extern c fn SDL_GetWindowMouseRect(
     window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> std::ffi::c::Ptr[sdl3::ctypes::SDL_Rect]
 
+# C: _Bool SDL_SetWindowOpacity(SDL_Window *window, float opacity)
+extern c fn SDL_SetWindowOpacity(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    opacity: std::ffi::c::Float
+) -> std::ffi::c::Bool
+
+# C: float SDL_GetWindowOpacity(SDL_Window *window)
+extern c fn SDL_GetWindowOpacity(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> std::ffi::c::Float
+
 # C: _Bool SDL_SetWindowParent(SDL_Window *window, SDL_Window *parent)
 extern c fn SDL_SetWindowParent(
     window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
@@ -552,6 +600,17 @@ extern c fn SDL_SetWindowProgressState(
 extern c fn SDL_GetWindowProgressState(
     window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
 ) -> std::ffi::c::Int
+
+# C: _Bool SDL_SetWindowProgressValue(SDL_Window *window, float value)
+extern c fn SDL_SetWindowProgressValue(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window],
+    value: std::ffi::c::Float
+) -> std::ffi::c::Bool
+
+# C: float SDL_GetWindowProgressValue(SDL_Window *window)
+extern c fn SDL_GetWindowProgressValue(
+    window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]
+) -> std::ffi::c::Float
 
 # C: void SDL_DestroyWindow(SDL_Window *window)
 extern c fn SDL_DestroyWindow(window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window]) -> unit

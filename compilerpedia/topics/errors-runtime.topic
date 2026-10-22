@@ -108,7 +108,7 @@ summary: CORE SEMANTIC EQUALITY stops a run when == (or a hash) reaches a functi
 index: errors
 alias: == on functions; function equality; equality of functions; hash of a function
 keywords: ==, hash, callable, block, function, mutable array, mutable vector, immutable_set, contains
-related: rule.equality stdlib.== stdlib.hash concept.function-types concept.mutable-array concept.mutable-vector error.not-callable
+related: rule.equality stdlib.== stdlib.hash concept.hashable concept.function-types concept.mutable-array concept.mutable-vector error.not-callable
 docs: README.md MUTABLE-ARRAY.md M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md
 code: CORE SEMANTIC EQUALITY
 
@@ -128,9 +128,14 @@ The message says "callables" for all of them, MutableArray included:
     == is not defined for callables: A == B
     hash is not defined for callables: V
 
-The front end does not reject these comparisons today, even where the
-operands' types show them: they fail when they run. (An affine value's
-comparison is the static AFFINE-EQUALITY-UNSUPPORTED instead.)
+The front end does not reject `==` of such values today, even where the
+operands' types show them: it fails when it runs. (An affine value's
+comparison is the static AFFINE-EQUALITY-UNSUPPORTED instead.) `hash` of a
+value whose type shows it is not Hashable -- a function, a struct with a
+function field -- is rejected at compile time (TRAIT-NOT-SATISFIED,
+concept.hashable); `hash` of a value of unknown type, such as an untyped
+parameter, still fails when it runs. Values of a Hashable type never
+reach this error.
 
 == EXAMPLE
     fn inc(x):
@@ -933,7 +938,10 @@ At compile time, on the native backends; a bug in the native backend, or
 a host Cranelift cannot generate code for. The driver translates NIR to
 Cranelift IR (shown by -emit-clif); when Cranelift's verifier or its code
 generation fails, or its ISA builder rejects the host, the message is
-Cranelift's own, usually naming the function.
+Cranelift's own, usually naming the function. One refusal is the native
+backend's own: "variadic C call of NAME: no variadic call lowering for the
+windows_fastcall convention" -- a variadic C call (concept.variadics) on
+Windows x86-64, which has none yet.
 
 == WHAT TO DO
 Check that the host is a supported platform (backend.platforms). Otherwise
@@ -1046,7 +1054,7 @@ index: errors backends
 alias: stack overflow; recursion too deep; deep recursion; native stack exhausted
 keywords: recursion, stack, depth, BOTLISH_NATIVE_STACK_BYTES, BOTLISH_NATIVE_COROUTINE_STACK_BYTES, coroutine, too many nested evaluations, limit, tail call
 related: backend.cranelift backend.interp backend.compile backend.performance concept.loops
-docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md COROUTINES.md README.md
+docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-1.md COROUTINES.md README.md
 code: NATIVE LIMIT STACK
 code: TCL LIMIT STACK
 
@@ -1056,10 +1064,14 @@ backends stop at different depths:
   * native backends and executables: native code runs on a 1 GiB stack,
     and a coroutine's body on an 8 MiB stack of its own; overflowing either
     stops the run with "native stack exhausted: too many nested calls"
-    (NATIVE LIMIT STACK), never a crash, on every host the native backend
-    runs on (Linux x86-64 and AArch64, macOS AArch64). A standalone
-    executable prints it on stderr as `error {NATIVE LIMIT STACK}
-    {native stack exhausted: ...}` and exits 1.
+    (NATIVE LIMIT STACK), never a crash, on Linux x86-64 and AArch64 and
+    macOS AArch64. A standalone executable prints it on stderr as `error
+    {NATIVE LIMIT STACK} {native stack exhausted: ...}` and exits 1. On
+    Windows x86-64 there is no stack guard yet: Botlish recursion is
+    stopped with the same error by the shadow stack's depth check (about
+    four million nested calls), which the default 1 GiB stack outlasts;
+    a smaller stack (BOTLISH_NATIVE_STACK_BYTES), or deep recursion inside
+    the runtime, ends the process instead.
   * interp and compile: Tcl's evaluation limit, raised by the compiler to
     about 14,000 nested Botlish calls on interp and 99,000 on compile,
     stops the run with "too many nested evaluations (infinite loop?)"
@@ -1117,7 +1129,9 @@ NATIVE LINK:
   reference to", "cannot find -lNAME", "unable to find library"), Apple
   ld's on macOS ("Undefined symbols for architecture arm64:" and a
   `"_SYMBOL", referenced from:` line per symbol, "ld: library 'NAME' not
-  found", "found architecture 'x86_64', required architecture 'arm64'").
+  found", "found architecture 'x86_64', required architecture 'arm64'"),
+  link.exe's on Windows ("error LNK2019: unresolved external symbol NAME",
+  "fatal error LNK1181: cannot open input file 'NAME.lib'").
 NATIVE AOT:
   * "executable link failed (STATUS): ..." with rustc's output, the system
     linker's own lines among it;
@@ -1131,7 +1145,15 @@ NATIVE AOT:
 For C: install the library (for the host's architecture), pass its
 directory with -L DIR, and check each `named` symbol against the library:
 a symbol is its C name, never Mach-O's `_`-prefixed spelling, which the
-toolchain adds. The Tcl backends never call C. For NATIVE AOT:
+toolchain adds. On Windows `extern c library "NAME"` is the file NAME.lib
+-- a static library, or a DLL's import library (the DLL itself must then
+be beside the executable or on PATH when it runs) -- and every executable
+links the static release C runtime (/MT, cl's default), so build a static
+C library with /MT: a /MD one calls the C runtime through `__imp_` imports
+the static runtime does not define, and link.exe reports them unresolved
+("error LNK2019: unresolved external symbol __imp_NAME"; the message then
+says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
+C runtime"). The Tcl backends never call C. For NATIVE AOT:
 the default (rustc) linker needs rustc and a built native backend in the
 checkout, and on macOS the Xcode command line tools (the system linker);
 the stub linker needs neither but is Linux x86-64 only and links no C.

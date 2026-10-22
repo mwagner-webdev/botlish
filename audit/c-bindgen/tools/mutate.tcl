@@ -219,7 +219,7 @@ try {
             -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed] -keep 0] status output
         cd $here
         file delete -force $scratch
-        if {[regexp {programs \d+ declarations \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
+        if {[regexp {programs \d+ declarations \d+ (?:variadic \d+ trailing \d+ )?disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
             set fuzz [expr {$n > 0 ? "killed ($n disagreements in [dict get $options -fuzz-count] programs)" : "survived"}]
         } else {
             set fuzz "killed (did not complete: [lastLine $output])"

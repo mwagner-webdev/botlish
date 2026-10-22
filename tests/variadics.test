@@ -1,0 +1,492 @@
+# variadics.test -- variadic parameters of Botlish functions
+# (VARIADICS-VERTICAL-SLICE-1.md):
+#
+#     fn sum(variadic numbers: List[int]) -> int      the trailing arguments
+#     sum(1, 2, 3)                                    are one ordinary List
+#
+# A variadic section is the last binding of a parameter list; every call of
+# the declared function (or a name bound to it, or method syntax) collects
+# its trailing arguments into one list construction, so the body sees an
+# ordinary immutable List. The tests run programs on every in-process
+# backend (interpreter, Tcl compiler, native generic, native specialized)
+# and require one outcome; parsing, the retained HIR facts, every diagnostic
+# with its location, method spelling, aliases, values, imprinting, modules,
+# coroutines, HIR text and interchange, GC stress and the standalone
+# executable are pinned separately. The C side of variadics (`extern c fn
+# ... variadic`) is tests/c-ffi.test's (cf-va-*).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+proc stripLocations {message} {
+    return [regsub -all {[^ ]*\.bot:[0-9]+:[0-9]+} $message {t.bot:L:C}]
+}
+
+# The outcomes of SOURCE on every backend, or the one static rejection.
+proc outcomesOf {source} {
+    set path [makeFile $source variadics-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path -cache ""} hir options]} {
+            set code [dict get $options -errorcode]
+            return [lmap backend $::allBackends {list error $code [stripLocations $hir]}]
+        }
+        return [lmap backend $::allBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] eq "value"} {
+                list value [lindex $outcome 1]
+            } else {
+                list error [lindex $outcome 1] [stripLocations [lindex $outcome 2]]
+            }
+        }]
+    } finally {
+        removeFile variadics-case.bot
+    }
+}
+
+# The one outcome SOURCE has on every backend ("disagree: ..." if they differ).
+proc parity {source} {
+    set outcomes [outcomesOf $source]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "disagree: [lmap b $::allBackends o $outcomes {list $b $o}]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The value SOURCE has on every backend, or what differs / the error.
+proc valueOf {source} {
+    set outcome [parity $source]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+# "KIND LINE:COLUMN MESSAGE" of every diagnostic of the static rejection of
+# SOURCE, in the build's order -- or "accepted".
+proc rejections {source} {
+    set path [makeFile $source variadics-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path -cache ""} message options]} {
+            set diagnostics [dict getdef $options -diagnostics {}]
+            if {$diagnostics eq {}} {
+                set diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]
+            }
+            return [lmap d $diagnostics {
+                regexp {^[^ ]*\.bot:([0-9]+:[0-9]+): (.*)$} [dict get $d message] -> where text
+                string cat "[lindex [dict get $d errorcode] end] $where $text"
+            }]
+        }
+        return accepted
+    } finally {
+        removeFile variadics-case.bot
+    }
+}
+
+proc hirOf {source} {
+    set path [makeFile $source variadics-case.bot]
+    try {
+        return [surface::readProgramFile $path -cache "" -warnings off]
+    } finally {
+        removeFile variadics-case.bot
+    }
+}
+
+proc ast {source args} {
+    return [surface::formatAst [surface::parse $source t.bot] {*}$args]
+}
+
+proc parseError {source} {
+    if {![catch {surface::parse $source t.bot} message options]} {
+        return "no error"
+    }
+    lassign [dict get $options -errorcode] a b diagnostic
+    if {"$a $b" ne "SURFACE SYNTAX"} {
+        return "unexpected error: $message"
+    }
+    set code [expr {[dict exists $diagnostic code] ? [dict get $diagnostic code] : "-"}]
+    return "[dict get $diagnostic line]:[dict get $diagnostic column] $code"
+}
+
+# The sum of a List of Ints, and variadic functions over it.
+set ::sums {import std::list
+fn sum_from(xs: List[int], i: int, acc: int) -> int:
+    if i == xs.length():
+        acc
+    else:
+        x = xs.at(i):
+            on IndexNotFound:
+                0
+        xs.sum_from(i + 1, acc + x)
+fn sum(variadic numbers: List[int]) -> int:
+    numbers.sum_from(0, 0)
+fn weighted(weight: int, variadic numbers: List[int]) -> int:
+    weight * numbers.sum_from(0, 0)
+}
+
+# ---------------------------------------------------------------------------
+# Parsing
+
+test va-parse-basic {a variadic section after the fixed parameters} -body {
+    ast "fn f(a, b: int, variadic xs: List\[int\]):\n    xs"
+} -result {fn f (a b:int variadic xs:List[int])
+    (name xs)}
+
+test va-parse-only {a function whose only parameter is variadic} -body {
+    ast "fn f(variadic xs: List\[str\]):\n    xs"
+} -result {fn f (variadic xs:List[str])
+    (name xs)}
+
+test va-parse-bare-list {a bare List, the element type each call imprints} -body {
+    ast "fn f(variadic values: List):\n    values"
+} -result {fn f (variadic values:List)
+    (name values)}
+
+test va-parse-sections {the variadic parameter follows flags and context, the last binding; only the resume clause follows it} -body {
+    ast "fn f(a, flags :q, context io: Log, variadic xs: List\[int\], resume Input):\n    xs"
+} -result {fn f (a flags :q context io:Log variadic xs:List[int] resume Input)
+    (name xs)}
+
+test va-parse-contextual {"variadic" is contextual: an ordinary name everywhere else} -body {
+    list [ast "fn f(variadic):\n    variadic"] [ast "fn f(variadic: int, x):\n    variadic"] \
+        [ast "variadic = 1\nvariadic(variadic)"]
+} -result {{fn f (variadic)
+    (name variadic)} {fn f (variadic:int x)
+    (name variadic)} {(bind variadic (int 1))
+(call (name variadic) (name variadic))}}
+
+test va-parse-trailing-comma {a trailing comma after the variadic parameter} -body {
+    ast "fn f(a, variadic xs: List\[int\],):\n    xs"
+} -result {fn f (a variadic xs:List[int])
+    (name xs)}
+
+foreach {name source expected} {
+    two-sections {fn f(variadic a: List[int], variadic b: List[int]):
+    a} {1:29 MALFORMED-VARIADIC-SECTION}
+    parameter-after {fn f(variadic a: List[int], b):
+    a} {1:29 MALFORMED-VARIADIC-SECTION}
+    flags-after {fn f(variadic a: List[int], flags :q):
+    a} {1:29 MALFORMED-VARIADIC-SECTION}
+    flag-after {fn f(a, variadic b: List[int], :q):
+    a} {1:32 MALFORMED-VARIADIC-SECTION}
+    context-after {fn f(variadic a: List[int], context io: Log):
+    a} {1:29 MALFORMED-VARIADIC-SECTION}
+    untyped {fn f(variadic a):
+    a} {1:15 MALFORMED-VARIADIC-SECTION}
+    untyped-comma {fn f(variadic a, b):
+    a} {1:15 MALFORMED-VARIADIC-SECTION}
+    missing-type {fn f(variadic a:):
+    a} {1:17 -}
+    resume-before {fn f(resume Input, variadic a: List[int]):
+    a} {1:20 -}
+    trait-requirement {trait Shape:
+    fn area(s: Shape, variadic xs: List[int]) -> int} {2:23 MALFORMED-VARIADIC-SECTION}
+} {
+    test va-parse-error-$name "malformed: $name" -body {
+        parseError $source
+    } -result $expected
+}
+
+test va-parse-messages {the syntax errors say what is wrong and what to write} -body {
+    lmap source [list "fn f(variadic a: List\[int\], variadic b: List\[int\]):\n    a" \
+                     "fn f(variadic a: List\[int\], b):\n    a" \
+                     "fn f(variadic a):\n    a" \
+                     "fn f(variadic a: List\[int\], flags :q):\n    a"] {
+        catch {surface::parse $source t.bot} message
+        regsub {^t\.bot:[0-9]+:[0-9]+: } $message {}
+    }
+} -result {{MALFORMED-VARIADIC-SECTION: a function declares at most one variadic parameter ("variadic NAME: List[T]", the last parameter of its list)} {MALFORMED-VARIADIC-SECTION: the variadic parameter "a" must be the last parameter of the list, found name "b" after it (a parameter list is ordinary parameters, then flags, then context, then the variadic parameter)} {MALFORMED-VARIADIC-SECTION: variadic parameter "a" needs its List type: write "variadic a: List[T]" (or "List" for an element type each call imprints)} {MALFORMED-VARIADIC-SECTION: the variadic parameter "a" must be the last parameter of the list, found name "flags" after it (a parameter list is ordinary parameters, then flags, then context, then the variadic parameter)}}
+
+# ---------------------------------------------------------------------------
+# Semantics: the trailing arguments are one ordinary List
+
+test va-zero-one-many {zero, one and several trailing arguments bind lists of 0, 1 and 3 elements} -body {
+    valueOf "${::sums}\[sum(), sum(5), sum(1, 2, 3), sum(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)\]\n"
+} -result {[0, 5, 6, 78]}
+
+test va-fixed-then-variadic {fixed parameters bind first, the rest is the List} -body {
+    valueOf "${::sums}\[weighted(10), weighted(10, 1), weighted(2, 1, 2, 3)\]\n"
+} -result {[0, 10, 12]}
+
+test va-the-list-itself {the body's parameter is exactly the List of the trailing arguments, in order} -body {
+    valueOf "fn pack(a: int, variadic xs: List\[int\]) -> List\[int\]:\n    xs\n\[pack(1), pack(1, 2), pack(1, 2, 3, 4)\]\n"
+} -result {[[], [2], [2, 3, 4]]}
+
+test va-strings {a List of Strings} -body {
+    valueOf "import std::list\nfn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n\[tag(\"t\"), tag(\"t\", \"ab\", \"cd\"), std::list::length(tag(\"x\", \"y1\", \"y2\", \"y3\"))\]\n"
+} -result {[[], ["ab", "cd"], 3]}
+
+test va-float64 {a List of Float64 values} -body {
+    valueOf "import std::list\nfn fsum(xs: List\[Float64\], i: int, acc: Float64) -> Float64 errors NonFiniteFloat:\n    if i == std::list::length(xs):\n        acc\n    else:\n        x = std::list::at(xs, i):\n            on IndexNotFound:\n                0.0\n        fsum(xs, i + 1, acc + x)\nfn total(variadic xs: List\[Float64\]) -> Float64 errors NonFiniteFloat:\n    fsum(xs, 0, 0.0)\nr = total(0.5, 1.25, 2.0):\n    on NonFiniteFloat:\n        -1.0\nz = total():\n    on NonFiniteFloat:\n        -1.0\n\[r, z\]\n"
+} -result {[3.75, 0.0]}
+
+test va-element-domain {an element type that is a domain: each trailing argument is proven in it by its own proof (where the List literal [1, 9, 10] is a List[int], not admissible as a List[Small])} -body {
+    valueOf "${::sums}type Small = Int in 0..10\nfn smalls(variadic xs: List\[Small\]) -> List\[Small\]:\n    xs\n\[smalls(), smalls(1, 9, 10)\]\n"
+} -result {[[], [1, 9, 10]]}
+
+test va-nested {a variadic call as an argument of another, and of itself} -body {
+    valueOf "${::sums}\[sum(sum(1, 2), sum(), sum(3, sum(4, 5))), weighted(sum(1, 1), sum(2), 1)\]\n"
+} -result {[15, 6]}
+
+test va-recursive {a recursive variadic function, each call collecting its own arguments} -body {
+    valueOf "import std::list\nfn count_down(n: int, variadic acc: List\[int\]) -> int:\n    if n == 0:\n        std::list::length(acc)\n    else:\n        count_down(n - 1, n, n, n)\n\[count_down(0), count_down(4), count_down(0, 1, 2)\]\n"
+} -result {[0, 3, 2]}
+
+test va-called-from-function {a variadic function called from another function and from a closure} -body {
+    valueOf "${::sums}fn twice(x: int) -> int:\n    sum(x, x)\nfn outer(a: int) -> int:\n    fn inner(variadic ys: List\[int\]) -> int:\n        a + sum_from(ys, 0, 0)\n    inner(1, 2) + inner()\n\[twice(21), outer(10)\]\n"
+} -result {[42, 23]}
+
+test va-references-retained {the List owns its elements: strings, lists and structs built in the arguments outlive the call} -body {
+    valueOf "import std::list\nimport std::str\nstruct P:\n    x: int\nfn keep(variadic xs: List\[str\]) -> List\[str\]:\n    xs\nfn pair(variadic ps: List\[P\]) -> List\[P\]:\n    ps\nfn lists(variadic ls: List\[List\[int\]\]) -> List\[List\[int\]\]:\n    ls\nkept = keep(std::str::concat(\"ab\", \"cd\"), \"x\".concat(\"yz\"))\nps = pair(P {x: 1}, P {x: 2})\nnested = lists(\[1, 2\], \[3\])\n\[kept, ps.length(), nested\]\n"
+} -result {[["abcd", "xyz"], 2, [[1, 2], [3]]]}
+
+test va-imprinted-bare-list {a bare List is the element type each call imprints, not List[any]: a call of Ints is a List[int], one of Strings a List[str]} -body {
+    set hir [hirOf "import std::list\nfn inspect(variadic values: List) -> int:\n    std::list::length(values)\na = inspect(1, 2, 3)\nb = inspect(\"x\", \"y\")\nc = inspect()\n\[a, b, c\]\n"]
+    set lists {}
+    foreach e [hirFind $hir call] {
+        if {[dict exists [hir::node $hir $e] variadic]} {
+            lappend lists [hir::types::show [hir::typeOf $hir [lindex [hir::get $hir $e args] end]]]
+        }
+    }
+    join $lists
+} -cleanup {unset -nocomplain hir lists} -result {List[int]{length: 3} List[str]{length: 2} List[never]}
+
+test va-imprinted-values {bare List and List[T] run like the same function given the list literal} -body {
+    valueOf "import std::list\nfn inspect(variadic values: List) -> int:\n    std::list::length(values)\nfn firsts(variadic values: List\[T\]) -> List\[T\]:\n    values\n\[inspect(), inspect\[int\](), inspect(1, 2), firsts(1, 2), firsts\[str\](\"x\"), firsts()\]\n"
+} -result {[0, 0, 2, [1, 2], ["x"], []]}
+
+test va-imprinted-heterogeneous {heterogeneous arguments imprint what the same List literal's elements imprint (their least upper bound), never a positional type} -body {
+    set a [valueOf "import std::list\nfn inspect(variadic values: List) -> int:\n    std::list::length(values)\ninspect(1, \"x\", true)\n"]
+    set b [valueOf "import std::list\nfn inspect(values: List\[T\]) -> int:\n    std::list::length(values)\ninspect(\[1, \"x\", true\])\n"]
+    list $a $b
+} -cleanup {unset -nocomplain a b} -result {3 3}
+
+test va-bare-list-fresh-variable {a bare List's variable is fresh: it never captures another variable of the signature or a visible type} -body {
+    set hir [hirOf "type T = Int in 0..9\nfn f(xs: List\[T1\], variadic ys: List) -> int:\n    7\nf(\[1\], \"a\")\n"]
+    set block [lindex [hirFind $hir block] 0]
+    join [lmap t [hir::get $hir $block declaredParamTypes] {hir::types::show $t}]
+} -cleanup {unset -nocomplain hir block} -result {List[T1] List[T2]}
+
+# ---------------------------------------------------------------------------
+# Evaluation: once each, in written order
+
+set ::logFns {import std::list
+import std::mutable_array
+context struct Log:
+    digits: MutableArray[int]
+fn probe(id, result, context log: Log):
+    n = std::mutable_array::get(log.digits, 0, 0)
+    std::mutable_array::set(log.digits, 0, n * 10 + id):
+        on IndexNotFound:
+            unit
+    result
+fn logged(context log: Log):
+    std::mutable_array::get(log.digits, 0, 0)
+with context Log {digits: std::mutable_array::create(1, 0)}
+fn f(a, variadic xs: List[int]):
+    [a, xs]
+}
+
+test va-evaluation-order {every argument is evaluated once, in written order, the fixed ones first} -body {
+    list [valueOf "${::logFns}v = f(probe(1, 10), probe(2, 20), probe(3, 30), probe(4, 40))\n\[v, logged()\]\n"] \
+        [valueOf "${::logFns}v = probe(1, 10).f(probe(2, 20), probe(3, 30))\n\[v, logged()\]\n"] \
+        [valueOf "${::logFns}v = f(probe(5, 1))\n\[v, logged()\]\n"]
+} -result {{[[10, [20, 30, 40]], 1234]} {[[10, [20, 30]], 123]} {[[1, []], 5]}}
+
+test va-evaluation-errors {an argument that fails ends the call: earlier arguments ran once, later ones never} -body {
+    valueOf "${::logFns}error Boom:\n    code: int\nfn boom(x: int) -> int errors Boom:\n    if x > 5:\n        fail Boom {code: x}\n    x\nfn g(x: int) errors Boom:\n    f(probe(1, 1), probe(2, 2), boom(x), probe(3, 3))\ncell = std::mutable_array::create(2, 9)\nstd::mutable_array::set(cell, 1, 1):\n    on IndexNotFound:\n        unit\nr = g(std::mutable_array::get(cell, 0, 0)):\n    on Boom details:\n        \[details.code\]\ns = g(std::mutable_array::get(cell, 1, 0)):\n    on Boom details:\n        \[details.code\]\n\[r, s, logged()\]\n"
+} -result {[[9], [1, [2, 1, 3]], 12123]}
+
+# ---------------------------------------------------------------------------
+# Calls: method syntax, aliases, values, flags, modules, coroutines
+
+test va-method-syntax {method syntax: the receiver is the first argument, fixed or collected} -body {
+    valueOf "${::sums}\[(1).sum(2, 3), (2).weighted(5, 5), (7).sum()\]\n"
+} -result {[6, 20, 7]}
+
+test va-method-equals-free {method and free spelling are the same HIR} -body {
+    set m [hirOf "${::sums}(2).weighted(5, 5)\n"]
+    set f [hirOf "${::sums}weighted(2, 5, 5)\n"]
+    expr {[hir::lower $m] eq [hir::lower $f]}
+} -cleanup {unset -nocomplain m f} -result 1
+
+test va-alias {a name bound to a variadic function is called like it} -body {
+    valueOf "${::sums}g = sum\nh = g\n\[g(1, 2), h(), h(1, 2, 3)\]\n"
+} -result {[3, 0, 6]}
+
+test va-function-value {as a value, a variadic function is the ordinary function of its List parameter: a call through the value passes the List} -body {
+    list [valueOf "${::sums}fn apply(f, xs):\n    f(xs)\nfn apply_typed(f: Fn{args: \[List\[int\]\], return: int}, xs: List\[int\]) -> int:\n    f(xs)\nfs = \[sum, sum\]\nfirst = fs.at(0):\n    on IndexNotFound:\n        sum\n\[apply(sum, \[1, 2\]), apply_typed(sum, \[3, 4\]), first(\[5, 6\])\]\n"] \
+        [parity "${::sums}fn apply(f, x):\n    f(x)\napply(weighted, 2)\n"]
+} -result {{[3, 7, 11]} {error {CORE SEMANTIC ARITY} {block (weight numbers) expects 2 argument(s), got 1}}}
+
+test va-flags {a variadic function with flags: the flags are named, the trailing arguments collected} -body {
+    valueOf "${::sums}fn report(base: int, flags :loud, variadic xs: List\[int\]) -> int:\n    if loud:\n        base + sum_from(xs, 0, 0)\n    else:\n        base\n\[report(10), report(10, 1, 2), report(10, 1, 2, :loud), report(10, :loud)\]\n"
+} -result {[10, 10, 13, 10]}
+
+test va-coroutine {a variadic yielding function constructs a coroutine over its List} -constraints nativeCoroutines -body {
+    valueOf "struct Ev:\n    n: int\nfn gen(variadic xs: List\[int\]):\n    loop x in xs:\n        yield Ev {n: x}\n    Ev {n: -1}\nfn drive() -> List\[int\]:\n    coroutine {step, first} = gen(4, 5)\n    second = step()\n    third = step()\n    \[first.n, second.n, third.n\]\ndrive()\n"
+} -result {[4, 5, -1]}
+
+test va-coroutine-calls {variadic calls inside a coroutine body} -constraints nativeCoroutines -body {
+    valueOf "${::sums}struct Ev:\n    n: int\nfn gen(a: int):\n    yield Ev {n: sum(a, a)}\n    Ev {n: sum(a, 1, 2, 3)}\nfn drive() -> List\[int\]:\n    coroutine {step, first} = gen(4)\n    second = step()\n    \[first.n, second.n\]\ndrive()\n"
+} -result {[8, 10]}
+
+test va-application-module {a variadic function of an application module, called qualified and by method syntax} -body {
+    set dir [makeDirectory variadics-app]
+    makeFile "import std::list\nfn count(variadic xs: List\[int\]) -> int:\n    std::list::length(xs)\nfn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n" util.bot $dir
+    set main [makeFile "import util\n\[util::count(1, 2, 3), util::count(), util::tag(\"t\", \"a\", \"b\"), \"t\".tag(\"c\")\]\n" main.bot $dir]
+    set hir [surface::readProgramFile $main -cache "" -warnings off]
+    lsort -unique [lmap b $::allBackends {lindex [outcomeUnderHir $b $hir] 1}]
+} -cleanup {removeDirectory variadics-app; unset -nocomplain dir main hir} -result {{[3, 0, ["a", "b"], ["c"]]}}
+
+test va-method-arity-filter {a variadic method candidate fits a call of its fixed arguments or more: beside another module's two-parameter function of the same name, (1).tag(5, 6) and (1).tag() fit only the variadic one, so the receiver's candidates are settled by arity, with no method decision recorded (methodCalls)} -body {
+    set dir [makeDirectory variadics-arity]
+    makeFile "import std::list\nfn tag(x: int, variadic ys: List\[int\]) -> int:\n    x + 10 * std::list::length(ys)\n" va.bot $dir
+    makeFile "fn tag(x: int, y: int) -> int:\n    100 * x + y\n" vb.bot $dir
+    set main [makeFile "import va\nimport vb\n\[(1).tag(5, 6), (1).tag()\]\n" main.bot $dir]
+    set hir [surface::readProgramFile $main -cache "" -warnings off]
+    list [dict size [dict getdef $hir methodCalls {}]] \
+        [lsort -unique [lmap b $::allBackends {lindex [outcomeUnderHir $b $hir] 1}]]
+} -cleanup {removeDirectory variadics-arity; unset -nocomplain dir main hir} -result {0 {{[21, 1]}}}
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+test va-arity {fewer arguments than the fixed parameters is a compile-time ARITY at the call} -body {
+    rejections "${::sums}weighted()\n"
+} -result {{ARITY 14:1 function weighted takes 1 fixed argument(s) before its variadic parameter, got 0 argument(s)}}
+
+test va-arity-flags {the ARITY of a variadic function with flags counts the fixed arguments only, once} -body {
+    rejections "fn report(a: int, b: int, flags :loud, variadic xs: List\[int\]) -> int:\n    a\nreport(1, :loud)\n"
+} -result {{ARITY 3:1 function report takes 2 fixed argument(s) before its variadic parameter and the flags :loud, got 1 argument(s)}}
+
+test va-element-type {each trailing argument that breaks the element type is diagnosed at its own spelling} -body {
+    rejections "${::sums}\[weighted(1, \"a\", 2, true), sum(1, 2.5)\]\n"
+} -result {{TYPE 14:14 argument 2 of weighted cannot be proven to satisfy int, the element type of its variadic parameter "numbers" (argument type: str)} {TYPE 14:22 argument 4 of weighted cannot be proven to satisfy int, the element type of its variadic parameter "numbers" (argument type: bool)} {TYPE 14:36 argument 2 of sum cannot be proven to satisfy int, the element type of its variadic parameter "numbers" (argument type: Float64)}}
+
+test va-element-domain-unproven {an argument not proven in the element domain is rejected, never converted} -body {
+    rejections "type Small = Int in 0..10\nfn smalls(variadic xs: List\[Small\]) -> int:\n    7\nfn g(n: int) -> int:\n    smalls(1, n)\ng(3)\n"
+} -result {{TYPE 5:15 argument 2 of smalls cannot be proven to satisfy int[Small], the element type of its variadic parameter "xs" (argument type: int, facts: [-∞, +∞])}}
+
+test va-not-a-list {a variadic parameter not declared a List is TYPE at the declaration} -body {
+    rejections "fn f(variadic xs: int) -> int:\n    7\nf(1)\n"
+} -result {{TYPE 1:5 the variadic parameter "xs" is declared int, but a variadic parameter is bound to the List of the call's trailing arguments: declare it List[ELEMENT] (or a bare List, whose element type each call imprints)}}
+
+test va-imprinted-not-a-value {a variadic function with an imprinted List is no value, as every imprinted callable} -body {
+    rejections "import std::list\nfn inspect(variadic values: List) -> int:\n    std::list::length(values)\ng = \[inspect\]\n"
+} -result {{IMPRINT 4:6 inspect has imprint variables, so it is not a value: an imprinted callable is only called, where each call imprints its variables (wrap the call in a function to pass it on)}}
+
+test va-explicit-imprint-count {explicit imprints of a bare List: exactly one, its fresh variable} -body {
+    rejections "import std::list\nfn inspect(variadic values: List) -> int:\n    std::list::length(values)\ninspect\[int, str\]()\n"
+} -result {{IMPRINT 4:1 inspect takes 1 imprint(s), [T] (in the order they first occur in its signature), but 2 are given}}
+
+test va-trait-implementation {a variadic function implements no trait requirement} -body {
+    set r [rejections "trait Sized:\n    fn size(s: Sized) -> int\nstruct Box:\n    n: int\nfn size(variadic b: List\[Box\]) -> int:\n    7\nfn measure(s: Sized) -> int:\n    s.size()\nmeasure(Box {n: 1})\n"]
+    expr {[string match "*is variadic: a trait requirement is a fixed signature*" $r] ? "rejected" : $r}
+} -cleanup {unset -nocomplain r} -result rejected
+
+# ---------------------------------------------------------------------------
+# What HIR keeps
+
+test va-hir-facts {the block records its fixed count, the call what it collected; the list is an ordinary list construction} -body {
+    set hir [hirOf "fn pack(a: int, variadic xs: List\[int\]) -> List\[int\]:\n    xs\n\[pack(1), pack(1, 2, 3)\]\n"]
+    set block [lindex [hirFind $hir block] 0]
+    set calls {}
+    foreach e [hirFind $hir call] {
+        if {[dict exists [hir::node $hir $e] variadic]} {
+            set last [lindex [hir::get $hir $e args] end]
+            lappend calls [list [hir::get $hir $e variadic] [llength [hir::get $hir $e args]] \
+                [hir::get $hir $last target] [llength [hir::get $hir $last args]]]
+        }
+    }
+    list [hir::get $hir $block variadic] [llength [hir::get $hir $block params]] $calls
+} -cleanup {unset -nocomplain hir block calls last} -match glob \
+    -result {1 2 {{{fixed 1 count 0} 2 {native y*} 0} {{fixed 1 count 2} 2 {native y*} 2}}}
+
+test va-hir-text-roundtrip {HIR text keeps the variadic boundary of the declaration and of every call, and reads back to the same text} -body {
+    set hir [hirOf "fn pack(a: int, variadic xs: List\[int\]) -> List\[int\]:\n    xs\nfn any_pack(variadic xs: List) -> int:\n    7\n\[pack(1), pack(1, 2, 3), any_pack(), any_pack(\"a\", \"b\")\]\n"]
+    set t1 [hir::format $hir]
+    set t2 [hir::format [hir::parse $t1]]
+    set marks [lmap line [split $t1 \n] {
+        if {![regexp {(block .*\(.*\)) captures \(\) (variadic [0-9]+)|(call block\(e[0-9]+\) variadic [0-9]+ [0-9]+)} $line -> a b c]} continue
+        regsub -all {e[0-9]+|s[0-9]+|b[0-9]+} [string trim "$a $b$c"] {#}
+    }]
+    list [expr {$t1 eq $t2}] $marks [core::formatValue [core::compiler::evalHir [hir::parse $t1]]]
+} -cleanup {unset -nocomplain hir t1 t2 marks} -result {1 {{block # (# a:int, # xs:List[int]) variadic 1} {block # (# xs:List[T]) variadic 0} {call block(#) variadic 1 0} {call block(#) variadic 1 2} {call block(#) variadic 0 0} {call block(#) variadic 0 2}} {[[], [2, 3], 7, 7]}}
+
+test va-interchange {a variadic program written as HIR interchange and read back runs alike, its facts kept} -body {
+    set hir [hirOf "${::sums}fn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n\[sum(1, 2, 3), weighted(2, 4), tag(\"x\", \"a\", \"b\")\]\n"]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    set facts [lmap h [list $hir $back] {
+        lmap e [hirFind $h call] {if {[dict exists [hir::node $h $e] variadic]} {hir::get $h $e variadic} else continue}
+    }]
+    list [expr {[lindex $facts 0] eq [lindex $facts 1]}] \
+        [lsort -unique [lmap b $::allBackends {lindex [outcomeUnderHir $b $back] 1}]]
+} -cleanup {unset -nocomplain hir back facts} -result {1 {{[6, 8, ["a", "b"]]}}}
+
+test va-no-warnings {a variadic program compiles under -warnings error} -body {
+    set path [makeFile "${::sums}\[sum(1, 2), weighted(1, 2, 3), (1).sum(2)\]\n" variadics-warn.bot]
+    surface::readProgramFile $path -cache "" -warnings error
+    string cat clean
+} -cleanup {removeFile variadics-warn.bot; unset -nocomplain path} -result clean
+
+test va-method-eligible-silent {METHOD-ELIGIBLE never suggests method syntax from a call's collected List} -body {
+    set path [makeFile "${::sums}x = 4\n\[sum(x, 2, 3), weighted(x, 2)\]\n" variadics-warn.bot]
+    set hir [surface::readProgramFile $path -cache "" -warnings default -warning-channel ""]
+    lmap w [hir::warnings::of $hir] {if {[dict get $w code] eq "METHOD-ELIGIBLE"} {set w} else continue}
+} -cleanup {removeFile variadics-warn.bot; unset -nocomplain path hir} -result {}
+
+# ---------------------------------------------------------------------------
+# Native: specialization, GC stress, the standalone executable
+
+test va-native-specialized {the specialized native backend specializes the variadic function for the List it is given, as for any List argument} -body {
+    set hir [hirOf "${::sums}fn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n\[sum(1, 2, 3), tag(\"x\", \"a\")\]\n"]
+    set nir [native::nir $hir]
+    list [regexp {listnew} $nir] [lindex [outcomeUnderHir cranelift $hir] 1]
+} -cleanup {unset -nocomplain hir nir} -result {1 {[6, ["a"]]}}
+
+proc withGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+test va-gc-stress {under GC stress, Lists of managed values built in the arguments, collected and kept across further allocation, stay intact} -constraints nativeCoroutines -body {
+    set program "import std::list\nimport std::str\nfn keep(variadic xs: List\[str\]) -> List\[str\]:\n    xs\nfn grow(n: int, acc: List\[List\[str\]\]) -> List\[List\[str\]\]:\n    if n == 0:\n        acc\n    else:\n        grow(n - 1, acc.append(keep(\"a\".concat(\"b\"), \"c\".concat(\"d\"), \"e\")))\nall = grow(40, \[\])\nlast = all.at(39):\n    on IndexNotFound:\n        \[\]\n\[all.length(), last\]\n"
+    set hir [hirOf $program]
+    withGcStress {
+        lsort -unique [lmap b {cranelift-generic cranelift} {lindex [outcomeUnderHir $b $hir] 1}]
+    }
+} -cleanup {unset -nocomplain program hir} -result {{[40, ["ab", "cd", "e"]]}}
+
+proc executableValue {text} {
+    set dir [makeDirectory {variadics executable}]
+    try {
+        set path [file join $dir program.bot]
+        set f [open $path w]
+        puts -nonewline $f $text
+        close $f
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        return [string trim [exec [file join $dir program]]]
+    } finally {
+        removeDirectory {variadics executable}
+    }
+}
+
+test va-standalone-executable {the standalone native executable prints what every in-process backend computes} -constraints executableAot -body {
+    set program "${::sums}fn tag(name: str, variadic parts: List\[str\]) -> List\[str\]:\n    parts\n\[sum(), sum(1, 2, 3), weighted(2, 4, 5), tag(\"x\", \"a\", \"b\")\]\n"
+    list [executableValue $program] [valueOf $program]
+} -cleanup {unset -nocomplain program} -result {{[0, 6, 18, ["a", "b"]]} {[0, 6, 18, ["a", "b"]]}}
+
+cleanupTests

@@ -232,46 +232,46 @@ proc core::primitives::add {a b} {
 <<<<
     if {[hir::types::IsCallable $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]
             || [hir::types::IsEnum $declared] || [hir::types::IsCAddress $declared] || [hir::types::IsImprint $declared]
-            || [hir::types::IsNativeMemory $declared]} {
+            || [hir::types::IsNativeMemory $declared] || [hir::refinements::IsRefined $declared]} {
 ====
     if {[hir::types::IsEnum $declared] && [hir::types::IsEnum $argType]} {
         return 1
     }
     if {[hir::types::IsCallable $declared] || [hir::types::IsStructLike $declared] || [hir::types::IsCoroutine $declared]
             || [hir::types::IsEnum $declared] || [hir::types::IsCAddress $declared] || [hir::types::IsImprint $declared]
-            || [hir::types::IsNativeMemory $declared]} {
+            || [hir::types::IsNativeMemory $declared] || [hir::refinements::IsRefined $declared]} {
 >>>>
 
 @@ hash-ignores-enum-tcl the hash ignores the enum's identity (Tcl runtimes)
 ## core/hashing.tcl
 <<<<
-            set h [Bytes $h [Utf8Bytes [core::value::enumId $v]]]
+            Text out $mode [Utf8Bytes [core::value::enumId $v]]
 ====
-            set h $h
+            set out $out
 >>>>
 
 @@ hash-ignores-enum-native the hash ignores the enum's identity (native runtime)
 ## native/src/runtime/ops.rs
 <<<<
-                let h = fnv1a(h, name.as_bytes());
+                sink.text(info.name.as_bytes());
 ====
-                let h = { let _ = name; h };
+                let _ = &info.name;
 >>>>
 
 @@ hash-uses-position-tcl the hash reads a case's position instead of its name (Tcl runtimes): reordering changes it
 ## core/hashing.tcl
 <<<<
-            return [Bytes $h [Utf8Bytes [core::value::enumCaseName $v]]]
+            Text out $mode [Utf8Bytes [core::value::enumCaseName $v]]
 ====
-            return [Bytes $h [Utf8Bytes [lsearch -exact [hir::enums::cases [core::value::enumId $v]] [core::value::enumCaseName $v]]]]
+            Text out $mode [Utf8Bytes [lsearch -exact [hir::enums::cases [core::value::enumId $v]] [core::value::enumCaseName $v]]]
 >>>>
 
 @@ hash-uses-position-native the hash reads a case's number instead of its name (native runtime): reordering changes it
 ## native/src/runtime/ops.rs
 <<<<
-                fnv1a(h, case.as_bytes())
+                sink.text(info.cases[c as usize].as_bytes());
 ====
-                { let _ = case; fnv1a(h, c.to_string().as_bytes()) }
+                sink.text(c.to_string().as_bytes());
 >>>>
 
 @@ enum-affine an enum is accidentally affine
@@ -337,7 +337,7 @@ proc hir::enums::IsAffine {id {seen {}}} {
 ## hir/format.tcl
 <<<<
         const {
-            Line $hir $e "const [dict get $node literal]" $indent $origins lines
+            Line $hir $e "const [hir::format::Literal [dict get $node literal]]" $indent $origins lines
         }
 ====
         const {
@@ -345,6 +345,6 @@ proc hir::enums::IsAffine {id {seen {}}} {
             if {[lindex $literal 0] eq "enum"} {
                 set literal [list enum [list Lost [lindex $literal 1 1]]]
             }
-            Line $hir $e "const $literal" $indent $origins lines
+            Line $hir $e "const [hir::format::Literal $literal]" $indent $origins lines
         }
 >>>>

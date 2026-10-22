@@ -38,6 +38,10 @@ opaque struct SDL_AudioSpec:
 opaque struct SDL_Color:
     tag: unit
 
+# struct SDL_FColor (include/SDL3/SDL_pixels.h), a complete C type: its layout is sdl3::layouts::SDL_FColor
+opaque struct SDL_FColor:
+    tag: unit
+
 # struct SDL_Palette (include/SDL3/SDL_pixels.h), a complete C type: its layout is sdl3::layouts::SDL_Palette
 opaque struct SDL_Palette:
     tag: unit
@@ -50,7 +54,7 @@ opaque struct SDL_PixelFormatDetails:
 opaque struct SDL_Point:
     tag: unit
 
-# struct SDL_FPoint (include/SDL3/SDL_rect.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_FPoint (include/SDL3/SDL_rect.h), a complete C type: its layout is sdl3::layouts::SDL_FPoint
 opaque struct SDL_FPoint:
     tag: unit
 
@@ -58,7 +62,7 @@ opaque struct SDL_FPoint:
 opaque struct SDL_Rect:
     tag: unit
 
-# struct SDL_FRect (include/SDL3/SDL_rect.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_FRect (include/SDL3/SDL_rect.h), a complete C type: its layout is sdl3::layouts::SDL_FRect
 opaque struct SDL_FRect:
     tag: unit
 
@@ -70,7 +74,7 @@ opaque struct SDL_Surface:
 opaque struct SDL_CameraSpec:
     tag: unit
 
-# struct SDL_DisplayMode (include/SDL3/SDL_video.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_DisplayMode (include/SDL3/SDL_video.h), a complete C type: its layout is sdl3::layouts::SDL_DisplayMode
 opaque struct SDL_DisplayMode:
     tag: unit
 
@@ -82,7 +86,7 @@ opaque struct SDL_DialogFileFilter:
 opaque struct SDL_VirtualJoystickTouchpadDesc:
     tag: unit
 
-# struct SDL_VirtualJoystickSensorDesc (include/SDL3/SDL_joystick.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_VirtualJoystickSensorDesc (include/SDL3/SDL_joystick.h), a complete C type: its layout is sdl3::layouts::SDL_VirtualJoystickSensorDesc
 opaque struct SDL_VirtualJoystickSensorDesc:
     tag: unit
 
@@ -98,7 +102,7 @@ opaque struct SDL_GamepadBinding:
 opaque struct SDL_CursorFrameInfo:
     tag: unit
 
-# struct SDL_Finger (include/SDL3/SDL_touch.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_Finger (include/SDL3/SDL_touch.h), a complete C type: its layout is sdl3::layouts::SDL_Finger
 opaque struct SDL_Finger:
     tag: unit
 
@@ -110,7 +114,7 @@ opaque struct SDL_Event:
 opaque struct SDL_PathInfo:
     tag: unit
 
-# struct SDL_GPUViewport (include/SDL3/SDL_gpu.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_GPUViewport (include/SDL3/SDL_gpu.h), a complete C type: its layout is sdl3::layouts::SDL_GPUViewport
 opaque struct SDL_GPUViewport:
     tag: unit
 
@@ -226,7 +230,7 @@ opaque struct SDL_MessageBoxColorScheme:
 opaque struct SDL_MessageBoxData:
     tag: unit
 
-# struct SDL_Vertex (include/SDL3/SDL_render.h), a complete C type whose layout is blocked (layouts.tsv)
+# struct SDL_Vertex (include/SDL3/SDL_render.h), a complete C type: its layout is sdl3::layouts::SDL_Vertex
 opaque struct SDL_Vertex:
     tag: unit
 
@@ -268,6 +272,10 @@ opaque struct SDL_Condition:
 
 # struct SDL_Cursor
 opaque struct SDL_Cursor:
+    tag: unit
+
+# struct SDL_DisplayModeData
+opaque struct SDL_DisplayModeData:
     tag: unit
 
 # struct SDL_Environment

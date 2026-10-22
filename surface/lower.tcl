@@ -226,7 +226,8 @@ proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
 proc surface::lower::ExternDeclOf {node namespace} {
     return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
         namespace $namespace symbol [dict get $node symbol] symbolSpan [dict get $node symbolSpan] \
-        params [dict get $node params] resultType [dict get $node resultType] \
+        params [dict get $node params] variadic [dict getdef $node variadic 0] \
+        variadicSpan [dict getdef $node variadicSpan ""] resultType [dict get $node resultType] \
         resultTypeSpan [dict get $node resultTypeSpan] provenance [dict get $node provenance] \
         provenanceSpan [dict get $node provenanceSpan] span [dict get $node span] \
         origin [OriginOf $node]]
@@ -807,6 +808,17 @@ proc surface::lower::Node {node} {
                 list $name [Origin $span "[dict get $node id]/($name)"]
             }]
             set paramTypes [lmap param [dict get $node params] {lindex $param 2}]
+            set variadic [dict getdef $node variadic ""]
+            if {$variadic ne ""} {
+                # The variadic parameter (VARIADICS-VERTICAL-SLICE-1.md) is
+                # the block's last ordinary parameter, bound to a List: each
+                # call collects its trailing arguments into one
+                # (hir/variadic.tcl), so the body and every backend see an
+                # ordinary List parameter.
+                set name [dict get $variadic name]
+                lappend params [list $name [Origin [dict get $variadic nameSpan] "[dict get $node id]/($name)"]]
+                lappend paramTypes [dict get $variadic type]
+            }
             set errors [lmap pair [dict get $node errors] {
                 lassign $pair errName errSpan
                 list $errName [Origin $errSpan "[dict get $node id]/errors($errName)"]
@@ -817,6 +829,10 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {$variadic ne ""} {
+                set block [hir::syntax::withVariadic $block \
+                    [Origin [dict get $variadic span] "[dict get $node id]/variadic"]]
             }
             if {[dict exists $node proves] && [dict get $node proves] ne {}} {
                 set block [hir::syntax::withProofs $block [lmap clause [dict get $node proves] {

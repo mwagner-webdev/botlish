@@ -785,7 +785,8 @@ loop that collects Ints.
   no line continuation), unrelated to enums.
 * **HIR text of programs that import modules** does not round-trip (a
   pre-existing limitation of HIR text, independent of enums); module-free
-  enum programs do.
+  enum programs do. (Since fixed: HIR text has module sections,
+  HIR-INTERCHANGE.md.)
 
 ### 49. Future payload-extension audit
 

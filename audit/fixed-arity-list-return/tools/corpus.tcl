@@ -182,7 +182,7 @@ proc elementTypes {hir w} {
 # The audit
 
 set commit [string trim [exec git -C $auditRoot rev-parse HEAD]]
-set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench lib]]
+set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench stdlib]]
 puts "# FIXED-ARITY-LIST-RETURN corpus audit: tclsh9.0 audit/fixed-arity-list-return/tools/corpus.tcl"
 puts "# commit $commit (corpus paths [expr {$dirty eq "" ? "clean" : "MODIFIED: $dirty"}])"
 puts ""

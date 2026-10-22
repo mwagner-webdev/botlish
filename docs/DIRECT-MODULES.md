@@ -549,7 +549,8 @@ unchanged (`dm-interchange-keeps-the-summary`). No lowering or backend reads
 either: there is no runtime direct bit and no native representation
 (`dm-no-runtime-representation`). Programs past the source boundary -- core
 IR text, HIR text -- carry no `moduleDecls` and are not judged
-(`dm-core-ir-untouched`): there is nothing to be a module of.
+(`dm-core-ir-untouched`): core IR text has nothing to be a module of, and
+HIR text's module sections (HIR-INTERCHANGE.md) carry no designations.
 
 The monomorphized build of a trait program is not judged again: directness
 is a property of the program as written, decided on the checked build (whose

@@ -34,6 +34,13 @@ pub enum OpCode {
     IGe,
     IEq,
     VEq,
+    /// VEq at a call site native/lower.tcl's `NativeCallOp` (`equality`) has
+    /// proven equality-total: both operands' static types are
+    /// `hir::types::IsEqualityTotal` (HASHABLE-AND-KEYED-HASH.md, "Total
+    /// lowering"), so `equal` can never refuse a kind. The same helper
+    /// (`rt_value_eq`) and the same inline fast path as VEq; only the
+    /// NO_VALUE check and the `may_error` effect are gone.
+    VEqTotal,
     StrEq,
     /// `==` of two operands statically UnicodeChar (native/lower.tcl's
     /// NativeCallOp): word equality of the two immediates; never fails.
@@ -55,6 +62,11 @@ pub enum OpCode {
     ListLen,
     ListGet,
     ListAppend,
+    /// `list#with_length(L, N)` (core/listlength.tcl, LIST-CARDINALITY-
+    /// REFINEMENTS.md): L itself when it has exactly N elements, else the
+    /// declared LengthMismatch -- the explicit validator of the List
+    /// length refinement; never a copy.
+    ListWithLength,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
     /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
@@ -188,6 +200,18 @@ pub enum OpCode {
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
     /// header and ops.rs's `rt_hash`.
     Hash,
+    /// Hash at a call site whose operand native/lower.tcl's `NativeCallOp`
+    /// (`hashing`) has proven Hashable (`hir::types::IsHashable`): the same
+    /// helper (`rt_hash`), which can never refuse such a value, so no
+    /// NO_VALUE check and no `may_error` (HASHABLE-AND-KEYED-HASH.md).
+    HashTotal,
+    /// The private table hash (core/hashing.tcl's tableHash, ops.rs's
+    /// rt_table_hash): SipHash-1-3 of the operand's canonical input under the
+    /// runtime's process key, masked to 61 bits. The dynamically dispatched
+    /// entry (`impl=`) only: a call the compiler admitted is TableHashTotal.
+    TableHash,
+    /// TableHash of an operand proven Hashable: never fails.
+    TableHashTotal,
     /// Validates a StringRegion's bounds (base String, start, end: character
     /// indices) exactly as `Substr` would, without allocating or copying:
     /// UNIT on success, RANGE on failure. Emitted once, at the point in
@@ -317,7 +341,10 @@ pub enum OpCode {
     /// paired by native/lower.tcl with a `keepalive` of the storage after it.
     MBytesAddr,
     /// `%u = op keepalive %b`: a use of %b that is never removed and does
-    /// nothing, so %b stays a GC root until here. Result unit.
+    /// nothing, so %b stays a GC root until here (codegen::roots's liveness:
+    /// %b's slot is in the stack map of every safepoint before it). No
+    /// machine code: it is no call (C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+    /// Result unit.
     KeepAlive,
     /// Fixed binary layouts (BINARY-LAYOUT.md, core/binary.tcl): the
     /// straight-line code native/lower.tcl emits for one statically known
@@ -597,6 +624,28 @@ pub enum OpCode {
     /// per-opcode split as SetContainsTotal's.
     RIMod,
     RIModTotal,
+    /// C words (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): a 64-bit C integer
+    /// result held as the machine word the C ABI returned, in a register of
+    /// the `i64` or `u64` kind (`i64regs=`/`u64regs=`: the word read as
+    /// signed or unsigned), never a GC root. `foreigncall` defines one when
+    /// its destination is declared so; nothing else does but `cword`. These
+    /// are its only consumers: no raw or tagged op ever reads a word.
+    ///
+    /// CWBox: the Int the word is -- tagged inline when it fits the small
+    /// range, else a BigInt (`rt_ffi_box_i64`/`_u64`: the one allocating
+    /// path, hence a safepoint). The word's kind gives its signedness.
+    CWBox,
+    /// The comparisons of a word (operand 0) with operand 1: a word of the
+    /// same kind (a machine comparison, signed or unsigned by the kind) or a
+    /// tagged Int (inline for a small Int; `rt_ffi_word_cmp`, which
+    /// allocates nothing, for a BigInt). A tagged Bool, exact for every
+    /// pair of values: no operand is converted to the other's
+    /// representation, and none is boxed.
+    CWLt,
+    CWLe,
+    CWGt,
+    CWGe,
+    CWEq,
     /// ShortString1 (SHORT-STRING.md): a String the compiler proved has at
     /// most one character, carried as one signed i64 -- `-1` is the empty
     /// String, `0..=0x10FFFF` (never a surrogate) is the one Unicode scalar
@@ -661,6 +710,10 @@ pub enum RegKind {
     Raw,
     Short,
     Ascii,
+    /// A 64-bit C integer word read as signed / unsigned (`i64regs=`,
+    /// `u64regs=`; OpCode::CWBox).
+    I64,
+    U64,
 }
 
 impl RegKind {
@@ -670,7 +723,14 @@ impl RegKind {
             RegKind::Raw => "raw",
             RegKind::Short => "short",
             RegKind::Ascii => "ascii",
+            RegKind::I64 => "i64",
+            RegKind::U64 => "u64",
         }
+    }
+
+    /// Whether this is one of the two C word kinds.
+    pub fn is_word(self) -> bool {
+        matches!(self, RegKind::I64 | RegKind::U64)
     }
 }
 
@@ -717,6 +777,7 @@ op_spellings! {
     "ige" => IGe,
     "ieq" => IEq,
     "veq" => VEq,
+    "veqtotal" => VEqTotal,
     "streq" => StrEq,
     "chareq" => CharEq,
     "enumeq" => EnumEq,
@@ -729,6 +790,7 @@ op_spellings! {
     "listlen" => ListLen,
     "listget" => ListGet,
     "listappend" => ListAppend,
+    "listwithlen" => ListWithLength,
     "setfromlist" => SetFromList,
     "setfromlisttotal" => SetFromListTotal,
     "setcontains" => SetContains,
@@ -791,6 +853,9 @@ op_spellings! {
     "mkok" => MkOk,
     "mkerror" => MkError,
     "hash" => Hash,
+    "hashtotal" => HashTotal,
+    "tablehash" => TableHash,
+    "tablehashtotal" => TableHashTotal,
     "regioncheck" => RegionCheck,
     "regioneq" => RegionEq,
     "decodecharat" => DecodeCharAt,
@@ -873,6 +938,12 @@ op_spellings! {
     "riadd" => RIAdd,
     "risub" => RISub,
     "rimul" => RIMul,
+    "cwbox" => CWBox,
+    "cwlt" => CWLt,
+    "cwle" => CWLe,
+    "cwgt" => CWGt,
+    "cwge" => CWGe,
+    "cweq" => CWEq,
     "rilt" => RILt,
     "rile" => RILe,
     "rigt" => RIGt,
@@ -954,7 +1025,7 @@ impl OpCode {
             Argv | CPtrNull => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
-            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | D64Neg
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
@@ -988,10 +1059,21 @@ impl OpCode {
             | RIAnd | RIOr | RIXor | RIMod | RIModTotal)
     }
 
+    /// Whether OP is a C word operation (CWBox and the word comparisons):
+    /// its operand 0 is a word of either kind, and a comparison's operand 1
+    /// a word of the same kind or a tagged Int (`validate` checks these
+    /// itself; `operand_kind_at` names the word kind as I64).
+    pub fn word_op(self) -> bool {
+        use OpCode::*;
+        matches!(self, CWBox | CWLt | CWLe | CWGt | CWGe | CWEq)
+    }
+
     /// The physical kind the operand at position I of OP must have.
     pub fn operand_kind_at(self, i: usize) -> RegKind {
         use OpCode::*;
-        if self.raw_operands() {
+        if self.word_op() {
+            if i == 0 { RegKind::I64 } else { RegKind::Tagged }
+        } else if self.raw_operands() {
             RegKind::Raw
         } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
             RegKind::Short
@@ -1028,6 +1110,11 @@ pub enum Inst {
     /// value the register can hold fits the runtime's small-Int range, so
     /// `op rbox` of it never needs a check.
     RawInt { dst: Reg, digits: String },
+    /// `%d = cword DIGITS`: a C word constant (OpCode::CWBox) in register D
+    /// of the `i64` or `u64` kind, DIGITS in that kind's range (the
+    /// two's-complement bits of a signed word, the binary of an unsigned
+    /// one): a C sentinel compared without building its Int.
+    CWord { dst: Reg, digits: String },
     /// A ShortString1 constant (`shortlit N`): -1 is the empty String, N in
     /// 0..=0x10FFFF (never a surrogate) the one-character String of that
     /// Unicode scalar value. U+0000 is `shortlit 0`, never Empty.
@@ -1111,7 +1198,15 @@ pub enum Inst {
     /// place (the alias is an exposure). Always a safepoint: foreign code
     /// may reach the runtime (later, callbacks), so this frame's roots are
     /// in its stack map.
-    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, discard: bool },
+    ///
+    /// A call of a variadic C function (VARIADICS-VERTICAL-SLICE-1.md; its
+    /// declaration's `variadic=1`) passes the declaration's fixed operands,
+    /// then one operand per `varargs=CLASS:PROMOTED,...` entry: the trailing
+    /// arguments, each decoded by its own class and passed as the class C's
+    /// default argument promotion makes it (VarArg). The call's machine
+    /// signature is this call's own (codegen::clif::c_call_signature); no
+    /// list or argument array exists at run time.
+    ForeignCall { dst: Reg, foreign: u32, args: Vec<Reg>, exposed: Vec<bool>, discard: bool, varargs: Vec<VarArg> },
     /// A direct call of a scalar-replacement companion function (a function
     /// with `results` > 1: see Function::results): like Call, but the
     /// callee returns several tagged Values at once -- the fields of a
@@ -1351,8 +1446,15 @@ pub struct Function {
     /// like the other scalar results, a function that `may_error` returns
     /// (value, status).
     pub ascii_result: bool,
+    /// Registers declared C words read as signed (`i64regs=`) and as
+    /// unsigned (`u64regs=`), C-FFI-ERROR-CAPTURE-MILESTONE-2.md: a 64-bit
+    /// C integer result kept as its machine word (OpCode::CWBox). Two more
+    /// kinds, disjoint from each other and from the three above; never a
+    /// parameter or a result: a word lives and dies in its function.
+    pub i64_regs: Vec<bool>,
+    pub u64_regs: Vec<bool>,
     /// Registers that hold an unboxed machine scalar rather than a tagged
-    /// Value, of any physical kind (raw, short or ascii): never GC
+    /// Value, of any physical kind (raw, short, ascii or a C word): never GC
     /// roots, never stored to the shadow stack. Derived once at parse time;
     /// codegen and root analysis read this, never the two declarations.
     pub scalar_regs: Vec<bool>,
@@ -1367,9 +1469,37 @@ impl Function {
             RegKind::Short
         } else if self.ascii_regs[r as usize] {
             RegKind::Ascii
+        } else if self.i64_regs[r as usize] {
+            RegKind::I64
+        } else if self.u64_regs[r as usize] {
+            RegKind::U64
         } else {
             RegKind::Tagged
         }
+    }
+
+    /// Whether this function contains a Botlish call (`Call`/`CallEnv`/
+    /// `CallMulti`/`CallEnvMulti`/`CallValue` -- a dynamically dispatched
+    /// call is folded into `CallValue`). `Tail`/`TailEnv` (a self back-edge,
+    /// codegen::clif's own doc) is deliberately not one of these: it is a
+    /// CFG jump to this same frame's entry block, never a machine `call`, so
+    /// it neither grows the native call stack nor creates a second frame.
+    ///
+    /// It decides codegen::roots's fallback RuntimeStack storage and, where
+    /// the shadow stack bounds recursion (`runtime::native_stack::
+    /// depth_checked`), the depth reservation -- and so whether the function
+    /// can fail (`summarize_call_effects`).
+    pub fn has_botlish_call(&self) -> bool {
+        self.body.iter().any(|inst| {
+            matches!(
+                inst,
+                Inst::Call { .. }
+                    | Inst::CallEnv { .. }
+                    | Inst::CallMulti { .. }
+                    | Inst::CallEnvMulti { .. }
+                    | Inst::CallValue { .. }
+            )
+        })
     }
 
     /// Whether this function uses the packed-ASCII ABI anywhere.
@@ -1484,8 +1614,16 @@ pub struct EnumDecl {
 
 /// The C ABI transport class of a C function's parameter or result
 /// (C-FFI.md; hir/foreign.tcl's AbiClass): an integer of its exact width and
-/// signedness, C `_Bool` (a Botlish bool: one byte holding 0 or 1), a data
-/// or function pointer, or void (a result only).
+/// signedness, C `_Bool` (a Botlish bool: one byte holding 0 or 1), an IEEE
+/// 754 binary32 or binary64 in the target's floating-point register class,
+/// a data or function pointer, or void (a result only).
+///
+/// The floating classes are representations, not Botlish types
+/// (C-FLOAT-FFI-MILESTONE-1.md): both carry a Float64 value on the Botlish
+/// side, and they differ in width, register use and conversion -- an F32
+/// argument is the Float64 narrowed (checked: an overflow is NonFiniteFloat
+/// before the call), an F32 result is widened exactly, and either result is
+/// admitted only when finite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CAbi {
     I8,
@@ -1497,11 +1635,51 @@ pub enum CAbi {
     I64,
     U64,
     Bool,
-    /// C double, an IEEE 754 binary64 in the target's floating-point
-    /// register class: a Float64 value's number (FLOAT64-MILESTONE-1.md).
+    /// C float, an IEEE 754 binary32 (C-FLOAT-FFI-MILESTONE-1.md).
+    F32,
+    /// C double, an IEEE 754 binary64 (FLOAT64-MILESTONE-1.md).
     F64,
     Ptr,
     Void,
+}
+
+/// One trailing argument of a variadic C call (`foreigncall`'s `varargs=`
+/// entry `CLASS:PROMOTED`): CLASS the argument's own C ABI class (how its
+/// Botlish value is decoded: an Int, a bool, a Float64's number, a C address
+/// word), PROMOTED the class it is passed as after C's default argument
+/// promotion (hir::cabi::VariadicArgument): an `int` for every integer
+/// narrower than one and for `_Bool`, every other class itself. Never a
+/// narrow integer, a `_Bool` or void.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VarArg {
+    pub class: CAbi,
+    pub promoted: CAbi,
+}
+
+impl VarArg {
+    /// `CLASS:PROMOTED`, when it is a promotion C performs: a double or
+    /// pointer class unchanged, an integer or `_Bool` to an integer class of
+    /// at least 32 bits that holds every value of CLASS. Never a C float: no
+    /// Botlish value is one (a Float64 is passed as a double), and C
+    /// promotes a float to a double anyway.
+    pub fn parse(text: &str) -> Option<VarArg> {
+        let (class, promoted) = text.split_once(':')?;
+        let class = CAbi::parse(class)?;
+        let promoted = CAbi::parse(promoted)?;
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let valid = match class {
+            CAbi::Void | CAbi::F32 => false,
+            CAbi::F64 | CAbi::Ptr => promoted == class,
+            CAbi::Bool => integer(promoted) && promoted.bits() >= 32,
+            _ => {
+                integer(promoted)
+                    && promoted.bits() >= 32
+                    && (promoted == class
+                        || (class.bits() < promoted.bits() && (promoted.signed() || !class.signed())))
+            }
+        };
+        valid.then_some(VarArg { class, promoted })
+    }
 }
 
 impl CAbi {
@@ -1516,6 +1694,7 @@ impl CAbi {
             "i64" => CAbi::I64,
             "u64" => CAbi::U64,
             "bool" => CAbi::Bool,
+            "f32" => CAbi::F32,
             "f64" => CAbi::F64,
             "ptr" => CAbi::Ptr,
             "void" => CAbi::Void,
@@ -1523,12 +1702,12 @@ impl CAbi {
         })
     }
 
-    /// The width in bits of an integer class (64 for a pointer), 0 for void.
+    /// The width in bits of the class (64 for a pointer), 0 for void.
     pub fn bits(self) -> u32 {
         match self {
             CAbi::I8 | CAbi::U8 | CAbi::Bool => 8,
             CAbi::I16 | CAbi::U16 => 16,
-            CAbi::I32 | CAbi::U32 => 32,
+            CAbi::I32 | CAbi::U32 | CAbi::F32 => 32,
             CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 => 64,
             CAbi::Void => 0,
         }
@@ -1536,6 +1715,12 @@ impl CAbi {
 
     pub fn signed(self) -> bool {
         matches!(self, CAbi::I8 | CAbi::I16 | CAbi::I32 | CAbi::I64)
+    }
+
+    /// 1 for a floating-point class (F32, F64): it travels in the
+    /// floating-point registers, never extended.
+    pub fn floating(self) -> bool {
+        matches!(self, CAbi::F32 | CAbi::F64)
     }
 }
 
@@ -1546,7 +1731,9 @@ impl CAbi {
 /// result is exactly the pointer argument I, that index -- every call checks
 /// it (the development assertion of the binding's contract,
 /// `rt_ffi_contract_violation`). NAME is the declaration's Botlish name, for
-/// messages.
+/// messages. VARIADIC (`variadic=1`, VARIADICS-VERTICAL-SLICE-1.md): PARAMS
+/// are the fixed parameters of a variadic C function, whose calls each pass
+/// their own trailing arguments (`foreigncall`'s `varargs=`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ForeignDecl {
     pub symbol: String,
@@ -1554,6 +1741,7 @@ pub struct ForeignDecl {
     pub params: Vec<CAbi>,
     pub result: CAbi,
     pub alias: Option<u32>,
+    pub variadic: bool,
 }
 
 /// The compilation target a program was built for (`target "NAME"
@@ -1858,7 +2046,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
     let n = program.functions.len();
     let mut local = vec![(false, false); n];
+    // Where the shadow stack's depth check bounds recursion (Windows), a
+    // function making a Botlish call fails with NATIVE LIMIT STACK from its
+    // own prologue (codegen::roots's `depth_reservation`), so its callers
+    // must check: elsewhere the stack guard ends an exhausted run instead.
+    let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
     for (i, f) in program.functions.iter().enumerate() {
+        local[i].0 = depth_checked && f.has_botlish_call();
         for inst in &f.body {
             match inst {
                 Inst::Guard { .. } | Inst::GuardBool { .. }
@@ -1873,11 +2067,14 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
                 Inst::CallValue { .. } => local[i] = (true, true),
                 // A C call (C-FFI.md) is a safepoint; it fails only on a
                 // result it cannot represent (an address, a _Bool byte, a
-                // double that is no finite number) or a violated alias
-                // contract.
+                // floating value that is no finite number), an argument it
+                // cannot pass (a Float64 no finite C float holds) or a
+                // violated alias contract.
                 Inst::ForeignCall { foreign, .. } => {
                     let decl = &program.foreigns[*foreign as usize];
-                    local[i].0 |= matches!(decl.result, CAbi::Ptr | CAbi::Bool | CAbi::F64) || decl.alias.is_some();
+                    local[i].0 |= matches!(decl.result, CAbi::Ptr | CAbi::Bool | CAbi::F32 | CAbi::F64)
+                        || decl.params.contains(&CAbi::F32)
+                        || decl.alias.is_some();
                     local[i].1 = true;
                 }
                 _ => {}
@@ -2011,7 +2208,12 @@ fn parse_foreign(p: &Parser, tokens: &[Token]) -> Result<(u32, ForeignDecl), Nir
         None => None,
     };
     let name = kv.get("name").cloned().unwrap_or_else(|| symbol.clone());
-    Ok((index, ForeignDecl { symbol, name, params, result, alias }))
+    let variadic = match kv.get("variadic").map(String::as_str) {
+        None => false,
+        Some("1") if !params.is_empty() => true,
+        Some(_) => return p.err("foreign variadic=1 needs at least one fixed parameter"),
+    };
+    Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic }))
 }
 
 fn parse_enum(p: &Parser, tokens: &[Token]) -> Result<(u32, EnumDecl), NirError> {
@@ -2163,7 +2365,20 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         }
     }
     let ascii_result = kv.get("asciiresult").is_some_and(|v| v == "1");
-    let scalar_regs: Vec<bool> = (0..regs as usize).map(|r| raw_regs[r] || short_regs[r] || ascii_regs[r]).collect();
+    let mut i64_regs = vec![false; regs as usize];
+    let mut u64_regs = vec![false; regs as usize];
+    for (key, list) in [("i64regs", &mut i64_regs), ("u64regs", &mut u64_regs)] {
+        if let Some(text) = kv.get(key) {
+            for tok in text.split_whitespace() {
+                let r: usize = tok.parse().map_err(|_| ())
+                    .and_then(|r: usize| if r < regs as usize { Ok(r) } else { Err(()) })
+                    .or_else(|_| p.err::<usize>(format!("bad {key} register {tok}")))?;
+                list[r] = true;
+            }
+        }
+    }
+    let scalar_regs: Vec<bool> =
+        (0..regs as usize).map(|r| raw_regs[r] || short_regs[r] || ascii_regs[r] || i64_regs[r] || u64_regs[r]).collect();
     Ok(Function {
         id,
         name: name.clone(),
@@ -2188,6 +2403,8 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         ascii_regs,
         ascii_params,
         ascii_result,
+        i64_regs,
+        u64_regs,
         scalar_regs,
     })
 }
@@ -2256,6 +2473,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     return p.err("bad rawint literal (must fit an i64)");
                 }
                 Inst::RawInt { dst, digits }
+            }
+            "cword" => {
+                let digits = tokens.get(3).and_then(word).unwrap_or("").to_string();
+                if digits.parse::<i64>().is_err() && digits.parse::<u64>().is_err() {
+                    return p.err("bad cword literal (must fit a signed or an unsigned 64-bit word)");
+                }
+                Inst::CWord { dst, digits }
             }
             "shortlit" => {
                 let text = tokens.get(3).and_then(word).unwrap_or("");
@@ -2382,8 +2606,17 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 }
                 let mut exposed = vec![false; args.len()];
                 let mut discard = false;
+                let mut varargs = Vec::new();
                 for t in &tokens[j..] {
                     match t {
+                        Token::Pair(k, v) if k == "varargs" => {
+                            for w in v.split(',') {
+                                match VarArg::parse(w) {
+                                    Some(a) => varargs.push(a),
+                                    None => return p.err(format!("foreigncall varargs= entry \"{w}\" is no CLASS:PROMOTED of C's default argument promotion")),
+                                }
+                            }
+                        }
                         Token::Pair(k, v) if k == "exposed" => {
                             for w in v.split(',') {
                                 match w.parse::<usize>() {
@@ -2399,8 +2632,21 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 let Some(decl) = program.foreigns.get(foreign as usize) else {
                     return p.err(format!("foreigncall of undeclared foreign {foreign}"));
                 };
-                if decl.params.len() != args.len() {
-                    return p.err(format!("foreigncall of {} takes {} operand(s), got {}", decl.name, decl.params.len(), args.len()));
+                if !decl.variadic && !varargs.is_empty() {
+                    return p.err(format!("foreigncall of {}: varargs= of a C function that is not variadic", decl.name));
+                }
+                if decl.params.len() + varargs.len() != args.len() {
+                    return p.err(format!(
+                        "foreigncall of {} takes {} operand(s) ({} fixed, {} trailing), got {}",
+                        decl.name,
+                        decl.params.len() + varargs.len(),
+                        decl.params.len(),
+                        varargs.len(),
+                        args.len()
+                    ));
+                }
+                if exposed.iter().skip(decl.params.len()).any(|e| *e) {
+                    return p.err(format!("foreigncall of {}: a trailing argument is never an exposure", decl.name));
                 }
                 if let Some(i) = exposed.iter().zip(&decl.params).position(|(e, c)| *e && *c != CAbi::Ptr) {
                     return p.err(format!("foreigncall of {}: operand {i} is exposed at a non-pointer parameter", decl.name));
@@ -2408,7 +2654,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 if discard && !decl.alias.is_some_and(|a| exposed[a as usize]) {
                     return p.err(format!("foreigncall of {}: discard needs a result aliasing an exposed operand", decl.name));
                 }
-                Inst::ForeignCall { dst, foreign, args, exposed, discard }
+                Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs }
             }
             "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)?, may_error: true, may_gc: true },
             "callenvmulti" => {
@@ -2596,9 +2842,15 @@ fn validate(program: &Program) -> Result<(), NirError> {
         if let Some(i) = (0..f.params as usize).find(|i| f.ascii_regs[*i] && !f.ascii_params[*i]) {
             return fail(ctx(format!("parameter register %{i} is declared ascii but is not an asciiparams position")));
         }
-        if let Some(r) = (0..f.regs as usize)
-            .find(|r| [f.raw_regs[*r], f.short_regs[*r], f.ascii_regs[*r]].iter().filter(|b| **b).count() > 1) {
+        if let Some(r) = (0..f.regs as usize).find(|r| {
+            [f.raw_regs[*r], f.short_regs[*r], f.ascii_regs[*r], f.i64_regs[*r], f.u64_regs[*r]].iter().filter(|b| **b).count() > 1
+        }) {
             return fail(ctx(format!("register %{r} is declared in two scalar kinds")));
+        }
+        // A C word lives and dies in its function: never a parameter (no
+        // function receives a machine word it did not get from C itself).
+        if let Some(i) = (0..f.params as usize).find(|i| f.i64_regs[*i] || f.u64_regs[*i]) {
+            return fail(ctx(format!("parameter register %{i} is declared a C word")));
         }
         let mut labels = HashSet::new();
         for inst in &f.body {
@@ -2633,6 +2885,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::PushErrorExit(l) => targets.push(*l),
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
+                | Inst::CWord { dst, .. }
                 | Inst::ShortLit { dst, .. }
                 | Inst::AsciiLit { dst, .. }
                 | Inst::Str { dst, .. }
@@ -2793,6 +3046,38 @@ fn validate(program: &Program) -> Result<(), NirError> {
                         return fail(ctx(format!("rawint %{dst}: not declared in rawregs")));
                     }
                 }
+                Inst::CWord { dst, digits } => {
+                    let fits = match kind(*dst) {
+                        RegKind::I64 => digits.parse::<i64>().is_ok(),
+                        RegKind::U64 => digits.parse::<u64>().is_ok(),
+                        _ => return fail(ctx(format!("cword %{dst}: not declared in i64regs or u64regs"))),
+                    };
+                    if !fits {
+                        return fail(ctx(format!("cword %{dst}: {digits} is outside its {} word", kind(*dst).name())));
+                    }
+                }
+                // A C call's destination is a C word exactly when its result
+                // class is a 64-bit integer of the word's signedness (the
+                // machine word C returned, kept: OpCode::CWBox); otherwise a
+                // tagged Value, as every operand is.
+                Inst::ForeignCall { dst, foreign, args, discard, .. } => {
+                    if let Some(a) = args.iter().find(|a| kind(**a) != RegKind::Tagged) {
+                        return fail(ctx(format!("foreigncall operand %{a} is {}, must be tagged", kind(*a).name())));
+                    }
+                    let result = program.foreigns.get(*foreign as usize).map(|d| d.result);
+                    match kind(*dst) {
+                        RegKind::Tagged => {}
+                        RegKind::I64 if result == Some(CAbi::I64) && !*discard => {}
+                        RegKind::U64 if result == Some(CAbi::U64) && !*discard => {}
+                        k => {
+                            return fail(ctx(format!(
+                                "foreigncall %{dst} is {}, but its result class is {result:?}{}",
+                                k.name(),
+                                if *discard { " (discarded)" } else { "" }
+                            )));
+                        }
+                    }
+                }
                 Inst::ShortLit { dst, .. } => {
                     if kind(*dst) != RegKind::Short {
                         return fail(ctx(format!("shortlit %{dst}: not declared in shortregs")));
@@ -2851,6 +3136,26 @@ fn validate(program: &Program) -> Result<(), NirError> {
                             kind(*dst).name(),
                             kind(*src).name()
                         )));
+                    }
+                }
+                Inst::Op { dst, op, args } if op.word_op() => {
+                    // Operand 0 a word of either kind; a comparison's
+                    // operand 1 a word of that same kind or a tagged Int.
+                    let word = kind(args[0]);
+                    if !word.is_word() {
+                        return fail(ctx(format!("op {op:?}: operand %{} is {}, must be a C word (i64 or u64)", args[0], word.name())));
+                    }
+                    if let Some(b) = args.get(1) {
+                        if kind(*b) != word && kind(*b) != RegKind::Tagged {
+                            return fail(ctx(format!(
+                                "op {op:?}: operand %{b} is {}, must be {} or tagged",
+                                kind(*b).name(),
+                                word.name()
+                            )));
+                        }
+                    }
+                    if kind(*dst) != RegKind::Tagged {
+                        return fail(ctx(format!("op {op:?}: result %{dst} is declared {}, must be tagged", kind(*dst).name())));
                     }
                 }
                 Inst::Op { dst, op, args } => {
@@ -3034,7 +3339,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 }
                 Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
-                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::DeclaredPayload { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
+                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::DeclaredPayload { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::CWord { .. } | Inst::ShortLit { .. }
                 | Inst::AsciiLit { .. }
                 | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Float { .. } | Inst::Enum { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
@@ -3211,7 +3516,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
 /// caller).
 fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
-        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Bytes { dst, .. } | Inst::Char { dst, .. }
+        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::CWord { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Bytes { dst, .. } | Inst::Char { dst, .. }
         | Inst::Float { dst, .. } | Inst::Enum { dst, .. } | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
@@ -3270,7 +3575,40 @@ mod effect_tests {
         );
         let p = parse(text).unwrap();
         assert!(p.functions.iter().all(|f| f.may_gc));
-        assert!(p.functions.iter().all(|f| !f.may_error));
+        // Every function here makes a Botlish call, so it fails exactly
+        // where the shadow stack's depth check bounds recursion.
+        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        assert!(p.functions.iter().all(|f| f.may_error == depth_checked));
+    }
+
+    /// WINDOWS-X86-64-MILESTONE-1.md, section 3: where the depth check
+    /// bounds recursion, a function that cannot otherwise fail still fails
+    /// with NATIVE LIMIT STACK from its prologue once it makes a Botlish
+    /// call, so its raw result carries a status word and its callers check
+    /// it (a caller that did not added the error sentinel as an Int). A
+    /// function without one has no reservation and stays infallible.
+    #[test]
+    fn a_botlish_call_fails_exactly_where_depth_is_checked() {
+        let text = concat!(
+            "nir 1 call-effects=1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = int 3\n    %1 = call 1 %0\n    ret %1\nend\n",
+            "func 1 \"down\" params=1 env=0 regs=4 pnames=\"n\" captures=0 rawregs=\"\"\n",
+            "    %1 = int 1\n    %2 = call 2 %0\n    %3 = call 1 %2\n    ret %3\nend\n",
+            "func 2 \"leaf\" params=1 env=0 regs=1 pnames=\"n\" captures=0 rawregs=\"\"\n",
+            "    ret %0\nend\n"
+        );
+        let p = parse(text).unwrap();
+        let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+        let effects: Vec<bool> = p.functions.iter().map(|f| f.may_error).collect();
+        assert_eq!(effects, vec![depth_checked, depth_checked, false]);
+        let checked: Vec<bool> = p.functions[1]
+            .body
+            .iter()
+            .filter_map(|inst| if let Inst::Call { may_error, .. } = inst { Some(*may_error) } else { None })
+            .collect();
+        assert_eq!(checked, vec![false, depth_checked]);
+        assert_eq!(depth_checked, cfg!(any(target_os = "windows", feature = "fallback-roots")));
     }
 
     #[test]
@@ -4062,3 +4400,97 @@ mod packed_ascii_tests {
         assert!(!m.is_empty());
     }
 }
+
+#[cfg(test)]
+mod c_float_vararg_tests {
+    use super::*;
+
+    /// A trailing argument of a variadic C call is never a C float
+    /// (C-FLOAT-FFI-MILESTONE-1.md): no Botlish value is one, and C promotes
+    /// a float to a double; nor is a float any integer's promotion. A double
+    /// stays a double.
+    #[test]
+    fn ffi_c_float_never_a_vararg_class() {
+        for text in ["f32:f32", "f32:f64", "i8:f32", "u8:f32", "bool:f32", "i32:f32"] {
+            assert!(VarArg::parse(text).is_none(), "{text} parsed");
+        }
+        let double = VarArg::parse("f64:f64").unwrap();
+        assert_eq!((double.class, double.promoted), (CAbi::F64, CAbi::F64));
+        assert!(VarArg::parse("u8:i32").is_some());
+    }
+}
+
+/// C words (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): two register kinds, `i64`
+/// and `u64`, defined by a `foreigncall` of a 64-bit integer result or a
+/// `cword` constant, read only by `cwbox` and the word comparisons, never a
+/// parameter, a result, a tagged operand or another kind's.
+#[cfg(test)]
+mod c_word_tests {
+    use super::*;
+
+    fn program(words: &str, foreign: &str, body: &str, regs: u32) -> String {
+        format!(
+            "nir 1\n\n{foreign}func 0 \"<program>\" params=0 env=0 regs={regs} pnames=\"\" captures=0 {words}\n{body}end\n"
+        )
+    }
+
+    fn error_of(text: &str) -> String {
+        match parse(text) {
+            Ok(_) => String::new(),
+            Err(e) => e.message,
+        }
+    }
+
+    #[test]
+    fn c_word_kinds_parse_and_validate() {
+        let text = program(
+            "i64regs=\"0 1\" u64regs=\"2 3\"",
+            "",
+            "    %0 = cword -9223372036854775808\n    %1 = cword -1\n    %2 = cword 18446744073709551615\n    %3 = cword 0\n    %4 = int 5\n    %5 = op cwlt %0 %1\n    %6 = op cweq %2 %3\n    %7 = op cwge %2 %4\n    %8 = op cwbox %2\n    %9 = op listnew %5 %6 %7 %8\n    ret %9\n",
+            10,
+        );
+        let p = parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
+        let f = &p.functions[0];
+        assert_eq!((f.kind_of(0), f.kind_of(2), f.kind_of(4)), (RegKind::I64, RegKind::U64, RegKind::Tagged));
+        assert!(f.scalar_regs[0] && f.scalar_regs[3] && !f.scalar_regs[4], "a word is never a GC root");
+        assert!(op_may_allocate_word());
+    }
+
+    fn op_may_allocate_word() -> bool {
+        use crate::runtime::ops::op_may_allocate;
+        op_may_allocate(OpCode::CWBox) && !op_may_allocate(OpCode::CWLt) && !op_may_allocate(OpCode::CWEq)
+    }
+
+    #[test]
+    fn c_word_misuses_are_rejected() {
+        let cases = [
+            // A constant outside its kind, or in no word register.
+            ("u64regs=\"0\"", "", "    %0 = cword -1\n    %1 = unit\n    ret %1\n", "outside its u64 word"),
+            ("i64regs=\"0\"", "", "    %0 = cword 9223372036854775808\n    %1 = unit\n    ret %1\n", "outside its i64 word"),
+            ("", "", "    %0 = cword 1\n    ret %0\n", "not declared in i64regs or u64regs"),
+            // A word where a tagged Value is required.
+            ("i64regs=\"0\"", "", "    %0 = cword 1\n    %1 = int 1\n    %2 = op iadd %0 %1\n    ret %2\n", "operand %0 is i64"),
+            ("i64regs=\"0\"", "", "    %0 = cword 1\n    ret %0\n", "ret %0: it is i64"),
+            ("i64regs=\"0\"", "", "    %0 = cword 1\n    %1 = move %0\n    ret %1\n", "%1 is tagged, %0 is i64"),
+            // A word comparison of no word, or of the other kind.
+            ("", "", "    %0 = int 1\n    %1 = op cwlt %0 %0\n    ret %1\n", "must be a C word"),
+            ("i64regs=\"0\" u64regs=\"1\"", "", "    %0 = cword 1\n    %1 = cword 1\n    %2 = op cwlt %0 %1\n    ret %2\n", "must be i64 or tagged"),
+            // In two kinds at once.
+            ("i64regs=\"0\" rawregs=\"0\"", "", "    %0 = cword 1\n    %1 = unit\n    ret %1\n", "two scalar kinds"),
+            // A C call's word of another class.
+            ("i64regs=\"0\"", "foreign 0 \"f\" params=\"\" result=i32 name=\"m::f\"\n\n", "    %0 = foreigncall 0\n    %1 = unit\n    ret %1\n", "its result class is Some(I32)"),
+            ("i64regs=\"0\"", "foreign 0 \"f\" params=\"\" result=u64 name=\"m::f\"\n\n", "    %0 = foreigncall 0\n    %1 = unit\n    ret %1\n", "its result class is Some(U64)"),
+        ];
+        for (words, foreign, body, expected) in cases {
+            let message = error_of(&program(words, foreign, body, 3));
+            assert!(message.contains(expected), "{words} {body}: expected an error containing {expected:?}, got {message:?}");
+        }
+        // The matching kind is accepted.
+        let ok = program("u64regs=\"0\"", "foreign 0 \"f\" params=\"\" result=u64 name=\"m::f\"\n\n", "    %0 = foreigncall 0\n    %1 = op cwbox %0\n    ret %1\n", 2);
+        assert_eq!(error_of(&ok), "");
+        // Never a parameter.
+        let param = "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = unit\n    ret %0\nend\nfunc 1 \"f\" params=1 env=0 regs=2 pnames=\"x\" captures=0 i64regs=\"0\"\n    %1 = unit\n    ret %1\nend\n";
+        assert!(error_of(param).contains("declared a C word"), "{}", error_of(param));
+    }
+}
+

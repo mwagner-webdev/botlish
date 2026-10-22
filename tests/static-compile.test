@@ -121,7 +121,7 @@ proc scDifferential {text} {
         set hir [surface::compile $ordinary -strict 0 -warnings off]
     } trap {SURFACE MODULE} {message options} {
         # The loader raises (-strict 0 or not): its one diagnostic.
-        regexp {^[^:]*:([0-9]+):([0-9]+): (.*)$} $message -> line column text
+        regexp {^.*?:([0-9]+):([0-9]+): (.*)$} $message -> line column text
         return [list [list [lindex [dict get $options -errorcode] 2] $line $column {} $text] [scReified $source]]
     }
     foreach d [hir::diagnostics $hir] {
@@ -414,11 +414,11 @@ test sc-affine-use-after-move {item 57: a use after move in the body is code Use
     scAgree [scProbe "coroutine \{step\} = worker(10)\nconsume(step, 1)\nconsume(step, 2)" $scAffineDecls]
 } -result {value {[std::compiler::DiagnosticCode::UseAfterMove, 25, 17, [std::compiler::SourceLocation {line: 24, column: 17}], "`step` was used after its coroutine value was moved\n\nmoved here:\n    step passed to consume  (<input>:24:17)\n\nused here:\n    <input>:25:17"]}}
 
-test sc-affine-rollback {items 39, 57: a rejected block that moved an outer affine value leaves it unmoved: the code after it uses it, at compile time and at run time} -body {
+test sc-affine-rollback {items 39, 57: a rejected block that moved an outer affine value leaves it unmoved: the code after it uses it, at compile time and at run time} -constraints nativeCoroutines -body {
     scAgree "${scAffineDecls}fn probe(n: int) -> int errors std::compiler::CompilerError:\n    coroutine \{step\} = worker(10)\n    if flag(n):\n        static compile:\n            consume(step, 1)\n            consume(step, 2)\n    e = step(Message \{value: 5\})\n    e.value\n\nr = probe(1):\n    on std::compiler::CompilerError:\n        -1\nr2 = probe(500):\n    on std::compiler::CompilerError \{code\}:\n        if code == std::compiler::DiagnosticCode::UseAfterMove:\n            -2\n        else:\n            -3\n\[r, r2\]\n"
 } -result {value {[5, -2]}}
 
-test sc-affine-rollback-next-block {items 39, 88: a later block is judged after an earlier rejected block's move is gone: it uses the value and is accepted} -body {
+test sc-affine-rollback-next-block {items 39, 88: a later block is judged after an earlier rejected block's move is gone: it uses the value and is accepted} -constraints nativeCoroutines -body {
     set text "${scAffineDecls}fn probe(n: int) -> int errors std::compiler::CompilerError:\n    coroutine \{step\} = worker(10)\n    if flag(n):\n        static compile:\n            consume(step, 1)\n            consume(step, 2)\n    static compile:\n        consume(step, 7)\n\nr = probe(1):\n    on std::compiler::CompilerError:\n        -1\nr\n"
     list [scSites $text] [scAgree $text]
 } -cleanup {unset -nocomplain text} -result {{{rejected USE-AFTER-MOVE 26 21} accepted} {value 7}}
@@ -584,7 +584,7 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
             if {$case eq [join [lmap word [split $kind -] {string totitle $word}] ""]} continue
             list $kind $case
         }] [llength $cases]
-} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 105}
+} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 107}
 
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
 # kind the compiler's front end (hir/*.tcl, surface/modules.tcl) can name, by
@@ -607,7 +607,7 @@ set scCensus {
     parser {STATIC-INTRINSIC-FORM STATIC-UNKNOWN-OPERATION COROUTINE-BINDING-FIELD MALFORMED-CONTEXT-SECTION
         MALFORMED-FLAG-SECTION MALFORMED-FLAG ARGUMENT-AFTER-FLAG FLAG-NOT-A-VALUE LIST-DESTRUCTURING
         ANONYMOUS-ENUM TRAIT-EMPTY TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT TRAIT-REQUIREMENT-BODY
-        TRAIT-NESTED}
+        TRAIT-NESTED MALFORMED-VARIADIC-SECTION}
     runtime {NOT-CALLABLE NOT-BOOLEAN}
     other {MODULE-BINDINGS C-ABI-TYPES DIRECT-MODULES A-Z A-Z0-9}
 }

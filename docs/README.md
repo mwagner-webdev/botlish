@@ -862,6 +862,9 @@ result until `std::web::uri_query_value?` proves it one.
 | `stdlib/io.bot` | the portable text output: the context trait `std::io::IO`, `WriteFailed`, `std::io::print`, `print_line`, `write_error`, `write_error_line` (CONTEXT-TRAITS.md) |
 | `stdlib/io/path.bot` | the portable textual path trait `std::io::path::Path` (`concat`, `text`) and `NotAPath` (CONTEXT-TRAITS.md) |
 | `stdlib/linux/path.bot` | `std::linux::path::LinuxPath`, a refinement of str (non-empty, no U+0000): `valid?`, `validate`, `concat`, `text` (CONTEXT-TRAITS.md) |
+| `stdlib/darwin.bot` | `darwin`, the macOS platform's low-level IO (a direct module; every `darwin` namespace is UNSUPPORTED-PLATFORM for a non-macOS target): libSystem's `write`, `read`, `open` (variadic), `close` and `__error` as `extern c fn`; `std::darwin::write(fd, data)`, `read(fd, data)`, `open(path, access)`, `create(path, access, mode)`, `create_new`, `close(fd)` -- one C call each, a result holding the C result (-1 on failure) and the errno a failure left, read through `__error()` and a native view (`std::darwin::errno()`) (MACOS-AARCH64-MILESTONE-8.md) |
+| `stdlib/darwin/io.bot` | `std::darwin::io::DarwinIO`, macOS's process standard I/O as one opaque context over three opaque `FileDescriptor` tokens; `create()`, the contextual `write`, `write_error`, `read`; `write_text`/`write_error_text`, DarwinIO's implementation of `std::io::IO`, with LinuxIO's completion policy (MACOS-AARCH64-MILESTONE-8.md) |
+| `stdlib/darwin/path.bot` | `std::darwin::path::DarwinPath`, a refinement of str (non-empty, no U+0000), given to open(2) as UTF-8 and one NUL: `valid?`, `validate`, `concat`, `text` |
 | `stdlib/abi/x86_64.bot` | `std::abi::x86_64::Register64`, the x86-64 register word as a transport value, and its two Int conversions (LINUX-X86-64-SYSCALL.md); `from_i8` ... `from_usize` encode ABI numeric values as register words, sign- or zero-extended (ABI-NUMERIC-DOMAINS.md) |
 | `stdlib/abi/aarch64.bot` | `std::abi::aarch64::Register64` and its conversions: the same layer for AArch64, bit for bit the same encoding (LINUX-SYSCALL-TRANSPORTS.md) |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
@@ -1875,6 +1878,24 @@ add10(32)          # 42 (add captures x)
   boolean literals to a function with a subject and boolean options is
   `MANY-BOOLEAN-ARGUMENTS` (§23). See FLAGS.md ("Boolean arguments" states
   the idiom).
+* **Variadic parameters.** `fn sum(variadic numbers: List[int]) -> int:`
+  ends a parameter list (after the flags and the context section; only a
+  resume clause follows it) with one parameter bound to the List of a
+  call's trailing arguments: `sum()`, `sum(1, 2, 3)`, `log(level, "a", "b")`,
+  `report(10, 1, 2, :loud)` (trailing arguments before the flags). The body
+  sees an ordinary immutable List; resolution collects the trailing
+  arguments into one ordinary list construction, every argument evaluated
+  once, in order, each trailing one proven in the element type by its own
+  proof. A bare `variadic values: List` imprints its element type per call
+  (hir/imprint.tcl), so such a function is called, never used as a value;
+  a typed one used as a value is the ordinary function of its List
+  parameter. Method syntax and aliases collect too; there is no spread, no
+  tuple and no heterogeneous sequence. An `extern c fn` ends in the bare
+  word `variadic` for C's `...`: each call's trailing arguments are C ABI
+  values (C scalars, `std::ffi::c::Bool`, Float64, `Ptr`, `FnPtr`), promoted as
+  C promotes them, passed by a per-call machine signature on the native
+  backends. `MALFORMED-VARIADIC-SECTION` reports a misplaced section. See
+  VARIADICS-VERTICAL-SLICE-1.md.
 * **Contexts.** `context struct Clock:` (or `opaque context struct LinuxIO:`)
   declares a struct whose values may be installed into the current execution
   environment; `with context EXPR` installs EXPR's value -- its inferred type

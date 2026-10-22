@@ -33,15 +33,13 @@
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-    all(target_os = "macos", target_arch = "aarch64")
-));
-
-/// Whether this host links a program that calls C
+const EXECUTABLES: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64"),
 ====
-    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu")
-));
-
-/// Whether this host links a program that calls C
+const EXECUTABLES: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu"),
 >>>>
 
 @@ linux-aot-rejected Linux left out of the hosts that link executables
@@ -59,15 +57,30 @@ const EXECUTABLES: bool = cfg!(any(
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-    all(target_os = "macos", target_arch = "aarch64")
-));
-
-pub fn emit_executable
+const C_CALLS: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64"),
 ====
-    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu")
+const C_CALLS: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu"),
+>>>>
+
+@@ c-calls-refused-on-windows C calls refused on Windows x86-64 (MSVC), where they link since WINDOWS-X86-64-MILESTONE-2.md
+%% windows-x86_64
+## native/src/codegen/aot.rs
+<<<<
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
 
-pub fn emit_executable
+/// The file an executable emitted for DESTINATION is
+====
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "gnu", target_arch = "x86_64")
+));
+
+/// The file an executable emitted for DESTINATION is
 >>>>
 
 @@ c-calls-refused-on-linux C calls refused on Linux, where they link
@@ -192,4 +205,54 @@ const C_CALLS: bool = cfg!(any(
     if !target.name.is_empty() {
         return Ok(());
     }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows x86-64, MSVC (WINDOWS-X86-64-MILESTONE-1.md): the link plan and the
+# C runtime. Their unit tests kill them on every host.
+
+@@ msvc-link-plan-is-gnus link.exe gets GNU ld's spelling of the link plan (-LDIR, -lNAME, the archive group), which it does not take
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc {
+        for dir in link_dirs {
+====
+    if flavor == LinkerFlavor::Msvc && link_dirs.is_empty() && link_dirs.len() > 0 {
+        for dir in link_dirs {
+>>>>
+
+@@ msvc-crt-dynamic an MSVC executable links rustc's dynamic C runtime, which needs the Visual C++ redistributable's VCRUNTIME140.dll
+## native/src/codegen/aot.rs
+<<<<
+    let mut args = vec!["-C".to_string(), "target-feature=+crt-static".to_string()];
+====
+    let mut args = vec!["-C".to_string(), "target-feature=-crt-static".to_string()];
+>>>>
+
+@@ msvc-crt-dynamic-for-c-programs a program that calls C links the dynamic C runtime (milestone 1's placeholder): its executable needs VCRUNTIME140.dll, a console program that writes through kernel32 included
+## native/src/codegen/aot.rs
+<<<<
+fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
+    if flavor != LinkerFlavor::Msvc {
+====
+fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
+    if flavor != LinkerFlavor::Msvc || calls_c(_program) {
+>>>>
+
+@@ msvc-other-runtimes-linked the other Microsoft runtimes are not excluded, so a C library's default-library directive links a second C runtime beside the static one
+## native/src/codegen/aot.rs
+<<<<
+    for library in OTHER_MSVC_RUNTIMES {
+        args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
+====
+    for library in OTHER_MSVC_RUNTIMES.iter().take(0) {
+        args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
+>>>>
+
+@@ msvc-link-hint-silent link.exe's unresolved __imp_ imports (a /MD library in a static-runtime executable) come with no explanation of the C runtime policy
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
+====
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp__") {
 >>>>

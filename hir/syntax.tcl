@@ -28,7 +28,11 @@
 #             the function's context parameter section -- CONTEXTS.md;
 #             absent for a function without one), resume (optional: {TYPE
 #             ORIGIN}, the function's `resume TYPE` clause -- COROUTINES.md;
-#             its declared coroutine resume protocol, never a parameter)
+#             its declared coroutine resume protocol, never a parameter),
+#             variadic (optional: the ORIGIN of the function's variadic
+#             section -- VARIADICS-VERTICAL-SLICE-1.md: its last ordinary
+#             parameter is the List each call collects its trailing
+#             arguments into; absent for a function without one)
 #   call      callee, args, flags (optional: {NAME ORIGIN} pairs, the flags
 #             the call supplies, in written order -- FLAGS.md), written
 #             (optional, see below)
@@ -286,6 +290,18 @@ proc hir::syntax::withOperator {call op} {
 # BLOCK (a `block` node) declared `nomethod` by its author.
 proc hir::syntax::withNoMethod {block} {
     dict set block nomethod 1
+    return $block
+}
+
+# BLOCK (a `block` node) declaring a variadic section at ORIGIN
+# (VARIADICS-VERTICAL-SLICE-1.md): its last ordinary parameter is the
+# variadic one, bound at each call to the List of the call's trailing
+# arguments (hir/variadic.tcl).
+proc hir::syntax::withVariadic {block origin} {
+    if {[llength [dict get $block params]] == 0} {
+        core::malformed "a variadic block has its variadic parameter last" [list block]
+    }
+    dict set block variadic $origin
     return $block
 }
 

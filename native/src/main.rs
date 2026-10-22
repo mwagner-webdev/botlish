@@ -17,7 +17,9 @@
 //!                                        without compiling
 //!   botlish-native object OUT FILE.nir   write a relocatable program object
 //!   botlish-native executable OUT FILE.nir  link a standalone executable
-//!                                        (Linux ELF, macOS AArch64 Mach-O;
+//!                                        (Linux ELF, macOS AArch64 Mach-O,
+//!                                        Windows x86-64 PE: OUT.exe for an
+//!                                        OUT without an extension;
 //!                                        BOTLISH_NATIVE_LINKER: rustc, the
 //!                                        default, or stub: codegen/aot.rs)
 //!   botlish-native check FILE.nir        parse and validate only
@@ -57,6 +59,15 @@
 //! its standard output and error are this driver's own. `batch` and
 //! `--alloc` do not run one.
 //!
+//! `--table-hash-key HEX` (anywhere on the line; 32 hexadecimal digits, the
+//! two 64-bit key words K0 then K1) fixes the key of the private table hash
+//! (HASHABLE-AND-KEYED-HASH.md) for this run instead of the one the runtime
+//! draws from the system's random source: test harnesses only
+//! (core::hashing::useTableHashKey, which native::RunDriver forwards), so
+//! exact keyed hashes can be compared with an independent implementation.
+//! Nothing in a program can set or read the key; a standalone executable has
+//! no such option and always draws its own.
+//!
 //! `--result PATH` (anywhere on the line, any command) writes the output
 //! lines below to PATH instead of standard output, which `run` then leaves
 //! to the program alone: what it writes there (io::print_line, raw
@@ -81,11 +92,14 @@
 //!                                                  runtime/metrics.rs's Tcl dict)
 //! ```
 //!
-//! Native code runs on a worker pthread with a large native stack. On
+//! Native code runs on a worker thread with a large native stack. On
 //! Linux (x86-64, AArch64) and macOS AArch64 the stack guard
-//! (runtime/platform/) supplies overflow protection.
+//! (runtime/platform/) supplies overflow protection; on Windows there is no
+//! guard yet, and a native stack exhausted past the shadow stack's depth
+//! check ends the process (WINDOWS-X86-64-MILESTONE-1.md).
 
 mod codegen;
+mod launch;
 use botlish_native::{nir, runtime};
 
 use codegen::{Backend, CompileOptions, CraneliftJit, Site};
@@ -245,6 +259,30 @@ fn extract_argv(args: &[String]) -> Option<(Vec<String>, Option<Vec<Vec<u8>>>)> 
     Some((out, snapshot))
 }
 
+/// Pulls "--table-hash-key HEX" out of ARGS (anywhere) and fixes the table
+/// hash's key: the remaining arguments in order. None if the value is not
+/// 32 hexadecimal digits.
+fn extract_table_hash_key(args: &[String]) -> Option<Vec<String>> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--table-hash-key" {
+            let hex = args.get(i + 1)?;
+            if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            let k0 = u64::from_str_radix(&hex[..16], 16).ok()?;
+            let k1 = u64::from_str_radix(&hex[16..], 16).ok()?;
+            runtime::ops::set_table_hash_key(k0, k1).ok()?;
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Some(out)
+}
+
 /// Pulls every "--link-dir DIR" out of ARGS (anywhere): the remaining
 /// arguments in order, and the directories. None if one has no value.
 fn extract_link_dirs(args: &[String]) -> Option<(Vec<String>, Vec<String>)> {
@@ -268,7 +306,8 @@ fn cli(args: &[String]) -> i32 {
         eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
         2
     };
-    let Some((args, link_dirs)) = extract_link_dirs(args) else { return usage() };
+    let Some(args) = extract_table_hash_key(args) else { return usage() };
+    let Some((args, link_dirs)) = extract_link_dirs(&args) else { return usage() };
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];
@@ -343,8 +382,11 @@ fn cli(args: &[String]) -> i32 {
             0
         }
         "executable" => {
-            match codegen::aot::emit_executable(&program, std::path::Path::new(&rest[0]), &link_dirs) {
-                Ok(()) => emit(&tcl_list(&["executable".to_string(), rest[0].clone()])),
+            // The file the executable is: OUT, or OUT.exe on Windows
+            // (codegen::aot::executable_path), as given.
+            let named = codegen::aot::executable_path(std::path::Path::new(&rest[0]));
+            match codegen::aot::emit_executable(&program, &named, &link_dirs) {
+                Ok(_) => emit(&tcl_list(&["executable".to_string(), named.to_string_lossy().into_owned()])),
                 Err(e) => {
                     let code = if codegen::aot::calls_c(&program) { "LINK" } else { "AOT" };
                     emit_error(&["NATIVE", code], &e);
@@ -423,38 +465,36 @@ fn run_linked(
         }
     }
     let _cleanup = Cleanup(work.clone());
-    let executable = work.join("program");
-    if let Err(e) = codegen::aot::emit_executable(program, &executable, link_dirs) {
-        emit_error(&["NATIVE", "LINK"], &e);
-        return 0;
-    }
+    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs) {
+        Ok(executable) => executable,
+        Err(e) => {
+            emit_error(&["NATIVE", "LINK"], &e);
+            return 0;
+        }
+    };
     let argv: Vec<Vec<u8>> = snapshot
         .unwrap_or_else(|| runtime::vm::DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect());
-    let Some((first, rest)) = argv.split_first() else {
+    if argv.is_empty() {
         emit_error(
             &["NATIVE", "UNSUPPORTED", "foreign"],
             "a program that calls C runs as a process, which has at least one argument: an empty argument vector cannot be given to it",
         );
         return 0;
-    };
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::process::CommandExt;
-    let result = work.join("result");
-    let mut child = std::process::Command::new(&executable);
-    child
-        .arg0(std::ffi::OsStr::from_bytes(first))
-        .args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)))
-        .env("BOTLISH_NATIVE_RESULT", &result)
-        .env("BOTLISH_NATIVE_COMPILE_US", started.elapsed().as_micros().to_string());
-    if command == "bench" {
-        child.env("BOTLISH_NATIVE_RUNS", runs.to_string());
-    } else {
-        child.env_remove("BOTLISH_NATIVE_RUNS");
     }
-    let status = match child.status() {
+    let result = work.join("result");
+    let environment = [
+        ("BOTLISH_NATIVE_RESULT", Some(result.clone().into_os_string())),
+        ("BOTLISH_NATIVE_COMPILE_US", Some(started.elapsed().as_micros().to_string().into())),
+        ("BOTLISH_NATIVE_RUNS", (command == "bench").then(|| runs.to_string().into())),
+    ];
+    let status = match run_linked_executable(&executable, &argv, &environment) {
         Ok(status) => status,
-        Err(e) => {
-            emit_error(&["NATIVE", "IO"], &format!("cannot run the linked program: {e}"));
+        Err(launch::LaunchError::Arguments(message)) => {
+            emit_error(&["NATIVE", "UNSUPPORTED", "foreign"], &message);
+            return 0;
+        }
+        Err(launch::LaunchError::System(message)) => {
+            emit_error(&["NATIVE", "IO"], &format!("cannot run the linked program: {message}"));
             return 2;
         }
     };
@@ -470,6 +510,59 @@ fn run_linked(
         emit(line);
     }
     0
+}
+
+/// Runs the linked EXECUTABLE with the argument vector ARGV (argument zero
+/// first), byte for byte, and ENVIRONMENT's variables set (or removed, for
+/// None) in its environment, and waits for it: how it ended, for messages.
+/// Its standard input, output and error are this driver's.
+#[cfg(unix)]
+fn run_linked_executable(
+    executable: &std::path::Path,
+    argv: &[Vec<u8>],
+    environment: &[(&str, Option<std::ffi::OsString>)],
+) -> Result<String, launch::LaunchError> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    let (first, rest) = argv.split_first().expect("run_linked checks for argument zero");
+    let mut child = std::process::Command::new(executable);
+    child.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+    for (name, value) in environment {
+        match value {
+            Some(value) => child.env(name, value),
+            None => child.env_remove(name),
+        };
+    }
+    child.status().map(|status| status.to_string()).map_err(|e| launch::LaunchError::System(e.to_string()))
+}
+
+/// A Windows process has no argument vector of its own, only a command
+/// line: launch.rs writes the one the program's runtime splits back into
+/// ARGV, argument zero included, and starts it with CreateProcessW
+/// (ARGV.md, "Windows"). The environment is this driver's, with
+/// ENVIRONMENT's variables set or removed first.
+#[cfg(windows)]
+fn run_linked_executable(
+    executable: &std::path::Path,
+    argv: &[Vec<u8>],
+    environment: &[(&str, Option<std::ffi::OsString>)],
+) -> Result<String, launch::LaunchError> {
+    // Checked before the environment changes: a refused vector runs nothing.
+    launch::command_line(&launch::utf16_arguments(argv).map_err(launch::LaunchError::Arguments)?)
+        .map_err(launch::LaunchError::Arguments)?;
+    for (name, value) in environment {
+        // SAFETY: the driver is single-threaded here -- it compiled and
+        // linked the program on this thread and starts no other -- and
+        // exits after the run, so nothing else reads its environment.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+    let code = launch::run(executable, argv)?;
+    Ok(format!("exit code: {code} ({code:#010x})"))
 }
 
 fn call_effect_report(program: &nir::Program) -> String {

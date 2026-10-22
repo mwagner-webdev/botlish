@@ -268,17 +268,17 @@ std::char::scalar_value('A')}] call] 0]]
 test char-list-infers-applied-type {['-', '.', '_', '~'] infers as List[UnicodeChar] through ordinary homogeneous List construction inference, no char-specific rule} -body {
     set h [sourceHir {['-', '.', '_', '~']}]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
-} -result {List[UnicodeChar]}
+} -result {List[UnicodeChar]{length: 4}}
 
 test char-list-mixed-codepoints {['A', 'é', '😀'] (different UTF-8 lengths and numeric values) is still List[UnicodeChar]: element semantic type, not encoding size, decides it} -body {
     set h [sourceHir "\['A', 'é', '\U0001F600'\]"]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
-} -result {List[UnicodeChar]}
+} -result {List[UnicodeChar]{length: 3}}
 
 test char-list-string-mix-not-uniform {['A', "A"] (UnicodeChar and String) is neither List[UnicodeChar] nor List[String]: ordinary heterogeneous List behavior, no coercion} -body {
     set h [sourceHir {['A', "A"]}]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
-} -result list
+} -result {list{length: 2}}
 
 test char-consume-list {consume(chars: List[UnicodeChar]) accepts a char list literal} -body {
     surface::compile {import std::list

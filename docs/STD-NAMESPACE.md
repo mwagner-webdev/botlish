@@ -25,9 +25,9 @@ standard library, from before and after the migration:
 
 | file | what it holds |
 |---|---|
-| `before.tsv` | every standard-library entity of the tree before the milestone (512 rows) |
-| `after.tsv` | the same entities after it (512 rows) |
-| `renames.tsv` | old name -> new name for every program-visible entity (420 rows) |
+| `before.tsv` | every standard-library entity of the tree before the milestone (603 rows) |
+| `after.tsv` | the same entities after it (603 rows) |
+| `renames.tsv` | old name -> new name for every program-visible entity (509 rows) |
 | `tools/census.tcl` | writes a census from a checkout (`-root DIR -out FILE`) |
 | `tools/renames.py` | joins the two censuses; exits 1 if an entity has no partner |
 | `tools/migrate.py` | the mechanical part of the corpus migration (section 7) |
@@ -43,7 +43,9 @@ Columns:
   language primitive (`+`, `==`, `hash`, `argv`) and is in no namespace;
   `internal` is a `#` native (`mutable_vector#consume`) or a core-IR-only
   accessor that no source can spell; `builtin` is a runtime error or enum
-  that every program sees; `demo` is the `std::mathish` demonstration module.
+  that every program sees; `demo` is the `std::mathish` demonstration module;
+  `std-internal` is an internal namespace (`std::table_hash`) or its member,
+  which only standard-library modules may name (HASHABLE-AND-KEYED-HASH.md).
 * **origin**: a module file, an intrinsic, or both.
 * **location**: the defining file and line.
 * **platform**, **arch**, **direct**: as the target table and the module's
@@ -58,9 +60,9 @@ tclsh9.0 audit/stdlib-census/tools/census.tcl -out audit/stdlib-census/after.tsv
 
 The migration is a bijection, which `renames.py` checks:
 
-* 420 program-visible entities (32 namespaces and 388 members, roles `api`
-  and `demo`), each now named under `std::`;
-* the 24 root primitives, 56 internal natives and 12 runtime builtins keep
+* 509 program-visible entities (38 namespaces and 471 members, roles `api`,
+  `demo` and `std-internal`), each now named under `std::`;
+* the 24 root primitives, 57 internal natives and 13 runtime builtins keep
   their names.
 
 ## 2. One root, two origins
@@ -273,10 +275,26 @@ whose diagnostic must name the archive's own `stdlib/`.
 `std-bundled-standard-library` and `std-bundled-native` check the same thing
 with an archive built from a dynamic `tclsh9.0` in the test process.
 
-The Linux platform namespaces are now `std::linux`, `std::linux::io`,
-`std::linux::path`, `std::linux::sys` and the transports
-`std::linux::abi::x86_64` and `std::linux::abi::aarch64`. They remain Linux's,
-and a target of another operating system still gets `UNSUPPORTED-PLATFORM`.
+The platform namespaces keep their platforms under their new names
+(core/cabi.tcl's `platforms`: whole-path roots, never a first segment):
+
+* Linux: `std::linux`, `std::linux::io`, `std::linux::path`,
+  `std::linux::sys` and the transports `std::linux::abi::x86_64` and
+  `std::linux::abi::aarch64`;
+* macOS: `std::darwin`, `std::darwin::io` and `std::darwin::path`
+  (MACOS-AARCH64-MILESTONE-8.md);
+* Windows: `std::windows` and `std::windows::io`
+  (WINDOWS-X86-64-MILESTONE-2.md).
+
+A target of another operating system still gets `UNSUPPORTED-PLATFORM`. A
+module a program or a test writes that is merely named like a system (an
+application `windows.bot`, a private library's `std::win32`) is no
+platform's.
+
+The internal namespace of the keyed table hash is `std::table_hash`
+(HASHABLE-AND-KEYED-HASH.md): only standard-library modules, the files whose
+namespace is under `std`, may import it or name its member
+(`INTERNAL-NAMESPACE` for any other file).
 
 Nothing in this milestone adds a toolchain requirement. It needs no MinGW and
 changes no C binding's ABI facts. The generated bindings spell `std::ffi::c`.

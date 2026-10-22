@@ -552,21 +552,29 @@ title: -
 summary: The structural hash of any value that has equality, an Int in 0..2^61-1: equal values (==) always hash equal.
 index: stdlib
 keywords: hash code; hashing; hash table; bucket; fingerprint
-related: stdlib.== stdlib.mod concept.values
+related: stdlib.== stdlib.mod concept.values concept.hashable
 
 == NOTES
 hash(v) is a language primitive, exactly as general as ==: Ints, Strings,
 Bools, unit, characters, Lists, structs, enum cases, ImmutableSets and
 byte storage all hash, and two values that are == hash to the same Int.
 The result is nonnegative and below 2^61, so hash(key).mod(capacity) is a
-valid table slot.
+valid table slot. It is also the one operation of the built-in trait
+Hashable (concept.hashable): `x.hash()` on a Hashable value.
 
 The value is deterministic: the same on every backend, in every run and
 every process, with no random seed. It is not promised across compiler
 versions, and it is not cryptographic: never persist it or use it for
-security. A function, MutableArray or MutableVector has no hash (the
-EQUALITY error when the call runs), and an affine value is rejected at
-compile time (AFFINE-EQUALITY-UNSUPPORTED).
+security, and do not rely on it against keys an adversary chooses (the
+standard library's hash structures use a separate, collision-hardened hash
+for that, which no program sees).
+
+A function, MutableArray or MutableVector has no hash. Where the argument's
+type shows it is not Hashable (a function, a struct with a function field)
+the call is rejected at compile time (TRAIT-NOT-SATISFIED); an argument of
+unknown type (an untyped parameter) is checked when the call runs (the
+EQUALITY error); an affine value is rejected at compile time
+(AFFINE-EQUALITY-UNSUPPORTED). The hash of a Hashable value never fails.
 
 == EXAMPLES
 @example accept
@@ -621,15 +629,15 @@ title: -
 summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
 index: stdlib
 keywords: list functions; array functions; sequence operations
-related: concept.lists task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter
 
 == NOTES
-Three intrinsics (std::list::length, std::list::at, std::list::append) and
-the ordinary Botlish functions of stdlib/list.bot built on them. `import
-std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
-methods (xs.at(0)). A List is immutable: append returns a new List and
-nothing changes one in place (a MutableVector is the growable mutable
-alternative).
+Four intrinsics (std::list::length, std::list::at, std::list::append and the length
+validator std::list::with_length) and the ordinary Botlish functions of
+stdlib/list.bot built on them. `import std::list` makes both
+callable, qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List
+is immutable: append returns a new List and nothing changes one in place
+(a MutableVector is the growable mutable alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
 concatenation of two Lists or index-of: a collecting loop
@@ -723,6 +731,42 @@ xs = [1, 2]
 ys = xs.append(3)
 [xs, ys, xs.append([4])]
 @value [[1, 2], [1, 2, 3], [1, 2, [4]]]
+@end
+
+@topic stdlib.std::list::with_length
+title: -
+summary: std::list::with_length[List[T]{length: N}](xs): xs itself, now known to have exactly N elements, when it has; otherwise the declared error LengthMismatch, after `import std::list`.
+index: stdlib
+keywords: check length; validate length; exact length; assert length; fixed length; LengthMismatch
+related: concept.list-length concept.scalar-refinements stdlib.std::list::length stdlib.std::decimal_rounded::round rule.unhandled-errors
+
+== NOTES
+The explicit way to mint a List length refinement (concept.list-length)
+from a List whose length is not known statically. It compares the length
+once and returns its argument unchanged -- no copy, no new List -- with the
+type of its imprint; any other length completes with the builtin declared
+error LengthMismatch. The imprint is explicit and must be a refined List
+type (std::list::with_length[List[int]](xs) is a TYPE error, and without [T]
+it is IMPRINT); the argument must already be a List of the imprint's
+element type, since the check proves a length, never elements. Where a
+guard reads better, `if xs.length() == N:` refines xs in its branch
+without a call. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import std::list
+
+fn triple(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    std::list::with_length[List[int]{length: 3}](xs)
+
+fn middle(xs: List[int]) -> int:
+    t = xs.triple():
+        on LengthMismatch:
+            return -1
+    t.at(1)
+
+[middle([4, 5, 6]), middle([4, 5])]
+@value [5, -1]
 @end
 
 @topic stdlib.std::list::get
@@ -1240,19 +1284,22 @@ fn safe(x: Float64) -> DecimalRounded{minDecimalsPreserved: 2}:
 
 @topic stdlib.module.std::float64
 title: -
-summary: The explicit conversions of Float64: from and to Int (std::float64::from_int, std::float64::truncate) and from DecimalRounded (std::float64::from_decimal_rounded).
+summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
 index: stdlib
-keywords: float functions; float conversion; int to float; float to int; decimal to float
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
 related: concept.floats stdlib./ concept.decimal-rounded
 
 == NOTES
-`float64` has no module file: its members are intrinsics, reached with
-`import std::float64`. They are the only conversions between Float64 and the
-other number types: Botlish never converts implicitly, so an expression
-mixing an Int and a Float64 is rejected until one side is converted (and
-so is one mixing a Float64 and a DecimalRounded value). There is no
+The conversions are intrinsics and the bounds (min, max, abs, clamp) the
+ordinary Botlish of stdlib/float64.bot, all reached with `import std::float64`.
+The conversions are the only ones between Float64 and the other number
+types: Botlish never converts implicitly, so an expression mixing an Int
+and a Float64 is rejected until one side is converted (and so is one
+mixing a Float64 and a DecimalRounded value). The bounds never fail: they
+compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, and no bit-level access to a Float64.
+result, no math library beyond these, and no bit-level access to a
+Float64.
 
 @topic stdlib.std::float64::from_decimal_rounded
 title: -
@@ -2379,17 +2426,26 @@ a field. The layout is static: it is named at a parse or a query and read
 from the value's type at an emit, never a runtime value. A field may be a
 fixed array, `field name: array 16 of std::ffi::c::Char at 8`: N elements of
 any representation (a scalar, a pointer, a nested layout, another array),
-element i at the field's offset plus i times the element's width; its copied
-value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md). There are no
-unions, bitfields, variable-length tails, zero-length arrays or floats in a
-layout.
+element i at the field's offset plus i times the element's width; its
+copied value is a List of exactly N elements (FIXED-LAYOUT-ARRAYS.md).
+There are no bitfields, variable-length tails or zero-length arrays in a
+layout; overlapping interpretations are a union layout's (LAYOUT-UNIONS.md).
 
-A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of
-the target's pointer width). Such a layout is native-only: bytes never
-become a pointer, so std::binary::parse and std::binary::emit of it are
-LAYOUT-NATIVE-ONLY, and it is read from live native memory through a
-NativeView[L] (std::binary::native::view, then its fields or
-std::binary::load).
+A field may be C's float or double (std::ffi::c::Float, 4 bytes; std::ffi::c::Double,
+8), its value a Float64. A read of one -- std::binary::parse, std::binary::read,
+std::binary::load, std::binary::element, a view's field -- fails with the declared
+NonFiniteFloat when its bits are a NaN or an infinity (negative zero reads
+as 0.0); a write, store or emit of a float rounds the Float64 to nearest,
+ties to even, and fails with NonFiniteFloat when it overflows the float,
+before a byte is written. A call is charged NonFiniteFloat only when it
+reads a float or a double or writes a float: the errors listed below
+include it for those calls alone (concept.c-floats).
+
+A field may be a C pointer (std::ffi::c::Ptr[T] or std::ffi::c::FnPtr[F], of the
+target's pointer width). Such a layout is native-only: bytes never become
+a pointer, so std::binary::parse and std::binary::emit of it are LAYOUT-NATIVE-ONLY,
+and it is read from live native memory through a NativeView[L]
+(std::binary::native::view, then its fields or std::binary::load).
 
 Writes name their field statically, LAYOUT.FIELD or a path through nested
 layouts (Header.origin.x). A record in byte storage the program owns is

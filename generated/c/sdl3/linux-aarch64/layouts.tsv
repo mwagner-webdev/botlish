@@ -45,11 +45,11 @@ field	struct SDL_Color	0	r	scalar	0	1	-	Uint8 r	std::ffi::c::UChar	c=r
 field	struct SDL_Color	1	g	scalar	1	1	-	Uint8 g	std::ffi::c::UChar	c=g
 field	struct SDL_Color	2	b	scalar	2	1	-	Uint8 b	std::ffi::c::UChar	c=b
 field	struct SDL_Color	3	a	scalar	3	1	-	Uint8 a	std::ffi::c::UChar	c=a
-record	struct SDL_FColor	-	-	layout-blocked	-	16	4	struct SDL_FColor	-	typedefs=SDL_FColor; identity=sdl3::ctypes::SDL_FColor; header=include/SDL3/SDL_pixels.h:1126; blockers=float: field r: float (float) | float: field g: float (float) | float: field b: float (float) | float: field a: float (float); roots=float
-field	struct SDL_FColor	0	r	float	0	4	-	float r	-	c=r; blockers=float: float (float)
-field	struct SDL_FColor	1	g	float	4	4	-	float g	-	c=g; blockers=float: float (float)
-field	struct SDL_FColor	2	b	float	8	4	-	float b	-	c=b; blockers=float: float (float)
-field	struct SDL_FColor	3	a	float	12	4	-	float a	-	c=a; blockers=float: float (float)
+record	struct SDL_FColor	-	SDL_FColor	layout-direct	-	16	4	struct SDL_FColor	-	typedefs=SDL_FColor; identity=sdl3::ctypes::SDL_FColor; header=include/SDL3/SDL_pixels.h:1126; pointed-by=1
+field	struct SDL_FColor	0	r	scalar	0	4	-	float r	std::ffi::c::Float	c=r
+field	struct SDL_FColor	1	g	scalar	4	4	-	float g	std::ffi::c::Float	c=g
+field	struct SDL_FColor	2	b	scalar	8	4	-	float b	std::ffi::c::Float	c=b
+field	struct SDL_FColor	3	a	scalar	12	4	-	float a	std::ffi::c::Float	c=a
 record	struct SDL_Palette	-	SDL_Palette	layout-direct	-	24	8	struct SDL_Palette	-	typedefs=SDL_Palette; identity=sdl3::ctypes::SDL_Palette; header=include/SDL3/SDL_pixels.h:1141; pointed-by=13
 field	struct SDL_Palette	0	ncolors	scalar	0	4	-	int ncolors	std::ffi::c::Int	c=ncolors
 field	struct SDL_Palette	1	colors	pointer	8	8	-	SDL_Color *colors	std::ffi::c::Ptr[SDL_Color]	c=colors
@@ -75,20 +75,20 @@ field	struct SDL_PixelFormatDetails	15	Ashift	scalar	31	1	-	Uint8 Ashift	std::ff
 record	struct SDL_Point	-	SDL_Point	layout-direct	-	8	4	struct SDL_Point	-	typedefs=SDL_Point; identity=sdl3::ctypes::SDL_Point; header=include/SDL3/SDL_rect.h:49; pointed-by=3
 field	struct SDL_Point	0	x	scalar	0	4	-	int x	std::ffi::c::Int	c=x
 field	struct SDL_Point	1	y	scalar	4	4	-	int y	std::ffi::c::Int	c=y
-record	struct SDL_FPoint	-	-	layout-blocked	-	8	4	struct SDL_FPoint	-	typedefs=SDL_FPoint; identity=sdl3::ctypes::SDL_FPoint; header=include/SDL3/SDL_rect.h:63; blockers=float: field x: float (float) | float: field y: float (float); roots=float; pointed-by=5
-field	struct SDL_FPoint	0	x	float	0	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_FPoint	1	y	float	4	4	-	float y	-	c=y; blockers=float: float (float)
-record	struct SDL_Rect	-	SDL_Rect	layout-direct	-	16	4	struct SDL_Rect	-	typedefs=SDL_Rect; identity=sdl3::ctypes::SDL_Rect; header=include/SDL3/SDL_rect.h:83; pointed-by=40
+record	struct SDL_FPoint	-	SDL_FPoint	layout-direct	-	8	4	struct SDL_FPoint	-	typedefs=SDL_FPoint; identity=sdl3::ctypes::SDL_FPoint; header=include/SDL3/SDL_rect.h:63; pointed-by=6
+field	struct SDL_FPoint	0	x	scalar	0	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_FPoint	1	y	scalar	4	4	-	float y	std::ffi::c::Float	c=y
+record	struct SDL_Rect	-	SDL_Rect	layout-direct	-	16	4	struct SDL_Rect	-	typedefs=SDL_Rect; identity=sdl3::ctypes::SDL_Rect; header=include/SDL3/SDL_rect.h:83; pointed-by=42
 field	struct SDL_Rect	0	x	scalar	0	4	-	int x	std::ffi::c::Int	c=x
 field	struct SDL_Rect	1	y	scalar	4	4	-	int y	std::ffi::c::Int	c=y
 field	struct SDL_Rect	2	w	scalar	8	4	-	int w	std::ffi::c::Int	c=w
 field	struct SDL_Rect	3	h	scalar	12	4	-	int h	std::ffi::c::Int	c=h
-record	struct SDL_FRect	-	-	layout-blocked	-	16	4	struct SDL_FRect	-	typedefs=SDL_FRect; identity=sdl3::ctypes::SDL_FRect; header=include/SDL3/SDL_rect.h:109; blockers=float: field x: float (float) | float: field y: float (float) | float: field w: float (float) | float: field h: float (float); roots=float; pointed-by=15
-field	struct SDL_FRect	0	x	float	0	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_FRect	1	y	float	4	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_FRect	2	w	float	8	4	-	float w	-	c=w; blockers=float: float (float)
-field	struct SDL_FRect	3	h	float	12	4	-	float h	-	c=h; blockers=float: float (float)
-record	struct SDL_Surface	-	SDL_Surface	layout-direct	-	48	8	struct SDL_Surface	-	typedefs=SDL_Surface; identity=sdl3::ctypes::SDL_Surface; header=include/SDL3/SDL_surface.h:138; pointed-by=68
+record	struct SDL_FRect	-	SDL_FRect	layout-direct	-	16	4	struct SDL_FRect	-	typedefs=SDL_FRect; identity=sdl3::ctypes::SDL_FRect; header=include/SDL3/SDL_rect.h:109; pointed-by=21
+field	struct SDL_FRect	0	x	scalar	0	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_FRect	1	y	scalar	4	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_FRect	2	w	scalar	8	4	-	float w	std::ffi::c::Float	c=w
+field	struct SDL_FRect	3	h	scalar	12	4	-	float h	std::ffi::c::Float	c=h
+record	struct SDL_Surface	-	SDL_Surface	layout-direct	-	48	8	struct SDL_Surface	-	typedefs=SDL_Surface; identity=sdl3::ctypes::SDL_Surface; header=include/SDL3/SDL_surface.h:138; pointed-by=74
 field	struct SDL_Surface	0	flags	scalar	0	4	-	SDL_SurfaceFlags flags	std::ffi::c::UInt	c=flags
 field	struct SDL_Surface	1	format	scalar	4	4	-	SDL_PixelFormat format	std::ffi::c::UInt	c=format
 field	struct SDL_Surface	2	w	scalar	8	4	-	int w	std::ffi::c::Int	c=w
@@ -104,13 +104,13 @@ field	struct SDL_CameraSpec	2	width	scalar	8	4	-	int width	std::ffi::c::Int	c=wi
 field	struct SDL_CameraSpec	3	height	scalar	12	4	-	int height	std::ffi::c::Int	c=height
 field	struct SDL_CameraSpec	4	framerate_numerator	scalar	16	4	-	int framerate_numerator	std::ffi::c::Int	c=framerate_numerator
 field	struct SDL_CameraSpec	5	framerate_denominator	scalar	20	4	-	int framerate_denominator	std::ffi::c::Int	c=framerate_denominator
-record	struct SDL_DisplayMode	-	-	layout-blocked	-	40	8	struct SDL_DisplayMode	-	typedefs=SDL_DisplayMode; identity=sdl3::ctypes::SDL_DisplayMode; header=include/SDL3/SDL_video.h:139; blockers=float: field pixel_density: float (float) | float: field refresh_rate: float (float); roots=float; pointed-by=5
+record	struct SDL_DisplayMode	-	SDL_DisplayMode	layout-direct	-	40	8	struct SDL_DisplayMode	-	typedefs=SDL_DisplayMode; identity=sdl3::ctypes::SDL_DisplayMode; header=include/SDL3/SDL_video.h:139; pointed-by=6
 field	struct SDL_DisplayMode	0	displayID	scalar	0	4	-	SDL_DisplayID displayID	std::ffi::c::UInt	c=displayID
 field	struct SDL_DisplayMode	1	format	scalar	4	4	-	SDL_PixelFormat format	std::ffi::c::UInt	c=format
 field	struct SDL_DisplayMode	2	w	scalar	8	4	-	int w	std::ffi::c::Int	c=w
 field	struct SDL_DisplayMode	3	h	scalar	12	4	-	int h	std::ffi::c::Int	c=h
-field	struct SDL_DisplayMode	4	pixel_density	float	16	4	-	float pixel_density	-	c=pixel_density; blockers=float: float (float)
-field	struct SDL_DisplayMode	5	refresh_rate	float	20	4	-	float refresh_rate	-	c=refresh_rate; blockers=float: float (float)
+field	struct SDL_DisplayMode	4	pixel_density	scalar	16	4	-	float pixel_density	std::ffi::c::Float	c=pixel_density
+field	struct SDL_DisplayMode	5	refresh_rate	scalar	20	4	-	float refresh_rate	std::ffi::c::Float	c=refresh_rate
 field	struct SDL_DisplayMode	6	refresh_rate_numerator	scalar	24	4	-	int refresh_rate_numerator	std::ffi::c::Int	c=refresh_rate_numerator
 field	struct SDL_DisplayMode	7	refresh_rate_denominator	scalar	28	4	-	int refresh_rate_denominator	std::ffi::c::Int	c=refresh_rate_denominator
 field	struct SDL_DisplayMode	8	internal	pointer	32	8	-	SDL_DisplayModeData *internal	std::ffi::c::Ptr[SDL_DisplayModeData]	c=internal
@@ -122,9 +122,9 @@ field	struct SDL_GUID	0	data	array	0	16	-	Uint8 data[16]	array 16 of std::ffi::c
 record	struct SDL_VirtualJoystickTouchpadDesc	-	SDL_VirtualJoystickTouchpadDesc	layout-direct	-	8	2	struct SDL_VirtualJoystickTouchpadDesc	-	typedefs=SDL_VirtualJoystickTouchpadDesc; identity=sdl3::ctypes::SDL_VirtualJoystickTouchpadDesc; header=include/SDL3/SDL_joystick.h:433
 field	struct SDL_VirtualJoystickTouchpadDesc	0	nfingers	scalar	0	2	-	Uint16 nfingers	std::ffi::c::UShort	c=nfingers
 field	struct SDL_VirtualJoystickTouchpadDesc	1	padding	array	2	6	-	Uint16 padding[3]	array 3 of std::ffi::c::UShort	c=padding; element=scalar Uint16; bounds=3; extent=3
-record	struct SDL_VirtualJoystickSensorDesc	-	-	layout-blocked	-	8	4	struct SDL_VirtualJoystickSensorDesc	-	typedefs=SDL_VirtualJoystickSensorDesc; identity=sdl3::ctypes::SDL_VirtualJoystickSensorDesc; header=include/SDL3/SDL_joystick.h:446; blockers=float: field rate: float (float); roots=float
+record	struct SDL_VirtualJoystickSensorDesc	-	SDL_VirtualJoystickSensorDesc	layout-direct	-	8	4	struct SDL_VirtualJoystickSensorDesc	-	typedefs=SDL_VirtualJoystickSensorDesc; identity=sdl3::ctypes::SDL_VirtualJoystickSensorDesc; header=include/SDL3/SDL_joystick.h:446
 field	struct SDL_VirtualJoystickSensorDesc	0	type_	scalar	0	4	-	SDL_SensorType type	std::ffi::c::Int	c=type
-field	struct SDL_VirtualJoystickSensorDesc	1	rate	float	4	4	-	float rate	-	c=rate; blockers=float: float (float)
+field	struct SDL_VirtualJoystickSensorDesc	1	rate	scalar	4	4	-	float rate	std::ffi::c::Float	c=rate
 record	struct SDL_VirtualJoystickDesc	-	SDL_VirtualJoystickDesc	layout-direct	-	136	8	struct SDL_VirtualJoystickDesc	-	typedefs=SDL_VirtualJoystickDesc; identity=sdl3::ctypes::SDL_VirtualJoystickDesc; header=include/SDL3/SDL_joystick.h:465; pointed-by=1
 field	struct SDL_VirtualJoystickDesc	0	version	scalar	0	4	-	Uint32 version	std::ffi::c::UInt	c=version
 field	struct SDL_VirtualJoystickDesc	1	type_	scalar	4	2	-	Uint16 type	std::ffi::c::UShort	c=type
@@ -178,11 +178,11 @@ field	struct SDL_GamepadBinding	3	output	nested	20	12	-	union anon@SDL_gamepad.h
 record	struct SDL_CursorFrameInfo	-	SDL_CursorFrameInfo	layout-direct	-	16	8	struct SDL_CursorFrameInfo	-	typedefs=SDL_CursorFrameInfo; identity=sdl3::ctypes::SDL_CursorFrameInfo; header=include/SDL3/SDL_mouse.h:138; pointed-by=1
 field	struct SDL_CursorFrameInfo	0	surface	pointer	0	8	-	SDL_Surface *surface	std::ffi::c::Ptr[SDL_Surface]	c=surface
 field	struct SDL_CursorFrameInfo	1	duration	scalar	8	4	-	Uint32 duration	std::ffi::c::UInt	c=duration
-record	struct SDL_Finger	-	-	layout-blocked	-	24	8	struct SDL_Finger	-	typedefs=SDL_Finger; identity=sdl3::ctypes::SDL_Finger; header=include/SDL3/SDL_touch.h:102; blockers=float: field x: float (float) | float: field y: float (float) | float: field pressure: float (float); roots=float; pointed-by=1
+record	struct SDL_Finger	-	SDL_Finger	layout-direct	-	24	8	struct SDL_Finger	-	typedefs=SDL_Finger; identity=sdl3::ctypes::SDL_Finger; header=include/SDL3/SDL_touch.h:102; pointed-by=1
 field	struct SDL_Finger	0	id	scalar	0	8	-	SDL_FingerID id	std::ffi::c::ULong	c=id
-field	struct SDL_Finger	1	x	float	8	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_Finger	2	y	float	12	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_Finger	3	pressure	float	16	4	-	float pressure	-	c=pressure; blockers=float: float (float)
+field	struct SDL_Finger	1	x	scalar	8	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_Finger	2	y	scalar	12	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_Finger	3	pressure	scalar	16	4	-	float pressure	std::ffi::c::Float	c=pressure
 record	struct SDL_CommonEvent	-	SDL_CommonEvent	layout-direct	-	16	8	struct SDL_CommonEvent	-	typedefs=SDL_CommonEvent; identity=-; header=include/SDL3/SDL_events.h:296
 field	struct SDL_CommonEvent	0	type_	scalar	0	4	-	Uint32 type	std::ffi::c::UInt	c=type
 field	struct SDL_CommonEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
@@ -249,18 +249,18 @@ field	struct SDL_MouseDeviceEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::f
 field	struct SDL_MouseDeviceEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_MouseDeviceEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_MouseDeviceEvent	3	which	scalar	16	4	-	SDL_MouseID which	std::ffi::c::UInt	c=which
-record	struct SDL_MouseMotionEvent	-	-	layout-blocked	-	48	8	struct SDL_MouseMotionEvent	-	typedefs=SDL_MouseMotionEvent; identity=-; header=include/SDL3/SDL_events.h:453; blockers=float: field x: float (float) | float: field y: float (float) | float: field xrel: float (float) | float: field yrel: float (float); roots=float
+record	struct SDL_MouseMotionEvent	-	SDL_MouseMotionEvent	layout-direct	-	48	8	struct SDL_MouseMotionEvent	-	typedefs=SDL_MouseMotionEvent; identity=-; header=include/SDL3/SDL_events.h:453
 field	struct SDL_MouseMotionEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_MouseMotionEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_MouseMotionEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_MouseMotionEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_MouseMotionEvent	4	which	scalar	20	4	-	SDL_MouseID which	std::ffi::c::UInt	c=which
 field	struct SDL_MouseMotionEvent	5	state	scalar	24	4	-	SDL_MouseButtonFlags state	std::ffi::c::UInt	c=state
-field	struct SDL_MouseMotionEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_MouseMotionEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_MouseMotionEvent	8	xrel	float	36	4	-	float xrel	-	c=xrel; blockers=float: float (float)
-field	struct SDL_MouseMotionEvent	9	yrel	float	40	4	-	float yrel	-	c=yrel; blockers=float: float (float)
-record	struct SDL_MouseButtonEvent	-	-	layout-blocked	-	40	8	struct SDL_MouseButtonEvent	-	typedefs=SDL_MouseButtonEvent; identity=-; header=include/SDL3/SDL_events.h:472; blockers=c-bool: field down: C _Bool (_Bool) | float: field x: float (float) | float: field y: float (float); roots=c-bool,float
+field	struct SDL_MouseMotionEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_MouseMotionEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_MouseMotionEvent	8	xrel	scalar	36	4	-	float xrel	std::ffi::c::Float	c=xrel
+field	struct SDL_MouseMotionEvent	9	yrel	scalar	40	4	-	float yrel	std::ffi::c::Float	c=yrel
+record	struct SDL_MouseButtonEvent	-	-	layout-blocked	-	40	8	struct SDL_MouseButtonEvent	-	typedefs=SDL_MouseButtonEvent; identity=-; header=include/SDL3/SDL_events.h:472; blockers=c-bool: field down: C _Bool (_Bool); roots=c-bool
 field	struct SDL_MouseButtonEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_MouseButtonEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_MouseButtonEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
@@ -270,19 +270,19 @@ field	struct SDL_MouseButtonEvent	5	button	scalar	24	1	-	Uint8 button	std::ffi::
 field	struct SDL_MouseButtonEvent	6	down	c-bool	25	1	-	_Bool down	-	c=down; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_MouseButtonEvent	7	clicks	scalar	26	1	-	Uint8 clicks	std::ffi::c::UChar	c=clicks
 field	struct SDL_MouseButtonEvent	8	padding	scalar	27	1	-	Uint8 padding	std::ffi::c::UChar	c=padding
-field	struct SDL_MouseButtonEvent	9	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_MouseButtonEvent	10	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
-record	struct SDL_MouseWheelEvent	-	-	layout-blocked	-	56	8	struct SDL_MouseWheelEvent	-	typedefs=SDL_MouseWheelEvent; identity=-; header=include/SDL3/SDL_events.h:492; blockers=float: field x: float (float) | float: field y: float (float) | float: field mouse_x: float (float) | float: field mouse_y: float (float); roots=float
+field	struct SDL_MouseButtonEvent	9	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_MouseButtonEvent	10	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
+record	struct SDL_MouseWheelEvent	-	SDL_MouseWheelEvent	layout-direct	-	56	8	struct SDL_MouseWheelEvent	-	typedefs=SDL_MouseWheelEvent; identity=-; header=include/SDL3/SDL_events.h:492
 field	struct SDL_MouseWheelEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_MouseWheelEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_MouseWheelEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_MouseWheelEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_MouseWheelEvent	4	which	scalar	20	4	-	SDL_MouseID which	std::ffi::c::UInt	c=which
-field	struct SDL_MouseWheelEvent	5	x	float	24	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_MouseWheelEvent	6	y	float	28	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_MouseWheelEvent	5	x	scalar	24	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_MouseWheelEvent	6	y	scalar	28	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_MouseWheelEvent	7	direction	scalar	32	4	-	SDL_MouseWheelDirection direction	std::ffi::c::UInt	c=direction
-field	struct SDL_MouseWheelEvent	8	mouse_x	float	36	4	-	float mouse_x	-	c=mouse_x; blockers=float: float (float)
-field	struct SDL_MouseWheelEvent	9	mouse_y	float	40	4	-	float mouse_y	-	c=mouse_y; blockers=float: float (float)
+field	struct SDL_MouseWheelEvent	8	mouse_x	scalar	36	4	-	float mouse_x	std::ffi::c::Float	c=mouse_x
+field	struct SDL_MouseWheelEvent	9	mouse_y	scalar	40	4	-	float mouse_y	std::ffi::c::Float	c=mouse_y
 field	struct SDL_MouseWheelEvent	10	integer_x	scalar	44	4	-	Sint32 integer_x	std::ffi::c::Int	c=integer_x
 field	struct SDL_MouseWheelEvent	11	integer_y	scalar	48	4	-	Sint32 integer_y	std::ffi::c::Int	c=integer_y
 record	struct SDL_JoyAxisEvent	-	SDL_JoyAxisEvent	layout-direct	-	32	8	struct SDL_JoyAxisEvent	-	typedefs=SDL_JoyAxisEvent; identity=-; header=include/SDL3/SDL_events.h:513
@@ -362,23 +362,23 @@ field	struct SDL_GamepadDeviceEvent	0	type_	scalar	0	4	-	SDL_EventType type	std:
 field	struct SDL_GamepadDeviceEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_GamepadDeviceEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_GamepadDeviceEvent	3	which	scalar	16	4	-	SDL_JoystickID which	std::ffi::c::UInt	c=which
-record	struct SDL_GamepadTouchpadEvent	-	-	layout-blocked	-	40	8	struct SDL_GamepadTouchpadEvent	-	typedefs=SDL_GamepadTouchpadEvent; identity=-; header=include/SDL3/SDL_events.h:684; blockers=float: field x: float (float) | float: field y: float (float) | float: field pressure: float (float); roots=float
+record	struct SDL_GamepadTouchpadEvent	-	SDL_GamepadTouchpadEvent	layout-direct	-	40	8	struct SDL_GamepadTouchpadEvent	-	typedefs=SDL_GamepadTouchpadEvent; identity=-; header=include/SDL3/SDL_events.h:684
 field	struct SDL_GamepadTouchpadEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_GamepadTouchpadEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_GamepadTouchpadEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_GamepadTouchpadEvent	3	which	scalar	16	4	-	SDL_JoystickID which	std::ffi::c::UInt	c=which
 field	struct SDL_GamepadTouchpadEvent	4	touchpad	scalar	20	4	-	Sint32 touchpad	std::ffi::c::Int	c=touchpad
 field	struct SDL_GamepadTouchpadEvent	5	finger	scalar	24	4	-	Sint32 finger	std::ffi::c::Int	c=finger
-field	struct SDL_GamepadTouchpadEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_GamepadTouchpadEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_GamepadTouchpadEvent	8	pressure	float	36	4	-	float pressure	-	c=pressure; blockers=float: float (float)
-record	struct SDL_GamepadSensorEvent	-	-	layout-blocked	-	48	8	struct SDL_GamepadSensorEvent	-	typedefs=SDL_GamepadSensorEvent; identity=-; header=include/SDL3/SDL_events.h:702; blockers=float: field data: array element: float (float); roots=float
+field	struct SDL_GamepadTouchpadEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_GamepadTouchpadEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_GamepadTouchpadEvent	8	pressure	scalar	36	4	-	float pressure	std::ffi::c::Float	c=pressure
+record	struct SDL_GamepadSensorEvent	-	SDL_GamepadSensorEvent	layout-direct	-	48	8	struct SDL_GamepadSensorEvent	-	typedefs=SDL_GamepadSensorEvent; identity=-; header=include/SDL3/SDL_events.h:702
 field	struct SDL_GamepadSensorEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_GamepadSensorEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_GamepadSensorEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_GamepadSensorEvent	3	which	scalar	16	4	-	SDL_JoystickID which	std::ffi::c::UInt	c=which
 field	struct SDL_GamepadSensorEvent	4	sensor	scalar	20	4	-	Sint32 sensor	std::ffi::c::Int	c=sensor
-field	struct SDL_GamepadSensorEvent	5	data	float	24	12	-	float data[3]	-	c=data; element=other float; bounds=3; extent=3; blockers=float: array element: float (float)
+field	struct SDL_GamepadSensorEvent	5	data	array	24	12	-	float data[3]	array 3 of std::ffi::c::Float	c=data; element=scalar float; bounds=3; extent=3
 field	struct SDL_GamepadSensorEvent	6	sensor_timestamp	scalar	40	8	-	Uint64 sensor_timestamp	std::ffi::c::ULong	c=sensor_timestamp
 record	struct SDL_AudioDeviceEvent	-	-	layout-blocked	-	24	8	struct SDL_AudioDeviceEvent	-	typedefs=SDL_AudioDeviceEvent; identity=-; header=include/SDL3/SDL_events.h:722; blockers=c-bool: field recording: C _Bool (_Bool); roots=c-bool
 field	struct SDL_AudioDeviceEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
@@ -399,23 +399,23 @@ field	struct SDL_RenderEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c
 field	struct SDL_RenderEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_RenderEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_RenderEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
-record	struct SDL_TouchFingerEvent	-	-	layout-blocked	-	56	8	struct SDL_TouchFingerEvent	-	typedefs=SDL_TouchFingerEvent; identity=-; header=include/SDL3/SDL_events.h:781; blockers=float: field x: float (float) | float: field y: float (float) | float: field dx: float (float) | float: field dy: float (float) | float: field pressure: float (float); roots=float
+record	struct SDL_TouchFingerEvent	-	SDL_TouchFingerEvent	layout-direct	-	56	8	struct SDL_TouchFingerEvent	-	typedefs=SDL_TouchFingerEvent; identity=-; header=include/SDL3/SDL_events.h:781
 field	struct SDL_TouchFingerEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_TouchFingerEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_TouchFingerEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_TouchFingerEvent	3	touchID	scalar	16	8	-	SDL_TouchID touchID	std::ffi::c::ULong	c=touchID
 field	struct SDL_TouchFingerEvent	4	fingerID	scalar	24	8	-	SDL_FingerID fingerID	std::ffi::c::ULong	c=fingerID
-field	struct SDL_TouchFingerEvent	5	x	float	32	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_TouchFingerEvent	6	y	float	36	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_TouchFingerEvent	7	dx	float	40	4	-	float dx	-	c=dx; blockers=float: float (float)
-field	struct SDL_TouchFingerEvent	8	dy	float	44	4	-	float dy	-	c=dy; blockers=float: float (float)
-field	struct SDL_TouchFingerEvent	9	pressure	float	48	4	-	float pressure	-	c=pressure; blockers=float: float (float)
+field	struct SDL_TouchFingerEvent	5	x	scalar	32	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_TouchFingerEvent	6	y	scalar	36	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_TouchFingerEvent	7	dx	scalar	40	4	-	float dx	std::ffi::c::Float	c=dx
+field	struct SDL_TouchFingerEvent	8	dy	scalar	44	4	-	float dy	std::ffi::c::Float	c=dy
+field	struct SDL_TouchFingerEvent	9	pressure	scalar	48	4	-	float pressure	std::ffi::c::Float	c=pressure
 field	struct SDL_TouchFingerEvent	10	windowID	scalar	52	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
-record	struct SDL_PinchFingerEvent	-	-	layout-blocked	-	24	8	struct SDL_PinchFingerEvent	-	typedefs=SDL_PinchFingerEvent; identity=-; header=include/SDL3/SDL_events.h:799; blockers=float: field scale: float (float); roots=float
+record	struct SDL_PinchFingerEvent	-	SDL_PinchFingerEvent	layout-direct	-	24	8	struct SDL_PinchFingerEvent	-	typedefs=SDL_PinchFingerEvent; identity=-; header=include/SDL3/SDL_events.h:799
 field	struct SDL_PinchFingerEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_PinchFingerEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_PinchFingerEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
-field	struct SDL_PinchFingerEvent	3	scale	float	16	4	-	float scale	-	c=scale; blockers=float: float (float)
+field	struct SDL_PinchFingerEvent	3	scale	scalar	16	4	-	float scale	std::ffi::c::Float	c=scale
 field	struct SDL_PinchFingerEvent	4	windowID	scalar	20	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 record	struct SDL_PenProximityEvent	-	SDL_PenProximityEvent	layout-direct	-	32	8	struct SDL_PenProximityEvent	-	typedefs=SDL_PenProximityEvent; identity=-; header=include/SDL3/SDL_events.h:826
 field	struct SDL_PenProximityEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
@@ -425,59 +425,59 @@ field	struct SDL_PenProximityEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowI
 field	struct SDL_PenProximityEvent	4	which	scalar	20	4	-	SDL_PenID which	std::ffi::c::UInt	c=which
 field	struct SDL_PenProximityEvent	5	pen_state	scalar	24	4	-	SDL_PenInputFlags pen_state	std::ffi::c::UInt	c=pen_state
 field	struct SDL_PenProximityEvent	6	device_type	scalar	28	4	-	SDL_PenDeviceType device_type	std::ffi::c::Int	c=device_type
-record	struct SDL_PenMotionEvent	-	-	layout-blocked	-	40	8	struct SDL_PenMotionEvent	-	typedefs=SDL_PenMotionEvent; identity=-; header=include/SDL3/SDL_events.h:848; blockers=float: field x: float (float) | float: field y: float (float); roots=float
+record	struct SDL_PenMotionEvent	-	SDL_PenMotionEvent	layout-direct	-	40	8	struct SDL_PenMotionEvent	-	typedefs=SDL_PenMotionEvent; identity=-; header=include/SDL3/SDL_events.h:848
 field	struct SDL_PenMotionEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_PenMotionEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_PenMotionEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_PenMotionEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_PenMotionEvent	4	which	scalar	20	4	-	SDL_PenID which	std::ffi::c::UInt	c=which
 field	struct SDL_PenMotionEvent	5	pen_state	scalar	24	4	-	SDL_PenInputFlags pen_state	std::ffi::c::UInt	c=pen_state
-field	struct SDL_PenMotionEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_PenMotionEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_PenMotionEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_PenMotionEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_PenMotionEvent	8	device_type	scalar	36	4	-	SDL_PenDeviceType device_type	std::ffi::c::Int	c=device_type
-record	struct SDL_PenTouchEvent	-	-	layout-blocked	-	48	8	struct SDL_PenTouchEvent	-	typedefs=SDL_PenTouchEvent; identity=-; header=include/SDL3/SDL_events.h:869; blockers=float: field x: float (float) | float: field y: float (float) | c-bool: field eraser: C _Bool (_Bool) | c-bool: field down: C _Bool (_Bool); roots=c-bool,float
+record	struct SDL_PenTouchEvent	-	-	layout-blocked	-	48	8	struct SDL_PenTouchEvent	-	typedefs=SDL_PenTouchEvent; identity=-; header=include/SDL3/SDL_events.h:869; blockers=c-bool: field eraser: C _Bool (_Bool) | c-bool: field down: C _Bool (_Bool); roots=c-bool
 field	struct SDL_PenTouchEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_PenTouchEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_PenTouchEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_PenTouchEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_PenTouchEvent	4	which	scalar	20	4	-	SDL_PenID which	std::ffi::c::UInt	c=which
 field	struct SDL_PenTouchEvent	5	pen_state	scalar	24	4	-	SDL_PenInputFlags pen_state	std::ffi::c::UInt	c=pen_state
-field	struct SDL_PenTouchEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_PenTouchEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_PenTouchEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_PenTouchEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_PenTouchEvent	8	eraser	c-bool	36	1	-	_Bool eraser	-	c=eraser; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_PenTouchEvent	9	down	c-bool	37	1	-	_Bool down	-	c=down; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_PenTouchEvent	10	device_type	scalar	40	4	-	SDL_PenDeviceType device_type	std::ffi::c::Int	c=device_type
-record	struct SDL_PenButtonEvent	-	-	layout-blocked	-	48	8	struct SDL_PenButtonEvent	-	typedefs=SDL_PenButtonEvent; identity=-; header=include/SDL3/SDL_events.h:892; blockers=float: field x: float (float) | float: field y: float (float) | c-bool: field down: C _Bool (_Bool); roots=c-bool,float
+record	struct SDL_PenButtonEvent	-	-	layout-blocked	-	48	8	struct SDL_PenButtonEvent	-	typedefs=SDL_PenButtonEvent; identity=-; header=include/SDL3/SDL_events.h:892; blockers=c-bool: field down: C _Bool (_Bool); roots=c-bool
 field	struct SDL_PenButtonEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_PenButtonEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_PenButtonEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_PenButtonEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_PenButtonEvent	4	which	scalar	20	4	-	SDL_PenID which	std::ffi::c::UInt	c=which
 field	struct SDL_PenButtonEvent	5	pen_state	scalar	24	4	-	SDL_PenInputFlags pen_state	std::ffi::c::UInt	c=pen_state
-field	struct SDL_PenButtonEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_PenButtonEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_PenButtonEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_PenButtonEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_PenButtonEvent	8	button	scalar	36	1	-	Uint8 button	std::ffi::c::UChar	c=button
 field	struct SDL_PenButtonEvent	9	down	c-bool	37	1	-	_Bool down	-	c=down; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_PenButtonEvent	10	device_type	scalar	40	4	-	SDL_PenDeviceType device_type	std::ffi::c::Int	c=device_type
-record	struct SDL_PenAxisEvent	-	-	layout-blocked	-	48	8	struct SDL_PenAxisEvent	-	typedefs=SDL_PenAxisEvent; identity=-; header=include/SDL3/SDL_events.h:915; blockers=float: field x: float (float) | float: field y: float (float) | float: field value: float (float); roots=float
+record	struct SDL_PenAxisEvent	-	SDL_PenAxisEvent	layout-direct	-	48	8	struct SDL_PenAxisEvent	-	typedefs=SDL_PenAxisEvent; identity=-; header=include/SDL3/SDL_events.h:915
 field	struct SDL_PenAxisEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_PenAxisEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_PenAxisEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_PenAxisEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
 field	struct SDL_PenAxisEvent	4	which	scalar	20	4	-	SDL_PenID which	std::ffi::c::UInt	c=which
 field	struct SDL_PenAxisEvent	5	pen_state	scalar	24	4	-	SDL_PenInputFlags pen_state	std::ffi::c::UInt	c=pen_state
-field	struct SDL_PenAxisEvent	6	x	float	28	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_PenAxisEvent	7	y	float	32	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_PenAxisEvent	6	x	scalar	28	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_PenAxisEvent	7	y	scalar	32	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_PenAxisEvent	8	axis	scalar	36	4	-	SDL_PenAxis axis	std::ffi::c::UInt	c=axis
-field	struct SDL_PenAxisEvent	9	value	float	40	4	-	float value	-	c=value; blockers=float: float (float)
+field	struct SDL_PenAxisEvent	9	value	scalar	40	4	-	float value	std::ffi::c::Float	c=value
 field	struct SDL_PenAxisEvent	10	device_type	scalar	44	4	-	SDL_PenDeviceType device_type	std::ffi::c::Int	c=device_type
-record	struct SDL_DropEvent	-	-	layout-blocked	-	48	8	struct SDL_DropEvent	-	typedefs=SDL_DropEvent; identity=-; header=include/SDL3/SDL_events.h:936; blockers=float: field x: float (float) | float: field y: float (float); roots=float
+record	struct SDL_DropEvent	-	SDL_DropEvent	layout-direct	-	48	8	struct SDL_DropEvent	-	typedefs=SDL_DropEvent; identity=-; header=include/SDL3/SDL_events.h:936
 field	struct SDL_DropEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_DropEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_DropEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_DropEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::ffi::c::UInt	c=windowID
-field	struct SDL_DropEvent	4	x	float	20	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_DropEvent	5	y	float	24	4	-	float y	-	c=y; blockers=float: float (float)
+field	struct SDL_DropEvent	4	x	scalar	20	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_DropEvent	5	y	scalar	24	4	-	float y	std::ffi::c::Float	c=y
 field	struct SDL_DropEvent	6	source	pointer	32	8	-	const char *source	std::ffi::c::Ptr[std::ffi::c::Char]	c=source
 field	struct SDL_DropEvent	7	data	pointer	40	8	-	const char *data	std::ffi::c::Ptr[std::ffi::c::Char]	c=data
 record	struct SDL_ClipboardEvent	-	-	layout-blocked	-	32	8	struct SDL_ClipboardEvent	-	typedefs=SDL_ClipboardEvent; identity=-; header=include/SDL3/SDL_events.h:954; blockers=c-bool: field owner: C _Bool (_Bool); roots=c-bool
@@ -487,12 +487,12 @@ field	struct SDL_ClipboardEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::f
 field	struct SDL_ClipboardEvent	3	owner	c-bool	16	1	-	_Bool owner	-	c=owner; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_ClipboardEvent	4	num_mime_types	scalar	20	4	-	Sint32 num_mime_types	std::ffi::c::Int	c=num_mime_types
 field	struct SDL_ClipboardEvent	5	mime_types	pointer	24	8	-	const char **mime_types	std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]	c=mime_types
-record	struct SDL_SensorEvent	-	-	layout-blocked	-	56	8	struct SDL_SensorEvent	-	typedefs=SDL_SensorEvent; identity=-; header=include/SDL3/SDL_events.h:969; blockers=float: field data: array element: float (float); roots=float
+record	struct SDL_SensorEvent	-	SDL_SensorEvent	layout-direct	-	56	8	struct SDL_SensorEvent	-	typedefs=SDL_SensorEvent; identity=-; header=include/SDL3/SDL_events.h:969
 field	struct SDL_SensorEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
 field	struct SDL_SensorEvent	1	reserved	scalar	4	4	-	Uint32 reserved	std::ffi::c::UInt	c=reserved
 field	struct SDL_SensorEvent	2	timestamp	scalar	8	8	-	Uint64 timestamp	std::ffi::c::ULong	c=timestamp
 field	struct SDL_SensorEvent	3	which	scalar	16	4	-	SDL_SensorID which	std::ffi::c::UInt	c=which
-field	struct SDL_SensorEvent	4	data	float	20	24	-	float data[6]	-	c=data; element=other float; bounds=6; extent=6; blockers=float: array element: float (float)
+field	struct SDL_SensorEvent	4	data	array	20	24	-	float data[6]	array 6 of std::ffi::c::Float	c=data; element=scalar float; bounds=6; extent=6
 field	struct SDL_SensorEvent	5	sensor_timestamp	scalar	48	8	-	Uint64 sensor_timestamp	std::ffi::c::ULong	c=sensor_timestamp
 record	struct SDL_QuitEvent	-	SDL_QuitEvent	layout-direct	-	16	8	struct SDL_QuitEvent	-	typedefs=SDL_QuitEvent; identity=-; header=include/SDL3/SDL_events.h:984
 field	struct SDL_QuitEvent	0	type_	scalar	0	4	-	SDL_EventType type	std::ffi::c::UInt	c=type
@@ -506,7 +506,7 @@ field	struct SDL_UserEvent	3	windowID	scalar	16	4	-	SDL_WindowID windowID	std::f
 field	struct SDL_UserEvent	4	code	scalar	20	4	-	Sint32 code	std::ffi::c::Int	c=code
 field	struct SDL_UserEvent	5	data1	pointer	24	8	-	void *data1	std::ffi::c::Ptr[std::ffi::c::Void]	c=data1
 field	struct SDL_UserEvent	6	data2	pointer	32	8	-	void *data2	std::ffi::c::Ptr[std::ffi::c::Void]	c=data2
-record	union SDL_Event	-	-	layout-blocked	-	128	8	union SDL_Event	-	typedefs=SDL_Event; identity=sdl3::ctypes::SDL_Event; header=include/SDL3/SDL_events.h:1022; nested=field key (struct SDL_KeyboardEvent, union-member) -> c-bool | field edit_candidates (struct SDL_TextEditingCandidatesEvent, union-member) -> c-bool | field motion (struct SDL_MouseMotionEvent, union-member) -> float | field button (struct SDL_MouseButtonEvent, union-member) -> c-bool | field wheel (struct SDL_MouseWheelEvent, union-member) -> float | field jbutton (struct SDL_JoyButtonEvent, union-member) -> c-bool | field gbutton (struct SDL_GamepadButtonEvent, union-member) -> c-bool | field gtouchpad (struct SDL_GamepadTouchpadEvent, union-member) -> float | field gsensor (struct SDL_GamepadSensorEvent, union-member) -> float | field adevice (struct SDL_AudioDeviceEvent, union-member) -> c-bool | field sensor (struct SDL_SensorEvent, union-member) -> float | field tfinger (struct SDL_TouchFingerEvent, union-member) -> float | field pinch (struct SDL_PinchFingerEvent, union-member) -> float | field ptouch (struct SDL_PenTouchEvent, union-member) -> float | field pmotion (struct SDL_PenMotionEvent, union-member) -> float | field pbutton (struct SDL_PenButtonEvent, union-member) -> float | field paxis (struct SDL_PenAxisEvent, union-member) -> float | field drop (struct SDL_DropEvent, union-member) -> float | field clipboard (struct SDL_ClipboardEvent, union-member) -> c-bool; roots=c-bool,float; deps=struct SDL_AudioDeviceEvent,struct SDL_CameraDeviceEvent,struct SDL_ClipboardEvent,struct SDL_CommonEvent,struct SDL_DisplayEvent,struct SDL_DropEvent,struct SDL_GamepadAxisEvent,struct SDL_GamepadButtonEvent,struct SDL_GamepadDeviceEvent,struct SDL_GamepadSensorEvent,struct SDL_GamepadTouchpadEvent,struct SDL_JoyAxisEvent,struct SDL_JoyBallEvent,struct SDL_JoyBatteryEvent,struct SDL_JoyButtonEvent,struct SDL_JoyDeviceEvent,struct SDL_JoyHatEvent,struct SDL_KeyboardDeviceEvent,struct SDL_KeyboardEvent,struct SDL_MouseButtonEvent,struct SDL_MouseDeviceEvent,struct SDL_MouseMotionEvent,struct SDL_MouseWheelEvent,struct SDL_PenAxisEvent,struct SDL_PenButtonEvent,struct SDL_PenMotionEvent,struct SDL_PenProximityEvent,struct SDL_PenTouchEvent,struct SDL_PinchFingerEvent,struct SDL_QuitEvent,struct SDL_RenderEvent,struct SDL_SensorEvent,struct SDL_TextEditingCandidatesEvent,struct SDL_TextEditingEvent,struct SDL_TextInputEvent,struct SDL_TouchFingerEvent,struct SDL_UserEvent,struct SDL_WindowEvent; pointed-by=8
+record	union SDL_Event	-	-	layout-blocked	-	128	8	union SDL_Event	-	typedefs=SDL_Event; identity=sdl3::ctypes::SDL_Event; header=include/SDL3/SDL_events.h:1022; nested=field key (struct SDL_KeyboardEvent, union-member) -> c-bool | field edit_candidates (struct SDL_TextEditingCandidatesEvent, union-member) -> c-bool | field button (struct SDL_MouseButtonEvent, union-member) -> c-bool | field jbutton (struct SDL_JoyButtonEvent, union-member) -> c-bool | field gbutton (struct SDL_GamepadButtonEvent, union-member) -> c-bool | field adevice (struct SDL_AudioDeviceEvent, union-member) -> c-bool | field ptouch (struct SDL_PenTouchEvent, union-member) -> c-bool | field pbutton (struct SDL_PenButtonEvent, union-member) -> c-bool | field clipboard (struct SDL_ClipboardEvent, union-member) -> c-bool; roots=c-bool; deps=struct SDL_AudioDeviceEvent,struct SDL_CameraDeviceEvent,struct SDL_ClipboardEvent,struct SDL_CommonEvent,struct SDL_DisplayEvent,struct SDL_DropEvent,struct SDL_GamepadAxisEvent,struct SDL_GamepadButtonEvent,struct SDL_GamepadDeviceEvent,struct SDL_GamepadSensorEvent,struct SDL_GamepadTouchpadEvent,struct SDL_JoyAxisEvent,struct SDL_JoyBallEvent,struct SDL_JoyBatteryEvent,struct SDL_JoyButtonEvent,struct SDL_JoyDeviceEvent,struct SDL_JoyHatEvent,struct SDL_KeyboardDeviceEvent,struct SDL_KeyboardEvent,struct SDL_MouseButtonEvent,struct SDL_MouseDeviceEvent,struct SDL_MouseMotionEvent,struct SDL_MouseWheelEvent,struct SDL_PenAxisEvent,struct SDL_PenButtonEvent,struct SDL_PenMotionEvent,struct SDL_PenProximityEvent,struct SDL_PenTouchEvent,struct SDL_PinchFingerEvent,struct SDL_QuitEvent,struct SDL_RenderEvent,struct SDL_SensorEvent,struct SDL_TextEditingCandidatesEvent,struct SDL_TextEditingEvent,struct SDL_TextInputEvent,struct SDL_TouchFingerEvent,struct SDL_UserEvent,struct SDL_WindowEvent; pointed-by=8
 field	union SDL_Event	0	type_	scalar	0	4	-	Uint32 type	std::ffi::c::UInt	c=type
 field	union SDL_Event	1	common	nested	0	16	-	SDL_CommonEvent common	SDL_CommonEvent	c=common
 field	union SDL_Event	2	display	nested	0	32	-	SDL_DisplayEvent display	SDL_DisplayEvent	c=display
@@ -553,13 +553,13 @@ field	struct SDL_PathInfo	1	size	scalar	8	8	-	Uint64 size	std::ffi::c::ULong	c=s
 field	struct SDL_PathInfo	2	create_time	scalar	16	8	-	SDL_Time create_time	std::ffi::c::Long	c=create_time
 field	struct SDL_PathInfo	3	modify_time	scalar	24	8	-	SDL_Time modify_time	std::ffi::c::Long	c=modify_time
 field	struct SDL_PathInfo	4	access_time	scalar	32	8	-	SDL_Time access_time	std::ffi::c::Long	c=access_time
-record	struct SDL_GPUViewport	-	-	layout-blocked	-	24	4	struct SDL_GPUViewport	-	typedefs=SDL_GPUViewport; identity=sdl3::ctypes::SDL_GPUViewport; header=include/SDL3/SDL_gpu.h:1384; blockers=float: field x: float (float) | float: field y: float (float) | float: field w: float (float) | float: field h: float (float) | float: field min_depth: float (float) | float: field max_depth: float (float); roots=float; pointed-by=1
-field	struct SDL_GPUViewport	0	x	float	0	4	-	float x	-	c=x; blockers=float: float (float)
-field	struct SDL_GPUViewport	1	y	float	4	4	-	float y	-	c=y; blockers=float: float (float)
-field	struct SDL_GPUViewport	2	w	float	8	4	-	float w	-	c=w; blockers=float: float (float)
-field	struct SDL_GPUViewport	3	h	float	12	4	-	float h	-	c=h; blockers=float: float (float)
-field	struct SDL_GPUViewport	4	min_depth	float	16	4	-	float min_depth	-	c=min_depth; blockers=float: float (float)
-field	struct SDL_GPUViewport	5	max_depth	float	20	4	-	float max_depth	-	c=max_depth; blockers=float: float (float)
+record	struct SDL_GPUViewport	-	SDL_GPUViewport	layout-direct	-	24	4	struct SDL_GPUViewport	-	typedefs=SDL_GPUViewport; identity=sdl3::ctypes::SDL_GPUViewport; header=include/SDL3/SDL_gpu.h:1384; pointed-by=1
+field	struct SDL_GPUViewport	0	x	scalar	0	4	-	float x	std::ffi::c::Float	c=x
+field	struct SDL_GPUViewport	1	y	scalar	4	4	-	float y	std::ffi::c::Float	c=y
+field	struct SDL_GPUViewport	2	w	scalar	8	4	-	float w	std::ffi::c::Float	c=w
+field	struct SDL_GPUViewport	3	h	scalar	12	4	-	float h	std::ffi::c::Float	c=h
+field	struct SDL_GPUViewport	4	min_depth	scalar	16	4	-	float min_depth	std::ffi::c::Float	c=min_depth
+field	struct SDL_GPUViewport	5	max_depth	scalar	20	4	-	float max_depth	std::ffi::c::Float	c=max_depth
 record	struct SDL_GPUTextureTransferInfo	-	SDL_GPUTextureTransferInfo	layout-direct	-	24	8	struct SDL_GPUTextureTransferInfo	-	typedefs=SDL_GPUTextureTransferInfo; identity=sdl3::ctypes::SDL_GPUTextureTransferInfo; header=include/SDL3/SDL_gpu.h:1416; pointed-by=2
 field	struct SDL_GPUTextureTransferInfo	0	transfer_buffer	pointer	0	8	-	SDL_GPUTransferBuffer *transfer_buffer	std::ffi::c::Ptr[SDL_GPUTransferBuffer]	c=transfer_buffer
 field	struct SDL_GPUTextureTransferInfo	1	offset	scalar	8	4	-	Uint32 offset	std::ffi::c::UInt	c=offset
@@ -615,18 +615,18 @@ record	struct SDL_GPUIndirectDispatchCommand	-	SDL_GPUIndirectDispatchCommand	la
 field	struct SDL_GPUIndirectDispatchCommand	0	groupcount_x	scalar	0	4	-	Uint32 groupcount_x	std::ffi::c::UInt	c=groupcount_x
 field	struct SDL_GPUIndirectDispatchCommand	1	groupcount_y	scalar	4	4	-	Uint32 groupcount_y	std::ffi::c::UInt	c=groupcount_y
 field	struct SDL_GPUIndirectDispatchCommand	2	groupcount_z	scalar	8	4	-	Uint32 groupcount_z	std::ffi::c::UInt	c=groupcount_z
-record	struct SDL_GPUSamplerCreateInfo	-	-	layout-blocked	-	52	4	struct SDL_GPUSamplerCreateInfo	-	typedefs=SDL_GPUSamplerCreateInfo; identity=sdl3::ctypes::SDL_GPUSamplerCreateInfo; header=include/SDL3/SDL_gpu.h:1612; blockers=float: field mip_lod_bias: float (float) | float: field max_anisotropy: float (float) | float: field min_lod: float (float) | float: field max_lod: float (float) | c-bool: field enable_anisotropy: C _Bool (_Bool) | c-bool: field enable_compare: C _Bool (_Bool); roots=c-bool,float; pointed-by=1
+record	struct SDL_GPUSamplerCreateInfo	-	-	layout-blocked	-	52	4	struct SDL_GPUSamplerCreateInfo	-	typedefs=SDL_GPUSamplerCreateInfo; identity=sdl3::ctypes::SDL_GPUSamplerCreateInfo; header=include/SDL3/SDL_gpu.h:1612; blockers=c-bool: field enable_anisotropy: C _Bool (_Bool) | c-bool: field enable_compare: C _Bool (_Bool); roots=c-bool; pointed-by=1
 field	struct SDL_GPUSamplerCreateInfo	0	min_filter	scalar	0	4	-	SDL_GPUFilter min_filter	std::ffi::c::UInt	c=min_filter
 field	struct SDL_GPUSamplerCreateInfo	1	mag_filter	scalar	4	4	-	SDL_GPUFilter mag_filter	std::ffi::c::UInt	c=mag_filter
 field	struct SDL_GPUSamplerCreateInfo	2	mipmap_mode	scalar	8	4	-	SDL_GPUSamplerMipmapMode mipmap_mode	std::ffi::c::UInt	c=mipmap_mode
 field	struct SDL_GPUSamplerCreateInfo	3	address_mode_u	scalar	12	4	-	SDL_GPUSamplerAddressMode address_mode_u	std::ffi::c::UInt	c=address_mode_u
 field	struct SDL_GPUSamplerCreateInfo	4	address_mode_v	scalar	16	4	-	SDL_GPUSamplerAddressMode address_mode_v	std::ffi::c::UInt	c=address_mode_v
 field	struct SDL_GPUSamplerCreateInfo	5	address_mode_w	scalar	20	4	-	SDL_GPUSamplerAddressMode address_mode_w	std::ffi::c::UInt	c=address_mode_w
-field	struct SDL_GPUSamplerCreateInfo	6	mip_lod_bias	float	24	4	-	float mip_lod_bias	-	c=mip_lod_bias; blockers=float: float (float)
-field	struct SDL_GPUSamplerCreateInfo	7	max_anisotropy	float	28	4	-	float max_anisotropy	-	c=max_anisotropy; blockers=float: float (float)
+field	struct SDL_GPUSamplerCreateInfo	6	mip_lod_bias	scalar	24	4	-	float mip_lod_bias	std::ffi::c::Float	c=mip_lod_bias
+field	struct SDL_GPUSamplerCreateInfo	7	max_anisotropy	scalar	28	4	-	float max_anisotropy	std::ffi::c::Float	c=max_anisotropy
 field	struct SDL_GPUSamplerCreateInfo	8	compare_op	scalar	32	4	-	SDL_GPUCompareOp compare_op	std::ffi::c::UInt	c=compare_op
-field	struct SDL_GPUSamplerCreateInfo	9	min_lod	float	36	4	-	float min_lod	-	c=min_lod; blockers=float: float (float)
-field	struct SDL_GPUSamplerCreateInfo	10	max_lod	float	40	4	-	float max_lod	-	c=max_lod; blockers=float: float (float)
+field	struct SDL_GPUSamplerCreateInfo	9	min_lod	scalar	36	4	-	float min_lod	std::ffi::c::Float	c=min_lod
+field	struct SDL_GPUSamplerCreateInfo	10	max_lod	scalar	40	4	-	float max_lod	std::ffi::c::Float	c=max_lod
 field	struct SDL_GPUSamplerCreateInfo	11	enable_anisotropy	c-bool	44	1	-	_Bool enable_anisotropy	-	c=enable_anisotropy; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_GPUSamplerCreateInfo	12	enable_compare	c-bool	45	1	-	_Bool enable_compare	-	c=enable_compare; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_GPUSamplerCreateInfo	13	padding1	scalar	46	1	-	Uint8 padding1	std::ffi::c::UChar	c=padding1
@@ -693,13 +693,13 @@ record	struct SDL_GPUTransferBufferCreateInfo	-	SDL_GPUTransferBufferCreateInfo	
 field	struct SDL_GPUTransferBufferCreateInfo	0	usage	scalar	0	4	-	SDL_GPUTransferBufferUsage usage	std::ffi::c::UInt	c=usage
 field	struct SDL_GPUTransferBufferCreateInfo	1	size	scalar	4	4	-	Uint32 size	std::ffi::c::UInt	c=size
 field	struct SDL_GPUTransferBufferCreateInfo	2	props	scalar	8	4	-	SDL_PropertiesID props	std::ffi::c::UInt	c=props
-record	struct SDL_GPURasterizerState	-	-	layout-blocked	-	28	4	struct SDL_GPURasterizerState	-	typedefs=SDL_GPURasterizerState; identity=-; header=include/SDL3/SDL_gpu.h:1844; blockers=float: field depth_bias_constant_factor: float (float) | float: field depth_bias_clamp: float (float) | float: field depth_bias_slope_factor: float (float) | c-bool: field enable_depth_bias: C _Bool (_Bool) | c-bool: field enable_depth_clip: C _Bool (_Bool); roots=c-bool,float
+record	struct SDL_GPURasterizerState	-	-	layout-blocked	-	28	4	struct SDL_GPURasterizerState	-	typedefs=SDL_GPURasterizerState; identity=-; header=include/SDL3/SDL_gpu.h:1844; blockers=c-bool: field enable_depth_bias: C _Bool (_Bool) | c-bool: field enable_depth_clip: C _Bool (_Bool); roots=c-bool
 field	struct SDL_GPURasterizerState	0	fill_mode	scalar	0	4	-	SDL_GPUFillMode fill_mode	std::ffi::c::UInt	c=fill_mode
 field	struct SDL_GPURasterizerState	1	cull_mode	scalar	4	4	-	SDL_GPUCullMode cull_mode	std::ffi::c::UInt	c=cull_mode
 field	struct SDL_GPURasterizerState	2	front_face	scalar	8	4	-	SDL_GPUFrontFace front_face	std::ffi::c::UInt	c=front_face
-field	struct SDL_GPURasterizerState	3	depth_bias_constant_factor	float	12	4	-	float depth_bias_constant_factor	-	c=depth_bias_constant_factor; blockers=float: float (float)
-field	struct SDL_GPURasterizerState	4	depth_bias_clamp	float	16	4	-	float depth_bias_clamp	-	c=depth_bias_clamp; blockers=float: float (float)
-field	struct SDL_GPURasterizerState	5	depth_bias_slope_factor	float	20	4	-	float depth_bias_slope_factor	-	c=depth_bias_slope_factor; blockers=float: float (float)
+field	struct SDL_GPURasterizerState	3	depth_bias_constant_factor	scalar	12	4	-	float depth_bias_constant_factor	std::ffi::c::Float	c=depth_bias_constant_factor
+field	struct SDL_GPURasterizerState	4	depth_bias_clamp	scalar	16	4	-	float depth_bias_clamp	std::ffi::c::Float	c=depth_bias_clamp
+field	struct SDL_GPURasterizerState	5	depth_bias_slope_factor	scalar	20	4	-	float depth_bias_slope_factor	std::ffi::c::Float	c=depth_bias_slope_factor
 field	struct SDL_GPURasterizerState	6	enable_depth_bias	c-bool	24	1	-	_Bool enable_depth_bias	-	c=enable_depth_bias; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_GPURasterizerState	7	enable_depth_clip	c-bool	25	1	-	_Bool enable_depth_clip	-	c=enable_depth_clip; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_GPURasterizerState	8	padding1	scalar	26	1	-	Uint8 padding1	std::ffi::c::UChar	c=padding1
@@ -734,7 +734,7 @@ field	struct SDL_GPUGraphicsPipelineTargetInfo	3	has_depth_stencil_target	c-bool
 field	struct SDL_GPUGraphicsPipelineTargetInfo	4	padding1	scalar	17	1	-	Uint8 padding1	std::ffi::c::UChar	c=padding1
 field	struct SDL_GPUGraphicsPipelineTargetInfo	5	padding2	scalar	18	1	-	Uint8 padding2	std::ffi::c::UChar	c=padding2
 field	struct SDL_GPUGraphicsPipelineTargetInfo	6	padding3	scalar	19	1	-	Uint8 padding3	std::ffi::c::UChar	c=padding3
-record	struct SDL_GPUGraphicsPipelineCreateInfo	-	-	layout-blocked	-	168	8	struct SDL_GPUGraphicsPipelineCreateInfo	-	typedefs=SDL_GPUGraphicsPipelineCreateInfo; identity=sdl3::ctypes::SDL_GPUGraphicsPipelineCreateInfo; header=include/SDL3/SDL_gpu.h:1948; nested=field rasterizer_state (struct SDL_GPURasterizerState, field) -> float | field multisample_state (struct SDL_GPUMultisampleState, field) -> c-bool | field depth_stencil_state (struct SDL_GPUDepthStencilState, field) -> c-bool | field target_info (struct SDL_GPUGraphicsPipelineTargetInfo, field) -> c-bool; roots=c-bool,float; deps=struct SDL_GPUDepthStencilState,struct SDL_GPUGraphicsPipelineTargetInfo,struct SDL_GPUMultisampleState,struct SDL_GPURasterizerState,struct SDL_GPUVertexInputState; pointed-by=1
+record	struct SDL_GPUGraphicsPipelineCreateInfo	-	-	layout-blocked	-	168	8	struct SDL_GPUGraphicsPipelineCreateInfo	-	typedefs=SDL_GPUGraphicsPipelineCreateInfo; identity=sdl3::ctypes::SDL_GPUGraphicsPipelineCreateInfo; header=include/SDL3/SDL_gpu.h:1948; nested=field rasterizer_state (struct SDL_GPURasterizerState, field) -> c-bool | field multisample_state (struct SDL_GPUMultisampleState, field) -> c-bool | field depth_stencil_state (struct SDL_GPUDepthStencilState, field) -> c-bool | field target_info (struct SDL_GPUGraphicsPipelineTargetInfo, field) -> c-bool; roots=c-bool; deps=struct SDL_GPUDepthStencilState,struct SDL_GPUGraphicsPipelineTargetInfo,struct SDL_GPUMultisampleState,struct SDL_GPURasterizerState,struct SDL_GPUVertexInputState; pointed-by=1
 field	struct SDL_GPUGraphicsPipelineCreateInfo	0	vertex_shader	pointer	0	8	-	SDL_GPUShader *vertex_shader	std::ffi::c::Ptr[SDL_GPUShader]	c=vertex_shader
 field	struct SDL_GPUGraphicsPipelineCreateInfo	1	fragment_shader	pointer	8	8	-	SDL_GPUShader *fragment_shader	std::ffi::c::Ptr[SDL_GPUShader]	c=fragment_shader
 field	struct SDL_GPUGraphicsPipelineCreateInfo	2	vertex_input_state	nested	16	32	-	SDL_GPUVertexInputState vertex_input_state	SDL_GPUVertexInputState	c=vertex_input_state
@@ -759,7 +759,7 @@ field	struct SDL_GPUComputePipelineCreateInfo	10	threadcount_x	scalar	52	4	-	Uin
 field	struct SDL_GPUComputePipelineCreateInfo	11	threadcount_y	scalar	56	4	-	Uint32 threadcount_y	std::ffi::c::UInt	c=threadcount_y
 field	struct SDL_GPUComputePipelineCreateInfo	12	threadcount_z	scalar	60	4	-	Uint32 threadcount_z	std::ffi::c::UInt	c=threadcount_z
 field	struct SDL_GPUComputePipelineCreateInfo	13	props	scalar	64	4	-	SDL_PropertiesID props	std::ffi::c::UInt	c=props
-record	struct SDL_GPUColorTargetInfo	-	-	layout-blocked	-	64	8	struct SDL_GPUColorTargetInfo	-	typedefs=SDL_GPUColorTargetInfo; identity=sdl3::ctypes::SDL_GPUColorTargetInfo; header=include/SDL3/SDL_gpu.h:2025; blockers=c-bool: field cycle: C _Bool (_Bool) | c-bool: field cycle_resolve_texture: C _Bool (_Bool); nested=field clear_color (struct SDL_FColor, field) -> float; roots=c-bool,float; deps=struct SDL_FColor; pointed-by=1
+record	struct SDL_GPUColorTargetInfo	-	-	layout-blocked	-	64	8	struct SDL_GPUColorTargetInfo	-	typedefs=SDL_GPUColorTargetInfo; identity=sdl3::ctypes::SDL_GPUColorTargetInfo; header=include/SDL3/SDL_gpu.h:2025; blockers=c-bool: field cycle: C _Bool (_Bool) | c-bool: field cycle_resolve_texture: C _Bool (_Bool); roots=c-bool; deps=struct SDL_FColor; pointed-by=1
 field	struct SDL_GPUColorTargetInfo	0	texture	pointer	0	8	-	SDL_GPUTexture *texture	std::ffi::c::Ptr[SDL_GPUTexture]	c=texture
 field	struct SDL_GPUColorTargetInfo	1	mip_level	scalar	8	4	-	Uint32 mip_level	std::ffi::c::UInt	c=mip_level
 field	struct SDL_GPUColorTargetInfo	2	layer_or_depth_plane	scalar	12	4	-	Uint32 layer_or_depth_plane	std::ffi::c::UInt	c=layer_or_depth_plane
@@ -773,9 +773,9 @@ field	struct SDL_GPUColorTargetInfo	9	cycle	c-bool	56	1	-	_Bool cycle	-	c=cycle;
 field	struct SDL_GPUColorTargetInfo	10	cycle_resolve_texture	c-bool	57	1	-	_Bool cycle_resolve_texture	-	c=cycle_resolve_texture; blockers=c-bool: C _Bool (_Bool)
 field	struct SDL_GPUColorTargetInfo	11	padding1	scalar	58	1	-	Uint8 padding1	std::ffi::c::UChar	c=padding1
 field	struct SDL_GPUColorTargetInfo	12	padding2	scalar	59	1	-	Uint8 padding2	std::ffi::c::UChar	c=padding2
-record	struct SDL_GPUDepthStencilTargetInfo	-	-	layout-blocked	-	32	8	struct SDL_GPUDepthStencilTargetInfo	-	typedefs=SDL_GPUDepthStencilTargetInfo; identity=sdl3::ctypes::SDL_GPUDepthStencilTargetInfo; header=include/SDL3/SDL_gpu.h:2089; blockers=float: field clear_depth: float (float) | c-bool: field cycle: C _Bool (_Bool); roots=c-bool,float; pointed-by=1
+record	struct SDL_GPUDepthStencilTargetInfo	-	-	layout-blocked	-	32	8	struct SDL_GPUDepthStencilTargetInfo	-	typedefs=SDL_GPUDepthStencilTargetInfo; identity=sdl3::ctypes::SDL_GPUDepthStencilTargetInfo; header=include/SDL3/SDL_gpu.h:2089; blockers=c-bool: field cycle: C _Bool (_Bool); roots=c-bool; pointed-by=1
 field	struct SDL_GPUDepthStencilTargetInfo	0	texture	pointer	0	8	-	SDL_GPUTexture *texture	std::ffi::c::Ptr[SDL_GPUTexture]	c=texture
-field	struct SDL_GPUDepthStencilTargetInfo	1	clear_depth	float	8	4	-	float clear_depth	-	c=clear_depth; blockers=float: float (float)
+field	struct SDL_GPUDepthStencilTargetInfo	1	clear_depth	scalar	8	4	-	float clear_depth	std::ffi::c::Float	c=clear_depth
 field	struct SDL_GPUDepthStencilTargetInfo	2	load_op	scalar	12	4	-	SDL_GPULoadOp load_op	std::ffi::c::UInt	c=load_op
 field	struct SDL_GPUDepthStencilTargetInfo	3	store_op	scalar	16	4	-	SDL_GPUStoreOp store_op	std::ffi::c::UInt	c=store_op
 field	struct SDL_GPUDepthStencilTargetInfo	4	stencil_load_op	scalar	20	4	-	SDL_GPULoadOp stencil_load_op	std::ffi::c::UInt	c=stencil_load_op
@@ -784,7 +784,7 @@ field	struct SDL_GPUDepthStencilTargetInfo	6	cycle	c-bool	28	1	-	_Bool cycle	-	c
 field	struct SDL_GPUDepthStencilTargetInfo	7	clear_stencil	scalar	29	1	-	Uint8 clear_stencil	std::ffi::c::UChar	c=clear_stencil
 field	struct SDL_GPUDepthStencilTargetInfo	8	mip_level	scalar	30	1	-	Uint8 mip_level	std::ffi::c::UChar	c=mip_level
 field	struct SDL_GPUDepthStencilTargetInfo	9	layer	scalar	31	1	-	Uint8 layer	std::ffi::c::UChar	c=layer
-record	struct SDL_GPUBlitInfo	-	-	layout-blocked	-	96	8	struct SDL_GPUBlitInfo	-	typedefs=SDL_GPUBlitInfo; identity=sdl3::ctypes::SDL_GPUBlitInfo; header=include/SDL3/SDL_gpu.h:2115; blockers=c-bool: field cycle: C _Bool (_Bool); nested=field clear_color (struct SDL_FColor, field) -> float; roots=c-bool,float; deps=struct SDL_FColor,struct SDL_GPUBlitRegion; pointed-by=1
+record	struct SDL_GPUBlitInfo	-	-	layout-blocked	-	96	8	struct SDL_GPUBlitInfo	-	typedefs=SDL_GPUBlitInfo; identity=sdl3::ctypes::SDL_GPUBlitInfo; header=include/SDL3/SDL_gpu.h:2115; blockers=c-bool: field cycle: C _Bool (_Bool); roots=c-bool; deps=struct SDL_FColor,struct SDL_GPUBlitRegion; pointed-by=1
 field	struct SDL_GPUBlitInfo	0	source	nested	0	32	-	SDL_GPUBlitRegion source	SDL_GPUBlitRegion	c=source
 field	struct SDL_GPUBlitInfo	1	destination	nested	32	32	-	SDL_GPUBlitRegion destination	SDL_GPUBlitRegion	c=destination
 field	struct SDL_GPUBlitInfo	2	load_op	scalar	64	4	-	SDL_GPULoadOp load_op	std::ffi::c::UInt	c=load_op
@@ -944,11 +944,11 @@ field	struct SDL_MessageBoxData	3	message	pointer	24	8	-	const char *message	std
 field	struct SDL_MessageBoxData	4	numbuttons	scalar	32	4	-	int numbuttons	std::ffi::c::Int	c=numbuttons
 field	struct SDL_MessageBoxData	5	buttons	pointer	40	8	-	const SDL_MessageBoxButtonData *buttons	std::ffi::c::Ptr[SDL_MessageBoxButtonData]	c=buttons
 field	struct SDL_MessageBoxData	6	colorScheme	pointer	48	8	-	const SDL_MessageBoxColorScheme *colorScheme	std::ffi::c::Ptr[SDL_MessageBoxColorScheme]	c=colorScheme
-record	struct SDL_Vertex	-	-	layout-blocked	-	32	4	struct SDL_Vertex	-	typedefs=SDL_Vertex; identity=sdl3::ctypes::SDL_Vertex; header=include/SDL3/SDL_render.h:89; nested=field position (struct SDL_FPoint, field) -> float | field color (struct SDL_FColor, field) -> float | field position (struct SDL_FPoint, field) -> float; roots=float; deps=struct SDL_FColor,struct SDL_FPoint; pointed-by=1
+record	struct SDL_Vertex	-	SDL_Vertex	layout-direct	-	32	4	struct SDL_Vertex	-	typedefs=SDL_Vertex; identity=sdl3::ctypes::SDL_Vertex; header=include/SDL3/SDL_render.h:89; deps=struct SDL_FColor,struct SDL_FPoint; pointed-by=1
 field	struct SDL_Vertex	0	position	nested	0	8	-	SDL_FPoint position	SDL_FPoint	c=position
 field	struct SDL_Vertex	1	color	nested	8	16	-	SDL_FColor color	SDL_FColor	c=color
 field	struct SDL_Vertex	2	tex_coord	nested	24	8	-	SDL_FPoint tex_coord	SDL_FPoint	c=tex_coord
-record	struct SDL_Texture	-	SDL_Texture	layout-direct	-	16	4	struct SDL_Texture	-	typedefs=SDL_Texture; identity=sdl3::ctypes::SDL_Texture; header=include/SDL3/SDL_render.h:160; pointed-by=27
+record	struct SDL_Texture	-	SDL_Texture	layout-direct	-	16	4	struct SDL_Texture	-	typedefs=SDL_Texture; identity=sdl3::ctypes::SDL_Texture; header=include/SDL3/SDL_render.h:160; pointed-by=37
 field	struct SDL_Texture	0	format	scalar	0	4	-	SDL_PixelFormat format	std::ffi::c::UInt	c=format
 field	struct SDL_Texture	1	w	scalar	4	4	-	int w	std::ffi::c::Int	c=w
 field	struct SDL_Texture	2	h	scalar	8	4	-	int h	std::ffi::c::Int	c=h
@@ -987,7 +987,7 @@ field	struct SDL_DateTime	7	day_of_week	scalar	28	4	-	int day_of_week	std::ffi::
 field	struct SDL_DateTime	8	utc_offset	scalar	32	4	-	int utc_offset	std::ffi::c::Int	c=utc_offset
 record	struct SDL_AsyncIO	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_AsyncIO; identity=sdl3::ctypes::SDL_AsyncIO; header=include/SDL3/SDL_asyncio.h:124; pointed-by=5
 record	struct SDL_AsyncIOQueue	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_AsyncIOQueue; identity=sdl3::ctypes::SDL_AsyncIOQueue; header=include/SDL3/SDL_asyncio.h:183; pointed-by=9
-record	struct SDL_AudioStream	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_AudioStream; identity=sdl3::ctypes::SDL_AudioStream; header=include/SDL3/SDL_audio.h:452; pointed-by=30
+record	struct SDL_AudioStream	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_AudioStream; identity=sdl3::ctypes::SDL_AudioStream; header=include/SDL3/SDL_audio.h:452; pointed-by=34
 record	struct SDL_Camera	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Camera; identity=sdl3::ctypes::SDL_Camera; header=include/SDL3/SDL_camera.h:102; pointed-by=8
 record	struct SDL_Condition	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Condition; identity=sdl3::ctypes::SDL_Condition; header=include/SDL3/SDL_mutex.h:841; pointed-by=6
 record	struct SDL_Cursor	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Cursor; identity=sdl3::ctypes::SDL_Cursor; header=include/SDL3/SDL_mouse.h:90; pointed-by=8
@@ -1008,23 +1008,23 @@ record	struct SDL_GPUSampler	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_GPUSampler; 
 record	struct SDL_GPUShader	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_GPUShader; identity=sdl3::ctypes::SDL_GPUShader; header=include/SDL3/SDL_gpu.h:496; pointed-by=2
 record	struct SDL_GPUTexture	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_GPUTexture; identity=sdl3::ctypes::SDL_GPUTexture; header=include/SDL3/SDL_gpu.h:473; pointed-by=9
 record	struct SDL_GPUTransferBuffer	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_GPUTransferBuffer; identity=sdl3::ctypes::SDL_GPUTransferBuffer; header=include/SDL3/SDL_gpu.h:453; pointed-by=4
-record	struct SDL_Gamepad	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Gamepad; identity=sdl3::ctypes::SDL_Gamepad; header=include/SDL3/SDL_gamepad.h:100; pointed-by=40
-record	struct SDL_Haptic	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Haptic; identity=sdl3::ctypes::SDL_Haptic; header=include/SDL3/SDL_haptic.h:150; pointed-by=26
-record	struct SDL_IOStream	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_IOStream; identity=sdl3::ctypes::SDL_IOStream; header=include/SDL3/SDL_iostream.h:182; pointed-by=53
-record	struct SDL_Joystick	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Joystick; identity=sdl3::ctypes::SDL_Joystick; header=include/SDL3/SDL_joystick.h:94; pointed-by=39
+record	struct SDL_Gamepad	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Gamepad; identity=sdl3::ctypes::SDL_Gamepad; header=include/SDL3/SDL_gamepad.h:100; pointed-by=43
+record	struct SDL_Haptic	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Haptic; identity=sdl3::ctypes::SDL_Haptic; header=include/SDL3/SDL_haptic.h:150; pointed-by=27
+record	struct SDL_IOStream	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_IOStream; identity=sdl3::ctypes::SDL_IOStream; header=include/SDL3/SDL_iostream.h:182; pointed-by=54
+record	struct SDL_Joystick	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Joystick; identity=sdl3::ctypes::SDL_Joystick; header=include/SDL3/SDL_joystick.h:94; pointed-by=41
 record	struct SDL_Mutex	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Mutex; identity=sdl3::ctypes::SDL_Mutex; header=include/SDL3/SDL_mutex.h:296; pointed-by=7
 record	struct SDL_Process	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Process; identity=sdl3::ctypes::SDL_Process; header=include/SDL3/SDL_process.h:64; pointed-by=9
 record	struct SDL_RWLock	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_RWLock; identity=sdl3::ctypes::SDL_RWLock; header=include/SDL3/SDL_mutex.h:438; pointed-by=7
-record	struct SDL_Renderer	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Renderer; identity=sdl3::ctypes::SDL_Renderer; header=include/SDL3/SDL_render.h:146; pointed-by=58
+record	struct SDL_Renderer	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Renderer; identity=sdl3::ctypes::SDL_Renderer; header=include/SDL3/SDL_render.h:146; pointed-by=75
 record	struct SDL_Semaphore	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Semaphore; identity=sdl3::ctypes::SDL_Semaphore; header=include/SDL3/SDL_mutex.h:684; pointed-by=7
-record	struct SDL_Sensor	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Sensor; identity=sdl3::ctypes::SDL_Sensor; header=include/SDL3/SDL_sensor.h:54; pointed-by=8
+record	struct SDL_Sensor	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Sensor; identity=sdl3::ctypes::SDL_Sensor; header=include/SDL3/SDL_sensor.h:54; pointed-by=9
 record	struct SDL_SharedObject	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_SharedObject; identity=sdl3::ctypes::SDL_SharedObject; header=include/SDL3/SDL_loadso.h:77; pointed-by=3
 record	struct SDL_Storage	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Storage; identity=sdl3::ctypes::SDL_Storage; header=include/SDL3/SDL_storage.h:332; pointed-by=17
 record	struct SDL_Thread	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Thread; identity=sdl3::ctypes::SDL_Thread; header=include/SDL3/SDL_thread.h:71; pointed-by=7
 record	struct SDL_Tray	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Tray; identity=sdl3::ctypes::SDL_Tray; header=include/SDL3/SDL_tray.h:51; pointed-by=7
 record	struct SDL_TrayEntry	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_TrayEntry; identity=sdl3::ctypes::SDL_TrayEntry; header=include/SDL3/SDL_tray.h:65; pointed-by=15
 record	struct SDL_TrayMenu	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_TrayMenu; identity=sdl3::ctypes::SDL_TrayMenu; header=include/SDL3/SDL_tray.h:58; pointed-by=9
-record	struct SDL_Window	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Window; identity=sdl3::ctypes::SDL_Window; header=include/SDL3/SDL_video.h:175; pointed-by=101
+record	struct SDL_Window	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_Window; identity=sdl3::ctypes::SDL_Window; header=include/SDL3/SDL_video.h:175; pointed-by=110
 record	struct SDL_hid_device	-	-	opaque-only	-	-	-	-	-	typedefs=SDL_hid_device; identity=sdl3::ctypes::SDL_hid_device; header=include/SDL3/SDL_hidapi.h:71; pointed-by=17
 record	struct SDL_iconv_data_t	-	-	opaque-only	-	-	-	-	-	identity=sdl3::ctypes::SDL_iconv_data_t; header=include/SDL3/SDL_stdinc.h:5815; pointed-by=3
 record	union _XEvent	-	-	opaque-only	-	-	-	-	-	typedefs=XEvent; identity=sdl3::ctypes::XEvent; header=include/SDL3/SDL_system.h:141

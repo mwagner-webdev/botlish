@@ -19,7 +19,9 @@
 #              language primitive, not in any namespace), internal (a native
 #              no source can spell: `#` names and core-IR-only accessors),
 #              builtin (a runtime error or enum every program sees),
-#              demo (a demonstration module)
+#              demo (a demonstration module), std-internal (a member of an
+#              internal namespace, core::native::declareInternalNamespace,
+#              or that namespace: only standard-library modules may name it)
 #   origin     source (a module file), intrinsic (a registered native or a
 #              compiler-declared type), source+intrinsic (a namespace with
 #              both)
@@ -167,6 +169,16 @@ dict for {ns files} $moduleNamespaces {
     }
 }
 
+# The role of a member of namespace NS: std-internal for an internal
+# namespace's (a front end that has the notion), else api.
+proc Visibility {ns} {
+    if {[info commands ::core::native::isInternalNamespace] ne ""
+            && [core::native::isInternalNamespace $ns]} {
+        return std-internal
+    }
+    return api
+}
+
 # Registered natives.
 set nativeNamespaces [dict create]
 foreach name [lsort [core::native::names]] {
@@ -180,7 +192,7 @@ foreach name [lsort [core::native::names]] {
         continue
     }
     dict set nativeNamespaces $ns 1
-    Row $name intrinsic $ns api intrinsic [RegisteredIn $name]
+    Row $name intrinsic $ns [Visibility $ns] intrinsic [RegisteredIn $name]
 }
 
 # Compiler-declared types of ffi::c (C-ABI-TYPES.md).
@@ -228,7 +240,7 @@ foreach ns [lsort -unique [concat [dict keys $moduleNamespaces] [dict keys $nati
     if {[core::native::isDirectNamespace $ns]} {
         set direct 1
     }
-    Row $ns namespace "" [expr {[string match *mathish $ns] ? "demo" : "api"}] $origin $location $arch $direct
+    Row $ns namespace "" [expr {[string match *mathish $ns] ? "demo" : [Visibility $ns]}] $origin $location $arch $direct
 }
 
 set out [list [join {name kind namespace role origin location platform arch direct} \t]]

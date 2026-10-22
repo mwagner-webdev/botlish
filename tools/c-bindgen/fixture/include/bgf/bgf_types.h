@@ -31,4 +31,10 @@ typedef struct bgf_window_ bgf_window;
  * identity however many modules point to it. */
 extern int bgf_handle_id(bgf_handle *handle);
 
+/* C floating typedef chains (C-FLOAT-FFI-MILESTONE-1.md): bgf_real32 is a
+ * typedef of a typedef of float; the compiler confirms what each names. */
+typedef float bgf_scalar32;
+typedef bgf_scalar32 bgf_real32;
+typedef double bgf_scalar64;
+
 #endif

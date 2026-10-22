@@ -750,10 +750,15 @@ proc surface::modules::TypeRefs {type span foundVar} {
         TypeRefs [lindex $type 2] $span found
         return
     }
-    if {[llength $type] == 3 && [lindex $type 0] eq "refine"} {
+    if {[llength $type] in {3 4} && [lindex $type 0] eq "refine"} {
         # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): the refined
-        # name's reference (the parameters are numbers).
-        TypeRefs [lindex $type 1] $span found
+        # name's reference (the parameters are numbers) -- of an applied
+        # type, the base's references (LIST-CARDINALITY-REFINEMENTS.md).
+        if {[llength $type] == 4} {
+            TypeRefs [lindex $type 3] $span found
+        } else {
+            TypeRefs [lindex $type 1] $span found
+        }
         return
     }
     lassign $type head arg
@@ -833,6 +838,9 @@ proc surface::modules::RemapFile {node fileId} {
             if {[dict exists $node resume]} {
                 lassign [dict get $node resume] type origin
                 dict set node resume [list $type [RemapOrigin $origin $fileId]]
+            }
+            if {[dict exists $node variadic]} {
+                dict set node variadic [RemapOrigin [dict get $node variadic] $fileId]
             }
             # paramTypes carries no origin of its own (plain type-name
             # strings, resolved later by hir/resolve.tcl): nothing to remap.
@@ -1135,7 +1143,8 @@ proc surface::modules::NamespaceExists {ns} {
 # its type imports must never silently shadow, or be shadowed by, one.
 proc surface::modules::IsBuiltinTypeName {short} {
     return [expr {$short in {Int any never Fn} || [dict exists $::hir::types::constructors $short]
-        || [core::type::isBuiltinName $short] || [core::native::isBuiltinEnum $short]}]
+        || [core::type::isBuiltinName $short] || [core::native::isBuiltinEnum $short]
+        || [hir::traits::isIntrinsicName $short]}]
 }
 
 # The namespaces a file imports, spelled for the "not imported" hint: a
@@ -1199,6 +1208,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
             if {$path eq "" && [IntrinsicMembers $ns] eq ""} {
                 Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": [NoSuchNamespace $state $own $ns]"
             }
+            CheckInternal $state $own $ns $span
             if {$path ne ""} {
                 LoadNamespace state $ns $span $path
             }
@@ -1347,6 +1357,25 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
 # of the file AST of module OWN (KEY as CollectAndLoad's, ENV its import
 # environment, IMPORTED its imported namespaces): Error unless it is
 # authorized and names a real member.
+# INTERNAL-NAMESPACE: code of namespace OWN ("" for the entry program) names
+# the internal namespace NS (core::native::declareInternalNamespace;
+# HASHABLE-AND-KEYED-HASH.md, "Visibility boundary") -- an import of it or a
+# qualified reference into it -- without being a standard library module.
+# The standard library is the modules of namespaces under std, the files
+# under core::libraryDir that are no application module (LoadNamespace
+# records those); the entry program is never one, and no application module
+# can be a standard namespace (RESERVED-NAMESPACE).
+proc surface::modules::CheckInternal {state own ns span} {
+    if {![core::native::isInternalNamespace $ns]} {
+        return
+    }
+    if {$own ne "" && ![dict exists $state application $own]} {
+        return
+    }
+    Error INTERNAL-NAMESPACE $span \
+        "namespace \"$ns\" is internal to the standard library: only its modules may import it or name its members ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
+}
+
 proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
     upvar 1 $stateVar state
     variable standardRoot
@@ -1394,6 +1423,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         Error NOT-A-STRUCT $span \
             "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
     }
+    CheckInternal $state $own $namespaceName $span
     if {$namespaceName ni $imported} {
         if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor $state $key $namespaceName]
                 && ![NamespaceExists ${standardRoot}::$namespaceName]} {

@@ -380,7 +380,7 @@ test vc-types-1 {[Int, Int] keeps an ordinary List[Int] theorem; [Int, String] s
     }
     list [parity $text] [lindex $results 0] [expr {[lindex $results 0] eq [lindex $results 1]}] \
         [expr {[typeCensus $text 1] eq [typeCensus $text 0]}]
-} -result {{value {[[1, 2, 3], [2, "foo", 2]]}} {{<program> {list[List[int], list]}} {mixed<int> list} {pair<int> {List[int]}}} 1 1}
+} -result {{value {[[1, 2, 3], [2, "foo", 2]]}} {{<program> {list[List[int]{length: 3}, list{length: 3}]}} {mixed<int> list} {pair<int> {List[int]}}} 1 1}
 
 test vc-types-2 {types, instance keys and function counts are identical with virtual construction on and off} -body {
     set text "$digits\nfn piece(i):\n    std::str::concat(\"<\", std::list::at(digits, mod(i, 10)))\n\nfn build(i, n, acc, l):\n    if i >= n:\n        return \[acc, l\]\n    build(i + 1, n, std::str::concat(acc, piece(i)), std::list::append(l, i))\n\nbuild(0, 4, \"\", \[\])"

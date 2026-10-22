@@ -1,5 +1,13 @@
 # C-BINDGEN.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: C `float` and
+> `double` are bound (`std::ffi::c::Float`, `std::ffi::c::Double`) wherever a C scalar
+> is -- parameters, results, pointees, callbacks, typedef chains the compiler
+> confirms -- and `long double` (with the other non-IEEE-binary32/64 floating
+> types) is the remaining floating blocker, `long-double`; the `float` and
+> `double` blockers, counts and tables below are this milestone's (SDL3 binds
+> 1217 functions now, Tcl 829, BoringSSL 3978, Win32 3304).
+
 Automatic C binding generation: `tools/c-bindgen.tcl` turns real C headers
 into ordinary Botlish source -- `extern c library`, `extern c fn` with its
 link symbol and its explicit pointer contract, opaque pointee types, typed
@@ -82,6 +90,7 @@ extern c fn SDL_CreateWindow(
 35. [What to run when changing this](#35-what-to-run-when-changing-this)
 36. [Files](#36-files)
 37. [SDL3 capability pressure](#37-sdl3-capability-pressure)
+38. [Variadic functions](#38-variadic-functions)
 
 ## 1. Results
 
@@ -275,7 +284,7 @@ An API name is:
 
 | kind | when | what is emitted |
 |---|---|---|
-| direct | a declared, non-inline function whose name is not also a macro (or is a macro naming itself) | an extern of the symbol the probe found |
+| direct | a declared, non-inline function whose name is not also a macro (or is a macro naming itself) | an extern of the symbol the probe found; a prototype ending in `...` ends in `variadic` (section 38) |
 | alias | an object-like macro naming a function (`#define bgf_legacy bgf_current`), a renaming function-like macro (`#define bgf_call_add(a, b) bgf_add(a, b)`) | an extern of the target function's symbol with its signature, `named` |
 | thunk | a static inline function; a declared function shadowed by a function-like macro of its name; a stub-table redirection (profile `stubs thunk`); a macro the profile gives a signature | an extern of the shim's C wrapper (section 14) |
 | excluded | the profile's `exclude` | nothing; the row says so |
@@ -290,7 +299,10 @@ The blockers: `float`, `double`, `long-double`, `complex`,
 `thunk-rejected`, `macro-needs-signature`, `unsupported-macro`. An API may
 have several; each is located ("parameter 2 (y): float"), and all are
 reported, not only the first, so the report can say which missing
-capability each API waits for.
+capability each API waits for. `variadic` now blocks only a variadic
+function no direct call can reach -- one only a thunk could call (C cannot
+forward `...`), or one with no fixed parameter -- and a variadic prototype
+the C compiler contradicts is `prototype-mismatch` (section 38).
 
 A declaration redeclared with a different type is a generator error.
 
@@ -626,7 +638,10 @@ incomplete handle, a pointer-hiding typedef, a complete struct behind a
 pointer and one by value, two tags whose names collide, keyword parameter
 names, an unnamed parameter, an array parameter, `_Bool`, an asm label, a
 `redefine_extname`, an object-like and a function-like alias, floats,
-varargs, a `va_list`, an `ms_abi` function, an unprototyped one, static
+a variadic function (`bgf_printf`, bound) and an object-like alias of it
+(`bgf_print`), a `va_list`, a variadic function
+only its macro's thunk could call (`bgf_vshadow`) and the variadic one the
+macro names (`bgf_vother`), an `ms_abi` function, an unprototyped one, static
 inline functions, a stub-table redirection, a declared function shadowed by
 its macro, platform-only and architecture-only functions, and constants of
 every suffix and cast. `bgf.c` implements it; the generator never reads it.
@@ -638,7 +653,9 @@ binding) and `demo/caller.c` (C, through the header) compute the same list
 on both native backends, value for value: direct calls, aliases, link
 names, the stub-table thunk, the macro-shadow thunk, inline and macro
 thunks, typed constants, `_Bool`, opaque handles across two headers' modules,
-the colliding identities, byte borrowing and write-back (`cb-fixture-run`).
+the colliding identities, byte borrowing and write-back, a variadic call of
+`bgf_printf` with an int, a long, a double and a pointer, and one through its
+alias `bgf_print` (`cb-fixture-run`).
 
 The tests that compile, link and run a binding use what generation produces
 in the test's own process (staged in its temporary directory), not the
@@ -652,7 +669,9 @@ bound (89.8%): 720 direct, 84 aliases (Tcl's `#define Tcl_X Tcl_XEx`
 families and `TclBN_*` renames), 16 thunks (1 inline, 12 macro-shadowed
 declarations, 3 macros with profile signatures); 93 unsupported (63 macros
 needing a signature, 11 variadic, 9 double, 7 other macros, 2 thunks the
-compiler rejects, 1 callback outside the universe); 219 constants.
+compiler rejects, 1 callback outside the universe); 219 constants. (Since
+VARIADICS-VERTICAL-SLICE-1.md the 11 variadic ones are bound -- 9 direct, 2
+aliases -- so 831 are, 91.0%; section 38.)
 
 The acceptance (`examples/ffi/bindgen/tcl/demo.bot`, `cb-tcl-acceptance`)
 is the hand-written C FFI demo's behavior from generated declarations:
@@ -669,7 +688,8 @@ symbol-prefixed static build (`BORINGSSL_PREFIX=botlish_bssl`): 4,118 API
 names, 3,977 bound (96.6%): 3,098 direct, 62 aliases, 817 thunks (every
 static inline function); 141 unsupported (66 macros needing a signature, 64
 other macros, 5 variadic, 3 unsupported types, 2 `va_list`, 1 double);
-3,117 constants. Every direct symbol is prefixed by the symbol probe and
+3,117 constants (since VARIADICS-VERTICAL-SLICE-1.md the 5 variadic ones are
+bound directly: 3,982, 96.7%; section 38). Every direct symbol is prefixed by the symbol probe and
 defined by the static build -- `libcrypto.a`, `libssl.a` or
 `libdecrepit.a` -- except the two FIPS-only functions a non-FIPS build does
 not define (`BORINGSSL_integrity_test`, `FIPS_module_hash`;
@@ -911,8 +931,10 @@ nor the compiler established.
 random declarations from the subset the generator binds (typedef chains
 through `<stdint.h>`, enums of either sign, `_Bool`, opaque handles, byte
 pointers, static inline functions, asm labels, macro aliases, typed
-constants of every suffix and cast) plus declarations it must refuse
-(float, double, struct by value, varargs) -- and their implementation,
+constants of every suffix and cast, variadic prototypes whose genuine
+stdarg bodies read their trailing arguments back) plus declarations it must
+refuse (float, double, struct by value, a `va_list`, a variadic function
+only a thunk could call) -- and their implementation,
 generates their binding with an in-memory profile, and calls every bound
 function from Botlish on both native backends. Everything is checked
 against the fuzzer's own model of LP64 Linux C, never the generator's or the
@@ -989,7 +1011,7 @@ fuzzer ran 3 programs (seed 11) per mutant:
 | `struct-by-value-as-pointer` | a struct or union passed by value is bound as a pointer to it | 5 | `cb-fixture-unsupported` | killed |
 | `callback-unchecked` | a callback's signature is not checked: its unrepresentable arguments and result are dropped | 12 | `cb-fixture-compiles`, `cb-fixture-interchange` | -- |
 | `calling-convention-ignored` | an explicit calling convention attribute is ignored | 5 | `cb-fixture-targets`, `cb-fixture-unsupported` | -- |
-| `variadic-ignored` | a variadic function is bound by its fixed parameters | 7 | `cb-fixture-unsupported` | -- |
+| `variadic-ignored` | a variadic function is bound by its fixed parameters (since VARIADICS-VERTICAL-SLICE-1.md: the `variadic` marker is never emitted; section 38 has its seven siblings) | 7 | `cb-fixture-unsupported` | -- |
 | `evidence-readonly-as-write` | the compiler's readonly is read as write access | 7 | `cb-fixture-contracts`, `cb-policy-conflict` | -- |
 | `thunk-rejection-ignored` | a thunk the C compiler rejects stays bound (its blame is dropped) | 5 | `cb-tcl-acceptance`, `cb-tcl-inventory` | -- |
 | `macro-shadow-direct` | a declared function its own function-like macro shadows is bound directly, not through the macro | 8 | `cb-fixture-api-names`, `cb-fixture-interchange` | -- |
@@ -1078,7 +1100,9 @@ relocation change), and anything on macOS (section 34).
   SDL3 and 1,152 BoringSSL; what remains waits for floats, Bool fields,
   bitfields and double.)
 * **Floats** (SDL3: 114 API names), aggregates by value (8), varargs (23):
-  their own milestones.
+  their own milestones. (Varargs since VARIADICS-VERTICAL-SLICE-1.md: SDL3's
+  15 variadic functions are bound; its 7 taking a `va_list` are not, section
+  38.)
 * **Macro signatures**: 63 Tcl, 66 BoringSSL and 113 SDL3 function-like
   macros compute something and have no signature of their own; each needs a
   profile signature to be thunked.
@@ -1145,7 +1169,7 @@ names (linux-x86_64; an API may count in several rows):
 | C `_Bool` | 506 in their signatures; 456 bound only because of it | 36.0%; 32.5% | added by this milestone (`std::ffi::c::Bool`, section 16) |
 | a signature for a function-like macro | 157: 113 that compute or call something, 44 no thunk can stand for | 11.2% | a profile signature thunks one (as Tcl's `Tcl_Eval`); the 44 are statements, declarations, decorations and fragments |
 | `float`, `double` | 114 | 8.1% | not bound: a floating-point milestone |
-| varargs, `va_list` | 23 | 1.6% | not bound |
+| varargs, `va_list` | 23 | 1.6% | the 15 variadic functions bound since VARIADICS-VERTICAL-SLICE-1.md (section 38); the 7 taking a `va_list` not |
 | aggregates by value | 8 | 0.6% | not bound |
 | a callback signature outside the universe | 2 | 0.1% | not bound (a double in a callback) |
 | an explicit calling convention | 0 | 0.0% | |
@@ -1160,3 +1184,62 @@ rest is not an ABI shape but a missing signature (157 macros) and floats
 (114 names); what limits most of what is bound is that nearly no pointer
 parameter has a contract, and a fifth of the bound functions see a struct
 they cannot look into.
+
+## 38. Variadic functions
+
+Since VARIADICS-VERTICAL-SLICE-1.md, a prototype ending in `...` is bound:
+its fixed parameters as always, then the bare `variadic` of an `extern c
+fn` (C-FFI.md, section 1), its symbol and its contract kept. Each call of the
+binding passes its own trailing C types; nothing in the binding describes
+them, and no fact comes from a format string, a format attribute or a name.
+
+* **Where the variadic flag comes from.** The header parser's prototype
+  (`...` in the declarator, `tools/cheader/cdecl.tcl`'s `variadic` flag),
+  confirmed by the compiler: the prototype probe (`probe.tcl`'s
+  `prototypes`) compiles one `_Static_assert(__builtin_types_compatible_p(
+  __typeof__(NAME), RENDERED))` per variadic function, RENDERED the parsed
+  type spelled back in C, so a `va_list` taken for `...`, a `...` lost or a
+  fixed parameter misread is `prototype-mismatch`, never a binding
+  (`cb-fixture-variadic-prototype-probe`, `cb-variadic-contradicted-and-
+  callbacks`).
+* **A `va_list` parameter is a fixed parameter**, of a type nothing
+  represents: `va-list`, unchanged.
+* **A variadic function only a thunk could call** stays unsupported
+  (`variadic`, "reached through a C thunk, which cannot forward its trailing
+  arguments"): a static inline one, one its own function-like macro shadows
+  (the fixture's `bgf_vshadow`; the variadic function the macro names,
+  `bgf_vother`, is bound directly), and every stub-table redirection
+  (tclstubs). So does one with no fixed parameter (C23's `f(...)`): an
+  `extern c fn` needs one.
+* **A variadic callback type** stays `unsupported-callback-signature`: a
+  function pointer's type has no per-call trailing types.
+
+The census, by profile (linux-x86_64 unless named; the other targets of a
+profile are the same):
+
+| profile | variadic API names | bound now | still unsupported |
+|---|---:|---|---|
+| tcl | 11 | 9 direct (`Tcl_Panic`, `Tcl_AppendResult`, `Tcl_AppendStringsToObj`, `Tcl_SetErrorCode`, `Tcl_VarEval`, `Tcl_ObjPrintf`, `Tcl_AppendPrintfToObj`, `TclBN_mp_init_multi`, `TclBN_mp_clear_multi`), 2 aliases (`mp_init_multi`, `mp_clear_multi`) | -- |
+| tclstubs | 9 | -- | 9 `variadic`: every one is a stub-table redirection, reached only through a thunk |
+| boringssl | 5 (+ 2 `va_list`) | 5 direct (`ERR_add_error_data`, `ERR_add_error_dataf`, `BIO_printf`, `BIO_snprintf`, `OPENSSL_asprintf`) | `BIO_vsnprintf`, `OPENSSL_vasprintf` (`va-list`) |
+| sdl3 | 15 (+ 7 `va_list`) | 15 direct (`SDL_Log*` eight, `SDL_LogMessage`, `SDL_SetError`, `SDL_IOprintf`, `SDL_snprintf`, `SDL_swprintf`, `SDL_asprintf`, `SDL_sscanf`) | the 7 `...V`/`v...` functions (`va-list`) |
+| win32 (windows-x86_64-gnu) | 3 (+ 6 `va_list`) | `wsprintfA`, `wsprintfW` direct, `wsprintf` an alias of `wsprintfW` | `FormatMessage(A/W)` and `wvsprintf(A/W)` (`va-list`) |
+| fixture | 3 (+ 1 `va_list`, + 1 alias) | `bgf_printf`, `bgf_vother` direct, `bgf_print` an alias of `bgf_printf` (`named "bgf_printf"`) | `bgf_vshadow` (`variadic`: its macro's thunk), `bgf_vprintf` (`va-list`) |
+
+`cb-tcl-variadic` calls the generated `Tcl_AppendResult` (a NULL-terminated
+list of strings) on both native backends and compares the interpreter's
+result with C's own call; `cb-fixture-run` calls `bgf_printf`. Win32's
+formatting functions are generated, their prototypes confirmed by the
+MinGW-w64 compiler's prototype probe at generation, and not called: nothing
+runs a Windows binary, and calling `wsprintf` with an uncontrolled buffer
+only to show it works is no evidence worth the risk.
+
+The fuzzer (section 30) draws variadic prototypes with one to three fixed
+parameters, the last never narrower than `int` (va_start's), and calls each
+once with 0 to 12 trailing arguments -- every C integer type, `_Bool`, a
+handle pointer -- that its genuine stdarg body reads back with `va_arg` of
+the promoted type. Eight mutants (`variadic-*` in `audit/c-bindgen/tools/
+mutants.txt`: the marker dropped, the flag lost, a thunk forwarding,
+no fixed parameter, the probe's answer ignored, the probe vacuous, the
+probe not asked, a variadic callback mapped) are each killed by a test of
+behavior or the fuzzer.

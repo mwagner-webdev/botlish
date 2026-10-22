@@ -423,6 +423,31 @@ materialization (`vt-nested-materialization-rebuilds`: two `structnew`, as the
 physical form, equal and printed identically, named identity preserved:
 `vt-nested-identity`).
 
+One kind of inner value is opened past an independent use: a foreign call's
+write-back value `{result: R, NAME: MutableBytes}` is a value tree whose
+MutableBytes children exist, as their one field, the moment C returns
+(`WriteBackTree`; a write-back call written as a literal's field is a child
+too, `LiteralTree`). A class with such a child opens it even where `r.NAME`
+is read whole, provided every such use runs as often as the binding -- the
+same innermost loop; never a parameter's use, which would build it once per
+call -- and the use builds the MutableBytes there, once per dominating
+scope (`OpenedFieldObject`, which a later materialization of the outer
+reuses). The reason is not width (opening a one-field child costs nothing)
+but placement: built at the call, the object would be allocated between the
+C function's return and the program's read of its result, where an
+allocation may change the C error state (C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+A use in a deeper loop, or a parameter's, keeps the child closed -- which,
+since C-FFI-ERROR-CAPTURE-MILESTONE-2.md, no longer means built at the call:
+a closed write-back child is a pending object (native/lower.tcl's
+`PendingObject`), its field register standing for the MutableBytes until the
+first use that needs it builds it -- a loop's body's at the loop's entry,
+once (`HoistDeferredUses`, `cb-write-back-allocations`), a parameter's at
+the call that passes it. The cut is unchanged; only where the closed child
+is built moved. Unlike every other cut decision this one is not an
+optimization: native lowering applies it whatever the policy (the legacy
+width policy and `-struct-nesting 0` keep every child closed, and closed
+children are pending all the same).
+
 ## Use density
 
 Recorded per slot as `live` (fields read downstream) against `W`; the score is
@@ -573,7 +598,8 @@ frontier compares, hashes and prints exactly as one built at the construction
 * No re-virtualization of an incoming physical object near its final consumer.
 * The score is calibrated to this machine's Cranelift/x86-64 ABI (4 effective
   argument registers, 2 return registers); the knobs exist for that reason.
-* `cranelift-generic` (`-specialize 0`) keeps its pre-existing struct limitation.
+* `cranelift-generic` (`-specialize 0`) keeps its pre-existing struct limitation
+  (a write-back value returned from a function is built at its return there).
 * The late frontier is not free: in the probe, keeping a wide value virtual
   through local use and then materializing costs more code and stack than
   building it at the construction when the materialization is unconditional (see

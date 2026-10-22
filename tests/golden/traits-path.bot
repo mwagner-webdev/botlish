@@ -25,7 +25,7 @@ import std::test
 import type std::io::path::Path
 
 # A Windows-like path: a struct of this namespace, joined with a backslash
-# (traits.test's module windows::WindowsPath; its `parent` and `render`
+# (traits.test's module winpath::WindowsPath; its `parent` and `render`
 # become std::io::path::Path's `text`).
 struct WindowsPath:
     text: str

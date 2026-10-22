@@ -513,10 +513,12 @@ test abi-mutable-bytes-tcl-backends-refuse-the-address {interp and compile refus
         [agree "direct module\n${pre}fn emit():\n    std::linux::read(std::abi::i32(0), std::abi::bytes::zeroed(std::abi::usize(1)))\n7" {interp compile}]
 } -result {{{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}} {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}} 7}
 
-test abi-mutable-bytes-no-fake-read-on-tcl-backends {nothing in core or lib (other than core/programfile.tcl, which reads the program's own source file) routes reads through gets, read, a Tcl channel or stdin helpers} -body {
+test abi-mutable-bytes-no-fake-read-on-tcl-backends {nothing in core or lib (other than core/programfile.tcl, which reads the program's own source file, and core/hashing.tcl, which reads the system's entropy for the table hash's key) routes reads through gets, read, a Tcl channel or stdin helpers} -body {
     set hits {}
     foreach file [concat [glob -directory [file join $::projectRoot core] *.tcl] [glob -directory [file join $::projectRoot stdlib] *.bot]] {
-        if {[file tail $file] eq "programfile.tcl"} continue
+        # (hashing.tcl reads the operating system's entropy, /dev/urandom,
+        # for the private table hash's process key: never program input.)
+        if {[file tail $file] in {programfile.tcl hashing.tcl}} continue
         set channel [open $file r]
         set lineNumber 0
         foreach line [split [read $channel] \n] {
@@ -806,7 +808,7 @@ test abi-mutable-bytes-nir-update-and-freeze {NIR of the pure operations: set is
     }
 } -match glob -result {{std::abi::bytes::zeroed 1} {std::abi::bytes::from_bytes 1} {std::abi::bytes::replace 1} {std::abi::bytes::detach missing} {std::abi::bytes::freeze 1} {std::abi::bytes::mutable_length 1}}
 
-test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of std::linux::read: the writable address helper, then the syscall helper, then the keepalive helper, in that order, the keepalive's operand being the very value the address helper took (the detached storage), and the syscall call's stack map naming the stack slot that holds that storage -- so the collector sees it as a root at the syscall's own safepoint} -body {
+test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of std::linux::read: the writable address helper, then the syscall helper, and no keepalive call -- the NIR keepalive is no machine code (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); what it guarantees is the syscall call's stack map, which names the stack slot that holds the very value the address helper took (the detached storage) -- so the collector sees it as a root at the syscall's own safepoint (nativeFrameRoots: elsewhere it is a shadow-stack root and no stack map is emitted)} -body {
     set clif [native::clif [bytesHir [readProgram 8] 1 linux-x86_64]]
     set helperOf [dict create]
     foreach {- ref name} [regexp -all -inline -line {^; (u0:[0-9]+) = (rt_[a-z0-9_]+)} $clif] { dict set helperOf $ref $name }
@@ -835,8 +837,8 @@ test abi-mutable-bytes-clif-keepalive-and-stack-map {CLIF of std::linux::read: t
     regexp "store \[a-z.0-9 \]*$root, v3(?:\\+(\[0-9\]+))?\n" "$block\n" -> offset
     if {$offset eq ""} { set offset 0 }
     list [lsearch -all -inline -regexp $names {^rt_(mbytes_addr|keepalive|linux_x86_64_syscall)$}] \
-        [expr {[lindex $addr 1] eq [lindex $keep 1]}] [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
-} -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_keepalive} 1 1}
+        [expr {$keep eq ""}] [regexp "ss0\\+$offset\[,\\]\]" [lindex $syscall 2]]
+} -result [list {rt_mbytes_addr rt_linux_x86_64_syscall} 1 [testConstraint nativeFrameRoots]]
 
 proc machineCalls {exe function} {
     set disassembly [exec objdump -d --no-show-raw-insn -M intel --disassemble=$function $exe]
@@ -853,19 +855,17 @@ proc machineCalls {exe function} {
     return $calls
 }
 
-test abi-mutable-bytes-machine-code-read-function {the machine code of std::linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then the keepalive helper, then to_int; the address and keepalive helpers are given the SAME register (the storage) so it is live across the syscall; and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-mutable-bytes-machine-code-read-function {the machine code of std::linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then to_int, and the result struct built after it (the keepalive is no machine code: the detached storage stays live across the syscall through its stack map, abi-mutable-bytes-clif-keepalive-and-stack-map); and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump rustcLinker} -body {
     set text [readProgram 8]
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] std::linux::sys::read]
     set calls [machineCalls $exe botlish_fn_$id]
     set targets [lmap c $calls {lindex $c 0}]
     set helpers [lsearch -all -inline -regexp $targets {^rt_}]
-    set addressSource [lindex [lsearch -inline -index 0 $calls rt_mbytes_addr] 1]
-    set keepSource [lindex [lsearch -inline -index 0 $calls rt_keepalive] 1]
-    list $helpers [expr {$addressSource ne "" && $addressSource eq $keepSource}] \
+    list $helpers \
         [llength [lsearch -all -regexp $targets {^(read|recv|recvfrom|pread|pread64|readv|syscall)(@plt)?$}]] \
         [expr {[lsearch -regexp $targets {^botlish_fn_[0-9]+$}] >= 0}]
-} -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_keepalive rt_struct_new} 1 0 1}
+} -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_struct_new} 0 1}
 
 test abi-mutable-bytes-detach-function-machine-code {the detach (std::abi::bytes::detach) is the runtime's clone helper and nothing else: one call, to rt_mbytes_clone} -constraints {linuxX86_64 objdump rustcLinker} -body {
     set text [readProgram 8]
@@ -952,7 +952,7 @@ rs"
     list [expr {$normal eq $stressed}] [expr {[lindex $stressed 1] eq $input}] [string match {\[16, 16, *} [lindex $stressed 0]]
 } -result {1 1 1}
 
-test abi-mutable-bytes-gc-stress-pure-values {the in-process native runs (specialized and unspecialized) under GC stress give the same results as without: updates, freezes, prefixes, equality and hashes of MutableBytes held in Lists and structs} -constraints nativeLinux -body {
+test abi-mutable-bytes-gc-stress-pure-values {the in-process native runs (specialized and unspecialized) under GC stress give the same results as without: updates, freezes, prefixes, equality and hashes of MutableBytes held in Lists and structs} -constraints nativeCoroutines -body {
     set text "${::pure}struct Holder:\n    data: std::abi::bytes::MutableBytes\na = mb(\"alias\")\nxs = \[a, put(a, 0, [X]), a, std::abi::bytes::from_bytes(std::abi::bytes::from_list(pattern(100)))\]\nh = Holder {data: put(a, 4, [Z])}\n\[std::abi::bytes::freeze(a) == std::abi::bytes::from_list(std::str::encode_utf8(\"alias\")), xs == \[a, put(a, 0, [X]), a, std::abi::bytes::from_bytes(std::abi::bytes::from_list(pattern(100)))\], hash(a) == hash(mb(\"alias\")), is(h.data, \"aliaZ\"), is(a, \"alias\"), std::list::length(xs)\]"
     set plain [outcomesOf $text $::nativeBackends]
     withEnv BOTLISH_NATIVE_GC_STRESS 1 {set stressed [outcomesOf $text $::nativeBackends]}
@@ -1097,13 +1097,24 @@ r = rd(0, a)
 # of the test, so a read here is of whatever stdin the test runner has --
 # every program below reads descriptor 1000 (EBADF) or only builds values)
 
-proc allocationsOf {text} {
-    set report [native::allocationReport [bytesHir "${::linuxPrelude}\n$text"] summary]
+proc allocationsOf {text {prelude ""}} {
+    if {$prelude eq ""} {
+        set prelude $::linuxPrelude
+    }
+    set report [native::allocationReport [bytesHir "$prelude\n$text"] summary]
     list [dict get $report total allocations] \
         [dict get $report byKind MutableBytes allocations] \
         [dict get $report byKind Bytes allocations] \
         [dict get $report byKind Struct allocations] \
         [dict get $report byKind List allocations]
+}
+
+# The same of a program that makes no syscall: the pure prelude, which
+# imports nothing of Linux, so it runs natively on every host with the
+# native runtime (nativeCoroutines), macOS arm64 included
+# (MACOS-AARCH64-MILESTONE-7.md).
+proc pureAllocationsOf {text} {
+    return [allocationsOf $text $::pure]
 }
 
 test abi-mutable-bytes-allocations {allocation evidence {total MutableBytes Bytes Struct List}: the empty MutableBytes is one shared static (0), a small and a large one are exactly one heap object each, a binding is plain sharing (no second storage; the one List is the test's own tuple), passing and returning through a function shares the storage too (it only materializes the one-field wrapper Struct where the value crosses a call), set costs one copy of the storage (and its wrapper), freeze one immutable Bytes, a read costs the detach clone beside the original (2 storages, one wrapper for the returned buffer) -- the eager copies this milestone accepts, none hidden} -constraints nativeLinux -body {
@@ -1118,25 +1129,25 @@ test abi-mutable-bytes-allocations {allocation evidence {total MutableBytes Byte
         [allocationsOf "m = std::abi::bytes::zeroed(std::abi::usize(16))\nr = rd(1000, m)\nr.result"]
 } -result {{0 0 0 0 0} {1 1 0 0 0} {1 1 0 0 0} {2 1 0 0 1} {2 1 0 1 0} {4 2 0 2 0} {2 1 1 0 0} {3 2 0 1 0}}
 
-test abi-mutable-bytes-allocations-aggregates {a MutableBytes stored in a List is the one storage shared: a List of two copies of one value holds ONE storage object (MutableBytes column 1); a mutated copy beside it is a second (2) -- storing in an aggregate copies nothing} -constraints nativeLinux -body {
+test abi-mutable-bytes-allocations-aggregates {a MutableBytes stored in a List is the one storage shared: a List of two copies of one value holds ONE storage object (MutableBytes column 1); a mutated copy beside it is a second (2) -- storing in an aggregate copies nothing} -constraints nativeCoroutines -body {
     lmap text [list \
         "m = std::abi::bytes::zeroed(std::abi::usize(16))\nxs = \[m, m\]\nloop x in xs:\n    std::abi::bytes::mutable_length(x).value" \
         "m = std::abi::bytes::zeroed(std::abi::usize(16))\nxs = \[m, put(m, 0, std::byte::from_int(1))\]\nloop x in xs:\n    std::abi::bytes::mutable_length(x).value"] {
-        lindex [allocationsOf $text] 1
+        lindex [pureAllocationsOf $text] 1
     }
 } -result {1 2}
 
-test abi-mutable-bytes-heap-object-layout {the heap storage is ONE allocation of 16 header bytes (kind, marked, static flag, then the 8-byte length) plus the payload, in-line, with no pointer to a second block: a 4096-byte MutableBytes is a 4112-byte object, reported as its own kind} -constraints nativeLinux -body {
-    set report [native::allocationReport [bytesHir "${::linuxPrelude}\nm = std::abi::bytes::zeroed(std::abi::usize(4096))\nstd::abi::bytes::mutable_length(m).value"] summary]
+test abi-mutable-bytes-heap-object-layout {the heap storage is ONE allocation of 16 header bytes (kind, marked, static flag, then the 8-byte length) plus the payload, in-line, with no pointer to a second block: a 4096-byte MutableBytes is a 4112-byte object, reported as its own kind} -constraints nativeCoroutines -body {
+    set report [native::allocationReport [bytesHir "${::pure}\nm = std::abi::bytes::zeroed(std::abi::usize(4096))\nstd::abi::bytes::mutable_length(m).value"] summary]
     list [dict get $report byKind MutableBytes allocations] [dict get $report byKind MutableBytes headerBytes] \
         [dict get $report byKind MutableBytes payloadBytes] [dict get $report byKind MutableBytes allocatedBytes]
 } -result {1 16 4096 4112}
 
-test abi-mutable-bytes-no-static-mutable-constants {a compile-time-known mutable value is never a shared writable static: two identical mutable_bytes_from_bytes of the same constant Bytes, and two mutable_bytes(3), are FOUR separate heap storages (an immutable constant Bytes, by contrast, is one static object): no unrelated logical values can share writable static storage} -constraints nativeLinux -body {
+test abi-mutable-bytes-no-static-mutable-constants {a compile-time-known mutable value is never a shared writable static: two identical mutable_bytes_from_bytes of the same constant Bytes, and two mutable_bytes(3), are FOUR separate heap storages (an immutable constant Bytes, by contrast, is one static object): no unrelated logical values can share writable static storage} -constraints nativeCoroutines -body {
     list \
-        [lindex [allocationsOf "a = mb(\"abc\")\nb = mb(\"abc\")\n\[std::abi::bytes::mutable_length(a).value, std::abi::bytes::mutable_length(b).value\]"] 1] \
-        [lindex [allocationsOf "a = std::abi::bytes::zeroed(std::abi::usize(3))\nb = std::abi::bytes::zeroed(std::abi::usize(3))\n\[std::abi::bytes::mutable_length(a).value, std::abi::bytes::mutable_length(b).value\]"] 1] \
-        [lindex [allocationsOf "a = std::abi::bytes::from_list(std::str::encode_utf8(\"abc\"))\nb = std::abi::bytes::from_list(std::str::encode_utf8(\"abc\"))\n\[std::abi::bytes::length(a).value, std::abi::bytes::length(b).value\]"] 2]
+        [lindex [pureAllocationsOf "a = mb(\"abc\")\nb = mb(\"abc\")\n\[std::abi::bytes::mutable_length(a).value, std::abi::bytes::mutable_length(b).value\]"] 1] \
+        [lindex [pureAllocationsOf "a = std::abi::bytes::zeroed(std::abi::usize(3))\nb = std::abi::bytes::zeroed(std::abi::usize(3))\n\[std::abi::bytes::mutable_length(a).value, std::abi::bytes::mutable_length(b).value\]"] 1] \
+        [lindex [pureAllocationsOf "a = std::abi::bytes::from_list(std::str::encode_utf8(\"abc\"))\nb = std::abi::bytes::from_list(std::str::encode_utf8(\"abc\"))\n\[std::abi::bytes::length(a).value, std::abi::bytes::length(b).value\]"] 2]
 } -result {2 2 0}
 
 test abi-mutable-bytes-raw-write-is-a-memory-barrier {the raw syscall is a strong memory/effect barrier and read is not special-cased: a freeze taken BEFORE a raw read into a buffer shows the old bytes, a freeze taken AFTER shows the kernel's bytes -- neither is cached across the syscall nor moved over it, specialized or not} -constraints {linuxX86_64 posixShell} -body {

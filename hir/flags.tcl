@@ -90,7 +90,14 @@ proc hir::flags::InterfaceOf {hir callee} {
 proc hir::flags::DeclareFunction {hirVar b block} {
     upvar 1 $hirVar hir
     set flags [lmap flag [dict getdef $block flags {}] {lindex $flag 0}]
-    dict set hir bindings $b flagIface [dict create flags $flags ordinary [llength [dict get $block params]]]
+    set iface [dict create flags $flags ordinary [llength [dict get $block params]]]
+    if {[dict exists $block variadic]} {
+        # A variadic function (hir/variadic.tcl): its last ordinary
+        # parameter is the List each call collects its trailing arguments
+        # into.
+        dict set iface variadic 1
+    }
+    dict set hir bindings $b flagIface $iface
 }
 
 # Records that binding B (just established by `B = VALUE`) is an alias of the
@@ -193,7 +200,7 @@ proc hir::flags::ResolveCall {hirVar e node ctx} {
         }
         lappend seen $name
     }
-    if {$declared eq {}} {
+    if {$declared eq {} || [hir::variadic::ArityReported $hir $e]} {
         return
     }
     set args [dict get $hir exprs $e args]

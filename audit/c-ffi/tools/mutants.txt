@@ -182,10 +182,8 @@
 @@ every-extern-direct every call of a C function is an authority source, noescape ones included
 ## hir/direct.tcl
 <<<<
-        set retains [core::cabi::RetainingParameters [dict get [core::native::metadata $name] foreign]]
-        if {$retains ne {}} {
+        if {$reasons ne {}} {
 ====
-        set retains [core::cabi::RetainingParameters [dict get [core::native::metadata $name] foreign]]
         if {1} {
 >>>>
 
@@ -193,10 +191,8 @@
 ## hir/direct.tcl
 <<<<
         set retains [core::cabi::RetainingParameters [dict get [core::native::metadata $name] foreign]]
-        if {$retains ne {}} {
 ====
-        set retains [core::cabi::RetainingParameters [dict get [core::native::metadata $name] foreign]]
-        if {0} {
+        set retains {}
 >>>>
 
 @@ nearest-library each C function is associated with the last library its own unit declares, and only libraries some function is associated with are linked
@@ -316,11 +312,11 @@
 ## core/cabi.tcl
 <<<<
 proc core::cabi::ExternImpl {display args} {
-    core::semanticError NATIVE-ONLY \
+    set meta [core::native::metadata extern#$display]
 ====
 proc core::cabi::ExternImpl {display args} {
     return 0
-    core::semanticError NATIVE-ONLY \
+    set meta [core::native::metadata extern#$display]
 >>>>
 
 @@ unknown-provenance-exposed an exposure is admitted where the pointer result's provenance is unknown (it may point into the exposed storage)
@@ -334,7 +330,7 @@ proc core::cabi::ExternImpl {display args} {
 @@ extern-arity-unchecked a C call passing a different number of arguments than its signature is not a compile-time ARITY
 ## hir/borrow.tcl
 <<<<
-    if {[core::native::isExtern $native] && [llength [dict get $node args]] != [llength $params]} {
+    if {!$variadic && [core::native::isExtern $native] && [llength [dict get $node args]] != [llength $params]} {
 ====
     if {0} {
 >>>>
@@ -352,9 +348,11 @@ proc core::cabi::ExternImpl {display args} {
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") { LinkerFlavor::Apple } else { LinkerFlavor::Gnu };
+const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
+    LinkerFlavor::Apple
 ====
-const LINKER: LinkerFlavor = LinkerFlavor::Gnu;
+const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
+    LinkerFlavor::Gnu
 >>>>
 
 @@ apple-plan-has-group Apple's link plan keeps GNU ld's archive group
@@ -501,9 +499,9 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% macos-aarch64
 ## core/cabi.tcl
 <<<<
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 1 triple aarch64-apple-darwin floating IEEE} \
 ====
-        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin} \
+        macos-aarch64   {os macos arch aarch64 model LP64 charSigned 0 triple aarch64-apple-darwin floating IEEE} \
 >>>>
 
 @@ mach-o-symbol-double-prefixed on macOS a C function's link symbol is declared with Mach-O's `_` already on it, so the object crate's prefix makes it `__NAME`
@@ -532,11 +530,276 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
     let object_path = work.0.join("program.o");
 >>>>
 
-@@ fixture-wrong-architecture the C fixture is compiled for x86-64 on macOS: every link of it fails (the tests' own fixture build)
+@@ fixture-wrong-architecture the C fixture is compiled for x86-64 on macOS: every link of it fails (the tests' own fixture build, tests/ctoolchain.tcl's)
 %% macos-aarch64
-## tests/c-ffi.test
+## tests/ctoolchain.tcl
 <<<<
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
+            exec cc -c -O2 -fPIC $source -o $object
 ====
-        exec cc -arch x86_64 -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
+            exec cc -arch x86_64 -c -O2 -fPIC $source -o $object
+>>>>
+
+# --- variadic C calls (VARIADICS-VERTICAL-SLICE-1.md) --------------------------
+
+@@ va-no-fixed-parameter-parses `extern c fn f(variadic)` is accepted: a variadic C function with no named parameter for va_start
+## surface/parser.tcl
+<<<<
+            if {$params eq {}} {
+                FailCode $variadicSpan EXTERN-SYNTAX \
+====
+            if {0} {
+                FailCode $variadicSpan EXTERN-SYNTAX \
+>>>>
+
+@@ va-parameter-after-marker-parses a fixed parameter after `variadic` is accepted (and taken for a fixed one)
+## surface/parser.tcl
+<<<<
+        if {$variadicSpan ne ""} {
+            FailCode [dict get [Peek p] span] EXTERN-SYNTAX \
+====
+        if {0} {
+            FailCode [dict get [Peek p] span] EXTERN-SYNTAX \
+>>>>
+
+@@ va-declaration-not-variadic the registration drops an extern c fn's `variadic`: the function is registered with its fixed parameters only
+## hir/foreign.tcl
+<<<<
+        set variadic [dict getdef $decl variadic 0]
+====
+        set variadic 0
+>>>>
+
+@@ va-plain-int-admitted a plain Botlish integer is a trailing argument, passed as a C long long
+## hir/cabi.tcl
+<<<<
+    if {$type eq "int" || ([lindex $type 0] eq "refined" && [lindex $type 1] eq "int")} {
+        return [dict create problem TYPE message [format \
+====
+    if {$type eq "int"} {
+        return [dict create c $::core::cabi::namespace\::LongLong class i64 promoted i64]
+    }
+    if {[lindex $type 0] eq "refined" && [lindex $type 1] eq "int"} {
+        return [dict create problem TYPE message [format \
+>>>>
+
+@@ va-ambiguous-scalar-takes-first a value proven two C scalars at once is passed as the first of them
+## hir/cabi.tcl
+<<<<
+    if {[llength $scalars] == 1} {
+        lassign [lindex $scalars 0] name info
+====
+    if {[llength $scalars] >= 1} {
+        lassign [lindex $scalars 0] name info
+>>>>
+
+@@ va-byte-storage-trailing-is-a-type-error byte storage as a trailing argument is reported as a plain type error, not as the foreign-borrow refusal (whose -strict 0 replay refuses the call)
+## hir/cabi.tcl
+<<<<
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create problem FOREIGN-BORROW message [format \
+====
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create problem TYPE message [format \
+>>>>
+
+@@ va-narrow-not-promoted a C integer narrower than int is passed as its own class: no default argument promotion
+## core/cabi.tcl
+<<<<
+    if {$bits < [dict get $int bits]} {
+        return i[dict get $int bits]
+    }
+====
+>>>>
+
+@@ va-unsigned-narrow-promoted-unsigned an unsigned C integer narrower than int is promoted to unsigned int (C promotes it to int, which holds every value)
+## core/cabi.tcl
+<<<<
+    if {$bits < [dict get $int bits]} {
+        return i[dict get $int bits]
+    }
+====
+    if {$bits < [dict get $int bits]} {
+        return [expr {[dict get $info signed] ? "i" : "u"}][dict get $int bits]
+    }
+>>>>
+
+@@ va-fixed-arity-unchecked a variadic C call passing fewer than its fixed parameters compiles
+## hir/borrow.tcl
+<<<<
+    if {$variadic && [llength [dict get $node args]] < [llength $params]} {
+====
+    if {0} {
+>>>>
+
+@@ va-trailing-pointer-not-direct a pointer passed as a trailing argument (no contract: C may keep it) is no direct edge
+## hir/direct.tcl
+<<<<
+            if {[dict getdef $how promoted ""] eq "ptr"} {
+                lappend pointers $position
+            }
+====
+>>>>
+
+@@ va-trailing-classes-reversed native lowering writes a call's trailing classes in reverse order: each trailing operand passed as another's C type
+## native/lower.tcl
+<<<<
+            append text " varargs=[join [lmap how [dict get $node cvarargs] {
+====
+            append text " varargs=[join [lmap how [lreverse [dict get $node cvarargs]] {
+>>>>
+
+@@ va-al-omitted a System V variadic call states no vector-register count in %al (no stub: whatever rax holds)
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    module.isa().name() == "x64" && super::target::c_call_conv(module.isa().triple()) == CallConv::SystemV
+====
+    false
+>>>>
+
+@@ va-al-zero a System V variadic call always states 0 vector registers in %al, doubles or not
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
+====
+    0
+>>>>
+
+@@ va-stub-jit-jump-misplaced the JIT form of the %al stub writes the C function's address one byte late (the jump goes elsewhere; the JIT compiles a C call but never runs one, so only the encoding test sees it)
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+        (bytes, 7, cranelift_codegen::binemit::Reloc::Abs8, 0)
+====
+        (bytes, 8, cranelift_codegen::binemit::Reloc::Abs8, 0)
+>>>>
+
+@@ va-stub-plt-addend-dropped the object form of the %al stub's jump has no -4 addend: an executable's variadic call lands four bytes past the C function
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+        (bytes, 6, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4)
+====
+        (bytes, 6, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, 0)
+>>>>
+
+@@ va-apple-trailing-in-registers Apple's variadic call is not padded: trailing arguments take the free x and v registers instead of the stack
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+    let mut padding = vec![];
+    if apple {
+====
+    let mut padding = vec![];
+    if false {
+>>>>
+
+@@ va-apple-integer-padding-skipped Apple's free integer registers are padded only when a double also trails: trailing integers alone land in x registers
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+        if varargs.iter().any(|a| a.promoted != nir::CAbi::F64) {
+====
+        if varargs.iter().any(|a| a.promoted == nir::CAbi::F64) {
+>>>>
+
+@@ va-apple-narrow-slots Apple's trailing integers keep their promoted width: an int takes a four-byte stack slot, not the eight-byte one va_arg reads
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+        } else if apple {
+            I64
+        } else {
+====
+        } else if false {
+            I64
+        } else {
+>>>>
+## native/src/codegen/clif.rs
+<<<<
+        if apple || arg.promoted.bits() == 64 {
+====
+        if arg.promoted.bits() == 64 {
+>>>>
+
+@@ va-linux-aarch64-is-apples a Linux AArch64 variadic call is laid out as Apple's: trailing arguments on the stack, where AAPCS64's va_arg reads the registers first
+%% linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+    let apple = sig.call_conv == CallConv::AppleAarch64;
+====
+    let apple = module.isa().name() == "aarch64";
+>>>>
+
+@@ va-last-fixed-as-trailing a variadic call's last fixed argument is taken for its first trailing one (the boundary one position early)
+## hir/borrow.tcl
+<<<<
+        dict set hir exprs $e cvarargs [lmap argType [lrange $argTypes [llength [dict get $contract params]] end] {
+====
+        dict set hir exprs $e cvarargs [lmap argType [lrange $argTypes [expr {[llength [dict get $contract params]] - 1}] end] {
+>>>>
+
+@@ va-pointer-truncated a trailing pointer is passed with its low 32 bits only
+## native/src/codegen/clif.rs
+<<<<
+            nir::CAbi::Ptr => self.b.ins().sshr_imm_s(v, 4),
+            nir::CAbi::Bool => {
+                let shifted = self.b.ins().ushr_imm_s(v, 2);
+====
+            nir::CAbi::Ptr => {
+                let address = self.b.ins().sshr_imm_s(v, 4);
+                let low = self.b.ins().ireduce(types::I32, address);
+                self.b.ins().uextend(I64, low)
+            }
+            nir::CAbi::Bool => {
+                let shifted = self.b.ins().ushr_imm_s(v, 2);
+>>>>
+
+@@ va-apple-doubles-counted-as-integers Apple's padding counts a fixed double as an integer register: one x register too few is padded, so a trailing integer lands in it
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+        let fixed_integers = decl.params.len() - fixed_floatings;
+====
+        let fixed_integers = decl.params.len();
+>>>>
+
+@@ va-apple-double-registers-miscounted Apple's padding ignores the fixed doubles: all of v0-v7 are padded, so a trailing double's stack slot moves past the padding that spilled
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+            padding.extend((fixed_floatings..8).map(|_| types::F64));
+====
+            padding.extend((0..8).map(|_| types::F64));
+>>>>
+
+@@ va-fixed-floats-not-vector-registers a System V variadic call's %al counts its double parameters only: a fixed C float, passed in an xmm register too, is left out of the bound
+%% linux-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
+====
+    sig.params.iter().filter(|p| p.value_type == types::F64).count().min(8) as u32
+>>>>
+
+@@ va-apple-fixed-floats-counted-as-integers Apple's padding counts a fixed C float as an integer register, not a v register: x registers go unpadded and v registers are padded twice, so trailing arguments leave the stack
+%% macos-aarch64 linux-aarch64
+## native/src/codegen/clif.rs
+<<<<
+        let fixed_floatings = decl.params.iter().filter(|c| c.floating()).count();
+====
+        let fixed_floatings = decl.params.iter().filter(|c| **c == nir::CAbi::F64).count();
+>>>>
+
+@@ va-float-vararg-parses NIR accepts a C float as a trailing argument's class (no Botlish value is one, and C promotes a float to a double)
+## native/src/nir.rs
+<<<<
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let valid = match class {
+            CAbi::Void | CAbi::F32 => false,
+====
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let valid = match class {
+            CAbi::Void => false,
 >>>>

@@ -1,5 +1,12 @@
 # C-ABI-TYPES.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: `std::ffi::c::Float`
+> (C `float`, binary32) and `std::ffi::c::Double` (C `double`, binary64) are C
+> representations `{cfloat NAME}` whose values are Float64s, admitted as
+> pointees (`Ptr[std::ffi::c::Float]`, `Ptr[std::ffi::c::Double]`) and in function
+> pointer signatures; C `long double` still has no type ("No `size_t`; one
+> floating type").
+
 The smallest C ABI type universe the header archaeology justifies: C integer
 scalars by identity, `std::ffi::c::Void`, typed data pointers, function-pointer
 types, and the five pointer operations -- plus the general callable
@@ -375,7 +382,10 @@ callback typedef (`Tcl_ObjCmdProc`) is a binding-generator alias of its
 `FnPtr` type -- naming the protocol is generator policy, not a compiler
 primitive. **Variadic** function pointers are deferred: no spelling exists
 for one, so Tcl's one variadic callback type (`Tcl_PanicProc`) cannot be
-written yet; a variadic flag belongs with vararg calling, if ever.
+written yet. Vararg *calling* exists since VARIADICS-VERTICAL-SLICE-1.md (an
+`extern c fn` ending in `variadic`, each call's trailing types its own); a
+function pointer's type carries no per-call trailing types, so a variadic
+callback stays unsupported (C-BINDGEN.md's `unsupported-callback-signature`).
 
 ## Imprinting
 
@@ -578,7 +588,8 @@ access.
   (REFINEMENT-VALUES.md) refines carriers by declared refinements; a
   non-null pointer fact would be a new kind of fact, and nothing consumes
   one yet.
-* **Function pointers are affine** (above), and **variadic** ones deferred.
+* **Function pointers are affine** (above), and **variadic** ones deferred
+  (variadic calls of declared C functions are VARIADICS-VERTICAL-SLICE-1.md's).
 * **Typedefs, enums and arrays** are generator concerns: integer typedefs are
   aliases of the scalar the probe found, callback typedefs aliases of their
   `FnPtr`, opaque-handle typedefs the opaque struct's name; a C enum is the
@@ -734,8 +745,17 @@ killed by `ca-ptr-wide-address`, and the fuzzer now draws addresses up to
 (nesting, pointee categories, clone/erase/retype sequences, invalid pointees
 and retypes), scalar bound probes on random targets and imprinting calls,
 each with its outcome computed by an independent model in the fuzzer (its
-own copy of the data models), and runs every accepted program on all four
-backends: 0 disagreements in 40 programs each for seeds 1, 17 and 41.
+own copy of the data models), and runs every accepted program on every
+backend that runs its target here (`backendsFor`, keyed by the HIR's target:
+all four for the host's, the Tcl backends for another, whose program the
+native driver refuses: NATIVE TARGET): 0 disagreements in 40 programs each
+for seeds 1, 17 and 41. After the compilation-targets milestone it ran other
+targets' programs natively too and reported every refusal as a disagreement
+(seeds 1, 2 and 7: 3, 9 and 4; seed 7 is mutate.tcl's, so its fuzz verdict
+killed every mutant); since keying the backends by target (2026-10-21) it
+reports 0 for seeds 1-7, 17, 41 and 99 and in 300 programs each for seeds 11
+and 12, and at mutate.tcl's seed kills 15 of the 26 mutants by itself (the
+test file kills all 26).
 
 ## Compiler performance
 

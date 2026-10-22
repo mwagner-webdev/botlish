@@ -70,6 +70,16 @@
 #   hir::borrow::verify HIRVAR              foreign operations are only called
 #   hir::borrow::transports HIR E           call E's recorded exposures
 #   hir::borrow::retaining HIR E            the `direct` hook
+#
+# A variadic C function (VARIADICS-VERTICAL-SLICE-1.md) has a contract of
+# its fixed parameters only (`variadic 1`). A call's trailing arguments
+# follow none of the above: each is passed as its own static C type with
+# C's default argument promotion (hir::cabi::VariadicArgument), recorded on
+# the call node by its typing (`cvarargs`: one {c SPELLING class CLASS
+# promoted PROMOTED} per trailing argument, in order), and a trailing
+# argument without one -- a plain Int, a String, byte storage, anything
+# that is no C ABI value type -- is the call's diagnostic (TYPE, or
+# FOREIGN-BORROW for byte storage: it has no contract to admit it).
 
 namespace eval hir::borrow {}
 
@@ -183,6 +193,10 @@ proc hir::borrow::Type {hirVar e meta argTypes} {
     if {$params ne ""} {
         set index 0
         foreach param $params argType $argTypes {
+            if {$param eq ""} {
+                # A variadic call's trailing arguments (below).
+                break
+            }
             set decision [Decide $param $argType]
             if {[lindex $decision 0] eq "borrow"} {
                 lappend borrows [list $index [lindex $decision 1] [dict get $param name]]
@@ -194,11 +208,21 @@ proc hir::borrow::Type {hirVar e meta argTypes} {
         }
     }
     dict set hir exprs $e borrows $borrows
+    if {[dict getdef $contract variadic 0]} {
+        # How each trailing argument is passed (the header): the call's own
+        # C signature beyond the declaration's.
+        dict set hir exprs $e cvarargs [lmap argType [lrange $argTypes [llength [dict get $contract params]] end] {
+            hir::cabi::VariadicArgument $argType
+        }]
+    }
     set binding [hir::imprint::BindingOf $hir $e]
     set result [hir::types::canonical [hir::imprint::Substitute [dict get $contract result] $binding]]
     if {[hir::imprint::Mentions $result]} {
         return any
     }
+    # (A C floating result is its carrier's value, admitted at the boundary:
+    # a Float64, C-FLOAT-FFI-MILESTONE-1.md.)
+    set result [hir::cabi::Carrier $result]
     # A result that is exactly an exposed argument's pointer (provenance
     # {alias NAME}: SHA256's `out`) is that exposure's address, which no
     # Botlish value may hold: the call yields unit in its place, and records
@@ -250,9 +274,11 @@ proc hir::borrow::VerifyCall {hirVar ranges e node name} {
     set problems [Problems $hir $ranges $e $node $name]
     set refused ""
     foreach problem $problems {
-        lassign $problem kind message arg
+        lassign $problem kind message arg refuse
         hir::Diagnose hir $kind $message $arg
-        if {$kind eq "FOREIGN-BORROW" && $refused eq ""} {
+        if {($kind eq "FOREIGN-BORROW" || $refuse eq "1") && $refused eq ""} {
+            # (A trailing argument with no C type is refused alike: no
+            # backend makes a C call it cannot give a C signature.)
             set refused "$name: $message"
         }
     }
@@ -271,7 +297,9 @@ proc hir::borrow::refused {hir e} {
     return [dict getdef $node borrowRefused ""]
 }
 
-# The problems of VerifyCall, as {KIND MESSAGE EXPR}.
+# The problems of VerifyCall, as {KIND MESSAGE EXPR ?REFUSE?}: REFUSE 1 for
+# a problem a -strict 0 run replays though it is no FOREIGN-BORROW (a
+# trailing argument with no C type).
 proc hir::borrow::Problems {hir ranges e node name} {
     set contract [Contract $hir $node]
     if {$contract eq ""} {
@@ -284,11 +312,31 @@ proc hir::borrow::Problems {hir ranges e node name} {
     }
     set problems {}
     set native [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
-    if {[core::native::isExtern $native] && [llength [dict get $node args]] != [llength $params]} {
+    set variadic [dict getdef $contract variadic 0]
+    if {$variadic && [llength [dict get $node args]] < [llength $params]} {
+        # A variadic C call passes at least its fixed parameters.
+        return [list [list ARITY [format {%s is a variadic C function of %d fixed parameter(s), its declaration's C signature, and this call passes %d argument(s)} \
+            $name [llength $params] [llength [dict get $node args]]] $e]]
+    }
+    if {!$variadic && [core::native::isExtern $native] && [llength [dict get $node args]] != [llength $params]} {
         # A C call passes exactly its signature's arguments (the platform
         # ABI has no other call): a compile-time ARITY, never a run-time one.
         return [list [list ARITY [format {%s is a C function of %d parameter(s), its declaration's C signature, and this call passes %d argument(s)} \
             $name [llength $params] [llength [dict get $node args]]] $e]]
+    }
+    if {$variadic} {
+        # The trailing arguments: each exactly one C type (the header).
+        set index [llength $params]
+        foreach arg [lrange [dict get $node args] [llength $params] end] {
+            incr index
+            set argType [hir::typeOf $hir $arg]
+            if {$argType eq "never" || [dict exists $hir poisoned $arg]} continue
+            set how [hir::cabi::VariadicArgument $argType]
+            if {[dict exists $how problem]} {
+                lappend problems [list [dict get $how problem] \
+                    "argument $index of $name, a trailing argument of a variadic C function: [dict get $how message]" $arg 1]
+            }
+        }
     }
     set index 0
     foreach arg [dict get $node args] param $params {
@@ -310,12 +358,19 @@ proc hir::borrow::Problems {hir ranges e node name} {
         } else {
             set argRange [hir::range::unknown]
         }
-        if {[hir::range::ProvesValueAcceptedBy $argType $argRange $declared]} {
+        # (A C floating parameter admits its carrier's values: any Float64,
+        # narrowed at the boundary. C-FLOAT-FFI-MILESTONE-1.md.)
+        set carrier [hir::cabi::Carrier $declared]
+        if {[hir::range::ProvesValueAcceptedBy $argType $argRange $carrier]} {
             continue
         }
+        set shown [hir::types::show $declared]
+        if {$carrier ne $declared} {
+            append shown ", whose values are [hir::types::show $carrier]s"
+        }
         lappend problems [list TYPE [format {argument %d of %s cannot be proven to satisfy %s (argument type: %s)%s} \
-            $index $name [hir::types::show $declared] [hir::semantic::ShowType $hir $argType] \
-            [hir::range::MismatchClause $argType $declared]] $arg]
+            $index $name $shown [hir::semantic::ShowType $hir [hir::range::ShownArgType $argType $declared]] \
+            [hir::range::MismatchClause $argType $carrier]] $arg]
     }
     # A data pointer result of a call that exposes Botlish storage may point
     # into that storage (memchr's result is inside its argument) unless the

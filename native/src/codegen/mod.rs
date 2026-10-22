@@ -151,6 +151,27 @@ pub trait Backend {
     fn compile(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError>;
 }
 
+/// Whether generated code probes every page of a frame larger than one page,
+/// top down, before it uses the frame (Cranelift's inline probestack):
+///
+///   * where the native stack guard exists (Linux x86-64 and AArch64, macOS
+///     AArch64): without probes a large Cranelift frame could jump over the
+///     thread library's guard pages entirely, and the guard
+///     (runtime::platform) would never see the overflow;
+///   * on Windows, whether or not a guard exists (it does not yet): Windows
+///     commits a thread's stack one page at a time, as each access to the
+///     guard page just below the committed part moves it down, so a frame
+///     larger than a page that touches its far end first skips the guard
+///     page and faults on reserved, uncommitted memory -- an ordinary
+///     program would crash with plenty of stack left. Every Windows C
+///     compiler probes for the same reason (`__chkstk`).
+///
+/// This is stack growth, not overflow handling: on Windows a native stack
+/// exhausted for real still ends the process (WINDOWS-X86-64-MILESTONE-1.md).
+fn stack_probes() -> bool {
+    crate::runtime::native_stack::native_stack_overflow_supported() || cfg!(target_os = "windows")
+}
+
 fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
     let mut flags = settings::builder();
     let set = |flags: &mut settings::Builder, k: &str, v: &str| {
@@ -159,9 +180,8 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
     set(&mut flags, "opt_level", "speed")?;
     set(&mut flags, "use_colocated_libcalls", "false")?;
     set(&mut flags, "is_pic", if pic { "true" } else { "false" })?;
-    // Probe only large frames (default spacing: one 4 KiB page). Without
-    // this, a large Cranelift frame can jump over pthread's guard entirely.
-    if crate::runtime::native_stack::native_stack_overflow_supported() {
+    // Probe only large frames (default spacing: one 4 KiB page).
+    if stack_probes() {
         set(&mut flags, "enable_probestack", "true")?;
         set(&mut flags, "probestack_strategy", "inline")?;
     }
@@ -487,10 +507,12 @@ mod context_area_tests {
         assert!(crate::nir::parse(&text).is_err(), "a slot beyond the area must be rejected");
     }
 
-    /// x86-64 only: the relocation types and the relaxation are the x86-64
-    /// psABI's (on AArch64 the object addresses the area with ADRP/LDR GOT
-    /// pairs, which `relax_context_got` leaves alone).
-    #[cfg(target_arch = "x86_64")]
+    /// x86-64 ELF only: the relocation types and the relaxation are the
+    /// x86-64 psABI's (on AArch64 the object addresses the area with
+    /// ADRP/LDR GOT pairs, which `relax_context_got` leaves alone, and a
+    /// COFF object -- Windows' -- has neither GOT nor ELF relocations: the
+    /// relaxation is ELF's and a no-op there).
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     #[test]
     fn the_object_addresses_the_area_with_relaxable_relocations_only() {
         let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
@@ -799,6 +821,85 @@ mod packed_ascii_generic_entry_tests {
     }
 }
 
+/// Stack probes (`stack_probes`): every host that needs them probes a large
+/// frame page by page, and a function with a frame of many pages runs on a
+/// fresh thread whose stack is committed as it grows -- on Windows, where a
+/// thread's stack is committed one guard page at a time, the far end of an
+/// unprobed frame of that size is uncommitted memory and the run would fault.
+#[cfg(test)]
+mod stack_probe_tests {
+    use super::*;
+    use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind};
+    use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+    use cranelift_module::{Linkage, Module};
+
+    #[test]
+    fn a_frame_of_many_pages_is_probed_and_runs() {
+        let isa = isa(false).expect("isa");
+        assert_eq!(isa.flags().enable_probestack(), stack_probes());
+        assert_eq!(stack_probes(), cfg!(windows) || crate::runtime::native_stack::native_stack_overflow_supported());
+        if !stack_probes() {
+            return;
+        }
+        assert_eq!(isa.flags().probestack_strategy(), settings::ProbestackStrategy::Inline);
+        let mut module = JITModule::new(JITBuilder::with_isa(isa, cranelift_module::default_libcall_names()));
+        let mut sig = module.make_signature();
+        sig.returns.push(AbiParam::new(types::I64));
+        let id = module.declare_function("big_frame", Linkage::Local, &sig).expect("declare");
+        let mut ctx = module.make_context();
+        ctx.func.signature = sig;
+        let mut fbc = FunctionBuilderContext::new();
+        let config = module.isa().frontend_config();
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbc);
+            let block = b.create_block();
+            b.switch_to_block(block);
+            b.seal_block(block);
+            // One MiB of frame, its lowest word -- the end farthest from the
+            // committed part of the stack -- written first.
+            let slot = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 1 << 20, 3));
+            let base = b.ins().stack_addr(types::I64, slot, 0);
+            let v = b.ins().iconst(types::I64, 42);
+            b.ins().store(MemFlagsData::trusted(), v, base, 0);
+            let r = b.ins().load(types::I64, MemFlagsData::trusted(), base, 0);
+            b.ins().return_(&[r]);
+            b.finalize(config);
+        }
+        ctx.set_disasm(true);
+        module.define_function(id, &mut ctx).expect("define");
+        // The probe: Cranelift's page-by-page loop, in the prologue.
+        let vcode = ctx.compiled_code().and_then(|code| code.vcode.clone()).unwrap_or_default();
+        assert!(vcode.contains("stack_probe_loop"), "{vcode}");
+        module.finalize_definitions().expect("finalize");
+        let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(module.get_finalized_function(id)) };
+        let result = std::thread::Builder::new().stack_size(4 << 20).spawn(move || f()).expect("thread").join().expect("join");
+        assert_eq!(result, 42);
+    }
+}
+
+/// The program object is the host target's object format: ELF on Linux,
+/// Mach-O on macOS, COFF x86-64 (machine 0x8664, the same bytes for the MSVC
+/// and the GNU environment) on Windows.
+#[cfg(test)]
+mod object_format_tests {
+    use super::*;
+
+    #[test]
+    fn the_program_object_is_the_hosts_format() {
+        let text = "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 7\n    ret %0\nend\n";
+        let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
+        let bytes = emit_object(&program).unwrap_or_else(|e| panic!("{}", e.message())).bytes;
+        if cfg!(target_os = "linux") {
+            assert_eq!(&bytes[..4], b"\x7fELF");
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(&bytes[..4], &0xfeedfacf_u32.to_le_bytes());
+        } else if cfg!(all(windows, target_arch = "x86_64")) {
+            // An IMAGE_FILE_HEADER: Machine IMAGE_FILE_MACHINE_AMD64 first.
+            assert_eq!(&bytes[..2], &0x8664_u16.to_le_bytes());
+        }
+    }
+}
+
 /// Euclidean mod's three native forms (native/lower.tcl's "Euclidean mod"):
 /// the raw `rimodtotal` (no zero test), the raw `rimod` (an inline zero test,
 /// rt_int_mod's ARITHMETIC error on a cold path) and the tagged `imod`
@@ -948,3 +1049,48 @@ mod euclid_mod_tests {
         }
     }
 }
+
+/// C words compiled and run (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): `cword`
+/// constants of both kinds, the word comparisons against words and against
+/// tagged Ints (small, negative, BigInt), and `cwbox` on both sides of the
+/// small-Int boundary.
+#[cfg(test)]
+mod c_word_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::ProgramInfo;
+    use std::rc::Rc;
+
+    #[test]
+    fn c_word_comparisons_and_boxing_run() {
+        let text = concat!(
+            "nir 1 call-effects=1 statics=0\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=28 pnames=\"\" captures=0 u64regs=\"0 1 2 3\" i64regs=\"4 5 6\"\n",
+            "    %0 = cword 18446744073709551615\n    %1 = cword 18446744073709551614\n",
+            "    %2 = cword 4611686018427387904\n    %3 = cword 4611686018427387903\n",
+            "    %4 = cword -9223372036854775808\n    %5 = cword -1\n    %6 = cword -4611686018427387905\n",
+            "    %7 = int 0\n    %8 = int -1\n    %9 = int 18446744073709551614\n    %10 = int -9223372036854775809\n",
+            "    %11 = op cwgt %0 %1\n    %12 = op cweq %0 %9\n    %13 = op cweq %1 %9\n    %14 = op cwlt %0 %7\n",
+            "    %15 = op cwgt %0 %8\n    %16 = op cwlt %4 %8\n    %17 = op cwlt %4 %5\n    %18 = op cwge %2 %9\n",
+            "    %19 = op cwgt %4 %10\n    %20 = op cwle %6 %8\n",
+            "    %21 = op cwbox %0\n    %22 = op cwbox %4\n    %23 = op cwbox %5\n    %24 = op cwbox %2\n    %25 = op cwbox %3\n    %26 = op cwbox %6\n",
+            "    %27 = op listnew %11 %12 %13 %14 %15 %16 %17 %18 %19 %20 %21 %22 %23 %24 %25 %26\n",
+            "    ret %27\nend\n",
+        );
+        let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            AllocMode::Off,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        let result = (compiled.entry)(&mut *vm);
+        assert_eq!(
+            crate::runtime::show::show(result),
+            "[true, false, true, false, true, true, true, false, true, true, 18446744073709551615, -9223372036854775808, -1, 4611686018427387904, 4611686018427387903, -4611686018427387905]"
+        );
+    }
+}
+

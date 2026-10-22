@@ -613,8 +613,7 @@ impl Loaded {
 /// with the process's own arguments. Returns the exit status.
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub fn main() -> i32 {
-    use std::os::unix::ffi::OsStringExt;
-    let argv: Vec<Vec<u8>> = std::env::args_os().map(|a| a.into_vec()).collect();
+    let argv = super::aot::process_argv();
     let loaded = match Image::read_appended("/proc/self/exe").and_then(Image::load) {
         Ok(loaded) => loaded,
         Err(error) => {

@@ -66,7 +66,7 @@ proc epCode {text} {
 # The first diagnostic's message of TEXT without its location, or "ok".
 proc epMessage {text} {
     if {[catch {surface::compile $text -warnings off} message options]} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
         return $message
     }
     return ok
@@ -521,7 +521,7 @@ test ep-affine-fail-moves {item 30: failing with an affine field moves it into t
         [epCode "${::epAffine}fn g(n: int) -> int errors ReadFailed:\n    s = make(n)\n    t = s\n    if n > 0:\n        fail ReadFailed {stream: s, bytesRead: 1}\n    0\n1\n"]
 } -result {USE-AFTER-MOVE USE-AFTER-MOVE}
 
-test ep-affine-handlers {items 32-34: an ignored payload releases its coroutine; a whole binding owns it; a destructured stream is used and released; a partial destructuring releases the unbound affine field -- no coroutine is left alive on the Tcl backends} -body {
+test ep-affine-handlers {items 32-34: an ignored payload releases its coroutine; a whole binding owns it; a destructured stream is used and released; a partial destructuring releases the unbound affine field -- no coroutine is left alive on the Tcl backends} -constraints nativeCoroutines -body {
     set pre "${::epAffine}fn f(n: int) -> int:\n    read(n):\n"
     list [epReleased "${pre}        on ReadFailed:\n            7\n\[f(3), f(0), test_ep_live()\]\n"] \
         [epReleased "${pre}        on ReadFailed details:\n            details.bytesRead\n\[f(3), f(0), test_ep_live()\]\n"] \
@@ -539,29 +539,29 @@ test ep-affine-native-releases {items 34, 77: natively, every coroutine a payloa
     }
 } -cleanup {unset -nocomplain pre text c} -result {{2 0} {2 0} {2 0}}
 
-test ep-affine-propagation {item 35: an affine payload propagates through a declaring function to the handler that takes it; nothing is copied, nothing left alive} -body {
+test ep-affine-propagation {item 35: an affine payload propagates through a declaring function to the handler that takes it; nothing is copied, nothing left alive} -constraints nativeCoroutines -body {
     epReleased "${::epAffine}fn mid(n: int) -> int errors ReadFailed:\n    read(n) + 1\nfn f(n: int) -> int:\n    mid(n):\n        on ReadFailed {stream: s, bytesRead: b}:\n            e = s(Message {value: 5})\n            e.value * 100 + b\n\[f(3), f(0), test_ep_live()\]\n"
 } -result {{value {[503, 1, 0]}} {value {[503, 1, 0]}}}
 
-test ep-affine-propagation-releasing {item 35: an affine payload propagates through a function that releases an affine value of its own on the error edge -- the releasing re-raise releases what the function owns and raises the payload it received, which the handler then resumes} -body {
+test ep-affine-propagation-releasing {item 35: an affine payload propagates through a function that releases an affine value of its own on the error edge -- the releasing re-raise releases what the function owns and raises the payload it received, which the handler then resumes} -constraints nativeCoroutines -body {
     epReleased "${::epAffine}fn mid(n: int) -> int errors ReadFailed:\n    held = make(7)\n    x = read(n)\n    consume(held) + x\nfn f(n: int) -> int:\n    mid(n):\n        on ReadFailed {stream: s, bytesRead: b}:\n            e = s(Message {value: 5})\n            e.value * 100 + b\n\[f(3), f(0), test_ep_live()\]\n"
 } -result {{value {[503, 2, 0]}} {value {[503, 2, 0]}}}
 
-test ep-affine-partial-construction {item 31: a later payload field that fails abandons the payload: the affine field already moved into it is released (pending temporary)} -body {
+test ep-affine-partial-construction {item 31: a later payload field that fails abandons the payload: the affine field already moved into it is released (pending temporary)} -constraints nativeCoroutines -body {
     epReleased "${::epAffine}fn g(n: int) -> int errors ReadFailed, Boom:\n    s = make(n)\n    if n > 0:\n        fail ReadFailed {stream: s, bytesRead: might_fail(n)}\n    0\nfn f(n: int) -> int:\n    g(n):\n        on ReadFailed {bytesRead}:\n            bytesRead\n        on Boom:\n            -1\n\[f(3), f(1), f(0), test_ep_live()\]\n"
 } -result {{value {[-1, 1, 0, 0]}} {value {[-1, 1, 0, 0]}}}
 
-test ep-affine-handler-exits {items 74-75: a handler that returns, fails, breaks or continues releases the payload bindings it still owns} -body {
+test ep-affine-handler-exits {items 74-75: a handler that returns, fails, breaks or continues releases the payload bindings it still owns} -constraints nativeCoroutines -body {
     list [epReleased "${::epAffine}fn f(n: int) -> int:\n    x = read(n):\n        on ReadFailed {stream, bytesRead}:\n            if bytesRead > 2:\n                return 99\n            consume(stream)\n    x + 1\n\[f(3), f(2), f(0), test_ep_live()\]\n"] \
         [epReleased "${::epAffine}fn f(n: int) -> int errors Boom:\n    x = read(n):\n        on ReadFailed details:\n            might_fail(n)\n    x + 1\nfn h(n: int) -> int:\n    f(n):\n        on Boom:\n            -5\n\[h(3), h(1), h(0), test_ep_live()\]\n"] \
         [epReleased "${::epAffine}fn f(k: int) -> int:\n    total = loop i from 0 to k:\n        x = read(i):\n            on ReadFailed {stream, bytesRead}:\n                if bytesRead == 2:\n                    continue\n                if bytesRead == 4:\n                    break\n                consume(stream)\n        x\n    std::list::length(total)\n\[f(6), test_ep_live()\]\n"]
 } -result {{{value {[99, 3, 1, 0]}} {value {[99, 3, 1, 0]}}} {{value {[-5, 2, 1, 0]}} {value {[-5, 2, 1, 0]}}} {{value {[3, 0]}} {value {[3, 0]}}}}
 
-test ep-affine-refail {item 36: a handler destructures an affine payload and fails another error built from an unrestricted field; the stream it does not bind is released} -body {
+test ep-affine-refail {item 36: a handler destructures an affine payload and fails another error built from an unrestricted field; the stream it does not bind is released} -constraints nativeCoroutines -body {
     epReleased "${::epAffine}fn mid(n: int) -> int errors Plain:\n    read(n):\n        on ReadFailed {bytesRead}:\n            fail Plain {code: bytesRead}\nfn f(n: int) -> int:\n    mid(n):\n        on Plain {code}:\n            code\n\[f(3), f(0), test_ep_live()\]\n"
 } -result {{value {[3, 0, 0]}} {value {[3, 0, 0]}}}
 
-test ep-affine-pending-arguments {item 73: a call abandoned by a payload error releases the caller's pending affine argument; the payload's own ownership tree is separate} -body {
+test ep-affine-pending-arguments {item 73: a call abandoned by a payload error releases the caller's pending affine argument; the payload's own ownership tree is separate} -constraints nativeCoroutines -body {
     epReleased "${::epAffine}fn use2(c: Coroutine{args: \[Message\], return: Event}, n: int) -> int:\n    consume(c) + n\nfn g(n: int) -> int errors ReadFailed:\n    use2(make(1), read(n))\nfn f(n: int) -> int:\n    g(n):\n        on ReadFailed {bytesRead}:\n            bytesRead * 10\n\[f(3), f(0), test_ep_live()\]\n"
 } -result {{value {[30, 2, 0]}} {value {[30, 2, 0]}}}
 
@@ -572,7 +572,7 @@ test ep-affine-hir-evidence {item 76: HIR shows the move into the payload, the h
         [epHirLines $text "*const 7 : int release=#"]
 } -cleanup {unset -nocomplain text} -result {{{# ref # s : Coroutine{args: [Message], return: Event, errors: []} move}} {{on ReadFailed # payload (# payload#*)} {on ReadFailed # payload (# destructure#*) consumed=stream binds # stream, # bytesRead}} {{# const 7 : int release=#}}}
 
-test ep-affine-exit-after-payload {a fail whose payload reads an unrestricted field of an affine owner releases that owner as it leaves, after the payload is evaluated} -body {
+test ep-affine-exit-after-payload {a fail whose payload reads an unrestricted field of an affine owner releases that owner as it leaves, after the payload is evaluated} -constraints nativeCoroutines -body {
     set text "${::epAffine}struct Holder:\n    tag: int\n    step: Coroutine{args: \[Message\], return: Event}\nerror Tagged:\n    tag: int\nfn g(n: int) -> int errors Tagged:\n    h = Holder {tag: n, step: make(n)}\n    if n > 1:\n        fail Tagged {tag: h.tag * 2}\n    {step} = h\n    e = step(Message {value: 5})\n    e.value\nfn f(n: int) -> int:\n    g(n):\n        on Tagged {tag}:\n            tag\n\[f(3), f(1), test_ep_live()\]\n"
     list [epReleased $text] [epHirLines $text "*fail Tagged*"]
 } -cleanup {unset -nocomplain text} -result {{{value {[6, 5, 0]}} {value {[6, 5, 0]}}} {{# fail Tagged : never exit-release=#}}}
@@ -582,7 +582,7 @@ test ep-coroutine-affine-payload-rejected {items 83-84: a coroutine may not fail
         [epCode "${::epAffine}fn gen(resume Message) -> Event errors Plain:\n    m = yield Event {value: 1}\n    if m.value > 1:\n        fail Plain {code: m.value}\n    Event {value: 2}\ncoroutine {step} = gen():\n    on Plain:\n        Event {value: 0}\n1\n"]
 } -result {COROUTINE-CONTRACT ok}
 
-test ep-coroutine-cached-payload {items 82-83: a coroutine that fails with an (unrestricted) payload raises the same payload again on a later resume, never running its body again} -body {
+test ep-coroutine-cached-payload {items 82-83: a coroutine that fails with an (unrestricted) payload raises the same payload again on a later resume, never running its body again} -constraints nativeCoroutines -body {
     epAgree "import std::coroutine\nstruct Message:\n    value: int\nerror Overflow:\n    limit: int\n    seen: int\nfn counter(limit: int, resume Message) -> int errors Overflow:\n    m = yield 0\n    if m.value > limit:\n        fail Overflow {limit: limit, seen: m.value}\n    m.value\nfn go(n: int) -> int:\n    coroutine {step} = counter(3):\n        on Overflow:\n            return -1\n    a = step(Message {value: n}):\n        on Overflow {seen}:\n            seen * 10\n    b = step(Message {value: 1}):\n        on Overflow details:\n            details.limit * 100 + details.seen\n    a + b\n\[go(2), go(9)\]\n"
 } -result {value {[4, 399]}}
 

@@ -6,7 +6,7 @@
 import std::ffi::c
 import tclstubs::ctypes
 
-extern c library "botlish_shim_tclstubs_2627031d"
+extern c library "botlish_shim_tclstubs_629eba3e"
 extern c library "tclstub9.0"
 
 # C: int Tcl_PkgProvideEx(Tcl_Interp *interp, const char *name, const char *version, const void *clientData) (called through (tclStubsPtr -> tcl_PkgProvideEx))
@@ -145,6 +145,13 @@ extern c fn Tcl_DbNewByteArrayObj named "botlish_tclstubs_Tcl_DbNewByteArrayObj"
     line: std::ffi::c::Int
 ) -> std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_DbNewDoubleObj(double doubleValue, const char *file, int line) (called through (tclStubsPtr -> tcl_DbNewDoubleObj))
+extern c fn Tcl_DbNewDoubleObj named "botlish_tclstubs_Tcl_DbNewDoubleObj"(
+    doubleValue: std::ffi::c::Double,
+    file: std::ffi::c::Ptr[std::ffi::c::Char],
+    line: std::ffi::c::Int
+) -> std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_DbNewListObj(Tcl_Size objc, Tcl_Obj *const *objv, const char *file, int line) (called through (tclStubsPtr -> tcl_DbNewListObj))
 extern c fn Tcl_DbNewListObj named "botlish_tclstubs_Tcl_DbNewListObj"(
     objc: std::ffi::c::Long,
@@ -196,6 +203,20 @@ extern c fn Tcl_GetByteArrayFromObj named "botlish_tclstubs_Tcl_GetByteArrayFrom
     objPtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
     numBytesPtr: std::ffi::c::Ptr[std::ffi::c::Long]
 ) -> std::ffi::c::Ptr[std::ffi::c::UChar]
+
+# C: int Tcl_GetDouble(Tcl_Interp *interp, const char *src, double *doublePtr) (called through (tclStubsPtr -> tcl_GetDouble))
+extern c fn Tcl_GetDouble named "botlish_tclstubs_Tcl_GetDouble"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    src: std::ffi::c::Ptr[std::ffi::c::Char],
+    doublePtr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
+# C: int Tcl_GetDoubleFromObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *doublePtr) (called through (tclStubsPtr -> tcl_GetDoubleFromObj))
+extern c fn Tcl_GetDoubleFromObj named "botlish_tclstubs_Tcl_GetDoubleFromObj"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    objPtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    doublePtr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
 
 # C: int Tcl_GetInt(Tcl_Interp *interp, const char *src, int *intPtr) (called through (tclStubsPtr -> tcl_GetInt))
 extern c fn Tcl_GetInt named "botlish_tclstubs_Tcl_GetInt"(
@@ -266,6 +287,11 @@ extern c fn Tcl_NewByteArrayObj named "botlish_tclstubs_Tcl_NewByteArrayObj"(
     numBytes: std::ffi::c::Long
 ) -> std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_NewDoubleObj(double doubleValue) (called through (tclStubsPtr -> tcl_NewDoubleObj))
+extern c fn Tcl_NewDoubleObj named "botlish_tclstubs_Tcl_NewDoubleObj"(
+    doubleValue: std::ffi::c::Double
+) -> std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_NewListObj(Tcl_Size objc, Tcl_Obj *const objv[]) (called through (tclStubsPtr -> tcl_NewListObj))
 extern c fn Tcl_NewListObj named "botlish_tclstubs_Tcl_NewListObj"(
     objc: std::ffi::c::Long,
@@ -294,6 +320,12 @@ extern c fn Tcl_SetByteArrayObj named "botlish_tclstubs_Tcl_SetByteArrayObj"(
     objPtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
     bytes: std::ffi::c::Ptr[std::ffi::c::UChar],
     numBytes: std::ffi::c::Long
+) -> unit
+
+# C: void Tcl_SetDoubleObj(Tcl_Obj *objPtr, double doubleValue) (called through (tclStubsPtr -> tcl_SetDoubleObj))
+extern c fn Tcl_SetDoubleObj named "botlish_tclstubs_Tcl_SetDoubleObj"(
+    objPtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    doubleValue: std::ffi::c::Double
 ) -> unit
 
 # C: void Tcl_SetListObj(Tcl_Obj *objPtr, Tcl_Size objc, Tcl_Obj *const objv[]) (called through (tclStubsPtr -> tcl_SetListObj))
@@ -708,6 +740,20 @@ extern c fn Tcl_ExprBooleanObj named "botlish_tclstubs_Tcl_ExprBooleanObj"(
     ptr: std::ffi::c::Ptr[std::ffi::c::Int]
 ) -> std::ffi::c::Int
 
+# C: int Tcl_ExprDouble(Tcl_Interp *interp, const char *expr, double *ptr) (called through (tclStubsPtr -> tcl_ExprDouble))
+extern c fn Tcl_ExprDouble named "botlish_tclstubs_Tcl_ExprDouble"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    expr: std::ffi::c::Ptr[std::ffi::c::Char],
+    ptr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
+# C: int Tcl_ExprDoubleObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *ptr) (called through (tclStubsPtr -> tcl_ExprDoubleObj))
+extern c fn Tcl_ExprDoubleObj named "botlish_tclstubs_Tcl_ExprDoubleObj"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    objPtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj],
+    ptr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
 # C: int Tcl_ExprLong(Tcl_Interp *interp, const char *expr, long *ptr) (called through (tclStubsPtr -> tcl_ExprLong))
 extern c fn Tcl_ExprLong named "botlish_tclstubs_Tcl_ExprLong"(
     interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
@@ -1029,6 +1075,13 @@ extern c fn Tcl_OpenTcpServer named "botlish_tclstubs_Tcl_OpenTcpServer"(
 # C: void Tcl_Preserve(void *data) (called through (tclStubsPtr -> tcl_Preserve))
 extern c fn Tcl_Preserve named "botlish_tclstubs_Tcl_Preserve"(
     data: std::ffi::c::Ptr[std::ffi::c::Void]
+) -> unit
+
+# C: void Tcl_PrintDouble(Tcl_Interp *interp, double value, char *dst) (called through (tclStubsPtr -> tcl_PrintDouble))
+extern c fn Tcl_PrintDouble named "botlish_tclstubs_Tcl_PrintDouble"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    value: std::ffi::c::Double,
+    dst: std::ffi::c::Ptr[std::ffi::c::Char]
 ) -> unit
 
 # C: int Tcl_PutEnv(const char *assignment) (called through (tclStubsPtr -> tcl_PutEnv))
@@ -3029,6 +3082,13 @@ extern c fn Tcl_GetChannelError named "botlish_tclstubs_Tcl_GetChannelError"(
     chan: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Channel_],
     msg: std::ffi::c::Ptr[std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Obj]]
 ) -> unit
+
+# C: int Tcl_InitBignumFromDouble(Tcl_Interp *interp, double initval, void *toInit) (called through (tclStubsPtr -> tcl_InitBignumFromDouble))
+extern c fn Tcl_InitBignumFromDouble named "botlish_tclstubs_Tcl_InitBignumFromDouble"(
+    interp: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_Interp],
+    initval: std::ffi::c::Double,
+    toInit: std::ffi::c::Ptr[std::ffi::c::Void]
+) -> std::ffi::c::Int
 
 # C: Tcl_Obj *Tcl_GetNamespaceUnknownHandler(Tcl_Interp *interp, Tcl_Namespace *nsPtr) (called through (tclStubsPtr -> tcl_GetNamespaceUnknownHandler))
 extern c fn Tcl_GetNamespaceUnknownHandler named "botlish_tclstubs_Tcl_GetNamespaceUnknownHandler"(

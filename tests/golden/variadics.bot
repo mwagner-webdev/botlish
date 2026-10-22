@@ -1,0 +1,403 @@
+# variadics.bot -- variadic parameters (VARIADICS-VERTICAL-SLICE-1.md), as a
+# source-level specification:
+#
+#     fn sum(variadic numbers: List[int]) -> int    the last parameter binding
+#     sum(1, 2, 3)                                  its trailing arguments: one List
+#
+# A call of a variadic function passes its fixed arguments, then any number
+# of trailing ones, which its body sees as one ordinary immutable List of
+# the declared element type (a bare List imprints the element per call).
+# Method spelling, aliases and calls from any function collect alike; a
+# variadic function used as a value is the function of its List parameter,
+# so a call through the value passes the List. Each trailing argument is
+# proven in the element type by its own proof. The static diagnostics: Arity
+# for fewer than the fixed arguments, Type at a trailing argument outside the
+# element type and at a declared type that is no List, Imprint for an
+# imprinted variadic function used as a value or given the wrong imprints.
+#
+# Ported from tests/variadics.test. The Tcl tests stay authoritative and
+# unchanged; what source cannot observe stays there only: parsing and its
+# MALFORMED-VARIADIC-SECTION (a parser diagnostic, which no static compile
+# block holds), the HIR facts, HIR text and interchange, the evaluation
+# order (an installed context's log, which a body cannot use), the
+# imprinted List's static type, warnings, the native NIR, GC stress, the
+# standalone executable and application modules, a trait implementation
+# (top-level only: its rejection would reject the suite), and every C variadic
+# (tests/c-ffi.test's cf-va-*: a C function exists only in a library the
+# program is linked with).
+#
+# Conventions:
+#
+# * Each Tcl test compiles one program; here that program is the test's
+#   block. The Tcl tests' shared ::sums prelude (sum_from, sum, weighted) is
+#   declared in every block that uses it; its `import std::list` is the suite's.
+# * Diagnostics compare the DiagnosticCode at the location the Tcl test pins,
+#   translated to this file's line and column.
+#
+# Imports: compiler and test (the framework); list (method sugar `.at` and
+# `.length` resolve to std::list::at and std::list::length, and std::list::length is called
+# qualified); str (std::str::concat).
+import std::compiler
+import std::list
+import std::str
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations (top-level only)
+
+# va-element-domain, va-element-domain-unproven: the element domain.
+type VaSmall = Int in 0..10
+
+# va-references-retained: a struct built in the arguments.
+struct VaPoint:
+    x: int
+
+# va-coroutine, va-coroutine-calls: the yielded event.
+struct VaEvent:
+    n: int
+
+# ---------------------------------------------------------------------------
+# The trailing arguments are one ordinary List (va-zero-one-many ...)
+
+fn register_semantics_tests():
+    fn zero_one_many() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            [sum(), sum(5), sum(1, 2, 3), sum(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)]
+    std::test::value("va-zero-one-many", [0, 5, 6, 78], zero_one_many)
+
+    fn fixed_then_variadic() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn weighted(weight: int, variadic numbers: List[int]) -> int:
+                weight * numbers.sum_from(0, 0)
+            [weighted(10), weighted(10, 1), weighted(2, 1, 2, 3)]
+    std::test::value("va-fixed-then-variadic", [0, 10, 12], fixed_then_variadic)
+
+    fn the_list_itself() errors std::compiler::CompilerError:
+        static compile:
+            fn pack(a: int, variadic xs: List[int]) -> List[int]:
+                xs
+            [pack(1), pack(1, 2), pack(1, 2, 3, 4)]
+    std::test::value("va-the-list-itself", [[], [2], [2, 3, 4]], the_list_itself)
+
+    fn strings() errors std::compiler::CompilerError:
+        static compile:
+            fn tag(name: str, variadic parts: List[str]) -> List[str]:
+                parts
+            [tag("t"), tag("t", "ab", "cd"), std::list::length(tag("x", "y1", "y2", "y3"))]
+    std::test::value("va-strings", [[], ["ab", "cd"], 3], strings)
+
+    fn float64() errors std::compiler::CompilerError:
+        static compile:
+            fn fsum(xs: List[Float64], i: int, acc: Float64) -> Float64 errors NonFiniteFloat:
+                if i == std::list::length(xs):
+                    acc
+                else:
+                    x = std::list::at(xs, i):
+                        on IndexNotFound:
+                            0.0
+                    fsum(xs, i + 1, acc + x)
+            fn total(variadic xs: List[Float64]) -> Float64 errors NonFiniteFloat:
+                fsum(xs, 0, 0.0)
+            r = total(0.5, 1.25, 2.0):
+                on NonFiniteFloat:
+                    -1.0
+            z = total():
+                on NonFiniteFloat:
+                    -1.0
+            [r, z]
+    std::test::value("va-float64", [3.75, 0.0], float64)
+
+    fn element_domain() errors std::compiler::CompilerError:
+        static compile:
+            fn smalls(variadic xs: List[VaSmall]) -> List[VaSmall]:
+                xs
+            [smalls(), smalls(1, 9, 10)]
+    std::test::value("va-element-domain", [[], [1, 9, 10]], element_domain)
+
+    fn nested() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            fn weighted(weight: int, variadic numbers: List[int]) -> int:
+                weight * numbers.sum_from(0, 0)
+            [sum(sum(1, 2), sum(), sum(3, sum(4, 5))), weighted(sum(1, 1), sum(2), 1)]
+    std::test::value("va-nested", [15, 6], nested)
+
+    fn recursive() errors std::compiler::CompilerError:
+        static compile:
+            fn count_down(n: int, variadic acc: List[int]) -> int:
+                if n == 0:
+                    std::list::length(acc)
+                else:
+                    count_down(n - 1, n, n, n)
+            [count_down(0), count_down(4), count_down(0, 1, 2)]
+    std::test::value("va-recursive", [0, 3, 2], recursive)
+
+    fn called_from_function() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            fn twice(x: int) -> int:
+                sum(x, x)
+            fn outer(a: int) -> int:
+                fn inner(variadic ys: List[int]) -> int:
+                    a + ys.sum_from(0, 0)
+                inner(1, 2) + inner()
+            [twice(21), outer(10)]
+    std::test::value("va-called-from-function", [42, 23], called_from_function)
+
+    fn references_retained() errors std::compiler::CompilerError:
+        static compile:
+            fn keep(variadic xs: List[str]) -> List[str]:
+                xs
+            fn pair(variadic ps: List[VaPoint]) -> List[VaPoint]:
+                ps
+            fn lists(variadic ls: List[List[int]]) -> List[List[int]]:
+                ls
+            kept = keep(std::str::concat("ab", "cd"), "x".concat("yz"))
+            ps = pair(VaPoint {x: 1}, VaPoint {x: 2})
+            nested = lists([1, 2], [3])
+            [kept, ps.length(), nested]
+    std::test::value("va-references-retained", [["abcd", "xyz"], 2, [[1, 2], [3]]], references_retained)
+
+# ---------------------------------------------------------------------------
+# A bare List imprints its element per call (va-imprinted-*)
+
+fn register_imprint_tests():
+    fn imprinted_values() errors std::compiler::CompilerError:
+        static compile:
+            fn inspect(variadic values: List) -> int:
+                std::list::length(values)
+            fn firsts(variadic values: List[T]) -> List[T]:
+                values
+            [inspect(), inspect[int](), inspect(1, 2), firsts(1, 2), firsts[str]("x"), firsts()]
+    std::test::value("va-imprinted-values", [0, 0, 2, [1, 2], ["x"], []], imprinted_values)
+
+    fn heterogeneous() errors std::compiler::CompilerError:
+        static compile:
+            fn inspect(variadic values: List) -> int:
+                std::list::length(values)
+            inspect(1, "x", true)
+    std::test::value("va-imprinted-heterogeneous", 3, heterogeneous)
+
+    fn heterogeneous_literal() errors std::compiler::CompilerError:
+        static compile:
+            fn inspect(values: List[T]) -> int:
+                std::list::length(values)
+            inspect([1, "x", true])
+    std::test::value("va-imprinted-heterogeneous/literal", 3, heterogeneous_literal)
+
+# ---------------------------------------------------------------------------
+# Calls: method syntax, aliases, values, flags, coroutines
+
+fn register_call_tests():
+    fn method_syntax() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            fn weighted(weight: int, variadic numbers: List[int]) -> int:
+                weight * numbers.sum_from(0, 0)
+            [(1).sum(2, 3), (2).weighted(5, 5), (7).sum()]
+    std::test::value("va-method-syntax", [6, 20, 7], method_syntax)
+
+    fn alias() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            g = sum
+            h = g
+            [g(1, 2), h(), h(1, 2, 3)]
+    std::test::value("va-alias", [3, 0, 6], alias)
+
+    fn function_value() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            fn apply(f, xs):
+                f(xs)
+            fn apply_typed(f: Fn{args: [List[int]], return: int}, xs: List[int]) -> int:
+                f(xs)
+            fs = [sum, sum]
+            first = fs.at(0):
+                on IndexNotFound:
+                    sum
+            [apply(sum, [1, 2]), apply_typed(sum, [3, 4]), first([5, 6])]
+    std::test::value("va-function-value", [3, 7, 11], function_value)
+
+    fn with_flags() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn report(base: int, flags :loud, variadic xs: List[int]) -> int:
+                if loud:
+                    base + xs.sum_from(0, 0)
+                else:
+                    base
+            [report(10), report(10, 1, 2), report(10, 1, 2, :loud), report(10, :loud)]
+    std::test::value("va-flags", [10, 10, 13, 10], with_flags)
+
+    fn coroutine_over_list() errors std::compiler::CompilerError:
+        static compile:
+            fn gen(variadic xs: List[int]):
+                loop x in xs:
+                    yield VaEvent {n: x}
+                VaEvent {n: -1}
+            fn drive() -> List[int]:
+                coroutine {step, first} = gen(4, 5)
+                second = step()
+                third = step()
+                [first.n, second.n, third.n]
+            drive()
+    std::test::value("va-coroutine", [4, 5, -1], coroutine_over_list)
+
+    fn coroutine_calls() errors std::compiler::CompilerError:
+        static compile:
+            fn sum_from(xs: List[int], i: int, acc: int) -> int:
+                if i == xs.length():
+                    acc
+                else:
+                    x = xs.at(i):
+                        on IndexNotFound:
+                            0
+                    xs.sum_from(i + 1, acc + x)
+            fn sum(variadic numbers: List[int]) -> int:
+                numbers.sum_from(0, 0)
+            fn gen(a: int):
+                yield VaEvent {n: sum(a, a)}
+                VaEvent {n: sum(a, 1, 2, 3)}
+            fn drive() -> List[int]:
+                coroutine {step, first} = gen(4)
+                second = step()
+                [first.n, second.n]
+            drive()
+    std::test::value("va-coroutine-calls", [8, 10], coroutine_calls)
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+fn register_diagnostic_tests():
+    fn arity() errors std::compiler::CompilerError:
+        static compile:
+            fn weighted(weight: int, variadic numbers: List[int]) -> int:
+                weight
+            weighted()
+    std::test::rejects_at("va-arity", std::compiler::DiagnosticCode::Arity, 347, 13, arity)
+
+    fn arity_flags() errors std::compiler::CompilerError:
+        static compile:
+            fn report(a: int, b: int, flags :loud, variadic xs: List[int]) -> int:
+                a
+            report(1, :loud)
+    std::test::rejects_at("va-arity-flags", std::compiler::DiagnosticCode::Arity, 354, 13, arity_flags)
+
+    fn element_type() errors std::compiler::CompilerError:
+        static compile:
+            fn weighted(weight: int, variadic numbers: List[int]) -> int:
+                weight
+            weighted(1, "a", 2)
+    std::test::rejects_at("va-element-type", std::compiler::DiagnosticCode::Type, 361, 25, element_type)
+
+    fn element_domain_unproven() errors std::compiler::CompilerError:
+        static compile:
+            fn smalls(variadic xs: List[VaSmall]) -> int:
+                7
+            fn g(n: int) -> int:
+                smalls(1, n)
+            g(3)
+    std::test::rejects_at("va-element-domain-unproven", std::compiler::DiagnosticCode::Type, 369, 27, element_domain_unproven)
+
+    fn not_a_list() errors std::compiler::CompilerError:
+        static compile:
+            fn f(variadic xs: int) -> int:
+                7
+            f(1)
+    std::test::rejects_at("va-not-a-list", std::compiler::DiagnosticCode::Type, 375, 17, not_a_list)
+
+    fn imprinted_not_a_value() errors std::compiler::CompilerError:
+        static compile:
+            fn inspect(variadic values: List) -> int:
+                std::list::length(values)
+            g = [inspect]
+            std::list::length(g)
+    std::test::rejects_at("va-imprinted-not-a-value", std::compiler::DiagnosticCode::Imprint, 384, 18, imprinted_not_a_value)
+
+    fn explicit_imprint_count() errors std::compiler::CompilerError:
+        static compile:
+            fn inspect(variadic values: List) -> int:
+                std::list::length(values)
+            inspect[int, str]()
+    std::test::rejects_at("va-explicit-imprint-count", std::compiler::DiagnosticCode::Imprint, 392, 13, explicit_imprint_count)
+
+fn register_variadics_tests():
+    register_semantics_tests()
+    register_imprint_tests()
+    register_call_tests()
+    register_diagnostic_tests()
+
+with context std::test::suite()
+register_variadics_tests()
+std::test::report()

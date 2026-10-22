@@ -245,7 +245,10 @@ pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
-        let mut shadow = if super::native_stack::native_stack_overflow_supported() {
+        // The shadow stack holds the fallback plan's roots and bounds its
+        // recursion (codegen::roots's `depth_reservation`): needed unless
+        // both native-frame roots and the native stack guard replace it.
+        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS && super::native_stack::native_stack_overflow_supported() {
             Vec::new()
         } else {
             vec![0u64; SHADOW_STACK_SLOTS]

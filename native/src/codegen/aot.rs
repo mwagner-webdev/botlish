@@ -1,9 +1,11 @@
 //! Standalone executable linking: Linux glibc on x86-64 (both linkers) and
 //! AArch64 (the `rustc` linker), ELF; macOS on AArch64 (the `rustc` linker),
-//! Mach-O (MACOS-AARCH64-MILESTONE-5.md). Cranelift emits the program object
-//! in the host triple's format; a linker turns it and the runtime into an
-//! executable. The executable needs neither Tcl, rustc, the source nor this
-//! checkout: only the system's own libraries.
+//! Mach-O (MACOS-AARCH64-MILESTONE-5.md); Windows on x86-64 with MSVC's
+//! toolchain (the `rustc` linker), PE (WINDOWS-X86-64-MILESTONE-1.md).
+//! Cranelift emits the program object in the host triple's format; a linker
+//! turns it and the runtime into an executable. The executable needs neither
+//! Tcl, rustc, the source nor this checkout: only the system's own libraries
+//! (on Windows the C runtime is linked statically for it: `crt_args`).
 //!
 //! Two linkers, chosen by `BOTLISH_NATIVE_LINKER` (SINGLE-EXECUTABLE.md):
 //!
@@ -38,6 +40,14 @@
 //! -- carry Mach-O's `_` prefix because the object crate writes it, and the
 //! linker signs the executable ad hoc, as it signs every arm64 executable it
 //! links.
+//!
+//! On Windows nothing in the link is PE- or COFF-specific code of ours
+//! either: the object is Cranelift's COFF (the `object` crate's, the same
+//! bytes for the MSVC and the GNU environment), rustc links it with
+//! Microsoft's `link.exe`, which it finds -- with the MSVC libraries and the
+//! Windows SDK's import libraries -- by itself, without a Developer Command
+//! Prompt, and the C runtime's startup (`mainCRTStartup`) is rustc's. An
+//! executable's file name ends in `.exe` (`executable_path`).
 use super::{Const, ObjectProgram, emit_object};
 use crate::nir::Program;
 use botlish_native::runtime::aotimage::{self, Fixup, FunctionCode, Image, Target};
@@ -87,9 +97,7 @@ fn startup(program: &Program, object: &ObjectProgram) -> String {
         "}\nextern \"C\" fn entry(vm: *mut Vm) -> Value {\n\
         let f: aot::ProgramEntry = unsafe { std::mem::transmute(botlish_fn_0 as *const ()) };\n\
         f(vm)\n}\nfn main() {\n\
-        use std::os::unix::ffi::OsStringExt;\n\
-        let argv: Vec<Vec<u8>> = std::env::args_os().map(|a| a.into_vec()).collect();\n\
-        std::process::exit(aot::run(argv, || {\n\
+        std::process::exit(aot::run(aot::process_argv(), || {\n\
         let info = ProgramInfo { functions: vec![\n",
     );
     for f in &program.functions {
@@ -198,37 +206,62 @@ pub fn calls_c(program: &Program) -> bool {
 }
 
 /// Whether this host links executables: Linux glibc on x86-64 and AArch64
-/// (ELF), macOS on AArch64 (Mach-O, MACOS-AARCH64-MILESTONE-5.md). On every
-/// one the program object is Cranelift's, in the host triple's object
-/// format, and the rustc linker links it through the platform's own linker.
+/// (ELF), macOS on AArch64 (Mach-O, MACOS-AARCH64-MILESTONE-5.md), Windows
+/// on x86-64 with MSVC's toolchain (PE, WINDOWS-X86-64-MILESTONE-1.md: the
+/// driver built for `x86_64-pc-windows-msvc`, never for MinGW's
+/// `x86_64-pc-windows-gnu`, which is no native target). On every one the
+/// program object is Cranelift's, in the host triple's object format, and
+/// the rustc linker links it through the platform's own linker.
 const EXECUTABLES: bool = cfg!(any(
     all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
-    all(target_os = "macos", target_arch = "aarch64")
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
 
 /// Whether this host links a program that calls C (C-FFI.md): Linux glibc on
-/// x86-64 and AArch64, with GNU ld's link plan, and macOS on AArch64, with
+/// x86-64 and AArch64, with GNU ld's link plan; macOS on AArch64, with
 /// Apple's (`LinkerFlavor`), where the Apple C ABI was validated against real
-/// callees compiled by Apple clang (MACOS-AARCH64-MILESTONE-6.md). A host
-/// that links executables but whose C ABI is not validated would refuse a C
-/// call here, before the linker runs; there is none today.
+/// callees compiled by Apple clang (MACOS-AARCH64-MILESTONE-6.md); Windows
+/// on x86-64 with MSVC's toolchain, with link.exe's, where the Win64 C ABI
+/// was validated against callees compiled by MSVC's cl and ml64
+/// (WINDOWS-X86-64-MILESTONE-2.md). Every host that links executables links
+/// C calls today; a new one refuses them here, before the linker runs, until
+/// its C ABI is validated.
 const C_CALLS: bool = cfg!(any(
     all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
-    all(target_os = "macos", target_arch = "aarch64")
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
 
-pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<(), String> {
+/// The file an executable emitted for DESTINATION is: DESTINATION itself,
+/// except on Windows, where an executable's name ends in `.exe` and a
+/// DESTINATION without an extension gets it (`fib` -> `fib.exe`), as
+/// MinGW's gcc names its output; a name with an extension is kept as given.
+/// Default and explicit names follow the same rule (main.tcl names the
+/// executable of FILE.bot FILE: FILE.exe on Windows).
+pub fn executable_path(destination: &Path) -> PathBuf {
+    let extension = std::env::consts::EXE_EXTENSION;
+    if extension.is_empty() || destination.extension().is_some() {
+        destination.to_path_buf()
+    } else {
+        destination.with_extension(extension)
+    }
+}
+
+/// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`
+/// and returns that path (absolute).
+pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<PathBuf, String> {
     if !EXECUTABLES {
-        return Err("executable emission requires Linux glibc on x86_64 or aarch64, or macOS on aarch64".into());
+        return Err("executable emission requires Linux glibc on x86_64 or aarch64, macOS on aarch64, or Windows on x86_64 with the MSVC toolchain".into());
     }
     if calls_c(program) && !C_CALLS {
         return Err(format!(
-            "native link failed: this program calls C or declares a C library ({}), and C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only: on this host executables of programs that call no C are supported, C calls not yet (C-FFI.md)",
+            "native link failed: this program calls C or declares a C library ({}), and C calls are linked on Linux glibc (x86_64, aarch64), macOS (aarch64) and Windows (x86_64, MSVC) only: on this host executables of programs that call no C are supported, C calls not yet (C-FFI.md)",
             describe_link_plan(program)
         ));
     }
-    let destination = std::path::absolute(destination).map_err(|e| e.to_string())?;
-    match std::env::var("BOTLISH_NATIVE_LINKER").as_deref() {
+    let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
+    let linked = match std::env::var("BOTLISH_NATIVE_LINKER").as_deref() {
         Err(std::env::VarError::NotPresent) | Ok("" | "rustc") => link_rustc(program, &destination, link_dirs),
         Ok("stub") if calls_c(program) => Err(format!(
             "native link failed: this program calls C or declares a C library ({}), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)",
@@ -237,21 +270,37 @@ pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[Strin
         Ok("stub") => link_stub(program, &destination),
         Ok(other) => Err(format!("unknown BOTLISH_NATIVE_LINKER {other:?} (known: rustc stub)")),
         Err(e) => Err(format!("BOTLISH_NATIVE_LINKER: {e}")),
-    }
+    };
+    linked.map(|()| destination)
 }
 
-/// The C functions and libraries PROGRAM names, for messages.
+/// The C functions and libraries PROGRAM names, for messages: each library
+/// as this host's linker is given it (`library_argument`).
 fn describe_link_plan(program: &Program) -> String {
+    describe_link_plan_for(LINKER, program)
+}
+
+fn describe_link_plan_for(flavor: LinkerFlavor, program: &Program) -> String {
     let mut parts = Vec::new();
     if !program.foreigns.is_empty() {
         let names: Vec<&str> = program.foreigns.iter().map(|f| f.symbol.as_str()).collect();
         parts.push(format!("symbols {}", names.join(", ")));
     }
     if !program.links.is_empty() {
-        let libraries: Vec<String> = program.links.iter().map(|l| format!("-l{l}")).collect();
+        let libraries: Vec<String> = program.links.iter().map(|l| library_argument(flavor, l)).collect();
         parts.push(format!("libraries {}", libraries.join(" ")));
     }
     parts.join("; ")
+}
+
+/// How a FLAVOR linker is given the library LIBRARY (`extern c library
+/// "LIBRARY"`): `-lLIBRARY`, which GNU ld and Apple's ld search the -L
+/// directories for (libLIBRARY.so/.a, .dylib/.a); `LIBRARY.lib` for
+/// link.exe, which searches its /LIBPATH directories and then the LIB
+/// environment's (the SDK's and MSVC's own) for exactly that file -- a
+/// static library or a DLL's import library.
+fn library_argument(flavor: LinkerFlavor, library: &str) -> String {
+    if flavor == LinkerFlavor::Msvc { format!("{library}.lib") } else { format!("-l{library}") }
 }
 
 /// The linker's own account of a failed link of a program that calls C:
@@ -261,7 +310,11 @@ fn describe_link_plan(program: &Program) -> String {
 /// `ld:` lines); Apple's ld and clang on macOS (`Undefined symbols for
 /// architecture arm64:` and the `"_SYMBOL", referenced from:` line of each
 /// symbol, `ld: library 'NAME' not found`, `ld: warning: ignoring file ...,
-/// found architecture ...`, `clang: error: linker command failed`).
+/// found architecture ...`, `clang: error: linker command failed`);
+/// Microsoft's link.exe on Windows (`error LNK2019: unresolved external
+/// symbol`, `fatal error LNK1120: N unresolved externals`, `fatal error
+/// LNK1181: cannot open input file 'NAME.lib'`: every `LNKnnnn` error or
+/// warning) and LLVM's `lld-link: error:`.
 fn linker_diagnostics(stderr: &str) -> String {
     let lines: Vec<&str> = stderr
         .lines()
@@ -276,10 +329,32 @@ fn linker_diagnostics(stderr: &str) -> String {
                 || line.contains("Undefined symbols for architecture")
                 || line.contains("\", referenced from:")
                 || line.contains("linker command failed")
+                || line.contains("error LNK")
+                || line.contains("warning LNK")
+                || line.contains("lld-link:")
         })
         .filter(|line| !line.starts_with("= note: \"") && line.len() < 2000)
         .collect();
     if lines.is_empty() { stderr.to_string() } else { lines.join("\n") }
+}
+
+/// What a FLAVOR linker's DIAGNOSTICS mean when they are about the C runtime
+/// rather than the program, said once after them. link.exe's unresolved
+/// `__imp_NAME` is a reference compiled to be imported from a DLL: a C
+/// library compiled for the dynamic C runtime (cl's `/MD`) refers to the
+/// runtime's functions so, and a Botlish executable links the static release
+/// C runtime and no other (`crt_args`), which defines NAME but no `__imp_NAME`
+/// -- link.exe resolves such a reference itself (LNK4217) only when the
+/// static runtime's NAME is linked anyway, so a `/MD` library links or not
+/// by what else the program happens to pull in (WINDOWS-X86-64-MILESTONE-2.md,
+/// "The C runtime"). Nothing for any other failure or linker.
+fn link_hint(flavor: LinkerFlavor, diagnostics: &str) -> Option<&'static str> {
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
+        return Some(
+            "an unresolved __imp_ symbol is a reference compiled to be imported from a DLL: a C library compiled for the dynamic C runtime (cl /MD) refers to the runtime's functions so, and a Botlish executable links the static C runtime (/MT, cl's default) and no other: compile the library with /MT, or, for a function a DLL exports, link the DLL's import library",
+        );
+    }
+    None
 }
 
 /// The `rustc` linker: a generated startup crate, compiled and linked
@@ -298,12 +373,19 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
     let object = emit_object(program).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join("program.o");
     let source_path = work.0.join("startup.rs");
-    let executable = work.0.join("executable");
+    // With the platform's executable suffix: MinGW's gcc would append .exe
+    // to a name without one (link.exe keeps a name as given).
+    let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
     std::fs::write(&source_path, startup(program, &object)).map_err(|e| e.to_string())?;
+    // rustc compiles the startup crate for the driver's own target, the one
+    // the runtime library was built for, whatever rustc's own host is: a
+    // Windows machine commonly has both Rust Windows host toolchains, and a
+    // startup crate of the other one would not link against this runtime.
     let output = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
         .arg("--edition=2024")
         .arg("--crate-name=botlish_program")
+        .arg(format!("--target={}", target_lexicon::HOST))
         .args([
             "-C",
             "opt-level=2",
@@ -319,6 +401,7 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
         .arg("-C")
         .arg(format!("link-arg={}", object_path.display()))
         .args(link_plan_args(program, link_dirs))
+        .args(crt_args(program))
         .arg(&source_path)
         .arg("-o")
         .arg(&executable)
@@ -327,10 +410,13 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if calls_c(program) {
+            let diagnostics = linker_diagnostics(&stderr);
+            let hint = link_hint(LINKER, &diagnostics).map(|hint| format!("\n{hint}")).unwrap_or_default();
             return Err(format!(
-                "native link failed: the system linker could not link this program with the C functions and libraries it declares ({}):\n{}",
+                "native link failed: the system linker could not link this program with the C functions and libraries it declares ({}):\n{}{}",
                 describe_link_plan(program),
-                linker_diagnostics(&stderr)
+                diagnostics,
+                hint
             ));
         }
         return Err(format!("executable link failed ({}):\n{}", output.status, stderr));
@@ -342,17 +428,91 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
 }
 
 /// The system linker a link plan is written for: the platform's, which
-/// rustc drives through the C compiler driver (`cc`).
+/// rustc drives through the C compiler driver (`cc`) on Unix and directly on
+/// Windows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LinkerFlavor {
     /// GNU ld, gold or lld through gcc or clang: Linux.
     Gnu,
     /// Apple's ld through Apple clang: macOS.
     Apple,
+    /// Microsoft's link.exe (or LLVM's lld-link in its place): Windows with
+    /// the MSVC toolchain.
+    Msvc,
 }
 
 /// This host's linker flavor.
-const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") { LinkerFlavor::Apple } else { LinkerFlavor::Gnu };
+const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
+    LinkerFlavor::Apple
+} else if cfg!(target_env = "msvc") {
+    LinkerFlavor::Msvc
+} else {
+    LinkerFlavor::Gnu
+};
+
+/// The Microsoft C and C++ runtime libraries a Windows executable never
+/// links: every one but the static release runtime it does link (`libcmt`,
+/// `libvcruntime`, `libucrt`; `libcpmt` for C++) -- the dynamic runtimes
+/// (`/MD`, `/MDd`: the import libraries of `VCRUNTIME140.dll`, the UCRT's
+/// `ucrtbase.dll` and `MSVCP140.dll`) and the static debug one (`/MTd`).
+const OTHER_MSVC_RUNTIMES: [&str; 12] = [
+    "msvcrt.lib",
+    "msvcrtd.lib",
+    "vcruntime.lib",
+    "vcruntimed.lib",
+    "ucrt.lib",
+    "ucrtd.lib",
+    "libcmtd.lib",
+    "libvcruntimed.lib",
+    "libucrtd.lib",
+    "msvcprt.lib",
+    "msvcprtd.lib",
+    "libcpmtd.lib",
+];
+
+/// rustc's arguments choosing PROGRAM's C runtime. On Windows (MSVC) every
+/// executable links the static release C runtime (`+crt-static`: libcmt,
+/// libvcruntime and the static UCRT), whether it calls C or not
+/// (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime"):
+///
+///   * it imports only the system's own DLLs -- kernel32 and the API sets
+///     every Windows has -- and never `VCRUNTIME140.dll`, the Visual C++
+///     redistributable's, which rustc's default dynamic runtime (`/MD`)
+///     needs: a program that writes to the console through kernel32 runs on
+///     a Windows without Visual Studio;
+///   * one executable holds one C runtime. A C library brings the runtime it
+///     was compiled for as default-library directives (`/DEFAULTLIB:MSVCRT`
+///     for `/MD`, `LIBCMT` for `/MT`), and link.exe would otherwise link
+///     both, warn (LNK4098) and give the library a second heap, a second
+///     errno and a second set of stdio streams. So every other runtime's
+///     library is excluded (`/NODEFAULTLIB:`, `OTHER_MSVC_RUNTIMES`): a
+///     static library compiled with `/MT` (cl's default) shares the
+///     executable's runtime; one compiled with `/MD` that calls the runtime
+///     refers to it through `__imp_` imports, which link.exe resolves
+///     against the static runtime only for a function something else
+///     already linked (LNK4217), and otherwise fails to link (LNK2019,
+///     NATIVE LINK, with `link_hint`'s explanation) -- never silently
+///     linked with a second runtime. A DLL keeps the runtime it was linked
+///     with, behind its own exports, as every Windows DLL does: one built
+///     with `/MD` needs the Visual C++ redistributable where it runs, the
+///     executable still does not.
+///
+/// Nothing elsewhere: Linux and macOS executables use the system's C
+/// library as they always have.
+fn crt_args(program: &Program) -> Vec<String> {
+    crt_args_for(LINKER, program)
+}
+
+fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
+    if flavor != LinkerFlavor::Msvc {
+        return Vec::new();
+    }
+    let mut args = vec!["-C".to_string(), "target-feature=+crt-static".to_string()];
+    for library in OTHER_MSVC_RUNTIMES {
+        args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
+    }
+    args
+}
 
 /// rustc's arguments passing PROGRAM's link plan to this host's system
 /// linker (`link_plan_args_for`).
@@ -363,7 +523,10 @@ fn link_plan_args(program: &Program, link_dirs: &[String]) -> Vec<String> {
 /// rustc's arguments passing PROGRAM's link plan to a FLAVOR system linker:
 /// the search directories LINK_DIRS (`-LDIR`), then every library
 /// `-lNAME`, in the plan's order -- for GNU ld inside one linker group,
-/// for Apple's ld as they are. Nothing for a program that names none.
+/// for Apple's ld as they are; for link.exe in its own spelling,
+/// `/LIBPATH:DIR` and `NAME.lib`, and no group: link.exe searches every
+/// library until nothing more resolves, in any order. Nothing for a program
+/// that names none.
 ///
 /// The group is GNU ld's (and gold's) way of resolving archives whatever
 /// their order: they search an archive only for what is undefined when they
@@ -400,6 +563,15 @@ fn link_plan_args_for(flavor: LinkerFlavor, program: &Program, link_dirs: &[Stri
         return args;
     }
     args.extend(["-C".to_string(), "default-linker-libraries=yes".to_string()]);
+    if flavor == LinkerFlavor::Msvc {
+        for dir in link_dirs {
+            args.extend(["-C".to_string(), format!("link-arg=/LIBPATH:{dir}")]);
+        }
+        for library in &program.links {
+            args.extend(["-C".to_string(), format!("link-arg={}", library_argument(flavor, library))]);
+        }
+        return args;
+    }
     for dir in link_dirs {
         args.extend(["-C".to_string(), format!("link-arg=-L{dir}")]);
     }
@@ -451,6 +623,7 @@ fn link_stub(program: &Program, destination: &Path) -> Result<(), String> {
     let work = WorkDir::beside(destination)?;
     let executable = work.0.join("executable");
     std::fs::write(&executable, &bytes).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
@@ -795,7 +968,7 @@ mod tests {
                 "link-arg=-Wl,--end-group"
             ]
         );
-        assert_eq!(describe_link_plan(&program), "symbols c_add; libraries -lfirst -lsecond");
+        assert_eq!(describe_link_plan_for(LinkerFlavor::Gnu, &program), "symbols c_add; libraries -lfirst -lsecond");
     }
 
     /// Apple's ld gets the same plan without GNU's group, which it rejects
@@ -821,11 +994,106 @@ mod tests {
         assert!(args.iter().all(|a| !a.contains("--start-group") && !a.contains("--end-group") && !a.contains("-Wl,")));
     }
 
-    /// The host's flavor is its platform linker's: Apple's on macOS, GNU's
-    /// on Linux.
+    /// Microsoft's link.exe gets the plan in its own spelling: the C
+    /// driver's default libraries kept, `/LIBPATH:DIR` for every search
+    /// directory (a path with a space is one argument), `NAME.lib` for every
+    /// library in the plan's order, and no GNU flag or group at all (link.exe
+    /// resolves libraries in any order).
+    #[test]
+    fn ffi_link_plan_msvc_is_link_exes_spelling() {
+        let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let args = link_plan_args_for(LinkerFlavor::Msvc, &program, &["C:\\opt\\lib".to_string(), "rel dir".to_string()]);
+        let links: Vec<&str> = args.iter().filter(|a| *a != "-C").map(String::as_str).collect();
+        assert_eq!(
+            links,
+            vec![
+                "default-linker-libraries=yes",
+                "link-arg=/LIBPATH:C:\\opt\\lib",
+                "link-arg=/LIBPATH:rel dir",
+                "link-arg=first.lib",
+                "link-arg=second.lib"
+            ]
+        );
+        assert!(args.iter().all(|a| !a.contains("-Wl,") && !a.contains("group") && !a.contains("link-arg=-l") && !a.contains("link-arg=-L")));
+        // Messages name each library as link.exe is given it.
+        assert_eq!(describe_link_plan_for(LinkerFlavor::Msvc, &program), "symbols c_add; libraries first.lib second.lib");
+        assert_eq!(describe_link_plan_for(LinkerFlavor::Apple, &program), "symbols c_add; libraries -lfirst -lsecond");
+    }
+
+    /// The C runtime of an executable: on Windows (MSVC) the static release
+    /// one, so that it imports no Visual C++ redistributable DLL, for every
+    /// program, one that calls C included, and every other Microsoft runtime
+    /// excluded from the link, so that a C library's default-library
+    /// directive never brings a second one; nothing anywhere else.
+    #[test]
+    fn link_hint_explains_imports_of_the_dynamic_c_runtime() {
+        // link.exe's words for a /MD library's runtime call in a static-CRT
+        // executable (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime").
+        let md = "LINK : warning LNK4217: symbol 'malloc' defined in 'libucrt.lib(malloc.obj)' is imported by 'lib.lib(lib.obj)' in function 'f'\n\
+                  lib.lib(lib.obj) : error LNK2019: unresolved external symbol __imp_strtol referenced in function f";
+        let hint = link_hint(LinkerFlavor::Msvc, md).expect("a hint for __imp_");
+        assert!(hint.contains("/MD") && hint.contains("/MT"), "{hint}");
+        // Only for that: an ordinary unresolved symbol, another linker.
+        assert_eq!(link_hint(LinkerFlavor::Msvc, "program.o : error LNK2019: unresolved external symbol botlish_nope referenced in function botlish_fn_0"), None);
+        assert_eq!(link_hint(LinkerFlavor::Gnu, md), None);
+        assert_eq!(link_hint(LinkerFlavor::Apple, md), None);
+    }
+
+    #[test]
+    fn crt_is_static_and_alone_for_msvc_executables() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let text = FFI_PROGRAM.replace("link \"first\"\n", "").replace("link \"second\"\n", "")
+            .replace("foreign 0 \"c_add\" params=\"i32 i32\" result=i32 name=\"m::add\"\n", "")
+            .replace("%2 = foreigncall 0 %0 %1", "%2 = int 42");
+        let plain = crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
+        for program in [&plain, &ffi] {
+            let args = crt_args_for(LinkerFlavor::Msvc, program);
+            assert_eq!(&args[..2], ["-C", "target-feature=+crt-static"]);
+            let excluded: Vec<&str> = args[2..]
+                .iter()
+                .filter(|a| *a != "-C")
+                .map(|a| a.strip_prefix("link-arg=/NODEFAULTLIB:").unwrap_or_else(|| panic!("{a}")))
+                .collect();
+            assert_eq!(excluded.len() * 2, args.len() - 2);
+            // The dynamic runtimes, release and debug, and the static debug
+            // one, C and C++; never the static release runtime linked.
+            for library in ["msvcrt.lib", "vcruntime.lib", "ucrt.lib", "msvcrtd.lib", "libcmtd.lib", "libucrtd.lib", "msvcprt.lib"] {
+                assert!(excluded.contains(&library), "{library} not excluded: {excluded:?}");
+            }
+            for library in ["libcmt.lib", "libvcruntime.lib", "libucrt.lib", "libcpmt.lib", "kernel32.lib"] {
+                assert!(!excluded.contains(&library), "{library} excluded: {excluded:?}");
+            }
+        }
+        for flavor in [LinkerFlavor::Gnu, LinkerFlavor::Apple] {
+            assert!(crt_args_for(flavor, &plain).is_empty());
+            assert!(crt_args_for(flavor, &ffi).is_empty());
+        }
+        assert_eq!(crt_args(&plain), crt_args_for(LINKER, &plain));
+    }
+
+    /// An executable's file: on Windows a name without an extension gets
+    /// `.exe` (a name with one is kept), elsewhere every name is kept.
+    #[test]
+    fn executable_names_follow_the_platform() {
+        let windows = cfg!(windows);
+        let named = |p: &str| executable_path(Path::new(p)).to_string_lossy().into_owned();
+        assert_eq!(named("dir/fib"), if windows { "dir/fib.exe" } else { "dir/fib" });
+        assert_eq!(named("dir.v2/fib"), if windows { "dir.v2/fib.exe" } else { "dir.v2/fib" });
+        assert_eq!(named("dir/fib.exe"), "dir/fib.exe");
+        assert_eq!(named("dir/fib.bin"), "dir/fib.bin");
+    }
+
+    /// The host's flavor is its platform linker's: Apple's on macOS,
+    /// Microsoft's on Windows (MSVC), GNU's on Linux.
     #[test]
     fn ffi_link_plan_flavor_is_the_hosts() {
-        let expected = if cfg!(target_os = "macos") { LinkerFlavor::Apple } else { LinkerFlavor::Gnu };
+        let expected = if cfg!(target_os = "macos") {
+            LinkerFlavor::Apple
+        } else if cfg!(target_env = "msvc") {
+            LinkerFlavor::Msvc
+        } else {
+            LinkerFlavor::Gnu
+        };
         assert_eq!(LINKER, expected);
         let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         assert_eq!(link_plan_args(&program, &[]), link_plan_args_for(expected, &program, &[]));
@@ -871,6 +1139,28 @@ mod tests {
         assert!(kept.contains("undefined reference to `botlish_no_such_symbol'"), "{kept:?}");
         assert!(kept.contains("collect2: error: ld returned 1 exit status"), "{kept:?}");
         assert!(!kept.contains("\"-m64\""), "{kept:?}");
+        // Microsoft's link.exe, as rustc reports it, and LLVM's lld-link.
+        let msvc = concat!(
+            "error: linking with `link.exe` failed: exit code: 1120\n",
+            "  |\n",
+            "  = note: \"C:\\\\VS\\\\link.exe\" \"/NOLOGO\" \"C:\\\\w\\\\program.o\" \"botlish_missing.lib\" \"/OUT:C:\\\\w\\\\executable.exe\"\n",
+            "  = note: some arguments are omitted. use `--verbose` to show all linker arguments\n",
+            "  = note: program.o : error LNK2019: unresolved external symbol botlish_no_such_symbol referenced in function botlish_fn_0\r\n",
+            "          C:\\w\\executable.exe : fatal error LNK1120: 1 unresolved externals\r\n",
+            "          LINK : fatal error LNK1181: cannot open input file 'botlish_missing.lib'\r\n",
+            "          lld-link: error: could not open 'botlish_missing.lib': no such file or directory\n",
+        );
+        let kept = linker_diagnostics(msvc);
+        for line in [
+            "error LNK2019: unresolved external symbol botlish_no_such_symbol referenced in function botlish_fn_0",
+            "fatal error LNK1120: 1 unresolved externals",
+            "LINK : fatal error LNK1181: cannot open input file 'botlish_missing.lib'",
+            "lld-link: error: could not open 'botlish_missing.lib': no such file or directory",
+            "error: linking with `link.exe` failed: exit code: 1120",
+        ] {
+            assert!(kept.lines().any(|l| l.ends_with(line)), "{line:?} not in {kept:?}");
+        }
+        assert!(!kept.contains("/NOLOGO"), "{kept:?}");
     }
 
     /// An ordinary program passes the linker nothing.

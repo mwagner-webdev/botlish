@@ -222,11 +222,11 @@ test raw-internal-abi-gc-stress {a raw parameter and a raw loop variable live ac
     set path [file join $dir prog]
     try {
         native::executable $hir $path
-        set on [exec env PATH= $path]
-        set gc [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        set on [runStandalone $path]
+        set gc [runStandalone $path BOTLISH_NATIVE_GC_STRESS 1]
         file delete $path
         native::executable $hir $path -block-escape-opt 0
-        set off [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        set off [runStandalone $path BOTLISH_NATIVE_GC_STRESS 1]
         list $sig [parity $hir] $on $gc $off
     } finally {
         removeDirectory {raw internal abi executable test}

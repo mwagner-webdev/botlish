@@ -28,13 +28,11 @@ core::cabi::installTestFixture
 
 # Live arrays need only the native backend (the JIT): those tests run on
 # every host it is built for. Allocation counts and GC stress need the native
-# runtime on Linux (as in native-view.test), and a standalone executable a
-# host that links them (tests/helpers.tcl).
+# backend's whole runtime (nativeCoroutines, as in native-view.test), and a
+# standalone executable a host that links them (tests/helpers.tcl).
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set laBackends {interp compile cranelift-generic cranelift}
 set laNative {cranelift-generic cranelift}
@@ -801,7 +799,7 @@ test la-pointer-affinity {affinity is preserved: a List of pointers loaded from 
         [laKinds "fn f(v: NativeView\[PTRS\]) -> List\[std::ffi::c::Ptr\[Node\]\]:\n    \[std::binary::element(v.ps, 0), std::binary::element(v.ps, 1)\]\n0\n"] \
         [laKinds "fn f(v: NativeView\[PTRS\], e: NativeEdit\[PTRS\]) -> unit:\n    xs = std::binary::load(v.ps)\n    std::binary::store(e, PTRS.ps, xs)\n    std::binary::store(e, PTRS.ps, xs)\n0\n"] \
         [hir::types::show [hir::layouts::TermConsumerType {array 2 {cptr {nstruct Node}}}]]
-} -result {USE-AFTER-MOVE USE-AFTER-MOVE accepted accepted {List[std::ffi::c::Ptr[Node]]}}
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE accepted accepted {List[std::ffi::c::Ptr[Node]]{length: 2}}}
 
 test la-native-authority {read and write authority stay distinct inside arrays: an array read through a view is NativeView[array N of E], whose elements are views -- std::binary::store_element through it, or std::binary::store through one of its record elements, is BINARY-OPERAND (a view never becomes an edit); std::binary::store_element writes one scalar or pointer element (an element that is a record or a row is LAYOUT-OPERAND: write its fields or elements through its own edit); std::binary::element needs a live array (a scalar field, a record view or a record element's edit is BINARY-OPERAND), as std::binary::load needs a view, an edit or a live array; reading through an edit's arrays is allowed} -body {
     set f "fn f(v: NativeView\[SHAPES\], e: NativeEdit\[SHAPES\]) -> int:\n"
@@ -818,13 +816,13 @@ test la-native-authority {read and write authority stay distinct inside arrays: 
     }
 } -cleanup {unset -nocomplain f body} -result {{BINARY-OPERAND {std::binary::store_element writes live native memory through a native edit; this array is NativeView[array 4 of int[std::binary::U8]], read through a native view, which is read-only: write authority over native memory is a NativeEdit, made from a pointer by std::binary::native::edit (a view never becomes one)}} {BINARY-OPERAND {std::binary::store writes live native memory through a native edit (a NativeEdit[L], std::binary::native::edit); this value's type here is NativeView[TAILED], a native view, which is read-only: write authority over native memory is a NativeEdit[L], made from a pointer by std::binary::native::edit (a view never becomes one)}} {LAYOUT-OPERAND {std::binary::store_element writes one scalar or pointer element, but an element of NativeEdit[array 2 of TAILED] is the nested layout TAILED: write its fields through std::binary::element(a, i), the element's own live edit}} {LAYOUT-OPERAND {std::binary::store_element writes one scalar or pointer element, but an element of NativeEdit[array 2 of array 3 of int[std::binary::U16]] is an array: write its elements through std::binary::element(a, i), the element's own live array}} {BINARY-OPERAND {std::binary::element needs a live fixed array: a value whose static type is NativeView[array N of E] or NativeEdit[array N of E] (an array field read through a native view or edit, v.items, or an element of such an array); this value's type here is int[std::binary::U16]}} {BINARY-OPERAND {std::binary::element needs a live fixed array: a value whose static type is NativeView[array N of E] or NativeEdit[array N of E] (an array field read through a native view or edit, v.items, or an element of such an array); this value's type here is NativeView[SHAPES]}} {BINARY-OPERAND {std::binary::load needs a value whose static type is NativeView[L] or NativeEdit[L] for a layout L (a native view or edit, std::binary::native::view or std::binary::native::edit, whose layout it reads every field of) or a live fixed array NativeView[array N of E] (v.items); this value's type here is int[std::binary::U16]}} {BINARY-OPERAND {std::binary::element needs a live fixed array: a value whose static type is NativeView[array N of E] or NativeEdit[array N of E] (an array field read through a native view or edit, v.items, or an element of such an array); this value's type here is NativeEdit[TAILED]}}}
 
-test la-native-types {NativeView[array N of E] and NativeEdit[array N of E] name live arrays: the extent and the element are part of the type (array 5, or I8 elements, is another type: TYPE), a view and an edit are distinct (no upgrade, no implicit downgrade), and a row and an array of records have their own types; an extent of 0 in an annotation is LAYOUT-ARRAY-EXTENT; the copied type of an array (TermConsumerType) is a List of its elements' copies} -body {
+test la-native-types {NativeView[array N of E] and NativeEdit[array N of E] name live arrays: the extent and the element are part of the type (array 5, or I8 elements, is another type: TYPE), a view and an edit are distinct (no upgrade, no implicit downgrade), and a row and an array of records have their own types; an extent of 0 in an annotation is LAYOUT-ARRAY-EXTENT; the copied type of an array (TermConsumerType) is a List of its elements' copies, each List stating its extent (LIST-CARDINALITY-REFINEMENTS.md)} -body {
     set calls "fn f(v: NativeView\[SHAPES\], e: NativeEdit\[SHAPES\]) -> int:\n    g(v.first) + g(e.first) + g(v.m) + g(v.tails)\n0\n"
     list {*}[lmap t {"NativeView\[array 4 of std::binary::U8\]" "NativeView\[array 5 of std::binary::U8\]" "NativeView\[array 4 of std::binary::I8\]" "NativeEdit\[array 4 of std::binary::U8\]" "NativeView\[array 2 of array 3 of std::binary::U16\]" "NativeView\[array 2 of TAILED\]"} {
         lmap d [laDiagnostics "fn g(a: $t) -> int:\n    0\n$calls"] {lindex [split [lindex $d 1] :] 1}
     }] [laFirst "fn g(a: NativeView\[array 0 of std::binary::U8\]) -> int:\n    0\n0\n"] \
         [hir::types::show [hir::layouts::TermConsumerType {array 2 {array 3 {layout TAILED}}}]]
-} -cleanup {unset -nocomplain calls t} -result [list {20 33 42} {7 20 33 42} {7 20 33 42} {7 33 42} {7 20 42} {7 20 33} {LAYOUT-ARRAY-EXTENT {unknown or invalid type NativeView[array 0 of std::binary::U8] for parameter "a": NativeView[array 0 of std::binary::U8]: a fixed array's extent is a positive integer, not 0}} {List[List[LayoutStruct[TAILED]]]}]
+} -cleanup {unset -nocomplain calls t} -result [list {20 33 42} {7 20 33 42} {7 20 33 42} {7 33 42} {7 20 42} {7 20 33} {LAYOUT-ARRAY-EXTENT {unknown or invalid type NativeView[array 0 of std::binary::U8] for parameter "a": NativeView[array 0 of std::binary::U8]: a fixed array's extent is a positive integer, not 0}} {List[List[LayoutStruct[TAILED]]{length: 3}]{length: 2}}]
 
 # ---------------------------------------------------------------------------
 # Proofs: indices and extents
@@ -899,7 +897,7 @@ test la-native-nir {native code of live arrays: an element read at a dynamic ind
         [laOpNames [laNir $program ld]] [laOpNames $bw] [regexp -all faildeclared $bw]
 } -cleanup {unset -nocomplain program whole checked bw} -result {{ige ilt nativeload risub runbox} {{%8 = op nativeload %0 %1 %7}} {imul iadd nativeload runbox} {imul iadd iadd nativeload runbox} {iadd nativestore} {iadd ilt imul listgetproven listnew nativestorearray} 0 1 2 1 nativeloadarray {mbyteslen ieq listlen ieq mbytesclone binstorearray} 2}
 
-test la-native-allocations {natively, element reads and stores allocate nothing (a row's element, a record element's field, a u32 store above i32 -- 1000 of each, the same as a loop doing nothing), a whole load allocates exactly the List it returns (one per row, one Struct per record: unrolled, no accumulator), and a whole store allocates nothing beyond its List operand} -constraints nativeLinux -body {
+test la-native-allocations {natively, element reads and stores allocate nothing (a row's element, a record element's field, a u32 store above i32 -- 1000 of each, the same as a loop doing nothing), a whole load allocates exactly the List it returns (one per row, one Struct per record: unrolled, no accumulator), and a whole store allocates nothing beyond its List operand} -constraints {nativeBuilt nativeCoroutines} -body {
     set loop "fn run(n: int) -> int errors NativeViewNull, NativeEditNull:\n    p = memory(ramp(48))\n    v = std::binary::native::view(SHAPES, p)\n    e = std::binary::native::edit(SHAPES, p)\n    k = loop i from 0 to n:\n        f(v, e)\n    0\nr = run(1000):\n    on NativeViewNull:\n        0\n    on NativeEditNull:\n        0\nr\n"
     set head "fn f(v: NativeView\[SHAPES\], e: NativeEdit\[SHAPES\]) -> int:\n"
     lmap body [list \
@@ -940,7 +938,7 @@ test la-unchecked-replay {a program compiled unchecked (-strict 0) whose array o
 # ---------------------------------------------------------------------------
 # HIR, interchange, isolation, cache, specialization
 
-test la-hir-text-roundtrip {HIR text carries array fields (a layout line's `rows: array 2 of array 2 of U16 at 4`) and live array types (NativeView[array 2 of array 2 of U16]): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (a program that imports binary does not round trip as HIR text in general: the operations' HIR is carried by interchange, la-interchange)} -constraints nativeBuilt -body {
+test la-hir-text-roundtrip {HIR text carries array fields (a layout line's `rows: array 2 of array 2 of U16 at 4`) and live array types (NativeView[array 2 of array 2 of U16]): formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome (the operations' HIR is carried by interchange too: la-interchange)} -constraints nativeBuilt -body {
     set source "direct module\n\nimport std::binary::native\nimport std::ffi::c\n\ntype U8 = Int in 0..255\ntype U16 = Int in 0..65535\n\nopaque struct Node:\n    tag: unit\n\nlayout P:\n    size 4\n    align 2\n    field x: U16 at 0\n    field y: U16 at 2\n\nlayout R:\n    size 24\n    align 2\n    field bytes: array 4 of U8 at 0\n    field rows: array 2 of array 2 of U16 at 4\n    field ps: array 3 of P at 12\n\nfn rows_of(r: NativeView\[R\]) -> NativeView\[array 2 of array 2 of U16\]:\n    r.rows\n\nfn ps_of(r: NativeView\[R\]) -> NativeView\[array 3 of P\]:\n    r.ps\n\nfn run() -> int errors NativeViewNull:\n    p = std::ffi::c::null\[Node\]()\n    v = std::binary::native::view(R, p)\n    a = rows_of(v)\n    b = ps_of(v)\n    0\n\nr = run():\n    on NativeViewNull:\n        -1\nr\n"
     set hir [surface::compile $source arrays.bot -warnings off]
     set text [hir::format $hir]
@@ -1022,7 +1020,7 @@ test la-registrations {the array operations are root natives whose -layout roles
         set meta [core::native::metadata $name]
         list $name [dict get $meta layout] [dict get $meta contextFree] [dict get $meta ownership] [dict get $meta resultShape] [dict get $meta errors] [dict get $meta bounds] [dict get $meta resultLength]
     }
-} -cleanup {unset -nocomplain name meta} -result {{std::binary::element {arrayed {0 binary#element} index 1 op element} 0 {observe observe} {native-element 0} IndexNotFound {index narray 0 1} {}} {binary#element {array 2 index 1 op element} 0 {observe observe observe} {native-element 0} IndexNotFound {index narray 0 1} {}} {std::binary::store_element {arrayed {0 binary#store_element} index 1 value 2 op store_element} 0 {observe observe observe} {} IndexNotFound {index narray 0 1} {}} {binary#store_element {array 3 index 1 value 2 op store_element} 0 {observe observe observe observe} {} IndexNotFound {index narray 0 1} {}} {std::binary::load {viewed {0 binary#load} arrayed {0 binary#load_array}} 0 observe {view-struct 0} {} {} {extent 0}} {binary#load_array {array 1 op load_array} 0 {observe observe} {view-struct 0} {} {} {extent 0}} {std::binary::store {edited 0 path 1 value 2 op store} 0 {observe observe observe} {} LayoutExtentMismatch {extents 2} {}}}
+} -cleanup {unset -nocomplain name meta} -result {{std::binary::element {arrayed {0 binary#element} index 1 op element} 0 {observe observe} {native-element 0} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary#element {array 2 index 1 op element} 0 {observe observe observe} {native-element 0} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {std::binary::store_element {arrayed {0 binary#store_element} index 1 value 2 op store_element} 0 {observe observe observe} {} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {binary#store_element {array 3 index 1 value 2 op store_element} 0 {observe observe observe observe} {} {IndexNotFound NonFiniteFloat} {index narray 0 1} {}} {std::binary::load {viewed {0 binary#load} arrayed {0 binary#load_array}} 0 observe {view-struct 0} NonFiniteFloat {} {extent 0}} {binary#load_array {array 1 op load_array} 0 {observe observe} {view-struct 0} NonFiniteFloat {} {extent 0}} {std::binary::store {edited 0 path 1 value 2 op store} 0 {observe observe observe} {} {LayoutExtentMismatch NonFiniteFloat} {extents 2} {}}}
 
 # ---------------------------------------------------------------------------
 # Executables and GC stress
@@ -1038,7 +1036,7 @@ test la-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LIN
     list [expr {"value {[exec $path]}" eq $direct}] [lindex $direct 0]
 } -cleanup {unset -nocomplain source hir path direct} -result {1 value}
 
-test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live arrays stay exact: whole loads building Lists of Lists and of LayoutStructs, 64-bit elements that are BigInts stored and loaded, whole stores from Lists made in the same iteration, byte writes of arrays each allocating a fresh storage -- every operand stays rooted while the next allocation runs} -constraints nativeLinux -body {
+test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live arrays stay exact: whole loads building Lists of Lists and of LayoutStructs, 64-bit elements that are BigInts stored and loaded, whole stores from Lists made in the same iteration, byte writes of arrays each allocating a fresh storage -- every operand stays rooted while the next allocation runs} -constraints {nativeBuilt nativeCoroutines} -body {
     set source [laProgram "fn many(k: int) -> List\[any\] errors NativeEditNull, NativeViewNull, LayoutLengthMismatch:\n    p = memory(fill(64, 0))\n    e = std::binary::native::edit(SCALARS, p)\n    v = std::binary::native::view(SCALARS, p)\n    q = memory(ramp(48))\n    w = std::binary::native::view(SHAPES, q)\n    rs = loop i from 0 to k:\n        std::binary::store_element(e.u64, 0, 18446744073709551615)\n        std::binary::store(e, SCALARS.i64, \[i64(-9223372036854775808), i64(9223372036854775807)\])\n        a = std::binary::write(mutable(fill(48, 0)), SHAPES.m, std::binary::load(w.m))\n        b = std::binary::write(a, SHAPES.tails, std::binary::load(w.tails))\n        \[std::binary::load(v), std::binary::load(w), frozen(b) == bytes_of(fill(48, 0)), std::binary::element(v.i64, 1)\]\n    std::list::at(rs, k - 1):\n        on IndexNotFound:\n            \[\]\nr = many(40):\n    on NativeEditNull:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\nr\n"]
     set hir [surface::compile $source arrays.bot -warnings off]
     set plain [laOutcome cranelift $hir]
@@ -1073,8 +1071,7 @@ set ::laFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
     set ::laFixtureDir [makeDirectory narray-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi narray-fixture.c] -o [file join $::laFixtureDir fixture.o]
-        exec ar rcs [file join $::laFixtureDir libbotlish_narray_fixture.a] [file join $::laFixtureDir fixture.o]
+        ctool::staticLibrary $::laFixtureDir botlish_narray_fixture [file join $::projectRoot tests cffi narray-fixture.c]
     } message]} {
         puts stderr "layout-arrays.test: the C fixture did not build: $message"
         set ::laFixtureDir ""

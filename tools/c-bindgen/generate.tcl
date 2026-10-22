@@ -142,10 +142,11 @@ proc ::cbind::generate::run {profile target {options {}}} {
     set requests [dict get $model requests]
     set values [::cbind::probe::values $config $tool [dict get $requests values]]
     set symbols [::cbind::probe::symbols $config $tool [dict get $requests symbols] $prefix]
+    set prototypes [::cbind::probe::prototypes $config $tool [dict get $requests prototypes]]
     dict set timing probes [Seconds $t0]
 
     set t0 [clock microseconds]
-    set model [::cbind::model::resolve $model [dict create values $values symbols $symbols prefix $prefix]]
+    set model [::cbind::model::resolve $model [dict create values $values symbols $symbols prototypes $prototypes prefix $prefix]]
     dict set model profile $profile
     dict set model target $target
     dict set model run [dict create revision $revision command [dict get $run command] \

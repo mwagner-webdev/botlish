@@ -134,8 +134,58 @@ extern c fn bgf_renamed named "bgf_renamed_impl"(x: std::ffi::c::Int) -> std::ff
 # C: int bgf_current(int x)
 extern c fn bgf_current(x: std::ffi::c::Int) -> std::ffi::c::Int
 
+# C: int bgf_printf(const char *format, ...)
+extern c fn bgf_printf(
+    format: std::ffi::c::Ptr[std::ffi::c::Char] read noescape,
+    variadic
+) -> std::ffi::c::Int
+
+# C: int bgf_vother(int n, ...)
+extern c fn bgf_vother(
+    n: std::ffi::c::Int,
+    variadic
+) -> std::ffi::c::Int
+
+# C: double bgf_scale(double x, float y)
+extern c fn bgf_scale(
+    x: std::ffi::c::Double,
+    y: std::ffi::c::Float
+) -> std::ffi::c::Double
+
+# C: void bgf_float_out(float *out)
+extern c fn bgf_float_out(out: std::ffi::c::Ptr[std::ffi::c::Float]) -> unit
+
 # C: int bgf_linux_only(void)
 extern c fn bgf_linux_only() -> std::ffi::c::Int
+
+# C: bgf_real32 bgf_scale32(bgf_scalar32 x, bgf_scalar64 k)
+extern c fn bgf_scale32(
+    x: std::ffi::c::Float,
+    k: std::ffi::c::Double
+) -> std::ffi::c::Float
+
+# C: double bgf_dot(const float *xs, const double *ys, size_t n)
+extern c fn bgf_dot(
+    xs: std::ffi::c::Ptr[std::ffi::c::Float],
+    ys: std::ffi::c::Ptr[std::ffi::c::Double],
+    n: std::ffi::c::ULong
+) -> std::ffi::c::Double
+
+# C: float bgf_apply_float(bgf_float_fn f, float x)
+extern c fn bgf_apply_float(
+    f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float], return: std::ffi::c::Float}],
+    x: std::ffi::c::Float
+) -> std::ffi::c::Float
+
+# C: bgf_float_fn bgf_halver(void)
+extern c fn bgf_halver(
+    
+) -> std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Float], return: std::ffi::c::Float}]
+
+# C: double bgf_sum_mixed(const bgf_mixed_floats *m)
+extern c fn bgf_sum_mixed(
+    m: std::ffi::c::Ptr[bgf::ctypes::bgf_mixed_floats]
+) -> std::ffi::c::Double
 
 # C: bgf_legacy: an alias of bgf_current, int bgf_current(int x)
 extern c fn bgf_legacy named "bgf_current"(x: std::ffi::c::Int) -> std::ffi::c::Int
@@ -144,4 +194,10 @@ extern c fn bgf_legacy named "bgf_current"(x: std::ffi::c::Int) -> std::ffi::c::
 extern c fn bgf_call_add named "bgf_add"(
     a: std::ffi::c::Int,
     b: std::ffi::c::Int
+) -> std::ffi::c::Int
+
+# C: bgf_print: an alias of bgf_printf, int bgf_printf(const char *format, ...)
+extern c fn bgf_print named "bgf_printf"(
+    format: std::ffi::c::Ptr[std::ffi::c::Char] read noescape,
+    variadic
 ) -> std::ffi::c::Int

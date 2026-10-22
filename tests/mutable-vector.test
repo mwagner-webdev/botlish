@@ -63,7 +63,7 @@ proc mvCode {text} {
 
 proc mvMessage {text} {
     if {[catch {surface::compile $text -warnings off} message options]} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
         return $message
     }
     return ok
@@ -185,7 +185,7 @@ r = schedule():
 r
 "
 
-test mv-principal-scheduler {item 102: first and second move into the List and the List into the vector; take moves one continuation out, resuming it advances the same execution, push moves it back, pop moves the other out; every continuation is released exactly once, none forked, on every backend} -body {
+test mv-principal-scheduler {item 102: first and second move into the List and the List into the vector; take moves one continuation out, resuming it advances the same execution, push moves it back, pop moves the other out; every continuation is released exactly once, none forked, on every backend} -constraints nativeCoroutines -body {
     list [mvAgree $mvPrincipal] [mvReleases $mvPrincipal] [mvReleases $mvPrincipal compile]
 } -result {{value {[11, 22, 0]}} {{value {[11, 22, 0]}} 2 1 {1 2}} {{value {[11, 22, 0]}} 2 1 {1 2}}}
 
@@ -220,7 +220,7 @@ test mv-type-syntax {items 3, 74: MutableVector[T] is an applied type like List[
         [mvCode "import std::mutable_vector\nfn f(v: mutable_vector\[int\]) -> int:\n    1\nf(1)\n"]
 } -result {{MutableVector[List[str]]} {mutvec {list str}} TYPE {expected "]" after the type argument, found ","} TYPE}
 
-test mv-construction {items 10-12: from_list(List[T]) is MutableVector[T]; the empty literal gives the proven-empty MutableVector[never], admissible as a declared MutableVector[T] (the typed empty vector) and into which nothing can be pushed; from_list leaves an unrestricted List usable and unchanged by later pushes} -body {
+test mv-construction {items 10-12: from_list(List[T]) is MutableVector[T]; the empty literal gives the proven-empty MutableVector[never], admissible as a declared MutableVector[T] (the typed empty vector) and into which nothing can be pushed; from_list leaves an unrestricted List usable and unchanged by later pushes} -constraints nativeCoroutines -body {
     list [mvAgree "import std::mutable_vector\nimport std::list\nxs = \[1, 2\]\nv = std::mutable_vector::from_list(xs)\nv.push(3)\n\[xs, v, std::list::length(xs)\]\n"] \
         [hir::types::show [mvBindingType [surface::compile "import std::mutable_vector\nv = std::mutable_vector::from_list(\[\])\nv.length()\n" -warnings off] v]] \
         [mvAgree "${mvDecls}q = empty_queue()\nq.push(make(1))\nq.length()\n"] \
@@ -285,14 +285,14 @@ test mv-take-order {items 24, 25: take(i) keeps the relative order of the elemen
     mvAgree "import std::mutable_vector\nfn f() -> List\[int\] errors IndexNotFound:\n    v = std::mutable_vector::from_list(\[1, 2, 3, 4, 5\])\n    a = v.take(2)\n    b = v.take(0)\n    v.push(6)\n    c = v.take(0)\n    \[a, b, c, v.at(0), v.at(1), v.at(2), v.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
 } -result {value {[3, 1, 2, 4, 5, 6, 3]}}
 
-test mv-show {a vector shows as its current elements on every backend; == and hash of a vector are the EQUALITY error (none was added), statically AFFINE-EQUALITY-UNSUPPORTED for an affine one} -body {
+test mv-show {a vector shows as its current elements on every backend; == and hash of a vector are the EQUALITY error (none was added), statically AFFINE-EQUALITY-UNSUPPORTED for an affine one (a hash of a value statically known to be a vector is TRAIT-NOT-SATISFIED at compile time, HASHABLE-AND-KEYED-HASH.md: here an untyped function hashes it)} -body {
     list [mvAgree "import std::mutable_vector\nv = std::mutable_vector::from_list(\[\"a0\", \"b0\"\])\n\[v, std::mutable_vector::from_list(\[\])\]\n"] \
         [lindex [mvAgree "import std::mutable_vector\nv = std::mutable_vector::from_list(\[1\])\nv == v\n"] 1] \
-        [lindex [mvAgree "import std::mutable_vector\nv = std::mutable_vector::from_list(\[1\])\nhash(v)\n"] 1] \
+        [lindex [mvAgree "import std::mutable_vector\nfn h(x):\n    hash(x)\nv = std::mutable_vector::from_list(\[1\])\nh(v)\n"] 1] \
         [mvCode "${mvDecls}q = empty_queue()\nq == q\n"]
 } -result {{value {[<mutable-vector ["a0", "b0"]>, <mutable-vector []>]}} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} AFFINE-EQUALITY-UNSUPPORTED}
 
-test mv-generic {item 72: an untyped function given a vector is specialized by the vector's static type: one size(xs) serves unrestricted and affine vectors (the affine one moves in and is released by the clone)} -body {
+test mv-generic {item 72: an untyped function given a vector is specialized by the vector's static type: one size(xs) serves unrestricted and affine vectors (the affine one moves in and is released by the clone)} -constraints nativeCoroutines -body {
     set text "${mvDecls}fn size(xs) -> int:\n    std::mutable_vector::length(xs)\n\[size(std::mutable_vector::from_list(\[1, 2, 3\])), size(std::mutable_vector::from_list(\[make(1)\]))\]\n"
     list [mvAgree $text] [lrange [mvReleases $text] 1 2] [dict get [lindex [mvNative $text] 0] released]
 } -cleanup {unset -nocomplain text} -result {{value {[3, 1]}} {1 1} 1}
@@ -436,12 +436,12 @@ struct Capture:
 # ---------------------------------------------------------------------------
 # Affine vectors (items 7, 8, 12, 19-36, 40-42, 47, 60, 81)
 
-test mv-affine-push-moves {item 21: pushing an affine element moves it: the pushed binding is USE-AFTER-MOVE while the vector stays usable} -body {
+test mv-affine-push-moves {item 21: pushing an affine element moves it: the pushed binding is USE-AFTER-MOVE while the vector stays usable} -constraints nativeCoroutines -body {
     list [mvCode "${mvDecls}fn f() -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    queue.push(step)\n    e = step(Command {value: 1})\n    queue.length()\nf()\n"] \
         [mvAgree "${mvDecls}fn f() -> int:\n    queue = empty_queue()\n    coroutine {step} = worker(1)\n    queue.push(step)\n    queue.length()\nf()\n"]
 } -result {USE-AFTER-MOVE {value 1}}
 
-test mv-affine-whole-moves {items 7, 8, 40, 41: an affine vector moves whole through bindings, arguments and results (the old owner is USE-AFTER-MOVE); no copy is made of it or of any element} -body {
+test mv-affine-whole-moves {items 7, 8, 40, 41: an affine vector moves whole through bindings, arguments and results (the old owner is USE-AFTER-MOVE); no copy is made of it or of any element} -constraints nativeCoroutines -body {
     set pre "${mvDecls}fn pass(values: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> MutableVector\[Coroutine{args: \[Command\], return: Event}\]:\n    values\nfn consume(queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    queue.length()\n"
     set ok "${pre}fn f() -> int:\n    q = std::mutable_vector::from_list(\[make(1), make(2)\])\n    r = pass(q)\n    s = r\n    consume(s)\nf()\n"
     list [mvAgree $ok] [lrange [mvReleases $ok] 1 2] \
@@ -462,12 +462,12 @@ test mv-affine-at {item 19: `at` of an affine element is AFFINE-ELEMENT-COPY-OUT
         [mvMessage "${mvDecls}fn f() -> int:\n    q = empty_queue()\n    s = std::mutable_vector::at(q, 0):\n        on IndexNotFound:\n            make(1)\n    1\nf()\n"]
 } -result {AFFINE-ELEMENT-COPY-OUT AFFINE-ELEMENT-COPY-OUT {std::mutable_vector::at would copy an affine element out of `q` (MutableVector[Coroutine{args: [Command], return: Event, errors: []}]) while the vector still owns it, making a second owner: move it out instead -- `take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another (there are no references to elements)}}
 
-test mv-affine-pop-take-swap {items 22-27: pop and take move exactly one element out (the vector owns the rest), swap moves the replacement in and the old element out; a resumed element is the same execution; every coroutine is released exactly once} -body {
+test mv-affine-pop-take-swap {items 22-27: pop and take move exactly one element out (the vector owns the rest), swap moves the replacement in and the old element out; a resumed element is the same execution; every coroutine is released exactly once} -constraints nativeCoroutines -body {
     set text "${mvDecls}fn f() -> List\[int\] errors IndexNotFound:\n    q = std::mutable_vector::from_list(\[make(1), make(2), make(3)\])\n    a = q.pop()\n    b = q.take(0)\n    e1 = b(Command {value: 10})\n    old = q.swap(0, b)\n    e2 = old(Command {value: 20})\n    \[e1.value, e2.value, q.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
     list [mvAgree $text] [mvReleases $text]
 } -cleanup {unset -nocomplain text} -result {{value {[11, 22, 1]}} {{value {[11, 22, 1]}} 3 1 {3 2 1}}}
 
-test mv-affine-swap-failure {items 28, 59: a failed swap leaves the vector unchanged and releases the replacement it was given (owned by the failed operation, never handed back: the source binding stays moved); the handler runs; nothing leaks} -body {
+test mv-affine-swap-failure {items 28, 59: a failed swap leaves the vector unchanged and releases the replacement it was given (owned by the failed operation, never handed back: the source binding stays moved); the handler runs; nothing leaks} -constraints nativeCoroutines -body {
     set text "${mvDecls}fn f() -> int:\n    q = std::mutable_vector::from_list(\[make(1), make(2)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = old(Command {value: 1})\n    e.value * 10 + q.length()\nf()\n"
     list [mvAgree $text] [mvReleases $text] \
         [mvCode "${mvDecls}fn f() -> int:\n    q = std::mutable_vector::from_list(\[make(1)\])\n    coroutine {step} = worker(3)\n    old = q.swap(999, step):\n        on IndexNotFound:\n            make(4)\n    e = step(Command {value: 1})\n    1\nf()\n"]
@@ -496,13 +496,13 @@ test mv-affine-drop-order {items 32, 33, 81: a vector dropped with live elements
         [hir::affine::Descriptor {} [list mutvec {nstruct Running}]]
 } -result {{{value 1} 3 1 {1 2 3}} {{value 1} 2 1 {1 2}} vs1.1.c}
 
-test mv-affine-struct-elements {item 47: a vector of affine structs: push moves the struct (USE-AFTER-MOVE of even its unrestricted field), pop moves one out, destructuring it continues the same coroutine} -body {
+test mv-affine-struct-elements {item 47: a vector of affine structs: push moves the struct (USE-AFTER-MOVE of even its unrestricted field), pop moves one out, destructuring it continues the same coroutine} -constraints nativeCoroutines -body {
     set pre "${mvDecls}fn f() -> str errors IndexNotFound:\n    running = Running {name: \"w0\", step: make(7)}\n    queue = std::mutable_vector::from_list(\[Running {name: \"a0\", step: make(8)}\])\n    queue.push(running)\n"
     list [mvCode "${pre}    running.name\nr = f():\n    on IndexNotFound:\n        \"\"\nr\n"] \
         [mvAgree "${pre}    item = queue.pop()\n    {step, name} = item\n    e = step(Command {value: 1})\n    name\nr = f():\n    on IndexNotFound:\n        \"\"\nr\n"]
 } -cleanup {unset -nocomplain pre} -result {USE-AFTER-MOVE {value {"w0"}}}
 
-test mv-affine-struct-field {item 42: an affine vector as a struct field makes the struct affine; the field is a mutable place (`s.queue.push(...)`), the struct moves whole, a consuming destructuring takes the vector out} -body {
+test mv-affine-struct-field {item 42: an affine vector as a struct field makes the struct affine; the field is a mutable place (`s.queue.push(...)`), the struct moves whole, a consuming destructuring takes the vector out} -constraints nativeCoroutines -body {
     set text "${mvDecls}struct State:\n    name: str\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int errors IndexNotFound:\n    s = State {name: \"s0\", queue: std::mutable_vector::from_list(\[make(1)\])}\n    s.queue.push(make(2))\n    n = s.queue.length()\n    moved = s\n    {queue} = moved\n    first = queue.take(0)\n    e = first(Command {value: 5})\n    n * 100 + e.value\nr = f():\n    on IndexNotFound:\n        0\nr\n"
     list [mvAgree $text] [lrange [mvReleases $text] 1 2] \
         [mvCode "${mvDecls}struct State:\n    queue: MutableVector\[Coroutine{args: \[Command\], return: Event}\]\nfn f() -> int:\n    s = State {queue: empty_queue()}\n    q = s.queue\n    1\nf()\n"]
@@ -518,7 +518,7 @@ test mv-affine-erasure {item 71: an affine vector never becomes `any` (a paramet
         [mvCode "${mvDecls}fn f() -> any:\n    empty_queue()\nf()\n1\n"]
 } -result {AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED}
 
-test mv-affine-growth {items 35, 36: 1000 suspended coroutines pushed through many capacity changes, then drained: every one released exactly once, in order, none forked, lost or released early; natively every one released (none left to the collector), also under GC stress} -body {
+test mv-affine-growth {items 35, 36: 1000 suspended coroutines pushed through many capacity changes, then drained: every one released exactly once, in order, none forked, lost or released early; natively every one released (none left to the collector), also under GC stress} -constraints nativeCoroutines -body {
     set text "${mvDecls}fn grow(n: int, keep: int) -> int:\n    queue = empty_queue()\n    loop i from 0 to n:\n        coroutine {step} = worker(i)\n        queue.push(step)\n    total = loop step in queue:\n        if step(Command {value: 0}).value >= keep:\n            break\n        1\n    std::list::length(total)\n\[grow(1000, 2000), grow(1000, 500)\]\n"
     set r [mvReleases $text]
     list [mvAgree $text] [lrange $r 1 2] [expr {[lindex $r 3] eq [lmap i [lrepeat 2000 0] {incr k}]}] \
@@ -531,7 +531,7 @@ test mv-affine-growth {items 35, 36: 1000 suspended coroutines pushed through ma
 
 set mvLoopDecls "${mvDecls}fn q4() -> MutableVector\[Coroutine{args: \[Command\], return: Event}\]:\n    std::mutable_vector::from_list(\[make(1), make(2), make(3), make(4)\])\n"
 
-test mv-loop-consumes {items 48, 58: `loop item in queue` over an affine vector consumes it: the binding is moved at loop entry, each element moves into the loop variable in order and is released at the end of its iteration; the loop collects unrestricted values} -body {
+test mv-loop-consumes {items 48, 58: `loop item in queue` over an affine vector consumes it: the binding is moved at loop entry, each element moves into the loop variable in order and is released at the end of its iteration; the loop collects unrestricted values} -constraints nativeCoroutines -body {
     set text "${mvLoopDecls}fn f() -> List\[int\]:\n    queue = q4()\n    loop step in queue:\n        e = step(Command {value: 100})\n        e.value\nf()\n"
     list [mvAgree $text] [mvReleases $text] \
         [mvCode "${mvLoopDecls}fn f() -> int:\n    queue = q4()\n    xs = loop step in queue:\n        1\n    queue.length()\nf()\n"]
@@ -823,7 +823,7 @@ fn id(x: int) -> int:
 
 }
 
-test mv-cow-by-reference-yield {a context member handed over by reference to a native is read as it was when evaluated although a later argument yields and the resumer replaces the member meanwhile -- the yield bare or inside a call; a local vector, which no resumer can reach, is still handed over uncopied -- on every backend, with the copies the elaboration wrote} -body {
+test mv-cow-by-reference-yield {a context member handed over by reference to a native is read as it was when evaluated although a later argument yields and the resumer replaces the member meanwhile -- the yield bare or inside a call; a local vector, which no resumer can reach, is still handed over uncopied -- on every backend, with the copies the elaboration wrote} -constraints nativeCoroutines -body {
     lmap case {
         {fn w(context c: Counts, resume Msg) -> Ev:
     x = std::mutable_vector::at(c.values, (yield Ev {n: c.values.length()}).i):

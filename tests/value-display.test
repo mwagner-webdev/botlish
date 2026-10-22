@@ -119,7 +119,11 @@ test value-display-native-message-controls {a runtime error naming a String of e
 # ---------------------------------------------------------------------------
 # Printed output: main.tcl's value line, and a standalone executable's stdout
 # (show.rs). Both are read back without end-of-line translation, so a raw
-# carriage return could not be translated away.
+# carriage return could not be translated away. main.tcl's own lines end in
+# its standard output's line ending, Tcl's default: "\r\n" on Windows (an
+# executable's output is its bytes, "\n"); the value line is split at
+# exactly that.
+set mainEol [if {$::tcl_platform(platform) eq "windows"} {string cat \r\n} else {string cat \n}]
 
 test value-display-main {main.tcl prints a value holding a carriage return escaped, on every backend} -body {
     set path [file join $scratch main.bot]
@@ -132,7 +136,7 @@ test value-display-main {main.tcl prints a value holding a carriage return escap
         fconfigure $channel -translation lf -encoding utf-8
         set output [read $channel]
         close $channel
-        lindex [split $output \n] 1
+        lindex [split [string map [list $::mainEol \n] $output] \n] 1
     }
 } -result [lrepeat 4 {   value: ["a\rb", '\r']}]
 

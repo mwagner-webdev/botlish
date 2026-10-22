@@ -301,7 +301,12 @@ test setcontains-uri-web-is-unreserved-local-op-total {std::web::is_unreserved's
     regexp {op setcontainstotal} $body
 } -result 1
 
-test setcontains-uri-web-is-unreserved-may-error-false {std::web::is_unreserved's own function-level may_error becomes false: SetContains was its only fallible local op, and it is now proven non-erroring (spec item 32)} -body {
+# std::web::is_unreserved's may_error where the shadow stack's depth check bounds
+# recursion (nativeDepthChecked): its Botlish call makes it fallible there
+# whatever its SetContains proves.
+set ::isUnreservedError [if {[testConstraint nativeDepthChecked]} {string cat true} else {string cat false}]
+
+test setcontains-uri-web-is-unreserved-may-error-false {std::web::is_unreserved's own function-level may_error becomes false: SetContains was its only fallible local op, and it is now proven non-erroring (spec item 32); true where the depth check makes its Botlish call fallible (nativeDepthChecked)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     set effects [native::Driver calls $nirText]
@@ -309,15 +314,15 @@ test setcontains-uri-web-is-unreserved-may-error-false {std::web::is_unreserved'
     foreach line $effects {
         if {[string match {*callee_name="std::web::is_unreserved*} $line]} {
             set found 1
-            if {![string match {*may_error=false*} $line]} {
-                return "not false: $line"
+            if {![string match "*may_error=$::isUnreservedError*" $line]} {
+                return "not $::isUnreservedError: $line"
             }
         }
     }
     expr {$found ? "all-false" : "not-found"}
 } -result all-false
 
-test setcontains-uri-esc-from-edge-becomes-non-erroring {esc_from -> std::web::is_unreserved's edge (esc_char's, M2's own identified residual, before ENCODE-UTF8-ALLOCATION-RESEARCH.md) naturally collapses to may_error=false through existing, unmodified call-effect propagation -- no esc_from-specific or std::web::is_unreserved-specific code} -body {
+test setcontains-uri-esc-from-edge-becomes-non-erroring {esc_from -> std::web::is_unreserved's edge (esc_char's, M2's own identified residual, before ENCODE-UTF8-ALLOCATION-RESEARCH.md) naturally collapses to may_error=false through existing, unmodified call-effect propagation -- no esc_from-specific or std::web::is_unreserved-specific code (may_error=true where the depth check makes the call fallible, nativeDepthChecked)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     set effects [native::Driver calls $nirText]
@@ -325,7 +330,7 @@ test setcontains-uri-esc-from-edge-becomes-non-erroring {esc_from -> std::web::i
         if {![string match {*caller_name="esc_from"*callee_name="std::web::is_unreserved*} $line]} continue
         set line
     }]
-    list [llength $lines] [lmap l $lines {string match {*may_error=false*} $l}]
+    list [llength $lines] [lmap l $lines {string match "*may_error=$::isUnreservedError*" $l}]
 } -result {1 1}
 
 # ---------------------------------------------------------------------------

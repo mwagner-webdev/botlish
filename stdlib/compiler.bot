@@ -1,12 +1,13 @@
 # compiler.bot -- the "std::compiler" namespace: the compiler's diagnostics as
 # ordinary Botlish values (STATIC-COMPILE.md).
 #
-#   std::compiler::CompilerError       the one error a `static compile:` block whose
-#                                 body the compiler rejects completes with
-#   std::compiler::DiagnosticCode      which diagnostic rejected it: the stable,
-#                                 typed identity of a compiler diagnostic
-#   std::compiler::SourceLocation      a line and column of the source file the
-#                                 block is written in
+#   std::compiler::CompilerError   the one error a `static compile:` block
+#                                  whose body the compiler rejects completes
+#                                  with
+#   std::compiler::DiagnosticCode  which diagnostic rejected it: the stable,
+#                                  typed identity of a compiler diagnostic
+#   std::compiler::SourceLocation  a line and column of the source file the
+#                                  block is written in
 #
 #   import std::compiler
 #
@@ -88,6 +89,8 @@ enum DiagnosticCode:
     FlagFunctionValue,
     ForeignBorrow,
     Imprint,
+    InternalIntrinsicValue,
+    InternalNamespace,
     KnownError,
     LayoutArrayExtent,
     LayoutArrayIndex,

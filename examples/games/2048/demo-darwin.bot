@@ -1,0 +1,15 @@
+# demo-darwin.bot -- demo.bot on macOS (MACOS-AARCH64-MILESTONE-8.md): the
+# same game and presentation (demo_play.bot), with macOS's std::io::IO context
+# installed -- std::darwin::io's, whose writes are libSystem's write(2).
+#
+#   tclsh9.0 main.tcl -backend cranelift examples/games/2048/demo-darwin.bot
+#   tclsh9.0 main.tcl -emit-native-executable examples/games/2048/demo-darwin.bot
+import demo_play
+import std::io
+import std::darwin::io
+
+with context std::darwin::io::create()
+
+demo_play::main():
+    on std::io::WriteFailed:
+        unit

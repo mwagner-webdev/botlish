@@ -1,5 +1,10 @@
 # NATIVE-LAYOUT-WRITES.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: a store or a write
+> of a C float field rounds the Float64 to nearest, ties to even, and an
+> overflow is `NonFiniteFloat` before a byte is written; a C double field is
+> stored exactly (the "Botlish has no float" item of section 22).
+
 > Partially superseded by FIXED-LAYOUT-ARRAYS.md: designators name array
 > elements statically (`L.pts[2].x`), `std::binary::store_element` writes one
 > element of a live array at a dynamic index, and a whole array is written
@@ -599,9 +604,10 @@ No new registry: everything a backend reads about a write is in the HIR --
 the designator constant carries the absolute offset and the encoding, the
 descriptor constant an edit's layout. `NativeEdit[L]` prints and reads back as
 HIR text (`ne-hir-text-roundtrip`: format, read, format is identical and the
-read HIR runs; HIR text of a program importing a library module does not
-round trip in general -- `std::binary::store` needs `import std::binary` -- so the
-writes are carried by interchange). `hir/interchange.tcl` carries the HIR
+read HIR runs; HIR text of a program importing a library module did not
+round trip then -- `std::binary::store` needs `import std::binary` -- so the writes
+are carried by interchange. HIR text has module sections since:
+HIR-INTERCHANGE.md). `hir/interchange.tcl` carries the HIR
 dict: a program written as `.hirx` and read back after another compilation
 declaring a same-named layout with other offsets writes through its own
 layout, natively and on the Tcl backends (`ne-interchange`); `main.tcl

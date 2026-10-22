@@ -518,7 +518,8 @@ visible candidates.
   ui::named::Named.name witness Person`). A single-file trait program's HIR
   reads back to the same text and runs the same on every backend (module
   programs' HIR text does not round-trip, for every program: a pre-existing
-  limitation of HIR text).
+  limitation of HIR text, since fixed: HIR text has module sections,
+  HIR-INTERCHANGE.md).
 * **CLI**: `tclsh9.0 main.tcl -traits FILE` prints the traits, each
   conformance the program uses with its implementation mapping, every
   concrete type the program declares (structs, refinements, integer domains
@@ -837,7 +838,8 @@ concrete function.
   limit (`TRAIT-INSTANCE-BUDGET`), and a trait program is built twice (more
   when method calls must be decided), so compile time grows with the
   program; runtime cost is zero.
-* **HIR text** of programs with modules does not round-trip (pre-existing).
+* **HIR text** of programs with modules does not round-trip (pre-existing;
+  since fixed: HIR text has module sections, HIR-INTERCHANGE.md).
 * Found while fuzzing, **not trait-specific and not fixed here**: the
   source-type registry of a previous compilation in the same process is
   not reset by one that declares only structs (a later `struct w1::Item`

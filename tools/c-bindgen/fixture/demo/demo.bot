@@ -39,6 +39,15 @@ fn bytes_of(values: List[int]) -> std::abi::bytes::Bytes:
 fn text(s: str) -> std::abi::bytes::Bytes:
     std::abi::bytes::from_list(std::str::encode_utf8(s))
 
+# C types for the trailing arguments of the variadic bgf_printf, which have no
+# declared parameter type to prove a value against (VARIADICS-VERTICAL-
+# SLICE-1.md): converters, functions whose declared result is the type.
+fn c_int(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    x
+
+fn c_long(x: std::ffi::c::Long) -> std::ffi::c::Long:
+    x
+
 handle = cstring("alpha").bgf_open(1)
 alias = handle.clone()
 window = bgf::bgf::bgf_window_of(alias)
@@ -53,6 +62,8 @@ handle_id = id_handle.bgf_handle_id()
 twin = std::ffi::c::null[bgf::ctypes::bgf_twin]()
 twin_struct = std::ffi::c::null[bgf::ctypes::bgf_twin_struct]()
 twins = twin.bgf_twins(twin_struct)
+summed = cstring("dldfp").bgf_printf(c_int(5), c_long(-7), c_int(30), 2.75, nothing)
+printed = cstring("dd").bgf_print(c_int(7), c_int(8))
 bgf::bgf::bgf_close(handle)
 [2.bgf_add(3),
  bgf::bgf::bgf_length(cstring("hello")),
@@ -86,4 +97,6 @@ bgf::bgf::bgf_close(handle)
  bgf::bgf::bgf_flip(true),
  handle_id,
  twins,
- bgf::bgf::BGF_HIGH_CHAR]
+ bgf::bgf::BGF_HIGH_CHAR,
+ summed,
+ printed]

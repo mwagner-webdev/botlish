@@ -1,5 +1,12 @@
 # C-FFI.md
 
+> Partially superseded by C-FLOAT-FFI-MILESTONE-1.md: C `float` is
+> `std::ffi::c::Float` (binary32, its values Float64s: a Float64 passed to one is
+> rounded to nearest, ties to even, and an overflow is `NonFiniteFloat`
+> before C runs), and `std::ffi::c::Float` and `std::ffi::c::Double` are C types of
+> pointees, function pointer signatures and layout fields too; `long double`
+> stays out (sections 3 and 26).
+
 `extern c library` and `extern c fn`: Botlish's first real C calls. A
 program declares the C functions it calls, by their C signatures and the
 contract of each pointer parameter, and the libraries it links; the native
@@ -85,7 +92,8 @@ Two top-level declarations, in any module or the entry program:
 externLibrary := "extern" "c" "library" STRING
 
 externFn      := "extern" "c" "fn" NAME ["named" STRING]
-                 "(" [param ("," param)* [","]] ")" "->" resultType [resultFact]
+                 "(" [param ("," param)* ["," "variadic"] [","]] ")"
+                 "->" resultType [resultFact]
 param         := NAME ":" type [access] [escape]
 access        := "read" | "write"
 escape        := "noescape" | "proven" "noescape" | "captures"
@@ -115,8 +123,11 @@ extern c fn keep named "bcf_keep"(p: std::ffi::c::Ptr[std::ffi::c::Void] capture
 * **`named "SYMBOL"`** overrides the link symbol (section 2): letters,
   digits, `_ . $`, not starting with a digit. One `named` per declaration.
 * **The signature is the C signature**: every parameter typed, the result
-  type required (`-> unit` for void), no varargs (`..`, `...`, a trailing
-  `.` are errors: there is no variadic ABI here).
+  type required (`-> unit` for void). A variadic C function (C's `...`)
+  ends its parameters with the bare word `variadic`, after at least one
+  fixed parameter, with nothing after it and no name or type of its own:
+  each call passes its own C types (VARIADICS-VERTICAL-SLICE-1.md; `..`,
+  `...` and a trailing `.` stay errors, the `...` one naming `variadic`).
 * **Facts** follow a parameter's type and the result type; each is stated
   at most once.
 * **Declarations are top-level** (a module's or the entry program's own),
@@ -202,9 +213,20 @@ zero, and a double returned that is not finite -- NaN or an infinity -- is
 the call's declared error `NonFiniteFloat` (a declaration whose result is
 Double declares it).
 
+A variadic declaration's trailing arguments are typed per call
+(VARIADICS-VERTICAL-SLICE-1.md): each is a C integer scalar, `std::ffi::c::Bool`,
+Float64 (`double`), an `std::ffi::c::Ptr` or an `std::ffi::c::FnPtr` -- a plain `int`,
+a String, a List, a struct, byte storage or an erased value is refused at
+the call -- passed as C's default argument promotions make it (an integer
+narrower than `int`, and `_Bool`, as `int`). The call's machine signature is
+its own: x86-64 System V states the vector registers it used in `%al`,
+Linux AArch64 passes the trailing arguments as AAPCS64 passes any, and Apple
+AArch64 passes every one of them on the stack in an 8-byte slot. A
+`va_list` parameter is a fixed one, which nothing here represents.
+
 Not here, each an error at the declaration: C `float` and `long double`,
 structs or unions by value, arrays (a parameter `uint8_t out[32]` is the pointer it
-decays to), varargs, `unit` as a parameter, an imprint variable in a
+decays to), a `va_list`, `unit` as a parameter, an imprint variable in a
 signature (one C function has one ABI), a Botlish value type that is no C
 type (`int`, `str`, `Bytes`: byte storage reaches C only through a pointer
 parameter's contract, section 6).
@@ -306,6 +328,34 @@ by a `keepalive` of each exposed storage after the call (NIR in section 10);
 an unchecked (`-strict 0`) program's refused exposure replays the refusal at
 run time, the C call never made (`cf-strict0-replay`).
 
+**C error state** (C-FFI-ERROR-CAPTURE-MILESTONE-1.md,
+C-FFI-ERROR-CAPTURE-MILESTONE-2.md). A C function that fails the POSIX way
+returns a sentinel and leaves the reason in errno; its binding reads errno
+right after the call (`std::darwin::errno()`: a C call of `__error()`,
+`__errno_location()` on glibc, and a native view). Nothing the compiler
+inserts runs in between: the keepalive is no machine code, a write-back
+value is fields -- the C result and the private copies -- built only where
+a use needs an object, and a 64-bit integer result is the machine word C
+returned (a C word, section 8), compared with its sentinel as it is --
+`(size_t)-1` included -- and boxed only at its first use that needs an Int.
+So the comparison of the result and the errno read follow the call
+directly, with no allocation, safepoint or runtime call, whatever the
+result's value and whatever the lowering: this foreign-result transport is
+a correctness rule of native lowering, not an optimization, and
+`-struct-opt 0`, `-specialize 0` and the other representation policies
+keep it (a write-back value escape analysis leaves alone -- a binding a
+closure captures, struct scalar replacement off -- is held as fields all
+the same, and built at its first use that needs it, a loop's at the
+loop's entry). The compiler knows no error convention: it reads no errno,
+adds no field, translates nothing -- it only adds nothing. What it does not
+cover: a C `float`/`double` result (a Float64 is a heap object, built by
+the call), a value returned from the function that made the call before
+anything read errno, and what the program itself builds before its read
+(C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32). `tests/c-ffi-error-
+capture.test` proves it in NIR, in the object file's machine code, by
+single-stepping the executable, and with an allocator that changes errno,
+in every lowering mode.
+
 ## 7. Pointer results
 
 A pointer result is truthful: SHA256 returns `uint8_t *`, so its
@@ -337,7 +387,7 @@ so none is.
 | Botlish word | to C | from C |
 |---|---|---|
 | small Int (`(n << 1) \| 1`), a narrow scalar | `n`, reduced to the class width; extended by the call's signature (`sext`/`uext`) | sign- or zero-extended from the class width by Botlish, whatever the callee left in the register's other bits, then tagged |
-| Int, a 64-bit scalar | `n`: inline for a small Int, `rt_ffi_int_word` for a BigInt | tagged when it fits the small range, else a BigInt (`rt_ffi_box_i64`, `rt_ffi_box_u64`) |
+| Int, a 64-bit scalar | `n`: inline for a small Int, `rt_ffi_int_word` for a BigInt | the machine word itself, a C word (an `i64` or `u64` register: C-FFI-ERROR-CAPTURE-MILESTONE-2.md), compared as it is (`cwlt` ... against a `cword` constant or an Int) and made an Int at its first use that needs one (`cwbox`: tagged when it fits the small range, else a BigInt, `rt_ffi_box_i64`, `rt_ffi_box_u64`) |
 | C address word (`(a << 4) \| 0b1110`) | `a` (an arithmetic shift: null, word 14, is 0) | `(a << 4) \| 0b1110` when `a` fits the word's sign-extended 60 bits, else a `NATIVE ADDRESS` failure |
 | exposure address (a small Int, `bytesaddr`/`mbytesaddr`) | the address | -- |
 | bool (`false`, `true`) | the byte 0 or 1, zero-extended to the register like an `unsigned char` (on x86-64 to its 32 low bits, as GCC and Clang callees read a `_Bool`) | the result byte: 0 is `false`, 1 is `true`, anything else a `NATIVE BOOL` failure naming the function and the byte, never a bool made of one bit (`cf-bool-invalid`) |
@@ -457,6 +507,13 @@ func 5 "digest" params=1 ...
     %14 = structnew 1 %13 %10 @e349                  # {out: ..., result: unit}
 ```
 
+(As it was when this milestone landed. Since C-FFI-ERROR-CAPTURE-
+MILESTONE-1.md the write-back value is fields wherever escape analysis keeps
+it virtual -- here `%7` and `%10` -- and a `structnew` is emitted only at a
+use that needs the object: `digest`'s `written.out`, handed to
+`std::abi::bytes::freeze`, builds the MutableBytes there (`structnew 0 %7` after
+the keepalives), and the struct is never built.)
+
 The header's `foreign N` entries are the program's foreign table, numbered
 on first use: the link symbol, each parameter's ABI class, the result's,
 the alias parameter, the Botlish name (for messages); `link` lines are the
@@ -479,7 +536,10 @@ pointers 64-bit words, the result at its width with no extension (the
 caller extends it, section 8).
 A `foreigncall` is one direct `call` of the import, with the transport
 inline around it (`cf-clif`). It is a safepoint of the native stack maps
-(conservatively: no C function can reach the collector today).
+(conservatively: no C function can reach the collector today; a 64-bit
+result outside the small-Int range is boxed, `rt_ffi_box_i64`). A
+`keepalive` after it emits nothing: its operand's liveness is the root
+plan's, from the NIR.
 
 ## 11. Linking
 
@@ -644,10 +704,36 @@ the fixture compiled by Apple clang, and the machine state each call
 arrives in matches Apple clang's own calls of the same prototypes
 (`cf-abi-*`). Symbols are their C names: the object crate writes Mach-O's
 `_` user label prefix, for a C function's symbol as for Botlish's own.
+macOS's IO is a binding of this kind (MACOS-AARCH64-MILESTONE-8.md):
+stdlib/darwin.bot declares libSystem's `write`, `read`, `open` (variadic),
+`close` and `__error` as `extern c fn` with byte-borrowing contracts, and
+stdlib/darwin/io.bot puts them behind `std::io::IO`; no extern c library is needed,
+libSystem being in every macOS executable's link.
 
-Elsewhere the native backends already refuse executables (Linux glibc
-and macOS AArch64 only), so they refuse a program that calls C the same
-way. A `-target`
+**Windows x86-64** (WINDOWS-X86-64-MILESTONE-2.md): the same code path,
+with the Win64 C ABI (Cranelift's `windows_fastcall`: four positional
+registers shared by the integer and floating kinds, a 32-byte shadow space,
+every further argument in its own 8-byte stack slot, LLP64's 32-bit
+`long`) and Microsoft's link.exe through rustc: `extern c library "NAME"`
+is `NAME.lib` (a static library or a DLL's import library), `-L DIR` is
+`/LIBPATH:DIR`, and there is no archive group (link.exe searches every
+library until nothing more resolves). Every executable links the static
+release C runtime and excludes every other Microsoft runtime, so a static
+C library compiled for `/MT` (cl's default) shares it, and one compiled for
+`/MD` does not link: its calls of the runtime are `__imp_` imports, which
+link.exe resolves against the static runtime only for a function something
+else linked anyway (LNK4217) and otherwise refuses (LNK2019, NATIVE LINK
+with the driver's explanation). A DLL keeps its own runtime, `/MT` or `/MD`
+(section "The C runtime" of the milestone report). The machine state each call arrives in is checked
+against MSVC-built callees (tests/cffi/fixture.c with
+tests/cffi/fixture-win64.asm's capture). A variadic C call is a codegen
+error on Windows (no Win64 variadic lowering yet). Windows I/O is a binding
+of this kind: stdlib/windows.bot declares kernel32's GetStdHandle, WriteFile
+and GetLastError, stdlib/windows/io.bot puts them behind `std::io::IO`.
+
+Elsewhere the native backends already refuse executables (Linux glibc,
+macOS AArch64 and Windows x86-64 only), so they refuse a program that calls
+C the same way. A `-target`
 other than the host's chooses the ABI classes of a compilation (its HIR),
 never a cross-link: linking is for the host, and the driver refuses to run
 or link a program built for another target at all (`NATIVE TARGET`,
@@ -658,7 +744,8 @@ a Linux C function.
 convention, selected where its signature is built
 (`native/src/codegen/target.rs`'s `c_call_conv`, called by `clif.rs`'s
 `c_signature`): `system_v` on Linux, `apple_aarch64` on macOS AArch64 --
-never the generic AArch64 one there -- and Cranelift lowers it (registers,
+never the generic AArch64 one there -- `windows_fastcall` on Windows
+x86-64, and Cranelift lowers it (registers,
 stack placement, narrow-argument extension). Botlish-to-Botlish calls and
 runtime helper calls keep the ISA's default convention. The one exception
 Botlish makes to Cranelift's lowering is what it asks of it: no extension
@@ -992,7 +1079,9 @@ libraries, `-L` directories, a wrong-architecture library, a failed link,
 and GC stress, coroutines and the stack guard around C calls. Its C side is
 `tests/cffi/fixture.c`, compiled with the host C compiler into a static
 archive in a private directory (test infrastructure only); it runs wherever
-C calls do (`nativeCCalls`: Linux x86-64 and AArch64, macOS AArch64); the
+C calls do (`nativeCCalls`: Linux x86-64 and AArch64, macOS AArch64,
+Windows x86-64, where tests/ctoolchain.tcl builds it with MSVC's cl, lib
+and ml64); the
 Tcl tests need a linkable `libtcl9.0`, the BoringSSL ones the package-owned
 build (skipped when it is not built).
 
@@ -1150,7 +1239,7 @@ and in CI).
 | Temporary byte borrowing still requires noescape. | **Confirmed.** The admission is the borrowing milestone's, unchanged (`cf-borrow-refusals`). |
 | Raw foreign Ptr values can cross calls independently of borrowing. | **Confirmed.** A `Ptr` is a raw address word, passed and returned as one; a pointer result is borrowing's concern only when the same call exposes storage (section 7). |
 | No callback/export mechanism exists yet. | **Confirmed.** Botlish never calls an `FnPtr`, and exports no C symbol. |
-| No aggregate/varargs ABI exists yet. | **Confirmed.** Structs, unions and arrays by value and varargs are declaration errors (floating point was too until FLOAT64-MILESTONE-1.md added `std::ffi::c::Double`; `float` and `long double` still are). |
+| No aggregate/varargs ABI exists yet. | **Confirmed** at the time; varargs since VARIADICS-VERTICAL-SLICE-1.md (`variadic`, a per-call signature). Structs, unions and arrays by value are declaration errors (floating point was too until FLOAT64-MILESTONE-1.md added `std::ffi::c::Double`; `float` and `long double` still are). |
 
 ## 25. For a binding generator
 
@@ -1183,8 +1272,9 @@ writes exactly these declarations, which compile like hand-written ones.
   development tool (C-BINDGEN.md) as ordinary source, and compiling them
   needs no header, preprocessor or C compiler.
 * C `float` and `long double` (`double` is `std::ffi::c::Double`,
-  FLOAT64-MILESTONE-1.md), structs, unions and arrays by value, varargs,
-  bitfields.
+  FLOAT64-MILESTONE-1.md), structs, unions and arrays by value, `va_list`,
+  bitfields. (Variadic calls are VARIADICS-VERTICAL-SLICE-1.md's: no format
+  string is read, no runtime argument list built.)
 * Callbacks (Botlish code called from C), exported C symbols, calling an
   `FnPtr`.
 * `dlopen`/`dlsym`, lazy binding, a runtime library path policy.
@@ -1210,11 +1300,16 @@ run (main.rs's `run_linked`, runtime/aot.rs's `driver_protocol`), run
 `audit/c-ffi/tools/mutate.tcl` (every mutant in its `mutants.txt` must
 still apply and be killed: update a mutant's text when you change the code
 it mutates, keeping it a mutant of the same rule), plus
-`tests/c-pointer-borrowing.test` and its mutants for a change to the shared
-exposure, `tests/direct-modules.test` and its mutants for a change to the
+`tests/c-pointer-borrowing.test`, `tests/c-ffi-error-capture.test` and the
+borrowing mutants for a change to the shared exposure or to what follows a
+C call (the write-back value, the keepalive, the result's conversion),
+`tests/direct-modules.test` and its mutants for a change to the
 direct edge, and the isolation and interchange audits for a change to the
 registry. Build BoringSSL once (`tclsh9.0 tests/cffi/boringssl.tcl`) so the
-acceptance tests run. `bench/c-ffi.tcl` regenerates section 21.
+acceptance tests run. `bench/c-ffi.tcl` regenerates section 21. A change to
+variadic calls (VARIADICS-VERTICAL-SLICE-1.md, "What to run when changing
+this") also needs the `ffi_` Rust tests on an AArch64 host, which carry the
+Apple and Linux AArch64 placements.
 
 ## 28. Files
 
@@ -1224,11 +1319,12 @@ acceptance tests run. `bench/c-ffi.tcl` regenerates section 21.
 | surface/ast.tcl, surface/lower.tcl, surface/modules.tcl | the AST nodes, their collection per unit, the loader passing them to the build |
 | hir/foreign.tcl | registration, validation, the link plan, bindings, the side tables, capture/Install |
 | hir/hir.tcl, hir/declarations.tcl, hir/resolve.tcl, hir/hygiene.tcl, hir/semantic.tcl, hir/warnings.tcl | the build's options and side tables, isolation, the root-kind bindings and their names |
-| hir/borrow.tcl | the extern arity, the result provenance, not-a-value |
+| hir/borrow.tcl | the extern arity, the result provenance, not-a-value, a variadic call's trailing C types (`cvarargs`) |
+| hir/cabi.tcl (`VariadicArgument`), core/cabi.tcl (`promoted`) | a trailing argument's one C type and its default argument promotion |
 | hir/direct.tcl | the retaining call as an authority source |
 | core/native.tcl, core/cabi.tcl | `-extern` metadata, `isExtern`, `displayName`; the provenance in the contract, `ExternImpl` (NATIVE-ONLY) |
 | native/lower.tcl, native/native.tcl, main.tcl | the foreign table, `foreigncall`, link directories, `-L` |
-| native/src/nir.rs, codegen/clif.rs, codegen/roots.rs, codegen/mod.rs | the NIR, the C call and its transport, the safepoint, the JIT's unlinked symbols |
+| native/src/nir.rs, codegen/clif.rs, codegen/roots.rs, codegen/mod.rs | the NIR, the C call and its transport (a variadic call's per-call signature, `c_call_signature`, and x86-64's `%al` stub, `va_stub`), the safepoint, the JIT's unlinked symbols |
 | native/src/codegen/target.rs | the target's C convention, and which parameters carry an extension attribute (Apple's stack-passed ones do not) |
 | native/src/codegen/aot.rs, native/src/main.rs, native/src/runtime/aot.rs | the link plan's arguments (per `LinkerFlavor`), linker failures, the stub's refusal, the linked run and its driver protocol |
 | native/src/runtime/ffi.rs, runtime/error.rs | the slow paths and the two failures |

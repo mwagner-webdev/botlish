@@ -1,0 +1,452 @@
+name: tests (windows x86-64)
+
+# The Windows x86-64 port's CI (WINDOWS-X86-64-MILESTONE-1.md, section 7;
+# WINDOWS-X86-64-MILESTONE-2.md, section 7):
+# real Windows Server 2025 runners, MSVC's toolchain -- the native driver and
+# runtime built for x86_64-pc-windows-msvc, executables linked by rustc with
+# Microsoft's link.exe, which rustc finds with the Windows SDK by itself (no
+# step here enters a Developer Command Prompt for Botlish) -- and Tcl 9.0.1
+# built from its pinned source. Production code only: nothing applies the
+# census's probe patch or sets a BOTLISH_PROBE_* variable (that evidence is
+# windows-probe.yml's, WINDOWS-TOOLCHAIN-CENSUS.md). Neither Wine nor WSL is
+# an authority here.
+#
+#   smoke        every push: the host and its toolchains; the native build
+#                and the Rust unit tests; core::cabi's windows-x86_64 row
+#                against clang's MSVC target; the native status (each
+#                capability works or is refused as recorded); program
+#                objects (COFF) and executables (PE: console subsystem,
+#                imports only the system's DLLs -- the C runtime linked
+#                statically); C calls linked by link.exe against libraries
+#                cl and lib build here, and the C runtime matrix (/MT and
+#                /MD static libraries and DLLs); Windows I/O (kernel32's
+#                WriteFile through the portable std::io::IO) of hello and the
+#                2048 demo into files and pipes, through bash, cmd and
+#                PowerShell; the allocation-heavy workloads on both native
+#                backends and as executables, plainly and repeatedly under
+#                GC stress; the census's pure program, URI workload and 2048
+#                benchmark through main.tcl on both Cranelift backends,
+#                plainly and under GC stress; the 2048 benchmark's
+#                executable and MSVC's own
+#                dumpbin's reading of the object and the executable; the
+#                smoke tier and the Windows-relevant test files
+#                (argv, targets, executables, the command line, the C FFI
+#                and its Win64 ABI checks against MSVC-built fixtures,
+#                Windows I/O)
+#   acceptance   every push, four shards: tests/platform/tier.tcl's
+#                acceptance tier -- every Tcl test file on interp and every
+#                golden suite (native backends excluded by the golden
+#                runner: no native coroutines on Windows yet) -- minus the
+#                files its notYet table lists for windows-x86_64, each with
+#                its cause
+#   full         opt-in: "[ci-full]" in the pushed head commit's message, or
+#                a manual run with tier "full": the acceptance tier under
+#                BOTLISH_NATIVE_GC_STRESS=1 in four shards, or exactly the
+#                tier.tcl items a "CI-Tests:" trailer (or the "tests"
+#                input) names, under GC stress only with "CI-GC-Stress: 1"
+#                (or the "gc_stress" input)
+#
+# Pushes to any branch run it, so a branch gets Windows results before this
+# file is on main; a pull request from this repository's own branches skips
+# (its push already ran), one from a fork runs. Documentation-only pushes
+# skip. A newer push to the same branch cancels a running one, except on
+# main. The checkout keeps the repository's bytes (no CRLF conversion).
+
+on:
+  push:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "acceptance: the ordinary jobs; full: also the GC-stress tier"
+        type: choice
+        options: [acceptance, full]
+        default: acceptance
+      tests:
+        description: "the full tier's items instead of its default payload (tests/platform/tier.tcl items, space-separated)"
+        required: false
+        default: ""
+      gc_stress:
+        description: "Run the named items under BOTLISH_NATIVE_GC_STRESS=1"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x86_64-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# The C compiler of core::cabi's windows-x86_64 row, for every job: clang,
+# whose default target on Windows is MSVC's. The image's `cc` is a MinGW gcc,
+# windows-x86_64-gnu's toolchain, which cabi-facts.tcl refuses for this row,
+# as it should.
+env:
+  CC: clang
+
+defaults:
+  run:
+    # Git for Windows' bash, -eo pipefail (a failure piped through tee
+    # fails the step).
+    shell: bash
+
+jobs:
+  smoke:
+    name: smoke (Windows x86-64, MSVC)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Host
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion
+          "processor: $env:PROCESSOR_ARCHITECTURE, $env:NUMBER_OF_PROCESSORS CPUs"
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") { throw "not an x86-64 Windows runner: $env:PROCESSOR_ARCHITECTURE" }
+          # Only Git's coreutils link.exe may be on PATH: Microsoft's is
+          # found by rustc itself, never through a Developer Command Prompt.
+          Get-Command link.exe -All -ErrorAction SilentlyContinue | Select-Object Source
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Versions
+        run: |
+          rustc -vV
+          cargo -V
+          echo 'puts "Tcl [info patchlevel], hostTarget: [source core/core.tcl; core::cabi::hostTarget]"' | tclsh9.0
+          clang --version | head -2
+
+      - name: Build native (Cranelift) backend
+        id: build
+        uses: ./.github/actions/build-native
+
+      # Every check below runs once the backend is built, whatever an earlier
+      # one found, so that one failure never hides the others.
+
+      # The runtime's tests and the driver's own (--bins): the link plans
+      # (MSVC's among them), targets, stack probes, the program object's
+      # format, the argument encoding.
+      - name: Native Rust unit tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo test --release --manifest-path native/Cargo.toml --lib --bins 2>&1 | tee rust-tests.log
+
+      # No stack guard on Windows yet: the test target says so and checks
+      # nothing (it must still build and run).
+      - name: Native stack test target (no guard on this host)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo test --release --manifest-path native/Cargo.toml --test native_stack
+
+      - name: C ABI facts against core::cabi's windows-x86_64 row (clang, MSVC target)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/cabi-facts.tcl
+
+      # Each native capability works or is refused exactly as recorded for
+      # windows-x86_64 (tests/platform/native-status.tcl): the JIT, GC
+      # stress, objects, executables, the target boundary (another
+      # operating system, the other Windows environment), C calls and byte
+      # exposure to the C library, Windows I/O, variadic C calls and
+      # coroutines refused, the stack without its guard.
+      - name: Native status
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/native-status.tcl -verbose 1 2>&1 | tee native-status.log
+
+      # The COFF object and the PE executable, read here (no MSVC tool):
+      # symbols, relocations, subsystem, imported DLLs (the system's only),
+      # the standalone runs; then C calls with MSVC's cl and lib (the
+      # tests' C toolchain, tests/ctoolchain.tcl: vcvars64.bat's
+      # environment for those tools alone) -- link.exe's command line and
+      # its own words for a missing library and an undefined symbol -- and
+      # the C runtime matrix.
+      - name: Native objects and executables
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1 2>&1 | tee aot-facts.log
+
+      # The census's allocation-heavy workloads and more, on both native
+      # backends and as executables, five times under GC stress.
+      - name: GC workloads (cranelift, cranelift-generic, executables; GC stress)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 5 2>&1 | tee gc-workloads.log
+
+      # The census's three programs (its pure program, the URI workload and
+      # the 2048 benchmark) through main.tcl itself, on both Cranelift
+      # backends, as ordinary runs and under GC stress.
+      - name: The census's programs through main.tcl (cranelift, cranelift-generic; GC stress)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          failed=0
+          while IFS='|' read -r file expected; do
+            for backend in cranelift cranelift-generic; do
+              for stress in 0 1; do
+                out=$(BOTLISH_NATIVE_GC_STRESS=$stress tclsh9.0 main.tcl -warnings off -backend $backend "$file" 2>&1 | tr -d '\r') || true
+                value=$(printf '%s\n' "$out" | sed -n 's/^   value: //p')
+                if [ "$value" = "$expected" ]; then verdict=ok; else verdict=FAIL; failed=1; fi
+                echo "$verdict $file -backend $backend, GC stress $stress: $value"
+                [ "$verdict" = ok ] || printf '%s\n' "$out"
+              done
+            done
+          done <<'EOF'
+          audit/windows-toolchain/programs/fib.bot|[75025, "hello", 18446744073709551614]
+          bench/uri-steady.bot|29500
+          examples/games/2048/bench.bot|2002720
+          EOF
+          exit $failed
+
+      - name: The 2048 benchmark as an executable
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p artifacts
+          cp examples/games/2048/bench.bot examples/games/2048/game2048.bot audit/windows-toolchain/programs/fib.bot artifacts/
+          tclsh9.0 main.tcl -warnings off -emit-native-executable artifacts/bench.bot artifacts/fib.bot | tee artifacts/emit.txt
+          grep -qx 'executable: artifacts/bench.exe' artifacts/emit.txt
+          echo 'source native/native.tcl; native::object [surface::readProgramFile artifacts/fib.bot -warnings off] artifacts/fib.obj' | tclsh9.0
+          value=$(artifacts/fib.exe)
+          echo "fib.exe: $value"
+          test "$value" = '[75025, "hello", 18446744073709551614]'
+          value=$(artifacts/bench.exe)
+          echo "bench.exe: $value"
+          test "$value" = 2002720
+          value=$(BOTLISH_NATIVE_GC_STRESS=1 artifacts/bench.exe)
+          echo "bench.exe under GC stress: $value"
+          test "$value" = 2002720
+
+      # Windows I/O as a user meets it (WINDOWS-X86-64-MILESTONE-2.md,
+      # section 5): hello-windows.bot and the 2048 demo as executables,
+      # their standard output a file, a pipe and (for stderr) its own file,
+      # redirected by bash, cmd and PowerShell -- the bytes exactly the
+      # program's (UTF-8, LF, no code page applied), byte-compared with the
+      # Linux demo's expected game. A runner's output is never a console:
+      # what a console shows is the console's, not checked here.
+      - name: Windows I/O (hello, the 2048 demo; files and pipes through bash, cmd and PowerShell)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p wio
+          cp examples/io/hello-windows.bot wio/hello.bot
+          cp examples/games/2048/demo-windows.bot examples/games/2048/demo_play.bot examples/games/2048/game2048.bot wio/
+          tclsh9.0 main.tcl -warnings off -emit-native-executable wio/hello.bot wio/demo-windows.bot
+          printf 'Hello, world!\nunit\n' > wio/hello.expected
+          ./wio/hello.exe > wio/hello.file 2> wio/hello.err
+          cmp wio/hello.file wio/hello.expected
+          test ! -s wio/hello.err
+          ./wio/hello.exe | cat > wio/hello.pipe
+          cmp wio/hello.pipe wio/hello.expected
+          cmd //c 'wio\hello.exe > wio\hello.cmd 2>&1'
+          cmp wio/hello.cmd wio/hello.expected
+          pwsh -NoProfile -Command '$p = Start-Process -FilePath .\wio\hello.exe -NoNewWindow -Wait -PassThru -RedirectStandardOutput wio\hello.pwsh -RedirectStandardError wio\hello.pwsh-err; exit $p.ExitCode'
+          cmp wio/hello.pwsh wio/hello.expected
+          ./wio/demo-windows.exe > wio/demo.file
+          BOTLISH_NATIVE_GC_STRESS=1 ./wio/demo-windows.exe | cat > wio/demo.pipe
+          cmp wio/demo.file wio/demo.pipe
+          tclsh9.0 tests/workload-2048.test -match 'workload-2048-demo-windows-*' 2>&1 | tee wio/demo-test.log
+          grep -q 'Failed	0' wio/demo-test.log
+          grep -q 'Passed	1' wio/demo-test.log
+          echo "hello: $(od -An -c wio/hello.file | tr -s ' ')"
+          echo "demo: $(wc -c < wio/demo.file) bytes, $(grep -c . wio/demo.file) lines"
+
+      # A second opinion on the files tests/binary-header.tcl reads: MSVC's
+      # own dumpbin (the only step that enters vcvars64.bat).
+      - name: dumpbin (MSVC) on the object and the executables
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS=%%i
+          call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
+          dumpbin /nologo /headers artifacts\fib.obj | findstr /i "machine sections" || exit /b 1
+          dumpbin /nologo /symbols artifacts\fib.obj | findstr /i "botlish_fn_ rt_list_new" || exit /b 1
+          dumpbin /nologo /relocations artifacts\fib.obj | findstr /i "REL32" || exit /b 1
+          dumpbin /nologo /dependents artifacts\bench.exe || exit /b 1
+          dumpbin /nologo /dependents artifacts\bench.exe | findstr /i "vcruntime ucrtbase api-ms-win-crt" && (echo bench.exe imports the C runtime & exit /b 1)
+          dumpbin /nologo /headers artifacts\bench.exe | findstr /i "subsystem machine" || exit /b 1
+          exit /b 0
+
+      # The smoke tier (examples on all four backends, front-end files) and
+      # the test files the port changes most: argv (the Windows argument
+      # tests, linked runs among them), targets, executables, the command
+      # line, applications, the 2048 workload, the C FFI (the Win64 ABI
+      # against MSVC-built fixtures), byte exposure, C floats, Windows I/O.
+      - name: Smoke tier and the Windows-relevant test files
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
+            main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
+            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test 2>&1 | tee tier.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Smoke (Windows x86-64, MSVC)"
+            echo '```'
+            for log in native-status.log aot-facts.log; do
+              [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
+            done
+            [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
+            awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke
+          path: |
+            *.log
+            artifacts
+          if-no-files-found: ignore
+
+  acceptance:
+    name: acceptance (Windows x86-64, shard ${{ matrix.shard }}/4)
+    # After the smoke job, whatever its result: Windows runners are few, and
+    # the smoke's verdict is the one wanted first.
+    needs: smoke
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: windows-2025
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Acceptance tier, this shard
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/4" -backends interp acceptance 2>&1 | tee tier.log
+
+      - name: Publish summary
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          {
+            echo "## Acceptance (Windows x86-64), shard $SHARD/4"
+            echo '```'
+            awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-acceptance-shard-${{ matrix.shard }}
+          path: tier.log
+          if-no-files-found: ignore
+
+  full:
+    name: full (Windows x86-64, shard ${{ matrix.shard }}/4)
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full')
+    runs-on: windows-2025
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      # What this shard runs, as macos-arm64.yml's full tier decides it.
+      - name: Decide this shard's items
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          INPUT_TESTS: ${{ inputs.tests }}
+          INPUT_GC_STRESS: ${{ inputs.gc_stress }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          items=""
+          stress=0
+          if [[ $EVENT == workflow_dispatch ]]; then
+            items=$INPUT_TESTS
+            [[ $INPUT_GC_STRESS == true ]] && stress=1
+          else
+            trailers=$(printf '%s\n' "$MESSAGE" | git interpret-trailers --parse)
+            items=$(sed -n 's/^CI-Tests: *//p' <<< "$trailers" | tr '\n' ' ')
+            [[ $(sed -n 's/^CI-GC-Stress: *//p' <<< "$trailers") == 1 ]] && stress=1
+          fi
+          items=$(echo $items)
+          if [[ -z $items ]]; then
+            items=acceptance
+            stress=1
+          fi
+          shards=1
+          for item in $items; do
+            [[ $item == all || $item == acceptance || $item == smoke ]] && shards=4
+          done
+          work=true
+          (( SHARD > shards )) && work=false
+          {
+            echo "items=$items"
+            echo "stress=$stress"
+            echo "shards=$shards"
+            echo "work=$work"
+          } >> "$GITHUB_OUTPUT"
+          echo "items: $items; GC stress: $stress; shards: $shards; this shard ($SHARD) runs: $work"
+
+      - name: Keep the repository's bytes
+        if: steps.decide.outputs.work == 'true'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        if: steps.decide.outputs.work == 'true'
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        if: steps.decide.outputs.work == 'true'
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        if: steps.decide.outputs.work == 'true'
+        uses: ./.github/actions/build-native
+
+      - name: Full tier items, this shard
+        if: steps.decide.outputs.work == 'true'
+        env:
+          ITEMS: ${{ steps.decide.outputs.items }}
+          STRESS: ${{ steps.decide.outputs.stress }}
+          SHARDS: ${{ steps.decide.outputs.shards }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          read -r -a items <<< "$ITEMS"
+          tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/$SHARDS" -gc-stress "$STRESS" "${items[@]}" 2>&1 | tee tier.log
+
+      - name: Publish summary
+        if: always() && steps.decide.outputs.work == 'true'
+        env:
+          ITEMS: ${{ steps.decide.outputs.items }}
+          STRESS: ${{ steps.decide.outputs.stress }}
+          SHARDS: ${{ steps.decide.outputs.shards }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          {
+            echo "## Full, shard $SHARD/$SHARDS: $ITEMS (GC stress: $STRESS)"
+            echo '```'
+            awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the tier did not run"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.decide.outputs.work == 'true'
+        with:
+          name: windows-full-shard-${{ matrix.shard }}
+          path: tier.log
+          if-no-files-found: ignore

@@ -2864,6 +2864,20 @@ NID_MULTI_INPUT = win32::ctypes::c_int(64)
 NID_READY = win32::ctypes::c_int(128)
 MAX_STR_BLOCKREASON = win32::ctypes::c_int(256)
 
+# C: int wsprintfA(LPSTR, LPCSTR, ...)
+extern c fn wsprintfA(
+    arg1: std::ffi::c::Ptr[std::ffi::c::Char],
+    arg2: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Int
+
+# C: int wsprintfW(LPWSTR, LPCWSTR, ...)
+extern c fn wsprintfW(
+    arg1: std::ffi::c::Ptr[std::ffi::c::UShort],
+    arg2: std::ffi::c::Ptr[std::ffi::c::UShort],
+    variadic
+) -> std::ffi::c::Int
+
 # C: HKL LoadKeyboardLayoutA(LPCSTR pwszKLID, UINT Flags)
 extern c fn LoadKeyboardLayoutA(
     pwszKLID: std::ffi::c::Ptr[std::ffi::c::Char],
@@ -7253,6 +7267,13 @@ extern c fn GetPointerInputTransform(
     pointerId: std::ffi::c::UInt,
     historyCount: std::ffi::c::UInt,
     inputTransform: std::ffi::c::Ptr[std::ffi::c::UInt]
+) -> std::ffi::c::Int
+
+# C: wsprintf: an alias of wsprintfW, int wsprintfW(LPWSTR, LPCWSTR, ...)
+extern c fn wsprintf named "wsprintfW"(
+    arg1: std::ffi::c::Ptr[std::ffi::c::UShort],
+    arg2: std::ffi::c::Ptr[std::ffi::c::UShort],
+    variadic
 ) -> std::ffi::c::Int
 
 # C: LoadKeyboardLayout: an alias of LoadKeyboardLayoutW, HKL LoadKeyboardLayoutW(LPCWSTR pwszKLID, UINT Flags)

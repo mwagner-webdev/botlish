@@ -120,7 +120,7 @@ file boringssl/asn1.bot 1580 aa2885e2
 file boringssl/asn1t.bot 40 e03a686f
 file boringssl/base.bot 8 f6116b58
 file boringssl/base64.bot 95 d9ffaf97
-file boringssl/bio.bot 790 e200bbc9
+file boringssl/bio.bot 797 a3984139
 file boringssl/blake2.bot 36 5b1ec5c5
 file boringssl/blowfish.bot 50 99172d25
 file boringssl/bn.bot 877 d8d8e42d
@@ -134,7 +134,7 @@ file boringssl/cms.bot 65 4ed66e05
 file boringssl/conf.bot 79 b3cc753a
 file boringssl/crypto.bot 150 10ad636f
 file boringssl/ctrdrbg.bot 67 1cc09153
-file boringssl/ctypes.bot 803 505d8893
+file boringssl/ctypes.bot 803 c6133c11
 file boringssl/curve25519.bot 120 03916f3e
 file boringssl/des.bot 109 84282230
 file boringssl/dh.bot 236 a00e5a5f
@@ -145,7 +145,7 @@ file boringssl/ec_key.bot 281 708dd744
 file boringssl/ecdh.bot 30 35d98444
 file boringssl/ecdsa.bot 165 3d766adb
 file boringssl/engine.bot 54 b110fa72
-file boringssl/err.bot 246 f42a1ffb
+file boringssl/err.bot 258 a7627547
 file boringssl/evp.bot 1196 ae8b7e66
 file boringssl/evp_errors.bot 50 42359ee8
 file boringssl/ex_data.bot 10 ecf519aa
@@ -154,10 +154,10 @@ file boringssl/hmac.bot 102 5179f0e7
 file boringssl/hpke.bot 368 0772bf76
 file boringssl/hrss.bot 52 de0f2530
 file boringssl/kdf.bot 45 6f4de2cc
-file boringssl/layouts.bot 1000 76c5e4e2
+file boringssl/layouts.bot 1011 ad46ec80
 file boringssl/md4.bot 42 07de08a3
 file boringssl/md5.bot 42 2953c637
-file boringssl/mem.bot 197 34e0884a
+file boringssl/mem.bot 212 f8d481b7
 file boringssl/mldsa.bot 284 f8b812e2
 file boringssl/mlkem.bot 109 50d0a2fb
 file boringssl/nid.bot 982 c2f6cfc3
@@ -167,7 +167,7 @@ file boringssl/pkcs7.bot 143 96075b69
 file boringssl/pkcs8.bot 166 f1438a3c
 file boringssl/pool.bot 80 49d32bac
 file boringssl/posix_time.bot 26 8d8c77f4
-file boringssl/rand.bot 88 b570a98c
+file boringssl/rand.bot 95 7e55ad6e
 file boringssl/rc4.bot 28 8293a3f0
 file boringssl/ripemd.bot 43 40138d2e
 file boringssl/rsa.bot 615 724d20ce
@@ -197,10 +197,10 @@ file boringssl/x509.bot 4006 28e0118d
 file boringssl/x509v3.bot 25 04870820
 file boringssl/x509v3_errors.bot 70 f550ad0c
 file boringssl/xwing.bot 59 cdf8cfa4
-file layouts-check.c 865 77e8a498
-file layouts.tsv 656 f5f18692
-file report.tsv 11390 a00a420a
-file report.txt 171 343b1066
+file layouts-check.c 878 81f7b0f0
+file layouts.tsv 656 884b6ac7
+file report.tsv 11390 bcdea981
+file report.txt 162 182eae56
 file shim.c 3374 371bf922
 libraries boringssl/aead.bot {crypto stdc++}
 libraries boringssl/aes.bot {crypto stdc++}
@@ -284,7 +284,7 @@ count complete 95
 count constants 3117
 count constantsSeen 4429
 count declared 3109
-count direct 3098
+count direct 3104
 count enumerators 95
 count excluded 0
 count fnmacros 185
@@ -293,31 +293,29 @@ count inline 817
 count manual 2
 count opaque 102
 count proven 123
-count ptrParams 6801
+count ptrParams 6809
 count ptrResults 1288
 count resultAlias 1
 count resultIndependent 0
 count resultUnknown 1287
 count tablestubs 0
 count thunk 817
-count unknownParams 6676
-count unknownRetention 3542
-count unsupported 141
+count unknownParams 6684
+count unknownRetention 3547
+count unsupported 135
 count views 1317
-blocked double 1
 blocked macro-needs-signature 66
 blocked unsupported-macro 64
 blocked unsupported-type 3
 blocked va-list 2
-blocked variadic 5
 layout_abi linux-x86_64 clang x86_64-linux-gnu {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 28
-layout_count blocked 5
-layout_count blockedDirect 3
-layout_count blockedStructs 4
+layout_count blocked 4
+layout_count blockedDirect 2
+layout_count blockedStructs 3
 layout_count blockedTransitive 2
 layout_count blockedUnions 1
-layout_count emitted 118
+layout_count emitted 119
 layout_count emittedSynthetic 3
 layout_count emittedUnions 22
 layout_count incomplete 102
@@ -330,7 +328,6 @@ layout_count unheld 0
 layout_count unions 23
 layout_blocked bitfield 2
 layout_blocked nested-layout-blocked 2
-layout_blocked unsupported-pointer 1
 contract sk_void_call_free_func free_func {escape proven-noescape access read} compiler {nocapture readonly}
 contract sk_void_call_copy_func copy_func {escape proven-noescape access read} compiler {nocapture readonly}
 contract sk_void_call_cmp_func cmp_func {escape proven-noescape access read} compiler {nocapture readonly}

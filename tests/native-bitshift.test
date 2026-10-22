@@ -130,7 +130,7 @@ test bitshift-real-byte-nibble-no-guard {no runtime kind guard survives on this 
 
 test bitshift-real-byte-nibble-clif-no-helper-call {std::byte::nibble's own Cranelift IR body makes no call at all (no rt_int_shr, no BigInt/kind-guard fallback branch): true machine-lowering evidence, not just NIR text (spec \167 73-76)} -body {
     set body [FunctionBody [native::clif [refinedChecksHir] -tiny-leaf-inline-opt 0] std::byte::nibble "\n; function "]
-    list [expr {[string first "call " $body] < 0}] [expr {[string first "sshr" $body] >= 0}]
+    list [expr {![regexp {\mcall } $body]}] [expr {[string first "sshr" $body] >= 0}]
 } -result {1 1}
 
 test bitshift-real-byte-high-nibble-unchanged {std::byte::high_nibble has no shift for this milestone to lower; its mask, of a byte proven at most 244, is the raw op riand (NATIVE-RESULT-BOUNDS.md: AND/OR/XOR of small operands left the tagged-word path), not the tagged op iand} -body {

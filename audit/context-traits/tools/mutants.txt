@@ -1,6 +1,6 @@
-# Mutants of context traits, validator proofs, the Linux path library and the
-# portable io library (audit/context-traits/tools/mutate.tcl;
-# CONTEXT-TRAITS.md).
+# Mutants of context traits, validator proofs, the Linux path library, the
+# Darwin and Windows I/O libraries and the portable io library
+# (audit/context-traits/tools/mutate.tcl; CONTEXT-TRAITS.md).
 #
 #   @@ NAME DESCRIPTION
 #   ## FILE
@@ -242,4 +242,349 @@ fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
     io.stderr.write_all(std::str::encode_utf8(text))
 ====
     io.stdout.write_all(std::str::encode_utf8(text))
+>>>>
+
+# --- Darwin I/O (stdlib/darwin.bot, stdlib/darwin/io.bot; MACOS-AARCH64-MILESTONE-8.md)
+#
+# Mutants with a `%% macos-aarch64` line are killed by what a run on macOS
+# shows (tests/darwin-io.test's execution tests: real descriptors, files,
+# errno, the write(2) interposer); elsewhere they are SKIPPED. The others are
+# killed on every host by the front end's tests (the platform rule, the C
+# declarations, NIR, the authority boundary).
+
+@@ darwin-import-on-linux the std::darwin namespace is designated no platform's, so a Linux or Windows program may import it
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create std::linux linux std::darwin macos std::windows windows]
+====
+    variable platforms [dict create std::linux linux std::windows windows]
+>>>>
+
+@@ darwin-falls-back-to-linux the std::darwin namespace is designated Linux's platform interface (Darwin I/O on Linux's terms)
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create std::linux linux std::darwin macos std::windows windows]
+====
+    variable platforms [dict create std::linux linux std::darwin linux std::windows windows]
+>>>>
+
+@@ darwin-write-unsigned-result write(2)'s ssize_t result is declared unsigned, so -1 reads as a huge byte count
+## stdlib/darwin.bot
+<<<<
+extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+====
+extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::ULong
+>>>>
+
+@@ darwin-write-borrow-writable write(2)'s buffer is declared writable, so it is detached and comes back as a write-back value
+## stdlib/darwin.bot
+<<<<
+extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+====
+extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+>>>>
+
+@@ darwin-read-borrow-readable read(2)'s buffer is declared read-only, so C would write storage it may only read
+## stdlib/darwin.bot
+<<<<
+extern c fn c_read named "read"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+====
+extern c fn c_read named "read"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+>>>>
+
+@@ darwin-write-count-mismatch std::darwin::write asks write(2) for one byte whatever the buffer holds (a count not the buffer's)
+%% macos-aarch64
+## stdlib/darwin.bot
+<<<<
+    n = fd.c_write(data, std::abi::bytes::length(data).value)
+====
+    n = fd.c_write(data, 1)
+>>>>
+
+@@ darwin-read-returns-original std::darwin::read returns the caller's buffer instead of the copy C wrote
+%% macos-aarch64
+## stdlib/darwin.bot
+<<<<
+    ReadResult {count: r.result, errno: 0, data: r.buf}
+====
+    ReadResult {count: r.result, errno: 0, data: data}
+>>>>
+
+@@ darwin-errno-on-success a successful write reports whatever errno holds (a stale value) instead of none
+%% macos-aarch64
+## stdlib/darwin.bot
+<<<<
+    WriteResult {count: n, errno: 0}
+====
+    WriteResult {count: n, errno: errno()}
+>>>>
+
+@@ darwin-errno-after-another-call a failed open reads errno only after another C call (a close of -1, which sets EBADF)
+## stdlib/darwin.bot
+<<<<
+    fd = c_open(c_string(path), oflag)
+    if fd < 0:
+        failure = errno()
+====
+    fd = c_open(c_string(path), oflag)
+    if fd < 0:
+        other = c_close(-1)
+        failure = errno()
+>>>>
+
+@@ darwin-errno-constant errno() reports one fixed value (EBADF) whatever the failed call left
+## stdlib/darwin.bot
+<<<<
+            return 0
+    cell.value
+====
+            return 0
+    9
+>>>>
+
+@@ darwin-linux-error-convention a failed write's errno is taken from its result as Linux's raw -errno (-(-1) = 1), not from errno
+%% macos-aarch64
+## stdlib/darwin.bot
+<<<<
+        failure = errno()
+        return WriteResult {count: n, errno: failure}
+====
+        failure = errno()
+        return WriteResult {count: n, errno: 0 - n}
+>>>>
+
+@@ darwin-open-mode-omitted create opens with O_CREAT but passes no creation mode (no variadic argument)
+## stdlib/darwin.bot
+<<<<
+    path.open_mode(access_flags(access) + o_creat + o_trunc + o_cloexec, mode)
+====
+    path.open_with(access_flags(access) + o_creat + o_trunc + o_cloexec)
+>>>>
+
+@@ darwin-path-not-terminated the C string open(2) reads has no terminating NUL
+## stdlib/darwin.bot
+<<<<
+    std::abi::bytes::from_list(std::str::encode_utf8(path).append(terminator()))
+====
+    std::abi::bytes::from_list(std::str::encode_utf8(path))
+>>>>
+
+@@ darwin-short-write-complete DarwinIO treats a short write as complete
+%% macos-aarch64
+## stdlib/darwin/io.bot
+<<<<
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+====
+    if written < 0:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+>>>>
+
+@@ darwin-short-write-repeats-prefix DarwinIO completes a short write by writing the whole text again
+%% macos-aarch64
+## stdlib/darwin/io.bot
+<<<<
+        remaining = loop i from written to n:
+====
+        remaining = loop i from 0 to n:
+>>>>
+
+@@ darwin-zero-write-retried DarwinIO retries a write that made no progress instead of failing
+%% macos-aarch64
+## stdlib/darwin/io.bot
+<<<<
+    if written <= 0:
+        fail std::io::WriteFailed
+====
+    if written < 0:
+        fail std::io::WriteFailed
+>>>>
+
+@@ darwin-stdout-is-stdin DarwinIO's standard output is descriptor 0
+%% macos-aarch64
+## stdlib/darwin/io.bot
+<<<<
+        stdout: FileDescriptor {raw: 1},
+====
+        stdout: FileDescriptor {raw: 0},
+>>>>
+
+@@ darwin-stderr-is-stdout DarwinIO's error output is descriptor 1
+%% macos-aarch64
+## stdlib/darwin/io.bot
+<<<<
+        stderr: FileDescriptor {raw: 2},
+====
+        stderr: FileDescriptor {raw: 1},
+>>>>
+
+@@ darwin-io-direct std::darwin::io is a direct module whose completion holds the raw authority without its context (no longer context-mediated)
+## stdlib/darwin/io.bot
+<<<<
+import std::abi
+import std::abi::bytes
+import std::darwin
+import std::ffi::c
+====
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::darwin
+import std::ffi::c
+>>>>
+## stdlib/darwin/io.bot
+<<<<
+fn write_all(fd: FileDescriptor, bytes: List[Byte], context io: DarwinIO) -> unit errors std::io::WriteFailed:
+====
+fn write_all(fd: FileDescriptor, bytes: List[Byte]) -> unit errors std::io::WriteFailed:
+>>>>
+
+@@ darwin-errno-before-call read takes errno before its C call, not after it (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)
+## stdlib/darwin.bot
+<<<<
+    r = fd.c_read(data, std::abi::bytes::mutable_length(data).value)
+    if r.result < 0:
+        failure = errno()
+====
+    early = errno()
+    r = fd.c_read(data, std::abi::bytes::mutable_length(data).value)
+    if r.result < 0:
+        failure = early
+>>>>
+
+# --- Windows I/O (stdlib/windows.bot, stdlib/windows/io.bot; WINDOWS-X86-64-MILESTONE-2.md)
+#
+# Mutants with a `%% windows-x86_64` line are killed by what a run on
+# Windows shows (tests/windows-io.test's execution tests: real files and
+# pipes, the WriteFile injector, the launcher's refused handles); elsewhere
+# they are SKIPPED. The others are killed on every host by the front end's
+# tests (the platform rule, the C declarations, NIR, the pure parts on the
+# Tcl backends).
+
+@@ windows-import-elsewhere the std::windows namespace is designated no platform's, so a Linux or macOS program may import it
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create std::linux linux std::darwin macos std::windows windows]
+====
+    variable platforms [dict create std::linux linux std::darwin macos]
+>>>>
+
+@@ windows-falls-back-to-linux the std::windows namespace is designated Linux's platform interface
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create std::linux linux std::darwin macos std::windows windows]
+====
+    variable platforms [dict create std::linux linux std::darwin macos std::windows linux]
+>>>>
+
+@@ windows-buffer-writable WriteFile's buffer is declared writable, so it is detached and comes back as a write-back value
+## stdlib/windows.bot
+<<<<
+buffer: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, count: std::ffi::c::ULong
+====
+buffer: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULong
+>>>>
+
+@@ windows-count-not-a-dword WriteFile's DWORD count is declared 64 bits wide (LP64's unsigned long, not LLP64's)
+## stdlib/windows.bot
+<<<<
+read noescape, count: std::ffi::c::ULong, written:
+====
+read noescape, count: std::ffi::c::ULongLong, written:
+>>>>
+
+@@ windows-last-error-late a failed WriteFile's last-error code is read only after the byte count is decoded (a Botlish call between them)
+## stdlib/windows.bot
+<<<<
+    if r.result == 0:
+        failure = c_get_last_error()
+        return WriteResult {ok: false, count: written(r.written), last_error: failure}
+====
+    if r.result == 0:
+        count = written(r.written)
+        failure = c_get_last_error()
+        return WriteResult {ok: false, count: count, last_error: failure}
+>>>>
+
+@@ windows-output-selector-is-error the output device's selector is STD_ERROR_HANDLE's
+## stdlib/windows.bot
+<<<<
+    if device == StandardDevice::Output:
+        return 4294967285
+====
+    if device == StandardDevice::Output:
+        return 4294967284
+>>>>
+
+@@ windows-request-off-by-one a request asks for one byte fewer than the data holds
+## stdlib/windows.bot
+<<<<
+    if n > 4294967295:
+        return 4294967295
+    n
+====
+    if n > 4294967295:
+        return 4294967295
+    if n == 0:
+        return 0
+    n - 1
+>>>>
+
+@@ windows-error-code-dropped a failed WriteFile's last-error code is not reported (0, as if it had none)
+%% windows-x86_64
+## stdlib/windows.bot
+<<<<
+        return WriteResult {ok: false, count: written(r.written), last_error: failure}
+====
+        return WriteResult {ok: false, count: written(r.written), last_error: 0}
+>>>>
+
+@@ windows-short-write-complete WindowsIO treats a short write as complete
+%% windows-x86_64
+## stdlib/windows/io.bot
+<<<<
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+====
+    if written < 0:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+>>>>
+
+@@ windows-short-write-repeats-prefix WindowsIO completes a short write by writing the whole text again
+%% windows-x86_64
+## stdlib/windows/io.bot
+<<<<
+        remaining = loop i from written to n:
+====
+        remaining = loop i from 0 to n:
+>>>>
+
+@@ windows-zero-write-retried WindowsIO retries a write that made no progress instead of failing
+%% windows-x86_64
+## stdlib/windows/io.bot
+<<<<
+    if written <= 0:
+        fail std::io::WriteFailed
+====
+    if written < 0:
+        fail std::io::WriteFailed
+>>>>
+
+@@ windows-error-to-stdout WindowsIO writes the portable error stream to standard output
+%% windows-x86_64
+## stdlib/windows/io.bot
+<<<<
+    io.stderr.write_all(std::str::encode_utf8(text))
+====
+    io.stdout.write_all(std::str::encode_utf8(text))
+>>>>
+
+@@ windows-raw-write-to-stderr std::windows::io::write writes to the context's standard error
+%% windows-x86_64
+## stdlib/windows/io.bot
+<<<<
+    std::windows::standard_handle(io.stdout).write_file(data)
+====
+    std::windows::standard_handle(io.stderr).write_file(data)
 >>>>

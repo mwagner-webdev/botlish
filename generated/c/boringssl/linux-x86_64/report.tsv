@@ -107,8 +107,8 @@ function	ERR_error_string	direct	boringssl::err	direct	symbol botlish_bssl_ERR_e
 function	ERR_GET_FUNC	thunk	boringssl::thunks::err	thunk (inline)	symbol botlish_boringssl_ERR_GET_FUNC; (std::ffi::c::UInt) -> std::ffi::c::Int
 function	ERR_clear_system_error	direct	boringssl::err	direct	symbol botlish_bssl_ERR_clear_system_error; () -> unit
 function	ERR_put_error	direct	boringssl::err	direct	symbol botlish_bssl_ERR_put_error; (std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::UInt) -> unit
-function	ERR_add_error_data	unsupported		variadic	a variadic function (...)
-function	ERR_add_error_dataf	unsupported		variadic	a variadic function (...)
+function	ERR_add_error_data	direct	boringssl::err	direct	symbol botlish_bssl_ERR_add_error_data; (std::ffi::c::UInt, variadic) -> unit
+function	ERR_add_error_dataf	direct	boringssl::err	direct	symbol botlish_bssl_ERR_add_error_dataf; (std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
 function	ERR_set_error_data	direct	boringssl::err	direct	symbol botlish_bssl_ERR_set_error_data; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> unit
 function	CRYPTO_cleanup_all_ex_data	direct	boringssl::ex_data	direct	symbol botlish_bssl_CRYPTO_cleanup_all_ex_data; () -> unit
 function	OPENSSL_sk_new	direct	boringssl::stack	direct	symbol botlish_bssl_OPENSSL_sk_new; (std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]]], return: std::ffi::c::Int}]) -> std::ffi::c::Ptr[OPENSSL_STACK]
@@ -265,7 +265,7 @@ function	BIO_pop	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_pop; (std:
 function	BIO_next	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_next; (std::ffi::c::Ptr[BIO]) -> std::ffi::c::Ptr[BIO]
 function	BIO_find_type	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_find_type; (std::ffi::c::Ptr[BIO], std::ffi::c::Int) -> std::ffi::c::Ptr[BIO]
 function	BIO_copy_next_retry	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_copy_next_retry; (std::ffi::c::Ptr[BIO]) -> unit
-function	BIO_printf	unsupported		variadic	a variadic function (...)
+function	BIO_printf	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_printf; (std::ffi::c::Ptr[BIO], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
 function	BIO_indent	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_indent; (std::ffi::c::Ptr[BIO], std::ffi::c::UInt, std::ffi::c::UInt) -> std::ffi::c::Int
 function	BIO_hexdump	direct	boringssl::bio	direct	symbol botlish_bssl_BIO_hexdump; (std::ffi::c::Ptr[BIO], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::ULong, std::ffi::c::UInt) -> std::ffi::c::Int
 function	ERR_print_errors	direct	boringssl::bio	direct	symbol botlish_bssl_ERR_print_errors; (std::ffi::c::Ptr[BIO]) -> unit
@@ -1088,10 +1088,10 @@ function	OPENSSL_tolower	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSS
 function	OPENSSL_isspace	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_isspace; (std::ffi::c::Int) -> std::ffi::c::Int
 function	OPENSSL_strcasecmp	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_strcasecmp; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	OPENSSL_strncasecmp	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_strncasecmp; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong) -> std::ffi::c::Int
-function	BIO_snprintf	unsupported		variadic	a variadic function (...)
+function	BIO_snprintf	direct	boringssl::mem	direct	symbol botlish_bssl_BIO_snprintf; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
 function	BIO_vsnprintf	unsupported		va-list	parameter 4 (args): __builtin_va_list
 function	OPENSSL_vasprintf	unsupported		va-list	parameter 3 (args): __builtin_va_list
-function	OPENSSL_asprintf	unsupported		variadic	a variadic function (...)
+function	OPENSSL_asprintf	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_asprintf; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
 function	OPENSSL_strndup	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_strndup; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	OPENSSL_memdup	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_memdup; (std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
 function	OPENSSL_strlcpy	direct	boringssl::mem	direct	symbol botlish_bssl_OPENSSL_strlcpy; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong) -> std::ffi::c::ULong
@@ -3119,7 +3119,7 @@ function	RAND_pseudo_bytes	direct	boringssl::rand	direct	symbol botlish_bssl_RAN
 function	RAND_seed	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_seed; (std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int) -> unit
 function	RAND_load_file	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_load_file; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> std::ffi::c::Int
 function	RAND_file_name	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_file_name; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Char]
-function	RAND_add	unsupported		double	parameter 3 (entropy): double
+function	RAND_add	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_add; (std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::Double) -> unit
 function	RAND_egd	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_egd; (std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	RAND_poll	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_poll; () -> std::ffi::c::Int
 function	RAND_status	direct	boringssl::rand	direct	symbol botlish_bssl_RAND_status; () -> std::ffi::c::Int
@@ -11274,7 +11274,7 @@ record	struct X509_info_st	layout-direct	boringssl::layouts	X509_INFO	sizeof 64,
 record	struct v3_ext_method	layout-direct	boringssl::layouts	X509V3_EXT_METHOD	sizeof 104, _Alignof 8, 14 fields
 record	struct v3_ext_ctx	layout-direct	boringssl::layouts	X509V3_CTX	sizeof 48, _Alignof 8, 6 fields
 record	struct X509_algor_st	layout-direct	boringssl::layouts	X509_ALGOR	sizeof 16, _Alignof 8, 2 fields
-record	struct rand_meth_st	layout-blocked		unsupported-pointer	field add: callback argument 3: double (double) (unsupported-callback-signature)
+record	struct rand_meth_st	layout-direct	boringssl::layouts	RAND_METHOD	sizeof 48, _Alignof 8, 6 fields
 record	struct rc4_key_st	layout-direct	boringssl::layouts	RC4_KEY	sizeof 1032, _Alignof 4, 3 fields
 record	struct RIPEMD160state_st	layout-direct	boringssl::layouts	RIPEMD160_CTX	sizeof 96, _Alignof 4, 5 fields
 record	struct trust_token_st	layout-direct	boringssl::layouts	TRUST_TOKEN	sizeof 16, _Alignof 8, 2 fields

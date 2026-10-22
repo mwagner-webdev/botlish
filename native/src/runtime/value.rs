@@ -575,6 +575,213 @@ pub fn float_bits(v: Value) -> u64 {
     unsafe { as_ref::<FloatObj>(v) }.bits
 }
 
+// ---------------------------------------------------------------------------
+// The C floating boundary (C-FLOAT-FFI-MILESTONE-1.md; core/cabi.tcl's
+// "The C floating types" is the reference): a C float or double is a
+// foreign representation whose Botlish carrier is Float64. These are the
+// runtime's one statement of its rules -- every layout load and store of a
+// C floating field and element goes through them (runtime/ops.rs's
+// bin_decode / bin_encode); a C call's arguments and results are the same
+// rules in generated code (codegen::clif's foreign_call).
+
+/// The IEEE 754 interchange formats a C floating type is on every supported
+/// target: C float binary32, C double binary64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CFloatFormat {
+    Binary32,
+    Binary64,
+}
+
+impl CFloatFormat {
+    /// The format of a WIDTH-byte representation, if any.
+    pub fn of_width(width: usize) -> Option<CFloatFormat> {
+        match width {
+            4 => Some(CFloatFormat::Binary32),
+            8 => Some(CFloatFormat::Binary64),
+            _ => None,
+        }
+    }
+
+    pub fn width(self) -> usize {
+        match self {
+            CFloatFormat::Binary32 => 4,
+            CFloatFormat::Binary64 => 8,
+        }
+    }
+}
+
+/// Admit: the number C bits BITS of FORMAT stand for, as a Float64 entering
+/// Botlish -- the binary64 bits of the value (negative zero made zero) -- or
+/// Err(the NonFiniteResult code) for NaN (2) or an infinity (0 positive, 1
+/// negative). A binary32 widens exactly (every finite binary32 is a
+/// binary64; `as f64` never rounds).
+pub fn admit_c_float(format: CFloatFormat, bits: u64) -> Result<u64, u64> {
+    let x = match format {
+        CFloatFormat::Binary32 => f32::from_bits(bits as u32) as f64,
+        CFloatFormat::Binary64 => f64::from_bits(bits),
+    };
+    match FloatType::Float64.admit(x) {
+        Some(admitted) => Ok(admitted),
+        None => Err(super::ops::non_finite_code(x)),
+    }
+}
+
+/// Narrow: the bits of FORMAT the finite carrier number X leaves Botlish as,
+/// or Err(the NonFiniteResult code of the infinity it rounds to). binary64
+/// is exact. binary32 rounds to nearest, ties to even (Rust's `as f32`,
+/// IEEE 754's conversion: an overflow becomes the infinity of X's sign,
+/// which is an error here, never clamped to the largest float), its
+/// negative zero -- a tiny negative X -- made zero; a subnormal stays one.
+pub fn narrow_c_float(format: CFloatFormat, x: f64) -> Result<u64, u64> {
+    match format {
+        CFloatFormat::Binary64 => Ok(x.to_bits()),
+        CFloatFormat::Binary32 => {
+            let n = (x as f32) + 0.0;
+            if n.is_finite() { Ok(n.to_bits() as u64) } else { Err(super::ops::non_finite_code(n as f64)) }
+        }
+    }
+}
+
+#[cfg(test)]
+mod c_float_tests {
+    //! The C floating boundary's rules (C-FLOAT-FFI-MILESTONE-1.md), checked
+    //! against an oracle of integer arithmetic on the bits: never `as f32`,
+    //! the conversion narrow_c_float itself uses.
+    use super::{admit_c_float, narrow_c_float, CFloatFormat};
+
+    /// The binary32 bits nearest the finite double X, to nearest, ties to
+    /// even, or None for an overflow; a zero of either sign is +0.
+    fn oracle(x: f64) -> Option<u32> {
+        let bits = x.to_bits();
+        let negative = (bits >> 63) as u32;
+        let e = ((bits >> 52) & 0x7ff) as i64;
+        let f = bits & 0xf_ffff_ffff_ffff;
+        let (m, exp) = if e == 0 { (f, -1074) } else { (f | (1 << 52), e - 1075) };
+        if m == 0 {
+            return Some(0);
+        }
+        let length = 64 - m.leading_zeros() as i64;
+        let mut q = (exp + length - 1 - 23).max(-149);
+        let shift = q - exp;
+        if shift >= 64 {
+            // Below half the smallest subnormal (m < 2^53): zero.
+            return Some(0);
+        }
+        let mut k = if shift <= 0 {
+            m << (-shift)
+        } else {
+            let k = m >> shift;
+            let rest = m - (k << shift);
+            let half = 1u64 << (shift - 1);
+            if rest > half || (rest == half && k & 1 == 1) { k + 1 } else { k }
+        };
+        if k == 1 << 24 {
+            k = 1 << 23;
+            q += 1;
+        }
+        if k == 0 {
+            return Some(0);
+        }
+        if q > 104 {
+            return None;
+        }
+        let out = if k < (1 << 23) { k as u32 } else { (((q + 150) as u32) << 23) | (k as u32 - (1 << 23)) };
+        Some((negative << 31) | out)
+    }
+
+    /// Deterministic doubles around ties, subnormal midpoints and the
+    /// overflow threshold, both signs.
+    fn samples(n: usize) -> Vec<f64> {
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut out = Vec::new();
+        for i in 0..n {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let r = state >> 11;
+            let x = match i % 4 {
+                0 => {
+                    let k = ((1u64 << 23) | ((r & 0x3f_ffff) << 1) | 1) as f64;
+                    (k + 0.5) * 2f64.powi(((r >> 30) % 230) as i32 - 150)
+                }
+                1 => ((r % 64) as f64 + 0.5) * 2f64.powi(-149) + ((r >> 7) % 3) as f64 * 2f64.powi(-170),
+                2 => 340282356779733661637539395458142568448.0 + ((r % 2001) as f64 - 1000.0) * 2f64.powi(85),
+                _ => f64::from_bits((((r % 330) + 820) << 52) | (state & 0xf_ffff_ffff_ffff)),
+            };
+            out.push(if r & (1 << 40) != 0 { -x } else { x });
+        }
+        out
+    }
+
+    #[test]
+    fn c_float_narrow_equals_the_oracle() {
+        for x in samples(20000) {
+            let got = narrow_c_float(CFloatFormat::Binary32, x);
+            match oracle(x) {
+                Some(bits) => assert_eq!(got, Ok(bits as u64), "{x:e}"),
+                None => assert_eq!(got, Err(if x > 0.0 { 0 } else { 1 }), "{x:e}"),
+            }
+        }
+    }
+
+    #[test]
+    fn c_float_narrow_boundaries() {
+        let threshold = 340282356779733661637539395458142568448.0f64;
+        let below = f64::from_bits(threshold.to_bits() - 1);
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, below), Ok(0x7f7f_ffff));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, threshold), Err(0));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, -threshold), Err(1));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, 1e300), Err(0));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, -1e-50), Ok(0));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, 2f64.powi(-150)), Ok(0));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, 1.5 * 2f64.powi(-149)), Ok(2));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, 1.0 + 2f64.powi(-24)), Ok(0x3f80_0000));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary32, 1.0 + 3.0 * 2f64.powi(-24)), Ok(0x3f80_0002));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary64, 0.1), Ok(0.1f64.to_bits()));
+        assert_eq!(narrow_c_float(CFloatFormat::Binary64, 1e300), Ok(1e300f64.to_bits()));
+    }
+
+    #[test]
+    fn c_float_admit_rules() {
+        for (format, nan, pinf, ninf, nzero) in [
+            (CFloatFormat::Binary32, 0x7fc0_0001u64, 0x7f80_0000u64, 0xff80_0000u64, 0x8000_0000u64),
+            (CFloatFormat::Binary64, 0x7ff8_0000_0000_0001, 0x7ff0_0000_0000_0000, 0xfff0_0000_0000_0000, 0x8000_0000_0000_0000),
+        ] {
+            assert_eq!(admit_c_float(format, nan), Err(2));
+            assert_eq!(admit_c_float(format, nan | if format.width() == 4 { 0x8000_0000 } else { 0x8000_0000_0000_0000 }), Err(2));
+            assert_eq!(admit_c_float(format, pinf), Err(0));
+            assert_eq!(admit_c_float(format, ninf), Err(1));
+            assert_eq!(admit_c_float(format, nzero), Ok(0));
+            assert_eq!(admit_c_float(format, 1), Ok(if format.width() == 4 { 2f64.powi(-149).to_bits() } else { 1 }));
+        }
+        assert_eq!(admit_c_float(CFloatFormat::Binary32, 0x7f7f_ffff), Ok((f32::MAX as f64).to_bits()));
+        assert_eq!(admit_c_float(CFloatFormat::Binary32, 0x3dcc_cccd), Ok(0.10000000149011612f64.to_bits()));
+    }
+
+    #[test]
+    fn c_float_widening_is_exact() {
+        // Every exponent, sampled significands, both signs: a finite
+        // binary32 admitted and narrowed back is itself.
+        for e in 0u32..255 {
+            for f in [0u32, 1, 2, 0x40_0000, 0x7f_fffe, 0x7f_ffff, 0x12_3456, 0x55_5555] {
+                for sign in [0u32, 0x8000_0000] {
+                    let bits = sign | (e << 23) | f;
+                    if bits == 0x8000_0000 {
+                        continue;
+                    }
+                    let wide = admit_c_float(CFloatFormat::Binary32, bits as u64).unwrap();
+                    assert_eq!(narrow_c_float(CFloatFormat::Binary32, f64::from_bits(wide)), Ok(bits as u64), "{bits:#x}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn c_float_formats_are_the_c_types_widths() {
+        assert_eq!(CFloatFormat::of_width(4).map(|f| f.width()), Some(4));
+        assert_eq!(CFloatFormat::of_width(8).map(|f| f.width()), Some(8));
+        assert!(CFloatFormat::of_width(16).is_none());
+    }
+}
+
 #[repr(C)]
 pub struct ResultObj {
     pub hdr: Header,

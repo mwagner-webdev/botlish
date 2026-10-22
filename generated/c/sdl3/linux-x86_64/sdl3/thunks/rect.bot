@@ -6,7 +6,7 @@
 import std::ffi::c
 import sdl3::ctypes
 
-extern c library "botlish_shim_sdl3_92412515"
+extern c library "botlish_shim_sdl3_6de904a8"
 extern c library "SDL3"
 
 # C: static inline void SDL_RectToFRect(const SDL_Rect *rect, SDL_FRect *frect)
@@ -41,6 +41,13 @@ extern c fn SDL_PointInRectFloat named "botlish_sdl3_SDL_PointInRectFloat"(
 # C: static inline _Bool SDL_RectEmptyFloat(const SDL_FRect *r)
 extern c fn SDL_RectEmptyFloat named "botlish_sdl3_SDL_RectEmptyFloat"(
     r: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect] read
+) -> std::ffi::c::Bool
+
+# C: static inline _Bool SDL_RectsEqualEpsilon(const SDL_FRect *a, const SDL_FRect *b, float epsilon)
+extern c fn SDL_RectsEqualEpsilon named "botlish_sdl3_SDL_RectsEqualEpsilon"(
+    a: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect] read,
+    b: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect] read,
+    epsilon: std::ffi::c::Float
 ) -> std::ffi::c::Bool
 
 # C: static inline _Bool SDL_RectsEqualFloat(const SDL_FRect *a, const SDL_FRect *b)

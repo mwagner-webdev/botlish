@@ -77,14 +77,14 @@ header winuser.h 4dadbaa4
 header winver.h 736e7a39
 header wow64apiset.h e7a43da7
 shim_library botlish_shim_win32_e3f8535c
-file layouts-check.c 7360 9ac7f2fc
-file layouts.tsv 7169 ce52eea9
-file report.tsv 24619 9151f4fb
-file report.txt 180 4a8e2727
+file layouts-check.c 7580 03b1a06c
+file layouts.tsv 7169 00c35774
+file report.tsv 24619 013ad8b9
+file report.txt 170 0ef7e2fd
 file shim.c 198 e3f8535c
 file win32/apiset.bot 9 5357b816
 file win32/basetsd.bot 43 a4712ae3
-file win32/ctypes.bot 1355 0749f655
+file win32/ctypes.bot 1359 50342be6
 file win32/datetimeapi.bot 88 4a45e8a5
 file win32/debugapi.bot 55 0ba326c4
 file win32/errhandlingapi.bot 59 948b334e
@@ -98,7 +98,7 @@ file win32/interlockedapi.bot 47 f3776998
 file win32/ioapiset.bot 85 567931f5
 file win32/jobapi.bot 13 d9568fa2
 file win32/ktmtypes.bot 59 92935949
-file win32/layouts.bot 9850 d43eb608
+file win32/layouts.bot 10119 c6966023
 file win32/libloaderapi.bot 343 7fada7bb
 file win32/mcx.bot 153 98fcafe6
 file win32/memoryapi.bot 372 18cf19a5
@@ -135,13 +135,13 @@ file win32/winbase.bot 5154 d7ee20cf
 file win32/wincon.bot 614 cad22d9d
 file win32/windef.bot 17 c46f08bd
 file win32/winerror.bot 4466 a31395b2
-file win32/wingdi.bot 4338 965c4063
+file win32/wingdi.bot 4421 e65dddb2
 file win32/winnetwk.bot 564 a6663b57
 file win32/winnls.bot 1489 2638fc7e
 file win32/winnt.bot 4089 96ad3163
 file win32/winreg.bot 1157 6be46d20
 file win32/winsvc.bot 754 4229d521
-file win32/winuser.bot 8308 9db5f307
+file win32/winuser.bot 8329 182aeba3
 file win32/winver.bot 296 7dfa1428
 file win32/wnnc.bot 74 d78e07ac
 file win32/wow64apiset.bot 65 db191c45
@@ -193,8 +193,8 @@ libraries win32/winuser.bot user32
 libraries win32/winver.bot {kernel32 version}
 libraries win32/wow64apiset.bot kernel32
 import_library kernel32 libkernel32.a 1411
-import_library user32 libuser32.a 829
-import_library gdi32 libgdi32.a 380
+import_library user32 libuser32.a 832
+import_library gdi32 libgdi32.a 386
 import_library advapi32 libadvapi32.a 401
 import_library version libversion.a 21
 import_library mpr libmpr.a 61
@@ -202,7 +202,7 @@ import_library imm32 libimm32.a 82
 import_library virtdisk libvirtdisk.a 25
 import_library ntdll libntdll.a 18
 import_library synchronization libsynchronization.a 3
-import_library opengl32 libopengl32.a 17
+import_library opengl32 libopengl32.a 20
 import_library msimg32 libmsimg32.a 2
 import_library winspool libwinspool.a 3
 import_multiple AcquireSRWLockExclusive kernel32 synchronization
@@ -272,7 +272,7 @@ import_multiple WaitForSingleObject kernel32 synchronization
 import_multiple WaitForSingleObjectEx kernel32 synchronization
 import_multiple WakeAllConditionVariable kernel32 synchronization
 import_multiple WakeConditionVariable kernel32 synchronization
-count alias 597
+count alias 600
 count aliases 639
 count bool 0
 count boolOnly 0
@@ -281,7 +281,7 @@ count complete 900
 count constants 15309
 count constantsSeen 14448
 count declared 2787
-count direct 2656
+count direct 2665
 count enumerators 1049
 count excluded 0
 count fnmacros 286
@@ -290,19 +290,18 @@ count inline 42
 count manual 0
 count opaque 10
 count proven 19
-count ptrParams 6484
+count ptrParams 6507
 count ptrResults 506
 count resultAlias 0
 count resultIndependent 0
 count resultUnknown 506
 count tablestubs 0
 count thunk 42
-count unknownParams 6465
-count unknownRetention 3004
-count unsupported 459
-count views 1792
+count unknownParams 6488
+count unknownRetention 3016
+count unsupported 447
+count views 1801
 blocked by-value-aggregate 36
-blocked float 9
 blocked macro-needs-signature 248
 blocked no-import-library 103
 blocked no-link-symbol 8
@@ -310,18 +309,17 @@ blocked union-by-value 1
 blocked unsupported-callback-signature 15
 blocked unsupported-macro 30
 blocked va-list 6
-blocked variadic 3
-convention_default stdcall 3176
+convention_default stdcall 3185
 layout_abi windows-x86_64-gnu clang x86_64-w64-mingw32 {Ubuntu clang version 18.1.3 (1ubuntu1)}
 layout_count anonymous 271
-layout_count blocked 171
-layout_count blockedDirect 68
-layout_count blockedStructs 124
-layout_count blockedTransitive 103
-layout_count blockedUnions 47
-layout_count emitted 996
-layout_count emittedSynthetic 64
-layout_count emittedUnions 77
+layout_count blocked 152
+layout_count blockedDirect 58
+layout_count blockedStructs 106
+layout_count blockedTransitive 94
+layout_count blockedUnions 46
+layout_count emitted 1015
+layout_count emittedSynthetic 66
+layout_count emittedUnions 78
 layout_count incomplete 10
 layout_count promoted 3
 layout_count public 1171
@@ -332,8 +330,7 @@ layout_count unheld 4
 layout_count unions 127
 layout_blocked bitfield 55
 layout_blocked flexible-array 3
-layout_blocked float 10
-layout_blocked nested-layout-blocked 106
+layout_blocked nested-layout-blocked 95
 contract TpInitializeCallbackEnviron cbe {escape proven-noescape access write} compiler {nocapture writeonly}
 contract TpSetCallbackThreadpool cbe {escape proven-noescape access write} compiler {nocapture writeonly}
 contract TpSetCallbackCleanupGroup cbe {escape proven-noescape access write} compiler {nocapture writeonly}

@@ -33,6 +33,9 @@ proc ::cbind::report::rows {model} {
         set sig ""
         if {$k in {direct alias thunk}} {
             set types [lmap q [dict get $e params] {ReportType $ids [dict get $q type]}]
+            if {[dict getdef $e variadic 0]} {
+                lappend types variadic
+            }
             set sig "; ([join $types {, }]) -> [ReportType $ids [dict get $e result type]]"
         }
         set lib [expr {[dict exists $e library] ? "; library [dict get $e library]" : ""}]
@@ -547,7 +550,7 @@ proc ::cbind::report::text {model} {
     lappend out [Line "C _Bool in the signature (blocked without std::ffi::c::Bool)" [dict get $c bool] $apis]
     lappend out [Line "  of them bound now, bool their only blocker" [dict get $c boolOnly] $apis]
     foreach {label reasons} {
-        "float/double" {float double long-double}
+        "long double and the other floating types (C float and double are bound)" {long-double unsupported-floating}
         "aggregates by value (struct, union)" {by-value-aggregate union-by-value}
         "varargs (..., va_list)" {variadic va-list}
         "callback signature outside the ABI universe" {unsupported-callback-signature}

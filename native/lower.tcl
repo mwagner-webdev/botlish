@@ -144,6 +144,7 @@ namespace eval native::lower {
         std::list::length {op listlen} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
+        list#with_length {op listwithlen} \
         std::immutable_set::from_list {equality-list} \
         std::immutable_set::contains  {equality-set} \
         std::mutable_array::allocate {op mutarrayallocate} \
@@ -169,7 +170,8 @@ namespace eval native::lower {
         error?       {op iserror} \
         result-value {op resultvalue} \
         result-error {op resulterror} \
-        hash         {op hash} \
+        hash         {hashing hash hashtotal} \
+        std::table_hash::of {hashing tablehash tablehashtotal} \
         std::char::scalar_value {op charcodepoint} \
         std::byte_store::from_list {op bytesfromlist} \
         std::byte_store::byte_count    {op byteslen} \
@@ -404,6 +406,13 @@ namespace eval native::lower {
     # `veq`/`streq` (not proven allocation-free), and nothing else in the
     # `natives` table above.
     variable leafInlineSafeOps {iadd isub imul ilt ile igt ige ieq iand ior ixor ishr ishl imod}
+    # A test-only fault injection (`-fault NAME`, BOTLISH_NATIVE_FAULT; never
+    # a compilation option of a program): "" lowers as specified.
+    # `eager-foreign-result` re-creates the representation C-FFI-ERROR-
+    # CAPTURE-MILESTONE-2.md removed -- every C call's result converted and
+    # its write-back value built right after the call -- so the error-capture
+    # detectors can show that they see it (their positive control).
+    variable fault ""
 }
 
 # ---------------------------------------------------------------------------
@@ -1430,7 +1439,8 @@ proc native::lower::Program {hirProgram args} {
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
-            -virtual-construction-opt $constructionDefault] $args]
+            -virtual-construction-opt $constructionDefault \
+            -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -1499,6 +1509,11 @@ proc native::lower::Program {hirProgram args} {
     set traversalOpt [dict get $options -string-traversal-opt]
     set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
     set constructionOpt [dict get $options -virtual-construction-opt]
+    variable fault
+    set fault [dict get $options -fault]
+    if {$fault ni {"" eager-foreign-result}} {
+        throw {NATIVE BUG} "native lowering: unknown fault \"$fault\" (the one fault injection is eager-foreign-result)"
+    }
     set leafEligible [dict create]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt] \
@@ -1671,7 +1686,7 @@ proc native::lower::Program {hirProgram args} {
     foreach key $foreignList {
         set record [dict get $declarations $key]
         set alias [core::cabi::AliasIndex [dict get $record contract]]
-        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}] name=[Quote $key]"
+        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}][expr {[dict getdef $record abi variadic 0] ? " variadic=1" : ""}] name=[Quote $key]"
     }
     # The target the program was built for (core/cabi.tcl's name and
     # triple), when its HIR depends on one (hir::cabi::targetOf): the driver
@@ -2513,7 +2528,7 @@ proc native::lower::CompanionFunction {id} {
         }
     }
     if {$ok} {
-        set fields [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]
+        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
             Emit fn "retmulti [join $fields { }]"
         }
@@ -2953,7 +2968,7 @@ proc native::lower::InternalCompanionFunction {id} {
         }
     }
     if {$ok} {
-        set fields [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]
+        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
             Emit fn "retmulti [join $fields { }]"
         }
@@ -3151,7 +3166,7 @@ proc native::lower::FieldsCompanionFunction {id} {
         }
     }
     if {$ok} {
-        set fields [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]
+        set fields [TaggedFields fn [VirtualValue fn [lindex $body end] $arity [hir::escape::resultCut $escape $id]]]
         if {$fields ne "never"} {
             Emit fn "retmulti [join $fields { }]"
         }
@@ -3334,14 +3349,26 @@ proc native::lower::ScalarKind {fnVar reg} {
     return ""
 }
 
-# The ` shortregs="..." asciiregs="..."` suffix of FN's header ("" when it
-# has no scalar String register).
+# The ` shortregs="..." asciiregs="..." i64regs="..." u64regs="..."` suffix
+# of FN's header ("" when it has no scalar String register and no C word).
 proc native::lower::ShortRegsHeader {fnVar} {
     upvar 1 $fnVar fn
-    if {![dict exists $fn shortRegs]} {
-        return ""
-    }
     set out ""
+    if {[dict exists $fn wordRegs]} {
+        # The C words (AssignWord, C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+        foreach kind {i64 u64} {
+            set regs {}
+            dict for {r k} [dict get $fn wordRegs] {
+                if {$k eq $kind} { lappend regs [string range $r 1 end] }
+            }
+            if {$regs ne ""} {
+                append out " ${kind}regs=[Quote [join [lsort -integer $regs] { }]]"
+            }
+        }
+    }
+    if {![dict exists $fn shortRegs]} {
+        return $out
+    }
     foreach kind {short ascii} {
         set regs {}
         dict for {r k} [dict get $fn shortRegs] {
@@ -3738,7 +3765,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         countloop { set result [CountLoop fn $e $node] }
         lockloop  { set result [LockLoop fn $e $node] }
         struct    { set result [Struct fn $e $node] }
-        project   { set result [Project fn $e $node] }
+        project   { set result [Project fn $e $node $want] }
         return {
             # The coroutines this exit takes out of scope: released before
             # its value, or (those the value refers to) right before
@@ -3753,8 +3780,8 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 # classifies as a recognized construction of this same
                 # arity, so VirtualValue's fields (not a materialized List)
                 # are what this return actually produces.
-                set fields [VirtualValue fn [dict get $node value] $companion \
-                    [hir::escape::resultCut $escape [dict get $fn instance]]]
+                set fields [TaggedFields fn [VirtualValue fn [dict get $node value] $companion \
+                    [hir::escape::resultCut $escape [dict get $fn instance]]] $e]
                 if {$fields ne "never"} {
                     ReleaseHandles fn $after $e
                     Emit fn "retmulti [join $fields { }]" $e
@@ -3892,6 +3919,13 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     if {[dict exists $affineTemps $e]} {
         # A pending temporary a release may name (ReleaseHandles).
         dict set fn temps $e [list reg $result]
+    }
+    if {($want ne "cword" && [dict exists $fn wordRegs $result]) || [dict exists $fn pending $result]} {
+        # A C word or a pending object where no consumer of one asked for it
+        # (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): its tagged value, here, at
+        # its first use that needs one.
+        set result [TaggedField fn $result $e]
+        set repr tagged
     }
     if {$result ne "never" && $want eq "raw" && $repr eq "tagged"} {
         # WANT could not be produced directly (Ref/Call are the only kinds
@@ -4034,18 +4068,38 @@ proc native::lower::StructFields {fnVar e node {cut ""}} {
         if {$cut ne "" && [dict exists [CutDict $cut] $name]} {
             # An opened inner literal: evaluated here, at the position the
             # field is written, its own fields in written order; they join
-            # the outer's physical fields.
-            if {[hir::kind $hir $field] ne "struct"} {
-                throw {NATIVE BUG} "native lowering: field \"$name\" opened but not an inline literal ($field)"
-            }
+            # the outer's physical fields. A foreign call's write-back value
+            # opens the same way (hir::escape::LiteralTree): its fields.
             lassign [dict get [CutDict $cut] $name] sub subcut
-            set r [StructFields fn $field [hir::node $hir $field] $subcut]
+            if {[hir::kind $hir $field] eq "call"} {
+                set r [VirtualValue fn $field [hir::escape::CutFields $sub $subcut] $subcut]
+            } elseif {[hir::kind $hir $field] ne "struct"} {
+                throw {NATIVE BUG} "native lowering: field \"$name\" opened but not an inline literal ($field)"
+            } else {
+                set r [StructFields fn $field [hir::node $hir $field] $subcut]
+            }
             if {$r ne "never" && [hir::typeOf $hir $field] eq "never"} {
                 Emit fn unreachable $field
                 return never
             }
         } else {
-            set r [Expr fn $field]
+            set mandatory [MandatoryWriteBack $field]
+            if {$mandatory ne ""} {
+                # A write-back value as a field its representation keeps
+                # closed: its fields, and the field a pending object over
+                # them (C-FFI-ERROR-CAPTURE-MILESTONE-2.md), built where a
+                # use needs it.
+                lassign $mandatory n sub subcut
+                set r [VirtualValue fn $field $n $subcut]
+                if {$r ne "never"} {
+                    set r [PendingObject fn $sub $r $subcut]
+                }
+            } else {
+                # A C word stays one: the struct's fields are its consumers'
+                # to convert (TaggedFields where it is built, after every
+                # field; a virtual local keeps it).
+                set r [Expr fn $field cword]
+            }
         }
         if {$r eq "never"} {
             return never
@@ -4096,8 +4150,10 @@ proc native::lower::FieldOffset {shape cut name} {
 
 # The object of a struct of SHAPE opened as CUT whose physical fields are the
 # registers FIELDS: inner objects of opened fields first, then the outer,
-# each `structnew` of its exact shape. Source expression E.
-proc native::lower::BuildStruct {fnVar shape cut fields e} {
+# each `structnew` of its exact shape. Source expression E. BUILT maps an
+# opened field to its object when one already exists (OpenedFieldObject):
+# that object is used, not built again.
+proc native::lower::BuildStruct {fnVar shape cut fields e {built {}}} {
     upvar 1 $fnVar fn
     lassign $shape id layout
     set cuts [CutDict $cut]
@@ -4107,10 +4163,14 @@ proc native::lower::BuildStruct {fnVar shape cut fields e} {
         if {[dict exists $cuts $field]} {
             lassign [dict get $cuts $field] sub subcut
             set w [hir::escape::CutFields $sub $subcut]
-            lappend regs [BuildStruct fn $sub $subcut [lrange $fields $pos [expr {$pos + $w - 1}]] $e]
+            if {[dict exists $built $field]} {
+                lappend regs [dict get $built $field]
+            } else {
+                lappend regs [BuildStruct fn $sub $subcut [lrange $fields $pos [expr {$pos + $w - 1}]] $e]
+            }
             incr pos $w
         } else {
-            lappend regs [lindex $fields $pos]
+            lappend regs [TaggedField fn [lindex $fields $pos] $e]
             incr pos
         }
     }
@@ -4136,7 +4196,7 @@ proc native::lower::Struct {fnVar e node} {
         return [Assign fn unit]
     }
     lassign [StructShapeOf $node] id layout
-    return [Assign fn "structnew [ShapeIndex $id $layout] [join $ordered { }]" $e]
+    return [Assign fn "structnew [ShapeIndex $id $layout] [join [TaggedFields fn $ordered $e] { }]" $e]
 }
 
 # Materialization (STRUCT-SCALAR-REPLACEMENT.md): the physical struct of the
@@ -4164,12 +4224,59 @@ proc native::lower::MaterializeVirtual {fnVar b e} {
     if {$mat ne ""} {
         return $mat
     }
-    set mat [BuildStruct fn $shape [lindex $rootLocal 5] [lindex $rootLocal 1] $e]
+    set mat [BuildStruct fn $shape [lindex $rootLocal 5] [lindex $rootLocal 1] $e [lindex $rootLocal 7]]
     dict set fn locals $root [lreplace $rootLocal 4 4 $mat]
     return $mat
 }
 
-proc native::lower::Project {fnVar e node} {
+# The value of field NAME of a struct of SHAPE opened as CUT whose physical
+# fields are FIELDS: a closed field's register; an opened field's object,
+# built here from its own fields (BuildStruct). An opened field is read whole
+# only where hir/escape.tcl's NestingPlan let a write-back's MutableBytes stay
+# open past an independent use (building it at that use is no more often than
+# at the foreign call, and nothing runs at the call).
+proc native::lower::FieldValue {fnVar shape cut fields name e} {
+    upvar 1 $fnVar fn
+    set offset [FieldOffset $shape $cut $name]
+    set cuts [CutDict $cut]
+    if {![dict exists $cuts $name]} {
+        return [lindex $fields $offset]
+    }
+    lassign [dict get $cuts $name] sub subcut
+    set width [hir::escape::CutFields $sub $subcut]
+    return [BuildStruct fn $sub $subcut [lrange $fields $offset [expr {$offset + $width - 1}]] $e]
+}
+
+# The object of the opened field NAME of virtual binding B, read whole at E:
+# the field of the whole object when that exists already, else built here
+# (FieldValue) and kept in the root binding's entry (index 7: field ->
+# object), so every later use this scope dominates -- and a later
+# materialization of the whole value (MaterializeVirtual) -- reads the same
+# object. Branches and loops restore `fn locals`, dropping one that does not
+# dominate what follows.
+proc native::lower::OpenedFieldObject {fnVar b name e} {
+    upvar 1 $fnVar fn
+    lassign [dict get $fn locals $b] - fields shape root - cut
+    set rootLocal [dict get $fn locals $root]
+    set mat [lindex $rootLocal 4]
+    if {$mat ne ""} {
+        return [Assign fn "structget [lsearch -exact [lindex $shape 1] $name] $mat" $e]
+    }
+    while {[llength $rootLocal] < 8} {
+        lappend rootLocal ""
+    }
+    set built [lindex $rootLocal 7]
+    if {[dict exists $built $name]} {
+        return [dict get $built $name]
+    }
+    set object [FieldValue fn $shape $cut $fields $name $e]
+    dict set built $name $object
+    lset rootLocal 7 $built
+    dict set fn locals $root $rootLocal
+    return $object
+}
+
+proc native::lower::Project {fnVar e node {want tagged}} {
     upvar 1 $fnVar fn
     variable hir
     variable escape
@@ -4190,7 +4297,7 @@ proc native::lower::Project {fnVar e node} {
         # the cut kept closed is an ordinary object read with `structget`.
         set r [ProjectChain fn $e $node]
         if {$r ne ""} {
-            return $r
+            return [FieldOut fn $r $want $e]
         }
     }
     if {[hir::kind $hir $receiver] eq "ref"} {
@@ -4206,7 +4313,14 @@ proc native::lower::Project {fnVar e node} {
                 if {$slot < 0} {
                     throw {NATIVE BUG} "native lowering: virtual binding $b has no field \"$name\" ($e)"
                 }
-                return [lindex [lindex $local 1] [FieldOffset [lindex $local 2] [lindex $local 5] $name]]
+                if {[dict exists [CutDict [lindex $local 5]] $name]} {
+                    # An opened field read whole (a write-back's
+                    # MutableBytes): its object, built at its first such use.
+                    return [OpenedFieldObject fn $b $name $e]
+                }
+                # A C word or a pending object stays one where that is wanted
+                # (FieldOut).
+                return [FieldOut fn [lindex [lindex $local 1] [FieldOffset [lindex $local 2] [lindex $local 5] $name]] $want $e]
             }
         }
     }
@@ -4221,7 +4335,19 @@ proc native::lower::Project {fnVar e node} {
         if {$fields eq "never"} {
             return never
         }
-        return [lindex $fields [FieldOffset $shape $cut $name]]
+        return [FieldOut fn [FieldValue fn $shape $cut $fields $name $e] $want $e]
+    }
+    set mandatory [MandatoryWriteBack $receiver]
+    if {$mandatory ne ""} {
+        # A write-back value read straight off its call that no analysis
+        # above took (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): read from its
+        # fields all the same; nothing else of it is built.
+        lassign $mandatory n shape cut
+        set fields [VirtualValue fn $receiver $n $cut]
+        if {$fields eq "never"} {
+            return never
+        }
+        return [FieldOut fn [FieldValue fn $shape $cut $fields $name $e] $want $e]
     }
     if {$type eq "never"} {
         # HIR proved the receiver never completes normally (an element of a
@@ -4484,7 +4610,7 @@ proc native::lower::ContextInstallCall {fnVar e node} {
         # `with context`, hir/escape.tcl's ctxUse): its leaves without the
         # object, a closed inner struct read with `structget`.
         lassign $local - fields shape - - cut
-        set leaves [ContextLeafRegs fn $e $shape $cut $fields]
+        set leaves [ContextLeafRegs fn $e $shape $cut [TaggedFields fn $fields $e]]
     } else {
         set value [Expr fn $arg]
         if {$value eq "never"} {
@@ -5005,6 +5131,525 @@ proc native::lower::BytesAddrCall {fnVar e node wantVirtual} {
 }
 
 # ---------------------------------------------------------------------------
+# Foreign-result transport (C-FFI-ERROR-CAPTURE-MILESTONE-2.md)
+#
+# A C function that fails the POSIX way leaves its reason in errno, which
+# the program reads right after the call. Whatever the compiler runs in
+# between -- an allocation, a runtime call, a collection -- may change it.
+# So a C call's result is never converted, boxed or built merely because C
+# returned it: it is held in the representation the call produced it in
+# until the first use that needs another, whatever the optimization flags
+# (-struct-opt, -escape-opt, -specialize, the nesting and width policies),
+# and that first use is the program's own. This is a correctness rule of the
+# transport, not an optimization: what the flags turn off is the optional
+# aggregate work around it.
+#
+#   C words      a 64-bit C integer result (class i64 or u64) is the machine
+#                word C returned, in a register of the `i64`/`u64` kind
+#                (AssignWord; nir.rs's OpCode::CWBox). A comparison with
+#                an Int compares the word itself (WordComparison: `cwlt`
+#                ..., a constant sentinel as a `cword` of the same kind);
+#                every other use boxes it once per dominating scope
+#                (WordTagged: `cwbox`, a BigInt only for a value outside
+#                the small range). A word is never a binding's tagged
+#                value, an argument, a result or a capture: a binding holds
+#                it as `{cword WORD}` (Bind), and every consumer that needs
+#                a tagged value asks WordTagged.
+#   pending      a write-back value's MutableBytes that its representation
+#   objects      keeps closed (one field: the object) is a pending object
+#                (PendingObject): a register never defined, standing for
+#                `structnew MutableBytes STORAGE` over the private copy C
+#                wrote, built where a use needs the object (TaggedField),
+#                read for its storage alone where a use needs only that
+#                (OpenedOwnerStorage). A field opened by its cut is already
+#                its storage (hir/escape.tcl's NestingPlan).
+#   mandatory    a write-back value escape analysis did not make virtual --
+#   deferral     struct scalar replacement off, a binding a closure
+#                captures, a use the analysis gives up on -- is still held
+#                as fields: a plain local bound to one (or to an `if` of
+#                them), and one projected straight off its call
+#                (MandatoryWriteBack, Bind, Project). Its uses build what
+#                they need, at the use: the whole value (MaterializeVirtual)
+#                where one is needed, a capture included (CaptureRegsOf).
+#   loops        a deferred value a loop's body needs built is built once,
+#                at the loop's entry (HoistDeferredUses), never once per
+#                iteration.
+#
+# Field registers flow on in the deferred forms only into the places that
+# know them -- a virtual local's own fields, the projection that reads one --
+# and every other consumer of field registers takes TaggedFields: a struct
+# built from them, a `retmulti`, the fields handed to a callee, an `if`'s
+# join (which joins two words of one kind in a word, JoinWordKinds), an error
+# payload, a context's leaves.
+
+# Like Assign, for an instruction whose result is a C word of KIND (i64 |
+# u64): records R in fn wordRegs, emitted as the func header's `i64regs=` /
+# `u64regs=`.
+proc native::lower::AssignWord {fnVar rhs kind {e ""}} {
+    upvar 1 $fnVar fn
+    set r [Assign fn $rhs $e]
+    dict set fn wordRegs $r $kind
+    return $r
+}
+
+# The C word kind (i64 | u64) of register REG, "" when it is none.
+proc native::lower::WordKind {fnVar reg} {
+    upvar 1 $fnVar fn
+    if {[dict exists $fn wordRegs $reg]} {
+        return [dict get $fn wordRegs $reg]
+    }
+    return ""
+}
+
+# The C word kind of the result of the extern C function KEY's calls (its
+# declaration's ABI class i64 or u64), "" for any other result.
+proc native::lower::ForeignWordKind {key} {
+    variable hir
+    set record [dict get [hir::foreign::declarations $hir] $key]
+    return [dict getdef {i64 i64 u64 u64} [dict get $record abi result] ""]
+}
+
+# 1 if the Int N fits a C word of KIND.
+proc native::lower::WordFits {kind n} {
+    if {$kind eq "i64"} {
+        return [expr {$n >= -9223372036854775808 && $n <= 9223372036854775807}]
+    }
+    return [expr {$n >= 0 && $n <= 18446744073709551615}]
+}
+
+# The tagged Int of C word WORD: `op cwbox`, once per dominating scope (fn
+# rawCache, which branches and loops save and restore).
+proc native::lower::WordTagged {fnVar word {e ""}} {
+    upvar 1 $fnVar fn
+    set key cwbox:$word
+    if {[dict exists $fn rawCache $key]} {
+        return [dict get $fn rawCache $key]
+    }
+    set r [Assign fn "op cwbox $word" $e]
+    dict set fn rawCache $key $r
+    return $r
+}
+
+# A pending object: a fresh register, never defined, standing for the struct
+# of SHAPE (an {ID LAYOUT} key) opened as CUT over the physical fields FIELDS
+# (themselves possibly C words or pending objects) until a use needs it
+# (TaggedField builds it, BuildStruct).
+proc native::lower::PendingObject {fnVar shape fields {cut ""}} {
+    upvar 1 $fnVar fn
+    set p [NewReg fn]
+    dict set fn pending $p [list $shape $cut $fields]
+    return $p
+}
+
+# The storage of pending object REG when it is a MutableBytes (its one
+# field), "" otherwise.
+proc native::lower::PendingStorage {fnVar reg} {
+    upvar 1 $fnVar fn
+    if {[dict exists $fn pending $reg]} {
+        lassign [dict get $fn pending $reg] shape cut fields
+        if {[lindex $shape 0] eq [core::bytestore::mutableBytesType] && $cut eq ""} {
+            return [lindex $fields 0]
+        }
+    }
+    return ""
+}
+
+# The tagged value of field register REG: REG itself, unless it is a C word
+# (its Int, WordTagged) or a pending object (its object, built here once per
+# dominating scope).
+proc native::lower::TaggedField {fnVar reg {e ""}} {
+    upvar 1 $fnVar fn
+    if {[dict exists $fn wordRegs $reg]} {
+        return [WordTagged fn $reg $e]
+    }
+    if {[dict exists $fn pending $reg]} {
+        set key pending:$reg
+        if {[dict exists $fn rawCache $key]} {
+            return [dict get $fn rawCache $key]
+        }
+        lassign [dict get $fn pending $reg] shape cut fields
+        set r [BuildStruct fn $shape $cut $fields $e]
+        dict set fn rawCache $key $r
+        return $r
+    }
+    return $reg
+}
+
+proc native::lower::TaggedFields {fnVar regs {e ""}} {
+    upvar 1 $fnVar fn
+    if {$regs eq "never"} {
+        return never
+    }
+    return [lmap r $regs {TaggedField fn $r $e}]
+}
+
+# A field register REG read by a projection that wants WANT: the C word
+# itself where a word is wanted (a comparison, WordComparison), its tagged
+# value otherwise (TaggedField).
+proc native::lower::FieldOut {fnVar reg want {e ""}} {
+    upvar 1 $fnVar fn
+    if {$want eq "cword" && [dict exists $fn wordRegs $reg]} {
+        return $reg
+    }
+    return [TaggedField fn $reg $e]
+}
+
+# {N SHAPE CUT} when E (the current view) is a write-back value no
+# representation decision has to be made for: a foreign call with a write
+# exposure (hir::escape::WriteBackResult, whatever the struct options), or an
+# `if` every value branch of which ends in one of one shape -- held as
+# fields with every written MutableBytes opened (WriteBackCut: nothing to
+# build at the call). "" for anything else, and under the
+# eager-foreign-result fault.
+proc native::lower::MandatoryWriteBack {e} {
+    variable hir
+    variable fault
+    if {$fault ne ""} {
+        return ""
+    }
+    switch -- [hir::kind $hir $e] {
+        call {
+            if {![dict exists $hir exprs $e borrows]} {
+                return ""
+            }
+            set c [hir::escape::WriteBackResult $hir $e {enabled 1}]
+            if {$c eq ""} {
+                return ""
+            }
+            set shape [lindex $c 1 1]
+            set cut [hir::escape::WriteBackCut $hir $e]
+            return [list [hir::escape::CutFields $shape $cut] $shape $cut]
+        }
+        if {
+            set node [hir::node $hir $e]
+            set result ""
+            foreach body [list [dict get $node thenBody] [dict get $node elseBody]] {
+                if {$body eq ""} {
+                    return ""
+                }
+                if {![hir::get $hir [lindex $body 0] reachable]} {
+                    continue
+                }
+                set last [lindex $body end]
+                if {[hir::typeOf $hir $last] eq "never"} {
+                    continue
+                }
+                set m [MandatoryWriteBack $last]
+                if {$m eq "" || ($result ne "" && $m ne $result)} {
+                    return ""
+                }
+                set result $m
+            }
+            return $result
+        }
+    }
+    return ""
+}
+
+# How every physical field of a virtual `if` join (If) is joined, when
+# every value branch ends in a write-back call of one written set: a C word
+# result of one kind K in all of them in a word register of kind K (`i64`,
+# `u64`), a MutableBytes CUT keeps closed (a pending object in every branch,
+# BorrowCall) by its storage (`pending`), anything else "" (tagged, each
+# branch's field tagged first). E is the `if` (NODE), N its fields.
+proc native::lower::JoinWordKinds {e node n cut} {
+    variable hir
+    variable fault
+    set kinds [lrepeat $n ""]
+    set type [hir::typeOf $hir $e]
+    if {$fault ne "" || ![hir::types::IsStruct $type]} {
+        return $kinds
+    }
+    set layout [hir::types::StructLayout $type]
+    if {"result" ni $layout} {
+        return $kinds
+    }
+    set kind ""
+    set written ""
+    foreach body [list [dict get $node thenBody] [dict get $node elseBody]] {
+        if {$body eq "" || ![hir::get $hir [lindex $body 0] reachable]} {
+            continue
+        }
+        set last [lindex $body end]
+        if {[hir::typeOf $hir $last] eq "never"} {
+            continue
+        }
+        if {[hir::kind $hir $last] ne "call" || ![dict exists $hir exprs $last borrows]
+                || [hir::escape::WrittenNames $hir $last] eq "" || [hir::borrow::refused $hir $last] ne ""
+                || [hir::borrow::resultAlias $hir $last] >= 0} {
+            return $kinds
+        }
+        lassign [hir::get $hir $last target] targetKind target
+        set name [dict get [hir::symbol $hir $target] name]
+        if {$targetKind ne "native" || ![core::native::isExtern $name]} {
+            return $kinds
+        }
+        set names [hir::escape::WrittenNames $hir $last]
+        if {$written ne "" && [lsort $names] ne [lsort $written]} {
+            return $kinds
+        }
+        set written $names
+        set k [ForeignWordKind [core::native::displayName $name]]
+        if {$k eq "" || ($kind ne "" && $k ne $kind)} {
+            set kind none
+        } else {
+            set kind $k
+        }
+    }
+    if {$written eq ""} {
+        return $kinds
+    }
+    if {$kind ni {"" none}} {
+        lset kinds [FieldOffset [list "" $layout] $cut result] $kind
+    }
+    foreach name $written {
+        if {![dict exists [CutDict $cut] $name]} {
+            lset kinds [FieldOffset [list "" $layout] $cut $name] pending
+        }
+    }
+    return $kinds
+}
+
+# A native comparison (< <= > >= ==, OP) E (NODE) of two Ints, one of which
+# is a C word: the word compared as it is (`op cwlt` ...), the other operand
+# a `cword` of the same kind when it is an Int constant that fits, else its
+# tagged Int -- nothing boxed, nothing allocated. Every operand that may be
+# one is asked for a word (Expr's `cword`): a binding holding one, a C call,
+# a projection of a write-back value's result; an Int constant is
+# evaluated last (it has no effect). "" when the comparison is not of that
+# form (an operand that needs a check, a non-Int), and NativeCall's ordinary
+# comparison when no operand turned out to be a word.
+proc native::lower::WordComparison {fnVar e node name op argExprs want} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable guards
+    variable knownErrors
+    if {$op ni {ilt ile igt ige ieq} || [llength $argExprs] != 2} {
+        return ""
+    }
+    set candidate 0
+    foreach arg $argExprs {
+        set key [list $e $arg]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]
+                || [hir::types::kindOf [hir::typeOf $hir $arg]] ne "int"} {
+            return ""
+        }
+        if {[hir::kind $hir $arg] in {ref call project}} {
+            set candidate 1
+        }
+    }
+    if {!$candidate} {
+        return ""
+    }
+    set regs {}
+    foreach arg $argExprs {
+        if {[IntConstOf $arg] ne ""} {
+            lappend regs ""
+            continue
+        }
+        set r [Expr fn $arg cword]
+        if {$r eq "never"} {
+            return {never tagged}
+        }
+        lappend regs $r
+    }
+    set side -1
+    foreach r $regs i {0 1} {
+        if {$side < 0 && $r ne "" && [WordKind fn $r] ne ""} {
+            set side $i
+        }
+    }
+    if {$side < 0} {
+        set tagged {}
+        foreach r $regs arg $argExprs {
+            if {$r eq ""} {
+                set r [Expr fn $arg]
+            }
+            lappend tagged $r
+        }
+        return [NativeCall fn $e $node $name $tagged 0 $op $want]
+    }
+    set word [lindex $regs $side]
+    set kind [WordKind fn $word]
+    set otherExpr [lindex $argExprs [expr {1 - $side}]]
+    set other [lindex $regs [expr {1 - $side}]]
+    if {$other eq ""} {
+        set value [IntConstOf $otherExpr]
+        if {[WordFits $kind $value]} {
+            set other [AssignWord fn "cword $value" $kind $otherExpr]
+        } else {
+            set other [Expr fn $otherExpr]
+        }
+    } elseif {[WordKind fn $other] ne "" && [WordKind fn $other] ne $kind} {
+        set other [WordTagged fn $other $otherExpr]
+    }
+    if {$side == 1} {
+        set op [dict get {ilt igt ile ige igt ilt ige ile ieq ieq} $op]
+    }
+    dict lappend fn calls [list native $name]
+    dict incr fn wordCompare
+    return [list [Assign fn "op [dict get {ilt cwlt ile cwle igt cwgt ige cwge ieq cweq} $op] $word $other" $e] tagged]
+}
+
+# The Int value of E when it is an Int constant, "" otherwise.
+proc native::lower::IntConstOf {e} {
+    variable hir
+    if {[hir::kind $hir $e] ne "const"} {
+        return ""
+    }
+    set value [hir::get $hir $e value]
+    if {[core::value::kind $value] ne "int"} {
+        return ""
+    }
+    return [core::value::intOf $value]
+}
+
+# Builds, before a loop whose body is EXPRS (loop E), what the body needs
+# built of the deferred values bound outside it, once: a C word used other
+# than in a comparison (WordTagged), a pending object read whole
+# (TaggedField), an opened MutableBytes read whole (OpenedFieldObject), a
+# mandatory virtual value used whole or captured (MaterializeVirtual). The
+# body's uses then find them in the scope the loop saved; nothing is built
+# once per iteration (DeferredNeeds says which uses need what).
+proc native::lower::HoistDeferredUses {fnVar exprs e} {
+    upvar 1 $fnVar fn
+    set needs [dict create]
+    foreach x $exprs {
+        DeferredNeeds fn $x "" 0 needs
+    }
+    dict for {b list} $needs {
+        set local [dict get $fn locals $b]
+        switch -- [lindex $local 0] {
+            cword {
+                WordTagged fn [lindex $local 1] $e
+            }
+            virtual {
+                if {"whole" in $list} {
+                    MaterializeVirtual fn $b $e
+                    continue
+                }
+                lassign $local - fields shape - - cut
+                foreach need [lsort -unique $list] {
+                    set name [lindex $need 1]
+                    if {[dict exists [CutDict $cut] $name]} {
+                        OpenedFieldObject fn $b $name $e
+                    } else {
+                        TaggedField fn [lindex $fields [FieldOffset $shape $cut $name]] $e
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Records in NEEDSVAR (BindingId -> needs) what expression X (inside a loop
+# body; PARENT its parent, NESTED 1 inside a nested function) needs built of
+# a deferred local -- `whole` (a mandatory virtual value used or captured
+# whole), {field NAME} (a pending, word or opened field read whole), or a C
+# word's `tagged` value. A comparison's operand, a projection into an opened
+# value, a byte owner handed to a foreign call and a word compared need
+# nothing (they read the representation as it is).
+proc native::lower::DeferredNeeds {fnVar x parent nested needsVar} {
+    upvar 1 $fnVar fn
+    upvar 1 $needsVar needs
+    variable hir
+    set kind [hir::kind $hir $x]
+    if {$kind eq "ref"} {
+        set b [hir::get $hir $x binding]
+        if {$b eq "" || ![dict exists $fn locals $b]} {
+            return
+        }
+        set local [dict get $fn locals $b]
+        switch -- [lindex $local 0] {
+            cword {
+                if {$nested || ![ComparisonOperand $parent $x]} {
+                    dict lappend needs $b tagged
+                }
+            }
+            virtual {
+                if {[lindex $local 2] eq ""} {
+                    return
+                }
+                if {$nested} {
+                    if {[lindex $local 6] eq "mandatory"} {
+                        dict lappend needs $b whole
+                    }
+                    return
+                }
+                if {$parent eq "" || [hir::kind $hir $parent] ne "project" || [hir::get $hir $parent receiver] ne $x} {
+                    if {[lindex $local 6] eq "mandatory"} {
+                        dict lappend needs $b whole
+                    }
+                    return
+                }
+                # A projection chain: its first name decides.
+                lassign $local - fields shape - - cut
+                set name [hir::get $hir $parent name]
+                set outer $parent
+                set chain 1
+                while {1} {
+                    set up [Parent $outer]
+                    if {$up eq "" || [hir::kind $hir $up] ne "project" || [hir::get $hir $up receiver] ne $outer} {
+                        break
+                    }
+                    set outer $up
+                    incr chain
+                }
+                set consumer [Parent $outer]
+                if {[dict exists [CutDict $cut] $name]} {
+                    if {$chain == 1 && ![ExposedOwner $consumer $outer]} {
+                        dict lappend needs $b [list field $name]
+                    }
+                    return
+                }
+                set reg [lindex $fields [FieldOffset $shape $cut $name]]
+                if {[dict exists $fn wordRegs $reg]} {
+                    if {$chain > 1 || ![ComparisonOperand $consumer $outer]} {
+                        dict lappend needs $b [list field $name]
+                    }
+                } elseif {[dict exists $fn pending $reg]} {
+                    if {$chain > 1 || ![ExposedOwner $consumer $outer]} {
+                        dict lappend needs $b [list field $name]
+                    }
+                }
+            }
+        }
+        return
+    }
+    set inner [expr {$nested || $kind eq "block"}]
+    foreach child [hir::children $hir $x] {
+        DeferredNeeds fn $child $x $inner needs
+    }
+}
+
+# 1 if X is an operand of the native comparison (< <= > >= ==) PARENT.
+proc native::lower::ComparisonOperand {parent x} {
+    variable hir
+    if {$parent eq "" || [hir::kind $hir $parent] ne "call"} {
+        return 0
+    }
+    lassign [hir::get $hir $parent target] targetKind target
+    return [expr {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] in {< <= > >= ==}
+        && $x in [hir::get $hir $parent args]}]
+}
+
+# 1 if X is an argument foreign call PARENT exposes (its byte owner: only
+# its storage is read, StorageOf).
+proc native::lower::ExposedOwner {parent x} {
+    variable hir
+    if {$parent eq "" || [hir::kind $hir $parent] ne "call" || ![dict exists $hir exprs $parent borrows]} {
+        return 0
+    }
+    set index [lsearch -exact [hir::get $hir $parent args] $x]
+    foreach borrow [hir::get $hir $parent borrows] {
+        if {[lindex $borrow 0] == $index} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Byte exposure: the one mechanism behind every machine address of Botlish
 # byte storage (ABI-BYTES.md, MUTABLE-BYTES.md, C-POINTER-BORROWING.md),
 # shared by the Linux syscall bridges (BytesAddrCall, SyscallCall) and by
@@ -5076,16 +5721,27 @@ proc native::lower::KeepExposedAlive {fnVar operands e} {
 #     {result: R, NAME: MutableBytes} (sorted fields), each NAME the
 #     MutableBytes over the private copy C wrote.
 #
+# The write-back value is a construction like a struct literal (hir/escape.
+# tcl's WriteBackResult): wanted virtual (WANTVIRTUAL fields, cut WANTCUT) it
+# is handed back as fields -- the C result's register and, for each written
+# NAME the cut opens, the private copy's storage register -- and nothing is
+# built after the call; a MutableBytes is made only where a use reads it whole
+# (native::lower::FieldValue, MaterializeVirtual), and the struct only where
+# a use needs the object. So the code after the operation runs no allocation,
+# no collection and no runtime call before the program reads the result (the
+# C error state, errno, is still intact: C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+# Only a field a representation class keeps closed is built here, eagerly.
+#
 # An unchecked (-strict 0) program's call that hir/borrow.tcl refused
 # (`borrowRefused`) evaluates its arguments and replays the refusal at run
 # time, as every backend does: no address of storage is ever handed to an
 # operation that may keep it.
-proc native::lower::BorrowCall {fnVar e node} {
+proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want tagged}} {
     upvar 1 $fnVar fn
     variable hir
     variable natives
     variable context
-    variable structOpt
+    variable fault
     set name [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
     set refused [hir::borrow::refused $hir $e]
     if {$refused ne ""} {
@@ -5151,23 +5807,56 @@ proc native::lower::BorrowCall {fnVar e node} {
         if {[dict size $access]} {
             append text " exposed=[join [lsort -integer [dict keys $access]] ,]"
         }
+        if {[dict exists $node cvarargs] && [dict get $node cvarargs] ne {}} {
+            # A variadic C call (VARIADICS-VERTICAL-SLICE-1.md): each
+            # trailing operand's own C ABI class and the class C's default
+            # argument promotion passes it as (hir::borrow's `cvarargs`); the
+            # call's machine signature is built from them (codegen/clif.rs).
+            append text " varargs=[join [lmap how [dict get $node cvarargs] {
+                string cat [dict get $how class] : [dict get $how promoted]
+            }] ,]"
+        }
+        set wordKind ""
         if {[hir::borrow::resultAlias $hir $e] >= 0} {
             append text " discard"
+        } elseif {$fault eq ""} {
+            # A 64-bit C integer result is the word C returned, kept as it
+            # is (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): converted, if at
+            # all, at its first use that needs an Int.
+            set wordKind [ForeignWordKind $key]
         }
-        set result [Assign fn $text $e]
+        if {$wordKind ne ""} {
+            set result [AssignWord fn $text $wordKind $e]
+        } else {
+            set result [Assign fn $text $e]
+        }
     } else {
         set result [Assign fn "[dict get $natives $name] [join $operands { }]" $e]
     }
     KeepExposedAlive fn $operands $e
     if {[dict size $written] == 0} {
+        if {[WordKind fn $result] ne ""} {
+            if {$want eq "cword"} {
+                return [list $result cword]
+            }
+            return [list [WordTagged fn $result $e] tagged]
+        }
         return [list $result tagged]
     }
-    if {$structOpt && [dict exists $context discarded $e]} {
+    if {$wantVirtual eq "" && $fault eq "" && [dict exists $context discarded $e]} {
+        # A write-back value nothing reads (statement position): nothing is
+        # built, whatever the optimization flags.
         return [list [Assign fn unit] tagged]
     }
     set type [hir::typeOf $hir $e]
     set layout [hir::types::StructLayout $type]
     set mutableType [core::bytestore::mutableBytesType]
+    set mutableLayout [hir::structs::names $mutableType]
+    set opened [dict create]
+    if {$wantVirtual ne ""} {
+        set opened [CutDict $wantCut]
+    }
+    set eager [dict create]
     set fields {}
     foreach field $layout {
         if {$field eq "result"} {
@@ -5178,9 +5867,45 @@ proc native::lower::BorrowCall {fnVar e node} {
         if {$i < 0 || ![dict exists $written $i]} {
             throw {NATIVE BUG} "native lowering: write-back field $field of $name has no written argument ($e)"
         }
-        lappend fields [Assign fn "structnew [ShapeIndex $mutableType [hir::structs::names $mutableType]] [dict get $written $i]" $e]
+        if {$fault eq "eager-foreign-result"} {
+            # The fault: every MutableBytes built right after the call.
+            set object [Assign fn "structnew [ShapeIndex $mutableType $mutableLayout] [dict get $written $i]" $e]
+            dict set eager $field $object
+        }
+        if {[dict exists $opened $field]} {
+            # Opened: the MutableBytes' own fields, its storage the private
+            # copy C wrote -- no object.
+            if {[lindex [dict get $opened $field] 0] ne [list $mutableType $mutableLayout]} {
+                throw {NATIVE BUG} "native lowering: write-back field $field of $name opened as [lindex [dict get $opened $field] 0] ($e)"
+            }
+            foreach slot $mutableLayout {
+                if {$slot ne [core::bytestore::storageField]} {
+                    throw {NATIVE BUG} "native lowering: $mutableType has a field $slot beside its storage ($e)"
+                }
+                lappend fields [dict get $written $i]
+            }
+            continue
+        }
+        if {$fault eq "eager-foreign-result"} {
+            lappend fields $object
+            continue
+        }
+        # Closed (its representation keeps the MutableBytes one field): a
+        # pending object, built where a use needs it -- never here.
+        lappend fields [PendingObject fn [list $mutableType $mutableLayout] [list [dict get $written $i]]]
     }
-    return [list [Assign fn "structnew [ShapeIndex {} $layout] [join $fields { }]" $e] tagged]
+    if {$wantVirtual ne ""} {
+        if {[llength $fields] != $wantVirtual} {
+            throw {NATIVE BUG} "native lowering: expected a $wantVirtual-field write-back of $name at $e"
+        }
+        if {$fault eq "eager-foreign-result"} {
+            # The fault: the whole value built right after the call too.
+            dict set eager result $result
+            Assign fn "structnew [ShapeIndex {} $layout] [join [lmap field $layout {dict get $eager $field}] { }]" $e
+        }
+        return [list $fields virtual]
+    }
+    return [list [Assign fn "structnew [ShapeIndex {} $layout] [join [TaggedFields fn $fields $e] { }]" $e] tagged]
 }
 
 # ---------------------------------------------------------------------------
@@ -5197,9 +5922,17 @@ proc native::lower::BorrowCall {fnVar e node} {
 # because their offsets differ, exactly as two struct types' projections do.
 
 # The encoding word of `binload`/`binstore` (native/src/runtime/ops.rs's
-# bin_encoding) of the descriptor scalar SIGN WIDTH ENDIAN.
+# bin_encoding) of the descriptor scalar SIGN WIDTH ENDIAN: SIGN u or i an
+# integer's, f the IEEE 754 format of WIDTH bytes (C-FLOAT-FFI-
+# MILESTONE-1.md: 64 set), whose loads admit (NaN and the infinities are
+# NonFiniteFloat, negative zero zero) and whose stores narrow (a binary32
+# overflow is NonFiniteFloat) in the runtime's one implementation of the
+# boundary rules -- so a program with one may raise NonFiniteFloat there.
 proc native::lower::LayoutEncoding {sign width endian} {
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0)}]
+    if {$sign eq "f"} {
+        RuntimeRaises NonFiniteFloat
+    }
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
 }
 
 # Call E (NODE) of a binary operation: {REGISTER tagged} or {never tagged}.
@@ -5363,14 +6096,14 @@ proc native::lower::LayoutCall {fnVar e node wantVirtual} {
                 # leaves without the object, a closed inner struct read with
                 # `structget`.
                 lassign $local - fields shape - - cut
-                set leaves [ContextLeafRegs fn $e $shape $cut $fields]
+                set leaves [ContextLeafRegs fn $e $shape $cut [TaggedFields fn $fields $e]]
             } elseif {[hir::kind $hir $arg] eq "struct" && [hir::get $hir $arg named]
                     && [hir::get $hir $arg structId] eq [lindex $descriptor 0]} {
                 # The construction written as the argument (`std::binary::emit(
                 # LayoutStruct[L] {...})`): its fields, evaluated in written
                 # order, are the leaves; the object is never built (a nested
                 # literal is, and is read with `structget`).
-                set ordered [StructFields fn $arg [hir::node $hir $arg]]
+                set ordered [TaggedFields fn [StructFields fn $arg [hir::node $hir $arg]]]
                 if {$ordered eq "never"} {
                     return {never tagged}
                 }
@@ -5794,9 +6527,10 @@ proc native::lower::DecodeAt {fnVar e mode source descriptor base {fieldsOnly 0}
 }
 
 # The List the fixed array REPR ({array N STRIDE ELEMENT}) holds at BASE of
-# SOURCE (MODE as ReprRead's), copied: a row of scalars by one helper call
-# (`binloadarray` / `nativeloadarray`: N contiguous scalars, STRIDE their
-# width); any other element read element by element, element I at BASE + I
+# SOURCE (MODE as ReprRead's), copied: a row of scalars -- integers or C
+# floating values -- by one helper call (`binloadarray` / `nativeloadarray`:
+# N contiguous scalars, STRIDE their width, the C type's: 4 for a float);
+# any other element read element by element, element I at BASE + I
 # * STRIDE -- unrolled into one `listnew` of the N values up to
 # UnrollExtent elements (so the List is the one allocation), past it in a
 # counted loop appending each -- O(N), straight from the descriptor's
@@ -5805,7 +6539,7 @@ proc native::lower::ArrayRead {fnVar e mode source repr base} {
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
-    if {[lindex $element 0] in {u i}} {
+    if {[lindex $element 0] in {u i f}} {
         lassign $element sign width endian
         set at [At fn $e $base 0]
         set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -5953,7 +6687,7 @@ proc native::lower::ReprWrite {fnVar e mode target repr base value} {
         }
         array {
             lassign $repr - extent stride element
-            if {[lindex $element 0] in {u i}} {
+            if {[lindex $element 0] in {u i f}} {
                 lassign $element sign width endian
                 set at [At fn $e $base 0]
                 set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -6059,11 +6793,57 @@ proc native::lower::StorageOf {fnVar arg {structType ""}} {
             }
         }
     }
+    if {[hir::kind $hir $arg] eq "project"} {
+        set storage [OpenedOwnerStorage fn $arg $structType $slot]
+        if {$storage ne ""} {
+            return $storage
+        }
+    }
     set object [Expr fn $arg]
     if {$object eq "never"} {
         return never
     }
     return [Assign fn "structget $slot $object" $arg]
+}
+
+# The storage register of byte owner ARG (of opaque struct STRUCTTYPE, its
+# storage at SLOT) when ARG is `r.NAME`, r a virtual struct whose cut opened
+# NAME (a write-back's MutableBytes handed on to another foreign call): read
+# from the opened fields, no object built. "" otherwise.
+proc native::lower::OpenedOwnerStorage {fnVar arg structType slot} {
+    upvar 1 $fnVar fn
+    variable hir
+    set receiver [hir::get $hir $arg receiver]
+    if {[hir::kind $hir $receiver] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $hir $receiver binding]
+    if {$b eq "" || ![dict exists $fn locals $b]} {
+        return ""
+    }
+    set local [dict get $fn locals $b]
+    if {[lindex $local 0] ne "virtual" || [lindex $local 2] eq ""} {
+        return ""
+    }
+    lassign $local - fields shape - - cut
+    set name [hir::get $hir $arg name]
+    set cuts [CutDict $cut]
+    if {![dict exists $cuts $name]} {
+        # A closed field that is a pending object (a write-back's
+        # MutableBytes no use has built yet): its storage, nothing built.
+        if {$name in [lindex $shape 1] && $structType eq [core::bytestore::mutableBytesType]} {
+            set storage [PendingStorage fn [lindex $fields [FieldOffset $shape $cut $name]]]
+            if {$storage ne ""} {
+                return $storage
+            }
+        }
+        return ""
+    }
+    lassign [dict get $cuts $name] sub subcut
+    if {[lindex $sub 0] ne $structType || $subcut ne ""} {
+        return ""
+    }
+    return [lindex $fields [expr {[FieldOffset $shape $cut $name] + $slot}]]
 }
 
 # The register of the projection chain ending at project node E when its root
@@ -6091,7 +6871,7 @@ proc native::lower::ProjectChain {fnVar e node} {
             return ""
         }
         set local [dict get $fn locals $b]
-        if {[lindex $local 0] ne "virtual" || [lindex $local 2] eq "" || [lindex $local 5] eq ""} {
+        if {[lindex $local 0] ne "virtual" || [lindex $local 2] eq ""} {
             return ""
         }
         lassign $local - fields shape - - cut
@@ -6114,7 +6894,8 @@ proc native::lower::ProjectChain {fnVar e node} {
         if {[dict exists $cuts $name]} {
             lassign [dict get $cuts $name] sub subcut
             if {$i == [llength $names] - 1} {
-                throw {NATIVE BUG} "native lowering: opened field \"$name\" read as a whole at $e"
+                # An opened field read whole: built here (FieldValue).
+                return [FieldValue fn $shape $cut $fields $name $e]
             }
             set fields [lrange $fields $offset [expr {$offset + [hir::escape::CutFields $sub $subcut] - 1}]]
             set shape $sub
@@ -6123,9 +6904,19 @@ proc native::lower::ProjectChain {fnVar e node} {
             continue
         }
         # A closed field: its register holds the inner object; the rest of
-        # the chain is ordinary projection from it.
+        # the chain is ordinary projection from it. A pending object
+        # (C-FFI-ERROR-CAPTURE-MILESTONE-2.md) is read from its own fields,
+        # nothing built; the chain's own last field is the caller's to take
+        # as it is (FieldOut).
         set r [lindex $fields $offset]
         incr i
+        if {$i < [llength $nodes] && [dict exists $fn pending $r]} {
+            lassign [dict get $fn pending $r] shape cut fields
+            continue
+        }
+        if {$i < [llength $nodes]} {
+            set r [TaggedField fn $r $e]
+        }
         foreach next [lrange $nodes $i end] {
             set recvType [hir::typeOf $hir [hir::get $hir $next receiver]]
             if {$recvType eq "never"} {
@@ -6287,6 +7078,15 @@ proc native::lower::Ref {fnVar e node want} {
         }
         fnvalue { return [list [Assign fn "fnvalue $where" $e] tagged] }
         self    { return [list [Assign fn self $e] tagged] }
+        cword {
+            # A C call's 64-bit result held as its word (Bind): the word
+            # where one is wanted (a comparison), else its Int, built once
+            # per dominating scope.
+            if {$want eq "cword"} {
+                return [list $where cword]
+            }
+            return [list [WordTagged fn $where $e] tagged]
+        }
         virtual {
             # A virtual struct (hir/escape.tcl) referenced where the physical
             # object is needed: its one materialization, at this first such
@@ -6483,6 +7283,43 @@ proc native::lower::Bind {fnVar e node} {
             dict set fn locals $b [list virtual $fields $shape $b "" $cut]
             return ""
         }
+        if {[dict exists $context discarded $e] && [dict get [hir::binding $hir $b] kind] eq "local"
+                && ![hir::isModuleBinding $hir $b]} {
+            # A C call's result no analysis above took (C-FFI-ERROR-CAPTURE-
+            # MILESTONE-2.md, "Foreign-result transport"): a write-back value
+            # held as fields, a C word as the word -- whatever the
+            # optimization flags. An alias of either is the same.
+            if {[hir::kind $hir $valueExpr] eq "ref"} {
+                set source [dict getdef $fn locals [hir::get $hir $valueExpr binding] ""]
+                if {[lindex $source 0] eq "cword"
+                        || ([lindex $source 0] eq "virtual" && [lindex $source 6] eq "mandatory")} {
+                    dict set fn locals $b [lrange $source 0 6]
+                    return ""
+                }
+            }
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {$mandatory ne ""} {
+                lassign $mandatory n shape cut
+                set fields [VirtualValue fn $valueExpr $n $cut]
+                if {$fields eq "never"} {
+                    return never
+                }
+                dict set fn locals $b [list virtual $fields $shape $b "" $cut mandatory]
+                return ""
+            }
+            if {[hir::kind $hir $valueExpr] eq "call" && [dict exists $hir exprs $valueExpr borrows]} {
+                set value [Expr fn $valueExpr cword]
+                if {$value eq "never"} {
+                    return never
+                }
+                if {[WordKind fn $value] ne ""} {
+                    dict set fn locals $b [list cword $value]
+                    return ""
+                }
+                dict set fn locals $b [list reg $value]
+                return $value
+            }
+        }
         set family [hir::construction::localFamily $construction $currentInstance $b]
         if {$family ne ""} {
             # A plan local (hir::construction; "Virtual construction"
@@ -6599,6 +7436,13 @@ proc native::lower::CaptureRegsOf {fnVar bindings} {
         switch -- $how {
             reg        { lappend values $where }
             rawreg     { lappend values [TaggedOf fn $where] }
+            cword      { lappend values [WordTagged fn $where] }
+            virtual {
+                # A write-back value held as fields (Bind's foreign-result
+                # transport): captured as its object, built here, at the
+                # capture.
+                lappend values [MaterializeVirtual fn $b ""]
+            }
             shortreg   { lappend values [TaggedOfShort fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
@@ -6676,7 +7520,7 @@ proc native::lower::VirtualValue {fnVar e arity {cut ""}} {
     if {[dict get $node kind] ne "call"} {
         throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
     }
-    lassign [Call fn $e $node tagged $arity] result repr
+    lassign [Call fn $e $node tagged $arity 0 $cut] result repr
     if {$result eq "never"} {
         return [Never fn $e]
     }
@@ -6791,7 +7635,11 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths {fieldCuts {}}} 
                         set b [hir::get $hir $arg binding]
                         if {$b eq "" || ![dict exists $fn locals $b]
                                 || [lindex [dict get $fn locals $b] 0] ne "virtual"
-                                || [llength [lindex [dict get $fn locals $b] 1]] != $width} {
+                                || [llength [lindex [dict get $fn locals $b] 1]] != $width
+                                || [lindex [dict get $fn locals $b] 5] ne $cut} {
+                            # (A cut of another class -- a write-back value
+                            # held as fields by the foreign-result transport
+                            # -- is no argument of this parameter's.)
                             return 0
                         }
                     }
@@ -6849,21 +7697,21 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
             if {[llength $fields] != $n} {
                 return ""
             }
-            return $fields
+            return [TaggedFields fn $fields $e]
         }
         struct - if {
-            return [VirtualValue fn $e $n $cut]
+            return [TaggedFields fn [VirtualValue fn $e $n $cut] $e]
         }
         call {
             set node [hir::node $hir $e]
-            lassign [Call fn $e $node tagged $n] result repr
+            lassign [Call fn $e $node tagged $n 0 $cut] result repr
             if {$result eq "never"} {
                 return [Never fn $e]
             }
             if {$repr ne "virtual"} {
                 return ""
             }
-            return $result
+            return [TaggedFields fn $result $e]
         }
     }
     return ""
@@ -6936,7 +7784,10 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}
                 incr i
                 continue
             }
-            set r [Expr fn $arg $argWant]
+            # A tagged argument may arrive as a C word, boxed below, once
+            # every argument is evaluated (C-FFI-ERROR-CAPTURE-MILESTONE-2.md:
+            # the call is its first use that needs the Int).
+            set r [Expr fn $arg [if {$argWant eq "tagged"} {string cat cword} else {set argWant}]]
             if {$r eq "never"} {
                 return never
             }
@@ -6944,7 +7795,7 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}
         }
         incr i
     }
-    return $regs
+    return [TaggedFields fn $regs]
 }
 
 # 1 if argument expression E is an Int literal that fits the small-Int
@@ -7200,7 +8051,7 @@ proc native::lower::ClosedResult {fnVar e result} {
 #     keepalive after it).
 # Calls with neither (every call of a program that never takes an address) pay
 # one dict-exists test.
-proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
+proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
     upvar 1 $fnVar fn
     variable hir
     # A declared error this call propagates out of the scope of affine
@@ -7212,7 +8063,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         set pad [NewLabel fn]
         Emit fn "pusherrorexit $pad" $e
     }
-    set result [CallInner fn $e $node $want $wantVirtual $wantRegion]
+    set result [CallInner fn $e $node $want $wantVirtual $wantRegion $wantCut]
     if {[lindex [dict get $node target] 0] eq "block" && [BytesFlowCandidate fn $e $node]} {
         AddressFlowAcrossCall fn $e $node $result
     }
@@ -7336,7 +8187,7 @@ proc native::lower::AddressFlowAcrossCall {fnVar e node result} {
     KeepExposedAlive fn $operands $e
 }
 
-proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
+proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0} {wantCut ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
@@ -7403,8 +8254,9 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
     }
     if {$targetKind eq "native" && [dict exists $node borrows]} {
         # A foreign call (hir/borrow.tcl): its byte exposures, from the
-        # call node.
-        return [BorrowCall fn $e $node]
+        # call node; a write-back value as fields when wanted virtual (cut
+        # WANTCUT).
+        return [BorrowCall fn $e $node $wantVirtual $wantCut $want]
     }
     if {$targetKind eq "native" && [core::bytestore::isBridge [dict get [hir::symbol $hir $target] name]]} {
         # The raw address bridge (core/bytestore.tcl, ABI-BYTES.md): reads the
@@ -7669,13 +8521,27 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         } else {
             set rawEligible 0
         }
+        if {!$rawEligible && $wantVirtual eq "" && !$wantRegion && [dict get $node known] eq ""
+                && [PlainNativeCallee $calleeExpr]} {
+            # A comparison of a C word (C-FFI-ERROR-CAPTURE-MILESTONE-2.md):
+            # the word compared as it is, never boxed.
+            set word [WordComparison fn $e $node $name $op $argExprs $want]
+            if {$word ne ""} {
+                return $word
+            }
+        }
         set argRegs {}
         foreach arg $argExprs {
-            set r [Expr fn $arg [expr {$rawEligible ? "raw" : "tagged"}]]
+            # An operand that is a C word is boxed once every operand is
+            # evaluated: the operation is its first use that needs the Int.
+            set r [Expr fn $arg [expr {$rawEligible ? "raw" : "cword"}]]
             if {$r eq "never"} {
                 return {never tagged}
             }
             lappend argRegs $r
+        }
+        if {!$rawEligible} {
+            set argRegs [TaggedFields fn $argRegs $e]
         }
         return [NativeCall fn $e $node $name $argRegs $rawEligible $op $want]
     }
@@ -8917,8 +9783,30 @@ proc native::lower::NativeCallOp {e node} {
                 # one representation, so equality is bit equality, and it
                 # cannot fail.
                 set op f64eq
+            } elseif {[hir::types::IsEqualityTotal [hir::typeOf $hir $a]]
+                    && [hir::types::IsEqualityTotal [hir::typeOf $hir $b]]} {
+                # Both operands equality-total (hir::types::IsEqualityTotal:
+                # structs, Lists and sets of such values, two different
+                # scalar kinds): structural equality that can never refuse a
+                # kind, so no error edge (HASHABLE-AND-KEYED-HASH.md).
+                set op veqtotal
             }
             return [list $name $op]
+        }
+        hashing {
+            # A hash (core/native.tcl's -hashing): the generic op refuses a
+            # value with no hash (EQUALITY); where the operand's static type
+            # is Hashable (hir::types::IsHashable: a witness of the intrinsic
+            # trait, the very predicate that admits a Hashable argument),
+            # the total op, with no error edge (HASHABLE-AND-KEYED-HASH.md,
+            # "Total lowering").
+            lassign $impl _ generic total
+            set index [lindex [dict get [core::native::metadata $name] hashing] 0]
+            if {[llength $argExprs] > $index
+                    && [hir::types::IsHashable [hir::typeOf $hir [lindex $argExprs $index]]]} {
+                return [list $name $total]
+            }
+            return [list $name $generic]
         }
         equality-set {
             # SetContains's generic form (rt_set_contains) can raise
@@ -8978,7 +9866,7 @@ proc native::lower::NativeCallOp {e node} {
             # before this milestone (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md).
             set op setfromlist
             if {[llength $argExprs] == 1} {
-                set listType [hir::typeOf $hir [lindex $argExprs 0]]
+                set listType [hir::types::Unrefined [hir::typeOf $hir [lindex $argExprs 0]]]
                 if {[hir::types::IsList $listType]
                         && [hir::types::IsEqualityTotal [lindex $listType 1]]} {
                     set op setfromlisttotal
@@ -9735,6 +10623,7 @@ proc native::lower::NativeImpl {name} {
     set impl [dict get $natives $name]
     switch -- [lindex $impl 0] {
         equality      { return veq }
+        hashing       { return [lindex $impl 1] }
         equality-set  { return setcontains }
         equality-list { return setfromlist }
         coroutine-resume { return coresume }
@@ -9905,9 +10794,18 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
         set else [NewLabel fn]
     }
     set join [NewLabel fn]
-    # A virtual struct join (branch merging): one result register per field.
+    # A virtual struct join (branch merging): one result register per field
+    # -- a C word field of every branch joined as a word of its kind
+    # (JoinWordKinds), every other field tagged.
+    set joinKinds {}
     if {$virtualN ne ""} {
         set result [NewRegs fn $virtualN]
+        set joinKinds [JoinWordKinds $e $node $virtualN $virtualCut]
+        foreach r $result k $joinKinds {
+            if {$k in {i64 u64}} {
+                dict set fn wordRegs $r $k
+            }
+        }
     } else {
         set result [NewReg fn]
     }
@@ -9958,7 +10856,22 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
         dict set fn rawCache $savedRaw
         if {$value ne "never"} {
             if {$virtualN ne ""} {
-                foreach r $result v $value {
+                foreach r $result v $value k $joinKinds {
+                    if {$k in {i64 u64}} {
+                        if {[WordKind fn $v] ne $k} {
+                            throw {NATIVE BUG} "native lowering: the $k join of $e got $v ([WordKind fn $v])"
+                        }
+                    } elseif {$k eq "pending"} {
+                        # A closed MutableBytes joined by its storage; the
+                        # join's field is a pending object over it (below).
+                        set storage [PendingStorage fn $v]
+                        if {$storage eq ""} {
+                            throw {NATIVE BUG} "native lowering: the pending join of $e got $v"
+                        }
+                        set v $storage
+                    } else {
+                        set v [TaggedField fn $v $e]
+                    }
                     Emit fn "$r = move $v"
                     JoinKeepAddr fn $r $v
                 }
@@ -9974,6 +10887,16 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
         return never
     }
     EmitLabel fn $join
+    if {"pending" in $joinKinds} {
+        set mutableType [core::bytestore::mutableBytesType]
+        set result [lmap r $result k $joinKinds {
+            if {$k eq "pending"} {
+                PendingObject fn [list $mutableType [hir::structs::names $mutableType]] [list $r]
+            } else {
+                set r
+            }
+        }]
+    }
     return $result
 }
 
@@ -10453,6 +11376,9 @@ proc native::lower::ListLoop {fnVar e node} {
     set continueLabel [NewLabel fn]
     set normalExit [NewLabel fn]
     set exit [NewLabel fn]
+    # What the body needs built of a deferred value bound outside it,
+    # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+    HoistDeferredUses fn [dict get $node body] $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
     if {$consuming} {
@@ -10662,6 +11588,9 @@ proc native::lower::CountLoop {fnVar e node} {
     set continueLabel [NewLabel fn]
     set normalExit [NewLabel fn]
     set exit [NewLabel fn]
+    # What the body needs built of a deferred value bound outside it,
+    # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+    HoistDeferredUses fn [dict get $node body] $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
     set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
@@ -10830,6 +11759,9 @@ proc native::lower::LockLoop {fnVar e node} {
     set continueLabel [NewLabel fn]
     set normalExit [NewLabel fn]
     set exit [NewLabel fn]
+    # What the body needs built of a deferred value bound outside it,
+    # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+    HoistDeferredUses fn [dict get $node body] $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
     if {[dict get $first kind] eq "list"} {
@@ -10913,7 +11845,7 @@ proc native::lower::PayloadFields {fnVar value name e} {
         if {[dict get $node layout] ne $layout} {
             throw {NATIVE BUG} "native lowering: the payload of fail $name has fields ([dict get $node layout]), not ($layout) ($e)"
         }
-        return [StructFields fn $value $node]
+        return [TaggedFields fn [StructFields fn $value $node] $e]
     }
     if {[hir::kind $hir $value] eq "ref"} {
         set b [hir::get $hir $value binding]
@@ -10921,7 +11853,7 @@ proc native::lower::PayloadFields {fnVar value name e} {
             set local [dict get $fn locals $b]
             if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne "" && [lindex $local 5] eq ""
                     && [lindex $local 2 1] eq $layout} {
-                return [lindex $local 1]
+                return [TaggedFields fn [lindex $local 1] $e]
             }
         }
     }
@@ -11093,6 +12025,9 @@ proc native::lower::Loop {fnVar e node} {
     set head [NewLabel fn]
     set exit [NewLabel fn]
     set result [NewReg fn]
+    # What the body needs built of a deferred value bound outside it,
+    # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+    HoistDeferredUses fn [dict get $node body] $e
     Emit fn "jump $head" $e
     EmitLabel fn $head
     set saved [dict get $fn locals]

@@ -22,6 +22,7 @@
 //! | rt_value_eq            | any, any            | Bool; EQUALITY on callables  | no        |
 //! | rt_str_eq              | Str, Str            | Bool                         | no        |
 //! | rt_hash                | any                 | Int (61-bit); EQUALITY       | no        |
+//! | rt_table_hash          | any                 | Int (61-bit); EQUALITY       | no        |
 //! | rt_str_len             | Str                 | Int                          | no        |
 //! | rt_substr              | Str, Int, Int       | Str; declared LowerUnderrun/ | yes       |
 //! |                        |                     | UpperOverrun (check_slice)   |           |
@@ -53,6 +54,8 @@
 //! | rt_list_get_proven     | List, Int           | element (index proven valid  | no        |
 //! |                        |                     | by hir/completions.tcl)      |           |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
+//! | rt_list_with_length    | List, Int           | the same List; declared      | no        |
+//! |                        |                     | LengthMismatch               |           |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
@@ -88,7 +91,7 @@ use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
     rt_ffi_fixture_read_reentrant,
 };
-use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word};
+use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp};
 use super::nview::{
     rt_cptr_fixture_bytes, rt_cptr_fixture_memory, rt_cptr_offset, rt_mbytes_write, rt_mbytes_write_ptr, rt_native_load,
     rt_bin_load_array, rt_native_load_array, rt_bin_store_array, rt_native_store_array, rt_bin_store_ptr,
@@ -158,6 +161,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // The raw result register is boxed as a BigInt when it is outside
             // the small-Int range (runtime/syscall.rs).
             | SyscallLinuxX86_64 | SyscallLinuxAarch64
+            // A C word outside the small-Int range is boxed as a BigInt
+            // (C-FFI-ERROR-CAPTURE-MILESTONE-2.md); the word comparisons
+            // allocate nothing.
+            | CWBox
             // The borrow test fixture's foreign operations
             // (runtime/ffifixture.rs): a foreign call may run Botlish code
             // (read_reentrant collects and allocates on purpose), and read
@@ -247,7 +254,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // another architecture's target the transport is NATIVE
         // UNSUPPORTED, also through NO_VALUE.)
         | SyscallLinuxX86_64 | SyscallLinuxAarch64
-        | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        | ListNew | ListGet | ListAppend | ListWithLength | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
         | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
         // MutableArray: a capacity outside the limit (RANGE), the declared
@@ -275,6 +282,14 @@ pub fn op_may_error(op: OpCode) -> bool {
         // M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic SetFromList/
         // SetContains keep their unconditional classification.
         | SetFromList | SetContains
+        // The table hash's dynamically dispatched entry refuses a value with
+        // no hash, as Hash does. VEqTotal, HashTotal and TableHashTotal are
+        // deliberately *not* listed: each is its generic sibling at a call
+        // site whose operands native/lower.tcl proved equality-total or
+        // Hashable (hir::types::IsEqualityTotal, IsHashable), so the shared
+        // helper's refusal is unreachable there (HASHABLE-AND-KEYED-HASH.md,
+        // "Total lowering").
+        | TableHash
         // A segment ends with the body's unhandled error; a yield outside a
         // running coroutine is a defensive runtime check a checked program
         // never reaches.
@@ -535,10 +550,25 @@ pub extern "C" fn rt_int_shr(p: *mut Vm, a: Value, b: Value) -> Value {
     vm(p).new_big(int_to_big(a) >> (k as usize))
 }
 
+/// The order of two Ints, read in place: a BigInt is borrowed, never
+/// copied, so no comparison allocates (a C call's error state survives one
+/// that runs before it is read: C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
 fn int_compare(a: Value, b: Value) -> Ordering {
     match (int_small(a), int_small(b)) {
         (Some(x), Some(y)) => x.cmp(&y),
-        _ => int_to_big(a).cmp(&int_to_big(b)),
+        (Some(x), None) => small_big_order(x, big_of(b)),
+        (None, Some(y)) => small_big_order(y, big_of(a)).reverse(),
+        (None, None) => big_of(a).cmp(big_of(b)),
+    }
+}
+
+/// The order of the small Int X against the BigInt N.
+fn small_big_order(x: i64, n: &BigInt) -> Ordering {
+    use num_traits::ToPrimitive;
+    match n.to_i64() {
+        Some(y) => x.cmp(&y),
+        None if n.is_negative() => Ordering::Greater,
+        None => Ordering::Less,
     }
 }
 
@@ -771,9 +801,179 @@ fn decimal_text(neg: bool, mut mag: u128, buf: &mut [u8; 40]) -> &[u8] {
     &buf[start..]
 }
 
-/// H folded with V's kind tag and payload, recursing into List elements and
-/// a Result payload exactly as `equal` recurses (see ops.rs's `equal`).
-fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
+// ---------------------------------------------------------------------------
+// One canonical walk, two hashes (core/hashing.tcl's Encode;
+// HASHABLE-AND-KEYED-HASH.md). `walk` visits a value exactly as `equal`
+// recurses -- its kind tag, then its payload -- and hands every piece to a
+// sink. The two sinks differ only where the hashes do:
+//
+//   Fnv (the public `hash`)  a text is its bytes alone; a nested value is its
+//                            own 64-bit FNV-1a sub-hash, 8 bytes LE; a set's
+//                            members are XOR-combined sub-hashes: the bytes
+//                            rt_hash always hashed, so every public hash is
+//                            unchanged.
+//   Sip13 (the table hash)   a text is its byte count (8 bytes LE) then its
+//                            bytes (a prefix-free input); a nested value is
+//                            walked inline into the same state, never folded
+//                            as a public sub-hash; a set's members are
+//                            XOR-combined keyed hashes.
+//
+// Nothing allocates: texts are borrowed or formatted on the stack
+// (`decimal_text`), and both states are a few words on the stack.
+
+trait CanonicalSink: Sized {
+    /// Bytes whose length the walk already fixed (a tag, a count, a word).
+    fn bytes(&mut self, b: &[u8]);
+    /// A variable-length text.
+    fn text(&mut self, b: &[u8]);
+    /// A nested value (a List element, a struct field, a Result payload).
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()>;
+    /// The whole 64-bit hash of set member V, from a fresh state.
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()>;
+}
+
+/// The public hash's state: FNV-1a, 64-bit.
+struct Fnv(u64);
+
+impl CanonicalSink for Fnv {
+    #[inline]
+    fn bytes(&mut self, b: &[u8]) {
+        self.0 = fnv1a(self.0, b);
+    }
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.0 = fnv1a(self.0, b);
+    }
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        let sub = self.member(p, v)?;
+        self.bytes(&sub.to_le_bytes());
+        Ok(())
+    }
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()> {
+        let mut sub = Fnv(FNV_OFFSET);
+        walk(p, &mut sub, v)?;
+        Ok(sub.0)
+    }
+}
+
+/// SipHash-1-3 (Aumasson and Bernstein; one compression round, three
+/// finalization rounds, the variant Rust's HashMap uses), streaming: the
+/// table hash's state under the process key. core/hashing.tcl's SipHash13 is
+/// the same function; audit/hashable/tools/oracle.py is an independent one.
+/// C and D are the round counts, so the tests can check the permutation and
+/// the padding against std's SipHash-2-4.
+#[derive(Clone)]
+struct Sip<const C: usize, const D: usize> {
+    k: (u64, u64),
+    v: [u64; 4],
+    /// The pending bytes of an unfinished 8-byte word, little-endian.
+    tail: u64,
+    ntail: usize,
+    length: usize,
+}
+
+type Sip13 = Sip<1, 3>;
+
+impl<const C: usize, const D: usize> Sip<C, D> {
+    fn new(k0: u64, k1: u64) -> Self {
+        Sip {
+            k: (k0, k1),
+            v: [k0 ^ 0x736f6d6570736575, k1 ^ 0x646f72616e646f6d, k0 ^ 0x6c7967656e657261, k1 ^ 0x7465646279746573],
+            tail: 0,
+            ntail: 0,
+            length: 0,
+        }
+    }
+
+    #[inline]
+    fn round(v: &mut [u64; 4]) {
+        v[0] = v[0].wrapping_add(v[1]);
+        v[1] = v[1].rotate_left(13) ^ v[0];
+        v[0] = v[0].rotate_left(32);
+        v[2] = v[2].wrapping_add(v[3]);
+        v[3] = v[3].rotate_left(16) ^ v[2];
+        v[0] = v[0].wrapping_add(v[3]);
+        v[3] = v[3].rotate_left(21) ^ v[0];
+        v[2] = v[2].wrapping_add(v[1]);
+        v[1] = v[1].rotate_left(17) ^ v[2];
+        v[2] = v[2].rotate_left(32);
+    }
+
+    #[inline]
+    fn compress(&mut self, m: u64) {
+        self.v[3] ^= m;
+        for _ in 0..C {
+            Self::round(&mut self.v);
+        }
+        self.v[0] ^= m;
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.length += bytes.len();
+        let mut rest = bytes;
+        if self.ntail > 0 {
+            while self.ntail < 8 {
+                let Some((&b, more)) = rest.split_first() else { return };
+                self.tail |= (b as u64) << (8 * self.ntail);
+                self.ntail += 1;
+                rest = more;
+            }
+            let m = self.tail;
+            self.compress(m);
+            self.tail = 0;
+            self.ntail = 0;
+        }
+        let mut words = rest.chunks_exact(8);
+        for w in &mut words {
+            self.compress(u64::from_le_bytes(w.try_into().unwrap()));
+        }
+        for (i, &b) in words.remainder().iter().enumerate() {
+            self.tail |= (b as u64) << (8 * i);
+        }
+        self.ntail = words.remainder().len();
+    }
+
+    fn finish(&self) -> u64 {
+        let mut v = self.v;
+        let b = ((self.length as u64 & 0xff) << 56) | self.tail;
+        v[3] ^= b;
+        for _ in 0..C {
+            Self::round(&mut v);
+        }
+        v[0] ^= b;
+        v[2] ^= 0xff;
+        for _ in 0..D {
+            Self::round(&mut v);
+        }
+        v[0] ^ v[1] ^ v[2] ^ v[3]
+    }
+}
+
+impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
+    #[inline]
+    fn bytes(&mut self, b: &[u8]) {
+        self.write(b);
+    }
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.write(&(b.len() as u64).to_le_bytes());
+        self.write(b);
+    }
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        walk(p, self, v)
+    }
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()> {
+        let mut sub = Self::new(self.k.0, self.k.1);
+        walk(p, &mut sub, v)?;
+        Ok(sub.finish())
+    }
+}
+
+/// Hands V's canonical input to SINK: its kind tag, then its payload,
+/// recursing into List elements, struct fields and a Result payload exactly
+/// as `equal` recurses (core/hashing.tcl's Encode, byte for byte). Refuses
+/// the kinds `equal` refuses, as rt_hash always did.
+fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> {
     let kind = kind_of(v);
     if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr) {
         vm(p).fail(RtError::Unhashable { value: v });
@@ -804,8 +1004,8 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr
         | Kind::DecimalRounded => unreachable!(),
     };
-    let h = fnv1a(h, &[tag]);
-    Ok(match kind {
+    sink.bytes(&[tag]);
+    match kind {
         // Canonical decimal text, matching how core::value::equal treats
         // textual identity as numeric equality for every Int, small or big.
         // Formatted on the stack (`decimal_text`); a BigInt of more than 128
@@ -813,42 +1013,43 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Int => {
             let mut buf = [0u8; 40];
             match int_small(v) {
-                Some(n) => fnv1a(h, decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
+                Some(n) => sink.text(decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
                 None => {
                     use num_traits::ToPrimitive;
                     let n = big_of(v);
                     match n.magnitude().to_u128() {
-                        Some(mag) => fnv1a(h, decimal_text(n.is_negative(), mag, &mut buf)),
-                        None => fnv1a(h, n.to_str_radix(10).as_bytes()),
+                        Some(mag) => sink.text(decimal_text(n.is_negative(), mag, &mut buf)),
+                        None => sink.text(n.to_str_radix(10).as_bytes()),
                     }
                 }
             }
         }
         // Evidence is metadata, not part of the value (equal ignores it too).
-        Kind::Str => fnv1a(h, str_of(v).as_bytes()),
-        Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
-        Kind::Unit => h,
+        Kind::Str => sink.text(str_of(v).as_bytes()),
+        Kind::Bool => sink.bytes(&[(v == TRUE) as u8]),
+        Kind::Unit => {}
         // The byte count (8 bytes, little-endian), then every byte in order:
         // core/hashing.tcl's bytestore case, byte for byte, and consistent
-        // with the byte-sequence equality above.
+        // with the byte-sequence equality above. The count delimits the
+        // bytes in both hashes.
         Kind::ByteStore => {
             let bytes = bytes_of(v);
-            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
-            fnv1a(h, bytes)
+            sink.bytes(&(bytes.len() as u64).to_le_bytes());
+            sink.bytes(bytes);
         }
         // A MutableBytes hashes by its current contents under its own kind
         // tag (core/hashing.tcl's `bytestore - mutbytes` case).
         Kind::MutByteStore => {
             let bytes = mutbytes_of(v);
-            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
-            fnv1a(h, bytes)
+            sink.bytes(&(bytes.len() as u64).to_le_bytes());
+            sink.bytes(bytes);
         }
         // Canonical decimal codepoint text, matching how Int's own text is
         // hashed above (core/hashing.tcl's identical choice).
-        Kind::UnicodeChar => fnv1a(h, decimal_text(false, char_of(v) as u128, &mut [0u8; 40])),
+        Kind::UnicodeChar => sink.text(decimal_text(false, char_of(v) as u128, &mut [0u8; 40])),
         // The bits, 8 bytes little-endian (core/hashing.tcl's Float64 case):
         // consistent with the bit equality above.
-        Kind::Float64 => fnv1a(h, &float_bits(v).to_le_bytes()),
+        Kind::Float64 => sink.bytes(&float_bits(v).to_le_bytes()),
         Kind::DecimalRounded => unreachable!(),
         // core/hashing.tcl's enum case, byte for byte (ENUMS.md): the enum's
         // declaration identity text, a 0xFF separator, the case's declared
@@ -857,50 +1058,45 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             let (e, c) = enum_parts(v);
             current_program(|prog| {
                 let info = &prog.enums[e as usize];
-                let (name, case) = (&info.name, &info.cases[c as usize]);
-                let h = fnv1a(h, name.as_bytes());
-                let h = fnv1a(h, &[0xFF]);
-                fnv1a(h, case.as_bytes())
+                sink.text(info.name.as_bytes());
+                sink.bytes(&[0xFF]);
+                sink.text(info.cases[c as usize].as_bytes());
             })
         }
         Kind::List => {
             let items = list_of(v).items();
-            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            sink.bytes(&(items.len() as u64).to_le_bytes());
             for item in items {
-                let sub = hash_mix(p, FNV_OFFSET, *item)?;
-                h = fnv1a(h, &sub.to_le_bytes());
+                sink.child(p, *item)?;
             }
-            h
         }
         Kind::Result => {
             let r = result_of(v);
-            let h = fnv1a(h, &[r.ok as u8]);
-            let sub = hash_mix(p, FNV_OFFSET, r.payload)?;
-            fnv1a(h, &sub.to_le_bytes())
+            sink.bytes(&[r.ok as u8]);
+            sink.child(p, r.payload)?;
         }
         Kind::Struct => {
             // core/hashing.tcl's struct case, byte for byte: the declaration
             // identity text (empty for an anonymous struct), the field
-            // count, then each slot's name text and sub-hash in slot order.
-            // The shape is borrowed for the whole fold, never cloned: a
-            // field's sub-hash (a nested struct's or enum's) borrows the
-            // program again, and RefCell's shared borrows nest (only
-            // `Vm::new` borrows it mutably, and hashing makes no Vm).
+            // count, then each slot's name text and value in slot order.
+            // The shape is borrowed for the whole walk, never cloned: a
+            // field's walk (a nested struct's or enum's) borrows the program
+            // again, and RefCell's shared borrows nest (only `Vm::new`
+            // borrows it mutably, and hashing makes no Vm).
             let obj = struct_of(v);
             current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
-                let mut h = fnv1a(h, shape.name.as_deref().unwrap_or("").as_bytes());
-                h = fnv1a(h, &(shape.fields.len() as u64).to_le_bytes());
+                sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
+                sink.bytes(&(shape.fields.len() as u64).to_le_bytes());
                 for (field, item) in shape.fields.iter().zip(obj.fields().iter()) {
-                    h = fnv1a(h, field.as_bytes());
-                    let sub = hash_mix(p, FNV_OFFSET, *item)?;
-                    h = fnv1a(h, &sub.to_le_bytes());
+                    sink.text(field.as_bytes());
+                    sink.child(p, *item)?;
                 }
-                Ok(h)
+                Ok(())
             })?
         }
         Kind::ImmutableSet => {
-            // Order-independent (XOR-combined member sub-hashes), matching
+            // Order-independent (XOR-combined member hashes), matching
             // `set_equal`'s own order-independent equality and core/
             // hashing.tcl's identical Tcl-side choice: two equal sets must
             // hash equal regardless of construction order. No ImmutableSet-
@@ -908,24 +1104,82 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             // the existing, pre-existing generic `hash` native total for
             // the new kind.
             let items = set_of(v).items();
-            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            sink.bytes(&(items.len() as u64).to_le_bytes());
             let mut combined = 0u64;
             for item in items {
-                combined ^= hash_mix(p, FNV_OFFSET, *item)?;
+                combined ^= sink.member(p, *item)?;
             }
-            h = fnv1a(h, &combined.to_le_bytes());
-            h
+            sink.bytes(&combined.to_le_bytes());
         }
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr => unreachable!(),
-    })
+    }
+    Ok(())
 }
 
+/// The public hash: the FNV-1a of V's canonical input, masked to 61 bits
+/// (always a small Int: no allocation). NO_VALUE with EQUALITY for a value
+/// with no hash; the compiler's `hashtotal` calls it only for a Hashable one.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
-    match hash_mix(p, FNV_OFFSET, v) {
-        Ok(h) => vm(p).new_int((h & HASH_MASK) as i64),
+    let mut sink = Fnv(FNV_OFFSET);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.0 & HASH_MASK) as i64),
         Err(()) => NO_VALUE,
     }
+}
+
+// ---------------------------------------------------------------------------
+// The table hash's process key (HASHABLE-AND-KEYED-HASH.md, "Hidden secret")
+
+/// The key of every table hash this process computes, drawn once, on first
+/// use. Runtime state, never a Botlish value: no operation returns, stores
+/// or compares it, and nothing but table_hash_key reads it.
+static TABLE_HASH_KEY: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+
+/// Draws a key from the system's random source: std's RandomState, which
+/// reads the operating system's entropy (getrandom, arc4random,
+/// ProcessPrng) for its own SipHash keys. Two states built in one thread
+/// carry different keys (std advances the thread's keys for each), and a
+/// hash of a fixed input under each is a 64-bit word derived from them: 128
+/// bits of the system's randomness, with no dependency of our own.
+fn draw_table_hash_key() -> (u64, u64) {
+    use std::hash::{BuildHasher, Hasher};
+    let word = |salt: u64| {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(salt);
+        h.finish()
+    };
+    (word(0x7461626c65), word(0x6861736820))
+}
+
+fn table_hash_key() -> (u64, u64) {
+    *TABLE_HASH_KEY.get_or_init(draw_table_hash_key)
+}
+
+/// Fixes this process's table hash key before any table hash is computed:
+/// the driver's `--table-hash-key` (native/src/main.rs), which only test
+/// harnesses pass, so the tests can compare exact keyed hashes with an
+/// independent implementation. Err if the key was already drawn or set.
+pub fn set_table_hash_key(k0: u64, k1: u64) -> Result<(), String> {
+    TABLE_HASH_KEY.set((k0, k1)).map_err(|_| "the table hash key is already in use".to_string())
+}
+
+/// The table hash of V under the key K: SipHash-1-3 of V's canonical input,
+/// masked to 61 bits like the public hash.
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.finish() & HASH_MASK) as i64),
+        Err(()) => NO_VALUE,
+    }
+}
+
+/// The private table hash (core/hashing.tcl's tableHash): what the standard
+/// library's hash structures place values with. Equal values hash equal
+/// within one process; nothing is promised across processes or versions.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_table_hash(p: *mut Vm, v: Value) -> Value {
+    table_hash_with_key(p, v, table_hash_key())
 }
 
 // ---------------------------------------------------------------------------
@@ -992,9 +1246,12 @@ pub extern "C" fn rt_bytes_len(p: *mut Vm, v: Value) -> Value {
 /// (the object's address plus the constant payload offset; no read of the
 /// payload, no allocation). Valid only while V is live and unmoved -- the
 /// collector never moves objects, and native lowering keeps V live through the
-/// syscall that consumes the address (`op keepalive`). The address of a
-/// 47-bit Linux x86-64 user-space object is far below the small-Int
-/// ceiling; anything else is refused rather than truncated.
+/// syscall or C call that consumes the address (`op keepalive`). A heap
+/// object's address on every host the native backend runs on -- Linux
+/// x86-64 (47-bit user space), Linux AArch64 (48-bit, or 52 with large
+/// virtual addresses) and macOS AArch64 (47-bit; its heap is above 4 GiB,
+/// tests/c-byte-borrowing.test's bb-read-address-above-4gib) -- is below the
+/// small-Int ceiling (2^62); anything else is refused rather than truncated.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
     if let Err(failed) = bytes_operand(p, v, "std::abi::x86_64::from_bytes") {
@@ -1027,17 +1284,6 @@ pub extern "C" fn rt_cptr_fixture_address(p: *mut Vm, v: Value) -> Value {
     vm(p).new_int(cptr_address(v))
 }
 
-/// `op keepalive %b`: a use of V that the optimizer cannot remove and that
-/// does nothing. native/lower.tcl emits it *after* every syscall whose
-/// address operands came from `bytesaddr %b`, so V is live (a GC root at
-/// every safepoint, including the syscall's own) from its definition until the
-/// kernel has returned. `black_box` keeps the value observed.
-#[unsafe(no_mangle)]
-pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
-    std::hint::black_box(v);
-    UNIT
-}
-
 // ---------------------------------------------------------------------------
 // Fixed binary layouts (BINARY-LAYOUT.md; core/binary.tcl is the reference).
 //
@@ -1047,36 +1293,60 @@ pub extern "C" fn rt_keepalive(_p: *mut Vm, v: Value) -> Value {
 // one length check (parse) or one `byteszeroed` (emit). Every byte order is
 // little-endian, the target's; the encoding word keeps room for big-endian.
 
+/// The scalar encoding of a fixed-layout op (`binload`'s word, native/
+/// lower.tcl's LayoutEncoding): its width in bytes, its byte order, and
+/// either an integer's signedness or, for a C float or double field, its
+/// IEEE 754 format (C-FLOAT-FFI-MILESTONE-1.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BinEncoding {
+    pub width: usize,
+    pub signed: bool,
+    pub big: bool,
+    pub float: Option<CFloatFormat>,
+}
+
 /// The scalar encoding word of `binload`/`binstore`: width in bytes (1, 2, 4
-/// or 8), signedness, byte order -- or None for a malformed word.
-pub(super) fn bin_encoding(code: Value) -> Option<(usize, bool, bool)> {
+/// or 8, the low four bits), signed (16), big-endian (32), a C floating
+/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed)
+/// -- or None for a malformed word.
+pub(super) fn bin_encoding(code: Value) -> Option<BinEncoding> {
     let c = int_small(code)?;
     let width = (c & 15) as usize;
-    if !matches!(width, 1 | 2 | 4 | 8) || c & !63 != 0 {
+    if !matches!(width, 1 | 2 | 4 | 8) || c & !127 != 0 {
         return None;
     }
-    Some((width, c & 16 != 0, c & 32 != 0))
+    let signed = c & 16 != 0;
+    let float = if c & 64 != 0 {
+        if signed {
+            return None;
+        }
+        Some(CFloatFormat::of_width(width)?)
+    } else {
+        None
+    };
+    Some(BinEncoding { width, signed, big: c & 32 != 0, float })
 }
 
 /// The storage, offset and encoding operands of a fixed-layout op, checked:
-/// the storage is a byte storage and WIDTH bytes at OFFSET lie inside it.
-/// (offset, width, signed, big-endian).
-fn bin_operands(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, usize, bool, bool), Value> {
+/// the storage is a byte storage and the encoding's bytes at OFFSET lie
+/// inside it. (offset, encoding).
+fn bin_operands(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, BinEncoding), Value> {
     bytes_operand(p, storage, context)?;
     bin_extent(p, storage, offset, code, context)
 }
 
 /// bin_operands' offset and encoding checks, for a storage of either byte
 /// kind (its length is at the same place in both).
-fn bin_extent(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, usize, bool, bool), Value> {
-    let Some((width, signed, big)) = bin_encoding(code) else {
+fn bin_extent(p: *mut Vm, storage: Value, offset: Value, code: Value, context: &str) -> Result<(usize, BinEncoding), Value> {
+    let Some(encoding) = bin_encoding(code) else {
         let message = format!("{context}: malformed scalar encoding {}", super::show::int_text(code));
         return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
     };
     // (Either byte kind: the payload is at the same place in both.)
     let len = unsafe { super::bytesobj::BytesObj::payload(storage) }.len();
+    let width = encoding.width;
     match int_small(offset) {
-        Some(o) if o >= 0 && (o as usize).checked_add(width).is_some_and(|end| end <= len) => Ok((o as usize, width, signed, big)),
+        Some(o) if o >= 0 && (o as usize).checked_add(width).is_some_and(|end| end <= len) => Ok((o as usize, encoding)),
         _ => {
             let message = format!("{context}: {width} bytes at offset {} lie outside a storage of {len} bytes", super::show::int_text(offset));
             Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }))
@@ -1095,28 +1365,38 @@ pub extern "C" fn rt_bytes_zeroed(p: *mut Vm, n: Value) -> Value {
     vm(p).new_bytes_with(count, |init| init.push_zeros(count))
 }
 
-/// `binload %s %o %c`: the Int at offset O of storage S in encoding C.
+/// `binload %s %o %c`: the value at offset O of storage S in encoding C.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_bin_load(p: *mut Vm, storage: Value, offset: Value, code: Value) -> Value {
-    let (at, width, signed, big) = match bin_operands(p, storage, offset, code, "std::binary::parse") {
+    let (at, encoding) = match bin_operands(p, storage, offset, code, "std::binary::parse") {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    bin_decode(p, &bytes_of(storage)[at..at + width], signed, big)
+    bin_decode(p, &bytes_of(storage)[at..at + encoding.width], encoding)
 }
 
-/// The Int the encoded scalar BYTES (1, 2, 4 or 8 of them) holds, SIGNED
-/// two's complement or unsigned, BIG-endian or little: `binload`'s decoding,
-/// shared with the native view's `nativeload` (runtime/nview.rs).
-pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], signed: bool, big: bool) -> Value {
+/// The value the encoded scalar BYTES (1, 2, 4 or 8 of them) holds in
+/// ENCODING: an integer's Int (two's complement or unsigned), or a C
+/// floating representation's Float64 -- admitted by the boundary's rule
+/// (value.rs's admit_c_float: NaN and the infinities are NonFiniteFloat,
+/// negative zero zero, a binary32 widened exactly). `binload`'s decoding,
+/// shared with the native view's `nativeload` and the row reads
+/// (runtime/nview.rs).
+pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], encoding: BinEncoding) -> Value {
     let width = bytes.len();
     let mut word = [0u8; 8];
     word[..width].copy_from_slice(bytes);
-    if big {
+    if encoding.big {
         word[..width].reverse();
     }
     let raw = u64::from_le_bytes(word);
-    if signed {
+    if let Some(format) = encoding.float {
+        return match admit_c_float(format, raw) {
+            Ok(bits) => vm(p).new_float(FloatType::Float64, bits),
+            Err(result) => rt_float_nonfinite(p, result),
+        };
+    }
+    if encoding.signed {
         let shift = 64 - 8 * width as u32;
         vm(p).new_int(((raw << shift) as i64) >> shift)
     } else if raw <= i64::MAX as u64 {
@@ -1138,11 +1418,12 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
             return failed;
         }
     }
-    let (at, width, signed, big) = match bin_extent(p, storage, offset, code, "std::binary::emit") {
+    let (at, encoding) = match bin_extent(p, storage, offset, code, "std::binary::emit") {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    let bytes = match bin_encode(p, value, width, signed, big, "std::binary::emit") {
+    let width = encoding.width;
+    let bytes = match bin_encode(p, value, encoding, "std::binary::emit") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
@@ -1153,15 +1434,29 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
     UNIT
 }
 
-/// The WIDTH-byte encoding of the Int VALUE, SIGNED two's complement or
-/// unsigned, BIG-endian or little, in the first WIDTH bytes of the result:
-/// `binstore`'s encoding, shared with the layout writes of a native edit and
-/// of byte storage (runtime/nview.rs, NATIVE-LAYOUT-WRITES.md). A value
-/// outside the encoding is a RANGE error (CONTEXT names the operation),
-/// raised before the caller writes anything: never a truncation, a wrap or a
-/// reinterpretation.
-pub(super) fn bin_encode(p: *mut Vm, value: Value, width: usize, signed: bool, big: bool, context: &str) -> Result<[u8; 8], Value> {
+/// The ENCODING of VALUE in the first `width` bytes of the result: an Int
+/// two's complement or unsigned, or a Float64 as a C float or double --
+/// narrowed by the boundary's rule (value.rs's narrow_c_float: to nearest,
+/// ties to even; a binary32 overflow is NonFiniteFloat, never clamped) --
+/// BIG-endian or little. `binstore`'s encoding, shared with the layout writes
+/// of a native edit and of byte storage (runtime/nview.rs, NATIVE-LAYOUT-
+/// WRITES.md). A value outside an integer encoding is a RANGE error (CONTEXT
+/// names the operation); every failure is raised before the caller writes
+/// anything: never a truncation, a wrap or a reinterpretation.
+pub(super) fn bin_encode(p: *mut Vm, value: Value, encoding: BinEncoding, context: &str) -> Result<[u8; 8], Value> {
     use num_traits::ToPrimitive;
+    let BinEncoding { width, signed, big, float } = encoding;
+    if let Some(format) = float {
+        if heap_kind(value) != KIND_FLOAT {
+            return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Float64, got: value }));
+        }
+        let bits = narrow_c_float(format, float64_of(value)).map_err(|result| rt_float_nonfinite(p, result))?;
+        let mut bytes = bits.to_le_bytes();
+        if big {
+            bytes[..width].reverse();
+        }
+        return Ok(bytes);
+    }
     if !is_small(value) && heap_kind(value) != KIND_BIGINT {
         return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Int, got: value }));
     }
@@ -2042,6 +2337,18 @@ pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     }
 }
 
+/// `list#with_length(L, N)` (`listwithlen`, LIST-CARDINALITY-REFINEMENTS.md):
+/// L itself -- the same List, never a copy -- when it has exactly N
+/// elements, else the declared LengthMismatch.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_with_length(p: *mut Vm, l: Value, n: Value) -> Value {
+    let len = list_of(l).items().len();
+    match int_small(n) {
+        Some(want) if want >= 0 && want as usize == len => l,
+        _ => fail_builtin(p, super::error::ERR_LENGTH_MISMATCH, "LengthMismatch"),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = list_of(l).items();
@@ -2809,7 +3116,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IGt => cmp(|o| o == Ordering::Greater),
         IGe => cmp(|o| o != Ordering::Less),
         IEq => cmp(|o| o == Ordering::Equal),
-        VEq => rt_value_eq(p, a[0], a[1]),
+        VEq | VEqTotal => rt_value_eq(p, a[0], a[1]),
         StrEq => rt_str_eq(p, a[0], a[1]),
         CharEq | EnumEq => bool_value(a[0] == a[1]),
         ListNew => rt_list_new(p, a.len() as u64, a.as_ptr()),
@@ -2827,6 +3134,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
+        ListWithLength => rt_list_with_length(p, a[0], a[1]),
         SetFromList => rt_set_from_list(p, a[0]),
         // Same runtime helper as SetFromList: the distinction is purely an
         // op_may_error classification (see OpCode::SetFromListTotal's own
@@ -2908,7 +3216,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         D64Round => super::decimal::rt_decimal_round(p, a[0], a[1]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
-        Hash => rt_hash(p, a[0]),
+        Hash | HashTotal => rt_hash(p, a[0]),
+        TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
@@ -2932,6 +3241,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CoRelease => rt_co_release(p, a[0]),
         AffineDrop => rt_affine_drop(p, a[0], a[1]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
+        // A C word exists only between a C call and its uses, in one
+        // function (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): never a value.
+        | CWBox | CWLt | CWLe | CWGt | CWGe | CWEq
         | RIShr | RIShl | RIAnd | RIOr | RIXor | RIMod | RIModTotal | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum
@@ -2995,6 +3307,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_ffi_int_word, 2),
         h!(rt_ffi_box_i64, 2),
         h!(rt_ffi_box_u64, 2),
+        h!(rt_ffi_word_cmp, 4),
         h!(rt_ffi_bad_address, 3),
         h!(rt_ffi_bad_bool, 3),
         h!(rt_ffi_contract_violation, 4),
@@ -3019,6 +3332,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_value_eq, 3),
         h!(rt_str_eq, 3),
         h!(rt_hash, 2),
+        h!(rt_table_hash, 2),
         h!(rt_str_len, 2),
         h!(rt_substr, 4),
         h!(rt_substr_proven, 4),
@@ -3043,7 +3357,6 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_bytes_from_list, 2),
         h!(rt_bytes_len, 2),
         h!(rt_bytes_addr, 2),
-        h!(rt_keepalive, 2),
         h!(rt_mbytes_new, 2),
         h!(rt_mbytes_from, 2),
         h!(rt_mbytes_len, 2),
@@ -3077,6 +3390,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_struct_new, 4),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
+        h!(rt_list_with_length, 3),
         h!(rt_list_get_proven, 3),
         h!(rt_list_append, 3),
         h!(rt_construct, 4),
@@ -3443,6 +3757,151 @@ mod tests {
         assert_eq!(rt_hash(&mut *vm, min), small(707785774613091011));
         let two80 = rooted!(vm, vm.new_big(BigInt::from(1u128 << 80)));
         assert_eq!(rt_hash(&mut *vm, two80), small(999613055982882793));
+    }
+
+    // -----------------------------------------------------------------------
+    // The table hash (HASHABLE-AND-KEYED-HASH.md). `cargo test --lib
+    // table_hash` runs these.
+
+    /// The key 00 01 .. 0f of the SipHash papers' vectors.
+    const VECTOR_KEY: (u64, u64) = (0x0706050403020100, 0x0f0e0d0c0b0a0908);
+
+    fn sip<const C: usize, const D: usize>(key: (u64, u64), chunks: &[&[u8]]) -> u64 {
+        let mut s = Sip::<C, D>::new(key.0, key.1);
+        for c in chunks {
+            s.write(c);
+        }
+        s.finish()
+    }
+
+    #[test]
+    fn table_hash_sip_matches_published_vectors() {
+        // SipHash-2-4 (the paper's appendix; the reference vectors.h) and
+        // SipHash-1-3 (Rust's core tests, test_siphash_1_3).
+        let msg: Vec<u8> = (0..64).collect();
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&msg[..15]]), 0xa129ca6149be45e5);
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&[]]), 0x726fdb47dd0e0e31);
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&msg[..8]]), 0x93f5f5799a932462);
+        assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&[]]), 0xabac0158050fc4dc);
+        assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&msg[..1]]), 0xc9f49bf37d57ca93);
+        // audit/hashable/tools/oracle.py's SipHash-1-3, an independent
+        // implementation, at every boundary of the block structure.
+        for (n, want) in [(7, 0xd3927d989bb11140u64), (8, 0x369095118d299a8e), (15, 0xd320d86d2a519956), (16, 0xcc4fdd1a7d908b66), (63, 0x9d199062b7bbb3a8)] {
+            assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&msg[..n]]), want, "SipHash-1-3 of {n} bytes");
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn table_hash_sip_streams_like_std_siphasher() {
+        // std's SipHasher is SipHash-2-4: the same permutation and padding
+        // with other round counts, over any split of the same bytes.
+        use std::hash::Hasher;
+        let mut seed = 0x2545f4914f6cdd1du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for len in 0..80usize {
+            let key = (next(), next());
+            let msg: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let mut std = std::hash::SipHasher::new_with_keys(key.0, key.1);
+            std.write(&msg);
+            let want = std.finish();
+            let cut1 = (next() as usize) % (len + 1);
+            let cut2 = cut1 + (next() as usize) % (len - cut1 + 1);
+            assert_eq!(sip::<2, 4>(key, &[&msg]), want, "len {len}");
+            assert_eq!(sip::<2, 4>(key, &[&msg[..cut1], &msg[cut1..cut2], &msg[cut2..]]), want, "len {len} split");
+            assert_eq!(sip::<1, 3>(key, &[&msg[..cut1], &msg[cut1..]]), sip::<1, 3>(key, &[&msg]), "len {len} split 1-3");
+        }
+    }
+
+    #[test]
+    fn table_hash_of_values_matches_the_oracle() {
+        use crate::runtime::vm::{EnumInfo, ShapeInfo};
+        let mut vm = Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false }],
+                enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
+            }),
+            AllocMode::Summary,
+        );
+        // audit/hashable/tools/oracle.py under the vector key: 7;
+        // P {x: -5, y: "héllo"}; [1, '🙂', Color::Green]; {1, 2, 3}.
+        let s = rooted!(vm, str_val(&mut vm, "h\u{e9}llo"));
+        let p = rooted!(vm, vm.new_struct(0, vec![small(-5), s]));
+        let list = rooted!(vm, vm.new_list(vec![small(1), make_char(0x1F642), make_enum(0, 1)]));
+        let set = rooted!(vm, vm.new_set(vec![small(1), small(2), small(3)]));
+        let reordered = rooted!(vm, vm.new_set(vec![small(3), small(1), small(2)]));
+        assert_eq!(table_hash_with_key(&mut *vm, small(7), VECTOR_KEY), small(1659226329979122286));
+        assert_eq!(table_hash_with_key(&mut *vm, p, VECTOR_KEY), small(2049144106076300702));
+        assert_eq!(table_hash_with_key(&mut *vm, list, VECTOR_KEY), small(900147083491920494));
+        assert_eq!(table_hash_with_key(&mut *vm, set, VECTOR_KEY), small(1805504437171615301));
+        // Equal values, different constructions: one hash.
+        assert_eq!(table_hash_with_key(&mut *vm, reordered, VECTOR_KEY), small(1805504437171615301));
+        // A value with no hash is refused, as the public hash refuses it.
+        let array = rooted!(vm, vm.new_mutarray(1));
+        assert_eq!(table_hash_with_key(&mut *vm, array, VECTOR_KEY), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn table_hash_reads_the_value_not_its_public_hash() {
+        // Two Ints with one 64-bit FNV state (audit/hashable/tools/
+        // collide.rs): equal public hashes, nested too, so any function of
+        // the public hash and a key collides on them; the table hash does
+        // not.
+        use num_bigint::BigInt;
+        let mut vm = vm();
+        let a = rooted!(vm, vm.new_big(BigInt::from(17384044247497657079u64)));
+        let b = rooted!(vm, vm.new_big(BigInt::from(13834495523901255922u64)));
+        assert_eq!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, b));
+        let la = rooted!(vm, vm.new_list(vec![a]));
+        let lb = rooted!(vm, vm.new_list(vec![b]));
+        assert_eq!(rt_hash(&mut *vm, la), rt_hash(&mut *vm, lb));
+        assert_ne!(table_hash_with_key(&mut *vm, a, VECTOR_KEY), table_hash_with_key(&mut *vm, b, VECTOR_KEY));
+        assert_ne!(table_hash_with_key(&mut *vm, la, VECTOR_KEY), table_hash_with_key(&mut *vm, lb, VECTOR_KEY));
+    }
+
+    #[test]
+    fn table_hash_process_key_is_drawn_once() {
+        // The production path: one key per process, drawn on first use and
+        // never redrawn, so repeated table hashes of one value agree; a key
+        // can no longer be fixed once one is in use.
+        let mut vm = vm();
+        let k = table_hash_key();
+        assert_eq!(table_hash_key(), k);
+        let first = rt_table_hash(&mut *vm, small(42));
+        for _ in 0..100 {
+            assert_eq!(rt_table_hash(&mut *vm, small(42)), first);
+        }
+        assert!(set_table_hash_key(1, 2).is_err());
+        // Two draws (two processes' keys) come from the system's source:
+        // equal only by a 2^-128 chance.
+        assert_ne!(draw_table_hash_key(), draw_table_hash_key());
+    }
+
+    #[test]
+    fn table_hash_allocates_nothing() {
+        // As the public hash (RO-1): Ints up to 128 bits, code points,
+        // Strings, structs and nested structs walk without a heap object;
+        // the result is a small Int.
+        use num_bigint::BigInt;
+        let mut vm = vm_with_shapes(&[(Some("P"), &["x", "y"]), (Some("Q"), &["p", "name"])]);
+        let s = rooted!(vm, str_val(&mut vm, "session-key-0042"));
+        let big = rooted!(vm, vm.new_big(BigInt::from(1u128 << 100)));
+        let p = rooted!(vm, vm.new_struct(0, vec![small(1), small(2)]));
+        let q = rooted!(vm, vm.new_struct(1, vec![p, s]));
+        let before = vm.metrics.total_allocations();
+        for v in [small(7), big, make_char(0x1F642), s, p, q] {
+            rt_table_hash(&mut *vm, v);
+            rt_hash(&mut *vm, v);
+        }
+        assert_eq!(vm.metrics.total_allocations(), before);
     }
 
     #[test]
@@ -4013,6 +4472,105 @@ mod tests {
         assert_eq!(vm.declared_error, 0);
     }
 
+    /// A Windows argument (runtime/aot.rs's `wtf8_from_utf16`): valid UTF-16
+    /// -- ASCII, a BMP scalar, a surrogate pair, the empty argument, spaces
+    /// and quotes, which are content once the command line is split -- is
+    /// exactly its UTF-8, so `argv()` reads it as on Linux.
+    #[test]
+    fn argv_windows_utf16_is_its_utf8() {
+        use crate::runtime::aot::wtf8_from_utf16;
+        for text in ["C:\\dir with space\\prog.exe", "", "a \"quoted\" b\\", "\u{e9}e\u{301}", "\u{1f600}\u{20ac}", "\u{ffff}\u{10ffff}"] {
+            assert_eq!(wtf8_from_utf16(text.encode_utf16()), text.as_bytes(), "{text:?}");
+        }
+        let mut vm = vm();
+        vm.set_argv(["prog", "", "\u{1f600}"].iter().map(|t| wtf8_from_utf16(t.encode_utf16())).collect());
+        assert_eq!(argv_strings(rt_argv(&mut *vm)), vec!["prog", "", "\u{1f600}"]);
+    }
+
+    /// An unpaired surrogate -- UTF-16 a Windows command line may hold, no
+    /// Unicode scalar -- is its code unit's three-byte form (never U+FFFD or
+    /// a dropped unit), lossless and distinct for every unit, which strict
+    /// UTF-8 rejects: `argv()` is the declared error, as for invalid UTF-8
+    /// on Linux. A surrogate pair split by another unit is two unpaired
+    /// surrogates.
+    #[test]
+    fn argv_windows_unpaired_surrogate_is_the_declared_error() {
+        use crate::runtime::aot::wtf8_from_utf16;
+        assert_eq!(wtf8_from_utf16([0xD800]), b"\xED\xA0\x80");
+        assert_eq!(wtf8_from_utf16([0xDFFF]), b"\xED\xBF\xBF");
+        assert_eq!(wtf8_from_utf16([0x61, 0xDC00, 0x62]), b"a\xED\xB0\x80b");
+        assert_eq!(wtf8_from_utf16([0xD83D, 0x20, 0xDE00]), b"\xED\xA0\xBD \xED\xB8\x80");
+        assert_eq!(wtf8_from_utf16([0xD83D, 0xDE00]), "\u{1f600}".as_bytes());
+        let lone: Vec<Vec<u8>> = (0xD800..=0xDFFFu16).map(|u| wtf8_from_utf16([u])).collect();
+        assert!(lone.iter().all(|b| std::str::from_utf8(b).is_err()));
+        assert_eq!(lone.iter().collect::<std::collections::HashSet<_>>().len(), lone.len());
+        let mut vm = vm();
+        vm.set_argv(vec![b"prog".to_vec(), wtf8_from_utf16([0x61, 0xD800])]);
+        assert_eq!(rt_argv(&mut *vm), NO_VALUE);
+        assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
+    }
+
+    /// The driver's inverse of the Windows encoding, for a linked run's
+    /// command line (WINDOWS-X86-64-MILESTONE-2.md): every unit sequence --
+    /// lone surrogates of both kinds, pairs, a pair split by another unit,
+    /// every boundary scalar -- decodes back from its WTF-8 exactly, and
+    /// bytes that are no WTF-8 of anything decode to nothing: stray and
+    /// missing continuations, overlong forms, values past U+10FFFF, 0xFF,
+    /// and a pair written as two three-byte surrogates (which would encode
+    /// back to the scalar's four bytes).
+    #[test]
+    fn argv_windows_wtf8_decodes_back_to_its_units() {
+        use crate::runtime::aot::{utf16_from_wtf8, wtf8_from_utf16};
+        let cases: Vec<Vec<u16>> = vec![
+            vec![],
+            "C:\\dir with space\\prog.exe".encode_utf16().collect(),
+            "\u{e9}e\u{301}\u{1f600}\u{ffff}\u{10ffff}\u{7f}\u{80}\u{7ff}\u{800}".encode_utf16().collect(),
+            vec![0xD800],
+            vec![0xDFFF],
+            vec![0x61, 0xDC00, 0x62],
+            vec![0xD83D, 0x20, 0xDE00],
+            vec![0xD83D, 0xDE00],
+            vec![0xDE00, 0xD83D],
+            vec![0xD800, 0xD800, 0xDC00],
+            vec![0],
+        ];
+        for units in &cases {
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16(units.iter().copied())).as_ref(), Some(units), "{units:x?}");
+        }
+        // Every single unit, and a pseudo-random sample of short sequences.
+        for unit in 0..=0xFFFFu16 {
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16([unit])), Some(vec![unit]), "{unit:#x}");
+        }
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..20000 {
+            let units: Vec<u16> = (0..(state % 7))
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    [0x41, 0x7FF, 0x800, 0xD800, 0xDBFF, 0xDC00, 0xDFFF, 0xFFFF, (state >> 16) as u16][(state % 9) as usize]
+                })
+                .collect();
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16(units.iter().copied())), Some(units.clone()), "{units:x?}");
+        }
+        for bad in [
+            &b"\x80"[..],
+            b"a\xC3",
+            b"\xC3\x28",
+            b"\xC0\xAF",
+            b"\xE0\x80\xAF",
+            b"\xF0\x80\x80\xAF",
+            b"\xF4\x90\x80\x80",
+            b"\xFF",
+            b"\xED\xA0\xBD\xED\xB8\x80",
+        ] {
+            assert_eq!(utf16_from_wtf8(bad), None, "{bad:x?}");
+        }
+        // A lone trail before a lone lead is no pair: both stay.
+        assert_eq!(utf16_from_wtf8(b"\xED\xB8\x80\xED\xA0\xBD"), Some(vec![0xDE00, 0xD83D]));
+    }
+
     #[test]
     fn argv_zero_arguments_is_the_empty_list() {
         let mut vm = vm();
@@ -4074,6 +4632,34 @@ mod tests {
                 vm.declared_error = 0;
             }
         }
+    }
+
+    // list#with_length (LIST-CARDINALITY-REFINEMENTS.md): the List itself
+    // (the same object, never a copy) when it has exactly the length, else
+    // the builtin declared error LengthMismatch -- also for a negative or
+    // BigInt length, which no List has.
+
+    #[test]
+    fn list_with_length_returns_its_operand_or_length_mismatch() {
+        let mut vm = vm();
+        let list = rooted!(vm, vm.new_list(vec![small(10), small(20), small(30)]));
+        let lists = vm.metrics.by_kind[KIND_LIST as usize].allocations;
+        assert_eq!(rt_list_with_length(&mut *vm, list, small(3)), list);
+        assert_eq!(vm.declared_error, 0);
+        assert_eq!(vm.metrics.by_kind[KIND_LIST as usize].allocations, lists);
+        let big = rooted!(vm, vm.new_big(num_bigint::BigInt::from(1u8) << 80));
+        for n in [small(2), small(4), small(0), small(-3), big] {
+            assert_eq!(rt_list_with_length(&mut *vm, list, n), NO_VALUE);
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_LENGTH_MISMATCH);
+            assert_eq!(
+                vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+                Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error LengthMismatch>".to_string()))
+            );
+            vm.error = None;
+            vm.declared_error = 0;
+        }
+        let empty = rooted!(vm, vm.new_list(vec![]));
+        assert_eq!(rt_list_with_length(&mut *vm, empty, small(0)), empty);
     }
 
     // The *proven helpers (hir/completions.tcl's bounds proof, PROOF-FACT-

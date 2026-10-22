@@ -11,8 +11,10 @@
 #
 #   * 0 to 14 parameters -- past the six (x86-64 SysV) or eight (AAPCS64)
 #     integer argument registers, so the later ones are on the stack -- each
-#     a C integer scalar (all eleven, plain char at the target's signedness)
-#     or a C _Bool (std::ffi::c::Bool: a Botlish bool),
+#     a C integer scalar (all eleven, plain char at the target's signedness),
+#     a C _Bool (std::ffi::c::Bool: a Botlish bool), a C double (std::ffi::c::Double,
+#     recorded as its bit pattern: it takes a floating-point register, and
+#     the variadic conventions count those apart from the integer ones),
 #     a raw `unsigned char *` (null, or an address inside the library's own
 #     cells), a read byte pointer (a std::abi::bytes::Bytes or a MutableBytes,
 #     exposed) or a write byte pointer (a MutableBytes, C writing a private
@@ -22,7 +24,15 @@
 #     1 for any nonzero value), void, an
 #     independent pointer into the cells (or NULL), or a pointer declared an
 #     alias of one of its raw or write pointer parameters (which it returns);
-#   * with or without a `named` link symbol.
+#   * with or without a `named` link symbol;
+#   * fixed or variadic (`extern c fn f(FIXED..., variadic)`,
+#     VARIADICS-VERTICAL-SLICE-1.md): a variadic function's one call passes
+#     0 to 18 trailing arguments -- any C integer scalar or _Bool (through a
+#     converter of its type), a Float64 (C double) or a raw pointer -- that
+#     its genuine stdarg body reads with va_arg of the type C's default
+#     argument promotions give (int for one narrower than int), recording a
+#     double as its bit pattern. Its last fixed parameter, va_start's, is
+#     never narrower than int.
 #
 # Every argument value is drawn toward the type's bounds (min, min + 1, -1,
 # 0, 1, max - 1, max) or uniformly inside its range; byte storage has a
@@ -41,9 +51,10 @@
 # produce exactly the model's list; on the Tcl backends it must fail with
 # NATIVE-ONLY.
 #
-# The last line is "programs N functions F disagreements D"; every
-# disagreement is printed with its application directory, kept unless -keep
-# is 0.
+# The last line is "programs N functions F variadic V trailing T
+# disagreements D" (V variadic functions called with T trailing arguments
+# in all); every disagreement is printed with its application directory,
+# kept unless -keep is 0.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -n 10 -seed 1 -functions 12 -gc-stress 0 -keep 1 -verbose 0]
@@ -141,19 +152,42 @@ proc pattern {seed length} {
 
 proc blist {values} { return "\[[join $values {, }]\]" }
 
+# The C type a trailing scalar of TYPE reaches a variadic callee as (C11
+# 6.5.2.2p6-7: an integer narrower than int, _Bool included, is int).
+proc promoted {type} {
+    lassign [dict get $::scalars $type] spelling bits
+    return [expr {$bits < 32 ? "int" : $spelling}]
+}
+
+# A Float64 a decimal literal writes exactly (a multiple of 1/4), and the
+# unsigned 64-bit pattern of its IEEE double.
+proc doubleValue {} {
+    set m [pick [list 0 1 -1 [between -1000 1000] [between -4000000 4000000]]]
+    return [format %.2f [expr {$m / 4.0}]]
+}
+proc doubleBits {v} {
+    binary scan [binary format d $v] w bits
+    return [expr {$bits % (2 ** 64)}]
+}
+
 # One function I of program P: a dict {params result named symbol}.
-# A param is {kind scalar type T} | {kind raw escape E} | {kind in escape E
-# owner bytes|mutable} | {kind out escape E}; a result {kind scalar type T
-# from J add C} | {kind unit} | {kind independent} | {kind alias of J}.
+# A param is {kind scalar type T} | {kind double} | {kind raw escape E} |
+# {kind in escape E owner bytes|mutable} | {kind out escape E}; a result
+# {kind scalar type T from J add C} | {kind unit} | {kind independent} |
+# {kind alias of J}.
 proc drawFunction {p i} {
     set params {}
+    set variadic [chance 0.3]
     set n [pick [list 0 1 2 3 [between 4 8] [between 9 14]]]
+    if {$variadic && $n == 0} { set n 1 }
     for {set j 0} {$j < $n} {incr j} {
         set escape [expr {[chance 0.2] ? "proven noescape" : "noescape"}]
         set r [expr {rand()}]
-        if {$r < 0.6} {
+        if {$r < 0.55} {
             lappend params [dict create kind scalar type [pick [dict keys $::scalars]]]
-        } elseif {$r < 0.73} {
+        } elseif {$r < 0.65} {
+            lappend params [dict create kind double]
+        } elseif {$r < 0.75} {
             lappend params [dict create kind raw escape $escape]
         } elseif {$r < 0.87} {
             lappend params [dict create kind in escape $escape owner [pick {bytes bytes mutable}]]
@@ -161,6 +195,28 @@ proc drawFunction {p i} {
             lappend params [dict create kind out escape $escape]
         }
     }
+    if {$variadic} {
+        # va_start's parameter has its own promoted type.
+        set last [lindex $params end]
+        if {[dict get $last kind] eq "scalar" && [lindex [dict get $::scalars [dict get $last type]] 1] < 32} {
+            lset params end [dict create kind scalar type [pick {Int UInt Long ULong LongLong ULongLong}]]
+        }
+    }
+    set trailing {}
+    if {$variadic} {
+        set count [pick [list 0 1 2 [between 3 8] [between 9 18]]]
+        for {set j 0} {$j < $count} {incr j} {
+            set r [expr {rand()}]
+            if {$r < 0.55} {
+                lappend trailing [dict create kind scalar type [pick [dict keys $::scalars]]]
+            } elseif {$r < 0.85} {
+                lappend trailing [dict create kind double]
+            } else {
+                lappend trailing [dict create kind raw]
+            }
+        }
+    }
+    set seenCount [expr {$n + [llength $trailing]}]
     set aliasable {}
     set hasOut 0
     set j 0
@@ -172,7 +228,7 @@ proc drawFunction {p i} {
     set r [expr {rand()}]
     if {$r < 0.55} {
         set result [dict create kind scalar type [pick [dict keys $::scalars]] \
-            from [expr {$n > 0 && [chance 0.85] ? [between 0 [expr {$n - 1}]] : -1}] add [pick [list 0 1 7 [between 0 1000000]]]]
+            from [expr {$seenCount > 0 && [chance 0.85] ? [between 0 [expr {$seenCount - 1}]] : -1}] add [pick [list 0 1 7 [between 0 1000000]]]]
     } elseif {$r < 0.7} {
         set result [dict create kind unit]
     } elseif {$r < 0.85 && !$hasOut} {
@@ -191,13 +247,13 @@ proc drawFunction {p i} {
     }
     set named [chance 0.7]
     set symbol [expr {$named ? "fz_p${p}_f$i" : "f$i"}]
-    return [dict create params $params result $result named $named symbol $symbol]
+    return [dict create params $params result $result named $named symbol $symbol variadic $variadic trailing $trailing]
 }
 
 # The C source of FUNCTIONS.
 proc cSource {functions} {
-    set c "#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n"
-    append c "unsigned char fz_cells\[$::cells\];\nunsigned long long fz_seen\[16\];\n"
+    set c "#include <stdarg.h>\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n\n"
+    append c "unsigned char fz_cells\[$::cells\];\nunsigned long long fz_seen\[32\];\n"
     append c "unsigned char *fz_cell(int k) { return fz_cells + k; }\n"
     append c "unsigned long long fz_offset(unsigned char *p) { return p ? (unsigned long long)(p - fz_cells) + 1 : 0; }\n"
     append c "unsigned long long fz_seen_at(int i) { return fz_seen\[i\]; }\n\n"
@@ -217,6 +273,10 @@ proc cSource {functions} {
                     lappend formals "[lindex [dict get $::scalars [dict get $param type]] 0] a$j"
                     append body "    fz_seen\[$j\] = (unsigned long long)a$j;\n"
                 }
+                double {
+                    lappend formals "double a$j"
+                    append body "    { unsigned long long u; memcpy(&u, &a$j, sizeof u); fz_seen\[$j\] = u; }\n"
+                }
                 raw {
                     lappend formals "unsigned char *a$j"
                     append body "    fz_seen\[$j\] = fz_offset(a$j);\n"
@@ -231,6 +291,19 @@ proc cSource {functions} {
                 }
             }
             incr j
+        }
+        if {[dict get $f variadic]} {
+            lappend formals ...
+            append body "    va_list ap;\n    va_start(ap, a[expr {$j - 1}]);\n"
+            foreach t [dict get $f trailing] {
+                switch [dict get $t kind] {
+                    scalar { append body "    fz_seen\[$j\] = (unsigned long long)va_arg(ap, [promoted [dict get $t type]]);\n" }
+                    double { append body "    { double d = va_arg(ap, double); unsigned long long u; memcpy(&u, &d, sizeof u); fz_seen\[$j\] = u; }\n" }
+                    raw { append body "    fz_seen\[$j\] = fz_offset(va_arg(ap, unsigned char *));\n" }
+                }
+                incr j
+            }
+            append body "    va_end(ap);\n"
         }
         switch [dict get $result kind] {
             scalar {
@@ -265,11 +338,15 @@ proc binding {functions} {
         foreach param [dict get $f params] {
             switch [dict get $param kind] {
                 scalar { lappend formals "p$j: std::ffi::c::[dict get $param type]" }
+                double { lappend formals "p$j: std::ffi::c::Double" }
                 raw { lappend formals "p$j: std::ffi::c::Ptr\[std::ffi::c::UChar\] [dict get $param escape]" }
                 in { lappend formals "p$j: std::ffi::c::Ptr\[std::ffi::c::UChar\] read [dict get $param escape]" }
                 out { lappend formals "p$j: std::ffi::c::Ptr\[std::ffi::c::UChar\] write [dict get $param escape]" }
             }
             incr j
+        }
+        if {[dict get $f variadic]} {
+            lappend formals variadic
         }
         set result [dict get $f result]
         set rtype [switch [dict get $result kind] {
@@ -288,7 +365,24 @@ proc binding {functions} {
 # The entry program calling FUNCTIONS (with their drawn arguments), and the
 # model's value of it.
 proc program {functions} {
-    set text "import std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport fz\n\n"
+    # A pointer passed as a trailing argument has no contract (its escape is
+    # unknown): direct authority, which the program acknowledges; a trailing
+    # integer enters its C type through a converter.
+    set direct 0
+    set converters {}
+    foreach f $functions {
+        foreach t [dict get $f trailing] {
+            switch [dict get $t kind] {
+                raw { set direct 1 }
+                scalar { if {[dict get $t type] ne "Bool"} { lappend converters [dict get $t type] } }
+            }
+        }
+    }
+    set text [expr {$direct ? "direct module\n\n" : ""}]
+    append text "import std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport fz\n\n"
+    foreach type [lsort -unique $converters] {
+        append text "fn c_$type\(n: std::ffi::c::$type) -> std::ffi::c::$type:\n    n\n\n"
+    }
     append text "fn byte_of(n: int) -> std::byte::Byte:\n    if n >= 0 and n <= 255:\n        return n\n    0\n\n"
     append text "fn bytes_of(values: List\[int\]) -> std::abi::bytes::Bytes:\n    bytes = loop v in values:\n        byte_of(v)\n    std::abi::bytes::from_list(bytes)\n\n"
     append text "fn bit(b: bool) -> int:\n    if b:\n        return 1\n    0\n\n"
@@ -311,6 +405,10 @@ proc program {functions} {
                         lappend args $v
                     }
                     lappend seen [expr {$v % (2 ** 64)}]
+                }
+                double {
+                    lappend args [dict get $param value]
+                    lappend seen [doubleBits [dict get $param value]]
                 }
                 raw {
                     set cell [dict get $param cell]
@@ -339,6 +437,30 @@ proc program {functions} {
                     lappend seen [weighted $bytes]
                     lappend checks "bit(std::abi::bytes::freeze(c$i.p$j) == bytes_of([blist [pattern [dict get $param seed] [llength $bytes]]]))"
                     lappend checks "bit(std::abi::bytes::freeze(out${i}_$j) == bytes_of([blist $bytes]))"
+                }
+            }
+            incr j
+        }
+        foreach t [dict get $f trailing] {
+            switch [dict get $t kind] {
+                scalar {
+                    set v [dict get $t value]
+                    if {[dict get $t type] eq "Bool"} {
+                        lappend args [expr {$v ? "true" : "false"}]
+                    } else {
+                        lappend args "c_[dict get $t type]($v)"
+                    }
+                    lappend seen [expr {$v % (2 ** 64)}]
+                }
+                double {
+                    lappend args [dict get $t value]
+                    lappend seen [doubleBits [dict get $t value]]
+                }
+                raw {
+                    set cell [dict get $t cell]
+                    append text "r${i}_$j = [expr {$cell < 0 ? "std::ffi::c::null\[std::ffi::c::UChar\]()" : "fz::cell($cell)"}]\n"
+                    lappend args r${i}_$j
+                    lappend seen [expr {$cell < 0 ? 0 : $cell + 1}]
                 }
             }
             incr j
@@ -398,6 +520,7 @@ proc drawArguments {f} {
     foreach param [dict get $f params] {
         switch [dict get $param kind] {
             scalar { dict set param value [scalarValue [dict get $param type]] }
+            double { dict set param value [doubleValue] }
             raw { dict set param cell [expr {[chance 0.25] ? -1 : [between 0 [expr {$::cells - 1}]]}] }
             in - out {
                 set bytes [randomBytes]
@@ -409,6 +532,16 @@ proc drawArguments {f} {
         lappend params $param
     }
     dict set f params $params
+    set trailing {}
+    foreach t [dict get $f trailing] {
+        switch [dict get $t kind] {
+            scalar { dict set t value [scalarValue [dict get $t type]] }
+            double { dict set t value [doubleValue] }
+            raw { dict set t cell [expr {[chance 0.25] ? -1 : [between 0 [expr {$::cells - 1}]]}] }
+        }
+        lappend trailing $t
+    }
+    dict set f trailing $trailing
     return $f
 }
 
@@ -423,6 +556,8 @@ expr {srand([dict get $options -seed])}
 set scratch [file tempdir botlish-cffi-fuzz-]
 set programs 0
 set functionCount 0
+set variadics 0
+set trailingArgs 0
 set disagreements 0
 set kept {}
 for {set p 0} {$p < [dict get $options -n]} {incr p} {
@@ -466,6 +601,12 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
     }
     incr programs
     incr functionCount [llength $functions]
+    foreach f $functions {
+        if {[dict get $f variadic]} {
+            incr variadics
+            incr trailingArgs [llength [dict get $f trailing]]
+        }
+    }
     if {$problem ne ""} {
         incr disagreements
         lappend kept $dir
@@ -479,5 +620,5 @@ if {$kept eq "" || ![dict get $options -keep]} {
 } else {
     puts "kept: $scratch"
 }
-puts "programs $programs functions $functionCount disagreements $disagreements"
+puts "programs $programs functions $functionCount variadic $variadics trailing $trailingArgs disagreements $disagreements"
 exit [expr {$disagreements > 0}]

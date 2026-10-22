@@ -294,9 +294,14 @@ proc cpt::DeclarationKind {node} {
 }
 
 # Which natives source can name: not the internal ones (`#` in the name, the
-# compiler's own) and not the core-IR-only ones whose names contain `-`.
+# compiler's own), not the core-IR-only ones whose names contain `-`, and not
+# the members of an internal namespace (core::native::
+# declareInternalNamespace: the private table hash), which only the standard
+# library's own modules may call and which no reference documents as an API
+# (HASHABLE-AND-KEYED-HASH.md).
 proc cpt::PublicNative {name} {
-    return [expr {[string first # $name] < 0 && ![regexp {[a-z]-[a-z]} $name]}]
+    return [expr {[string first # $name] < 0 && ![regexp {[a-z]-[a-z]} $name]
+        && ![core::native::isInternal $name]}]
 }
 
 # The notes: compilerpedia/notes/stdlib.notes, in the topic format, by ID.
@@ -727,8 +732,14 @@ proc cpt::CheckExample {topic example backends scratch} {
     # platform (std::linux::io on a Mac) documents that system: it compiles for
     # its target, as the golden runner's suites do, and runs where a program
     # of that target runs here, on the Tcl backends.
-    set target [surface::modules::PlatformTarget [core::ReadFile $path]]
-    if {$target ne ""} {
+    # One that names its target (@target: a fact of that target, such as a
+    # C scalar's width) compiles for it and runs, on another host, the same
+    # way.
+    set target [dict get $example target]
+    if {$target eq ""} {
+        set target [surface::modules::PlatformTarget [core::ReadFile $path]]
+    }
+    if {$target ne "" && $target ne [core::cabi::hostTarget]} {
         set backends [lmap b $backends {expr {$b in {interp compile} ? $b : [continue]}}]
     }
     set failed [catch {surface::readProgramFile $path -warnings default -warning-channel "" -target $target} hir options]

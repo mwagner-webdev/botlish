@@ -132,11 +132,12 @@ $ctype eq "char"
 ## tools/c-bindgen/model.tcl
 <<<<
         float {
-            set sp [lindex $t 1]
+            return [Floating [lindex $t 1]]
+        }
 ====
         float {
             return [list ok std::ffi::c::Int {}]
-            set sp [lindex $t 1]
+        }
 >>>>
 
 @@ unsupported-omitted an unsupported API is left out of the report
@@ -308,10 +309,68 @@ $ctype eq "char"
     if {0} {
 >>>>
 
-@@ variadic-ignored a variadic function is bound by its fixed parameters
+@@ variadic-ignored a variadic prototype is bound by its fixed parameters (the bare variadic marker is never emitted)
+## tools/c-bindgen/emit.tcl
+<<<<
+        lappend params variadic
+====
+>>>>
+
+@@ variadic-flag-lost the model drops a prototype's `...`: a variadic function is bound as a fixed one
 ## tools/c-bindgen/model.tcl
 <<<<
-    if {"variadic" in $flags} { lappend blockers [list variadic "a variadic function (...)"] }
+    set variadic [expr {"variadic" in $flags}]
+====
+    set variadic 0
+>>>>
+
+@@ variadic-thunk-forwarded a variadic function only a C thunk can reach is bound through the thunk (which cannot forward its trailing arguments)
+## tools/c-bindgen/model.tcl
+<<<<
+    if {$variadic && $via ne "direct"} {
+====
+    if {0} {
+>>>>
+
+@@ variadic-without-fixed-bound a variadic prototype with no fixed parameter (C23's f(...)) is bound
+## tools/c-bindgen/model.tcl
+<<<<
+    } elseif {$variadic && [llength $params] == 0} {
+====
+    } elseif {0} {
+>>>>
+
+@@ variadic-prototype-unchecked the prototype probe's answer is ignored: a parsed variadic prototype the C compiler contradicts is bound
+## tools/c-bindgen/model.tcl
+<<<<
+                    if {$status ne "ok"} {
+                        dict set entry kind unsupported
+                        dict set entry blockers [list [list prototype-mismatch
+====
+                    if {0} {
+                        dict set entry kind unsupported
+                        dict set entry blockers [list [list prototype-mismatch
+>>>>
+
+@@ variadic-prototype-probe-vacuous the prototype probe asserts nothing: every parsed variadic prototype is confirmed
+## tools/c-bindgen/probe.tcl
+<<<<
+_Static_assert(__builtin_types_compatible_p(__typeof__($name), $rendered), \"variadic prototype of $name\");
+====
+_Static_assert(1, \"variadic prototype of $name\");
+>>>>
+
+@@ variadic-prototype-not-asked the model never asks the prototype probe about a variadic function
+## tools/c-bindgen/model.tcl
+<<<<
+                    lappend prototypes [list $subject [::cir::render $type]]
+====
+>>>>
+
+@@ variadic-callback-mapped a variadic callback type is mapped to the FnPtr of its fixed parameters
+## tools/c-bindgen/model.tcl
+<<<<
+        lappend blockers [list unsupported-callback-signature "a variadic callback ([Spell $fn])"]
 ====
 >>>>
 
@@ -450,12 +509,52 @@ $ctype eq "char"
 @@ layout-float-as-integer a float or double field is mapped to the C integer of its width (its bits as an integer)
 ## tools/c-bindgen/records.tcl
 <<<<
-            if {[string match _Float* $sp] || [string match __float* $sp] || $sp in {__bf16 __ibm128}} { set reason float }
-            return [list no [concat $blockers [list [list $reason "$sp ([::cir::spell $type])"]]] {}]
+            if {$blockers ne ""} { return [list no $blockers {}] }
+            return [list ok scalar [lindex $m 1]]
+        }
+        complex {
 ====
-            if {$sp eq "float"} { return [list ok scalar std::ffi::c::UInt] }
-            if {$sp eq "double"} { return [list ok scalar std::ffi::c::ULongLong] }
-            return [list no [concat $blockers [list [list $reason "$sp ([::cir::spell $type])"]]] {}]
+            if {$blockers ne ""} { return [list no $blockers {}] }
+            return [list ok scalar [dict get {std::ffi::c::Float std::ffi::c::UInt std::ffi::c::Double std::ffi::c::ULongLong} [lindex $m 1]]]
+        }
+        complex {
+>>>>
+
+# --- C floating types (C-FLOAT-FFI-MILESTONE-1.md) ---------------------------
+
+@@ bindgen-float-as-double a C float is bound as std::ffi::c::Double (its value passed as a binary64, its field 8 bytes wide)
+## tools/c-bindgen/model.tcl
+<<<<
+        float { return [list ok std::ffi::c::Float {float}] }
+====
+        float { return [list ok std::ffi::c::Double {float}] }
+>>>>
+
+@@ bindgen-double-as-float a C double is bound as std::ffi::c::Float (its value narrowed to a binary32)
+## tools/c-bindgen/model.tcl
+<<<<
+        double { return [list ok std::ffi::c::Double {float}] }
+====
+        double { return [list ok std::ffi::c::Float {float}] }
+>>>>
+
+@@ bindgen-long-double-as-double a C long double is bound as std::ffi::c::Double instead of reported unsupported
+## tools/c-bindgen/model.tcl
+<<<<
+        {long double} {
+            return [Blocked long-double
+====
+        {long double} {
+            return [list ok std::ffi::c::Double {float}]
+            return [Blocked long-double
+>>>>
+
+@@ bindgen-float-width-carrier a float array element's width is taken as the carrier's 8 bytes, not the C type's 4
+## tools/c-bindgen/records.tcl
+<<<<
+        return [dict get [core::cabi::floatingInfo $name $::cbind::model::target] bytes]
+====
+        return 8
 >>>>
 
 @@ layout-bool-as-uchar a C _Bool field is mapped to std::ffi::c::UChar (one byte), not blocked
@@ -512,9 +611,9 @@ $ctype eq "char"
 @@ layout-windows-gnu-as-msvc the Windows GNU target is labeled MSVC's (x86_64-pc-windows-msvc), so MinGW-w64 evidence compiles as the MSVC target's
 ## core/cabi.tcl
 <<<<
-        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu} \
+        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-gnu floating IEEE} \
 ====
-        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc} \
+        windows-x86_64-gnu {os windows arch x86_64 model LLP64 charSigned 1 triple x86_64-pc-windows-msvc floating IEEE} \
 >>>>
 
 # --- record layouts: further mutants ----------------------------------------
@@ -769,4 +868,36 @@ $ctype eq "char"
             && [dict get $recs [dict get $rec owner] status] ne "layout-direct"}]
 ====
         set unheld 0
+>>>>
+
+@@ va-list-as-variadic a final va_list parameter is read as the prototype's `...` (the parameter dropped, the function variadic)
+## tools/c-bindgen/model.tcl
+<<<<
+    set variadic [expr {"variadic" in $flags}]
+====
+    set variadic [expr {"variadic" in $flags}]
+    if {[llength $params] > 1 && [string match *va_list* [lindex $params end 1]]} {
+        set params [lrange $params 0 end-1]
+        set variadic 1
+    }
+>>>>
+
+@@ variadic-as-ellipsis the generated declaration spells the variadic marker as C's `...`
+## tools/c-bindgen/emit.tcl
+<<<<
+        lappend params variadic
+====
+        lappend params ...
+>>>>
+
+@@ variadic-named-dropped a variadic declaration loses its `named` link symbol (an alias's or a renamed one's)
+## tools/c-bindgen/emit.tcl
+<<<<
+    if {[dict get $entry symbol] ne $name} {
+        append head " named [Quote [dict get $entry symbol]]"
+    }
+====
+    if {[dict get $entry symbol] ne $name && ![dict getdef $entry variadic 0]} {
+        append head " named [Quote [dict get $entry symbol]]"
+    }
 >>>>

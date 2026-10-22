@@ -582,10 +582,10 @@ proc executableParity {text} {
         set expected [lindex [outcomeUnderHir interp $hir] 1]
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
         set relocated [file join $dir relocated]
-        file rename [file rootname $path] $relocated
+        file rename [native::executableFile [file rootname $path]] [native::executableFile $relocated]
         file delete $path
-        set plain [exec env PATH= $relocated]
-        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        set plain [runStandalone $relocated]
+        set stressed [runStandalone $relocated BOTLISH_NATIVE_GC_STRESS 1]
         if {$plain ne $expected || $stressed ne $expected} {
             error "interp $expected, executable $plain, gc-stress $stressed"
         }

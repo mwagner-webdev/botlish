@@ -24,7 +24,7 @@
 #
 #   with context std::test::suite()
 #   register_arithmetic_tests()
-#   std::test::report()          # ["PASS adds", "PASS unbound", "2 passed, 0 failed"]
+#   std::test::report()     # ["PASS adds", "PASS unbound", "2 passed, 0 failed"]
 #
 # The suite. `std::test::suite()` is the value a program installs with `with
 # context`: a Suite whose one field is the MutableVector of registered
@@ -372,6 +372,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         std::compiler::DiagnosticCode::FlagFunctionValue,
         std::compiler::DiagnosticCode::ForeignBorrow,
         std::compiler::DiagnosticCode::Imprint,
+        std::compiler::DiagnosticCode::InternalIntrinsicValue,
+        std::compiler::DiagnosticCode::InternalNamespace,
         std::compiler::DiagnosticCode::KnownError,
         std::compiler::DiagnosticCode::LayoutArrayExtent,
         std::compiler::DiagnosticCode::LayoutArrayIndex,
@@ -479,6 +481,8 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
         "FlagFunctionValue",
         "ForeignBorrow",
         "Imprint",
+        "InternalIntrinsicValue",
+        "InternalNamespace",
         "KnownError",
         "LayoutArrayExtent",
         "LayoutArrayIndex",

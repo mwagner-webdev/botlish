@@ -52,9 +52,11 @@
 @@ signed-as-unsigned-runtime the runtime's native load decodes every encoding as unsigned
 ## native/src/runtime/nview.rs
 <<<<
-    super::ops::bin_decode(p, &bytes[..width], signed, big)
+    super::ops::bin_decode(p, &bytes[..width], encoding)
+}
 ====
-    super::ops::bin_decode(p, &bytes[..width], false, big)
+    super::ops::bin_decode(p, &bytes[..width], super::ops::BinEncoding { signed: false, ..encoding })
+}
 >>>>
 
 # --- width -------------------------------------------------------------------
@@ -73,10 +75,10 @@
 ## native/src/runtime/nview.rs
 <<<<
     unsafe { std::ptr::copy_nonoverlapping(address as *const u8, bytes.as_mut_ptr(), width) };
-    super::ops::bin_decode(p, &bytes[..width], signed, big)
+    super::ops::bin_decode(p, &bytes[..width], encoding)
 ====
     unsafe { std::ptr::copy_nonoverlapping(address as *const u8, bytes.as_mut_ptr(), width.min(4)) };
-    super::ops::bin_decode(p, &bytes[..width], signed, big)
+    super::ops::bin_decode(p, &bytes[..width], encoding)
 >>>>
 
 @@ pointer-width-hardcoded a pointer field is 4 bytes wide whatever the target says

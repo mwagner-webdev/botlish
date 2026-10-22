@@ -80,7 +80,10 @@ proc hir::containers::ElementContract {t} {
         }
         return [hir::types::kindOf $t]
     }
-    return [hir::types::Unshaped $t]
+    # (An element contract forgets what inference minted about the values
+    # an array starts with: a slot of an array of [[1, 2]] takes any
+    # List[int], LIST-CARDINALITY-REFINEMENTS.md.)
+    return [hir::types::ForgetInferred [hir::types::Unshaped $t]]
 }
 
 # 1 if native NAME cannot retain any of its arguments where a later reader
@@ -99,6 +102,7 @@ proc hir::containers::NonRetaining {name} {
 # The element type of the collection type T (a MutableArray's or a
 # MutableVector's), or "" when T is not an applied one.
 proc hir::containers::Elem {t} {
+    set t [hir::types::Unrefined $t]
     if {[hir::types::IsMutArray $t] || [hir::types::IsMutVec $t]} {
         return [lindex $t 1]
     }

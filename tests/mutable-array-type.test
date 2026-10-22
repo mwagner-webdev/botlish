@@ -129,7 +129,7 @@ test mat-syn-2 {nested applied types work in every position} -body {
         [maLast "import std::immutable_set\nimport std::mutable_array\nfn f(xs: MutableArray\[ImmutableSet\[int\]\]) -> int:\n    std::mutable_array::capacity(xs)\nf(std::mutable_array::create(1, std::immutable_set::from_list(\[1\])))"]
 } -result {int int int int}
 
-test mat-syn-3 {canonical rendering is source-legible and stable} -body {
+test mat-syn-3 {canonical rendering is source-legible and stable (a List literal's type states its length, LIST-CARDINALITY-REFINEMENTS.md)} -body {
     list \
         [maLast "import std::mutable_array\nstd::mutable_array::create(1, 0)"] \
         [maLast "import std::mutable_array\nstd::mutable_array::create(1, \[\"a\"\])"] \
@@ -137,7 +137,7 @@ test mat-syn-3 {canonical rendering is source-legible and stable} -body {
         [maLast "import std::mutable_array\nstd::mutable_array::from_list(\[std::mutable_array::create(1, \"a\")\])"] \
         [maLast "fn f(g: Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}):\n    g\nfn h(m: MutableArray\[str\]) -> List\[int\]:\n    \[1\]\nf(h)"] \
         [maLast "fn f(g: Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}) -> Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}:\n    g\nfn h(m: MutableArray\[str\]) -> List\[int\]:\n    \[1\]\nf(h)"]
-} -result {{MutableArray[int]} {MutableArray[List[str]]} {List[MutableArray[int]]} {MutableArray[MutableArray[str]]} {block(e5)/1 -> List[int]} {Fn{args: [MutableArray[str]], return: List[int], errors: []}}}
+} -result {{MutableArray[int]} {MutableArray[List[str]]} {List[MutableArray[int]]{length: 1}} {MutableArray[MutableArray[str]]} {block(e5)/1 -> List[int]} {Fn{args: [MutableArray[str]], return: List[int], errors: []}}}
 
 test mat-syn-4 {the type is a real constructor: arity errors, unknown constructors, hyphenated spellings} -body {
     lmap src {
@@ -582,11 +582,11 @@ test mat-atk-6 {a join of equal contracts is fine} -body {
     maResult "import std::mutable_array\nfn f(c: bool):\n    if c:\n        std::mutable_array::from_list(\[1\])\n    else:\n        std::mutable_array::from_list(\[2\])\nf(true)" f
 } -result {MutableArray[int]}
 
-test mat-atk-7 {a List of arrays of different contracts is a List of their join} -body {
+test mat-atk-7 {a List of arrays of different contracts is a List of their join (of the literal's length, LIST-CARDINALITY-REFINEMENTS.md)} -body {
     list [maLast "import std::mutable_array\n\[std::mutable_array::from_list(\[1\]), std::mutable_array::from_list(\[\"a\"\])\]"] \
         [maLast "import std::mutable_array\n\[std::mutable_array::from_list(\[1\]), 5\]"] \
         [maLast "import std::mutable_array\n\[std::mutable_array::from_list(\[1\]), std::mutable_array::from_list(\[2\])\]"]
-} -result {{List[MutableArray[any]]} list {List[MutableArray[int]]}}
+} -result {{List[MutableArray[any]]{length: 2}} {list{length: 2}} {List[MutableArray[int]]{length: 2}}}
 
 test mat-atk-8 {aggregate erasure is a copy: List[MutableArray[str]] into an untyped, list or any parameter, and std::list::append of anything, are accepted} -body {
     set xs "xs = \[std::mutable_array::from_list(\[\"a\"\])\]\n"
@@ -950,8 +950,8 @@ proc maAotParity {text} {
             lappend expected [lindex $outcome 1]
         }
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        lappend expected [exec env PATH= [file rootname $path]]
-        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
         return [lindex $expected 0]
     } finally {

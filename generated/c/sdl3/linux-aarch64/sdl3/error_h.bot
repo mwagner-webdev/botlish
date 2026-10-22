@@ -5,6 +5,12 @@ import std::ffi::c
 
 extern c library "SDL3"
 
+# C: _Bool SDL_SetError(const char *fmt, ...)
+extern c fn SDL_SetError(
+    fmt: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Bool
+
 # C: _Bool SDL_OutOfMemory(void)
 extern c fn SDL_OutOfMemory() -> std::ffi::c::Bool
 

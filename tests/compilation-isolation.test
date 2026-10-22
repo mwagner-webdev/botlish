@@ -200,7 +200,7 @@ test ci-error-payload {a later program declaring the error without a payload, or
         [ciPair $ciBoom "1\n" $ciAll]
 } -result [concat {*}[lrepeat 2 {interp 1 {ok {[1, 405]}} compile 1 {ok {[1, 405]}} coretext 1 {ok {[1, 405]}} cranelift 1 {ok {[1, 405]}} cranelift-generic 1 {ok {[1, 405]}}}]]
 
-test ci-payload-release-edge {a payload-bearing error crossing an error edge that releases a coroutine, after a program declaring no error: hir::lower re-raised it without its payload, and the handler failed at run time} -body {
+test ci-payload-release-edge {a payload-bearing error crossing an error edge that releases a coroutine, after a program declaring no error: hir::lower re-raised it without its payload, and the handler failed at run time} -constraints nativeCoroutines -body {
     ciPair {struct Message:
     value: int
 
@@ -236,7 +236,7 @@ fn safe(n: int) -> int:
 } "1\n" $ciAll
 } -result {interp 1 {ok {[1, 1005]}} compile 1 {ok {[1, 1005]}} coretext 1 {ok {[1, 1005]}} cranelift 1 {ok {[1, 1005]}} cranelift-generic 1 {ok {[1, 1005]}}}
 
-test ci-affine-release {an earlier HIR whose struct owns a coroutine, after a program declaring nothing: the Tcl compiler emitted no drop for the dying struct (its coroutine never released), hir::lower and native lowering failed on the missing layout} -body {
+test ci-affine-release {an earlier HIR whose struct owns a coroutine, after a program declaring nothing: the Tcl compiler emitted no drop for the dying struct (its coroutine never released), hir::lower and native lowering failed on the missing layout} -constraints nativeCoroutines -body {
     set hA [ciCompile $ciRunning]
     set drops [regexp -all {core::affine::dropImpl} [dict get [core::compiler::compileHir $hA] code]]
     set result [ciPair $ciRunning "1\n" {interp compile cranelift cranelift-generic}]

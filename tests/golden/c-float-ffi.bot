@@ -1,0 +1,183 @@
+# c-float-ffi.bot -- C float and C double in byte storage
+# (C-FLOAT-FFI-MILESTONE-1.md): the source-level specification of
+#
+#   * a layout's C float and C double fields read from their own bytes (4
+#     and 8, little-endian): a float widened exactly, a subnormal as it is,
+#     negative zero as zero, a union's float alternative the low 4 bytes;
+#   * a Float64 written or emitted into a float field rounded to nearest,
+#     ties to even (a subnormal kept, a tiny negative number +0), into a
+#     double field as it is, a union alternative touching its own bytes
+#     alone;
+#   * a NaN (any payload) or an infinity in the bytes NonFiniteFloat with its
+#     payload when parsed or read, a Float64 that overflows a float
+#     NonFiniteFloat of its sign when written or emitted, never clamped.
+#
+# Ported from tests/c-float-ffi.test, which stays authoritative
+# (audit/golden/migration/fragments/c-float-ffi.tsv maps every test; what
+# only Tcl observes -- C calls and native memory (the test's own C fixture),
+# declaration-time rejections (a layout or extern declaration is top level
+# only, so never a static compile block's), the boundary's procedures and
+# their oracle, HIR, NIR and generated code, interchange, executables and GC
+# stress -- stays there).
+#
+# Imports: compiler and test (the framework); abi, std::abi::bytes, binary, byte
+# and std::ffi::c (the programs).
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::compiler
+import std::ffi::c
+import std::test
+
+# The Tcl suite's byte-storage layouts.
+layout MIXED:
+    size 24
+    align 8
+    field tag: std::ffi::c::UChar at 0
+    field a: std::ffi::c::Float at 4
+    field b: std::ffi::c::Double at 8
+    field c: std::ffi::c::Float at 16
+
+layout FLOATS:
+    size 16
+    align 4
+    field xs: array 4 of std::ffi::c::Float at 0
+
+union layout NUMBER:
+    size 8
+    align 8
+    alternative f: std::ffi::c::Float
+    alternative d: std::ffi::c::Double
+    alternative u: std::ffi::c::UInt
+
+layout RAW24:
+    size 24
+    align 1
+    field bs: array 24 of std::binary::U8 at 0
+
+layout RAW16:
+    size 16
+    align 1
+    field bs: array 16 of std::binary::U8 at 0
+
+layout RAW8:
+    size 8
+    align 1
+    field bs: array 8 of std::binary::U8 at 0
+
+fn bytes_of(values: List[int]) -> std::abi::bytes::Bytes:
+    bs = loop v in values:
+        b = std::byte::from_int(v):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                255
+        b
+    std::abi::bytes::from_list(bs)
+
+fn mutable(values: List[int]) -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::from_bytes(bytes_of(values))
+
+fn raw24(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:
+    std::binary::parse(RAW24, d).bs
+
+fn raw16(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:
+    std::binary::parse(RAW16, d).bs
+
+fn raw8(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:
+    std::binary::parse(RAW8, d).bs
+
+fn kind(r: NonFiniteResult) -> int:
+    if r == NonFiniteResult::NotANumber:
+        1
+    elif r == NonFiniteResult::PositiveInfinity:
+        2
+    else:
+        3
+
+# The inputs the compiler cannot decide (a written float decided at compile
+# time is its rounding, an overflow a KnownError): T a binary32 tie (to
+# even: 1.0), U one (to even: 1 + 2^-22), SUB one between subnormals, BIG
+# past the binary32 overflow threshold.
+fn register_c_float_ffi_tests(t: Float64, u: Float64, sub: Float64, big: Float64):
+    fn bytes_parse() errors std::compiler::CompilerError:
+        static compile:
+            fn go() -> list errors LayoutLengthMismatch, NonFiniteFloat:
+                d = bytes_of([7, 0, 0, 0, 0, 0, 192, 63, 154, 153, 153, 153, 153, 153, 185, 63, 0, 0, 0, 128, 0, 0, 0, 0])
+                s = std::binary::parse(MIXED, d)
+                f = std::binary::parse(FLOATS, bytes_of([1, 0, 0, 0, 0, 0, 128, 0, 255, 255, 127, 127, 205, 204, 204, 61]))
+                n = bytes_of([0, 0, 0, 0, 0, 0, 248, 63])
+                [s.tag, s.a, s.b, s.c, std::binary::read(d, MIXED.a), std::binary::read(d, MIXED.c), f.xs, std::binary::read(n, NUMBER.d), std::binary::read(n, NUMBER.f), std::binary::read(n, NUMBER.u)]
+            r = go():
+                on LayoutLengthMismatch:
+                    []
+                on NonFiniteFloat:
+                    []
+            r
+    std::test::value("cfl-bytes-parse", [7, 1.5, 0.1, 0.0, 1.5, 0.0, [1.401298464324817e-45, 1.1754943508222875e-38, 3.4028234663852886e38, 0.10000000149011612], 1.5, 0.0, 0], bytes_parse)
+
+    fn bytes_emit() errors std::compiler::CompilerError:
+        static compile:
+            fn go() -> list errors LayoutLengthMismatch, NonFiniteFloat:
+                m = LayoutStruct[MIXED] {tag: 1, a: 0.1, b: 0.25, c: -1.0e-50}
+                e = raw24(std::binary::emit(m))
+                w = std::abi::bytes::freeze(std::binary::write(std::binary::write(std::binary::write(std::binary::write(mutable([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), FLOATS.xs[0], t), FLOATS.xs[1], u), FLOATS.xs[2], sub), FLOATS.xs[3], 3.4028235e38))
+                n = std::abi::bytes::freeze(std::binary::write(mutable([1, 2, 3, 4, 5, 6, 7, 8]), NUMBER.f, 1.0))
+                [e, raw16(w), raw8(n), std::binary::parse(FLOATS, w).xs]
+            r = go():
+                on LayoutLengthMismatch:
+                    []
+                on NonFiniteFloat:
+                    []
+            r
+    std::test::value("cfl-bytes-emit", [[1, 0, 0, 0, 205, 204, 204, 61, 0, 0, 0, 0, 0, 0, 208, 63, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 128, 63, 2, 0, 128, 63, 2, 0, 0, 0, 255, 255, 127, 127], [0, 0, 128, 63, 5, 6, 7, 8], [1.0, 1.000000238418579, 2.802596928649634e-45, 3.4028234663852886e38]], bytes_emit)
+
+    fn bytes_nonfinite() errors std::compiler::CompilerError:
+        static compile:
+            fn attempt(n: int) -> int errors LayoutLengthMismatch, NonFiniteFloat:
+                d = bytes_of([7, 0, 0, 0, 1, 0, 192, 127, 0, 0, 0, 0, 0, 0, 240, 255, 0, 0, 0, 0, 0, 0, 0, 0])
+                m = mutable([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+                x = if n == 0:
+                    std::binary::parse(MIXED, d).tag
+                elif n == 1:
+                    y = std::binary::read(d, MIXED.a)
+                    0
+                elif n == 2:
+                    y = std::binary::read(d, MIXED.b)
+                    0
+                elif n == 3:
+                    y = std::binary::read(d, MIXED.c)
+                    0
+                elif n == 4:
+                    e = std::binary::emit(LayoutStruct[MIXED] {tag: 0, a: big, b: 0.0, c: 0.0})
+                    0
+                elif n == 5:
+                    e = std::binary::emit(LayoutStruct[MIXED] {tag: 0, a: 0.0, b: 0.0, c: -big})
+                    0
+                elif n == 6:
+                    w = std::binary::write(m, FLOATS.xs[2], big)
+                    0
+                else:
+                    w = std::binary::write(m, FLOATS.xs, [0.0, 0.0, 0.0, big])
+                    0
+                x
+            fn one(n: int) -> int errors LayoutLengthMismatch:
+                attempt(n):
+                    on NonFiniteFloat {result}:
+                        -kind(result)
+            fn go() -> list errors LayoutLengthMismatch:
+                loop n from 0 to 8:
+                    one(n)
+            r = go():
+                on LayoutLengthMismatch:
+                    []
+            r
+    std::test::value("cfl-bytes-nonfinite", [-1, -1, -3, 0, -2, -3, -2, -2], bytes_nonfinite)
+
+fn register_tests():
+    register_c_float_ffi_tests(1.0000000596046448, 1.0000001788139343, 2.1019476964872256e-45, 3.4028235677973367e38)
+
+with context std::test::suite()
+register_tests()
+std::test::report()

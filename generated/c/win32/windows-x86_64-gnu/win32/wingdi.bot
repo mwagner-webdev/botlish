@@ -2122,6 +2122,22 @@ extern c fn GetCharWidth32W(
     lpBuffer: std::ffi::c::Ptr[std::ffi::c::Int]
 ) -> std::ffi::c::Int
 
+# C: WINBOOL GetCharWidthFloatA(HDC hdc, UINT iFirst, UINT iLast, PFLOAT lpBuffer)
+extern c fn GetCharWidthFloatA(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    iFirst: std::ffi::c::UInt,
+    iLast: std::ffi::c::UInt,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Int
+
+# C: WINBOOL GetCharWidthFloatW(HDC hdc, UINT iFirst, UINT iLast, PFLOAT lpBuffer)
+extern c fn GetCharWidthFloatW(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    iFirst: std::ffi::c::UInt,
+    iLast: std::ffi::c::UInt,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Int
+
 # C: WINBOOL GetCharABCWidthsA(HDC hdc, UINT wFirst, UINT wLast, LPABC lpABC)
 extern c fn GetCharABCWidthsA(
     hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
@@ -3269,6 +3285,16 @@ extern c fn GetTextMetricsW(
     lptm: std::ffi::c::Ptr[win32::ctypes::TEXTMETRICW]
 ) -> std::ffi::c::Int
 
+# C: WINBOOL AngleArc(HDC hdc, int x, int y, DWORD r, FLOAT StartAngle, FLOAT SweepAngle)
+extern c fn AngleArc(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    x: std::ffi::c::Int,
+    y: std::ffi::c::Int,
+    r: std::ffi::c::ULong,
+    StartAngle: std::ffi::c::Float,
+    SweepAngle: std::ffi::c::Float
+) -> std::ffi::c::Int
+
 # C: WINBOOL PolyPolyline(HDC hdc, const POINT *apt, const DWORD *asz, DWORD csz)
 extern c fn PolyPolyline(
     hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
@@ -3440,6 +3466,13 @@ extern c fn SetArcDirection(
     dir: std::ffi::c::Int
 ) -> std::ffi::c::Int
 
+# C: WINBOOL SetMiterLimit(HDC hdc, FLOAT limit, PFLOAT old)
+extern c fn SetMiterLimit(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    limit: std::ffi::c::Float,
+    old: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Int
+
 # C: WINBOOL StrokeAndFillPath(HDC hdc)
 extern c fn StrokeAndFillPath(hdc: std::ffi::c::Ptr[win32::ctypes::HDC__]) -> std::ffi::c::Int
 
@@ -3457,6 +3490,12 @@ extern c fn ExtCreatePen(
     cStyle: std::ffi::c::ULong,
     pstyle: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Ptr[win32::ctypes::HPEN__]
+
+# C: WINBOOL GetMiterLimit(HDC hdc, PFLOAT plimit)
+extern c fn GetMiterLimit(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    plimit: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Int
 
 # C: int GetArcDirection(HDC hdc)
 extern c fn GetArcDirection(hdc: std::ffi::c::Ptr[win32::ctypes::HDC__]) -> std::ffi::c::Int
@@ -3928,6 +3967,30 @@ extern c fn wglUseFontBitmapsW(
 # C: WINBOOL SwapBuffers(HDC)
 extern c fn SwapBuffers(arg1: std::ffi::c::Ptr[win32::ctypes::HDC__]) -> std::ffi::c::Int
 
+# C: WINBOOL wglUseFontOutlinesA(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPGLYPHMETRICSFLOAT)
+extern c fn wglUseFontOutlinesA(
+    arg1: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    arg2: std::ffi::c::ULong,
+    arg3: std::ffi::c::ULong,
+    arg4: std::ffi::c::ULong,
+    arg5: std::ffi::c::Float,
+    arg6: std::ffi::c::Float,
+    arg7: std::ffi::c::Int,
+    arg8: std::ffi::c::Ptr[win32::ctypes::GLYPHMETRICSFLOAT]
+) -> std::ffi::c::Int
+
+# C: WINBOOL wglUseFontOutlinesW(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPGLYPHMETRICSFLOAT)
+extern c fn wglUseFontOutlinesW(
+    arg1: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    arg2: std::ffi::c::ULong,
+    arg3: std::ffi::c::ULong,
+    arg4: std::ffi::c::ULong,
+    arg5: std::ffi::c::Float,
+    arg6: std::ffi::c::Float,
+    arg7: std::ffi::c::Int,
+    arg8: std::ffi::c::Ptr[win32::ctypes::GLYPHMETRICSFLOAT]
+) -> std::ffi::c::Int
+
 # C: WINBOOL wglDescribeLayerPlane(HDC, int, int, UINT, LPLAYERPLANEDESCRIPTOR)
 extern c fn wglDescribeLayerPlane(
     arg1: std::ffi::c::Ptr[win32::ctypes::HDC__],
@@ -4085,6 +4148,14 @@ extern c fn GetCharWidth32 named "GetCharWidth32W"(
     iFirst: std::ffi::c::UInt,
     iLast: std::ffi::c::UInt,
     lpBuffer: std::ffi::c::Ptr[std::ffi::c::Int]
+) -> std::ffi::c::Int
+
+# C: GetCharWidthFloat: an alias of GetCharWidthFloatW, WINBOOL GetCharWidthFloatW(HDC hdc, UINT iFirst, UINT iLast, PFLOAT lpBuffer)
+extern c fn GetCharWidthFloat named "GetCharWidthFloatW"(
+    hdc: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    iFirst: std::ffi::c::UInt,
+    iLast: std::ffi::c::UInt,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::Float]
 ) -> std::ffi::c::Int
 
 # C: GetCharABCWidths: an alias of GetCharABCWidthsW, WINBOOL GetCharABCWidthsW(HDC hdc, UINT wFirst, UINT wLast, LPABC lpABC)
@@ -4335,4 +4406,16 @@ extern c fn wglUseFontBitmaps named "wglUseFontBitmapsW"(
     arg2: std::ffi::c::ULong,
     arg3: std::ffi::c::ULong,
     arg4: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: wglUseFontOutlines: an alias of wglUseFontOutlinesW, WINBOOL wglUseFontOutlinesW(HDC, DWORD, DWORD, DWORD, FLOAT, FLOAT, int, LPGLYPHMETRICSFLOAT)
+extern c fn wglUseFontOutlines named "wglUseFontOutlinesW"(
+    arg1: std::ffi::c::Ptr[win32::ctypes::HDC__],
+    arg2: std::ffi::c::ULong,
+    arg3: std::ffi::c::ULong,
+    arg4: std::ffi::c::ULong,
+    arg5: std::ffi::c::Float,
+    arg6: std::ffi::c::Float,
+    arg7: std::ffi::c::Int,
+    arg8: std::ffi::c::Ptr[win32::ctypes::GLYPHMETRICSFLOAT]
 ) -> std::ffi::c::Int

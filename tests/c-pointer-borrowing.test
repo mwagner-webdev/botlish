@@ -14,7 +14,9 @@
 #
 # Programs that run do so on all four executable paths (the interpreter,
 # the Tcl compiler, native code with and without specialization) and must
-# agree.
+# agree. The same contract through real C -- the host compiler's fixture and
+# the system C library, on every host that links C calls -- is
+# tests/c-byte-borrowing.test's.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -24,10 +26,12 @@ core::cabi::installBorrowFixture
 set cbBackends {interp compile cranelift-generic cranelift}
 set cbNative {cranelift-generic cranelift}
 
-# Linux on x86-64 or AArch64: the native runtime (coroutines, stack maps)
-# without a syscall.
-testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
-    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+# The native runtime's evidence -- coroutines, a collection at every
+# allocation (BOTLISH_NATIVE_GC_STRESS), allocation counts -- needs the
+# native backend's whole runtime (nativeCoroutines: Linux x86-64 and
+# AArch64, macOS AArch64), and a standalone executable a host that links
+# them (executableAot): capabilities, never an operating system
+# (MACOS-AARCH64-MILESTONE-7.md). Nothing here makes a syscall.
 
 set cbPrelude {import std::abi
 import std::abi::bytes
@@ -62,6 +66,18 @@ fn filled(n: int, seed: int):
         std::byte::from_int(mod(seed + 37 * i, 256))
 
 }
+# A storage length is a Usize, 64 bits; the fixture's count a std::ffi::c::ULong,
+# the target's unsigned long. On an LP64 target the length's range is the
+# count's; where unsigned long is 32 bits (Windows, LLP64) len and mlen prove
+# it with a mod -- a no-op for any storage a test makes -- on the same line,
+# so every location after the prelude stays where it is (cb-length-separate
+# states the rule).
+set cbULongBits [dict get [core::cabi::target [core::cabi::hostTarget]] long]
+if {$cbULongBits < 64} {
+    set cbPrelude [string map [list \
+        "    std::abi::bytes::length(data).value\n" "    mod(std::abi::bytes::length(data).value, [expr {2 ** $cbULongBits}])\n" \
+        "    std::abi::bytes::mutable_length(data).value\n" "    mod(std::abi::bytes::mutable_length(data).value, [expr {2 ** $cbULongBits}])\n"] $cbPrelude]
+}
 
 # The outcome of the program BODY (after the prelude) on every backend,
 # which must agree; a compile error is {error ERRORCODE MESSAGE}.
@@ -92,7 +108,7 @@ proc cbError {body args} {
     }
     set code [dict get $options -errorcode]
     set kind [expr {[lrange $code 0 1] eq {SURFACE SYNTAX} ? "SYNTAX" : [lindex $code 2]}]
-    regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+    regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
     return [list $kind $message]
 }
 
@@ -483,15 +499,15 @@ test cb-length-separate {an exposure adds no length: the count is a separate ord
 # ---------------------------------------------------------------------------
 # Synchronous: the exposure lives for the call alone
 
-test cb-exposure-after-arguments {every argument is evaluated before any exposure is made -- here an argument that yields (deep, inside a coroutine) -- so no argument's code, no call, allocation or suspension, comes between an exposure and the call; the borrow is categorically synchronous, and works inside a coroutine} -constraints nativeLinux -body {
+test cb-exposure-after-arguments {every argument is evaluated before any exposure is made -- here an argument that yields (deep, inside a coroutine) -- so no argument's code, no call, allocation or suspension, comes between an exposure and the call; the borrow is categorically synchronous, and works inside a coroutine} -constraints nativeCoroutines -body {
     cbAgree "struct Count:\n    n: std::ffi::c::ULong\n\nfn ask(resume Count) -> std::ffi::c::ULong:\n    c = yield \[0\]\n    c.n\n\nfn worker(data: std::abi::bytes::Bytes, resume Count) -> List\[int\]:\n    ffi_fixture::read\[std::ffi::c::UChar\](data, ask())\n\nfn f() -> List\[int\]:\n    coroutine {step} = worker(mk(5, 21))\n    step(Count {n: 3})\n\nf()"
 } -result [list value [cbList [lrange [cbPattern 5 21] 0 2]]]
 
-test cb-exposure-after-arguments-nir {NIR: the exposures follow the code of every argument (the count's call, len(...), here), the private copy of a write exposure precedes every address, and the operation follows every address} -body {
+test cb-exposure-after-arguments-nir {NIR: the exposures follow the code of every argument (the count's call, len(...), here), the private copy of a write exposure precedes every address, and the operation follows every address; the write-back value is never built as a struct (read straight off the call), only the MutableBytes the function returns, after the keepalives (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)} -body {
     set read [cbNirFunction "fn f(d: std::abi::bytes::Bytes) -> List\[int\]:\n    ffi_fixture::read\[std::ffi::c::UChar\](d, len(d))\n\nf(mk(3, 1))" f]
     set copy [cbNirFunction "fn f(src: std::abi::bytes::Bytes, dst: std::abi::bytes::MutableBytes) -> std::abi::bytes::MutableBytes:\n    ffi_fixture::copy(dst, src, len(src)).dst\n\nf(mk(3, 1), std::abi::bytes::zeroed(std::abi::usize(3)))" f]
     list [lsearch -all -inline -not -exact [cbOps $read] structget] [lsearch -all -inline -not -exact [cbOps $copy] structget]
-} -cleanup {unset -nocomplain read copy} -result {{call bytesaddr ffifixtureread keepalive} {call mbytesclone mbytesaddr bytesaddr ffifixturecopy keepalive keepalive structnew structnew}}
+} -cleanup {unset -nocomplain read copy} -result {{call bytesaddr ffifixtureread keepalive} {call mbytesclone mbytesaddr bytesaddr ffifixturecopy keepalive keepalive structnew}}
 
 # The Tcl model of an exposure: a handle of one call, gone when it returns.
 core::native::register cbtest::stash -arity 1 -impl [list apply {{p} {
@@ -538,7 +554,7 @@ test cb-failure-publishes-nothing {an operation that writes part of its output a
     cbAgree "fn attempt(m: std::abi::bytes::MutableBytes, count: std::ffi::c::ULong) -> List\[int\]:\n    r = ffi_fixture::fill_checked(m, count, 2):\n        on UpperOverrun:\n            return \[-1\]\n    ffi_fixture::read\[std::ffi::c::UChar\](r.out, mlen(r.out))\n\nm = mmk(4, 1)\n\[attempt(m, 4), attempt(m, 2), ffi_fixture::read\[std::ffi::c::UChar\](m, 4)\]"
 } -result [list value "\[\[-1\], [cbList [concat {91 128} [lrange [cbPattern 4 1] 2 end]]], [cbList [cbPattern 4 1]]\]"]
 
-test cb-failure-gc-stress {the failing and the succeeding exposure under a collection at every allocation: the same results} -constraints nativeLinux -body {
+test cb-failure-gc-stress {the failing and the succeeding exposure under a collection at every allocation: the same results} -constraints nativeCoroutines -body {
     cbWithEnv BOTLISH_NATIVE_GC_STRESS 1 {
         cbAgreeHir [cbHir "fn attempt(m: std::abi::bytes::MutableBytes, count: std::ffi::c::ULong) -> List\[int\]:\n    r = ffi_fixture::fill_checked(m, count, 2):\n        on UpperOverrun:\n            return \[-1\]\n    ffi_fixture::read\[std::ffi::c::UChar\](r.out, mlen(r.out))\n\nm = mmk(4, 1)\nloop i from 0 to 30:\n    \[attempt(m, 4), attempt(m, 2)\]"] $::cbNative
     }
@@ -588,7 +604,7 @@ test cb-nir-read-mutable {NIR of a read exposure of a MutableBytes: its own stor
     lsearch -all -inline -not -exact [cbOps [cbNirFunction "fn f(m: std::abi::bytes::MutableBytes) -> List\[int\]:\n    ffi_fixture::read\[std::ffi::c::UChar\](m, 4)\n\nf(std::abi::bytes::zeroed(std::abi::usize(4)))" f]] structget
 } -result {mbytesaddr ffifixtureread keepalive}
 
-test cb-nir-write {NIR of a write exposure: a private copy of the owner's storage (mbytesclone, the detach), ITS address, the operation, a keepalive of the copy, and the write-back struct over the copy -- the operand of the copy is the owner's storage, and the owner is never exposed itself} -body {
+test cb-nir-write {NIR of a write exposure: a private copy of the owner's storage (mbytesclone, the detach), ITS address, the operation, a keepalive of the copy, and -- the write-back value read straight off the call, never built as a struct -- the MutableBytes over the copy the function returns, built after the keepalive; the operand of the copy is the owner's storage, and the owner is never exposed itself} -body {
     set fn [cbNirFunction "fn f(m: std::abi::bytes::MutableBytes) -> std::abi::bytes::MutableBytes:\n    ffi_fixture::fill\[std::ffi::c::UChar\](m, 4, 1).out\n\nf(std::abi::bytes::zeroed(std::abi::usize(4)))" f]
     regexp {(%[0-9]+) = op mbytesclone (%[0-9]+)} $fn -> copy owner
     regexp {(%[0-9]+) = op mbytesaddr (%[0-9]+)} $fn -> address exposed
@@ -596,10 +612,10 @@ test cb-nir-write {NIR of a write exposure: a private copy of the owner's storag
     regexp {op keepalive (%[0-9]+)} $fn -> kept
     list [lsearch -all -inline -not -exact [cbOps $fn] structget] [expr {$exposed eq $copy}] [expr {$operand eq $address}] \
         [expr {$kept eq $copy}] [expr {$owner ne $copy}]
-} -cleanup {unset -nocomplain fn copy owner address exposed operand kept} -result {{mbytesclone mbytesaddr ffifixturefill keepalive structnew structnew} 1 1 1 1}
+} -cleanup {unset -nocomplain fn copy owner address exposed operand kept} -result {{mbytesclone mbytesaddr ffifixturefill keepalive structnew} 1 1 1 1}
 
-proc cbAllocations {body} {
-    set report [native::allocationReport [cbHir $body] summary]
+proc cbAllocations {body args} {
+    set report [native::allocationReport [cbHir $body] summary 1 {*}$args]
     lmap kind {Bytes MutableBytes Struct List} {
         expr {[dict exists $report byKind $kind] ? [dict get $report byKind $kind allocations] : 0}
     }
@@ -611,7 +627,7 @@ proc cbAllocationCost {without with} {
     lmap a [cbAllocations $without] b [cbAllocations $with] {expr {$b - $a}}
 }
 
-test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the result is used, its write-back struct and the copy's MutableBytes wrapper; measured, none hidden} -constraints nativeLinux -body {
+test cb-allocations {allocation evidence, natively -- what the exposure itself costs beside the same program without the call {Bytes MutableBytes Struct List}: a read exposure of a Bytes or of a MutableBytes held in a binding allocates nothing (the List is the operation's own result), while an owner written inline as the argument is built as its one-field wrapper first (1 Struct: the address bridge's StorageOf has the same frontier); a write exposure costs exactly the private copy of the storage (MutableBytes' eager detach, MUTABLE-BYTES.md) and, when the updated buffer is used whole, the copy's MutableBytes wrapper -- the write-back struct itself is never built (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); measured, none hidden} -constraints nativeCoroutines -body {
     set fn "fn f(n: std::ffi::c::ULong) -> int:\n    m = std::abi::bytes::zeroed(std::abi::usize(n))\n"
     list [cbAllocationCost "${fn}    std::abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    std::list::length(ffi_fixture::read\[std::ffi::c::UChar\](m, n))\n\nf(64)"] \
@@ -623,7 +639,25 @@ test cb-allocations {allocation evidence, natively -- what the exposure itself c
             "${fn}    r = ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(r.out).value\n\nf(64)"] \
         [cbAllocationCost "${fn}    std::abi::bytes::mutable_length(m).value\n\nf(64)" \
             "${fn}    ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(m).value\n\nf(64)"]
-} -cleanup {unset -nocomplain fn} -result {{0 0 0 1} {0 0 0 1} {0 0 1 1} {0 1 2 0} {0 1 0 0}}
+} -cleanup {unset -nocomplain fn} -result {{0 0 0 1} {0 0 0 1} {0 0 1 1} {0 1 1 0} {0 1 0 0}}
+
+test cb-write-back-allocations {the write-back value is fields (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): beside the same program without the call, a write exposure whose value is bound but not read, or discarded, costs the private copy and nothing else; its buffer read whole costs the copy and one MutableBytes, built at that use -- once however often the scope reads it, once when a loop reads it (built at the loop's entry: a use inside a loop deeper than the binding never builds it per iteration); the write-back struct itself is never built; and with struct scalar replacement off (-struct-opt 0) the same, the write-back value's transport being no optimization (C-FFI-ERROR-CAPTURE-MILESTONE-2.md) -- only each mutable_length's std::abi::Usize, an ordinary struct, is built then {MutableBytes Struct}} -constraints nativeCoroutines -body {
+    set fn "fn f(n: std::ffi::c::ULong) -> int:\n    m = std::abi::bytes::zeroed(std::abi::usize(n))\n"
+    set base "${fn}    std::abi::bytes::mutable_length(m).value\n\nf(64)"
+    set shapes [list \
+        "${fn}    r = ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(m).value\n\nf(64)" \
+        "${fn}    ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(m).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(r.out).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    std::abi::bytes::mutable_length(r.out).value + std::abi::bytes::mutable_length(r.out).value\n\nf(64)" \
+        "${fn}    r = ffi_fixture::fill\[std::ffi::c::UChar\](m, n, 1)\n    xs = loop i from 0 to 10:\n        std::abi::bytes::mutable_length(r.out).value\n    std::list::length(xs)\n\nf(64)"]
+    set result {}
+    foreach options {{} {-struct-opt 0}} {
+        lappend result [lmap shape $shapes {
+            lrange [lmap a [cbAllocations $base {*}$options] b [cbAllocations $shape {*}$options] {expr {$b - $a}}] 1 2
+        }]
+    }
+    set result
+} -cleanup {unset -nocomplain fn base shapes result} -result {{{1 0} {1 0} {1 1} {1 1} {1 1}} {{1 0} {1 0} {1 1} {1 2} {1 10}}}
 
 # ---------------------------------------------------------------------------
 # The Linux syscall machinery: shared, and unchanged
@@ -717,10 +751,10 @@ test cb-strict0-replay {an unchecked (-strict 0) program keeps a refused exposur
     }
 } -cleanup {unset -nocomplain body outcome} -result {{error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1} {error {CORE SEMANTIC TYPE} 1}}
 
-test cb-executable {a standalone executable of a program with read and write exposures prints what every in-process backend computes} -constraints nativeLinux -body {
+test cb-executable {a standalone executable of a program with read and write exposures prints what every in-process backend computes} -constraints executableAot -body {
     set dir [makeDirectory cb-executables]
     set exe [file join $dir borrow]
-    native::executable [cbHir "m = std::abi::bytes::zeroed(std::abi::usize(4))\nr = ffi_fixture::fill\[std::ffi::c::UChar\](m, 4, 33)\n\[ffi_fixture::read\[std::ffi::c::UChar\](mk(3, 9), 3), ffi_fixture::read\[std::ffi::c::Void\](r.out, 4)\]"] $exe
+    set exe [native::executable [cbHir "m = std::abi::bytes::zeroed(std::abi::usize(4))\nr = ffi_fixture::fill\[std::ffi::c::UChar\](m, 4, 33)\n\[ffi_fixture::read\[std::ffi::c::UChar\](mk(3, 9), 3), ffi_fixture::read\[std::ffi::c::Void\](r.out, 4)\]"] $exe]
     set out [exec $exe]
     file delete -force $dir
     set out

@@ -218,7 +218,8 @@ it never pretends a Float64 already is a decimal.
 ## 7. The scalar-refinement infrastructure
 
 `hir/refinements.tcl` is generic over a schema table, `families`; this
-milestone declares one family:
+milestone declares one family (LIST-CARDINALITY-REFINEMENTS.md adds the
+second, `List[T]{length: N}`, with the order `exactly`):
 
     DecimalRounded:
         base         DecimalRounded (core/type.tcl's primitive)
@@ -805,9 +806,10 @@ also checks an unrepresentable quantization.
   not: `ExactDecimal{minScale: 2, maxMagnitude: 40000}`'s sums are exact,
   and its decay to DecimalRounded is a proof, not a quantization.
 * **Further refinement families** are schema rows (section 7): `List[T]{
-  length: 4}` (order `exactly`), magnitude bounds (`atMost`). The parser's
-  `NAME{...}` form, validation, canonical form, implication, joins, text and
-  interchange are already generic.
+  length: 4}` (order `exactly`; landed, LIST-CARDINALITY-REFINEMENTS.md,
+  which also added applied bases and a family's `interface`), magnitude
+  bounds (`atMost`). The parser's `NAME{...}` form, validation, canonical
+  form, implication, joins, text and interchange are already generic.
 * **Choosing a representation.** Because only the guarantee is semantic,
   the compiler may later ask, per expression, *what is the cheapest
   implementation that proves the requested contract*: Float32 where the

@@ -355,6 +355,17 @@ extern c fn SDL_GetNumGamepadTouchpadFingers(
     touchpad: std::ffi::c::Int
 ) -> std::ffi::c::Int
 
+# C: _Bool SDL_GetGamepadTouchpadFinger(SDL_Gamepad *gamepad, int touchpad, int finger, _Bool *down, float *x, float *y, float *pressure)
+extern c fn SDL_GetGamepadTouchpadFinger(
+    gamepad: std::ffi::c::Ptr[sdl3::ctypes::SDL_Gamepad],
+    touchpad: std::ffi::c::Int,
+    finger: std::ffi::c::Int,
+    down: std::ffi::c::Ptr[std::ffi::c::Bool],
+    x: std::ffi::c::Ptr[std::ffi::c::Float],
+    y: std::ffi::c::Ptr[std::ffi::c::Float],
+    pressure: std::ffi::c::Ptr[std::ffi::c::Float]
+) -> std::ffi::c::Bool
+
 # C: _Bool SDL_GamepadHasSensor(SDL_Gamepad *gamepad, SDL_SensorType type)
 extern c fn SDL_GamepadHasSensor(
     gamepad: std::ffi::c::Ptr[sdl3::ctypes::SDL_Gamepad],
@@ -372,6 +383,20 @@ extern c fn SDL_SetGamepadSensorEnabled(
 extern c fn SDL_GamepadSensorEnabled(
     gamepad: std::ffi::c::Ptr[sdl3::ctypes::SDL_Gamepad],
     type_: std::ffi::c::Int
+) -> std::ffi::c::Bool
+
+# C: float SDL_GetGamepadSensorDataRate(SDL_Gamepad *gamepad, SDL_SensorType type)
+extern c fn SDL_GetGamepadSensorDataRate(
+    gamepad: std::ffi::c::Ptr[sdl3::ctypes::SDL_Gamepad],
+    type_: std::ffi::c::Int
+) -> std::ffi::c::Float
+
+# C: _Bool SDL_GetGamepadSensorData(SDL_Gamepad *gamepad, SDL_SensorType type, float *data, int num_values)
+extern c fn SDL_GetGamepadSensorData(
+    gamepad: std::ffi::c::Ptr[sdl3::ctypes::SDL_Gamepad],
+    type_: std::ffi::c::Int,
+    data: std::ffi::c::Ptr[std::ffi::c::Float],
+    num_values: std::ffi::c::Int
 ) -> std::ffi::c::Bool
 
 # C: _Bool SDL_RumbleGamepad(SDL_Gamepad *gamepad, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms)

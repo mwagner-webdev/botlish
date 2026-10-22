@@ -6,7 +6,7 @@
 import std::ffi::c
 import tclstubs::ctypes
 
-extern c library "botlish_shim_tclstubs_2627031d"
+extern c library "botlish_shim_tclstubs_629eba3e"
 extern c library "tclstub9.0"
 
 # C: void Tcl_MainEx(Tcl_Size argc, char **argv, Tcl_AppInitProc *appInitProc, Tcl_Interp *interp), shadowed by a function-like macro of its name

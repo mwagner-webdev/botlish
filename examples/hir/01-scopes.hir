@@ -19,7 +19,7 @@ e3 bind b3 inner : int
                     e10 ref b2 x : int
 e11 bind b4 + : block(e12)/2 -> list
     e12 block s5 (b5 a, b6 b) captures () : block(e12)/2 -> list
-        e13 call native(list) : list
+        e13 call native(list) : list{length: 2}
             e14 ref b7 list : native list
             e15 ref b5 a : any
             e16 ref b6 b : any

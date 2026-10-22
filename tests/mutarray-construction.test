@@ -163,7 +163,7 @@ test mutarray-type-2 {an immutable alias keeps the type} -body {
 
 test mutarray-type-3 {the source List stays an ordinary List[int]} -body {
     mcLast "import std::mutable_array\nxs = \[1, 2, 3\]\nm = std::mutable_array::from_list(xs)\nxs"
-} -result {List[int]}
+} -result {List[int]{length: 3}}
 
 test mutarray-type-4 {the low-level constructor is mutarray as before} -body {
     mcLast "import std::mutable_array\nstd::mutable_array::allocate(3)"
@@ -238,11 +238,11 @@ test mutarray-join-3 {a join with an unknown value is not mutarray} -body {
 
 test mutarray-list-1 {a literal of constructor results is List[mutarray]} -body {
     mcLast "import std::mutable_array\nrows = \[std::mutable_array::from_list(\[1\]), std::mutable_array::from_list(\[2\]), std::mutable_array::from_list(\[3\])\]\nrows"
-} -result {List[MutableArray[int]]}
+} -result {List[MutableArray[int]]{length: 3}}
 
 test mutarray-list-1b {a literal of raw constructor results is List[mutarray]} -body {
     mcLast "import std::mutable_array\nrows = \[std::mutable_array::allocate(1), std::mutable_array::allocate(2)\]\nrows"
-} -result {List[mutarray]}
+} -result {List[mutarray]{length: 2}}
 
 test mutarray-list-2 {std::list::at with a dynamic index is the element contract} -body {
     mcResult "import std::list\nimport std::mutable_array\nrows = \[std::mutable_array::from_list(\[1\]), std::mutable_array::from_list(\[2\])\]\nfn row(i) errors IndexNotFound:\n    std::list::at(rows, i)\nrow(1)" row
@@ -254,7 +254,7 @@ test mutarray-list-3 {std::list::at through a function-returned List[mutarray] i
 
 test mutarray-list-4 {std::list::append preserves List[MutableArray[int]]} -body {
     mcLast "import std::list\nimport std::mutable_array\nrows = std::list::append(\[std::mutable_array::from_list(\[1\])\], std::mutable_array::from_list(\[2\]))\nrows"
-} -result {List[MutableArray[int]]}
+} -result {List[MutableArray[int]]{length: 2}}
 
 test mutarray-list-5 {a consumer reached through std::list::at is statically proven, not checked at run time} -body {
     set src "import std::list\nimport std::mutable_array\nfn rows():\n    \[std::mutable_array::from_list(\[1\]), std::mutable_array::from_list(\[2, 3\])\]\nfn cap(i) errors IndexNotFound:\n    std::mutable_array::capacity(std::list::at(rows(), i))\nv = cap(1):\n    on IndexNotFound:\n        -1\nv"
@@ -265,7 +265,7 @@ test mutarray-list-5 {a consumer reached through std::list::at is statically pro
 
 test mutarray-list-6 {the element type is homogeneous only: adding a non-mutarray element widens} -body {
     mcLast "import std::mutable_array\nrows = \[std::mutable_array::allocate(1), 5\]\nrows"
-} -result list
+} -result {list{length: 2}}
 
 test mutarray-list-7 {an empty-List accumulator's element type is recovered by the recursive accumulator's semantic instance (no accumulator generics, no annotation)} -body {
     mcResult "import std::list\nimport std::mutable_array\nfn collect(acc, n):\n    if n == 0:\n        return acc\n    collect(std::list::append(acc, std::mutable_array::allocate(n)), n - 1)\nfn go():\n    collect(\[\], 3)\ngo()" go
@@ -336,7 +336,7 @@ test mutarray-pred-13 {the else branch gains no positive kind (no complement typ
 test mutarray-pred-14 {mutarray? as a value has the same structural callable type as its sibling predicates} -body {
     list [mcLast "\[integer?, list?, mutarray?\]"] \
         [mcLast "fn apply(p: Fn{args: \[any\], return: bool, errors: \[\]}, v) -> bool:\n    p(v)\napply(mutarray?, 1)"]
-} -result {{List[Fn{args: [any], return: bool, errors: []}]} bool}
+} -result {{List[Fn{args: [any], return: bool, errors: []}]{length: 3}} bool}
 
 test mutarray-pred-15 {a used specialization view keeps the bool result} -body {
     set hir [mcCompile "fn p(x):\n    mutarray?(x)\np(1)"]
@@ -362,13 +362,13 @@ test mutarray-neg-3 {[storage, length]: the record consumer needs an independent
 
 test mutarray-neg-4 {a heterogeneous pair literal is a plain list, not a product of mutarray and int} -body {
     mcLast "import std::mutable_array\n\[std::mutable_array::allocate(1), 0\]"
-} -result list
+} -result {list{length: 2}}
 
 test mutarray-neg-5 {the only mutarray fact about a local pair is the pre-existing exact-value fact, not a type} -body {
     list [mcLast "import std::mutable_array\np = \[std::mutable_array::allocate(1), 0\]\np"] \
         [mcLast "import std::list\nimport std::mutable_array\np = \[std::mutable_array::allocate(1), 0\]\nstd::list::at(p, 0)"] \
         [mcResult "import std::list\nimport std::mutable_array\nfn mk():\n    \[std::mutable_array::allocate(1), 0\]\nfn snd() errors IndexNotFound:\n    std::list::at(mk(), 1)\nv = snd():\n    on IndexNotFound:\n        0\nv" snd]
-} -result {list mutarray any}
+} -result {{list{length: 2}} mutarray any}
 
 test mutarray-neg-6 {no exact fact describes a MutableArray's contents} -body {
     set hir [mcCompile "import std::mutable_array\nm = std::mutable_array::from_list(\[1, 2, 3\])\nm"]
@@ -529,8 +529,8 @@ proc mcAotParity {text} {
             lappend expected [lindex $outcome 1]
         }
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        lappend expected [exec env PATH= [file rootname $path]]
-        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path]]
+        lappend expected [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
         return [lindex $expected 0]
     } finally {

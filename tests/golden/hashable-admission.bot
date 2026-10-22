@@ -1,0 +1,84 @@
+# hashable-admission.bot -- the public hash's admission and the internal
+# namespace, as source can observe them (HASHABLE-AND-KEYED-HASH.md; the Tcl
+# originals are tests/hashable.test's; hashable.bot is the companion with the
+# trait itself):
+#
+#   * `hash` of a value statically known not to be Hashable -- a function, a
+#     struct with a function field, a MutableVector -- is TraitNotSatisfied
+#     at compile time; of an affine C pointer, AffineEqualityUnsupported (the
+#     ownership discipline's);
+#   * the total lowerings of hash and == compute what the fallible ones do;
+#   * the internal namespace table_hash is unreachable from this program,
+#     even where a static block asks (InternalNamespace).
+#
+# This suite never names the trait, so it is no trait program: its rejected
+# blocks are decided together (a trait program's are decided one plan at a
+# time).
+import std::compiler
+import std::ffi::c
+import std::mutable_vector
+import std::test
+
+struct P:
+    x: int
+    y: int
+
+enum Color:
+    Red,
+    Green,
+    Blue,
+
+struct Q:
+    a: P
+    b: str
+    c: Color
+
+struct Holder:
+    n: int
+    f: Fn{args: [int], return: int}
+
+fn twice(n: int) -> int:
+    n * 2
+
+fn equal_q(a: Q, b: Q) -> bool:
+    a == b
+
+fn hash_q(q: Q) -> int:
+    hash(q)
+
+fn register_admission_tests():
+    fn b_hash_callable() errors std::compiler::CompilerError:
+        static compile:
+            hash(twice)
+    std::test::rejects_containing("hb-hash-static-rejection/function", std::compiler::DiagnosticCode::TraitNotSatisfied, "the argument of hash does not satisfy trait", b_hash_callable)
+
+    fn b_hash_holder() errors std::compiler::CompilerError:
+        static compile:
+            hash(Holder {n: 1, f: twice})
+    std::test::rejects("hb-hash-static-rejection/struct", std::compiler::DiagnosticCode::TraitNotSatisfied, b_hash_holder)
+
+    fn b_hash_vector() errors std::compiler::CompilerError:
+        static compile:
+            hash(std::mutable_vector::from_list([1]))
+    std::test::rejects("hb-hash-static-rejection/vector", std::compiler::DiagnosticCode::TraitNotSatisfied, b_hash_vector)
+
+    fn b_pointer_hash() errors std::compiler::CompilerError:
+        static compile:
+            p = std::ffi::c::null[std::ffi::c::Int]()
+            hash(p)
+    std::test::rejects("hb-authority-not-hashable/pointer-hash", std::compiler::DiagnosticCode::AffineEqualityUnsupported, b_pointer_hash)
+
+    fn b_total() errors std::compiler::CompilerError:
+        static compile:
+            q = Q {a: P {x: 1, y: 2}, b: "s", c: Color::Red}
+            [equal_q(q, q), equal_q(q, Q {a: P {x: 1, y: 3}, b: "s", c: Color::Red}), hash_q(q) == hash(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Red})]
+    std::test::value("hb-total-results-agree", [true, false, true], b_total)
+
+    fn b_internal() errors std::compiler::CompilerError:
+        static compile:
+            std::table_hash::of(1)
+    std::test::rejects("hb-internal-static-compile", std::compiler::DiagnosticCode::InternalNamespace, b_internal)
+
+with context std::test::suite()
+register_admission_tests()
+std::test::report()

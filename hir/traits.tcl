@@ -66,6 +66,77 @@ namespace eval hir::traits {
     # BindingId -> {UNIT NAME}: every unit-level binding's unit and source
     # name (before hygiene renames it), from the same index.
     variable unitNames [dict create]
+    # The intrinsic traits (HASHABLE-AND-KEYED-HASH.md, "Witness authority"):
+    # traits the language implementation declares. To its consumers each is
+    # an ordinary trait -- a parameter or result type, a view, its operations
+    # as method calls, monomorphized like any other -- named by its bare name
+    # in every module, like a built-in type. Only its witnesses differ: no
+    # structural conformance and no owner's functions take part; the
+    # implementation alone decides which types satisfy it, by WITNESS (a
+    # command prefix taking a type and returning {CLASS WHY} with CLASS total
+    # for a witness, as hir::types::HashClass does), and implements every
+    # requirement by the root native IMPLS names, for every witness.
+    # GUARANTEES are the operations every value seen through the trait is
+    # known to have total (hir::types::Totality). A source program cannot
+    # declare a witness of one, or a type or trait of its name.
+    #
+    #   Hashable  total equality and total hashing, so equal values hash
+    #             equally: the key contract of the standard library's hash
+    #             structures. Its one operation is the public hash.
+    variable intrinsics [dict create \
+        Hashable [dict create \
+            requirements {{name hash nameSpan {} span {} params {{name value type {trait Hashable} self 1}} result {type int self 0} errors {}}} \
+            impls {hash hash} \
+            witness hir::types::HashClass \
+            guarantees {equality hash}]]
+}
+
+# The names of the intrinsic traits.
+proc hir::traits::intrinsicNames {} {
+    variable intrinsics
+    return [dict keys $intrinsics]
+}
+
+# 1 if NAME is an intrinsic trait's name: reserved in every namespace, like a
+# built-in type's.
+proc hir::traits::isIntrinsicName {name} {
+    variable intrinsics
+    return [dict exists $intrinsics $name]
+}
+
+# 1 if trait ID is an intrinsic trait of the current compilation.
+proc hir::traits::isIntrinsic {id} {
+    variable registry
+    return [expr {[dict exists $registry $id intrinsic] && [dict get $registry $id intrinsic]}]
+}
+
+# The operations a value seen through trait ID is known to have total: an
+# intrinsic trait's GUARANTEES, nothing for any other.
+proc hir::traits::intrinsicGuarantees {id} {
+    variable intrinsics
+    if {![dict exists $intrinsics $id]} {
+        return {}
+    }
+    return [dict get $intrinsics $id guarantees]
+}
+
+# The declarations (declare's) of the intrinsic traits the syntax NODES and
+# the build OPTIONS (hir::buildSyntax's: the module sections and every
+# declaration -- a struct field's type, a type's carrier) may use: those whose
+# name they spell anywhere (the name is reserved, so it cannot mean anything
+# else). An over-approximation is harmless; a program that never spells the
+# name cannot use the trait. Like UsesCoroutines, read from the syntax before
+# the first build, so a program that uses one is a trait program from the
+# start (Stamp, the plan).
+proc hir::traits::IntrinsicDecls {nodes options} {
+    variable intrinsics
+    set decls {}
+    foreach name [dict keys $intrinsics] {
+        if {[regexp "\\m$name\\M" $nodes] || [regexp "\\m$name\\M" $options]} {
+            lappend decls [dict create name $name nameSpan "" namespace "" requirements {} span "" intrinsic 1]
+        }
+    }
+    return $decls
 }
 
 proc hir::traits::Reset {} {
@@ -128,6 +199,10 @@ proc hir::traits::lookup {name {ns ""}} {
     if {[dict size $registry] == 0} {
         return ""
     }
+    if {[isIntrinsic $name]} {
+        # An intrinsic trait: its bare name, in every namespace.
+        return $name
+    }
     if {[string first :: $name] >= 0} {
         if {[dict exists $registry $name]} {
             return $name
@@ -155,6 +230,15 @@ proc hir::traits::declare {decls} {
     Reset
     foreach decl $decls {
         set id [identity [dict get $decl name] [dict get $decl namespace]]
+        if {[dict getdef $decl intrinsic 0]} {
+            if {![dict exists $registry $id]} {
+                # (A source trait of the name is TRAIT-NAME-COLLISION at its
+                # own declaration: resolve.)
+                dict set registry $id [dict create id $id name [dict get $decl name] namespace "" \
+                    nameSpan "" span "" requirements [dict create] order {} context 0 intrinsic 1]
+            }
+            continue
+        }
         if {[dict exists $registry $id]} {
             Fail [dict get $decl nameSpan] TRAIT-NAME-COLLISION "trait \"$id\" is already declared"
         }
@@ -191,11 +275,27 @@ proc hir::traits::resolve {{sourceTypes {}}} {
     set types [lmap t $sourceTypes {
         if {[dict exists $t kind] && [dict get $t kind] in {struct enum}} {dict get $t id} else {dict get $t name}
     }]
+    variable intrinsics
     foreach id [dict keys $registry] {
         set entry [dict get $registry $id]
         set name [dict get $entry name]
         set ns [dict get $entry namespace]
         set span [dict get $entry nameSpan]
+        if {[dict getdef $entry intrinsic 0]} {
+            # An intrinsic trait (the namespace header): its requirements are
+            # the implementation's, already resolved.
+            set requirements [dict create]
+            foreach r [dict get $intrinsics $id requirements] {
+                dict set requirements [dict get $r name] $r
+            }
+            dict set registry $id requirements $requirements
+            dict set registry $id order [dict keys $requirements]
+            lappend entries [Entry $id]
+            continue
+        }
+        if {[isIntrinsicName $name]} {
+            Fail $span TRAIT-NAME-COLLISION "trait \"$name\" cannot be declared: the name is the built-in trait $name"
+        }
         if {$name in {Int any never Fn} || [core::type::isBuiltinName $name]
                 || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
             Fail $span TRAIT-NAME-COLLISION "trait \"$name\" cannot be declared: the name is already a built-in type"
@@ -232,9 +332,13 @@ proc hir::traits::resolve {{sourceTypes {}}} {
 proc hir::traits::Entry {id} {
     variable registry
     set entry [dict get $registry $id]
-    return [dict create id $id name [dict get $entry name] namespace [dict get $entry namespace] \
+    set result [dict create id $id name [dict get $entry name] namespace [dict get $entry namespace] \
         requirements [lmap n [dict get $entry order] {dict get $entry requirements $n}] \
         context [dict get $entry context]]
+    if {[dict getdef $entry intrinsic 0]} {
+        dict set result intrinsic 1
+    }
+    return $result
 }
 
 # Re-registers the `traits` entries of a serialized HIR (hir/read.tcl).
@@ -249,7 +353,7 @@ proc hir::traits::applyEntries {entries} {
         dict set registry [dict get $entry id] [dict create id [dict get $entry id] \
             name [dict get $entry name] namespace [dict get $entry namespace] nameSpan "" span "" \
             requirements $requirements order [dict keys $requirements] \
-            context [dict getdef $entry context 0]]
+            context [dict getdef $entry context 0] intrinsic [dict getdef $entry intrinsic 0]]
     }
 }
 
@@ -463,7 +567,8 @@ proc hir::traits::index {hir} {
                     set info [dict create kind block binding $b block $value origin [dict get $binding origin] \
                         params [lrange [dict get $node declaredParamTypes] 0 [expr {$arity - 1}]] \
                         result [dict get $node declaredResult] errors [dict get $node declaredErrors] \
-                        flags $flags contexts [dict getdef $node contextParams {}]]
+                        flags $flags contexts [dict getdef $node contextParams {}] \
+                        variadic [dict exists $node variadic]]
                 }
             }
             dict set impls $unit $name $info
@@ -626,6 +731,9 @@ proc hir::traits::Implementation {req witness owner kind} {
             if {[dict get $info flags] ne {}} {
                 return [dict create ok 0 reason "$qualified declares flags ([join [lmap f [dict get $info flags] {string cat : $f}] {, }]): implementations with flags are not supported yet" found $found]
             }
+            if {[dict getdef $info variadic 0]} {
+                return [dict create ok 0 reason "$qualified is variadic: a trait requirement is a fixed signature, and a variadic function is no implementation of one" found $found]
+            }
             if {[dict get $info contexts] ne {}} {
                 return [dict create ok 0 reason "$qualified requires a context ([join [lmap c [dict get $info contexts] {dict get $c context}] {, }]): context-dependent implementations are not supported yet" found $found]
             }
@@ -691,7 +799,9 @@ proc hir::traits::Mismatch {actual required req} {
 # the canonical type and the trait identity.
 proc hir::traits::satisfies {type id} {
     variable cache
-    set type [hir::types::canonical $type]
+    # (A witness is a monomorphization key: a List's known length selects
+    # no specialization, LIST-CARDINALITY-REFINEMENTS.md.)
+    set type [hir::types::canonical [hir::types::ForgetInferred $type]]
     set key [list $type $id]
     if {[dict exists $cache $key]} {
         return [dict get $cache $key]
@@ -704,6 +814,24 @@ proc hir::traits::satisfies {type id} {
         # A context trait (CONTEXT-TRAITS.md) is satisfied by installed
         # contexts (hir::contexts::satisfiesTrait), never by a value.
         dict set result reason "$id is a context trait: an installed context provides it, a value never satisfies it"
+    } elseif {[isIntrinsic $id]} {
+        # An intrinsic trait: the implementation's predicate decides, and
+        # its natives implement every requirement (the namespace header).
+        # No owner, no structural conformance: no source declaration can
+        # make a type a witness.
+        variable intrinsics
+        dict set result ownerKind intrinsic
+        lassign [{*}[dict get $intrinsics $id witness] $type] class why
+        if {$class eq "total"} {
+            dict set result ok 1
+            set impls {}
+            foreach {name native} [dict get $intrinsics $id impls] {
+                lappend impls $name [dict create kind native name $native]
+            }
+            dict set result impls $impls
+        } else {
+            dict set result reason $why
+        }
     } else {
         lassign [WitnessOwner $type] owner kind why
         dict set result owner $owner
@@ -810,7 +938,7 @@ proc hir::traits::EntryView {type constraint} {
         return $type
     }
     if {![hir::types::IsTrait $type] && $type ne "never" && [dict get [satisfies $type $id] ok]} {
-        return [hir::types::MakeView $id [hir::types::canonical $type]]
+        return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $type]]]
     }
     return $constraint
 }
@@ -840,7 +968,7 @@ proc hir::traits::ViewResult {declared body} {
         return $body
     }
     if {![hir::types::IsTrait $body] && [dict get [satisfies $body $id] ok]} {
-        return [hir::types::MakeView $id [hir::types::canonical $body]]
+        return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $body]]]
     }
     return $declared
 }
@@ -993,7 +1121,7 @@ proc hir::traits::NotSatisfiedMessage {hir param argType constraint} {
         return [format {argument for parameter "%s" may have several witnesses (%s): heterogeneous trait values are not supported} \
             $param [ShowWitness [hir::types::ViewWitness $argType]]]
     }
-    return "argument for parameter \"$param\" does not satisfy trait $id:\n[explain $argType $id $hir]"
+    return [hir::semantic::NameCallables $hir "argument for parameter \"$param\" does not satisfy trait $id:\n[explain $argType $id $hir]"]
 }
 
 # ---------------------------------------------------------------------------
@@ -1738,7 +1866,9 @@ proc hir::traits::WitnessName {w} {
     if {![catch {core::type::evidenceOf $w} names] && $names ne {}} {
         return [join $names +]
     }
-    return [hir::types::show $w]
+    # (Without spaces, like an affine witness's: a clone's name is one word
+    # of HIR text -- an anonymous struct's `struct{a:int,b:str}`.)
+    return [string map {" " ""} [hir::types::show $w]]
 }
 
 # The monomorphization plan of checked HIR (the source build), or {diagnostics
@@ -2439,7 +2569,11 @@ proc hir::traits::report {hir} {
     foreach entry [dict get $hir traits] {
         set owner [dict get $entry namespace]
         set kind [expr {[dict exists $entry context] && [dict get $entry context] ? "context trait" : "trait"}]
-        lappend lines "$kind [dict get $entry id] (owner: [if {$owner eq ""} {string cat "entry program"} else {set owner}])"
+        if {[dict getdef $entry intrinsic 0]} {
+            lappend lines "$kind [dict get $entry id] (built in: the language implementation supplies its witnesses)"
+        } else {
+            lappend lines "$kind [dict get $entry id] (owner: [if {$owner eq ""} {string cat "entry program"} else {set owner}])"
+        }
         foreach r [dict get $entry requirements] {
             set text "    fn [dict get $r name]([join [lmap p [dict get $r params] {format {%s: %s} [dict get $p name] [hir::types::show [dict get $p type]]}] {, }])"
             if {[dict get $r result] ne ""} {

@@ -121,7 +121,7 @@ testConstraint rustcLinker [expr {![info exists ::env(BOTLISH_NATIVE_LINKER)] ||
 # AArch64. A capability, not an operating system: a test that needs coroutines
 # or the native collector and runtime evidence around them carries this one;
 # a test that needs Linux syscalls keeps nativeLinux.
-testConstraint nativeCoroutines [expr {[core::cabi::hostTarget] in {linux-x86_64 linux-aarch64 macos-aarch64}}]
+testConstraint nativeCoroutines [native::hostSupports coroutines]
 
 # The native stack guard (runtime/platform/, MACOS-AARCH64-MILESTONE-4.md):
 # the runtime knows the bounds of the thread's stack and of every coroutine
@@ -129,26 +129,145 @@ testConstraint nativeCoroutines [expr {[core::cabi::hostTarget] in {linux-x86_64
 # coroutine's -- ends in NATIVE LIMIT STACK, with stack probes and no
 # shadow-stack depth token. A capability, not an operating system: Linux
 # x86-64 and AArch64 and macOS AArch64.
-testConstraint nativeStackGuard [expr {[core::cabi::hostTarget] in {linux-x86_64 linux-aarch64 macos-aarch64}}]
+testConstraint nativeStackGuard [native::hostSupports stackGuard]
+
+# GC roots in native frames (runtime/framewalk.rs's NATIVE_FRAME_ROOTS,
+# WINDOWS-X86-64-MILESTONE-1.md, section 3): stack maps and the frame walk on
+# Linux x86-64 and AArch64 and macOS AArch64; the fallback plan's shadow stack
+# on Windows. A test of the root plan expects the host's plan by it.
+testConstraint nativeFrameRoots [native::hostSupports frameRoots]
+
+# The shadow stack's depth check bounds Botlish recursion
+# (runtime::native_stack::depth_checked): unless native frames hold the roots
+# and the stack guard reports an exhausted stack (Windows). Every function
+# with a Botlish call then fails with NATIVE LIMIT STACK from its prologue
+# when the shadow stack is full, which nir's call effects record as
+# may_error: a test of a call's effects expects it by this.
+testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && [testConstraint nativeStackGuard])}]
 
 # Standalone executables (native::executable, native/src/codegen/aot.rs): the
-# native backend links them on Linux x86-64 and AArch64 (ELF) and on macOS
-# AArch64 (Mach-O, MACOS-AARCH64-MILESTONE-5.md), with the rustc linker
-# everywhere and the stub linker on Linux x86-64 too. A capability, not an
-# operating system: a test that builds and runs an executable of a portable
-# program carries this one; one whose program needs Linux syscalls keeps
+# native backend links them on Linux x86-64 and AArch64 (ELF), on macOS
+# AArch64 (Mach-O, MACOS-AARCH64-MILESTONE-5.md) and on Windows x86-64 with
+# MSVC's toolchain (PE, named NAME.exe: WINDOWS-X86-64-MILESTONE-1.md), with
+# the rustc linker everywhere and the stub linker on Linux x86-64 too. A
+# capability, not an operating system: a test that builds and runs an
+# executable of a portable program carries this one (and runs the file
+# native::executable returns); one whose program needs Linux syscalls keeps
 # nativeLinux, one that reads ELF or needs the stub linker its own
-# constraint, and a program that calls C carries nativeCCalls.
-testConstraint executableAot [expr {[core::cabi::hostTarget] in {linux-x86_64 linux-aarch64 macos-aarch64}}]
+# constraint, one that starts the executable through a Unix shell
+# (`exec -a`, `env -i`) unixShell, and a program that calls C carries
+# nativeCCalls.
+testConstraint executableAot [native::hostSupports executables]
+
+# A Unix shell for scripts the tests write and run (`#!/bin/sh` wrappers, `sh
+# -c`): a test that needs one carries this, never an operating system.
+testConstraint unixShell [expr {$::tcl_platform(platform) eq "unix" && [auto_execok sh] ne ""}]
+
+# Runs the standalone executable linked for PATH (native::executableFile:
+# PATH.exe on Windows) with PATH empty -- no toolchain or interpreter
+# launcher on it -- and the extra environment NAME VALUE ..., as `exec env
+# PATH= NAME=VALUE ... PATH` runs it on Unix, on any host (Windows has no
+# env): its standard output, as exec returns it. The environment is this
+# process's again afterwards.
+proc runStandalone {path args} {
+    set names [concat PATH [dict keys $args]]
+    set saved [dict create]
+    foreach name $names {
+        if {[info exists ::env($name)]} { dict set saved $name $::env($name) }
+    }
+    try {
+        set ::env(PATH) ""
+        foreach {name value} $args { set ::env($name) $value }
+        return [exec [native::executableFile $path]]
+    } finally {
+        foreach name $names { unset -nocomplain ::env($name) }
+        dict for {name value} $saved { set ::env($name) $value }
+    }
+}
+
+# Evaluates SCRIPT in the caller with the environment variables NAME VALUE
+# ... of PAIRS set, as `env NAME=VALUE ... COMMAND` runs a command on Unix,
+# on any host (Windows has no env): its result; the environment is this
+# process's again afterwards.
+proc withEnvironment {pairs script} {
+    set saved [dict create]
+    foreach {name value} $pairs {
+        if {![dict exists $saved $name]} { dict set saved $name [array get ::env $name] }
+        set ::env($name) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        dict for {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 1] }
+        }
+    }
+}
+
+# Runs the executable FILE (the path native::executable returned) with no
+# environment and nothing to find on PATH -- `env -i PATH=/nonexistent FILE`
+# on Unix; on Windows, which has no env, with PATH empty (runStandalone):
+# its standard output, as exec returns it.
+proc runBare {file} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        return [runStandalone $file]
+    }
+    return [exec env -i PATH=/nonexistent $file]
+}
 
 # C calls (extern c fn, C-FFI.md): the native backends link a program that
 # calls C with the system linker and its declared libraries and run it, on
-# Linux x86-64 and AArch64 (GNU ld's link plan, the SysV and AAPCS64 C ABIs)
-# and on macOS AArch64 (Apple's ld, the Apple arm64 C ABI,
-# MACOS-AARCH64-MILESTONE-6.md): codegen/aot.rs's C_CALLS. A capability, not
-# an operating system: a test that links and runs a C fixture carries this
-# one (and its fixture's own constraint: a C compiler, the rustc linker).
-testConstraint nativeCCalls [expr {[core::cabi::hostTarget] in {linux-x86_64 linux-aarch64 macos-aarch64}}]
+# Linux x86-64 and AArch64 (GNU ld's link plan, the SysV and AAPCS64 C ABIs),
+# on macOS AArch64 (Apple's ld, the Apple arm64 C ABI,
+# MACOS-AARCH64-MILESTONE-6.md) and on Windows x86-64 (link.exe, the Win64 C
+# ABI, WINDOWS-X86-64-MILESTONE-2.md): codegen/aot.rs's C_CALLS. A
+# capability, not an operating system: a test that links and runs a C
+# fixture carries this one (and its fixture's own constraint: the host's C
+# toolchain, cToolchain below, and the rustc linker).
+testConstraint nativeCCalls [native::hostSupports cCalls]
+
+# Variadic C calls (VARIADICS-VERTICAL-SLICE-1.md): lowered for the System V
+# and Apple AArch64 C conventions only; on Windows x86-64 a variadic call is
+# a codegen error. A test that compiles one to machine code, or runs one,
+# carries this beside nativeCCalls.
+testConstraint nativeCVariadics [native::hostSupports cVariadics]
+
+# The host's own C toolchain, the one C fixtures are built with
+# (tests/ctoolchain.tcl): cc and ar on Linux and macOS, MSVC's cl, ml64 and
+# lib on Windows (found through vswhere, used in vcvars64's environment for
+# those tools alone -- never for Botlish's own link).
+source [file join $::projectRoot tests ctoolchain.tcl]
+testConstraint cToolchain [ctool::available]
+
+# The host target's C data model is LP64 (a C long and a pointer 64 bits:
+# Linux, macOS), not Windows' LLP64 (a 32-bit long): a C oracle whose record
+# layout holds a long (native-view's, native-edit's) is LP64's.
+testConstraint lp64Target [expr {[core::cabi::hostTarget] ne ""
+    && [dict get [core::cabi::target [core::cabi::hostTarget]] model] eq "LP64"}]
+
+# The system C library is a dynamic library an executable imports its
+# functions from (glibc, libSystem): a test that reads an executable's
+# imports of it carries this. On Windows the C runtime is linked into every
+# executable (codegen/aot.rs's crt_args): nothing is imported from one.
+testConstraint dynamicSystemCLibrary [expr {$::tcl_platform(platform) ne "windows"}]
+
+# Darwin I/O (stdlib/darwin.bot, stdlib/darwin/io.bot, MACOS-AARCH64-MILESTONE-8.md):
+# the darwin namespace is this host's platform interface (core/cabi.tcl's
+# platforms designates it macOS's) and the native backend links C calls here,
+# so libSystem's read and write run: macOS arm64 today. A capability read from
+# the target table, never from the operating system's name: a test that runs
+# a program importing darwin::* carries it.
+testConstraint darwinIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
+    && [core::cabi::platformOf darwin] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
+
+# Windows I/O (stdlib/windows.bot, stdlib/windows/io.bot, WINDOWS-X86-64-MILESTONE-2.md):
+# the windows namespace is this host's platform interface (core/cabi.tcl's
+# platforms designates it Windows') and the native backend links C calls
+# here, so kernel32's GetStdHandle and WriteFile run: Windows x86-64 today. A
+# capability read from the target table, never from the operating system's
+# name: a test that runs a program importing windows::* carries it.
+testConstraint windowsIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
+    && [core::cabi::platformOf windows] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
 
 # binaryHeader PATH and hostBinaryHeader KIND: what a program object or an
 # executable is, and what this host's are.

@@ -1,0 +1,1176 @@
+# c-ffi-error-capture.test -- a C call's error state survives the
+# representation of its result (C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+#
+# A C function that fails the POSIX way returns a sentinel (-1) and leaves
+# the reason in errno, which its binding reads right after the call -- with
+# a C call of __errno_location() (glibc) or __error() (Darwin) and a native
+# view of the int it points to. Nothing the compiler inserts may run in
+# between: an allocation or a runtime call there may change errno. A call
+# with a `write noescape` byte parameter yields the write-back value
+# {result: R, NAME: MutableBytes}; its representation is fields -- the C
+# result and the private copy C wrote -- and nothing is built after the call:
+# a MutableBytes only where a use reads it whole, the struct only where a use
+# needs the object.
+#
+#   * NIR (every host, programs compiled for linux-x86_64 and
+#     macos-aarch64): between the C call and the call of errno() there is
+#     only the exposures' keepalive (no machine code) and the comparison,
+#     for every shape a write-back value takes -- bound, projected straight
+#     off the call, discarded, two written parameters, read and written
+#     aliases, returned from a function, held in a struct, joined by an
+#     `if`, in a loop, in a coroutine -- on both native lowerings; the
+#     detector finds the old eager construction (-struct-opt 0);
+#   * machine code (hosts that link C calls, objdump): the calls on every
+#     path, in the object file, from the C call's return to the call of
+#     errno() -- and in errno() from its entry to __errno_location/__error
+#     and from there to the load -- are at most the BigInt slow paths of a
+#     64-bit result (never taken by a small Int, the -1 sentinel); the
+#     detector finds the eager construction's rt_struct_new;
+#   * the instructions actually executed (Linux, ptrace: tests/cffi/
+#     window-trace.c): from the C call's return to the load of errno, only
+#     the wrapper, errno() and the C library's __errno_location run;
+#   * behavior through real C (tests/cffi/fixture.c's errno functions, the
+#     C library's own read(2)): distinct errnos in succession, a success
+#     after a failure, bytes written before a failure kept, the original
+#     never changed, two written parameters, aliases, results returned,
+#     stored, captured and held across a suspension -- both native backends,
+#     the executable, GC stress, and an allocator that changes errno on
+#     every allocation (tests/cffi/errno-clobber.c), whose effect the eager
+#     construction shows.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tests cffi window.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint objdump [expr {[auto_execok objdump] ne "" && [auto_execok file] ne ""}]
+set ::hostTarget [core::cabi::hostTarget]
+set ::scratch [makeDirectory ec-[pid]]
+set ::appCounter 0
+
+# Writes TEXT to PATH as UTF-8 with LF line ends.
+proc ecWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# The C error convention these tests run is POSIX's: errno through the
+# platform's location function (ecErrnoSymbol) and the C library's read,
+# open and close. A Windows target has neither: its C runtime's errno is
+# _errno(), its _read of a bad descriptor ends the process (the
+# invalid-parameter handler), open is variadic (no Win64 lowering), and its
+# own convention is GetLastError, whose window windows-io.test pins
+# (wi-last-error-read-first, wi-real-failures; WINDOWS-X86-64-MILESTONE-2.md,
+# section 8).
+testConstraint posixErrno [expr {[string match linux-* $::hostTarget] || [string match macos-* $::hostTarget]}]
+
+# The fixture library (c-ffi.test's), built once.
+set ::fixtureDir ""
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint posixErrno]} {
+    set ::fixtureDir [file join $::scratch fixture]
+    file mkdir $::fixtureDir
+    if {[catch {
+        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
+        exec ar rcs [file join $::fixtureDir libbotlish_cffi_fixture.a] [file join $::fixtureDir fixture.o]
+    } message]} {
+        puts stderr "c-ffi-error-capture.test: the fixture library did not build: $message"
+        set ::fixtureDir ""
+    }
+}
+testConstraint ecFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+
+# The allocator that changes errno (LD_PRELOAD on Linux, DYLD_INSERT_LIBRARIES
+# on macOS), built once: its path, or "".
+proc ecClobberLibrary {} {
+    if {![info exists ::clobberLibrary]} {
+        set ::clobberLibrary ""
+        if {$::tcl_platform(os) eq "Darwin"} {
+            set path [file join $::scratch libbcf_errno_clobber.dylib]
+            set flags -dynamiclib
+        } else {
+            set path [file join $::scratch libbcf_errno_clobber.so]
+            set flags {-shared -fPIC}
+        }
+        if {![catch {exec cc {*}$flags -O2 [file join $::projectRoot tests cffi errno-clobber.c] -o $path}]} {
+            set ::clobberLibrary $path
+        }
+    }
+    return $::clobberLibrary
+}
+testConstraint ecClobber [expr {[testConstraint ecFixture] && $::tcl_platform(os) in {Linux Darwin}}]
+
+# The single-step tracer (Linux), built once: its path, or "" where it does
+# not build or ptrace is not allowed.
+proc ecTracer {} {
+    if {![info exists ::tracer]} {
+        set ::tracer ""
+        set path [file join $::scratch window-trace]
+        if {![catch {exec cc -O2 [file join $::projectRoot tests cffi window-trace.c] -o $path -ldl}]
+                && ![catch {exec $path /bin/true 0 0} probe]} {
+            set ::tracer $path
+        } elseif {[file exists $path]} {
+            # A probe of a trivial program: START 0 is never reached, so a
+            # working tracer reports that the program ended first.
+            if {[catch {exec $path /bin/true 0 0} probe] && [string match "*ended before the window*" $probe]} {
+                set ::tracer $path
+            }
+        }
+    }
+    return $::tracer
+}
+testConstraint ecTrace [expr {[testConstraint ecFixture] && $::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64 aarch64 arm64} && [testConstraint cCompiler] && [ecTracer] ne ""}]
+
+# ---------------------------------------------------------------------------
+# The programs
+
+# The C library's errno location function of TARGET's platform.
+proc ecErrnoSymbol {target} {
+    return [expr {[string match macos-* $target] ? "__error" : "__errno_location"}]
+}
+
+# The binding (an application module `ec`): the fixture's errno functions,
+# the C library's read, open and close, and errno() -- std::darwin::errno's shape,
+# through the platform's own errno location function.
+set ecModule {direct module
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::ffi::c
+import std::list
+import std::str
+
+extern c library "botlish_cffi_fixture"
+
+extern c fn c_errno_location named "ERRNO"() -> std::ffi::c::Ptr[std::ffi::c::Int] independent
+extern c fn fill_errno named "bcf_fill_errno"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar, err: std::ffi::c::Int, stale: std::ffi::c::Int) -> std::ffi::c::Long
+extern c fn fill2_errno named "bcf_fill2_errno"(a: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, na: std::ffi::c::ULong, b: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, nb: std::ffi::c::ULong, err: std::ffi::c::Int) -> std::ffi::c::Long
+extern c fn reverse_errno named "bcf_reverse_errno"(src: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong, dst: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, err: std::ffi::c::Int) -> std::ffi::c::Long
+extern c fn tick named "bcf_tick"() -> std::ffi::c::UChar
+extern c fn c_read named "read"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+extern c fn c_open named "open"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, oflag: std::ffi::c::Int, variadic) -> std::ffi::c::Int
+extern c fn c_close named "close"(fd: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn large_error named "bcf_large_error"(failing: std::ffi::c::Int) -> SIZE_T
+extern c fn unsigned_errno named "bcf_unsigned_errno"(which: std::ffi::c::Int, err: std::ffi::c::Int) -> std::ffi::c::ULong
+extern c fn signed_errno named "bcf_signed_errno"(which: std::ffi::c::Int, err: std::ffi::c::Int) -> std::ffi::c::Long
+extern c fn fill_size named "bcf_fill_size"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar, err: std::ffi::c::Int) -> SIZE_T
+
+layout ErrnoCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Int at 0
+
+# What one C call did: its result, the errno a failure left (0 after a
+# success: errno is never read then) and the buffer as C left it.
+struct Outcome:
+    result: int
+    errno: int
+    data: std::abi::bytes::MutableBytes
+
+fn errno() -> int:
+    location = c_errno_location()
+    cell = std::binary::native::view(ErrnoCell, location):
+        on NativeViewNull:
+            return 0
+    cell.value
+
+fn mlen(d: std::abi::bytes::MutableBytes) -> std::ffi::c::ULong:
+    std::abi::bytes::mutable_length(d).value
+
+# bcf_fill_errno into a copy of DATA: std::darwin::read's shape.
+fn fill(data: std::abi::bytes::MutableBytes, seed: std::ffi::c::UChar, err: std::ffi::c::Int, stale: std::ffi::c::Int) -> Outcome:
+    r = fill_errno(data, mlen(data), seed, err, stale)
+    if r.result < 0:
+        failure = errno()
+        return Outcome {result: r.result, errno: failure, data: r.out}
+    Outcome {result: r.result, errno: 0, data: r.out}
+
+# read(2) into a copy of DATA: std::darwin::read itself, on any platform.
+fn read(fd: std::ffi::c::Int, data: std::abi::bytes::MutableBytes) -> Outcome:
+    r = c_read(fd, data, mlen(data))
+    if r.result < 0:
+        failure = errno()
+        return Outcome {result: r.result, errno: failure, data: r.buf}
+    Outcome {result: r.result, errno: 0, data: r.buf}
+
+fn terminator() -> std::byte::Byte:
+    0
+
+# open(2) of PATH with OFLAG: the descriptor, or -1 when it failed.
+fn open(path: str, oflag: std::ffi::c::Int) -> std::ffi::c::Int:
+    c_open(std::abi::bytes::from_list(std::str::encode_utf8(path).append(terminator())), oflag)
+
+fn close(fd: std::ffi::c::Int) -> std::ffi::c::Int:
+    c_close(fd)
+}
+
+# The write-back value's shapes, each a function reading errno right after a
+# failed call (each NAME below), and a program running them all.
+set shapesMain {direct module
+import std::abi
+import std::abi::bytes
+import std::coroutine
+import std::ffi::c
+import std::list
+import std::str
+import ec
+
+struct Event:
+    value: int
+
+fn status_only(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> int:
+    r = ec::fill_errno(data, ec::mlen(data), 5, err, 0)
+    if r.result < 0:
+        return ec::errno()
+    0
+
+fn direct(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> int:
+    if ec::fill_errno(data, ec::mlen(data), 5, err, 0).result < 0:
+        return ec::errno()
+    0
+
+fn two(a: std::abi::bytes::MutableBytes, b: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::fill2_errno(a, ec::mlen(a), b, ec::mlen(b), err)
+    if r.result < 0:
+        failure = ec::errno()
+        return [r.result, failure, r.a, r.b]
+    [r.result, 0, r.a, r.b]
+
+fn alias(m: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::reverse_errno(std::abi::bytes::freeze(m), ec::mlen(m), m, err)
+    if r.result < 0:
+        failure = ec::errno()
+        return [r.result, failure, r.dst, m]
+    [r.result, 0, r.dst, m]
+
+fn raw(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int):
+    ec::fill_errno(data, ec::mlen(data), 9, err, 0)
+
+fn via_raw(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = raw(data, err)
+    if r.result < 0:
+        failure = ec::errno()
+        return [r.result, failure, r.out]
+    [r.result, 0, r.out]
+
+fn wrapped(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    w = {r: ec::fill_errno(data, ec::mlen(data), 7, err, 0), tag: 1}
+    if w.r.result < 0:
+        failure = ec::errno()
+        return [w.r.result, failure, w.r.out, w.tag]
+    [w.r.result, 0, w.r.out, w.tag]
+
+fn chosen(data: std::abi::bytes::MutableBytes, which: bool, err: std::ffi::c::Int) -> list:
+    r = if which:
+        ec::fill_errno(data, ec::mlen(data), 1, err, 0)
+    else:
+        ec::fill_errno(data, ec::mlen(data), 2, err, 0)
+    if r.result < 0:
+        failure = ec::errno()
+        return [r.result, failure, r.out]
+    [r.result, 0, r.out]
+
+fn looped(data: std::abi::bytes::MutableBytes) -> list:
+    loop i from 0 to 3:
+        e = if i == 1:
+            22
+        else:
+            0
+        r = ec::fill_errno(data, ec::mlen(data), i, e, 0)
+        if r.result < 0:
+            [r.result, ec::errno(), r.out]
+        else:
+            [r.result, 0, r.out]
+
+fn suspended(data: std::abi::bytes::MutableBytes) -> Event:
+    r = ec::fill_errno(data, ec::mlen(data), 4, 33, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    yield Event {value: failure}
+    later = ec::fill_errno(data, ec::mlen(data), 6, 34, 0)
+    if later.result < 0:
+        return Event {value: ec::errno() + 1000 * std::abi::bytes::mutable_length(r.out).value}
+    Event {value: 0}
+
+fn captured(data: std::abi::bytes::MutableBytes):
+    r = ec::fill_errno(data, ec::mlen(data), 3, 0, 0)
+    fn get() -> std::abi::bytes::MutableBytes:
+        r.out
+    get
+
+fn in_coroutine(m: std::abi::bytes::MutableBytes) -> list:
+    coroutine {step, first} = suspended(m)
+    [first.value, step().value]
+
+m = std::abi::bytes::zeroed(std::abi::usize(4))
+f = captured(m)
+kept = [ec::fill(m, 1, 0, 0), ec::fill(m, 2, 13, 0), ec::fill(m, 3, 0, 99), ec::read(-1, m)]
+[kept, status_only(m, 4), direct(m, 5), two(m, m, 6), alias(std::abi::bytes::from_bytes(std::abi::bytes::from_list(std::str::encode_utf8("abcd"))), 7), via_raw(m, 8), wrapped(m, 10), chosen(m, true, 11), chosen(m, false, 0), looped(m), in_coroutine(m), f(), m]
+}
+
+# The value shapesMain prints: MutableBytes as the runtime shows them (`<mutbytes N: HEX>`).
+proc ecMut {hex} {
+    return "std::abi::bytes::MutableBytes {storage: <mutbytes [expr {[string length $hex] / 2}]: $hex>}"
+}
+proc ecOutcome {result errno hex} {
+    return "ec::Outcome {result: $result, errno: $errno, data: [ecMut $hex]}"
+}
+set shapesValue "\[\[[ecOutcome 4 0 01264b70], [ecOutcome -1 13 02274c71], [ecOutcome 4 0 03284d72], [ecOutcome -1 EBADF 00000000]\], 4, 5, \[-1, 6, [ecMut 01264b70], [ecMut 02274c71]\], \[-1, 7, [ecMut 64636261], [ecMut 61626364]\], \[-1, 8, [ecMut 092e5378]\], \[-1, 10, [ecMut 072c5176], 1\], \[-1, 11, [ecMut 01264b70]\], \[4, 0, [ecMut 02274c71]\], \[\[4, 0, [ecMut 00254a6f]\], \[-1, 22, [ecMut 01264b70]\], \[4, 0, [ecMut 02274c71]\]\], \[33, 4034\], [ecMut 03284d72], [ecMut 00000000]\]"
+
+# The host's errno values, from its own headers: {EBADF N EISDIR N} (POSIX's
+# usual values where no C compiler can say: the tests that use them need one).
+proc ecErrnoFacts {} {
+    if {![testConstraint cCompiler]} {
+        return {EBADF 9 EISDIR 21}
+    }
+    if {![info exists ::errnoFacts]} {
+        set dir [file join $::scratch facts]
+        file mkdir $dir
+        ecWrite [file join $dir facts.c] "#include <errno.h>\n#include <stdio.h>\nint main(void) { printf(\"EBADF %d EISDIR %d\", EBADF, EISDIR); return 0; }\n"
+        exec cc [file join $dir facts.c] -o [file join $dir facts]
+        set ::errnoFacts [exec [file join $dir facts]]
+    }
+    return $::errnoFacts
+}
+
+# shapesMain's value on the host, and as its executable shows it (opaque
+# buffers).
+proc ecExpected {} {
+    return [string map [list EBADF [dict get [ecErrnoFacts] EBADF]] $::shapesValue]
+}
+proc ecShown {} {
+    return [regsub -all {std::abi::bytes::MutableBytes \{storage: <mutbytes [0-9]+: [0-9a-f]*>\}} [ecExpected] {<opaque std::abi::bytes::MutableBytes>}]
+}
+
+# The std::ffi::c type of the host's size_t (C-FFI-ERROR-CAPTURE-MILESTONE-2.md):
+# the C compiler's own answer -- the unsigned type of size_t's width
+# (std::ffi::c::ULong on LP64, std::ffi::c::ULongLong where long is narrower) --
+# or, with no C compiler, an LP64 target's (the tests that call C need one).
+proc ecSizeType {} {
+    if {![testConstraint cCompiler]} {
+        return std::ffi::c::ULong
+    }
+    if {![info exists ::sizeType]} {
+        set dir [file join $::scratch size]
+        file mkdir $dir
+        ecWrite [file join $dir size.c] "#include <stddef.h>\n#include <stdio.h>\nint main(void) { printf(\"%d %d\", (int)sizeof(size_t), (int)sizeof(unsigned long)); return 0; }\n"
+        exec cc [file join $dir size.c] -o [file join $dir size]
+        lassign [exec [file join $dir size]] size ulong
+        set ::sizeType [expr {$size == $ulong ? "std::ffi::c::ULong" : "std::ffi::c::ULongLong"}]
+    }
+    return $::sizeType
+}
+
+# An application directory of MAIN and the binding for TARGET: its path.
+proc ecApp {main {target ""}} {
+    if {$target eq ""} {
+        set target $::hostTarget
+    }
+    set dir [file join $::scratch app[incr ::appCounter]]
+    file mkdir $dir
+    ecWrite [file join $dir main.bot] $main
+    set size [expr {$target eq $::hostTarget ? [ecSizeType] : "std::ffi::c::ULong"}]
+    ecWrite [file join $dir ec.bot] [string map [list ERRNO [ecErrnoSymbol $target] SIZE_T $size] $::ecModule]
+    return $dir
+}
+
+proc ecHir {dir {target ""}} {
+    if {$target eq ""} {
+        set target $::hostTarget
+    }
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target]
+}
+
+# The NIR windows of the shapes (window::nirWindows, their ops), compiled for
+# TARGET with lowering OPTIONS: {NAME OPS-OF-EACH-WINDOW ...}.
+proc ecShapeWindows {target options} {
+    set nir [native::nir [ecHir [ecApp $::shapesMain $target] $target] {*}$options]
+    set result {}
+    foreach name {ec::fill status_only direct two alias wrapped chosen looped suspended} {
+        lappend result $name [lmap w [window::nirWindows $nir $name ec::errno] {window::nirOps $w}]
+    }
+    lappend result raw [lmap w [window::nirWindows $nir raw ""] {window::nirOps $w}]
+    lappend result via_raw [lmap w [window::nirWindows $nir via_raw ec::errno {= callmulti }] {window::nirOps $w}]
+    return $result
+}
+
+# The native outcome of DIR's program on both native backends, which must
+# agree: {value TEXT} or {error CODE MESSAGE}.
+proc ecOutcome {dir} {
+    set hir [ecHir $dir]
+    set outcomes [native::withLinkDirs [list $::fixtureDir] {
+        lmap backend {cranelift cranelift-generic} {
+            lrange [outcomeUnderHir $backend $hir] 0 end-1
+        }
+    }]
+    if {[lindex $outcomes 0] ne [lindex $outcomes 1]} {
+        error "cranelift and cranelift-generic disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The standalone executable of DIR's program (lowering OPTIONS): its path.
+proc ecExecutable {dir {options {}}} {
+    set name program[incr ::appCounter]
+    return [native::withLinkDirs [list $::fixtureDir] {native::executable [ecHir $dir] [file join $dir $name] {*}$options}]
+}
+
+# What EXE prints, run with ENVIRONMENT ({NAME VALUE ...}).
+proc ecRun {exe {environment {}}} {
+    return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2>@1]]
+}
+
+# The environment that loads the errno-changing allocator into a run.
+proc ecClobbering {{marker 77}} {
+    set library [ecClobberLibrary]
+    set variable [expr {$::tcl_platform(os) eq "Darwin" ? "DYLD_INSERT_LIBRARIES" : "LD_PRELOAD"}]
+    return [list $variable $library BCF_ERRNO_CLOBBER $marker]
+}
+
+# ---------------------------------------------------------------------------
+# NIR: what runs between the C call and errno()
+
+test ec-nir-windows {between each shape's C call and its call of errno() there is the keepalive of every exposure (no machine code) and the comparison of the C word the call returned (cwlt: compared as it is, never boxed -- C-FFI-ERROR-CAPTURE-MILESTONE-2.md), nothing else -- a bound write-back value, a status read straight off the call, a discarded buffer, two written parameters, a read and a write exposure of one owner, a value held in a struct, an if joining two calls, a call in a loop (whose list holds the result before errno(): the word is boxed at the list, after errno()), one in a coroutine; a write-back value returned from a function crosses as fields: the callee's C call is followed by its keepalive and the boxing of its result for the return (cwbox: no allocation for a small Int; a word never crosses a call), the caller's comparison by errno(); the same on the specializing and the generic lowering, for Linux and for macOS -- but for the value returned from a function: the generic lowering (-specialize 0, cranelift-generic) carries no struct across a call boundary as fields (STRUCTS.md, "Known limitations"), so there the callee builds it before it returns (C-FFI-ERROR-CAPTURE-MILESTONE-1.md, "Known limits"): a function that returns a C call's result before reading its error state leaves the error state to whatever runs next (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "Generic lowering and function boundaries")} -body {
+    lmap target {linux-x86_64 macos-aarch64} {
+        lmap options {{} {-specialize 0}} {
+            ecShapeWindows $target $options
+        }
+    }
+} -result [lrepeat 2 [list \
+    {ec::fill {{keepalive cwlt}} status_only {{keepalive cwlt}} direct {{keepalive cwlt}} two {{keepalive keepalive cwlt}} alias {{keepalive keepalive cwlt}} wrapped {{keepalive cwlt}} chosen {{keepalive cwlt} {keepalive cwlt}} looped {{keepalive cwlt}} suspended {{keepalive cwlt} {keepalive cwlt}} raw {{keepalive cwbox}} via_raw ilt} \
+    {ec::fill {{keepalive cwlt}} status_only {{keepalive cwlt}} direct {{keepalive cwlt}} two {{keepalive keepalive cwlt}} alias {{keepalive keepalive cwlt}} wrapped {{keepalive cwlt}} chosen {{keepalive cwlt} {keepalive cwlt}} looped {{keepalive cwlt}} suspended {{keepalive cwlt} {keepalive cwlt}} raw {{keepalive structnew cwbox structnew}} via_raw {}}]]
+
+test ec-nir-no-hazard {no window of any shape holds anything that may allocate, call or collect (window::nirHazards), on either lowering} -body {
+    set hazards {}
+    foreach options {{} {-specialize 0}} {
+        set nir [native::nir [ecHir [ecApp $::shapesMain linux-x86_64] linux-x86_64] {*}$options]
+        foreach name {ec::fill ec::read status_only direct two alias wrapped chosen looped suspended} {
+            foreach w [window::nirWindows $nir $name ec::errno] {
+                lappend hazards {*}[window::nirHazards $w]
+            }
+        }
+    }
+    set hazards
+} -result {}
+
+test ec-nir-positive-control {the detector sees the eager construction: the lowering before this milestone -- struct scalar replacement off and the eager-foreign-result fault injection, which re-creates the eager write-back value (C-FFI-ERROR-CAPTURE-MILESTONE-2.md; -struct-opt 0 alone no longer builds it) -- has the write-back value's MutableBytes and struct objects (structnew) in every shape's window, and window::nirHazards reports them} -body {
+    set windows [ecShapeWindows linux-x86_64 {-struct-opt 0 -fault eager-foreign-result}]
+    list [dict get $windows ec::fill] [dict get $windows two] \
+        [llength [window::nirHazards [lindex [window::nirWindows [native::nir [ecHir [ecApp $::shapesMain linux-x86_64] linux-x86_64] -struct-opt 0 -fault eager-foreign-result] ec::fill ec::errno] 0]]]
+} -result {{{keepalive structnew structnew structget ilt}} {{keepalive keepalive structnew structnew structnew structget ilt}} 3}
+
+test ec-nir-no-write-back-object {the write-back struct itself is never built in the shapes that read it field by field: no structnew of its shape anywhere in ec::fill, ec::read, status_only, direct, two, alias, raw, via_raw, wrapped, chosen or looped; a MutableBytes is built only after errno() (ec::fill's failure path: errno, then the MutableBytes, then the Outcome's fields returned)} -body {
+    set nir [native::nir [ecHir [ecApp $::shapesMain linux-x86_64] linux-x86_64]]
+    set shapes [dict create]
+    foreach line [split $nir \n] {
+        if {[regexp {^shape ([0-9]+) anon fields="([^"]*)"} $line -> id fields]} {
+            dict set shapes $fields $id
+        }
+    }
+    set writeBack [lmap fields {{out result} {a b result} {dst result}} {dict getdef $shapes $fields none}]
+    set built {}
+    foreach name {ec::fill ec::read status_only direct two alias raw via_raw wrapped chosen looped} {
+        foreach body [window::nirBodies $nir $name] {
+            foreach line $body {
+                if {[regexp {= structnew ([0-9]+) } $line -> shape] && $shape in $writeBack} {
+                    lappend built $name
+                }
+            }
+        }
+    }
+    set fill [lindex [window::nirBodies $nir ec::fill] 0]
+    set errno [lsearch -regexp $fill "= call [window::nirId $nir ec::errno]\$"]
+    set mutable [lsearch -regexp $fill {= structnew }]
+    list $built [expr {$errno >= 0 && $mutable > $errno}]
+} -result {{} 1}
+
+test ec-darwin-read-window {std::darwin::read (stdlib/darwin.bot, compiled for macos-aarch64): read(2), the keepalive of its private copy, the comparison of the C word read(2) returned (cwlt: its ssize_t, never boxed), errno() -- on the specializing and the generic lowering, with struct scalar replacement on and off (C-FFI-ERROR-CAPTURE-MILESTONE-2.md); and the detector finds the old window again under the eager-foreign-result fault} -body {
+    set dir [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport std::darwin\nr = std::darwin::read(0, std::abi::bytes::zeroed(std::abi::usize(4)))\n\[r.count, r.errno\]\n" macos-aarch64]
+    set hir [ecHir $dir macos-aarch64]
+    lmap options {{} {-specialize 0} {-struct-opt 0} {-struct-opt 0 -specialize 0} {-struct-opt 0 -fault eager-foreign-result}} {
+        lmap w [window::nirWindows [native::nir $hir {*}$options] std::darwin::read std::darwin::errno] {window::nirOps $w}
+    }
+} -result {{{keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt}} {{keepalive structnew structnew structget ilt}}}
+
+test ec-interchange {HIR interchange carries what the representation needs: the program written as text and read back after another compilation lowers to the same NIR (the write-back value's fields are a lowering decision, no new HIR fact)} -body {
+    set hir [ecHir [ecApp $::shapesMain linux-x86_64] linux-x86_64]
+    set text [hir::interchange::encode $hir]
+    surface::compile "1 + 2\n" -warnings off
+    set back [hir::interchange::decode $text -target linux-x86_64]
+    expr {[native::nir $back] eq [native::nir $hir]}
+} -result 1
+
+test ec-tcl-backends {the Tcl backends run the binding up to its first C call, which they refuse (NATIVE-ONLY): the representation is native lowering's alone} -body {
+    set hir [ecHir [ecApp $::shapesMain linux-x86_64] linux-x86_64]
+    lmap backend {interp compile} {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}}
+
+# ---------------------------------------------------------------------------
+# Behavior through real C
+
+test ec-fixture-shapes {every shape through the fixture's C functions, on both native backends: distinct errnos in succession (13, EBADF from read(2), 6, 7, 8, 10, 11, 22, 33, 34), a success after a failure reporting 0 (never the stale errno 99 a successful call left), the bytes C wrote before failing kept, two written parameters each with its own copy of one owner, a read and a write exposure of one owner (the read sees the original, the copy is written, the original unchanged), results returned, stored in lists, held in a struct, captured by a closure and held across a suspension, and the caller's MutableBytes never changed} -constraints ecFixture -body {
+    ecOutcome [ecApp $::shapesMain]
+} -result [list value [ecExpected]]
+
+test ec-arguments-once {a write-exposing C call's arguments are evaluated once each, in order, before the call, and nothing of the call moves past the code after it: a counter C function as the seed argument (1), then again after the call (2); the buffer C wrote from seed 1} -constraints ecFixture -body {
+    ecOutcome [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport ec\nfn once(m: std::abi::bytes::MutableBytes) -> list:\n    r = ec::fill_errno(m, ec::mlen(m), ec::tick(), 0, 0)\n    after = ec::tick()\n    \[r.result, after, r.out\]\nonce(std::abi::bytes::zeroed(std::abi::usize(4)))\n"]
+} -result [list value "\[4, 2, [ecMut 01264b70]\]"]
+
+test ec-fixture-executable {the same program as a standalone executable prints the same value (the runtime shows the buffers opaque), also under GC stress (a collection at every allocation site) and with an allocator that changes errno on every allocation (tests/cffi/errno-clobber.c): no allocation runs between a failed call and its errno read} -constraints ecClobber -body {
+    set exe [ecExecutable [ecApp $::shapesMain]]
+    set plain [ecRun $exe]
+    list [expr {$plain eq [ecShown]}] [expr {[ecRun $exe {BOTLISH_NATIVE_GC_STRESS 1}] eq $plain}] \
+        [expr {[ecRun $exe [ecClobbering]] eq $plain}] [expr {[ecRun $exe [concat [ecClobbering] {BOTLISH_NATIVE_GC_STRESS 1}]] eq $plain}]
+} -result {1 1 1 1}
+
+test ec-clobber-positive-control {the allocator does change errno where something allocates between a C call and the errno read: a program that builds a String there reads the marker, not the C call's errno; and the lowering before this milestone (struct scalar replacement off with the eager-foreign-result fault: the write-back value built right after the call) reads the marker in every wrapper, while the same program lowered now reads each call's own errno} -constraints ecClobber -body {
+    set allocating [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport std::ffi::c\nimport std::str\nimport ec\nfn f(m: std::abi::bytes::MutableBytes, s: str) -> int:\n    r = ec::fill_errno(m, ec::mlen(m), 1, 13, 0)\n    t = std::str::concat(s, s)\n    if std::str::length(t) > 0 and r.result < 0:\n        return ec::errno()\n    0\n\[f(std::abi::bytes::zeroed(std::abi::usize(4)), \"ab\"), f(std::abi::bytes::zeroed(std::abi::usize(4)), \"cd\")\]\n"]
+    set exe [ecExecutable $allocating]
+    set app [ecApp $::shapesMain]
+    set eager [ecExecutable $app {-struct-opt 0 -fault eager-foreign-result}]
+    set now [ecExecutable $app]
+    list [ecRun $exe] [ecRun $exe [ecClobbering 77]] \
+        [lsort -unique [regexp -all -inline {errno: -?[0-9]+} [ecRun $eager [ecClobbering 77]]]] \
+        [lsort -unique [regexp -all -inline {errno: -?[0-9]+} [ecRun $now [ecClobbering 77]]]] \
+        [expr {[ecRun $eager] eq [ecRun $now]}]
+} -result [list {[13, 13]} {[77, 77]} {{errno: 0} {errno: 77}} [lsort -unique [list {errno: 0} {errno: 13} "errno: [dict get [ecErrnoFacts] EBADF]"]] 1]
+
+# Real read(2) of the C library (glibc, libSystem): failures with their own
+# errnos, successes between them, buffers of every size.
+set readMain {direct module
+import std::abi
+import std::abi::bytes
+import std::coroutine
+import std::ffi::c
+import std::list
+import std::str
+import ec
+
+struct Event:
+    value: int
+
+fn summary(o: ec::Outcome) -> List[int]:
+    [o.result, o.errno, std::abi::bytes::mutable_length(o.data).value]
+
+fn zeros(n: int) -> std::abi::bytes::MutableBytes:
+    size = std::abi::usize(n):
+        on std::abi::AbiIntegerAboveRange:
+            return std::abi::bytes::zeroed(std::abi::usize(0))
+        on std::abi::AbiIntegerBelowRange:
+            return std::abi::bytes::zeroed(std::abi::usize(0))
+    std::abi::bytes::zeroed(size)
+
+fn round(dir: str) -> List[List[int]]:
+    wo = ec::open("/dev/null", 1)
+    ro = ec::open("/dev/zero", 0)
+    d = ec::open(dir, 0)
+    rounds = [summary(ec::read(99, zeros(16))), summary(ec::read(wo, zeros(16))), summary(ec::read(d, zeros(16))),
+        summary(ec::read(ro, zeros(64))), summary(ec::read(99, zeros(0))), summary(ec::read(ro, zeros(0))),
+        summary(ec::read(ro, zeros(1048576))), summary(ec::read(wo, zeros(1048576)))]
+    ec::close(wo)
+    ec::close(ro)
+    ec::close(d)
+    rounds
+
+fn worker(dir: str) -> Event:
+    before = ec::read(99, zeros(8))
+    yield Event {value: before.errno}
+    after = ec::read(99, zeros(8))
+    Event {value: after.errno + 1000 * std::abi::bytes::mutable_length(before.data).value}
+
+fn filled() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::from_bytes(std::abi::bytes::from_list(std::str::encode_utf8("ABCDEFGH")))
+
+fn kept_read(dir: str) -> List[bool]:
+    original = filled()
+    ro = ec::open("/dev/zero", 0)
+    good = ec::read(ro, original)
+    bad = ec::read(99, original)
+    ec::close(ro)
+    [std::abi::bytes::freeze(good.data) == std::abi::bytes::freeze(zeros(8)), std::abi::bytes::freeze(bad.data) == std::abi::bytes::freeze(filled()), std::abi::bytes::freeze(original) == std::abi::bytes::freeze(filled())]
+
+fn all(dir: str) -> List[any]:
+    coroutine {step, first} = worker(dir)
+    [round(dir), first.value, step().value, kept_read(dir), round(dir) == round(dir)]
+}
+
+test ec-real-read {the C library's own read(2) through a write exposure, the errno read right after it: EBADF for a descriptor that does not exist and for one opened write-only, EISDIR for a directory (the host's own values), each before and after a success that reports 0 -- a 64-byte read of /dev/zero, an empty one, a 1 MiB one -- and an empty read of a bad descriptor failing too; inside a coroutine before and after a suspension; the buffer C filled kept, a failed read's buffer as it was, the caller's never changed; on both native backends, as an executable, under GC stress and with the errno-changing allocator} -constraints ecClobber -body {
+    set main $::readMain
+    append main "all(\"[file normalize $::scratch]\")\n"
+    set app [ecApp $main]
+    set value [lindex [ecOutcome $app] 1]
+    set exe [ecExecutable $app]
+    set plain [ecRun $exe]
+    list [expr {$value eq $plain}] [expr {[ecRun $exe {BOTLISH_NATIVE_GC_STRESS 1}] eq $plain}] \
+        [expr {[ecRun $exe [ecClobbering]] eq $plain}] $plain
+} -result [apply {{ebadf eisdir} {
+    list 1 1 1 "\[\[\[-1, $ebadf, 16\], \[-1, $ebadf, 16\], \[-1, $eisdir, 16\], \[64, 0, 64\], \[-1, $ebadf, 0\], \[0, 0, 0\], \[1048576, 0, 1048576\], \[-1, $ebadf, 1048576\]\], $ebadf, [expr {8000 + $ebadf}], \[true, true, true\], true\]"
+}} [dict get [ecErrnoFacts] EBADF] [dict get [ecErrnoFacts] EISDIR]]
+
+# ---------------------------------------------------------------------------
+# Machine code: the object file, read with its relocations
+
+# The functions (window::machine) of the object file of DIR's program
+# (lowering OPTIONS) and its NIR.
+proc ecObject {dir options} {
+    set hir [ecHir $dir]
+    set path [file join $dir object[incr ::appCounter].o]
+    native::object $hir $path {*}$options
+    return [list [window::machine $path] [native::nir $hir {*}$options]]
+}
+
+# The calls on the paths from each shape's C call to its errno() call, in
+# machine code: {NAME CALLS ...}.
+proc ecMachineWindows {dir options} {
+    lassign [ecObject $dir $options] functions nir
+    set errno botlish_fn_[window::nirId $nir ec::errno]
+    set result {}
+    foreach {name foreign} {ec::fill bcf_fill_errno ec::read read status_only bcf_fill_errno direct bcf_fill_errno two bcf_fill2_errno
+            alias bcf_reverse_errno wrapped bcf_fill_errno chosen bcf_fill_errno looped bcf_fill_errno suspended bcf_fill_errno} {
+        set calls {}
+        foreach id [regexp -all -inline -line "^func (\[0-9\]+) \"[string map {:: ::} $name]\" " $nir] {
+            if {[string is integer -strict $id]} {
+                lappend calls {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
+            }
+        }
+        lappend result $name [lsort -unique $calls]
+    }
+    return $result
+}
+
+test ec-machine-window {in the object file (objdump with relocations, every target's own call sequences), the calls on any path from each shape's C call to its call of errno() are at most the BigInt paths of a 64-bit result (window::bigIntPaths: taken only when the value is no small Int -- never for the -1 a failure returns), no allocation, no other runtime helper, no C function; errno() calls nothing from its entry to __errno_location/__error, and nothing from there to the load (rt_native_load)} -constraints {ecFixture objdump} -body {
+    set dir [ecApp $::shapesMain]
+    set windows [ecMachineWindows $dir {}]
+    set others {}
+    dict for {name calls} $windows {
+        foreach call $calls {
+            if {$call ni [window::bigIntPaths]} {
+                lappend others $name $call
+            }
+        }
+    }
+    lassign [ecObject $dir {}] functions nir
+    set errno botlish_fn_[window::nirId $nir ec::errno]
+    set location [ecErrnoSymbol $::hostTarget]
+    list $others [window::machineWindow $functions $errno "" $location] [window::machineWindow $functions $errno $location rt_native_load] \
+        [expr {$location in [window::machineCalls $functions $errno] && "rt_native_load" in [window::machineCalls $functions $errno]}]
+} -result {{} {} {} 1}
+
+test ec-machine-positive-control {the machine-code detector sees the eager construction: the object file of the eager lowering (struct scalar replacement off, the eager-foreign-result fault) has rt_struct_new on the path from every shape's C call to errno()} -constraints {ecFixture objdump} -body {
+    set windows [ecMachineWindows [ecApp $::shapesMain] {-struct-opt 0 -fault eager-foreign-result}]
+    lsort -unique [dict values [dict map {name calls} $windows {expr {"rt_struct_new" in $calls}}]]
+} -result 1
+
+# The functions (by symbol) every instruction of TRACE belongs to, in order,
+# each once per run of consecutive instructions: an executable's symbols
+# (SYMBOLS, `nm`'s address -> name) and, for a library, its path.
+proc ecTraceRuns {trace symbols errnoLib errnoOffset} {
+    set addresses [lsort -integer [dict keys $symbols]]
+    set runs {}
+    foreach line [split $trace \n] {
+        if {[regexp {^exe ([0-9a-f]+)$} $line -> hex]} {
+            set address [expr {"0x$hex"}]
+            set name ?
+            foreach a $addresses {
+                if {$a > $address} break
+                set name [dict get $symbols $a]
+            }
+        } elseif {[regexp {^lib (\S+) ([0-9a-f]+)$} $line -> path offset]} {
+            set at [expr {"0x$offset"}]
+            if {$path eq $errnoLib && $at >= $errnoOffset && $at < $errnoOffset + 64} {
+                set name __errno_location
+            } else {
+                set name lib:[file tail $path]
+            }
+        } else {
+            continue
+        }
+        if {[lindex $runs end] ne $name} {
+            lappend runs $name
+        }
+    }
+    return $runs
+}
+
+# The functions DIR's executable (lowering OPTIONS) runs from the return of
+# ec::fill's C call to the load of errno, by single-stepping it. The window
+# starts at the instruction after the call of bcf_fill_errno: found in the
+# object file of the same lowering (its relocation names the C function),
+# at the same offset in the executable's ec::fill, whose code is checked to
+# be the object's. With UNTILLIBRARY the trace ends at the first instruction
+# of a shared library (the allocator's entry, for the eager lowering: its
+# lock is not single-stepped, which on AArch64 would never end).
+proc ecTraced {dir options {untilLibrary 0} {function ec::fill} {foreign bcf_fill_errno}} {
+    set exe [ecExecutable $dir $options]
+    lassign [ecObject $dir $options] functions nir
+    set fill botlish_fn_[window::nirId $nir $function]
+    set offset [lindex [window::machineCallReturns $functions $fill $foreign] 0]
+    set symbols [dict create]
+    foreach line [split [exec nm $exe] \n] {
+        if {[regexp {^([0-9a-f]+) [tTwW] (\S+)$} $line -> address name]} {
+            dict set symbols [expr {"0x$address"}] $name
+        }
+    }
+    set linked [lindex [dict filter $symbols value $fill] 0]
+    set copy [window::machineMnemonics [window::machine $exe $fill] $fill]
+    if {$copy ne [window::machineMnemonics $functions $fill]} {
+        error "the executable's $fill is not the object's"
+    }
+    set start [format %x [expr {$linked + $offset}]]
+    set stop [format %x [lindex [dict filter $symbols value rt_native_load] 0]]
+    set output [exec env WINDOW_TRACE_UNTIL_LIBRARY=[expr {$untilLibrary ? 1 : ""}] [ecTracer] $exe $start $stop]
+    regexp -line {^errno (\S+) ([0-9a-f]+)$} $output -> lib at
+    set runs [ecTraceRuns $output $symbols $lib [expr {"0x$at"}]]
+    set errno botlish_fn_[window::nirId $nir ec::errno]
+    return [lmap name $runs {
+        expr {$name eq $fill ? $function : ($name eq $errno ? "ec::errno" : $name)}
+    }]
+}
+
+test ec-trace {the instructions actually executed (ptrace single-stepping the executable) from the return of ec::fill's failing C call to the load of errno: the wrapper's comparison and branch, errno()'s entry, the C library's __errno_location, errno() again up to the load -- no other function, no allocator; the eager executable (struct scalar replacement off, the eager-foreign-result fault: the eager write-back value) runs rt_struct_new and enters the C library's allocator there (traced up to that entry)} -constraints ecTrace -body {
+    set dir [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport ec\nr = ec::fill(std::abi::bytes::zeroed(std::abi::usize(4)), 1, 13, 0)\n\[r.result, r.errno\]\n"]
+    set eager [ecTraced $dir {-struct-opt 0 -fault eager-foreign-result} 1]
+    list [ecTraced $dir {}] [expr {"rt_struct_new" in $eager}] [expr {[lsearch -glob $eager lib:*] >= 0}]
+} -result {{ec::fill ec::errno __errno_location ec::errno} 1 1}
+
+# ---------------------------------------------------------------------------
+# C-FFI-ERROR-CAPTURE-MILESTONE-2.md: the error capture does not depend on
+# how the C result is represented -- scalar replacement off, the generic
+# lowering, a value that escapes after the capture, a 64-bit result outside
+# the small-Int range.
+
+# Write-back values that escape after (or around) the errno read, and 64-bit
+# results outside the small-Int range: each NAME reads errno right after its
+# failed call.
+set escapesMain {direct module
+import std::abi
+import std::abi::bytes
+import std::coroutine
+import std::ffi::c
+import std::list
+import std::str
+import ec
+
+struct Captured:
+    errno: int
+    fetch: Fn{args: [], return: std::abi::bytes::MutableBytes}
+
+struct Event:
+    value: int
+
+fn empty() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::zeroed(std::abi::usize(0))
+
+fn captured_after(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> Captured:
+    r = ec::fill_errno(data, ec::mlen(data), 3, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    fn get() -> std::abi::bytes::MutableBytes:
+        r.out
+    Captured {errno: failure, fetch: get}
+
+fn captured_success(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> Captured:
+    r = ec::fill_errno(data, ec::mlen(data), 4, err, 0)
+    if r.result < 0:
+        failure = ec::errno()
+        return Captured {errno: failure, fetch: empty}
+    fn get() -> std::abi::bytes::MutableBytes:
+        r.out
+    Captured {errno: 0, fetch: get}
+
+fn captured_failure(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> Captured:
+    r = ec::fill_errno(data, ec::mlen(data), 5, err, 0)
+    if r.result < 0:
+        failure = ec::errno()
+        fn get() -> std::abi::bytes::MutableBytes:
+            r.out
+        return Captured {errno: failure, fetch: get}
+    Captured {errno: 0, fetch: empty}
+
+fn nested(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> Captured:
+    r = ec::fill_errno(data, ec::mlen(data), 6, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    fn outer() -> Fn{args: [], return: std::abi::bytes::MutableBytes}:
+        fn inner() -> std::abi::bytes::MutableBytes:
+            r.out
+        inner
+    Captured {errno: failure, fetch: outer()}
+
+fn stored_list(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::fill_errno(data, ec::mlen(data), 7, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    [failure, r]
+
+fn stored_struct(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int):
+    r = ec::fill_errno(data, ec::mlen(data), 8, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    {errno: failure, wb: r}
+
+fn keep(w) -> list:
+    [w, w]
+
+fn passed(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::fill_errno(data, ec::mlen(data), 9, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    [failure, keep(r), r.out]
+
+fn loop_after(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::fill_errno(data, ec::mlen(data), 10, err, 0)
+    failure = if r.result < 0:
+        ec::errno()
+    else:
+        0
+    lens = loop i from 0 to 3:
+        [i, r.out]
+    [failure, lens]
+
+fn returned(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int):
+    r = ec::fill_errno(data, ec::mlen(data), 11, err, 0)
+    if r.result < 0:
+        if ec::errno() != err:
+            return ec::fill_errno(empty(), 0, 0, 0, 0)
+    r
+
+fn write_back_large(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = ec::fill_size(data, ec::mlen(data), 12, err)
+    if r.result == 18446744073709551615:
+        failure = ec::errno()
+        return [r.result, failure, r.out]
+    [r.result, 0, r.out]
+
+fn large(failing: std::ffi::c::Int) -> list:
+    r = ec::large_error(failing)
+    if r == 18446744073709551615:
+        failure = ec::errno()
+        return [r, failure]
+    [r, 0]
+
+fn large_direct(failing: std::ffi::c::Int) -> int:
+    if ec::large_error(failing) == 18446744073709551615:
+        return ec::errno()
+    0
+
+fn unsigned_first(which: std::ffi::c::Int, err: std::ffi::c::Int) -> list:
+    r = ec::unsigned_errno(which, err)
+    failure = if err != 0:
+        ec::errno()
+    else:
+        0
+    [r, failure]
+
+fn signed_cmp(which: std::ffi::c::Int, err: std::ffi::c::Int) -> list:
+    r = ec::signed_errno(which, err)
+    if r < 0:
+        failure = ec::errno()
+        return [r, failure]
+    [r, 0]
+
+fn signed_first(which: std::ffi::c::Int, err: std::ffi::c::Int) -> list:
+    r = ec::signed_errno(which, err)
+    failure = if err != 0:
+        ec::errno()
+    else:
+        0
+    [r, failure]
+
+fn co_large(failing: std::ffi::c::Int, again: std::ffi::c::Int) -> Event:
+    r = ec::large_error(failing)
+    failure = if r == 18446744073709551615:
+        ec::errno()
+    else:
+        0
+    yield Event {value: failure}
+    later = ec::large_error(again)
+    if later == 18446744073709551615:
+        return Event {value: ec::errno() + 1000 * failure}
+    Event {value: 0}
+
+fn in_coroutine(failing: std::ffi::c::Int, again: std::ffi::c::Int) -> list:
+    coroutine {step, first} = co_large(failing, again)
+    [first.value, step().value]
+
+fn int_sentinel() -> list:
+    r = ec::c_close(-1)
+    if r < 0:
+        failure = ec::errno()
+        return [r, failure]
+    [r, 0]
+
+m = std::abi::bytes::zeroed(std::abi::usize(4))
+a = captured_after(m, 41)
+s = captured_success(m, 0)
+s2 = captured_success(m, 42)
+f = captured_failure(m, 43)
+f2 = captured_failure(m, 0)
+n = nested(m, 44)
+[[a.errno, (a.fetch)()], [s.errno, (s.fetch)()], [s2.errno, (s2.fetch)()], [f.errno, (f.fetch)()], [f2.errno, (f2.fetch)()], [n.errno, (n.fetch)()],
+ stored_list(m, 45), stored_struct(m, 46), passed(m, 47), loop_after(m, 48), returned(m, 61), returned(m, 0), write_back_large(m, 49), write_back_large(m, 0),
+ large(50), large(0), large_direct(51), large_direct(0),
+ unsigned_first(6, 52), unsigned_first(2, 0), unsigned_first(3, 53), unsigned_first(4, 0),
+ signed_cmp(7, 54), signed_cmp(1, 55), signed_cmp(4, 0), signed_cmp(6, 56), signed_cmp(5, 57),
+ signed_first(6, 58), signed_first(5, 0), in_coroutine(59, 60), int_sentinel(), m]
+}
+
+# What escapesMain prints (ecMut: a MutableBytes as the runtime shows it):
+# with CLOBBERED, what it prints under the eager-foreign-result fault with
+# the errno-changing allocator -- 77 for every errno read after something
+# the fault allocates (all but the two signed results inside the small-Int
+# range, which even Milestone 1 never boxed).
+proc ecWb {result hex} {
+    return "{out: [ecMut $hex], result: $result}"
+}
+proc ecEscapesValue {{clobbered 0}} {
+    set e [list x "expr {\$x in {55 57} || !$clobbered ? \$x : 77}"]
+    return [join [list \
+        "\[\[[apply $e 41], [ecMut 03284d72]\], \[0, [ecMut 04294e73]\], \[[apply $e 42], [ecMut {}]\], \[[apply $e 43], [ecMut 052a4f74]\], \[0, [ecMut {}]\], \[[apply $e 44], [ecMut 062b5075]\]" \
+        "\[[apply $e 45], [ecWb -1 072c5176]\], {errno: [apply $e 46], wb: [ecWb -1 082d5277]}, \[[apply $e 47], \[[ecWb -1 092e5378], [ecWb -1 092e5378]\], [ecMut 092e5378]\], \[[apply $e 48], \[\[0, [ecMut 0a2f5479]\], \[1, [ecMut 0a2f5479]\], \[2, [ecMut 0a2f5479]\]\]\]" \
+        "[if {[apply $e 61] == 61} {ecWb -1 0b30557a} else {ecWb 0 {}}], [ecWb 4 0b30557a]" \
+        "\[18446744073709551615, [apply $e 49], [ecMut 0c31567b]\], \[4, 0, [ecMut 0c31567b]\]" \
+        "\[18446744073709551615, [apply $e 50]\], \[42, 0\], [apply $e 51], 0" \
+        "\[18446744073709551615, [apply $e 52]\], \[4611686018427387903, 0\], \[4611686018427387904, [apply $e 53]\], \[9223372036854775808, 0\]" \
+        "\[-9223372036854775808, [apply $e 54]\], \[-1, [apply $e 55]\], \[9223372036854775807, 0\], \[-4611686018427387905, [apply $e 56]\], \[-4611686018427387904, [apply $e 57]\]" \
+        "\[-4611686018427387905, [apply $e 58]\], \[-4611686018427387904, 0\], \[[apply $e 59], [expr {[apply $e 60] + 1000 * [apply $e 59]}]\], \[-1, [dict get [ecErrnoFacts] EBADF]\], [ecMut 00000000]\]"] ", "]
+}
+
+# escapesMain's value as its executable shows it (opaque buffers).
+proc ecEscapesShown {{clobbered 0}} {
+    return [regsub -all {std::abi::bytes::MutableBytes \{storage: <mutbytes [0-9]+: [0-9a-f]*>\}} [ecEscapesValue $clobbered] {<opaque std::abi::bytes::MutableBytes>}]
+}
+
+# The lowering modes whose results must agree and whose error capture must
+# hold (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4).
+set ecModes {{} {-struct-opt 0} {-specialize 0} {-struct-opt 0 -specialize 0}}
+
+# The NIR windows (their ops) from each C call of escapesMain's functions to
+# their call of errno(), lowered with OPTIONS: {NAME WINDOWS ...}.
+proc ecEscapeWindows {target options} {
+    set nir [native::nir [ecHir [ecApp $::escapesMain $target] $target] {*}$options]
+    set result {}
+    foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after returned write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
+        lappend result $name [lmap w [window::nirWindows $nir $name ec::errno] {window::nirOps $w}]
+    }
+    return $result
+}
+
+test ec-modes-nir-windows {in every lowering mode -- specialized and generic, struct scalar replacement on and off -- every function's window from its C call to its call of errno() holds the keepalives of its exposures and the comparison of the result, nothing else: the write-back value is never built there because a closure captures it afterwards (on every path, on the success path only, on the failure path only, inside a nested function), because it is stored in a List or a struct afterwards, passed to another function, returned by the function, or used in a loop; a 64-bit result outside the small-Int range is compared as the C word C returned (cweq/cwlt against a cword constant, unsigned for size_t and unsigned long, signed for long) and never boxed; a result read only after errno() is not even compared; the same inside a coroutine, before and after its suspension; and the Milestone 1 shapes too, with struct scalar replacement off -- but for the one shape whose program builds a struct of the write-back value before reading errno (wrapped: with scalar replacement off, that struct literal is an object the program asked for, C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32)} -body {
+    set result {}
+    foreach target {linux-x86_64 macos-aarch64} {
+        foreach options $::ecModes {
+            set windows [ecEscapeWindows $target $options]
+            set shapes [ecShapeWindows $target $options]
+            lappend result [list $windows [dict get $shapes ec::fill] [dict get $shapes two] [dict get $shapes chosen] \
+                [dict get $shapes looped] [dict get $shapes suspended] [dict get $shapes wrapped]]
+        }
+    }
+    lsort -unique $result
+} -result [list \
+    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} returned {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}}] \
+    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} returned {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive structnew cwbox structnew structnew structget structget ilt}}]]
+
+
+test ec-modes-nir-no-hazard {no window of the escapes program holds anything that may allocate, call or collect (window::nirHazards), in any lowering mode} -body {
+    set hazards {}
+    foreach options $::ecModes {
+        set nir [native::nir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64] {*}$options]
+        foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after returned write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
+            foreach w [window::nirWindows $nir $name ec::errno] {
+                lappend hazards {*}[window::nirHazards $w]
+            }
+        }
+    }
+    set hazards
+} -result {}
+
+test ec-boxed-results {no C call's 64-bit integer result is converted as part of the call (window::nirBoxedResults: every such foreigncall defines a C word, i64 or u64), in any lowering mode -- and the detector sees the conversion the eager-foreign-result fault re-creates (Milestone 1's representation: boxed by the call itself, rt_ffi_box_i64/_u64 beyond the small range)} -body {
+    set hir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64]
+    list [lmap options $::ecModes {window::nirBoxedResults [native::nir $hir {*}$options]}] \
+        [lsort -unique [lmap boxed [window::nirBoxedResults [native::nir $hir -fault eager-foreign-result]] {lindex $boxed 0}]]
+} -result {{{} {} {} {}} {captured_after captured_failure captured_success co_large large large_direct loop_after nested passed returned signed_cmp signed_first stored_list stored_struct unsigned_first write_back_large}}
+
+test ec-large-sentinel-nir {(size_t)-1 is compared as the unsigned word C returned: the result register is declared u64 (unsigned long and size_t; long is i64), the sentinel is a cword constant of the same kind, the comparison cweq; the Int is built (cwbox) only after errno(), for the List the function returns} -body {
+    set nir [native::nir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64]]
+    set body [lindex [window::nirBodies $nir large] 0]
+    set header [lsearch -inline -regexp [split $nir \n] {^func [0-9]+ "large" }]
+    regexp {(%[0-9]+) = foreigncall} [join $body \n] -> result
+    regexp {(%[0-9]+) = cword 18446744073709551615} [join $body \n] -> sentinel
+    set errno [lsearch -regexp $body "= call [window::nirId $nir ec::errno]\$"]
+    set box [lsearch -regexp $body "= op cwbox $result\$"]
+    list [regexp "u64regs=\"\[^\"\]*\\m[string range $result 1 end]\\M" $header] [regexp "u64regs=\"\[^\"\]*\\m[string range $sentinel 1 end]\\M" $header] \
+        [expr {[lsearch -exact $body "%[expr {[string range $sentinel 1 end] + 1}] = op cweq $result $sentinel"] >= 0}] [expr {$errno >= 0 && $box > $errno}] \
+        [regexp {i64regs=} [lsearch -inline -regexp [split $nir \n] {^func [0-9]+ "signed_cmp" }]]
+} -result {1 1 1 1 1}
+
+# Comparisons of every C word boundary value: the unsigned and the signed
+# table of tests/cffi/fixture.c against constants that fit the word, that
+# do not, and against BigInt values that are not constants.
+set compareMain {direct module
+import std::ffi::c
+import std::list
+import ec
+
+fn cmp_u(which: std::ffi::c::Int, big: int) -> list:
+    r = ec::unsigned_errno(which, 0)
+    [r, r < 0, r >= 0, r == 18446744073709551615, r > 4611686018427387903, r <= 4611686018427387904, -1 < r, r == -1, r < big, r == big, r > big, big >= r, r + 1, r - 1, ec::unsigned_errno(which, 0) == 18446744073709551615]
+
+fn cmp_s(which: std::ffi::c::Int, big: int) -> list:
+    r = ec::signed_errno(which, 0)
+    [r, r < 0, r == -1, r < -4611686018427387904, r >= 4611686018427387904, r == 9223372036854775807, r < 18446744073709551615, r > 0 - 18446744073709551615, r < big, r == big, r > big, big <= r, r + 1, r - 1]
+
+us = loop which from 0 to 7:
+    cmp_u(which, 18446744073709551614 + 0)
+ss = loop which from 0 to 8:
+    cmp_s(which, 0 - 9223372036854775808)
+[us, ss]
+}
+
+# compareMain's value, computed here from the tables.
+proc ecCompareExpected {} {
+    set bool {x {expr {$x ? "true" : "false"}}}
+    set unsigned {0 5 4611686018427387903 4611686018427387904 9223372036854775808 18446744073709551614 18446744073709551615}
+    set signed {0 -1 4611686018427387903 4611686018427387904 9223372036854775807 -4611686018427387904 -4611686018427387905 -9223372036854775808}
+    set us {}
+    set big 18446744073709551614
+    foreach r $unsigned {
+        set row [list $r]
+        foreach c [list [expr {$r < 0}] [expr {$r >= 0}] [expr {$r == 18446744073709551615}] [expr {$r > 4611686018427387903}] \
+                [expr {$r <= 4611686018427387904}] [expr {-1 < $r}] [expr {$r == -1}] [expr {$r < $big}] [expr {$r == $big}] [expr {$r > $big}] [expr {$big >= $r}]] {
+            lappend row [apply $bool $c]
+        }
+        lappend row [expr {$r + 1}] [expr {$r - 1}] [apply $bool [expr {$r == 18446744073709551615}]]
+        lappend us "\[[join $row {, }]\]"
+    }
+    set ss {}
+    set big -9223372036854775808
+    foreach r $signed {
+        set row [list $r]
+        foreach c [list [expr {$r < 0}] [expr {$r == -1}] [expr {$r < -4611686018427387904}] [expr {$r >= 4611686018427387904}] \
+                [expr {$r == 9223372036854775807}] [expr {$r < 18446744073709551615}] [expr {$r > -18446744073709551615}] \
+                [expr {$r < $big}] [expr {$r == $big}] [expr {$r > $big}] [expr {$big <= $r}]] {
+            lappend row [apply $bool $c]
+        }
+        lappend row [expr {$r + 1}] [expr {$r - 1}]
+        lappend ss "\[[join $row {, }]\]"
+    }
+    return "\[\[[join $us {, }]\], \[[join $ss {, }]\]\]"
+}
+
+test ec-word-comparisons {a C word compared with an Int is compared exactly, as the word it is, on both native backends: every boundary of the small-Int range (2^62 - 1, 2^62, -2^62, -2^62 - 1), the 64-bit extremes, unsigned against negative constants and constants beyond 2^64 - 1, signed against constants beyond its range, both against BigInt values that are no constants (rt_ffi_word_cmp, which allocates nothing) and with the word on either side; the full value remains an Int (r + 1, r - 1 of 2^64 - 1 and of -2^63 are BigInts)} -constraints ecFixture -body {
+    ecOutcome [ecApp $::compareMain]
+} -result [list value [ecCompareExpected]]
+
+test ec-escapes-values {the escapes program on both native backends: every errno its C call set (41 to 61, distinct, in succession), 0 after each success; a closure that captured the write-back value after the errno read, on the success path only, on the failure path only, inside a nested function, each returning the buffer C wrote; the value stored in a List, in a struct, passed to a function and used in a loop afterwards; the value returned by the function that read its errno (or, with the wrong errno, another value); a size_t result of (size_t)-1 compared, its errno read and the full 2^64 - 1 kept, also as a write-back value's result beside its buffer; the boundary values of the small-Int range on both sides, signed and unsigned; the same in a coroutine, before and after a suspension; an ordinary C int failing with -1 (close(-1): EBADF, the host's own); the caller's MutableBytes unchanged} -constraints ecFixture -body {
+    ecOutcome [ecApp $::escapesMain]
+} -result [list value [ecEscapesValue]]
+
+# What shapesMain's executable lowered with OPTIONS prints with the
+# errno-changing allocator: its plain value, but for the two shapes outside
+# the guarantee (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32) where the
+# lowering builds the value at the program's request -- `raw` returns its C
+# call's write-back value before anyone reads errno (an object, built before
+# the return, wherever the return transport carries no fields: the generic
+# lowering, struct scalar replacement off), and `wrapped` builds a struct
+# literal holding it before the read (an object the program asked for when
+# struct scalar replacement is off).
+proc ecShownClobbered {options} {
+    set shown [ecShown]
+    set opaque {<opaque std::abi::bytes::MutableBytes>}
+    if {"-struct-opt" in $options || "-specialize" in $options} {
+        set shown [string map [list "\[-1, 8, $opaque\]" "\[-1, 77, $opaque\]"] $shown]
+    }
+    if {"-struct-opt" in $options} {
+        set shown [string map [list "\[-1, 10, $opaque, 1\]" "\[-1, 77, $opaque, 1\]"] $shown]
+    }
+    return $shown
+}
+
+test ec-modes-executables {the escapes program and Milestone 1's shapes as standalone executables, lowered in every mode (specialized and generic, struct scalar replacement on and off): every mode prints the same value, and prints it again under GC stress; with the allocator that sets errno to 77 on every allocation, and with both at once, every errno is the C call's own whatever the lowering (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4) -- but where the program itself asks for the value before its errno read: a function returning its C call's write-back value unread (via_raw's raw: built for the return when the return carries no fields, the generic lowering and struct scalar replacement off) and a struct literal built around it (wrapped, with struct scalar replacement off)} -constraints ecClobber -body {
+    set escapes [ecApp $::escapesMain]
+    set shapes [ecApp $::shapesMain]
+    set result {}
+    foreach options $::ecModes {
+        set exe [ecExecutable $escapes $options]
+        lappend result [expr {[ecRun $exe] eq [ecEscapesShown] && [ecRun $exe {BOTLISH_NATIVE_GC_STRESS 1}] eq [ecEscapesShown]
+            && [ecRun $exe [ecClobbering]] eq [ecEscapesShown] && [ecRun $exe [concat [ecClobbering] {BOTLISH_NATIVE_GC_STRESS 1}]] eq [ecEscapesShown]}]
+        set exe [ecExecutable $shapes $options]
+        lappend result [expr {[ecRun $exe] eq [ecShown] && [ecRun $exe {BOTLISH_NATIVE_GC_STRESS 1}] eq [ecShown]
+            && [ecRun $exe [ecClobbering]] eq [ecShownClobbered $options]
+            && [ecRun $exe [concat [ecClobbering] {BOTLISH_NATIVE_GC_STRESS 1}]] eq [ecShownClobbered $options]}]
+    }
+    set result
+} -result {1 1 1 1 1 1 1 1}
+
+test ec-modes-positive-control {the eager-foreign-result fault (Milestone 1's eager write-back value and 64-bit boxing, re-created) reads the allocator's 77 for every escaping shape and every 64-bit result outside the small-Int range -- the errnos ec-modes-executables reads right are the ones an allocation between the call and the read would change -- while results and buffers stay the same: only the error state is lost; the two signed results inside the small-Int range keep theirs (no Milestone boxed them)} -constraints ecClobber -body {
+    set exe [ecExecutable [ecApp $::escapesMain] {-fault eager-foreign-result}]
+    list [expr {[ecRun $exe] eq [ecEscapesShown]}] [expr {[ecRun $exe [ecClobbering 77]] eq [ecEscapesShown 1]}]
+} -result {1 1}
+
+test ec-modes-machine-windows {in the object file (objdump with relocations), in every lowering mode, the calls on any path from each escaping shape's and each 64-bit result's C call to its call of errno() are at most the BigInt path of a comparison with a BigInt that is no constant (rt_int_cmp, rt_ffi_word_cmp: neither allocates) -- no boxing (rt_ffi_box_i64/_u64), no allocation, no helper; the 64-bit results' windows hold no call at all, (size_t)-1 compared inline with its constant -- and the detector sees the boxing and the eager write-back value the eager-foreign-result fault re-creates (rt_ffi_box_u64 after (size_t)-1, rt_struct_new after a write exposure)} -constraints {ecFixture objdump} -body {
+    set dir [ecApp $::escapesMain]
+    set shapes {captured_after bcf_fill_errno captured_success bcf_fill_errno captured_failure bcf_fill_errno nested bcf_fill_errno
+        stored_list bcf_fill_errno stored_struct bcf_fill_errno passed bcf_fill_errno loop_after bcf_fill_errno returned bcf_fill_errno
+        write_back_large bcf_fill_size large bcf_large_error large_direct bcf_large_error signed_cmp bcf_signed_errno co_large bcf_large_error int_sentinel close}
+    set windows {}
+    foreach options [concat $::ecModes {{-fault eager-foreign-result}}] {
+        lassign [ecObject $dir $options] functions nir
+        set errno botlish_fn_[window::nirId $nir ec::errno]
+        set calls [dict create]
+        foreach {name foreign} $shapes {
+            foreach id [regexp -all -inline -line "^func (\[0-9\]+) \"$name\" " $nir] {
+                if {[string is integer -strict $id]} {
+                    dict lappend calls $name {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
+                }
+            }
+        }
+        lappend windows [dict map {name list} $calls {lsort -unique [lmap call $list {expr {$call in {rt_int_cmp rt_ffi_word_cmp} ? [continue] : $call}}]}]
+    }
+    list [lsort -unique [lrange $windows 0 end-1]] [dict get [lindex $windows end] large] [dict get [lindex $windows end] large_direct] \
+        [expr {"rt_struct_new" in [dict get [lindex $windows end] captured_after]}]
+} -result {{{captured_after {} captured_success {} captured_failure {} nested {} stored_list {} stored_struct {} passed {} loop_after {} returned {} write_back_large {} large {} large_direct {} signed_cmp {} co_large {} int_sentinel {}}} rt_ffi_box_u64 rt_ffi_box_u64 1}
+
+test ec-trace-large-sentinel {the instructions actually executed (ptrace single-stepping the executable) from the return of bcf_large_error's (size_t)-1 to the load of errno: the wrapper's inline comparison of the word with (size_t)-1 and its branch, errno()'s entry, the C library's __errno_location, errno() again -- no boxing, no allocator, on the specialized and the generic lowering with struct scalar replacement off; the eager-foreign-result fault's executable boxes the word (rt_ffi_box_u64) and enters the C library's allocator there} -constraints ecTrace -body {
+    set dir [ecApp "direct module\nimport std::ffi::c\nimport ec\nfn large(failing: std::ffi::c::Int) -> list:\n    r = ec::large_error(failing)\n    if r == 18446744073709551615:\n        failure = ec::errno()\n        return \[r, failure\]\n    \[r, 0\]\nlarge(34)\n"]
+    set eager [ecTraced $dir {-fault eager-foreign-result} 1 large bcf_large_error]
+    list [ecTraced $dir {} 0 large bcf_large_error] [ecTraced $dir {-struct-opt 0 -specialize 0} 0 large bcf_large_error] \
+        [expr {"rt_ffi_box_u64" in $eager}] [expr {[lsearch -glob $eager lib:*] >= 0}]
+} -result {{large ec::errno __errno_location ec::errno} {large ec::errno __errno_location ec::errno} 1 1}
+
+test ec-trace-captured {the instructions executed from the return of a failing C call whose write-back value a closure captures after the errno read, to the load of errno: the wrapper, errno(), __errno_location -- the value is built for the closure afterwards, never before; also with struct scalar replacement off; the eager-foreign-result fault's executable builds it (rt_struct_new) and enters the allocator} -constraints ecTrace -body {
+    set dir [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport std::ffi::c\nimport ec\nstruct Captured:\n    errno: int\n    fetch: Fn{args: \[\], return: std::abi::bytes::MutableBytes}\nfn captured(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> Captured:\n    r = ec::fill_errno(data, ec::mlen(data), 3, err, 0)\n    failure = if r.result < 0:\n        ec::errno()\n    else:\n        0\n    fn get() -> std::abi::bytes::MutableBytes:\n        r.out\n    Captured {errno: failure, fetch: get}\nx = captured(std::abi::bytes::zeroed(std::abi::usize(4)), 13)\nx.errno\n"]
+    set eager [ecTraced $dir {-fault eager-foreign-result} 1 captured]
+    list [ecTraced $dir {} 0 captured] [ecTraced $dir {-struct-opt 0} 0 captured] [expr {"rt_struct_new" in $eager}] [expr {[lsearch -glob $eager lib:*] >= 0}]
+} -result {{captured ec::errno __errno_location ec::errno} {captured ec::errno __errno_location ec::errno} 1 1}
+
+test ec-modes-interchange {the escapes program written as HIR interchange text and read back lowers to the same NIR in every mode: C words, pending objects and the foreign-result transport are lowering decisions over the HIR's existing facts, no new HIR fact} -body {
+    set hir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64]
+    set text [hir::interchange::encode $hir]
+    surface::compile "1 + 2\n" -warnings off
+    set back [hir::interchange::decode $text -target linux-x86_64]
+    lsort -unique [lmap options $::ecModes {expr {[native::nir $back {*}$options] eq [native::nir $hir {*}$options]}}]
+} -result 1
+
+file delete -force $::scratch
+cleanupTests

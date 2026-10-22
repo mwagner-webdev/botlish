@@ -129,12 +129,16 @@
     if {$copy ne ""} {
 >>>>
 
-@@ loaded-length-one-more a List std::binary::load copied from an array of N is taken to have N + 1 elements
-## hir/cardinality.tcl
+@@ loaded-length-one-more a List std::binary::load copied from an array of N is taken to have N + 1 elements (the length its type states, which the size forms read: LIST-CARDINALITY-REFINEMENTS.md)
+## hir/types.tcl
 <<<<
-                return [FormConst [lindex $term 1]]
+            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
+                return [lindex $term 1]
+            }
 ====
-                return [FormConst [expr {[lindex $term 1] + 1}]]
+            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
+                return [expr {[lindex $term 1] + 1}]
+            }
 >>>>
 
 @@ reference-extent-short-accepted the reference implementation accepts a List shorter than the extent (writing fewer elements)
@@ -230,7 +234,7 @@
 @@ native-store-row-written-while-encoding the native runtime writes a row's elements one at a time as it encodes them, so a value outside the encoding leaves the elements before it written
 ## native/src/runtime/nview.rs
 <<<<
-    let bytes = match encoded_row(p, l, width, signed, big, "std::binary::store") {
+    let bytes = match encoded_row(p, l, encoding, "std::binary::store") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
@@ -242,8 +246,8 @@
     }
     let items = list_of(l).items().to_vec();
     for (i, item) in items.into_iter().enumerate() {
-        match super::ops::bin_encode(p, item, width, signed, big, "std::binary::store") {
-            Ok(encoded) => store_at(address + i * width, &encoded[..width]),
+        match super::ops::bin_encode(p, item, encoding, "std::binary::store") {
+            Ok(encoded) => store_at(address + i * encoding.width, &encoded[..encoding.width]),
             Err(failed) => return failed,
         }
     }
@@ -253,7 +257,7 @@
 @@ native-row-past-storage the native runtime accepts a row that ends one byte past its storage
 ## native/src/runtime/nview.rs
 <<<<
-        Some(end) if end <= size => Ok((at, width, signed, big)),
+        Some(end) if end <= size => Ok((at, encoding)),
 ====
-        Some(end) if end <= size + 1 => Ok((at, width, signed, big)),
+        Some(end) if end <= size + 1 => Ok((at, encoding)),
 >>>>

@@ -899,6 +899,17 @@ layout X509_ALGOR:
     field algorithm: std::ffi::c::Ptr[boringssl::ctypes::ASN1_OBJECT] at 0  # ASN1_OBJECT *algorithm
     field parameter: std::ffi::c::Ptr[boringssl::ctypes::ASN1_TYPE] at 8  # ASN1_TYPE *parameter
 
+# struct rand_meth_st, typedef RAND_METHOD (include/openssl/rand.h:112): sizeof 48, _Alignof 8
+layout RAND_METHOD:
+    size 48
+    align 8
+    field seed: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int], return: unit}] at 0  # void (*seed)(const void *buf, int num)
+    field bytes: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::ULong], return: std::ffi::c::Int}] at 8  # int (*bytes)(uint8_t *buf, size_t num)
+    field cleanup: std::ffi::c::FnPtr[Fn{args: [], return: unit}] at 16   # void (*cleanup)(void)
+    field add: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::Double], return: unit}] at 24  # void (*add)(const void *buf, int num, double entropy)
+    field pseudorand: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::ULong], return: std::ffi::c::Int}] at 32  # int (*pseudorand)(uint8_t *buf, size_t num)
+    field status: std::ffi::c::FnPtr[Fn{args: [], return: std::ffi::c::Int}] at 40  # int (*status)(void)
+
 # struct rc4_key_st, typedef RC4_KEY (include/openssl/rc4.h:28): sizeof 1032, _Alignof 4
 layout RC4_KEY:
     size 1032

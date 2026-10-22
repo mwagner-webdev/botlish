@@ -372,6 +372,13 @@ extern c fn BIO_copy_next_retry named "botlish_bssl_BIO_copy_next_retry"(
     bio: std::ffi::c::Ptr[boringssl::ctypes::BIO]
 ) -> unit
 
+# C: int BIO_printf(BIO *bio, const char *format, ...)
+extern c fn BIO_printf named "botlish_bssl_BIO_printf"(
+    bio: std::ffi::c::Ptr[boringssl::ctypes::BIO],
+    format: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Int
+
 # C: int BIO_indent(BIO *bio, unsigned int indent, unsigned int max_indent)
 extern c fn BIO_indent named "botlish_bssl_BIO_indent"(
     bio: std::ffi::c::Ptr[boringssl::ctypes::BIO],

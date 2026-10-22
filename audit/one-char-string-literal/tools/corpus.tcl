@@ -321,7 +321,7 @@ proc consumerOf {hir parent site} {
 # The audit
 
 set commit [string trim [exec git -C $auditRoot rev-parse HEAD]]
-set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench lib]]
+set dirty [string trim [exec git -C $auditRoot status --porcelain -- examples bench stdlib]]
 puts "# ONE-CHAR-STRING-LITERAL corpus audit: tclsh9.0 audit/one-char-string-literal/tools/corpus.tcl"
 puts "# commit $commit (corpus paths [expr {$dirty eq "" ? "clean" : "MODIFIED: $dirty"}])"
 puts ""

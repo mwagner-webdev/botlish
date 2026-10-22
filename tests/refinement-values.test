@@ -746,7 +746,7 @@ fn f(s: str, t: str) -> int:
 f(\"abcd\", \"efgh\")
 " -warnings off]
     list [boundTypeOf $hir mails] [boundTypeOf $hir mixed]
-} -result {{List[str[Mail]]} {List[str]}}
+} -result {{List[str[Mail]]{length: 2}} {List[str]{length: 2}}}
 
 test refinement-generic-imprint {an identity function's semantic instance keeps the refinement; one codegen instance serves both} -body {
     set source "$prelude

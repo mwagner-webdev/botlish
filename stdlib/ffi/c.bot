@@ -19,22 +19,32 @@
 # promotion, no wrapping); an Int becomes one only where its range proves it
 # fits. std::ffi::c::Int and std::ffi::c::Long stay two types where their ranges agree.
 #
-# C double (an intrinsic type of this namespace, FLOAT64-MILESTONE-1.md):
+# C floating types (intrinsic types of this namespace,
+# C-FLOAT-FFI-MILESTONE-1.md): C representations whose values are Float64s.
 #
-#   std::ffi::c::Double            Botlish's Float64 under its C ABI name: the
-#                             same values, carried as the target's IEEE 754
-#                             binary64 in its floating-point register class.
-#                             Every Float64 is a double; a double C returns
-#                             is a Float64 only when it is finite -- a NaN or
-#                             an infinity is the call's NonFiniteFloat (an
-#                             extern c fn returning one declares it), and
-#                             negative zero is zero.
+#   std::ffi::c::Double       C's double, IEEE 754 binary64 (8 bytes): every
+#                             Float64 is one, exactly
+#   std::ffi::c::Float        C's float, IEEE 754 binary32 (4 bytes): a
+#                             Float64 leaving for one is rounded to nearest,
+#                             ties to even, and one that rounds to an
+#                             infinity is NonFiniteFloat before C runs (never
+#                             clamped); a float entering widens exactly
+#
+# They name C types only -- an extern c fn's parameters and result, a
+# function pointer's signature, a pointee, a layout field -- and stay two
+# types (Ptr[std::ffi::c::Float] is no Ptr[std::ffi::c::Double]). A float or double
+# entering Botlish is a Float64 only when it is finite: a NaN or an infinity
+# is NonFiniteFloat (the call, or the layout read, declares it), and
+# negative zero is zero. Where a value type is written, std::ffi::c::Double means
+# Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number. C
+# long double has no type.
 #
 # Pointers (intrinsic types and operations of this namespace):
 #
-#   std::ffi::c::Void              the C void: an incomplete pointee, no values
-#   std::ffi::c::Ptr[T]            a C data pointer whose pointee identity is T:
-#                             std::ffi::c::Void, a C integer scalar, an opaque
+#   std::ffi::c::Void         the C void: an incomplete pointee, no values
+#   std::ffi::c::Ptr[T]       a C data pointer whose pointee identity is T:
+#                             std::ffi::c::Void, a C integer scalar, std::ffi::c::Bool,
+#                             std::ffi::c::Float or std::ffi::c::Double, an opaque
 #                             struct (an incomplete C tag's identity), or
 #                             another pointer
 #   std::ffi::c::FnPtr[Fn{args: [A, ...], return: R}]
@@ -60,12 +70,12 @@
 # or writes through it, and its pointee is a byte-sized C type
 # (std::ffi::c::Char, SChar, UChar) or std::ffi::c::Void:
 #
-#   std::abi::bytes::Bytes          read access only: C sees the bytes
-#   std::abi::bytes::MutableBytes   read: its bytes as they are; write: a private
-#                              copy C may modify, which the call returns as
-#                              the parameter's updated value (the caller's
-#                              own value never changes: a MutableBytes is a
-#                              value)
+#   std::abi::bytes::Bytes         read access only: C sees the bytes
+#   std::abi::bytes::MutableBytes  read: its bytes as they are; write: a
+#                                  private copy C may modify, which the call
+#                                  returns as the parameter's updated value
+#                                  (the caller's own value never changes: a
+#                                  MutableBytes is a value)
 #
 # A parameter that may keep the pointer, or about which nothing is known,
 # never admits it: `const` is not noescape, and unknown is not

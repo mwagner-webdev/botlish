@@ -150,6 +150,7 @@ proc hir::structs::OwnedRecursion {id} {
 # (STRUCT,CROSSED -> 1) bounds it: a struct is explored at most once per
 # CROSSED. (An anonymous struct's fields have no declaring struct: "".)
 proc hir::structs::OwnedRecursionFrom {target type crossed path visitedVar} {
+    set type [hir::types::Unrefined $type]
     upvar 1 $visitedVar visited
     variable registry
     if {[hir::types::IsNamedStruct $type]} {
@@ -387,7 +388,8 @@ proc hir::structs::apply {decls} {
         set ns [dict get $decl namespace]
         set id [identity $name $ns]
         if {$name in {Int any never Fn Coroutine enum} || [core::type::isBuiltinName $name] || [core::type::valid $id]
-                || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
+                || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]
+                || [hir::traits::isIntrinsicName $name]} {
             Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as a struct: the name is already a built-in or declared type"
         }
         if {[hir::enums::declared $id]} {
@@ -626,7 +628,7 @@ proc hir::structs::ProjectionProblem {hir e} {
         }
         NOT-A-STRUCT {
             return [list NOT-A-STRUCT [format {cannot project field "%s" from a value of type %s: only a struct has fields%s} \
-                $name [hir::types::show $type] $hint]]
+                $name [hir::types::showValue $type] $hint]]
         }
     }
     return [list UNPROVEN-FIELD [format {cannot project field "%s": the receiver's struct type is not known here (its type is %s), and a field projection is resolved statically, never looked up at run time%s} \

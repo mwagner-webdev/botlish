@@ -189,7 +189,7 @@
 ## hir/resolve.tcl
 <<<<
     SetField hir $e callee $c
-    SetField hir $e args [Sequence hir $argNodes $ctx]
+    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
 }
 ====
     SetField hir $e callee $c
@@ -205,7 +205,7 @@
         }
         set argNodes $wrapped
     }
-    SetField hir $e args [Sequence hir $argNodes $ctx]
+    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
 }
 >>>>
 ## hir/resolve.tcl

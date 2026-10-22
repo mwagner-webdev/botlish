@@ -259,3 +259,512 @@ proc hir::borrow::Decide {param argType} {
         return $result
     }
 >>>>
+
+# --- the macOS acceptance's mutants (MACOS-AARCH64-MILESTONE-7.md) -----------
+#
+# Bugs where the exposure meets the machine: the address the runtime
+# computes, the transport into a real C call, the detach's copy, which
+# storages a call keeps alive or exposes. Real C (tests/c-byte-borrowing.test)
+# kills them by what C read or wrote and by the address it was given; the
+# borrow fixture's NIR and allocation tests by structure.
+
+@@ exposure-is-object-word a read exposure of a Bytes hands C the storage object's own address (its header), not its payload's
+## native/src/runtime/ops.rs
+<<<<
+    let address = BytesObj::payload_address(v) as i64;
+====
+    let address = v as i64;
+>>>>
+
+@@ exposure-address-truncated a C call receives only the low 32 bits of an exposure's address
+## native/src/codegen/clif.rs
+<<<<
+            let word = if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+====
+            let word = if exposed[i] {
+                let address = self.b.ins().sshr_imm_s(v, 1);
+                self.b.ins().band_imm_s(address, 0xffff_ffff)
+            } else if class == nir::CAbi::Ptr {
+>>>>
+
+@@ apple-exposure-tagged under Apple's C convention an exposure's address is passed as its tagged small-Int word (2a + 1), not the address
+%% macos-aarch64
+## native/src/codegen/clif.rs
+<<<<
+            let word = if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+====
+            let word = if exposed[i] && apple {
+                v
+            } else if exposed[i] {
+                self.b.ins().sshr_imm_s(v, 1)
+            } else if class == nir::CAbi::Ptr {
+>>>>
+
+@@ keepalive-first-only a call with several exposures keeps only the first exposed storage alive
+## native/lower.tcl
+<<<<
+    foreach storage $kept {
+        Assign fn "op keepalive $storage" $e
+    }
+====
+    foreach storage [lrange $kept 0 0] {
+        Assign fn "op keepalive $storage" $e
+    }
+>>>>
+
+@@ detach-copy-short the write exposure's private copy (the detach) holds one byte fewer than its owner
+## native/src/runtime/ops.rs
+<<<<
+    vm(p).new_mutbytes_with(mutbytes_of(m).len(), |init| init.push_slice(mutbytes_of(m)))
+====
+    let short = mutbytes_of(m).len().saturating_sub(1);
+    vm(p).new_mutbytes_with(short, |init| init.push_slice(&mutbytes_of(m)[..short]))
+>>>>
+
+@@ read-exposure-copied a MutableBytes exposed for reading is copied first (a size-linear copy no read needs)
+## native/lower.tcl
+<<<<
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+====
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        if {$how eq "read" && [hir::borrow::IsMutableOwner $owner]} {
+            lset operands $i [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+        }
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+>>>>
+
+@@ exposure-wrong-owner every exposure of a call is the storage of its first exposed argument
+## native/lower.tcl
+<<<<
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands $i] [hir::borrow::IsMutableOwner $owner] $e]
+====
+        set owner [hir::typeOf $hir [lindex [dict get $node args] $i]]
+        lset operands $i [ExposeStorage fn [lindex $operands [lindex [dict keys $access] 0]] [hir::borrow::IsMutableOwner $owner] $e]
+>>>>
+
+@@ variadic-byte-argument-admitted byte storage is accepted as a trailing argument of a variadic C call, as if it were a pointer
+## hir/cabi.tcl
+<<<<
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create problem FOREIGN-BORROW message [format \
+====
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create c [hir::types::show $type] class ptr promoted ptr]
+        return [dict create problem FOREIGN-BORROW message [format \
+>>>>
+
+# --- error capture (C-FFI-ERROR-CAPTURE-MILESTONE-1.md) -----------------------
+#
+# The write-back value is fields, and nothing runs between a C call and the
+# comparison of its result. The structural mutants (an allocation or a
+# runtime call put back into that window) are killed by the window detectors
+# of tests/c-ffi-error-capture.test (NIR and machine code) and by the
+# errno-changing allocator; the value and lifetime mutants by the semantic
+# and GC-stress tests. (Returning the original owner instead of the private
+# copy is copy-back-omitted above; dropping a keepalive is
+# owner-liveness-dropped and keepalive-first-only; an exposure made before
+# a later argument's code is borrow-allowed-across-yield.)
+
+@@ write-back-not-a-construction neither the escape analysis nor the foreign-result transport recognizes the write-back value: the struct and its MutableBytes are built right after every C call (the lowering before C-FFI-ERROR-CAPTURE-MILESTONE-1.md; since Milestone 2 the transport, native/lower.tcl's MandatoryWriteBack, holds the value whatever the analysis says)
+## hir/escape.tcl
+<<<<
+    set written [WrittenNames $hir $e]
+    if {$written eq ""} {
+        return ""
+    }
+====
+    set written [WrittenNames $hir $e]
+    if {1} {
+        return ""
+    }
+>>>>
+## native/lower.tcl
+<<<<
+            set c [hir::escape::WriteBackResult $hir $e {enabled 1}]
+            if {$c eq ""} {
+                return ""
+            }
+====
+            set c [hir::escape::WriteBackResult $hir $e {enabled 1}]
+            if {1} {
+                return ""
+            }
+>>>>
+
+@@ write-back-buffer-eager the write-back value's MutableBytes are never opened or deferred: each is built right after the C call, the struct still fields (a nested MutableBytes wrapper built before the errno read)
+## hir/escape.tcl
+<<<<
+        dict set children $name [list [list $mutable [hir::structs::names $mutable]] {}]
+====
+>>>>
+## native/lower.tcl
+<<<<
+        lappend fields [PendingObject fn [list $mutableType $mutableLayout] [list [dict get $written $i]]]
+====
+        lappend fields [Assign fn "structnew [ShapeIndex $mutableType $mutableLayout] [dict get $written $i]" $e]
+>>>>
+## native/lower.tcl
+<<<<
+            set cut [hir::escape::WriteBackCut $hir $e]
+            return [list [hir::escape::CutFields $shape $cut] $shape $cut]
+====
+            set cut ""
+            return [list [hir::escape::CutFields $shape $cut] $shape $cut]
+>>>>
+
+@@ allocation-after-c-call native lowering builds a List of the C result right after the call, before the program reads it
+## native/lower.tcl
+<<<<
+    KeepExposedAlive fn $operands $e
+    if {[dict size $written] == 0} {
+====
+    KeepExposedAlive fn $operands $e
+    Assign fn "op listnew [TaggedField fn $result $e]" $e
+    if {[dict size $written] == 0} {
+>>>>
+
+@@ keepalive-is-a-call the keepalive of an exposure is a runtime call (one that touches the value: rt_hash), between the C call and the code reading its result
+## native/src/codegen/clif.rs
+<<<<
+            KeepAlive => self.iconst(UNIT),
+====
+            KeepAlive => {
+                let _ = self.call_helper("rt_hash", &[self.vm, a[0]]);
+                self.iconst(UNIT)
+            }
+>>>>
+
+@@ keepalive-not-a-use the root plan does not count a keepalive's operand as a use: an exposed storage is no GC root at the foreign operation's safepoint
+## native/src/codegen/roots.rs
+<<<<
+        Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
+====
+        Inst::Op { op: crate::nir::OpCode::KeepAlive, dst, .. } => (vec![*dst], vec![]),
+        Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
+>>>>
+
+@@ write-back-shared-copy one private copy serves every write exposure of the same owner in a call (two written parameters share one buffer)
+## native/lower.tcl
+<<<<
+    dict for {i how} $access {
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+            lset operands $i $private
+            dict set written $i $private
+        }
+    }
+====
+    set copies [dict create]
+    dict for {i how} $access {
+        if {$how eq "write" && [dict exists $copies [lindex $operands $i]]} {
+            set private [dict get $copies [lindex $operands $i]]
+            lset operands $i $private
+            dict set written $i $private
+        } elseif {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+            dict set copies [lindex $operands $i] $private
+            lset operands $i $private
+            dict set written $i $private
+        }
+    }
+>>>>
+
+@@ opened-buffer-not-built a write-back MutableBytes read whole is handed on as its storage, never built (materialization omitted where the value escapes)
+## native/lower.tcl
+<<<<
+    set object [FieldValue fn $shape $cut $fields $name $e]
+====
+    set object [lindex $fields [FieldOffset $shape $cut $name]]
+>>>>
+
+@@ write-back-result-changed the C result held in the write-back value's fields is not the word C returned (a C word field 0, a tagged one one more: the failure sentinel -1 reads as 0)
+## native/lower.tcl
+<<<<
+        if {$field eq "result"} {
+            lappend fields $result
+            continue
+        }
+====
+        if {$field eq "result" && [WordKind fn $result] ne ""} {
+            lappend fields [AssignWord fn "cword 0" [WordKind fn $result] $e]
+            continue
+        }
+        if {$field eq "result"} {
+            lappend fields [Assign fn "op iadd $result [Assign fn {int 1}]" $e]
+            continue
+        }
+>>>>
+
+@@ write-back-argument-twice a foreign call's ordinary argument is evaluated twice (its code runs again)
+## native/lower.tcl
+<<<<
+        } else {
+            set register [Expr fn $arg]
+        }
+====
+        } else {
+            set register [Expr fn $arg]
+            set register [Expr fn $arg]
+        }
+>>>>
+
+@@ write-back-buffer-built-per-iteration a write-back MutableBytes read whole inside a loop deeper than its binding is built where the loop's body reads it, once per iteration (no loop builds what its body needs at its entry: native/lower.tcl's HoistDeferredUses)
+## native/lower.tcl
+<<<<
+proc native::lower::HoistDeferredUses {fnVar exprs e} {
+    upvar 1 $fnVar fn
+    set needs [dict create]
+====
+proc native::lower::HoistDeferredUses {fnVar exprs e} {
+    upvar 1 $fnVar fn
+    return
+    set needs [dict create]
+>>>>
+
+@@ write-back-failure-path-eager only the success path stays lazy: entering an if's then-branch (the failure branch that reads errno) builds every opened write-back MutableBytes first
+## native/lower.tcl
+<<<<
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+====
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$role eq "then"} {
+            dict for {b local} [dict get $fn locals] {
+                if {[lindex $local 0] eq "virtual" && [lindex $local 3] eq $b} {
+                    foreach {field sub} [CutDict [lindex $local 5]] {
+                        if {[lindex $sub 0 1] eq "storage"} {
+                            OpenedFieldObject fn $b $field $e
+                        }
+                    }
+                }
+            }
+        }
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+>>>>
+
+@@ detach-before-later-arguments a write exposure's private copy is made as soon as its own argument is evaluated, before the arguments after it (the foreign call's work reordered with the program's)
+## native/lower.tcl
+<<<<
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+        } else {
+====
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+            if {[dict get $access $index] eq "write" && $register ne "never"} {
+                set register [Assign fn "op mbytesclone $register" $e]
+                dict set access $index early
+            }
+        } else {
+>>>>
+<<<<
+    dict for {i how} $access {
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+====
+    dict for {i how} $access {
+        if {$how eq "early"} {
+            dict set access $i write
+            dict set written $i [lindex $operands $i]
+        }
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+>>>>
+
+@@ write-back-copy-not-a-root the root plan never counts a write exposure's private copy as a managed register (like a context leaf): a write-back value's opened storage field is no GC root at a later safepoint
+## native/src/codegen/roots.rs
+<<<<
+        let is_context = matches!(inst, Inst::ContextLoad { .. });
+====
+        let is_context = matches!(inst, Inst::ContextLoad { .. })
+            || matches!(inst, Inst::Op { op: crate::nir::OpCode::MBytesClone, .. });
+>>>>
+
+# --- representation invariance (C-FFI-ERROR-CAPTURE-MILESTONE-2.md) ----------
+#
+# The error capture holds whatever the lowering: scalar replacement off, the
+# generic lowering, a value that escapes after the capture, a 64-bit result
+# outside the small-Int range. The structural mutants are killed by the
+# window detectors (NIR, window::nirBoxedResults, machine code, the
+# single-step trace) and the errno-changing allocator; the signedness, width
+# and value mutants by the semantic tests (ec-word-comparisons,
+# ec-escapes-values); the materialization mutants by values and allocation
+# counts.
+
+@@ transport-only-with-struct-opt the foreign-result transport is an optimization: with struct scalar replacement off (-struct-opt 0) a write-back value is built right after its C call
+## native/lower.tcl
+<<<<
+proc native::lower::MandatoryWriteBack {e} {
+    variable hir
+    variable fault
+    if {$fault ne ""} {
+====
+proc native::lower::MandatoryWriteBack {e} {
+    variable hir
+    variable fault
+    variable structOpt
+    if {$fault ne "" || !$structOpt} {
+>>>>
+
+@@ transport-not-in-generic-lowering the generic lowering (-specialize 0) has no foreign-result transport: a write-back value the escape analysis leaves alone is built right after its C call
+## native/lower.tcl
+<<<<
+proc native::lower::MandatoryWriteBack {e} {
+    variable hir
+    variable fault
+    if {$fault ne ""} {
+====
+proc native::lower::MandatoryWriteBack {e} {
+    variable hir
+    variable fault
+    variable spec
+    if {$fault ne "" || ![dict get $spec specialize]} {
+>>>>
+
+@@ captured-write-back-eager a write-back value a closure captures later is built right after its C call (Milestone 1's closed binding)
+## native/lower.tcl
+<<<<
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {$mandatory ne ""} {
+                lassign $mandatory n shape cut
+====
+            set mandatory [MandatoryWriteBack $valueExpr]
+            variable captureLists
+            if {[lsearch -exact [concat {*}[dict values $captureLists]] $b] >= 0} {
+                set mandatory ""
+            }
+            if {$mandatory ne ""} {
+                lassign $mandatory n shape cut
+>>>>
+
+@@ large-unsigned-boxed-at-call a 64-bit unsigned C result (unsigned long, size_t) is converted as part of the call: rt_ffi_box_u64 allocates a BigInt for (size_t)-1 before the program compares it (Milestone 1's representation)
+## native/lower.tcl
+<<<<
+            set wordKind [ForeignWordKind $key]
+        }
+====
+            set wordKind [ForeignWordKind $key]
+            if {$wordKind eq "u64"} {
+                set wordKind ""
+            }
+        }
+>>>>
+
+@@ large-signed-boxed-at-call a 64-bit signed C result (long) is converted as part of the call: rt_ffi_box_i64 allocates a BigInt beyond the small-Int range before the program compares it
+## native/lower.tcl
+<<<<
+            set wordKind [ForeignWordKind $key]
+        }
+====
+            set wordKind [ForeignWordKind $key]
+            if {$wordKind eq "i64"} {
+                set wordKind ""
+            }
+        }
+>>>>
+
+@@ sentinel-boxed-before-compare the comparison of a C word boxes it first (cwbox, then the tagged comparison): the full value materialized before the sentinel check
+## native/lower.tcl
+<<<<
+    if {$side < 0} {
+        set tagged {}
+        foreach r $regs arg $argExprs {
+====
+    if {$side >= 0} {
+        set regs [TaggedFields fn $regs $e]
+    }
+    if {1} {
+        set tagged {}
+        foreach r $regs arg $argExprs {
+>>>>
+
+@@ word-compare-wrong-signedness every C word is compared as a signed word: an unsigned long above 2^63 - 1 compares as a negative number
+## native/src/codegen/clif.rs
+<<<<
+            CWLt | CWLe | CWGt | CWGe | CWEq => {
+                let signed = self.f.kind_of(args[0]) == nir::RegKind::I64;
+====
+            CWLt | CWLe | CWGt | CWGe | CWEq => {
+                let signed = self.f.kind_of(args[0]) != nir::RegKind::Tagged;
+>>>>
+
+@@ word-truncated a C call's 64-bit word result keeps only its low 32 bits (sign-extended)
+## native/src/codegen/clif.rs
+<<<<
+        if word {
+            // A C word destination (nir.rs validated the 64-bit integer
+            // class): the machine word itself.
+            return Ok(returned);
+        }
+====
+        if word {
+            let low = self.b.ins().ireduce(types::I32, returned);
+            return Ok(self.b.ins().sextend(I64, low));
+        }
+>>>>
+
+@@ large-unsigned-masked-positive an unsigned C word is boxed as a small Int whatever its value: (size_t)-1 becomes the positive count 2^62 - 1
+## native/src/codegen/clif.rs
+<<<<
+            (self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, returned, SMALL_MAX + 1), "rt_ffi_box_u64")
+        };
+        let small = self.b.create_block();
+====
+            (self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, returned, -1), "rt_ffi_box_u64")
+        };
+        let returned = if signed { returned } else { self.b.ins().band_imm_s(returned, SMALL_MAX) };
+        let small = self.b.create_block();
+>>>>
+
+@@ word-leaks-untagged a C word reaches ordinary Botlish code as its raw machine word: cwbox passes it through untagged
+## native/src/codegen/clif.rs
+<<<<
+            CWBox => {
+                let signed = self.f.kind_of(args[0]) == nir::RegKind::I64;
+                self.box_word(a[0], signed)
+            }
+====
+            CWBox => a[0],
+>>>>
+
+@@ pending-object-built-per-use a deferred MutableBytes is built at every use that needs it, not once per dominating scope: the updated buffer materialized twice
+## native/lower.tcl
+<<<<
+        set key pending:$reg
+        if {[dict exists $fn rawCache $key]} {
+====
+        set key pending:$reg
+        if {0} {
+>>>>
+
+@@ capture-materialization-lost a closure capturing a write-back value held as fields captures its first field register instead of the value (a required materialization after the errno read omitted)
+## native/lower.tcl
+<<<<
+                lappend values [MaterializeVirtual fn $b ""]
+====
+                lappend values [lindex [Access fn $b] 1 0]
+>>>>
+
+@@ returned-write-back-eager a write-back value its function returns after reading errno is built right after its C call when no analysis keeps it as fields (-struct-opt 0, -escape-opt 0): the transport defers only values the function keeps to itself
+## native/lower.tcl
+<<<<
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {$mandatory ne ""} {
+====
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {[dict get $fn region] ne "program"} {
+                set last [lindex [hir::get $hir [dict get $fn region] body] end]
+                if {[hir::kind $hir $last] eq "ref" && [hir::get $hir $last binding] eq $b} {
+                    set mandatory ""
+                }
+            }
+            if {$mandatory ne ""} {
+>>>>

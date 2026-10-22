@@ -1,0 +1,50 @@
+# float64.bot -- the "std::float64" namespace's ordinary Botlish members.
+#
+# The namespace's intrinsics are root natives registered under their
+# qualified names -- std::float64::from_int, std::float64::truncate,
+# std::float64::from_decimal_rounded (core/float.tcl, FLOAT64-MILESTONE-1.md) --
+# and this module may never define a member of the same name
+# (surface/modules.tcl, DUPLICATE-NATIVE; STDLIB-NAMESPACES.md). Below are
+# the comparisons every program that bounds a Float64 writes, added by the
+# Icy Tower workload (ICY-TOWER-VERTICAL-SLICE-1.md, "Stdlib additions"):
+#
+#   std::float64::min(a, b)            the smaller of A and B (A when they
+#                                      are equal)
+#   std::float64::max(a, b)            the larger of A and B (A when they
+#                                      are equal)
+#   std::float64::abs(x)               X without its sign
+#   std::float64::clamp(x, low, high)  X bounded to LOW..HIGH: LOW when X is
+#                                      below it, else HIGH when X is above
+#                                      that, else X
+#
+# Each is a comparison and at most a negation, so none can fail: there is
+# no arithmetic that could leave the finite Float64s (no NonFiniteFloat),
+# and a Float64 has no NaN for a comparison to be unordered with. min and
+# max are `nomethod`: their operands are symmetric, and neither is a
+# receiver (the bit_and precedent, REFACTOR-WARNINGS-CLEAN.md).
+
+nomethod fn min(a: Float64, b: Float64) -> Float64:
+    if b < a:
+        b
+    else:
+        a
+
+nomethod fn max(a: Float64, b: Float64) -> Float64:
+    if b > a:
+        b
+    else:
+        a
+
+fn abs(x: Float64) -> Float64:
+    if x < 0.0:
+        -x
+    else:
+        x
+
+fn clamp(x: Float64, low: Float64, high: Float64) -> Float64:
+    if x < low:
+        low
+    elif x > high:
+        high
+    else:
+        x

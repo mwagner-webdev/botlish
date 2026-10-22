@@ -15,7 +15,7 @@ function	Tcl_SetExitProc	direct	tcl::tcl	direct	symbol Tcl_SetExitProc; (std::ff
 function	TclZipfs_AppHook	direct	tcl::tcl	direct	symbol TclZipfs_AppHook; (std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]]) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	Tcl_PkgProvideEx	direct	tcl::decls	direct	symbol Tcl_PkgProvideEx; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
 function	Tcl_PkgRequireEx	direct	tcl::decls	direct	symbol Tcl_PkgRequireEx; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[std::ffi::c::Char]
-function	Tcl_Panic	unsupported		variadic	a variadic function (...)
+function	Tcl_Panic	direct	tcl::decls	direct	symbol Tcl_Panic; (std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
 function	Tcl_Alloc	direct	tcl::decls	direct	symbol Tcl_Alloc; (std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
 function	Tcl_Free	direct	tcl::decls	direct	symbol Tcl_Free; (std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
 function	Tcl_Realloc	direct	tcl::decls	direct	symbol Tcl_Realloc; (std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
@@ -28,7 +28,7 @@ function	Tcl_SetTimer	direct	tcl::decls	direct	symbol Tcl_SetTimer; (std::ffi::c
 function	Tcl_Sleep	direct	tcl::decls	direct	symbol Tcl_Sleep; (std::ffi::c::Int) -> unit
 function	Tcl_WaitForEvent	direct	tcl::decls	direct	symbol Tcl_WaitForEvent; (std::ffi::c::Ptr[Tcl_Time]) -> std::ffi::c::Int
 function	Tcl_AppendAllObjTypes	direct	tcl::decls	direct	symbol Tcl_AppendAllObjTypes; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj]) -> std::ffi::c::Int
-function	Tcl_AppendStringsToObj	unsupported		variadic	a variadic function (...)
+function	Tcl_AppendStringsToObj	direct	tcl::decls	direct	symbol Tcl_AppendStringsToObj; (std::ffi::c::Ptr[Tcl_Obj], variadic) -> unit
 function	Tcl_AppendToObj	direct	tcl::decls	direct	symbol Tcl_AppendToObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> unit
 function	Tcl_ConcatObj	direct	tcl::decls	direct	symbol Tcl_ConcatObj; (std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_ConvertToType	direct	tcl::decls	direct	symbol Tcl_ConvertToType; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[Tcl_ObjType]) -> std::ffi::c::Int
@@ -36,7 +36,7 @@ function	Tcl_DbDecrRefCount	direct	tcl::decls	direct	symbol Tcl_DbDecrRefCount; 
 function	Tcl_DbIncrRefCount	direct	tcl::decls	direct	symbol Tcl_DbIncrRefCount; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> unit
 function	Tcl_DbIsShared	direct	tcl::decls	direct	symbol Tcl_DbIsShared; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Int
 function	Tcl_DbNewByteArrayObj	direct	tcl::decls	direct	symbol Tcl_DbNewByteArrayObj; (std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Obj]
-function	Tcl_DbNewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+function	Tcl_DbNewDoubleObj	direct	tcl::decls	direct	symbol Tcl_DbNewDoubleObj; (std::ffi::c::Double, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewListObj	direct	tcl::decls	direct	symbol Tcl_DbNewListObj; (std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewObj	direct	tcl::decls	direct	symbol Tcl_DbNewObj; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_DbNewStringObj	direct	tcl::decls	direct	symbol Tcl_DbNewStringObj; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Obj]
@@ -45,8 +45,8 @@ function	TclFreeObj	direct	tcl::decls	direct	symbol TclFreeObj; (std::ffi::c::Pt
 function	Tcl_GetBoolean	thunk	tcl::thunks::decls	thunk (macro-shadow: expression: calls a function)	symbol botlish_tcl_Tcl_GetBoolean; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
 function	Tcl_GetBooleanFromObj	thunk	tcl::thunks::decls	thunk (macro-shadow: expression: calls a function)	symbol botlish_tcl_Tcl_GetBooleanFromObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
 function	Tcl_GetByteArrayFromObj	thunk	tcl::thunks::decls	thunk (macro-shadow: call wrapper: computed arguments)	symbol botlish_tcl_Tcl_GetByteArrayFromObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Long]) -> std::ffi::c::Ptr[std::ffi::c::UChar]
-function	Tcl_GetDouble	unsupported		double	parameter 3 (doublePtr): a pointer to double
-function	Tcl_GetDoubleFromObj	unsupported		double	parameter 3 (doublePtr): a pointer to double
+function	Tcl_GetDouble	direct	tcl::decls	direct	symbol Tcl_GetDouble; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Double]) -> std::ffi::c::Int
+function	Tcl_GetDoubleFromObj	direct	tcl::decls	direct	symbol Tcl_GetDoubleFromObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Double]) -> std::ffi::c::Int
 function	Tcl_GetInt	direct	tcl::decls	direct	symbol Tcl_GetInt; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
 function	Tcl_GetIntFromObj	direct	tcl::decls	direct	symbol Tcl_GetIntFromObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
 function	Tcl_GetLongFromObj	direct	tcl::decls	direct	symbol Tcl_GetLongFromObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Long]) -> std::ffi::c::Int
@@ -60,19 +60,19 @@ function	Tcl_ListObjIndex	direct	tcl::decls	direct	symbol Tcl_ListObjIndex; (std
 function	TclListObjLength	direct	tcl::decls	direct	symbol TclListObjLength; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
 function	Tcl_ListObjReplace	direct	tcl::decls	direct	symbol Tcl_ListObjReplace; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Long, std::ffi::c::Long, std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Int
 function	Tcl_NewByteArrayObj	direct	tcl::decls	direct	symbol Tcl_NewByteArrayObj; (std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Long) -> std::ffi::c::Ptr[Tcl_Obj]
-function	Tcl_NewDoubleObj	unsupported		double	parameter 1 (doubleValue): double
+function	Tcl_NewDoubleObj	direct	tcl::decls	direct	symbol Tcl_NewDoubleObj; (std::ffi::c::Double) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewListObj	direct	tcl::decls	direct	symbol Tcl_NewListObj; (std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewObj	direct	tcl::decls	direct	symbol Tcl_NewObj; () -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_NewStringObj	direct	tcl::decls	direct	symbol Tcl_NewStringObj; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_SetByteArrayLength	direct	tcl::decls	direct	symbol Tcl_SetByteArrayLength; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Long) -> std::ffi::c::Ptr[std::ffi::c::UChar]
 function	Tcl_SetByteArrayObj	direct	tcl::decls	direct	symbol Tcl_SetByteArrayObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Long) -> unit
-function	Tcl_SetDoubleObj	unsupported		double	parameter 2 (doubleValue): double
+function	Tcl_SetDoubleObj	direct	tcl::decls	direct	symbol Tcl_SetDoubleObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Double) -> unit
 function	Tcl_SetListObj	direct	tcl::decls	direct	symbol Tcl_SetListObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> unit
 function	Tcl_SetObjLength	direct	tcl::decls	direct	symbol Tcl_SetObjLength; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Long) -> unit
 function	Tcl_SetStringObj	direct	tcl::decls	direct	symbol Tcl_SetStringObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> unit
 function	Tcl_AllowExceptions	direct	tcl::decls	direct	symbol Tcl_AllowExceptions; (std::ffi::c::Ptr[Tcl_Interp]) -> unit
 function	Tcl_AppendElement	direct	tcl::decls	direct	symbol Tcl_AppendElement; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char]) -> unit
-function	Tcl_AppendResult	unsupported		variadic	a variadic function (...)
+function	Tcl_AppendResult	direct	tcl::decls	direct	symbol Tcl_AppendResult; (std::ffi::c::Ptr[Tcl_Interp], variadic) -> unit
 function	Tcl_AsyncCreate	direct	tcl::decls	direct	symbol Tcl_AsyncCreate; (std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Int], return: std::ffi::c::Int}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[Tcl_AsyncHandler_]
 function	Tcl_AsyncDelete	direct	tcl::decls	direct	symbol Tcl_AsyncDelete; (std::ffi::c::Ptr[Tcl_AsyncHandler_]) -> unit
 function	Tcl_AsyncInvoke	direct	tcl::decls	direct	symbol Tcl_AsyncInvoke; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Int) -> std::ffi::c::Int
@@ -134,8 +134,8 @@ function	Tcl_Exit	direct	tcl::decls	direct	symbol Tcl_Exit; (std::ffi::c::Int) -
 function	Tcl_ExposeCommand	direct	tcl::decls	direct	symbol Tcl_ExposeCommand; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	Tcl_ExprBoolean	direct	tcl::decls	direct	symbol Tcl_ExprBoolean; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
 function	Tcl_ExprBooleanObj	direct	tcl::decls	direct	symbol Tcl_ExprBooleanObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Int
-function	Tcl_ExprDouble	unsupported		double	parameter 3 (ptr): a pointer to double
-function	Tcl_ExprDoubleObj	unsupported		double	parameter 3 (ptr): a pointer to double
+function	Tcl_ExprDouble	direct	tcl::decls	direct	symbol Tcl_ExprDouble; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Double]) -> std::ffi::c::Int
+function	Tcl_ExprDoubleObj	direct	tcl::decls	direct	symbol Tcl_ExprDoubleObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Double]) -> std::ffi::c::Int
 function	Tcl_ExprLong	direct	tcl::decls	direct	symbol Tcl_ExprLong; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Long]) -> std::ffi::c::Int
 function	Tcl_ExprLongObj	direct	tcl::decls	direct	symbol Tcl_ExprLongObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Long]) -> std::ffi::c::Int
 function	Tcl_ExprObj	direct	tcl::decls	direct	symbol Tcl_ExprObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Int
@@ -190,7 +190,7 @@ function	Tcl_OpenFileChannel	direct	tcl::decls	direct	symbol Tcl_OpenFileChannel
 function	Tcl_OpenTcpClient	direct	tcl::decls	direct	symbol Tcl_OpenTcpClient; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Ptr[Tcl_Channel_]
 function	Tcl_OpenTcpServer	direct	tcl::decls	direct	symbol Tcl_OpenTcpServer; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[Tcl_Channel_], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[Tcl_Channel_]
 function	Tcl_Preserve	direct	tcl::decls	direct	symbol Tcl_Preserve; (std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
-function	Tcl_PrintDouble	unsupported		double	parameter 2 (value): double
+function	Tcl_PrintDouble	direct	tcl::decls	direct	symbol Tcl_PrintDouble; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Double, std::ffi::c::Ptr[std::ffi::c::Char]) -> unit
 function	Tcl_PutEnv	direct	tcl::decls	direct	symbol Tcl_PutEnv; (std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	Tcl_PosixError	direct	tcl::decls	direct	symbol Tcl_PosixError; (std::ffi::c::Ptr[Tcl_Interp]) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	Tcl_QueueEvent	direct	tcl::decls	direct	symbol Tcl_QueueEvent; (std::ffi::c::Ptr[Tcl_Event], std::ffi::c::Int) -> unit
@@ -215,7 +215,7 @@ function	Tcl_SetChannelBufferSize	direct	tcl::decls	direct	symbol Tcl_SetChannel
 function	Tcl_SetChannelOption	direct	tcl::decls	direct	symbol Tcl_SetChannelOption; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Channel_], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	Tcl_SetCommandInfo	direct	tcl::decls	direct	symbol Tcl_SetCommandInfo; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[Tcl_CmdInfo]) -> std::ffi::c::Int
 function	Tcl_SetErrno	direct	tcl::decls	direct	symbol Tcl_SetErrno; (std::ffi::c::Int) -> unit
-function	Tcl_SetErrorCode	unsupported		variadic	a variadic function (...)
+function	Tcl_SetErrorCode	direct	tcl::decls	direct	symbol Tcl_SetErrorCode; (std::ffi::c::Ptr[Tcl_Interp], variadic) -> unit
 function	Tcl_SetMaxBlockTime	direct	tcl::decls	direct	symbol Tcl_SetMaxBlockTime; (std::ffi::c::Ptr[Tcl_Time]) -> unit
 function	Tcl_SetRecursionLimit	direct	tcl::decls	direct	symbol Tcl_SetRecursionLimit; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Long) -> std::ffi::c::Long
 function	Tcl_SetServiceMode	direct	tcl::decls	direct	symbol Tcl_SetServiceMode; (std::ffi::c::Int) -> std::ffi::c::Int
@@ -237,7 +237,7 @@ function	Tcl_UnsetVar2	direct	tcl::decls	direct	symbol Tcl_UnsetVar2; (std::ffi:
 function	Tcl_UntraceVar2	direct	tcl::decls	direct	symbol Tcl_UntraceVar2; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int], return: std::ffi::c::Ptr[std::ffi::c::Char]}], std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
 function	Tcl_UpdateLinkedVar	direct	tcl::decls	direct	symbol Tcl_UpdateLinkedVar; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char]) -> unit
 function	Tcl_UpVar2	direct	tcl::decls	direct	symbol Tcl_UpVar2; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Int
-function	Tcl_VarEval	unsupported		variadic	a variadic function (...)
+function	Tcl_VarEval	direct	tcl::decls	direct	symbol Tcl_VarEval; (std::ffi::c::Ptr[Tcl_Interp], variadic) -> std::ffi::c::Int
 function	Tcl_VarTraceInfo2	direct	tcl::decls	direct	symbol Tcl_VarTraceInfo2; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int], return: std::ffi::c::Ptr[std::ffi::c::Char]}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[std::ffi::c::Void]
 function	Tcl_Write	direct	tcl::decls	direct	symbol Tcl_Write; (std::ffi::c::Ptr[Tcl_Channel_], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> std::ffi::c::Long
 function	Tcl_WrongNumArgs	direct	tcl::decls	direct	symbol Tcl_WrongNumArgs; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]], std::ffi::c::Ptr[std::ffi::c::Char]) -> unit
@@ -517,7 +517,7 @@ function	Tcl_SetChannelErrorInterp	direct	tcl::decls	direct	symbol Tcl_SetChanne
 function	Tcl_GetChannelErrorInterp	direct	tcl::decls	direct	symbol Tcl_GetChannelErrorInterp; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> unit
 function	Tcl_SetChannelError	direct	tcl::decls	direct	symbol Tcl_SetChannelError; (std::ffi::c::Ptr[Tcl_Channel_], std::ffi::c::Ptr[Tcl_Obj]) -> unit
 function	Tcl_GetChannelError	direct	tcl::decls	direct	symbol Tcl_GetChannelError; (std::ffi::c::Ptr[Tcl_Channel_], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> unit
-function	Tcl_InitBignumFromDouble	unsupported		double	parameter 2 (initval): double
+function	Tcl_InitBignumFromDouble	direct	tcl::decls	direct	symbol Tcl_InitBignumFromDouble; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Double, std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
 function	Tcl_GetNamespaceUnknownHandler	direct	tcl::decls	direct	symbol Tcl_GetNamespaceUnknownHandler; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Namespace]) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_SetNamespaceUnknownHandler	direct	tcl::decls	direct	symbol Tcl_SetNamespaceUnknownHandler; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Namespace], std::ffi::c::Ptr[Tcl_Obj]) -> std::ffi::c::Int
 function	Tcl_GetEncodingFromObj	direct	tcl::decls	direct	symbol Tcl_GetEncodingFromObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Encoding_]]) -> std::ffi::c::Int
@@ -529,8 +529,8 @@ function	Tcl_AppendObjToErrorInfo	direct	tcl::decls	direct	symbol Tcl_AppendObjT
 function	Tcl_AppendLimitedToObj	direct	tcl::decls	direct	symbol Tcl_AppendLimitedToObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long, std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Char]) -> unit
 function	Tcl_Format	direct	tcl::decls	direct	symbol Tcl_Format; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Ptr[Tcl_Obj]
 function	Tcl_AppendFormatToObj	direct	tcl::decls	direct	symbol Tcl_AppendFormatToObj; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long, std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Obj]]) -> std::ffi::c::Int
-function	Tcl_ObjPrintf	unsupported		variadic	a variadic function (...)
-function	Tcl_AppendPrintfToObj	unsupported		variadic	a variadic function (...)
+function	Tcl_ObjPrintf	direct	tcl::decls	direct	symbol Tcl_ObjPrintf; (std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Ptr[Tcl_Obj]
+function	Tcl_AppendPrintfToObj	direct	tcl::decls	direct	symbol Tcl_AppendPrintfToObj; (std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
 function	Tcl_CancelEval	direct	tcl::decls	direct	symbol Tcl_CancelEval; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[Tcl_Obj], std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int) -> std::ffi::c::Int
 function	Tcl_Canceled	direct	tcl::decls	direct	symbol Tcl_Canceled; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Int) -> std::ffi::c::Int
 function	Tcl_CreatePipe	direct	tcl::decls	direct	symbol Tcl_CreatePipe; (std::ffi::c::Ptr[Tcl_Interp], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Channel_]], std::ffi::c::Ptr[std::ffi::c::Ptr[Tcl_Channel_]], std::ffi::c::Int) -> std::ffi::c::Int
@@ -704,7 +704,7 @@ function	TclBN_mp_add_d	direct	tcl::tommathdecls	direct	symbol TclBN_mp_add_d; (
 function	TclBN_mp_and	direct	tcl::tommathdecls	direct	symbol TclBN_mp_and; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 function	TclBN_mp_clamp	direct	tcl::tommathdecls	direct	symbol TclBN_mp_clamp; (std::ffi::c::Ptr[mp_int]) -> unit
 function	TclBN_mp_clear	direct	tcl::tommathdecls	direct	symbol TclBN_mp_clear; (std::ffi::c::Ptr[mp_int]) -> unit
-function	TclBN_mp_clear_multi	unsupported		variadic	a variadic function (...)
+function	TclBN_mp_clear_multi	direct	tcl::tommathdecls	direct	symbol TclBN_mp_clear_multi; (std::ffi::c::Ptr[mp_int], variadic) -> unit
 function	TclBN_mp_cmp	direct	tcl::tommathdecls	direct	symbol TclBN_mp_cmp; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 function	TclBN_mp_cmp_d	direct	tcl::tommathdecls	direct	symbol TclBN_mp_cmp_d; (std::ffi::c::Ptr[mp_int], std::ffi::c::ULong) -> std::ffi::c::Int
 function	TclBN_mp_cmp_mag	direct	tcl::tommathdecls	direct	symbol TclBN_mp_cmp_mag; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
@@ -719,7 +719,7 @@ function	TclBN_mp_expt_n	direct	tcl::tommathdecls	direct	symbol TclBN_mp_expt_n;
 function	TclBN_mp_grow	direct	tcl::tommathdecls	direct	symbol TclBN_mp_grow; (std::ffi::c::Ptr[mp_int], std::ffi::c::Int) -> std::ffi::c::Int
 function	TclBN_mp_init	direct	tcl::tommathdecls	direct	symbol TclBN_mp_init; (std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 function	TclBN_mp_init_copy	direct	tcl::tommathdecls	direct	symbol TclBN_mp_init_copy; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
-function	TclBN_mp_init_multi	unsupported		variadic	a variadic function (...)
+function	TclBN_mp_init_multi	direct	tcl::tommathdecls	direct	symbol TclBN_mp_init_multi; (std::ffi::c::Ptr[mp_int], variadic) -> std::ffi::c::Int
 function	TclBN_mp_init_set	direct	tcl::tommathdecls	direct	symbol TclBN_mp_init_set; (std::ffi::c::Ptr[mp_int], std::ffi::c::ULong) -> std::ffi::c::Int
 function	TclBN_mp_init_size	direct	tcl::tommathdecls	direct	symbol TclBN_mp_init_size; (std::ffi::c::Ptr[mp_int], std::ffi::c::Int) -> std::ffi::c::Int
 function	TclBN_mp_lshd	direct	tcl::tommathdecls	direct	symbol TclBN_mp_lshd; (std::ffi::c::Ptr[mp_int], std::ffi::c::Int) -> std::ffi::c::Int
@@ -828,7 +828,7 @@ macro	mp_add_d	alias	tcl::tommathdecls	alias of TclBN_mp_add_d	symbol TclBN_mp_a
 macro	mp_and	alias	tcl::tommathdecls	alias of TclBN_mp_and	symbol TclBN_mp_and; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 macro	mp_clamp	alias	tcl::tommathdecls	alias of TclBN_mp_clamp	symbol TclBN_mp_clamp; (std::ffi::c::Ptr[mp_int]) -> unit
 macro	mp_clear	alias	tcl::tommathdecls	alias of TclBN_mp_clear	symbol TclBN_mp_clear; (std::ffi::c::Ptr[mp_int]) -> unit
-macro	mp_clear_multi	unsupported		variadic	a variadic function (...)
+macro	mp_clear_multi	alias	tcl::tommathdecls	alias of TclBN_mp_clear_multi	symbol TclBN_mp_clear_multi; (std::ffi::c::Ptr[mp_int], variadic) -> unit
 macro	mp_cmp	alias	tcl::tommathdecls	alias of TclBN_mp_cmp	symbol TclBN_mp_cmp; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 macro	mp_cmp_d	alias	tcl::tommathdecls	alias of TclBN_mp_cmp_d	symbol TclBN_mp_cmp_d; (std::ffi::c::Ptr[mp_int], std::ffi::c::ULong) -> std::ffi::c::Int
 macro	mp_cmp_mag	alias	tcl::tommathdecls	alias of TclBN_mp_cmp_mag	symbol TclBN_mp_cmp_mag; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
@@ -847,7 +847,7 @@ macro	mp_grow	alias	tcl::tommathdecls	alias of TclBN_mp_grow	symbol TclBN_mp_gro
 macro	mp_init	alias	tcl::tommathdecls	alias of TclBN_mp_init	symbol TclBN_mp_init; (std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 macro	mp_init_copy	alias	tcl::tommathdecls	alias of TclBN_mp_init_copy	symbol TclBN_mp_init_copy; (std::ffi::c::Ptr[mp_int], std::ffi::c::Ptr[mp_int]) -> std::ffi::c::Int
 macro	mp_init_i64	alias	tcl::tommathdecls	alias of TclBN_mp_init_i64	symbol TclBN_mp_init_i64; (std::ffi::c::Ptr[mp_int], std::ffi::c::Long) -> std::ffi::c::Int
-macro	mp_init_multi	unsupported		variadic	a variadic function (...)
+macro	mp_init_multi	alias	tcl::tommathdecls	alias of TclBN_mp_init_multi	symbol TclBN_mp_init_multi; (std::ffi::c::Ptr[mp_int], variadic) -> std::ffi::c::Int
 macro	mp_init_set	alias	tcl::tommathdecls	alias of TclBN_mp_init_set	symbol TclBN_mp_init_set; (std::ffi::c::Ptr[mp_int], std::ffi::c::ULong) -> std::ffi::c::Int
 macro	mp_init_size	alias	tcl::tommathdecls	alias of TclBN_mp_init_size	symbol TclBN_mp_init_size; (std::ffi::c::Ptr[mp_int], std::ffi::c::Int) -> std::ffi::c::Int
 macro	mp_init_u64	alias	tcl::tommathdecls	alias of TclBN_mp_init_u64	symbol TclBN_mp_init_u64; (std::ffi::c::Ptr[mp_int], std::ffi::c::ULong) -> std::ffi::c::Int
@@ -1436,8 +1436,8 @@ record	struct Tcl_ObjType	layout-direct	tcl::layouts	Tcl_ObjType	sizeof 112, _Al
 record	struct anon@tcl.h:723	layout-direct	tcl::layouts	Tcl_ObjInternalRep_twoPtrValue	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:727	layout-direct	tcl::layouts	Tcl_ObjInternalRep_ptrAndLongRep	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:731	layout-direct	tcl::layouts	Tcl_ObjInternalRep_ptrAndSize	sizeof 16, _Alignof 8, 2 fields
-record	union Tcl_ObjInternalRep	layout-blocked		double	field doubleValue: double (double)
-record	struct Tcl_Obj	layout-blocked		nested-layout-blocked	field internalRep (union Tcl_ObjInternalRep, field) -> double
+record	union Tcl_ObjInternalRep	layout-direct	tcl::layouts	Tcl_ObjInternalRep	sizeof 16, _Alignof 8, 7 fields
+record	struct Tcl_Obj	layout-direct	tcl::layouts	Tcl_Obj	sizeof 48, _Alignof 8, 5 fields
 record	struct Tcl_Namespace	layout-direct	tcl::layouts	Tcl_Namespace	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_CallFrame	layout-direct	tcl::layouts	Tcl_CallFrame	sizeof 112, _Alignof 8, 14 fields
 record	struct anon@tcl.h:846	layout-direct	tcl::layouts	Tcl_CmdInfo	sizeof 80, _Alignof 8, 10 fields
@@ -1460,7 +1460,7 @@ record	struct Tcl_EncodingType	layout-direct	tcl::layouts	Tcl_EncodingType	sizeo
 record	struct Tcl_Config	layout-direct	tcl::layouts	Tcl_Config	sizeof 16, _Alignof 8, 2 fields
 record	struct anon@tcl.h:2175	layout-direct	tcl::layouts	Tcl_ArgvInfo	sizeof 48, _Alignof 8, 6 fields
 record	struct anon@tclDecls.h:1879	layout-direct	tcl::layouts	TclStubHooks	sizeof 24, _Alignof 8, 3 fields
-record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_DbNewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_GetDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_GetDoubleFromObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_NewDoubleObj: callback argument 1: double (double) (unsupported-callback-signature); field tcl_SetDoubleObj: callback argument 2: double (double) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ExprDouble: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_ExprDoubleObj: callback argument 3: a pointer to double (double) (unsupported-callback-signature); field tcl_PrintDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_InitBignumFromDouble: callback argument 2: double (double) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
+record	struct TclStubs	layout-blocked		unsupported-pointer	field tcl_Panic: a variadic callback (void (const char *format, ...)) (unsupported-callback-signature); field tcl_AppendStringsToObj: a variadic callback (void (Tcl_Obj *objPtr, ...)) (unsupported-callback-signature); field tcl_AppendResult: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_SetErrorCode: a variadic callback (void (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_VarEval: a variadic callback (int (Tcl_Interp *interp, ...)) (unsupported-callback-signature); field tcl_ObjPrintf: a variadic callback (Tcl_Obj *(const char *format, ...)) (unsupported-callback-signature); field tcl_AppendPrintfToObj: a variadic callback (void (Tcl_Obj *objPtr, const char *format, ...)) (unsupported-callback-signature)
 record	struct TclPlatStubs	layout-direct	tcl::layouts	TclPlatStubs	sizeof 48, _Alignof 8, 6 fields
 record	struct Tcl_MethodType	layout-direct	tcl::layouts	Tcl_MethodType	sizeof 40, _Alignof 8, 5 fields
 record	struct Tcl_MethodType2	layout-direct	tcl::layouts	Tcl_MethodType2	sizeof 40, _Alignof 8, 5 fields

@@ -148,7 +148,9 @@ end (strict, warnings default) with nothing imported but what it imports.
 One that imports a Linux namespace documents Linux: on a host of another
 operating system the check compiles it for that host architecture's Linux
 target (`surface::modules::PlatformTarget`, as the golden runner does) and
-runs it on the Tcl backends.
+runs it on the Tcl backends. One whose outcome is a fact of one target (a C
+scalar's width, say) names it with `@target`, and is compiled for it the
+same way on every host.
 Directives:
 
 | directive | for | meaning |
@@ -163,6 +165,7 @@ Directives:
 | `@at LINE:COL` | reject | the first diagnostic's location |
 | `@message GLOB` | reject | the first diagnostic's message, without its location |
 | `@caption TEXT` | both | the line shown above the code |
+| `@target TARGET` | both | compile for TARGET (a `core::cabi` target name), on the Tcl backends when it is not the host's |
 
 A rejected example is checked against the compiler's structured diagnostics
 (the error code and the first entry of `-diagnostics`), never against

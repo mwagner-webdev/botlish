@@ -284,6 +284,9 @@ proc hir::contexts::TraitImplementation {req w owner} {
     if {[dict get $info flags] ne {}} {
         return [dict create ok 0 reason "$qualified declares flags ([join [lmap f [dict get $info flags] {string cat : $f}] {, }]): implementations with flags are not supported yet" found $found]
     }
+    if {[dict getdef $info variadic 0]} {
+        return [dict create ok 0 reason "$qualified is variadic: a context-trait operation is a fixed signature, and a variadic function is no implementation of one" found $found]
+    }
     set contexts [dict get $info contexts]
     if {[llength $contexts] == 0} {
         return [dict create ok 0 reason "$qualified declares no context parameter: an implementation of a context-trait operation receives the context it implements as its one context parameter (\"context NAME: [namespace tail $w]\")" found $found]

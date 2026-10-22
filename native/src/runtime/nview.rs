@@ -101,10 +101,11 @@ pub extern "C" fn rt_native_load(p: *mut Vm, view: Value, offset: Value, code: V
         Ok(address) => address,
         Err(failed) => return failed,
     };
-    let Some((width, signed, big)) = super::ops::bin_encoding(code) else {
+    let Some(encoding) = super::ops::bin_encoding(code) else {
         let message = format!("native view: malformed scalar encoding {}", super::show::int_text(code));
         return fail(p, "RANGE", message);
     };
+    let width = encoding.width;
     let mut bytes = [0u8; 8];
     // SAFETY: the view's contract (NATIVE-LAYOUT-VIEWS.md, "Bounds and
     // lifetime"): the foreign interface that produced the address promises
@@ -112,7 +113,7 @@ pub extern "C" fn rt_native_load(p: *mut Vm, view: Value, offset: Value, code: V
     // this field inside that size. Unaligned: a layout may place a field at
     // any offset (a packed record).
     unsafe { std::ptr::copy_nonoverlapping(address as *const u8, bytes.as_mut_ptr(), width) };
-    super::ops::bin_decode(p, &bytes[..width], signed, big)
+    super::ops::bin_decode(p, &bytes[..width], encoding)
 }
 
 /// `nativeloadptr %v %o %w`: the C address word of the W-byte address stored
@@ -213,7 +214,7 @@ fn pointer_bits(p: *mut Vm, pointer: Value, width: Value, context: &str) -> Resu
 }
 
 /// The scalar encoding word C of a layout write (`binstore`'s), or RANGE.
-fn write_encoding(p: *mut Vm, code: Value, context: &str) -> Result<(usize, bool, bool), Value> {
+fn write_encoding(p: *mut Vm, code: Value, context: &str) -> Result<super::ops::BinEncoding, Value> {
     super::ops::bin_encoding(code).ok_or_else(|| {
         let message = format!("{context}: malformed scalar encoding {}", super::show::int_text(code));
         fail(p, "RANGE", message)
@@ -240,15 +241,15 @@ pub extern "C" fn rt_native_store(p: *mut Vm, edit: Value, offset: Value, code: 
         Ok(address) => address,
         Err(failed) => return failed,
     };
-    let (width, signed, big) = match write_encoding(p, code, CONTEXT) {
+    let encoding = match write_encoding(p, code, CONTEXT) {
         Ok(encoding) => encoding,
         Err(failed) => return failed,
     };
-    let bytes = match super::ops::bin_encode(p, value, width, signed, big, "std::binary::store") {
+    let bytes = match super::ops::bin_encode(p, value, encoding, "std::binary::store") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
-    store_at(address, &bytes[..width]);
+    store_at(address, &bytes[..encoding.width]);
     UNIT
 }
 
@@ -300,17 +301,17 @@ fn mbytes_written(p: *mut Vm, m: Value, offset: Value, encoded: &[u8], context: 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mbytes_write(p: *mut Vm, m: Value, offset: Value, code: Value, value: Value) -> Value {
     const CONTEXT: &str = "std::binary::write";
-    let (width, signed, big) = match write_encoding(p, code, CONTEXT) {
+    let encoding = match write_encoding(p, code, CONTEXT) {
         Ok(encoding) => encoding,
         Err(failed) => return failed,
     };
     // Encoded before anything is allocated: a value outside the encoding
-    // fails with nothing made or written.
-    let bytes = match super::ops::bin_encode(p, value, width, signed, big, CONTEXT) {
+    // (or a Float64 no binary32 holds) fails with nothing made or written.
+    let bytes = match super::ops::bin_encode(p, value, encoding, CONTEXT) {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
-    mbytes_written(p, m, offset, &bytes[..width], CONTEXT)
+    mbytes_written(p, m, offset, &bytes[..encoding.width], CONTEXT)
 }
 
 /// `mbyteswriteptr %m %o %w %q`: a fresh copy of the writable storage M with
@@ -334,17 +335,18 @@ pub extern "C" fn rt_mbytes_write_ptr(p: *mut Vm, m: Value, offset: Value, width
 // here reads a layout or a descriptor: the encoding and the count are the
 // row's constants.
 
-/// The row's operands: (offset, count, width, signed, big-endian), checked
-/// against SIZE bytes (the storage's, or usize::MAX for native memory, whose
-/// extent only the foreign interface knows).
-fn row_operands(p: *mut Vm, offset: Value, code: Value, count: usize, size: usize, context: &str) -> Result<(usize, usize, bool, bool), Value> {
-    let (width, signed, big) = write_encoding(p, code, context)?;
+/// The row's operands: (offset, encoding), checked against SIZE bytes (the
+/// storage's, or usize::MAX for native memory, whose extent only the foreign
+/// interface knows). A row of C floats strides the C type's width.
+fn row_operands(p: *mut Vm, offset: Value, code: Value, count: usize, size: usize, context: &str) -> Result<(usize, super::ops::BinEncoding), Value> {
+    let encoding = write_encoding(p, code, context)?;
+    let width = encoding.width;
     let at = match int_small(offset) {
         Some(o) if o >= 0 => o as usize,
         _ => return Err(fail(p, "RANGE", format!("{context}: malformed offset {}", super::show::int_text(offset)))),
     };
     match count.checked_mul(width).and_then(|n| n.checked_add(at)) {
-        Some(end) if end <= size => Ok((at, width, signed, big)),
+        Some(end) if end <= size => Ok((at, encoding)),
         _ => Err(fail(p, "RANGE", format!("{context}: {count} elements of {width} bytes at offset {at} lie outside {size} bytes"))),
     }
 }
@@ -357,14 +359,16 @@ fn row_count(p: *mut Vm, n: Value, context: &str) -> Result<usize, Value> {
     }
 }
 
-/// The List of the COUNT scalars of BYTES (contiguous, WIDTH each), decoded;
-/// every heap value (a u64 above i64::MAX's BigInt) rooted until the List
-/// holds it.
-fn decoded_row(p: *mut Vm, bytes: &[u8], width: usize, signed: bool, big: bool) -> Value {
+/// The List of the scalars of BYTES (contiguous, ENCODING's width each),
+/// decoded; every heap value (a u64 above i64::MAX's BigInt, a C float's
+/// Float64) rooted until the List holds it. The first element that is no
+/// value (a NaN or an infinity in a row of C floats) fails the whole read.
+fn decoded_row(p: *mut Vm, bytes: &[u8], encoding: super::ops::BinEncoding) -> Value {
     let base = vm(p).temp_roots.len();
+    let width = encoding.width;
     let mut items = Vec::with_capacity(bytes.len() / width);
     for chunk in bytes.chunks_exact(width) {
-        let v = super::ops::bin_decode(p, chunk, signed, big);
+        let v = super::ops::bin_decode(p, chunk, encoding);
         if v == NO_VALUE {
             vm(p).temp_roots.truncate(base);
             return v;
@@ -392,11 +396,11 @@ pub extern "C" fn rt_bin_load_array(p: *mut Vm, storage: Value, offset: Value, c
         Err(failed) => return failed,
     };
     let data = bytes_of(storage);
-    let (at, width, signed, big) = match row_operands(p, offset, code, count, data.len(), CONTEXT) {
+    let (at, encoding) = match row_operands(p, offset, code, count, data.len(), CONTEXT) {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    decoded_row(p, &data[at..at + count * width], width, signed, big)
+    decoded_row(p, &data[at..at + count * encoding.width], encoding)
 }
 
 /// `nativeloadarray %v %o %c %n`: the List of the N scalars of encoding C at
@@ -412,30 +416,32 @@ pub extern "C" fn rt_native_load_array(p: *mut Vm, view: Value, offset: Value, c
         Ok(count) => count,
         Err(failed) => return failed,
     };
-    let (_, width, signed, big) = match row_operands(p, make_small(0), code, count, usize::MAX, CONTEXT) {
+    let (_, encoding) = match row_operands(p, make_small(0), code, count, usize::MAX, CONTEXT) {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    let mut bytes = vec![0u8; count * width];
+    let mut bytes = vec![0u8; count * encoding.width];
     // SAFETY: as rt_native_load's: the foreign interface promises live
     // memory of the layout's size, and the layout's validation put the whole
     // array inside it. One copy of the row; nothing else is read.
     unsafe { std::ptr::copy_nonoverlapping(address as *const u8, bytes.as_mut_ptr(), bytes.len()) };
-    decoded_row(p, &bytes, width, signed, big)
+    decoded_row(p, &bytes, encoding)
 }
 
-/// The encoded bytes of the List L (every element an Int of encoding WIDTH,
-/// SIGNED, BIG), all of them encoded before anything is written: RANGE on
-/// the first element outside the encoding. Its length is the row's: the
+/// The encoded bytes of the List L (every element an Int, or for a row of C
+/// floats a Float64, of ENCODING), all of them encoded before anything is
+/// written: RANGE on the first element outside the encoding, NonFiniteFloat
+/// on the first Float64 no binary32 holds. Its length is the row's: the
 /// lowering checked it (the declared LayoutExtentMismatch) before.
-fn encoded_row(p: *mut Vm, l: Value, width: usize, signed: bool, big: bool, context: &str) -> Result<Vec<u8>, Value> {
+fn encoded_row(p: *mut Vm, l: Value, encoding: super::ops::BinEncoding, context: &str) -> Result<Vec<u8>, Value> {
     if heap_kind(l) != KIND_LIST {
         return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::List, got: l }));
     }
     let items = list_of(l).items();
+    let width = encoding.width;
     let mut bytes = Vec::with_capacity(items.len() * width);
     for &item in items {
-        let encoded = super::ops::bin_encode(p, item, width, signed, big, context)?;
+        let encoded = super::ops::bin_encode(p, item, encoding, context)?;
         bytes.extend_from_slice(&encoded[..width]);
     }
     Ok(bytes)
@@ -465,11 +471,11 @@ pub extern "C" fn rt_bin_store_array(p: *mut Vm, storage: Value, offset: Value, 
         Err(failed) => return failed,
     };
     let count = if heap_kind(l) == KIND_LIST { list_of(l).items().len() } else { 0 };
-    let (at, width, signed, big) = match row_operands(p, offset, code, count, size, CONTEXT) {
+    let (at, encoding) = match row_operands(p, offset, code, count, size, CONTEXT) {
         Ok(operands) => operands,
         Err(failed) => return failed,
     };
-    let bytes = match encoded_row(p, l, width, signed, big, CONTEXT) {
+    let bytes = match encoded_row(p, l, encoding, CONTEXT) {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };
@@ -513,11 +519,11 @@ pub extern "C" fn rt_native_store_array(p: *mut Vm, edit: Value, offset: Value, 
         Ok(address) => address,
         Err(failed) => return failed,
     };
-    let (width, signed, big) = match write_encoding(p, code, CONTEXT) {
+    let encoding = match write_encoding(p, code, CONTEXT) {
         Ok(encoding) => encoding,
         Err(failed) => return failed,
     };
-    let bytes = match encoded_row(p, l, width, signed, big, "std::binary::store") {
+    let bytes = match encoded_row(p, l, encoding, "std::binary::store") {
         Ok(bytes) => bytes,
         Err(failed) => return failed,
     };

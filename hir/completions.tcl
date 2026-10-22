@@ -740,6 +740,8 @@ proc hir::completions::ResultFinal {hir b} {
 # callable returns. A value of `any` never acquires a Fn type (the type
 # checker rejects it).
 proc hir::completions::Align {type final {depth 0}} {
+    set type [hir::types::Unrefined $type]
+    set final [hir::types::Unrefined $final]
     if {$depth > 8 || $type eq $final || $type in {never any ""} || $final in {"" any}} {
         return {}
     }
@@ -1630,6 +1632,17 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             if {[Eval hir ctx $diagnose $enclosing $guard [dict get $node receiver]] eq {never}} {
                 return never
             }
+            if {[hir::layouts::ProjectionReadsFloat [hir::typeOf $hir [dict get $node receiver]] [dict get $node name]]} {
+                # A C floating field read through a native view or edit
+                # (C-FLOAT-FFI-MILESTONE-1.md): native memory may hold a NaN
+                # or an infinity, which is the read's NonFiniteFloat -- the
+                # one projection that may fail (it becomes binary#view_field
+                # after the checks, hir::layouts::Elaborate).
+                if {$diagnose} {
+                    CheckFloatReadLegality hir $e $node $enclosing
+                }
+                MergeErrors ctx NonFiniteFloat
+            }
             set r [hir::range::ConstrainType $hir $e [hir::range::unknown]]
             dict set ctx exprs $e $r
             return $r
@@ -2241,6 +2254,11 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
     if {$exact ne {}} {
         return $exact
     }
+    # (A fact the argument's static type states: hir::range::Call.)
+    set measured [hir::types::MeasuredValue $hir $name $argExprs]
+    if {$measured ne {}} {
+        return [hir::range::point $measured]
+    }
     return [hir::range::RegisteredRange $name]
 }
 
@@ -2777,6 +2795,22 @@ proc hir::completions::UnhandledVerb {names} {
     return [expr {[llength $names] == 1 ? "is" : "are"}]
 }
 
+# The legality of projection E (NODE), a read of a C floating field through
+# a native view or edit (C-FLOAT-FFI-MILESTONE-1.md): its NonFiniteFloat
+# must be admitted by the enclosing function's own "errors" declaration
+# (ENCLOSING) -- a projection has no handler of its own.
+proc hir::completions::CheckFloatReadLegality {hirVar e node enclosing} {
+    upvar 1 $hirVar hir
+    set unhandled [Unhandled NonFiniteFloat {} $enclosing]
+    if {$unhandled eq ""} {
+        return
+    }
+    hir::Diagnose hir UNHANDLED-ERROR [format \
+        {this read of the C floating field "%s" through %s may produce %s -- native memory may hold a NaN or an infinity, which no Float64 is -- which %s not admitted by the enclosing function's own "errors" declaration (a field read has no handler of its own: read it in a function that declares the error, or copy the record with std::binary::load, a call a handler may follow)} \
+        [dict get $node name] [hir::types::show [hir::typeOf $hir [dict get $node receiver]]] \
+        [UnhandledPhrase $unhandled] [UnhandledVerb $unhandled]] $e
+}
+
 # CheckCallLegality for call E through a structural function type
 # CALLEETYPE: its whole declared error set ERRORS is effective (a structural
 # callee always may complete normally), so the one legality rule is
@@ -2900,7 +2934,18 @@ proc hir::completions::NativeDeclaredErrors {hir e name} {
     if {[dict get $meta completion]} {
         return [dict getdef $hir exprs $e calleeErrors {}]
     }
-    return [dict get $meta errors]
+    return [LayoutCallErrors $hir $name [dict get $hir exprs $e args] [dict get $meta errors]]
+}
+
+# ERRORS (native NAME's registered errors) as call ARGEXPRS charges them: a
+# layout operation's NonFiniteFloat only where the representation it reads
+# or writes holds a C floating value that can fail (hir::layouts::
+# CallErrors, C-FLOAT-FFI-MILESTONE-1.md).
+proc hir::completions::LayoutCallErrors {hir name argExprs errors} {
+    if {"NonFiniteFloat" ni $errors} {
+        return $errors
+    }
+    return [hir::layouts::CallErrors $hir $name $argExprs [lmap a $argExprs {hir::typeOf $hir $a}] $errors]
 }
 
 # NativeEffectiveFacts for call E. A coroutine segment (start, resume) may
@@ -2953,7 +2998,7 @@ proc hir::completions::NativeCallFacts {hirVar ctxVar guard e name argExprs argR
 
 proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
     set meta [core::native::metadata $name]
-    set errors [dict get $meta errors]
+    set errors [LayoutCallErrors $hir $name $argExprs [dict get $meta errors]]
     set bounds [dict get $meta bounds]
     set verdicts {}
     if {[dict get $meta fold] ne {}} {
@@ -2969,6 +3014,41 @@ proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
             error { return [list 0 [list [lindex $decided 1]] [list [list [lindex $decided 1]]]] }
         }
         return [list 1 $errors [list $errors]]
+    }
+    if {"NonFiniteFloat" in $errors && [hir::layouts::Role $name] ne ""} {
+        # A Float64 written into one C floating field or element
+        # (C-FLOAT-FFI-MILESTONE-1.md): a value this walk knows exactly is
+        # narrowed by the boundary's own rule (core::cabi::Narrow), so the
+        # write cannot fail through it (its other errors stay), or always
+        # does (KNOWN-ERROR).
+        set at [hir::layouts::RoleOf [hir::layouts::Role $name] value]
+        set format [hir::layouts::WrittenFloatFormat $hir $name $argExprs [lmap a $argExprs {hir::typeOf $hir $a}]]
+        set v [if {$at eq "" || $format eq ""} {string cat ""} else {ExactValueOf $hir $ctx [lindex $argExprs $at]}]
+        if {$v ne {} && [core::type::isFloat [core::value::kind $v]]} {
+            if {[lindex [core::cabi::Narrow $format [core::value::floatOf $v]] 0] ne "ok"} {
+                return [list 0 {NonFiniteFloat} {}]
+            }
+            set errors [lsearch -all -inline -not -exact $errors NonFiniteFloat]
+        }
+    }
+    if {[core::native::isExtern $name] && "NonFiniteFloat" in $errors} {
+        # A C call with a C floating result or a C float parameter
+        # (C-FLOAT-FFI-MILESTONE-1.md): a float argument this walk knows
+        # exactly is narrowed by the boundary's own rule (core::cabi::
+        # Narrow, what a run computes): one that rounds to an infinity makes
+        # the call fail before C runs (KNOWN-ERROR); when every one narrows
+        # to a finite float and C returns no floating value, the call cannot
+        # fail with NonFiniteFloat at all. A floating result is C's, never
+        # known: it may always be NaN or an infinity.
+        switch -- [ExternNarrowing $hir $ctx $name $argExprs] {
+            out { return [list 0 {NonFiniteFloat} {}] }
+            in {
+                set result [dict get [core::native::metadata $name] extern abi result]
+                if {$result ni {f32 f64}} {
+                    return [list 1 [lsearch -all -inline -not -exact $errors NonFiniteFloat] {}]
+                }
+            }
+        }
     }
     switch -- [lindex $bounds 0] {
         index {
@@ -3001,6 +3081,27 @@ proc hir::completions::NativeEffectiveFacts {hir ctx name argExprs argRanges} {
         }
     }
     return [list 1 $errors $verdicts]
+}
+
+# Whether every C float argument (ARGEXPRS) of a call of the extern c fn
+# native NAME narrows to a finite float (core::cabi::Narrow, C-FLOAT-FFI-
+# MILESTONE-1.md): `in` (every one is exactly known and does), `out` (one
+# exactly known rounds to an infinity: the call fails before C is called)
+# or "" (unknown).
+proc hir::completions::ExternNarrowing {hir ctx name argExprs} {
+    set abi [dict get [core::native::metadata $name] extern abi]
+    set verdict in
+    foreach i [hir::foreign::NarrowedParameters $abi] {
+        set v [ExactValueOf $hir $ctx [lindex $argExprs $i]]
+        if {$v eq {} || ![core::type::isFloat [core::value::kind $v]]} {
+            set verdict ""
+            continue
+        }
+        if {[lindex [core::cabi::Narrow binary32 [core::value::floatOf $v]] 0] ne "ok"} {
+            return out
+        }
+    }
+    return $verdict
 }
 
 # Whether every fixed array the value argument V of call ARGEXPRS of the
@@ -3086,6 +3187,11 @@ proc hir::completions::ReprValueVerdict {hir ctx repr e} {
                 set n [lindex $form 0]
             } elseif {[dict exists $ctx sizes $form]} {
                 set n [dict get $ctx sizes $form]
+            } else {
+                # The length the value's own static type states (a refined
+                # List, a guard's refinement: LIST-CARDINALITY-
+                # REFINEMENTS.md).
+                set n [hir::cardinality::TypedLength $hir $e]
             }
             if {$n eq ""} {
                 return ""
@@ -3165,9 +3271,11 @@ proc hir::completions::ExactCopy {hir e} {
         }
         handle {
             # A handled call whose handlers all leave (return, fail, ...)
-            # completes only with the call's own value.
+            # completes only with the call's own value. A handler body is a
+            # sequence: its last expression is the one that completes it.
             foreach body [dict get $node handlerBodies] {
-                if {![hir::types::Halts $hir $body [hir::typeOf $hir $body]]} {
+                set last [lindex $body end]
+                if {![hir::types::Halts $hir $last [hir::typeOf $hir $last]]} {
                     return ""
                 }
             }
@@ -3305,6 +3413,12 @@ proc hir::completions::SizesOf {hir ctx family container} {
         set literal [LiteralListOf $hir $ctx $container]
         if {$literal ne {}} {
             lappend forms [hir::cardinality::FormConst [llength [LiteralElements $literal]]]
+        }
+        # The length the read's own static type states (a guard's
+        # refinement of it: hir/cardinality.tcl's TypedLength).
+        set typed [hir::cardinality::TypedLength $hir $container]
+        if {$typed ne {}} {
+            lappend forms [hir::cardinality::FormConst $typed]
         }
     } elseif {$family eq "str"} {
         set v [ExactValueOf $hir $ctx $container]
@@ -3576,6 +3690,12 @@ proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
         if {$literal ne {}} {
             lappend sizes [hir::cardinality::FormConst [llength [LiteralElements $literal]]]
         }
+        # The length the read's own static type states (a refined List,
+        # a guard's refinement of it: LIST-CARDINALITY-REFINEMENTS.md).
+        set typed [hir::cardinality::TypedLength $hir $container]
+        if {$typed ne {}} {
+            lappend sizes [hir::cardinality::FormConst $typed]
+        }
     }
     set known {}
     foreach form $sizes {
@@ -3819,13 +3939,20 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
     if {!$dead && $normal} {
         lappend liveResults [hir::range::ConstrainType $hir $call $callResult]
     }
+    # The call's type with every List length forgotten (hir::types::
+    # ForgetInferred): forgetting a length is always valid, so a handler's
+    # List of another length (or of none) is admissible, and the handled
+    # value's type is then their join (hir::types::Handle: a List of no
+    # known length) -- a length inference minted never makes a handler
+    # inadmissible (LIST-CARDINALITY-REFINEMENTS.md).
+    set admitted [hir::types::ForgetInferred $callType]
     foreach name $handled body $handlerBodies type $handlerTypes {
         if {$type ne {never} && $callType ne {never}} {
             set range [hir::range::analyzeSequence $hir $body]
-            if {![hir::range::ProvesValueAcceptedBy $type $range $callType]} {
+            if {![hir::range::ProvesValueAcceptedBy $type $range $admitted]} {
                 hir::Diagnose hir TYPE [format \
                     {handler "on %s" completes with type %s, not admissible as %s (the call's own normal result type)} \
-                    $name [hir::types::show $type] [hir::types::show $callType]] $e
+                    $name [hir::types::show [hir::types::ForgetInferred $type]] [hir::types::show $admitted]] $e
             }
         }
         set saved [dict get $ctx bindings]

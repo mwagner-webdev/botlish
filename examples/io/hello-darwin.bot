@@ -1,0 +1,18 @@
+# The portable Hello World on macOS (CONTEXT-TRAITS.md;
+# MACOS-AARCH64-MILESTONE-8.md): examples/io/hello.bot with another context.
+# hello() is the same function: it declares no context, and std::io::print_line
+# requires the std::io::IO context trait; the installed std::darwin::io::DarwinIO is the
+# one context that implements it, so the call compiles to a direct call of
+# std::darwin::io::write_text -- one call of libSystem's write(2) with
+# "Hello, world!\n" for descriptor 1.
+import std::io
+import std::darwin::io
+
+fn hello() errors std::io::WriteFailed:
+    std::io::print_line("Hello, world!")
+
+with context std::darwin::io::create()
+
+hello():
+    on std::io::WriteFailed:
+        unit

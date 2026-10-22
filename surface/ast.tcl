@@ -91,7 +91,10 @@
 #              none; they follow the ordinary params -- FLAGS.md),
 #              contexts ({name nameSpan type typeSpan} dicts: the declared
 #              context parameters in written order -- `fn f(x, context io:
-#              LinuxIO)`; empty if none; the last section -- CONTEXTS.md),
+#              LinuxIO)`; empty if none -- CONTEXTS.md), variadic ("" or
+#              {name nameSpan type typeSpan span}: the variadic parameter,
+#              `variadic xs: List[int]`, the last binding of the list --
+#              VARIADICS-VERTICAL-SLICE-1.md),
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), resultType (the "-> TYPE" result annotation as
 #              surface::parser::TypeExpr returns it, "" if none) and
@@ -204,7 +207,10 @@
 #              name itself), symbolSpan, params ({name nameSpan type typeSpan
 #              access escape factsSpan} dicts in written order: access read |
 #              write | "", escape declared-noescape | proven-noescape |
-#              captures | "", "" an unstated fact), paramsSpan, resultType,
+#              captures | "", "" an unstated fact), paramsSpan, variadic
+#              (1 when the list ends with the bare word `variadic`, C's
+#              `...` -- VARIADICS-VERTICAL-SLICE-1.md) and variadicSpan,
+#              resultType,
 #              resultTypeSpan, provenance (independent | {alias PARAM} |
 #              ""), provenanceSpan -- "extern c fn NAME(...) -> T" (C-FFI.md):
 #              a C ABI declaration with no body. A declaration like
@@ -846,10 +852,15 @@ proc surface::ast::showType {type} {
         # FIXED-LAYOUT-ARRAYS.md).
         return "array [lindex $type 1] of [showType [lindex $type 2]]"
     }
-    if {[llength $type] == 3 && [lindex $type 0] eq "refine"} {
+    if {[llength $type] in {3 4} && [lindex $type 0] eq "refine"} {
         # A scalar refinement (surface::parser::ScalarRefinement,
-        # DECIMAL-ROUNDED-MILESTONE-1.md), its parameters as written.
-        return "[lindex $type 1]{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
+        # DECIMAL-ROUNDED-MILESTONE-1.md), its parameters as written -- of
+        # an applied type, after it (LIST-CARDINALITY-REFINEMENTS.md).
+        set head [lindex $type 1]
+        if {[llength $type] == 4} {
+            set head [showType [lindex $type 3]]
+        }
+        return "$head{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
     }
     lassign $type name arg
     if {$name eq "fn"} {
@@ -948,6 +959,9 @@ proc surface::ast::Statement {node indent show linesVar} {
                 }
                 set text
             }]
+            if {[dict getdef $node variadic 0]} {
+                lappend params variadic
+            }
             append line "([join $params {, }]) -> [showType [dict get $node resultType]]"
             switch -- [lindex [dict get $node provenance] 0] {
                 independent { append line " independent" }
@@ -993,6 +1007,9 @@ proc surface::ast::Statement {node indent show linesVar} {
                 lappend params context {*}[lmap c [dict get $node contexts] {
                     string cat [dict get $c name] : [showType [dict get $c type]]
                 }]
+            }
+            if {[dict exists $node variadic] && [dict get $node variadic] ne ""} {
+                lappend params variadic "[dict get $node variadic name]:[showType [dict get $node variadic type]]"
             }
             if {[dict exists $node resume] && [dict get $node resume] ne ""} {
                 lappend params resume [showType [dict get $node resume type]]

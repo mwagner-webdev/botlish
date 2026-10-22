@@ -132,10 +132,10 @@ test ev-not-exact-when-unknown {a parameter, a loop element and a user call are 
 # ---------------------------------------------------------------------------
 # Known immutable Lists are facts, not types
 
-test ev-list-fact-not-a-type {a known List keeps its ordinary homogeneous/heterogeneous static type; the exact vector is a separate fact} -body {
+test ev-list-fact-not-a-type {a known List keeps its ordinary homogeneous/heterogeneous static type (stating its length, LIST-CARDINALITY-REFINEMENTS.md); the exact vector is a separate fact} -body {
     list [evSem "xs = \[1, 2, 3\]\nxs"] [evSem "ys = \[\"x\", 3\]\nys"] \
         [evFact "xs = \[1, 2, 3\]\nxs"] [evFact "ys = \[\"x\", 3\]\nys"]
-} -result {{List[int]} list {exact-list[int(1), int(2), int(3)]} {exact-list[str("x"), int(3)]}}
+} -result {{List[int]{length: 3}} {list{length: 2}} {exact-list[int(1), int(2), int(3)]} {exact-list[str("x"), int(3)]}}
 
 test ev-list-fact-render {a fact renders as a fact, never as a tuple/record type} -body {
     set out [evFact "\[\"x\", 3, \[1, \"y\"\]\]"]
@@ -378,10 +378,10 @@ test ev-bound-eight-kept {a List of exactly maxElements keeps its exact vector} 
     list $hir::exact::maxElements [evRange $src]
 } -result {8 {[8, 8] {8}}}
 
-test ev-bound-nine-forgotten {a List of maxElements + 1 keeps its ordinary type and loses the exact vector} -body {
+test ev-bound-nine-forgotten {a List of maxElements + 1 keeps its ordinary type (a length is no exact vector: it has no bound) and loses the exact vector} -body {
     set src "x = \[1, 2, 3, 4, 5, 6, 7, 8, 9\]\nstd::list::at(x, 8)"
     list [evSem "x = \[1, 2, 3, 4, 5, 6, 7, 8, 9\]\nx"] [evFact "\[1, 2, 3, 4, 5, 6, 7, 8, 9\]"] [evSem $src] [evRange $src]
-} -result {{List[int]} none int {[-∞, +∞]}}
+} -result {{List[int]{length: 9}} none int {[-∞, +∞]}}
 
 test ev-bound-heterogeneous-forgotten {past the bound a heterogeneous List keeps its ordinary type and reads fall back to it} -body {
     set src "x = \[\"a\", 2, 3, 4, 5, 6, 7, 8, 9\]\nstd::list::at(x, 0)"

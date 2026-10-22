@@ -6,7 +6,8 @@
 #                                                  ?-keep 0|1? ?-verbose 0|1?
 #
 # Each of N programs is a fresh freestanding C header lf.h of K random
-# records: fields of every C integer type, stdint typedefs, typedef chains,
+# records: fields of every C integer type and of C float and double
+# (C-FLOAT-FFI-MILESTONE-1.md), stdint typedefs, typedef chains,
 # enums of either sign, data pointers (void, char, an earlier record, the
 # record itself, an incomplete record, a pointer to a pointer), function
 # pointers (inline and through a typedef), earlier records nested by value,
@@ -18,7 +19,7 @@
 # integers, a record and a scalar, an array and a scalar --, unions held by
 # value and as array elements, anonymous unions, anonymous structs inside
 # them) -- and, in some records, a field the layout language lacks: a
-# flexible array member, a bitfield, a float, a double, a _Bool, an array
+# flexible array member, a bitfield, a long double, a _Bool, an array
 # of one of those, or a record that holds one of those by value (directly,
 # as an array's elements, or as an alternative of a union, named or
 # anonymous). The fuzzer generates its binding
@@ -77,13 +78,13 @@ proc between {lo hi} { return [expr {$lo + int(rand() * ($hi - $lo + 1))}] }
 set host [core::cabi::hostTarget]
 set target [expr {[dict get $options -target] eq "" ? $host : [dict get $options -target]}]
 
-# The model: the target's data model, in this file's own words. C integer
-# spelling -> the std::ffi::c scalar; the stdint names -> their C type on the
-# target (LP64 Linux and macOS, LLP64 Windows: MinGW-w64's int64_t is long
-# long).
+# The model: the target's data model, in this file's own words. C scalar
+# spelling (the integers, float and double) -> the std::ffi::c scalar; the stdint
+# names -> their C type on the target (LP64 Linux and macOS, LLP64 Windows:
+# MinGW-w64's int64_t is long long).
 set scalars [dict create char Char {signed char} SChar {unsigned char} UChar short Short \
     {unsigned short} UShort int Int {unsigned int} UInt long Long {unsigned long} ULong \
-    {long long} LongLong {unsigned long long} ULongLong]
+    {long long} LongLong {unsigned long long} ULongLong float Float double Double]
 if {[string match windows-* $target]} {
     set stdints [dict create int8_t {signed char} uint8_t {unsigned char} int16_t short \
         uint16_t {unsigned short} int32_t int uint32_t {unsigned int} int64_t {long long} \
@@ -103,12 +104,14 @@ if {[string match windows-* $target]} {
 # reason REASON dep KEY}), in declaration order.
 proc drawProgram {p k} {
     set typedefs {}
-    for {set i 0} {$i < [between 1 3]} {incr i} {
+    set count [between 1 3]
+    for {set i 0} {$i < $count} {incr i} {
         set base [expr {[chance 0.5] ? [pick [dict keys $::stdints]] : [pick [dict keys $::scalars]]}]
         lappend typedefs [dict create name lf_t$i base $base]
     }
     set enums {}
-    for {set i 0} {$i < [between 0 2]} {incr i} {
+    set count [between 0 2]
+    for {set i 0} {$i < $count} {incr i} {
         set negative [chance 0.4]
         lappend enums [dict create name lf_e$i values [expr {$negative ? {-3 1 7} : {0 2 300}}]]
     }
@@ -301,8 +304,8 @@ proc drawAnonymous {i name selfName earlier kind} {
                 }
             }
             blocked {
-                set reason [pick {float c-bool bitfield}]
-                set decl [dict get {float "float NAME" c-bool "_Bool NAME" bitfield "unsigned int NAME : 3"} $reason]
+                set reason [pick {long-double c-bool bitfield}]
+                set decl [dict get {long-double "long double NAME" c-bool "_Bool NAME" bitfield "unsigned int NAME : 3"} $reason]
                 lappend inner [dict create c [string map [list NAME $iname] $decl] expect blocked reason $reason]
             }
         }
@@ -361,19 +364,18 @@ proc drawArray {name emitted} {
 # A field the layout language lacks: {c DECL expect blocked reason R dep KEY?}.
 proc drawBlocked {r i name earlier last} {
     set blockedEarlier [lmap e $earlier {expr {[dict get $e kind] eq "struct" && ![dict get $e anonymous] && [dict get $e expectStatus] eq "blocked" ? $e : [continue]}}]
-    set shapes {bitfield float double bool floats bools floatUnion floatUnions}
+    set shapes {bitfield longdouble bool longdoubles bools ldUnion ldUnions}
     if {$last} { lappend shapes flexible }
     if {[llength $blockedEarlier]} { lappend shapes nestedBlocked nestedBlocked nestedBlockedArray }
     set shape [pick $shapes]
     switch -- $shape {
-        floats { return [dict create c "float $name\[[between 1 4]\]" expect blocked reason float] }
+        longdoubles { return [dict create c "long double $name\[[between 1 4]\]" expect blocked reason long-double] }
         bools { return [dict create c "_Bool $name\[[between 1 4]\]" expect blocked reason c-bool] }
-        floatUnions { return [dict create c "union lf_fu $name\[2\]" expect blocked reason nested roots float] }
+        ldUnions { return [dict create c "union lf_lu $name\[2\]" expect blocked reason nested roots long-double] }
         flexible { return [dict create c "int $name\[\]" expect blocked reason flexible-array] }
-        floatUnion { return [dict create c "union lf_fu $name" expect blocked reason nested roots float] }
+        ldUnion { return [dict create c "union lf_lu $name" expect blocked reason nested roots long-double] }
         bitfield { return [dict create c "unsigned int $name : [between 1 9]" expect blocked reason bitfield] }
-        float { return [dict create c "float $name" expect blocked reason float] }
-        double { return [dict create c "double $name" expect blocked reason double] }
+        longdouble { return [dict create c "long double $name" expect blocked reason long-double] }
         bool { return [dict create c "_Bool $name" expect blocked reason c-bool] }
         nestedBlocked {
             set e [pick $blockedEarlier]
@@ -391,7 +393,7 @@ proc drawBlocked {r i name earlier last} {
 # The header text of PROG.
 proc header {prog} {
     set h "/* lf.h -- a layout fuzz program (audit/c-bindgen/tools/layout-fuzz.tcl). */\n#ifndef LF_H\n#define LF_H\n#include <stdint.h>\n#include <stddef.h>\n#include <stdbool.h>\n\n"
-    append h "struct lf_opaque;\nstruct lf_inner { int a; long b; };\nunion lf_u { int i; void *p; };\nunion lf_fu { int i; float f; };\ntypedef void (*lf_callback)(long);\n"
+    append h "struct lf_opaque;\nstruct lf_inner { int a; long b; };\nunion lf_u { int i; void *p; };\nunion lf_lu { int i; long double f; };\ntypedef void (*lf_callback)(long);\n"
     foreach t [dict get $prog typedefs] { append h "typedef [dict get $t base] [dict get $t name];\n" }
     foreach e [dict get $prog enums] {
         set items {}
@@ -627,6 +629,9 @@ proc arrayShape {type layouts} {
     if {![llength $extents]} { return {{} {}} }
     if {[regexp {^std::ffi::c::(Ptr|FnPtr)\[} $type]} {
         set width [expr {[dict get [core::cabi::target $::target] pointer] / 8}]
+    } elseif {$type in {std::ffi::c::Float std::ffi::c::Double}} {
+        # IEEE 754 binary32 and binary64 on every target.
+        set width [dict get {std::ffi::c::Float 4 std::ffi::c::Double 8} $type]
     } elseif {[regexp {^std::ffi::c::([A-Za-z]+)$} $type -> scalar]} {
         set width [expr {[dict get [core::cabi::scalarInfo $scalar $::target] bits] / 8}]
     } else {

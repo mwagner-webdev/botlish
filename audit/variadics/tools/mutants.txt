@@ -1,0 +1,224 @@
+# Mutants of Botlish variadic parameters (audit/variadics/tools/mutate.tcl;
+# VARIADICS-VERTICAL-SLICE-1.md): each a deliberate bug in the grammar
+# (surface/parser.tcl), the lowering (surface/lower.tcl), the collection of
+# a call's trailing arguments (hir/variadic.tcl), the callee interface
+# (hir/flags.tcl), the declaration's resolution and method candidates
+# (hir/resolve.tcl), the element proofs (hir/range.tcl), HIR text
+# (hir/format.tcl, hir/read.tcl), trait conformance (hir/traits.tcl) or the
+# warnings (hir/warnings.tcl). The C side's mutants are audit/c-ffi's
+# (va-*).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+@@ first-trailing-dropped a call collects its trailing arguments from the second one: the first is never passed
+## hir/variadic.tcl
+<<<<
+    set tail [lrange $argNodes $fixed end]
+====
+    set tail [lrange $argNodes [expr {$fixed + 1}] end]
+>>>>
+
+@@ trailing-reversed a call collects its trailing arguments in reverse order
+## hir/variadic.tcl
+<<<<
+    set tail [lrange $argNodes $fixed end]
+====
+    set tail [lreverse [lrange $argNodes $fixed end]]
+>>>>
+
+@@ fixed-count-includes-list the callee's fixed parameters are counted with the variadic List: the first trailing argument is taken for a fixed one
+## hir/variadic.tcl
+<<<<
+    set fixed [expr {[dict get $iface ordinary] - 1}]
+====
+    set fixed [dict get $iface ordinary]
+>>>>
+
+@@ empty-collects-nothing a call with no trailing argument passes no List at all
+## hir/variadic.tcl
+<<<<
+    set tail [lrange $argNodes $fixed end]
+====
+    set tail [lrange $argNodes $fixed end]
+    if {$tail eq {}} {
+        return $argNodes
+    }
+>>>>
+
+@@ arity-not-diagnosed a call passing fewer than the fixed arguments is not diagnosed where it is collected
+## hir/variadic.tcl
+<<<<
+    if {[llength $argNodes] < $fixed} {
+====
+    if {0} {
+>>>>
+
+@@ non-list-declared-accepted a variadic parameter declared with a type that is no List is accepted
+## hir/variadic.tcl
+<<<<
+    if {$declared eq "" || ([lindex $declared 0] eq "list" && [llength $declared] == 2)} {
+====
+    if {1} {
+>>>>
+
+@@ elements-unproven every trailing argument is taken as proven in the element type
+## hir/variadic.tcl
+<<<<
+        if {[hir::range::ProvesValueAcceptedBy $type $range $element]} {
+====
+        if {1} {
+>>>>
+
+@@ element-proof-bypassed a variadic call's collected List is held to the declared List type as a whole (a List literal, which keeps no element's range)
+## hir/range.tcl
+<<<<
+            if {!$inferred && [dict exists $node variadic] && $i == [dict get $node variadic fixed]
+====
+            if {0 && !$inferred && [dict exists $node variadic] && $i == [dict get $node variadic fixed]
+>>>>
+
+@@ interface-not-variadic the callee's interface does not say it is variadic: no call collects anything
+## hir/flags.tcl
+<<<<
+        dict set iface variadic 1
+====
+>>>>
+
+@@ bare-list-is-any a bare List in the variadic section is List[any], not an element type each call imprints
+## hir/resolve.tcl
+<<<<
+                    lappend declaredParamTypes [hir::types::MakeList [list imprint \
+                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] \
+                            [hir::imprint::EnclosingVariables $hir $ctx]]] {} 0 0]
+====
+                    lappend declaredParamTypes [hir::types::MakeList any {} 0 0]
+>>>>
+
+@@ method-candidate-fixed-arity a variadic function's method candidate accepts exactly its parameters' count, not that of its fixed ones or more
+## hir/resolve.tcl
+<<<<
+            return ">=[expr {[dict get $binding flagIface ordinary] - 1}]"
+====
+            return [dict get $binding flagIface ordinary]
+>>>>
+
+@@ lowering-drops-marker the lowering drops a function's variadic marker: its List parameter is an ordinary one
+## surface/lower.tcl
+<<<<
+            if {$variadic ne ""} {
+                set block [hir::syntax::withVariadic $block \
+====
+            if {0} {
+                set block [hir::syntax::withVariadic $block \
+>>>>
+
+@@ second-section-accepted a second variadic section is parsed, replacing the first (neither the section loop nor the section order refuses it)
+## surface/parser.tcl
+<<<<
+            if {[VariadicMarker p]} {
+                FailCode [dict get $token span] MALFORMED-VARIADIC-SECTION \
+                    "a function declares at most one variadic parameter (\"variadic NAME: List\[T\]\", the last parameter of its list)"
+            }
+            FailCode [dict get $token span] MALFORMED-VARIADIC-SECTION \
+====
+            if {[VariadicMarker p]} {
+            } else {FailCode [dict get $token span] MALFORMED-VARIADIC-SECTION \
+>>>>
+## surface/parser.tcl
+<<<<
+                "the variadic parameter \"[dict get $variadic name]\" must be the last parameter of the list, found [Describe $token] after it (a parameter list is ordinary parameters, then flags, then context, then the variadic parameter)"
+        }
+====
+                "the variadic parameter \"[dict get $variadic name]\" must be the last parameter of the list, found [Describe $token] after it (a parameter list is ordinary parameters, then flags, then context, then the variadic parameter)"}
+        }
+>>>>
+## surface/parser.tcl
+<<<<
+    if {[lsearch -exact $paramSectionOrder $new] <= [lsearch -exact $paramSectionOrder $section]} {
+        if {$new eq "variadic"} {
+====
+    if {$new eq "variadic" && $section eq "variadic"} {
+        return
+    }
+    if {[lsearch -exact $paramSectionOrder $new] <= [lsearch -exact $paramSectionOrder $section]} {
+        if {$new eq "variadic"} {
+>>>>
+
+@@ parameter-after-section-accepted an ordinary parameter after the variadic section is parsed
+## surface/parser.tcl
+<<<<
+        if {$section eq "variadic" && ![ResumeMarker p]} {
+====
+        if {$section eq "variadic" && ![ResumeMarker p] && [VariadicMarker p]} {
+>>>>
+
+@@ format-drops-declaration-mark HIR text drops a variadic function's `variadic N`
+## hir/format.tcl
+<<<<
+                append text " variadic [dict get $node variadic]"
+====
+>>>>
+
+@@ format-drops-call-mark HIR text drops a variadic call's `variadic FIXED COUNT`
+## hir/format.tcl
+<<<<
+                append text " variadic [dict get $node variadic fixed] [dict get $node variadic count]"
+====
+>>>>
+
+@@ read-drops-declaration-mark HIR text's reader ignores a function's `variadic N`
+## hir/read.tcl
+<<<<
+                SetField hir $e variadic $variadic
+====
+>>>>
+
+@@ read-drops-call-mark HIR text's reader ignores a call's `variadic FIXED COUNT`
+## hir/read.tcl
+<<<<
+                SetField hir $e variadic [dict create fixed $variadicFixed count $variadicCount]
+====
+>>>>
+
+@@ trait-implementation-accepted a variadic function implements a trait requirement of the same parameters
+## hir/traits.tcl
+<<<<
+            if {[dict getdef $info variadic 0]} {
+====
+            if {0} {
+>>>>
+
+@@ method-eligible-reads-collected-list METHOD-ELIGIBLE reads a variadic call's collected List as an argument (and suggests method syntax for it)
+## hir/warnings.tcl
+<<<<
+            if {[dict get $hir exprs $block kind] ne "block" || [dict exists $hir exprs $block variadic]} {
+====
+            if {[dict get $hir exprs $block kind] ne "block"} {
+>>>>
+
+@@ single-trailing-as-scalar a call with one trailing argument passes it bare, not as a List of one
+## hir/variadic.tcl
+<<<<
+    set collected [hir::syntax::callNode $origin [hir::syntax::rootRef $origin list] {*}$tail]
+====
+    set collected [hir::syntax::callNode $origin [hir::syntax::rootRef $origin list] {*}$tail]
+    if {[llength $tail] == 1} {
+        set collected [lindex $tail 0]
+    }
+>>>>
+
+@@ first-trailing-evaluated-twice the first trailing argument is written twice in the collected List (evaluated twice)
+## hir/variadic.tcl
+<<<<
+    set collected [hir::syntax::callNode $origin [hir::syntax::rootRef $origin list] {*}$tail]
+====
+    set collected [hir::syntax::callNode $origin [hir::syntax::rootRef $origin list] {*}[lrange $tail 0 0] {*}$tail]
+>>>>

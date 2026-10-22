@@ -31,6 +31,7 @@ IndexNotFound	builtin-error		builtin	intrinsic	core/native.tcl
 InvalidArgumentEncoding	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutExtentMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutLengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
+LengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LowerUnderrun	builtin-error		builtin	intrinsic	core/native.tcl			
 NativeEditNull	builtin-error		builtin	intrinsic	core/native.tcl			
 NativeViewNull	builtin-error		builtin	intrinsic	core/native.tcl			
@@ -131,12 +132,12 @@ ascii::is_digit	function	ascii	api	source	lib/ascii.bot:41
 ascii::is_lower	function	ascii	api	source	lib/ascii.bot:47			
 ascii::is_upper	function	ascii	api	source	lib/ascii.bot:44			
 binary	namespace		api	source+intrinsic	lib/binary.bot			
-binary#element	intrinsic		internal	intrinsic	core/binary.tcl:757			
-binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:708			
-binary#load	intrinsic		internal	intrinsic	core/binary.tcl:730			
-binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:767			
-binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:764			
-binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:733			
+binary#element	intrinsic		internal	intrinsic	core/binary.tcl:803			
+binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:754			
+binary#load	intrinsic		internal	intrinsic	core/binary.tcl:776			
+binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:813			
+binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:810			
+binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:779			
 binary::I16	type	binary	api	source	lib/binary.bot:61			
 binary::I32	type	binary	api	source	lib/binary.bot:62			
 binary::I64	type	binary	api	source	lib/binary.bot:63			
@@ -145,20 +146,20 @@ binary::U16	type	binary	api	source	lib/binary.bot:56
 binary::U32	type	binary	api	source	lib/binary.bot:57			
 binary::U64	type	binary	api	source	lib/binary.bot:58			
 binary::U8	type	binary	api	source	lib/binary.bot:55			
-binary::element	intrinsic	binary	api	intrinsic	core/binary.tcl:754			
-binary::emit	intrinsic	binary	api	intrinsic	core/binary.tcl:705			
-binary::layout_alignment	intrinsic	binary	api	intrinsic	core/binary.tcl:722			
-binary::layout_length	intrinsic	binary	api	intrinsic	core/binary.tcl:720			
-binary::load	intrinsic	binary	api	intrinsic	core/binary.tcl:727			
+binary::element	intrinsic	binary	api	intrinsic	core/binary.tcl:800			
+binary::emit	intrinsic	binary	api	intrinsic	core/binary.tcl:751			
+binary::layout_alignment	intrinsic	binary	api	intrinsic	core/binary.tcl:768			
+binary::layout_length	intrinsic	binary	api	intrinsic	core/binary.tcl:766			
+binary::load	intrinsic	binary	api	intrinsic	core/binary.tcl:773			
 binary::native	namespace		api	intrinsic				1
-binary::native::edit	intrinsic	binary::native	api	intrinsic	core/binary.tcl:736			
-binary::native::view	intrinsic	binary::native	api	intrinsic	core/binary.tcl:724			
-binary::parse	intrinsic	binary	api	intrinsic	core/binary.tcl:702			
-binary::read	intrinsic	binary	api	intrinsic	core/binary.tcl:717			
-binary::store	intrinsic	binary	api	intrinsic	core/binary.tcl:739			
-binary::store_element	intrinsic	binary	api	intrinsic	core/binary.tcl:760			
-binary::write	intrinsic	binary	api	intrinsic	core/binary.tcl:742			
-binary::write_foreign	intrinsic	binary	api	intrinsic	core/binary.tcl:746			
+binary::native::edit	intrinsic	binary::native	api	intrinsic	core/binary.tcl:782			
+binary::native::view	intrinsic	binary::native	api	intrinsic	core/binary.tcl:770			
+binary::parse	intrinsic	binary	api	intrinsic	core/binary.tcl:748			
+binary::read	intrinsic	binary	api	intrinsic	core/binary.tcl:763			
+binary::store	intrinsic	binary	api	intrinsic	core/binary.tcl:785			
+binary::store_element	intrinsic	binary	api	intrinsic	core/binary.tcl:806			
+binary::write	intrinsic	binary	api	intrinsic	core/binary.tcl:788			
+binary::write_foreign	intrinsic	binary	api	intrinsic	core/binary.tcl:792			
 bit_and	intrinsic		primitive	intrinsic				
 bit_or	intrinsic		primitive	intrinsic				
 bit_xor	intrinsic		primitive	intrinsic				
@@ -183,7 +184,7 @@ byte_store::from_list	intrinsic	byte_store	api	intrinsic	core/bytestore.tcl:195
 char	namespace		api	intrinsic				
 char::scalar_value	intrinsic	char	api	intrinsic	core/unicodechar.tcl:29			
 compiler	namespace		api	source	lib/compiler.bot			
-compiler::CompilerError	error	compiler	api	source	lib/compiler.bot:157			
+compiler::CompilerError	error	compiler	api	source	lib/compiler.bot:159			
 compiler::DiagnosticCode	enum	compiler	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
@@ -233,6 +234,8 @@ compiler::DiagnosticCode::FlagCalleeUnknown	enum-case	compiler::DiagnosticCode	a
 compiler::DiagnosticCode::FlagFunctionValue	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::ForeignBorrow	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::Imprint	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
+compiler::DiagnosticCode::InternalIntrinsicValue	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
+compiler::DiagnosticCode::InternalNamespace	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::KnownError	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::LayoutArrayExtent	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::LayoutArrayIndex	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
@@ -290,7 +293,7 @@ compiler::DiagnosticCode::UnprovenField	enum-case	compiler::DiagnosticCode	api	s
 compiler::DiagnosticCode::UnwrappedYield	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::UseAfterMove	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
 compiler::DiagnosticCode::YieldOutsideFunction	enum-case	compiler::DiagnosticCode	api	source	lib/compiler.bot:42			
-compiler::SourceLocation	struct	compiler	api	source	lib/compiler.bot:151			
+compiler::SourceLocation	struct	compiler	api	source	lib/compiler.bot:153			
 context#install	intrinsic		internal	intrinsic	core/contexts.tcl:106			
 context#load	intrinsic		internal	intrinsic	core/contexts.tcl:108			
 context#unreachable	intrinsic		internal	intrinsic	core/contexts.tcl:110			
@@ -301,6 +304,59 @@ coroutine#resume	intrinsic		internal	intrinsic	core/coroutines.tcl:328
 coroutine#start	intrinsic		internal	intrinsic	core/coroutines.tcl:326			
 coroutine#yield	intrinsic		internal	intrinsic	core/coroutines.tcl:330			
 coroutine::done?	intrinsic	coroutine	api	intrinsic	core/coroutines.tcl:332			
+darwin	namespace		api	source	lib/darwin.bot	macos		1
+darwin::Access	enum	darwin	api	source	lib/darwin.bot:127	macos		
+darwin::Access::ReadOnly	enum-case	darwin::Access	api	source	lib/darwin.bot:127	macos		
+darwin::Access::ReadWrite	enum-case	darwin::Access	api	source	lib/darwin.bot:127	macos		
+darwin::Access::WriteOnly	enum-case	darwin::Access	api	source	lib/darwin.bot:127	macos		
+darwin::AccessBits	type	darwin	api	source	lib/darwin.bot:124	macos		
+darwin::CloseResult	struct	darwin	api	source	lib/darwin.bot:155	macos		
+darwin::ErrnoCell	layout	darwin	api	source	lib/darwin.bot:109	macos		
+darwin::OpenResult	struct	darwin	api	source	lib/darwin.bot:149	macos		
+darwin::ReadResult	struct	darwin	api	source	lib/darwin.bot:142	macos		
+darwin::WriteResult	struct	darwin	api	source	lib/darwin.bot:135	macos		
+darwin::access_flags	function	darwin	api	source	lib/darwin.bot:198	macos		
+darwin::c_close	extern-fn	darwin	api	source	lib/darwin.bot:106	macos		
+darwin::c_errno_location	extern-fn	darwin	api	source	lib/darwin.bot:94	macos		
+darwin::c_open	extern-fn	darwin	api	source	lib/darwin.bot:103	macos		
+darwin::c_read	extern-fn	darwin	api	source	lib/darwin.bot:100	macos		
+darwin::c_string	function	darwin	api	source	lib/darwin.bot:194	macos		
+darwin::c_write	extern-fn	darwin	api	source	lib/darwin.bot:97	macos		
+darwin::close	function	darwin	api	source	lib/darwin.bot:236	macos		
+darwin::create	function	darwin	api	source	lib/darwin.bot:227	macos		
+darwin::create_new	function	darwin	api	source	lib/darwin.bot:232	macos		
+darwin::errno	function	darwin	api	source	lib/darwin.bot:161	macos		
+darwin::io	namespace		api	source	lib/darwin/io.bot	macos		
+darwin::io::DarwinIO	context-struct	darwin::io	api	source	lib/darwin/io.bot:69	macos		
+darwin::io::FileDescriptor	opaque-struct	darwin::io	api	source	lib/darwin/io.bot:64	macos		
+darwin::io::create	function	darwin::io	api	source	lib/darwin/io.bot:76	macos		
+darwin::io::read	function	darwin::io	api	source	lib/darwin/io.bot:96	macos		
+darwin::io::write	function	darwin::io	api	source	lib/darwin/io.bot:85	macos		
+darwin::io::write_all	function	darwin::io	api	source	lib/darwin/io.bot:112	macos		
+darwin::io::write_error	function	darwin::io	api	source	lib/darwin/io.bot:89	macos		
+darwin::io::write_error_text	function	darwin::io	api	source	lib/darwin/io.bot:134	macos		
+darwin::io::write_text	function	darwin::io	api	source	lib/darwin/io.bot:130	macos		
+darwin::o_cloexec	binding	darwin	api	source	lib/darwin.bot:121	macos		
+darwin::o_creat	binding	darwin	api	source	lib/darwin.bot:118	macos		
+darwin::o_excl	binding	darwin	api	source	lib/darwin.bot:120	macos		
+darwin::o_rdonly	binding	darwin	api	source	lib/darwin.bot:115	macos		
+darwin::o_rdwr	binding	darwin	api	source	lib/darwin.bot:117	macos		
+darwin::o_trunc	binding	darwin	api	source	lib/darwin.bot:119	macos		
+darwin::o_wronly	binding	darwin	api	source	lib/darwin.bot:116	macos		
+darwin::open	function	darwin	api	source	lib/darwin.bot:222	macos		
+darwin::open_mode	function	darwin	api	source	lib/darwin.bot:214	macos		
+darwin::open_with	function	darwin	api	source	lib/darwin.bot:206	macos		
+darwin::path	namespace		api	source	lib/darwin/path.bot	macos		
+darwin::path::DarwinPath	refined-type	darwin::path	api	source	lib/darwin/path.bot:37	macos		
+darwin::path::concat	function	darwin::path	api	source	lib/darwin/path.bot:84	macos		
+darwin::path::ends_with_slash?	function	darwin::path	api	source	lib/darwin/path.bot:66	macos		
+darwin::path::nul_free?	function	darwin::path	api	source	lib/darwin/path.bot:40	macos		
+darwin::path::text	function	darwin::path	api	source	lib/darwin/path.bot:62	macos		
+darwin::path::valid?	function	darwin::path	api	source	lib/darwin/path.bot:48	macos		
+darwin::path::validate	function	darwin::path	api	source	lib/darwin/path.bot:54	macos		
+darwin::read	function	darwin	api	source	lib/darwin.bot:181	macos		
+darwin::terminator	function	darwin	api	source	lib/darwin.bot:189	macos		
+darwin::write	function	darwin	api	source	lib/darwin.bot:170	macos		
 decimal_rounded	namespace		api	intrinsic				
 decimal_rounded#equal	intrinsic		internal	intrinsic				
 decimal_rounded#greater	intrinsic		internal	intrinsic				
@@ -315,6 +371,7 @@ ffi::c	namespace		api	source+intrinsic	lib/ffi/c.bot
 ffi::c::Bool	intrinsic-type	ffi::c	api	intrinsic	hir/cabi.tcl			
 ffi::c::Char	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl			
 ffi::c::Double	intrinsic-type	ffi::c	api	intrinsic	hir/cabi.tcl			
+ffi::c::Float	intrinsic-type	ffi::c	api	intrinsic	hir/cabi.tcl			
 ffi::c::FnPtr	intrinsic-type	ffi::c	api	intrinsic	hir/cabi.tcl			
 ffi::c::Int	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl			
 ffi::c::Long	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl			
@@ -328,17 +385,21 @@ ffi::c::ULong	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl
 ffi::c::ULongLong	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl			
 ffi::c::UShort	c-scalar-type	ffi::c	api	intrinsic	core/cabi.tcl			
 ffi::c::Void	intrinsic-type	ffi::c	api	intrinsic	hir/cabi.tcl			
-ffi::c::clone	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:332			
-ffi::c::erase	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:334			
-ffi::c::null	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:328			
-ffi::c::null?	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:330			
-ffi::c::retype	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:337			
-float64	namespace		api	intrinsic				
+ffi::c::clone	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:582			
+ffi::c::erase	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:584			
+ffi::c::null	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:578			
+ffi::c::null?	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:580			
+ffi::c::retype	intrinsic	ffi::c	api	intrinsic	core/cabi.tcl:587			
+float64	namespace		api	source+intrinsic	lib/float64.bot			
+float64::abs	function	float64	api	source	lib/float64.bot:37			
+float64::clamp	function	float64	api	source	lib/float64.bot:43			
 float64::from_decimal_rounded	intrinsic	float64	api	intrinsic	core/decimal.tcl:794			
 float64::from_int	intrinsic	float64	api	intrinsic				
+float64::max	function	float64	api	source	lib/float64.bot:31			
+float64::min	function	float64	api	source	lib/float64.bot:25			
 float64::truncate	intrinsic	float64	api	intrinsic				
 foreign#refused	intrinsic		internal	intrinsic				
-hash	intrinsic		primitive	intrinsic	core/hashing.tcl:253			
+hash	intrinsic		primitive	intrinsic	core/hashing.tcl:444			
 immutable_set	namespace		api	intrinsic				
 immutable_set::contains	intrinsic	immutable_set	api	intrinsic	core/immutableset.tcl:78			
 immutable_set::from_list	intrinsic	immutable_set	api	intrinsic	core/immutableset.tcl:75			
@@ -385,15 +446,17 @@ linux::sys::write	function	linux::sys	api	source	lib/linux/sys.x86_64.bot:38	lin
 linux::write	function	linux	api	source	lib/linux.bot:77	linux		
 list	intrinsic		primitive	intrinsic	core/primitives.tcl:102			
 list	namespace		api	source+intrinsic	lib/list.bot			
+list#with_length	intrinsic		internal	intrinsic	core/listlength.tcl:49			
 list::NotFound	error	list	api	source	lib/list.bot:74			
 list::all?	function	list	api	source	lib/list.bot:88			
 list::any?	function	list	api	source	lib/list.bot:82			
-list::append	intrinsic	list	api	intrinsic	core/lists.tcl:62			
-list::at	intrinsic	list	api	intrinsic	core/lists.tcl:59			
+list::append	intrinsic	list	api	intrinsic	core/lists.tcl:63			
+list::at	intrinsic	list	api	intrinsic	core/lists.tcl:60			
 list::find	function	list	api	source	lib/list.bot:100			
 list::get	function	list	api	source	lib/list.bot:76			
 list::length	intrinsic	list	api	intrinsic	core/lists.tcl:57			
 list::none?	function	list	api	source	lib/list.bot:94			
+list::with_length	intrinsic	list	api	intrinsic	core/listlength.tcl:45			
 list?	intrinsic		primitive	intrinsic				
 mathish	namespace		demo	source	lib/mathish.bot			
 mathish::inc	function	mathish	demo	source	lib/mathish.bot:6			
@@ -457,6 +520,8 @@ str::length	intrinsic	str	api	intrinsic	core/strings.tcl:114
 str::lowercase	intrinsic	str	api	intrinsic	core/strings.tcl:120			
 str::substring	intrinsic	str	api	intrinsic	core/strings.tcl:116			
 string?	intrinsic		primitive	intrinsic				
+table_hash	namespace		std-internal	intrinsic				
+table_hash::of	intrinsic	table_hash	std-internal	intrinsic	core/hashing.tcl:452			
 test	namespace		api	source	lib/test.bot			
 test::Erased	struct	test	api	source	lib/test.bot:295			
 test::Match	struct	test	api	source	lib/test.bot:95			
@@ -469,38 +534,38 @@ test::code_name	function	test	api	source	lib/test.bot:325
 test::contains_text?	function	test	api	source	lib/test.bot:281			
 test::count	function	test	api	source	lib/test.bot:152			
 test::describe	function	test	api	source	lib/test.bot:307			
-test::diagnostic	function	test	api	source	lib/test.bot:583			
-test::diagnostic_text	function	test	api	source	lib/test.bot:550			
+test::diagnostic	function	test	api	source	lib/test.bot:587			
+test::diagnostic_text	function	test	api	source	lib/test.bot:554			
 test::digit_value	function	test	api	source	lib/test.bot:170			
 test::digits_from	function	test	api	source	lib/test.bot:177			
-test::equal	function	test	api	source	lib/test.bot:567			
+test::equal	function	test	api	source	lib/test.bot:571			
 test::escape_of	function	test	api	source	lib/test.bot:214			
 test::escaped	function	test	api	source	lib/test.bot:230			
 test::glyph	function	test	api	source	lib/test.bot:160			
-test::holds	function	test	api	source	lib/test.bot:607			
+test::holds	function	test	api	source	lib/test.bot:611			
 test::int_text	function	test	api	source	lib/test.bot:185			
 test::joined	function	test	api	source	lib/test.bot:198			
-test::mismatch	function	test	api	source	lib/test.bot:563			
-test::no_results	function	test	api	source	lib/test.bot:688			
+test::mismatch	function	test	api	source	lib/test.bot:567			
+test::no_results	function	test	api	source	lib/test.bot:692			
 test::no_texts	function	test	api	source	lib/test.bot:193			
-test::passed	function	test	api	source	lib/test.bot:557			
+test::passed	function	test	api	source	lib/test.bot:561			
 test::quoted	function	test	api	source	lib/test.bot:248			
 test::registered	function	test	api	source	lib/test.bot:147			
-test::rejects	function	test	api	source	lib/test.bot:616			
-test::rejects_any	function	test	api	source	lib/test.bot:638			
-test::rejects_at	function	test	api	source	lib/test.bot:626			
-test::rejects_containing	function	test	api	source	lib/test.bot:664			
-test::rejects_message	function	test	api	source	lib/test.bot:651			
-test::report	function	test	api	source	lib/test.bot:749			
-test::result_lines	function	test	api	source	lib/test.bot:717			
-test::results	function	test	api	source	lib/test.bot:692			
-test::run	function	test	api	source	lib/test.bot:682			
-test::satisfies	function	test	api	source	lib/test.bot:575			
+test::rejects	function	test	api	source	lib/test.bot:620			
+test::rejects_any	function	test	api	source	lib/test.bot:642			
+test::rejects_at	function	test	api	source	lib/test.bot:630			
+test::rejects_containing	function	test	api	source	lib/test.bot:668			
+test::rejects_message	function	test	api	source	lib/test.bot:655			
+test::report	function	test	api	source	lib/test.bot:753			
+test::result_lines	function	test	api	source	lib/test.bot:721			
+test::results	function	test	api	source	lib/test.bot:696			
+test::run	function	test	api	source	lib/test.bot:686			
+test::satisfies	function	test	api	source	lib/test.bot:579			
 test::suite	function	test	api	source	lib/test.bot:136			
-test::summarize	function	test	api	source	lib/test.bot:707			
-test::summary_line	function	test	api	source	lib/test.bot:740			
+test::summarize	function	test	api	source	lib/test.bot:711			
+test::summary_line	function	test	api	source	lib/test.bot:744			
 test::text_lines	function	test	api	source	lib/test.bot:254			
-test::value	function	test	api	source	lib/test.bot:598			
+test::value	function	test	api	source	lib/test.bot:602			
 web	namespace		api	source	lib/web.bot			
 web::Emailish	refined-type	web	api	source	lib/web.bot:71			
 web::UriQueryValue	refined-type	web	api	source	lib/web.bot:226			
@@ -511,3 +576,29 @@ web::is_unreserved	function	web	api	source	lib/web.bot:223
 web::local_extra_chars	binding	web	api	source	lib/web.bot:105			
 web::uri_escape_text	function	web	api	source	lib/web.bot:266			
 web::uri_query_value?	function	web	api	source	lib/web.bot:237			
+windows	namespace		api	source	lib/windows.bot	windows		
+windows::StandardDevice	enum	windows	api	source	lib/windows.bot:83	windows		
+windows::StandardDevice::Error	enum-case	windows::StandardDevice	api	source	lib/windows.bot:83	windows		
+windows::StandardDevice::Input	enum-case	windows::StandardDevice	api	source	lib/windows.bot:83	windows		
+windows::StandardDevice::Output	enum-case	windows::StandardDevice	api	source	lib/windows.bot:83	windows		
+windows::WriteResult	struct	windows	api	source	lib/windows.bot:98	windows		
+windows::Written	layout	windows	api	source	lib/windows.bot:89	windows		
+windows::c_get_last_error	extern-fn	windows	api	source	lib/windows.bot:80	windows		
+windows::c_get_std_handle	extern-fn	windows	api	source	lib/windows.bot:68	windows		
+windows::c_write_file	extern-fn	windows	api	source	lib/windows.bot:77	windows		
+windows::io	namespace		api	source	lib/windows/io.bot	windows		
+windows::io::WindowsIO	context-struct	windows::io	api	source	lib/windows/io.bot:65	windows		
+windows::io::create	function	windows::io	api	source	lib/windows/io.bot:71	windows		
+windows::io::progress	function	windows::io	api	source	lib/windows/io.bot:88	windows		
+windows::io::write	function	windows::io	api	source	lib/windows/io.bot:77	windows		
+windows::io::write_all	function	windows::io	api	source	lib/windows/io.bot:108	windows		
+windows::io::write_error	function	windows::io	api	source	lib/windows/io.bot:81	windows		
+windows::io::write_error_text	function	windows::io	api	source	lib/windows/io.bot:130	windows		
+windows::io::write_some	function	windows::io	api	source	lib/windows/io.bot:96	windows		
+windows::io::write_text	function	windows::io	api	source	lib/windows/io.bot:126	windows		
+windows::last_error	function	windows	api	source	lib/windows.bot:121	windows		
+windows::request	function	windows	api	source	lib/windows.bot:126	windows		
+windows::selector	function	windows	api	source	lib/windows.bot:105	windows		
+windows::standard_handle	function	windows	api	source	lib/windows.bot:116	windows		
+windows::write_file	function	windows	api	source	lib/windows.bot:142	windows		
+windows::written	function	windows	api	source	lib/windows.bot:133	windows		

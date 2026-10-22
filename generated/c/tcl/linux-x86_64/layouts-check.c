@@ -18,6 +18,11 @@
     _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
     _Static_assert((((__typeof__(BOTLISH_M(T, m)))-1) < 0) == (sign), L ": signedness"); \
     _Static_assert((__typeof__(BOTLISH_M(T, m)))2 == 2, L ": no _Bool")
+#define BOTLISH_FLOATING(T, m, offset, width, ctype, L) \
+    BOTLISH_OFFSET(T, m, offset, L); \
+    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 8, L ": a floating type"); \
+    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(BOTLISH_M(T, m)), ctype), L ": the C type")
 #define BOTLISH_POINTER(T, m, offset, width, L) \
     BOTLISH_OFFSET(T, m, offset, L); \
     _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 5, L ": a pointer"); \
@@ -72,6 +77,22 @@ BOTLISH_SCALAR(__typeof__(((union Tcl_ObjInternalRep *)0)->ptrAndLongRep), value
 BOTLISH_RECORD(__typeof__(((union Tcl_ObjInternalRep *)0)->ptrAndSize), 16, 8, "Tcl_ObjInternalRep_ptrAndSize");
 BOTLISH_POINTER(__typeof__(((union Tcl_ObjInternalRep *)0)->ptrAndSize), ptr, 0, 8, "Tcl_ObjInternalRep_ptrAndSize.ptr");
 BOTLISH_SCALAR(__typeof__(((union Tcl_ObjInternalRep *)0)->ptrAndSize), size, 8, 8, 1, "Tcl_ObjInternalRep_ptrAndSize.size");
+
+BOTLISH_RECORD(union Tcl_ObjInternalRep, 16, 8, "Tcl_ObjInternalRep");
+BOTLISH_SCALAR(union Tcl_ObjInternalRep, longValue, 0, 8, 1, "Tcl_ObjInternalRep.longValue");
+BOTLISH_FLOATING(union Tcl_ObjInternalRep, doubleValue, 0, 8, double, "Tcl_ObjInternalRep.doubleValue");
+BOTLISH_POINTER(union Tcl_ObjInternalRep, otherValuePtr, 0, 8, "Tcl_ObjInternalRep.otherValuePtr");
+BOTLISH_SCALAR(union Tcl_ObjInternalRep, wideValue, 0, 8, 1, "Tcl_ObjInternalRep.wideValue");
+BOTLISH_NESTED(union Tcl_ObjInternalRep, twoPtrValue, 0, 16, "Tcl_ObjInternalRep.twoPtrValue");
+BOTLISH_NESTED(union Tcl_ObjInternalRep, ptrAndLongRep, 0, 16, "Tcl_ObjInternalRep.ptrAndLongRep");
+BOTLISH_NESTED(union Tcl_ObjInternalRep, ptrAndSize, 0, 16, "Tcl_ObjInternalRep.ptrAndSize");
+
+BOTLISH_RECORD(struct Tcl_Obj, 48, 8, "Tcl_Obj");
+BOTLISH_SCALAR(struct Tcl_Obj, refCount, 0, 8, 1, "Tcl_Obj.refCount");
+BOTLISH_POINTER(struct Tcl_Obj, bytes, 8, 8, "Tcl_Obj.bytes");
+BOTLISH_SCALAR(struct Tcl_Obj, length, 16, 8, 1, "Tcl_Obj.length");
+BOTLISH_POINTER(struct Tcl_Obj, typePtr, 24, 8, "Tcl_Obj.typePtr");
+BOTLISH_NESTED_UNION(struct Tcl_Obj, internalRep, 32, 16, "Tcl_Obj.internalRep");
 
 BOTLISH_RECORD(struct Tcl_Namespace, 40, 8, "Tcl_Namespace");
 BOTLISH_POINTER(struct Tcl_Namespace, name, 0, 8, "Tcl_Namespace.name");

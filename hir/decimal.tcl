@@ -104,6 +104,7 @@ proc hir::decimal::Precision {type} {
 # 1 if TYPE mentions a DecimalRounded type (itself, or in a List, set,
 # vector, array or struct field).
 proc hir::decimal::Mentions {type} {
+    set type [hir::types::Unrefined $type]
     if {[IsDecimal $type]} {
         return 1
     }
@@ -442,6 +443,7 @@ proc hir::decimal::Expectations {hir} {
 
 # 1 if TYPE is or holds (in a List) a refined DecimalRounded type.
 proc hir::decimal::MentionsRefined {type} {
+    set type [hir::types::Unrefined $type]
     if {[IsRefined $type]} {
         return 1
     }
@@ -451,6 +453,7 @@ proc hir::decimal::MentionsRefined {type} {
 # {E EXPECTED REASON ...}: expression E where TYPE is expected (WHAT says
 # where), and the elements of a List literal E where a List of it is.
 proc hir::decimal::Expected {hir e type what} {
+    set type [hir::types::Unrefined $type]
     if {[IsRefined $type]} {
         return [list $e $type $what]
     }
@@ -951,6 +954,7 @@ proc hir::decimal::ContainsDecimal {value} {
 }
 
 proc hir::decimal::Show {value type} {
+    set type [hir::types::Unrefined $type]
     set kind [core::value::kind $value]
     if {$kind eq $::core::decimal::kind} {
         if {[IsRefined $type]} {

@@ -9,17 +9,16 @@
 #   std::ffi::c::Bool                    C _Bool: Botlish's own bool (the
 #                                        same type, the C ABI's spelling of
 #                                        it), carried as the one byte 0 or 1
-#   std::ffi::c::Double                  C double: Botlish's own Float64 (the
-#                                        same type, the C ABI's spelling of
-#                                        it), carried as the target's IEEE
-#                                        754 binary64 in its floating-point
-#                                        register class. The two differ at
-#                                        the boundary only: every Float64 is
-#                                        a double, but a double C returns is
-#                                        a Float64 only when it is finite
-#                                        (NaN and the infinities are the
-#                                        call's NonFiniteFloat, negative
-#                                        zero is zero: FLOAT64-MILESTONE-1.md)
+#   std::ffi::c::Float   {cfloat Float}   C float and C double: foreign
+#   std::ffi::c::Double  {cfloat Double}  *representations* (C-FLOAT-FFI-
+#                                        MILESTONE-1.md), IEEE 754 binary32
+#                                        and binary64 on every target, whose
+#                                        Botlish carrier is Float64: a value
+#                                        crossing the boundary is a Float64
+#                                        on the Botlish side, the C type's
+#                                        bits on the C side (core/cabi.tcl's
+#                                        "The C floating types": admission,
+#                                        narrowing)
 #   std::ffi::c::Void                    the C void: a permanently
 #                                        incomplete pointee, never a type of
 #                                        a value
@@ -56,16 +55,38 @@
 #   {imprint T}              an imprint variable (hir/imprint.tcl), bound to
 #                            a pointee at each call
 #
-# Everything else -- int, str, List[...], an ordinary struct, an enum,
-# LayoutStruct[L], a non-C integer domain -- has no C representation contract
-# and is rejected (PointeeProblem). A function pointer's argument types are
-# C ABI value types (a scalar, a Ptr or a FnPtr) and its result is one of
-# them or unit (C's void result); it declares no errors.
+#   {cfloat NAME}            C float or C double (std::ffi::c::Float,
+#                            std::ffi::c::Double)
+#
+# Everything else -- int, str, Float64, List[...], an ordinary struct, an
+# enum, LayoutStruct[L], a non-C integer domain -- has no C representation
+# contract and is rejected (PointeeProblem). A function pointer's argument
+# types are C ABI value types (a scalar, a C floating type, a Ptr or a
+# FnPtr) and its result is one of them or unit (C's void result); it
+# declares no errors.
+#
+# C representations and Botlish carriers
+# --------------------------------------
+# A C integer scalar is both a C type and a Botlish type of values (an
+# integer domain), and C _Bool is Botlish's bool. A C floating type is a C
+# type only: Botlish has no binary32 number, and C's double is a
+# representation of Float64 values, not another name for the type. So
+# std::ffi::c::Float and std::ffi::c::Double denote {cfloat NAME} wherever a C type is
+# named -- an extern c fn's parameters and result, a function pointer's
+# signature, a pointee, a layout field (ResolveCType) -- and the values that
+# cross there are their carrier's (Carrier: Float64 for both today). In any
+# other position a type of Botlish values is written: std::ffi::c::Double there
+# is Float64, its values' type (FLOAT64-MILESTONE-1.md), and std::ffi::c::Float a
+# TYPE error (FloatMessage), since nothing in Botlish is a binary32 number.
+# Float64 is never a C type: C's double is std::ffi::c::Double. The two C types
+# never collapse into one: they differ in width, alignment, ABI class,
+# element stride and outbound conversion (core/cabi.tcl's floatingInfo), and
+# a future Float32 carrier for std::ffi::c::Float changes Carrier alone.
 
 namespace eval hir::cabi {
     # The intrinsic type names of namespace std::ffi::c besides its scalars: the
     # incomplete pointee and the two pointer constructors.
-    variable intrinsicTypes {Void Ptr FnPtr Bool Double}
+    variable intrinsicTypes {Void Ptr FnPtr Bool Float Double}
 }
 
 # The C target a compilation uses: TARGET when given, else the host's. An
@@ -157,8 +178,101 @@ proc hir::cabi::CompilationTarget {} {
 proc hir::cabi::VoidName {} { return "$::core::cabi::namespace\::Void" }
 proc hir::cabi::BoolName {} { return "$::core::cabi::namespace\::Bool" }
 proc hir::cabi::DoubleName {} { return "$::core::cabi::namespace\::Double" }
+proc hir::cabi::FloatName {} { return "$::core::cabi::namespace\::Float" }
 proc hir::cabi::PtrName {} { return "$::core::cabi::namespace\::Ptr" }
 proc hir::cabi::FnPtrName {} { return "$::core::cabi::namespace\::FnPtr" }
+
+# ---------------------------------------------------------------------------
+# C floating types (the file header's "C representations and Botlish
+# carriers")
+
+# The C floating type std::ffi::c::NAME's canonical type ({cfloat NAME}).
+proc hir::cabi::FloatingType {name} {
+    return [list cfloat $name]
+}
+
+# 1 if TYPE is a C floating type ({cfloat NAME}).
+proc hir::cabi::IsFloating {type} {
+    return [expr {[llength $type] == 2 && [lindex $type 0] eq "cfloat" && [core::cabi::isFloating [lindex $type 1]]}]
+}
+
+# The C floating type the type expression TYPEEXPR spells (std::ffi::c::Float,
+# std::ffi::c::Double), or "".
+proc hir::cabi::FloatingOfExpr {typeExpr} {
+    if {[llength $typeExpr] != 1} {
+        return ""
+    }
+    foreach name [core::cabi::floatingNames] {
+        if {$typeExpr eq "$::core::cabi::namespace\::$name"} {
+            return [FloatingType $name]
+        }
+    }
+    return ""
+}
+
+# The Botlish type of the values of C type TYPE: a C floating type's
+# carrier (Float64), any other type itself.
+proc hir::cabi::Carrier {type} {
+    if {[IsFloating $type]} {
+        return [dict get $::core::cabi::floatings [lindex $type 1] carrier]
+    }
+    return $type
+}
+
+# The metadata of C floating type TYPE on the compilation's C target
+# (core::cabi::floatingInfo): its format, size, alignment and ABI class.
+# TARGET "" is the compilation target the installed declarations were made
+# for (CompilationTarget; a C floating type is written only where std::ffi::c is
+# imported, which declares it).
+proc hir::cabi::FloatingInfo {type {target ""}} {
+    if {$target eq ""} {
+        set target [CompilationTarget]
+    }
+    if {$target eq ""} {
+        set target [ResolveTarget ""]
+    }
+    return [core::cabi::floatingInfo [lindex $type 1] $target]
+}
+
+# The display of C floating type TYPE (std::ffi::c::Float).
+proc hir::cabi::ShowFloating {type} {
+    return "$::core::cabi::namespace\::[lindex $type 1]"
+}
+
+# The message for std::ffi::c::Float written where a type of Botlish values is
+# needed.
+proc hir::cabi::FloatMessage {} {
+    return "[FloatName] is C's float, a foreign representation (IEEE 754 binary32) that only a C type names -- an extern c fn's parameter or result, a function pointer's signature, a pointee ([PtrName]\[[FloatName]\]) or a layout field: Botlish has no binary32 number, and a C float's value is a Float64 here (write Float64)"
+}
+
+# The resolved C type the type expression TYPEEXPR denotes in a position
+# that names a C type (the file header's "C representations and Botlish
+# carriers"): std::ffi::c::Float and std::ffi::c::Double are their C floating types, a
+# structural function type (a function pointer's signature) is resolved
+# argument by argument the same way, and everything else as any type is
+# (hir::resolve::ResolveTypeExpr; a Ptr's pointee and a FnPtr's signature
+# are C positions of their own). NS and IMPRINTS as ResolveTypeExpr's.
+proc hir::cabi::ResolveCType {typeExpr ns {imprints 0}} {
+    set floating [FloatingOfExpr $typeExpr]
+    if {$floating ne ""} {
+        return $floating
+    }
+    if {[llength $typeExpr] == 2 && [lindex $typeExpr 0] eq "fn"} {
+        set fields [lindex $typeExpr 1]
+        if {[dict getdef $fields kind ""] ne "coroutine"} {
+            set argTypes [lmap t [dict get $fields args] {ResolveCType $t $ns $imprints}]
+            set result [ResolveCType [dict get $fields return] $ns $imprints]
+            # (Errors a C signature never has: kept, for SignatureProblem to
+            # name, as the canonical identities they denote.)
+            set errors [lmap name [dict getdef $fields errors {}] {
+                set id [hir::errordecls::resolve $name $ns]
+                if {$id eq ""} {set name} else {set id}
+            }]
+            return [hir::types::MakeFn $argTypes $result $errors]
+        }
+    }
+    return [hir::resolve::ResolveTypeExpr $typeExpr $ns $imprints]
+}
 
 # ---------------------------------------------------------------------------
 # Pointers
@@ -176,7 +290,7 @@ proc hir::cabi::ResolvePtr {arg ns {imprints 0}} {
     if {$arg eq [VoidName]} {
         return [list cptr void]
     }
-    set pointee [hir::resolve::ResolveTypeExpr $arg $ns $imprints]
+    set pointee [ResolveCType $arg $ns $imprints]
     set problem [PointeeProblem $pointee]
     if {$problem ne ""} {
         return -code error -errorcode {BOTLISH TYPE} \
@@ -195,7 +309,7 @@ proc hir::cabi::ResolveFnPtr {arg ns {imprints 0}} {
         return -code error -errorcode {BOTLISH TYPE} \
             "invalid signature in $spelled: a C function pointer's argument is its signature, Fn{args: \[...\], return: R}"
     }
-    set fn [hir::resolve::ResolveTypeExpr $arg $ns $imprints]
+    set fn [ResolveCType $arg $ns $imprints]
     set problem [SignatureProblem $fn]
     if {$problem ne ""} {
         return -code error -errorcode {BOTLISH TYPE} "invalid signature in $spelled: $problem"
@@ -229,12 +343,12 @@ proc hir::cabi::SignatureProblem {fn} {
     return ""
 }
 
-# 1 if TYPE is a C ABI value type: a C integer scalar, C _Bool (bool), C
-# double (Float64), a C data or function pointer, or an imprint variable
-# (bound at each call).
+# 1 if TYPE is a C ABI value type: a C integer scalar, C _Bool (bool), a C
+# floating type (C float, C double), a C data or function pointer, or an
+# imprint variable (bound at each call).
 proc hir::cabi::IsValueType {type} {
-    return [expr {[core::type::cabiScalar $type] ne "" || $type in {bool Float64} || [hir::types::IsCPtr $type]
-        || [hir::types::IsCFnPtr $type] || [hir::types::IsImprint $type]}]
+    return [expr {[core::type::cabiScalar $type] ne "" || $type eq "bool" || [IsFloating $type]
+        || [hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type] || [hir::types::IsImprint $type]}]
 }
 
 # Why TYPE is not a C ABI value type, or "".
@@ -242,7 +356,22 @@ proc hir::cabi::ValueTypeProblem {type} {
     if {[IsValueType $type]} {
         return ""
     }
-    return "[hir::types::show $type] is not a C ABI value type (a C integer scalar such as [hir::cabi::ScalarExample], [BoolName], [DoubleName], [PtrName]\[...\] or [FnPtrName]\[...\])"
+    return "[hir::types::showValue $type] is not a C ABI value type (a C integer scalar such as [hir::cabi::ScalarExample], [BoolName], [FloatName], [DoubleName], [PtrName]\[...\] or [FnPtrName]\[...\])[NotCTypeClause $type]"
+}
+
+# A clause for the Botlish type TYPE that names the C type it is often
+# mistaken for, or "": Float64 is a type of values, C's double is
+# std::ffi::c::Double (whose values are Float64s).
+proc hir::cabi::NotCTypeClause {type} {
+    if {$type eq "Float64"} {
+        return ": Float64 is Botlish's number type, not a C representation; C's double is [DoubleName] and C's float [FloatName], whose values are Float64s"
+    }
+    # (A numeric refinement, DecimalRounded: a refined List is a List,
+    # which no C scalar is mistaken for.)
+    if {[hir::refinements::IsRefined $type] && ![hir::types::IsRefinedApplied $type]} {
+        return ": a scalar refinement is a Botlish guarantee about values, not a C representation; C's double is [DoubleName] and C's float [FloatName], whose values are Float64s (std::float64::from_decimal_rounded decays a DecimalRounded value to one)"
+    }
+    return ""
 }
 
 proc hir::cabi::ScalarExample {} {
@@ -253,7 +382,7 @@ proc hir::cabi::ScalarExample {} {
 # "" if it can (this file's header, "Pointee identities").
 proc hir::cabi::PointeeProblem {pointee} {
     if {$pointee eq "void" || $pointee eq "bool" || [hir::types::IsCPtr $pointee] || [hir::types::IsCFnPtr $pointee]
-            || [hir::types::IsImprint $pointee] || [core::type::cabiScalar $pointee] ne ""} {
+            || [hir::types::IsImprint $pointee] || [core::type::cabiScalar $pointee] ne "" || [IsFloating $pointee]} {
         return ""
     }
     set shown [hir::types::show $pointee]
@@ -270,7 +399,7 @@ proc hir::cabi::PointeeProblem {pointee} {
     if {[lindex $pointee 0] eq "refined" && [lindex $pointee 1] eq "int"} {
         return "$shown is an integer domain, not a C integer type: a C pointee scalar is one of namespace $::core::cabi::namespace's (e.g. [ScalarExample])"
     }
-    return "$shown has no C representation: a pointee is [VoidName], a C integer scalar, [BoolName], an opaque struct or another pointer"
+    return "$shown has no C representation: a pointee is [VoidName], a C integer scalar, [BoolName], [FloatName], [DoubleName], an opaque struct or another pointer[NotCTypeClause $pointee]"
 }
 
 # The display of pointee identity POINTEE (show's std::ffi::c::Ptr[...] argument).
@@ -343,8 +472,15 @@ proc hir::cabi::verify {hirVar} {
         if {$paramTypes eq ""} {
             continue
         }
+        # (A native of arity * repeats its last kind, except a variadic C
+        # function: its trailing arguments have no kind of a fixed
+        # parameter, each its own C type, hir::borrow.)
+        set variadic [dict getdef [dict get [core::native::metadata $name] foreign] variadic 0]
         set index 0
         foreach arg [dict get $node args] {
+            if {$variadic && $index >= [llength $paramTypes]} {
+                break
+            }
             set paramType [lindex $paramTypes [expr {min($index, [llength $paramTypes] - 1)}]]
             incr index
             set argType [hir::typeOf $hir $arg]
@@ -386,5 +522,74 @@ proc hir::cabi::ResolveImprint {typeExpr ns {variables {}}} {
     if {$typeExpr eq [VoidName]} {
         return void
     }
+    set floating [FloatingOfExpr $typeExpr]
+    if {$floating ne ""} {
+        # (A C floating type is a pointee identity too: std::ffi::c::null[
+        # std::ffi::c::Float]() is a null float *. Bound where values exist, it
+        # is refused: hir::imprint::BindingProblem.)
+        return $floating
+    }
     return [hir::resolve::ResolveTypeExpr $typeExpr $ns [if {$variables eq ""} {string cat 0} else {set variables}]]
+}
+
+# How a trailing argument of static type TYPE is passed to a variadic C
+# function (VARIADICS-VERTICAL-SLICE-1.md): {c SPELLING class CLASS promoted
+# PROMOTED} -- the argument's C type, its own ABI class and the class C's
+# default argument promotion passes it as on the compilation's target
+# (core::cabi::promoted) -- or {problem KIND MESSAGE} when it has no C type
+# a call could pass.
+#
+# The rule is stricter than any fixed parameter's: a fixed parameter's
+# declared C type says how an argument is passed, a trailing one has only
+# its own static type to say it. So that type must be exactly one C ABI
+# value type: a C integer scalar (one of its evidence names, never two), C
+# _Bool (Botlish's bool), C double (Float64), a data pointer or a function
+# pointer. A plain Int is none: its value fitting a C range never says
+# which C integer type the call passes (int, long, long long are different
+# arguments), and neither does a format string. Byte storage reaches C only
+# through a parameter's contract (C-POINTER-BORROWING.md), and a trailing
+# argument has none: FOREIGN-BORROW.
+proc hir::cabi::VariadicArgument {type} {
+    if {$type eq "bool"} {
+        return [dict create c [BoolName] class bool \
+            promoted [core::cabi::promotedBool [CompilationTarget]]]
+    }
+    if {$type eq "Float64"} {
+        return [dict create c [DoubleName] class f64 promoted f64]
+    }
+    if {[hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type]} {
+        return [dict create c [hir::types::show $type] class ptr promoted ptr]
+    }
+    if {[hir::borrow::IsOwner $type]} {
+        return [dict create problem FOREIGN-BORROW message [format \
+            {byte storage (%s) cannot be a trailing argument of a variadic C function: a trailing argument has no contract (no access, no escape), and byte storage reaches C only through a pointer parameter whose contract admits it} \
+            [hir::types::show $type]]]
+    }
+    set scalars {}
+    if {[lindex $type 0] eq "refined" && [lindex $type 1] eq "int" && [llength $type] == 3} {
+        foreach name [lindex $type 2] {
+            set info [core::type::cabiOf $name]
+            if {$info ne "" && $name ni [lmap s $scalars {lindex $s 0}]} {
+                lappend scalars [list $name $info]
+            }
+        }
+    }
+    if {[llength $scalars] == 1} {
+        lassign [lindex $scalars 0] name info
+        set class [expr {[dict get $info signed] ? "i" : "u"}][dict get $info bits]
+        return [dict create c $name class $class promoted [core::cabi::promoted $info]]
+    }
+    if {[llength $scalars] > 1} {
+        return [dict create problem TYPE message [format \
+            {its C type is ambiguous: the value is proven a %s at once, and a trailing argument is passed as exactly one C type -- convert it to the one the callee reads (a function whose declared result is that type)} \
+            [join [lmap s $scalars {lindex $s 0}] " and a "]]]
+    }
+    if {$type eq "int" || ([lindex $type 0] eq "refined" && [lindex $type 1] eq "int")} {
+        return [dict create problem TYPE message [format \
+            {%s is a Botlish integer, not a C type: a value fitting a C integer's range does not say which C type the call passes (int, long and long long are different arguments) -- give it one, e.g. a value of %s or %s (a declared parameter, a C function's result, or a converter function whose declared result is the type)} \
+            [hir::types::show $type] [ScalarExample] "$::core::cabi::namespace\::Long"]]
+    }
+    return [dict create problem TYPE message [format \
+        {%s is not a C ABI value type: a trailing argument of a variadic C function is a C integer scalar (such as %s), %s, %s, a %s[...] or a %s[...]} \
+        [hir::types::showValue $type] [ScalarExample] [BoolName] [DoubleName] [PtrName] [FnPtrName]]]
 }

@@ -17,6 +17,11 @@
     _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
     _Static_assert((((__typeof__(BOTLISH_M(T, m)))-1) < 0) == (sign), L ": signedness"); \
     _Static_assert((__typeof__(BOTLISH_M(T, m)))2 == 2, L ": no _Bool")
+#define BOTLISH_FLOATING(T, m, offset, width, ctype, L) \
+    BOTLISH_OFFSET(T, m, offset, L); \
+    _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 8, L ": a floating type"); \
+    _Static_assert(sizeof(BOTLISH_M(T, m)) == (width), L ": width"); \
+    _Static_assert(__builtin_types_compatible_p(__typeof__(BOTLISH_M(T, m)), ctype), L ": the C type")
 #define BOTLISH_POINTER(T, m, offset, width, L) \
     BOTLISH_OFFSET(T, m, offset, L); \
     _Static_assert(__builtin_classify_type(BOTLISH_M(T, m)) == 5, L ": a pointer"); \
@@ -218,6 +223,14 @@ BOTLISH_INSIDE(struct bgf_overlay, 8, 8, "bgf_overlay.member2");
 BOTLISH_SCALAR(struct bgf_overlay, i, 8, 4, 1, "bgf_overlay_member2.i");
 BOTLISH_POINTER(struct bgf_overlay, p, 8, 8, "bgf_overlay_member2.p");
 
+BOTLISH_RECORD(struct bgf_real, 16, 8, "bgf_real");
+BOTLISH_FLOATING(struct bgf_real, f, 0, 4, float, "bgf_real.f");
+BOTLISH_FLOATING(struct bgf_real, d, 8, 8, double, "bgf_real.d");
+
+BOTLISH_RECORD(struct bgf_float_ptr, 16, 8, "bgf_float_ptr");
+BOTLISH_POINTER(struct bgf_float_ptr, values, 0, 8, "bgf_float_ptr.values");
+BOTLISH_SCALAR(struct bgf_float_ptr, n, 8, 4, 1, "bgf_float_ptr.n");
+
 BOTLISH_RECORD(struct bgf_outer_blocked, 24, 4, "bgf_outer_blocked");
 BOTLISH_SCALAR(struct bgf_outer_blocked, n, 0, 4, 1, "bgf_outer_blocked.n");
 BOTLISH_NESTED(struct bgf_outer_blocked, chars, 4, 20, "bgf_outer_blocked.chars");
@@ -342,3 +355,37 @@ BOTLISH_SCALAR(struct bgf_two_anon, b, 0, 4, 1, "bgf_two_anon_member1.b");
 BOTLISH_INSIDE(struct bgf_two_anon, 8, 8, "bgf_two_anon.member2");
 BOTLISH_SCALAR(struct bgf_two_anon, c, 8, 2, 1, "bgf_two_anon_member2.c");
 BOTLISH_SCALAR(struct bgf_two_anon, d, 8, 8, 1, "bgf_two_anon_member2.d");
+
+BOTLISH_RECORD(struct bgf_mixed_floats, 24, 8, "bgf_mixed_floats");
+BOTLISH_SCALAR(struct bgf_mixed_floats, tag, 0, 1, 0, "bgf_mixed_floats.tag");
+BOTLISH_FLOATING(struct bgf_mixed_floats, a, 4, 4, float, "bgf_mixed_floats.a");
+BOTLISH_FLOATING(struct bgf_mixed_floats, b, 8, 8, double, "bgf_mixed_floats.b");
+BOTLISH_FLOATING(struct bgf_mixed_floats, c, 16, 4, float, "bgf_mixed_floats.c");
+
+BOTLISH_RECORD(struct bgf_mixed_real, 32, 8, "bgf_mixed_real");
+BOTLISH_FLOATING(struct bgf_mixed_real, x, 0, 4, float, "bgf_mixed_real.x");
+BOTLISH_FLOATING(struct bgf_mixed_real, y, 8, 8, double, "bgf_mixed_real.y");
+BOTLISH_FLOATING(struct bgf_mixed_real, z, 16, 4, float, "bgf_mixed_real.z");
+BOTLISH_FLOATING(struct bgf_mixed_real, w, 20, 4, float, "bgf_mixed_real.w");
+BOTLISH_FLOATING(struct bgf_mixed_real, v, 24, 8, double, "bgf_mixed_real.v");
+
+BOTLISH_RECORD(struct bgf_samples, 56, 8, "bgf_samples");
+BOTLISH_ARRAY(struct bgf_samples, xs, 4, "bgf_samples.xs");
+BOTLISH_OFFSET(struct bgf_samples, xs[3], 12, "bgf_samples.xs, its last element");
+BOTLISH_FLOATING(struct bgf_samples, xs[0], 0, 4, float, "bgf_samples.xs, its first element");
+BOTLISH_ARRAY(struct bgf_samples, ys, 2, "bgf_samples.ys");
+BOTLISH_ARRAY(struct bgf_samples, ys[0], 2, "bgf_samples.ys");
+BOTLISH_OFFSET(struct bgf_samples, ys[1][1], 40, "bgf_samples.ys, its last element");
+BOTLISH_FLOATING(struct bgf_samples, ys[0][0], 16, 8, double, "bgf_samples.ys, its first element");
+BOTLISH_SCALAR(struct bgf_samples, n, 48, 4, 1, "bgf_samples.n");
+
+BOTLISH_RECORD(union bgf_fnum, 8, 8, "bgf_fnum");
+BOTLISH_SCALAR(union bgf_fnum, i, 0, 4, 1, "bgf_fnum.i");
+BOTLISH_FLOATING(union bgf_fnum, f, 0, 4, float, "bgf_fnum.f");
+BOTLISH_FLOATING(union bgf_fnum, d, 0, 8, double, "bgf_fnum.d");
+
+BOTLISH_RECORD(struct bgf_anon_fnum, 8, 4, "bgf_anon_fnum");
+BOTLISH_SCALAR(struct bgf_anon_fnum, k, 0, 4, 1, "bgf_anon_fnum.k");
+BOTLISH_INSIDE(struct bgf_anon_fnum, 4, 4, "bgf_anon_fnum.member2");
+BOTLISH_SCALAR(struct bgf_anon_fnum, u, 4, 4, 0, "bgf_anon_fnum_member2.u");
+BOTLISH_FLOATING(struct bgf_anon_fnum, f, 4, 4, float, "bgf_anon_fnum_member2.f");

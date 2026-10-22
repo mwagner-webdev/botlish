@@ -100,6 +100,8 @@ program examples/refinement/refined-strings.bot
 program examples/io/child-path.bot
   ONE-CHAR-STRING-LITERAL 19:74 none -- char->text: the " " that separates the two printed paths is a single character appended as text (std::str::concat)
 program examples/io/hello.bot
+program examples/io/hello-darwin.bot
+program examples/io/hello-windows.bot
 program examples/io/show-path.bot
 program examples/abi/numeric-domains.bot
 program examples/binary/c-structs.bot
@@ -133,6 +135,8 @@ program stdlib/ascii.bot
 program stdlib/binary.bot
 program stdlib/byte.bot
 program stdlib/compiler.bot
+program stdlib/darwin.bot
+program stdlib/float64.bot
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot
 fails stdlib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic std::list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import std::list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import std::list`)
@@ -163,9 +167,12 @@ program stdlib/web.bot
   ONE-CHAR-STRING-LITERAL 219:85 none -- char->text: the digit "E", as above
   ONE-CHAR-STRING-LITERAL 219:90 none -- char->text: the digit "F", as above
   ONE-CHAR-STRING-LITERAL 275:9 none -- char->text: pct's "%" begins every escape it writes as text
+program stdlib/windows.bot
 program stdlib/abi/aarch64.bot
 program stdlib/abi/bytes.bot
 program stdlib/abi/x86_64.bot
+fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
+program stdlib/darwin/path.bot
 program stdlib/ffi/c.bot
 fails stdlib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import std::io::path`)
 fails stdlib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import std::linux::io`)
@@ -174,3 +181,4 @@ program stdlib/linux/path.bot
   ONE-CHAR-STRING-LITERAL 84:49 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
 program stdlib/linux/sys.aarch64.bot
 program stdlib/linux/sys.x86_64.bot
+fails stdlib/windows/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::windows::io`)

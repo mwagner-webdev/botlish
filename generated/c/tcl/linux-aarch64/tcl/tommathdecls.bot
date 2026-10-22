@@ -142,6 +142,12 @@ extern c fn TclBN_mp_clamp(a: std::ffi::c::Ptr[tcl::ctypes::mp_int]) -> unit
 # C: void TclBN_mp_clear(mp_int *a)
 extern c fn TclBN_mp_clear(a: std::ffi::c::Ptr[tcl::ctypes::mp_int]) -> unit
 
+# C: void TclBN_mp_clear_multi(mp_int *a, ...)
+extern c fn TclBN_mp_clear_multi(
+    a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
+    variadic
+) -> unit
+
 # C: mp_ord TclBN_mp_cmp(const mp_int *a, const mp_int *b)
 extern c fn TclBN_mp_cmp(
     a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
@@ -225,6 +231,12 @@ extern c fn TclBN_mp_init(a: std::ffi::c::Ptr[tcl::ctypes::mp_int]) -> std::ffi:
 extern c fn TclBN_mp_init_copy(
     a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
     b: std::ffi::c::Ptr[tcl::ctypes::mp_int]
+) -> std::ffi::c::Int
+
+# C: mp_err TclBN_mp_init_multi(mp_int *a, ...)
+extern c fn TclBN_mp_init_multi(
+    a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
+    variadic
 ) -> std::ffi::c::Int
 
 # C: mp_err TclBN_mp_init_set(mp_int *a, mp_digit b)
@@ -469,6 +481,12 @@ extern c fn mp_clamp named "TclBN_mp_clamp"(a: std::ffi::c::Ptr[tcl::ctypes::mp_
 # C: mp_clear: an alias of TclBN_mp_clear, void TclBN_mp_clear(mp_int *a)
 extern c fn mp_clear named "TclBN_mp_clear"(a: std::ffi::c::Ptr[tcl::ctypes::mp_int]) -> unit
 
+# C: mp_clear_multi: an alias of TclBN_mp_clear_multi, void TclBN_mp_clear_multi(mp_int *a, ...)
+extern c fn mp_clear_multi named "TclBN_mp_clear_multi"(
+    a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
+    variadic
+) -> unit
+
 # C: mp_cmp: an alias of TclBN_mp_cmp, mp_ord TclBN_mp_cmp(const mp_int *a, const mp_int *b)
 extern c fn mp_cmp named "TclBN_mp_cmp"(
     a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
@@ -579,6 +597,12 @@ extern c fn mp_init_copy named "TclBN_mp_init_copy"(
 extern c fn mp_init_i64 named "TclBN_mp_init_i64"(
     bignum: std::ffi::c::Ptr[tcl::ctypes::mp_int],
     initVal: std::ffi::c::Long
+) -> std::ffi::c::Int
+
+# C: mp_init_multi: an alias of TclBN_mp_init_multi, mp_err TclBN_mp_init_multi(mp_int *a, ...)
+extern c fn mp_init_multi named "TclBN_mp_init_multi"(
+    a: std::ffi::c::Ptr[tcl::ctypes::mp_int],
+    variadic
 ) -> std::ffi::c::Int
 
 # C: mp_init_set: an alias of TclBN_mp_init_set, mp_err TclBN_mp_init_set(mp_int *a, mp_digit b)

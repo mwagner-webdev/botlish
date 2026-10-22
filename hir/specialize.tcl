@@ -421,6 +421,7 @@ proc hir::specialize::KeyType {type} {
 # callable keys: an exact callable's identity is erased to its kind, a
 # structural function type to any.
 proc hir::specialize::ElementKeyType {type} {
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsMutVec $type]} {
         # A MutableVector keeps its element's key, like a List: an affine
         # element must never be erased from an instance's key (its owner
@@ -790,7 +791,7 @@ proc hir::specialize::Analyze {id} {
                     # already-specialized scalar key sharing the declared
                     # type's base, unioned with its evidence via narrow.
                     set type [if {[hir::types::IsSpecific $declaredType]} {set declaredType} else {hir::types::narrow $type $declaredType}]
-                } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
+                } elseif {([hir::types::IsList [hir::types::Unrefined $type]] && [hir::types::IsList [hir::types::Unrefined $declaredType]])
                         || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
                         || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])
                         || ([hir::types::IsMutArray $type] && [hir::types::IsMutArray $declaredType])} {
@@ -1453,7 +1454,7 @@ proc hir::specialize::CombineCallerTheorem {type fact} {
         }
         return [hir::types::narrow $type $fact]
     }
-    if {([hir::types::IsList $type] && [hir::types::IsList $fact])
+    if {([hir::types::IsList [hir::types::Unrefined $type]] && [hir::types::IsList [hir::types::Unrefined $fact]])
             || ([hir::types::IsSet $type] && [hir::types::IsSet $fact])} {
         return [hir::types::narrow $type $fact]
     }
@@ -1521,7 +1522,7 @@ proc hir::specialize::Reanalyze {id argTypes} {
         if {$declaredType ne {}} {
             if {![hir::types::IsSpecific $type]} {
                 set type [if {[hir::types::IsSpecific $declaredType]} {set declaredType} else {hir::types::narrow $type $declaredType}]
-            } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
+            } elseif {([hir::types::IsList [hir::types::Unrefined $type]] && [hir::types::IsList [hir::types::Unrefined $declaredType]])
                     || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
                         || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])
                         || ([hir::types::IsMutArray $type] && [hir::types::IsMutArray $declaredType])} {

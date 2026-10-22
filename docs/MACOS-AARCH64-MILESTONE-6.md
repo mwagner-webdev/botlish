@@ -1184,7 +1184,9 @@ On macOS, as on Linux, by design of this milestone (none is a regression):
   as `open` or `printf` with a fixed prototype is not merely unsupported
   but wrong on macOS (the arguments go in registers, the callee reads the
   stack). Botlish has no way to declare one variadic; a binding must not
-  pretend.
+  pretend. (Since VARIADICS-VERTICAL-SLICE-1.md it has: an `extern c fn`
+  ending in `variadic`, whose calls pass every trailing argument on
+  Apple's stack in an 8-byte slot.)
 * **Shared libraries**: linked and loaded (section 7), but no rpath,
   `@rpath`, framework or install-name policy of Botlish's: a library must
   be where dyld finds it. Frameworks (`-framework`) cannot be declared.
@@ -1252,7 +1254,9 @@ What Darwin IO still needs:
 2. **No variadic prototypes**: `open` and `fcntl` are variadic, and on
    Apple arm64 a fixed prototype for a variadic function passes its
    optional arguments in the wrong place (section 30). Darwin IO must use
-   non-variadic entry points or wait for variadic support.
+   non-variadic entry points or wait for variadic support (which
+   VARIADICS-VERTICAL-SLICE-1.md added: `extern c fn open(path: ...,
+   flags: std::ffi::c::Int, variadic) -> std::ffi::c::Int`).
 3. **errno**: Darwin's is `*__error()`, a thread-local reached through a
    function returning `int *`. Botlish has no C dereference; reading it
    needs a native view of a one-field layout (NATIVE-LAYOUT-VIEWS.md) or a

@@ -171,18 +171,18 @@
 @@ width-native-lower native lowering encodes an 8-byte field as a 4-byte one
 ## native/lower.tcl
 <<<<
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0)}]
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
 ====
-    return [expr {min($width, 4) + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0)}]
+    return [expr {min($width, 4) + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
 >>>>
 
 @@ width-rust the native load reads one byte of a 2-byte field
 ## native/src/runtime/ops.rs
 <<<<
-    bin_decode(p, &bytes_of(storage)[at..at + width], signed, big)
+    bin_decode(p, &bytes_of(storage)[at..at + encoding.width], encoding)
 ====
-    let width = if width == 2 { 1 } else { width };
-    bin_decode(p, &bytes_of(storage)[at..at + width], signed, big)
+    let width = if encoding.width == 2 { 1 } else { encoding.width };
+    bin_decode(p, &bytes_of(storage)[at..at + width], encoding)
 >>>>
 
 @@ width-subrange-hir a narrower integer domain (Int in 0..100) is accepted as the fixed-width encoding containing it, so parse can imprint a value outside the field's type
@@ -226,11 +226,11 @@
 @@ byte-order-rust-load the native load reads a little-endian field big-endian
 ## native/src/runtime/ops.rs
 <<<<
-    if big {
+    if encoding.big {
         word[..width].reverse();
     }
 ====
-    if !big {
+    if !encoding.big {
         word[..width].reverse();
     }
 >>>>
@@ -391,10 +391,10 @@ proc core::binary::EncodeRepr {operation repr value bytes at what} {
 @@ signedness-rust-load the native load sign-extends only 8-byte fields
 ## native/src/runtime/ops.rs
 <<<<
-    if signed {
+    if encoding.signed {
         let shift = 64 - 8 * width as u32;
 ====
-    if signed && width == 8 {
+    if encoding.signed && width == 8 {
         let shift = 64 - 8 * width as u32;
 >>>>
 

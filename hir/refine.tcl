@@ -208,6 +208,19 @@ proc hir::refine::CallImplication {hir e node} {
                     AddArgumentFact $hir result $outcome $args $index $fact
                 }
             }
+            if {$name eq "==" && [llength $args] == 2} {
+                set measured [Nothing]
+                MeasuredEquality $hir measured $args
+                set measured [dict get $measured 1]
+                dict for {b fact} $measured {
+                    set set [dict get $result 1]
+                    if {[dict exists $set $b]} {
+                        set fact [hir::types::narrow [dict get $set $b] $fact]
+                    }
+                    dict set set $b $fact
+                    dict set result 1 $set
+                }
+            }
         }
         block {
             # Only a predicate's contract speaks about a Boolean result; a
@@ -228,13 +241,47 @@ proc hir::refine::CallImplication {hir e node} {
         }
     }
     # A decided call (a type test its argument's type answers, or a
-    # predicate whose exact result is already known) has one outcome.
+    # predicate whose exact result is already known) has one outcome. A
+    # measured equality decided false (`std::list::length(xs) == 4` of an xs
+    # known to have another length) keeps its fact instead: true of no value
+    # of xs, it narrows xs to never where the guard would hold, so the code
+    # it guards -- which no run reaches -- is held to nothing, as a guard
+    # whose outcome is not decided is (LIST-CARDINALITY-REFINEMENTS.md).
     if {$known eq "1"} {
         dict set result 0 never
     } elseif {$known eq "0"} {
-        dict set result 1 never
+        if {[info exists measured] && $measured ne {}} {
+            dict set result 1 $measured
+        } else {
+            dict set result 1 never
+        }
     }
     return $result
+}
+
+# Records, in implication RESULT (upvar) for outcome 1, what the equality
+# OPERANDS (`A == B`) proves when one operand measures a scalar-refinement fact
+# of a value (hir::types::Measure: `std::list::length(xs)`) and the other is an
+# exactly known Int N (hir::exact::IntOf): that value has the fact -- `if
+# std::list::length(xs) == 4:` refines xs to List[T]{length: 4} in its then
+# branch, and, through the lowering of `!=` (an if), `if std::list::length(xs)
+# != 4: return` in what follows (LIST-CARDINALITY-REFINEMENTS.md). The fact
+# is a refinement of the family's base kind (List[any]{length: 4}), which
+# narrowing combines with what is known of the value's elements. The other
+# outcome proves nothing (a length other than 4 is no fact this theory
+# states), and so does a bound (`>=`): a refinement is an exact fact.
+proc hir::refine::MeasuredEquality {hir resultVar operands} {
+    upvar 1 $resultVar result
+    foreach {m v} [list {*}$operands [lindex $operands 1] [lindex $operands 0]] {
+        set measure [hir::types::Measure $hir $m]
+        set n [hir::exact::IntOf $hir $v]
+        if {$measure eq "" || $n eq "" || $n < 0} {
+            continue
+        }
+        lassign $measure arg family param
+        set fact [hir::types::Refine [hir::refinements::base $family] $family [list $param $n]]
+        AddArgumentFact $hir result 1 [list $arg] 0 $fact
+    }
 }
 
 # Records, in implication RESULT (upvar) for OUTCOME, that the value of
@@ -274,9 +321,16 @@ proc hir::refine::AddArgumentFact {hir resultVar outcome args index fact} {
 # The implication of the if expression E (node NODE) used as a Boolean value.
 proc hir::refine::IfImplication {hir ctx e node depth} {
     set condition [Implication $hir $ctx [dict get $node condition] [expr {$depth + 1}]]
+    # A branch its condition's decided outcome makes unreachable still has
+    # a value implication when that outcome keeps facts (a measured equality
+    # decided false: CallImplication): what holds on that impossible path
+    # holds vacuously, so the lowering of `!=` (`if A == B: false else:
+    # true`) carries a decided equality's fact as `not` would.
     set branches [dict create \
-        1 [BodyImplication $hir $ctx [dict get $node thenBody] [expr {$depth + 1}]] \
-        0 [BodyImplication $hir $ctx [dict get $node elseBody] [expr {$depth + 1}]]]
+        1 [BodyImplication $hir $ctx [dict get $node thenBody] [expr {$depth + 1}] \
+            [expr {[dict get $condition 1] ni {never {}}}]] \
+        0 [BodyImplication $hir $ctx [dict get $node elseBody] [expr {$depth + 1}] \
+            [expr {[dict get $condition 0] ni {never {}}}]]]
     set result [dict create]
     foreach outcome {1 0} {
         set joined ""
@@ -301,14 +355,17 @@ proc hir::refine::IfImplication {hir ctx e node depth} {
 }
 
 # The implication of the value of the sequence BODY (a branch): its last
-# expression's; a branch that never completes normally yields no value.
-proc hir::refine::BodyImplication {hir ctx body depth} {
+# expression's; a branch that never completes normally yields no value, nor
+# does an unreachable one -- unless DECIDED: its own if's decided condition
+# is all that makes it unreachable, and that outcome keeps facts
+# (IfImplication).
+proc hir::refine::BodyImplication {hir ctx body depth {decided 0}} {
     if {$body eq {}} {
         return [Nothing]
     }
     set last [lindex $body end]
     foreach e $body {
-        if {[hir::typeOf $hir $e] eq "never" || ![dict get $hir exprs $e reachable]} {
+        if {[hir::typeOf $hir $e] eq "never" || (![dict get $hir exprs $e reachable] && !$decided)} {
             return {1 never 0 never}
         }
     }

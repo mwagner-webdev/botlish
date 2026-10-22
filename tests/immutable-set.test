@@ -217,7 +217,7 @@ s = std::immutable_set::from_list(xs)
     set xsExpr [lindex [hirFind $h bind xs] 0]
     set sExpr [lindex [hirFind $h bind s] 0]
     list [hir::types::show [hir::typeOf $h $xsExpr]] [hir::types::show [hir::typeOf $h $sExpr]]
-} -result {{List[int[Small]]} {ImmutableSet[int[Small]]}}
+} -result {{List[int[Small]]{length: 3}} {ImmutableSet[int[Small]]}}
 
 test set-construct-unicodechar {std::immutable_set::from_list(['-', '.', '_', '~']) infers ImmutableSet[UnicodeChar] -- no char-specific set typing} -body {
     set h [surface::compile {import std::immutable_set
@@ -472,7 +472,7 @@ accepts(make())} $::smallDecl]
         [hir::types::show [hir::type $h [hir::get $h $makeBlock resultType]]] \
         [hir::types::show [lindex [hir::get $h $acceptsBlock declaredParamTypes] 0]] \
         [core::value::show [core::evalProgram [hir::lower $h]]]
-} -result {{List[int[Small]]} {ImmutableSet[int[Small]]} {ImmutableSet[int[Small]]} true}
+} -result {{List[int[Small]]{length: 3}} {ImmutableSet[int[Small]]} {ImmutableSet[int[Small]]} true}
 
 test set-required-unicodechar-payload {chars() -> ImmutableSet[UnicodeChar], the direct precursor to std::byte::set} -body {
     set src {import std::immutable_set

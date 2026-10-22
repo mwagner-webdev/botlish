@@ -1,183 +1,23 @@
 # demo.bot -- plays one deterministic game of 2048 with the engine
-# (game2048.bot) and prints it.
+# (game2048.bot) and prints it, on Linux: the game and its presentation are
+# demo_play.bot's (an application module beside it), and only the installed
+# std::io::IO context is this file's -- std::linux::io's, whose writes are the raw
+# write(2) syscall. demo-darwin.bot is the same program on macOS,
+# demo-windows.bot on Windows.
 #
-# The player is the usual corner strategy: try down, then left, then
-# right, then up, and take the first move that changes the board. The
-# randomness a real game has is a small linear congruential generator with a
-# fixed seed, here in the caller where it belongs: it picks the spawn's
-# empty position and whether the tile is a 4 (one time in ten) or a 2.
-#
-# It prints the first moves' boards, then the final board, the score and
-# the largest tile. Output goes through std::io::print_line, which needs the
-# native backend:
+# Output goes through std::io::print_line, which needs the native backend:
 #
 #   tclsh9.0 main.tcl -backend cranelift examples/games/2048/demo.bot
 #
 # or, as a standalone executable (written beside it, as demo):
 #
 #   tclsh9.0 main.tcl -emit-native-executable examples/games/2048/demo.bot
-import game2048
+import demo_play
 import std::io
 import std::linux::io
-import std::list
-import std::str
-
-# ---------------------------------------------------------------------------
-# Text: Botlish has no Int-to-String conversion and no integer division, so
-# the decimal digits are counted out by subtraction.
-
-fn digit(d: int) -> str:
-    text = "0123456789".substring(d, d + 1):
-        on LowerUnderrun:
-            ""
-        on UpperOverrun:
-            ""
-    text
-
-# How many times P fits into N, for 0 <= N < 10 * P.
-fn fits(n: int, p: int) -> int:
-    if n < p:
-        0
-    else:
-        1 + (n - p).fits(p)
-
-# The decimal digits of N (at least P, a power of ten), most significant
-# first, down to the digit worth P.
-fn digits(n: int, p: int) -> str:
-    next = p * 10
-    if n < next:
-        n.fits(p).digit()
-    else:
-        n.digits(next).concat(n.mod(next).fits(p).digit())
-
-# N >= 0 in decimal.
-fn decimal(n: int) -> str:
-    n.digits(1)
-
-# TEXT right-aligned in a field of six characters.
-fn field(text: str) -> str:
-    gap = 6 - std::str::length(text)
-    if gap <= 0:
-        return text
-    padding = "      ".substring(0, gap):
-        on LowerUnderrun:
-            ""
-        on UpperOverrun:
-            ""
-    padding.concat(text)
-
-fn cell_text(value: int) -> str:
-    if value == 0:
-        "     ."
-    else:
-        field(decimal(value))
-
-fn joined(parts: List[str]) -> str:
-    fn from(i: int) -> str:
-        if i >= std::list::length(parts):
-            return ""
-        parts.get(i, "").concat(from(i + 1))
-    from(0)
-
-fn board_lines(board: game2048::Board) -> List[str]:
-    loop row in board.rows():
-        cells = loop value in row:
-            cell_text(value)
-        joined(cells)
-
-fn direction_name(direction: game2048::Direction) -> str:
-    if direction == game2048::Direction::Left:
-        "left"
-    elif direction == game2048::Direction::Right:
-        "right"
-    elif direction == game2048::Direction::Up:
-        "up"
-    else:
-        "down"
-
-# ---------------------------------------------------------------------------
-# The player and the dice
-
-fn preferences() -> List[game2048::Direction]:
-    [game2048::Direction::Down, game2048::Direction::Left, game2048::Direction::Right, game2048::Direction::Up]
-
-struct Choice:
-    move: game2048::Move
-    direction: game2048::Direction
-
-# The first preferred move that changes GAME's board (the last one tried,
-# unchanged, when none does: the game is over then).
-fn choose(game: game2048::Game) -> Choice:
-    loop direction in preferences():
-        m = game.move(direction)
-        if m.changed:
-            return Choice {move: m, direction: direction}
-    Choice {move: game.move(game2048::Direction::Up), direction: game2048::Direction::Up}
-
-# The generator's next state.
-fn next_seed(seed: int) -> int:
-    (seed * 1103515245 + 12345).mod(2147483648)
-
-# A game between moves, the generator's state and the moves made so far.
-struct Turn:
-    game: game2048::Game
-    seed: int
-    moves: int
-
-# GAME, after MOVES moves, with one tile spawned where SEED says.
-fn spawned(game: game2048::Game, seed: int, moves: int) -> Turn:
-    roll = next_seed(seed)
-    empties = game.board.empty_positions()
-    count = std::list::length(empties)
-    if count == 0:
-        return Turn {game: game, seed: roll, moves: moves}
-    at = empties.get(roll.mod(count), game2048::Position {row: 0, column: 0})
-    tile = if roll.mod(10) == 0:
-        game2048::SpawnTile::Four
-    else:
-        game2048::SpawnTile::Two
-    placed = game.spawn(at, tile):
-        on game2048::CellOccupied:
-            game
-    Turn {game: placed, seed: roll, moves: moves}
-
-# The largest tile on BOARD.
-fn largest(board: game2048::Board) -> int:
-    loop power in [131072, 65536, 32768, 16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2]:
-        if board.reached?(power):
-            return power
-    0
-
-# ---------------------------------------------------------------------------
-# The game
-
-fn show(board: game2048::Board, title: str) errors std::io::WriteFailed:
-    std::io::print_line(title)
-    loop line in board.board_lines():
-        std::io::print_line(line)
-
-# Plays TURN's game to its end, printing the boards of its first SHOWN
-# moves.
-fn play(turn: Turn, shown: int) -> Turn errors std::io::WriteFailed:
-    if turn.game.game_over?():
-        return turn
-    choice = choose(turn.game)
-    moves = turn.moves + 1
-    if moves <= shown:
-        title = "move ".concat(decimal(moves)).concat(": ").concat(direction_name(choice.direction)).concat(", +").concat(decimal(choice.move.gained))
-        choice.move.game.board.show(title)
-    choice.move.game.spawned(turn.seed, moves).play(shown)
-
-fn main() errors std::io::WriteFailed:
-    first = game2048::new_game().spawned(2048, 0)
-    start = first.game.spawned(first.seed, 0)
-    start.game.board.show("start")
-    final = start.play(5)
-    final.game.board.show("game over after ".concat(decimal(final.moves)).concat(" moves"))
-    std::io::print_line("score ".concat(decimal(final.game.score)).concat(", largest tile ").concat(decimal(largest(final.game.board))))
 
 with context std::linux::io::create()
 
-main():
+demo_play::main():
     on std::io::WriteFailed:
         unit

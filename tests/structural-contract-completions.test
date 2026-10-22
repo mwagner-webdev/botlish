@@ -645,7 +645,7 @@ test scc-affine-edges {a coroutine live across a structural call: an edge for ea
     list [sccErrorEdges $sccAffine across] [sccErrorEdges $sccAffine across1] [sccErrorEdges $sccAffine across_untyped]
 } -result {{} E1 E2}
 
-test scc-affine-runs {and every backend releases the coroutine on the contract's error edge and the untyped one} -body {
+test scc-affine-runs {and every backend releases the coroutine on the contract's error edge and the untyped one} -constraints nativeCoroutines -body {
     sourceAgree $sccAffine
 } -result {value {[-2, 17, 17, -1, -2]}}
 
@@ -711,7 +711,7 @@ fn top(b: Box) -> int:
 [poison(2), h(Box {run: fails_with_stream}), h(Box {run: quiet}), top(Box {run: fails_with_stream}), top(Box {run: quiet})]
 }
 
-test scc-affine-payload {a contract admitting an affine-payload error: an edge for it (Carry) and none for the erased E2; payloads and coroutines released on every backend} -body {
+test scc-affine-payload {a contract admitting an affine-payload error: an edge for it (Carry) and none for the erased E2; payloads and coroutines released on every backend} -constraints nativeCoroutines -body {
     list [sccErrorEdges $sccAffinePayload live] [sccEffective $sccAffinePayload h] [sourceAgree $sccAffinePayload]
 } -result {Carry {handle Carry call {}} {value {[-2, 11, 7, -1, 108]}}}
 
@@ -773,7 +773,7 @@ fn run_box(b: Box) -> int:
 # instance while the program is checked, which puts Boom into the erased
 # contract then; the accepted program's invoke is specialized for it, so the
 # final HIR erases nothing.)
-test scc-coroutine-poison {an error-bearing coroutine given to an untyped function does not reach the Fn{args: [], return: int} field call: accepted, specialized, and the call is charged nothing} -body {
+test scc-coroutine-poison {an error-bearing coroutine given to an untyped function does not reach the Fn{args: [], return: int} field call: accepted, specialized, and the call is charged nothing} -constraints nativeCoroutines -body {
     set hir [surface::compile $sccCoroutine -warnings off]
     set clones [lsort [lmap b [dict keys [dict get $hir bindings]] {
         set n [dict get $hir bindings $b name]

@@ -68,6 +68,10 @@ pub const ERR_NON_FINITE_FLOAT: u32 = BUILTIN_ERROR_ID_BASE + 4;
 /// number of places (runtime::decimal's rt_decimal_round,
 /// DECIMAL-ROUNDED-MILESTONE-1.md).
 pub const ERR_UNREPRESENTABLE_DECIMAL: u32 = BUILTIN_ERROR_ID_BASE + 9;
+/// `LengthMismatch` (builtin error 10): `list#with_length`'s List does not
+/// have the length its imprint states (runtime::ops's rt_list_with_length,
+/// LIST-CARDINALITY-REFINEMENTS.md).
+pub const ERR_LENGTH_MISMATCH: u32 = BUILTIN_ERROR_ID_BASE + 10;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

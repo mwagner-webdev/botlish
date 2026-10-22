@@ -1,0 +1,388 @@
+# Mutants of the List length refinement (audit/list-length-refinement/tools/
+# mutate.tcl; LIST-CARDINALITY-REFINEMENTS.md): deliberate bugs in the
+# schema's exact order, the refinement's resolution, subtyping and admission,
+# decay, joins, the sources that mint it (literals, the empty List,
+# std::list::append, collecting loops, copies of fixed arrays, guards,
+# std::list::with_length), the boundaries that forget it (undeclared results,
+# semantic instance keys, mutable element contracts, handlers), the proofs
+# that read it (bounds, extents, std::list::length), HIR text and interchange,
+# FIXED-ARITY-LIST-RETURN, and the native validator.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# The type and its lattice
+
+@@ refinement-ignored a declared List[T]{length: N} resolves to List[T]: the fact is dropped
+## hir/resolve.tcl
+<<<<
+            set type [hir::types::Refine $base $family $facts]
+====
+            set type $base
+>>>>
+
+@@ runtime-type a refined List's runtime kind is taken to be its refinement form, not the List's
+## hir/types.tcl
+<<<<
+            return [kindOf [hir::refinements::Base $type]]
+====
+            return srefined
+>>>>
+
+@@ decay-rejected forgetting a length is not subtyping
+## hir/types.tcl
+<<<<
+        # Forgetting every fact: a member is a value of its base.
+        return [subtype [hir::refinements::Base $a] $b]
+====
+        # Forgetting every fact: a member is a value of its base.
+        return [expr {![hir::types::IsRefinedApplied $a] && [subtype [hir::refinements::Base $a] $b]}]
+>>>>
+
+@@ decay-rejected-admission admission does not forget an argument's length where a List[T] is required
+## hir/range.tcl
+<<<<
+    set arg [hir::types::Unrefined $arg]
+    if {$arg eq $declared} {
+        return 1
+    }
+====
+    if {$arg eq $declared} {
+        return 1
+    }
+>>>>
+
+@@ wrong-length-admitted an exact fact implies any other value of it
+## hir/refinements.tcl
+<<<<
+        return [expr {$a eq $b}]
+====
+        return 1
+>>>>
+
+@@ generic-ordering-exact exact length is ordered like an atLeast parameter (a List of 4 is taken for one of 3)
+## hir/refinements.tcl
+<<<<
+        return [expr {$a eq $b}]
+====
+        return [AtLeast $a $b]
+>>>>
+
+@@ unrefined-admitted a List of no known length is admitted where a length is required
+## hir/range.tcl
+<<<<
+        if {$facts eq {} || ![hir::refinements::ImpliesFacts $family $facts [hir::refinements::Facts $declared]]} {
+            return 0
+        }
+====
+        if {$facts ne {} && ![hir::refinements::ImpliesFacts $family $facts [hir::refinements::Facts $declared]]} {
+            return 0
+        }
+>>>>
+
+@@ join-keeps-left two different lengths join to the left one
+## hir/refinements.tcl
+<<<<
+            if {$va eq $vb} {
+                dict set facts $param $va
+            }
+====
+            dict set facts $param $va
+>>>>
+
+@@ join-keeps-right two different lengths join to the right one
+## hir/refinements.tcl
+<<<<
+            if {$va eq $vb} {
+                dict set facts $param $va
+            }
+====
+            dict set facts $param $vb
+>>>>
+
+@@ join-invents two different lengths join to an invented one (their larger)
+## hir/refinements.tcl
+<<<<
+            if {$va eq $vb} {
+                dict set facts $param $va
+            }
+====
+            dict set facts $param [expr {max($va, $vb)}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Function contracts
+
+@@ return-unchecked a declared refined result is not held to its length
+## hir/range.tcl
+<<<<
+        if {[hir::types::IsTraitConstraint [dict get $node declaredResult]]} {
+            # A declared trait result is proven per exit, with its witness
+====
+        if {[hir::types::IsTraitConstraint [dict get $node declaredResult]] || [hir::types::IsRefinedApplied [dict get $node declaredResult]]} {
+            # A declared trait result is proven per exit, with its witness
+>>>>
+
+@@ result-leaks an undeclared result keeps the length its implementation happens to have
+## hir/types.tcl
+<<<<
+        set result [ForgetInferred $result]
+====
+        set result $result
+>>>>
+
+@@ instance-key-keeps a semantic instance is keyed by the lengths its caller's arguments happen to have
+## hir/semantic.tcl
+<<<<
+        set t [hir::types::ForgetInferred $t]
+====
+        set t $t
+>>>>
+
+# ---------------------------------------------------------------------------
+# Minting
+
+@@ literal-off-by-one a List literal's length is one more than its element count
+## hir/types.tcl
+<<<<
+        return [llength $argExprs]
+====
+        return [expr {[llength $argExprs] + 1}]
+>>>>
+
+@@ empty-is-one the empty List[never] states length 1
+## hir/types.tcl
+<<<<
+        return [list length 0]
+====
+        return [list length 1]
+>>>>
+
+@@ append-no-increment std::list::append's result has its List's length, not one more
+## hir/types.tcl
+<<<<
+            return [expr {$n + ($d eq "" ? 0 : $d)}]
+====
+            return $n
+>>>>
+
+@@ loop-ignores-break a collecting loop that breaks still mints its domain's length
+## hir/types.tcl
+<<<<
+    if {[dict exists $ctx spec] || ![hir::cardinality::Exact $hir $e]} {
+====
+    if {[dict exists $ctx spec]} {
+>>>>
+
+@@ guard-wrong-branch std::list::length(xs) == N refines xs where it does not hold
+## hir/refine.tcl
+<<<<
+        AddArgumentFact $hir result 1 [list $arg] 0 $fact
+====
+        AddArgumentFact $hir result 0 [list $arg] 0 $fact
+>>>>
+
+@@ guard-one-order only std::list::length(xs) == N narrows, never N == std::list::length(xs)
+## hir/refine.tcl
+<<<<
+    foreach {m v} [list {*}$operands [lindex $operands 1] [lindex $operands 0]] {
+====
+    foreach {m v} $operands {
+>>>>
+
+@@ neguard-no-narrow a != early return does not narrow what follows it (the decided-path facts dropped)
+## hir/refine.tcl
+<<<<
+            set path [Conjoin $entry $value]
+====
+            set path $value
+>>>>
+
+@@ inequality-mints std::list::length(xs) >= N refines xs to List[T]{length: N}
+## hir/refine.tcl
+<<<<
+            if {$name eq "==" && [llength $args] == 2} {
+====
+            if {$name in {== >=} && [llength $args] == 2} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Fixed layout arrays
+
+@@ copy-unrefined a copied fixed array is a List of no known length
+## hir/layouts.tcl
+<<<<
+    return [hir::types::Refine [ArrayConsumerType $element] List [list length [dict get $repr extent]]]
+====
+    return [ArrayConsumerType $element]
+>>>>
+
+@@ copy-inner-lost a copied array of arrays forgets its rows' extent
+## hir/layouts.tcl
+<<<<
+    set element [CopyType [dict get $repr element]]
+====
+    set element [dict get $repr element type]
+>>>>
+
+@@ copy-off-by-one a copied fixed array's List states one element more than the extent (the type and the exact copy disagree)
+## hir/layouts.tcl
+<<<<
+    return [hir::types::Refine [ArrayConsumerType $element] List [list length [dict get $repr extent]]]
+====
+    return [hir::types::Refine [ArrayConsumerType $element] List [list length [expr {[dict get $repr extent] + 1}]]]
+>>>>
+
+@@ parse-field-unrefined a field of what std::binary::parse made has its LayoutStruct's unrefined field type
+## hir/types.tcl
+<<<<
+                set copied [hir::layouts::CopiedFieldType [dict get $copy layout] $name]
+====
+                set copied ""
+>>>>
+
+@@ write-still-checks a refined List's length is not read by the size forms: an extent (or index) it proves keeps its run-time check
+## hir/cardinality.tcl
+<<<<
+    set n [DefinedLength $hir $kind $id]
+    if {$n ne ""} {
+        return [FormConst $n]
+    }
+====
+>>>>
+
+@@ write-accepts-wrong a List of another known length is admitted into a fixed array (a write proven wrong is taken for proven)
+## hir/completions.tcl
+<<<<
+            if {$n != [dict get $repr extent]} {
+                return out
+            }
+====
+            if {$n != [dict get $repr extent]} {
+                return in
+            }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The proofs that read the refinement
+
+@@ bounds-n-plus-one a refined List's size form is one more than its length
+## hir/cardinality.tcl
+<<<<
+proc hir::cardinality::DefinedLength {hir kind id} {
+    if {$kind eq "expr"} {
+        return [hir::types::LengthOf [hir::typeOf $hir $id]]
+    }
+====
+proc hir::cardinality::DefinedLength {hir kind id} {
+    if {$kind eq "expr"} {
+        set n [hir::types::LengthOf [hir::typeOf $hir $id]]
+        return [expr {$n eq "" ? "" : $n + 1}]
+    }
+>>>>
+
+@@ measured-ignored std::list::length of a refined List is not known to be its length
+## hir/range.tcl
+<<<<
+            set measured [hir::types::MeasuredValue $hir $name [dict get $node args]]
+====
+            set measured ""
+>>>>
+
+@@ handler-strict a handler's List of another length is inadmissible as the call's result
+## hir/completions.tcl
+<<<<
+    set admitted [hir::types::ForgetInferred $callType]
+====
+    set admitted $callType
+>>>>
+
+@@ vector-keeps-literal-length a MutableVector's element contract keeps the length its first elements had
+## hir/types.tcl
+<<<<
+                return [MakeMutVec [ForgetInferred [lindex $list 1]] 0]
+====
+                return [MakeMutVec [lindex $list 1] 0]
+>>>>
+
+# ---------------------------------------------------------------------------
+# HIR text and interchange
+
+@@ hir-text-drops HIR text writes a refined List without its facts
+## hir/refinements.tcl
+<<<<
+        return "[hir::types::show [Base $type]]{[ShowFacts [Facts $type]]}"
+====
+        return [hir::types::show [Base $type]]
+>>>>
+
+@@ interchange-drops decoding interchange text forgets every List length (the HIR read back, as from the front-end cache, differs from the built one)
+## hir/interchange.tcl
+<<<<
+    set hir [WithRepresentations [dict get $body hir]]
+====
+    set hir [WithRepresentations [dict get $body hir]]
+    dict for {t type} [dict get $hir types] {
+        dict set hir types $t [hir::types::ForgetInferred $type]
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# FIXED-ARITY-LIST-RETURN
+
+@@ fixed-arity-suppressed a literal exit whose type states a length is no fixed-arity exit (the refinement taken for a suppression)
+## hir/warnings.tcl
+<<<<
+    if {[DeclaresListResult $hir $block]} {
+        return ""
+    }
+====
+    if {[DeclaresListResult $hir $block]} {
+        return ""
+    }
+    foreach exit [ShapeExits $hir $block] {
+        if {[hir::types::IsRefinedApplied [hir::typeOf $hir [lindex $exit 1]]]} {
+            return ""
+        }
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The validator
+
+@@ validator-unchecked std::list::with_length mints the refinement without checking the length (Tcl runtime)
+## core/listlength.tcl
+<<<<
+    if {[llength $items] != $want} {
+====
+    if {0} {
+>>>>
+
+@@ validator-unchecked-native std::list::with_length mints the refinement without checking the length (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+        Some(want) if want >= 0 && want as usize == len => l,
+====
+        Some(_) => l,
+>>>>
+
+@@ validator-copies std::list::with_length returns a copy of its List, not the List itself (native runtime)
+## native/src/runtime/ops.rs
+<<<<
+        Some(want) if want >= 0 && want as usize == len => l,
+====
+        Some(want) if want >= 0 && want as usize == len => {
+            let items = list_of(l).items().to_vec();
+            vm(p).new_list(items)
+        }
+>>>>

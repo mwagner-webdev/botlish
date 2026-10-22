@@ -2126,6 +2126,7 @@ proc hir::staticdeps::CoroutineOperations {} {
 # Fn, and what such a callable returns; a List's elements, a set's, a
 # vector's or an array's element; an anonymous struct's fields.
 proc hir::staticdeps::CallableParts {type {depth 0}} {
+    set type [hir::types::Unrefined $type]
     if {$depth > 8 || $type in {never any ""}} {
         return {}
     }
@@ -2718,6 +2719,7 @@ proc hir::staticdeps::AddSubtree {hir stateVar e succVar label} {
 # `never` or adds errors to a callable's): a callable, or a List, set,
 # vector, array or struct that may hold one.
 proc hir::staticdeps::CanCarry {hir type {seen {}}} {
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsExactBlock $type] || [hir::types::IsExactNative $type]
             || [hir::types::IsFn $type] || [hir::types::IsCoroutine $type]} {
         return 1

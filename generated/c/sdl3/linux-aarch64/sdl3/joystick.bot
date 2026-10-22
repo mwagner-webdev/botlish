@@ -131,6 +131,26 @@ extern c fn SDL_SetJoystickVirtualHat(
     value: std::ffi::c::UChar
 ) -> std::ffi::c::Bool
 
+# C: _Bool SDL_SetJoystickVirtualTouchpad(SDL_Joystick *joystick, int touchpad, int finger, _Bool down, float x, float y, float pressure)
+extern c fn SDL_SetJoystickVirtualTouchpad(
+    joystick: std::ffi::c::Ptr[sdl3::ctypes::SDL_Joystick],
+    touchpad: std::ffi::c::Int,
+    finger: std::ffi::c::Int,
+    down: std::ffi::c::Bool,
+    x: std::ffi::c::Float,
+    y: std::ffi::c::Float,
+    pressure: std::ffi::c::Float
+) -> std::ffi::c::Bool
+
+# C: _Bool SDL_SendJoystickVirtualSensorData(SDL_Joystick *joystick, SDL_SensorType type, Uint64 sensor_timestamp, const float *data, int num_values)
+extern c fn SDL_SendJoystickVirtualSensorData(
+    joystick: std::ffi::c::Ptr[sdl3::ctypes::SDL_Joystick],
+    type_: std::ffi::c::Int,
+    sensor_timestamp: std::ffi::c::ULong,
+    data: std::ffi::c::Ptr[std::ffi::c::Float],
+    num_values: std::ffi::c::Int
+) -> std::ffi::c::Bool
+
 # C: SDL_PropertiesID SDL_GetJoystickProperties(SDL_Joystick *joystick)
 extern c fn SDL_GetJoystickProperties(
     joystick: std::ffi::c::Ptr[sdl3::ctypes::SDL_Joystick]

@@ -1,0 +1,19 @@
+# The portable Hello World on Windows (CONTEXT-TRAITS.md;
+# WINDOWS-X86-64-MILESTONE-2.md): examples/io/hello.bot with another context.
+# hello() is the same function: it declares no context, and std::io::print_line
+# requires the std::io::IO context trait; the installed std::windows::io::WindowsIO is
+# the one context that implements it, so the call compiles to a direct call
+# of std::windows::io::write_text -- one kernel32 WriteFile of "Hello, world!\n" to
+# the process's standard output handle (GetStdHandle), with no C runtime in
+# the path.
+import std::io
+import std::windows::io
+
+fn hello() errors std::io::WriteFailed:
+    std::io::print_line("Hello, world!")
+
+with context std::windows::io::create()
+
+hello():
+    on std::io::WriteFailed:
+        unit

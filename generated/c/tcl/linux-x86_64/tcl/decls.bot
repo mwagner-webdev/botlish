@@ -23,6 +23,12 @@ extern c fn Tcl_PkgRequireEx(
     clientDataPtr: std::ffi::c::Ptr[std::ffi::c::Void]
 ) -> std::ffi::c::Ptr[std::ffi::c::Char]
 
+# C: void Tcl_Panic(const char *format, ...)
+extern c fn Tcl_Panic(
+    format: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> unit
+
 # C: void *Tcl_Alloc(size_t size)
 extern c fn Tcl_Alloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
 
@@ -85,6 +91,12 @@ extern c fn Tcl_AppendAllObjTypes(
     objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
 ) -> std::ffi::c::Int
 
+# C: void Tcl_AppendStringsToObj(Tcl_Obj *objPtr, ...)
+extern c fn Tcl_AppendStringsToObj(
+    objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    variadic
+) -> unit
+
 # C: void Tcl_AppendToObj(Tcl_Obj *objPtr, const char *bytes, Tcl_Size length)
 extern c fn Tcl_AppendToObj(
     objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
@@ -134,6 +146,13 @@ extern c fn Tcl_DbNewByteArrayObj(
     line: std::ffi::c::Int
 ) -> std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_DbNewDoubleObj(double doubleValue, const char *file, int line)
+extern c fn Tcl_DbNewDoubleObj(
+    doubleValue: std::ffi::c::Double,
+    file: std::ffi::c::Ptr[std::ffi::c::Char],
+    line: std::ffi::c::Int
+) -> std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_DbNewListObj(Tcl_Size objc, Tcl_Obj *const *objv, const char *file, int line)
 extern c fn Tcl_DbNewListObj(
     objc: std::ffi::c::Long,
@@ -163,6 +182,20 @@ extern c fn Tcl_DuplicateObj(
 
 # C: void TclFreeObj(Tcl_Obj *objPtr)
 extern c fn TclFreeObj(objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]) -> unit
+
+# C: int Tcl_GetDouble(Tcl_Interp *interp, const char *src, double *doublePtr)
+extern c fn Tcl_GetDouble(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    src: std::ffi::c::Ptr[std::ffi::c::Char],
+    doublePtr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
+# C: int Tcl_GetDoubleFromObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *doublePtr)
+extern c fn Tcl_GetDoubleFromObj(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    doublePtr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
 
 # C: int Tcl_GetInt(Tcl_Interp *interp, const char *src, int *intPtr)
 extern c fn Tcl_GetInt(
@@ -252,6 +285,11 @@ extern c fn Tcl_NewByteArrayObj(
     numBytes: std::ffi::c::Long
 ) -> std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
 
+# C: Tcl_Obj *Tcl_NewDoubleObj(double doubleValue)
+extern c fn Tcl_NewDoubleObj(
+    doubleValue: std::ffi::c::Double
+) -> std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
+
 # C: Tcl_Obj *Tcl_NewListObj(Tcl_Size objc, Tcl_Obj *const objv[])
 extern c fn Tcl_NewListObj(
     objc: std::ffi::c::Long,
@@ -278,6 +316,12 @@ extern c fn Tcl_SetByteArrayObj(
     objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
     bytes: std::ffi::c::Ptr[std::ffi::c::UChar],
     numBytes: std::ffi::c::Long
+) -> unit
+
+# C: void Tcl_SetDoubleObj(Tcl_Obj *objPtr, double doubleValue)
+extern c fn Tcl_SetDoubleObj(
+    objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    doubleValue: std::ffi::c::Double
 ) -> unit
 
 # C: void Tcl_SetListObj(Tcl_Obj *objPtr, Tcl_Size objc, Tcl_Obj *const objv[])
@@ -307,6 +351,12 @@ extern c fn Tcl_AllowExceptions(interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp
 extern c fn Tcl_AppendElement(
     interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
     element: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> unit
+
+# C: void Tcl_AppendResult(Tcl_Interp *interp, ...)
+extern c fn Tcl_AppendResult(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    variadic
 ) -> unit
 
 # C: Tcl_AsyncHandler Tcl_AsyncCreate(Tcl_AsyncProc *proc, void *clientData)
@@ -654,6 +704,20 @@ extern c fn Tcl_ExprBooleanObj(
     ptr: std::ffi::c::Ptr[std::ffi::c::Int]
 ) -> std::ffi::c::Int
 
+# C: int Tcl_ExprDouble(Tcl_Interp *interp, const char *expr, double *ptr)
+extern c fn Tcl_ExprDouble(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    expr: std::ffi::c::Ptr[std::ffi::c::Char],
+    ptr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
+# C: int Tcl_ExprDoubleObj(Tcl_Interp *interp, Tcl_Obj *objPtr, double *ptr)
+extern c fn Tcl_ExprDoubleObj(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    ptr: std::ffi::c::Ptr[std::ffi::c::Double]
+) -> std::ffi::c::Int
+
 # C: int Tcl_ExprLong(Tcl_Interp *interp, const char *expr, long *ptr)
 extern c fn Tcl_ExprLong(
     interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
@@ -973,6 +1037,13 @@ extern c fn Tcl_OpenTcpServer(
 # C: void Tcl_Preserve(void *data)
 extern c fn Tcl_Preserve(data: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
 
+# C: void Tcl_PrintDouble(Tcl_Interp *interp, double value, char *dst)
+extern c fn Tcl_PrintDouble(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    value: std::ffi::c::Double,
+    dst: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> unit
+
 # C: int Tcl_PutEnv(const char *assignment)
 extern c fn Tcl_PutEnv(assignment: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 
@@ -1106,6 +1177,12 @@ extern c fn Tcl_SetCommandInfo(
 # C: void Tcl_SetErrno(int err)
 extern c fn Tcl_SetErrno(err: std::ffi::c::Int) -> unit
 
+# C: void Tcl_SetErrorCode(Tcl_Interp *interp, ...)
+extern c fn Tcl_SetErrorCode(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    variadic
+) -> unit
+
 # C: void Tcl_SetMaxBlockTime(const Tcl_Time *timePtr)
 extern c fn Tcl_SetMaxBlockTime(timePtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Time]) -> unit
 
@@ -1238,6 +1315,12 @@ extern c fn Tcl_UpVar2(
     part2: std::ffi::c::Ptr[std::ffi::c::Char],
     localName: std::ffi::c::Ptr[std::ffi::c::Char],
     flags: std::ffi::c::Int
+) -> std::ffi::c::Int
+
+# C: int Tcl_VarEval(Tcl_Interp *interp, ...)
+extern c fn Tcl_VarEval(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    variadic
 ) -> std::ffi::c::Int
 
 # C: void *Tcl_VarTraceInfo2(Tcl_Interp *interp, const char *part1, const char *part2, int flags, Tcl_VarTraceProc *procPtr, void *prevClientData)
@@ -2888,6 +2971,13 @@ extern c fn Tcl_GetChannelError(
     msg: std::ffi::c::Ptr[std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]]
 ) -> unit
 
+# C: int Tcl_InitBignumFromDouble(Tcl_Interp *interp, double initval, void *toInit)
+extern c fn Tcl_InitBignumFromDouble(
+    interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
+    initval: std::ffi::c::Double,
+    toInit: std::ffi::c::Ptr[std::ffi::c::Void]
+) -> std::ffi::c::Int
+
 # C: Tcl_Obj *Tcl_GetNamespaceUnknownHandler(Tcl_Interp *interp, Tcl_Namespace *nsPtr)
 extern c fn Tcl_GetNamespaceUnknownHandler(
     interp: std::ffi::c::Ptr[tcl::ctypes::Tcl_Interp],
@@ -2961,6 +3051,19 @@ extern c fn Tcl_AppendFormatToObj(
     objc: std::ffi::c::Long,
     objv: std::ffi::c::Ptr[std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]]
 ) -> std::ffi::c::Int
+
+# C: Tcl_Obj *Tcl_ObjPrintf(const char *format, ...)
+extern c fn Tcl_ObjPrintf(
+    format: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj]
+
+# C: void Tcl_AppendPrintfToObj(Tcl_Obj *objPtr, const char *format, ...)
+extern c fn Tcl_AppendPrintfToObj(
+    objPtr: std::ffi::c::Ptr[tcl::ctypes::Tcl_Obj],
+    format: std::ffi::c::Ptr[std::ffi::c::Char],
+    variadic
+) -> unit
 
 # C: int Tcl_CancelEval(Tcl_Interp *interp, Tcl_Obj *resultObjPtr, void *clientData, int flags)
 extern c fn Tcl_CancelEval(

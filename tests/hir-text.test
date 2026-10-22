@@ -1,0 +1,200 @@
+# hir-text.test -- HIR text (hir::format, hir::parse) of whole programs:
+# what a program built from source carries into its text and reads back.
+#
+# A program that loads modules has a section per module (a "module
+# NAMESPACE SCOPE binds ..." line, the module's statements one level below
+# it, dependencies first, then the program's own); a String constant holding
+# a control character is one escaped word, so every line stays a line; a
+# context trait's clone may have no parameter; and the coroutine protocols,
+# which the text does not print, are inferred again when it is read. Each
+# test builds a program, formats it, reads the text back and formats again
+# (the same text), and checks that the read HIR has the built one's
+# structure and runs to the same outcome.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+proc htHir {text} {
+    return [surface::compile $text t.bot -warnings off]
+}
+
+# {TEXT READ}: HIR's text and the HIR read back from it; fails unless the
+# read HIR formats to the same text.
+proc htRoundTrip {hir} {
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    set again [hir::format $read]
+    if {$again ne $text} {
+        error "the read HIR formats to another text"
+    }
+    return [list $text $read]
+}
+
+# The outcome of HIR and of its read-back HIR on BACKENDS, as
+# {BACKEND SAME VALUE ...}: SAME is 1 when both run to the same outcome.
+proc htOutcomes {hir read backends} {
+    set out {}
+    foreach backend $backends {
+        set built [lrange [outcomeUnderHir $backend $hir] 0 1]
+        set again [lrange [outcomeUnderHir $backend $read] 0 1]
+        lappend out $backend [expr {$built eq $again}] [lindex $built 1]
+    }
+    return $out
+}
+
+set ::htAbi "import std::abi\nr = std::abi::u8(5)\nr.value + 1\n"
+
+set ::htBinary [string cat \
+    "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::byte\n" \
+    "layout M:\n    size 2\n    align 1\n    field a: std::binary::U8 at 0\n    field b: std::binary::U8 at 1\n" \
+    "fn b(n: int) -> std::byte::Byte:\n    if n >= 0 and n <= 255:\n        return n\n    0\n" \
+    "fn go() -> int errors LayoutLengthMismatch:\n    m = std::binary::parse(M, std::abi::bytes::from_list(\[b(7), b(9)\]))\n    m.a * 10 + m.b\n" \
+    "go():\n    on LayoutLengthMismatch:\n        -1\n"]
+
+test ht-module-sections {a program that loads a module prints the module's section -- a "module NAMESPACE SCOPE binds ..." line naming the module's own scope and bindings, its statements one level below -- before the program's own statements, unindented; read back, the module's scope is its own again (the HIR's modules and moduleScopeIds), its bindings are visible from the program, and the text formats the same} -body {
+    set hir [htHir $::htAbi]
+    lassign [htRoundTrip $hir] text read
+    set lines [split $text \n]
+    set at [lsearch -regexp $lines {^module }]
+    set s [dict get $hir modules abi]
+    list [regexp "^module abi $s binds b\[0-9\]+ std::abi::i8, " [lindex $lines $at]] \
+        [regexp {^    e[0-9]+ bind b[0-9]+ std::abi::i8 } [lindex $lines $at+1]] \
+        [regexp {^e[0-9]+ bind b[0-9]+ r } [lindex [lsearch -all -inline -regexp $lines {^e[0-9]+ }] 0]] \
+        [expr {[dict get $read modules] eq [dict get $hir modules]}] \
+        [expr {[dict keys [dict get $read moduleScopeIds]] eq [dict keys [dict get $hir moduleScopeIds]]}] \
+        [expr {[dict get $read scopes $s bindings] eq [dict get $hir scopes $s bindings]}] \
+        [expr {[dict get $read roots] eq [dict get $hir roots]}]
+} -result {1 1 1 1 1 1 1}
+
+test ht-module-sections-run {the read HIR of a program that loads a module runs to the built program's outcome on every backend} -constraints nativeBuilt -body {
+    set hir [htHir $::htAbi]
+    lassign [htRoundTrip $hir] text read
+    htOutcomes $hir $read {interp compile cranelift-generic cranelift}
+} -result {interp 1 6 compile 1 6 cranelift-generic 1 6 cranelift 1 6}
+
+test ht-module-section-order {module sections are printed in the order they run, a module before every module that imports it (binary after abi, which it imports), and the read HIR runs a binary layout program to the built one's outcome} -constraints nativeBuilt -body {
+    set hir [htHir $::htBinary]
+    lassign [htRoundTrip $hir] text read
+    set modules [lmap line [lsearch -all -inline -regexp [split $text \n] {^module }] {lindex $line 1}]
+    list [expr {[lsearch -exact $modules abi] < [lsearch -exact $modules binary]}] \
+        [expr {$modules eq [dict keys [dict get $hir modules]]}] \
+        [htOutcomes $hir $read {interp compile cranelift-generic cranelift}]
+} -result {1 1 {interp 1 79 compile 1 79 cranelift-generic 1 79 cranelift 1 79}}
+
+test ht-module-section-rules {reading holds module sections to the order a build gives them -- before the program's own statements, one per module, only in a program -- and to resolution's visibility: a module's binding is visible from the program, and still not before it is established; a module never sees the program's own bindings} -body {
+    lmap text [list \
+        "program s2 binds b2 y\nmodule m s3 binds b1 m::x\n    e1 bind b1 m::x : int\n        e2 const 1 : int\ne3 bind b2 y : int\n    e4 ref b1 m::x : int" \
+        "program s2\ne1 const 1 : int\nmodule m s3\n" \
+        "program s2\nmodule m s3\nmodule m s4\n" \
+        "ambient s0\nmodule m s3\n" \
+        "program s2\nmodule m s3 binds b1 m::x\n    e1 bind b1 m::x : int\n        e2 ref b1 m::x : int" \
+        "program s2 binds b1 x\nmodule m s3\n    e2 ref b1 x : int\ne1 bind b1 x : int\n    e3 const 1 : int"] {
+        if {[catch {hir::parse $text} read]} {
+            set read
+        } else {
+            list modules [dict get $read modules] roots [dict get $read roots]
+        }
+    }
+} -result {{modules {m s3} roots {e1 e3}} {HIR text line 3: module section m follows the program's own statements: module sections come first} {HIR text line 3: module m has two sections} {HIR text line 2: a module section belongs to a program, not to an ambient sequence} {HIR text: expression e2 refers to "m::x" (b1), which is not established until e1: forward references are not allowed} {HIR text line 3: binding b1 is not visible here}}
+
+test ht-control-characters {a String constant holding control characters (a newline, a tab, a carriage return) beside the characters Tcl quotes (a quote, a backslash, brackets, a dollar, braces) is written as one escaped word: no line of the text holds a control character, the read constant is the built one, and the read HIR runs to the same String} -body {
+    set hir [htHir "fn f() -> str:\n    \"a\\nb\\tc\\rd\\\"e\\\\f\[g\]\$h\{i\}\"\nf()\n"]
+    lassign [htRoundTrip $hir] text read
+    set consts [lmap e [dict keys [dict get $hir exprs]] {
+        if {[dict get $hir exprs $e kind] ne "const" || [lindex [dict get $hir exprs $e literal] 0] ne "str"} continue
+        set e
+    }]
+    set e [lindex $consts end]
+    list [regexp {[\x00-\x09\x0b-\x1f\x7f]} $text] \
+        [expr {[dict get $read exprs $e literal] eq [dict get $hir exprs $e literal]}] \
+        [string map {\n <nl> \t <tab> \r <cr>} [lindex [dict get $read exprs $e literal] 1]] \
+        [htOutcomes $hir $read {interp compile}]
+} -result [list 0 1 "a<nl>b<tab>c<cr>d\"e\\f\[g\]\$h\{i\}" [list interp 1 "\"a\\nb\\tc\\rd\\\"e\\\\f\[g\]\$h\{i\}\"" compile 1 "\"a\\nb\\tc\\rd\\\"e\\\\f\[g\]\$h\{i\}\""]]
+
+test ht-control-characters-native {the read HIR of a program with control characters in its String constants runs to the built program's String natively} -constraints nativeBuilt -body {
+    set hir [htHir "fn f() -> str:\n    \"line one\\nline two\\t!\"\nf()\n"]
+    lassign [htRoundTrip $hir] text read
+    htOutcomes $hir $read {cranelift-generic cranelift}
+} -result {cranelift-generic 1 {"line one\nline two\t!"} cranelift 1 {"line one\nline two\t!"}}
+
+set ::htClone {import std::io
+import std::str
+
+type Limit = Int in 0..1000
+
+context struct Limited:
+    max: Limit
+
+fn create_limited(max: Limit) -> Limited:
+    Limited {max: max}
+
+fn write_text(text: str, context c: Limited) -> unit errors std::io::WriteFailed:
+    if std::str::length(text) > c.max:
+        fail std::io::WriteFailed
+    unit
+
+fn write_error_text(text: str, context c: Limited) -> unit errors std::io::WriteFailed:
+    fail std::io::WriteFailed
+
+fn greet() -> int errors std::io::WriteFailed:
+    std::io::print_line("hi")
+    1
+
+with context create_limited(3)
+greet():
+    on std::io::WriteFailed:
+        0
+}
+
+test ht-parameterless-clone {a context trait's clone of a function with no parameter (greet, cloned for std::io::IO=Limited) is printed with an empty clone list and reads back: a clone's key is not in the text, and a clone need not have a first parameter} -body {
+    set hir [htHir $::htClone]
+    lassign [htRoundTrip $hir] text read
+    set line [lsearch -inline -regexp [split $text \n] {block s[0-9]+ \(\) .* clone \(\) contextclone \(std::io::IO=Limited\)}]
+    list [expr {$line ne ""}] [htOutcomes $hir $read {interp compile}]
+} -result {1 {interp 1 1 compile 1 1}}
+
+set ::htCoroutine {error E
+
+struct M:
+    value: int
+
+struct Ev:
+    value: int
+
+fn raise_e(m) -> int errors E:
+    fail E
+fn worker(f, resume M) -> Ev errors E:
+    m = yield Ev {value: 0}
+    x = f(m)
+    Ev {value: 1}
+fn drive(c: Coroutine{args: [M], return: Ev, errors: [E]}) -> int errors E:
+    e = c(M {value: 1})
+    e.value
+fn make(f) -> int errors E:
+    coroutine {step, first} = worker(f)
+    drive(step)
+fn top() -> int:
+    make(raise_e):
+        on E:
+            -1
+top()
+}
+
+test ht-coroutine-protocols {the coroutine protocols are inferred again when the text is read, as a build infers them (the built HIR's, without the yield effect hir::coroutines::verify adds, which the text prints), and the read HIR runs the coroutine program to the built one's outcome on the Tcl backends} -body {
+    set hir [htHir $::htCoroutine]
+    lassign [htRoundTrip $hir] text read
+    list [expr {[dict get $read coroutines] eq [dict remove [dict get $hir coroutines] mayYield next]}] \
+        [dict exists $read coroutines mayYield] \
+        [htOutcomes $hir $read {interp compile}]
+} -result {1 0 {interp 1 -1 compile 1 -1}}
+
+test ht-coroutine-protocols-native {native lowering types a resume through a structural Coroutine contract (e.value) from the coroutine protocols reading inferred again, on the read HIR as on the built one} -constraints {nativeBuilt nativeCoroutines} -body {
+    set hir [htHir $::htCoroutine]
+    lassign [htRoundTrip $hir] text read
+    htOutcomes $hir $read {cranelift-generic cranelift}
+} -result {cranelift-generic 1 -1 cranelift 1 -1}
+
+cleanupTests

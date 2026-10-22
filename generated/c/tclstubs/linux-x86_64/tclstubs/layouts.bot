@@ -63,6 +63,28 @@ layout Tcl_ObjInternalRep_ptrAndSize:
     field ptr: std::ffi::c::Ptr[std::ffi::c::Void] at 0  # void *ptr
     field size: std::ffi::c::Long at 8                   # Tcl_Size size
 
+# union Tcl_ObjInternalRep, typedef Tcl_ObjInternalRep (generic/tcl.h:717): sizeof 16, _Alignof 8
+union layout Tcl_ObjInternalRep:
+    size 16
+    align 8
+    alternative longValue: std::ffi::c::Long                        # long longValue
+    alternative doubleValue: std::ffi::c::Double                    # double doubleValue
+    alternative otherValuePtr: std::ffi::c::Ptr[std::ffi::c::Void]  # void *otherValuePtr
+    alternative wideValue: std::ffi::c::LongLong                    # Tcl_WideInt wideValue
+    alternative twoPtrValue: Tcl_ObjInternalRep_twoPtrValue         # struct {...} twoPtrValue
+    alternative ptrAndLongRep: Tcl_ObjInternalRep_ptrAndLongRep     # struct {...} ptrAndLongRep
+    alternative ptrAndSize: Tcl_ObjInternalRep_ptrAndSize           # struct {...} ptrAndSize
+
+# struct Tcl_Obj, typedef Tcl_Obj (generic/tcl.h:743): sizeof 48, _Alignof 8
+layout Tcl_Obj:
+    size 48
+    align 8
+    field refCount: std::ffi::c::Long at 0                                # Tcl_Size refCount
+    field bytes: std::ffi::c::Ptr[std::ffi::c::Char] at 8                 # char *bytes
+    field length: std::ffi::c::Long at 16                                 # Tcl_Size length
+    field typePtr: std::ffi::c::Ptr[tclstubs::ctypes::Tcl_ObjType] at 24  # const Tcl_ObjType *typePtr
+    field internalRep: Tcl_ObjInternalRep at 32                           # Tcl_ObjInternalRep internalRep
+
 # struct Tcl_Namespace, typedef Tcl_Namespace (generic/tcl.h:773): sizeof 40, _Alignof 8
 layout Tcl_Namespace:
     size 40

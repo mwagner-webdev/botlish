@@ -168,6 +168,17 @@ namespace eval core::value {
     # Every row of core/type.tcl's float family is a kind of its own here;
     # type.tcl checks that the two lists agree when it loads.
     variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum cptr Float64 DecimalRounded}
+    # The kinds whose values have no type-blind structural equality: `equal`
+    # refuses them (EQUALITY), and the compiler's equality-totality proof
+    # (hir::types::HashClass, HASHABLE-AND-KEYED-HASH.md) reads this very
+    # list, so the static answer and the operation cannot disagree. Callables
+    # and coroutine handles would need identity semantics; MutableArray and
+    # MutableVector have none (their header's identity is never a value's); a
+    # C pointer's or native view's address is never observable; a
+    # DecimalRounded value is equal to another only at its static type's
+    # precision, which a type-blind comparison does not know. native/src/
+    # runtime/ops.rs's `equal` refuses the same kinds.
+    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -482,12 +493,14 @@ proc core::value::containsBlock {v} {
 # Returns host 1/0.
 
 proc core::value::equal {a b} {
+    variable incomparable
     set ka [kind $a]
     set kb [kind $b]
     # MutableArray and MutableVector, like Block/Native, have no equality
     # (MUTABLE-ARRAY.md, MUTABLE-VECTOR.md: none was added for either; a
-    # header's identity is never a value's).
-    if {$ka in {block native mutarray coroutine mutvec cptr} || $kb in {block native mutarray coroutine mutvec cptr}} {
+    # header's identity is never a value's). The refused kinds are the
+    # `incomparable` list above.
+    if {($ka in $incomparable && $ka ne "DecimalRounded") || ($kb in $incomparable && $kb ne "DecimalRounded")} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
     }

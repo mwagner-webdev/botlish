@@ -1,0 +1,250 @@
+# Mutants of the Icy Tower vertical slice's rules (audit/icy-tower/mutate.tcl;
+# ICY-TOWER-VERTICAL-SLICE-1.md, "Mutation evidence"): each a plausible bug
+# in examples/games/icy-tower/'s pure modules -- the milestone brief's list
+# first (collision ignores the descending condition, the camera follows
+# downward, gravity's sign reversed, the platform removal threshold wrong,
+# the score decreasing, restart keeping a stale velocity), then ones the
+# rules' own decomposition suggests. Format (audit/golden/tools/mutants.txt):
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Every mutant must still apply and be killed by examples/games/icy-tower/
+# golden.bot: a failed test, or a suite that no longer compiles.
+
+@@ collision-ignores-descending a rising player lands on a platform whose top it crosses
+## examples/games/icy-tower/tower.bot
+<<<<
+    after.vy < 0.0 and before.y >= p.y and after.y <= p.y
+====
+    before.y >= p.y and after.y <= p.y
+>>>>
+
+@@ camera-follows-down the camera follows the player down as well as up
+## examples/games/icy-tower/tower.bot
+<<<<
+    Camera {bottom: std::float64::max(risen, followed), rising: rising}
+====
+    Camera {bottom: followed, rising: rising}
+>>>>
+
+@@ gravity-reversed gravity accelerates the player upward
+## examples/games/icy-tower/tower.bot
+<<<<
+    vy = player.vy - gravity * dt
+====
+    vy = player.vy + gravity * dt
+>>>>
+
+@@ removal-threshold-wrong platforms are dropped while still in view (the margin added, not subtracted)
+## examples/games/icy-tower/tower.bot
+<<<<
+    limit = bottom - keep_below
+====
+    limit = bottom + keep_below
+>>>>
+
+@@ score-decreases landing on a lower floor lowers the floor reached, and the score with it
+## examples/games/icy-tower/tower.bot
+<<<<
+    floor = if land.landed and land.platform.floor > world.floor:
+====
+    floor = if land.landed:
+>>>>
+
+@@ restart-keeps-velocity a restarted game keeps the falling player's velocity
+## examples/games/icy-tower/tower.bot
+<<<<
+            return new_world(world.rng, world.round + 1)
+====
+            fresh = new_world(world.rng, world.round + 1)
+            p = fresh.player
+            return World {
+                player: Player {x: p.x, y: p.y, vx: world.player.vx, vy: world.player.vy},
+                platforms: fresh.platforms,
+                camera: fresh.camera,
+                rng: fresh.rng,
+                floor: fresh.floor,
+                best: fresh.best,
+                time: fresh.time,
+                over: fresh.over,
+                round: fresh.round,
+            }
+>>>>
+
+@@ restart-same-tower a restart climbs the tower of the first game again (the seed, not the generator's state)
+## examples/games/icy-tower/tower.bot
+<<<<
+            return new_world(world.rng, world.round + 1)
+====
+            return new_world(7, world.round + 1)
+>>>>
+
+@@ no-dt-cap a stalled frame moves everything by its whole length
+## examples/games/icy-tower/tower.bot
+<<<<
+    h = dt.clamp(0.0, max_dt)
+====
+    h = std::float64::max(dt, 0.0)
+>>>>
+
+@@ landing-on-lowest-crossed of the platforms crossed in one frame, the lowest is landed on
+## examples/games/icy-tower/tower.bot
+<<<<
+        p = platforms.at(n - 1 - i):
+            on IndexNotFound:
+                break
+        if p.lands_on?(before, after):
+====
+        p = platforms.at(i):
+            on IndexNotFound:
+                break
+        if p.lands_on?(before, after):
+>>>>
+
+@@ touching-edges-overlap a player whose right edge only touches a platform's left edge lands
+## examples/games/icy-tower/tower.bot
+<<<<
+after.x + player_width > p.x
+====
+after.x + player_width >= p.x
+>>>>
+
+@@ bounce-ignores-run the run-up adds nothing to a bounce
+## examples/games/icy-tower/tower.bot
+<<<<
+    speed = jump_speed + jump_bonus * std::float64::abs(after.vx) / max_run
+====
+    speed = jump_speed + jump_bonus * after.vx / max_run
+>>>>
+
+@@ wall-stops-dead the left wall stops the player instead of sending it back
+## examples/games/icy-tower/tower.bot
+<<<<
+        Player {x: leftmost, y: y, vx: -vx * wall_rebound, vy: vy}
+====
+        Player {x: leftmost, y: y, vx: 0.0, vy: vy}
+>>>>
+
+@@ friction-reverses friction carries a slowing player through zero into the other direction
+## examples/games/icy-tower/tower.bot
+<<<<
+        std::float64::max(vx - friction * dt, 0.0)
+====
+        vx - friction * dt
+>>>>
+
+@@ rise-on-raw-height the tower starts rising at a raw altitude, not at the height the player is shown
+## examples/games/icy-tower/tower.bot
+<<<<
+    rising = camera.rising or best >= rise_height()
+====
+    rising = camera.rising or player.y - ground >= 600.0
+>>>>
+
+@@ game-over-without-margin the game ends as soon as the player's feet leave the view
+## examples/games/icy-tower/tower.bot
+<<<<
+        over: player.y + player_height < camera.bottom - lose_margin,
+====
+        over: player.y < camera.bottom,
+>>>>
+
+@@ best-is-current the best height follows the current height down
+## examples/games/icy-tower/tower.bot
+<<<<
+    if now > best:
+        now
+    else:
+        best
+====
+    now
+>>>>
+
+@@ unclimbable-gaps the gaps grow beyond what a standing jump clears
+## examples/games/icy-tower/tower.bot
+<<<<
+    gap = 72.0 + level * 0.14 + fraction(r1) * (44.0 + level * 0.03)
+====
+    gap = 72.0 + level * 0.14 + fraction(r1) * (124.0 + level * 0.03)
+>>>>
+
+@@ milestone-every-tenth every tenth floor spans the tower instead of every 25th
+## examples/games/icy-tower/tower.bot
+<<<<
+    floor.mod(25) == 0
+====
+    floor.mod(10) == 0
+>>>>
+
+@@ prune-drops-highest pruning may drop the highest platform, and the tower starts again from nowhere
+## examples/games/icy-tower/tower.bot
+<<<<
+        if p.y < limit and i < last:
+====
+        if p.y < limit:
+>>>>
+
+@@ generator-low-bits the generator's low bits place the platforms
+## examples/games/icy-tower/tower.bot
+<<<<
+    std::float64::from_int(state.shift_right(16)) / 65536.0
+====
+    std::float64::from_int(state.mod(65536)) / 65536.0
+>>>>
+
+@@ autopilot-ignores-fall the autopilot always aims at the platform above, even while falling
+## examples/games/icy-tower/tower.bot
+<<<<
+    target = if player.vy < 0.0:
+====
+    target = if player.vy < -100000.0:
+>>>>
+
+@@ tenths-swapped the tenths text puts the last digit first
+## examples/games/icy-tower/hud.bot
+<<<<
+    whole.append_char('.').append_char(tenth)
+====
+    "".append_char(tenth).append_char('.').concat(whole)
+>>>>
+
+@@ int-text-drops-sign a negative number is shown without its sign
+## examples/games/icy-tower/hud.bot
+<<<<
+        "".append_char('-').digits(-n, 1)
+====
+        "".digits(-n, 1)
+>>>>
+
+@@ timer-without-quantizing the timer shows the clock's Float64 tenths, cut off, not its displayed decimal
+## examples/games/icy-tower/hud.bot
+<<<<
+    shown = std::decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 1}](seconds):
+        on UnrepresentableDecimal:
+            return "unrepresentable"
+    metres_text(shown)
+====
+    tenths_text(std::float64::truncate(seconds * 10.0))
+>>>>
+
+@@ number-base-sixteen the command line reads numbers in base sixteen
+## examples/games/icy-tower/options.bot
+<<<<
+        from(i + 1, value * 10 + d)
+====
+        from(i + 1, value * 16 + d)
+>>>>
+
+@@ headless-without-frames a headless run without --frames is accepted
+## examples/games/icy-tower/options.bot
+<<<<
+    if headless and frames <= 0:
+====
+    if headless and frames < 0:
+>>>>

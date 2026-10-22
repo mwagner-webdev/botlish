@@ -84,12 +84,12 @@ function	SDL_ultoa	direct	sdl3::stdinc	direct	symbol SDL_ultoa; (std::ffi::c::UL
 function	SDL_lltoa	direct	sdl3::stdinc	direct	symbol SDL_lltoa; (std::ffi::c::LongLong, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_ulltoa	direct	sdl3::stdinc	direct	symbol SDL_ulltoa; (std::ffi::c::ULongLong, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Int) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_atoi	direct	sdl3::stdinc	direct	symbol SDL_atoi; (std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
-function	SDL_atof	unsupported		double	result: double
+function	SDL_atof	direct	sdl3::stdinc	direct	symbol SDL_atof; (std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Double
 function	SDL_strtol	direct	sdl3::stdinc	direct	symbol SDL_strtol; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Int) -> std::ffi::c::Long
 function	SDL_strtoul	direct	sdl3::stdinc	direct	symbol SDL_strtoul; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Int) -> std::ffi::c::ULong
 function	SDL_strtoll	direct	sdl3::stdinc	direct	symbol SDL_strtoll; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Int) -> std::ffi::c::LongLong
 function	SDL_strtoull	direct	sdl3::stdinc	direct	symbol SDL_strtoull; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Int) -> std::ffi::c::ULongLong
-function	SDL_strtod	unsupported		double	result: double
+function	SDL_strtod	direct	sdl3::stdinc	direct	symbol SDL_strtod; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]) -> std::ffi::c::Double
 function	SDL_strcmp	direct	sdl3::stdinc	direct	symbol SDL_strcmp; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
 function	SDL_strncmp	direct	sdl3::stdinc	direct	symbol SDL_strncmp; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong) -> std::ffi::c::Int
 function	SDL_strcasecmp	direct	sdl3::stdinc	direct	symbol SDL_strcasecmp; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Int
@@ -98,69 +98,69 @@ function	SDL_strpbrk	direct	sdl3::stdinc	direct	symbol SDL_strpbrk; (std::ffi::c
 function	SDL_StepUTF8	direct	sdl3::stdinc	direct	symbol SDL_StepUTF8; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::UInt
 function	SDL_StepBackUTF8	direct	sdl3::stdinc	direct	symbol SDL_StepBackUTF8; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]) -> std::ffi::c::UInt
 function	SDL_UCS4ToUTF8	direct	sdl3::stdinc	direct	symbol SDL_UCS4ToUTF8; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Ptr[std::ffi::c::Char]
-function	SDL_sscanf	unsupported		variadic	a variadic function (...)
+function	SDL_sscanf	direct	sdl3::stdinc	direct	symbol SDL_sscanf; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
 function	SDL_vsscanf	unsupported		va-list	parameter 3 (ap): __builtin_va_list
-function	SDL_snprintf	unsupported		variadic	a variadic function (...)
-function	SDL_swprintf	unsupported		variadic	a variadic function (...)
+function	SDL_snprintf	direct	sdl3::stdinc	direct	symbol SDL_snprintf; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
+function	SDL_swprintf	direct	sdl3::stdinc	direct	symbol SDL_swprintf; (std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Int], variadic) -> std::ffi::c::Int
 function	SDL_vsnprintf	unsupported		va-list	parameter 4 (ap): __builtin_va_list
 function	SDL_vswprintf	unsupported		va-list	parameter 4 (ap): __builtin_va_list
-function	SDL_asprintf	unsupported		variadic	a variadic function (...)
+function	SDL_asprintf	direct	sdl3::stdinc	direct	symbol SDL_asprintf; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Int
 function	SDL_vasprintf	unsupported		va-list	parameter 3 (ap): __builtin_va_list
 function	SDL_srand	direct	sdl3::stdinc	direct	symbol SDL_srand; (std::ffi::c::ULong) -> unit
 function	SDL_rand	direct	sdl3::stdinc	direct	symbol SDL_rand; (std::ffi::c::Int) -> std::ffi::c::Int
-function	SDL_randf	unsupported		float	result: float
+function	SDL_randf	direct	sdl3::stdinc	direct	symbol SDL_randf; () -> std::ffi::c::Float
 function	SDL_rand_bits	direct	sdl3::stdinc	direct	symbol SDL_rand_bits; () -> std::ffi::c::UInt
 function	SDL_rand_r	direct	sdl3::stdinc	direct	symbol SDL_rand_r; (std::ffi::c::Ptr[std::ffi::c::ULong], std::ffi::c::Int) -> std::ffi::c::Int
-function	SDL_randf_r	unsupported		float	result: float
+function	SDL_randf_r	direct	sdl3::stdinc	direct	symbol SDL_randf_r; (std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::Float
 function	SDL_rand_bits_r	direct	sdl3::stdinc	direct	symbol SDL_rand_bits_r; (std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::UInt
-function	SDL_acos	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_acosf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_asin	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_asinf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_atan	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_atanf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_atan2	unsupported		double	parameter 1 (y): double; parameter 2 (x): double; result: double
-function	SDL_atan2f	unsupported		float	parameter 1 (y): float; parameter 2 (x): float; result: float
-function	SDL_ceil	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_ceilf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_copysign	unsupported		double	parameter 1 (x): double; parameter 2 (y): double; result: double
-function	SDL_copysignf	unsupported		float	parameter 1 (x): float; parameter 2 (y): float; result: float
-function	SDL_cos	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_cosf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_exp	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_expf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_fabs	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_fabsf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_floor	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_floorf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_trunc	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_truncf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_fmod	unsupported		double	parameter 1 (x): double; parameter 2 (y): double; result: double
-function	SDL_fmodf	unsupported		float	parameter 1 (x): float; parameter 2 (y): float; result: float
-function	SDL_isinf	unsupported		double	parameter 1 (x): double
-function	SDL_isinff	unsupported		float	parameter 1 (x): float
-function	SDL_isnan	unsupported		double	parameter 1 (x): double
-function	SDL_isnanf	unsupported		float	parameter 1 (x): float
-function	SDL_log	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_logf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_log10	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_log10f	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_modf	unsupported		double	parameter 1 (x): double; parameter 2 (y): a pointer to double; result: double
-function	SDL_modff	unsupported		float	parameter 1 (x): float; parameter 2 (y): a pointer to float; result: float
-function	SDL_pow	unsupported		double	parameter 1 (x): double; parameter 2 (y): double; result: double
-function	SDL_powf	unsupported		float	parameter 1 (x): float; parameter 2 (y): float; result: float
-function	SDL_round	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_roundf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_lround	unsupported		double	parameter 1 (x): double
-function	SDL_lroundf	unsupported		float	parameter 1 (x): float
-function	SDL_scalbn	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_scalbnf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_sin	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_sinf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_sqrt	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_sqrtf	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_tan	unsupported		double	parameter 1 (x): double; result: double
-function	SDL_tanf	unsupported		float	parameter 1 (x): float; result: float
+function	SDL_acos	direct	sdl3::stdinc	direct	symbol SDL_acos; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_acosf	direct	sdl3::stdinc	direct	symbol SDL_acosf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_asin	direct	sdl3::stdinc	direct	symbol SDL_asin; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_asinf	direct	sdl3::stdinc	direct	symbol SDL_asinf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_atan	direct	sdl3::stdinc	direct	symbol SDL_atan; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_atanf	direct	sdl3::stdinc	direct	symbol SDL_atanf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_atan2	direct	sdl3::stdinc	direct	symbol SDL_atan2; (std::ffi::c::Double, std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_atan2f	direct	sdl3::stdinc	direct	symbol SDL_atan2f; (std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_ceil	direct	sdl3::stdinc	direct	symbol SDL_ceil; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_ceilf	direct	sdl3::stdinc	direct	symbol SDL_ceilf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_copysign	direct	sdl3::stdinc	direct	symbol SDL_copysign; (std::ffi::c::Double, std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_copysignf	direct	sdl3::stdinc	direct	symbol SDL_copysignf; (std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_cos	direct	sdl3::stdinc	direct	symbol SDL_cos; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_cosf	direct	sdl3::stdinc	direct	symbol SDL_cosf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_exp	direct	sdl3::stdinc	direct	symbol SDL_exp; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_expf	direct	sdl3::stdinc	direct	symbol SDL_expf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_fabs	direct	sdl3::stdinc	direct	symbol SDL_fabs; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_fabsf	direct	sdl3::stdinc	direct	symbol SDL_fabsf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_floor	direct	sdl3::stdinc	direct	symbol SDL_floor; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_floorf	direct	sdl3::stdinc	direct	symbol SDL_floorf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_trunc	direct	sdl3::stdinc	direct	symbol SDL_trunc; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_truncf	direct	sdl3::stdinc	direct	symbol SDL_truncf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_fmod	direct	sdl3::stdinc	direct	symbol SDL_fmod; (std::ffi::c::Double, std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_fmodf	direct	sdl3::stdinc	direct	symbol SDL_fmodf; (std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_isinf	direct	sdl3::stdinc	direct	symbol SDL_isinf; (std::ffi::c::Double) -> std::ffi::c::Int
+function	SDL_isinff	direct	sdl3::stdinc	direct	symbol SDL_isinff; (std::ffi::c::Float) -> std::ffi::c::Int
+function	SDL_isnan	direct	sdl3::stdinc	direct	symbol SDL_isnan; (std::ffi::c::Double) -> std::ffi::c::Int
+function	SDL_isnanf	direct	sdl3::stdinc	direct	symbol SDL_isnanf; (std::ffi::c::Float) -> std::ffi::c::Int
+function	SDL_log	direct	sdl3::stdinc	direct	symbol SDL_log; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_logf	direct	sdl3::stdinc	direct	symbol SDL_logf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_log10	direct	sdl3::stdinc	direct	symbol SDL_log10; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_log10f	direct	sdl3::stdinc	direct	symbol SDL_log10f; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_modf	direct	sdl3::stdinc	direct	symbol SDL_modf; (std::ffi::c::Double, std::ffi::c::Ptr[std::ffi::c::Double]) -> std::ffi::c::Double
+function	SDL_modff	direct	sdl3::stdinc	direct	symbol SDL_modff; (std::ffi::c::Float, std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Float
+function	SDL_pow	direct	sdl3::stdinc	direct	symbol SDL_pow; (std::ffi::c::Double, std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_powf	direct	sdl3::stdinc	direct	symbol SDL_powf; (std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_round	direct	sdl3::stdinc	direct	symbol SDL_round; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_roundf	direct	sdl3::stdinc	direct	symbol SDL_roundf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_lround	direct	sdl3::stdinc	direct	symbol SDL_lround; (std::ffi::c::Double) -> std::ffi::c::Long
+function	SDL_lroundf	direct	sdl3::stdinc	direct	symbol SDL_lroundf; (std::ffi::c::Float) -> std::ffi::c::Long
+function	SDL_scalbn	direct	sdl3::stdinc	direct	symbol SDL_scalbn; (std::ffi::c::Double, std::ffi::c::Int) -> std::ffi::c::Double
+function	SDL_scalbnf	direct	sdl3::stdinc	direct	symbol SDL_scalbnf; (std::ffi::c::Float, std::ffi::c::Int) -> std::ffi::c::Float
+function	SDL_sin	direct	sdl3::stdinc	direct	symbol SDL_sin; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_sinf	direct	sdl3::stdinc	direct	symbol SDL_sinf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_sqrt	direct	sdl3::stdinc	direct	symbol SDL_sqrt; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_sqrtf	direct	sdl3::stdinc	direct	symbol SDL_sqrtf; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_tan	direct	sdl3::stdinc	direct	symbol SDL_tan; (std::ffi::c::Double) -> std::ffi::c::Double
+function	SDL_tanf	direct	sdl3::stdinc	direct	symbol SDL_tanf; (std::ffi::c::Float) -> std::ffi::c::Float
 function	SDL_iconv_open	direct	sdl3::stdinc	direct	symbol SDL_iconv_open; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Ptr[SDL_iconv_data_t]
 function	SDL_iconv_close	direct	sdl3::stdinc	direct	symbol SDL_iconv_close; (std::ffi::c::Ptr[SDL_iconv_data_t]) -> std::ffi::c::Int
 function	SDL_iconv	direct	sdl3::stdinc	direct	symbol SDL_iconv; (std::ffi::c::Ptr[SDL_iconv_data_t], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Ptr[std::ffi::c::ULong], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]], std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::ULong
@@ -202,8 +202,8 @@ function	SDL_AddAtomicU32	direct	sdl3::atomic	direct	symbol SDL_AddAtomicU32; (s
 function	SDL_CompareAndSwapAtomicPointer	direct	sdl3::atomic	direct	symbol SDL_CompareAndSwapAtomicPointer; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]], std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
 function	SDL_SetAtomicPointer	direct	sdl3::atomic	direct	symbol SDL_SetAtomicPointer; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[std::ffi::c::Void]
 function	SDL_GetAtomicPointer	direct	sdl3::atomic	direct	symbol SDL_GetAtomicPointer; (std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]]) -> std::ffi::c::Ptr[std::ffi::c::Void]
-function	SDL_SwapFloat	unsupported		float	parameter 1 (x): float; result: float
-function	SDL_SetError	unsupported		variadic	a variadic function (...)
+function	SDL_SwapFloat	thunk	sdl3::thunks::endian	thunk (inline)	symbol botlish_sdl3_SDL_SwapFloat; (std::ffi::c::Float) -> std::ffi::c::Float
+function	SDL_SetError	direct	sdl3::error_h	direct	symbol SDL_SetError; (std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Bool
 function	SDL_SetErrorV	unsupported		va-list	parameter 2 (ap): __builtin_va_list
 function	SDL_OutOfMemory	direct	sdl3::error_h	direct	symbol SDL_OutOfMemory; () -> std::ffi::c::Bool
 function	SDL_GetError	direct	sdl3::error_h	direct	symbol SDL_GetError; () -> std::ffi::c::Ptr[std::ffi::c::Char]
@@ -217,14 +217,14 @@ function	SDL_SetPointerPropertyWithCleanup	direct	sdl3::properties	direct	symbol
 function	SDL_SetPointerProperty	direct	sdl3::properties	direct	symbol SDL_SetPointerProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
 function	SDL_SetStringProperty	direct	sdl3::properties	direct	symbol SDL_SetStringProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Bool
 function	SDL_SetNumberProperty	direct	sdl3::properties	direct	symbol SDL_SetNumberProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> std::ffi::c::Bool
-function	SDL_SetFloatProperty	unsupported		float	parameter 3 (value): float
+function	SDL_SetFloatProperty	direct	sdl3::properties	direct	symbol SDL_SetFloatProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_SetBooleanProperty	direct	sdl3::properties	direct	symbol SDL_SetBooleanProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_HasProperty	direct	sdl3::properties	direct	symbol SDL_HasProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Bool
 function	SDL_GetPropertyType	direct	sdl3::properties	direct	symbol SDL_GetPropertyType; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::UInt
 function	SDL_GetPointerProperty	direct	sdl3::properties	direct	symbol SDL_GetPointerProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[std::ffi::c::Void]
 function	SDL_GetStringProperty	direct	sdl3::properties	direct	symbol SDL_GetStringProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_GetNumberProperty	direct	sdl3::properties	direct	symbol SDL_GetNumberProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Long) -> std::ffi::c::Long
-function	SDL_GetFloatProperty	unsupported		float	parameter 3 (default_value): float; result: float
+function	SDL_GetFloatProperty	direct	sdl3::properties	direct	symbol SDL_GetFloatProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Float) -> std::ffi::c::Float
 function	SDL_GetBooleanProperty	direct	sdl3::properties	direct	symbol SDL_GetBooleanProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_ClearProperty	direct	sdl3::properties	direct	symbol SDL_ClearProperty; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Bool
 function	SDL_EnumerateProperties	direct	sdl3::properties	direct	symbol SDL_EnumerateProperties; (std::ffi::c::UInt, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
@@ -282,7 +282,7 @@ function	SDL_SeekIO	direct	sdl3::iostream	direct	symbol SDL_SeekIO; (std::ffi::c
 function	SDL_TellIO	direct	sdl3::iostream	direct	symbol SDL_TellIO; (std::ffi::c::Ptr[SDL_IOStream]) -> std::ffi::c::Long
 function	SDL_ReadIO	direct	sdl3::iostream	direct	symbol SDL_ReadIO; (std::ffi::c::Ptr[SDL_IOStream], std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong) -> std::ffi::c::ULong
 function	SDL_WriteIO	direct	sdl3::iostream	direct	symbol SDL_WriteIO; (std::ffi::c::Ptr[SDL_IOStream], std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong) -> std::ffi::c::ULong
-function	SDL_IOprintf	unsupported		variadic	a variadic function (...)
+function	SDL_IOprintf	direct	sdl3::iostream	direct	symbol SDL_IOprintf; (std::ffi::c::Ptr[SDL_IOStream], std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::ULong
 function	SDL_IOvprintf	unsupported		va-list	parameter 3 (ap): __builtin_va_list
 function	SDL_FlushIO	direct	sdl3::iostream	direct	symbol SDL_FlushIO; (std::ffi::c::Ptr[SDL_IOStream]) -> std::ffi::c::Bool
 function	SDL_LoadFile_IO	direct	sdl3::iostream	direct	symbol SDL_LoadFile_IO; (std::ffi::c::Ptr[SDL_IOStream], std::ffi::c::Ptr[std::ffi::c::ULong], std::ffi::c::Bool) -> std::ffi::c::Ptr[std::ffi::c::Void]
@@ -331,8 +331,8 @@ function	SDL_IsAudioDevicePlayback	direct	sdl3::audio	direct	symbol SDL_IsAudioD
 function	SDL_PauseAudioDevice	direct	sdl3::audio	direct	symbol SDL_PauseAudioDevice; (std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_ResumeAudioDevice	direct	sdl3::audio	direct	symbol SDL_ResumeAudioDevice; (std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_AudioDevicePaused	direct	sdl3::audio	direct	symbol SDL_AudioDevicePaused; (std::ffi::c::UInt) -> std::ffi::c::Bool
-function	SDL_GetAudioDeviceGain	unsupported		float	result: float
-function	SDL_SetAudioDeviceGain	unsupported		float	parameter 2 (gain): float
+function	SDL_GetAudioDeviceGain	direct	sdl3::audio	direct	symbol SDL_GetAudioDeviceGain; (std::ffi::c::UInt) -> std::ffi::c::Float
+function	SDL_SetAudioDeviceGain	direct	sdl3::audio	direct	symbol SDL_SetAudioDeviceGain; (std::ffi::c::UInt, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_CloseAudioDevice	direct	sdl3::audio	direct	symbol SDL_CloseAudioDevice; (std::ffi::c::UInt) -> unit
 function	SDL_BindAudioStreams	direct	sdl3::audio	direct	symbol SDL_BindAudioStreams; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Ptr[SDL_AudioStream]], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_BindAudioStream	direct	sdl3::audio	direct	symbol SDL_BindAudioStream; (std::ffi::c::UInt, std::ffi::c::Ptr[SDL_AudioStream]) -> std::ffi::c::Bool
@@ -343,10 +343,10 @@ function	SDL_CreateAudioStream	direct	sdl3::audio	direct	symbol SDL_CreateAudioS
 function	SDL_GetAudioStreamProperties	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamProperties; (std::ffi::c::Ptr[SDL_AudioStream]) -> std::ffi::c::UInt
 function	SDL_GetAudioStreamFormat	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamFormat; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[SDL_AudioSpec]) -> std::ffi::c::Bool
 function	SDL_SetAudioStreamFormat	direct	sdl3::audio	direct	symbol SDL_SetAudioStreamFormat; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[SDL_AudioSpec]) -> std::ffi::c::Bool
-function	SDL_GetAudioStreamFrequencyRatio	unsupported		float	result: float
-function	SDL_SetAudioStreamFrequencyRatio	unsupported		float	parameter 2 (ratio): float
-function	SDL_GetAudioStreamGain	unsupported		float	result: float
-function	SDL_SetAudioStreamGain	unsupported		float	parameter 2 (gain): float
+function	SDL_GetAudioStreamFrequencyRatio	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamFrequencyRatio; (std::ffi::c::Ptr[SDL_AudioStream]) -> std::ffi::c::Float
+function	SDL_SetAudioStreamFrequencyRatio	direct	sdl3::audio	direct	symbol SDL_SetAudioStreamFrequencyRatio; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetAudioStreamGain	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamGain; (std::ffi::c::Ptr[SDL_AudioStream]) -> std::ffi::c::Float
+function	SDL_SetAudioStreamGain	direct	sdl3::audio	direct	symbol SDL_SetAudioStreamGain; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_GetAudioStreamInputChannelMap	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamInputChannelMap; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Ptr[std::ffi::c::Int]
 function	SDL_GetAudioStreamOutputChannelMap	direct	sdl3::audio	direct	symbol SDL_GetAudioStreamOutputChannelMap; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Ptr[std::ffi::c::Int]
 function	SDL_SetAudioStreamInputChannelMap	direct	sdl3::audio	direct	symbol SDL_SetAudioStreamInputChannelMap; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Int) -> std::ffi::c::Bool
@@ -368,10 +368,10 @@ function	SDL_SetAudioStreamGetCallback	direct	sdl3::audio	direct	symbol SDL_SetA
 function	SDL_SetAudioStreamPutCallback	direct	sdl3::audio	direct	symbol SDL_SetAudioStreamPutCallback; (std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Int, std::ffi::c::Int], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
 function	SDL_DestroyAudioStream	direct	sdl3::audio	direct	symbol SDL_DestroyAudioStream; (std::ffi::c::Ptr[SDL_AudioStream]) -> unit
 function	SDL_OpenAudioDeviceStream	direct	sdl3::audio	direct	symbol SDL_OpenAudioDeviceStream; (std::ffi::c::UInt, std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Int, std::ffi::c::Int], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Ptr[SDL_AudioStream]
-function	SDL_SetAudioPostmixCallback	unsupported		unsupported-callback-signature	parameter 2 (callback): callback argument 3: a pointer to float (float)
+function	SDL_SetAudioPostmixCallback	direct	sdl3::audio	direct	symbol SDL_SetAudioPostmixCallback; (std::ffi::c::UInt, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
 function	SDL_LoadWAV_IO	direct	sdl3::audio	direct	symbol SDL_LoadWAV_IO; (std::ffi::c::Ptr[SDL_IOStream], std::ffi::c::Bool, std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UChar]], std::ffi::c::Ptr[std::ffi::c::UInt]) -> std::ffi::c::Bool
 function	SDL_LoadWAV	direct	sdl3::audio	direct	symbol SDL_LoadWAV; (std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UChar]], std::ffi::c::Ptr[std::ffi::c::UInt]) -> std::ffi::c::Bool
-function	SDL_MixAudio	unsupported		float	parameter 5 (volume): float
+function	SDL_MixAudio	direct	sdl3::audio	direct	symbol SDL_MixAudio; (std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_ConvertAudioSamples	direct	sdl3::audio	direct	symbol SDL_ConvertAudioSamples; (std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Int, std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UChar]], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_GetAudioFormatName	direct	sdl3::audio	direct	symbol SDL_GetAudioFormatName; (std::ffi::c::UInt) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_GetSilenceValueForFormat	direct	sdl3::audio	direct	symbol SDL_GetSilenceValueForFormat; (std::ffi::c::UInt) -> std::ffi::c::Int
@@ -400,13 +400,13 @@ function	SDL_GetRectEnclosingPoints	direct	sdl3::rect	direct	symbol SDL_GetRectE
 function	SDL_GetRectAndLineIntersection	direct	sdl3::rect	direct	symbol SDL_GetRectAndLineIntersection; (std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_PointInRectFloat	thunk	sdl3::thunks::rect	thunk (inline)	symbol botlish_sdl3_SDL_PointInRectFloat; (std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_RectEmptyFloat	thunk	sdl3::thunks::rect	thunk (inline)	symbol botlish_sdl3_SDL_RectEmptyFloat; (std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
-function	SDL_RectsEqualEpsilon	unsupported		float	parameter 3 (epsilon): float
+function	SDL_RectsEqualEpsilon	thunk	sdl3::thunks::rect	thunk (inline)	symbol botlish_sdl3_SDL_RectsEqualEpsilon; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_RectsEqualFloat	thunk	sdl3::thunks::rect	thunk (inline)	symbol botlish_sdl3_SDL_RectsEqualFloat; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_HasRectIntersectionFloat	direct	sdl3::rect	direct	symbol SDL_HasRectIntersectionFloat; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_GetRectIntersectionFloat	direct	sdl3::rect	direct	symbol SDL_GetRectIntersectionFloat; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_GetRectUnionFloat	direct	sdl3::rect	direct	symbol SDL_GetRectUnionFloat; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_GetRectEnclosingPointsFloat	direct	sdl3::rect	direct	symbol SDL_GetRectEnclosingPointsFloat; (std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Int, std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
-function	SDL_GetRectAndLineIntersectionFloat	unsupported		float	parameter 2 (X1): a pointer to float; parameter 3 (Y1): a pointer to float; parameter 4 (X2): a pointer to float; parameter 5 (Y2): a pointer to float
+function	SDL_GetRectAndLineIntersectionFloat	direct	sdl3::rect	direct	symbol SDL_GetRectAndLineIntersectionFloat; (std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_CreateSurface	direct	sdl3::surface	direct	symbol SDL_CreateSurface; (std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UInt) -> std::ffi::c::Ptr[SDL_Surface]
 function	SDL_CreateSurfaceFrom	direct	sdl3::surface	direct	symbol SDL_CreateSurfaceFrom; (std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int) -> std::ffi::c::Ptr[SDL_Surface]
 function	SDL_DestroySurface	direct	sdl3::surface	direct	symbol SDL_DestroySurface; (std::ffi::c::Ptr[SDL_Surface]) -> unit
@@ -446,7 +446,7 @@ function	SDL_GetSurfaceBlendMode	direct	sdl3::surface	direct	symbol SDL_GetSurfa
 function	SDL_SetSurfaceClipRect	direct	sdl3::surface	direct	symbol SDL_SetSurfaceClipRect; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_GetSurfaceClipRect	direct	sdl3::surface	direct	symbol SDL_GetSurfaceClipRect; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_FlipSurface	direct	sdl3::surface	direct	symbol SDL_FlipSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::UInt) -> std::ffi::c::Bool
-function	SDL_RotateSurface	unsupported		float	parameter 2 (angle): float
+function	SDL_RotateSurface	direct	sdl3::surface	direct	symbol SDL_RotateSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Float) -> std::ffi::c::Ptr[SDL_Surface]
 function	SDL_DuplicateSurface	direct	sdl3::surface	direct	symbol SDL_DuplicateSurface; (std::ffi::c::Ptr[SDL_Surface]) -> std::ffi::c::Ptr[SDL_Surface]
 function	SDL_ScaleSurface	direct	sdl3::surface	direct	symbol SDL_ScaleSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Ptr[SDL_Surface]
 function	SDL_ConvertSurface	direct	sdl3::surface	direct	symbol SDL_ConvertSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::UInt) -> std::ffi::c::Ptr[SDL_Surface]
@@ -455,7 +455,7 @@ function	SDL_ConvertPixels	direct	sdl3::surface	direct	symbol SDL_ConvertPixels;
 function	SDL_ConvertPixelsAndColorspace	direct	sdl3::surface	direct	symbol SDL_ConvertPixelsAndColorspace; (std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_PremultiplyAlpha	direct	sdl3::surface	direct	symbol SDL_PremultiplyAlpha; (std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_PremultiplySurfaceAlpha	direct	sdl3::surface	direct	symbol SDL_PremultiplySurfaceAlpha; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Bool) -> std::ffi::c::Bool
-function	SDL_ClearSurface	unsupported		float	parameter 2 (r): float; parameter 3 (g): float; parameter 4 (b): float; parameter 5 (a): float
+function	SDL_ClearSurface	direct	sdl3::surface	direct	symbol SDL_ClearSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_FillSurfaceRect	direct	sdl3::surface	direct	symbol SDL_FillSurfaceRect; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_FillSurfaceRects	direct	sdl3::surface	direct	symbol SDL_FillSurfaceRects; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Int, std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_BlitSurface	direct	sdl3::surface	direct	symbol SDL_BlitSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
@@ -464,14 +464,14 @@ function	SDL_BlitSurfaceScaled	direct	sdl3::surface	direct	symbol SDL_BlitSurfac
 function	SDL_BlitSurfaceUncheckedScaled	direct	sdl3::surface	direct	symbol SDL_BlitSurfaceUncheckedScaled; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_StretchSurface	direct	sdl3::surface	direct	symbol SDL_StretchSurface; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_BlitSurfaceTiled	direct	sdl3::surface	direct	symbol SDL_BlitSurfaceTiled; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
-function	SDL_BlitSurfaceTiledWithScale	unsupported		float	parameter 3 (scale): float
-function	SDL_BlitSurface9Grid	unsupported		float	parameter 7 (scale): float
+function	SDL_BlitSurfaceTiledWithScale	direct	sdl3::surface	direct	symbol SDL_BlitSurfaceTiledWithScale; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Float, std::ffi::c::Int, std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
+function	SDL_BlitSurface9Grid	direct	sdl3::surface	direct	symbol SDL_BlitSurface9Grid; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Float, std::ffi::c::Int, std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_MapSurfaceRGB	direct	sdl3::surface	direct	symbol SDL_MapSurfaceRGB; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::UInt
 function	SDL_MapSurfaceRGBA	direct	sdl3::surface	direct	symbol SDL_MapSurfaceRGBA; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::UInt
 function	SDL_ReadSurfacePixel	direct	sdl3::surface	direct	symbol SDL_ReadSurfacePixel; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar]) -> std::ffi::c::Bool
-function	SDL_ReadSurfacePixelFloat	unsupported		float	parameter 4 (r): a pointer to float; parameter 5 (g): a pointer to float; parameter 6 (b): a pointer to float; parameter 7 (a): a pointer to float
+function	SDL_ReadSurfacePixelFloat	direct	sdl3::surface	direct	symbol SDL_ReadSurfacePixelFloat; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_WriteSurfacePixel	direct	sdl3::surface	direct	symbol SDL_WriteSurfacePixel; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::Bool
-function	SDL_WriteSurfacePixelFloat	unsupported		float	parameter 4 (r): float; parameter 5 (g): float; parameter 6 (b): float; parameter 7 (a): float
+function	SDL_WriteSurfacePixelFloat	direct	sdl3::surface	direct	symbol SDL_WriteSurfacePixelFloat; (std::ffi::c::Ptr[SDL_Surface], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_GetNumCameraDrivers	direct	sdl3::camera	direct	symbol SDL_GetNumCameraDrivers; () -> std::ffi::c::Int
 function	SDL_GetCameraDriver	direct	sdl3::camera	direct	symbol SDL_GetCameraDriver; (std::ffi::c::Int) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_GetCurrentCameraDriver	direct	sdl3::camera	direct	symbol SDL_GetCurrentCameraDriver; () -> std::ffi::c::Ptr[std::ffi::c::Char]
@@ -529,16 +529,16 @@ function	SDL_GetDisplayBounds	direct	sdl3::video	direct	symbol SDL_GetDisplayBou
 function	SDL_GetDisplayUsableBounds	direct	sdl3::video	direct	symbol SDL_GetDisplayUsableBounds; (std::ffi::c::UInt, std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_GetNaturalDisplayOrientation	direct	sdl3::video	direct	symbol SDL_GetNaturalDisplayOrientation; (std::ffi::c::UInt) -> std::ffi::c::UInt
 function	SDL_GetCurrentDisplayOrientation	direct	sdl3::video	direct	symbol SDL_GetCurrentDisplayOrientation; (std::ffi::c::UInt) -> std::ffi::c::UInt
-function	SDL_GetDisplayContentScale	unsupported		float	result: float
+function	SDL_GetDisplayContentScale	direct	sdl3::video	direct	symbol SDL_GetDisplayContentScale; (std::ffi::c::UInt) -> std::ffi::c::Float
 function	SDL_GetFullscreenDisplayModes	direct	sdl3::video	direct	symbol SDL_GetFullscreenDisplayModes; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Ptr[std::ffi::c::Ptr[SDL_DisplayMode]]
-function	SDL_GetClosestFullscreenDisplayMode	unsupported		float	parameter 4 (refresh_rate): float
+function	SDL_GetClosestFullscreenDisplayMode	direct	sdl3::video	direct	symbol SDL_GetClosestFullscreenDisplayMode; (std::ffi::c::UInt, std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Float, std::ffi::c::Bool, std::ffi::c::Ptr[SDL_DisplayMode]) -> std::ffi::c::Bool
 function	SDL_GetDesktopDisplayMode	direct	sdl3::video	direct	symbol SDL_GetDesktopDisplayMode; (std::ffi::c::UInt) -> std::ffi::c::Ptr[SDL_DisplayMode]
 function	SDL_GetCurrentDisplayMode	direct	sdl3::video	direct	symbol SDL_GetCurrentDisplayMode; (std::ffi::c::UInt) -> std::ffi::c::Ptr[SDL_DisplayMode]
 function	SDL_GetDisplayForPoint	direct	sdl3::video	direct	symbol SDL_GetDisplayForPoint; (std::ffi::c::Ptr[SDL_Point]) -> std::ffi::c::UInt
 function	SDL_GetDisplayForRect	direct	sdl3::video	direct	symbol SDL_GetDisplayForRect; (std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::UInt
 function	SDL_GetDisplayForWindow	direct	sdl3::video	direct	symbol SDL_GetDisplayForWindow; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::UInt
-function	SDL_GetWindowPixelDensity	unsupported		float	result: float
-function	SDL_GetWindowDisplayScale	unsupported		float	result: float
+function	SDL_GetWindowPixelDensity	direct	sdl3::video	direct	symbol SDL_GetWindowPixelDensity; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Float
+function	SDL_GetWindowDisplayScale	direct	sdl3::video	direct	symbol SDL_GetWindowDisplayScale; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Float
 function	SDL_SetWindowFullscreenMode	direct	sdl3::video	direct	symbol SDL_SetWindowFullscreenMode; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[SDL_DisplayMode]) -> std::ffi::c::Bool
 function	SDL_GetWindowFullscreenMode	direct	sdl3::video	direct	symbol SDL_GetWindowFullscreenMode; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Ptr[SDL_DisplayMode]
 function	SDL_GetWindowICCProfile	direct	sdl3::video	direct	symbol SDL_GetWindowICCProfile; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::Ptr[std::ffi::c::Void]
@@ -560,8 +560,8 @@ function	SDL_GetWindowPosition	direct	sdl3::video	direct	symbol SDL_GetWindowPos
 function	SDL_SetWindowSize	direct	sdl3::video	direct	symbol SDL_SetWindowSize; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetWindowSize	direct	sdl3::video	direct	symbol SDL_GetWindowSize; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_GetWindowSafeArea	direct	sdl3::video	direct	symbol SDL_GetWindowSafeArea; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
-function	SDL_SetWindowAspectRatio	unsupported		float	parameter 2 (min_aspect): float; parameter 3 (max_aspect): float
-function	SDL_GetWindowAspectRatio	unsupported		float	parameter 2 (min_aspect): a pointer to float; parameter 3 (max_aspect): a pointer to float
+function	SDL_SetWindowAspectRatio	direct	sdl3::video	direct	symbol SDL_SetWindowAspectRatio; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetWindowAspectRatio	direct	sdl3::video	direct	symbol SDL_GetWindowAspectRatio; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_GetWindowBordersSize	direct	sdl3::video	direct	symbol SDL_GetWindowBordersSize; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_GetWindowSizeInPixels	direct	sdl3::video	direct	symbol SDL_GetWindowSizeInPixels; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_SetWindowMinimumSize	direct	sdl3::video	direct	symbol SDL_SetWindowMinimumSize; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Bool
@@ -594,8 +594,8 @@ function	SDL_GetWindowMouseGrab	direct	sdl3::video	direct	symbol SDL_GetWindowMo
 function	SDL_GetGrabbedWindow	direct	sdl3::video	direct	symbol SDL_GetGrabbedWindow; () -> std::ffi::c::Ptr[SDL_Window]
 function	SDL_SetWindowMouseRect	direct	sdl3::video	direct	symbol SDL_SetWindowMouseRect; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_GetWindowMouseRect	direct	sdl3::video	direct	symbol SDL_GetWindowMouseRect; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Ptr[SDL_Rect]
-function	SDL_SetWindowOpacity	unsupported		float	parameter 2 (opacity): float
-function	SDL_GetWindowOpacity	unsupported		float	result: float
+function	SDL_SetWindowOpacity	direct	sdl3::video	direct	symbol SDL_SetWindowOpacity; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetWindowOpacity	direct	sdl3::video	direct	symbol SDL_GetWindowOpacity; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Float
 function	SDL_SetWindowParent	direct	sdl3::video	direct	symbol SDL_SetWindowParent; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Bool
 function	SDL_SetWindowModal	direct	sdl3::video	direct	symbol SDL_SetWindowModal; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_SetWindowFocusable	direct	sdl3::video	direct	symbol SDL_SetWindowFocusable; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Bool) -> std::ffi::c::Bool
@@ -605,8 +605,8 @@ function	SDL_SetWindowShape	direct	sdl3::video	direct	symbol SDL_SetWindowShape;
 function	SDL_FlashWindow	direct	sdl3::video	direct	symbol SDL_FlashWindow; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_SetWindowProgressState	direct	sdl3::video	direct	symbol SDL_SetWindowProgressState; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetWindowProgressState	direct	sdl3::video	direct	symbol SDL_GetWindowProgressState; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Int
-function	SDL_SetWindowProgressValue	unsupported		float	parameter 2 (value): float
-function	SDL_GetWindowProgressValue	unsupported		float	result: float
+function	SDL_SetWindowProgressValue	direct	sdl3::video	direct	symbol SDL_SetWindowProgressValue; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetWindowProgressValue	direct	sdl3::video	direct	symbol SDL_GetWindowProgressValue; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Float
 function	SDL_DestroyWindow	direct	sdl3::video	direct	symbol SDL_DestroyWindow; (std::ffi::c::Ptr[SDL_Window]) -> unit
 function	SDL_ScreenSaverEnabled	direct	sdl3::video	direct	symbol SDL_ScreenSaverEnabled; () -> std::ffi::c::Bool
 function	SDL_EnableScreenSaver	direct	sdl3::video	direct	symbol SDL_EnableScreenSaver; () -> std::ffi::c::Bool
@@ -649,7 +649,7 @@ function	SDL_GetSensorName	direct	sdl3::sensor	direct	symbol SDL_GetSensorName; 
 function	SDL_GetSensorType	direct	sdl3::sensor	direct	symbol SDL_GetSensorType; (std::ffi::c::Ptr[SDL_Sensor]) -> std::ffi::c::Int
 function	SDL_GetSensorNonPortableType	direct	sdl3::sensor	direct	symbol SDL_GetSensorNonPortableType; (std::ffi::c::Ptr[SDL_Sensor]) -> std::ffi::c::Int
 function	SDL_GetSensorID	direct	sdl3::sensor	direct	symbol SDL_GetSensorID; (std::ffi::c::Ptr[SDL_Sensor]) -> std::ffi::c::UInt
-function	SDL_GetSensorData	unsupported		float	parameter 2 (data): a pointer to float
+function	SDL_GetSensorData	direct	sdl3::sensor	direct	symbol SDL_GetSensorData; (std::ffi::c::Ptr[SDL_Sensor], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_CloseSensor	direct	sdl3::sensor	direct	symbol SDL_CloseSensor; (std::ffi::c::Ptr[SDL_Sensor]) -> unit
 function	SDL_UpdateSensors	direct	sdl3::sensor	direct	symbol SDL_UpdateSensors; () -> unit
 function	SDL_LockJoysticks	direct	sdl3::joystick	direct	symbol SDL_LockJoysticks; () -> unit
@@ -674,8 +674,8 @@ function	SDL_SetJoystickVirtualAxis	direct	sdl3::joystick	direct	symbol SDL_SetJ
 function	SDL_SetJoystickVirtualBall	direct	sdl3::joystick	direct	symbol SDL_SetJoystickVirtualBall; (std::ffi::c::Ptr[SDL_Joystick], std::ffi::c::Int, std::ffi::c::Short, std::ffi::c::Short) -> std::ffi::c::Bool
 function	SDL_SetJoystickVirtualButton	direct	sdl3::joystick	direct	symbol SDL_SetJoystickVirtualButton; (std::ffi::c::Ptr[SDL_Joystick], std::ffi::c::Int, std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_SetJoystickVirtualHat	direct	sdl3::joystick	direct	symbol SDL_SetJoystickVirtualHat; (std::ffi::c::Ptr[SDL_Joystick], std::ffi::c::Int, std::ffi::c::UChar) -> std::ffi::c::Bool
-function	SDL_SetJoystickVirtualTouchpad	unsupported		float	parameter 5 (x): float; parameter 6 (y): float; parameter 7 (pressure): float
-function	SDL_SendJoystickVirtualSensorData	unsupported		float	parameter 4 (data): a pointer to float
+function	SDL_SetJoystickVirtualTouchpad	direct	sdl3::joystick	direct	symbol SDL_SetJoystickVirtualTouchpad; (std::ffi::c::Ptr[SDL_Joystick], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Bool, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_SendJoystickVirtualSensorData	direct	sdl3::joystick	direct	symbol SDL_SendJoystickVirtualSensorData; (std::ffi::c::Ptr[SDL_Joystick], std::ffi::c::Int, std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetJoystickProperties	direct	sdl3::joystick	direct	symbol SDL_GetJoystickProperties; (std::ffi::c::Ptr[SDL_Joystick]) -> std::ffi::c::UInt
 function	SDL_GetJoystickName	direct	sdl3::joystick	direct	symbol SDL_GetJoystickName; (std::ffi::c::Ptr[SDL_Joystick]) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_GetJoystickPath	direct	sdl3::joystick	direct	symbol SDL_GetJoystickPath; (std::ffi::c::Ptr[SDL_Joystick]) -> std::ffi::c::Ptr[std::ffi::c::Char]
@@ -770,12 +770,12 @@ function	SDL_GetGamepadButtonLabelForType	direct	sdl3::gamepad	direct	symbol SDL
 function	SDL_GetGamepadButtonLabel	direct	sdl3::gamepad	direct	symbol SDL_GetGamepadButtonLabel; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int) -> std::ffi::c::UInt
 function	SDL_GetNumGamepadTouchpads	direct	sdl3::gamepad	direct	symbol SDL_GetNumGamepadTouchpads; (std::ffi::c::Ptr[SDL_Gamepad]) -> std::ffi::c::Int
 function	SDL_GetNumGamepadTouchpadFingers	direct	sdl3::gamepad	direct	symbol SDL_GetNumGamepadTouchpadFingers; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int) -> std::ffi::c::Int
-function	SDL_GetGamepadTouchpadFinger	unsupported		float	parameter 5 (x): a pointer to float; parameter 6 (y): a pointer to float; parameter 7 (pressure): a pointer to float
+function	SDL_GetGamepadTouchpadFinger	direct	sdl3::gamepad	direct	symbol SDL_GetGamepadTouchpadFinger; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Bool], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_GamepadHasSensor	direct	sdl3::gamepad	direct	symbol SDL_GamepadHasSensor; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_SetGamepadSensorEnabled	direct	sdl3::gamepad	direct	symbol SDL_SetGamepadSensorEnabled; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int, std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_GamepadSensorEnabled	direct	sdl3::gamepad	direct	symbol SDL_GamepadSensorEnabled; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int) -> std::ffi::c::Bool
-function	SDL_GetGamepadSensorDataRate	unsupported		float	result: float
-function	SDL_GetGamepadSensorData	unsupported		float	parameter 3 (data): a pointer to float
+function	SDL_GetGamepadSensorDataRate	direct	sdl3::gamepad	direct	symbol SDL_GetGamepadSensorDataRate; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int) -> std::ffi::c::Float
+function	SDL_GetGamepadSensorData	direct	sdl3::gamepad	direct	symbol SDL_GetGamepadSensorData; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_RumbleGamepad	direct	sdl3::gamepad	direct	symbol SDL_RumbleGamepad; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::UShort, std::ffi::c::UShort, std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_RumbleGamepadTriggers	direct	sdl3::gamepad	direct	symbol SDL_RumbleGamepadTriggers; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::UShort, std::ffi::c::UShort, std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_SetGamepadLED	direct	sdl3::gamepad	direct	symbol SDL_SetGamepadLED; (std::ffi::c::Ptr[SDL_Gamepad], std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::Bool
@@ -811,12 +811,12 @@ function	SDL_HasMouse	direct	sdl3::mouse	direct	symbol SDL_HasMouse; () -> std::
 function	SDL_GetMice	direct	sdl3::mouse	direct	symbol SDL_GetMice; (std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Ptr[std::ffi::c::UInt]
 function	SDL_GetMouseNameForID	direct	sdl3::mouse	direct	symbol SDL_GetMouseNameForID; (std::ffi::c::UInt) -> std::ffi::c::Ptr[std::ffi::c::Char]
 function	SDL_GetMouseFocus	direct	sdl3::mouse	direct	symbol SDL_GetMouseFocus; () -> std::ffi::c::Ptr[SDL_Window]
-function	SDL_GetMouseState	unsupported		float	parameter 1 (x): a pointer to float; parameter 2 (y): a pointer to float
-function	SDL_GetGlobalMouseState	unsupported		float	parameter 1 (x): a pointer to float; parameter 2 (y): a pointer to float
-function	SDL_GetRelativeMouseState	unsupported		float	parameter 1 (x): a pointer to float; parameter 2 (y): a pointer to float
-function	SDL_WarpMouseInWindow	unsupported		float	parameter 2 (x): float; parameter 3 (y): float
-function	SDL_WarpMouseGlobal	unsupported		float	parameter 1 (x): float; parameter 2 (y): float
-function	SDL_SetRelativeMouseTransform	unsupported		unsupported-callback-signature	parameter 1 (callback): callback argument 5: a pointer to float (float); parameter 1 (callback): callback argument 6: a pointer to float (float)
+function	SDL_GetMouseState	direct	sdl3::mouse	direct	symbol SDL_GetMouseState; (std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::UInt
+function	SDL_GetGlobalMouseState	direct	sdl3::mouse	direct	symbol SDL_GetGlobalMouseState; (std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::UInt
+function	SDL_GetRelativeMouseState	direct	sdl3::mouse	direct	symbol SDL_GetRelativeMouseState; (std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::UInt
+function	SDL_WarpMouseInWindow	direct	sdl3::mouse	direct	symbol SDL_WarpMouseInWindow; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Float, std::ffi::c::Float) -> unit
+function	SDL_WarpMouseGlobal	direct	sdl3::mouse	direct	symbol SDL_WarpMouseGlobal; (std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_SetRelativeMouseTransform	direct	sdl3::mouse	direct	symbol SDL_SetRelativeMouseTransform; (std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong, std::ffi::c::Ptr[SDL_Window], std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Bool
 function	SDL_SetWindowRelativeMouseMode	direct	sdl3::mouse	direct	symbol SDL_SetWindowRelativeMouseMode; (std::ffi::c::Ptr[SDL_Window], std::ffi::c::Bool) -> std::ffi::c::Bool
 function	SDL_GetWindowRelativeMouseMode	direct	sdl3::mouse	direct	symbol SDL_GetWindowRelativeMouseMode; (std::ffi::c::Ptr[SDL_Window]) -> std::ffi::c::Bool
 function	SDL_CaptureMouse	direct	sdl3::mouse	direct	symbol SDL_CaptureMouse; (std::ffi::c::Bool) -> std::ffi::c::Bool
@@ -991,7 +991,7 @@ function	SDL_ResumeHaptic	direct	sdl3::haptic	direct	symbol SDL_ResumeHaptic; (s
 function	SDL_StopHapticEffects	direct	sdl3::haptic	direct	symbol SDL_StopHapticEffects; (std::ffi::c::Ptr[SDL_Haptic]) -> std::ffi::c::Bool
 function	SDL_HapticRumbleSupported	direct	sdl3::haptic	direct	symbol SDL_HapticRumbleSupported; (std::ffi::c::Ptr[SDL_Haptic]) -> std::ffi::c::Bool
 function	SDL_InitHapticRumble	direct	sdl3::haptic	direct	symbol SDL_InitHapticRumble; (std::ffi::c::Ptr[SDL_Haptic]) -> std::ffi::c::Bool
-function	SDL_PlayHapticRumble	unsupported		float	parameter 2 (strength): float
+function	SDL_PlayHapticRumble	direct	sdl3::haptic	direct	symbol SDL_PlayHapticRumble; (std::ffi::c::Ptr[SDL_Haptic], std::ffi::c::Float, std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_StopHapticRumble	direct	sdl3::haptic	direct	symbol SDL_StopHapticRumble; (std::ffi::c::Ptr[SDL_Haptic]) -> std::ffi::c::Bool
 function	SDL_hid_init	direct	sdl3::hidapi	direct	symbol SDL_hid_init; () -> std::ffi::c::Int
 function	SDL_hid_exit	direct	sdl3::hidapi	direct	symbol SDL_hid_exit; () -> std::ffi::c::Int
@@ -1043,15 +1043,15 @@ function	SDL_SetLogPriority	direct	sdl3::log	direct	symbol SDL_SetLogPriority; (
 function	SDL_GetLogPriority	direct	sdl3::log	direct	symbol SDL_GetLogPriority; (std::ffi::c::Int) -> std::ffi::c::UInt
 function	SDL_ResetLogPriorities	direct	sdl3::log	direct	symbol SDL_ResetLogPriorities; () -> unit
 function	SDL_SetLogPriorityPrefix	direct	sdl3::log	direct	symbol SDL_SetLogPriorityPrefix; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Bool
-function	SDL_Log	unsupported		variadic	a variadic function (...)
-function	SDL_LogTrace	unsupported		variadic	a variadic function (...)
-function	SDL_LogVerbose	unsupported		variadic	a variadic function (...)
-function	SDL_LogDebug	unsupported		variadic	a variadic function (...)
-function	SDL_LogInfo	unsupported		variadic	a variadic function (...)
-function	SDL_LogWarn	unsupported		variadic	a variadic function (...)
-function	SDL_LogError	unsupported		variadic	a variadic function (...)
-function	SDL_LogCritical	unsupported		variadic	a variadic function (...)
-function	SDL_LogMessage	unsupported		variadic	a variadic function (...)
+function	SDL_Log	direct	sdl3::log	direct	symbol SDL_Log; (std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogTrace	direct	sdl3::log	direct	symbol SDL_LogTrace; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogVerbose	direct	sdl3::log	direct	symbol SDL_LogVerbose; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogDebug	direct	sdl3::log	direct	symbol SDL_LogDebug; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogInfo	direct	sdl3::log	direct	symbol SDL_LogInfo; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogWarn	direct	sdl3::log	direct	symbol SDL_LogWarn; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogError	direct	sdl3::log	direct	symbol SDL_LogError; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogCritical	direct	sdl3::log	direct	symbol SDL_LogCritical; (std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
+function	SDL_LogMessage	direct	sdl3::log	direct	symbol SDL_LogMessage; (std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> unit
 function	SDL_LogMessageV	unsupported		va-list	parameter 4 (ap): __builtin_va_list
 function	SDL_GetDefaultLogOutputFunction	direct	sdl3::log	direct	symbol SDL_GetDefaultLogOutputFunction; () -> std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]], return: unit}]
 function	SDL_GetLogOutputFunction	direct	sdl3::log	direct	symbol SDL_GetLogOutputFunction; (std::ffi::c::Ptr[std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char]], return: unit}]], std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]]) -> unit
@@ -1091,17 +1091,17 @@ function	SDL_CreateTextureFromSurface	direct	sdl3::render	direct	symbol SDL_Crea
 function	SDL_CreateTextureWithProperties	direct	sdl3::render	direct	symbol SDL_CreateTextureWithProperties; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::UInt) -> std::ffi::c::Ptr[SDL_Texture]
 function	SDL_GetTextureProperties	direct	sdl3::render	direct	symbol SDL_GetTextureProperties; (std::ffi::c::Ptr[SDL_Texture]) -> std::ffi::c::UInt
 function	SDL_GetRendererFromTexture	direct	sdl3::render	direct	symbol SDL_GetRendererFromTexture; (std::ffi::c::Ptr[SDL_Texture]) -> std::ffi::c::Ptr[SDL_Renderer]
-function	SDL_GetTextureSize	unsupported		float	parameter 2 (w): a pointer to float; parameter 3 (h): a pointer to float
+function	SDL_GetTextureSize	direct	sdl3::render	direct	symbol SDL_GetTextureSize; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_SetTexturePalette	direct	sdl3::render	direct	symbol SDL_SetTexturePalette; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_Palette]) -> std::ffi::c::Bool
 function	SDL_GetTexturePalette	direct	sdl3::render	direct	symbol SDL_GetTexturePalette; (std::ffi::c::Ptr[SDL_Texture]) -> std::ffi::c::Ptr[SDL_Palette]
 function	SDL_SetTextureColorMod	direct	sdl3::render	direct	symbol SDL_SetTextureColorMod; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::Bool
-function	SDL_SetTextureColorModFloat	unsupported		float	parameter 2 (r): float; parameter 3 (g): float; parameter 4 (b): float
+function	SDL_SetTextureColorModFloat	direct	sdl3::render	direct	symbol SDL_SetTextureColorModFloat; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_GetTextureColorMod	direct	sdl3::render	direct	symbol SDL_GetTextureColorMod; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar]) -> std::ffi::c::Bool
-function	SDL_GetTextureColorModFloat	unsupported		float	parameter 2 (r): a pointer to float; parameter 3 (g): a pointer to float; parameter 4 (b): a pointer to float
+function	SDL_GetTextureColorModFloat	direct	sdl3::render	direct	symbol SDL_GetTextureColorModFloat; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_SetTextureAlphaMod	direct	sdl3::render	direct	symbol SDL_SetTextureAlphaMod; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::UChar) -> std::ffi::c::Bool
-function	SDL_SetTextureAlphaModFloat	unsupported		float	parameter 2 (alpha): float
+function	SDL_SetTextureAlphaModFloat	direct	sdl3::render	direct	symbol SDL_SetTextureAlphaModFloat; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_GetTextureAlphaMod	direct	sdl3::render	direct	symbol SDL_GetTextureAlphaMod; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::UChar]) -> std::ffi::c::Bool
-function	SDL_GetTextureAlphaModFloat	unsupported		float	parameter 2 (alpha): a pointer to float
+function	SDL_GetTextureAlphaModFloat	direct	sdl3::render	direct	symbol SDL_GetTextureAlphaModFloat; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_SetTextureBlendMode	direct	sdl3::render	direct	symbol SDL_SetTextureBlendMode; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_GetTextureBlendMode	direct	sdl3::render	direct	symbol SDL_GetTextureBlendMode; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::UInt]) -> std::ffi::c::Bool
 function	SDL_SetTextureScaleMode	direct	sdl3::render	direct	symbol SDL_SetTextureScaleMode; (std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Int) -> std::ffi::c::Bool
@@ -1117,8 +1117,8 @@ function	SDL_GetRenderTarget	direct	sdl3::render	direct	symbol SDL_GetRenderTarg
 function	SDL_SetRenderLogicalPresentation	direct	sdl3::render	direct	symbol SDL_SetRenderLogicalPresentation; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_GetRenderLogicalPresentation	direct	sdl3::render	direct	symbol SDL_GetRenderLogicalPresentation; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::UInt]) -> std::ffi::c::Bool
 function	SDL_GetRenderLogicalPresentationRect	direct	sdl3::render	direct	symbol SDL_GetRenderLogicalPresentationRect; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
-function	SDL_RenderCoordinatesFromWindow	unsupported		float	parameter 2 (window_x): float; parameter 3 (window_y): float; parameter 4 (x): a pointer to float; parameter 5 (y): a pointer to float
-function	SDL_RenderCoordinatesToWindow	unsupported		float	parameter 2 (x): float; parameter 3 (y): float; parameter 4 (window_x): a pointer to float; parameter 5 (window_y): a pointer to float
+function	SDL_RenderCoordinatesFromWindow	direct	sdl3::render	direct	symbol SDL_RenderCoordinatesFromWindow; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
+function	SDL_RenderCoordinatesToWindow	direct	sdl3::render	direct	symbol SDL_RenderCoordinatesToWindow; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_ConvertEventToRenderCoordinates	direct	sdl3::render	direct	symbol SDL_ConvertEventToRenderCoordinates; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Event]) -> std::ffi::c::Bool
 function	SDL_SetRenderViewport	direct	sdl3::render	direct	symbol SDL_SetRenderViewport; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_GetRenderViewport	direct	sdl3::render	direct	symbol SDL_GetRenderViewport; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
@@ -1127,33 +1127,33 @@ function	SDL_GetRenderSafeArea	direct	sdl3::render	direct	symbol SDL_GetRenderSa
 function	SDL_SetRenderClipRect	direct	sdl3::render	direct	symbol SDL_SetRenderClipRect; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_GetRenderClipRect	direct	sdl3::render	direct	symbol SDL_GetRenderClipRect; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Bool
 function	SDL_RenderClipEnabled	direct	sdl3::render	direct	symbol SDL_RenderClipEnabled; (std::ffi::c::Ptr[SDL_Renderer]) -> std::ffi::c::Bool
-function	SDL_SetRenderScale	unsupported		float	parameter 2 (scaleX): float; parameter 3 (scaleY): float
-function	SDL_GetRenderScale	unsupported		float	parameter 2 (scaleX): a pointer to float; parameter 3 (scaleY): a pointer to float
+function	SDL_SetRenderScale	direct	sdl3::render	direct	symbol SDL_SetRenderScale; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetRenderScale	direct	sdl3::render	direct	symbol SDL_GetRenderScale; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_SetRenderDrawColor	direct	sdl3::render	direct	symbol SDL_SetRenderDrawColor; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar, std::ffi::c::UChar) -> std::ffi::c::Bool
-function	SDL_SetRenderDrawColorFloat	unsupported		float	parameter 2 (r): float; parameter 3 (g): float; parameter 4 (b): float; parameter 5 (a): float
+function	SDL_SetRenderDrawColorFloat	direct	sdl3::render	direct	symbol SDL_SetRenderDrawColorFloat; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_GetRenderDrawColor	direct	sdl3::render	direct	symbol SDL_GetRenderDrawColor; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar], std::ffi::c::Ptr[std::ffi::c::UChar]) -> std::ffi::c::Bool
-function	SDL_GetRenderDrawColorFloat	unsupported		float	parameter 2 (r): a pointer to float; parameter 3 (g): a pointer to float; parameter 4 (b): a pointer to float; parameter 5 (a): a pointer to float
-function	SDL_SetRenderColorScale	unsupported		float	parameter 2 (scale): float
-function	SDL_GetRenderColorScale	unsupported		float	parameter 2 (scale): a pointer to float
+function	SDL_GetRenderDrawColorFloat	direct	sdl3::render	direct	symbol SDL_GetRenderDrawColorFloat; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
+function	SDL_SetRenderColorScale	direct	sdl3::render	direct	symbol SDL_SetRenderColorScale; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float) -> std::ffi::c::Bool
+function	SDL_GetRenderColorScale	direct	sdl3::render	direct	symbol SDL_GetRenderColorScale; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Float]) -> std::ffi::c::Bool
 function	SDL_SetRenderDrawBlendMode	direct	sdl3::render	direct	symbol SDL_SetRenderDrawBlendMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_GetRenderDrawBlendMode	direct	sdl3::render	direct	symbol SDL_GetRenderDrawBlendMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::UInt]) -> std::ffi::c::Bool
 function	SDL_RenderClear	direct	sdl3::render	direct	symbol SDL_RenderClear; (std::ffi::c::Ptr[SDL_Renderer]) -> std::ffi::c::Bool
-function	SDL_RenderPoint	unsupported		float	parameter 2 (x): float; parameter 3 (y): float
+function	SDL_RenderPoint	direct	sdl3::render	direct	symbol SDL_RenderPoint; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_RenderPoints	direct	sdl3::render	direct	symbol SDL_RenderPoints; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Int) -> std::ffi::c::Bool
-function	SDL_RenderLine	unsupported		float	parameter 2 (x1): float; parameter 3 (y1): float; parameter 4 (x2): float; parameter 5 (y2): float
+function	SDL_RenderLine	direct	sdl3::render	direct	symbol SDL_RenderLine; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_RenderLines	direct	sdl3::render	direct	symbol SDL_RenderLines; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_RenderRect	direct	sdl3::render	direct	symbol SDL_RenderRect; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_RenderRects	direct	sdl3::render	direct	symbol SDL_RenderRects; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_RenderFillRect	direct	sdl3::render	direct	symbol SDL_RenderFillRect; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
 function	SDL_RenderFillRects	direct	sdl3::render	direct	symbol SDL_RenderFillRects; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_RenderTexture	direct	sdl3::render	direct	symbol SDL_RenderTexture; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
-function	SDL_RenderTextureRotated	unsupported		double	parameter 5 (angle): double
+function	SDL_RenderTextureRotated	direct	sdl3::render	direct	symbol SDL_RenderTextureRotated; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Double, std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::UInt) -> std::ffi::c::Bool
 function	SDL_RenderTextureAffine	direct	sdl3::render	direct	symbol SDL_RenderTextureAffine; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Ptr[SDL_FPoint], std::ffi::c::Ptr[SDL_FPoint]) -> std::ffi::c::Bool
-function	SDL_RenderTextureTiled	unsupported		float	parameter 4 (scale): float
-function	SDL_RenderTexture9Grid	unsupported		float	parameter 4 (left_width): float; parameter 5 (right_width): float; parameter 6 (top_height): float; parameter 7 (bottom_height): float; parameter 8 (scale): float
-function	SDL_RenderTexture9GridTiled	unsupported		float	parameter 4 (left_width): float; parameter 5 (right_width): float; parameter 6 (top_height): float; parameter 7 (bottom_height): float; parameter 8 (scale): float; parameter 10 (tileScale): float
+function	SDL_RenderTextureTiled	direct	sdl3::render	direct	symbol SDL_RenderTextureTiled; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Float, std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
+function	SDL_RenderTexture9Grid	direct	sdl3::render	direct	symbol SDL_RenderTexture9Grid; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[SDL_FRect]) -> std::ffi::c::Bool
+function	SDL_RenderTexture9GridTiled	direct	sdl3::render	direct	symbol SDL_RenderTexture9GridTiled; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[SDL_FRect], std::ffi::c::Float) -> std::ffi::c::Bool
 function	SDL_RenderGeometry	direct	sdl3::render	direct	symbol SDL_RenderGeometry; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[SDL_Vertex], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Int) -> std::ffi::c::Bool
-function	SDL_RenderGeometryRaw	unsupported		float	parameter 3 (xy): a pointer to float; parameter 7 (uv): a pointer to float
+function	SDL_RenderGeometryRaw	direct	sdl3::render	direct	symbol SDL_RenderGeometryRaw; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Texture], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int, std::ffi::c::Ptr[SDL_FColor], std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_SetRenderTextureAddressMode	direct	sdl3::render	direct	symbol SDL_SetRenderTextureAddressMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Int, std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetRenderTextureAddressMode	direct	sdl3::render	direct	symbol SDL_GetRenderTextureAddressMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Int], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_RenderReadPixels	direct	sdl3::render	direct	symbol SDL_RenderReadPixels; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_Rect]) -> std::ffi::c::Ptr[SDL_Surface]
@@ -1166,8 +1166,8 @@ function	SDL_GetRenderMetalCommandEncoder	direct	sdl3::render	direct	symbol SDL_
 function	SDL_AddVulkanRenderSemaphores	direct	sdl3::render	direct	symbol SDL_AddVulkanRenderSemaphores; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::UInt, std::ffi::c::Long, std::ffi::c::Long) -> std::ffi::c::Bool
 function	SDL_SetRenderVSync	direct	sdl3::render	direct	symbol SDL_SetRenderVSync; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetRenderVSync	direct	sdl3::render	direct	symbol SDL_GetRenderVSync; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
-function	SDL_RenderDebugText	unsupported		float	parameter 2 (x): float; parameter 3 (y): float
-function	SDL_RenderDebugTextFormat	unsupported		float,variadic	a variadic function (...); parameter 2 (x): float; parameter 3 (y): float
+function	SDL_RenderDebugText	direct	sdl3::render	direct	symbol SDL_RenderDebugText; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Bool
+function	SDL_RenderDebugTextFormat	direct	sdl3::render	direct	symbol SDL_RenderDebugTextFormat; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Float, std::ffi::c::Float, std::ffi::c::Ptr[std::ffi::c::Char], variadic) -> std::ffi::c::Bool
 function	SDL_SetDefaultTextureScaleMode	direct	sdl3::render	direct	symbol SDL_SetDefaultTextureScaleMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Int) -> std::ffi::c::Bool
 function	SDL_GetDefaultTextureScaleMode	direct	sdl3::render	direct	symbol SDL_GetDefaultTextureScaleMode; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[std::ffi::c::Int]) -> std::ffi::c::Bool
 function	SDL_CreateGPURenderState	direct	sdl3::render	direct	symbol SDL_CreateGPURenderState; (std::ffi::c::Ptr[SDL_Renderer], std::ffi::c::Ptr[SDL_GPURenderStateCreateInfo]) -> std::ffi::c::Ptr[SDL_GPURenderState]
@@ -2596,7 +2596,7 @@ macro	SDL_MAX_UINT64	constant	sdl3::stdinc	std::ffi::c::ULong	unsigned long 1844
 macro	SDL_MIN_UINT64	constant	sdl3::stdinc	std::ffi::c::ULong	unsigned long 0
 macro	SDL_MAX_TIME	constant	sdl3::stdinc	std::ffi::c::Long	long 9223372036854775807
 macro	SDL_MIN_TIME	constant	sdl3::stdinc	std::ffi::c::Long	long -9223372036854775808
-macro	SDL_FLT_EPSILON	unsupported		float	a float constant
+macro	SDL_FLT_EPSILON	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	SDL_PRIs64	unsupported		not-integer-constant	its value is an address (a string or an object the linker places), no integer known before linking
 macro	SDL_PRIu64	unsupported		not-integer-constant	its value is an address (a string or an object the linker places), no integer known before linking
 macro	SDL_PRIx64	unsupported		not-integer-constant	its value is an address (a string or an object the linker places), no integer known before linking
@@ -2625,8 +2625,8 @@ macro	SDL_FALLTHROUGH	not-constant		decoration	decoration: attribute
 macro	SDL_NODISCARD	not-constant		decoration	decoration: attribute
 macro	SDL_MALLOC	not-constant		decoration	decoration: attribute
 macro	SDL_INVALID_UNICODE_CODEPOINT	constant	sdl3::stdinc	std::ffi::c::Int	int 65533
-macro	SDL_PI_D	unsupported		double	a double constant
-macro	SDL_PI_F	unsupported		float	a float constant
+macro	SDL_PI_D	unsupported		floating-constant	a double constant: the generator binds integer constants only
+macro	SDL_PI_F	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	SDL_ICONV_ERROR	constant	sdl3::stdinc	std::ffi::c::ULong	unsigned long 18446744073709551615
 macro	SDL_ICONV_E2BIG	constant	sdl3::stdinc	std::ffi::c::ULong	unsigned long 18446744073709551614
 macro	SDL_ICONV_EILSEQ	constant	sdl3::stdinc	std::ffi::c::ULong	unsigned long 18446744073709551613
@@ -2689,9 +2689,9 @@ macro	SDL_BLENDMODE_INVALID	constant	sdl3::blendmode	std::ffi::c::UInt	unsigned 
 macro	SDL_camera_h_	not-constant		empty	empty
 macro	SDL_pixels_h_	not-constant		empty	empty
 macro	SDL_ALPHA_OPAQUE	constant	sdl3::pixels	std::ffi::c::Int	int 255
-macro	SDL_ALPHA_OPAQUE_FLOAT	unsupported		float	a float constant
+macro	SDL_ALPHA_OPAQUE_FLOAT	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	SDL_ALPHA_TRANSPARENT	constant	sdl3::pixels	std::ffi::c::Int	int 0
-macro	SDL_ALPHA_TRANSPARENT_FLOAT	unsupported		float	a float constant
+macro	SDL_ALPHA_TRANSPARENT_FLOAT	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	SDL_surface_h_	not-constant		empty	empty
 macro	SDL_rect_h_	not-constant		empty	empty
 macro	SDL_SURFACE_PREALLOCATED	constant	sdl3::surface	std::ffi::c::UInt	unsigned int 1
@@ -2853,7 +2853,7 @@ macro	SDL_guid_h_	not-constant		empty	empty
 macro	SDL_joystick_h_	not-constant		empty	empty
 macro	SDL_power_h_	not-constant		empty	empty
 macro	SDL_sensor_h_	not-constant		empty	empty
-macro	SDL_STANDARD_GRAVITY	unsupported		float	a float constant
+macro	SDL_STANDARD_GRAVITY	unsupported		floating-constant	a float constant: the generator binds integer constants only
 macro	SDL_JOYSTICK_AXIS_MAX	constant	sdl3::joystick	std::ffi::c::Int	int 32767
 macro	SDL_JOYSTICK_AXIS_MIN	constant	sdl3::joystick	std::ffi::c::Int	int -32768
 macro	SDL_PROP_JOYSTICK_CAP_MONO_LED_BOOLEAN	not-constant		string-literal	constant: string literal
@@ -4371,7 +4371,7 @@ typedef	SDL_AudioSpec	opaque	sdl3::ctypes	identity SDL_AudioSpec	struct SDL_Audi
 typedef	SDL_AudioStream	opaque	sdl3::ctypes	identity SDL_AudioStream	struct SDL_AudioStream
 typedef	SDL_AudioStreamDataCompleteCallback	callback		std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Int], return: unit}]	void (*)(void *userdata, const void *buf, int buflen)
 typedef	SDL_AudioStreamCallback	callback		std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[SDL_AudioStream], std::ffi::c::Int, std::ffi::c::Int], return: unit}]	void (*)(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
-typedef	SDL_AudioPostmixCallback	unsupported		unsupported-callback-signature	callback argument 3: a pointer to float (float)
+typedef	SDL_AudioPostmixCallback	callback		std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[SDL_AudioSpec], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Int], return: unit}]	void (*)(void *userdata, const SDL_AudioSpec *spec, float *buffer, int buflen)
 typedef	SDL_BlendMode	scalar		std::ffi::c::UInt	an ABI alias of C unsigned int
 typedef	SDL_BlendOperation	scalar		std::ffi::c::UInt	enum SDL_BlendOperation, C unsigned int on this target
 typedef	SDL_BlendFactor	scalar		std::ffi::c::UInt	enum SDL_BlendFactor, C unsigned int on this target
@@ -4466,7 +4466,7 @@ typedef	SDL_SystemCursor	scalar		std::ffi::c::UInt	enum SDL_SystemCursor, C unsi
 typedef	SDL_MouseWheelDirection	scalar		std::ffi::c::UInt	enum SDL_MouseWheelDirection, C unsigned int on this target
 typedef	SDL_CursorFrameInfo	opaque	sdl3::ctypes	identity SDL_CursorFrameInfo	struct SDL_CursorFrameInfo
 typedef	SDL_MouseButtonFlags	scalar		std::ffi::c::UInt	an ABI alias of C unsigned int
-typedef	SDL_MouseMotionTransformCallback	unsupported		unsupported-callback-signature	callback argument 5: a pointer to float (float); callback argument 6: a pointer to float (float)
+typedef	SDL_MouseMotionTransformCallback	callback		std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong, std::ffi::c::Ptr[SDL_Window], std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]], return: unit}]	void (*)(void *userdata, Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, float *x, float *y)
 typedef	SDL_TouchID	scalar		std::ffi::c::ULong	an ABI alias of C unsigned long
 typedef	SDL_FingerID	scalar		std::ffi::c::ULong	an ABI alias of C unsigned long
 typedef	SDL_TouchDeviceType	scalar		std::ffi::c::Int	enum SDL_TouchDeviceType, C int on this target
@@ -4838,20 +4838,20 @@ record	struct SDL_InitState	layout-direct	sdl3::layouts	SDL_InitState	sizeof 24,
 record	struct SDL_IOStreamInterface	layout-direct	sdl3::layouts	SDL_IOStreamInterface	sizeof 56, _Alignof 8, 7 fields
 record	struct SDL_AudioSpec	layout-direct	sdl3::layouts	SDL_AudioSpec	sizeof 12, _Alignof 4, 3 fields
 record	struct SDL_Color	layout-direct	sdl3::layouts	SDL_Color	sizeof 4, _Alignof 1, 4 fields
-record	struct SDL_FColor	layout-blocked		float	field r: float (float); field g: float (float); field b: float (float); field a: float (float)
+record	struct SDL_FColor	layout-direct	sdl3::layouts	SDL_FColor	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_Palette	layout-direct	sdl3::layouts	SDL_Palette	sizeof 24, _Alignof 8, 4 fields
 record	struct SDL_PixelFormatDetails	layout-direct	sdl3::layouts	SDL_PixelFormatDetails	sizeof 32, _Alignof 4, 16 fields
 record	struct SDL_Point	layout-direct	sdl3::layouts	SDL_Point	sizeof 8, _Alignof 4, 2 fields
-record	struct SDL_FPoint	layout-blocked		float	field x: float (float); field y: float (float)
+record	struct SDL_FPoint	layout-direct	sdl3::layouts	SDL_FPoint	sizeof 8, _Alignof 4, 2 fields
 record	struct SDL_Rect	layout-direct	sdl3::layouts	SDL_Rect	sizeof 16, _Alignof 4, 4 fields
-record	struct SDL_FRect	layout-blocked		float	field x: float (float); field y: float (float); field w: float (float); field h: float (float)
+record	struct SDL_FRect	layout-direct	sdl3::layouts	SDL_FRect	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_Surface	layout-direct	sdl3::layouts	SDL_Surface	sizeof 48, _Alignof 8, 8 fields
 record	struct SDL_CameraSpec	layout-direct	sdl3::layouts	SDL_CameraSpec	sizeof 24, _Alignof 4, 6 fields
-record	struct SDL_DisplayMode	layout-blocked		float	field pixel_density: float (float); field refresh_rate: float (float)
+record	struct SDL_DisplayMode	layout-direct	sdl3::layouts	SDL_DisplayMode	sizeof 40, _Alignof 8, 9 fields
 record	struct SDL_DialogFileFilter	layout-direct	sdl3::layouts	SDL_DialogFileFilter	sizeof 16, _Alignof 8, 2 fields
 record	struct SDL_GUID	layout-direct	sdl3::layouts	SDL_GUID	sizeof 16, _Alignof 1, 1 fields
 record	struct SDL_VirtualJoystickTouchpadDesc	layout-direct	sdl3::layouts	SDL_VirtualJoystickTouchpadDesc	sizeof 8, _Alignof 2, 2 fields
-record	struct SDL_VirtualJoystickSensorDesc	layout-blocked		float	field rate: float (float)
+record	struct SDL_VirtualJoystickSensorDesc	layout-direct	sdl3::layouts	SDL_VirtualJoystickSensorDesc	sizeof 8, _Alignof 4, 2 fields
 record	struct SDL_VirtualJoystickDesc	layout-direct	sdl3::layouts	SDL_VirtualJoystickDesc	sizeof 136, _Alignof 8, 26 fields
 record	struct anon@SDL_gamepad.h:276	layout-direct	sdl3::layouts	SDL_GamepadBinding_input_axis	sizeof 12, _Alignof 4, 3 fields
 record	struct anon@SDL_gamepad.h:283	layout-direct	sdl3::layouts	SDL_GamepadBinding_input_hat	sizeof 8, _Alignof 4, 2 fields
@@ -4860,7 +4860,7 @@ record	struct anon@SDL_gamepad.h:296	layout-direct	sdl3::layouts	SDL_GamepadBind
 record	union anon@SDL_gamepad.h:292	layout-direct	sdl3::layouts	SDL_GamepadBinding_output	sizeof 12, _Alignof 4, 2 fields
 record	struct SDL_GamepadBinding	layout-direct	sdl3::layouts	SDL_GamepadBinding	sizeof 32, _Alignof 4, 4 fields
 record	struct SDL_CursorFrameInfo	layout-direct	sdl3::layouts	SDL_CursorFrameInfo	sizeof 16, _Alignof 8, 2 fields
-record	struct SDL_Finger	layout-blocked		float	field x: float (float); field y: float (float); field pressure: float (float)
+record	struct SDL_Finger	layout-direct	sdl3::layouts	SDL_Finger	sizeof 24, _Alignof 8, 4 fields
 record	struct SDL_CommonEvent	layout-direct	sdl3::layouts	SDL_CommonEvent	sizeof 16, _Alignof 8, 3 fields
 record	struct SDL_DisplayEvent	layout-direct	sdl3::layouts	SDL_DisplayEvent	sizeof 32, _Alignof 8, 6 fields
 record	struct SDL_WindowEvent	layout-direct	sdl3::layouts	SDL_WindowEvent	sizeof 32, _Alignof 8, 6 fields
@@ -4870,9 +4870,9 @@ record	struct SDL_TextEditingEvent	layout-direct	sdl3::layouts	SDL_TextEditingEv
 record	struct SDL_TextEditingCandidatesEvent	layout-blocked		c-bool	field horizontal: C _Bool (_Bool)
 record	struct SDL_TextInputEvent	layout-direct	sdl3::layouts	SDL_TextInputEvent	sizeof 32, _Alignof 8, 5 fields
 record	struct SDL_MouseDeviceEvent	layout-direct	sdl3::layouts	SDL_MouseDeviceEvent	sizeof 24, _Alignof 8, 4 fields
-record	struct SDL_MouseMotionEvent	layout-blocked		float	field x: float (float); field y: float (float); field xrel: float (float); field yrel: float (float)
-record	struct SDL_MouseButtonEvent	layout-blocked		c-bool,float	field down: C _Bool (_Bool); field x: float (float); field y: float (float)
-record	struct SDL_MouseWheelEvent	layout-blocked		float	field x: float (float); field y: float (float); field mouse_x: float (float); field mouse_y: float (float)
+record	struct SDL_MouseMotionEvent	layout-direct	sdl3::layouts	SDL_MouseMotionEvent	sizeof 48, _Alignof 8, 10 fields
+record	struct SDL_MouseButtonEvent	layout-blocked		c-bool	field down: C _Bool (_Bool)
+record	struct SDL_MouseWheelEvent	layout-direct	sdl3::layouts	SDL_MouseWheelEvent	sizeof 56, _Alignof 8, 12 fields
 record	struct SDL_JoyAxisEvent	layout-direct	sdl3::layouts	SDL_JoyAxisEvent	sizeof 32, _Alignof 8, 10 fields
 record	struct SDL_JoyBallEvent	layout-direct	sdl3::layouts	SDL_JoyBallEvent	sizeof 32, _Alignof 8, 10 fields
 record	struct SDL_JoyHatEvent	layout-direct	sdl3::layouts	SDL_JoyHatEvent	sizeof 24, _Alignof 8, 8 fields
@@ -4882,26 +4882,26 @@ record	struct SDL_JoyBatteryEvent	layout-direct	sdl3::layouts	SDL_JoyBatteryEven
 record	struct SDL_GamepadAxisEvent	layout-direct	sdl3::layouts	SDL_GamepadAxisEvent	sizeof 32, _Alignof 8, 10 fields
 record	struct SDL_GamepadButtonEvent	layout-blocked		c-bool	field down: C _Bool (_Bool)
 record	struct SDL_GamepadDeviceEvent	layout-direct	sdl3::layouts	SDL_GamepadDeviceEvent	sizeof 24, _Alignof 8, 4 fields
-record	struct SDL_GamepadTouchpadEvent	layout-blocked		float	field x: float (float); field y: float (float); field pressure: float (float)
-record	struct SDL_GamepadSensorEvent	layout-blocked		float	field data: array element: float (float)
+record	struct SDL_GamepadTouchpadEvent	layout-direct	sdl3::layouts	SDL_GamepadTouchpadEvent	sizeof 40, _Alignof 8, 9 fields
+record	struct SDL_GamepadSensorEvent	layout-direct	sdl3::layouts	SDL_GamepadSensorEvent	sizeof 48, _Alignof 8, 7 fields
 record	struct SDL_AudioDeviceEvent	layout-blocked		c-bool	field recording: C _Bool (_Bool)
 record	struct SDL_CameraDeviceEvent	layout-direct	sdl3::layouts	SDL_CameraDeviceEvent	sizeof 24, _Alignof 8, 4 fields
 record	struct SDL_RenderEvent	layout-direct	sdl3::layouts	SDL_RenderEvent	sizeof 24, _Alignof 8, 4 fields
-record	struct SDL_TouchFingerEvent	layout-blocked		float	field x: float (float); field y: float (float); field dx: float (float); field dy: float (float); field pressure: float (float)
-record	struct SDL_PinchFingerEvent	layout-blocked		float	field scale: float (float)
+record	struct SDL_TouchFingerEvent	layout-direct	sdl3::layouts	SDL_TouchFingerEvent	sizeof 56, _Alignof 8, 11 fields
+record	struct SDL_PinchFingerEvent	layout-direct	sdl3::layouts	SDL_PinchFingerEvent	sizeof 24, _Alignof 8, 5 fields
 record	struct SDL_PenProximityEvent	layout-direct	sdl3::layouts	SDL_PenProximityEvent	sizeof 32, _Alignof 8, 7 fields
-record	struct SDL_PenMotionEvent	layout-blocked		float	field x: float (float); field y: float (float)
-record	struct SDL_PenTouchEvent	layout-blocked		c-bool,float	field x: float (float); field y: float (float); field eraser: C _Bool (_Bool); field down: C _Bool (_Bool)
-record	struct SDL_PenButtonEvent	layout-blocked		c-bool,float	field x: float (float); field y: float (float); field down: C _Bool (_Bool)
-record	struct SDL_PenAxisEvent	layout-blocked		float	field x: float (float); field y: float (float); field value: float (float)
-record	struct SDL_DropEvent	layout-blocked		float	field x: float (float); field y: float (float)
+record	struct SDL_PenMotionEvent	layout-direct	sdl3::layouts	SDL_PenMotionEvent	sizeof 40, _Alignof 8, 9 fields
+record	struct SDL_PenTouchEvent	layout-blocked		c-bool	field eraser: C _Bool (_Bool); field down: C _Bool (_Bool)
+record	struct SDL_PenButtonEvent	layout-blocked		c-bool	field down: C _Bool (_Bool)
+record	struct SDL_PenAxisEvent	layout-direct	sdl3::layouts	SDL_PenAxisEvent	sizeof 48, _Alignof 8, 11 fields
+record	struct SDL_DropEvent	layout-direct	sdl3::layouts	SDL_DropEvent	sizeof 48, _Alignof 8, 8 fields
 record	struct SDL_ClipboardEvent	layout-blocked		c-bool	field owner: C _Bool (_Bool)
-record	struct SDL_SensorEvent	layout-blocked		float	field data: array element: float (float)
+record	struct SDL_SensorEvent	layout-direct	sdl3::layouts	SDL_SensorEvent	sizeof 56, _Alignof 8, 6 fields
 record	struct SDL_QuitEvent	layout-direct	sdl3::layouts	SDL_QuitEvent	sizeof 16, _Alignof 8, 3 fields
 record	struct SDL_UserEvent	layout-direct	sdl3::layouts	SDL_UserEvent	sizeof 40, _Alignof 8, 7 fields
-record	union SDL_Event	layout-blocked		nested-layout-blocked	field key (struct SDL_KeyboardEvent, union-member) -> c-bool; field edit_candidates (struct SDL_TextEditingCandidatesEvent, union-member) -> c-bool; field motion (struct SDL_MouseMotionEvent, union-member) -> float; field button (struct SDL_MouseButtonEvent, union-member) -> c-bool; field wheel (struct SDL_MouseWheelEvent, union-member) -> float; field jbutton (struct SDL_JoyButtonEvent, union-member) -> c-bool; field gbutton (struct SDL_GamepadButtonEvent, union-member) -> c-bool; field gtouchpad (struct SDL_GamepadTouchpadEvent, union-member) -> float; field gsensor (struct SDL_GamepadSensorEvent, union-member) -> float; field adevice (struct SDL_AudioDeviceEvent, union-member) -> c-bool; field sensor (struct SDL_SensorEvent, union-member) -> float; field tfinger (struct SDL_TouchFingerEvent, union-member) -> float; field pinch (struct SDL_PinchFingerEvent, union-member) -> float; field ptouch (struct SDL_PenTouchEvent, union-member) -> float; field pmotion (struct SDL_PenMotionEvent, union-member) -> float; field pbutton (struct SDL_PenButtonEvent, union-member) -> float; field paxis (struct SDL_PenAxisEvent, union-member) -> float; field drop (struct SDL_DropEvent, union-member) -> float; field clipboard (struct SDL_ClipboardEvent, union-member) -> c-bool
+record	union SDL_Event	layout-blocked		nested-layout-blocked	field key (struct SDL_KeyboardEvent, union-member) -> c-bool; field edit_candidates (struct SDL_TextEditingCandidatesEvent, union-member) -> c-bool; field button (struct SDL_MouseButtonEvent, union-member) -> c-bool; field jbutton (struct SDL_JoyButtonEvent, union-member) -> c-bool; field gbutton (struct SDL_GamepadButtonEvent, union-member) -> c-bool; field adevice (struct SDL_AudioDeviceEvent, union-member) -> c-bool; field ptouch (struct SDL_PenTouchEvent, union-member) -> c-bool; field pbutton (struct SDL_PenButtonEvent, union-member) -> c-bool; field clipboard (struct SDL_ClipboardEvent, union-member) -> c-bool
 record	struct SDL_PathInfo	layout-direct	sdl3::layouts	SDL_PathInfo	sizeof 40, _Alignof 8, 5 fields
-record	struct SDL_GPUViewport	layout-blocked		float	field x: float (float); field y: float (float); field w: float (float); field h: float (float); field min_depth: float (float); field max_depth: float (float)
+record	struct SDL_GPUViewport	layout-direct	sdl3::layouts	SDL_GPUViewport	sizeof 24, _Alignof 4, 6 fields
 record	struct SDL_GPUTextureTransferInfo	layout-direct	sdl3::layouts	SDL_GPUTextureTransferInfo	sizeof 24, _Alignof 8, 4 fields
 record	struct SDL_GPUTransferBufferLocation	layout-direct	sdl3::layouts	SDL_GPUTransferBufferLocation	sizeof 16, _Alignof 8, 2 fields
 record	struct SDL_GPUTextureLocation	layout-direct	sdl3::layouts	SDL_GPUTextureLocation	sizeof 32, _Alignof 8, 6 fields
@@ -4912,7 +4912,7 @@ record	struct SDL_GPUBufferRegion	layout-direct	sdl3::layouts	SDL_GPUBufferRegio
 record	struct SDL_GPUIndirectDrawCommand	layout-direct	sdl3::layouts	SDL_GPUIndirectDrawCommand	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_GPUIndexedIndirectDrawCommand	layout-direct	sdl3::layouts	SDL_GPUIndexedIndirectDrawCommand	sizeof 20, _Alignof 4, 5 fields
 record	struct SDL_GPUIndirectDispatchCommand	layout-direct	sdl3::layouts	SDL_GPUIndirectDispatchCommand	sizeof 12, _Alignof 4, 3 fields
-record	struct SDL_GPUSamplerCreateInfo	layout-blocked		c-bool,float	field mip_lod_bias: float (float); field max_anisotropy: float (float); field min_lod: float (float); field max_lod: float (float); field enable_anisotropy: C _Bool (_Bool); field enable_compare: C _Bool (_Bool)
+record	struct SDL_GPUSamplerCreateInfo	layout-blocked		c-bool	field enable_anisotropy: C _Bool (_Bool); field enable_compare: C _Bool (_Bool)
 record	struct SDL_GPUVertexBufferDescription	layout-direct	sdl3::layouts	SDL_GPUVertexBufferDescription	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_GPUVertexAttribute	layout-direct	sdl3::layouts	SDL_GPUVertexAttribute	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_GPUVertexInputState	layout-direct	sdl3::layouts	SDL_GPUVertexInputState	sizeof 32, _Alignof 8, 4 fields
@@ -4922,16 +4922,16 @@ record	struct SDL_GPUShaderCreateInfo	layout-direct	sdl3::layouts	SDL_GPUShaderC
 record	struct SDL_GPUTextureCreateInfo	layout-direct	sdl3::layouts	SDL_GPUTextureCreateInfo	sizeof 36, _Alignof 4, 9 fields
 record	struct SDL_GPUBufferCreateInfo	layout-direct	sdl3::layouts	SDL_GPUBufferCreateInfo	sizeof 12, _Alignof 4, 3 fields
 record	struct SDL_GPUTransferBufferCreateInfo	layout-direct	sdl3::layouts	SDL_GPUTransferBufferCreateInfo	sizeof 12, _Alignof 4, 3 fields
-record	struct SDL_GPURasterizerState	layout-blocked		c-bool,float	field depth_bias_constant_factor: float (float); field depth_bias_clamp: float (float); field depth_bias_slope_factor: float (float); field enable_depth_bias: C _Bool (_Bool); field enable_depth_clip: C _Bool (_Bool)
+record	struct SDL_GPURasterizerState	layout-blocked		c-bool	field enable_depth_bias: C _Bool (_Bool); field enable_depth_clip: C _Bool (_Bool)
 record	struct SDL_GPUMultisampleState	layout-blocked		c-bool	field enable_mask: C _Bool (_Bool); field enable_alpha_to_coverage: C _Bool (_Bool)
 record	struct SDL_GPUDepthStencilState	layout-blocked		c-bool	field enable_depth_test: C _Bool (_Bool); field enable_depth_write: C _Bool (_Bool); field enable_stencil_test: C _Bool (_Bool)
 record	struct SDL_GPUColorTargetDescription	layout-blocked		nested-layout-blocked	field blend_state (struct SDL_GPUColorTargetBlendState, field) -> c-bool
 record	struct SDL_GPUGraphicsPipelineTargetInfo	layout-blocked		c-bool	field has_depth_stencil_target: C _Bool (_Bool)
-record	struct SDL_GPUGraphicsPipelineCreateInfo	layout-blocked		nested-layout-blocked	field rasterizer_state (struct SDL_GPURasterizerState, field) -> float; field multisample_state (struct SDL_GPUMultisampleState, field) -> c-bool; field depth_stencil_state (struct SDL_GPUDepthStencilState, field) -> c-bool; field target_info (struct SDL_GPUGraphicsPipelineTargetInfo, field) -> c-bool
+record	struct SDL_GPUGraphicsPipelineCreateInfo	layout-blocked		nested-layout-blocked	field rasterizer_state (struct SDL_GPURasterizerState, field) -> c-bool; field multisample_state (struct SDL_GPUMultisampleState, field) -> c-bool; field depth_stencil_state (struct SDL_GPUDepthStencilState, field) -> c-bool; field target_info (struct SDL_GPUGraphicsPipelineTargetInfo, field) -> c-bool
 record	struct SDL_GPUComputePipelineCreateInfo	layout-direct	sdl3::layouts	SDL_GPUComputePipelineCreateInfo	sizeof 72, _Alignof 8, 14 fields
-record	struct SDL_GPUColorTargetInfo	layout-blocked		c-bool,nested-layout-blocked	field cycle: C _Bool (_Bool); field cycle_resolve_texture: C _Bool (_Bool); field clear_color (struct SDL_FColor, field) -> float
-record	struct SDL_GPUDepthStencilTargetInfo	layout-blocked		c-bool,float	field clear_depth: float (float); field cycle: C _Bool (_Bool)
-record	struct SDL_GPUBlitInfo	layout-blocked		c-bool,nested-layout-blocked	field cycle: C _Bool (_Bool); field clear_color (struct SDL_FColor, field) -> float
+record	struct SDL_GPUColorTargetInfo	layout-blocked		c-bool	field cycle: C _Bool (_Bool); field cycle_resolve_texture: C _Bool (_Bool)
+record	struct SDL_GPUDepthStencilTargetInfo	layout-blocked		c-bool	field cycle: C _Bool (_Bool)
+record	struct SDL_GPUBlitInfo	layout-blocked		c-bool	field cycle: C _Bool (_Bool)
 record	struct SDL_GPUBufferBinding	layout-direct	sdl3::layouts	SDL_GPUBufferBinding	sizeof 16, _Alignof 8, 2 fields
 record	struct SDL_GPUTextureSamplerBinding	layout-direct	sdl3::layouts	SDL_GPUTextureSamplerBinding	sizeof 16, _Alignof 8, 2 fields
 record	struct SDL_GPUStorageBufferReadWriteBinding	layout-blocked		c-bool	field cycle: C _Bool (_Bool)
@@ -4951,7 +4951,7 @@ record	struct SDL_MessageBoxButtonData	layout-direct	sdl3::layouts	SDL_MessageBo
 record	struct SDL_MessageBoxColor	layout-direct	sdl3::layouts	SDL_MessageBoxColor	sizeof 3, _Alignof 1, 3 fields
 record	struct SDL_MessageBoxColorScheme	layout-direct	sdl3::layouts	SDL_MessageBoxColorScheme	sizeof 15, _Alignof 1, 1 fields
 record	struct SDL_MessageBoxData	layout-direct	sdl3::layouts	SDL_MessageBoxData	sizeof 56, _Alignof 8, 7 fields
-record	struct SDL_Vertex	layout-blocked		nested-layout-blocked	field position (struct SDL_FPoint, field) -> float; field color (struct SDL_FColor, field) -> float; field position (struct SDL_FPoint, field) -> float
+record	struct SDL_Vertex	layout-direct	sdl3::layouts	SDL_Vertex	sizeof 32, _Alignof 4, 3 fields
 record	struct SDL_Texture	layout-direct	sdl3::layouts	SDL_Texture	sizeof 16, _Alignof 4, 4 fields
 record	struct SDL_GPURenderStateCreateInfo	layout-direct	sdl3::layouts	SDL_GPURenderStateCreateInfo	sizeof 64, _Alignof 8, 8 fields
 record	struct SDL_StorageInterface	layout-direct	sdl3::layouts	SDL_StorageInterface	sizeof 96, _Alignof 8, 12 fields

@@ -5,7 +5,7 @@
 # "Thunks"). Build the shim with `tools/c-bindgen.tcl build`.
 import std::ffi::c
 
-extern c library "botlish_shim_sdl3_b3a26b30"
+extern c library "botlish_shim_sdl3_923ddd74"
 extern c library "SDL3"
 
 # C: static inline _Bool SDL_size_mul_check_overflow(size_t a, size_t b, size_t *ret)

@@ -103,7 +103,7 @@ test loop-in-static-type {loop x in EXPR: BODY has static type List[R], R the bo
 v}]
     set e [lindex [dict get $hir roots] end]
     hir::types::show [hir::typeOf $hir $e]
-} -result {List[int]}
+} -result {List[int]{length: 3}}
 
 # ---------------------------------------------------------------------------
 # Iterable evaluated exactly once (raw core IR, test-tick/test-log's own
@@ -383,6 +383,6 @@ test loop-in-no-break-still-precise {a listloop with no break at all keeps its p
 v}]
     set e [lindex [dict get $hir roots] end]
     hir::types::show [hir::typeOf $hir $e]
-} -result {List[int]}
+} -result {List[int]{length: 3}}
 
 cleanupTests

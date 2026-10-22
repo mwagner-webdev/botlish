@@ -1,7 +1,8 @@
-//! The native-frame GC root walker (x86-64 and AArch64): the runtime half of the
-//! native-stack-map mechanism (see runtime::framemap's own doc for the
-//! compile-time half, and codegen::clif's module doc for what generated
-//! code guarantees this walker relies on).
+//! The native-frame GC root walker (x86-64 and AArch64, on the hosts of
+//! `NATIVE_FRAME_ROOTS`): the runtime half of the native-stack-map mechanism
+//! (see runtime::framemap's own doc for the compile-time half, and
+//! codegen::clif's module doc for what generated code guarantees this walker
+//! relies on).
 //!
 //! # Frame layout this walker assumes
 //!
@@ -93,6 +94,36 @@ use super::framemap::ProgramMap;
 use super::native_stack::NativeStack;
 use super::value::Value;
 
+/// Whether this host's collector finds `RootStorage::NativeFrame` roots by
+/// walking native frames: the one capability that stack-map emission
+/// (codegen::clif's `stack_maps`, and so codegen::roots's plan), root
+/// publication (the fallback plan's `Vm::native_roots_ptr`), the shadow
+/// stack (`Vm::new`), the root report (codegen::roots's `report`) and the
+/// walk itself (`walk`, `walk_from`) all read, so that they always agree.
+///
+/// True on x86-64 and AArch64 Linux (glibc) and macOS, where every frame the
+/// walk climbs keeps the frame-pointer chain this module's header describes:
+/// Cranelift's own, and this crate's Rust frames, built with `-C
+/// force-frame-pointers=yes` for exactly those triples (.cargo/config.toml).
+/// False everywhere else, Windows included: LLVM's Win64 prologue -- both Rust
+/// Windows targets' -- sets the frame pointer *inside* its frame (`sub rsp,
+/// N; lea rbp, [rsp+K]`, the `UWOP_SET_FPREG` form), so `[rbp]` of a Rust
+/// helper's frame is no saved frame pointer, forced frame pointers or not,
+/// and a walk reads garbage: missed roots, wrong results and faults, even in
+/// ordinary runs (WINDOWS-TOOLCHAIN-CENSUS.md, B2). There the fallback plan
+/// holds every root: a function with a Botlish call keeps its roots on the
+/// shadow stack, one without publishes its own frame's through
+/// `Vm::native_roots_ptr`, and no native frame is ever walked
+/// (WINDOWS-X86-64-MILESTONE-1.md, section 3).
+///
+/// The `fallback-roots` feature turns it off on any host, to test the
+/// fallback plan where the whole test suite runs (Cargo.toml).
+pub const NATIVE_FRAME_ROOTS: bool = cfg!(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"),
+    not(feature = "fallback-roots")
+));
+
 /// Defensive cap against a malformed frame-pointer chain. The native
 /// stack bound is the authoritative address range on Linux.
 const MAX_FRAMES: usize = 1 << 22;
@@ -182,8 +213,14 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, visit: impl FnMut(*mu
 /// starts at the frame its stack switch opened. STACK bounds the walk to that
 /// one stack, which is also where its chain ends (a coroutine stack's first
 /// frame record holds a zero frame pointer).
+///
+/// Without `NATIVE_FRAME_ROOTS` it walks nothing: no frame of this host is
+/// walkable, and none holds a root (the fallback plan).
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
+    if !NATIVE_FRAME_ROOTS {
+        return;
+    }
     let mut record = start;
     for _ in 0..MAX_FRAMES {
         if record == 0 || record % 8 != 0 || stack.is_some_and(|s| !s.contains(record, 16)) {
@@ -230,6 +267,35 @@ pub fn walk(_map: &ProgramMap, _stack: Option<&NativeStack>, _visit: impl FnMut(
 mod tests {
     use super::*;
     use crate::runtime::framemap::FunctionMap;
+
+    /// The capability is the hosts': Linux (glibc) and macOS, never Windows.
+    #[test]
+    fn native_frame_roots_are_the_frame_pointer_hosts() {
+        assert_eq!(
+            NATIVE_FRAME_ROOTS,
+            cfg!(all(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"), not(feature = "fallback-roots")))
+        );
+        if cfg!(windows) {
+            assert!(!NATIVE_FRAME_ROOTS);
+        }
+    }
+
+    /// Without the capability the walk never reads a frame: a map whose
+    /// one function claims every return address on this stack, with a root
+    /// at every safepoint, visits nothing.
+    #[test]
+    fn without_the_capability_nothing_is_walked() {
+        let mut map = ProgramMap::new();
+        map.push(FunctionMap { code_start: 0, code_end: usize::MAX, safepoints: vec![] });
+        map.finish();
+        let mut count = 0;
+        walk(&map, None, |_| count += 1);
+        assert_eq!(count, 0);
+        if !NATIVE_FRAME_ROOTS {
+            // A start record that would fault if dereferenced.
+            walk_from(&map, 8, None, |_| panic!("walked a frame without the capability"));
+        }
+    }
 
     /// With an empty map, the walk still ascends this thread's own Rust
     /// call stack (there is always at least this test's own frame, its

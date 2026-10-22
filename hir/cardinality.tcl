@@ -72,6 +72,29 @@ proc hir::cardinality::of_loop {hir e} {
     return [of $hir $e]
 }
 
+# 1 if no break or continue targets the collecting loop E (`exact`, of
+# alone): the same syntactic fact, found in E's own body (a nested
+# function's body cannot target E) rather than in the whole program.
+proc hir::cardinality::Exact {hir e} {
+    set work [hir::children $hir $e]
+    while {$work ne {}} {
+        set work [lassign $work x]
+        set node [dict get $hir exprs $x]
+        switch -- [dict get $node kind] {
+            break - continue {
+                if {[dict get $node target] eq $e} {
+                    return 0
+                }
+            }
+            block {
+                continue
+            }
+        }
+        lappend work {*}[hir::children $hir $x]
+    }
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Iteration-domain cardinality (COLLECTING-LOOPS.md)
 #
@@ -419,6 +442,21 @@ proc hir::cardinality::Capacity {hir e stepsVar} {
 # that requires one -- or a MutableArray a loop walks, whose length is
 # fixed too, or a MutableVector nothing can change (IterationLength), so
 # the length of one is its key's (ValueKey).
+#
+# The exact length a value's static type states (List[T]{length: N},
+# LIST-CARDINALITY-REFINEMENTS.md) is the constant N: the type of the
+# expression the alias chain ends at, or the declared type of the binding it
+# ends at (DefinedLength) -- both describe every value of the key, wherever
+# it is read, so every form of one value agrees. That is the one source of
+# a constant length: a List literal, std::list::append's result and a copy of a
+# fixed array (std::binary::load, std::binary::read: -result-length) state theirs in
+# their types (hir::types::MintLength), so no case here repeats them. What
+# stays here is what no type states: an exact value (hir::exact), and a
+# collecting loop's length symbolic in its domain's (`len` atoms). A
+# refinement only a guard proves of one read (the narrowed static type of a
+# `ref` inside `if std::list::length(xs) == 4:`) is that read's own
+# (TypedLength), which a proof adds beside this form (hir/completions.tcl's
+# sizes), as it adds the size a branch proved (ctx.sizes).
 proc hir::cardinality::ListLength {hir e stepsVar} {
     upvar 1 $stepsVar steps
     set fact [hir::exact::ListOf $hir $e]
@@ -426,6 +464,10 @@ proc hir::cardinality::ListLength {hir e stepsVar} {
         return [FormConst [hir::exact::Length $fact]]
     }
     lassign [Chase $hir $e steps] kind id
+    set n [DefinedLength $hir $kind $id]
+    if {$n ne ""} {
+        return [FormConst $n]
+    }
     if {$kind eq "binding"} {
         return [FormAtom [list len [list b $id]]]
     }
@@ -438,32 +480,58 @@ proc hir::cardinality::ListLength {hir e stepsVar} {
             }
         }
     }
-    set name [NativeName $hir $node]
-    if {$name eq "list"} {
-        return [FormConst [llength [dict get $node args]]]
-    }
-    # A List copied from a live fixed array has the array's extent, which
-    # its static type states (-result-length {extent K}: std::binary::load of a
-    # NativeView[array N of E], FIXED-LAYOUT-ARRAYS.md).
-    if {$name ne ""} {
-        set length [dict get [core::native::metadata $name] resultLength]
-        set args [dict get $node args]
-        if {[lindex $length 0] eq "extent" && [lindex $length 1] < [llength $args]} {
-            set term [hir::layouts::OfArrayType [hir::typeOf $hir [lindex $args [lindex $length 1]]]]
-            if {$term ne "" && [string is entier -strict [lindex $term 1]]} {
-                return [FormConst [lindex $term 1]]
-            }
-        }
-        # A List read from bytes through a designator of a fixed array has
-        # its extent (-result-length {path K}: std::binary::read, LAYOUT-UNIONS.md).
-        if {[lindex $length 0] eq "path" && [lindex $length 1] < [llength $args]} {
-            set repr [hir::layouts::PathField [hir::layouts::ConstText $hir [lindex $args [lindex $length 1]]]]
-            if {$repr ne "" && [dict get $repr kind] eq "array"} {
-                return [FormConst [dict get $repr extent]]
-            }
-        }
-    }
     return [FormAtom [list len [ValueKey $hir $id steps]]]
+}
+
+# The exact length every value of what an alias chain ends at (Chase's KIND
+# and ID) has by its type, or "": an expression whose static type states it,
+# a parameter whose declared (or trusted inferred) type does
+# (hir::signatures::entryTypes), a loop variable over a List whose element
+# type does. A value's static type is a fact of every value it describes
+# (hir/types.tcl), and a declared parameter type of every argument the
+# function is ever called with (hir::range::VerifyCall admits none other).
+proc hir::cardinality::DefinedLength {hir kind id} {
+    if {$kind eq "expr"} {
+        return [hir::types::LengthOf [hir::typeOf $hir $id]]
+    }
+    set binding [dict get $hir bindings $id]
+    if {[dict get $binding kind] ne "param"} {
+        return ""
+    }
+    set scope [dict get $hir scopes [dict get $binding scope]]
+    set owner [dict get $scope owner]
+    if {$owner eq "" || ![dict exists $hir exprs $owner]} {
+        return ""
+    }
+    set node [dict get $hir exprs $owner]
+    switch -- [dict get $node kind] {
+        block {
+            set index [lsearch -exact [dict get $node params] $id]
+            if {$index < 0} {
+                return ""
+            }
+            return [hir::types::LengthOf [lindex [hir::signatures::entryTypes $hir $owner] $index]]
+        }
+        listloop {
+            if {[dict get $node elementBinding] eq $id} {
+                return [hir::types::LengthOf [hir::types::elementOf [hir::typeOf $hir [dict get $node iterable]]]]
+            }
+        }
+        lockloop {
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list" && [dict get $domain binding] eq $id} {
+                    return [hir::types::LengthOf [hir::types::elementOf [hir::typeOf $hir [dict get $domain iterable]]]]
+                }
+            }
+        }
+    }
+    return ""
+}
+
+# The exact length the static type of the read E itself states -- a guard's
+# refinement of one `ref` included (hir/refine.tcl) -- or "".
+proc hir::cardinality::TypedLength {hir e} {
+    return [hir::types::LengthOf [hir::typeOf $hir $e]]
 }
 
 # The number of elements the list domain over the iterable expression E

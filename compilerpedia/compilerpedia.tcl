@@ -38,7 +38,7 @@
 #   @example accept|reject        an executable example, its code lines, then
 #   @DIRECTIVE ...                  directives (@value, @warn, @nowarn,
 #   @end                            @quiet, @backends, @output, @error, @at,
-#                                   @message, @caption) and @end
+#                                   @message, @caption, @target) and @end
 #
 # Lines before a file's first @topic are its header comment; after it, a
 # line starting with "#" (outside an example) is a comment.
@@ -77,7 +77,7 @@ namespace eval compilerpedia {
         title line summary line index words related words docs words symbol words
         alias phrases keywords phrases code lines match lines
     }
-    variable exampleDirectives {value warn nowarn quiet backends output error at message caption}
+    variable exampleDirectives {value warn nowarn quiet backends output error at message caption target}
 }
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ namespace eval compilerpedia {
 # code match body examples}: BODY a list of {heading ITEMS} sections (each
 # item {text LINE} or {example N}), EXAMPLES a list of example dicts
 # {id kind lines value warn nowarn quiet backends output error at message
-# caption line}.
+# caption target line}.
 proc compilerpedia::parse {text file} {
     variable keys
     variable exampleDirectives
@@ -154,7 +154,7 @@ proc compilerpedia::parse {text file} {
             if {[regexp {^@example\s+(accept|reject)\s*$} $line -> kind]} {
                 set example [dict create id "[dict get $topic id]#[expr {[llength [dict get $topic examples]] + 1}]" \
                     kind $kind lines {} value "" warn {} nowarn {} quiet 0 backends {interp compile} \
-                    output {} error "" at "" message "" caption "" line $number]
+                    output {} error "" at "" message "" caption "" target "" line $number]
                 set state example
                 continue
             }
@@ -953,6 +953,9 @@ proc compilerpedia::RenderExample {example} {
         set where [expr {[dict get $example at] ne "" ? " at [dict get $example at]" : ""}]
         lappend notes "[dict get $example error]$where"
     }
+    if {[dict get $example target] ne ""} {
+        lappend notes "for [dict get $example target]"
+    }
     set head "$label[if {$notes ne ""} {string cat " ([join $notes {; }])"} else {string cat ""}]"
     if {[dict get $example caption] ne ""} {
         append head " -- [dict get $example caption]"
@@ -1040,12 +1043,17 @@ proc compilerpedia::renderOverview {} {
 }
 
 # How this compiler is invoked, as the help names it: the single
-# executable's own name, or tclsh9.0 main.tcl in a checkout.
+# executable's own name, or tclsh9.0 main.tcl in a checkout -- as typed, so
+# without the .exe Windows finds by itself (main.tcl's cliInvocation).
 proc compilerpedia::Invocation {} {
-    if {[info exists ::single::app]} {
-        return [file tail [info nameofexecutable]]
+    set name [file tail [info nameofexecutable]]
+    if {$::tcl_platform(platform) eq "windows" && [string equal -nocase [file extension $name] .exe]} {
+        set name [file rootname $name]
     }
-    return "[file tail [info nameofexecutable]] main.tcl"
+    if {[info exists ::single::app]} {
+        return $name
+    }
+    return "$name main.tcl"
 }
 
 # ---------------------------------------------------------------------------

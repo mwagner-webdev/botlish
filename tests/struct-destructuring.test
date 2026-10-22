@@ -1936,7 +1936,7 @@ proc executableValue {text} {
     close $channel
     try {
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        return [exec env PATH= [file rootname $path]]
+        return [runStandalone [file rootname $path]]
     } finally {
         removeDirectory {destructuring executable}
     }
