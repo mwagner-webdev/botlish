@@ -815,9 +815,14 @@ Tcl originals, the Rust tests, the stub-linked executables, the warning
 gate, the method-call filter audit; its GC-stress job runs on main only)
 and tests-arm64.yml run
 [39743684422](https://github.com/mwagner-webdev/botlish/actions/runs/39743684422)
-AARCH64_GC. Main had moved four commits meanwhile (c011e55: workflow path
+green in every job, its GC-stress run of the whole suite
+included. Main had moved four commits meanwhile (c011e55: workflow path
 filters, the README, the Icy Tower CI); merged again (fa3eb8c), they change
 no code, and the two workflows this milestone also edits merged cleanly.
+On that final tree (81f5444) Windows run
+[39763123734](https://github.com/mwagner-webdev/botlish/actions/runs/39763123734)
+was green; its macOS run (39763123717) was still running when main took
+the merge -- the same code as macOS run 39743665357's.
 
 ## 8. Remaining limitations
 
