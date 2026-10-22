@@ -189,7 +189,13 @@ foreach {name description hosts edits} [readMutants [file join [file dirname [fi
 # the native backend, its native/target a real copy (each mutant rebuilds
 # it), following a linked target: a copied link would build every mutant
 # into another checkout.
-set tree [file tempdir botlish-windows-unwind-mutants]
+# On a CI runner, under its own temporary directory: a shorter path than
+# the user profile's, for Windows' build tools.
+if {[info exists ::env(RUNNER_TEMP)]} {
+    set tree [file tempdir [file join $::env(RUNNER_TEMP) wum]]
+} else {
+    set tree [file tempdir botlish-windows-unwind-mutants]
+}
 foreach dir {compiler core hir surface lib tests examples bench audit .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file copy [file join $root $dir] [file join $tree $dir]
@@ -250,6 +256,9 @@ try {
         if {$status != 0} {
             lappend results [list $name $description NOT-BUILT ""]
             puts "NOT-BUILT $name: [lastLine $output]"
+            foreach line [lrange [split [string trim $output] \n] end-11 end] {
+                puts "    $line"
+            }
             eval $restore
             continue
         }
