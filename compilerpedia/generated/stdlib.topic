@@ -8970,7 +8970,7 @@ summary: The structural hash of any value that has equality, an Int in 0..2^61-1
 index: stdlib
 symbol: hash
 keywords: hash code; hashing; hash table; bucket; fingerprint
-related: stdlib.module.root stdlib.== stdlib.mod concept.values
+related: stdlib.module.root stdlib.== stdlib.mod concept.values concept.hashable
 
 == SIGNATURE
     hash(any) -> int
@@ -8986,14 +8986,22 @@ hash(v) is a language primitive, exactly as general as ==: Ints, Strings,
 Bools, unit, characters, Lists, structs, enum cases, ImmutableSets and
 byte storage all hash, and two values that are == hash to the same Int.
 The result is nonnegative and below 2^61, so hash(key).mod(capacity) is a
-valid table slot.
+valid table slot. It is also the one operation of the built-in trait
+Hashable (concept.hashable): `x.hash()` on a Hashable value.
 
 The value is deterministic: the same on every backend, in every run and
 every process, with no random seed. It is not promised across compiler
 versions, and it is not cryptographic: never persist it or use it for
-security. A function, MutableArray or MutableVector has no hash (the
-EQUALITY error when the call runs), and an affine value is rejected at
-compile time (AFFINE-EQUALITY-UNSUPPORTED).
+security, and do not rely on it against keys an adversary chooses (the
+standard library's hash structures use a separate, collision-hardened hash
+for that, which no program sees).
+
+A function, MutableArray or MutableVector has no hash. Where the argument's
+type shows it is not Hashable (a function, a struct with a function field)
+the call is rejected at compile time (TRAIT-NOT-SATISFIED); an argument of
+unknown type (an untyped parameter) is checked when the call runs (the
+EQUALITY error); an affine value is rejected at compile time
+(AFFINE-EQUALITY-UNSUPPORTED). The hash of a Hashable value never fails.
 
 == EXAMPLES
 @example accept

@@ -34,6 +34,13 @@ pub enum OpCode {
     IGe,
     IEq,
     VEq,
+    /// VEq at a call site native/lower.tcl's `NativeCallOp` (`equality`) has
+    /// proven equality-total: both operands' static types are
+    /// `hir::types::IsEqualityTotal` (HASHABLE-AND-KEYED-HASH.md, "Total
+    /// lowering"), so `equal` can never refuse a kind. The same helper
+    /// (`rt_value_eq`) and the same inline fast path as VEq; only the
+    /// NO_VALUE check and the `may_error` effect are gone.
+    VEqTotal,
     StrEq,
     /// `==` of two operands statically UnicodeChar (native/lower.tcl's
     /// NativeCallOp): word equality of the two immediates; never fails.
@@ -193,6 +200,18 @@ pub enum OpCode {
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
     /// header and ops.rs's `rt_hash`.
     Hash,
+    /// Hash at a call site whose operand native/lower.tcl's `NativeCallOp`
+    /// (`hashing`) has proven Hashable (`hir::types::IsHashable`): the same
+    /// helper (`rt_hash`), which can never refuse such a value, so no
+    /// NO_VALUE check and no `may_error` (HASHABLE-AND-KEYED-HASH.md).
+    HashTotal,
+    /// The private table hash (core/hashing.tcl's tableHash, ops.rs's
+    /// rt_table_hash): SipHash-1-3 of the operand's canonical input under the
+    /// runtime's process key, masked to 61 bits. The dynamically dispatched
+    /// entry (`impl=`) only: a call the compiler admitted is TableHashTotal.
+    TableHash,
+    /// TableHash of an operand proven Hashable: never fails.
+    TableHashTotal,
     /// Validates a StringRegion's bounds (base String, start, end: character
     /// indices) exactly as `Substr` would, without allocating or copying:
     /// UNIT on success, RANGE on failure. Emitted once, at the point in
@@ -758,6 +777,7 @@ op_spellings! {
     "ige" => IGe,
     "ieq" => IEq,
     "veq" => VEq,
+    "veqtotal" => VEqTotal,
     "streq" => StrEq,
     "chareq" => CharEq,
     "enumeq" => EnumEq,
@@ -833,6 +853,9 @@ op_spellings! {
     "mkok" => MkOk,
     "mkerror" => MkError,
     "hash" => Hash,
+    "hashtotal" => HashTotal,
+    "tablehash" => TableHash,
+    "tablehashtotal" => TableHashTotal,
     "regioncheck" => RegionCheck,
     "regioneq" => RegionEq,
     "decodecharat" => DecodeCharAt,
@@ -1002,7 +1025,7 @@ impl OpCode {
             Argv | CPtrNull => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
-            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox | CWBox
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | D64Neg
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen

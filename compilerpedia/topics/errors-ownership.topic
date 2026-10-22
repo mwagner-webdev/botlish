@@ -2173,8 +2173,8 @@ summary: A value passed to (or returned as) a trait type does not satisfy it: it
 index: errors
 alias: type does not implement the trait; missing trait implementation
 keywords: trait, satisfy, conformance, implementation, owner namespace, witness, requirement, signature
-related: concept.traits concept.modules error.trait-unknown-operation error.trait-view-misuse error.type
-docs: TRAITS.md
+related: concept.traits concept.hashable concept.modules error.trait-unknown-operation error.trait-view-misuse error.type
+docs: TRAITS.md HASHABLE-AND-KEYED-HASH.md
 code: CORE SEMANTIC TRAIT-NOT-SATISFIED
 
 == MEANING
@@ -2190,6 +2190,13 @@ what was required and what was found.
 Types with no owner satisfy nothing: `int`, `bool`, `any`, a List or
 other applied type, a function. A view of one trait is not accepted as
 another trait.
+
+The built-in trait Hashable (concept.hashable) is satisfied differently:
+the language supplies its witnesses -- every type whose values all have
+total equality and a hash, `int`, Lists and structs of such types
+included -- and the message names the field or element that is not
+Hashable (a function has no total equality). The argument of `hash` is
+held to it too when its type shows it is not Hashable.
 
 == LIKELY CAUSES
   * no implementation, or one with a different parameter or result type;

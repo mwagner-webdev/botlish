@@ -254,6 +254,13 @@ proc native::RunDriver {output command nirText arguments} {
     foreach dir $linkDirs {
         lappend args --link-dir $dir
     }
+    if {$command in {run bench batch} && $::core::hashing::tableKeyOverride ne ""} {
+        # A test harness fixed the private table hash's key
+        # (core::hashing::useTableHashKey): the same key for this run, so
+        # every backend computes the same keyed hashes. Never set in
+        # production, where the driver draws its own.
+        lappend args --table-hash-key [format %016llx%016llx {*}$::core::hashing::tableKeyOverride]
+    }
     set binary [binary]
     incr runs
     lassign [file tempfile path botlish.nir] channel

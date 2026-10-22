@@ -1237,7 +1237,7 @@ test me-nomethod-lowers-to-a-marked-block {the lowered syntax marks the block, n
 
 # The builtin registry carries the flag too.
 
-test me-nomethod-native-default-off {exactly the five natives the warning-driven refactor marked are nomethod (REFACTOR-WARNINGS-CLEAN.md, P1), and the binary-layout operations whose first argument is a static layout operand, never a receiver value, or that are internal (binary::parse, the layout queries, binary#emit: BINARY-LAYOUT.md; binary::native::view, binary#load, binary#view_field: NATIVE-LAYOUT-VIEWS.md; binary::native::edit, binary::store, binary::write, binary::write_foreign, whose field operand is static: NATIVE-LAYOUT-WRITES.md; binary::element, binary::store_element and their elaborated forms with binary#load_array, which take a live array and an index like the other native-memory operations: FIXED-LAYOUT-ARRAYS.md; binary::read, whose field operand is static: LAYOUT-UNIONS.md); every other shipped native takes method syntax} -body {
+test me-nomethod-native-default-off {exactly the five natives the warning-driven refactor marked are nomethod (REFACTOR-WARNINGS-CLEAN.md, P1), and the binary-layout operations whose first argument is a static layout operand, never a receiver value, or that are internal (binary::parse, the layout queries, binary#emit: BINARY-LAYOUT.md; binary::native::view, binary#load, binary#view_field: NATIVE-LAYOUT-VIEWS.md; binary::native::edit, binary::store, binary::write, binary::write_foreign, whose field operand is static: NATIVE-LAYOUT-WRITES.md; binary::element, binary::store_element and their elaborated forms with binary#load_array, which take a live array and an index like the other native-memory operations: FIXED-LAYOUT-ARRAYS.md; binary::read, whose field operand is static: LAYOUT-UNIONS.md), and the private table hash, internal to the standard library, whose name says nothing as a method (table_hash::of: HASHABLE-AND-KEYED-HASH.md); every other shipped native takes method syntax} -body {
     set marked {}
     foreach name [core::native::names] {
         if {[dict get [core::native::metadata $name] nomethod]} {
@@ -1245,7 +1245,7 @@ test me-nomethod-native-default-off {exactly the five natives the warning-driven
         }
     }
     lsort $marked
-} -result {binary#element binary#emit binary#load binary#load_array binary#store_element binary#view_field binary::element binary::layout_alignment binary::layout_length binary::native::edit binary::native::view binary::parse binary::read binary::store binary::store_element binary::write binary::write_foreign bit_and bit_or bit_xor mutable_array::copy mutable_array::create}
+} -result {binary#element binary#emit binary#load binary#load_array binary#store_element binary#view_field binary::element binary::layout_alignment binary::layout_length binary::native::edit binary::native::view binary::parse binary::read binary::store binary::store_element binary::write binary::write_foreign bit_and bit_or bit_xor mutable_array::copy mutable_array::create table_hash::of}
 
 # The shipped markings (REFACTOR-WARNINGS-CLEAN.md, P1), one test per marked
 # function: the receiver form is NOMETHOD-CALL with the pinned message, the

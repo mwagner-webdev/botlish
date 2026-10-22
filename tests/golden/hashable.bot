@@ -1,0 +1,206 @@
+# hashable.bot -- the intrinsic trait Hashable and the public hash's
+# admission, as source can observe them (HASHABLE-AND-KEYED-HASH.md; the Tcl
+# originals are tests/hashable.test's):
+#
+#   * the public hash's values, byte for byte the ones it had before the
+#     milestone, at every kind and representation edge;
+#   * Hashable as an ordinary trait: a parameter of every witness kind, its
+#     operation `x.hash()`, a returned view keeping its witness, equality
+#     through it, a generic body's hash of another trait's view staying the
+#     dynamic hash;
+#   * the witnesses: no function, no struct or List holding one, no `any`,
+#     no MutableArray or MutableVector, no C pointer (the ownership
+#     discipline reports an affine one) -- TraitNotSatisfied at the
+#     boundary;
+#
+# The public hash's admission of a value that is not Hashable, the total
+# lowerings' values and the internal namespace are hashable-admission.bot's
+# (a program without the trait, so its static decisions batch).
+#
+# The struct, enum and helper names are the pinned corpus's (P, Q, Name,
+# Color): a struct's or an enum's identity is part of its hash.
+import abi
+import abi::bytes
+import compiler
+import ffi::c
+import immutable_set
+import mutable_array
+import mutable_vector
+import str
+import test
+
+struct P:
+    x: int
+    y: int
+
+enum Color:
+    Red,
+    Green,
+    Blue,
+
+struct Q:
+    a: P
+    b: str
+    c: Color
+
+struct Name:
+    first: str
+    last: str
+
+struct Holder:
+    n: int
+    f: Fn{args: [int], return: int}
+
+struct Outer:
+    inner: Holder
+
+trait Named:
+    fn name(value: Named) -> str
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn twice(n: int) -> int:
+    n * 2
+
+fn mk(s: str):
+    abi::bytes::from_list(str::encode_utf8(s))
+
+fn hashes(xs):
+    loop x in xs:
+        hash(x)
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn operation(x: Hashable) -> int:
+    x.hash()
+
+fn keep(x: Hashable) -> Hashable:
+    x
+
+fn same(a: Hashable, b: Hashable) -> bool:
+    a == b
+
+fn digest(v: Named) -> int:
+    hash(v)
+
+fn register_public_hash_tests():
+    fn b_pinned() errors compiler::CompilerError:
+        static compile:
+            small = [0, 1, -1, 7, 9, 10, -10, 99, 100, -100, 123456789, 999999999999999999, 1000000000000000000, -1000000000000000000, 2305843009213693951, 2305843009213693952, -2305843009213693952, 4611686018427387903, -4611686018427387904]
+            big = [4611686018427387904, -4611686018427387905, 9223372036854775807, 9223372036854775808, -9223372036854775808, -9223372036854775809, 9999999999999999999, 10000000000000000000, 18446744073709551615, 18446744073709551616, -18446744073709551616, 100000000000000000005, 1208925819614629174706176, 340282366920938463463374607431768211455, 340282366920938463463374607431768211456, -340282366920938463463374607431768211456, 100000000000000000000000000000000000007, 123456789012345678901234567890123456789012345678901234567890]
+            computed = [shift_left(1, 61) - 1, shift_left(1, 62) - 1, shift_left(1, 62), 0 - shift_left(1, 62), 0 - shift_left(1, 62) - 1, shift_left(1, 63), shift_left(1, 64) - 1, shift_left(1, 127), shift_left(1, 128) - 1, shift_left(1, 128), 0 - shift_left(1, 200)]
+            chars = ['a', 'Z', '0', ' ', 'é', '☃', '🙂', '􏿿']
+            strs = ["", "a", "1", "-1", "héllo ☃", "🙂 quick brown fox", "the quick brown fox jumps over the lazy dog, then again and again and again"]
+            others = [true, false, unit, [], [1, 2], [2, 1], [[1], ["a", 'b']], [-7, 'x', 4611686018427387904], [[]], [[], []], [unit]]
+            floats = [0.0, 1.0, 1.5, -1.5, 2.5, 0.1, 1000000.25, -0.001, 123456.789]
+            structs = [P {x: 1, y: 2}, P {x: -1, y: 4611686018427387903}, P {x: 4611686018427387904, y: 0}, Q {a: P {x: 3, y: 4}, b: "s", c: Color::Green}, {x: 1, y: "a"}, {y: "a", x: 1}, {}, {p: P {x: 1, y: 2}, e: Color::Red}, {q: Q {a: P {x: 0, y: 0}, b: "", c: Color::Red}, l: [P {x: 5, y: 6}, 'c']}, [P {x: 1, y: 2}, Color::Red], Color::Red, Color::Green, Color::Blue, Name {first: "Ada", last: "Lovelace"}, {first: "Ada", last: "Lovelace"}]
+            stores = [mk(""), mk("AB"), mk("héllo"), abi::bytes::from_bytes(mk("k1")), abi::bytes::zeroed(abi::Usize {value: 3}), immutable_set::from_list([1, 2, 3]), immutable_set::from_list([3, 2, 1]), immutable_set::from_list([P {x: 1, y: 2}, 'q', "s", 4611686018427387904]), immutable_set::from_list([])]
+            [hashes(small), hashes(big), hashes(computed), hashes(chars), hashes(strs), hashes(others), hashes(floats), hashes(structs), hashes(stores)]
+    test::value("hb-public-hash-pinned", [[590701660006484765, 590700560494856554, 1841256570420575205, 590693963425087288, 590691764401830866, 1837464354815632366, 1232241922609654511, 1829856833861554257, 1071077706910118458, 937610149661694189, 1126012111659584930, 688401425616871681, 676432798871476410, 907240050157444141, 175261749706404696, 175265048241289329, 139588933943155570, 623792353967692727, 391732480576983117], [623789055432808094, 391731381065354906, 2225555181428685637, 2225556280940313848, 707785774613091011, 707784675101462800, 2298452577807004200, 2007587621811679870, 416805031419869078, 416803931908240867, 1994653631623632162, 427091923338802545, 999613055982882793, 502245503115030836, 502248801649915469, 1353579516241496858, 2030847885960056155, 877126669977568183], [175261749706404696, 623792353967692727, 623789055432808094, 391732480576983117, 391731381065354906, 2225556280940313848, 416805031419869078, 1806367023798207000, 502245503115030836, 502248801649915469, 188015491597053100], [520338485003615157, 520330788422217680, 532739876655747101, 529788787446196452, 2169672265349400239, 601159812241541785, 1062334392747540938, 1345164029743383199], [1108936970115069484, 589763776587810007, 589711000029655879, 1157781450803295718, 161697780529065798, 1807445379848190912, 750001533518624772], [592596118541513868, 592597218053142079, 1108939169138325906, 1755045699346780531, 209653597448554385, 911644047884110197, 1475817003125096609, 1913505980942695101, 1110203966925749856, 405226008021937533, 441613374959686544], [1418026610602017291, 1616938159710682290, 1624678721571773930, 1624819459060184938, 1421923279811640175, 1570175326880950354, 6271737828421670, 60061494136369881, 977552786646800065], [40759426256795460, 372398025987676, 1750116610682253287, 1979528161859881862, 1616162032485106622, 1616162032485106622, 96595561622788695, 264212334118064381, 1503248951382783807, 2244796678099108584, 190789444800304525, 729460995536187665, 1446266572572458142, 2100847374582763991, 385120668595605514], [1190028771226210786, 2248776705808866443, 405943855183386752, 56799662987439511, 2233955353718004115, 1057024671619750778, 1057024671619750778, 1137679504874620389, 104850625164932166]], b_pinned)
+
+fn register_trait_tests():
+    fn b_argument() errors compiler::CompilerError:
+        static compile:
+            [fingerprint(7) == hash(7), fingerprint("apple") == hash("apple"), fingerprint(true) == hash(true), fingerprint(unit) == hash(unit), fingerprint('é') == hash('é'), fingerprint(1.5) == hash(1.5), fingerprint(Color::Red) == hash(Color::Red), fingerprint(P {x: 1, y: 2}) == hash(P {x: 1, y: 2}), fingerprint(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Green}) == hash(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Green}), fingerprint([1, 2]) == hash([1, 2]), fingerprint([[1], [2, 3]]) == hash([[1], [2, 3]]), fingerprint(immutable_set::from_list([1, 2])) == hash(immutable_set::from_list([2, 1])), fingerprint({a: 1, b: "x2"}) == hash({b: "x2", a: 1}), fingerprint([]) == hash([]), fingerprint(4611686018427387904) == hash(4611686018427387904)]
+    test::value("hb-trait-argument", [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true], b_argument)
+
+    fn b_operation() errors compiler::CompilerError:
+        static compile:
+            [operation(P {x: 1, y: 2}) == hash(P {x: 1, y: 2}), operation(3) == hash(3)]
+    test::value("hb-trait-operation/value", [true, true], b_operation)
+
+    fn b_provenance() errors compiler::CompilerError:
+        static compile:
+            v = keep(P {x: 4, y: 5})
+            [operation(v) == hash(P {x: 4, y: 5}), operation(keep(keep("k"))) == hash("k")]
+    test::value("hb-trait-provenance", [true, true], b_provenance)
+
+    fn b_equality() errors compiler::CompilerError:
+        static compile:
+            [same(P {x: 1, y: 2}, P {x: 1, y: 2}), same(P {x: 1, y: 2}, P {x: 1, y: 3}), same(1, "1"), same([1], [1])]
+    test::value("hb-trait-equality", [true, false, false, true], b_equality)
+
+    fn b_not_duck_typed() errors compiler::CompilerError:
+        static compile:
+            digest(Person {value: "Ada"}) == hash(Person {value: "Ada"})
+    test::value("hb-hash-generic-body-not-duck-typed", true, b_not_duck_typed)
+
+# One Hashable function per rejected block: their static decisions share no
+# instance, so they are decided together.
+fn digest_callable(x: Hashable) -> int:
+    hash(x)
+
+fn digest_struct_callable(x: Hashable) -> int:
+    hash(x)
+
+fn digest_list_callables(x: Hashable) -> int:
+    hash(x)
+
+fn digest_nested_callable(x: Hashable) -> int:
+    hash(x)
+
+fn digest_any(x: Hashable) -> int:
+    hash(x)
+
+fn digest_array(x: Hashable) -> int:
+    hash(x)
+
+fn digest_vector(x: Hashable) -> int:
+    hash(x)
+
+fn digest_pointer(x: Hashable) -> int:
+    hash(x)
+
+fn register_witness_tests():
+    fn b_callable() errors compiler::CompilerError:
+        static compile:
+            digest_callable(twice)
+    test::rejects_containing("hb-callable-not-hashable", compiler::DiagnosticCode::TraitNotSatisfied, "a function has no total equality", b_callable)
+
+    fn b_struct_callable() errors compiler::CompilerError:
+        static compile:
+            digest_struct_callable(Holder {n: 1, f: twice})
+    test::rejects_containing("hb-struct-with-callable-not-hashable", compiler::DiagnosticCode::TraitNotSatisfied, "field \"f\" of Holder", b_struct_callable)
+
+    fn b_list_callables() errors compiler::CompilerError:
+        static compile:
+            digest_list_callables([twice])
+    test::rejects("hb-list-of-callables-not-hashable/list", compiler::DiagnosticCode::TraitNotSatisfied, b_list_callables)
+
+    fn b_nested_callable() errors compiler::CompilerError:
+        static compile:
+            digest_nested_callable(Outer {inner: Holder {n: 1, f: twice}})
+    test::rejects("hb-list-of-callables-not-hashable/nested", compiler::DiagnosticCode::TraitNotSatisfied, b_nested_callable)
+
+    fn b_any(x) errors compiler::CompilerError:
+        static compile:
+            digest_any(x)
+    fn b_any_call() errors compiler::CompilerError:
+        b_any(1)
+    test::rejects_containing("hb-any-not-hashable", compiler::DiagnosticCode::TraitNotSatisfied, "any does not satisfy Hashable", b_any_call)
+
+    fn b_array() errors compiler::CompilerError:
+        static compile:
+            digest_array(mutable_array::create(2, 0))
+    test::rejects("hb-authority-not-hashable/array", compiler::DiagnosticCode::TraitNotSatisfied, b_array)
+
+    fn b_vector() errors compiler::CompilerError:
+        static compile:
+            digest_vector(mutable_vector::from_list([1]))
+    test::rejects("hb-authority-not-hashable/vector", compiler::DiagnosticCode::TraitNotSatisfied, b_vector)
+
+    fn b_pointer() errors compiler::CompilerError:
+        static compile:
+            digest_pointer(ffi::c::null[ffi::c::Int]())
+    test::rejects("hb-authority-not-hashable/pointer", compiler::DiagnosticCode::TraitNotSatisfied, b_pointer)
+
+with context test::suite()
+register_public_hash_tests()
+register_trait_tests()
+register_witness_tests()
+test::report()

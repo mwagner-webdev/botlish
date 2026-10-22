@@ -59,6 +59,15 @@
 //! its standard output and error are this driver's own. `batch` and
 //! `--alloc` do not run one.
 //!
+//! `--table-hash-key HEX` (anywhere on the line; 32 hexadecimal digits, the
+//! two 64-bit key words K0 then K1) fixes the key of the private table hash
+//! (HASHABLE-AND-KEYED-HASH.md) for this run instead of the one the runtime
+//! draws from the system's random source: test harnesses only
+//! (core::hashing::useTableHashKey, which native::RunDriver forwards), so
+//! exact keyed hashes can be compared with an independent implementation.
+//! Nothing in a program can set or read the key; a standalone executable has
+//! no such option and always draws its own.
+//!
 //! `--result PATH` (anywhere on the line, any command) writes the output
 //! lines below to PATH instead of standard output, which `run` then leaves
 //! to the program alone: what it writes there (io::print_line, raw
@@ -249,6 +258,30 @@ fn extract_argv(args: &[String]) -> Option<(Vec<String>, Option<Vec<Vec<u8>>>)> 
     Some((out, snapshot))
 }
 
+/// Pulls "--table-hash-key HEX" out of ARGS (anywhere) and fixes the table
+/// hash's key: the remaining arguments in order. None if the value is not
+/// 32 hexadecimal digits.
+fn extract_table_hash_key(args: &[String]) -> Option<Vec<String>> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--table-hash-key" {
+            let hex = args.get(i + 1)?;
+            if hex.len() != 32 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            let k0 = u64::from_str_radix(&hex[..16], 16).ok()?;
+            let k1 = u64::from_str_radix(&hex[16..], 16).ok()?;
+            runtime::ops::set_table_hash_key(k0, k1).ok()?;
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Some(out)
+}
+
 /// Pulls every "--link-dir DIR" out of ARGS (anywhere): the remaining
 /// arguments in order, and the directories. None if one has no value.
 fn extract_link_dirs(args: &[String]) -> Option<(Vec<String>, Vec<String>)> {
@@ -272,7 +305,8 @@ fn cli(args: &[String]) -> i32 {
         eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
         2
     };
-    let Some((args, link_dirs)) = extract_link_dirs(args) else { return usage() };
+    let Some(args) = extract_table_hash_key(args) else { return usage() };
+    let Some((args, link_dirs)) = extract_link_dirs(&args) else { return usage() };
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];

@@ -274,7 +274,7 @@ proc hir::enums::apply {decls} {
         }
         if {$name in {Int any never Fn Coroutine enum} || [core::type::isBuiltinName $name]
                 || [core::type::valid $id] || [dict exists $::hir::types::constructors $name]
-                || [core::native::isBuiltinEnum $name]} {
+                || [core::native::isBuiltinEnum $name] || [hir::traits::isIntrinsicName $name]} {
             Fail [dict get $decl nameSpan] "\"$name\" cannot be declared as an enum: the name is already a built-in or declared type"
         }
         if {[dict exists $registry $id]} {

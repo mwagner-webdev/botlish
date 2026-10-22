@@ -1,0 +1,917 @@
+# hashable.test -- the intrinsic trait Hashable, total hashing and equality,
+# and the private collision-hardened table hash (HASHABLE-AND-KEYED-HASH.md).
+#
+# Behavioral checks run on every backend (interp, compile, cranelift-generic,
+# cranelift) through one HIR (sourceAgree, keyedAgree). The keyed hash is
+# reached as the standard library reaches it: a module of a private copy of
+# lib/ (withPrivateLibrary) imports the internal namespace table_hash. Exact
+# keyed values are compared, under a fixed test key (core::hashing::
+# useTableHashKey, which native::RunDriver forwards to the driver), with
+# audit/hashable/tools/oracle.py, an independent implementation; the
+# production key is only ever checked for its laws.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# A python3 that runs (an executable alias that only opens an installer is
+# none).
+testConstraint python3 [expr {[auto_execok python3] ne ""
+    && ![catch {exec python3 -I -c {print(6 * 7)}} answer] && $answer eq "42"}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+set ::hbBackends {interp compile cranelift-generic cranelift}
+set ::hbKey {1311768467750121216 18364758544493064720}
+
+# The privileged fixture: a standard library module that may call the
+# private table hash, as the standard library's hash structures will.
+set ::hbFixture {import table_hash
+
+fn keyed(x: Hashable) -> int:
+    table_hash::of(x)
+}
+
+proc hbWriteModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+# The kind and location-free message of the first diagnostic of SOURCE's
+# compile rejection (with the library modules FILES), or "accepted": the
+# first entry of -diagnostics, never the first line of the message
+# (DIAGNOSTIC-RECOVERY.md).
+proc hbRejection {source {files {}}} {
+    withPrivateLibrary {
+        hbWriteModules $files
+        if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+            if {[dict exists $options -diagnostics]} {
+                set first [lindex [dict get $options -diagnostics] 0]
+                set message [dict get $first message]
+                set code [dict get $first errorcode]
+            } else {
+                set code [dict get $options -errorcode]
+            }
+            set result [list [lindex $code end] [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+        } else {
+            set result accepted
+        }
+    }
+    return $result
+}
+
+proc hbKind {source {files {}}} {
+    return [lindex [hbRejection $source $files] 0]
+}
+
+# sourceAgree of SOURCE with the fixture module `hashfix` in the library and
+# the table hash key KEY ("" for the process's drawn key).
+proc keyedAgree {source {key ""} {backends {}}} {
+    if {$backends eq {}} {
+        set backends $::hbBackends
+    }
+    withPrivateLibrary {
+        hbWriteModules [list hashfix.bot $::hbFixture]
+        core::hashing::useTableHashKey $key
+        try {
+            set result [sourceAgree $source $backends]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    return $result
+}
+
+proc hbHir {source {files {}}} {
+    withPrivateLibrary {
+        hbWriteModules [concat [list hashfix.bot $::hbFixture] $files]
+        set hir [surface::compile $source t.bot -warnings off]
+    }
+    return $hir
+}
+
+proc hbNir {source args} {
+    return [dict get [native::lower::program [hbHir $source] -tiny-leaf-inline-opt 0 {*}$args] text]
+}
+
+# The `may_error=...` of the calls of function NAME in NIR's call effects.
+proc hbMayError {nir name} {
+    set result {}
+    foreach line [native::Driver calls $nir] {
+        if {[string match "*callee_name=\"$name\" *" $line] && [regexp {may_error=(\w+)} $line -> e]} {
+            lappend result $e
+        }
+    }
+    return [lsort -unique $result]
+}
+
+# JSON TEXT with every non-ASCII character escaped (\uXXXX, a surrogate pair
+# beyond the BMP): the hand-off to the oracle is ASCII, so no pipe encoding
+# (Windows' code page) can change a String's text.
+proc hbAsciiJson {text} {
+    set out ""
+    foreach c [split $text ""] {
+        scan $c %c cp
+        if {$cp < 0x80} {
+            append out $c
+        } elseif {$cp < 0x10000} {
+            append out [format {\u%04x} $cp]
+        } else {
+            set v [expr {$cp - 0x10000}]
+            append out [format {\u%04x\u%04x} [expr {0xD800 + ($v >> 10)}] [expr {0xDC00 + ($v & 0x3FF)}]]
+        }
+    }
+    return $out
+}
+
+# The public and table hashes of the oracle's JSON values under KEY.
+proc hbOracle {jsons key} {
+    set out [exec python3 -I [file join $::projectRoot audit hashable tools oracle.py] hash {*}$key << [hbAsciiJson [join $jsons \n]]]
+    return [split $out \n]
+}
+
+# A struct-heavy prelude every behavioral program shares.
+set ::hbPrelude {import immutable_set
+
+struct P:
+    x: int
+    y: int
+
+enum Color:
+    Red,
+    Green,
+
+struct Q:
+    a: P
+    b: str
+    c: Color
+
+struct Holder:
+    n: int
+    f: Fn{args: [int], return: int}
+
+fn twice(n: int) -> int:
+    n * 2
+
+}
+
+# ---------------------------------------------------------------------------
+# Public hash compatibility: the exact values the public hash had before this
+# milestone (taken on the tree it started from, every backend agreeing),
+# unchanged by the shared canonical walk.
+
+set ::hbPinnedProgram {import abi
+import abi::bytes
+import str
+import immutable_set
+
+struct P:
+    x: int
+    y: int
+
+enum Color:
+    Red,
+    Green,
+    Blue,
+
+struct Q:
+    a: P
+    b: str
+    c: Color
+
+struct Name:
+    first: str
+    last: str
+
+fn mk(s: str):
+    abi::bytes::from_list(str::encode_utf8(s))
+
+fn hashes(xs):
+    loop x in xs:
+        hash(x)
+
+small = [0, 1, -1, 7, 9, 10, -10, 99, 100, -100, 123456789, 999999999999999999, 1000000000000000000, -1000000000000000000, 2305843009213693951, 2305843009213693952, -2305843009213693952, 4611686018427387903, -4611686018427387904]
+big = [4611686018427387904, -4611686018427387905, 9223372036854775807, 9223372036854775808, -9223372036854775808, -9223372036854775809, 9999999999999999999, 10000000000000000000, 18446744073709551615, 18446744073709551616, -18446744073709551616, 100000000000000000005, 1208925819614629174706176, 340282366920938463463374607431768211455, 340282366920938463463374607431768211456, -340282366920938463463374607431768211456, 100000000000000000000000000000000000007, 123456789012345678901234567890123456789012345678901234567890]
+computed = [shift_left(1, 61) - 1, shift_left(1, 62) - 1, shift_left(1, 62), 0 - shift_left(1, 62), 0 - shift_left(1, 62) - 1, shift_left(1, 63), shift_left(1, 64) - 1, shift_left(1, 127), shift_left(1, 128) - 1, shift_left(1, 128), 0 - shift_left(1, 200)]
+chars = ['a', 'Z', '0', ' ', 'é', '☃', '🙂', '􏿿']
+strs = ["", "a", "1", "-1", "héllo ☃", "🙂 quick brown fox", "the quick brown fox jumps over the lazy dog, then again and again and again"]
+others = [true, false, unit, [], [1, 2], [2, 1], [[1], ["a", 'b']], [-7, 'x', 4611686018427387904], [[]], [[], []], [unit]]
+floats = [0.0, 1.0, 1.5, -1.5, 2.5, 0.1, 1000000.25, -0.001, 123456.789]
+structs = [P {x: 1, y: 2}, P {x: -1, y: 4611686018427387903}, P {x: 4611686018427387904, y: 0}, Q {a: P {x: 3, y: 4}, b: "s", c: Color::Green}, {x: 1, y: "a"}, {y: "a", x: 1}, {}, {p: P {x: 1, y: 2}, e: Color::Red}, {q: Q {a: P {x: 0, y: 0}, b: "", c: Color::Red}, l: [P {x: 5, y: 6}, 'c']}, [P {x: 1, y: 2}, Color::Red], Color::Red, Color::Green, Color::Blue, Name {first: "Ada", last: "Lovelace"}, {first: "Ada", last: "Lovelace"}]
+stores = [mk(""), mk("AB"), mk("héllo"), abi::bytes::from_bytes(mk("k1")), abi::bytes::zeroed(abi::Usize {value: 3}), immutable_set::from_list([1, 2, 3]), immutable_set::from_list([3, 2, 1]), immutable_set::from_list([P {x: 1, y: 2}, 'q', "s", 4611686018427387904]), immutable_set::from_list([])]
+
+[hashes(small), hashes(big), hashes(computed), hashes(chars), hashes(strs), hashes(others), hashes(floats), hashes(structs), hashes(stores)]
+}
+
+set ::hbPinnedValues {[[590701660006484765, 590700560494856554, 1841256570420575205, 590693963425087288, 590691764401830866, 1837464354815632366, 1232241922609654511, 1829856833861554257, 1071077706910118458, 937610149661694189, 1126012111659584930, 688401425616871681, 676432798871476410, 907240050157444141, 175261749706404696, 175265048241289329, 139588933943155570, 623792353967692727, 391732480576983117], [623789055432808094, 391731381065354906, 2225555181428685637, 2225556280940313848, 707785774613091011, 707784675101462800, 2298452577807004200, 2007587621811679870, 416805031419869078, 416803931908240867, 1994653631623632162, 427091923338802545, 999613055982882793, 502245503115030836, 502248801649915469, 1353579516241496858, 2030847885960056155, 877126669977568183], [175261749706404696, 623792353967692727, 623789055432808094, 391732480576983117, 391731381065354906, 2225556280940313848, 416805031419869078, 1806367023798207000, 502245503115030836, 502248801649915469, 188015491597053100], [520338485003615157, 520330788422217680, 532739876655747101, 529788787446196452, 2169672265349400239, 601159812241541785, 1062334392747540938, 1345164029743383199], [1108936970115069484, 589763776587810007, 589711000029655879, 1157781450803295718, 161697780529065798, 1807445379848190912, 750001533518624772], [592596118541513868, 592597218053142079, 1108939169138325906, 1755045699346780531, 209653597448554385, 911644047884110197, 1475817003125096609, 1913505980942695101, 1110203966925749856, 405226008021937533, 441613374959686544], [1418026610602017291, 1616938159710682290, 1624678721571773930, 1624819459060184938, 1421923279811640175, 1570175326880950354, 6271737828421670, 60061494136369881, 977552786646800065], [40759426256795460, 372398025987676, 1750116610682253287, 1979528161859881862, 1616162032485106622, 1616162032485106622, 96595561622788695, 264212334118064381, 1503248951382783807, 2244796678099108584, 190789444800304525, 729460995536187665, 1446266572572458142, 2100847374582763991, 385120668595605514], [1190028771226210786, 2248776705808866443, 405943855183386752, 56799662987439511, 2233955353718004115, 1057024671619750778, 1057024671619750778, 1137679504874620389, 104850625164932166]]}
+
+test hb-public-hash-pinned {the public hash of 107 values at every kind and representation edge is byte for byte the value it had before this milestone, on every backend} -body {
+    sourceAgree $::hbPinnedProgram
+} -result [list value $::hbPinnedValues]
+
+test hb-public-hash-oracle {the independent oracle computes the pinned public hashes (kind tags, decimal texts, nested sub-hashes, the order-free set fold, byte storage, BigInt beyond 128 bits)} -constraints python3 -body {
+    # {GROUP INDEX} of the pinned corpus, and the value described for the
+    # oracle.
+    set cases {
+        {0 3} {{"int": "7"}}
+        {1 15} {{"int": "-340282366920938463463374607431768211456"}}
+        {1 17} {{"int": "123456789012345678901234567890123456789012345678901234567890"}}
+        {3 6} {{"char": 128578}}
+        {4 4} {{"str": "héllo ☃"}}
+        {5 4} {{"list": [{"int": "1"}, {"int": "2"}]}}
+        {5 6} {{"list": [{"list": [{"int": "1"}]}, {"list": [{"str": "a"}, {"char": 98}]}]}}
+        {6 2} {{"float": 1.5}}
+        {7 3} {{"struct": {"id": "Q", "fields": [["a", {"struct": {"id": "P", "fields": [["x", {"int": "3"}], ["y", {"int": "4"}]]}}], ["b", {"str": "s"}], ["c", {"enum": ["Color", "Green"]}]]}}}
+        {7 4} {{"struct": {"id": "", "fields": [["y", {"str": "a"}], ["x", {"int": "1"}]]}}}
+        {7 14} {{"struct": {"id": "", "fields": [["last", {"str": "Lovelace"}], ["first", {"str": "Ada"}]]}}}
+        {8 1} {{"struct": {"id": "abi::bytes::Bytes", "fields": [["storage", {"bytes": [65, 66]}]]}}}
+        {8 6} {{"set": [{"int": "3"}, {"int": "2"}, {"int": "1"}]}}
+    }
+    set pinned [string map {, "" [ "{" ] "}"} $::hbPinnedValues]
+    set pinned [lindex $pinned 0]
+    set jsons {}
+    set want {}
+    foreach {at json} $cases {
+        lappend jsons $json
+        lappend want [lindex $pinned {*}$at]
+    }
+    set got [lmap line [hbOracle $jsons $::hbKey] {lindex $line 0}]
+    expr {$got eq $want ? "agree" : "$got != $want"}
+} -result agree
+
+# ---------------------------------------------------------------------------
+# Hashable is an ordinary trait to its consumers
+
+test hb-trait-argument {a Hashable parameter accepts every witness kind, and hash through it is the public hash, on every backend} -body {
+    sourceAgree [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+[fingerprint(7) == hash(7), fingerprint("apple") == hash("apple"), fingerprint(true) == hash(true), fingerprint(unit) == hash(unit), fingerprint('é') == hash('é'), fingerprint(1.5) == hash(1.5), fingerprint(Color::Red) == hash(Color::Red), fingerprint(P {x: 1, y: 2}) == hash(P {x: 1, y: 2}), fingerprint(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Green}) == hash(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Green}), fingerprint([1, 2]) == hash([1, 2]), fingerprint([[1], [2, 3]]) == hash([[1], [2, 3]]), fingerprint(immutable_set::from_list([1, 2])) == hash(immutable_set::from_list([2, 1])), fingerprint({a: 1, b: "x2"}) == hash({b: "x2", a: 1}), fingerprint([]) == hash([]), fingerprint(4611686018427387904) == hash(4611686018427387904)]
+}]
+} -result {value {[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]}}
+
+test hb-trait-operation {the trait's one operation, x.hash(), is a direct call of the public hash in each specialization: no trait remains} -body {
+    set hir [surface::compile [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    x.hash()
+
+[fingerprint(P {x: 1, y: 2}) == hash(P {x: 1, y: 2}), fingerprint(3) == hash(3)]
+}] t.bot -warnings off]
+    set calls [lmap e [hirFind $hir call] {
+        if {![dict exists [hir::node $hir $e] traitImpl]} continue
+        list [dict get [hir::symbol $hir [lindex [hir::get $hir $e target] 1]] name] [dict get [hir::node $hir $e] traitImpl witness]
+    }]
+    list [lsort $calls] [lindex [outcomeUnderHir cranelift $hir] 1] \
+        [regexp {trait ID|\{trait } [lmap b [dict keys [dict get $hir bindings]] {dict getdef [hir::binding $hir $b] type ""}]]
+} -result {{{hash int} {hash {nstruct P}}} {[true, true]} 0}
+
+test hb-trait-provenance {a Hashable result keeps its witness: a returned view hashes like its concrete value and passes on to another Hashable parameter} -body {
+    sourceAgree [string cat $::hbPrelude {fn keep(x: Hashable) -> Hashable:
+    x
+
+fn fingerprint(x: Hashable) -> int:
+    x.hash()
+
+v = keep(P {x: 4, y: 5})
+[fingerprint(v) == hash(P {x: 4, y: 5}), fingerprint(keep(keep("k"))) == hash("k")]
+}]
+} -result {value {[true, true]}}
+
+test hb-trait-equality {two Hashable parameters compare by ordinary structural equality} -body {
+    sourceAgree [string cat $::hbPrelude {fn same(a: Hashable, b: Hashable) -> bool:
+    a == b
+
+[same(P {x: 1, y: 2}, P {x: 1, y: 2}), same(P {x: 1, y: 2}, P {x: 1, y: 3}), same(1, "1"), same([1], [1])]
+}]
+} -result {value {[true, false, false, true]}}
+
+test hb-trait-join {different witnesses never join to a Hashable value: TRAIT-WITNESS-JOIN, as for any trait} -body {
+    hbKind [string cat $::hbPrelude {fn pick(a: Hashable, b: Hashable, c: bool) -> Hashable:
+    if c:
+        a
+    else:
+        b
+
+pick(1, "a", true)
+}]
+} -result TRAIT-WITNESS-JOIN
+
+test hb-trait-storage {Hashable is not storable, as no trait is: a List[Hashable] or a field of it is TRAIT-STORAGE-UNSUPPORTED} -body {
+    list [hbKind "fn f(xs: List\[Hashable\]) -> int:\n    1\n\n1\n"] \
+        [hbKind "struct Box:\n    key: Hashable\n\n1\n"]
+} -result {TRAIT-STORAGE-UNSUPPORTED TRAIT-STORAGE-UNSUPPORTED}
+
+test hb-trait-visible-everywhere {Hashable is named by its bare name in every module, with no import, like a built-in type} -body {
+    withPrivateLibrary {
+        hbWriteModules [list keys.bot "fn digest(x: Hashable) -> int:\n    hash(x)\n"]
+        set result [sourceAgree "import keys\n\nkeys::digest(\[1, 2\]) == hash(\[1, 2\])\n"]
+    }
+    set result
+} -result {value true}
+
+test hb-monomorphization-ordinary {a Hashable function is specialized once per witness its calls pass, like any trait-polymorphic function; a function that does not name it is untouched} -body {
+    set hir [surface::compile [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn plain(x: int) -> int:
+    hash(x)
+
+[fingerprint(1), fingerprint(2), fingerprint(P {x: 1, y: 2}), fingerprint("s1"), plain(3)]
+}] t.bot -warnings off]
+    lsort [dict keys [dict get [dict get $hir traitFunctions] fingerprint clones]]
+} -result {fingerprint<P> fingerprint<int> fingerprint<str>}
+
+# ---------------------------------------------------------------------------
+# Witnesses: the census (HASHABLE-AND-KEYED-HASH.md, "Witness census")
+
+test hb-witness-census {the witnesses are exactly the types with total equality and a hash: the runtime's own refusal lists, recursing through Lists, sets and struct fields} -body {
+    set hir [hbHir {import ffi::c
+import abi
+import abi::bytes
+import mutable_array
+import mutable_vector
+
+type Small = Int in 0..10
+
+refined type Word = str
+
+enum Color:
+    Red,
+
+struct P:
+    x: int
+    y: int
+
+struct Nested:
+    p: P
+    tag: Color
+
+struct Holder:
+    n: int
+    f: Fn{args: [int], return: int}
+
+struct Loose:
+    v: any
+
+struct Tree:
+    label: str
+    kids: List[Tree]
+
+struct BadTree:
+    kids: List[BadTree]
+    f: Fn{args: [], return: int}
+
+opaque struct Secret:
+    code: int
+
+1
+}]
+    hir::activate $hir
+    set types [dict create \
+        int int str str bool bool unit unit UnicodeChar UnicodeChar Float64 Float64 \
+        Small {refined int {Small}} Word {refined str {Word}} \
+        ffi::c::Int {refined int {ffi::c::Int}} \
+        Color {enum Color} P {nstruct P} Nested {nstruct Nested} Holder {nstruct Holder} \
+        Loose {nstruct Loose} Tree {nstruct Tree} BadTree {nstruct BadTree} Secret {nstruct Secret} \
+        Bytes {nstruct abi::bytes::Bytes} \
+        {List[int]} {list int} {List[P]} {list {nstruct P}} {List[Holder]} {list {nstruct Holder}} \
+        {ImmutableSet[str]} {immutableSet str} \
+        anon {struct {a int b str}} anon-fn [list struct [list f [hir::types::MakeFn {int} int {}]]] \
+        any any Fn [hir::types::MakeFn {int} int {}] \
+        {MutableArray[int]} {mutarray int} {MutableVector[int]} {mutvec int} \
+        Ptr {cptr {refined int {ffi::c::Int}}} \
+        DecimalRounded {srefined DecimalRounded {minDecimalsPreserved 2}} \
+        imprint {imprint T}]
+    set rows {}
+    dict for {name t} $types {
+        lassign [hir::types::HashClass $t] class
+        lappend rows "$name $class [expr {[hir::types::IsEqualityTotal $t] ? "eq-total" : "eq-not-total"}]"
+    }
+    join $rows \n
+} -result {int total eq-total
+str total eq-total
+bool total eq-total
+unit total eq-total
+UnicodeChar total eq-total
+Float64 total eq-total
+Small total eq-total
+Word total eq-total
+ffi::c::Int total eq-total
+Color total eq-total
+P total eq-total
+Nested total eq-total
+Holder none eq-not-total
+Loose unknown eq-not-total
+Tree total eq-total
+BadTree none eq-not-total
+Secret total eq-total
+Bytes unknown eq-not-total
+List[int] total eq-total
+List[P] total eq-total
+List[Holder] none eq-not-total
+ImmutableSet[str] total eq-total
+anon total eq-total
+anon-fn none eq-not-total
+any unknown eq-not-total
+Fn none eq-not-total
+MutableArray[int] none eq-not-total
+MutableVector[int] none eq-not-total
+Ptr none eq-not-total
+DecimalRounded none eq-not-total
+imprint unknown eq-not-total}
+
+test hb-witness-agrees-with-the-operations {the census describes the operations: every witness kind is hashed and compared without EQUALITY by the dynamic, untyped == and hash, on every backend; a value of a type it calls none stops with EQUALITY there} -body {
+    list [sourceAgree [string cat $::hbPrelude {fn h(x):
+    hash(x)
+
+fn e(a, b):
+    a == b
+
+values = [7, 4611686018427387904, "s1", true, unit, 'é', 1.5, Color::Red, P {x: 1, y: 2}, Q {a: P {x: 1, y: 2}, b: "s", c: Color::Green}, [1, 2], immutable_set::from_list([1]), {a: 1}]
+ok = loop v in values:
+    h(v) == hash(v) and e(v, v)
+ok
+}]] [sourceAgree {fn inc(n):
+    n + 1
+
+fn h(x):
+    hash(x)
+
+h([inc])
+}] [sourceAgree {fn inc(n):
+    n + 1
+
+fn e(a, b):
+    a == b
+
+e([inc], [inc])
+}]
+} -result {{value {[true, true, true, true, true, true, true, true, true, true, true, true, true]}} {error {CORE SEMANTIC EQUALITY} {hash is not defined for callables: <block (n)>}} {error {CORE SEMANTIC EQUALITY} {== is not defined for callables: <block (n)> == <block (n)>}}}
+
+test hb-witness-requires-hash-support {a witness needs a hash as well as total equality: a kind whose values had equality but no hash would not be Hashable (here Float64, its hash refused for the test only)} -body {
+    set saved $::core::hashing::unhashable
+    lappend ::core::hashing::unhashable Float64
+    try {
+        list [hir::types::IsEqualityTotal Float64] [lindex [hir::types::HashClass Float64] 0] \
+            [catch {core::hashing::hash [core::value::float Float64 1.5]} m] $m
+    } finally {
+        set ::core::hashing::unhashable $saved
+    }
+} -result {1 none 1 {hash is not defined for callables: 1.5}}
+
+test hb-witness-requires-total-equality {a witness needs total equality as well as a hash: a kind whose values had a hash but no equality would not be Hashable (here Float64, its equality refused for the test only)} -body {
+    set saved $::core::value::incomparable
+    lappend ::core::value::incomparable Float64
+    try {
+        list [hir::types::IsEqualityTotal Float64] [lindex [hir::types::HashClass Float64] 0] \
+            [lindex [hir::types::HashClass {list Float64}] 0] [catch {core::value::equal [core::value::float Float64 1.5] [core::value::float Float64 1.5]}]
+    } finally {
+        set ::core::value::incomparable $saved
+    }
+} -result {0 none none 1}
+
+test hb-witness-not-user-definable {no source declaration makes a type Hashable or takes it away: a module's own `hash` function implements nothing, and a struct with a function field stays outside however its module spells it} -body {
+    withPrivateLibrary {
+        hbWriteModules [list model.bot "struct Holder:\n    f: Fn{args: \[int\], return: int}\n\nfn hash(value: Holder) -> int:\n    1\n\nstruct Plain:\n    n: int\n"]
+        set rejected [hbRejection "import model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn inc(n: int) -> int:\n    n + 1\n\nfingerprint(model::Holder {f: inc})\n"]
+        set accepted [sourceAgree "import model\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfingerprint(model::Plain {n: 3}) == hash(model::Plain {n: 3})\n"]
+    }
+    list [lindex $rejected 0] $accepted
+} -result {TRAIT-NOT-SATISFIED {value true}}
+
+test hb-reserved-name {Hashable is reserved: no struct, enum, type, refinement, layout or trait of a program may take the name} -body {
+    lmap decl [list "struct Hashable:\n    x: int" "enum Hashable:\n    A," "type Hashable = Int in 0..3" \
+            "refined type Hashable = str" "layout Hashable:\n    size 1\n    align 1\n    field a: UInt8 at 0" \
+            "trait Hashable:\n    fn hash(value: Hashable) -> int"] {
+        lindex [hbRejection "$decl\n\n1\n"] 0
+    }
+} -result {TYPE TYPE TYPE TYPE TYPE TRAIT-NAME-COLLISION}
+
+# ---------------------------------------------------------------------------
+# Callables and other non-witnesses: one rule, rejected at the boundary
+
+test hb-callable-not-hashable {a function is not Hashable: TRAIT-NOT-SATISFIED at the Hashable parameter, saying why in source terms} -body {
+    hbRejection [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fingerprint(twice)
+}]
+} -result {TRAIT-NOT-SATISFIED {argument for parameter "x" does not satisfy trait Hashable:
+twice/1 -> int does not satisfy Hashable
+a function has no total equality (== of two functions is not defined: there is no function identity)}}
+
+test hb-struct-with-callable-not-hashable {a struct holding a function is not Hashable, and the message names the field} -body {
+    lindex [split [lindex [hbRejection [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fingerprint(Holder {n: 1, f: twice})
+}]] 1] \n] 2
+} -result {field "f" of Holder (Fn{args: [int], return: int, errors: []}): a function has no total equality (== of two functions is not defined: there is no function identity)}
+
+test hb-list-of-callables-not-hashable {neither is a List of functions, nor a nested struct whose inner field holds one} -body {
+    list [hbKind [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fingerprint([twice])
+}]] [hbKind [string cat $::hbPrelude {struct Outer:
+    inner: Holder
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fingerprint(Outer {inner: Holder {n: 1, f: twice}})
+}]]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test hb-any-not-hashable {a statically unknown value (an untyped parameter) is not Hashable, whatever the runtime value would be} -body {
+    hbRejection {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn g(x):
+    fingerprint(x)
+
+g(1)
+}
+} -result {TRAIT-NOT-SATISFIED {argument for parameter "x" does not satisfy trait Hashable:
+any does not satisfy Hashable
+its static type is any, whose values are not known to have total equality and hashing (one may hold a function)}}
+
+test hb-authority-not-hashable {authority-bearing and mutable values are not Hashable: a MutableArray, a MutableVector, a C pointer (affine: the ownership discipline reports it), a coroutine handle} -body {
+    list [hbKind "import mutable_array\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfingerprint(mutable_array::create(2, 0))\n"] \
+        [hbKind "import mutable_vector\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfingerprint(mutable_vector::from_list(\[1\]))\n"] \
+        [hbKind "import ffi::c\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn f() -> int:\n    fingerprint(ffi::c::null\[ffi::c::Int\]())\n\nf()\n"] \
+        [hbKind "import ffi::c\nfn f() -> int:\n    p = ffi::c::null\[ffi::c::Int\]()\n    hash(p)\n\nf()\n"]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED AFFINE-EQUALITY-UNSUPPORTED}
+
+test hb-other-trait-view-not-hashable {a view of another trait is not Hashable, though its witness might be: no conversion between traits} -body {
+    hbKind {trait Named:
+    fn name(value: Named) -> str
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn describe(v: Named) -> int:
+    fingerprint(v)
+
+describe(Person {value: "Ada"})
+}
+} -result TRAIT-NOT-SATISFIED
+
+# ---------------------------------------------------------------------------
+# The public hash's admission (HASHABLE-AND-KEYED-HASH.md, "Public hash
+# admission")
+
+test hb-hash-static-rejection {hash of a value statically known not to be Hashable is rejected at compile time (it used to fail when run)} -body {
+    list [hbRejection [string cat $::hbPrelude "hash(twice)\n"]] \
+        [hbKind [string cat $::hbPrelude "hash(Holder {n: 1, f: twice})\n"]] \
+        [hbKind "import mutable_vector\nhash(mutable_vector::from_list(\[1\]))\n"]
+} -result {{TRAIT-NOT-SATISFIED {the argument of hash does not satisfy trait Hashable:
+twice/1 -> int does not satisfy Hashable
+a function has no total equality (== of two functions is not defined: there is no function identity)}} TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test hb-hash-dynamic-compatibility {hash of a statically unknown value stays the dynamic, fallible hash: a Hashable value at run time hashes, a function stops with EQUALITY, on every backend (generic code without type parameters relies on it)} -body {
+    list [sourceAgree {fn h(x):
+    hash(x)
+
+[h(1) == hash(1), h([1, "a"]) == hash([1, "a"])]
+}] [sourceAgree {fn h(x):
+    hash(x)
+
+fn inc(n):
+    n + 1
+
+h(inc)
+}]
+} -result {{value {[true, true]}} {error {CORE SEMANTIC EQUALITY} {hash is not defined for callables: <block (n)>}}}
+
+test hb-hash-generic-body-not-duck-typed {a trait-polymorphic body's hash of a view of another trait is not re-judged per witness: it stays the dynamic hash in every specialization} -body {
+    sourceAgree {trait Named:
+    fn name(value: Named) -> str
+
+struct Person:
+    value: str
+
+fn name(value: Person) -> str:
+    value.value
+
+fn digest(v: Named) -> int:
+    hash(v)
+
+digest(Person {value: "Ada"}) == hash(Person {value: "Ada"})
+}
+} -result {value true}
+
+# ---------------------------------------------------------------------------
+# Total lowering and effects (HASHABLE-AND-KEYED-HASH.md, "Total lowering")
+
+test hb-nir-hash-total {hash of a Hashable operand is hashtotal (no error edge), of an unknown one the fallible hash; a Hashable function is may_error=false} -body {
+    set nir [hbNir [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn h(x):
+    hash(x)
+
+fn direct(p: P) -> int:
+    hash(p)
+
+[fingerprint(P {x: 1, y: 2}), fingerprint(7), h(1), h("a"), direct(P {x: 3, y: 4})]
+}] -specialize 0]
+    list [regexp -all {op hashtotal} $nir] [regexp -all {op hash } $nir] \
+        [hbMayError $nir fingerprint<P>] [hbMayError $nir fingerprint<int>] [hbMayError $nir h] [hbMayError $nir direct]
+} -result {3 1 false false true false}
+
+test hb-nir-equality-total {== of equality-total operands (structs, Lists, sets of witnesses; two different scalar kinds) is veqtotal: no error edge, may_error=false; an unknown operand keeps veq} -body {
+    set nir [hbNir [string cat $::hbPrelude {fn e1(a: P, b: P) -> bool:
+    a == b
+
+fn e2(a: List[Q], b: List[Q]) -> bool:
+    a == b
+
+fn e3(a: int, b: str) -> bool:
+    a == b
+
+fn e4(a, b) -> bool:
+    a == b
+
+fn e5(a: Hashable, b: Hashable) -> bool:
+    a == b
+
+fn e6(a: P, b) -> bool:
+    a == b
+
+[e1(P {x: 1, y: 2}, P {x: 1, y: 2}), e2([], []), e3(1, "1"), e4(1, 2), e4("a", "b"), e5(P {x: 1, y: 1}, P {x: 1, y: 1}), e6(P {x: 1, y: 1}, 3)]
+}] -specialize 0]
+    list [regexp -all {op veqtotal} $nir] [regexp -all {op veq } $nir] \
+        [hbMayError $nir e1] [hbMayError $nir e2] [hbMayError $nir e3] [hbMayError $nir e4] [hbMayError $nir e5<P,P>] [hbMayError $nir e6]
+} -result {4 2 false false false true false true}
+
+# slot's Botlish call makes it fallible where the depth check bounds
+# recursion (nativeDepthChecked: NATIVE LIMIT STACK from its prologue).
+set ::hbSlotMayError [if {[testConstraint nativeDepthChecked]} {string cat true} else {string cat false}]
+
+test hb-nir-table-hash-total {the table hash of an admitted (Hashable) argument is tablehashtotal: no error edge, and the function making it is may_error=false and no safepoint (slot, which calls it, is may_error=true where the depth check makes its Botlish call fallible, nativeDepthChecked)} -body {
+    set nir [hbNir [string cat "import hashfix\n" $::hbPrelude {fn slot(p: P) -> int:
+    hashfix::keyed(p)
+
+[slot(P {x: 1, y: 2}), hashfix::keyed("s1"), hashfix::keyed(7)]
+}] -specialize 0]
+    set calls [native::Driver calls $nir]
+    list [regexp -all {op tablehashtotal} $nir] [regexp -all {op tablehash } $nir] \
+        [hbMayError $nir slot] [hbMayError $nir hashfix::keyed<P>] [hbMayError $nir hashfix::keyed<str>] \
+        [lsort -unique [lmap line $calls {if {![string match *keyed* $line]} continue; lindex [regexp -inline {may_gc=(\w+)} $line] 1}]]
+} -result [list 3 0 $::hbSlotMayError false false false]
+
+test hb-total-results-agree {the total lowerings compute what the fallible ones do, on every backend} -body {
+    sourceAgree [string cat $::hbPrelude {fn e(a: Q, b: Q) -> bool:
+    a == b
+
+fn h(q: Q) -> int:
+    hash(q)
+
+q = Q {a: P {x: 1, y: 2}, b: "s", c: Color::Red}
+[e(q, q), e(q, Q {a: P {x: 1, y: 3}, b: "s", c: Color::Red}), h(q) == hash(Q {a: P {x: 1, y: 2}, b: "s", c: Color::Red})]
+}]
+} -result {value {[true, false, true]}}
+
+# ---------------------------------------------------------------------------
+# The private table hash
+
+test hb-keyed-oracle {under a fixed test key, every backend computes exactly the independent oracle's table hash (and public hash) of every kind, nested values included} -constraints python3 -body {
+    set cases {
+        {7} {{"int": "7"}}
+        {-1} {{"int": "-1"}}
+        {4611686018427387904} {{"int": "4611686018427387904"}}
+        {-340282366920938463463374607431768211456} {{"int": "-340282366920938463463374607431768211456"}}
+        {123456789012345678901234567890123456789012345678901234567890} {{"int": "123456789012345678901234567890123456789012345678901234567890"}}
+        {"abc"} {{"str": "abc"}}
+        {""} {{"str": ""}}
+        {"héllo ☃🙂"} {{"str": "héllo ☃🙂"}}
+        {'a'} {{"char": 97}}
+        {'🙂'} {{"char": 128578}}
+        {true} {{"bool": true}}
+        {unit} {{"unit": null}}
+        {1.5} {{"float": 1.5}}
+        {-0.001} {{"float": -0.001}}
+        {[1, 2]} {{"list": [{"int": "1"}, {"int": "2"}]}}
+        {[]} {{"list": []}}
+        {[[1], [2, 3]]} {{"list": [{"list": [{"int": "1"}]}, {"list": [{"int": "2"}, {"int": "3"}]}]}}
+        {P {x: 1, y: 2}} {{"struct": {"id": "P", "fields": [["x", {"int": "1"}], ["y", {"int": "2"}]]}}}
+        {Q {a: P {x: 3, y: 4}, b: "s", c: Color::Green}} {{"struct": {"id": "Q", "fields": [["a", {"struct": {"id": "P", "fields": [["x", {"int": "3"}], ["y", {"int": "4"}]]}}], ["b", {"str": "s"}], ["c", {"enum": ["Color", "Green"]}]]}}}
+        {{y: "a1", x: 1}} {{"struct": {"id": "", "fields": [["y", {"str": "a1"}], ["x", {"int": "1"}]]}}}
+        {Color::Red} {{"enum": ["Color", "Red"]}}
+        {immutable_set::from_list([3, 1, 2])} {{"set": [{"int": "3"}, {"int": "1"}, {"int": "2"}]}}
+        {[P {x: 1, y: 2}, P {x: 3, y: 4}]} {{"list": [{"struct": {"id": "P", "fields": [["x", {"int": "1"}], ["y", {"int": "2"}]]}}, {"struct": {"id": "P", "fields": [["x", {"int": "3"}], ["y", {"int": "4"}]]}}]}}
+    }
+    set exprs {}
+    set jsons {}
+    foreach {e j} $cases {
+        lappend exprs "\[hash($e), hashfix::keyed($e)\]"
+        lappend jsons $j
+    }
+    set outcome [keyedAgree "import hashfix\n$::hbPrelude\[[join $exprs {, }]\]\n" $::hbKey]
+    set expected "\[[join [lmap line [hbOracle $jsons $::hbKey] {format {[%s, %s]} {*}$line}] {, }]\]"
+    expr {$outcome eq [list value $expected] ? "agree" : "$outcome != $expected"}
+} -result agree
+
+test hb-keyed-coherence {equal values hash equally under the table hash however they were made: sets in any order, anonymous struct fields in any order, an Int computed or written, a String built or written} -body {
+    keyedAgree "import hashfix\nimport str\n$::hbPrelude\[
+    hashfix::keyed(immutable_set::from_list(\[1, 2, 3\])) == hashfix::keyed(immutable_set::from_list(\[3, 1, 2, 1\])),
+    hashfix::keyed({a: 1, b: \"x2\"}) == hashfix::keyed({b: \"x2\", a: 1}),
+    hashfix::keyed(shift_left(1, 62)) == hashfix::keyed(4611686018427387904),
+    hashfix::keyed(shift_left(1, 62) - shift_left(1, 62) + 5) == hashfix::keyed(5),
+    hashfix::keyed(str::concat(\"ab\", \"cd\")) == hashfix::keyed(\"abcd\"),
+    hashfix::keyed(\[P {x: 1, y: 2}\]) == hashfix::keyed(\[P {x: 1, y: 2}\]),
+    hashfix::keyed(1) != hashfix::keyed(\"1\")
+\]\n" $::hbKey
+} -result {value {[true, true, true, true, true, true, true]}}
+
+test hb-keyed-process-key {with the production key (drawn once per process): one value hashes the same every time in a run, equal values equally, on every backend} -body {
+    keyedAgree "import hashfix\n$::hbPrelude
+fn many(n: int) -> List\[int\]:
+    loop i from 0 to n:
+        hashfix::keyed(P {x: 3, y: 4})
+
+xs = many(50)
+\[immutable_set::from_list(xs) == immutable_set::from_list(\[hashfix::keyed(P {x: 3, y: 4})\]), hashfix::keyed(\[1, 2\]) == hashfix::keyed(\[1, 2\])\]
+"
+} -result {value {[true, true]}}
+
+test hb-keyed-differs-across-processes {smoke test of the production key: two native runs (two processes, two drawn keys) of 64 values do not give all 64 table hashes equal (each value is free to collide; all 64 together only with probability 2^-3900)} -constraints nativeBuilt -body {
+    set source "import hashfix\nloop i from 0 to 64:\n    hashfix::keyed(i)\n"
+    withPrivateLibrary {
+        hbWriteModules [list hashfix.bot $::hbFixture]
+        set hir [surface::compile $source t.bot -warnings off]
+        set a [lindex [outcomeUnderHir cranelift $hir] 1]
+        set b [lindex [outcomeUnderHir cranelift $hir] 1]
+    }
+    list [llength [split $a ,]] [expr {$a ne $b}]
+} -result {64 1}
+
+test hb-keyed-not-post-mixed {two Ints with one whole 64-bit public FNV state (audit/hashable/tools/collide.rs) collide under the public hash, also nested in a List or a struct field -- so they would under any function of the public hash and a key -- and not under the table hash} -body {
+    keyedAgree "import hashfix\n$::hbPrelude
+a = 17384044247497657079
+b = 13834495523901255922
+\[a == b, hash(a) == hash(b), hash(\[a\]) == hash(\[b\]), hash(P {x: a, y: 0}) == hash(P {x: b, y: 0}),
+ hashfix::keyed(a) == hashfix::keyed(b), hashfix::keyed(\[a\]) == hashfix::keyed(\[b\]), hashfix::keyed(P {x: a, y: 0}) == hashfix::keyed(P {x: b, y: 0})\]
+" $::hbKey
+} -result {value {[false, true, true, true, false, false, false]}}
+
+test hb-keyed-collision-corpus {the hash-table experiment's int-collide keys (1024 Ints whose public hash is 0 mod 1024: one bucket of 1024) spread under the table hash like random keys (fixed test key; expected about 647 buckets, max load about 5)} -body {
+    set keys [string trim [core::ReadFile [file join $::projectRoot audit hashable data int-collide-1024.txt]]]
+    set source "import hashfix\nkeys = \[[join $keys {, }]\]\npublic = loop k in keys:\n    mod(hash(k), 1024)\nkeyed = loop k in keys:\n    mod(hashfix::keyed(k), 1024)\n\[public, keyed\]\n"
+    set outcome [keyedAgree $source $::hbKey {interp cranelift}]
+    lassign [lindex [string map {, "" [ "{" ] "}"} [lindex $outcome 1]] 0] public keyed
+    set loads [dict create]
+    foreach s $keyed {
+        dict incr loads $s
+    }
+    set max [tcl::mathfunc::max {*}[dict values $loads]]
+    list [llength $keys] [lsort -unique $public] [dict size $loads] $max [expr {[dict size $loads] > 560 && $max <= 9}]
+} -result {1024 0 651 5 1}
+
+# ---------------------------------------------------------------------------
+# The visibility boundary
+
+test hb-internal-import {ordinary code cannot import the internal namespace: the entry program} -body {
+    hbRejection "import table_hash\n\ntable_hash::of(1)\n"
+} -result {INTERNAL-NAMESPACE {namespace "table_hash" is internal to the standard library: only its modules may import it or name its members (the entry program is not one)}}
+
+test hb-internal-qualified {nor name its member fully qualified, imported or not} -body {
+    hbKind "table_hash::of(1)\n"
+} -result INTERNAL-NAMESPACE
+
+test hb-internal-application-module {an application module (beside the program file) cannot import it either} -body {
+    set dir [makeDirectory hb-app-[pid]]
+    try {
+        set f [open [file join $dir peek.bot] w]
+        puts $f "import table_hash\n\nfn peek(x: int) -> int:\n    table_hash::of(x)"
+        close $f
+        set f [open [file join $dir main.bot] w]
+        puts $f "import peek\n\npeek::peek(1)"
+        close $f
+        catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options
+        list [lindex [dict get $options -errorcode] end] [regexp {application module "peek"} $message]
+    } finally {
+        removeDirectory hb-app-[pid]
+    }
+} -result {INTERNAL-NAMESPACE 1}
+
+test hb-internal-not-a-method {no method syntax reaches it: it is nomethod, and its namespace is never imported by ordinary code} -body {
+    list [dict get [core::native::metadata table_hash::of] nomethod] [hbKind "x = 1\nx.of()\n"]
+} -result {1 NOT-A-STRUCT}
+
+test hb-internal-not-exported {it is no ordinary standard library export: no Compilerpedia reference topic names it, and help does not list it} -body {
+    set generated [core::ReadFile [file join $::projectRoot compilerpedia generated stdlib.topic]]
+    list [regexp {table_hash} $generated] [core::native::isInternalNamespace table_hash] [core::native::isInternal table_hash::of] [core::native::isInternal hash]
+} -result {0 1 1 0}
+
+test hb-internal-standard-module-calls {a standard library module may import and call it (the privileged fixture), and only with a Hashable argument} -body {
+    list [keyedAgree "import hashfix\nhashfix::keyed(\[1, 2\]) == hashfix::keyed(\[1, 2\])\n" $::hbKey] \
+        [lindex [hbRejection "import loose\n\nloose::k(1)\n" [list loose.bot "import table_hash\n\nfn k(x):\n    table_hash::of(x)\n"]] 0]
+} -result {{value true} TRAIT-NOT-SATISFIED}
+
+test hb-internal-no-function-value {even in a standard library module it is only ever called: an alias, an argument or a result is INTERNAL-INTRINSIC-VALUE} -body {
+    lmap body {
+        "fn k(x: int) -> int:\n    f = table_hash::of\n    f(x)\n"
+        "fn apply(f, x):\n    f(x)\n\nfn k(x: int) -> int:\n    apply(table_hash::of, x)\n"
+        "fn k():\n    table_hash::of\n"
+    } {
+        lindex [hbRejection "import leak\n\n1\n" [list leak.bot "import table_hash\n\n$body"]] 0
+    }
+} -result {INTERNAL-INTRINSIC-VALUE INTERNAL-INTRINSIC-VALUE INTERNAL-INTRINSIC-VALUE}
+
+test hb-internal-static-compile {a static compile block may ask whether ordinary code can reach it: the rejection is a CompilerError with its own code} -body {
+    sourceAgree {import compiler
+
+fn probe() errors compiler::CompilerError:
+    static compile:
+        table_hash::of(1)
+
+r = probe():
+    on compiler::CompilerError details:
+        details.code == compiler::DiagnosticCode::InternalNamespace
+r
+}
+} -result {value true}
+
+test hb-secret-not-a-value {the key is runtime state: no native returns it, and nothing but the table hash reads it} -body {
+    # No native's implementation is, or directly calls, the key's reader.
+    set exposing {}
+    foreach name [dict keys $::core::native::registry] {
+        set impl [lindex [dict get [core::native::metadata $name] impl] 0]
+        set body [expr {[info procs $impl] ne "" || [info procs ::$impl] ne "" ? [info body $impl] : ""}]
+        if {[regexp {TableKey|tableKey|DrawKey} "$impl $body"]} {
+            lappend exposing $name
+        }
+    }
+    set readers {}
+    foreach file [glob -directory [file join $::projectRoot core] *.tcl] {
+        if {[regexp {TableKey|tableKey} [core::ReadFile $file]]} {
+            lappend readers [file tail $file]
+        }
+    }
+    set rust {}
+    foreach file [glob -directory [file join $::projectRoot native src runtime] *.rs] {
+        set text [core::ReadFile $file]
+        if {[regexp {TABLE_HASH_KEY} $text]} {
+            lappend rust [file tail $file] [regexp -all {TABLE_HASH_KEY} $text]
+        }
+    }
+    list $exposing $readers $rust [dict get [core::native::metadata table_hash::of] contextFree]
+} -result {{} hashing.tcl {ops.rs 3} 0}
+
+# ---------------------------------------------------------------------------
+# Allocation, interchange, isolation
+
+test hb-allocation-free {the public and the table hash of an Int, a String, a struct and a nested struct allocate no heap object natively} -constraints nativeBuilt -body {
+    # The same values made (and the same one result List) with and without
+    # the eight hashes: what the hashes add.
+    set prefix [string cat "import hashfix\n" $::hbPrelude "s = \"session-key-0042\"\nq = Q {a: P {x: 1, y: 2}, b: s, c: Color::Red}\n"]
+    set base [hbHir [string cat $prefix "\[q, q.a, s, 7\]\n"]]
+    set hashed [hbHir [string cat $prefix "\[q, q.a, s, 7, hash(7), hashfix::keyed(7), hash(s), hashfix::keyed(s), hash(q.a), hashfix::keyed(q.a), hash(q), hashfix::keyed(q)\]\n"]]
+    set a [dict get [native::allocationReport $base summary] total allocations]
+    set b [dict get [native::allocationReport $hashed summary] total allocations]
+    list [expr {$b - $a}] [regexp -all {op (hashtotal|tablehashtotal)} [dict get [native::lower::program $hashed] text]]
+} -result {0 8}
+
+test hb-hir-text-and-interchange {a Hashable program's HIR text reads back to the same text and runs the same; its interchange form decodes and runs} -body {
+    set hir [surface::compile [string cat $::hbPrelude {fn fingerprint(x: Hashable) -> int:
+    x.hash()
+
+[fingerprint({a: 1, b: "x2"}) == hash({b: "x2", a: 1}), fingerprint(P {x: 1, y: 2}) == hash(P {x: 1, y: 2})]
+}] t.bot -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [regexp {trait Hashable intrinsic owner - requires hash\(value: Hashable\) -> int} $text] \
+        [expr {[hir::format $back] eq $text}] [lindex [outcomeUnderHir cranelift $back] 1] [lindex [outcomeUnderHir interp $decoded] 1]
+} -result {1 1 {[true, true]} {[true, true]}}
+
+test hb-isolation {a Hashable program compiled before another compilation runs unchanged afterwards} -body {
+    set first [surface::compile {fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fingerprint([1, 2]) == hash([1, 2])
+} t.bot -warnings off]
+    surface::compile "struct Other:\n    x: int\n\n1\n" u.bot -warnings off
+    list [lindex [outcomeUnderHir compile $first] 1] [lindex [outcomeUnderHir cranelift $first] 1]
+} -result {true true}
+
+test hb-no-traits-unchanged {a program that never names Hashable is no trait program: no traits, no monomorphization} -body {
+    set hir [surface::compile "struct P:\n    x: int\n\nhash(P {x: 1})\n" t.bot -warnings off]
+    list [dict exists $hir traits] [dict exists $hir traitFunctions]
+} -result {0 0}
+
+cleanupTests

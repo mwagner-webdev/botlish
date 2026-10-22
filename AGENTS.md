@@ -382,6 +382,12 @@ What it costs, measured on a 4-core container (2026-10-15):
     stress) and, except on pull requests, the GC-stress run. Run it on a
     branch with workflow_dispatch.
 
+  A push or pull request that changes only Markdown files and `docs/` starts
+  no workflow (their `paths-ignore`). Renaming or removing a design document
+  can still fail a test: `tools/compilerpedia.tcl check` takes a code-shaped
+  word the sources cite as a document's name only while `docs/NAME.md`
+  exists. Run `tclsh9.0 tools/compilerpedia.tcl check` before pushing one.
+
   Never set `BOTLISH_SKIP_GOLDEN_DUPLICATES` or run `tests/local.tcl` in a
   workflow: `tests/golden-duplicates.test` fails if one does.
 * **The skipped set is the manifest's, never a list kept by hand.** A Tcl
@@ -726,6 +732,55 @@ diagnostic kinds and the calls they are reported at). A change to that gate,
 to those kinds or to where they are anchored also needs
 `tests/static-economics.test` (`se-property-plan-gate`, `se-equal-plan-gate`)
 and the static-decision harnesses (Static intrinsics, below).
+
+## Hashable and the keyed table hash
+
+`Hashable` (HASHABLE-AND-KEYED-HASH.md) is an intrinsic trait: an ordinary
+trait to its clients (a parameter, a view, a requirement `hash`), whose
+witnesses only the language implementation supplies. A type is a witness
+when every value of it has total equality and total hashing
+(`hir::types::HashClass`, read from the runtimes' own refusal lists
+`core::value::incomparable` and `core::hashing::unhashable`); `any`, an
+imprint variable and a view of another trait are unknown, never witnesses.
+The public `hash` is unchanged (outputs pinned) and admits `checked`: a
+statically non-Hashable argument is TRAIT-NOT-SATISFIED, a Hashable one
+lowers to the total `hashtotal` (no EQUALITY edge), anything else stays the
+dynamic hash. `table_hash::of` is the private keyed hash: SipHash-1-3 of the
+canonical walk (never a mix of the public hash), keyed by a process-local
+secret drawn once from the system, `required` Hashable, internal to the
+standard library. Keep it so:
+
+* No user witness: never let a declaration, an `impl`, a field or a name
+  make a type Hashable, and never add custom hashing, identity hashing, an
+  `Equatable` or a derive. A user trait, struct, enum, layout or type named
+  `Hashable` stays a collision.
+* No Botlish value of the secret, no key argument, no way to read or set it
+  but the test hooks (`core::hashing::useTableHashKey`, the driver's
+  `--table-hash-key`, which only `native/native.tcl` passes), and no
+  observable table hash: the namespace `table_hash` is internal
+  (`core::native::declareInternalNamespace`): INTERNAL-NAMESPACE for an
+  import or a qualified name outside the standard library,
+  INTERNAL-INTRINSIC-VALUE for its native taken as a value.
+* Admission is registration metadata (`-hashing {K required|checked}`),
+  never a check keyed on a native's name; the totality walk is one
+  statement for both operations: never a second list of kinds.
+* The two folds share one canonical walk per runtime
+  (`core::hashing::Encode`; ops.rs's `walk` over a `CanonicalSink`): change
+  both runtimes together, and the oracle (`audit/hashable/tools/oracle.py`)
+  with them.
+
+If you change any of that (the report's "What to run when changing this"
+lists the files), run `tests/hashable.test`, `tests/native-hashing.test`,
+`tests/traits.test`, the golden suites `hashable.bot` and
+`hashable-admission.bot` (`tclsh9.0 tests/local.tcl
+tests/golden/hashable.bot tests/golden/hashable-admission.bot`),
+`audit/hashable/tools/fuzz.tcl` (several seeds, once with `-gc-stress 1`),
+`audit/hashable/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), `python3 -I
+audit/hashable/tools/oracle.py selftest` and `cargo test --release
+--manifest-path native/Cargo.toml --lib hash`. `audit/hashable/tools/census.tcl`
+regenerates the witness census; `bench/hashable.tcl` the performance report.
 
 ## Context traits
 

@@ -95,10 +95,10 @@
 @@ hash-blind hash of a DecimalRounded value hashes its representation instead of refusing
 ## core/hashing.tcl
 <<<<
-        core::semanticError EQUALITY \
-            "hash of a DecimalRounded value needs the precision of its type, which a hash does not know"
+            core::semanticError EQUALITY \
+                "hash of a DecimalRounded value needs the precision of its type, which a hash does not know"
 ====
-        return [Bytes $h [Utf8Bytes [lindex $v 1]]]
+            return [Utf8Bytes [lindex $v 1]]
 >>>>
 
 @@ display-extra-place a result displays one place more than its type guarantees
