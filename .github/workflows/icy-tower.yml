@@ -32,13 +32,15 @@ jobs:
         run: bash .devcontainer/setup.sh
 
       # CMake and Ninja build SDL3; the X11 development headers its x11
-      # video driver (the Xvfb session's build); Xvfb, ImageMagick and
-      # Pillow the session itself.
-      - name: Install SDL3's build tools and the X11 session's tools
+      # video driver (the Xvfb session's build); Xvfb, ImageMagick, Pillow
+      # and libXtst (the keys, injected through ctypes) the session itself;
+      # valgrind the memcheck test (workload-icy-tower-executable-no-leaks),
+      # which is skipped without it and so would fail the next step.
+      - name: Install SDL3's build tools, valgrind and the X11 session's tools
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            cmake ninja-build libx11-dev libxext-dev xvfb imagemagick python3-pil
+            cmake ninja-build libx11-dev libxext-dev xvfb imagemagick python3-pil libxtst6 valgrind
 
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native
