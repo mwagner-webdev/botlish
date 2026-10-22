@@ -599,7 +599,8 @@ proc native::structCensusText {hir args} {
 # nested decision), plus the planning facts and the aggregate metrics, as a
 # dict:
 #   records    the census records (hir/escape.tcl's Census)
-#   nested     one dict per representation class with an inline nested literal:
+#   nested     one dict per representation class with an inline nested literal
+#              or a write-back value (its LAZY paths built at their use):
 #              the value-tree cut chosen for it (opened / closed paths and why)
 #   params     the path verdict of every planned virtual parameter slot
 #   results    the return verdict of every recognized struct result
@@ -772,11 +773,14 @@ proc native::transportCensusText {hir args} {
     }
     foreach cls [dict get $c nested] {
         set closed [join [lmap p [dict get $cls closed] {format "%s:%s" [join [lindex $p 0] .] [lindex $p 1]}] ", "]
-        lappend lines [format "nested class %s: width %d -> %d  opened {%s}  kept closed {%s}  args=%d rets=%d%s score=%.1f/%.1f" \
+        # A write-back value's MutableBytes opened past a use that reads it
+        # whole: built at that use (hir::escape::NestingPlan's LAZY).
+        set lazy [join [lmap p [dict getdef $cls lazy {}] {join $p .}] ", "]
+        lappend lines [format "nested class %s: width %d -> %d  opened {%s}  kept closed {%s}  args=%d rets=%d%s score=%.1f/%.1f%s" \
             [join [lindex [dict get $cls shape] 1] ,] [dict get $cls width0] [dict get $cls width] \
             [join [lmap p [dict get $cls opened] {join $p .}] ", "] $closed \
             [dict get $cls argEdges] [dict get $cls retEdges] [expr {[dict get $cls cyclic] ? " cyclic" : ""}] \
-            [dict get $cls score] [dict get $cls budget]]
+            [dict get $cls score] [dict get $cls budget] [if {$lazy ne ""} {string cat "  built at its use {$lazy}"} else {string cat ""}]]
     }
     dict for {key v} [dict get $c params] {
         dict with v {

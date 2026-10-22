@@ -1251,9 +1251,9 @@ core/cabi.tcl's `platforms` (Compilation targets, below). Keep it so:
   could call C (`di-errno-read-first` pins the NIR). errno is read through
   `__error()` and a native view of a one-field layout: no pointer
   dereference operator, no stored or cached errno pointer, no global errno.
-  `darwin::read`'s write-back value is built between its call and the errno
-  read (two allocations; MACOS-AARCH64-MILESTONE-8.md, section 7): do not
-  add a third thing there.
+  Nothing runs between `darwin::read`'s call and its errno read but the
+  keepalive (no machine code) and the comparison: its write-back value is
+  fields (C FFI error capture, below); never add a statement there.
 * `open` is declared with its genuine variadic prototype; the creation mode
   is its one trailing argument, an `ffi::c::UShort` (macOS's `mode_t`).
   Never declare a variadic C function with a fixed trailing parameter: on
@@ -2065,6 +2065,53 @@ what they cover. The BoringSSL acceptance tests need the package-owned
 static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
+
+## C FFI error capture
+
+A C function that fails the POSIX way (a sentinel result, the reason in
+errno) is read by its binding right after the call -- a C call of
+`__errno_location()`/`__error()` and a native view -- and nothing the
+compiler inserts may run in between (C-FFI-ERROR-CAPTURE-MILESTONE-1.md):
+no allocation, no safepoint that can collect, no runtime or C call. Keep it
+so:
+
+* A write exposure's write-back value `{result: R, NAME: MutableBytes}` is a
+  construction escape analysis recognizes (`hir::escape::WriteBackResult`),
+  represented as fields -- the C result and each private copy's storage, its
+  MutableBytes opened (`WriteBackTree`) -- and built only where a use needs
+  an object: a MutableBytes read whole at that use (`OpenedFieldObject`),
+  the struct where the value must be one. Never build it at the call again,
+  and never open a MutableBytes past a use that runs more often than its
+  binding (a deeper loop, a parameter's use).
+* `op keepalive` is no machine code: what keeps an exposed storage a root
+  is its NIR use (codegen::roots's liveness, the stack maps). Never turn it
+  back into a call, and never weaken the NIR keepalive itself.
+* The compiler knows no error convention: no errno intrinsic, no automatic
+  errno field, no error translation, no annotation, no rule keyed on a C
+  function's name. A binding reads its function's error state itself, right
+  after the call; the compiler only adds nothing in between.
+
+If you change the write-back value's representation (the `WriteBackResult`,
+`WriteBackTree`, `WriteBackPaths`, `WriteBackCut` and write-back cases of
+`NestingPlan` in hir/escape.tcl; `BorrowCall`, `FieldValue`,
+`OpenedFieldObject`, `OpenedOwnerStorage`, the opened-call case of
+`StructFields` in native/lower.tcl), the keepalive's codegen, a foreign
+call's result conversion or what errno() lowers to, run
+`tests/c-ffi-error-capture.test` (its machine-code tests read the object
+file with `objdump`; its trace needs Linux and ptrace),
+`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test`,
+`tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
+acceptance tier of every branch push, and under GC stress a `[ci-full]`
+push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
+under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
+(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
+`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule; its
+error-capture mutants are killed by tests/c-ffi-error-capture.test, which
+it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`.
+`bench/c-ffi-error-capture.tcl` (`-root DIR` for a baseline checkout; the
+tier item `c-capture-bench` on macOS) is the performance report.
 
 ## C floating types (ffi::c::Float, ffi::c::Double)
 

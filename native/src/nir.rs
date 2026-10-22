@@ -341,7 +341,10 @@ pub enum OpCode {
     /// paired by native/lower.tcl with a `keepalive` of the storage after it.
     MBytesAddr,
     /// `%u = op keepalive %b`: a use of %b that is never removed and does
-    /// nothing, so %b stays a GC root until here. Result unit.
+    /// nothing, so %b stays a GC root until here (codegen::roots's liveness:
+    /// %b's slot is in the stack map of every safepoint before it). No
+    /// machine code: it is no call (C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+    /// Result unit.
     KeepAlive,
     /// Fixed binary layouts (BINARY-LAYOUT.md, core/binary.tcl): the
     /// straight-line code native/lower.tcl emits for one statically known

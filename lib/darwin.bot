@@ -39,11 +39,10 @@
 #   same thread (a Botlish program runs on one native thread: coroutines
 #   switch stacks, never threads) and with no possible suspension between
 #   (a yield is a statement of the coroutine's own body, never inside these
-#   functions). For write, open and close nothing at all runs between the
-#   call and the read; read's write exposure has its write-back value built
-#   right after the call (C-POINTER-BORROWING.md: two small allocations,
-#   before any Botlish code runs), which allocates and may collect but calls
-#   no libSystem function that reports through errno.
+#   functions). Nothing the compiler inserts runs between the call and the
+#   read either: read's write-back value is fields, its MutableBytes built
+#   only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md), so no
+#   allocation, collection or runtime call can disturb errno there.
 #
 # Byte storage reaches C only through the borrowing contract
 # (C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it

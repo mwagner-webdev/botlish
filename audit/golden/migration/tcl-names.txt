@@ -795,6 +795,7 @@ tests/c-pointer-borrowing.test cb-write-owner-usable-again pass
 tests/c-pointer-borrowing.test cb-write-result-type pass
 tests/c-pointer-borrowing.test cb-write-sees-current-bytes pass
 tests/c-pointer-borrowing.test cb-write-value-semantics pass
+tests/c-pointer-borrowing.test cb-write-back-allocations pass
 tests/calls.test arith-1 pass
 tests/calls.test arith-2 pass
 tests/calls.test arith-3 pass
@@ -8232,6 +8233,21 @@ tests/workload-2048.test workload-2048-demo-main-native pass
 tests/workload-2048.test workload-2048-golden-suite pass
 tests/workload-2048.test workload-2048-strict-warnings pass
 tests/workload-2048.test workload-2048-warning-clean pass
+tests/c-ffi-error-capture.test ec-clobber-positive-control pass
+tests/c-ffi-error-capture.test ec-darwin-read-window pass
+tests/c-ffi-error-capture.test ec-fixture-executable pass
+tests/c-ffi-error-capture.test ec-fixture-shapes pass
+tests/c-ffi-error-capture.test ec-interchange pass
+tests/c-ffi-error-capture.test ec-machine-positive-control pass
+tests/c-ffi-error-capture.test ec-machine-window pass
+tests/c-ffi-error-capture.test ec-nir-no-hazard pass
+tests/c-ffi-error-capture.test ec-nir-no-write-back-object pass
+tests/c-ffi-error-capture.test ec-nir-positive-control pass
+tests/c-ffi-error-capture.test ec-nir-windows pass
+tests/c-ffi-error-capture.test ec-real-read pass
+tests/c-ffi-error-capture.test ec-tcl-backends pass
+tests/c-ffi-error-capture.test ec-trace pass
+tests/c-ffi-error-capture.test ec-arguments-once pass
 tests/c-ffi.test cf-parse-forms pass
 tests/c-ffi.test cf-parse-errors pass
 tests/c-ffi.test cf-parse-messages pass
@@ -8645,6 +8661,7 @@ tests/darwin-io.test di-short-write-completed pass
 tests/darwin-io.test di-write-failures pass
 tests/darwin-io.test di-stderr-failure pass
 tests/darwin-io.test di-errno pass
+tests/darwin-io.test di-errno-allocator pass
 tests/darwin-io.test di-stdin pass
 tests/darwin-io.test di-files pass
 tests/darwin-io.test di-file-errors pass

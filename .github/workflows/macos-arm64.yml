@@ -50,7 +50,7 @@ on:
         options: [acceptance, full]
         default: acceptance
       tests:
-        description: "Tier C's items instead of its default payload (tests/platform/tier.tcl items, space-separated: X.test, X.bot, smoke, acceptance, all, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants[=NAME,...], c-ffi-bench, c-borrow-fuzz, c-borrow-mutants[=NAME,...], c-borrow-bench, darwin-io-mutants, darwin-io-bench)"
+        description: "Tier C's items instead of its default payload (tests/platform/tier.tcl items, space-separated: X.test, X.bot, smoke, acceptance, all, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants[=NAME,...], c-ffi-bench, c-borrow-fuzz, c-borrow-mutants[=NAME,...], c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench)"
         required: false
         default: ""
       gc_stress:

@@ -304,6 +304,15 @@ MutableBytes wrapper flattened as a nested field), so that `read`'s
 comparison and `errno()` follow the call with nothing between. Section 28
 records it; this milestone does not change the borrowing lowering.
 
+> **Follow-up.** C-FFI-ERROR-CAPTURE-MILESTONE-1.md made that change: the
+> write-back value is fields, its MutableBytes built only where a use reads
+> it whole (after `errno()` here), and the keepalive is no machine code. read
+> is now `foreigncall`, `keepalive`, `ilt`, `call errno` like write
+> (`di-errno-read-first`), its machine code calls nothing in between on the
+> -1 path, and an allocator that changes errno on every allocation no longer
+> changes what read reports (`di-errno-allocator`). The table and the
+> paragraphs above record this milestone as it was.
+
 **Threads and coroutines.** A Botlish program runs on one native thread;
 coroutines switch stacks, never threads (COROUTINES.md), so the errno a
 wrapper reads is its own thread's. A `yield` is a statement of a coroutine's
@@ -952,7 +961,7 @@ runs on Linux AArch64 as everywhere.
 * **read's errno window** (section 7): two allocations by the system
   allocator run between read(2) and the errno read. Closing it is a
   compiler representation change (a scalar-replaced write-back value), not a
-  library one.
+  library one. Closed by C-FFI-ERROR-CAPTURE-MILESTONE-1.md.
 * **No portable file API.** `darwin::open`/`create`/`close` are Darwin's
   raw layer (direct); there is no `io::` file operation and no Linux
   counterpart in lib/linux.bot (Linux has write and read only). A portable
@@ -988,7 +997,7 @@ runs on Linux AArch64 as everywhere.
   without erasing provenance.
 * **An errno-exact write exposure**: the scalar-replaced write-back value of
   section 7, so that a write-exposing C call's errno can be read with
-  nothing between.
+  nothing between. Done: C-FFI-ERROR-CAPTURE-MILESTONE-1.md.
 * **Descriptor lifetime**: affine descriptors released by a static drop
   (AFFINE-VALUES.md) or an explicit close protocol, before files are a
   portable resource.
