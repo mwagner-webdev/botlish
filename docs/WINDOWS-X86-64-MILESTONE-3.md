@@ -188,12 +188,16 @@ Code inspection of every transition (WINDOWS-TOOLCHAIN-CENSUS.md, B2):
 |---|---|---|
 | driver -> Botlish | `main.rs`'s `execute`, `runtime::aot::run` and `driver_protocol`, the stub's `aotimage` (Linux), tests | the whole run |
 | Botlish -> runtime helper | every `call_helper` of `codegen::clif` | the helpers that allocate collect (`Vm::alloc` and the `alloc_*` paths) |
-| runtime helper -> Botlish | `rt_call_value` (a function value's generic entry), the affine and mutable-vector bodies that call a closure, coroutine thunks (not on Windows) | further Botlish frames, more collections |
+| runtime helper -> Botlish | `rt_call_value` (a function value's generic entry, reached by a jump: no frame of its own in an optimized build), the runtime functions that call a closure and go on (`mutable_array::generate`, the affine and mutable-vector bodies), coroutine thunks (not on Windows) | further Botlish frames, more collections |
 | Botlish -> C | `foreigncall` | C cannot allocate Botlish memory; the borrow fixture's `read_reentrant` (Rust) collects, standing for re-entry |
 
 A collection always starts in Rust (`Vm::collect_with`), several Rust frames
-above the innermost Botlish frame, and a Rust frame (`rt_call_value`) can
-sit between two Botlish frames.
+above the innermost Botlish frame, and a Rust frame -- a runtime function
+that calls a closure, such as `mutable_array::generate`'s -- can sit
+between two Botlish frames. (`rt_call_value` cannot: it ends in a call of
+the closure's code that LLVM makes a jump -- `jmp *%rax` in the release
+build, controlled experiment; section 7.3 tells what assuming otherwise
+cost.)
 
 ## 2. Architecture: unwind information, AOT and JIT
 
@@ -342,7 +346,8 @@ thread's stack or not ascending, like Linux's at the end of its chain.
 
 It costs nothing per call. Per collection it costs one `RtlVirtualUnwind`
 step per Rust frame on the stack -- the collector's own, the helper's, any
-`rt_call_value`, and the driver's and the system's below the program, down
+runtime function between Botlish frames, and the driver's and the system's
+below the program, down
 to `RtlUserThreadStart` -- plus a frame-record step per Botlish frame, as on
 Linux. It reuses the authoritative metadata of every Rust frame: nothing of
 Rust's frame conventions is assumed.
@@ -358,7 +363,7 @@ of what it would take (section 1.5's transitions):
   before each (`call_helper` where `RootPlan::safepoint_slots` has the
   instruction), and the C calls that may re-enter (the borrow fixture's);
 * **nested runtime calls**: a Rust frame that calls back into Botlish code
-  (`rt_call_value`, the affine and mutable-vector bodies, any future one)
+  (`mutable_array::generate`, the affine and mutable-vector bodies, any future one)
   must save the anchor and restore it after the call -- an anchor stack, or
   every walk would stop at the first such frame and miss every Botlish frame
   above it. Each such transition is code to remember to write: forgetting
@@ -414,8 +419,9 @@ per collection, and only GC stress makes collections frequent enough to see
 it: in ordinary runs no workload is slower with the walk than with the
 fallback (section 8). B would save those Rust frames' steps, but at a
 store per runtime call in every run, and with a correctness obligation at
-every entry into Botlish code from Rust -- `rt_call_value` and every future
-re-entry must save and restore the anchor, and forgetting one misses roots
+every entry into Botlish code from Rust -- `mutable_array::generate`, the
+affine and mutable-vector bodies and every future re-entry must save and
+restore the anchor, and forgetting one misses roots
 silently (section 3.2) -- where A crosses any Rust frame, present or
 future, by the metadata the platform keeps for it anyway.
 
@@ -453,7 +459,8 @@ capability: there is one answer to "are the roots in native frames".
    stack pointer at its call.** The first is reached by unwinding the Rust
    frames from the collector's own context; each next one by its callee's
    frame record (a Botlish callee) or by unwinding the Rust callee
-   (`rt_call_value`, a helper) from an exact context. Its stack pointer is
+   (`mutable_array::generate`'s, a helper's) from an exact context. Its
+   stack pointer is
    the context's RSP because the frame above it was unwound to it: the
    address just above the return address its call pushed. Cranelift's
    x86-64 frames keep RSP fixed in the body, so that is the RSP every stack
@@ -484,7 +491,7 @@ capability: there is one answer to "are the roots in native frames".
 | Case | Where tested | How |
 |---|---|---|
 | roots in an allocating function, its callers, nested calls | `a_callers_root_survives_its_callees_collections`, `the_collectors_walk_agrees_with_windows_on_jit_frames`, native-status `gc-frame-walk` | GC stress |
-| roots across a Rust frame between Botlish frames | `a_callers_root_survives_its_callees_collections` (a `callvalue` through `rt_call_value`) | GC stress; killed when the walk skips its caller (section 7.3) |
+| roots across a Rust frame between Botlish frames | `a_callers_root_survives_its_callees_collections` (`mutable_array::generate` calling a factory that collects) | GC stress; kills a walk that stops at that frame (section 7.3) |
 | leaf-function roots | every workload | a leaf's roots are stack-map entries of its own frame, like any |
 | roots across C calls, borrowed bytes | c-ffi.test's `cf-gc-calls`, c-byte-borrowing.test's stress tests, the borrow fixture's re-entrant collection | acceptance tier, GC-stress tier |
 | mutable collections | mutable-vector, mutable-array tests, gc-workloads | acceptance and GC-stress tiers |
@@ -606,7 +613,7 @@ under both plans.
 | Windows' unwinder alone climbs JIT frames to the instructions that called them, callee-saved registers restored | `windows_unwinds_jit_frames_to_their_callers` | Windows | real Windows |
 | ... from every instruction of every function | `windows_unwinds_every_instruction_of_jit_code` | Windows | real Windows |
 | The collector's walk agrees with Windows' unwinder on every Botlish frame of every collection | `the_collectors_walk_agrees_with_windows_on_jit_frames`; gc-workloads `-unwind-check 1`; the census's programs under the check | Windows | real Windows |
-| A caller's roots survive its callees' collections, across `rt_call_value` too | `codegen::caller_root_tests::a_callers_root_survives_its_callees_collections` | every host, both plans | real Windows, Linux, macOS |
+| A caller's roots survive its callees' collections, across a Rust frame too | `codegen::caller_root_tests::a_callers_root_survives_its_callees_collections` | every host, both plans | real Windows, Linux, macOS |
 | A recursion deeper than its thread's stack ends in NATIVE LIMIT STACK; a shallower one runs | `the_stack_limit_ends_a_recursion_deeper_than_the_stack`; native-status `stack-overflow`, `stack-depth-limit`, `recursion-limit`; aot-facts `standalone-depth-limit`, `standalone-stack-overflow` | Windows | real Windows |
 | The limit's margin; where the stack pointer is checked; the capability's hosts | `the_stack_limit_keeps_a_margin_of_the_stacks_size`, `the_stack_pointer_is_checked_where_no_guard_backs_native_frame_roots`, `native_frame_roots_are_the_frame_pointer_and_unwinder_hosts` | every host | real Windows, Linux, macOS |
 | Roots through whole programs | gc-workloads (both Cranelift backends and executables, plainly and under GC stress), the census's programs through main.tcl, native-status `gc-frame-walk`, the smoke and acceptance tiers, the full tier under GC stress | Windows | real Windows |
@@ -691,12 +698,22 @@ Cranelift's own encoding (section 1.2) would have read both from `[rbp]`.
 
 `a_callers_root_survives_its_callees_collections` builds a list, calls a
 function that allocates and collects thirty times -- once through a
-function value (`rt_call_value`, a Rust frame between the two Botlish
-frames) and once directly -- and then reads the list: under GC stress its
-root is only in its own frame, two frames and a Rust frame above the
-collections. A walk that stops at the first Botlish frame frees it (the
-`walk-first-botlish-frame-only` mutant, killed by it on Linux and on
-Windows).
+function value, once directly, and three times from the factory of a
+`mutable_array::generate`, whose runtime frame stays between the factory's
+frames and the caller's -- and then reads the list: under GC stress its
+root is only in its own frame. A walk that stops at the first Botlish frame
+frees it (the `walk-first-botlish-frame-only` mutant, killed by it on Linux
+and on Windows), and so does a walk that stops at the first Rust frame
+above a Botlish frame (`walk-stops-at-rust`; on Linux, the same mutation of
+the frame-pointer walk, applied by hand: the caller's list read as 999s).
+
+The test did not have the `generate` until the first Windows mutation run:
+`walk-stops-at-rust` survived it, because its function-value call was
+meant to put `rt_call_value`'s Rust frame between the two Botlish frames,
+and in the release build `rt_call_value` has none -- it jumps to the
+closure's code (`jmp *%rax`). No other detector -- GC workloads, native
+status, aot-facts -- collects with a Rust frame between Botlish frames
+either; section 7.6.
 
 `audit/windows-unwind/tools/mutate.tcl` (tier item `windows-unwind-mutants`)
 applies twenty deliberate bugs to a private copy of the checkout, rebuilds
@@ -817,6 +834,7 @@ walk and stack guard are unchanged.
 | Linux mutation run | `pdata-wrong-unwind-info` survived on Linux | the object test's functions all had the same frame, so another function's identical `UNWIND_INFO` was right by accident | functions of more than one frame shape (528d49a) |
 | ac93df3's (both builds) | the single-step test: "every activation returned" | the test's own bookkeeping: its last trap, back in the test, returned before popping the program entry's activation; no instruction unwound wrongly | popped there too (19a04b2) |
 | the same | dumpbin's Botlish entries not found | dumpbin's listing of the image names no function | the entries are the one run matching the object's table: `audit/windows-unwind/tools/dumpbin-entries.tcl` (19a04b2) |
+| dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (@@FIXCOMMIT) |
 
 ## 8. Performance
 
