@@ -316,24 +316,11 @@ jobs:
       - name: Publish summary
         if: always()
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Smoke (Windows x86-64, MSVC)"
-            echo '```'
-            for log in native-status.log aot-facts.log; do
-              [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
-            done
-            [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
-            [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
-            awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
-            echo '```'
-            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
-              echo '### Failed tests'
-              echo '```'
-              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
-              echo '```'
-            fi
-            # A failure's own words, readable from the run's summary (the
-            # check run's output) wherever its logs are not.
+            # Failures first, in their own words (the annotations' first
+            # parts), then the listings, then every check's line.
             if [ -f rust-tests.log ] && grep -aq 'test result: FAILED\|^error' rust-tests.log; then
               echo '### Rust unit test failures'
               echo '```'
@@ -349,7 +336,13 @@ jobs:
                 echo '```'
               fi
             done
-            for listing in artifacts/fib-unwind.txt artifacts/bench-unwind.txt artifacts/unwind-check.txt; do
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
+            for listing in artifacts/unwind-check.txt artifacts/fib-unwind.txt artifacts/bench-unwind.txt; do
               if [ -f "$listing" ]; then
                 echo "### $listing"
                 echo '```'
@@ -357,6 +350,25 @@ jobs:
                 echo '```'
               fi
             done
+            echo '### Checks'
+            echo '```'
+            for log in native-status.log aot-facts.log; do
+              [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
+            done
+            [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
+            [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
+            [ -f gc-workloads-unwind.log ] && grep -a 'native unwind check' gc-workloads-unwind.log | head -n 30
+            awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
+            echo '```'
+            # The Rust tests of this milestone's Windows paths, by name: the
+            # evidence that they ran here (WINDOWS-X86-64-MILESTONE-3.md).
+            if [ -f rust-tests.log ]; then
+              echo '### Rust tests'
+              echo '```'
+              grep -a 'test result' rust-tests.log
+              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack)' rust-tests.log
+              echo '```'
+            fi
           } > smoke-summary.md
           cat smoke-summary.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -443,6 +455,7 @@ jobs:
       - name: Publish summary
         if: always()
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Root plans (Windows x86-64)"
             echo '```'
@@ -510,6 +523,7 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Acceptance (Windows x86-64), shard $SHARD/4"
             echo '```'
@@ -623,6 +637,7 @@ jobs:
           SHARDS: ${{ steps.decide.outputs.shards }}
           SHARD: ${{ matrix.shard }}
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Full, shard $SHARD/$SHARDS: $ITEMS (GC stress: $STRESS)"
             echo '```'
