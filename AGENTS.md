@@ -2786,6 +2786,7 @@ no semantics of its own. Keep it so:
 If you change the seam, the cache's use of it, a diagnostic producer, or the
 service, run `tests/compiler-service.test`, `tests/main-cli.test`,
 `tests/diagnostic-recovery.test`, `tests/hir-cache.test`,
+`audit/compiler-service/tools/mutate.tcl`,
 `audit/diagnostic-recovery/tools/mutate.tcl`,
 `audit/hir-interchange/tools/mutate.tcl` and
 `audit/hir-interchange/tools/roundtrip.tcl -via cache` (each mutant must

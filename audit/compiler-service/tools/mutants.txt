@@ -104,11 +104,11 @@
 @@ syntax-no-end a syntax diagnostic's end is its start: the range does not reach the end of what is wrong
 ## surface/ast.tcl
 <<<<
-        end [dict get $span end] message $message \
-        endLine [dict get $span endLine] endColumn [dict get $span endColumn]]
+        end [dict get $span end] endLine [dict get $span endLine] \
+        endColumn [dict get $span endColumn] message $message]
 ====
-        end [dict get $span start] message $message \
-        endLine [dict get $span line] endColumn [dict get $span column]]
+        end [dict get $span start] endLine [dict get $span line] \
+        endColumn [dict get $span column] message $message]
 >>>>
 
 @@ related-dropped a semantic diagnostic's related locations are not carried as data

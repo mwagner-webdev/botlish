@@ -77,13 +77,14 @@ core/            runtime and interpreter (see "Implementation map")
 hir/             semantic HIR: resolution, types, refinements, lowering
 compiler/        HIR -> Tcl compiler
 native/          HIR -> NIR -> Cranelift native backend (Tcl lowering; Rust runtime and codegen)
-surface/         source language: lexer, parser, surface AST, AST -> HIR
+surface/         source language: lexer, parser, surface AST, AST -> HIR; the source seam
+service/         the compiler service: workspaces, revisions, position queries (COMPILER-SERVICE-MILESTONE-1.md)
 examples/*.ir    acceptance programs as IR data
 examples/hir/    HIR samples (.hir text) with the core IR they lower to
 examples/surface/  source programs (.bot)
 examples/stdlib/   algorithm corpus in Botlish: reverse, replace, CSV, matmul (§18)
 tests/*.test     tcltest suite
-main.tcl         the command line: run, build, inspect; -help (Compilerpedia)
+main.tcl         the command line: run, build, check, inspect; -help (Compilerpedia)
 compilerpedia/   the built-in reference: engine, topics, generated stdlib topics (COMPILERPEDIA.md)
 single/          main.tcl and the compiler stack as one executable (SINGLE-EXECUTABLE.md)
 ```
@@ -97,6 +98,7 @@ tclsh9.0 main.tcl -backend cranelift FILE.bot  # run natively: what it prints, t
 tclsh9.0 main.tcl -emit-native-executable FILE.bot  # compile to ./FILE (Linux glibc, macOS arm64)
 tclsh9.0 main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
 tclsh9.0 main.tcl -emit-hir-interchange FILE.bot   # write the analyzed HIR as FILE.hirx (HIR-INTERCHANGE.md)
+tclsh9.0 main.tcl -check FILE.bot              # report its diagnostics; run, build, write nothing
 tclsh9.0 main.tcl -backend cranelift FILE.hirx     # run it with no front end (same front end only)
 BOTLISH_HIR_CACHE=DIR tclsh9.0 main.tcl FILE.bot   # keep and reuse the front end's HIR across runs
 CORE_BACKEND=compile tclsh9.0 tests/all.tcl    # test suite, one backend
