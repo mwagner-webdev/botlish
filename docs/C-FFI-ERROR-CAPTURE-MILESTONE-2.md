@@ -738,7 +738,7 @@ against all three default detector files and the fuzzer):
 | `audit/error-payloads/tools/mutate.tcl`, its six of native/lower.tcl (`PayloadFields` changed: `native-small-payload-boxes` retargeted) | 6 | 6 | 0 | 0 | 0 / 0 |
 | `audit/abi-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 | 0 / 0 |
 | `audit/mutable-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 | 0 / 0 |
-| `audit/c-pointer-borrowing/tools/mutate.tcl` on macOS (`c-borrow-mutants=`: the four codegen word mutants and `apple-exposure-tagged`, run 39738749211; <<MACOS-RUN3-MUTANTS>>) | 5 | 5 | 0 | 0 | 0 / 0 |
+| `audit/c-pointer-borrowing/tools/mutate.tcl` on macOS (`c-borrow-mutants=`: the four codegen word mutants and `apple-exposure-tagged`, run 39738749211; the other fourteen of this milestone's eighteen, run 39760256834) | 19 | 19 | 0 | 0 | 0 / 0 |
 | `audit/context-traits/tools/mutate.tcl -only darwin-*` on macOS (`darwin-io-mutants`, run 39738749211) | 20 | 20 | 0 | 0 | 0 / 0 |
 
 The fuzzers, on the unmutated tree: `audit/c-ffi/tools/fuzz.tcl` (random
@@ -910,7 +910,7 @@ GitHub Actions, `.github/workflows/tests.yml` (dispatched on the branch):
 | run | commit | result |
 |---|---|---|
 | [39736853106](https://github.com/mwagner-webdev/botlish/actions/runs/39736853106) | 188a58f | success: interp, compile, cranelift and cranelift-generic coverage, the native Rust unit tests, the stub-linked executables, golden shards 1-4, the warning gate, the method-call kind filter (the GC-stress job runs on pushes to main only; the GC-stress runs above cover it) |
-<<CI-LINUX-FINAL>>
+| [39747067898](https://github.com/mwagner-webdev/botlish/actions/runs/39747067898) | 9e38f24 (the final code: later commits change the benchmark script and documents only) | success: the same jobs |
 
 ## 29. Linux AArch64 CI
 
@@ -940,7 +940,7 @@ another:
 |---|---|---|---|
 | [39738749211](https://github.com/mwagner-webdev/botlish/actions/runs/39738749211) | 9e38f24 (dispatch) | smoke (the Rust unit tests, `c_word` and `ffi_word_cmp` among them); the acceptance tier's two shards (every test file, c-ffi-error-capture.test and darwin-io.test among them, and every golden suite on all four backends); Tier C: `c-borrow-mutants=` the four codegen word mutants and `apple-exposure-tagged`, `darwin-io-mutants`, `c-capture-bench` against e2ae884 | success: every job; mutants 5 of 5 and 20 of 20 killed (below); the benchmark in section 27 |
 | [39752321962](https://github.com/mwagner-webdev/botlish/actions/runs/39752321962) | 4e15575 (dispatch) | Tier C under GC stress: c-ffi-error-capture.test, darwin-io.test, c-pointer-borrowing.test, c-byte-borrowing.test and coroutines.test on interp and compile (their native tests run the executables and the JIT with `BOTLISH_NATIVE_GC_STRESS=1`); smoke and acceptance again | Tier C: 218 tests per Tcl backend, 214 passed, 4 skipped (`ecTrace` 3: the ptrace traces are Linux's; `nativeLinux` 1), 0 failed -- so `ec-modes-executables`, `ec-modes-positive-control`, `ec-escapes-values`, `ec-modes-machine-windows`, `di-errno-allocator` (scalar replacement on and off, and the fault) and `bb-guard-malloc` passed under GC stress on Apple Silicon; smoke, both acceptance shards and the Linux control: success |
-<<MACOS-RUN3>>
+| [39760256834](https://github.com/mwagner-webdev/botlish/actions/runs/39760256834) | 84150f1 (dispatch; the code of 9e38f24) | Tier C: `c-borrow-mutants=` this milestone's fourteen Tcl-side mutants (the transport, captured, returned, generic and `-struct-opt 0` ones, the boxing and comparison ones, the pending-object and capture ones, and Milestone 1's five retargeted); smoke and acceptance again | success, every job: 14 of 14 killed on macos-aarch64 (1957 s), by the same detectors as on Linux (`ec-modes-nir-windows`, `ec-modes-machine-windows` on the Mach-O object, `ec-modes-executables` with the `DYLD_INSERT_LIBRARIES` allocator, `ec-boxed-results`, `cb-write-back-allocations`, ...) |
 
 The mutants on macos-aarch64 (run 39738749211):
 
