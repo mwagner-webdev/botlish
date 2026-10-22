@@ -690,7 +690,71 @@ format, the front-end cache and their keys are unchanged.
 
 ## 25. Mutation results
 
-<<MUTANTS>>
+`audit/c-pointer-borrowing/tools/mutate.tcl` (each mutant a private copy of
+the compiler and backend, a native one rebuilt; one that does not build is
+NOT-BUILT, never killed; one whose text no longer occurs exactly once is
+NOT-APPLIED) now carries 56 mutants: Milestone 1's 43, five of them
+retargeted at the transport (`write-back-not-a-construction`,
+`write-back-buffer-eager`, `allocation-after-c-call`,
+`write-back-result-changed`, `write-back-buffer-built-per-iteration`), and
+thirteen new. The brief's list, each as the mutant that realizes it and
+the detectors that kill it -- structural ones for the window, semantic and
+GC-stress ones for values, signedness and lifetimes:
+
+| the brief's mutation | mutant | kind | killed by (Linux x86-64) |
+|---|---|---|---|
+| eager write-back construction only with `-struct-opt 0` | `transport-only-with-struct-opt` | window | 7 tests: `ec-modes-nir-windows`, `ec-modes-nir-no-hazard`, `ec-modes-machine-windows`, `ec-modes-executables` (the allocator), `ec-darwin-read-window`, `cb-write-back-allocations`, ... |
+| eager construction for closure-captured values | `captured-write-back-eager` | window | 5: `ec-modes-nir-windows`, `ec-modes-nir-no-hazard`, `ec-modes-machine-windows`, `ec-modes-executables`, `ec-trace-captured` |
+| eager construction for a returned write-back value | `returned-write-back-eager` | window | 4: `ec-modes-nir-windows`, `ec-modes-nir-no-hazard`, `ec-modes-machine-windows`, `ec-modes-executables` (with the allocator, `returned` hands back the other value) |
+| eager construction in generic lowering | `transport-not-in-generic-lowering` | window | 5: `ec-modes-nir-windows`, `ec-modes-nir-no-hazard`, `ec-modes-machine-windows`, `ec-modes-executables`, `ec-darwin-read-window` |
+| immediate `rt_ffi_box_u64` for a large sentinel | `large-unsigned-boxed-at-call` | window | 6: `ec-boxed-results`, `ec-large-sentinel-nir`, `ec-modes-nir-windows`, `ec-modes-machine-windows`, `ec-modes-executables`, `ec-trace-large-sentinel` |
+| immediate `rt_ffi_box_i64` for a large signed result | `large-signed-boxed-at-call` | window | 14, among them `ec-boxed-results`, `ec-darwin-read-window`, `ec-fixture-executable`, `ec-interchange` |
+| the sentinel compared with the wrong signedness | `word-compare-wrong-signedness` (codegen::clif) | value | 1: `ec-word-comparisons` (an unsigned word above 2^63 - 1 against 2^62 and a BigInt) |
+| a raw 64-bit return truncated | `word-truncated` (codegen::clif) | value | 12, among them `bb-read-sizes`, `bb-read-zero-and-high-bytes`, `bb-read-address-above-4gib`, `bb-gc-stress` |
+| the full value materialized before the sentinel comparison | `sentinel-boxed-before-compare` | window | 9, among them `ec-large-sentinel-nir`, `ec-modes-nir-windows`, `ec-modes-machine-windows`, `ec-modes-executables`, `ec-darwin-read-window` |
+| a nested MutableBytes wrapper built before the errno read | `write-back-buffer-eager` (retargeted) | window | 17, among them `ec-darwin-read-window`, `ec-fixture-executable`, `ec-clobber-positive-control`, `cb-write-back-allocations` |
+| a detached owner's GC root lost | `write-back-copy-not-a-root` (codegen::roots), `keepalive-not-a-use` | lifetime | 8 GC-stress tests, among them `bb-gc-stress`, `cb-failure-gc-stress`, `cb-gc-stress-programs`, `ec-fixture-executable`; 1: `cb-liveness-reentrant` |
+| a required materialization after the errno read lost | `capture-materialization-lost` | value | 5: `ec-escapes-values`, `ec-modes-executables`, `ec-fixture-executable`, `ec-fixture-shapes`, `ec-clobber-positive-control` |
+| the updated buffer materialized twice | `pending-object-built-per-use`, `write-back-buffer-built-per-iteration` (retargeted) | allocation | 1 each: `cb-write-back-allocations` (no value changes) |
+| errno read before the C call | `darwin-errno-before-call` (audit/context-traits, lib/darwin.bot) | value (macOS) | the macOS run, section 30 (Milestone 1: `di-errno-allocator`, `di-errno-read-first`, `di-stdin`). A compiler never moves a call across another call; the order is the binding's, and the one binding that reads errno is Darwin's |
+| errno read after an unrelated allocation | `allocation-after-c-call` (retargeted) | window | 23, among them `cb-nir-read`, `cb-nir-write`, `cb-allocations`, `cb-exposure-after-arguments-nir` |
+| a large unsigned failure taken for a positive count | `large-unsigned-masked-positive` (codegen::clif) | value | 6: `ec-escapes-values`, `ec-word-comparisons`, `ec-modes-executables`, `ec-modes-positive-control`, `bb-read-sizes`, `bb-read-zero-and-high-bytes` |
+| an untagged C scalar leaked into an ordinary value | `word-leaks-untagged` (codegen::clif) | value | 17, among them `bb-read-sizes`, `bb-read-address`, `bb-gc-stress`, `bb-coroutines` |
+
+The window mutants survive the borrowing fuzzer, as they should: it
+compares values and buffers, which those mutants leave as they are (they
+only move allocations); the structural detectors and the errno-changing
+allocator kill them.
+
+The runs (Linux x86-64, this container, 9e38f24's tree; the borrowing
+harness in lanes of a few mutants, each lane its own private trees; the
+mutants that predate this milestone and mutate nothing it changed --
+contracts, admission, the Tcl exposure model -- against
+tests/c-pointer-borrowing.test and tests/c-byte-borrowing.test, the rest
+against all three default detector files and the fuzzer):
+
+| harness | mutants | killed | survived | skipped | not applied / not built |
+|---|---:|---:|---:|---:|---:|
+| `audit/c-pointer-borrowing/tools/mutate.tcl` (all) | 56 | 55 | 0 | 1 (`apple-exposure-tagged`: macos-aarch64 only) | 0 / 0 |
+| `audit/c-ffi/tools/mutate.tcl`, the six of native/lower.tcl's foreign-call lowering | 6 | 6 | 0 | 0 | 0 / 0 |
+| `audit/error-payloads/tools/mutate.tcl`, its six of native/lower.tcl (`PayloadFields` changed: `native-small-payload-boxes` retargeted) | 6 | 6 | 0 | 0 | 0 / 0 |
+| `audit/abi-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 | 0 / 0 |
+| `audit/mutable-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 | 0 / 0 |
+| `audit/c-pointer-borrowing/tools/mutate.tcl` on macOS (`c-borrow-mutants=`: the four codegen word mutants and `apple-exposure-tagged`, run 39738749211; <<MACOS-RUN3-MUTANTS>>) | 5 | 5 | 0 | 0 | 0 / 0 |
+| `audit/context-traits/tools/mutate.tcl -only darwin-*` on macOS (`darwin-io-mutants`, run 39738749211) | 20 | 20 | 0 | 0 | 0 / 0 |
+
+The fuzzers, on the unmutated tree: `audit/c-ffi/tools/fuzz.tcl` (random
+C signatures with every C integer result class, `long` and `unsigned long`
+among them, so random 64-bit words through the new C words; seeds 1, 2, 3
+and 9 under GC stress, 10 programs and 120 functions each): 0
+disagreements; `audit/c-pointer-borrowing/tools/fuzz.tcl` (seeds 1 and 2,
+and 9 under GC stress, 15 programs each): 0 disagreements.
+
+Every mutant of the other campaigns that mutates a file this milestone
+changed (affine, binary-layout, bounds-proofs, branch-form-boolean,
+c-abi-types, c-float-ffi, coroutines, enums, layout-arrays, layout-unions,
+list-length-refinement, mutable-array, native-aot, native-edit,
+native-view, target-model, type-predicates) still applies exactly once.
 
 ## 26. Allocation counts
 
@@ -725,23 +789,203 @@ boxing is inside the call (the `helpers` column).
 
 ## 27. Performance
 
-<<PERFORMANCE>>
+This is a correctness milestone; the measurements look for regressions.
+bench/c-ffi-error-capture.tcl, both trees on one machine (`-baseline-rev
+e2ae884` on macOS; `-root` a checkout of e2ae884 locally).
+
+**Instructions per call** (`-instructions 1`: callgrind, 2000 calls minus
+the empty loop; they repeat within about 1-2%, where a shared machine
+scatters times by a factor of two). The `errno` part's executables -- real C (tests/cffi/fixture.c),
+the wrapper, its C call, its errno read and the loop -- Linux x86-64,
+e2ae884 -> this milestone:
+
+| shape | default | `-struct-opt 0` | `-specialize 0` | both |
+|---|---:|---:|---:|---:|
+| small signed sentinel (`long` -1) | 283 -> 269 | 283 -> 271 | 283 -> 271 | 283 -> 271 |
+| `(size_t)-1` | 913 -> 260 | 913 -> 262 | 913 -> 262 | 913 -> 262 |
+| large successful result (2^64 - 1 kept) | 1824 -> 1674 | 1823 -> 1675 | 1823 -> 1675 | 1823 -> 1675 |
+| write-back status only | 1254 -> 1240 | 4470 -> 2145 | 2156 -> 2145 | 4470 -> 2145 |
+| write-back status and buffer | 2197 -> 2182 | 4913 -> 4504 | 4517 -> 4504 | 4913 -> 4504 |
+| captured by a closure after the read | 4859 -> 4848 | 5754 -> 5743 | 5754 -> 5743 | 5754 -> 5743 |
+| stored in a List after the read | 4473 -> 4464 | 4872 -> 4865 | 4873 -> 4865 | 4872 -> 4865 |
+
+Every shape executes fewer instructions in every mode. `(size_t)-1` loses
+the BigInt (`rt_ffi_box_u64`, its `malloc` and `free`) and the comparison's
+two BigInt copies (the eager fault, which keeps the boxing but has the
+copy-free `rt_int_cmp`, counts 834: the copies were about 80 of the 650); the large successful result keeps its BigInt (the List
+needs the Int) but loses the copies. With scalar replacement off the
+write-back value is no longer built at the call. The captured and stored
+shapes do the same work as before -- the value is built for the closure or
+the List -- after the read instead of before it.
+
+The in-process shapes (the borrow fixture's write exposure, Milestone 1's
+`shapes`; the driver's JIT run under callgrind):
+
+| shape | default | `-struct-opt 0` | `-specialize 0` | both |
+|---|---:|---:|---:|---:|
+| discarded | 1142 -> 1142 | 3488 -> 1189 | 1183 -> 1188 | 3477 -> 1176 |
+| the C result alone (`unsigned long`) | 1371 -> 1380 | 3824 -> 1380 | 1486 -> 1510 | 3818 -> 1376 |
+| the result and the buffer | 3266 -> 3265 | 5788 -> 4530 | 4517 -> 4522 | 5748 -> 4527 |
+| returned unread, read by the caller | 3010 -> 3012 | 5404 -> 5404 | 5390 -> 5397 | 5392 -> 5401 |
+
+Where scalar replacement already applied the counts are equal within 2%,
+which is also how much two counts of one tree differ between runs (this
+tree's `result` counted 1380 here and 1372 in the benchmark's own
+`-instructions 1` run); where it did not, a third
+to two thirds fewer.
+
+**Time per call.** The container's times scatter by a factor of up to two
+between runs of the same tree (four runs of the `shapes` part gave
+e2ae884's `discarded` 64.8, 38.2, 69.9 and 103.2 ns), so they are no
+regression signal here; the counts above are. macOS (run 39738749211, one `macos-15` runner,
+best of five processes of 100,000 calls, minus the empty loop), e2ae884 ->
+this milestone, ns:
+
+| shape | default | `-struct-opt 0` | `-specialize 0` | both |
+|---|---:|---:|---:|---:|
+| small signed sentinel | -1.9 -> 7.7 | 22.2 -> 12.4 | 23.4 -> 26.2 | 16.5 -> 49.3 |
+| `(size_t)-1` | 50.1 -> 20.7 | 78.3 -> 7.5 | 73.5 -> 27.7 | 125.7 -> 32.6 |
+| large successful result | 92.3 -> 149.5 | 94.0 -> 106.5 | 126.4 -> 120.6 | 133.6 -> 113.8 |
+| write-back status only | 26.1 -> 72.0 | 202.9 -> 112.6 | 167.2 -> 112.2 | 232.2 -> 119.0 |
+| status and buffer | 86.1 -> 146.1 | 292.4 -> 219.2 | 279.4 -> 236.0 | 354.9 -> 259.4 |
+| captured after the read | 294.7 -> 304.9 | 375.8 -> 283.3 | 345.3 -> 325.3 | 440.3 -> 409.6 |
+| stored in a List after the read | 221.2 -> 215.3 | 272.2 -> 239.1 | 291.6 -> 338.6 | 448.6 -> 251.9 |
+
+These are differences of a few milliseconds per executable run, inside a
+process start's own variance (the empty-loop subtraction makes one time
+negative), and they go both ways: the default write-back status reads
+26.1 -> 72.0 ns where its instruction count fell 1254 -> 1240, and the
+eager fault on the same runner reads 9.5, 57.0, 101.4, 167.2, 285.0, 319.1
+and 326.9 ns for the seven shapes. The in-process shapes on macOS: discarded 39.0 -> 37.3, result
+28.5 -> 36.3, both 83.8 -> 102.2, returned 98.3 -> 87.8, detach of 64 KiB
+1984 -> 2414 ns -- the detach being the private copy, which the milestone
+does not touch, the scatter is the runner's. `read(2)`: 619.6 -> 588.2
+(64 bytes), 314.9 -> 360.0 (EBADF), 5909 -> 6502 (64 KiB).
+
+**Per shape and mode** (both machines, the `errno` part): the protected
+window's hazards (`before`) and the calls on any path of its machine code
+(`helpers`):
+
+| | e2ae884 | this milestone | the fault |
+|---|---|---|---|
+| `before`, write-back shapes, default | 0, but 3 when captured | 0 | 2 or 3 |
+| `before`, write-back shapes, `-struct-opt 0` / both | 3 | 0 | 2 or 3 |
+| `helpers`, every shape, every mode | `rt_ffi_box_i64`/`_u64`, `rt_int_cmp` (+ `rt_struct_new`) | none | as e2ae884 |
+| GC stress (the executable's output) | same | same | same |
+
+The detached copy remains (one MutableBytes per call: section 26), and
+large values are boxed whenever a use needs the Int: no BigInt work was
+optimized away beyond the comparison's copies.
 
 ## 28. Linux x86-64 CI
 
-<<CI-LINUX>>
+Locally (Linux x86-64, a 4-core container):
+
+* `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile,
+  every golden suite on all four backends through the front-end cache):
+  6,668 and 6,607 tests passed, 1 failed on each Tcl backend --
+  `tests/numeric-looking-names.test`'s source rule (two `expr {... ? ...
+  : ...}` the new lowering had selected strings with; rewritten as `if`, the
+  file passes) -- and all 101 golden suites passed on all four backends.
+* Under `BOTLISH_NATIVE_GC_STRESS=1`: c-ffi-error-capture (27), c-pointer-
+  borrowing (62), c-byte-borrowing (19 + 1 skipped: `guardMalloc` is
+  macOS's), c-ffi (109 + 3 skipped: BoringSSL 2, `appleAvailability`),
+  coroutines (81), affine (48), abi-bytes (73), abi-mutable-bytes (76),
+  value-transport (64), struct-scalar-replacement (84), virtual-construction
+  (51), struct-destructuring (263), c-float-ffi (37), variadics (58),
+  native-view (39), native-edit (55): no failure.
+* `cargo test --release --manifest-path native/Cargo.toml --lib`: 281
+  passed, also under GC stress.
+* Differential (the brief's "same programs, every policy"): every golden
+  suite on cranelift and cranelift-generic with
+  `BOTLISH_NATIVE_STRUCT_OPT=0`: 101 suites, 4,987 and 4,885 tests, no
+  failure; with `BOTLISH_NATIVE_SPECIALIZE=0` and with both: 94 suites
+  pass on both backends, and the 7 that exclude cranelift-generic for the
+  generic lowering's known limit (NATIVE UNSUPPORTED struct-shape, STRUCTS.md
+  "Known limitations": `destructuring-instances`, `methods-struct-instances`,
+  ...) abort on cranelift the same way, as they do on e2ae884. Section 18's
+  executables compare the four modes value for value.
+* `tools/compilerpedia.tcl check`: 752 topics, 572 examples, no problem.
+
+GitHub Actions, `.github/workflows/tests.yml` (dispatched on the branch):
+
+| run | commit | result |
+|---|---|---|
+| [39736853106](https://github.com/mwagner-webdev/botlish/actions/runs/39736853106) | 188a58f | success: interp, compile, cranelift and cranelift-generic coverage, the native Rust unit tests, the stub-linked executables, golden shards 1-4, the warning gate, the method-call kind filter (the GC-stress job runs on pushes to main only; the GC-stress runs above cover it) |
+<<CI-LINUX-FINAL>>
 
 ## 29. Linux AArch64 CI
 
-<<CI-ARM64>>
+`.github/workflows/tests-arm64.yml` on GitHub's `ubuntu-24.04-arm` runners
+(dispatched on the branch): the Tcl suite on interp and compile, its
+cranelift and cranelift-generic coverage, the native Rust unit tests, the
+golden suites in four shards and the GC-stress run.
+
+| run | commit | result |
+|---|---|---|
+| [39736856392](https://github.com/mwagner-webdev/botlish/actions/runs/39736856392) | 188a58f | success, every job. The interp job: 8,839 tests, 8,718 passed, 121 skipped, 0 failed; no test skipped for `ecTrace`, `ecClobber`, `ecFixture` or `objdump`, so the AArch64 single-step traces (`ec-trace`, `ec-trace-large-sentinel`, `ec-trace-captured`), the errno-changing allocator over glibc (`ec-modes-executables`, `ec-modes-positive-control`), the object-file windows (`ec-modes-machine-windows` on AAPCS64 object code) and `ec-word-comparisons` (the unsigned conditions) ran and passed there |
+<<CI-ARM64-FINAL>>
+
+The AArch64 lowering adds nothing of its own: a word is an `i64`
+Cranelift value whatever the ISA, the comparisons are Cranelift's
+`icmp`, and AAPCS64's argument and return lowering is Cranelift's as
+before (no Apple convention on Linux: `c_call_conv` is the triple's).
 
 ## 30. macOS AArch64 CI
 
-<<CI-MACOS>>
+GitHub's `macos-15` Apple Silicon runners, `.github/workflows/macos-arm64.yml`
+(the shared development Mac was not used). The workflow cancels a branch's
+running run when another starts, so the Tier C dispatches ran one after
+another:
+
+| run | commit | what | result |
+|---|---|---|---|
+| [39738749211](https://github.com/mwagner-webdev/botlish/actions/runs/39738749211) | 9e38f24 (dispatch) | smoke (the Rust unit tests, `c_word` and `ffi_word_cmp` among them); the acceptance tier's two shards (every test file, c-ffi-error-capture.test and darwin-io.test among them, and every golden suite on all four backends); Tier C: `c-borrow-mutants=` the four codegen word mutants and `apple-exposure-tagged`, `darwin-io-mutants`, `c-capture-bench` against e2ae884 | success: every job; mutants 5 of 5 and 20 of 20 killed (below); the benchmark in section 27 |
+<<MACOS-RUN2>>
+
+The mutants on macos-aarch64 (run 39738749211):
+
+| mutant | killed by |
+|---|---|
+| `apple-exposure-tagged` | 26 tests, among them `bb-guard-malloc`, `bb-read-address-above-4gib` |
+| `word-compare-wrong-signedness` | `ec-word-comparisons` |
+| `word-truncated` | 13 tests, among them `bb-read-sizes`, `bb-guard-malloc` |
+| `large-unsigned-masked-positive` | 6: `ec-escapes-values`, `ec-word-comparisons`, `ec-modes-executables`, `ec-modes-positive-control`, `bb-read-sizes`, `bb-read-zero-and-high-bytes` |
+| `word-leaks-untagged` | 18 tests |
+| the 20 `darwin-*` mutants of audit/context-traits | all killed; `darwin-errno-before-call` (errno read before the C call) by `di-errno-allocator`, `di-errno-read-first`, `di-stdin`; `darwin-errno-after-another-call` by 4 |
+
+So on Apple Silicon: the new fixture's `(size_t)-1`, the signed and
+unsigned word tables and the escapes program through Apple clang and
+libSystem's errno (`__error`), the errno-changing `malloc` interposer,
+`-struct-opt 0`, the generic lowering, the captured, escaping and nested
+shapes, the Mach-O object windows (`ec-modes-machine-windows`), Darwin's
+`read` with scalar replacement on and off and the fault, and Apple's
+variadic and byte-borrowing behavior (c-ffi.test, c-byte-borrowing.test,
+`apple-exposure-tagged`) all pass with the same `darwin::read` source.
 
 ## 31. Windows regression
 
-<<CI-WINDOWS>>
+The shared lowering is the same code on Windows; C calls are not (they are
+refused there, `C_CALLS`), so what Windows validates is the shared
+compiler, never the foreign-error behavior:
+
+* **Shared lowering, validated by the Windows tests**:
+  `.github/workflows/windows-x86_64.yml` on the push of 9e38f24 --
+  [39738732944](https://github.com/mwagner-webdev/botlish/actions/runs/39738732944):
+  success, the smoke job (the Rust unit tests with the new `c_word` and
+  `ffi_word_cmp` ones, native status, the COFF/PE facts, the GC workloads
+  under GC stress with the fallback root plan, the 2048 executable) and the
+  acceptance tier's four shards (every test file; c-ffi-error-capture.test's
+  NIR tests compile their programs for linux-x86_64 and macos-aarch64 on
+  the Windows host and pass; its executable tests need C calls and skip).
+  Words are `scalar_regs`, so the fallback root plan never shadows one.
+* **C return-value transport, validated on Linux and macOS** (sections 28
+  to 30).
+* **Windows native foreign-error behavior: not executable yet.** No
+  Windows program calls C; `GetLastError()` read by an `extern c fn` right
+  after the call will need no new mechanism -- a `DWORD` is a 32-bit C
+  scalar (no word), a 64-bit result is a word like any other -- but nothing
+  here claims Windows runtime correctness for it.
 
 ## 32. Remaining limits of the guarantee
 

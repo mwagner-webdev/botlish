@@ -2091,8 +2091,9 @@ you change the code it mutates, keeping it a mutant of the same rule; its
 error-capture mutants are killed by tests/c-ffi-error-capture.test, which
 it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`. `bench/c-ffi-error-capture.tcl`
 (`-root DIR` for a baseline checkout; the tier item `c-capture-bench` on
-macOS; its `errno` part every shape and lowering) is the performance
-report.
+macOS; its `errno` part every shape and lowering; `-instructions 1`
+callgrind's instruction counts, which a shared machine does not scatter
+as it does times) is the performance report.
 
 ## C floating types (ffi::c::Float, ffi::c::Double)
 
