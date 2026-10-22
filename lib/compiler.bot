@@ -88,6 +88,8 @@ enum DiagnosticCode:
     FlagFunctionValue,
     ForeignBorrow,
     Imprint,
+    InternalIntrinsicValue,
+    InternalNamespace,
     KnownError,
     LayoutArrayExtent,
     LayoutArrayIndex,

@@ -285,10 +285,10 @@ test mv-take-order {items 24, 25: take(i) keeps the relative order of the elemen
     mvAgree "import mutable_vector\nfn f() -> List\[int\] errors IndexNotFound:\n    v = mutable_vector::from_list(\[1, 2, 3, 4, 5\])\n    a = v.take(2)\n    b = v.take(0)\n    v.push(6)\n    c = v.take(0)\n    \[a, b, c, v.at(0), v.at(1), v.at(2), v.length()\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
 } -result {value {[3, 1, 2, 4, 5, 6, 3]}}
 
-test mv-show {a vector shows as its current elements on every backend; == and hash of a vector are the EQUALITY error (none was added), statically AFFINE-EQUALITY-UNSUPPORTED for an affine one} -body {
+test mv-show {a vector shows as its current elements on every backend; == and hash of a vector are the EQUALITY error (none was added), statically AFFINE-EQUALITY-UNSUPPORTED for an affine one (a hash of a value statically known to be a vector is TRAIT-NOT-SATISFIED at compile time, HASHABLE-AND-KEYED-HASH.md: here an untyped function hashes it)} -body {
     list [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[\"a0\", \"b0\"\])\n\[v, mutable_vector::from_list(\[\])\]\n"] \
         [lindex [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nv == v\n"] 1] \
-        [lindex [mvAgree "import mutable_vector\nv = mutable_vector::from_list(\[1\])\nhash(v)\n"] 1] \
+        [lindex [mvAgree "import mutable_vector\nfn h(x):\n    hash(x)\nv = mutable_vector::from_list(\[1\])\nh(v)\n"] 1] \
         [mvCode "${mvDecls}q = empty_queue()\nq == q\n"]
 } -result {{value {[<mutable-vector ["a0", "b0"]>, <mutable-vector []>]}} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} AFFINE-EQUALITY-UNSUPPORTED}
 

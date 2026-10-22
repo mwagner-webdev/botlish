@@ -408,10 +408,10 @@ test dr-equality {== means the same decimal at P (the smaller guaranteed precisi
         "\[eq2(sum(), 0.3), ne2(sum(), 0.3), eq2(1.234, 1.2349), eq3(1.234, 1.2349), eq3(1.2345, 1.2355), ne2(1.25, 1.24)\]\n"]
 } -result {[true, false, true, false, false, true]}
 
-test dr-equality-refused {equality that does not know the precision is refused: of a List or struct holding DecimalRounded values (statically), and the type-blind equality an untyped function's == or a hash would use (EQUALITY at run time, on every backend)} -body {
+test dr-equality-refused {equality that does not know the precision is refused: of a List or struct holding DecimalRounded values (statically), and the type-blind equality an untyped function's == or hash would use (EQUALITY at run time, on every backend; a hash of a value statically DecimalRounded is TRAIT-NOT-SATISFIED at compile time, HASHABLE-AND-KEYED-HASH.md)} -body {
     list [rejection "fn f() -> List\[$dr2\]:\n    \[0.1\]\nf() == f()\n"] \
         [drOutcome [drHir "fn same(a, b):\n    a == b\nfn d() -> $dr2:\n    0.5\nsame(\[d()\], \[d()\])\n"]] \
-        [drOutcome [drHir "fn d() -> $dr2:\n    0.5\nhash(d())\n"]]
+        [drOutcome [drHir "fn d() -> $dr2:\n    0.5\nfn h(x):\n    hash(x)\nh(d())\n"]]
 } -result {{TYPE: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)} {error {CORE SEMANTIC EQUALITY} {== of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)}} {error {CORE SEMANTIC EQUALITY} {hash of a DecimalRounded value needs the precision of its type, which a hash does not know}}}
 
 test dr-sets-refused {a set hashes its members by value, which knows no precision: ImmutableSet of DecimalRounded is a type error, as an annotation and as a call's result} -body {

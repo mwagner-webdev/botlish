@@ -513,10 +513,12 @@ test abi-mutable-bytes-tcl-backends-refuse-the-address {interp and compile refus
         [agree "direct module\n${pre}fn emit():\n    linux::read(abi::i32(0), abi::bytes::zeroed(abi::usize(1)))\n7" {interp compile}]
 } -result {{{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}} {{error {CORE SEMANTIC NATIVE-ONLY}} {error {CORE SEMANTIC NATIVE-ONLY}}} 7}
 
-test abi-mutable-bytes-no-fake-read-on-tcl-backends {nothing in core or lib (other than core/programfile.tcl, which reads the program's own source file) routes reads through gets, read, a Tcl channel or stdin helpers} -body {
+test abi-mutable-bytes-no-fake-read-on-tcl-backends {nothing in core or lib (other than core/programfile.tcl, which reads the program's own source file, and core/hashing.tcl, which reads the system's entropy for the table hash's key) routes reads through gets, read, a Tcl channel or stdin helpers} -body {
     set hits {}
     foreach file [concat [glob -directory [file join $::projectRoot core] *.tcl] [glob -directory [file join $::projectRoot lib] *.bot]] {
-        if {[file tail $file] eq "programfile.tcl"} continue
+        # (hashing.tcl reads the operating system's entropy, /dev/urandom,
+        # for the private table hash's process key: never program input.)
+        if {[file tail $file] in {programfile.tcl hashing.tcl}} continue
         set channel [open $file r]
         set lineNumber 0
         foreach line [split [read $channel] \n] {

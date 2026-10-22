@@ -22,6 +22,7 @@
 //! | rt_value_eq            | any, any            | Bool; EQUALITY on callables  | no        |
 //! | rt_str_eq              | Str, Str            | Bool                         | no        |
 //! | rt_hash                | any                 | Int (61-bit); EQUALITY       | no        |
+//! | rt_table_hash          | any                 | Int (61-bit); EQUALITY       | no        |
 //! | rt_str_len             | Str                 | Int                          | no        |
 //! | rt_substr              | Str, Int, Int       | Str; declared LowerUnderrun/ | yes       |
 //! |                        |                     | UpperOverrun (check_slice)   |           |
@@ -277,6 +278,14 @@ pub fn op_may_error(op: OpCode) -> bool {
         // M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic SetFromList/
         // SetContains keep their unconditional classification.
         | SetFromList | SetContains
+        // The table hash's dynamically dispatched entry refuses a value with
+        // no hash, as Hash does. VEqTotal, HashTotal and TableHashTotal are
+        // deliberately *not* listed: each is its generic sibling at a call
+        // site whose operands native/lower.tcl proved equality-total or
+        // Hashable (hir::types::IsEqualityTotal, IsHashable), so the shared
+        // helper's refusal is unreachable there (HASHABLE-AND-KEYED-HASH.md,
+        // "Total lowering").
+        | TableHash
         // A segment ends with the body's unhandled error; a yield outside a
         // running coroutine is a defensive runtime check a checked program
         // never reaches.
@@ -773,9 +782,179 @@ fn decimal_text(neg: bool, mut mag: u128, buf: &mut [u8; 40]) -> &[u8] {
     &buf[start..]
 }
 
-/// H folded with V's kind tag and payload, recursing into List elements and
-/// a Result payload exactly as `equal` recurses (see ops.rs's `equal`).
-fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
+// ---------------------------------------------------------------------------
+// One canonical walk, two hashes (core/hashing.tcl's Encode;
+// HASHABLE-AND-KEYED-HASH.md). `walk` visits a value exactly as `equal`
+// recurses -- its kind tag, then its payload -- and hands every piece to a
+// sink. The two sinks differ only where the hashes do:
+//
+//   Fnv (the public `hash`)  a text is its bytes alone; a nested value is its
+//                            own 64-bit FNV-1a sub-hash, 8 bytes LE; a set's
+//                            members are XOR-combined sub-hashes: the bytes
+//                            rt_hash always hashed, so every public hash is
+//                            unchanged.
+//   Sip13 (the table hash)   a text is its byte count (8 bytes LE) then its
+//                            bytes (a prefix-free input); a nested value is
+//                            walked inline into the same state, never folded
+//                            as a public sub-hash; a set's members are
+//                            XOR-combined keyed hashes.
+//
+// Nothing allocates: texts are borrowed or formatted on the stack
+// (`decimal_text`), and both states are a few words on the stack.
+
+trait CanonicalSink: Sized {
+    /// Bytes whose length the walk already fixed (a tag, a count, a word).
+    fn bytes(&mut self, b: &[u8]);
+    /// A variable-length text.
+    fn text(&mut self, b: &[u8]);
+    /// A nested value (a List element, a struct field, a Result payload).
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()>;
+    /// The whole 64-bit hash of set member V, from a fresh state.
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()>;
+}
+
+/// The public hash's state: FNV-1a, 64-bit.
+struct Fnv(u64);
+
+impl CanonicalSink for Fnv {
+    #[inline]
+    fn bytes(&mut self, b: &[u8]) {
+        self.0 = fnv1a(self.0, b);
+    }
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.0 = fnv1a(self.0, b);
+    }
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        let sub = self.member(p, v)?;
+        self.bytes(&sub.to_le_bytes());
+        Ok(())
+    }
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()> {
+        let mut sub = Fnv(FNV_OFFSET);
+        walk(p, &mut sub, v)?;
+        Ok(sub.0)
+    }
+}
+
+/// SipHash-1-3 (Aumasson and Bernstein; one compression round, three
+/// finalization rounds, the variant Rust's HashMap uses), streaming: the
+/// table hash's state under the process key. core/hashing.tcl's SipHash13 is
+/// the same function; audit/hashable/tools/oracle.py is an independent one.
+/// C and D are the round counts, so the tests can check the permutation and
+/// the padding against std's SipHash-2-4.
+#[derive(Clone)]
+struct Sip<const C: usize, const D: usize> {
+    k: (u64, u64),
+    v: [u64; 4],
+    /// The pending bytes of an unfinished 8-byte word, little-endian.
+    tail: u64,
+    ntail: usize,
+    length: usize,
+}
+
+type Sip13 = Sip<1, 3>;
+
+impl<const C: usize, const D: usize> Sip<C, D> {
+    fn new(k0: u64, k1: u64) -> Self {
+        Sip {
+            k: (k0, k1),
+            v: [k0 ^ 0x736f6d6570736575, k1 ^ 0x646f72616e646f6d, k0 ^ 0x6c7967656e657261, k1 ^ 0x7465646279746573],
+            tail: 0,
+            ntail: 0,
+            length: 0,
+        }
+    }
+
+    #[inline]
+    fn round(v: &mut [u64; 4]) {
+        v[0] = v[0].wrapping_add(v[1]);
+        v[1] = v[1].rotate_left(13) ^ v[0];
+        v[0] = v[0].rotate_left(32);
+        v[2] = v[2].wrapping_add(v[3]);
+        v[3] = v[3].rotate_left(16) ^ v[2];
+        v[0] = v[0].wrapping_add(v[3]);
+        v[3] = v[3].rotate_left(21) ^ v[0];
+        v[2] = v[2].wrapping_add(v[1]);
+        v[1] = v[1].rotate_left(17) ^ v[2];
+        v[2] = v[2].rotate_left(32);
+    }
+
+    #[inline]
+    fn compress(&mut self, m: u64) {
+        self.v[3] ^= m;
+        for _ in 0..C {
+            Self::round(&mut self.v);
+        }
+        self.v[0] ^= m;
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.length += bytes.len();
+        let mut rest = bytes;
+        if self.ntail > 0 {
+            while self.ntail < 8 {
+                let Some((&b, more)) = rest.split_first() else { return };
+                self.tail |= (b as u64) << (8 * self.ntail);
+                self.ntail += 1;
+                rest = more;
+            }
+            let m = self.tail;
+            self.compress(m);
+            self.tail = 0;
+            self.ntail = 0;
+        }
+        let mut words = rest.chunks_exact(8);
+        for w in &mut words {
+            self.compress(u64::from_le_bytes(w.try_into().unwrap()));
+        }
+        for (i, &b) in words.remainder().iter().enumerate() {
+            self.tail |= (b as u64) << (8 * i);
+        }
+        self.ntail = words.remainder().len();
+    }
+
+    fn finish(&self) -> u64 {
+        let mut v = self.v;
+        let b = ((self.length as u64 & 0xff) << 56) | self.tail;
+        v[3] ^= b;
+        for _ in 0..C {
+            Self::round(&mut v);
+        }
+        v[0] ^= b;
+        v[2] ^= 0xff;
+        for _ in 0..D {
+            Self::round(&mut v);
+        }
+        v[0] ^ v[1] ^ v[2] ^ v[3]
+    }
+}
+
+impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
+    #[inline]
+    fn bytes(&mut self, b: &[u8]) {
+        self.write(b);
+    }
+    #[inline]
+    fn text(&mut self, b: &[u8]) {
+        self.write(&(b.len() as u64).to_le_bytes());
+        self.write(b);
+    }
+    fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()> {
+        walk(p, self, v)
+    }
+    fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()> {
+        let mut sub = Self::new(self.k.0, self.k.1);
+        walk(p, &mut sub, v)?;
+        Ok(sub.finish())
+    }
+}
+
+/// Hands V's canonical input to SINK: its kind tag, then its payload,
+/// recursing into List elements, struct fields and a Result payload exactly
+/// as `equal` recurses (core/hashing.tcl's Encode, byte for byte). Refuses
+/// the kinds `equal` refuses, as rt_hash always did.
+fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> {
     let kind = kind_of(v);
     if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr) {
         vm(p).fail(RtError::Unhashable { value: v });
@@ -806,8 +985,8 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr
         | Kind::DecimalRounded => unreachable!(),
     };
-    let h = fnv1a(h, &[tag]);
-    Ok(match kind {
+    sink.bytes(&[tag]);
+    match kind {
         // Canonical decimal text, matching how core::value::equal treats
         // textual identity as numeric equality for every Int, small or big.
         // Formatted on the stack (`decimal_text`); a BigInt of more than 128
@@ -815,42 +994,43 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Int => {
             let mut buf = [0u8; 40];
             match int_small(v) {
-                Some(n) => fnv1a(h, decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
+                Some(n) => sink.text(decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
                 None => {
                     use num_traits::ToPrimitive;
                     let n = big_of(v);
                     match n.magnitude().to_u128() {
-                        Some(mag) => fnv1a(h, decimal_text(n.is_negative(), mag, &mut buf)),
-                        None => fnv1a(h, n.to_str_radix(10).as_bytes()),
+                        Some(mag) => sink.text(decimal_text(n.is_negative(), mag, &mut buf)),
+                        None => sink.text(n.to_str_radix(10).as_bytes()),
                     }
                 }
             }
         }
         // Evidence is metadata, not part of the value (equal ignores it too).
-        Kind::Str => fnv1a(h, str_of(v).as_bytes()),
-        Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
-        Kind::Unit => h,
+        Kind::Str => sink.text(str_of(v).as_bytes()),
+        Kind::Bool => sink.bytes(&[(v == TRUE) as u8]),
+        Kind::Unit => {}
         // The byte count (8 bytes, little-endian), then every byte in order:
         // core/hashing.tcl's bytestore case, byte for byte, and consistent
-        // with the byte-sequence equality above.
+        // with the byte-sequence equality above. The count delimits the
+        // bytes in both hashes.
         Kind::ByteStore => {
             let bytes = bytes_of(v);
-            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
-            fnv1a(h, bytes)
+            sink.bytes(&(bytes.len() as u64).to_le_bytes());
+            sink.bytes(bytes);
         }
         // A MutableBytes hashes by its current contents under its own kind
         // tag (core/hashing.tcl's `bytestore - mutbytes` case).
         Kind::MutByteStore => {
             let bytes = mutbytes_of(v);
-            let h = fnv1a(h, &(bytes.len() as u64).to_le_bytes());
-            fnv1a(h, bytes)
+            sink.bytes(&(bytes.len() as u64).to_le_bytes());
+            sink.bytes(bytes);
         }
         // Canonical decimal codepoint text, matching how Int's own text is
         // hashed above (core/hashing.tcl's identical choice).
-        Kind::UnicodeChar => fnv1a(h, decimal_text(false, char_of(v) as u128, &mut [0u8; 40])),
+        Kind::UnicodeChar => sink.text(decimal_text(false, char_of(v) as u128, &mut [0u8; 40])),
         // The bits, 8 bytes little-endian (core/hashing.tcl's Float64 case):
         // consistent with the bit equality above.
-        Kind::Float64 => fnv1a(h, &float_bits(v).to_le_bytes()),
+        Kind::Float64 => sink.bytes(&float_bits(v).to_le_bytes()),
         Kind::DecimalRounded => unreachable!(),
         // core/hashing.tcl's enum case, byte for byte (ENUMS.md): the enum's
         // declaration identity text, a 0xFF separator, the case's declared
@@ -859,50 +1039,45 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             let (e, c) = enum_parts(v);
             current_program(|prog| {
                 let info = &prog.enums[e as usize];
-                let (name, case) = (&info.name, &info.cases[c as usize]);
-                let h = fnv1a(h, name.as_bytes());
-                let h = fnv1a(h, &[0xFF]);
-                fnv1a(h, case.as_bytes())
+                sink.text(info.name.as_bytes());
+                sink.bytes(&[0xFF]);
+                sink.text(info.cases[c as usize].as_bytes());
             })
         }
         Kind::List => {
             let items = list_of(v).items();
-            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            sink.bytes(&(items.len() as u64).to_le_bytes());
             for item in items {
-                let sub = hash_mix(p, FNV_OFFSET, *item)?;
-                h = fnv1a(h, &sub.to_le_bytes());
+                sink.child(p, *item)?;
             }
-            h
         }
         Kind::Result => {
             let r = result_of(v);
-            let h = fnv1a(h, &[r.ok as u8]);
-            let sub = hash_mix(p, FNV_OFFSET, r.payload)?;
-            fnv1a(h, &sub.to_le_bytes())
+            sink.bytes(&[r.ok as u8]);
+            sink.child(p, r.payload)?;
         }
         Kind::Struct => {
             // core/hashing.tcl's struct case, byte for byte: the declaration
             // identity text (empty for an anonymous struct), the field
-            // count, then each slot's name text and sub-hash in slot order.
-            // The shape is borrowed for the whole fold, never cloned: a
-            // field's sub-hash (a nested struct's or enum's) borrows the
-            // program again, and RefCell's shared borrows nest (only
-            // `Vm::new` borrows it mutably, and hashing makes no Vm).
+            // count, then each slot's name text and value in slot order.
+            // The shape is borrowed for the whole walk, never cloned: a
+            // field's walk (a nested struct's or enum's) borrows the program
+            // again, and RefCell's shared borrows nest (only `Vm::new`
+            // borrows it mutably, and hashing makes no Vm).
             let obj = struct_of(v);
             current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
-                let mut h = fnv1a(h, shape.name.as_deref().unwrap_or("").as_bytes());
-                h = fnv1a(h, &(shape.fields.len() as u64).to_le_bytes());
+                sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
+                sink.bytes(&(shape.fields.len() as u64).to_le_bytes());
                 for (field, item) in shape.fields.iter().zip(obj.fields().iter()) {
-                    h = fnv1a(h, field.as_bytes());
-                    let sub = hash_mix(p, FNV_OFFSET, *item)?;
-                    h = fnv1a(h, &sub.to_le_bytes());
+                    sink.text(field.as_bytes());
+                    sink.child(p, *item)?;
                 }
-                Ok(h)
+                Ok(())
             })?
         }
         Kind::ImmutableSet => {
-            // Order-independent (XOR-combined member sub-hashes), matching
+            // Order-independent (XOR-combined member hashes), matching
             // `set_equal`'s own order-independent equality and core/
             // hashing.tcl's identical Tcl-side choice: two equal sets must
             // hash equal regardless of construction order. No ImmutableSet-
@@ -910,24 +1085,82 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             // the existing, pre-existing generic `hash` native total for
             // the new kind.
             let items = set_of(v).items();
-            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            sink.bytes(&(items.len() as u64).to_le_bytes());
             let mut combined = 0u64;
             for item in items {
-                combined ^= hash_mix(p, FNV_OFFSET, *item)?;
+                combined ^= sink.member(p, *item)?;
             }
-            h = fnv1a(h, &combined.to_le_bytes());
-            h
+            sink.bytes(&combined.to_le_bytes());
         }
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr => unreachable!(),
-    })
+    }
+    Ok(())
 }
 
+/// The public hash: the FNV-1a of V's canonical input, masked to 61 bits
+/// (always a small Int: no allocation). NO_VALUE with EQUALITY for a value
+/// with no hash; the compiler's `hashtotal` calls it only for a Hashable one.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
-    match hash_mix(p, FNV_OFFSET, v) {
-        Ok(h) => vm(p).new_int((h & HASH_MASK) as i64),
+    let mut sink = Fnv(FNV_OFFSET);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.0 & HASH_MASK) as i64),
         Err(()) => NO_VALUE,
     }
+}
+
+// ---------------------------------------------------------------------------
+// The table hash's process key (HASHABLE-AND-KEYED-HASH.md, "Hidden secret")
+
+/// The key of every table hash this process computes, drawn once, on first
+/// use. Runtime state, never a Botlish value: no operation returns, stores
+/// or compares it, and nothing but table_hash_key reads it.
+static TABLE_HASH_KEY: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+
+/// Draws a key from the system's random source: std's RandomState, which
+/// reads the operating system's entropy (getrandom, arc4random,
+/// ProcessPrng) for its own SipHash keys. Two states built in one thread
+/// carry different keys (std advances the thread's keys for each), and a
+/// hash of a fixed input under each is a 64-bit word derived from them: 128
+/// bits of the system's randomness, with no dependency of our own.
+fn draw_table_hash_key() -> (u64, u64) {
+    use std::hash::{BuildHasher, Hasher};
+    let word = |salt: u64| {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(salt);
+        h.finish()
+    };
+    (word(0x7461626c65), word(0x6861736820))
+}
+
+fn table_hash_key() -> (u64, u64) {
+    *TABLE_HASH_KEY.get_or_init(draw_table_hash_key)
+}
+
+/// Fixes this process's table hash key before any table hash is computed:
+/// the driver's `--table-hash-key` (native/src/main.rs), which only test
+/// harnesses pass, so the tests can compare exact keyed hashes with an
+/// independent implementation. Err if the key was already drawn or set.
+pub fn set_table_hash_key(k0: u64, k1: u64) -> Result<(), String> {
+    TABLE_HASH_KEY.set((k0, k1)).map_err(|_| "the table hash key is already in use".to_string())
+}
+
+/// The table hash of V under the key K: SipHash-1-3 of V's canonical input,
+/// masked to 61 bits like the public hash.
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+        Ok(()) => vm(p).new_int((sink.finish() & HASH_MASK) as i64),
+        Err(()) => NO_VALUE,
+    }
+}
+
+/// The private table hash (core/hashing.tcl's tableHash): what the standard
+/// library's hash structures place values with. Equal values hash equal
+/// within one process; nothing is promised across processes or versions.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_table_hash(p: *mut Vm, v: Value) -> Value {
+    table_hash_with_key(p, v, table_hash_key())
 }
 
 // ---------------------------------------------------------------------------
@@ -2875,7 +3108,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IGt => cmp(|o| o == Ordering::Greater),
         IGe => cmp(|o| o != Ordering::Less),
         IEq => cmp(|o| o == Ordering::Equal),
-        VEq => rt_value_eq(p, a[0], a[1]),
+        VEq | VEqTotal => rt_value_eq(p, a[0], a[1]),
         StrEq => rt_str_eq(p, a[0], a[1]),
         CharEq | EnumEq => bool_value(a[0] == a[1]),
         ListNew => rt_list_new(p, a.len() as u64, a.as_ptr()),
@@ -2975,7 +3208,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         D64Round => super::decimal::rt_decimal_round(p, a[0], a[1]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
-        Hash => rt_hash(p, a[0]),
+        Hash | HashTotal => rt_hash(p, a[0]),
+        TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
@@ -3086,6 +3320,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_value_eq, 3),
         h!(rt_str_eq, 3),
         h!(rt_hash, 2),
+        h!(rt_table_hash, 2),
         h!(rt_str_len, 2),
         h!(rt_substr, 4),
         h!(rt_substr_proven, 4),
@@ -3511,6 +3746,151 @@ mod tests {
         assert_eq!(rt_hash(&mut *vm, min), small(707785774613091011));
         let two80 = rooted!(vm, vm.new_big(BigInt::from(1u128 << 80)));
         assert_eq!(rt_hash(&mut *vm, two80), small(999613055982882793));
+    }
+
+    // -----------------------------------------------------------------------
+    // The table hash (HASHABLE-AND-KEYED-HASH.md). `cargo test --lib
+    // table_hash` runs these.
+
+    /// The key 00 01 .. 0f of the SipHash papers' vectors.
+    const VECTOR_KEY: (u64, u64) = (0x0706050403020100, 0x0f0e0d0c0b0a0908);
+
+    fn sip<const C: usize, const D: usize>(key: (u64, u64), chunks: &[&[u8]]) -> u64 {
+        let mut s = Sip::<C, D>::new(key.0, key.1);
+        for c in chunks {
+            s.write(c);
+        }
+        s.finish()
+    }
+
+    #[test]
+    fn table_hash_sip_matches_published_vectors() {
+        // SipHash-2-4 (the paper's appendix; the reference vectors.h) and
+        // SipHash-1-3 (Rust's core tests, test_siphash_1_3).
+        let msg: Vec<u8> = (0..64).collect();
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&msg[..15]]), 0xa129ca6149be45e5);
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&[]]), 0x726fdb47dd0e0e31);
+        assert_eq!(sip::<2, 4>(VECTOR_KEY, &[&msg[..8]]), 0x93f5f5799a932462);
+        assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&[]]), 0xabac0158050fc4dc);
+        assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&msg[..1]]), 0xc9f49bf37d57ca93);
+        // audit/hashable/tools/oracle.py's SipHash-1-3, an independent
+        // implementation, at every boundary of the block structure.
+        for (n, want) in [(7, 0xd3927d989bb11140u64), (8, 0x369095118d299a8e), (15, 0xd320d86d2a519956), (16, 0xcc4fdd1a7d908b66), (63, 0x9d199062b7bbb3a8)] {
+            assert_eq!(sip::<1, 3>(VECTOR_KEY, &[&msg[..n]]), want, "SipHash-1-3 of {n} bytes");
+        }
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn table_hash_sip_streams_like_std_siphasher() {
+        // std's SipHasher is SipHash-2-4: the same permutation and padding
+        // with other round counts, over any split of the same bytes.
+        use std::hash::Hasher;
+        let mut seed = 0x2545f4914f6cdd1du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for len in 0..80usize {
+            let key = (next(), next());
+            let msg: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let mut std = std::hash::SipHasher::new_with_keys(key.0, key.1);
+            std.write(&msg);
+            let want = std.finish();
+            let cut1 = (next() as usize) % (len + 1);
+            let cut2 = cut1 + (next() as usize) % (len - cut1 + 1);
+            assert_eq!(sip::<2, 4>(key, &[&msg]), want, "len {len}");
+            assert_eq!(sip::<2, 4>(key, &[&msg[..cut1], &msg[cut1..cut2], &msg[cut2..]]), want, "len {len} split");
+            assert_eq!(sip::<1, 3>(key, &[&msg[..cut1], &msg[cut1..]]), sip::<1, 3>(key, &[&msg]), "len {len} split 1-3");
+        }
+    }
+
+    #[test]
+    fn table_hash_of_values_matches_the_oracle() {
+        use crate::runtime::vm::{EnumInfo, ShapeInfo};
+        let mut vm = Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false }],
+                enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
+            }),
+            AllocMode::Summary,
+        );
+        // audit/hashable/tools/oracle.py under the vector key: 7;
+        // P {x: -5, y: "héllo"}; [1, '🙂', Color::Green]; {1, 2, 3}.
+        let s = rooted!(vm, str_val(&mut vm, "h\u{e9}llo"));
+        let p = rooted!(vm, vm.new_struct(0, vec![small(-5), s]));
+        let list = rooted!(vm, vm.new_list(vec![small(1), make_char(0x1F642), make_enum(0, 1)]));
+        let set = rooted!(vm, vm.new_set(vec![small(1), small(2), small(3)]));
+        let reordered = rooted!(vm, vm.new_set(vec![small(3), small(1), small(2)]));
+        assert_eq!(table_hash_with_key(&mut *vm, small(7), VECTOR_KEY), small(1659226329979122286));
+        assert_eq!(table_hash_with_key(&mut *vm, p, VECTOR_KEY), small(2049144106076300702));
+        assert_eq!(table_hash_with_key(&mut *vm, list, VECTOR_KEY), small(900147083491920494));
+        assert_eq!(table_hash_with_key(&mut *vm, set, VECTOR_KEY), small(1805504437171615301));
+        // Equal values, different constructions: one hash.
+        assert_eq!(table_hash_with_key(&mut *vm, reordered, VECTOR_KEY), small(1805504437171615301));
+        // A value with no hash is refused, as the public hash refuses it.
+        let array = rooted!(vm, vm.new_mutarray(1));
+        assert_eq!(table_hash_with_key(&mut *vm, array, VECTOR_KEY), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn table_hash_reads_the_value_not_its_public_hash() {
+        // Two Ints with one 64-bit FNV state (audit/hashable/tools/
+        // collide.rs): equal public hashes, nested too, so any function of
+        // the public hash and a key collides on them; the table hash does
+        // not.
+        use num_bigint::BigInt;
+        let mut vm = vm();
+        let a = rooted!(vm, vm.new_big(BigInt::from(17384044247497657079u64)));
+        let b = rooted!(vm, vm.new_big(BigInt::from(13834495523901255922u64)));
+        assert_eq!(rt_hash(&mut *vm, a), rt_hash(&mut *vm, b));
+        let la = rooted!(vm, vm.new_list(vec![a]));
+        let lb = rooted!(vm, vm.new_list(vec![b]));
+        assert_eq!(rt_hash(&mut *vm, la), rt_hash(&mut *vm, lb));
+        assert_ne!(table_hash_with_key(&mut *vm, a, VECTOR_KEY), table_hash_with_key(&mut *vm, b, VECTOR_KEY));
+        assert_ne!(table_hash_with_key(&mut *vm, la, VECTOR_KEY), table_hash_with_key(&mut *vm, lb, VECTOR_KEY));
+    }
+
+    #[test]
+    fn table_hash_process_key_is_drawn_once() {
+        // The production path: one key per process, drawn on first use and
+        // never redrawn, so repeated table hashes of one value agree; a key
+        // can no longer be fixed once one is in use.
+        let mut vm = vm();
+        let k = table_hash_key();
+        assert_eq!(table_hash_key(), k);
+        let first = rt_table_hash(&mut *vm, small(42));
+        for _ in 0..100 {
+            assert_eq!(rt_table_hash(&mut *vm, small(42)), first);
+        }
+        assert!(set_table_hash_key(1, 2).is_err());
+        // Two draws (two processes' keys) come from the system's source:
+        // equal only by a 2^-128 chance.
+        assert_ne!(draw_table_hash_key(), draw_table_hash_key());
+    }
+
+    #[test]
+    fn table_hash_allocates_nothing() {
+        // As the public hash (RO-1): Ints up to 128 bits, code points,
+        // Strings, structs and nested structs walk without a heap object;
+        // the result is a small Int.
+        use num_bigint::BigInt;
+        let mut vm = vm_with_shapes(&[(Some("P"), &["x", "y"]), (Some("Q"), &["p", "name"])]);
+        let s = rooted!(vm, str_val(&mut vm, "session-key-0042"));
+        let big = rooted!(vm, vm.new_big(BigInt::from(1u128 << 100)));
+        let p = rooted!(vm, vm.new_struct(0, vec![small(1), small(2)]));
+        let q = rooted!(vm, vm.new_struct(1, vec![p, s]));
+        let before = vm.metrics.total_allocations();
+        for v in [small(7), big, make_char(0x1F642), s, p, q] {
+            rt_table_hash(&mut *vm, v);
+            rt_hash(&mut *vm, v);
+        }
+        assert_eq!(vm.metrics.total_allocations(), before);
     }
 
     #[test]

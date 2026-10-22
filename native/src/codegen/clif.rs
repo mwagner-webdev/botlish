@@ -2275,7 +2275,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.bool_of(eq)
             }
             CPtrSame => a[0],
-            VEq => {
+            VEq | VEqTotal => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
                 self.b.switch_to_block(fast);
@@ -2284,7 +2284,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().jump(done, &[BlockArg::Value(r)]);
                 self.b.switch_to_block(slow);
                 let r = self.call_helper("rt_value_eq", &[self.vm, a[0], a[1]]);
-                self.check(r);
+                if op == VEq {
+                    // (VEqTotal's operands are proven equality-total: the
+                    // helper cannot refuse them, op_may_error.)
+                    self.check(r);
+                }
                 self.b.ins().jump(done, &[BlockArg::Value(r)]);
                 self.b.switch_to_block(done);
                 result
@@ -2473,6 +2477,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         IShl => ("rt_int_shl", None, true, None),
                         IShr => ("rt_int_shr", None, true, None),
                         Hash => ("rt_hash", None, true, None),
+                        // A Hashable operand (native/lower.tcl's `hashing`
+                        // form): the same helper, which cannot refuse it.
+                        HashTotal => ("rt_hash", None, false, None),
+                        TableHash => ("rt_table_hash", None, true, None),
+                        TableHashTotal => ("rt_table_hash", None, false, None),
                         RegionCheck => ("rt_str_region_check", None, true, None),
                         RegionEq => ("rt_str_region_eq", None, false, None),
                         StrEq => ("rt_str_eq", None, false, None),

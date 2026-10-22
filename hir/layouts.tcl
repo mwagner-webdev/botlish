@@ -1152,7 +1152,8 @@ proc hir::layouts::NotScalarReason {type spelled} {
 # The kind of declaration (for a message) the identity ID already is, or "".
 proc hir::layouts::OtherDeclaration {id name} {
     if {$name in {Int any never Fn Coroutine enum unit} || [core::type::isBuiltinName $name]
-            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
+            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]
+            || [hir::traits::isIntrinsicName $name]} {
         return "a built-in type"
     }
     if {[core::type::valid $id]} {

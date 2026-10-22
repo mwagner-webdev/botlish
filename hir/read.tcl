@@ -211,8 +211,11 @@ proc hir::read::TypeDecls {lines} {
 
 # The `traits` entry hir::format::TraitDecl's line CONTENT states.
 proc hir::read::TraitLine {content number} {
-    if {![regexp {^trait (\S+)( context)? owner (\S+) requires (.+)$} $content -> id context owner reqsText]} {
-        Fail $number "expected \"trait ID ?context? owner NS requires REQ ; ...\""
+    if {![regexp {^trait (\S+)( context)?( intrinsic)? owner (\S+) requires (.+)$} $content -> id context intrinsic owner reqsText]} {
+        Fail $number "expected \"trait ID ?context? ?intrinsic? owner NS requires REQ ; ...\""
+    }
+    if {$intrinsic ne "" && ![hir::traits::isIntrinsicName $id]} {
+        Fail $number "\"$id\" is not an intrinsic trait of this front end"
     }
     set requirements {}
     foreach text [split [string map {" ; " \x01} $reqsText] \x01] {
@@ -253,7 +256,7 @@ proc hir::read::TraitLine {content number} {
     }
     return [dict create id $id name [lindex [split [string map {:: \x01} $id] \x01] end] \
         namespace [if {$owner eq "-"} {string cat ""} else {set owner}] requirements $requirements \
-        context [expr {$context ne ""}]]
+        context [expr {$context ne ""}] intrinsic [expr {$intrinsic ne ""}]]
 }
 
 # The `kind enum` declaration (hir::enums::apply's input) of the enum line

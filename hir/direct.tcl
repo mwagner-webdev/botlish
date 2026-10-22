@@ -171,6 +171,12 @@ proc hir::direct::Targets {hir c node unit memoVar sections} {
         set record [dict get $node traitCall]
         set trait [dict get $record trait]
         set requirement [dict get $record requirement]
+        if {[hir::traits::isIntrinsic $trait]} {
+            # An intrinsic trait's operation (HASHABLE-AND-KEYED-HASH.md) runs
+            # the implementation's own native for every witness, never a
+            # module's function: no module is its target.
+            return {}
+        }
         # A trait operation may run the implementation of any witness: a
         # top-level function of the requirement's name in the witness's owner
         # module (conformance looks nowhere else, TRAITS.md and

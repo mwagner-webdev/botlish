@@ -170,7 +170,8 @@ namespace eval native::lower {
         error?       {op iserror} \
         result-value {op resultvalue} \
         result-error {op resulterror} \
-        hash         {op hash} \
+        hash         {hashing hash hashtotal} \
+        table_hash::of {hashing tablehash tablehashtotal} \
         char::scalar_value {op charcodepoint} \
         byte_store::from_list {op bytesfromlist} \
         byte_store::byte_count    {op byteslen} \
@@ -8934,8 +8935,30 @@ proc native::lower::NativeCallOp {e node} {
                 # one representation, so equality is bit equality, and it
                 # cannot fail.
                 set op f64eq
+            } elseif {[hir::types::IsEqualityTotal [hir::typeOf $hir $a]]
+                    && [hir::types::IsEqualityTotal [hir::typeOf $hir $b]]} {
+                # Both operands equality-total (hir::types::IsEqualityTotal:
+                # structs, Lists and sets of such values, two different
+                # scalar kinds): structural equality that can never refuse a
+                # kind, so no error edge (HASHABLE-AND-KEYED-HASH.md).
+                set op veqtotal
             }
             return [list $name $op]
+        }
+        hashing {
+            # A hash (core/native.tcl's -hashing): the generic op refuses a
+            # value with no hash (EQUALITY); where the operand's static type
+            # is Hashable (hir::types::IsHashable: a witness of the intrinsic
+            # trait, the very predicate that admits a Hashable argument),
+            # the total op, with no error edge (HASHABLE-AND-KEYED-HASH.md,
+            # "Total lowering").
+            lassign $impl _ generic total
+            set index [lindex [dict get [core::native::metadata $name] hashing] 0]
+            if {[llength $argExprs] > $index
+                    && [hir::types::IsHashable [hir::typeOf $hir [lindex $argExprs $index]]]} {
+                return [list $name $total]
+            }
+            return [list $name $generic]
         }
         equality-set {
             # SetContains's generic form (rt_set_contains) can raise
@@ -9752,6 +9775,7 @@ proc native::lower::NativeImpl {name} {
     set impl [dict get $natives $name]
     switch -- [lindex $impl 0] {
         equality      { return veq }
+        hashing       { return [lindex $impl 1] }
         equality-set  { return setcontains }
         equality-list { return setfromlist }
         coroutine-resume { return coresume }

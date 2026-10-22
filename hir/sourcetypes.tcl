@@ -385,7 +385,8 @@ proc hir::sourcetypes::CheckDeclaredName {decl} {
         return
     }
     if {$name in {Int any never Fn} || [core::type::isBuiltinName $name]
-            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
+            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]
+            || [hir::traits::isIntrinsicName $name]} {
         Fail [dict get $decl nameSpan] \
             "type \"$name\" cannot be declared: the name is already a built-in type"
     }
@@ -551,6 +552,10 @@ proc hir::sourcetypes::RegisterOne {decl parentId} {
     if {$name eq "Int" && $cabi eq ""} {
         Fail [dict get $decl nameSpan] \
             "\"Int\" is the compiler's own built-in integer type and cannot be redeclared"
+    }
+    if {$cabi eq "" && [hir::traits::isIntrinsicName $name]} {
+        Fail [dict get $decl nameSpan] \
+            "type \"$name\" cannot be declared: the name is the built-in trait $name"
     }
     if {$cabi eq "" && [dict get $decl namespace] ne "" && ([core::type::isBuiltinName $name]
             || [dict exists $::hir::types::constructors $name] || $name in {any never Fn})} {

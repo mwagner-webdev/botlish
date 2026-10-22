@@ -1246,7 +1246,7 @@ proc hir::escape::NativeUseTag {name} {
     if {"structural-equality" in $runtime} {
         return equality
     }
-    if {"hash" in $runtime} {
+    if {"hash" in $runtime || "table-hash" in $runtime} {
         return hash
     }
     return "native call"

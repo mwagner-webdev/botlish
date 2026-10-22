@@ -2332,6 +2332,64 @@ binary::emit(5)
 @at 3:14
 @end
 
+@topic error.internal-namespace
+title: INTERNAL-NAMESPACE: a namespace only the standard library may use
+summary: Code outside the standard library imports, or names a member of, a namespace internal to the language implementation (table_hash, the private table hash of the standard library's hash structures).
+index: errors
+alias: namespace is internal to the standard library; internal namespace; private intrinsic
+keywords: internal, namespace, standard library, private, table_hash, keyed hash, import
+related: concept.hashable concept.imports error.internal-intrinsic-value error.missing-import
+docs: HASHABLE-AND-KEYED-HASH.md IMPORTS.md
+code: SURFACE MODULE INTERNAL-NAMESPACE
+code: CORE SEMANTIC INTERNAL-NAMESPACE
+
+== MEANING
+A few intrinsic namespaces belong to the language implementation: their
+operations exist for the standard library's own modules, which build
+public facilities on them. Only a standard library module may import such a
+namespace or name its members; the entry program and application modules
+may not, whatever they import.
+
+    namespace "table_hash" is internal to the standard library: only its
+    modules may import it or name its members (the entry program is not one)
+
+== WHAT TO DO
+Use the public facility instead: `hash` for a deterministic hash
+(concept.hashable). The private table hash is no API: its numbers change
+from run to run and are never shown to a program.
+
+@example reject
+import table_hash
+
+table_hash::of(1)
+@caption the entry program imports the internal namespace
+@error SURFACE MODULE INTERNAL-NAMESPACE
+@at 1:8
+@end
+
+@topic error.internal-intrinsic-value
+title: INTERNAL-INTRINSIC-VALUE: an internal intrinsic used as a value
+summary: A member of an internal namespace (table_hash::of) may only be called, never bound, passed, returned, stored or captured as a function value.
+index: errors
+alias: can only be called, never used as a value; internal intrinsic value
+keywords: internal, intrinsic, function value, standard library, table_hash
+related: error.internal-namespace concept.hashable concept.function-types
+docs: HASHABLE-AND-KEYED-HASH.md
+code: CORE SEMANTIC INTERNAL-INTRINSIC-VALUE
+
+== MEANING
+Only standard library modules can reach an internal namespace
+(INTERNAL-NAMESPACE), and there its members are only ever called: a
+function value of one could be passed, stored or returned out of the code
+allowed to use it, and a call through a value would reach it unseen. Every
+use that is not the callee of a call -- an alias, an argument, a result, a
+List element, a capture -- is this error. Programs outside the standard
+library never see it: they cannot name the intrinsic at all.
+
+== WHAT TO DO
+Call the intrinsic directly where the value is needed, inside the standard
+library module that may use it.
+
 @topic error.missing-import
 title: MISSING-IMPORT: a namespace member used without importing its namespace
 summary: Code uses a member of a namespace its file does not import -- written ns::member, or reached by method syntax x.member(); add import ns to that file.

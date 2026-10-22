@@ -584,7 +584,7 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
             if {$case eq [join [lmap word [split $kind -] {string totitle $word}] ""]} continue
             list $kind $case
         }] [llength $cases]
-} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 105}
+} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 107}
 
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
 # kind the compiler's front end (hir/*.tcl, surface/modules.tcl) can name, by

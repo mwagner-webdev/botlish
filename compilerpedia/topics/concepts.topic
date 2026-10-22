@@ -2821,7 +2821,7 @@ summary: A `trait` declares operations; a trait-typed parameter accepts any valu
 index: concepts
 alias: trait; traits; interface; type class; protocol
 keywords: trait, interface, structural, conformance, view, witness, monomorphization, TRAIT-NOT-SATISFIED, TRAIT-VIEW-MISUSE, polymorphism, dispatch, vtable
-related: concept.context-traits concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
+related: concept.context-traits concept.hashable concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
 docs: TRAITS.md
 
 == WHAT IT IS
@@ -2845,6 +2845,9 @@ on which only the trait's operations are allowed (as method calls).
     Nothing of the trait exists at run time.
   * A trait is declared at top level and needs at least one requirement;
     requirements are signatures only.
+  * The built-in trait Hashable (concept.hashable) is used the same way,
+    but its witnesses come from the language, not from a module's
+    functions.
 
 == WHY
 Traits abstract over values without a run-time cost or a second dispatch
@@ -2888,6 +2891,96 @@ describe(Pet {species: "cat"})
 
 == MORE
 TRAITS.md.
+
+@topic concept.hashable
+title: Hashable: values with total equality and total hashing
+summary: Hashable is a built-in trait, used like any trait, whose witnesses the language supplies: exactly the types whose every value has total equality and a hash.
+index: concepts
+alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
+keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
+related: concept.traits stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
+docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md
+
+== WHAT IT IS
+    fn fingerprint(x: Hashable) -> int:
+        hash(x)
+
+Hashable is a trait like any other to the code that uses it: a parameter,
+a result or a function of it is monomorphized per concrete type, and
+`x.hash()` is its one operation (the public hash). What differs is who
+supplies the witnesses: no module implements Hashable, and no source
+declaration can make a type satisfy it. A type is Hashable exactly when
+every value of it has total equality (== with it never stops with
+EQUALITY) and a hash, and so equal values always hash equally:
+
+  * Int and every integer domain, String, Bool, unit, UnicodeChar,
+    Float64, enum cases;
+  * a List or ImmutableSet of Hashable elements;
+  * a struct (also an opaque one) whose every field is Hashable.
+
+Not Hashable: a function (functions have no equality), a coroutine handle,
+a MutableArray or MutableVector, a C pointer or native view, a
+DecimalRounded value, and any struct, List or set that holds one; `any`
+and an untyped field, whose values are not known (one may hold a
+function); a view of another trait; an imprint variable.
+
+== RULES
+  * A value enters Hashable at a Hashable parameter or result, like any
+    trait: a type that is not Hashable is TRAIT-NOT-SATISFIED there, with
+    the field or element that is not, never later.
+  * hash(x) and x == y never stop with EQUALITY when the operands are
+    Hashable; the compiler drops the failure path.
+  * hash(x) of a value statically known not to be Hashable (a function,
+    a struct with a function field) is TRAIT-NOT-SATISFIED at compile time.
+    hash of a value of unknown type (an untyped parameter) is still
+    checked when it runs (EQUALITY), as before.
+  * Hashable cannot be declared, implemented or named by a type, struct,
+    enum, layout or trait of a program: the name is reserved.
+
+== WHY
+Hash-based collections need keys whose equality and hash agree and never
+fail; a function's equality is not total, so a function is no key. Making
+that a trait lets a function demand it of its arguments statically. The
+standard library's hash structures place keys with a separate,
+collision-hardened hash: SipHash-1-3 of the key under a secret the runtime
+draws once per process, which no program can read, pass or print. Unlike
+the public hash, its numbers differ from run to run, so keys chosen to
+collide under the public hash do not collide there; no program observes
+them.
+
+== EXAMPLES
+@example accept
+struct Point:
+    x: int
+    y: int
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+[fingerprint(Point {x: 1, y: 2}) == hash(Point {x: 1, y: 2}), fingerprint("apple") == "apple".hash()]
+@caption fingerprint is compiled for Point and for String; both hashes are total
+@value [true, true]
+@end
+
+@example reject
+struct Handler:
+    name: str
+    run: Fn{args: [int], return: int}
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn twice(n: int) -> int:
+    n * 2
+
+fingerprint(Handler {name: "double", run: twice})
+@caption Handler's field run is a function, which has no total equality
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 11:13
+@end
+
+== MORE
+HASHABLE-AND-KEYED-HASH.md; concept.traits.
 
 @topic concept.affine
 title: Affine values: one owner, moved, released

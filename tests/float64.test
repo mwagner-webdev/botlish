@@ -165,7 +165,7 @@ test float-value-kind {a Float64 is a kind of its own: never an Int, never equal
     set a [core::value::float Float64 1.0]
     set b [core::value::int 1]
     list [core::value::kind $a] [core::value::equal $a $b] [core::value::equal $a [core::value::float Float64 1.0]] \
-        [expr {[core::hashing::Mix $core::hashing::FnvOffset $a] == [core::hashing::Mix $core::hashing::FnvOffset $b]}]
+        [expr {[core::hashing::Fold public $a] == [core::hashing::Fold public $b]}]
 } -result {Float64 0 1 0}
 
 test float-negative-zero {there is one zero: negative zero is made zero by the value constructor, by every operation and by the native runtime} -body {

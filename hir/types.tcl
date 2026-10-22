@@ -2259,32 +2259,185 @@ proc hir::types::narrow {current fact} {
     return [core::type::narrow $current $fact]
 }
 
-# 1 if every value of static TYPE is guaranteed to support Botlish's
-# ordinary structural equality unconditionally: the compile-time mirror of
-# the *actual* equality-totality condition both equality implementations
-# enforce (core/value.tcl's core::value::equal and native/src/runtime/
-# ops.rs's equal, byte-for-byte the same rule): a comparison can only ever
-# fail (raise EQUALITY) when one of its two operands has runtime kind
-# Block, Native, or MutableArray. Every other kind (Int -- and so every
-# source-defined bounded-integer domain over it, e.g. Byte/Nibble/Small,
-# since kindOf collapses a refinement to its base kind -- Str, Bool, Unit,
-# UnicodeChar) is unconditionally safe, regardless of which *other*
-# equality-total kind it is compared against (mismatched kinds simply
-# compare unequal, never fail: see equal's own "ka != kb -> false" branch,
-# checked only *after* its Block/Native/MutArray guard). "any"/an
-# unresolved or broad aggregate kind (a bare "list"/"immutableSet" with no
-# known element type, or "" for a type with no fixed kind at all) is
-# conservatively not proven: a value of that static type could still be
-# one of the three unsafe kinds at runtime.
+# ---------------------------------------------------------------------------
+# Equality and hash totality, and the intrinsic trait Hashable
+# (HASHABLE-AND-KEYED-HASH.md)
+
+# {CLASS WHY}: how every value of static TYPE answers to OPERATION -- equality
+# (`==`, core::value::equal) or hash (core::hashing's canonical walk) -- the
+# compile-time mirror of the operation itself:
 #
-# Deliberately narrow (this is SetContains's own effect refinement's
-# "minimum useful proof" -- M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md): does
-# not recurse into a List[T]/ImmutableSet[T] element type, so a precise
-# List[Byte] is not (yet) proven total even though core::value::equal's own
-# recursive list case would make it so -- sound but incomplete, never
-# unsound, and not needed by this milestone's own motivating call site.
+#   total    every value has it: the operation never refuses one (equality of
+#            two values of total types never raises EQUALITY: values of
+#            different kinds simply compare unequal; hashing never raises)
+#   none     TYPE names a component whose every value lacks it -- a function,
+#            a coroutine handle, a MutableArray, a C pointer, ... -- so its
+#            values are statically known not to be Hashable
+#   unknown  neither is known: a component of no fixed kind (any, an imprint
+#            variable, a view of another trait, a bare collection kind)
+#
+# WHY is "" for total, else the reason in source terms (what a
+# TRAIT-NOT-SATISFIED explanation prints). One walk serves both operations:
+# the per-kind facts are the runtime's own refusal lists (core::value's
+# `incomparable` for equality, core::hashing's `unhashable` for hash), and the
+# composite kinds recurse exactly as both operations do -- a List or an
+# ImmutableSet into its elements, a struct into its fields (an opaque
+# struct's too: `==` already compares its representation). SEEN holds the
+# named structs being walked: a struct met again through its own fields (a
+# `kids: List[Tree]`) adds nothing, so a recursive type is total when every
+# other component is (every value is finite).
+proc hir::types::Totality {operation type {seen {}}} {
+    if {$type eq "never"} {
+        # No value: vacuously total (List[never] is the empty List).
+        return {total ""}
+    }
+    if {[IsTrait $type]} {
+        if {$operation in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
+            # A view of a trait whose witnesses guarantee the operation (the
+            # intrinsic trait Hashable): total whatever the witness is.
+            return {total ""}
+        }
+        return [list unknown "it is seen only through trait [lindex $type 1], whose values need not have total equality and hashing"]
+    }
+    if {[IsFn $type]} {
+        return [list none [NoTotality $operation block]]
+    }
+    if {[IsImprint $type]} {
+        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+    }
+    if {[hir::cabi::IsFloating $type]} {
+        return [Totality $operation [hir::cabi::Carrier $type] $seen]
+    }
+    if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+        # A refinement is knowledge about a value of its base (a List of a
+        # known length): the base's answer.
+        return [Totality $operation [hir::refinements::Base $type] $seen]
+    }
+    if {[llength $type] >= 2} {
+        switch -- [lindex $type 0] {
+            list {
+                if {[llength $type] == 3} {
+                    # A positional shape: each element's own type.
+                    return [Components $operation [lmap p [lindex $type 2] {list "element of the List" $p}] $seen]
+                }
+                return [Components $operation [list [list "its elements" [lindex $type 1]]] $seen]
+            }
+            immutableSet {
+                return [Components $operation [list [list "its members" [lindex $type 1]]] $seen]
+            }
+            struct {
+                set parts {}
+                foreach {name t} [lindex $type 1] {
+                    lappend parts [list "field \"$name\"" $t]
+                }
+                return [Components $operation $parts $seen]
+            }
+            nstruct {
+                set id [lindex $type 1]
+                if {$id in $seen} {
+                    return {total ""}
+                }
+                if {![hir::structs::declared $id] && [hir::layouts::OfStructId $id] eq ""} {
+                    return [list unknown "$id is not a declared struct"]
+                }
+                set parts {}
+                foreach {name t} [hir::structs::fieldTypes $id] {
+                    lappend parts [list "field \"$name\" of $id" [if {$t eq {}} {string cat any} else {set t}]]
+                }
+                return [Components $operation $parts [concat $seen [list $id]]]
+            }
+        }
+    }
+    set kind [kindOf $type]
+    if {$operation eq "equality"} {
+        set refused $::core::value::incomparable
+    } else {
+        set refused $::core::hashing::unhashable
+    }
+    if {$kind in $refused} {
+        return [list none [NoTotality $operation $kind]]
+    }
+    if {$kind eq "" || $kind in {list immutableSet struct result}} {
+        # (`any`, an imprint variable and the other kind-less types are "":
+        # kindOf; the others are bare kinds whose elements are not known.)
+        return [list unknown "its static type is [show $type], whose values are not known to have total equality and hashing (one may hold a function)"]
+    }
+    return {total ""}
+}
+
+# Totality's answer for a value made of the PARTS {WHAT TYPE}: none if one part
+# is (the first such, named), else unknown if one part is, else total.
+proc hir::types::Components {operation parts seen} {
+    set unknown ""
+    foreach part $parts {
+        lassign $part what t
+        lassign [Totality $operation $t $seen] class why
+        if {$class eq "none"} {
+            return [list none "$what ([show $t]): $why"]
+        }
+        if {$class eq "unknown" && $unknown eq ""} {
+            set unknown "$what ([show $t]): $why"
+        }
+    }
+    if {$unknown ne ""} {
+        return [list unknown $unknown]
+    }
+    return {total ""}
+}
+
+# Why a value of runtime KIND has no OPERATION, in source terms.
+proc hir::types::NoTotality {operation kind} {
+    set op [expr {$operation eq "hash" ? "hash" : "total equality"}]
+    switch -- $kind {
+        block - native {
+            return "a function has no $op (== of two functions is not defined: there is no function identity)"
+        }
+        coroutine {
+            return "a coroutine handle has no $op (comparing one would observe what it owns)"
+        }
+        mutarray - mutvec {
+            return "a [expr {$kind eq "mutarray" ? "MutableArray" : "MutableVector"}] has no $op (a mutable header's identity is never a value's)"
+        }
+        cptr {
+            return "a C pointer or native view has no $op (no address identity is observable)"
+        }
+        DecimalRounded {
+            return "a DecimalRounded value has no $op: it is equal to another only at its type's precision, which [expr {$operation eq "hash" ? "a hash" : "a type-blind equality"}] does not know"
+        }
+    }
+    return "a value of kind $kind has no $op"
+}
+
+# 1 if every value of static TYPE is guaranteed to support Botlish's ordinary
+# structural equality unconditionally: comparing it with any value of an
+# equality-total type can never raise EQUALITY (Totality's `total` for
+# equality). It recurses into Lists, ImmutableSets and structs, as
+# core::value::equal does. The bare `never` is left out, as it always was: a
+# call whose operand can produce no value keeps its generic lowering
+# (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md's List[never] fixture); as a
+# component (the element of List[never]) it is vacuously total.
 proc hir::types::IsEqualityTotal {type} {
-    return [expr {[kindOf $type] in [core::type::scalarKinds]}]
+    return [expr {$type ne "never" && [lindex [Totality equality $type] 0] eq "total"}]
+}
+
+# {CLASS WHY}: TYPE against the intrinsic trait Hashable -- total equality and
+# total hashing (Totality of both operations: none if either is, then unknown,
+# else total).
+proc hir::types::HashClass {type} {
+    lassign [Totality equality $type] e ewhy
+    lassign [Totality hash $type] h hwhy
+    if {$e eq "none"} { return [list none $ewhy] }
+    if {$h eq "none"} { return [list none $hwhy] }
+    if {$e eq "unknown"} { return [list unknown $ewhy] }
+    if {$h eq "unknown"} { return [list unknown $hwhy] }
+    return {total ""}
+}
+
+# 1 if every value of static TYPE is Hashable: the witness predicate of the
+# intrinsic trait Hashable (hir::traits's intrinsics), and the one native
+# lowering reads to choose a total hash.
+proc hir::types::IsHashable {type} {
+    return [expr {[lindex [HashClass $type] 0] eq "total"}]
 }
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.

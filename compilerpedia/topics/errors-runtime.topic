@@ -108,7 +108,7 @@ summary: CORE SEMANTIC EQUALITY stops a run when == (or a hash) reaches a functi
 index: errors
 alias: == on functions; function equality; equality of functions; hash of a function
 keywords: ==, hash, callable, block, function, mutable array, mutable vector, immutable_set, contains
-related: rule.equality stdlib.== stdlib.hash concept.function-types concept.mutable-array concept.mutable-vector error.not-callable
+related: rule.equality stdlib.== stdlib.hash concept.hashable concept.function-types concept.mutable-array concept.mutable-vector error.not-callable
 docs: README.md MUTABLE-ARRAY.md M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md
 code: CORE SEMANTIC EQUALITY
 
@@ -128,9 +128,14 @@ The message says "callables" for all of them, MutableArray included:
     == is not defined for callables: A == B
     hash is not defined for callables: V
 
-The front end does not reject these comparisons today, even where the
-operands' types show them: they fail when they run. (An affine value's
-comparison is the static AFFINE-EQUALITY-UNSUPPORTED instead.)
+The front end does not reject `==` of such values today, even where the
+operands' types show them: it fails when it runs. (An affine value's
+comparison is the static AFFINE-EQUALITY-UNSUPPORTED instead.) `hash` of a
+value whose type shows it is not Hashable -- a function, a struct with a
+function field -- is rejected at compile time (TRAIT-NOT-SATISFIED,
+concept.hashable); `hash` of a value of unknown type, such as an untyped
+parameter, still fails when it runs. Values of a Hashable type never
+reach this error.
 
 == EXAMPLE
     fn inc(x):

@@ -1773,6 +1773,48 @@ proc hir::range::verifyBlocks {hirVar blocks} {
     }
 }
 
+# A hashed argument of call E (NODE) of native NAME (core/native.tcl's
+# -hashing; HASHABLE-AND-KEYED-HASH.md), held to the intrinsic trait Hashable
+# by its witness predicate (hir::types::HashClass): mode `required` (the
+# private table hash) admits exactly Hashable arguments, like a parameter
+# declared `x: Hashable`; mode `checked` (the public hash) refuses only an
+# argument statically known not to be Hashable -- a function, a struct with a
+# function field -- and hashes a statically unknown one (any) dynamically.
+# Checked in the program as written only: never in a semantic instance's view
+# (whose instance key may forget an element type), nor in the monomorphized
+# build, whose witness types would turn a generic body's dynamic hash into a
+# rejection no source type states (TRAITS.md, "No delayed duck typing").
+proc hir::range::VerifyHashing {hirVar e node name} {
+    upvar 1 $hirVar hir
+    set hashing [dict getdef [core::native::metadata $name] hashing ""]
+    if {$hashing eq "" || [dict exists $hir semanticContext] || [hir::traits::Planning]} {
+        return
+    }
+    lassign $hashing index mode
+    set arg [lindex [dict get $node args] $index]
+    if {$arg eq "" || [dict exists $hir poisoned $arg]} {
+        return
+    }
+    set type [hir::typeOf $hir $arg]
+    if {[hir::types::IsAffine $type]} {
+        # An affine argument is the ownership discipline's to report, for
+        # every equality-role native alike (AFFINE-EQUALITY-UNSUPPORTED,
+        # hir/affine.tcl): a second diagnostic would only restate it.
+        return
+    }
+    lassign [hir::types::HashClass $type] class why
+    if {$class eq "total" || ($mode eq "checked" && $class eq "unknown")} {
+        return
+    }
+    if {[hir::types::IsTrait $type]} {
+        set message [format {the argument of %s is a view of trait %s, not of Hashable: a trait view satisfies only its own trait (there is no trait composition or conversion between traits)} \
+            $name [lindex $type 1]]
+    } else {
+        set message "the argument of $name does not satisfy trait Hashable:\n[hir::types::show $type] does not satisfy Hashable\n$why"
+    }
+    hir::Diagnose hir TRAIT-NOT-SATISFIED [hir::semantic::NameCallables $hir $message] $arg
+}
+
 # Walks every call reachable from E within its own block/program (spec #58:
 # a nested block's body is its own region, so this never descends into a
 # closure's own body -- that gets its own top-level call from
@@ -1827,6 +1869,7 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         # its imprinted parameter types (hir/imprint.tcl).
         set name [dict get [hir::symbol $hir $targetBlock] name]
         hir::containers::VerifyNative hir $ranges $e $node $name
+        VerifyHashing hir $e $node $name
         if {[dict get [core::native::metadata $name] foreign] ne ""} {
             # A foreign call contract is the native's whole signature: its
             # byte exposures and its typed C parameters (hir/borrow.tcl).
