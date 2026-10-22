@@ -662,6 +662,20 @@ jobs:
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the tier did not run"
             echo '```'
+            # A mutation tool's own report: each mutant's verdict and what
+            # killed it, or why it did not build.
+            if grep -aqE '^(KILLED|SURVIVED|NOT-BUILT|NOT-APPLIED|SKIPPED) ' tier.log 2>/dev/null; then
+              echo '### Mutants'
+              echo '```'
+              grep -aE '^(KILLED|SURVIVED|NOT-BUILT|NOT-APPLIED|SKIPPED) |^    |^[0-9]+ mutants on ' tier.log | head -n 300
+              echo '```'
+            fi
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
           } > full-summary.md
           cat full-summary.md >> "$GITHUB_STEP_SUMMARY"
 
