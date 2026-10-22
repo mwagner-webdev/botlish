@@ -76,7 +76,9 @@ proc outcome {stress script} {
     if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 } else { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) }
     try {
         if {[catch {uplevel 1 $script} result options]} {
-            return [list error [dict get $options -errorcode] [lindex [split $result \n] 0]]
+            # The whole message: a crashed driver's own report follows its
+            # first line (shown shortened per run, whole among the failures).
+            return [list error [dict get $options -errorcode] [string trim $result]]
         }
         return [list value $result]
     } finally {
@@ -97,7 +99,7 @@ proc runExecutable {executable} {
     set text [string trimright [read $channel] \n]
     close $channel
     if {$unwindCheck} {
-        if {![regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it$} $text - functions] || $functions == 0} {
+        if {![regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames$} $text - functions] || $functions == 0} {
             error "no unwind check's account: $text"
         }
     } elseif {$text ne ""} {
@@ -112,7 +114,7 @@ proc record {name label expected observed seconds} {
     incr runs
     set ok [expr {$observed eq $expected}]
     if {!$ok} { lappend failures "$name $label: [join $observed { }]" }
-    set text [join $observed " "]
+    set text [lindex [split [join $observed " "] \n] 0]
     if {[string length $text] > 60} { set text "[string range $text 0 56]..." }
     puts [format "%-4s %-14s %-30s %6.2f s  %s" [expr {$ok ? "ok" : "FAIL"}] $name $label $seconds $text]
     flush stdout

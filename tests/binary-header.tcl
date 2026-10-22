@@ -136,8 +136,9 @@ proc peFacts {path} {
 }
 
 # The COFF object PATH's sections, symbols and relocations, read from its
-# headers and tables: a dict {sections {NAME ...} symbols {{NAME SECTION
-# CLASS} ...} relocations {{SECTION TYPE SYMBOL} ...}}, SECTION a symbol's
+# headers and tables: a dict {sections {NAME ...} sizes {NAME BYTES ...}
+# symbols {{NAME SECTION CLASS} ...} relocations {{SECTION TYPE SYMBOL}
+# ...}}, BYTES a section's raw data size, SECTION a symbol's
 # 1-based section number (0: undefined, an import), CLASS its storage class
 # (2: external, 3: static), TYPE an IMAGE_REL_AMD64_* name (ADDR64, REL32,
 # ...) -- what `dumpbin /symbols /relocations` lists, read without a tool.
@@ -177,18 +178,21 @@ proc coffFacts {path} {
         incr i $aux
     }
     set sections {}
+    set sizes [dict create]
     set relocations {}
     for {set i 0} {$i < $count} {incr i} {
         set at [expr {20 + $optionalSize + 40 * $i}]
         set name [{*}$nameOf $bytes $strings [string range $bytes $at [expr {$at + 7}]]]
         lappend sections $name
+        binary scan $bytes @[expr {$at + 16}]iu rawSize
+        dict incr sizes $name $rawSize
         binary scan $bytes @[expr {$at + 24}]iu@[expr {$at + 32}]su relocTable relocCount
         for {set r 0} {$r < $relocCount} {incr r} {
             binary scan $bytes @[expr {$relocTable + 10 * $r + 4}]iusu index type
             lappend relocations [list $name [dict getdef $amd64 $type TYPE$type] [lindex $names $index]]
         }
     }
-    return [dict create sections $sections symbols $symbols relocations $relocations]
+    return [dict create sections $sections sizes $sizes symbols $symbols relocations $relocations]
 }
 
 # What binaryHeader reports for this host's native program objects (KIND

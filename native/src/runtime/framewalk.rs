@@ -342,6 +342,11 @@ pub mod windows {
 
     static FORCED: AtomicBool = AtomicBool::new(false);
     static CHECKED: AtomicUsize = AtomicUsize::new(0);
+    /// The walks the check saw, and the frames of them Windows' unwinder
+    /// crossed (Rust frames, the driver's, the system's below it): what the
+    /// collector's way across Rust frames costs, in RtlVirtualUnwind calls.
+    static WALKS: AtomicUsize = AtomicUsize::new(0);
+    static UNWOUND: AtomicUsize = AtomicUsize::new(0);
 
     /// Whether BOTLISH_NATIVE_UNWIND_CHECK=1 (read once), or a test turned
     /// the check on (`force_unwind_check`).
@@ -402,9 +407,11 @@ pub mod windows {
     pub fn summary() -> Option<String> {
         unwind_check().then(|| {
             format!(
-                "native unwind check: {} functions, {} Botlish frames, every one as Windows unwinds it",
+                "native unwind check: {} functions, {} Botlish frames, every one as Windows unwinds it; {} walks unwound {} other frames",
                 CHECKED_FUNCTIONS.load(Ordering::Relaxed),
-                CHECKED.load(Ordering::Relaxed)
+                CHECKED.load(Ordering::Relaxed),
+                WALKS.load(Ordering::Relaxed),
+                UNWOUND.load(Ordering::Relaxed)
             )
         })
     }
@@ -446,6 +453,9 @@ pub mod windows {
     pub fn walk_context(map: &ProgramMap, context: &mut Context, stack: Option<&NativeStack>, check: bool, visit: &mut dyn FnMut(*mut Value)) {
         let (low, high) = stack.map_or_else(thread_stack, |s| (s.low_bound, s.high_bound));
         let within = |address: usize, size: usize| address >= low && address.checked_add(size).is_some_and(|end| end <= high);
+        if check {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+        }
         for _ in 0..MAX_FRAMES {
             let (pc, sp) = (context.0.Rip as usize, context.0.Rsp as usize);
             if pc == 0 || !within(sp, 8) {
@@ -473,6 +483,9 @@ pub mod windows {
             } else {
                 // SAFETY: the context is exact for this frame (super::walk).
                 unsafe { unwind_one(context, None) };
+                if check {
+                    UNWOUND.fetch_add(1, Ordering::Relaxed);
+                }
             }
             if (context.0.Rsp as usize) <= sp {
                 break;
@@ -546,16 +559,18 @@ mod tests {
     use super::*;
     use crate::runtime::framemap::FunctionMap;
 
-    /// The capability is the hosts': Linux (glibc) and macOS, never Windows.
+    /// The capability is the hosts': Linux (glibc) and macOS, by the
+    /// frame-pointer chain, and Windows x86-64 (MSVC), by Windows' unwinder
+    /// across Rust frames; none in a `fallback-roots` build.
     #[test]
-    fn native_frame_roots_are_the_frame_pointer_hosts() {
+    fn native_frame_roots_are_the_frame_pointer_and_unwinder_hosts() {
         assert_eq!(
             NATIVE_FRAME_ROOTS,
-            cfg!(all(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"), not(feature = "fallback-roots")))
+            cfg!(all(
+                any(all(target_os = "linux", target_env = "gnu"), target_os = "macos", all(windows, target_env = "msvc", target_arch = "x86_64")),
+                not(feature = "fallback-roots")
+            ))
         );
-        if cfg!(windows) {
-            assert!(!NATIVE_FRAME_ROOTS);
-        }
     }
 
     /// Without the capability the walk never reads a frame: a map whose

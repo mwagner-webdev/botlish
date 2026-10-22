@@ -109,4 +109,26 @@ mod tests {
         let suspended = NativeStack { state: StackState::Suspended, ..stack };
         assert!(!suspended.is_guard_fault(0x1fff));
     }
+
+    /// The stack limit keeps an eighth of the stack below it, between 64 KiB
+    /// and 1 MiB: 1 MiB of a 1 GiB stack, 512 KiB of 4 MiB, 128 KiB of the
+    /// smallest stack the driver makes (1 MiB), 64 KiB of anything smaller.
+    #[test]
+    fn the_stack_limit_keeps_a_margin_of_the_stacks_size() {
+        let stack = |size: usize| NativeStack { low_bound: 0x10_0000, high_bound: 0x10_0000 + size, guard_low: 0x10_0000,
+            saved_sp: None, state: StackState::Active };
+        for (size, margin) in [(1 << 30, 1 << 20), (4 << 20, 512 << 10), (1 << 20, 128 << 10), (256 << 10, 64 << 10)] {
+            assert_eq!(stack(size).stack_limit(), 0x10_0000 + margin, "a stack of {size} bytes");
+        }
+    }
+
+    /// The depth is checked by the stack pointer exactly where native frames
+    /// hold the roots and no guard reports an exhausted stack.
+    #[test]
+    fn the_stack_pointer_is_checked_where_no_guard_backs_native_frame_roots() {
+        assert!(!stack_limit_checked(false), "the fallback plan's bound is the shadow stack's");
+        assert_eq!(stack_limit_checked(true), !native_stack_overflow_supported());
+        assert_eq!(depth_checked(true), stack_limit_checked(true));
+        assert!(depth_checked(false));
+    }
 }

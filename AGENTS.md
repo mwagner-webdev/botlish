@@ -493,9 +493,10 @@ tclsh9.0 tests/all.tcl
 ```
 
 From Windows, run the same thing inside WSL for Linux GC-stress results
-when validating native stack walking: Windows-native execution walks no
-native frame at all (the fallback root plan: "Windows x86-64 (MSVC)",
-below) and has no stack guard, so it cannot validate either:
+when validating the Linux frame walk or the stack guard: Windows-native
+execution walks its frames another way (Windows' unwinder across Rust
+frames: "Windows x86-64 (MSVC)", below) and has no stack guard, so it
+validates neither:
 
 ```powershell
 wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
@@ -1093,24 +1094,50 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
 * GC roots: one capability, `runtime::framewalk::NATIVE_FRAME_ROOTS`,
   decides stack-map emission (`clif.rs`'s `stack_maps`), the root plan,
   the shadow stack (`Vm::new`), the root report and the walk itself. It is
-  false on Windows: LLVM's Win64 prologue puts the frame pointer inside the
-  frame, so the frame walk cannot climb Rust frames there, forced frame
-  pointers or not. Never re-enable the walk on Windows by forcing frame
-  pointers or by a second, diverging check; native-frame roots there need
-  unwind metadata (`.pdata`/`.xdata`, `RtlVirtualUnwind`), a milestone of
-  their own. Where the shadow stack's depth check bounds recursion
-  (`runtime::native_stack::depth_checked`), every function with a Botlish
-  call can fail with NATIVE LIMIT STACK from its prologue: the depth
-  reservation and nir's call effects read that one predicate, so no call
-  site skips the check (WINDOWS-X86-64-MILESTONE-1.md, section 3.4). The
-  fallback plan does not support coroutines (a suspended coroutine's
-  shadow slots break the shadow stack's order). The `fallback-roots` cargo
-  feature builds Windows' root plan on any host, to run the suite with it
-  (a test build, never shipped; its coroutine tests fail under GC stress).
+  true on Windows since WINDOWS-X86-64-MILESTONE-3.md: Botlish frames keep
+  Cranelift's frame-pointer chain and stack maps, and the walk crosses
+  every other frame (the collector's, runtime helpers, `rt_call_value`, the
+  driver) with Windows' unwinder (`RtlLookupFunctionEntry`,
+  `RtlVirtualUnwind`: framewalk's `windows`). LLVM's Win64 prologue puts
+  the frame pointer inside the frame: never walk a Rust frame by its RBP on
+  Windows, forced frame pointers or not, and never add a second, diverging
+  check of the capability.
+* Unwind information: every Botlish function has Windows x64 unwind
+  information, encoded by `codegen::unwind` from Cranelift's own prologue
+  description (`UnwindInst`), never by Cranelift 0.135.2's winx64 encoder,
+  which restores callee-saved registers from the wrong slots
+  (`cranelift_windows_encoding_defect_still_present`: when it fails, check
+  Cranelift's encoding against Windows' unwinder before taking it). A
+  prologue of another shape is an error, never described approximately.
+  The COFF object carries it in `.pdata`/`.xdata` (`add_windows_unwind`;
+  the same COFF for both Windows environments); the JIT registers it with
+  `RtlAddFunctionTable` (`codegen::jitunwind`: code, data and unwind
+  information in one reserved range, the function table's base; the table
+  deleted before the code is released, which `CompiledProgram`'s field
+  order does). `BOTLISH_NATIVE_UNWIND_CHECK=1` compares every Botlish
+  function's entry and every walked Botlish frame with Windows' unwinder
+  and reports a count on standard error at the end of a run.
+* Depth: with no stack guard yet, a function with a Botlish call checks its
+  stack pointer against the Vm's stack limit (the thread's stack plus a
+  margin: `native_stack::stack_limit_checked`, `NativeStack::stack_limit`,
+  `clif.rs`'s `prologue_stack_limit`) and fails with NATIVE LIMIT STACK;
+  nir's call effects read the same predicate (`depth_checked`), so no call
+  site skips the check (WINDOWS-X86-64-MILESTONE-1.md, section 3.4). It
+  bounds the bytes of stack used, which a shadow slot count does not once
+  roots live in native frames. No shadow stack is allocated on Windows.
+* The fallback plan (shadow-stack roots and depth, leaf frames published,
+  no walk) remains the bootstrap of a host without native-frame roots: the
+  `fallback-roots` cargo feature builds it on any host, to run the suite
+  with it (a test build, never shipped; CI's Windows `roots` job runs its
+  Rust tests and the GC workloads). It does not support coroutines (a
+  suspended coroutine's shadow slots break the shadow stack's order): never
+  make it coroutine-aware; a host with native coroutines needs native-frame
+  roots.
 * Stack probes are on on Windows (`codegen::stack_probes`): Windows
   commits a thread's stack a page at a time. They are not a stack guard:
-  there is none on Windows yet, and the shadow stack's depth check is the
-  only clean NATIVE LIMIT STACK there.
+  there is none on Windows yet, and the stack-limit check is the only
+  clean NATIVE LIMIT STACK there (deep recursion in the runtime, or one
+  frame larger than the check's margin, still ends the process).
 * Arguments: a Windows process's command line, split by the Microsoft C
   runtime's rules (Rust's `args_os`), each argument's UTF-16 as WTF-8
   (`runtime::aot::wtf8_from_utf16`): never `OsString`'s internal encoding,
@@ -1119,8 +1146,9 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   `tests/platform/native-status.tcl` (its windows-x86_64 row) and
   `native/native.tcl`'s `capabilities` table (which tests/helpers.tcl's
   `executableAot`, `nativeCCalls`, `nativeCoroutines`, `nativeStackGuard`,
-  `nativeFrameRoots` (and from the last two `nativeDepthChecked`) and the
-  golden runner read); the test files that do not pass on Windows yet,
+  `nativeFrameRoots` (and from the last two `nativeDepthChecked`: true on
+  Windows) and the golden runner read); the test files that do not pass on
+  Windows yet,
   with their causes, in `tests/platform/tier.tcl`'s `notYetByHost`. A
   milestone that changes one updates it in the same change; never weaken a
   test to make Windows green. A test that needs a capability carries its
@@ -1132,13 +1160,27 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
 * CI: `.github/workflows/windows-x86_64.yml` on every push (windows-2025,
   production code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`):
   the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
-  COFF/PE checks, C calls through link.exe and the C runtime matrix,
-  `tests/platform/gc-workloads.tcl` under GC stress, the 2048 executable,
-  Windows I/O redirected by bash, cmd and PowerShell, dumpbin, the smoke
-  tier and the Windows-relevant test files) and the acceptance tier in
-  four shards; `[ci-full]` or a manual run adds the GC-stress tier.
+  COFF/PE checks and unwind information, C calls through link.exe and the
+  C runtime matrix, `tests/platform/gc-workloads.tcl` under GC stress and
+  under the unwind check, the 2048 executable, Windows I/O redirected by
+  bash, cmd and PowerShell, dumpbin's headers and unwind information, the
+  smoke tier and the Windows-relevant test files), the `roots` job (the
+  fallback plan's Rust tests and GC workloads, `bench/root-plans.tcl`;
+  `[ci-probes]` or a manual run adds `audit/windows-unwind`'s anchor probe)
+  and the acceptance tier in four shards; `[ci-full]` or a manual run adds
+  the GC-stress tier.
   Neither Wine nor WSL is an authority for Windows; a `-gnu` cross build
   under Wine is a development aid only.
+
+If you change Windows unwind information (`codegen::unwind`,
+`add_windows_unwind`, `codegen::jitunwind`), the Windows walk
+(`framewalk::windows`), the stack-limit check, or Cranelift's version, run
+the Rust tests (on Windows too: the JIT's function table and the virtual
+unwind tests run there only), `tests/platform/gc-workloads.tcl
+-unwind-check 1` and `tests/platform/aot-facts.tcl` on Windows, and
+`audit/windows-unwind/tools/mutate.tcl` (every mutant in its `mutants.txt`
+that applies to the host must still apply and be killed; on Windows the
+tier item `windows-unwind-mutants`).
 
 If you change the Windows link plan, the CRT policy, executable naming,
 `EXECUTABLES`/`C_CALLS`, `same_target`, `NATIVE_FRAME_ROOTS` or what reads

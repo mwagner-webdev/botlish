@@ -33,6 +33,9 @@ name: tests (windows x86-64)
 #                (argv, targets, executables, the command line, the C FFI
 #                and its Win64 ABI checks against MSVC-built fixtures,
 #                Windows I/O)
+#   roots        every push: the fallback root plan (a `fallback-roots`
+#                driver: its Rust tests, the GC workloads) and native-frame
+#                roots against it on the same runner (bench/root-plans.tcl)
 #   acceptance   every push, four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
 #                golden suite (native backends excluded by the golden
@@ -70,6 +73,10 @@ on:
         default: ""
       gc_stress:
         description: "Run the named items under BOTLISH_NATIVE_GC_STRESS=1"
+        type: boolean
+        default: false
+      probes:
+        description: "The roots job's probes (audit/windows-unwind): explicit frame anchors' per-call cost"
         type: boolean
         default: false
 
@@ -137,7 +144,7 @@ jobs:
       # format, the argument encoding.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: cargo test --release --manifest-path native/Cargo.toml --lib --bins 2>&1 | tee rust-tests.log
+        run: cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
 
       # No stack guard on Windows yet: the test target says so and checks
       # nothing (it must still build and run).
@@ -316,8 +323,34 @@ jobs:
               [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
             done
             [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
+            [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             echo '```'
+            # A failure's own words, readable from the run's summary (the
+            # check run's output) wherever its logs are not.
+            if [ -f rust-tests.log ] && grep -aq 'test result: FAILED\|^error' rust-tests.log; then
+              echo '### Rust unit test failures'
+              echo '```'
+              awk '/^failures:$/ {on = 1} on {print} /^test result/ {on = 0}' rust-tests.log | head -n 300
+              grep -a -A12 '^error' rust-tests.log | head -n 100
+              echo '```'
+            fi
+            for log in native-status.log aot-facts.log gc-workloads.log gc-workloads-unwind.log; do
+              if [ -f "$log" ] && grep -aqE '^(FAIL|FAILED)' "$log"; then
+                echo "### $log"
+                echo '```'
+                grep -a -A25 -E '^(FAIL|FAILED)' "$log" | head -n 200
+                echo '```'
+              fi
+            done
+            for listing in artifacts/fib-unwind.txt artifacts/bench-unwind.txt artifacts/unwind-check.txt; do
+              if [ -f "$listing" ]; then
+                echo "### $listing"
+                echo '```'
+                head -n 60 "$listing"
+                echo '```'
+              fi
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -327,6 +360,96 @@ jobs:
           path: |
             *.log
             artifacts
+          if-no-files-found: ignore
+
+  # The two root plans on one Windows runner (WINDOWS-X86-64-MILESTONE-3.md,
+  # sections 6 and 8): the fallback plan -- the shadow stack, the bootstrap
+  # of a host without native-frame roots -- built from this checkout with the
+  # `fallback-roots` feature, its Rust tests and the GC workloads on it; then
+  # bench/root-plans.tcl, native-frame roots against it with the same
+  # compiler and the same NIR: the JIT and executables, GC stress's cost per
+  # collection, code and unwind information sizes.
+  roots:
+    name: root plans (Windows x86-64, native frames and the fallback)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        id: build
+        uses: ./.github/actions/build-native
+
+      - name: Cache the fallback-roots build
+        uses: actions/cache@v4
+        with:
+          path: native/target-fallback
+          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the fallback-roots driver
+        id: fallback
+        run: cargo build --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback
+
+      - name: The fallback plan's Rust tests
+        if: ${{ !cancelled() && steps.fallback.outcome == 'success' }}
+        run: cargo test --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback --lib --bins --no-fail-fast 2>&1 | tee fallback-rust-tests.log
+
+      - name: GC workloads on the fallback plan
+        if: ${{ !cancelled() && steps.fallback.outcome == 'success' }}
+        env:
+          BOTLISH_NATIVE_BIN: native/target-fallback/release/botlish-native.exe
+        run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 3 2>&1 | tee fallback-gc-workloads.log
+
+      - name: Native-frame roots against the fallback plan
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fallback.outcome == 'success' }}
+        run: tclsh9.0 bench/root-plans.tcl -fallback native/target-fallback/release/botlish-native.exe -runs 20 -rounds 7 -stress-runs 3 2>&1 | tee root-plans.log
+
+      # Strategy B's per-call cost, measured (WINDOWS-X86-64-MILESTONE-3.md,
+      # section 3): a driver built with audit/windows-unwind/tools/anchors.patch
+      # stores the stack pointer to the Vm before every runtime call at a GC
+      # safepoint -- the explicit frame anchor that design's collector would
+      # start from -- which nothing reads, against the production driver. On
+      # demand: "[ci-probes]" in the head commit, or a manual run with probes.
+      - name: "Probe: explicit frame anchors' per-call cost (strategy B)"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git apply audit/windows-unwind/tools/anchors.patch
+          cargo build --release --manifest-path native/Cargo.toml --target-dir native/target-anchors
+          git apply -R audit/windows-unwind/tools/anchors.patch
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-anchors/release/botlish-native.exe -name anchors -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee anchors.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Root plans (Windows x86-64)"
+            echo '```'
+            [ -f fallback-rust-tests.log ] && grep -a 'test result' fallback-rust-tests.log
+            [ -f fallback-gc-workloads.log ] && sed -n '1p;$p' fallback-gc-workloads.log
+            [ -f fallback-gc-workloads.log ] && grep -a '^FAILED' fallback-gc-workloads.log
+            [ -f root-plans.log ] && cat root-plans.log
+            [ -f anchors.log ] && cat anchors.log
+            echo '```'
+            if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
+              echo '```'
+              awk '/^failures:$/ {on = 1} on {print} /^test result/ {on = 0}' fallback-rust-tests.log | head -n 200
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-root-plans
+          path: "*.log"
           if-no-files-found: ignore
 
   acceptance:
