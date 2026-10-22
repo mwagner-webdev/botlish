@@ -922,7 +922,7 @@ golden suites in four shards and the GC-stress run.
 | run | commit | result |
 |---|---|---|
 | [39736856392](https://github.com/mwagner-webdev/botlish/actions/runs/39736856392) | 188a58f | success, every job. The interp job: 8,839 tests, 8,718 passed, 121 skipped, 0 failed; no test skipped for `ecTrace`, `ecClobber`, `ecFixture` or `objdump`, so the AArch64 single-step traces (`ec-trace`, `ec-trace-large-sentinel`, `ec-trace-captured`), the errno-changing allocator over glibc (`ec-modes-executables`, `ec-modes-positive-control`), the object-file windows (`ec-modes-machine-windows` on AAPCS64 object code) and `ec-word-comparisons` (the unsigned conditions) ran and passed there |
-<<CI-ARM64-FINAL>>
+| [39747072233](https://github.com/mwagner-webdev/botlish/actions/runs/39747072233) | 9e38f24 (the final code) | success, every job, the GC-stress run included (1 h 40 min) |
 
 The AArch64 lowering adds nothing of its own: a word is an `i64`
 Cranelift value whatever the ISA, the comparisons are Cranelift's
