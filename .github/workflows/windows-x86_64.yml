@@ -33,6 +33,9 @@ name: tests (windows x86-64)
 #                (argv, targets, executables, the command line, the C FFI
 #                and its Win64 ABI checks against MSVC-built fixtures,
 #                Windows I/O)
+#   roots        every push: the fallback root plan (a `fallback-roots`
+#                driver: its Rust tests, the GC workloads) and native-frame
+#                roots against it on the same runner (bench/root-plans.tcl)
 #   acceptance   every push, four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
 #                golden suite (native backends excluded by the golden
@@ -70,6 +73,10 @@ on:
         default: ""
       gc_stress:
         description: "Run the named items under BOTLISH_NATIVE_GC_STRESS=1"
+        type: boolean
+        default: false
+      probes:
+        description: "The roots job's probes (audit/windows-unwind): explicit frame anchors' per-call cost"
         type: boolean
         default: false
 
@@ -135,9 +142,14 @@ jobs:
       # The runtime's tests and the driver's own (--bins): the link plans
       # (MSVC's among them), targets, stack probes, the program object's
       # format, the argument encoding.
+      # Then the single-step unwind test again, for its own account (how many
+      # instructions it unwound, the frames it probed): a passing test's
+      # output is otherwise not shown.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: cargo test --release --manifest-path native/Cargo.toml --lib --bins 2>&1 | tee rust-tests.log
+        run: |
+          cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
+          cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
 
       # No stack guard on Windows yet: the test target says so and checks
       # nothing (it must still build and run).
@@ -176,20 +188,32 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 5 2>&1 | tee gc-workloads.log
 
+      # The same workloads with Windows' own unwinder checking the collector
+      # (WINDOWS-X86-64-MILESTONE-3.md): BOTLISH_NATIVE_UNWIND_CHECK=1 -- every
+      # Botlish function's unwind entry (the JIT's function table, the
+      # executable's .pdata) spans exactly its code, and every Botlish frame
+      # of every collection unwinds by it as by its frame record.
+      - name: GC workloads under Windows' unwind check
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 2 -unwind-check 1 2>&1 | tee gc-workloads-unwind.log
+
       # The census's three programs (its pure program, the URI workload and
       # the 2048 benchmark) through main.tcl itself, on both Cranelift
-      # backends, as ordinary runs and under GC stress.
-      - name: The census's programs through main.tcl (cranelift, cranelift-generic; GC stress)
+      # backends, as ordinary runs, under GC stress, and under GC stress with
+      # Windows' unwind check.
+      - name: The census's programs through main.tcl (cranelift, cranelift-generic; GC stress, unwind check)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           failed=0
           while IFS='|' read -r file expected; do
             for backend in cranelift cranelift-generic; do
-              for stress in 0 1; do
-                out=$(BOTLISH_NATIVE_GC_STRESS=$stress tclsh9.0 main.tcl -warnings off -backend $backend "$file" 2>&1 | tr -d '\r') || true
+              for mode in 0 1 check; do
+                stress=$([ "$mode" = 0 ] && echo 0 || echo 1)
+                check=$([ "$mode" = check ] && echo 1 || echo 0)
+                out=$(BOTLISH_NATIVE_GC_STRESS=$stress BOTLISH_NATIVE_UNWIND_CHECK=$check tclsh9.0 main.tcl -warnings off -backend $backend "$file" 2>&1 | tr -d '\r') || true
                 value=$(printf '%s\n' "$out" | sed -n 's/^   value: //p')
                 if [ "$value" = "$expected" ]; then verdict=ok; else verdict=FAIL; failed=1; fi
-                echo "$verdict $file -backend $backend, GC stress $stress: $value"
+                echo "$verdict $file -backend $backend, GC stress $stress, unwind check $check: $value"
                 [ "$verdict" = ok ] || printf '%s\n' "$out"
               done
             done
@@ -217,6 +241,10 @@ jobs:
           value=$(BOTLISH_NATIVE_GC_STRESS=1 artifacts/bench.exe)
           echo "bench.exe under GC stress: $value"
           test "$value" = 2002720
+          value=$(BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_UNWIND_CHECK=1 artifacts/bench.exe 2> artifacts/unwind-check.txt)
+          echo "bench.exe under GC stress, unwind check: $value; $(cat artifacts/unwind-check.txt)"
+          test "$value" = 2002720
+          grep -qE '^native unwind check: [1-9][0-9]* functions, [1-9][0-9]* Botlish frames' artifacts/unwind-check.txt
 
       # Windows I/O as a user meets it (WINDOWS-X86-64-MILESTONE-2.md,
       # section 5): hello-windows.bot and the 2048 demo as executables,
@@ -265,7 +293,31 @@ jobs:
           dumpbin /nologo /dependents artifacts\bench.exe || exit /b 1
           dumpbin /nologo /dependents artifacts\bench.exe | findstr /i "vcruntime ucrtbase api-ms-win-crt" && (echo bench.exe imports the C runtime & exit /b 1)
           dumpbin /nologo /headers artifacts\bench.exe | findstr /i "subsystem machine" || exit /b 1
+          rem Windows unwind information (WINDOWS-X86-64-MILESTONE-3.md): the
+          rem object's function table (an object's entries are relocations:
+          rem dumpbin lists them undecoded), the executables' exception
+          rem directories, and fib.exe's every entry decoded (the next step
+          rem picks out the Botlish functions' by their names in its PDB).
+          dumpbin /nologo /unwindinfo artifacts\fib.obj > artifacts\fib-obj-unwind.txt || exit /b 1
+          type artifacts\fib-obj-unwind.txt
+          findstr /c:"Function Table" artifacts\fib-obj-unwind.txt || exit /b 1
+          dumpbin /nologo /headers artifacts\fib.exe | findstr /i /c:"Exception Directory" || exit /b 1
+          dumpbin /nologo /unwindinfo artifacts\fib.exe > artifacts\fib-unwind.txt || exit /b 1
+          dumpbin /nologo /headers artifacts\bench.exe | findstr /i /c:"Exception Directory" || exit /b 1
+          dumpbin /nologo /unwindinfo artifacts\bench.exe > artifacts\bench-unwind.txt || exit /b 1
+          findstr /i /c:"Function Table" artifacts\bench-unwind.txt || exit /b 1
           exit /b 0
+
+      # dumpbin's decoding of each Botlish function's UNWIND_INFO in fib.exe.
+      # An image's listing names no function: the Botlish entries are the
+      # one run of entries matching the object's own table (sizes, and
+      # distances between their UNWIND_INFO), each the frame codegen::unwind
+      # describes (audit/windows-unwind/tools/dumpbin-entries.tcl).
+      - name: dumpbin's decoding of the Botlish functions' unwind information
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          tclsh9.0 audit/windows-unwind/tools/dumpbin-entries.tcl artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt artifacts/fib-botlish-unwind.txt | tee artifacts/fib-botlish-found.txt
+          cat artifacts/fib-botlish-unwind.txt
 
       # The smoke tier (examples on all four backends, front-end files) and
       # the test files the port changes most: argv (the Windows argument
@@ -282,16 +334,69 @@ jobs:
       - name: Publish summary
         if: always()
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Smoke (Windows x86-64, MSVC)"
+            # Failures first, in their own words (the annotations' first
+            # parts), then the listings, then every check's line.
+            if [ -f rust-tests.log ] && grep -aq 'test result: FAILED\|^error' rust-tests.log; then
+              echo '### Rust unit test failures'
+              echo '```'
+              awk '/^failures:$/ {on = 1} on {print} /^test result/ {on = 0}' rust-tests.log | head -n 300
+              grep -a -A12 '^error' rust-tests.log | head -n 100
+              echo '```'
+            fi
+            for log in native-status.log aot-facts.log gc-workloads.log gc-workloads-unwind.log; do
+              if [ -f "$log" ] && grep -aqE '^(FAIL|FAILED)' "$log"; then
+                echo "### $log"
+                echo '```'
+                grep -a -A25 -E '^(FAIL|FAILED)' "$log" | head -n 200
+                echo '```'
+              fi
+            done
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
+            for listing in artifacts/unwind-check.txt artifacts/fib-botlish-found.txt artifacts/fib-botlish-unwind.txt artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt; do
+              if [ -f "$listing" ]; then
+                echo "### $listing"
+                echo '```'
+                tr -d '\r' < "$listing" | head -n 60
+                echo '```'
+              fi
+            done
+            echo '### Checks'
             echo '```'
             for log in native-status.log aot-facts.log; do
               [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
             done
             [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
+            [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
+            [ -f gc-workloads-unwind.log ] && grep -a 'native unwind check' gc-workloads-unwind.log | head -n 30
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            # The Rust tests of this milestone's Windows paths, by name: the
+            # evidence that they ran here (WINDOWS-X86-64-MILESTONE-3.md).
+            if [ -f rust-tests.log ]; then
+              echo '### Rust tests'
+              echo '```'
+              grep -a 'test result' rust-tests.log
+              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack)' rust-tests.log
+              grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
+              echo '```'
+            fi
+          } > smoke-summary.md
+          cat smoke-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: smoke-summary.md
+          title: smoke
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -300,6 +405,105 @@ jobs:
           path: |
             *.log
             artifacts
+          if-no-files-found: ignore
+
+  # The two root plans on one Windows runner (WINDOWS-X86-64-MILESTONE-3.md,
+  # sections 6 and 8): the fallback plan -- the shadow stack, the bootstrap
+  # of a host without native-frame roots -- built from this checkout with the
+  # `fallback-roots` feature, its Rust tests and the GC workloads on it; then
+  # bench/root-plans.tcl, native-frame roots against it with the same
+  # compiler and the same NIR: the JIT and executables, GC stress's cost per
+  # collection, code and unwind information sizes.
+  roots:
+    name: root plans (Windows x86-64, native frames and the fallback)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        id: build
+        uses: ./.github/actions/build-native
+
+      - name: Cache the fallback-roots build
+        uses: actions/cache@v4
+        with:
+          path: native/target-fallback
+          key: native-fallback-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: native-fallback-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the fallback-roots driver
+        id: fallback
+        run: cargo build --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback
+
+      - name: The fallback plan's Rust tests
+        if: ${{ !cancelled() && steps.fallback.outcome == 'success' }}
+        run: cargo test --release --manifest-path native/Cargo.toml --features fallback-roots --target-dir native/target-fallback --lib --bins --no-fail-fast 2>&1 | tee fallback-rust-tests.log
+
+      - name: GC workloads on the fallback plan
+        if: ${{ !cancelled() && steps.fallback.outcome == 'success' }}
+        env:
+          BOTLISH_NATIVE_BIN: native/target-fallback/release/botlish-native.exe
+        run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 3 2>&1 | tee fallback-gc-workloads.log
+
+      - name: Native-frame roots against the fallback plan
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fallback.outcome == 'success' }}
+        run: tclsh9.0 bench/root-plans.tcl -fallback native/target-fallback/release/botlish-native.exe -runs 20 -rounds 7 -stress-runs 3 2>&1 | tee root-plans.log
+
+      # Strategy B's per-call cost, measured (WINDOWS-X86-64-MILESTONE-3.md,
+      # section 3): a driver built with audit/windows-unwind/tools/anchors.patch
+      # stores the stack pointer to the Vm before every runtime call at a GC
+      # safepoint -- the explicit frame anchor that design's collector would
+      # start from -- which nothing reads, against the production driver. On
+      # demand: "[ci-probes]" in the head commit, or a manual run with probes.
+      - name: "Probe: explicit frame anchors' per-call cost (strategy B)"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git apply audit/windows-unwind/tools/anchors.patch
+          cargo build --release --manifest-path native/Cargo.toml --target-dir native/target-anchors
+          git apply -R audit/windows-unwind/tools/anchors.patch
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-anchors/release/botlish-native.exe -name anchors -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee anchors.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          set +e  # a check that finds nothing must not end the summary
+          {
+            echo "## Root plans (Windows x86-64)"
+            echo '```'
+            [ -f fallback-rust-tests.log ] && grep -a 'test result' fallback-rust-tests.log
+            [ -f fallback-gc-workloads.log ] && sed -n '1p;$p' fallback-gc-workloads.log
+            [ -f fallback-gc-workloads.log ] && grep -a '^FAILED' fallback-gc-workloads.log
+            [ -f root-plans.log ] && cat root-plans.log
+            [ -f anchors.log ] && cat anchors.log
+            echo '```'
+            if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
+              echo '```'
+              awk '/^failures:$/ {on = 1} on {print} /^test result/ {on = 0}' fallback-rust-tests.log | head -n 200
+              echo '```'
+            fi
+          } > roots-summary.md
+          cat roots-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: roots-summary.md
+          title: roots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-root-plans
+          path: "*.log"
           if-no-files-found: ignore
 
   acceptance:
@@ -338,12 +542,27 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Acceptance (Windows x86-64), shard $SHARD/4"
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
+          } > acceptance-summary.md
+          cat acceptance-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always()
+        uses: ./.github/actions/annotate
+        with:
+          file: acceptance-summary.md
+          title: acceptance ${{ matrix.shard }}/4
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -437,12 +656,35 @@ jobs:
           SHARDS: ${{ steps.decide.outputs.shards }}
           SHARD: ${{ matrix.shard }}
         run: |
+          set +e  # a check that finds nothing must not end the summary
           {
             echo "## Full, shard $SHARD/$SHARDS: $ITEMS (GC stress: $STRESS)"
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the tier did not run"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            # A mutation tool's own report: each mutant's verdict and what
+            # killed it, or why it did not build.
+            if grep -aqE '^(KILLED|SURVIVED|NOT-BUILT|NOT-APPLIED|SKIPPED) ' tier.log 2>/dev/null; then
+              echo '### Mutants'
+              echo '```'
+              grep -aE '^(KILLED|SURVIVED|NOT-BUILT|NOT-APPLIED|SKIPPED) |^    |^[0-9]+ mutants on ' tier.log | head -n 300
+              echo '```'
+            fi
+            if grep -aq '^==== .*FAILED' tier.log 2>/dev/null; then
+              echo '### Failed tests'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
+              echo '```'
+            fi
+          } > full-summary.md
+          cat full-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Annotate with the summary
+        if: always() && steps.decide.outputs.work == 'true'
+        uses: ./.github/actions/annotate
+        with:
+          file: full-summary.md
+          title: full ${{ matrix.shard }}
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.decide.outputs.work == 'true'

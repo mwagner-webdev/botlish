@@ -26,7 +26,7 @@
 //! `NativeFrame`, on `self.stack_maps` (this function's own copy of
 //! `roots::plan`'s `native_frame_supported` argument --
 //! runtime::framewalk's `NATIVE_FRAME_ROOTS`: x86-64 and AArch64 Linux and
-//! macOS, never Windows):
+//! macOS, x86-64 Windows):
 //!
 //!   * `RuntimeStack`: the shared shadow-stack array, indexed via
 //!     `vm.ss_top`/`ss_limit`; at least one slot always, so the shared
@@ -36,19 +36,24 @@
 //!     path this module implements): this function's own Cranelift-managed
 //!     native stack slot (`self.root_slot`/`self.base`). No publish/restore
 //!     of any kind -- the collector discovers these slots by walking the
-//!     native call stack's frame-pointer chain (rbp, x29) and consulting
+//!     native call stack's frame-pointer chain (rbp, x29; on Windows,
+//!     Windows' unwinder across the Rust frames between) and consulting
 //!     Cranelift `UserStackMapEntry`s
 //!     attached to each safepoint's own `call` instruction
 //!     (`mark_safepoint`, runtime/framewalk.rs). Eligible for every
 //!     function, called or not, recursive or not.
-//!   * `NativeFrame`, fallback (`!self.stack_maps`, any other host:
-//!     Windows): the original, narrower mechanism -- only eligible for a
+//!   * `NativeFrame`, fallback (`!self.stack_maps`, any other host, and
+//!     the `fallback-roots` test build): the original, narrower mechanism --
+//!     only eligible for a
 //!     function with no Botlish call, published to `vm.native_roots_ptr`/
 //!     `_len` (`prologue_native_frame`).
 //!
-//! On Linux x86-64 and AArch64 the pthread guard handles native overflow,
-//! so a calling function has no Botlish-specific depth-token instructions.
-//! Other targets retain the one-slot shadow depth check.
+//! On Linux and macOS the stack guard handles native overflow, so a calling
+//! function has no Botlish-specific depth instructions. On Windows, whose
+//! native frames hold the roots but which has no guard yet, a calling
+//! function compares its stack pointer with the Vm's stack limit
+//! (`prologue_stack_limit`); the fallback plan's `RuntimeStack` frames are
+//! bounded by the shadow array's end.
 //!
 //! Whichever combination applies, `self.base` is simply "the address slot 0
 //! lives at" for the rest of this file: `def`/`def_raw`/`zero_root_slots`
@@ -65,7 +70,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
+    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -494,6 +499,23 @@ pub struct DefineResult {
     /// roots nothing of its own (see codegen::framemap's doc on why its
     /// code range is still registered, with an empty table).
     pub safepoints: Vec<(u32, Vec<u32>)>,
+    /// The Windows x64 `UNWIND_INFO` of the direct function and of the
+    /// generic entry (codegen::unwind), when the module's code is Windows
+    /// x86-64's (`unwind::windows_x64`); None elsewhere. The AOT object
+    /// writes them to `.xdata` (codegen::emit_object), the JIT registers
+    /// them (codegen::jitunwind).
+    pub direct_unwind: Option<Vec<u8>>,
+    pub entry_unwind: Option<Vec<u8>>,
+}
+
+/// The Windows x64 `UNWIND_INFO` of the function just compiled in CTX, or
+/// None where the module's code is not Windows x86-64's.
+fn windows_unwind<M: Module>(module: &M, ctx: &cranelift_codegen::Context, what: &str) -> Result<Option<Vec<u8>>, BackendError> {
+    if !super::unwind::windows_x64(module.isa()) {
+        return Ok(None);
+    }
+    let code = ctx.compiled_code().ok_or_else(|| BackendError::Bug(format!("{what}: no compiled code")))?;
+    super::unwind::unwind_info(code.buffer.data(), &code.buffer.unwind_info).map_err(|e| BackendError::Codegen(format!("{what}: {e}")))
 }
 
 /// Defines function F and its generic entry. Returns F's CLIF if LISTING,
@@ -531,6 +553,7 @@ pub fn define<M: Module>(
         BackendError::Codegen(format!("function {} ({}): {e:?}", f.id, f.name))
     })?;
     let direct_size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+    let direct_unwind = windows_unwind(module, &ctx, &format!("function {} ({})", f.id, f.name))?;
     // Pull this function's stack maps out before `clear_context` drops them
     // (see `DefineResult::safepoints`'s own doc): `(CodeOffset, span,
     // ir::UserStackMap)` triples, one per safepoint `mark_safepoint`
@@ -599,8 +622,9 @@ pub fn define<M: Module>(
         b.finalize(config);
         module.define_function(symbols.entry[f.id as usize], &mut ctx).map_err(module_error)?;
         let entry_size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+        let entry_unwind = windows_unwind(module, &ctx, &format!("the generic entry of function {}", f.id))?;
         module.clear_context(&mut ctx);
-        return Ok(DefineResult { clif_text: listing.then_some(text), direct_size, entry_size, safepoints });
+        return Ok(DefineResult { clif_text: listing.then_some(text), direct_size, entry_size, safepoints, direct_unwind, entry_unwind });
     }
     {
         let mut fctx = FunctionBuilderContext::new();
@@ -690,8 +714,9 @@ pub fn define<M: Module>(
     }
     module.define_function(symbols.entry[f.id as usize], &mut ctx).map_err(module_error)?;
     let entry_size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+    let entry_unwind = windows_unwind(module, &ctx, &format!("the generic entry of function {}", f.id))?;
     module.clear_context(&mut ctx);
-    Ok(DefineResult { clif_text: listing.then_some(text), direct_size, entry_size, safepoints })
+    Ok(DefineResult { clif_text: listing.then_some(text), direct_size, entry_size, safepoints, direct_unwind, entry_unwind })
 }
 
 struct Translator<'a, 'b, M: Module> {
@@ -723,8 +748,6 @@ struct Translator<'a, 'b, M: Module> {
     /// function with zero physical slots (nothing was ever published, so
     /// nothing needs saving).
     saved_native_roots: Option<(ir::Value, ir::Value)>,
-    /// Fallback target only: saved shadow depth token.
-    depth_token: Option<ir::Value>,
     /// The stack-map path's own Cranelift stack slot backing `self.base`,
     /// for `mark_safepoint` to attach `UserStackMapEntry`s against (needs
     /// the raw `ir::StackSlot`, not just its address). `Some` only when
@@ -837,7 +860,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             instrument_sites,
             // Not yet inside `f.body` (still building the prologue): an
             // out-of-range sentinel, so a call the prologue itself emits
-            // (e.g. `rt_stack_overflow` on a depth-token overflow) can never
+            // (`rt_stack_overflow` past the stack limit) can never
             // accidentally match a real safepoint's index and have stack-map
             // entries misattached to it (`mark_safepoint`'s own guard).
             current_index: usize::MAX,
@@ -847,7 +870,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             vm: placeholder,
             base: placeholder,
             saved_native_roots: None,
-            depth_token: None,
             root_slot: None,
             stack_maps,
             body,
@@ -933,12 +955,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         Ok(())
     }
 
-    /// Reserves the physical root slots. A fallback target may also reserve
-    /// a shadow depth token; the x86-64/Linux path emits no such token.
+    /// Reserves the physical root slots, after bounding the recursion where
+    /// this function must (`RootPlan::depth_reservation`): `RuntimeStack`
+    /// storage reserves its slots in the shadow array, whose end is the
+    /// bound; native-frame storage checks the stack pointer
+    /// (`prologue_stack_limit`). Linux and macOS, whose guard reports an
+    /// exhausted stack, need neither.
     fn prologue_root_frame(&mut self) {
-        // Fallback NativeFrame storage keeps the legacy depth bound.
         if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation {
-            self.prologue_depth_token();
+            self.prologue_stack_limit();
         }
         match self.plan.storage {
             RootStorage::RuntimeStack => self.prologue_runtime_stack(),
@@ -955,38 +980,32 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         }
     }
 
-    /// `RootPlan::depth_reservation`'s own minimal reservation: bumps the
-    /// shared shadow array's `ss_top` by exactly one slot and checks it
-    /// against `ss_limit`, exactly like `prologue_runtime_stack`'s own
-    /// check, but storing no Value there at all -- this slot exists purely
-    /// to bound native recursion depth (unchanged mechanism, milestone
-    /// brief: "do not solve or remove (3) yet"), never to hold a root. It
-    /// is still zeroed (a literal 0, `is_pointer`'s own safe sentinel --
-    /// runtime/value.rs), so a *later*, unrelated frame's own depth-token
-    /// bump landing on the very same shadow-array bytes (LIFO reuse, like
-    /// any stack) never leaves this collector-visible region holding stale,
-    /// possibly-dangling machine data the shadow-stack scan
-    /// (runtime/heap.rs's `collect_with`) could misread as a live Value --
-    /// see this file's header on why that scan and this token must coexist
-    /// safely without the token ever contributing a spurious root.
-    fn prologue_depth_token(&mut self) {
-        let old_top = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_TOP_OFFSET);
-        let new_top = self.b.ins().iadd_imm_s(old_top, 8);
-        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_LIMIT_OFFSET);
-        let over = self.b.ins().icmp(IntCC::UnsignedGreaterThan, new_top, limit);
+    /// `RootPlan::depth_reservation` where native frames hold the roots but
+    /// no guard reports an exhausted stack (Windows x86-64 until its stack
+    /// guard: runtime::native_stack's `stack_limit_checked`): the frame,
+    /// already allocated and probed, fails with NATIVE LIMIT STACK
+    /// (`rt_stack_overflow`) when the stack pointer is below `vm.stack_limit`
+    /// -- the thread's stack bound plus a margin for what may run below a
+    /// checked frame (`Vm::new`). A bound in bytes of the native stack the
+    /// recursion actually uses, which the shadow stack's slot count is not
+    /// once the roots live in native frames (WINDOWS-X86-64-MILESTONE-3.md,
+    /// section 5). Nothing to undo on the way out; the failure is an error
+    /// every caller checks, as the shadow stack's was (nir's call effects,
+    /// `depth_checked`).
+    fn prologue_stack_limit(&mut self) {
+        let sp = self.b.ins().get_stack_pointer(I64);
+        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STACK_LIMIT_OFFSET);
+        let over = self.b.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
         let overflow = self.b.create_block();
         let setup = self.b.create_block();
         self.b.ins().brif(over, overflow, &[], setup, &[]);
+        self.b.set_cold_block(overflow);
 
         self.b.switch_to_block(overflow);
         self.call_helper("rt_stack_overflow", &[self.vm]);
         self.return_zeros();
 
         self.b.switch_to_block(setup);
-        self.b.ins().store(MemFlagsData::trusted(), new_top, self.vm, VM_SS_TOP_OFFSET);
-        let zero = self.iconst(0);
-        self.b.ins().store(MemFlagsData::trusted(), zero, old_top, 0);
-        self.depth_token = Some(old_top);
     }
 
     /// `RootStorage::RuntimeStack`'s prologue: reserve and clear this
@@ -1085,11 +1104,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// this milestone); `NativeFrame` restores the fallback path's
     /// `vm.native_roots_ptr`/`_len` publish when it made one (nothing to do
     /// on the stack-map path, which never publishes anything -- see
-    /// `prologue_native_frame`'s own doc). Independently of `storage`,
-    /// *also* pops `self.depth_token` when this frame reserved one
-    /// (`RootPlan::depth_reservation`) -- the two restores are unrelated
-    /// and both may apply at once (a `NativeFrame`, stack-map-path,
-    /// call-containing function like `fib<int>`).
+    /// `prologue_native_frame`'s own doc). The stack-limit check
+    /// (`prologue_stack_limit`) reserves nothing and has nothing to undo.
     fn restore_root_frame(&mut self) {
         match self.plan.storage {
             RootStorage::RuntimeStack => {
@@ -1101,9 +1117,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     self.b.ins().store(MemFlagsData::trusted(), len, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
                 }
             }
-        }
-        if let Some(old_top) = self.depth_token {
-            self.b.ins().store(MemFlagsData::trusted(), old_top, self.vm, VM_SS_TOP_OFFSET);
         }
     }
 
@@ -1501,7 +1514,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// calling operation) and, more importantly, every call made *outside*
     /// `f.body` translation, i.e. `self.current_index == usize::MAX`
     /// (`Translator::new`'s own doc) during prologue codegen -- a
-    /// `prologue_depth_token` overflow's own `rt_stack_overflow` call must
+    /// `prologue_stack_limit` failure's own `rt_stack_overflow` call must
     /// never be mistaken for a real instruction's safepoint (it runs before
     /// this frame's own slots hold anything meaningful at all).
     ///

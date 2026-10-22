@@ -132,17 +132,21 @@ testConstraint nativeCoroutines [native::hostSupports coroutines]
 testConstraint nativeStackGuard [native::hostSupports stackGuard]
 
 # GC roots in native frames (runtime/framewalk.rs's NATIVE_FRAME_ROOTS,
-# WINDOWS-X86-64-MILESTONE-1.md, section 3): stack maps and the frame walk on
-# Linux x86-64 and AArch64 and macOS AArch64; the fallback plan's shadow stack
-# on Windows. A test of the root plan expects the host's plan by it.
+# WINDOWS-X86-64-MILESTONE-1.md, section 3; -3.md): stack maps and the frame
+# walk on Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 (there
+# with Windows' unwinder across Rust frames); the fallback plan's shadow stack
+# where a `fallback-roots` driver runs. A test of the root plan expects the
+# host's plan by it.
 testConstraint nativeFrameRoots [native::hostSupports frameRoots]
 
-# The shadow stack's depth check bounds Botlish recursion
-# (runtime::native_stack::depth_checked): unless native frames hold the roots
-# and the stack guard reports an exhausted stack (Windows). Every function
-# with a Botlish call then fails with NATIVE LIMIT STACK from its prologue
-# when the shadow stack is full, which nir's call effects record as
-# may_error: a test of a call's effects expects it by this.
+# A depth check bounds Botlish recursion (runtime::native_stack::depth_checked):
+# unless native frames hold the roots and the stack guard reports an exhausted
+# stack (Windows, where a function with a Botlish call checks its stack
+# pointer against the thread's stack: native_stack::stack_limit_checked; the
+# fallback plan, where the shadow stack's end is the bound). Every function
+# with a Botlish call then fails with NATIVE LIMIT STACK from its prologue,
+# which nir's call effects record as may_error: a test of a call's effects
+# expects it by this.
 testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && [testConstraint nativeStackGuard])}]
 
 # Standalone executables (native::executable, native/src/codegen/aot.rs): the

@@ -1,0 +1,287 @@
+# Mutants of Windows unwind information and the native-frame GC roots built
+# on it (audit/windows-unwind/tools/mutate.tcl; WINDOWS-X86-64-MILESTONE-3.md,
+# section 7): the UNWIND_INFO encoder, the object's .pdata and .xdata, the
+# JIT's function table, the collector's walk on Windows, the stack-limit
+# check and the call effects that go with it.
+#
+#   @@ NAME DESCRIPTION
+#   %% HOST ...        (optional) the host targets the mutant applies to
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# The encoder's and the object's mutants apply on every x86-64 host
+# (`%% linux-x86_64 windows-x86_64`): the Rust tests that detect them make
+# Windows x86-64 code, which any x86-64 build can and an AArch64 build
+# cannot (it has no x86-64 backend; on macOS and Linux AArch64 they are
+# skipped). One that only Windows runs is `%% windows-x86_64`. Lines
+# starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# The UNWIND_INFO encoder (codegen/unwind.rs)
+
+@@ unwind-frame-offset-zero the frame offset left 0, Cranelift's own encoding: the establisher frame at RBP, above the saves
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/unwind.rs
+<<<<
+        RBP | ((clobbers / 16) as u8) << 4,
+====
+        RBP,
+>>>>
+
+@@ unwind-save-scaled-by-16 a general register's save offset counted in 16 bytes, as Cranelift does
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/unwind.rs
+<<<<
+            RegClass::Int => (UWOP_SAVE_NONVOL, 8),
+====
+            RegClass::Int => (UWOP_SAVE_NONVOL, 16),
+>>>>
+
+@@ unwind-no-clobber-allocation no allocation code for the clobber area: the unwinder's RSP stays at the establisher frame
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/unwind.rs
+<<<<
+    if clobbers > 0 {
+        codes.push(if clobbers <= 128 {
+====
+    if clobbers > 1 << 20 {
+        codes.push(if clobbers <= 128 {
+>>>>
+
+@@ unwind-frame-pointer-at-definition the frame pointer's code where Cranelift defines the frame (after the probes), not where it is set
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/unwind.rs
+<<<<
+    let established = FRAME_SETUP.len() as u8;
+====
+    let established = byte(defined_at)?;
+>>>>
+
+@@ unwind-no-prologue-check any prologue taken for Cranelift's: no check of the push and the move
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/unwind.rs
+<<<<
+        Some((1, UnwindInst::PushFrameRegs { offset_upward_to_caller_sp: 16 })) if code.starts_with(&FRAME_SETUP) => {}
+====
+        Some(_) => {}
+>>>>
+
+# ---------------------------------------------------------------------------
+# The object's .pdata and .xdata (codegen/mod.rs)
+
+@@ pdata-missing no unwind sections in the object: Windows takes every Botlish frame for a leaf
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/mod.rs
+<<<<
+    if entries.is_empty() {
+        return Ok(());
+    }
+    entries.sort_by_key(|e| (e.0, e.1));
+====
+    if !entries.is_empty() {
+        return Ok(());
+    }
+    entries.sort_by_key(|e| (e.0, e.1));
+>>>>
+
+@@ pdata-end-short every function's entry one byte short of its code
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/mod.rs
+<<<<
+        let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, info as i64)];
+====
+        let fields = [(entry.2, 0), (entry.2, i64::from(entry.3) - 1), (xdata_symbol, info as i64)];
+>>>>
+
+@@ pdata-unsorted the function table in declaration order, not address order
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/mod.rs
+<<<<
+    entries.sort_by_key(|e| (e.0, e.1));
+====
+    entries.reverse();
+>>>>
+
+@@ pdata-wrong-unwind-info every function's entry naming the first UNWIND_INFO
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/mod.rs
+<<<<
+        let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, info as i64)];
+====
+        let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, 0 * info as i64)];
+>>>>
+
+# ---------------------------------------------------------------------------
+# The JIT's function table (codegen/jitunwind.rs)
+
+@@ jit-unregistered the JIT's code never registered with Windows
+%% windows-x86_64
+## native/src/codegen/jitunwind.rs
+<<<<
+    FunctionTable::register(base, &functions).map(Some).map_err(|e| super::BackendError::Codegen(format!("the JIT's function table: {e}")))
+====
+    let _ = (base, functions);
+    Ok(None)
+>>>>
+
+@@ jit-table-deleted-early the function table deleted as soon as it is registered
+%% windows-x86_64
+## native/src/codegen/jitunwind.rs
+<<<<
+        Ok(FunctionTable { entries })
+    }
+====
+        // SAFETY: deletes the table just added, by its address.
+        unsafe { RtlDeleteFunctionTable(entries.as_ptr()) };
+        Ok(FunctionTable { entries })
+    }
+>>>>
+
+@@ jit-stale-registration the function table never deleted: entries for released code
+%% windows-x86_64
+## native/src/codegen/jitunwind.rs
+<<<<
+        unsafe { RtlDeleteFunctionTable(self.entries.as_ptr()) };
+====
+        let _ = self.entries.len();
+>>>>
+
+@@ jit-end-short every JIT function's entry one byte short of its code
+%% windows-x86_64
+## native/src/codegen/jitunwind.rs
+<<<<
+                EndAddress: begin.checked_add(size).ok_or("a function past the table's reach")?,
+====
+                EndAddress: begin.checked_add(size - 1).ok_or("a function past the table's reach")?,
+>>>>
+
+# ---------------------------------------------------------------------------
+# The collector's walk on Windows (runtime/framewalk.rs)
+
+@@ walk-frame-pointers-through-rust the invalid frame-pointer walk again: a Rust frame left by [rbp], not by Windows' unwinder
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+                // SAFETY: the context is exact for this frame (super::walk).
+                unsafe { unwind_one(context, None) };
+====
+                let fp = context.0.Rbp as usize;
+                if fp < sp || fp % 8 != 0 || !within(fp, 16) {
+                    break;
+                }
+                // SAFETY: inside the stack.
+                unsafe {
+                    context.0.Rip = *((fp + 8) as *const u64);
+                    context.0.Rsp = fp as u64 + 16;
+                    context.0.Rbp = *(fp as *const u64);
+                }
+>>>>
+
+@@ walk-stops-at-rust the walk ends at the first Rust frame above a Botlish frame: never past std::mutable_array::generate's
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+            } else {
+                // SAFETY: the context is exact for this frame (super::walk).
+                unsafe { unwind_one(context, None) };
+                if check {
+====
+            } else {
+                if botlish_seen {
+                    break;
+                }
+                // SAFETY: the context is exact for this frame (super::walk).
+                unsafe { unwind_one(context, None) };
+                if check {
+>>>>
+## native/src/runtime/framewalk.rs
+<<<<
+            if let Some(function) = map.find(pc) {
+                for &entry in function.roots_at(pc) {
+====
+            if let Some(function) = map.find(pc) {
+                botlish_seen = true;
+                for &entry in function.roots_at(pc) {
+>>>>
+## native/src/runtime/framewalk.rs
+<<<<
+        if check {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+        }
+====
+        let mut botlish_seen = false;
+        if check {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+        }
+>>>>
+
+@@ walk-roots-from-the-frame-pointer a root read at the frame pointer plus its stack-map offset, not the stack pointer
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+                    let Some(root) = sp.checked_add(entry as usize) else { break };
+====
+                    let Some(root) = (context.0.Rbp as usize).checked_add(entry as usize) else { break };
+>>>>
+
+@@ walk-first-botlish-frame-only only the innermost Botlish frame's roots: its callers' are missed
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+            if let Some(function) = map.find(pc) {
+                for &entry in function.roots_at(pc) {
+====
+            if let Some(function) = map.find(pc) {
+                let first = !std::mem::replace(&mut seen, true);
+                for &entry in function.roots_at(pc).iter().filter(|_| first) {
+>>>>
+## native/src/runtime/framewalk.rs
+<<<<
+        if check {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+        }
+====
+        let mut seen = false;
+        if check {
+            WALKS.fetch_add(1, Ordering::Relaxed);
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The stack-limit check (codegen/clif.rs, runtime/vm.rs) and the call
+# effects it implies (nir.rs)
+
+@@ stack-limit-unchecked no stack-limit check in a function's prologue: deep recursion exhausts the stack
+%% windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+        if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation {
+            self.prologue_stack_limit();
+        }
+====
+        if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation && self.f.id == u32::MAX {
+            self.prologue_stack_limit();
+        }
+>>>>
+
+@@ stack-limit-at-the-stacks-end the stack limit at the stack's low bound: no margin for what runs below a checked frame
+%% windows-x86_64
+## native/src/runtime/native_stack.rs
+<<<<
+        self.low_bound + (size / 8).clamp(64 << 10, 1 << 20)
+====
+        self.low_bound + (size / 8).clamp(0, 0)
+>>>>
+
+@@ effects-infallible a function with a Botlish call proven infallible although its stack check can fail: callers do not check
+%% windows-x86_64
+## native/src/nir.rs
+<<<<
+        local[i].0 = depth_checked && f.has_botlish_call();
+====
+        local[i].0 = depth_checked && f.has_botlish_call() && f.id == u32::MAX;
+>>>>

@@ -91,8 +91,8 @@ use std::fmt::Write as _;
 ///   physical *root storage* only on the fallback path, for a function
 ///   that contains a Botlish call (mirrors the original, pre-stack-map
 ///   mechanism exactly). On the native-stack-map path this storage is
-///   never used for roots. On x86-64/Linux it is not allocated; other
-///   targets retain its safe depth and root-storage fallback.
+///   never used for roots, and the array is not allocated (`Vm::new`):
+///   only the fallback plan has one, for its roots and its depth bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootStorage {
     NativeFrame,
@@ -139,8 +139,13 @@ pub struct RootPlan {
     /// `slot_of`/`num_slots`/`entry_zero` above (this module's own doc: "a
     /// storage-location change, not a new root allocator").
     pub storage: RootStorage,
-    /// Fallback-only shadow recursion bound. False on x86-64/Linux,
-    /// where the native pthread guard provides overflow protection.
+    /// The function bounds recursion in its prologue
+    /// (`native_stack::depth_checked`, for a function with a Botlish call):
+    /// with `RuntimeStack` storage its shadow slots against the shadow
+    /// array's end, with `NativeFrame` storage its stack pointer against the
+    /// Vm's stack limit (`native_stack::stack_limit_checked`: Windows until
+    /// its guard). False on Linux and macOS, whose stack guard reports an
+    /// exhausted stack.
     pub depth_reservation: bool,
     /// `RootStorage::NativeFrame` on the native-stack-map path only: for
     /// each safepoint instruction (by its index into `f.body`), the

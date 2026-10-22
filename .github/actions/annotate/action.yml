@@ -1,0 +1,38 @@
+name: Annotate with a file
+description: >
+  Publishes a text file (a job's summary: failures and their own words) as
+  annotations, a part of at most 3900 characters each (GitHub keeps 4 KiB of
+  an annotation's message), parts 1-10 as notices and 11-20 as warnings (ten
+  of each kind a step): annotations are readable through the checks API
+  wherever a run's logs and artifacts are not (WINDOWS-X86-64-MILESTONE-3.md,
+  section 7).
+
+inputs:
+  file:
+    description: the file to publish
+    required: true
+  title:
+    description: the annotations' title
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        FILE: ${{ inputs.file }}
+        TITLE: ${{ inputs.title }}
+      run: |
+        [ -s "$FILE" ] || exit 0
+        size=$(wc -c < "$FILE")
+        part=0
+        for (( at = 0; at < size && part < 20; at += 3900 )); do
+          part=$((part + 1))
+          kind=notice
+          (( part > 10 )) && kind=warning
+          text=$(tail -c +$((at + 1)) "$FILE" | head -c 3900)
+          text=${text//'%'/'%25'}
+          text=${text//$'\r'/'%0D'}
+          text=${text//$'\n'/'%0A'}
+          echo "::$kind title=$TITLE ($part)::$text"
+        done

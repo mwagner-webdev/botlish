@@ -142,16 +142,21 @@ namespace eval native {
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   frameRoots   GC roots in native frames, found by the frame walk
-#                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS); elsewhere the
-#                fallback plan's shadow stack. A `fallback-roots` test build
-#                of the driver has none on any host: the tests of the
-#                native-frame plan then fail, by design.
+#                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
+#                chain, on Windows with Windows' unwinder across Rust frames);
+#                elsewhere the fallback plan's shadow stack. A
+#                `fallback-roots` test build of the driver has none on any
+#                host: the tests of the native-frame plan then fail, by
+#                design.
 #
 # Windows x86-64 (MSVC) runs native code and links executables since
 # WINDOWS-X86-64-MILESTONE-1.md and C calls since WINDOWS-X86-64-MILESTONE-2.md
-# (the Win64 C ABI, link.exe's link plan); its variadic C calls, coroutines
-# and stack guard are later milestones'; its GC roots are on the shadow
-# stack (the frame walk cannot climb Win64 frames).
+# (the Win64 C ABI, link.exe's link plan), and keeps its GC roots in native
+# frames since WINDOWS-X86-64-MILESTONE-3.md (unwind information for
+# Botlish code, Windows' unwinder across Rust frames); its variadic C calls,
+# coroutines and stack guard are later milestones'. Without the guard, a
+# function with a Botlish call checks its stack pointer and can fail with
+# NATIVE LIMIT STACK (tests/helpers.tcl's nativeDepthChecked).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
@@ -160,7 +165,7 @@ namespace eval native {
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64} \
-        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64}]
+        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this

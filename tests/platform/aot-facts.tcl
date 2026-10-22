@@ -53,10 +53,12 @@
 # none of the Visual C++ runtime or the UCRT's (the C runtime is linked
 # statically); its name (NAME.exe); and the standalone runs, from another
 # directory with only the system directory on PATH, where the outcomes
-# differ from Unix's exactly as recorded: native coroutines are refused, the
-# depth check's NATIVE LIMIT STACK is reported as any run-time error is
-# (MESSAGE (CODE)), and a native stack exhausted before the shadow stack's
-# depth check fires ends the process (no stack guard yet). C calls
+# differ from Unix's exactly as recorded: native coroutines are refused, and
+# the stack-limit check's NATIVE LIMIT STACK is reported as any run-time
+# error is (MESSAGE (CODE)), no stack guard yet. The object's unwind
+# information (.pdata, .xdata) is read too, and the executable is run with
+# BOTLISH_NATIVE_UNWIND_CHECK=1 under GC stress: Windows' unwinder against
+# every Botlish function and frame (WINDOWS-X86-64-MILESTONE-3.md). C calls
 # (WINDOWS-X86-64-MILESTONE-2.md) are checked with MSVC's own tools
 # (`windowsCCalls`: cl, lib, link.exe through rustc) and the C runtime
 # matrix of static libraries and DLLs compiled for /MT and /MD. Prints
@@ -674,6 +676,19 @@ proc windowsChecks {} {
     set foreign [lmap t $types {expr {$t in [dict get $facts relocTypes] ? [continue] : $t}}]
     check object-relocations [expr {$types ne "" && $foreign eq ""}] \
         "sections [dict get $coff sections]; relocation types $types" [join [dict get $coff relocations] \n]
+    # Windows unwind information (WINDOWS-X86-64-MILESTONE-3.md): .pdata holds
+    # one RUNTIME_FUNCTION per function -- start, end and UNWIND_INFO, each an
+    # image-relative ADDR32NB relocation: the start and the end against the
+    # function's own symbol, the UNWIND_INFO against .xdata.
+    set pdata [lsearch -all -inline -index 0 -exact [dict get $coff relocations] .pdata]
+    set starts [lmap {start end info} $pdata {lindex $start 2}]
+    set ends [lmap {start end info} $pdata {lindex $end 2}]
+    set infos [lsort -unique [lmap {start end info} $pdata {lindex $info 2}]]
+    set pdataTypes [lsort -unique [lmap r $pdata {lindex $r 1}]]
+    check object-unwind [expr {".pdata" in [dict get $coff sections] && ".xdata" in [dict get $coff sections]
+            && $pdataTypes eq "ADDR32NB" && [lsort $starts] eq [lsort $functions] && $starts eq $ends && $infos eq ".xdata"}] \
+        "[llength $starts] RUNTIME_FUNCTIONs for [llength $functions] functions, relocation types $pdataTypes, UNWIND_INFO in $infos" \
+        [join $pdata \n]
 
     # ---- The executable: NAME.exe for NAME.
     set started [clock microseconds]
@@ -714,6 +729,15 @@ proc windowsChecks {} {
     check standalone-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] "[shown $outcome] ($runMs ms)"
     set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1}]
     check standalone-gc-stress [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+    # The linked executable's unwind information as Windows' own unwinder
+    # reads it (runtime::framewalk's BOTLISH_NATIVE_UNWIND_CHECK): every
+    # function's .pdata entry spans exactly its code, and under GC stress
+    # every Botlish frame of every collection unwinds by it exactly as by its
+    # frame record, restoring callee-saved registers from inside the frame.
+    set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
+    set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames\n$} [lindex $outcome 2] - functionsChecked framesChecked]
+    check standalone-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 "$programValue\n"] && $checked
+            && $functionsChecked == [llength $functions] && $framesChecked > 0}] [shown $outcome]
     set standalone {apply {{runDir cwdDir name text environment} {
         set path [native::executable [surface::compile $text $name.bot -warnings off] [file join $runDir $name]]
         return [windowsRun $cwdDir $path $environment]
@@ -723,19 +747,21 @@ proc windowsChecks {} {
         && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
     set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {}]
     check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
-    # The shadow stack's depth check (codegen::roots's depth_reservation)
-    # bounds Botlish recursion on the default 1 GiB stack: NATIVE LIMIT
-    # STACK, exit status 1, as everywhere -- an ordinary run-time error
-    # here, which the executable reports as it reports every one (MESSAGE
-    # (CODE), like standalone-error), where the guard of the other hosts
-    # writes its own fixed line ($overflowLine). A smaller stack is
-    # exhausted first, and with no stack guard yet the process ends in
-    # Rust's own stack overflow report, a failure status.
+    # The stack-limit check (codegen::clif's prologue_stack_limit, where
+    # codegen::roots's depth_reservation: no stack guard yet) bounds Botlish
+    # recursion by the bytes of the thread's stack it uses: NATIVE LIMIT
+    # STACK, exit status 1, as everywhere -- an ordinary run-time error here,
+    # which the executable reports as it reports every one (MESSAGE (CODE),
+    # like standalone-error), where the guard of the other hosts writes its
+    # own fixed line ($overflowLine) -- on the default 1 GiB stack and on a
+    # 16 MiB one alike. Until milestone 3 the shadow stack's slot count was
+    # the bound, which the 16 MiB stack did not reach: the process ended in
+    # Rust's own stack overflow report.
+    set limited [list 1 "" "native stack exhausted: too many nested calls (NATIVE LIMIT STACK)\n"]
     set outcome [{*}$standalone $runDir $cwdDir overflow [string map {DEPTH 100000000} $downProgram] {}]
-    check standalone-depth-limit [expr {$outcome eq [list 1 "" "native stack exhausted: too many nested calls (NATIVE LIMIT STACK)\n"]}] "1 GiB stack: [shown $outcome]"
+    check standalone-depth-limit [expr {$outcome eq $limited}] "1 GiB stack: [shown $outcome]"
     set outcome [windowsRun $cwdDir [file join $runDir overflow.exe] {BOTLISH_NATIVE_STACK_BYTES 16777216}]
-    check standalone-stack-overflow [expr {[lindex $outcome 0] ni {0 1} && [lindex $outcome 1] eq ""
-        && [string match "*has overflowed its stack*" [lindex $outcome 2]]}] "16 MiB stack, no guard: [shown $outcome]"
+    check standalone-stack-overflow [expr {$outcome eq $limited}] "16 MiB stack: [shown $outcome]"
     set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
     check standalone-coroutine-refused [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
         && [string match "native coroutines need stack switching*(NATIVE UNSUPPORTED value)\n" [lindex $outcome 2]]}] [shown $outcome]

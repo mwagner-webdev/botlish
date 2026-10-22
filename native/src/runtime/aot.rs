@@ -165,7 +165,7 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
             }
         }
     });
-    match worker {
+    let status = match worker {
         Ok(worker) => match worker.join() {
             Ok(status) => status,
             Err(_) => {
@@ -177,7 +177,13 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
             eprintln!("{error} (NATIVE STARTUP)");
             1
         }
+    };
+    // BOTLISH_NATIVE_UNWIND_CHECK's account (runtime::framewalk).
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    if let Some(summary) = super::framewalk::windows::summary() {
+        eprintln!("{summary}");
     }
+    status
 }
 
 /// Runs the program as `botlish-native run` (or `bench`) would and writes its

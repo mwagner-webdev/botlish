@@ -1,0 +1,20 @@
+diff --git a/native/src/codegen/clif.rs b/native/src/codegen/clif.rs
+index d18da5c..fbc5615 100644
+--- a/native/src/codegen/clif.rs
++++ b/native/src/codegen/clif.rs
+@@ -1490,6 +1490,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
+     fn call_helper(&mut self, name: &str, args: &[ir::Value]) -> ir::Value {
+         let id = self.symbols.helpers[name];
+         let r = self.helper_ref(id);
++        // PROBE (audit/windows-unwind/tools/anchors.patch, never committed): the
++        // per-call cost of explicit frame anchors (WINDOWS-X86-64-MILESTONE-3.md,
++        // section 3, strategy B) -- the stack pointer stored to the Vm before
++        // every runtime call at a GC safepoint, into a word the native-frame
++        // plan never reads (native_roots_len). Nothing reads it.
++        if self.plan.safepoint_slots.contains_key(&self.current_index) {
++            let sp = self.b.ins().get_stack_pointer(I64);
++            self.b.ins().store(MemFlagsData::trusted(), sp, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
++        }
+         let call = self.b.ins().call(r, args);
+         self.mark_safepoint(call);
+         self.b.inst_results(call)[0]
