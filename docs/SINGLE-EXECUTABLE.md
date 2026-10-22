@@ -65,7 +65,7 @@ zipfs-enabled tclsh) and a directory.
    main.tcl         single/main.tcl
    tcl_library/     the base kit's own Tcl script library
    botlish/         main.tcl, LICENSE, core/, compiler/, hir/, surface/,
-                    native/*.tcl, stdlib/, compilerpedia/ (its engine, topics/
+                    service/, native/*.tcl, stdlib/, compilerpedia/ (its engine, topics/
                     and generated/), BUILD (the source revision -version
                     prints) (checkout-relative paths)
    native-bin/      botlish-native, botlish-aot-stub, ID

@@ -1,0 +1,97 @@
+# json_probe.bot -- runs json_tokens.bot over well-formed and malformed
+# inputs (COMPILER-SERVICE-CENSUS.md, "FFI and JSON feasibility").
+#
+#   tclsh9.0 main.tcl -backend cranelift audit/compiler-service/probes/json/json_probe.bot
+#
+# Its value is one record per case: the case, the token count (or -1), the
+# failure (the error's name, "" for none) and its offset or number. The last
+# case tokenizes an LSP-sized message REPEAT times, for timing.
+
+import json_tokens
+import std::list
+import std::str
+
+fn outcome(name: str, tokens: int, failure: str, detail: int):
+    {case: name, tokens: tokens, failure: failure, detail: detail}
+
+fn run(name: str, text: str, limit: int):
+    r = json_tokens::tokenize(text, limit):
+        on json_tokens::Malformed details:
+            return outcome(name, -1, "Malformed", details.at)
+        on json_tokens::TooManyTokens details:
+            return outcome(name, -1, "TooManyTokens", details.limit)
+        on IndexNotFound:
+            return outcome(name, -1, "IndexNotFound", -1)
+        on LowerUnderrun:
+            return outcome(name, -1, "LowerUnderrun", -1)
+        on UpperOverrun:
+            return outcome(name, -1, "UpperOverrun", -1)
+    outcome(name, std::list::length(r), "", 0)
+
+fn decoded(name: str, text: str):
+    tokens = json_tokens::tokenize(text, 100):
+        on json_tokens::Malformed details:
+            return outcome(name, -1, "Malformed", details.at)
+        on json_tokens::TooManyTokens details:
+            return outcome(name, -1, "TooManyTokens", details.limit)
+        on IndexNotFound:
+            return outcome(name, -1, "IndexNotFound", -1)
+        on LowerUnderrun:
+            return outcome(name, -1, "LowerUnderrun", -1)
+        on UpperOverrun:
+            return outcome(name, -1, "UpperOverrun", -1)
+    first = std::list::get(tokens, 0, json_tokens::Token {kind: "none", start: 0, end: 0})
+    d = json_tokens::decode(text, first):
+        on json_tokens::NoScalarConstructor details:
+            return outcome(name, 1, "NoScalarConstructor", details.scalar)
+        on IndexNotFound:
+            return outcome(name, -1, "IndexNotFound", -1)
+    outcome(name, std::str::length(d), "", 0)
+
+# A didChange-like message (about 1 KiB): a whole document's text as one
+# JSON string, with escapes, numbers and nesting.
+message = "{\"jsonrpc\": \"2.0\", \"id\": 17, \"method\": \"textDocument/didChange\", \"params\": {\"textDocument\": {\"uri\": \"file:///home/user/app/main.bot\", \"version\": 42}, \"contentChanges\": [{\"text\": \"import util\\nimport std::list\\n\\nfn total(x: int, y: int) -> int:\\n    x + y\\n\\nx = util::f(2)\\n[x + 1, std::list::get([1, 2], 5, 0)]\\n# caf\\u00e9 \\\"quoted\\\" \\t tab\\n\"}], \"range\": {\"start\": {\"line\": 3, \"character\": 14}, \"end\": {\"line\": 3, \"character\": 15}}, \"numbers\": [0, -1, 2.5, 1e10, -0.25E-3, 123456789012345678901234567890], \"flags\": [true, false, null]}}"
+
+fn repeat(text: str, times: int, total: int) -> int:
+    if times == 0:
+        return total
+    # The input varies with TIMES (one or two trailing spaces), so no
+    # analysis can treat the repeated call as one constant computation.
+    padded = if times.mod(2) == 0:
+        std::str::concat(text, " ")
+    else:
+        std::str::concat(text, "  ")
+    r = json_tokens::tokenize(padded, 100000):
+        on json_tokens::Malformed:
+            return -1
+        on json_tokens::TooManyTokens:
+            return -1
+        on IndexNotFound:
+            return -1
+        on LowerUnderrun:
+            return -1
+        on UpperOverrun:
+            return -1
+    repeat(text, times - 1, total + std::list::length(r))
+
+[
+    outcome("message length", std::str::length(message), "", 0),
+    run("message", message, 1000),
+    run("empty object", "{}", 10),
+    run("nested", "[[[[{\"a\": [1, {\"b\": null}]}]]]]", 100),
+    run("unterminated string", "{\"a\": \"b", 100),
+    run("raw newline in string", "\"a\nb\"", 100),
+    run("bad escape", "\"\\x\"", 100),
+    run("short unicode escape", "\"\\u12\"", 100),
+    run("leading zero", "01", 100),
+    run("lone minus", "-", 100),
+    run("fraction without digits", "1.", 100),
+    run("exponent without digits", "1e+", 100),
+    run("bad literal", "tru", 100),
+    run("stray character", "{\"a\": @}", 100),
+    run("token bound", message, 10),
+    decoded("decode plain escapes", "\"a\\nb\\t\\\"c\\\\\""),
+    decoded("decode \\u00e9", "\"caf\\u00e9\""),
+    decoded("decode \\b", "\"\\b\""),
+    outcome("repeat 200 x message", repeat(message, 200, 0), "", 0),
+]

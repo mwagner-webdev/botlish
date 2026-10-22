@@ -2642,6 +2642,61 @@ proc hir::types::show {type} {
     return [core::type::show $type]
 }
 
+# TYPE as a person reads it (a hover's text; COMPILER-SERVICE-MILESTONE-1.md):
+# `show` of TYPE with every exact callable in it -- a block, which `show`
+# names by its expression id (`block(e8)/2 -> int`), or a native -- replaced by
+# its structural contract (structuralOf), in the Fn{...} notation an
+# annotation spells. A type with no exact callable in it is shown as `show`
+# shows it. Never used where a diagnostic's message is made.
+proc hir::types::presented {type} {
+    return [show [Presentable $type]]
+}
+
+proc hir::types::Presentable {type} {
+    if {[IsExactBlock $type] || [IsExactNative $type]} {
+        set structural [structuralOf $type]
+        if {$structural eq ""} {
+            return $type
+        }
+        set type $structural
+    }
+    if {[llength $type] < 2} {
+        return $type
+    }
+    if {[hir::refinements::IsRefined $type]} {
+        set family [hir::refinements::Family $type]
+        if {[hir::refinements::IsApplied $family]} {
+            return [Refine [Presentable [hir::refinements::Base $type]] $family [hir::refinements::Facts $type]]
+        }
+        return $type
+    }
+    switch -- [lindex $type 0] {
+        list {
+            if {[llength $type] == 3} {
+                return [list list [Presentable [lindex $type 1]] [lmap p [lindex $type 2] {Presentable $p}]]
+            }
+            return [list list [Presentable [lindex $type 1]]]
+        }
+        immutableSet - mutarray - mutvec {
+            return [list [lindex $type 0] [Presentable [lindex $type 1]]]
+        }
+        struct {
+            set fields {}
+            foreach {name t} [lindex $type 1] {
+                lappend fields $name [Presentable $t]
+            }
+            return [list struct $fields]
+        }
+        fn - coroutine {
+            set fields [lindex $type 1]
+            dict set fields args [lmap t [dict get $fields args] {Presentable $t}]
+            dict set fields return [Presentable [dict get $fields return]]
+            return [list [lindex $type 0] $fields]
+        }
+    }
+    return $type
+}
+
 # The TypeId of TYPE in the program, interning it.
 proc hir::types::intern {hirVar type} {
     upvar 1 $hirVar hir

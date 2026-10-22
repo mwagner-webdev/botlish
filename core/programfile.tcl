@@ -40,8 +40,13 @@ proc core::readProgramFile {path} {
 
 # The libraries named by "# requires: NAME ..." comments in PATH.
 proc core::programFileRequires {path} {
+    return [RequiresOf [ReadFile $path]]
+}
+
+# The libraries named by "# requires: NAME ..." comments in program TEXT.
+proc core::RequiresOf {text} {
     set libraries {}
-    foreach line [split [ReadFile $path] \n] {
+    foreach line [split $text \n] {
         if {[regexp {^\s*#\s*requires:\s*(.*)$} $line _ names]} {
             foreach name $names {
                 if {$name ni $libraries} {

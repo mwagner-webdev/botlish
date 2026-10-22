@@ -1,0 +1,12 @@
+bounds of std::list::at(xs, c::pick()) with xs = [10, 20, 30]:
+  declared -> int, body 2                  ok        (no error)
+  declared -> int, body 7                  semantic  {KNOWN-ERROR main.bot:5}
+  unannotated, body 2                      ok        (no error)
+  unannotated, body 7                      semantic  {KNOWN-ERROR main.bot:5}
+an unannotated function's inferred result reaching a typed parameter:
+  unannotated, body 2                      ok        (no error)
+  unannotated, body "s"                    semantic  {TYPE main.bot:6}
+completion facts: pick(1) of a function declaring `errors Boom`:
+  body: fail when n > 1                    ok        (no error)
+  body: fail when n > 0                    semantic  {KNOWN-ERROR main.bot:3}
+  body: never fails                        ok        (no error)

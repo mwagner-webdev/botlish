@@ -274,9 +274,11 @@
 #
 # Diagnostics
 # -----------
-# A diagnostic is a dict {file line column start end message}. surface::raise
-# throws one as {SURFACE SYNTAX DIAGNOSTIC} with the message
-# "FILE:LINE:COLUMN: TEXT".
+# A diagnostic is a dict {file line column start end endLine endColumn
+# message}: the span of what is wrong, as a span records it (a zero-width
+# span is a position where something is missing), and the message, last
+# (an error code's last element is its text). surface::raise throws one
+# as {SURFACE SYNTAX DIAGNOSTIC} with the message "FILE:LINE:COLUMN: TEXT".
 
 namespace eval surface::ast {}
 
@@ -312,7 +314,16 @@ proc surface::ast::location {span} {
 proc surface::diagnostic {span message} {
     return [dict create file [dict get $span file] line [dict get $span line] \
         column [dict get $span column] start [dict get $span start] \
-        end [dict get $span end] message $message]
+        end [dict get $span end] endLine [dict get $span endLine] \
+        endColumn [dict get $span endColumn] message $message]
+}
+
+# The span of syntax DIAGNOSTIC (surface::diagnostic): where it starts and
+# ends, in the shape of any other span.
+proc surface::diagnosticSpan {diagnostic} {
+    return [surface::ast::span [dict get $diagnostic file] [dict get $diagnostic start] \
+        [dict get $diagnostic end] [dict get $diagnostic line] [dict get $diagnostic column] \
+        [dict get $diagnostic endLine] [dict get $diagnostic endColumn]]
 }
 
 proc surface::raise {diagnostic} {

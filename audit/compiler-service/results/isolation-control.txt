@@ -1,0 +1,14 @@
+--- pass: activate before querying = 1
+FAILS: retained, queried again after all others (reverse order) (appB/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained, queried again after all others (reverse order) (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained A after failSemantic/main.bot (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained A after failDecl/main.bot (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+--- pass: activate before querying = 0
+FAILS: retained, queried again after all others (reverse order) (appB/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained, queried again after all others (reverse order) (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained A after failSemantic/main.bot (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+FAILS: retained A after failDecl/main.bot (appA/main.bot): core::type: unknown type "geo::Small" in "refined int geo::Small"
+DIFFERS: A's queries read after a failed build without activation
+   raw       error: core::type: unknown type "geo::Small" in "refined int geo::Small"
+   activated helper-call {kind ref type {block(e24)/1 -> int} sourceName helper bindingKind local definition /tmp/tcl_YAlbO0/appA/main.bot:7:1 references /tmp/tcl_YAlbO0/appA/main.bot:14:2 diagnostics {} topics {}} shape-field {kind project type int diagnostics {} topics {}} geo-make {kind ref type {block(e2)/1 -
+isolation: 86 checks, 9 differences (activate-first pass: 4, raw pass: 4; activation switches: 0)

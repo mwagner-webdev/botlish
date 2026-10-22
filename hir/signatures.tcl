@@ -211,6 +211,37 @@ proc hir::signatures::of {hir e} {
         errors [dict getdef $node declaredErrors {}]]
 }
 
+# The signature of the function block E as the head of its declaration spells
+# it, for a reader (a hover: COMPILER-SERVICE-MILESTONE-1.md), never an
+# expression id: `fn NAME(a: int, b) -> int errors Boom`. NAME is the source
+# name of the binding E is bound to (hir::semantic::CallableName), absent for
+# an unnamed function; each parameter is its source name with the contract a
+# call must meet (paramType), or the bare name when it has none; the result
+# is the declared one, else the inferred one; the errors are the declared
+# set. Every type is presented (hir::types::presented).
+proc hir::signatures::text {hir e} {
+    set signature [of $hir $e]
+    set params [lmap param [dict get $signature params] {
+        set name [hir::semantic::SourceName $hir [dict get $param binding]]
+        set type [paramType $param]
+        if {$type eq "any" && [dict get $param source] eq "none"} {
+            set name
+        } else {
+            string cat $name ": " [hir::types::presented $type]
+        }
+    }]
+    set text fn
+    set name [hir::semantic::CallableName $hir $e]
+    if {$name ne ""} {
+        append text " " $name
+    }
+    append text "([join $params {, }]) -> [hir::types::presented [dict get $signature result]]"
+    if {[dict get $signature errors] ne {}} {
+        append text " errors [join [dict get $signature errors] {, }]"
+    }
+    return $text
+}
+
 # One parameter's contract as the user would read it: its trusted type if
 # it has one (callers must prove it), else its checked one, else any.
 proc hir::signatures::paramType {param} {

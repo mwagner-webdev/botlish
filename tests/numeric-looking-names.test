@@ -173,6 +173,7 @@ proc nl::StringTernaries {} {
         [glob -directory [file join $::projectRoot surface] *.tcl] \
         [glob -directory [file join $::projectRoot compiler] *.tcl] \
         [glob -directory [file join $::projectRoot native] *.tcl] \
+        [glob -directory [file join $::projectRoot service] *.tcl] \
         [list [file join $::projectRoot compilerpedia compilerpedia.tcl] [file join $::projectRoot main.tcl]]]
     foreach path [lsort $files] {
         set channel [open $path]

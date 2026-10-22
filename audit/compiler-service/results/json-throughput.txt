@@ -1,0 +1,3 @@
+cranelift       9.7 us per message (median run: 0 messages 622 ms, 5000 messages 671 ms)
+compile     17450.5 us per message (median run: 0 messages 73 ms, 40 messages 771 ms)
+interp     626668.6 us per message (median run: 0 messages 838 ms, 10 messages 7105 ms)

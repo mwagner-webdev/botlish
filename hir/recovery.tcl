@@ -3,6 +3,7 @@
 #
 #   hir::recovery::reported HIR    the diagnostics to report, in order
 #   hir::recovery::raise HIR LOCATE   raise them as one error
+#   hir::recovery::entries HIR REPORTED LOCATE   what raise raises, as data
 #   hir::recovery::runnable HIR    the HIR a backend compiles: without poison
 #
 # A compilation reports every diagnostic that is independently true of the
@@ -194,14 +195,31 @@ proc hir::recovery::runnable {hir} {
 # starts with its "FILE:LINE:COLUMN: " (a source program's), else it is the
 # message alone (core IR text, whose origins name no file).
 proc hir::recovery::raise {hir reported locate} {
+    core::raiseDiagnostics [entries $hir $reported $locate]
+}
+
+# The core::raiseDiagnostics entries of the diagnostics REPORTED of HIR, as
+# raise raises them (LOCATE as raise's): each with its location and its
+# related locations as data, beside the located text, and the HIR diagnostic
+# itself as its `record`. The one statement of what a semantic diagnostic is
+# outside HIR: a strict compilation raises these, and the compiler service
+# reports exactly these for a lenient one (COMPILER-SERVICE-MILESTONE-1.md).
+proc hir::recovery::entries {hir reported locate} {
     set entries {}
     foreach diagnostic $reported {
         set message [dict get $diagnostic message]
+        set location ""
+        set related {}
         if {$locate} {
             set origin [if {[dict exists $diagnostic origin]} {dict get $diagnostic origin} else {hir::get $hir [dict get $diagnostic expr] origin}]
             set message "[hir::originLocation $hir $origin]: $message"
+            set location [hir::originSpan $hir $origin]
+            foreach o [dict getdef $diagnostic related {}] {
+                lappend related [hir::originSpan $hir $o]
+            }
         }
-        lappend entries [dict create errorcode [list CORE SEMANTIC [dict get $diagnostic kind]] message $message]
+        lappend entries [dict create errorcode [list CORE SEMANTIC [dict get $diagnostic kind]] message $message \
+            summary [dict get $diagnostic message] location $location related $related record $diagnostic]
     }
-    core::raiseDiagnostics $entries
+    return $entries
 }

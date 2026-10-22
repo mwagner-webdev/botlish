@@ -17,6 +17,8 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -check                 analyze each .bot input, report its diagnostics,
+#                          run and build nothing (the compiler service)
 #   -help [QUERY...]       Compilerpedia, the built-in reference
 #                          (compilerpedia/, COMPILERPEDIA.md); everything
 #                          after -help is the query
@@ -104,6 +106,17 @@
 # with no front end, while the program, its modules and the front end are
 # unchanged (the front-end cache, surface/cache.tcl).
 #
+# -check analyzes each .bot input as a compilation does and reports what it
+# reports -- the same diagnostics, in the same words, the same "help:" lines,
+# its warnings on stderr under the -warnings policy -- without evaluating the
+# program, generating native code or writing anything: through the compiler
+# service (service/service.tcl, COMPILER-SERVICE-MILESTONE-1.md), the
+# in-process analysis an editor's tooling shares. A file with no error prints
+# "ok"; one with errors makes the run exit 1. Of the other options only
+# -warnings and -target (which decide the analysis) combine with it; the
+# rest run, build or inspect, and -check does none of that, so naming one
+# beside it is a usage error, as is an input that is not Botlish source.
+#
 # -L DIR adds DIR to the system linker's library search path (-LDIR) for a
 # program that calls C (C-FFI.md: `extern c library` and `extern c fn`), which
 # the native backends and -emit-native-executable link with the libraries it
@@ -156,6 +169,7 @@ set cliOptions {
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
+    -check {} check {report each .bot input's diagnostics; run nothing}
     -code {} inspect {the compile backend's generated Tcl code}
     -hir {} inspect {the program's semantic HIR}
     -ast {} inspect {a .bot file's surface syntax tree}
@@ -197,7 +211,7 @@ proc usage {} {
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." ""]
-    foreach {group heading} {run Running argv {Program arguments} build Building inspect {Inspecting (printed before the program runs)} help Reference} {
+    foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
         foreach {name argument optionGroup description} $cliOptions {
             if {$optionGroup ne $group} continue
@@ -390,10 +404,10 @@ proc helpHint {channel prefix code message} {
 }
 
 # After a compilation that printed warnings (on stderr), the topic of each
-# distinct warning code, once.
-proc warningHints {hir} {
+# distinct warning code of CODES (the warnings' codes), once.
+proc warningHints {codes} {
     global root hintsShown
-    set codes [lsort -unique [lmap w [hir::warnings::of $hir] {dict get $w code}]]
+    set codes [lsort -unique $codes]
     if {$codes eq ""} {
         return
     }
@@ -435,8 +449,10 @@ proc runFile {path showCode showHir showAst showAot showNative} {
     set hir ""
     set extension [file extension $path]
     if {$extension eq ".bot"} {
-        # Parse with recovery first, so every syntax error is reported.
-        set ast [surface::parse [core::ReadFile $path] $path -recover 1]
+        # Parse with recovery first, so every syntax error is reported (the
+        # text as every compilation reads it, surface/source.tcl; the AST
+        # kept for the compilation's own parse, surface::modules::Parse).
+        set ast [surface::modules::Parse $path [surface::source::text $path]]
         if {$showAst} {
             puts [surface::formatAst $ast]
         }
@@ -460,7 +476,7 @@ proc runFile {path showCode showHir showAst showAot showNative} {
             printError stdout "   error: " $hir $options
             return 1
         } else {
-            warningHints $hir
+            warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
         }
         # Core IR is only produced for the branch that consumes it, the
         # interpreter. The Tcl compiler compiles the HIR once (below), for
@@ -583,7 +599,7 @@ proc emitInterchange {path} {
         switch -- [file extension $path] {
             .bot {
                 set hir [surface::readProgramFile $path -warnings $warnings -target $target]
-                warningHints $hir
+                warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
             }
             .hir { set hir [hir::readFile $path] }
             default { throw {HIR INTERCHANGE INPUT} "expected a .bot or .hir input file: $path" }
@@ -597,6 +613,40 @@ proc emitInterchange {path} {
     return 0
 }
 
+# Analyzes the .bot file PATH without running or building it (-check), in
+# the compiler service's workspace checkWorkspace, and prints what a
+# compilation of it reports: each error as runFile prints a rejected
+# program's, each warning on stderr as the compilation would, with the same
+# help lines; "ok" when it has no error. Returns 1 for a program with errors.
+proc checkFile {path} {
+    global checkWorkspace hintsShown
+    set hintsShown {}
+    puts "== [file tail $path] (check)"
+    if {[catch {service::analyze $checkWorkspace $path} revision options]} {
+        printError stdout "   error: " $revision $options
+        return 1
+    }
+    try {
+        set warnings [service::diagnostics $revision -severity warning]
+        foreach warning $warnings {
+            puts stderr [dict get $warning text]
+        }
+        warningHints [lmap w $warnings {dict get $w code}]
+        set errors [service::diagnostics $revision -severity error]
+        foreach error $errors {
+            puts "   error: [dict get $error text] ([dict get $error code])"
+            helpHint stdout "   " [dict get $error code] [dict get $error text]
+        }
+    } finally {
+        service::release $revision
+    }
+    if {$errors ne {}} {
+        return 1
+    }
+    puts "   ok"
+    return 0
+}
+
 proc emitExecutable {path} {
     global warnings target hintsShown
     set hintsShown {}
@@ -604,7 +654,7 @@ proc emitExecutable {path} {
         switch -- [file extension $path] {
             .bot {
                 set hir [surface::readProgramFile $path -warnings $warnings -target $target]
-                warningHints $hir
+                warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
             }
             .hir { set hir [hir::readFile $path] }
             .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
@@ -634,6 +684,28 @@ set showAot ""
 set showNative ""
 set injectedArgv [core::process::defaultArgv]
 set injectedArgvGiven 0
+set check 0
+foreach option [dict get $commandLine options] {
+    lassign $option arg value
+    if {$arg eq "-check"} {
+        set check 1
+    }
+}
+if {$check} {
+    # -check analyzes; every option but the analysis's own runs, builds or
+    # inspects, which it never does: refused, never ignored.
+    foreach option [dict get $commandLine options] {
+        set arg [lindex $option 0]
+        if {$arg ni {-check -warnings -target}} {
+            usageError "-check cannot be combined with $arg: it analyzes the program and reports its diagnostics, without running, building or inspecting it (it takes -warnings and -target)"
+        }
+    }
+    foreach path $files {
+        if {[file extension $path] ne ".bot"} {
+            usageError "-check analyzes Botlish source files (.bot), and $path is not one"
+        }
+    }
+}
 foreach option [dict get $commandLine options] {
     lassign $option arg value
     switch -- $arg {
@@ -691,8 +763,14 @@ foreach option [dict get $commandLine options] {
     }
 }
 set failures 0
+if {$check} {
+    source [file join $root service service.tcl]
+    set checkWorkspace [service::workspace -warnings $warnings -target $target]
+}
 foreach path $files {
-    if {$showNative eq "executable"} {
+    if {$check} {
+        incr failures [checkFile $path]
+    } elseif {$showNative eq "executable"} {
         incr failures [emitExecutable $path]
     } elseif {$showNative eq "interchange"} {
         incr failures [emitInterchange $path]

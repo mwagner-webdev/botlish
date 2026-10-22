@@ -52,11 +52,21 @@
 # prints the warnings its HIR carries, as the build did. A compilation that
 # fails, or that traces its static decisions (BOTLISH_STATIC_TRACE), is
 # never cached.
+#
+# Sources: every text and every absence is the compilation's source provider's
+# (surface/source.tcl), the program's and its dependencies' alike, from the
+# one snapshot the compilation reads -- a lookup validates an entry against
+# what that snapshot says, so a hit is exactly as valid for an unsaved buffer
+# as for a file: validity is a matter of contents, never of where they came
+# from. But only a compilation whose every answer came from the disk is kept
+# (surface::source::persistable; stats `buffered` otherwise): an editor's
+# buffer is a transient state of a document, and an entry built from one
+# would only displace the disk's.
 
 namespace eval surface::cache {
     variable version 1
     variable magic botlish-hir-cache
-    variable stats [dict create hits 0 misses 0 stores 0 stale 0 invalid 0 unstored 0]
+    variable stats [dict create hits 0 misses 0 stores 0 stale 0 invalid 0 unstored 0 buffered 0]
 }
 
 # The cache directory compilations use unless told otherwise: the
@@ -107,12 +117,13 @@ proc surface::cache::EntryPath {dir key} {
     return [file join $dir [format %08x%08x.hirc [zlib crc32 $bytes] [zlib adler32 $bytes]]]
 }
 
-# The text of file PATH, or "" with EXISTS 0 when there is none.
+# The text of source file PATH, or "" with EXISTS 0 when there is none: the
+# compilation's source provider's answer (surface/source.tcl).
 proc surface::cache::Contents {path existsVar} {
     upvar 1 $existsVar exists
-    set exists [file isfile $path]
+    set exists [surface::source::exists $path]
     if {$exists} {
-        return [core::ReadFile $path]
+        return [surface::source::text $path]
     }
     return ""
 }
@@ -244,8 +255,14 @@ proc surface::cache::store {dir path source mode strict hir reads {target ""} {r
     set entryPath [EntryPath $dir $key]
     set temporary ""
     try {
+        set dependencies [Dependencies $hir $reads $target $root]
+        if {![surface::source::persistable]} {
+            # (Asked after Dependencies, whose probes are the snapshot's too.)
+            dict incr stats buffered
+            return
+        }
         set entry [list $magic $version key $key \
-            dependencies [Dependencies $hir $reads $target $root] \
+            dependencies $dependencies \
             interchange [hir::interchange::encode $hir -trait-source 1]]
         file mkdir $dir
         set temporary $entryPath.[pid].[clock microseconds]

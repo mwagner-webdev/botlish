@@ -171,11 +171,25 @@
 >>>>
 
 @@ deps-read-when-kept an entry records its modules' texts when it is kept, not the texts the build read: a module edited during the build hits the old HIR
+# Reading when kept means reading the file again, past the compilation's
+# source snapshot (surface/source.tcl), which would answer with the text the
+# build read: the mutant drops both the build's reads and the snapshot.
 ## surface/cache.tcl
 <<<<
         if {[dict exists $reads $dependency]} {
 ====
         if {0} {
+>>>>
+<<<<
+    set exists [surface::source::exists $path]
+    if {$exists} {
+        return [surface::source::text $path]
+    }
+====
+    set exists [file isfile $path]
+    if {$exists} {
+        return [core::ReadFile $path]
+    }
 >>>>
 
 @@ lookup-skips-dependencies a hit checks no dependency

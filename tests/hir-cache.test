@@ -341,7 +341,7 @@ test hc-environment {BOTLISH_HIR_CACHE names the directory compilations use by d
     lappend result [surface::cache::directory] [llength [glob -directory $cache *.hirc]]
 } -cleanup {
     removeDirectory hc-environment
-} -result {1 {hits 0 misses 1 stores 1 stale 0 invalid 0 unstored 0} 0 0 0 {{value: [6, 3]}} {} 1}
+} -result {1 {hits 0 misses 1 stores 1 stale 0 invalid 0 unstored 0 buffered 0} 0 0 0 {{value: [6, 3]}} {} 1}
 
 # (Last: a Tcl library, once loaded, stays loaded in this process.)
 test hc-key-libraries {the key holds the Tcl libraries loaded (core::loadLibrary, `# requires:`), which register natives every later compilation can resolve: a library loaded since is another entry} -setup {

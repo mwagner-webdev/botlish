@@ -1,0 +1,247 @@
+# mutants.txt -- the compiler service's mutants (tools/mutate.tcl).
+#
+# Format: "@@ NAME DESCRIPTION" starts a mutant; "## FILE" names the file
+# its next edits change; each edit is "<<<<", the exact text to replace
+# (occurring once), "====", its replacement, ">>>>". Update a mutant's text
+# when the code it mutates changes, keeping it a mutant of the same rule.
+
+@@ no-activation a query reads a retained revision without activating its HIR: the registries answer for whichever program was analyzed last
+## service/service.tcl
+<<<<
+    set hir [QueryHir $revision]
+    if {$hir ne ""} {
+        hir::activate $hir
+    }
+    return $revision
+====
+    set hir [QueryHir $revision]
+    return $revision
+>>>>
+
+@@ text-not-normalized the seam hands the front end a source's text as the provider has it: a CRLF or lone-CR file or buffer is another text than its LF twin
+## surface/source.tcl
+<<<<
+    set text [normalize [{*}$current text $path]]
+    dict set snapshot $path text $text
+====
+    set text [{*}$current text $path]
+    dict set snapshot $path text $text
+>>>>
+
+@@ store-buffers the front-end cache keeps a compilation that read unsaved buffers: an editor's transient text displaces the disk's entry
+## surface/source.tcl
+<<<<
+        if {[dict get $observation from] ne "disk"} {
+            return 0
+        }
+====
+        if {0} {
+            return 0
+        }
+>>>>
+
+@@ validate-against-disk a cache lookup validates an entry's dependencies against the disk, not the compilation's sources: a buffer that differs from the file is served the file's HIR
+## surface/cache.tcl
+<<<<
+    set exists [surface::source::exists $path]
+    if {$exists} {
+        return [surface::source::text $path]
+    }
+====
+    set exists [file isfile $path]
+    if {$exists} {
+        return [core::ReadFile $path]
+    }
+>>>>
+
+@@ references-by-name references are collected by the name a reference spells, not the binding it resolves to: two bindings of one name share them
+## service/service.tcl
+<<<<
+            dict lappend references [dict get $node binding] $e
+====
+            foreach b [dict keys [dict get $hir bindings]] {
+                if {[hir::semantic::SourceName $hir $b] eq [hir::semantic::RefName $hir $e]} {
+                    dict lappend references $b $e
+                }
+            }
+>>>>
+
+@@ definition-whole-statement a definition is its binding's origin, the whole declaring statement, even where the declaration's name is written
+## service/service.tcl
+<<<<
+    if {[dict exists $nodes $node nameSpan]} {
+        lappend candidates [dict get $nodes $node nameSpan]
+    }
+====
+    if {0} {
+        lappend candidates [dict get $nodes $node nameSpan]
+    }
+>>>>
+<<<<
+        if {$end > $start && [string range $text $start [expr {$end - 1}]] eq $name} {
+====
+        if {$end > $start} {
+>>>>
+
+@@ unfiltered-diagnostics the service reports every diagnostic of the lenient HIR, not what a strict compilation reports: dependent diagnostics of a resolution failure come back
+## service/service.tcl
+<<<<
+    set errors [hir::recovery::entries $hir [hir::recovery::reported $hir] 1]
+====
+    set errors [hir::recovery::entries $hir [hir::diagnostics $hir] 1]
+>>>>
+
+@@ loader-unlocated a loader diagnostic's location is left in its text only, not given as data
+## surface/modules.tcl
+<<<<
+    set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
+        summary $message location $span related {}]
+====
+    set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
+        summary $message location "" related {}]
+>>>>
+
+@@ syntax-no-end a syntax diagnostic's end is its start: the range does not reach the end of what is wrong
+## surface/ast.tcl
+<<<<
+        end [dict get $span end] endLine [dict get $span endLine] \
+        endColumn [dict get $span endColumn] message $message]
+====
+        end [dict get $span start] endLine [dict get $span line] \
+        endColumn [dict get $span column] message $message]
+>>>>
+
+@@ related-dropped a semantic diagnostic's related locations are not carried as data
+## hir/recovery.tcl
+<<<<
+            foreach o [dict getdef $diagnostic related {}] {
+                lappend related [hir::originSpan $hir $o]
+            }
+====
+            foreach o {} {
+                lappend related [hir::originSpan $hir $o]
+            }
+>>>>
+
+@@ rejection-ignored the service ignores the warning policy's rejection: under -warnings error a program with a warning is reported clean
+## service/service.tcl
+<<<<
+    set rejection [hir::warnings::Rejection $hir $warnings $mode]
+====
+    set rejection [hir::warnings::Rejection $hir $warnings default]
+>>>>
+
+@@ hover-internal-ids hover shows a type as the compiler's internal notation, an exact function as block(eN)
+## service/service.tcl
+<<<<
+    if {$b eq ""} {
+        return [hir::types::presented $type]
+    }
+    return "[hir::semantic::SourceName $hir $b]: [hir::types::presented $type]"
+====
+    if {$b eq ""} {
+        return [hir::types::show $type]
+    }
+    return "[hir::semantic::SourceName $hir $b]: [hir::types::show $type]"
+>>>>
+<<<<
+    if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
+        return [hir::signatures::text $hir [lindex $type 1]]
+    }
+====
+    if {0} {
+        return [hir::signatures::text $hir [lindex $type 1]]
+    }
+>>>>
+
+@@ expansion-not-written among expressions with equal ranges the query answers with the innermost, an expansion the front end made, not the written construct
+## service/service.tcl
+<<<<
+        while {[llength $exprs] > 1
+                && [lindex $starts [lindex $exprs 0]] == [lindex $starts [lindex $exprs 1]]
+====
+        while {0 && [llength $exprs] > 1
+                && [lindex $starts [lindex $exprs 0]] == [lindex $starts [lindex $exprs 1]]
+>>>>
+
+@@ revision-reads-workspace a revision's source text is the workspace's current document, not the text it analyzed
+## service/service.tcl
+<<<<
+    return [dict get $revision sources $source text]
+}
+====
+    set workspace [Workspace [dict get $revision workspace]]
+    set normal [file normalize $source]
+    if {[dict exists $workspace overlay $normal text]} {
+        return [surface::source::normalize [dict get $workspace overlay $normal text]]
+    }
+    return [dict get $revision sources $source text]
+}
+>>>>
+
+@@ version-unchecked a query naming another version of a buffer than its revision read is answered anyway
+## service/service.tcl
+<<<<
+    if {[dict exists $args -version] && [dict get $options -version] ne [dict getdef $observation version ""]} {
+====
+    if {0} {
+>>>>
+
+@@ release-keeps release forgets a revision's name but the service keeps the revision
+## service/service.tcl
+<<<<
+    set revision [Get $rev]
+    dict unset revisions $rev
+    set ws [dict get $revision workspace]
+====
+    set revision [Get $rev]
+    set ws [dict get $revision workspace]
+>>>>
+
+@@ entry-syntax-not-first a compilation that fails before it parses the entry (a missing `# requires:` library) reports that failure, not the entry's syntax errors the command line reports
+## service/service.tcl
+<<<<
+        if {[lrange $code 0 1] ne {SURFACE SYNTAX}} {
+====
+        if {0} {
+>>>>
+
+@@ hit-parses-entry the entry is parsed before the compilation, so an analysis the front-end cache answers parses it anyway
+## service/service.tcl
+<<<<
+    set text [surface::source::text $path]
+    try {
+====
+    set text [surface::source::text $path]
+    surface::modules::Parse $path $text
+    try {
+>>>>
+
+@@ check-ignores-options -check silently ignores the options that run, build or inspect, instead of refusing them
+## main.tcl
+<<<<
+        if {$arg ni {-check -warnings -target}} {
+====
+        if {0} {
+>>>>
+
+@@ check-writes -check writes the analyzed HIR beside each input (as -emit-hir-interchange would)
+## main.tcl
+<<<<
+    try {
+        set warnings [service::diagnostics $revision -severity warning]
+====
+    try {
+        if {[service::hir $revision] ne ""} {
+            hir::interchange::writeFile [file rootname $path].hirx [service::hir $revision]
+        }
+        set warnings [service::diagnostics $revision -severity warning]
+>>>>
+
+@@ check-text-mismatch -check prints a diagnostic's message without the location a run prints
+## main.tcl
+<<<<
+            puts "   error: [dict get $error text] ([dict get $error code])"
+====
+            puts "   error: [dict get $error message] ([dict get $error code])"
+>>>>
