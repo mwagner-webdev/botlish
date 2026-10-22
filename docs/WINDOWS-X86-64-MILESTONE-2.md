@@ -686,12 +686,14 @@ Windows namespaces' refusals and the `c-variadic` convention probe.
 | `audit/target-model/tools/mutate.tcl` | Linux x86-64 | 18 mutants, 18 killed |
 | `audit/c-ffi/tools/mutate.tcl` | Linux x86-64 | 71 mutants: 56 killed, 15 skipped (another host's code: Apple's and Linux AArch64's variadic placements, Mach-O, the macOS fixture), 0 survived (run in two parts: the first stopped at the 2-hour limit after 56) |
 | `audit/context-traits/tools/mutate.tcl -only 'windows-*,darwin-import-on-linux,darwin-falls-back-to-linux'` | Linux x86-64 | 15 mutants: 9 killed (the 7 front-end Windows I/O mutants and the 2 Darwin platform mutants whose text this milestone moved), 6 skipped (`%% windows-x86_64`), 0 survived |
+| `audit/context-traits/tools/mutate.tcl -only 'windows-*'` (tier item `windows-io-mutants`) | Windows x86-64 (CI) | 13 mutants, 13 killed, 0 survived (section 7.6; after the harness's line-ending fix) |
+| the same | macOS arm64 (CI) | 13 mutants: 7 killed, 6 skipped (`%% windows-x86_64`), 0 survived |
 
 The six Windows-only I/O mutants (`windows-error-code-dropped`,
 `-short-write-complete`, `-short-write-repeats-prefix`,
 `-zero-write-retried`, `-error-to-stdout`, `-raw-write-to-stderr`) are
-written for windows-io.test's execution tests; they run on Windows through
-the tier item `windows-io-mutants` (section 7.6).
+killed on Windows by windows-io.test's execution tests, through the tier
+item `windows-io-mutants` (section 7.6).
 
 ### 7.6 GC stress and the Windows-only mutants on Windows
 
@@ -737,7 +739,30 @@ on Linux reproduces the miss (a child writing `\r\n`: no failed test parsed
 with `lf`, the test parsed with `auto`); mutate.tcl's `run` now reads with
 `-translation auto`.
 
-**The Windows I/O mutants, with the fix**: RERUN_PENDING
+**The Windows I/O mutants, with the fix**: run
+[39682605613](https://github.com/mwagner-webdev/botlish/actions/runs/39682605613)
+(6114fde, the push of the fix with `[ci-full]` and `CI-Tests:
+windows-io-mutants`): **13 mutants, 13 killed, 0 survived, 0 skipped (on
+windows-x86_64)**. The seven front-end mutants die as on Linux; the six
+Windows-only ones, by the execution tests written for them:
+
+| mutant | killed by |
+|---|---|
+| `windows-error-code-dropped` | `wi-raw-results`, `wi-real-failures` |
+| `windows-short-write-complete` | `wi-borrowed-handles`, `wi-short-write-completed`, `wi-stderr-short-and-failed`, `wi-steady-completion`, `wi-write-failures` |
+| `windows-short-write-repeats-prefix` | windows-io.test does not complete (`wi-stderr-short-and-failed` FAILED, then the 30-minute timeout) |
+| `windows-zero-write-retried` | the same |
+| `windows-error-to-stdout` | `wi-routing-utf8`, `wi-stderr-short-and-failed`, `wi-text-edges` |
+| `windows-raw-write-to-stderr` | `wi-raw-results`, `wi-real-failures` |
+
+The same push's macOS run
+[39682605680](https://github.com/mwagner-webdev/botlish/actions/runs/39682605680)
+ran the item too: 13 mutants, 7 killed, 0 survived, 6 skipped (on
+macos-aarch64): the front-end ones apply on every host. That run's other
+jobs are as in section 7.4: smoke, the Linux control and acceptance shard
+1/2 green, shard 2/2 failing c-byte-borrowing.test, the file of main's
+pre-existing `bb-guard-malloc` failure. The Windows run's smoke job and
+its four acceptance shards were green on 6114fde as well.
 
 ## 8. Remaining limitations
 
@@ -778,8 +803,12 @@ Known limits:
   of either is set up), as are the generated-binding runs (the C binding
   generator's fixture has no MSVC target: `fixtureHostBinding`).
 * **Windows I/O's `%% windows-x86_64` mutants** (six of the thirteen) are
-  killed only by Windows runs (section 7.5); the tier item
-  `windows-io-mutants` runs them on a Windows runner.
+  killed only by Windows runs (sections 7.5, 7.6); the tier item
+  `windows-io-mutants` runs them on a Windows runner. Two of them
+  (`-short-write-repeats-prefix`, `-zero-write-retried`) keep
+  windows-io.test from finishing, and the file has no time bound of its
+  own, so the harness's 30-minute timeout kills them: the item takes about
+  73 minutes.
 * **The golden suites run on the Tcl backends only** on Windows, as in
   milestone 1 (their runner is a coroutine).
 * **rustc must match** the driver's own, as on every host (milestone 1).
