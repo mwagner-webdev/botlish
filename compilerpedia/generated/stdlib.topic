@@ -4417,11 +4417,10 @@ outcome, a logical copy for read) but not in convention:
   same thread (a Botlish program runs on one native thread: coroutines
   switch stacks, never threads) and with no possible suspension between
   (a yield is a statement of the coroutine's own body, never inside these
-  functions). For write, open and close nothing at all runs between the
-  call and the read; read's write exposure has its write-back value built
-  right after the call (C-POINTER-BORROWING.md: two small allocations,
-  before any Botlish code runs), which allocates and may collect but calls
-  no libSystem function that reports through errno.
+  functions). Nothing the compiler inserts runs between the call and the
+  read either: read's write-back value is fields, its MutableBytes built
+  only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md), so no
+  allocation, collection or runtime call can disturb errno there.
 
 Byte storage reaches C only through the borrowing contract
 (C-POINTER-BORROWING.md): write's buffer is `read noescape` (exposed as it
@@ -5288,6 +5287,60 @@ nothing, is never dereferenced, and has no arithmetic, ordering,
 equality or conversion to or from an Int. Calling C itself is
 `extern c fn` (concept.c-ffi), which runs only on the native backends.
 
+@topic stdlib.float64::min
+title: float64::min -- Function (nomethod) of module float64
+summary: The function (nomethod) float64::min of the standard module float64.
+index: stdlib
+symbol: float64::min
+related: stdlib.module.float64
+
+== DECLARATION
+    nomethod fn min(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::min.
+
+@topic stdlib.float64::max
+title: float64::max -- Function (nomethod) of module float64
+summary: The function (nomethod) float64::max of the standard module float64.
+index: stdlib
+symbol: float64::max
+related: stdlib.module.float64
+
+== DECLARATION
+    nomethod fn max(a: Float64, b: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::max.
+
+@topic stdlib.float64::abs
+title: float64::abs -- Function of module float64
+summary: The function float64::abs of the standard module float64.
+index: stdlib
+symbol: float64::abs
+related: stdlib.module.float64
+
+== DECLARATION
+    fn abs(x: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::abs or, as a method,
+receiver.abs(...).
+
+@topic stdlib.float64::clamp
+title: float64::clamp -- Function of module float64
+summary: The function float64::clamp of the standard module float64.
+index: stdlib
+symbol: float64::clamp
+related: stdlib.module.float64
+
+== DECLARATION
+    fn clamp(x: Float64, low: Float64, high: Float64) -> Float64:
+
+== MODULE
+lib/float64.bot: import float64, then write float64::clamp or, as a
+method, receiver.clamp(...).
+
 @topic stdlib.float64::from_decimal_rounded
 title: float64::from_decimal_rounded -- intrinsic of namespace float64
 summary: The Float64 nearest round(x, N), N the places the DecimalRounded x's type guarantees, after `import float64`: the visible decay of a guarantee; it never fails.
@@ -5401,31 +5454,60 @@ big = 1.0e20
 
 @topic stdlib.module.float64
 title: float64 -- standard namespace
-summary: The explicit conversions of Float64: from and to Int (float64::from_int, float64::truncate) and from DecimalRounded (float64::from_decimal_rounded).
+summary: Float64's explicit conversions (float64::from_int, float64::truncate, float64::from_decimal_rounded) and its bounds (float64::min, max, abs, clamp).
 index: stdlib
 symbol: float64
-keywords: float functions; float conversion; int to float; float to int; decimal to float
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
 related: concept.floats stdlib./ concept.decimal-rounded
 
+== DESCRIPTION
+The namespace's intrinsics are root natives registered under their qualified
+names -- float64::from_int, float64::truncate, float64::from_decimal_rounded
+(core/float.tcl, FLOAT64-MILESTONE-1.md) -- and this module may never define
+a member of the same name (surface/modules.tcl, DUPLICATE-NATIVE;
+STDLIB-NAMESPACES.md). Below are the comparisons every program that bounds a
+Float64 writes, added by the Icy Tower workload
+(ICY-TOWER-VERTICAL-SLICE-1.md, "Stdlib additions"):
+
+  float64::min(a, b)          the smaller of A and B (A when they are
+                               equal)
+  float64::max(a, b)          the larger of A and B (A when they are
+                               equal)
+  float64::abs(x)             X without its sign
+  float64::clamp(x, low, high) X bounded to LOW..HIGH: LOW when X is below
+                               it, else HIGH when X is above that, else X
+
+Each is a comparison and at most a negation, so none can fail: there is no
+arithmetic that could leave the finite Float64s (no NonFiniteFloat), and a
+Float64 has no NaN for a comparison to be unordered with. min and max are
+`nomethod`: their operands are symmetric, and neither is a receiver (the
+bit_and precedent, REFACTOR-WARNINGS-CLEAN.md).
+
 == SOURCE
-Compiler intrinsics only, no module file (import float64).
+lib/float64.bot (import float64).
 
 == MEMBERS
+    float64::abs                   function
+    float64::clamp                 function
     float64::from_decimal_rounded  intrinsic -- The Float64 nearest round(x...
     float64::from_int              intrinsic -- The Float64 nearest the Int...
+    float64::max                   function (nomethod)
+    float64::min                   function (nomethod)
     float64::truncate              intrinsic -- The Int part of the Float64...
 
-Each member is a topic: -help NAME (e.g. -help
-float64::from_decimal_rounded).
+Each member is a topic: -help NAME (e.g. -help float64::abs).
 
 == NOTES
-`float64` has no module file: its members are intrinsics, reached with
-`import float64`. They are the only conversions between Float64 and the
-other number types: Botlish never converts implicitly, so an expression
-mixing an Int and a Float64 is rejected until one side is converted (and
-so is one mixing a Float64 and a DecimalRounded value). There is no
+The conversions are intrinsics and the bounds (min, max, abs, clamp) the
+ordinary Botlish of lib/float64.bot, all reached with `import float64`.
+The conversions are the only ones between Float64 and the other number
+types: Botlish never converts implicitly, so an expression mixing an Int
+and a Float64 is rejected until one side is converted (and so is one
+mixing a Float64 and a DecimalRounded value). The bounds never fail: they
+compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
-result, and no bit-level access to a Float64.
+result, no math library beyond these, and no bit-level access to a
+Float64.
 
 @topic stdlib.immutable_set::contains
 title: immutable_set::contains -- intrinsic of namespace immutable_set
@@ -6969,13 +7051,66 @@ import list
 @value [3, 0, 1]
 @end
 
+@topic stdlib.list::with_length
+title: list::with_length -- intrinsic of namespace list
+summary: list::with_length[List[T]{length: N}](xs): xs itself, now known to have exactly N elements, when it has; otherwise the declared error LengthMismatch, after `import list`.
+index: stdlib
+symbol: list::with_length
+keywords: check length; validate length; exact length; assert length; fixed length; LengthMismatch
+related: stdlib.module.list concept.list-length concept.scalar-refinements stdlib.list::length stdlib.decimal_rounded::round rule.unhandled-errors
+
+== SIGNATURE
+    list::with_length(list) -> list
+
+== ERRORS
+    LengthMismatch
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace list: import list, then write list::with_length.
+Method syntax: receiver.with_length(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The explicit way to mint a List length refinement (concept.list-length)
+from a List whose length is not known statically. It compares the length
+once and returns its argument unchanged -- no copy, no new List -- with the
+type of its imprint; any other length completes with the builtin declared
+error LengthMismatch. The imprint is explicit and must be a refined List
+type (list::with_length[List[int]](xs) is a TYPE error, and without [T]
+it is IMPRINT); the argument must already be a List of the imprint's
+element type, since the check proves a length, never elements. Where a
+guard reads better, `if xs.length() == N:` refines xs in its branch
+without a call. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import list
+
+fn triple(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    list::with_length[List[int]{length: 3}](xs)
+
+fn middle(xs: List[int]) -> int:
+    t = xs.triple():
+        on LengthMismatch:
+            return -1
+    t.at(1)
+
+[middle([4, 5, 6]), middle([4, 5])]
+@value [5, -1]
+@end
+
 @topic stdlib.module.list
 title: list -- standard namespace
 summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
 index: stdlib
 symbol: list
 keywords: list functions; array functions; sequence operations
-related: concept.lists task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter
 
 == DESCRIPTION
 The namespace's intrinsics are root natives registered under their qualified
@@ -7063,12 +7198,14 @@ lib/list.bot (import list).
     list::get                      function
     list::length                   intrinsic -- The number of elements of a...
     list::none?                    function
+    list::with_length              intrinsic -- list::with_length[List[T]{l...
 
 Each member is a topic: -help NAME (e.g. -help list::NotFound).
 
 == NOTES
-Three intrinsics (list::length, list::at, list::append) and the ordinary
-Botlish functions of lib/list.bot built on them. `import list` makes both
+Four intrinsics (list::length, list::at, list::append and the length
+validator list::with_length) and the ordinary Botlish functions of
+lib/list.bot built on them. `import list` makes both
 callable, qualified (list::at(xs, 0)) or as methods (xs.at(0)). A List
 is immutable: append returns a new List and nothing changes one in place
 (a MutableVector is the growable mutable alternative).
@@ -8833,7 +8970,7 @@ summary: The structural hash of any value that has equality, an Int in 0..2^61-1
 index: stdlib
 symbol: hash
 keywords: hash code; hashing; hash table; bucket; fingerprint
-related: stdlib.module.root stdlib.== stdlib.mod concept.values
+related: stdlib.module.root stdlib.== stdlib.mod concept.values concept.hashable
 
 == SIGNATURE
     hash(any) -> int
@@ -8849,14 +8986,22 @@ hash(v) is a language primitive, exactly as general as ==: Ints, Strings,
 Bools, unit, characters, Lists, structs, enum cases, ImmutableSets and
 byte storage all hash, and two values that are == hash to the same Int.
 The result is nonnegative and below 2^61, so hash(key).mod(capacity) is a
-valid table slot.
+valid table slot. It is also the one operation of the built-in trait
+Hashable (concept.hashable): `x.hash()` on a Hashable value.
 
 The value is deterministic: the same on every backend, in every run and
 every process, with no random seed. It is not promised across compiler
 versions, and it is not cryptographic: never persist it or use it for
-security. A function, MutableArray or MutableVector has no hash (the
-EQUALITY error when the call runs), and an affine value is rejected at
-compile time (AFFINE-EQUALITY-UNSUPPORTED).
+security, and do not rely on it against keys an adversary chooses (the
+standard library's hash structures use a separate, collision-hardened hash
+for that, which no program sees).
+
+A function, MutableArray or MutableVector has no hash. Where the argument's
+type shows it is not Hashable (a function, a struct with a function field)
+the call is rejected at compile time (TRAIT-NOT-SATISFIED); an argument of
+unknown type (an untyped parameter) is checked when the call runs (the
+EQUALITY error); an affine value is rejected at compile time
+(AFFINE-EQUALITY-UNSUPPORTED). The hash of a Hashable value never fails.
 
 == EXAMPLES
 @example accept
@@ -11047,13 +11192,13 @@ the error a WriteResult then carries.
 Windows reports a failure as its API does: the call returns FALSE and the
 reason is the thread's last-error code (GetLastError), which a later call
 may change. write_file reads it right after WriteFile returns, before any
-other Win32 call: what runs between the two is the write-back value of the
-byte count's exposure (C-POINTER-BORROWING.md: two small allocations, which
-may collect), and the allocator and the collector make no Win32 call that
-sets the last-error code. A result never encodes the code in its count: it
-holds WriteFile's own success, the count it reported, and, separately, the
-code a failed call left (`last_error`) (0 when it succeeded: the code is
-never read after a success, where it means nothing).
+other call: nothing runs between the two but the test of WriteFile's BOOL,
+and the byte count's write-back value is built only after it
+(C-FFI-ERROR-CAPTURE-MILESTONE-1.md); neither the allocator nor the
+collector makes a Win32 call that sets the code. A result never encodes the
+code in its count: it holds WriteFile's own success, the count it reported,
+and, separately, the code a failed call left (`last_error`) (0 when it
+succeeded: the code is never read after a success, where it means nothing).
 
 Byte storage reaches C only through the borrowing contract
 (C-POINTER-BORROWING.md): the buffer is `read noescape` (exposed as it is,

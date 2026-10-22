@@ -165,7 +165,7 @@ test float-value-kind {a Float64 is a kind of its own: never an Int, never equal
     set a [core::value::float Float64 1.0]
     set b [core::value::int 1]
     list [core::value::kind $a] [core::value::equal $a $b] [core::value::equal $a [core::value::float Float64 1.0]] \
-        [expr {[core::hashing::Mix $core::hashing::FnvOffset $a] == [core::hashing::Mix $core::hashing::FnvOffset $b]}]
+        [expr {[core::hashing::Fold public $a] == [core::hashing::Fold public $b]}]
 } -result {Float64 0 1 0}
 
 test float-negative-zero {there is one zero: negative zero is made zero by the value constructor, by every operation and by the native runtime} -body {
@@ -237,10 +237,10 @@ test float-aggregates {Float64 values in Lists, structs, enums' neighbours and M
         "\[p == q, p.x, list::length(xs), hash(p) == hash(q), hash(1.5) == hash(1.5), hash(1.5) == hash(2.5), v.length(), xs == \[1.0, 2.0, 3.0\]\]\n"]
 } -result {[true, 1.5, 3, true, true, false, 3, true]}
 
-test float-list-inference {a List literal of Float64 values is a List[Float64], and an element read recovers Float64} -body {
+test float-list-inference {a List literal of Float64 values is a List[Float64] (of its length, LIST-CARDINALITY-REFINEMENTS.md), and an element read recovers Float64} -body {
     set hir [floatHir "import list\nxs = \[1.0, 2.5\]\nx = list::at(xs, 0):\n    on IndexNotFound:\n        0.0\nx\n"]
     join [lmap name {xs x} {hir::types::show [hir::bindingType $hir [hir::lookup $hir [hir::top $hir] $name]]}]
-} -result {List[Float64] Float64}
+} -result {List[Float64]{length: 2} Float64}
 
 # ---------------------------------------------------------------------------
 # Operator resolution (hir/operators.tcl)

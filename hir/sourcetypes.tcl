@@ -345,7 +345,11 @@ proc hir::sourcetypes::TypeExprNames {typeExpr} {
         return [TypeExprNames [lindex $typeExpr 2]]
     }
     if {[hir::refinements::IsRefinementExpr $typeExpr]} {
-        # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): its name.
+        # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): its name --
+        # of an applied type, its base's names.
+        if {[llength $typeExpr] == 4} {
+            return [TypeExprNames [lindex $typeExpr 3]]
+        }
         return [list [lindex $typeExpr 1]]
     }
     lassign $typeExpr head arg
@@ -381,7 +385,8 @@ proc hir::sourcetypes::CheckDeclaredName {decl} {
         return
     }
     if {$name in {Int any never Fn} || [core::type::isBuiltinName $name]
-            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
+            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]
+            || [hir::traits::isIntrinsicName $name]} {
         Fail [dict get $decl nameSpan] \
             "type \"$name\" cannot be declared: the name is already a built-in type"
     }
@@ -486,6 +491,7 @@ proc hir::sourcetypes::RefinementCarrierEligible {type} {
 # "" if every value of static type TYPE is transitively immutable (no
 # operation can change it after it exists), else why not, as a clause.
 proc hir::sourcetypes::ValueStability {type {visiting {}}} {
+    set type [hir::types::Unrefined $type]
     if {$type eq "any"} {
         return "may be any value, including a mutable one"
     }
@@ -546,6 +552,10 @@ proc hir::sourcetypes::RegisterOne {decl parentId} {
     if {$name eq "Int" && $cabi eq ""} {
         Fail [dict get $decl nameSpan] \
             "\"Int\" is the compiler's own built-in integer type and cannot be redeclared"
+    }
+    if {$cabi eq "" && [hir::traits::isIntrinsicName $name]} {
+        Fail [dict get $decl nameSpan] \
+            "type \"$name\" cannot be declared: the name is the built-in trait $name"
     }
     if {$cabi eq "" && [dict get $decl namespace] ne "" && ([core::type::isBuiltinName $name]
             || [dict exists $::hir::types::constructors $name] || $name in {any never Fn})} {

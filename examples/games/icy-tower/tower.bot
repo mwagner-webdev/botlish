@@ -1,0 +1,413 @@
+# tower.bot -- the rules of the Icy Tower vertical slice
+# (ICY-TOWER-VERTICAL-SLICE-1.md): one player bouncing up a tower of
+# platforms, a camera that follows it and then rises on its own, a score,
+# game over and restart. Pure: no SDL, no clock and no input device. A
+# frame is `step(world, input, dt)`, so everything here runs, and is
+# tested, on every backend.
+#
+# World coordinates are the view's logical units (the view is 480 x 720)
+# with x to the right and y UP: y is altitude. A platform's y is its top
+# surface, the player's x its left edge and its y its feet, the camera's
+# `bottom` the altitude at the view's bottom edge. Turning altitude into
+# screen rows is the renderer's business (render.bot).
+#
+# The player never stands: landing on a platform while falling bounces it
+# straight back up, higher the faster it runs (Icy Tower's run-up). The
+# walls on either side send it back at a fraction of its speed. Nothing is
+# random except the platforms, which a 32-bit linear congruential
+# generator places from the world's seed: a seed is a tower.
+import decimal_rounded
+import float64
+import list
+
+# ---------------------------------------------------------------------------
+# The constants (units: view units, seconds)
+
+view_width = 480.0
+view_height = 720.0
+
+# The walls' thickness: the player and the platforms stay between them.
+wall = 20.0
+inner_width = view_width - 2.0 * wall
+
+player_width = 26.0
+player_height = 34.0
+
+# The player's x between the walls.
+leftmost = wall
+rightmost = view_width - wall - player_width
+
+# The top of floor 0, the ground platform the game starts on.
+ground = 40.0
+
+gravity = 2100.0
+run_accel = 2400.0
+friction = 1800.0
+max_run = 420.0
+wall_rebound = 0.6
+
+# A bounce's upward speed: jump_speed standing still, jump_speed plus
+# jump_bonus at full run. jump_speed alone reaches 860^2 / (2 * 2100), 176
+# units: every gap the generator makes (at most 150) is climbable without a
+# run-up.
+jump_speed = 860.0
+jump_bonus = 440.0
+
+# The longest step a frame takes: a stalled frame (a breakpoint, a dragged
+# window) never moves anything further than this one would.
+max_dt = 0.05
+
+# The camera follows once the player's feet are this fraction of the view
+# above its bottom edge.
+follow_line = 0.55
+
+# Game over: the player's head this far below the view's bottom edge.
+lose_margin = 60.0
+
+# Platforms this far below the view's bottom edge are dropped; new ones are
+# made up to this far above its top edge.
+keep_below = 120.0
+build_above = 200.0
+
+# A view unit is a centimetre: heights are shown in metres.
+units_per_metre = 100.0
+
+# ---------------------------------------------------------------------------
+# The state
+
+struct Player:
+    x: Float64
+    y: Float64
+    vx: Float64
+    vy: Float64
+
+struct Platform:
+    x: Float64
+    y: Float64
+    width: Float64
+    floor: int
+
+# The altitude at the view's bottom edge, and whether the tower has started
+# rising on its own.
+struct Camera:
+    bottom: Float64
+    rising: bool
+
+# What the player asks for in one frame.
+struct Input:
+    left: bool
+    right: bool
+    restart: bool
+
+# One game: the player, the platforms in ascending order, the camera, the
+# generator's state, the highest floor landed on, the best height reached
+# (in metres, as the player is shown it), the time played, whether it is
+# over, and which round of the session it is.
+struct World:
+    player: Player
+    platforms: List[Platform]
+    camera: Camera
+    rng: int
+    floor: int
+    best: DecimalRounded{minDecimalsPreserved: 1}
+    time: Float64
+    over: bool
+    round: int
+
+# The platform below everything: what a search that finds none returns. (A
+# function: a module value cannot be a struct. Called only where a search
+# found nothing, never as `get`'s default, which is built on every call:
+# an index that is in range is read with `at`, the impossible miss
+# handled.)
+fn nowhere() -> Platform:
+    Platform {x: 0.0, y: -1000000.0, width: 0.0, floor: -1}
+
+# ---------------------------------------------------------------------------
+# Heights a player is shown: DecimalRounded, one decimal place.
+
+# The best height of a new game.
+fn no_height() -> DecimalRounded{minDecimalsPreserved: 1}:
+    0.0
+
+# The best height at which the tower starts rising by itself. A rule stated
+# in the metres the player reads: it holds when the displayed best height
+# reaches 6.0, whatever binary64 the feet's altitude had.
+fn rise_height() -> DecimalRounded{minDecimalsPreserved: 1}:
+    6.0
+
+# The height of altitude Y above the ground, in metres, at one place.
+fn metres(y: Float64) -> DecimalRounded{minDecimalsPreserved: 1} errors NonFiniteFloat, UnrepresentableDecimal:
+    decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 1}]((y - ground) / units_per_metre)
+
+# BEST, or the player's height when it shows more: a record is only ever a
+# number the player has seen.
+fn best_after(best: DecimalRounded{minDecimalsPreserved: 1}, player: Player) -> DecimalRounded{minDecimalsPreserved: 1} errors NonFiniteFloat:
+    now = metres(player.y):
+        on UnrepresentableDecimal:
+            best
+    if now > best:
+        now
+    else:
+        best
+
+# ---------------------------------------------------------------------------
+# The generator
+
+# The next state of the 32-bit linear congruential generator (Numerical
+# Recipes' constants).
+fn next_random(state: int) -> int:
+    (state * 1664525 + 1013904223).mod(4294967296)
+
+# A number in [0, 1) from STATE's high 16 bits (the low bits of an LCG are
+# poor).
+fn fraction(state: int) -> Float64 errors NonFiniteFloat:
+    float64::from_int(state.shift_right(16)) / 65536.0
+
+# Every 25th floor spans the tower, as Icy Tower's numbered floors do.
+fn milestone?(floor: int) -> bool:
+    floor.mod(25) == 0
+
+# A platform and the generator's state after placing it.
+struct Placed:
+    platform: Platform
+    rng: int
+
+# The platform of the floor above BELOW, placed by the generator at RNG:
+# the higher the floor, the larger the gaps and the narrower the platforms.
+fn placed(below: Platform, rng: int) -> Placed errors NonFiniteFloat:
+    floor = below.floor + 1
+    capped = if floor < 200:
+        floor
+    else:
+        200
+    level = float64::from_int(capped)
+    r1 = next_random(rng)
+    r2 = next_random(r1)
+    r3 = next_random(r2)
+    gap = 72.0 + level * 0.14 + fraction(r1) * (44.0 + level * 0.03)
+    if milestone?(floor):
+        return Placed {platform: Platform {x: wall, y: below.y + gap, width: inner_width, floor: floor}, rng: r3}
+    widest = float64::max(200.0 - level * 0.6, 80.0)
+    width = widest * (0.6 + 0.4 * fraction(r2))
+    x = wall + fraction(r3) * (inner_width - width)
+    Placed {platform: Platform {x: x, y: below.y + gap, width: width, floor: floor}, rng: r3}
+
+# Platforms and the generator's state.
+struct Tower:
+    platforms: List[Platform]
+    rng: int
+
+# PLATFORMS with new ones placed above the highest, until one is above
+# LIMIT.
+fn grown(platforms: List[Platform], rng: int, limit: Float64) -> Tower errors NonFiniteFloat:
+    top = platforms.at(list::length(platforms) - 1):
+        on IndexNotFound:
+            nowhere()
+    if top.y > limit:
+        return Tower {platforms: platforms, rng: rng}
+    next = top.placed(rng)
+    platforms.append(next.platform).grown(next.rng, limit)
+
+# The platforms of PLATFORMS still worth keeping below BOTTOM, the view's
+# bottom edge: those at most keep_below under it, and always the highest,
+# from which the next one is placed. The list itself unless its lowest
+# platform is to be dropped, so it is rebuilt only when a platform leaves,
+# not every frame.
+fn pruned(platforms: List[Platform], bottom: Float64) -> List[Platform] errors NonFiniteFloat:
+    limit = bottom - keep_below
+    lowest = platforms.at(0):
+        on IndexNotFound:
+            return []
+    if lowest.y >= limit:
+        return platforms
+    last = list::length(platforms) - 1
+    loop p in platforms and i from 0 to list::length(platforms):
+        if p.y < limit and i < last:
+            continue
+        p
+
+# ---------------------------------------------------------------------------
+# Motion
+
+# Horizontal velocity VX after DT seconds of INPUT: accelerating toward the
+# one direction held, up to max_run; slowing to a stop by friction when
+# neither or both are held.
+fn run_velocity(vx: Float64, input: Input, dt: Float64) -> Float64 errors NonFiniteFloat:
+    if input.left and not input.right:
+        float64::max(vx - run_accel * dt, -max_run)
+    elif input.right and not input.left:
+        float64::min(vx + run_accel * dt, max_run)
+    elif vx > 0.0:
+        float64::max(vx - friction * dt, 0.0)
+    else:
+        float64::min(vx + friction * dt, 0.0)
+
+# PLAYER after DT seconds of INPUT and gravity, before any landing: the
+# velocities first, then the position from them (semi-implicit Euler); a
+# wall stops it and sends it back at wall_rebound of its speed.
+fn moved(player: Player, input: Input, dt: Float64) -> Player errors NonFiniteFloat:
+    vx = player.vx.run_velocity(input, dt)
+    vy = player.vy - gravity * dt
+    x = player.x + vx * dt
+    y = player.y + vy * dt
+    if x < leftmost:
+        Player {x: leftmost, y: y, vx: -vx * wall_rebound, vy: vy}
+    elif x > rightmost:
+        Player {x: rightmost, y: y, vx: -vx * wall_rebound, vy: vy}
+    else:
+        Player {x: x, y: y, vx: vx, vy: vy}
+
+# Whether the player, moving from BEFORE to AFTER, lands on P: it is
+# falling, its feet were at or above P's top and are now at or below it,
+# and it overlaps P horizontally. Crossing the top is what counts, so no
+# speed and no frame length can carry the feet through a platform, and a
+# player rising through one from below never lands on it.
+fn lands_on?(p: Platform, before: Player, after: Player) -> bool errors NonFiniteFloat:
+    after.vy < 0.0 and before.y >= p.y and after.y <= p.y and after.x + player_width > p.x and after.x < p.x + p.width
+
+# The platform the player lands on moving from BEFORE to AFTER, if any:
+# the highest one it crossed.
+struct Landing:
+    landed: bool
+    platform: Platform
+
+fn landing(platforms: List[Platform], before: Player, after: Player) -> Landing errors NonFiniteFloat:
+    n = list::length(platforms)
+    loop i from 0 to n:
+        p = platforms.at(n - 1 - i):
+            on IndexNotFound:
+                break
+        if p.lands_on?(before, after):
+            return Landing {landed: true, platform: p}
+    Landing {landed: false, platform: nowhere()}
+
+# AFTER, standing on P's top and bouncing off it: straight up, faster the
+# faster it runs.
+fn bounced(after: Player, p: Platform) -> Player errors NonFiniteFloat:
+    speed = jump_speed + jump_bonus * float64::abs(after.vx) / max_run
+    Player {x: after.x, y: p.y, vx: after.vx, vy: speed}
+
+# ---------------------------------------------------------------------------
+# The camera
+
+# How fast the tower rises by itself at FLOOR, in units per second.
+fn rise_speed(floor: int) -> Float64 errors NonFiniteFloat:
+    float64::min(30.0 + float64::from_int(floor) * 0.9, 170.0)
+
+# CAMERA after DT seconds: it rises at the tower's speed once BEST has
+# reached rise_height, and moves up at once to keep the player's feet no
+# higher than follow_line of the view. It never moves down.
+fn camera_after(camera: Camera, player: Player, best: DecimalRounded{minDecimalsPreserved: 1}, floor: int, dt: Float64) -> Camera errors NonFiniteFloat:
+    rising = camera.rising or best >= rise_height()
+    risen = if rising:
+        camera.bottom + rise_speed(floor) * dt
+    else:
+        camera.bottom
+    followed = player.y - view_height * follow_line
+    Camera {bottom: float64::max(risen, followed), rising: rising}
+
+# ---------------------------------------------------------------------------
+# Games
+
+# A new game on the tower of SEED, the session's ROUND-th. (nomethod: a
+# seed is not a receiver.)
+nomethod fn new_world(seed: int, round: int) -> World errors NonFiniteFloat:
+    floor0 = Platform {x: wall, y: ground, width: inner_width, floor: 0}
+    tower = [floor0].grown(seed.mod(4294967296), view_height + build_above)
+    player = Player {x: (view_width - player_width) / 2.0, y: ground, vx: 0.0, vy: 0.0}
+    World {
+        player: player,
+        platforms: tower.platforms,
+        camera: Camera {bottom: 0.0, rising: false},
+        rng: tower.rng,
+        floor: 0,
+        best: no_height(),
+        time: 0.0,
+        over: false,
+        round: round,
+    }
+
+# The score: ten points a floor.
+fn score(world: World) -> int:
+    world.floor * 10
+
+# WORLD after one frame of INPUT that lasted DT seconds (at most max_dt of
+# it counts). A game that is over stays as it is until INPUT asks for a
+# restart, which starts a new game on the next tower of the same
+# generator.
+fn step(world: World, input: Input, dt: Float64) -> World errors NonFiniteFloat:
+    if world.over:
+        if input.restart:
+            return new_world(world.rng, world.round + 1)
+        return world
+    h = dt.clamp(0.0, max_dt)
+    before = world.player
+    after = before.moved(input, h)
+    land = world.platforms.landing(before, after)
+    player = if land.landed:
+        after.bounced(land.platform)
+    else:
+        after
+    floor = if land.landed and land.platform.floor > world.floor:
+        land.platform.floor
+    else:
+        world.floor
+    best = world.best.best_after(player)
+    camera = world.camera.camera_after(player, best, floor, h)
+    tower = world.platforms.pruned(camera.bottom).grown(world.rng, camera.bottom + view_height + build_above)
+    World {
+        player: player,
+        platforms: tower.platforms,
+        camera: camera,
+        rng: tower.rng,
+        floor: floor,
+        best: best,
+        time: world.time + h,
+        over: player.y + player_height < camera.bottom - lose_margin,
+        round: world.round,
+    }
+
+# ---------------------------------------------------------------------------
+# A deterministic player (headless runs, smoke tests)
+
+# The highest platform at or below altitude Y, else nowhere().
+fn below(platforms: List[Platform], y: Float64) -> Platform:
+    n = list::length(platforms)
+    loop i from 0 to n:
+        p = platforms.at(n - 1 - i):
+            on IndexNotFound:
+                break
+        if p.y <= y:
+            return p
+    nowhere()
+
+# The lowest platform above altitude Y, else nowhere().
+fn above(platforms: List[Platform], y: Float64) -> Platform:
+    loop p in platforms:
+        if p.y > y:
+            return p
+    nowhere()
+
+# What the autopilot does in WORLD: restart a game that is over; else run
+# toward the middle of the platform it is falling onto, or, rising, of the
+# next platform above its feet.
+fn autopilot(world: World) -> Input errors NonFiniteFloat:
+    if world.over:
+        return Input {left: false, right: false, restart: true}
+    player = world.player
+    target = if player.vy < 0.0:
+        world.platforms.below(player.y)
+    else:
+        world.platforms.above(player.y)
+    centre = player.x + player_width / 2.0
+    aim = target.x + target.width / 2.0
+    Input {left: centre > aim + 6.0, right: centre < aim - 6.0, restart: false}
+
+# The fixed frame of the deterministic runs: a 60 Hz display.
+frame_time = 1.0 / 60.0
+
+# WORLD after FRAMES fixed frames of the autopilot.
+fn simulate(world: World, frames: int) -> World errors NonFiniteFloat:
+    if frames <= 0:
+        return world
+    world.step(autopilot(world), frame_time).simulate(frames - 1)

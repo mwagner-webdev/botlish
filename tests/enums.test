@@ -339,7 +339,7 @@ test enum-rename-case {renaming a case is an API rename: a reference to the old 
 
 test enum-case-type {a case expression has exactly its declaring enum's type: no per-case subtype} -body {
     enumTypes "${vehicle}a = VehicleType::Car\nb = a\nc = VehicleType::Boat\nd = \[a, c\]\n"
-} -result {a:VehicleType | b:VehicleType | c:VehicleType | d:List[VehicleType]}
+} -result {a:VehicleType | b:VehicleType | c:VehicleType | d:List[VehicleType]{length: 2}}
 
 test enum-type-algebra {nominal: a type is a subtype only of itself (and any); two enums join to any, never to an anonymous union} -body {
     surface::compile "enum A:\n    X,\nenum B:\n    X,\n1\n" enum.bot

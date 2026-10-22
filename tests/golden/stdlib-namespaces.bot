@@ -294,7 +294,7 @@ fn register_qualified_intrinsic_tests():
     fn b_unknown_list_member() errors compiler::CompilerError:
         static compile:
             list::nope([1])
-    test::rejects_message("ns-unknown-member-lists-intrinsics-too", compiler::DiagnosticCode::UnknownSymbol, "namespace \"list\" has no definition \"nope\" (it defines: all?, any?, append, at, find, get, length, none?)", b_unknown_list_member)
+    test::rejects_message("ns-unknown-member-lists-intrinsics-too", compiler::DiagnosticCode::UnknownSymbol, "namespace \"list\" has no definition \"nope\" (it defines: all?, any?, append, at, find, get, length, none?, with_length)", b_unknown_list_member)
 
 # ---------------------------------------------------------------------------
 # at and set: required indexed access, IndexNotFound otherwise. The indices

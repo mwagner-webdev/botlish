@@ -304,6 +304,15 @@ MutableBytes wrapper flattened as a nested field), so that `read`'s
 comparison and `errno()` follow the call with nothing between. Section 28
 records it; this milestone does not change the borrowing lowering.
 
+> **Follow-up.** C-FFI-ERROR-CAPTURE-MILESTONE-1.md made that change: the
+> write-back value is fields, its MutableBytes built only where a use reads
+> it whole (after `errno()` here), and the keepalive is no machine code. read
+> is now `foreigncall`, `keepalive`, `ilt`, `call errno` like write
+> (`di-errno-read-first`), its machine code calls nothing in between on the
+> -1 path, and an allocator that changes errno on every allocation no longer
+> changes what read reports (`di-errno-allocator`). The table and the
+> paragraphs above record this milestone as it was.
+
 **Threads and coroutines.** A Botlish program runs on one native thread;
 coroutines switch stacks, never threads (COROUTINES.md), so the errno a
 wrapper reads is its own thread's. A `yield` is a statement of a coroutine's
@@ -583,6 +592,20 @@ also under GC stress. Contexts stay static across suspension: the
 coroutines' DarwinIO is the one selected at their construction, and no
 context machinery is added to either runtime (COROUTINES.md).
 
+Whole files under GC stress on macOS: Tier C of macOS run
+[39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611)
+(at b08ac4c, before the last test fixes) ran fourteen files with
+`BOTLISH_NATIVE_GC_STRESS=1` for the whole process, on interp and compile --
+darwin-io, c-byte-borrowing, c-pointer-borrowing, workload-2048,
+context-traits, portable-io, target-model, c-ffi, native-view, native-edit,
+layout-arrays, layout-unions, binary-layout and abi-mutable-bytes -- and the
+borrowing fuzzer's seeds 1, 2 and 9 (no disagreement). Each pass: 626
+tests, 584 passed, 40 skipped (2 boringssl, 16 linuxX86_64, 21 nativeLinux,
+1 tclLibrary) and 2 failed, both test defects fixed since and neither a
+matter of the collector: bb-guard-malloc's control
+(MACOS-AARCH64-MILESTONE-7.md, section 8) and di-stderr-failure, which
+compared the streams' undecoded bytes with text (7bdd5e2).
+
 ## 19. Native linked runs
 
 A program that calls C is never JIT-run: the native backends link it as an
@@ -654,7 +677,17 @@ select their own context through the same `demo_play` functions;
 `workload-2048-demo-darwin-executable` (macOS) runs the macOS demo as a
 standalone executable and requires the Linux demo's exact output.
 
-PENDING-2048
+On macOS arm64, workload-2048.test ran and passed (main's run
+[39603310734](https://github.com/mwagner-webdev/botlish/actions/runs/39603310734),
+acceptance shard 2/2, and the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215)):
+`workload-2048-demo-darwin-executable` -- demo-darwin.bot as a standalone
+Mach-O executable printing the whole game through libSystem, byte for byte
+the Linux demo's output, the same under GC stress --,
+`workload-2048-demo-two-platforms` and `workload-2048-bench-executable`
+among them. The two Linux-only tests (`workload-2048-demo-executable`,
+`workload-2048-demo-main-native`: `nativeLinux`) are skipped there, as
+before.
 
 ## 23. Mutation results
 
@@ -696,7 +729,41 @@ Two were first marked macOS-only (`darwin-errno-after-another-call`,
 calls and to read `open_mode` too made the NIR see both on any host, and
 they lost their marks.
 
-PENDING-MUTANTS-MACOS
+**On macOS arm64** (the tier item `darwin-io-mutants`, the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215),
+Tier C shard 1/3: `audit/context-traits/tools/mutate.tcl -only darwin-*`,
+646 s): **19 mutants, 19 killed, 0 survived, 0 skipped**. Every Darwin
+mutant, the nine Linux cannot run among them, is killed by darwin-io.test
+(the context-trait fuzzer, which knows nothing of Darwin, survives every
+one, as expected):
+
+| mutant | killed by (failed tests) |
+|---|---|
+| `darwin-import-on-linux` | 2: di-platform-no-way-around, di-platform-rule |
+| `darwin-falls-back-to-linux` | 13: di-authority, di-c-declarations, di-c-string, di-errno-read-first, di-implements, di-path-validity, ... |
+| `darwin-write-unsigned-result` | 5: di-c-declarations, di-errno, di-errno-read-first, di-stderr-failure, di-write-failures |
+| `darwin-write-borrow-writable` | 26 |
+| `darwin-read-borrow-readable` | 26 |
+| `darwin-write-count-mismatch` | 6: di-errno, di-files, di-short-write-completed, di-stderr-failure, di-stdin, di-write-failures |
+| `darwin-read-returns-original` | 2: di-files, di-stdin |
+| `darwin-errno-on-success` | 1: di-errno |
+| `darwin-errno-after-another-call` | 3: di-errno, di-errno-read-first, di-file-errors |
+| `darwin-errno-constant` | 3: di-errno, di-errno-read-first, di-file-errors |
+| `darwin-linux-error-convention` | 1: di-errno |
+| `darwin-open-mode-omitted` | 3: di-c-declarations, di-errno-read-first, di-files |
+| `darwin-path-not-terminated` | 1: di-c-string |
+| `darwin-short-write-complete` | 3: di-short-write-completed, di-stderr-failure, di-write-failures |
+| `darwin-short-write-repeats-prefix` | 3: di-short-write-completed, di-stderr-failure, di-write-failures |
+| `darwin-zero-write-retried` | 1: di-write-failures |
+| `darwin-stdout-is-stdin` | 10: di-coroutines-gc-stress, di-deep-and-modules, di-hello-executable, di-native-backends, di-routing-utf8, di-short-write-completed, ... |
+| `darwin-stderr-is-stdout` | 6: di-coroutines-gc-stress, di-deep-and-modules, di-routing-utf8, di-stderr-failure, di-stdin, di-text-edges |
+| `darwin-io-direct` | 16: di-authority, di-coroutines-gc-stress, di-deep-and-modules, di-hello-executable, di-native-backends, di-platform-no-way-around, ... |
+
+Four mutants are killed by one test only (`darwin-errno-on-success`,
+`darwin-linux-error-convention`, `darwin-path-not-terminated`,
+`darwin-zero-write-retried`): each is the one behavior that test pins
+(di-errno's successes reporting 0 and its -1 results, di-c-string's
+terminator, di-write-failures' no-progress write).
 
 ## 24. Performance
 
@@ -753,26 +820,148 @@ What the numbers separate:
 nothing, because a constant text's encoding is folded into a static
 storage at compile time, and was removed.)
 
-PENDING-BENCH-MACOS
+**macOS arm64** (the darwin module through libSystem; a GitHub `macos-15`
+runner, the tier item `darwin-io-bench` of macOS run
+[39624150692](https://github.com/mwagner-webdev/botlish/actions/runs/39624150692),
+all three parts in that one run; best of 5 runs of 100 000 iterations; ns
+per iteration):
+
+| row | loop | + call | call |
+|---|---:|---:|---:|
+| write 14 B | 21.2 | 496.7 | 475.5 |
+| write 64 KiB | 40.7 | 535.4 | 494.7 |
+| write EBADF | 27.2 | 268.6 | 241.4 |
+| read 64 | 21.7 | 905.0 | 883.2 |
+| read 4096 | 22.3 | 879.0 | 856.6 |
+| read 65536 | 41.9 | 6849.4 | 6807.5 |
+| read EBADF 64 | 20.4 | 438.0 | 417.5 |
+| read EBADF 4096 | 22.8 | 596.7 | 573.9 |
+| read EBADF 65536 | 40.9 | 4469.2 | 4428.3 |
+| errno() | 22.2 | 40.6 | 18.3 |
+| print 14 B | 21.8 | 675.8 | 654.0 |
+| print 4 KiB | 22.4 | 5611.8 | 5589.3 |
+| print_line 13 B | 21.7 | 707.4 | 685.8 |
+
+Partial-write completion (part 2: print 4 KiB, every write on descriptor 1
+capped at L bytes by the interposer; ns per print):
+
+| cap | loop | + call | call |
+|---|---:|---:|---:|
+| no cap (1 write) | 19.7 | 5782.8 | 5763.1 |
+| L 2048 (2 writes) | 19.9 | 65194.7 | 65174.8 |
+| L 1024 (4 writes) | 20.6 | 200066.6 | 200046.0 |
+| L 512 (8 writes) | 23.5 | 454076.6 | 454053.1 |
+
+Build and process (part 3): front end 335 ms, `native::executable` 488 ms
+(the Mach-O link through Apple's ld); a process of hello-darwin 2.47 ms
+against 2.60 ms for an executable that does no IO.
+
+What the macOS numbers say, beside Linux's (each on its own host, so the
+two only bound each other's overheads):
+
+* **The write exposure copies nothing there either**: 64 KiB costs 495 ns
+  against 476 ns for 14 bytes.
+* **errno() is 18 ns**: one C call of `__error` and one load through the
+  native view, against 241 ns for a write's whole failure path.
+* **The read detach is the same value semantics**: read EBADF grows from
+  418 ns to 4.4 us with the buffer (the private copy), and a successful
+  read of 64 KiB from /dev/zero adds the kernel's fill (6.8 us). (Read 64
+  above read 4096 is the method's noise.)
+* **The portable text path costs about 180 ns over the raw write** for a
+  short line (print 14 B against write 14 B) and about 1.2 ns per byte for
+  4 KiB (write_text's encoding and write_all's Bytes, as on Linux);
+  print_line's newline adds about 30 ns.
+* **A short write is expensive to complete: about 30 ns per byte it
+  re-copies** (59 us for one completion of 2048 bytes; 194 us for 6144 bytes
+  over three; 448 us for 14 336 over seven), against 1.2 ns per byte for the
+  first write's whole path. Each completion copies the unwritten suffix into
+  a new List element by element (`loop i from written to n: bytes.at(i)`)
+  and makes a Bytes of it, so a text of n bytes written in K short pieces
+  re-copies (K - 1) n / 2 bytes (2048, 6144 and 14 336 here): linear in the
+  pieces, quadratic in the text at a fixed cap. The element loop is where
+  the difference to the first write's path must lie. The interposer itself
+  costs little (no cap: 5763 ns against print 4 KiB's 5589). The
+  code is LinuxIO's line for line: this is the portable completion policy's
+  cost, not Darwin's, and it only matters where writes come back short
+  (pipes, sockets), rarely for a terminal or a regular file. Writing the
+  suffix in place would need an offset exposure of byte storage, which byte
+  borrowing does not have (section 28).
+* A libSystem write of 14 bytes to /dev/null (476 ns) costs more than the
+  Linux transport's raw syscall (200 ns), on different machines. Botlish's
+  own part of it is the read exposure (no copy), an ordinary C call (about
+  free next to the loop on macOS: MACOS-AARCH64-MILESTONE-6.md, section 26)
+  and the result; the rest is libSystem's write and the kernel's.
+* **Process startup dwarfs the IO**: one print_line is within the noise of
+  a 2.5 ms process (hello was even the faster of the two here).
 
 ## 25. macOS GitHub Actions runs
 
-PENDING-RUNS
+Every macOS fact in this report is from these runs of
+`.github/workflows/macos-arm64.yml` on GitHub's `macos-15` arm64 runners
+(the shared development Mac was not used). A run on the branch was
+cancelled whenever a later push to the branch superseded it; its finished
+jobs' results stand.
+
+| run | commit | what it ran | result |
+|---|---|---|---|
+| [39574475382](https://github.com/mwagner-webdev/botlish/actions/runs/39574475382) | 6828d12 | the census baseline, before milestone 7 | the census of section 1 (MACOS-AARCH64-MILESTONE-7.md) |
+| [39577805370](https://github.com/mwagner-webdev/botlish/actions/runs/39577805370) | 3587425 | milestone 7; Tier C under GC stress | smoke passed; acceptance 2/2 failed on c-byte-borrowing.test alone (bb-guard-malloc's banner defect); cancelled by the next push |
+| [39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611) | b08ac4c | milestones 7 and 8; Tier C: fourteen files and the borrowing fuzzer under GC stress | smoke passed; Tier C: two test defects, bb-guard-malloc and di-stderr-failure, everything else passed under stress; cancelled by the next push |
+| [39593142355](https://github.com/mwagner-webdev/botlish/actions/runs/39593142355) | 7bdd5e2 | the fixes of those defects | smoke and acceptance 1/2 passed (darwin-io.test 27 of 27); cancelled at 12:54 by the branch push of the merge |
+| [39603310734](https://github.com/mwagner-webdev/botlish/actions/runs/39603310734) | d598dba (main) | the milestones merged into main | smoke and acceptance 1/2 passed, acceptance 2/2 failed on bb-guard-malloc alone (its 4080-byte control); workload-2048.test, context-traits.test passed |
+| [39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215) | d598dba (dispatch) | Tier C: the mutants, the benchmarks, the fuzzers | 19 of 19 Darwin IO and 8 of 8 borrowing mutants killed; both fuzzers no disagreement; c-borrow-bench; darwin-io-bench's part 2 failed (the bench's `env` clash); acceptance as on main |
+| [39616115189](https://github.com/mwagner-webdev/botlish/actions/runs/39616115189) | 905cb6e (branch only) | the Guard Malloc diagnostic | its facts (MACOS-AARCH64-MILESTONE-7.md, section 8); the bench failed again (the interposer reached the linker); cancelled once Tier C had run |
+| [39624150692](https://github.com/mwagner-webdev/botlish/actions/runs/39624150692) | b5d07f5 | the reworked bb-guard-malloc, the bench's fix | **every job passed**: smoke, both acceptance shards, and Tier C (c-byte-borrowing.test 20 of 20 on interp and compile, darwin-io-bench all three parts) |
 
 ## 26. Linux x86-64 regression
 
-PENDING-LINUX
+`audit/context-traits/tools/fuzz.tcl` (generated context-trait programs
+against its own oracle; DarwinIO's satisfaction is the same structural rule
+the generated contexts exercise), three disjoint seed ranges of 20 programs
+on this milestone's tree:
+
+| seeds | accepted (selections) | rejected | disagreements |
+|---|---|---|---:|
+| 100-119 | 7 (15) | 13 (MISSING-CONTEXT 11, AMBIGUOUS-CONTEXT-IMPLEMENTATION 2) | 0 |
+| 200-219 | 9 (12) | 11 (MISSING-CONTEXT 11) | 0 |
+| 300-319 | 9 (15) | 11 (MISSING-CONTEXT 11) | 0 |
+
+tests.yml on main at d598dba (milestones 7 and 8 merged), run
+[39603310748](https://github.com/mwagner-webdev/botlish/actions/runs/39603310748): all thirteen
+jobs passed: the Tcl suite on interp and on compile, cranelift and
+cranelift-generic coverage, the four golden shards (every suite beside its
+Tcl originals), the stub-linked executables, the warning gate, the
+method-call kind filter's audit, the native Rust unit tests, and the whole
+suite under GC stress.
+
+static-decisions at d598dba (the front end changed: core/cabi.tcl and
+lib/), run [39603310752](https://github.com/mwagner-webdev/botlish/actions/runs/39603310752): the batched and the sequential scheduler
+agree on every golden suite (no DISAGREE, no DOES NOT COMPILE;
+`mutable-array.bot: batched 5/7 35.2s sequential 69/205 1229.9s`), as they
+did on the branch at b08ac4c ([39585334356](https://github.com/mwagner-webdev/botlish/actions/runs/39585334356)). windows-x86_64.yml at
+d598dba, run [39603310730](https://github.com/mwagner-webdev/botlish/actions/runs/39603310730): the smoke job and the four acceptance
+shards passed (Tcl 9.0.1 from the workflow's cache).
 
 ## 27. Linux AArch64 regression
 
-PENDING-ARM64
+tests-arm64.yml on main at d598dba (milestones 7 and 8 merged), run
+[39603310756](https://github.com/mwagner-webdev/botlish/actions/runs/39603310756): all ten jobs passed -- the Tcl suite on interp (8747
+tests: 8637 passed, 110 skipped, 0 failed) and on compile (8632 passed, 115
+skipped, 0 failed), cranelift and cranelift-generic coverage, the four
+golden shards, the native Rust unit tests (also under GC stress) and the
+whole suite under GC stress (1 h 49 min).
+Milestone 8 changes nothing of Linux's IO: lib/linux.bot, lib/linux/,
+lib/io.bot and the syscall transports have no diff between main before the
+milestones (cc5a660) and d598dba; the Darwin tests' front-end half (the
+platform rule, the declarations' NIR, the C string, the authority table)
+runs on Linux AArch64 as everywhere.
 
 ## 28. Remaining platform IO gaps
 
 * **read's errno window** (section 7): two allocations by the system
   allocator run between read(2) and the errno read. Closing it is a
   compiler representation change (a scalar-replaced write-back value), not a
-  library one.
+  library one. Closed by C-FFI-ERROR-CAPTURE-MILESTONE-1.md.
 * **No portable file API.** `darwin::open`/`create`/`close` are Darwin's
   raw layer (direct); there is no `io::` file operation and no Linux
   counterpart in lib/linux.bot (Linux has write and read only). A portable
@@ -786,6 +975,12 @@ PENDING-ARM64
   buffering are not here, on either platform.
 * **No retry policy.** EINTR and EAGAIN are failures, as on Linux; a caller
   that wants a retry has the raw layer.
+* **Short-write completion copies.** Each completion copies the unwritten
+  suffix into a new List and Bytes (about 30 ns per byte on the macOS
+  runners, section 24), so a text of n bytes written in K short pieces
+  re-copies (K - 1) n / 2 bytes; LinuxIO's is the same code. Writing the rest
+  in place needs a way to expose part of a byte storage (an offset or a
+  slice), which byte borrowing does not have.
 * **One thread.** errno is read on the program's one native thread; a
   threaded runtime would keep the property only if a C call and its errno
   read stayed on one thread with no suspension between.
@@ -802,7 +997,7 @@ PENDING-ARM64
   without erasing provenance.
 * **An errno-exact write exposure**: the scalar-replaced write-back value of
   section 7, so that a write-exposing C call's errno can be read with
-  nothing between.
+  nothing between. Done: C-FFI-ERROR-CAPTURE-MILESTONE-1.md.
 * **Descriptor lifetime**: affine descriptors released by a static drop
   (AFFINE-VALUES.md) or an explicit close protocol, before files are a
   portable resource.

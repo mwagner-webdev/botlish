@@ -255,6 +255,8 @@ namespace eval hir::static {
         FLAG-FUNCTION-VALUE                      FlagFunctionValue
         FOREIGN-BORROW                           ForeignBorrow
         IMPRINT                                  Imprint
+        INTERNAL-INTRINSIC-VALUE                 InternalIntrinsicValue
+        INTERNAL-NAMESPACE                       InternalNamespace
         KNOWN-ERROR                              KnownError
         LAYOUT-ARRAY-EXTENT                      LayoutArrayExtent
         LAYOUT-ARRAY-INDEX                       LayoutArrayIndex

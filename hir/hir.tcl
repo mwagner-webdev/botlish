@@ -535,6 +535,15 @@ proc hir::BuildSyntax {nodes args} {
 # them as decided; without seeds the build is the one it always was.
 proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
     upvar 1 $checkedVar checked
+    if {[dict exists $given -trait-decls]} {
+        # The intrinsic traits the program may use (HASHABLE-AND-KEYED-HASH.md):
+        # declared beside its own, so it is a trait program like any other.
+        set intrinsic [hir::traits::IntrinsicDecls $nodes $options]
+        if {$intrinsic ne {}} {
+            dict set options -trait-decls [concat [dict get $options -trait-decls] $intrinsic]
+            dict set given -trait-decls [dict get $options -trait-decls]
+        }
+    }
     set traits [expr {[dict get $options -trait-decls] ne {}}]
     # A source program that may construct coroutines may give a generic
     # function an affine argument, which the monomorphization below
@@ -584,6 +593,10 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # from its operands' static types, written into its call
         # (DECIMAL-ROUNDED-MILESTONE-1.md, hir::decimal::Elaborate).
         hir::decimal::Elaborate hir
+        # The length every list::with_length[T] call checks, from its
+        # imprint, written into the call (LIST-CARDINALITY-REFINEMENTS.md,
+        # hir::listlength::Elaborate).
+        hir::listlength::Elaborate hir
     }
     return $hir
 }
@@ -1335,6 +1348,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::range::verifyDeclaredParams hir
     hir::operators::verify hir
     hir::decimal::verify hir
+    hir::listlength::verify hir
     hir::callables::verify hir
     hir::lockstep::verify hir
     hir::structs::verify hir
@@ -1344,6 +1358,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::affine::verify hir
     hir::mutvec::verify hir
     hir::syscall::verify hir
+    hir::internal::verify hir
     hir::borrow::verify hir
     hir::layouts::verify hir
     hir::semantic::verify hir
@@ -1668,7 +1683,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall borrow foreign errordecls refinements types operators decimal exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

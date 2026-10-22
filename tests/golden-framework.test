@@ -816,7 +816,7 @@ test gf-code-name-complete {test::code_name spells every compiler::DiagnosticCod
     set shown [gfValue "import compiler\nimport test\n\[$calls\]\n"]
     set expected "\[[join [lmap c $cases {format {"%s"} $c}] {, }]\]"
     list [llength $cases] [expr {$shown eq $expected}]
-} -result {105 1}
+} -result {107 1}
 
 # ---------------------------------------------------------------------------
 # GC stress and warnings

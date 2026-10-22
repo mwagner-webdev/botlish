@@ -26,9 +26,11 @@
 # (bench/c-pointer-borrowing.tcl), `darwin-io-mutants`
 # (audit/context-traits/tools/mutate.tcl -only 'darwin-*': Darwin I/O's
 # mutants, MACOS-AARCH64-MILESTONE-8.md), `darwin-io-bench`
-# (bench/darwin-io.tcl) or `windows-io-mutants` (the same tool's
-# 'windows-*': Windows I/O's mutants, WINDOWS-X86-64-MILESTONE-2.md); the
-# last twelve are never part of a tier.
+# (bench/darwin-io.tcl), `c-capture-bench` (bench/c-ffi-error-capture.tcl,
+# C-FFI-ERROR-CAPTURE-MILESTONE-1.md) or `windows-io-mutants` (the same
+# tool as darwin-io-mutants, 'windows-*': Windows I/O's mutants,
+# WINDOWS-X86-64-MILESTONE-2.md); the last thirteen are never part of a
+# tier.
 #
 #   smoke       cabi, examples and a dozen front-end test files that never
 #               reach the native backend: about 15 seconds
@@ -68,13 +70,15 @@
 #   c-borrow-bench        tclsh9.0 bench/c-pointer-borrowing.tcl
 #   darwin-io-mutants     tclsh9.0 audit/context-traits/tools/mutate.tcl -only darwin-*
 #   darwin-io-bench       tclsh9.0 bench/darwin-io.tcl
+#   c-capture-bench       tclsh9.0 bench/c-ffi-error-capture.tcl -baseline-rev 8c29f7e
 #   windows-io-mutants    tclsh9.0 audit/context-traits/tools/mutate.tcl -only windows-*
 #
 # -gc-stress 1 runs everything with BOTLISH_NATIVE_GC_STRESS=1. -shard I/N
 # (1 <= I <= N) keeps the Ith of every N test files and of every N suites,
 # for parallel CI jobs; examples, cabi, rust, native-stack-mutants,
-# native-aot-mutants, native-stack-bench, the darwin-io-*, windows-io-mutants and the c-ffi-*
-# and c-borrow-* checks run in shard 1 only. -list 1
+# native-aot-mutants, native-stack-bench, c-capture-bench, the darwin-io-*,
+# windows-io-mutants and the c-ffi-* and c-borrow-* checks run in shard 1
+# only. -list 1
 # prints the commands and runs nothing. Each command is printed before it
 # runs and streams its output; at the end a summary lists every failure with
 # the command that reruns it alone. Exits 1 on any failure. It never uses
@@ -111,7 +115,7 @@ set notYet [dict getdef $notYetByHost [core::cabi::hostTarget] {}]
 
 proc usage {} {
     puts stderr "usage: tclsh9.0 tests/platform/tier.tcl ?-backends LIST? ?-golden-backends LIST? ?-example-backends LIST? ?-gc-stress 0|1? ?-shard I/N? ?-list 0|1? ITEM ..."
-    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants | native-aot-mutants | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | windows-io-mutants"
+    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants | native-aot-mutants | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants"
     exit 2
 }
 
@@ -202,7 +206,7 @@ proc addTier {name} {
 foreach item $items {
     if {$item in {smoke acceptance all}} {
         addTier $item
-    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench windows-io-mutants}
+    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants}
             || [regexp {^c-(ffi|borrow)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
         addCheck $item
     } elseif {[string match *.test $item]} {
@@ -210,7 +214,7 @@ foreach item $items {
     } elseif {[string match *.bot $item]} {
         addSuite $item $goldenBackends
     } else {
-        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench or windows-io-mutants: $item"
+        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench or windows-io-mutants: $item"
         usage
     }
 }
@@ -313,6 +317,11 @@ foreach check $checks {
         }
         darwin-io-bench {
             lappend commands [list "platform I/O performance" {} [list $tclsh [file join $root bench darwin-io.tcl]] plain]
+        }
+        c-capture-bench {
+            # Against the commit before C-FFI-ERROR-CAPTURE-MILESTONE-1, the
+            # report's baseline, built on the same runner.
+            lappend commands [list "C error capture performance" {} [list $tclsh [file join $root bench c-ffi-error-capture.tcl] -baseline-rev 8c29f7edd13a515b725415190f5d9c07294615c5] plain]
         }
         windows-io-mutants {
             lappend commands [list "Windows I/O mutants" {} \

@@ -440,6 +440,19 @@ fn write_all(fd: FileDescriptor, bytes: List[Byte], context io: DarwinIO) -> uni
 fn write_all(fd: FileDescriptor, bytes: List[Byte]) -> unit errors io::WriteFailed:
 >>>>
 
+@@ darwin-errno-before-call read takes errno before its C call, not after it (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)
+## lib/darwin.bot
+<<<<
+    r = fd.c_read(data, abi::bytes::mutable_length(data).value)
+    if r.result < 0:
+        failure = errno()
+====
+    early = errno()
+    r = fd.c_read(data, abi::bytes::mutable_length(data).value)
+    if r.result < 0:
+        failure = early
+>>>>
+
 # --- Windows I/O (lib/windows.bot, lib/windows/io.bot; WINDOWS-X86-64-MILESTONE-2.md)
 #
 # Mutants with a `%% windows-x86_64` line are killed by what a run on

@@ -272,7 +272,7 @@ proc hir::format::ErrorDecl {hir name} {
 }
 
 # One line for a trait declaration (TRAITS.md, HIR's `traits`): "trait ID
-# owner NS requires REQ ; REQ ...", each REQ "NAME(P: T, ...) -> R errors E,
+# ?intrinsic? owner NS requires REQ ; REQ ...", each REQ "NAME(P: T, ...) -> R errors E,
 # ..." with the trait's own type spelled as its identity (NS "-" for the
 # entry program). Read back by hir::read::TraitLine.
 proc hir::format::TraitDecl {entry} {
@@ -290,7 +290,10 @@ proc hir::format::TraitDecl {entry} {
     set ns [dict get $entry namespace]
     # A context trait (CONTEXT-TRAITS.md) carries its modifier.
     set context [expr {[dict exists $entry context] && [dict get $entry context] ? " context" : ""}]
-    return "trait [dict get $entry id]$context owner [if {$ns eq ""} {string cat "-"} else {set ns}] requires [join $reqs { ; }]"
+    # An intrinsic trait (HASHABLE-AND-KEYED-HASH.md) carries its marker: its
+    # witnesses are the implementation's, never a structural conformance.
+    set intrinsic [expr {[dict getdef $entry intrinsic 0] ? " intrinsic" : ""}]
+    return "trait [dict get $entry id]$context$intrinsic owner [if {$ns eq ""} {string cat "-"} else {set ns}] requires [join $reqs { ; }]"
 }
 
 # One line for a trait-polymorphic source function the monomorphized program

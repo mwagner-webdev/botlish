@@ -2275,7 +2275,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.bool_of(eq)
             }
             CPtrSame => a[0],
-            VEq => {
+            // `keepalive %b` (C-FFI-ERROR-CAPTURE-MILESTONE-1.md): no machine
+            // operation at all. What keeps %b a GC root up to here is the NIR
+            // use itself: codegen::roots's liveness counts it, so %b's slot
+            // is in the stack map of every safepoint before it -- the
+            // exposing syscall's or C call's own included -- and is not
+            // reused before it. Emitting nothing also means nothing runs
+            // between a C call and the code that reads its result: a call
+            // there could disturb the C error state (errno).
+            KeepAlive => self.iconst(UNIT),
+            VEq | VEqTotal => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
                 self.b.switch_to_block(fast);
@@ -2284,7 +2293,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().jump(done, &[BlockArg::Value(r)]);
                 self.b.switch_to_block(slow);
                 let r = self.call_helper("rt_value_eq", &[self.vm, a[0], a[1]]);
-                self.check(r);
+                if op == VEq {
+                    // (VEqTotal's operands are proven equality-total: the
+                    // helper cannot refuse them, op_may_error.)
+                    self.check(r);
+                }
                 self.b.ins().jump(done, &[BlockArg::Value(r)]);
                 self.b.switch_to_block(done);
                 result
@@ -2473,6 +2486,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         IShl => ("rt_int_shl", None, true, None),
                         IShr => ("rt_int_shr", None, true, None),
                         Hash => ("rt_hash", None, true, None),
+                        // A Hashable operand (native/lower.tcl's `hashing`
+                        // form): the same helper, which cannot refuse it.
+                        HashTotal => ("rt_hash", None, false, None),
+                        TableHash => ("rt_table_hash", None, true, None),
+                        TableHashTotal => ("rt_table_hash", None, false, None),
                         RegionCheck => ("rt_str_region_check", None, true, None),
                         RegionEq => ("rt_str_region_eq", None, false, None),
                         StrEq => ("rt_str_eq", None, false, None),
@@ -2483,13 +2501,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // allocates one object (or returns the static empty
                         // one) and is fallible (a non-byte element is TYPE);
                         // length/address read the header of a value that must
-                        // be a storage (TYPE otherwise) and never allocate;
-                        // keepalive is a real call so it is never removed
-                        // and its operand is live across everything before it.
+                        // be a storage (TYPE otherwise) and never allocate
+                        // (keepalive is no call: above).
                         BytesFromList => ("rt_bytes_from_list", None, true, Some(("bytesfromlist", KIND_BYTES))),
                         BytesLen => ("rt_bytes_len", None, true, None),
                         BytesAddr => ("rt_bytes_addr", None, true, None),
-                        KeepAlive => ("rt_keepalive", None, false, None),
                         // Fixed binary layouts (BINARY-LAYOUT.md): one helper
                         // call per field; all fallible only on operands a
                         // checked program never produces. A load may build a
@@ -2674,6 +2690,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         StrRegionIsTclAlnum => ("rt_str_region_is_tcl_alnum", None, true, None),
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
+                        ListWithLength => ("rt_list_with_length", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),
                         // Deliberately no inline fast path (item 64: "a
                         // helper/runtime call is entirely acceptable"),

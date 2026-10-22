@@ -91,6 +91,9 @@ namespace eval hir::callables {}
 # called unchecked through `f()(9999)`); and a List/ImmutableSet whose
 # elements are.
 proc hir::callables::Bearing {hir type {mutable 1}} {
+    # (A refined List bears what its base bears: a refinement is knowledge,
+    # never an obligation, LIST-CARDINALITY-REFINEMENTS.md.)
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsMutArray $type]} {
         # A MutableArray is a value (MUTABLE-ARRAY.md): a position that
         # forgets its element contract holds a logical copy, which no write
@@ -181,6 +184,7 @@ proc hir::callables::CarriedErrors {hir type} {
 proc hir::callables::CarriedInto {hir type errorsVar} {
     upvar 1 $errorsVar errors
     variable carriedVisiting
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsMutArray $type] || [hir::types::IsSet $type] || [hir::types::IsMutVec $type]} {
         CarriedInto $hir [lindex $type 1] errors
         return
@@ -264,6 +268,13 @@ proc hir::callables::BearingNamed {hir id mutable} {
 # preserve TYPE's. FINAL "" (no typed context at all) preserves nothing.
 proc hir::callables::Preserves {hir type final} {
     if {$type eq $final || $type eq "never" || ![Bearing $hir $type]} {
+        return 1
+    }
+    # A refinement says nothing about the obligations a value carries: the
+    # bases decide (forgetting a length keeps every contract).
+    set type [hir::types::Unrefined $type]
+    set final [hir::types::Unrefined $final]
+    if {$type eq $final} {
         return 1
     }
     if {$final eq ""} {
@@ -369,6 +380,7 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
 # vacuous MutableArray[any]): the array itself, an element of a List/set, a
 # function's parameter or result, an exact block's result.
 proc hir::callables::HasMutArray {type} {
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsMutArray $type]} {
         return [expr {[lindex $type 1] ne "any" || [HasMutArray [lindex $type 1]]}]
     }

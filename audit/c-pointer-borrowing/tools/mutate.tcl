@@ -15,10 +15,11 @@
 # it:
 #
 #   * the test files FILES (default tests/c-pointer-borrowing.test, the
-#     borrow fixture's, and tests/c-byte-borrowing.test, real C built by the
-#     host's own compiler -- skipped where no C call links; each with a
-#     private -tmpdir): killed if any test fails or a file does not
-#     complete;
+#     borrow fixture's, tests/c-byte-borrowing.test, real C built by the
+#     host's own compiler -- skipped where no C call links -- and
+#     tests/c-ffi-error-capture.test, the error-capture window's detectors;
+#     each with a private -tmpdir): killed if any test fails or a file does
+#     not complete;
 #   * audit/c-pointer-borrowing/tools/fuzz.tcl -n N -seed S (owners,
 #     contracts and pointees against its own admission and byte model,
 #     every backend): killed if it reports a disagreement or does not
@@ -37,7 +38,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/c-pointer-borrowing.test tests/c-byte-borrowing.test} -fuzz-count 15 -fuzz-seed 7 -timeout 1800]
+set options [dict create -only "" -tests {tests/c-pointer-borrowing.test tests/c-byte-borrowing.test tests/c-ffi-error-capture.test} -fuzz-count 15 -fuzz-seed 7 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value

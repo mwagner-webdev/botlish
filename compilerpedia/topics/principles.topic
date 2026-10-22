@@ -89,10 +89,11 @@ principle.lint-precision.
 Idiomatic default. Group different values as a struct with named fields
 (Botlish has no tuples and no positional destructuring of a List); use a
 List for a sequence of like values. A function that deliberately returns a
-fixed-length sequence declares it with a list result type.
+fixed-length sequence declares it with a list result type;
+`List[T]{length: N}` states the length and is still a sequence.
 
 See: principle.name-the-parts, concept.structs, concept.lists,
-warning.fixed-arity-list-return.
+concept.list-length, warning.fixed-arity-list-return.
 
 == 7. CONTROL FORMS HAVE PLACEMENT RULES
 Language rule. `if` and a collecting `loop` are values only where their

@@ -64,10 +64,16 @@
 #                   compile-time semantics only (no runtime check exists).
 #   resultLength    "" or the length of the collection the native returns,
 #                   for static analyses that track lengths and capacities
-#                   (hir/cardinality.tcl), read by registration, never by
-#                   name:
+#                   (hir/cardinality.tcl) and for the exact List length a
+#                   returned List's type states (hir/types.tcl's Call mints
+#                   List[T]{length: N} from it, LIST-CARDINALITY-
+#                   REFINEMENTS.md), read by registration, never by name:
+#                     args            the number of arguments (the List
+#                                     literal's constructor, `list`)
 #                     int K           the Int argument K (allocate's capacity)
 #                     list K          the length of List argument K
+#                     list K D        the length of List argument K plus D
+#                                     (list::append: one more)
 #                     extent K        the extent N of argument K's static
 #                                     type when it is a live fixed array,
 #                                     NativeView[array N of E] or
@@ -80,6 +86,34 @@
 #                                     names (binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
+#   hashing         "" or {K MODE}: argument K is hashed -- compared by the
+#                   hash's equality and walked by its canonical encoding
+#                   (core/hashing.tcl; HASHABLE-AND-KEYED-HASH.md) -- so its
+#                   static type answers to the intrinsic trait Hashable
+#                   (hir::types::HashClass), read by registration, never by
+#                   name. MODE says how a call is admitted:
+#                     required        the argument must be Hashable, like a
+#                                     parameter declared `x: Hashable`
+#                                     (the private table hash): TRAIT-NOT-
+#                                     SATISFIED otherwise, and the call never
+#                                     fails (native lowering's total op)
+#                     checked         an argument statically known not to be
+#                                     Hashable (a function, a struct with a
+#                                     function field) is TRAIT-NOT-SATISFIED;
+#                                     a Hashable one makes the call total; a
+#                                     statically unknown one (any) is hashed
+#                                     dynamically and may still fail with
+#                                     EQUALITY (the public `hash`)
+#   measures        "" or {FAMILY PARAM K}: the Int the native returns is
+#                   exactly the value of parameter PARAM of the scalar-
+#                   refinement family FAMILY (hir/refinements.tcl) of its
+#                   argument K -- list::length measures {List length 0}
+#                   (LIST-CARDINALITY-REFINEMENTS.md). Read by registration,
+#                   never by name: the Range of a call whose argument's
+#                   static type states the fact is that one value
+#                   (hir/range.tcl, hir/completions.tcl), and an equality
+#                   of the call with an exactly known Int refines the
+#                   argument on the branch where it holds (hir/refine.tcl).
 #   keepsLength     0 | 1 (default 0): the operation mutates its receiver
 #                   (ownership role `place`) without changing its length --
 #                   it replaces elements in place (a swap, a set, a copy into
@@ -350,13 +384,18 @@ namespace eval core::native {
     #   float-alloc          makes a floating-point value, which the native
     #                        runtime keeps in a heap object of its own
     #                        (core/float.tcl; FLOAT64-MILESTONE-1.md)
+    #   table-hash           computes the private collision-hardened hash of
+    #                        a value under the runtime's hidden process key
+    #                        (core/hashing.tcl's tableHash, ops.rs's
+    #                        rt_table_hash; HASHABLE-AND-KEYED-HASH.md)
     #   raw-syscall          executes a raw Linux kernel transition (x86-64's
     #                        `syscall`, AArch64's `svc #0`) with unknown
     #                        effects (core/linuxabi.tcl;
     #                        LINUX-X86-64-SYSCALL.md)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality mutarray-alloc mutarray-mutate hash set-alloc
-        process-argv raw-syscall bytestore-alloc raw-address mutvec-alloc mutvec-mutate float-alloc}
+        process-argv raw-syscall bytestore-alloc raw-address mutvec-alloc mutvec-mutate float-alloc
+        table-hash}
     # The -ownership roles (OWNERSHIP ROLES above).
     variable ownershipRoles {observe place move element repeat factory copy-out equality resume message release erase}
     # NAME -> 1: the errors the runtime itself declares, visible in every
@@ -381,6 +420,14 @@ namespace eval core::native {
     # declared by declareDirectNamespace beside the namespace's natives,
     # never derived from a name.
     variable directNamespaces [dict create]
+    # NS -> 1: the intrinsic namespaces internal to the language
+    # implementation (HASHABLE-AND-KEYED-HASH.md, "Visibility boundary"):
+    # only a standard library module may import one (surface/modules.tcl's
+    # CheckImports, INTERNAL-NAMESPACE), and no code may take a member as a
+    # value (hir::resolve's INTERNAL-INTRINSIC-VALUE). Declared by
+    # declareInternalNamespace beside the namespace's natives, never derived
+    # from a name.
+    variable internalNamespaces [dict create]
 }
 
 # Declares the intrinsic namespace NS (one with qualified root natives,
@@ -415,6 +462,36 @@ proc core::native::directNamespaces {} {
     return [lsort [dict keys $directNamespaces]]
 }
 
+# Declares the intrinsic namespace NS internal to the language implementation:
+# its members are callable by the standard library's modules only, and only
+# called, never taken as a value. Namespace granular, like
+# declareDirectNamespace.
+proc core::native::declareInternalNamespace {ns} {
+    variable internalNamespaces
+    if {[qualifiedMembers $ns] eq {}} {
+        error "core::native::declareInternalNamespace: \"$ns\" has no intrinsic members (register its natives first)"
+    }
+    dict set internalNamespaces $ns 1
+}
+
+# 1 if the intrinsic namespace NS is internal (declareInternalNamespace).
+proc core::native::isInternalNamespace {ns} {
+    variable internalNamespaces
+    return [dict exists $internalNamespaces $ns]
+}
+
+# 1 if native NAME is a member of an internal namespace.
+proc core::native::isInternal {name} {
+    set ns [namespaceOf $name]
+    return [expr {$ns ne "" && [isInternalNamespace $ns]}]
+}
+
+# The intrinsic namespaces declared internal, sorted.
+proc core::native::internalNamespaces {} {
+    variable internalNamespaces
+    return [lsort [dict keys $internalNamespaces]]
+}
+
 # The intrinsic namespace of the qualified root native NAME (the part of its
 # registered name before the last "::": linux::abi::x86_64::syscall is a
 # member of linux::abi::x86_64, qualifiedMembers' membership), "" for a native in no namespace.
@@ -446,7 +523,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {}]
+        -mutation-stable 0 -fold {} -measures {} -hashing {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -572,9 +649,15 @@ proc core::native::register {name args} {
             || ![dict get $options -completion])} {
         error "core::native::register: -errors-from of \"$name\" must be the index of an argument of a -completion native"
     }
+    set measures [dict get $options -measures]
+    if {$measures ne "" && ([llength $measures] != 3 || ![string is digit -strict [lindex $measures 2]]
+            || $arity eq "*" || [lindex $measures 2] >= $arity || [dict get $options -result-type] ne "int")} {
+        error "core::native::register: bad -measures \"$measures\" for \"$name\" (FAMILY PARAM K, an Int result)"
+    }
     set length [dict get $options -result-length]
-    if {$length ne "" && ([llength $length] != 2 || [lindex $length 0] ni {int list extent path}
-            || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity)} {
+    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list extent path}
+            || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity
+            || ([llength $length] == 3 && ([lindex $length 0] ne "list" || ![string is digit -strict [lindex $length 2]])))} {
         error "core::native::register: bad -result-length \"$length\" for \"$name\""
     }
     set dropForm [dict get $options -drop-form]
@@ -608,6 +691,11 @@ proc core::native::register {name args} {
             || [llength [dict get $imprint params]] != $arity)} {
         error "core::native::register: bad -imprint \"$imprint\" for \"$name\""
     }
+    set hashing [dict get $options -hashing]
+    if {$hashing ne "" && ([llength $hashing] != 2 || ![string is digit -strict [lindex $hashing 0]]
+            || $arity eq "*" || [lindex $hashing 0] >= $arity || [lindex $hashing 1] ni {required checked})} {
+        error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
+    }
     set bounds [dict get $options -bounds]
     if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
         error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
@@ -628,7 +716,8 @@ proc core::native::register {name args} {
         ownership $ownership errorsFrom $errorsFrom resultLength $length \
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
-        mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold]]
+        mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
+        measures $measures hashing $hashing]
     return [core::value::native $name]
 }
 
@@ -1238,7 +1327,9 @@ proc core::native::invoke {nativeValue argValues} {
 #                            non-finite C double entering Botlish (C-FFI.md)
 # The binary errors follow (core/binary.tcl), then UnrepresentableDecimal
 # (core/decimal.tcl, which core/core.tcl loads after binary.tcl so that the
-# ids existing programs and documents show stay what they were).
+# ids existing programs and documents show stay what they were), then
+# LengthMismatch (core/listlength.tcl, loaded after decimal.tcl: builtin
+# error 10, LIST-CARDINALITY-REFINEMENTS.md).
 core::native::declareError InvalidArgumentEncoding
 core::native::declareError IndexNotFound
 core::native::declareError LowerUnderrun

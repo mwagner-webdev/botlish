@@ -109,30 +109,27 @@ proc program {setup body discarded n} {
 
 # The best time (microseconds) of one run of the program TEXT, inside one
 # process, its standard output /dev/null and its standard input /dev/zero;
-# ENV the environment variables the program runs with.
-proc best {text {env {}}} {
+# INJECTED environment variables ({NAME VALUE ...}) for the program's own
+# process only.
+proc best {text {injected {}}} {
     set hir [surface::compile $text -warnings off]
-    set nirPath [file join $::scratch program.nir]
     set resultPath [file join $::scratch result]
-    set channel [open $nirPath w]
-    fconfigure $channel -encoding utf-8 -translation lf
-    puts -nonewline $channel [native::nir $hir]
-    close $channel
-    set saved {}
-    foreach {name value} $env {
-        lappend saved $name [expr {[info exists ::env($name)] ? [list $::env($name)] : {}}]
-        set ::env($name) $value
-    }
-    try {
+    file delete $resultPath
+    if {[llength $injected]} {
+        # The executable the driver would link for the run, run here with the
+        # driver protocol's variables (runtime/aot.rs), so that the variables
+        # reach the program's process and not the system linker's (the write
+        # interposer in cc and ld aborts the link).
+        set exe [native::executable $hir [file join $::scratch injected]]
+        exec env BOTLISH_NATIVE_RESULT=$resultPath BOTLISH_NATIVE_RUNS=$::runs \
+            {*}[lmap {name value} $injected {string cat $name = $value}] $exe </dev/zero >/dev/null 2>/dev/null
+    } else {
+        set nirPath [file join $::scratch program.nir]
+        set channel [open $nirPath w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel [native::nir $hir]
+        close $channel
         exec [native::binary] bench $::runs $nirPath --result $resultPath </dev/zero >/dev/null 2>/dev/null
-    } finally {
-        foreach {name value} $saved {
-            if {$value eq ""} {
-                unset ::env($name)
-            } else {
-                set ::env($name) [lindex $value 0]
-            }
-        }
     }
     set lines [split [core::ReadFile $resultPath] \n]
     set times [lsearch -inline $lines {times *}]
@@ -144,9 +141,9 @@ proc best {text {env {}}} {
 
 # "LOOP CALL DIFFERENCE": ns per iteration of the loop without and with the
 # call, and their difference.
-proc perCall {setup call discarded {env {}}} {
-    set baseline [expr {1000.0 * [best [program $setup 0 0 $::n] $env] / $::n}]
-    set t [expr {1000.0 * [best [program $setup $call $discarded $::n] $env] / $::n}]
+proc perCall {setup call discarded {injected {}}} {
+    set baseline [expr {1000.0 * [best [program $setup 0 0 $::n] $injected] / $::n}]
+    set t [expr {1000.0 * [best [program $setup $call $discarded $::n] $injected] / $::n}]
     return [format "%10.1f %10.1f %10.1f" $baseline $t [expr {$t - $baseline}]]
 }
 
@@ -197,9 +194,9 @@ try {
         puts "2. partial-write completion: print 4 KiB, every write on descriptor 1 capped at L bytes (ns per print)"
         puts [format "  %-16s %10s %10s %10s" "" loop "+ call" call]
         foreach limit {0 2048 1024 512} {
-            set env [list DYLD_INSERT_LIBRARIES $inject BCF_WRITE_FD 1 BCF_WRITE_LIMIT $limit]
+            set injected [list DYLD_INSERT_LIBRARIES $inject BCF_WRITE_FD 1 BCF_WRITE_LIMIT $limit]
             set label [expr {$limit == 0 ? "no cap (1 write)" : "L $limit ([expr {4096 / $limit}] writes)"}]
-            puts [format "  %-16s %s" $label [perCall $text4k "io::print(text)$handled" 1 $env]]
+            puts [format "  %-16s %s" $label [perCall $text4k "io::print(text)$handled" 1 $injected]]
         }
     } else {
         puts "2. partial-write completion: macOS only (libSystem's write is interposable; Linux's syscalls are not)"

@@ -100,4 +100,4 @@ core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
     -param-types {any any} -result-type bool -runtime structural-equality -context-free 1 \
     -ownership {equality equality}
 core::native::register list -arity * -impl core::primitives::makeList \
-    -result-type list -runtime list-alloc -result-shape elements -context-free 1 -ownership {element}
+    -result-type list -runtime list-alloc -result-shape elements -result-length args -context-free 1 -ownership {element}

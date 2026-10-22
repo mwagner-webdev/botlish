@@ -161,7 +161,7 @@ proc hir::variadic::DiagnoseElements {hirVar e node arg element param ranges} {
         }
         hir::Diagnose hir TYPE [format \
             {argument %d of %s cannot be proven to satisfy %s, the element type of its variadic parameter "%s" (argument type: %s%s)%s} \
-            $position $callee [hir::types::show $element] $param [hir::semantic::ShowType $hir $type] \
+            $position $callee [hir::types::show $element] $param [hir::semantic::ShowType $hir [hir::range::ShownArgType $type $element]] \
             [hir::range::FactsClause $type $element $range] [hir::range::MismatchClause $type $element]] $item
         set reported 1
     }

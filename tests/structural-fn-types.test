@@ -426,7 +426,7 @@ loop check in checks:
     set checkRef [lindex [hirFind $hir ref check] 0]
     list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir $checkRef]] \
          [hir::types::show [hir::typeOf $hir $loop]] [fnRun $src]
-} -result {{List[Fn{args: [any], return: bool, errors: []}]} {Fn{args: [any], return: bool, errors: []}} {List[bool]} {[false, false, true, false]}}
+} -result {{List[Fn{args: [any], return: bool, errors: []}]{length: 4}} {Fn{args: [any], return: bool, errors: []}} {List[bool]{length: 4}} {[false, false, true, false]}}
 
 test fn-accept-if-join {an if choosing between a native and a Block has their common Fn type -- not any -- and the binding keeps it} -body {
     set src {fn lenient?(c):
@@ -874,7 +874,7 @@ test fn-dogfood-source-checks {source-checks.bot: the checks List is List[Fn...]
     }] 1]]
     list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir [hir::get $hir $call callee]]] \
          [hir::get $hir $call target]
-} -result {{List[Fn{args: [any], return: bool, errors: []}]} {Fn{args: [any], return: bool, errors: []}} {}}
+} -result {{List[Fn{args: [any], return: bool, errors: []}]{length: 4}} {Fn{args: [any], return: bool, errors: []}} {}}
 
 test fn-dogfood-lex-strategy {lex-strategy.bot: choose_classifier's if is a structural Fn, not any; classifier keeps it; classifier(c) is still an indirect call} -body {
     set hir [fnBench lex-strategy]

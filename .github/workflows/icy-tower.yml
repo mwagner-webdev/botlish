@@ -1,0 +1,89 @@
+name: icy-tower
+
+# The Icy Tower vertical slice (ICY-TOWER-VERTICAL-SLICE-1.md, "CI"): the
+# game's Linux executable built from source with the generated SDL3 binding,
+# its tests with the package-owned libSDL3.so present (so none of
+# tests/workload-icy-tower.test's executable tests is skipped: the ordinary
+# test jobs, tests.yml, run the same file without SDL, where only the pure
+# game's tests run), the independent oracle, the mutants, and a real X11
+# window under Xvfb (keyboard input injected with XTest, screenshots). The
+# executable and the screenshots are uploaded as the run's artifact.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  slice:
+    name: icy-tower (build, test, oracle, mutants, Xvfb)
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      # CMake and Ninja build SDL3; the X11 development headers its x11
+      # video driver (the Xvfb session's build); Xvfb, ImageMagick and
+      # Pillow the session itself.
+      - name: Install SDL3's build tools and the X11 session's tools
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build libx11-dev libxext-dev xvfb imagemagick python3-pil
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the pinned SDL3 source and the package-owned SDL3 builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/botlish/c-header-src/sdl3
+            ~/.cache/botlish/sdl3
+            ~/.cache/botlish/sdl3-x11
+          key: icy-tower-sdl3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/cffi/sdl3.tcl', '.github/workflows/icy-tower.yml') }}
+
+      - name: Build the package-owned SDL3 (headless, and with the x11 driver)
+        run: |
+          tclsh9.0 tests/cffi/sdl3.tcl
+          BOTLISH_SDL3_DIR="$HOME/.cache/botlish/sdl3-x11" \
+          BOTLISH_SDL3_CMAKE_FLAGS="-DSDL_WAYLAND=OFF -DSDL_X11_XCURSOR=OFF -DSDL_X11_XINPUT=OFF -DSDL_X11_XRANDR=OFF -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XSHAPE=OFF -DSDL_X11_XFIXES=OFF -DSDL_X11_XDBE=OFF -DSDL_X11_XTEST=OFF -DSDL_X11_XSYNC=OFF" \
+            tclsh9.0 tests/cffi/sdl3.tcl
+
+      - name: Run the slice's tests (none skipped)
+        run: |
+          tmp=$(mktemp -d)
+          tclsh9.0 tests/workload-icy-tower.test -tmpdir "$tmp" | tee "$tmp/log"
+          grep -qP 'Failed\t0$' "$tmp/log"
+          ! grep -qP 'Skipped\t[1-9]' "$tmp/log"
+
+      - name: Build the executable
+        run: examples/games/icy-tower/build.sh "$PWD/icy-tower-out/icy-tower"
+
+      - name: Compare the executable with the independent oracle
+        run: |
+          LD_LIBRARY_PATH="$(tclsh9.0 tests/cffi/sdl3.tcl | tail -n 1)" \
+            python3 audit/icy-tower/oracle.py compare icy-tower-out/icy-tower
+
+      - name: Kill the mutants
+        run: tclsh9.0 audit/icy-tower/mutate.tcl
+
+      - name: Play it in an X11 window (Xvfb)
+        run: python3 audit/icy-tower/tools/xvfb-session.py icy-tower-out/icy-tower "$HOME/.cache/botlish/sdl3-x11" icy-tower-out/xvfb
+
+      - name: Upload the executable and the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: icy-tower-linux-x86_64
+          path: icy-tower-out/
+          if-no-files-found: warn

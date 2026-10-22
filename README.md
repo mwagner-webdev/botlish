@@ -1,8 +1,35 @@
-<p align=center>
-    <img src="./robot.transparent.svg" style="width: 10vw;">
+<div align="center">
+
+<img src="./docs/assets/readme-banner.svg" alt="Botlish: a language for humans and agents alike" width="100%" />
+
+<img src="./robot.cyan.svg" alt="Botlish robot" width="96" />
+
+<br />
+
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&pause=1400&color=0891b2&center=true&vCenter=true&width=900&lines=Reads+like+a+scripting+language.;The+compiler+explains+the+language.;Every+error+is+explicitly+handled+unless+proven+not+to+occur.;Every+dependency+is+explicit,+including+I/O+and+time.;Compiles+to+fast+native+code.;Actor-like+concurrency+model,+no+borrow+checker.;Runs+everywhere,+but+adopts+to+local+conventions." alt="Reads like a scripting language. The compiler explains the language. Every error is explicitly handled unless proven not to occur. Every dependency is explicit, including I/O and time. Compiles to fast native code. Actor-like concurrency model, no borrow checker. Runs everywhere, but adopts to local conventions." />
+
+<br />
+
+<p>
+  <a href="#download-the-single-file-compiler"><img src="./docs/assets/download-badge.svg" alt="Download" /></a>
+  <a href="#why-botlish"><img src="https://img.shields.io/badge/why_botlish-0e7490?style=for-the-badge" alt="Why Botlish" /></a>
+  <a href="#a-tour"><img src="https://img.shields.io/badge/a_tour-0e7490?style=for-the-badge" alt="A tour" /></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/getting_started-0e7490?style=for-the-badge" alt="Getting started" /></a>
+  <a href="#how-it-is-built"><img src="https://img.shields.io/badge/how_it_is_built-0e7490?style=for-the-badge" alt="How it is built" /></a>
+  <a href="docs/INDEX.md"><img src="https://img.shields.io/badge/docs-0e7490?style=for-the-badge" alt="Docs" /></a>
 </p>
 
-# Botlish
+<p>
+  <a href="https://github.com/mwagner-webdev/botlish/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/mwagner-webdev/botlish/tests.yml?branch=main&style=flat-square&label=tests&labelColor=164e63&color=0e7490&logo=githubactions&logoColor=white" alt="tests" /></a>
+  <img src="https://img.shields.io/badge/Tcl-9.0-0e7490?style=flat-square&labelColor=164e63" alt="Tcl 9.0" />
+  <img src="https://img.shields.io/badge/Rust-1.95%2B-0e7490?style=flat-square&labelColor=164e63&logo=rust&logoColor=white" alt="Rust 1.95+" />
+  <img src="https://img.shields.io/badge/native-Cranelift-0e7490?style=flat-square&labelColor=164e63" alt="Cranelift" />
+  <img src="https://img.shields.io/badge/Linux-x86--64%20%C2%B7%20arm64-0e7490?style=flat-square&labelColor=164e63&logo=linux&logoColor=white" alt="Linux x86-64 and arm64" />
+  <img src="https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&labelColor=164e63&logo=apple&logoColor=white" alt="macOS Apple Silicon" />
+  <img src="https://img.shields.io/badge/license-MIT-0e7490?style=flat-square&labelColor=164e63" alt="MIT" />
+</p>
+
+</div>
 
 **A high-level, native-capable, safe and friendly language for building
 applications, designed to be written and read by humans and agents alike.**
@@ -61,6 +88,37 @@ runs with `darwin::io::create()` installed instead, and the write is
 libSystem's `write(2)`, called through the C FFI
 ([examples/io/hello-darwin.bot](examples/io/hello-darwin.bot),
 [MACOS-AARCH64-MILESTONE-8.md](docs/MACOS-AARCH64-MILESTONE-8.md)).
+
+## Download the single-file compiler
+
+<p align="center">
+  <a href="https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64"><img src="./docs/assets/download-linux.svg" alt="Download Botlish: the single-file compiler for Linux x86-64" width="460" /></a>
+</p>
+
+The whole compiler is one Linux x86-64 executable: the command line, the
+standard library, every backend and the native code generator, in a single
+file that needs nothing but glibc (2.39 or newer). There is no Tcl, Rust, C
+compiler or linker to install, and the standalone executables it builds need
+nothing else either. CI builds it from `main` on every push and publishes
+each build that passes its smoke tests, run in stock Ubuntu containers, as
+the [`single-latest` release](https://github.com/mwagner-webdev/botlish/releases/tag/single-latest),
+with its SHA-256 checksum. Save the program above as `hello.bot`, then:
+
+```sh
+curl -fLo botlish https://github.com/mwagner-webdev/botlish/releases/download/single-latest/botlish-linux-x86_64
+chmod +x botlish
+./botlish -backend cranelift hello.bot                   # run natively, just in time
+./botlish -emit-native-executable hello.bot && ./hello   # build a standalone executable
+./botlish -help                                          # Compilerpedia, the built-in reference
+```
+
+**No C calls yet.** A program that calls C (`extern c fn`,
+[C-FFI.md](docs/C-FFI.md)) compiles, but its native link is refused
+(`NATIVE LINK`): the single-file compiler links with its own stub linker,
+which links no C library. FFI support is coming to it soon; until then such a
+program needs a checkout with the native backend built
+([Getting started](#getting-started)). How the single file is built and what
+it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
 
 ## Botlish and Rust
 
@@ -449,8 +507,8 @@ tclsh9.0 tests/local.tcl                                      # the whole test s
 
 `single/build.sh` packs the compiler, both native executables and the
 standard library into one Linux x86-64 executable that needs nothing but
-glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)); CI publishes it
-as the `botlish-linux-x86_64` artifact.
+glibc ([SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md)), the one
+[the download button](#download-the-single-file-compiler) above fetches.
 
 ## How it is built
 
@@ -502,3 +560,9 @@ backends run wherever Tcl 9 does.
 ## License
 
 [MIT](LICENSE)
+
+<div align="center">
+
+<img src="./docs/assets/readme-footer.svg" alt="" width="100%" />
+
+</div>

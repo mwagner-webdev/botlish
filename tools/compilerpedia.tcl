@@ -249,9 +249,14 @@ proc cpt::DeclarationKind {node} {
 }
 
 # Which natives source can name: not the internal ones (`#` in the name, the
-# compiler's own) and not the core-IR-only ones whose names contain `-`.
+# compiler's own), not the core-IR-only ones whose names contain `-`, and not
+# the members of an internal namespace (core::native::
+# declareInternalNamespace: the private table hash), which only the standard
+# library's own modules may call and which no reference documents as an API
+# (HASHABLE-AND-KEYED-HASH.md).
 proc cpt::PublicNative {name} {
-    return [expr {[string first # $name] < 0 && ![regexp {[a-z]-[a-z]} $name]}]
+    return [expr {[string first # $name] < 0 && ![regexp {[a-z]-[a-z]} $name]
+        && ![core::native::isInternal $name]}]
 }
 
 # The notes: compilerpedia/notes/stdlib.notes, in the topic format, by ID.

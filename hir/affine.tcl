@@ -425,6 +425,7 @@ proc hir::affine::CallConsumer {hir p e role type} {
 # (core/native.tcl's -ownership) says it does with the value -- never the
 # native's name. A native without a role for it erases the value (`erase`).
 proc hir::affine::NativeConsumer {hir p e index native type} {
+    set type [hir::types::Unrefined $type]
     set role [core::native::ownershipRole $native $index]
     # The receiver of a collection operation may be a place path (a field
     # projection of a binding), which the operation reaches in place.
@@ -1937,6 +1938,7 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
+    set type [hir::types::Unrefined $type]
     if {[hir::types::IsCAddress $type]} {
         # A C pointer (C-ABI-TYPES.md) is affine but owns nothing: its owner's
         # death releases nothing, so it has no descriptor (and an aggregate

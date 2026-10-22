@@ -529,13 +529,46 @@ proc hir::layouts::ElementType {type} {
 }
 
 # The consumer (copied) type of the representation term TERM: what
-# binary::load makes of it.
+# binary::load makes of it (CopyType: a copied array's List states its
+# extent).
 proc hir::layouts::TermConsumerType {term} {
     set repr [ReprOfTerm $term]
     if {$repr eq ""} {
         return any
     }
-    return [dict get $repr type]
+    return [CopyType $repr]
+}
+
+# The type of a *copy* of the representation REPR -- what binary::load,
+# binary::read or a field of what binary::parse made holds: its consumer
+# type (the registry's `type`), with every fixed array's List refined by its
+# extent, at every depth (LIST-CARDINALITY-REFINEMENTS.md): `array 2 of
+# array 3 of E` copies to List[List[T]{length: 3}]{length: 2}. A copy has
+# exactly the layout's extents -- the layout machinery made it so -- while a
+# value written into an array (the consumer type a write's value and a
+# LayoutStruct construction are held to) may have any length, which the
+# write checks (LayoutExtentMismatch). A union has no copied value (`any`,
+# UnionConsumerType), and neither has an array of one.
+proc hir::layouts::CopyType {repr} {
+    if {[dict get $repr kind] ne "array"} {
+        return [dict get $repr type]
+    }
+    set element [CopyType [dict get $repr element]]
+    if {$element eq [UnionConsumerType] && [dict get $repr element kind] eq "union"} {
+        return [dict get $repr type]
+    }
+    return [hir::types::Refine [ArrayConsumerType $element] List [list length [dict get $repr extent]]]
+}
+
+# The copy type (CopyType) of field NAME of a copy of the layout ID, or ""
+# when ID has no such field.
+proc hir::layouts::CopiedFieldType {id name} {
+    foreach field [dict get [entry $id] fields] {
+        if {[dict get $field name] eq $name} {
+            return [CopyType $field]
+        }
+    }
+    return ""
 }
 
 # TERM as source text, the way hir::types::show prints a type: "array 16 of
@@ -1100,8 +1133,9 @@ proc hir::layouts::NotScalarReason {type spelled} {
         }
         return "$spelled is Int in [dict get $facts min]..[dict get $facts max], which is not the range of a fixed-width encoding (8, 16, 32 or 64 bits, unsigned 0..2^n-1 or two's-complement -2^(n-1)..2^(n-1)-1), so its width is unknown or not every bit pattern would be a value of it"
     }
-    if {$type eq "Float64" || [hir::refinements::IsRefined $type]} {
-        # (C-FLOAT-FFI-MILESTONE-1.md: a field names a representation.)
+    if {$type eq "Float64" || ([hir::refinements::IsRefined $type] && ![hir::types::IsRefinedApplied $type])} {
+        # (C-FLOAT-FFI-MILESTONE-1.md: a field names a representation. A
+        # refined List is a List, LIST-CARDINALITY-REFINEMENTS.md.)
         return "[hir::types::show $type] is a type of Botlish values, not a binary representation: a floating field names the representation it holds, [hir::cabi::FloatName] (IEEE 754 binary32) or [hir::cabi::DoubleName] (binary64), whose values are Float64s"
     }
     if {[hir::types::IsNamedStruct $type]} {
@@ -1118,7 +1152,8 @@ proc hir::layouts::NotScalarReason {type spelled} {
 # The kind of declaration (for a message) the identity ID already is, or "".
 proc hir::layouts::OtherDeclaration {id name} {
     if {$name in {Int any never Fn Coroutine enum unit} || [core::type::isBuiltinName $name]
-            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]} {
+            || [dict exists $::hir::types::constructors $name] || [core::native::isBuiltinEnum $name]
+            || [hir::traits::isIntrinsicName $name]} {
         return "a built-in type"
     }
     if {[core::type::valid $id]} {
@@ -2445,7 +2480,7 @@ proc hir::layouts::VerifyWriteValue {hirVar ranges e node name} {
             return
         }
         hir::Diagnose hir TYPE [format {the value %s writes into an element of %s cannot be proven to satisfy the element's type %s (value type: %s%s)} \
-            $name [hir::types::show $arrayType] [hir::types::show $declared] [hir::semantic::ShowType $hir $valueType] \
+            $name [hir::types::show $arrayType] [hir::types::show $declared] [hir::semantic::ShowType $hir [hir::range::ShownArgType $valueType $declared]] \
             [hir::range::FactsClause $valueType $declared $range]] $arg
         return
     }
@@ -2481,7 +2516,7 @@ proc hir::layouts::VerifyWriteValue {hirVar ranges e node name} {
         set hint ": data and function pointers are distinct, and nothing converts one into the other"
     }
     hir::Diagnose hir TYPE [format {the value written to field %s by %s cannot be proven to satisfy the field's type %s (value type: %s%s)%s} \
-        [PathText $path] $name [hir::types::show $declared] [hir::semantic::ShowType $hir $valueType] \
+        [PathText $path] $name [hir::types::show $declared] [hir::semantic::ShowType $hir [hir::range::ShownArgType $valueType $declared]] \
         [hir::range::FactsClause $valueType $declared $range] $hint] $arg
 }
 

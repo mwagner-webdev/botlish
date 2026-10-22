@@ -358,3 +358,198 @@ proc hir::borrow::Decide {param argType} {
         return [dict create c [hir::types::show $type] class ptr promoted ptr]
         return [dict create problem FOREIGN-BORROW message [format \
 >>>>
+
+# --- error capture (C-FFI-ERROR-CAPTURE-MILESTONE-1.md) -----------------------
+#
+# The write-back value is fields, and nothing runs between a C call and the
+# comparison of its result. The structural mutants (an allocation or a
+# runtime call put back into that window) are killed by the window detectors
+# of tests/c-ffi-error-capture.test (NIR and machine code) and by the
+# errno-changing allocator; the value and lifetime mutants by the semantic
+# and GC-stress tests. (Returning the original owner instead of the private
+# copy is copy-back-omitted above; dropping a keepalive is
+# owner-liveness-dropped and keepalive-first-only; an exposure made before
+# a later argument's code is borrow-allowed-across-yield.)
+
+@@ write-back-not-a-construction the escape analysis does not recognize the write-back value: the struct and its MutableBytes are built right after every C call (the lowering before this milestone)
+## hir/escape.tcl
+<<<<
+    set written [WrittenNames $hir $e]
+    if {$written eq ""} {
+        return ""
+    }
+====
+    set written [WrittenNames $hir $e]
+    if {1} {
+        return ""
+    }
+>>>>
+
+@@ write-back-buffer-eager the write-back value's MutableBytes are never opened: each is built right after the C call, the struct still fields
+## hir/escape.tcl
+<<<<
+        dict set children $name [list [list $mutable [hir::structs::names $mutable]] {}]
+====
+>>>>
+
+@@ allocation-after-c-call native lowering builds a List of the C result right after the call, before the program reads it
+## native/lower.tcl
+<<<<
+    KeepExposedAlive fn $operands $e
+    if {[dict size $written] == 0} {
+====
+    KeepExposedAlive fn $operands $e
+    Assign fn "op listnew $result" $e
+    if {[dict size $written] == 0} {
+>>>>
+
+@@ keepalive-is-a-call the keepalive of an exposure is a runtime call (one that touches the value: rt_hash), between the C call and the code reading its result
+## native/src/codegen/clif.rs
+<<<<
+            KeepAlive => self.iconst(UNIT),
+====
+            KeepAlive => {
+                let _ = self.call_helper("rt_hash", &[self.vm, a[0]]);
+                self.iconst(UNIT)
+            }
+>>>>
+
+@@ keepalive-not-a-use the root plan does not count a keepalive's operand as a use: an exposed storage is no GC root at the foreign operation's safepoint
+## native/src/codegen/roots.rs
+<<<<
+        Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
+====
+        Inst::Op { op: crate::nir::OpCode::KeepAlive, dst, .. } => (vec![*dst], vec![]),
+        Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
+>>>>
+
+@@ write-back-shared-copy one private copy serves every write exposure of the same owner in a call (two written parameters share one buffer)
+## native/lower.tcl
+<<<<
+    dict for {i how} $access {
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+            lset operands $i $private
+            dict set written $i $private
+        }
+    }
+====
+    set copies [dict create]
+    dict for {i how} $access {
+        if {$how eq "write" && [dict exists $copies [lindex $operands $i]]} {
+            set private [dict get $copies [lindex $operands $i]]
+            lset operands $i $private
+            dict set written $i $private
+        } elseif {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+            dict set copies [lindex $operands $i] $private
+            lset operands $i $private
+            dict set written $i $private
+        }
+    }
+>>>>
+
+@@ opened-buffer-not-built a write-back MutableBytes read whole is handed on as its storage, never built (materialization omitted where the value escapes)
+## native/lower.tcl
+<<<<
+    set object [FieldValue fn $shape $cut $fields $name $e]
+====
+    set object [lindex $fields [FieldOffset $shape $cut $name]]
+>>>>
+
+@@ write-back-result-changed the C result held in the write-back value's fields is not the word C returned (one more: the failure sentinel -1 reads as 0)
+## native/lower.tcl
+<<<<
+        if {$field eq "result"} {
+            lappend fields $result
+            continue
+        }
+====
+        if {$field eq "result"} {
+            lappend fields [Assign fn "op iadd $result [Assign fn {int 1}]" $e]
+            continue
+        }
+>>>>
+
+@@ write-back-argument-twice a foreign call's ordinary argument is evaluated twice (its code runs again)
+## native/lower.tcl
+<<<<
+        } else {
+            set register [Expr fn $arg]
+        }
+====
+        } else {
+            set register [Expr fn $arg]
+            set register [Expr fn $arg]
+        }
+>>>>
+
+@@ write-back-buffer-built-per-iteration a write-back MutableBytes read whole inside a loop deeper than its binding stays open, so it is built once per iteration
+## hir/escape.tcl
+<<<<
+                if {[lindex $member 0] eq "par" || $bindExpr eq ""
+                        || [dict getdef $loopOf $pe "?"] ne [dict getdef $loopOf $bindExpr "?"]} {
+====
+                if {[lindex $member 0] eq "par" || $bindExpr eq ""} {
+>>>>
+
+@@ write-back-failure-path-eager only the success path stays lazy: entering an if's then-branch (the failure branch that reads errno) builds every opened write-back MutableBytes first
+## native/lower.tcl
+<<<<
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+====
+        set savedRaw [dict get $fn rawCache]
+        set body [dict get $node ${role}Body]
+        if {$role eq "then"} {
+            dict for {b local} [dict get $fn locals] {
+                if {[lindex $local 0] eq "virtual" && [lindex $local 3] eq $b} {
+                    foreach {field sub} [CutDict [lindex $local 5]] {
+                        if {[lindex $sub 0 1] eq "storage"} {
+                            OpenedFieldObject fn $b $field $e
+                        }
+                    }
+                }
+            }
+        }
+        if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
+>>>>
+
+@@ detach-before-later-arguments a write exposure's private copy is made as soon as its own argument is evaluated, before the arguments after it (the foreign call's work reordered with the program's)
+## native/lower.tcl
+<<<<
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+        } else {
+====
+        if {[dict exists $access $index]} {
+            set register [StorageOf fn $arg [lindex [hir::typeOf $hir $arg] 1]]
+            if {[dict get $access $index] eq "write" && $register ne "never"} {
+                set register [Assign fn "op mbytesclone $register" $e]
+                dict set access $index early
+            }
+        } else {
+>>>>
+<<<<
+    dict for {i how} $access {
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+====
+    dict for {i how} $access {
+        if {$how eq "early"} {
+            dict set access $i write
+            dict set written $i [lindex $operands $i]
+        }
+        if {$how eq "write"} {
+            set private [Assign fn "op mbytesclone [lindex $operands $i]" $e]
+>>>>
+
+@@ write-back-copy-not-a-root the root plan never counts a write exposure's private copy as a managed register (like a context leaf): a write-back value's opened storage field is no GC root at a later safepoint
+## native/src/codegen/roots.rs
+<<<<
+        let is_context = matches!(inst, Inst::ContextLoad { .. });
+====
+        let is_context = matches!(inst, Inst::ContextLoad { .. })
+            || matches!(inst, Inst::Op { op: crate::nir::OpCode::MBytesClone, .. });
+>>>>

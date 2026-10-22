@@ -415,10 +415,14 @@ extern c fn c_get_last_error named "GetLastError"() -> ffi::c::ULong
   `WriteResult {ok, count, last_error}`: WriteFile's BOOL, the count it
   reported, and the last-error code a failed call left, read with
   GetLastError **right after** the call. Between the two runs only the
-  write-back value of the count's exposure (two small allocations) and the
-  BOOL's test (`wi-last-error-read-first` pins the NIR); the allocator and
-  the collector make no Win32 call that sets the last-error code. The code
-  is never folded into the count, and never read after a success.
+  BOOL's test (and the exposures' keepalives, which are no machine code):
+  the count's write-back value is built after GetLastError
+  (`wi-last-error-read-first` pins the NIR). That is
+  C-FFI-ERROR-CAPTURE-MILESTONE-1.md's lowering, which reached this code
+  when the branch merged main; before it, the write-back value's two small
+  allocations came first, harmless too, since neither the allocator nor
+  the collector makes a Win32 call that sets the code. The code is never
+  folded into the count, and never read after a success.
 * `standard_handle` is GetStdHandle as it is now (SetStdHandle may change
   it). NULL (the process has no handle for the device) is told apart with
   `null?`; INVALID_HANDLE_VALUE is a pointer Botlish cannot compare with (a
@@ -764,6 +768,36 @@ jobs are as in section 7.4: smoke, the Linux control and acceptance shard
 pre-existing `bb-guard-malloc` failure. The Windows run's smoke job and
 its four acceptance shards were green on 6114fde as well.
 
+### 7.7 Merging main
+
+The branch merged main at 0191d55, which had gained, meanwhile,
+C-FFI-ERROR-CAPTURE-MILESTONE-1 (written while Windows refused C calls),
+the Hashable trait, List cardinality refinements and macOS milestones 7
+and 8's follow-ups. Where they meet this milestone:
+
+* **The WriteFile window got narrower.** Main's lowering builds a write
+  exposure's write-back value only where a use needs it, so in
+  `windows::write_file` nothing but the BOOL's test now runs between
+  WriteFile and GetLastError: `wi-last-error-read-first` pins
+  `keepalive keepalive runbox rieq br` (before:
+  `... structnew structnew structget ...`).
+* **c-ffi-error-capture.test needs POSIX's convention.** Its C tests were
+  skipped on Windows only because C calls were (`nativeCCalls`); with C
+  calls they would build a MinGW fixture with `cc`, read errno through
+  `__errno_location`, call read(2) and a variadic open(2). They now need
+  `posixErrno` (a Linux or macOS target) and skip on Windows as before
+  (section 8).
+* **bb-guard-malloc, the macOS failure of section 7.4, is main's, and main
+  changed it**: it exposes 16-byte storages now (MACOS-AARCH64-MILESTONE-7.md,
+  section 8); `appExecutable` keeps main's comment and this milestone's
+  Windows branch. MERGED_MACOS_RESULT
+* The rest merged as both sides wrote it: the tier items `c-capture-bench`
+  and `windows-io-mutants` side by side, main's Darwin errno mutant beside
+  the Windows I/O mutants, fixture.c's `errno.h` and `limits.h`, main's
+  split of `ht-coroutine-protocols` (the native half behind
+  `nativeCoroutines`, as this milestone had done). The golden manifest and
+  Compilerpedia's generated stdlib were regenerated, identical to the merge.
+
 ## 8. Remaining limitations
 
 Refused on Windows, each with its own error:
@@ -802,6 +836,14 @@ Known limits:
   tests are skipped on Windows (`tclLibrary`, `boringssl`: no Windows build
   of either is set up), as are the generated-binding runs (the C binding
   generator's fixture has no MSVC target: `fixtureHostBinding`).
+* **C error capture on Windows is GetLastError's only.**
+  c-ffi-error-capture.test's C tests (errno, read, open, close: POSIX's
+  convention) skip on Windows (`posixErrno`): MSVC's errno is `_errno()`,
+  its `_read` of a bad descriptor ends the process (the invalid-parameter
+  handler), and open is variadic. GetLastError's window is pinned
+  (`wi-last-error-read-first`) and its codes are checked against real
+  failures (`wi-real-failures`); an errno read under MSVC's runtime is
+  untested.
 * **Windows I/O's `%% windows-x86_64` mutants** (six of the thirteen) are
   killed only by Windows runs (sections 7.5, 7.6); the tier item
   `windows-io-mutants` runs them on a Windows runner. Two of them

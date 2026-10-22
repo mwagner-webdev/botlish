@@ -42,13 +42,16 @@ checking it there:
   and the benchmark on macOS (`c-borrow-fuzz`, `c-borrow-mutants`,
   `c-borrow-bench`), and native-status records the capability
   (`c-byte-borrow`).
-* **Two test-harness defects fixed on the way**, both in bb-guard-malloc's
-  positive control (section 8): Guard Malloc writes a banner to standard
-  error, which Tcl's `exec` took for a failure (commit ec7cae8: runs are now
-  judged by exit status, a fault by the signal that killed the process);
-  and, exposed by that stricter check, the over-reading program had never
-  compiled (`len(d) + 1` is not provably a `size_t`), which the old `catch`
-  had also counted as a fault.
+* **Three defects in bb-guard-malloc's positive control, fixed on the way**
+  (section 8): Guard Malloc writes a banner to standard error, which Tcl's
+  `exec` took for a failure (commit ec7cae8: runs are now judged by exit
+  status, a fault by the signal that killed the process); exposed by that
+  stricter check, the over-reading program had never compiled (`len(d) + 1`
+  is not provably a `size_t`), which the old `catch` had also counted as a
+  fault; and once it compiled, Guard Malloc did not catch its one-byte
+  over-read of a 4080-byte storage, so the good run of those storages had
+  shown nothing. The test now exposes 16-byte storages, whose one-byte
+  overruns it shows faulting, with one control per kind of exposure.
 
 ## 1. The initial census
 
@@ -245,6 +248,20 @@ tests run on every host as before.
   after every argument, so an argument's allocation or yield never runs
   while an exposure is open (`cb-exposure-after-arguments`, now on macOS).
 
+Whole files under GC stress on macOS: Tier C of macOS run
+[39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611)
+(at b08ac4c, before the last test fixes) ran fourteen files with
+`BOTLISH_NATIVE_GC_STRESS=1` for the whole process, on interp and compile --
+darwin-io, c-byte-borrowing, c-pointer-borrowing, workload-2048,
+context-traits, portable-io, target-model, c-ffi, native-view, native-edit,
+layout-arrays, layout-unions, binary-layout and abi-mutable-bytes -- and the
+borrowing fuzzer's seeds 1, 2 and 9 (no disagreement). Each pass: 626
+tests, 584 passed, 40 skipped (2 boringssl, 16 linuxX86_64, 21 nativeLinux,
+1 tclLibrary) and 2 failed, both test defects fixed since and neither a
+matter of the collector: bb-guard-malloc's control (section 8) and
+di-stderr-failure, which compared the streams' undecoded bytes with text
+(7bdd5e2).
+
 ## 8. Real-library acceptance
 
 **libSystem.** bb-system-library calls the system C library's own `memcmp`,
@@ -259,26 +276,46 @@ in an executable. bb-system-symbols reads the executable's symbol table
 to the system library, so the calls are libSystem's own code.
 
 **Guard Malloc** (macOS): bb-guard-malloc runs an executable of read and
-write exposures of 4080-byte storages (a 16-byte header plus 4080 bytes is a
-4096-byte allocation, a multiple of 16) -- the fixture's and libSystem's
-`memcpy`/`memcmp` -- under `/usr/lib/libgmalloc.dylib`, which places every
-allocation against an inaccessible page: it runs to the oracle's value, so
-no C call reads or writes past an exposed storage. The positive control is
-the same executable with one count one byte too long, which must be killed
-by a signal under libgmalloc and must not be without it; a C probe
-(`guardMallocWorks`) shows the detector faults on this host before the test
-is enabled. Two macOS runs found the control vacuous, twice over. First,
-libgmalloc's banner on standard error made `exec` report every guarded run
-as failed -- the good executable's correct value included -- so both the
-probe's and the test's fault checks passed without a fault; both now read
-the exit status and require `CHILDKILLED`. Second, with that check in
-place, the bad executable "did not fault": it had never been built, because
-the mutated count `len(d) + 1` is not provably an `ffi::c::ULong` (a
-compile-time TYPE error the old `catch` had counted as the fault). The
-over-read is now the literal count 4081 for a 4080-byte storage made by
-`bytesfromlist` at run time (a heap allocation, not a static storage: the
-NIR shows it), and a program that fails to compile can no longer pass for a
-fault.
+write exposures of 16-byte storages (a 16-byte header plus 16 bytes is a
+32-byte block) -- the fixture's read and write, libSystem's `memcpy` and
+`memcmp` -- under `/usr/lib/libgmalloc.dylib`, which puts every block on
+pages of its own, its end against the page after it: it runs to the oracle's
+value, so no C call reads or writes past those exposed storages. Three
+positive controls, one per kind of exposure -- the fixture's read one byte
+too long, its write one byte too long into the detach copy, and `memcpy` one
+byte too long -- must each be killed by a signal under libgmalloc, and the
+read must not be without it; a C probe (`guardMallocWorks`) shows the
+detector faults on this host before the test is enabled.
+
+The control took three macOS rounds to be real. First, libgmalloc's banner
+on standard error made `exec` report every guarded run as failed -- the good
+executable's correct value included -- so both the probe's and the test's
+fault checks passed without a fault; both now read the exit status and
+require `CHILDKILLED`. Second, with that check in place, the bad executable
+"did not fault": it had never been built, because the mutated count
+`len(d) + 1` is not provably an `ffi::c::ULong` (a compile-time TYPE error
+the old `catch` had counted as the fault). Third, with a literal count, the
+one-byte over-read of the 4080-byte storages the test then used (4096-byte
+blocks, made by `bytesfromlist` at run time: heap allocations, not static
+storages) ran to a value under libgmalloc. A branch-only diagnostic on the
+runners (macOS run
+[39616115189](https://github.com/mwagner-webdev/botlish/actions/runs/39616115189),
+at 905cb6e, never on main) separated the detector from the borrowing:
+
+| under libgmalloc | one byte past the end |
+|---|---|
+| a C `malloc` block of 16, 32, 4096 or 4112 bytes | SIGSEGV |
+| a 16-byte Botlish storage (a 32-byte block) | SIGSEGV |
+| a 4080-byte Botlish storage (a 4096-byte block) | no fault: the byte read as 0 |
+| the same storage read 40 000 bytes far | SIGSEGV |
+
+libgmalloc was loaded into the executable (its banner; `DYLD_PRINT_LIBRARIES`
+names it) and placed both storages' blocks to end exactly on a 16 KiB page
+boundary (their payload addresses were 16368 and 12304 modulo 16384), so
+each exposure was the block libgmalloc made; but the page after the 4096-byte
+block was mapped. Why it was was not established. What it means is that the
+4080-byte good run had never shown what it claimed; the test now claims what
+its controls show, for the storages it exposes.
 
 **BoringSSL.** Not run on macOS. The SHA-256 acceptance needs the
 package-owned static BoringSSL (tests/cffi/boringssl.tcl) and links
@@ -380,7 +417,26 @@ that change what C sees (`mutable-exclusivity-dropped`, `copy-back-omitted`,
 `capturing-parameter-accepts-borrow`, `ptr-int-from-byte-storage`,
 `unknown-access-admitted`, `strict0-not-replayed`, ...).
 
-PENDING-MUTANTS-MACOS
+**On macOS arm64** (the tier item `c-borrow-mutants` with the eight new
+mutants, the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215),
+543.8 s): **8 mutants, 8 killed, 0 survived, 0 skipped** --
+`apple-exposure-tagged` among them, the one Linux cannot run:
+
+| mutant | killed by (failed tests; the fuzzer) |
+|---|---|
+| `apple-exposure-tagged` | 18 tests (bb-coroutines, bb-gc-stress, bb-read-address, bb-read-address-above-4gib, bb-read-repeated-nested, ...) |
+| `exposure-is-object-word` | 20 tests (bb-read-address, bb-read-sizes, bb-read-zero-and-high-bytes, ...); the fuzzer, 18 disagreements in 15 programs |
+| `exposure-address-truncated` | 18 tests (bb-read-address-above-4gib among them) |
+| `keepalive-first-only` | `cb-exposure-after-arguments-nir` |
+| `detach-copy-short` | 25 tests; the fuzzer, 20 disagreements in 15 programs |
+| `read-exposure-copied` | `bb-read-address`, `cb-allocations`, `cb-nir-read-mutable` |
+| `exposure-wrong-owner` | 12 tests (bb-read-write-one-owner, bb-system-library, bb-system-library-gc-stress, ...) |
+| `variadic-byte-argument-admitted` | `bb-refusals` |
+
+Every kill list also names bb-guard-malloc, which failed on that tree
+unmutated (section 8): no kill rests on it, since every mutant fails at
+least one other test.
 
 ## 12. Fuzzing results
 
@@ -399,7 +455,21 @@ case is compiled alone and must name the model's reason).
 | 3 | 80 | 46 | 0 |
 | 4, `-gc-stress 1` | 80 | 41 | 0 |
 
-PENDING-FUZZ-MACOS
+**On macOS arm64** (the tier item `c-borrow-fuzz`, the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215)):
+
+| seed | cases | refused | disagreements |
+|---|---:|---:|---:|
+| 1 | 80 | 33 | 0 |
+| 2 | 80 | 37 | 0 |
+| 9, GC stress | 80 | 48 | 0 |
+
+Seeds 1 and 2 are the Linux table's (the same 33 and 37 refusals, the
+same programs), and both hosts run them without a disagreement. The
+C FFI fuzzer (`c-ffi-fuzz`, which drives real C callees, variadic calls
+among them, through Apple's convention) ran beside it: seeds 1, 2 and 9
+(GC stress), 120 functions each (43, 32 and 33 variadic; 211, 107 and 143
+trailing arguments), 0 disagreements.
 
 ## 13. Performance
 
@@ -423,15 +493,80 @@ write-back value is used. Read stays flat in the size (the differences are
 the method's noise, tens of ns either way, as the negative entry shows);
 write grows by the detach's copy, about 0.04 ns per byte at 64 KiB.
 
-PENDING-BENCH-MACOS
+**On macOS arm64** (the tier item `c-borrow-bench`, a GitHub `macos-15`
+runner, the dispatch
+[39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215);
+the same method; ns per call):
+
+| owner of S bytes | 0 | 64 | 4096 | 65536 |
+|---|---:|---:|---:|---:|
+| raw (a null `Ptr`: the operation alone) | 14.3 | 13.9 | 12.4 | 14.3 |
+| read exposure of a Bytes | 11.7 | 11.5 | 13.0 | 32.2 |
+| read exposure of a MutableBytes | 12.0 | 13.4 | 12.4 | 24.8 |
+| write exposure, result discarded | 6.4 | 34.1 | 181.2 | 1581.5 |
+| write exposure, result used | 72.4 | 97.9 | 266.9 | 1642.2 |
+
+Allocations of one call at S = 64, beside the program without it
+(`{Bytes MutableBytes Struct List}`): raw, read and read m `0 0 0 1` (the
+loop's own list, as without the call), write `0 1 0 0`, write+r `0 1 2 0` --
+exactly Linux's: a read exposure allocates nothing, a write exposure the one
+MutableBytes of its detach, and the two small structs of the write-back
+value when it is used. The shape is Linux's too: write grows by the detach's copy
+(about 0.024 ns per byte at 64 KiB), and read is flat up to 4 KiB. Its
+64 KiB entries are 10-20 ns above the others, which no per-byte work
+explains (the operation reads no byte, and the exposure reads none either);
+Linux's same column moved by 30 ns either way.
 
 ## 14. macOS GitHub Actions runs
 
-PENDING-RUNS
+Every macOS fact in this report is from these runs of
+`.github/workflows/macos-arm64.yml` on GitHub's `macos-15` arm64 runners
+(the shared development Mac was not used). A run on the branch was
+cancelled whenever a later push to the branch superseded it; its finished
+jobs' results stand.
+
+| run | commit | what it ran | result |
+|---|---|---|---|
+| [39574475382](https://github.com/mwagner-webdev/botlish/actions/runs/39574475382) | 6828d12 | the census baseline, before milestone 7 | the census of section 1 |
+| [39577805370](https://github.com/mwagner-webdev/botlish/actions/runs/39577805370) | 3587425 | milestone 7; Tier C under GC stress | smoke passed; acceptance 2/2 failed on c-byte-borrowing.test alone (bb-guard-malloc's banner defect); cancelled by the next push |
+| [39585147611](https://github.com/mwagner-webdev/botlish/actions/runs/39585147611) | b08ac4c | milestones 7 and 8; Tier C: fourteen files and the borrowing fuzzer under GC stress | smoke passed; Tier C: two test defects, bb-guard-malloc and di-stderr-failure, everything else passed under stress; cancelled by the next push |
+| [39593142355](https://github.com/mwagner-webdev/botlish/actions/runs/39593142355) | 7bdd5e2 | the fixes of those defects | smoke and acceptance 1/2 passed (darwin-io.test 27 of 27); cancelled at 12:54 by the branch push of the merge |
+| [39603310734](https://github.com/mwagner-webdev/botlish/actions/runs/39603310734) | d598dba (main) | the milestones merged into main | smoke and acceptance 1/2 passed, acceptance 2/2 failed on bb-guard-malloc alone (its 4080-byte control); workload-2048.test, context-traits.test passed |
+| [39603460215](https://github.com/mwagner-webdev/botlish/actions/runs/39603460215) | d598dba (dispatch) | Tier C: the mutants, the benchmarks, the fuzzers | 19 of 19 Darwin IO and 8 of 8 borrowing mutants killed; both fuzzers no disagreement; c-borrow-bench; darwin-io-bench's part 2 failed (the bench's `env` clash); acceptance as on main |
+| [39616115189](https://github.com/mwagner-webdev/botlish/actions/runs/39616115189) | 905cb6e (branch only) | the Guard Malloc diagnostic | its facts (section 8); the bench failed again (the interposer reached the linker); cancelled once Tier C had run |
+| [39624150692](https://github.com/mwagner-webdev/botlish/actions/runs/39624150692) | b5d07f5 | the reworked bb-guard-malloc, the bench's fix | **every job passed**: smoke, both acceptance shards, and Tier C (c-byte-borrowing.test 20 of 20 on interp and compile, darwin-io-bench all three parts) |
 
 ## 15. Linux regressions
 
-PENDING-LINUX
+**Linux x86-64.** tests.yml on milestone 7's own commit (3587425,
+dispatched on the branch), run
+[39577813683](https://github.com/mwagner-webdev/botlish/actions/runs/39577813683): every job
+passed (its native GC-stress job runs on pushes to main only). tests.yml on
+main at d598dba, run
+[39603310748](https://github.com/mwagner-webdev/botlish/actions/runs/39603310748): all thirteen
+jobs passed: the Tcl suite on interp and on compile, cranelift and
+cranelift-generic coverage, the four golden shards (every suite beside its
+Tcl originals), the stub-linked executables, the warning gate, the
+method-call kind filter's audit, the native Rust unit tests, and the whole
+suite under GC stress.
+
+**Linux AArch64.** tests-arm64.yml at 3587425, run
+[39577817112](https://github.com/mwagner-webdev/botlish/actions/runs/39577817112): all ten
+jobs passed, the whole suite under GC stress among them (1 h 37 min).
+tests-arm64.yml on main at d598dba (milestones 7 and 8 merged), run
+[39603310756](https://github.com/mwagner-webdev/botlish/actions/runs/39603310756): all ten jobs passed -- the Tcl suite on interp (8747
+tests: 8637 passed, 110 skipped, 0 failed) and on compile (8632 passed, 115
+skipped, 0 failed), cranelift and cranelift-generic coverage, the four
+golden shards, the native Rust unit tests (also under GC stress) and the
+whole suite under GC stress (1 h 49 min).
+
+static-decisions at d598dba (the front end changed: core/cabi.tcl and
+lib/), run [39603310752](https://github.com/mwagner-webdev/botlish/actions/runs/39603310752): the batched and the sequential scheduler
+agree on every golden suite (no DISAGREE, no DOES NOT COMPILE;
+`mutable-array.bot: batched 5/7 35.2s sequential 69/205 1229.9s`), as they
+did on the branch at b08ac4c ([39585334356](https://github.com/mwagner-webdev/botlish/actions/runs/39585334356)). windows-x86_64.yml at
+d598dba, run [39603310730](https://github.com/mwagner-webdev/botlish/actions/runs/39603310730): the smoke job and the four acceptance
+shards passed (Tcl 9.0.1 from the workflow's cache).
 
 ## 16. Remaining limitations
 
@@ -442,9 +577,13 @@ PENDING-LINUX
   package-owned build is not in the macOS workflow, and the binding names
   GNU libstdc++.
 * **Guard Malloc is a sampling detector**: it catches an access past the end
-  of an allocation whose size is a multiple of 16; bb-guard-malloc sizes its
-  storages accordingly, and the other tests' oracles check content, not
-  bounds.
+  of a block whose size is a multiple of 16 only when the page after the
+  block is unmapped, and on the runners it was not after a 4096-byte storage
+  made after a 4080-element list (section 8). bb-guard-malloc therefore
+  exposes only storages whose one-byte overruns its controls show faulting
+  (16 bytes); for larger exposures the evidence of bounds is the tests'
+  counts (each exposure's own length) and their content checks, not a
+  detector.
 * **The Botlish fixture is not C**: c-pointer-borrowing.test's fixture is the
   runtime's own Rust code. Only c-byte-borrowing.test and c-ffi.test count as
   evidence of Apple C calls.

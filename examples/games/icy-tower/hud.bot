@@ -1,0 +1,146 @@
+# hud.bot -- the text of the Icy Tower vertical slice
+# (ICY-TOWER-VERTICAL-SLICE-1.md): the lines the renderer draws over the
+# game and the one-line summary a run ends with. Pure, like tower.bot.
+#
+# Botlish has no Int-to-String and no integer division, and a
+# DecimalRounded value has no text either: numbers are spelled out here, a
+# digit at a time, by subtraction (as the 2048 workload does), and a height
+# is shown by decaying it to the Float64 nearest its guaranteed decimal and
+# counting its tenths.
+import decimal_rounded
+import float64
+import list
+import str
+import tower
+
+# ---------------------------------------------------------------------------
+# Numbers
+
+# TEXT followed by the digit D, 0 <= D <= 9.
+fn digit(text: str, d: int) -> str:
+    c = "0123456789".char_at(d):
+        on IndexNotFound:
+            return text
+    text.append_char(c)
+
+# How many times P fits into N, for 0 <= N < 10 * P.
+fn fits(n: int, p: int) -> int:
+    if n < p:
+        0
+    else:
+        1 + (n - p).fits(p)
+
+# TEXT followed by the decimal digits of N >= 0 from the digit worth P (a
+# power of ten, P <= N or P = 1) down.
+fn digits(text: str, n: int, p: int) -> str:
+    next = p * 10
+    if n < next:
+        text.digit(n.fits(p))
+    else:
+        text.digits(n, next).digit(n.mod(next).fits(p))
+
+# N in decimal.
+fn int_text(n: int) -> str:
+    if n < 0:
+        "".append_char('-').digits(-n, 1)
+    else:
+        "".digits(n, 1)
+
+# The Int nearest X.
+fn nearest(x: Float64) -> int errors NonFiniteFloat:
+    if x < 0.0:
+        float64::truncate(x - 0.5)
+    else:
+        float64::truncate(x + 0.5)
+
+# The text of a count of tenths: 123 is "12.3", 5 is "0.5", -5 is "-0.5".
+fn tenths_text(tenths: int) -> str:
+    if tenths < 0:
+        return "".append_char('-').concat(tenths_text(-tenths))
+    text = int_text(tenths)
+    padded = if str::length(text) < 2:
+        "".append_char('0').concat(text)
+    else:
+        text
+    n = str::length(padded)
+    whole = padded.substring(0, n - 1):
+        on LowerUnderrun:
+            ""
+        on UpperOverrun:
+            ""
+    tenth = padded.char_at(n - 1):
+        on IndexNotFound:
+            return whole
+    whole.append_char('.').append_char(tenth)
+
+# M with its one guaranteed decimal place, "12.3": the Float64 nearest the
+# guaranteed decimal, times ten, to the nearest Int.
+fn metres_text(m: DecimalRounded{minDecimalsPreserved: 1}) -> str errors NonFiniteFloat:
+    tenths_text(nearest(float64::from_decimal_rounded(m) * 10.0))
+
+# SECONDS as a timer shows them, at one place: quantized to a DecimalRounded
+# value first, so the display reads the decimal the timer states.
+fn timer_text(seconds: Float64) -> str errors NonFiniteFloat:
+    shown = decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 1}](seconds):
+        on UnrepresentableDecimal:
+            return "unrepresentable"
+    metres_text(shown)
+
+fn yes_no(b: bool) -> str:
+    if b:
+        "yes"
+    else:
+        "no"
+
+# PARTS, a space between each two.
+fn spaced(parts: List[str]) -> str:
+    fn from(i: int) -> str:
+        if i >= list::length(parts):
+            return ""
+        part = parts.get(i, "")
+        if i == 0:
+            part.concat(from(i + 1))
+        else:
+            "".append_char(' ').concat(part).concat(from(i + 1))
+    from(0)
+
+# ---------------------------------------------------------------------------
+# What the player reads
+
+# The lines in the top left corner: the score, the floor, the best height
+# and the time.
+fn status_lines(world: tower::World) -> List[str] errors NonFiniteFloat:
+    [
+        "SCORE ".concat(int_text(tower::score(world))),
+        "FLOOR ".concat(int_text(world.floor)),
+        "BEST ".concat(metres_text(world.best)).concat(" M"),
+        "TIME ".concat(timer_text(world.time)),
+    ]
+
+# The lines in the middle of the view: the controls at the start, the end
+# of the game when it is over, nothing otherwise.
+fn banner_lines(world: tower::World) -> List[str]:
+    if world.over:
+        return ["GAME OVER", "R: PLAY AGAIN   ESC: QUIT"]
+    if world.time < 3.0 and world.round == 1:
+        return ["LEFT/RIGHT OR A/D TO RUN", "LAND TO BOUNCE - CLIMB!"]
+    []
+
+# The one-line state of a run after FRAMES frames: what a smoke run prints
+# and what its tests compare.
+fn summary(world: tower::World, frames: int) -> str errors NonFiniteFloat:
+    p = world.player
+    spaced([
+        "frames=".concat(int_text(frames)),
+        "round=".concat(int_text(world.round)),
+        "floor=".concat(int_text(world.floor)),
+        "score=".concat(int_text(tower::score(world))),
+        "best=".concat(metres_text(world.best)),
+        "time=".concat(timer_text(world.time)),
+        "over=".concat(yes_no(world.over)),
+        "x=".concat(int_text(nearest(p.x))),
+        "y=".concat(int_text(nearest(p.y))),
+        "camera=".concat(int_text(nearest(world.camera.bottom))),
+        "platforms=".concat(int_text(list::length(world.platforms))),
+        "rng=".concat(int_text(world.rng)),
+    ])

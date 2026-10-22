@@ -392,6 +392,8 @@ with the declared error NonFiniteFloat. There is no negative zero either:
     < <= > >= == !=     comparisons
     float64::from_int(n)    Int -> nearest Float64 (import float64)
     float64::truncate(x)    Float64 -> Int, toward zero
+    float64::min(a, b)  float64::max(a, b)  x.abs()  x.clamp(low, high)
+                        bounds (lib/float64.bot); they never fail
 
 == RULES
   * A literal with a decimal point is a Float64, except where a
@@ -480,9 +482,9 @@ x * 1.0e300
 title: DecimalRounded: a decimal-rounding guarantee, not a representation
 summary: DecimalRounded{minDecimalsPreserved: N}: a number whose type guarantees that rounding it to N places (half to even) gives the intended decimal, proven by the compiler, observed at N places.
 index: concepts
-alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal; scalar refinement
+alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal
 keywords: decimal, rounding, round, half even, precision, places, guarantee, refinement, money, Float64, from_decimal_rounded, quantize, exact, ExactDecimal, observation, ceiling
-related: concept.floats stdlib.float64::from_decimal_rounded stdlib.decimal_rounded::round stdlib.module.decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
+related: concept.scalar-refinements concept.floats stdlib.float64::from_decimal_rounded stdlib.decimal_rounded::round stdlib.module.decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
 docs: DECIMAL-ROUNDED-MILESTONE-1.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC EQUALITY | *of a DecimalRounded value needs the precision of its type*
 match: CORE SEMANTIC TYPE | *DecimalRounded*
@@ -632,6 +634,52 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
 @error CORE SEMANTIC DECIMAL-GUARANTEE-LOST
 @at 2:5
 @end
+
+@topic concept.scalar-refinements
+title: Scalar refinements: compiler-known facts in braces
+summary: A scalar refinement, written TYPE{param: N, ...}, adds facts the compiler proves to a type without changing its values: DecimalRounded{minDecimalsPreserved: N} and List[T]{length: N} are the families.
+index: concepts
+alias: scalar refinement; scalar refinements; refinement parameters; refinement in braces; refinement family
+keywords: refinement, braces, parameter, fact, guarantee, family, length, minDecimalsPreserved, decay, forget, subtype, join
+related: concept.decimal-rounded concept.list-length concept.refinements concept.integer-domains error.refinement-parameter proof.types
+docs: DECIMAL-ROUNDED-MILESTONE-1.md LIST-CARDINALITY-REFINEMENTS.md
+
+== WHAT IT IS
+A scalar refinement is a type of a compiler-known family with integer
+parameters, written in braces after the type it refines:
+
+    DecimalRounded{minDecimalsPreserved: 2}    a decimal guarantee
+    List[int]{length: 4}                       an exact length
+
+The parameters are part of the type and the compiler owns their meaning.
+A refinement strengthens what is known about a value; it never changes what
+the value is: a List[int]{length: 4} is an ordinary List[int], with the
+same representation on every backend and no tag or check at run time.
+
+== RULES
+  * Forgetting is always valid and free: a refined value stands wherever
+    its family's weaker type is expected (a List[T]{length: 4} where a
+    List[T] is), with no conversion.
+  * Recovering a fact takes a proof (a literal, a guard, a declared
+    contract the compiler checks) or an explicit, fallible validation
+    (decimal_rounded::round, list::with_length). Admission never inserts
+    a check.
+  * Each parameter has an order: minDecimalsPreserved is a lower bound (4
+    places imply 2), an exact length implies only itself. Two branches
+    keep what both state and forget the rest.
+  * A family's parameters are checked where the type is written
+    (REFINEMENT-PARAMETER). These are not the predicate refinements of
+    `refined type` (concept.refinements), and not integer domains
+    (concept.integer-domains).
+
+== WHY
+One mechanism carries every compiler-known scalar fact, so a new kind of
+guarantee needs a schema row, not a type system of its own, and every fact
+decays, joins and prints the same way.
+
+== MORE
+concept.decimal-rounded, concept.list-length;
+DECIMAL-ROUNDED-MILESTONE-1.md, LIST-CARDINALITY-REFINEMENTS.md.
 
 @topic concept.integer-domains
 title: Integer domains: `type Name = Int in LO..HI`
@@ -876,14 +924,15 @@ summary: List[T] is an immutable sequence written [a, b]; its operations need `i
 index: concepts
 alias: List type; list literal; immutable list; sequence
 keywords: list, List, at, get, append, length, find, any?, all?, IndexNotFound, element, index, empty list
-related: concept.loops concept.values concept.destructuring proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.list stdlib.list::at stdlib.list::get
+related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.list stdlib.list::at stdlib.list::get
 docs: README.md STDLIB-NAMESPACES.md RETURNING-ITERABLE-LOOPS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import list`:
 length, at, append (a new List with one more element), get (with a
 default), find, any?, all?, none?. Element types are inferred; a parameter
-or result may declare `List[T]`.
+or result may declare `List[T]`, or `List[T]{length: N}` for a List of a
+proven exact length (concept.list-length).
 
 == RULES
   * `xs.at(i)` fails with the declared error IndexNotFound unless the
@@ -926,6 +975,154 @@ a
 
 == MORE
 STDLIB-NAMESPACES.md (at and get); RETURNING-ITERABLE-LOOPS.md.
+
+@topic concept.list-length
+title: List[T]{length: N}: a List of a proven exact length
+summary: List[T]{length: N} is an ordinary List whose length is proven to be exactly N: it decays to List[T] freely, is minted by proofs or list::with_length, and removes bounds and extent checks.
+index: concepts
+alias: list length refinement; exact length list; fixed length list; List length; length refinement; known length list; list cardinality; LengthMismatch
+keywords: List, length, exact, cardinality, refinement, with_length, LengthMismatch, decay, guard, fixed array, extent, bounds, tuple, IndexNotFound, LayoutExtentMismatch
+related: concept.scalar-refinements concept.lists stdlib.list::with_length stdlib.list::length proof.list-bounds concept.binary-layouts principle.name-the-parts warning.fixed-arity-list-return error.refinement-parameter
+docs: LIST-CARDINALITY-REFINEMENTS.md
+match: CORE SEMANTIC TYPE | *states no exact length*
+match: CORE SEMANTIC TYPE | *element(s) is never one of*
+match: CORE SEMANTIC TYPE | *list::with_length*
+
+== WHAT IT IS
+`List[int]{length: 4}` is the List family of scalar refinements
+(concept.scalar-refinements): a List[int] whose length is proven to be
+exactly 4. The length is a non-negative integer literal; it is knowledge,
+not representation -- the value is the same List as a List[int], with no
+inline array, tuple or fixed-size object behind it, and nothing checks it
+at run time.
+
+    fn sum3(r: List[int]{length: 3}) -> int:
+        r.at(0) + r.at(1) + r.at(2)      # no IndexNotFound to handle
+
+== RULES
+  * Decay is free: a List[T]{length: N} stands wherever a List[T] does.
+    The reverse needs the fact: a List[T] argument, field or result where
+    a length is required is a TYPE error ("states no exact length"), and a
+    List of another length is one too ("is never one of N"): an exact
+    length implies no other.
+  * What mints it: a List literal (`[1, 2, 3]` is List[int]{length: 3};
+    `[]` has length 0); a declared parameter, struct field or result
+    type; list::append (one more than its List); a collecting loop with no
+    break or continue over a List of known length or a counted range; the
+    copy of a fixed layout array (binary::parse, binary::load,
+    binary::read: `array 2 of array 3 of E` copies to
+    List[List[E]{length: 3}]{length: 2}); a guard
+    `if xs.length() == N:` (either operand order, or `!=` with an early
+    return); and list::with_length[List[T]{length: N}](xs), which checks
+    once and fails with LengthMismatch.
+  * What does not: `xs.length() >= N` (an exact length is an equality),
+    a filtering loop (`continue`), a MutableVector or MutableArray (their
+    length can change: they have no length refinement).
+  * A declared refined result is a contract the compiler holds every exit
+    to, and callers see it. An undeclared result forgets lengths its body
+    happens to have, and so do a generic function's instances, handlers'
+    admission and mutable containers' element types: an accident of the
+    implementation is never an API.
+  * Two branches of different lengths join to List[T] (equal lengths keep
+    theirs). Nothing is ever specialized by length.
+  * The proofs read it: list::at with an index in range needs no handler
+    (an index out of range is KNOWN-ERROR), list::length of it is the
+    constant N, and a write of it into a fixed layout array of N elements
+    loses its LayoutExtentMismatch path (a List of no known length keeps
+    the run-time check).
+  * It is not a tuple: a fixed group of different values is still a struct
+    (principle.name-the-parts), and FIXED-ARITY-LIST-RETURN warns exactly
+    as it would for List[T] (warning.fixed-arity-list-return). A declared
+    `-> List[T]{length: N}` is a list result type like `-> List[T]`.
+
+== WHY
+Exact lengths were known in several places -- literals, fixed arrays,
+loops -- but each proof kept its own copy. As a type, the fact crosses a
+function boundary by declaration, is checked once where it enters, and
+removes the checks it makes redundant, without making a List anything but
+a sequence.
+
+== EXAMPLES
+@example accept
+import list
+
+fn sum3(r: List[int]{length: 3}) -> int:
+    r.at(0) + r.at(1) + r.at(2)
+
+fn total(xs: List[int]) -> int:
+    if xs.length() != 3:
+        return -1
+    xs.sum3()
+
+[total([1, 2, 3]), total([4]), [7, 8, 9].sum3()]
+@caption A literal and a length guard mint the fact; the parameter needs no handler
+@value [6, -1, 24]
+@end
+
+@example accept
+import list
+
+fn row(xs: List[int]) -> List[int]{length: 3} errors LengthMismatch:
+    list::with_length[List[int]{length: 3}](xs)
+
+fn safe(xs: List[int]) -> List[int]{length: 3}:
+    xs.row():
+        on LengthMismatch:
+            [0, 0, 0]
+
+[safe([1, 2, 3]), safe([1, 2])]
+@caption Validated once, explicitly
+@value [[1, 2, 3], [0, 0, 0]]
+@end
+
+@example accept
+import abi::bytes
+import binary
+import list
+
+layout Row:
+    size 3
+    align 1
+    field cells: array 3 of binary::U8 at 0
+
+fn ends(r: List[binary::U8]{length: 3}) -> int:
+    r.at(0) + r.at(2)
+
+fn total(data: abi::bytes::Bytes) -> int errors LayoutLengthMismatch:
+    binary::parse(Row, data).cells.ends()
+
+binary::layout_length(Row)
+@caption A fixed array's copy states its extent
+@value 3
+@end
+
+@example reject
+import list
+
+fn sum3(r: List[int]{length: 3}) -> int:
+    r.at(0) + r.at(1) + r.at(2)
+
+fn total(xs: List[int]) -> int:
+    xs.sum3()
+
+0
+@caption A List[int] states no length, and admission inserts no check
+@error CORE SEMANTIC TYPE
+@at 7:5
+@end
+
+@example reject
+fn pair() -> List[int]{length: 2}:
+    [1, 2, 3]
+
+pair()
+@caption A declared length is a contract on every exit
+@error CORE SEMANTIC TYPE
+@at 1:8
+@end
+
+== MORE
+LIST-CARDINALITY-REFINEMENTS.md; concept.scalar-refinements.
 
 @topic concept.structs
 title: Structs: named and anonymous records of fields
@@ -2627,7 +2824,7 @@ summary: A `trait` declares operations; a trait-typed parameter accepts any valu
 index: concepts
 alias: trait; traits; interface; type class; protocol
 keywords: trait, interface, structural, conformance, view, witness, monomorphization, TRAIT-NOT-SATISFIED, TRAIT-VIEW-MISUSE, polymorphism, dispatch, vtable
-related: concept.context-traits concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
+related: concept.context-traits concept.hashable concept.specialization concept.method-sugar error.trait-not-satisfied error.trait-view-misuse
 docs: TRAITS.md
 
 == WHAT IT IS
@@ -2651,6 +2848,9 @@ on which only the trait's operations are allowed (as method calls).
     Nothing of the trait exists at run time.
   * A trait is declared at top level and needs at least one requirement;
     requirements are signatures only.
+  * The built-in trait Hashable (concept.hashable) is used the same way,
+    but its witnesses come from the language, not from a module's
+    functions.
 
 == WHY
 Traits abstract over values without a run-time cost or a second dispatch
@@ -2694,6 +2894,96 @@ describe(Pet {species: "cat"})
 
 == MORE
 TRAITS.md.
+
+@topic concept.hashable
+title: Hashable: values with total equality and total hashing
+summary: Hashable is a built-in trait, used like any trait, whose witnesses the language supplies: exactly the types whose every value has total equality and a hash.
+index: concepts
+alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
+keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
+related: concept.traits stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
+docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md
+
+== WHAT IT IS
+    fn fingerprint(x: Hashable) -> int:
+        hash(x)
+
+Hashable is a trait like any other to the code that uses it: a parameter,
+a result or a function of it is monomorphized per concrete type, and
+`x.hash()` is its one operation (the public hash). What differs is who
+supplies the witnesses: no module implements Hashable, and no source
+declaration can make a type satisfy it. A type is Hashable exactly when
+every value of it has total equality (== with it never stops with
+EQUALITY) and a hash, and so equal values always hash equally:
+
+  * Int and every integer domain, String, Bool, unit, UnicodeChar,
+    Float64, enum cases;
+  * a List or ImmutableSet of Hashable elements;
+  * a struct (also an opaque one) whose every field is Hashable.
+
+Not Hashable: a function (functions have no equality), a coroutine handle,
+a MutableArray or MutableVector, a C pointer or native view, a
+DecimalRounded value, and any struct, List or set that holds one; `any`
+and an untyped field, whose values are not known (one may hold a
+function); a view of another trait; an imprint variable.
+
+== RULES
+  * A value enters Hashable at a Hashable parameter or result, like any
+    trait: a type that is not Hashable is TRAIT-NOT-SATISFIED there, with
+    the field or element that is not, never later.
+  * hash(x) and x == y never stop with EQUALITY when the operands are
+    Hashable; the compiler drops the failure path.
+  * hash(x) of a value statically known not to be Hashable (a function,
+    a struct with a function field) is TRAIT-NOT-SATISFIED at compile time.
+    hash of a value of unknown type (an untyped parameter) is still
+    checked when it runs (EQUALITY), as before.
+  * Hashable cannot be declared, implemented or named by a type, struct,
+    enum, layout or trait of a program: the name is reserved.
+
+== WHY
+Hash-based collections need keys whose equality and hash agree and never
+fail; a function's equality is not total, so a function is no key. Making
+that a trait lets a function demand it of its arguments statically. The
+standard library's hash structures place keys with a separate,
+collision-hardened hash: SipHash-1-3 of the key under a secret the runtime
+draws once per process, which no program can read, pass or print. Unlike
+the public hash, its numbers differ from run to run, so keys chosen to
+collide under the public hash do not collide there; no program observes
+them.
+
+== EXAMPLES
+@example accept
+struct Point:
+    x: int
+    y: int
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+[fingerprint(Point {x: 1, y: 2}) == hash(Point {x: 1, y: 2}), fingerprint("apple") == "apple".hash()]
+@caption fingerprint is compiled for Point and for String; both hashes are total
+@value [true, true]
+@end
+
+@example reject
+struct Handler:
+    name: str
+    run: Fn{args: [int], return: int}
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+fn twice(n: int) -> int:
+    n * 2
+
+fingerprint(Handler {name: "double", run: twice})
+@caption Handler's field run is a function, which has no total equality
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 11:13
+@end
+
+== MORE
+HASHABLE-AND-KEYED-HASH.md; concept.traits.
 
 @topic concept.affine
 title: Affine values: one owner, moved, released

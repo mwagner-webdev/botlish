@@ -25,6 +25,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [UNICODE-CHAR-LITERALS.md](UNICODE-CHAR-LITERALS.md) -- `UnicodeChar`: a scalar type distinct from Int and String
 - [FLOAT64-MILESTONE-1.md](FLOAT64-MILESTONE-1.md) -- `Float64`: finite binary64 numbers, decimal literals, `/`, `NonFiniteFloat`, C `double` (completion report)
 - [DECIMAL-ROUNDED-MILESTONE-1.md](DECIMAL-ROUNDED-MILESTONE-1.md) -- `DecimalRounded{minDecimalsPreserved: N}`: the first scalar refinement, a decimal-rounding guarantee proven for constants, observed at its precision, independent of its binary64 representation (completion report)
+- [LIST-CARDINALITY-REFINEMENTS.md](LIST-CARDINALITY-REFINEMENTS.md) -- `List[T]{length: N}`: the second scalar refinement, an exact List length as an ordinary List's type fact (the `exactly` order, applied bases, declared-only contracts); minted by literals, loops, guards, layout copies and `list::with_length`, consumed by the bounds, extent and range proofs; the migration of every exact-cardinality source, fuzzer, mutants, benchmark (completion report)
 - [ELIF.md](ELIF.md) -- `elif`
 - [METHOD-SUGAR.md](METHOD-SUGAR.md) -- method-call sugar
 - [FLAGS.md](FLAGS.md) -- flag parameters
@@ -65,6 +66,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 ### Abstraction: traits, contexts and modules
 
 - [TRAITS.md](TRAITS.md) -- traits: eager structural views, monomorphized away
+- [HASHABLE-AND-KEYED-HASH.md](HASHABLE-AND-KEYED-HASH.md) -- the intrinsic trait `Hashable` (witnesses the language supplies), total hashing and equality, and the private keyed table hash
 - [CONTEXTS.md](CONTEXTS.md) -- contexts: static execution-environment dependencies
 - [CONTEXT-TRAITS.md](CONTEXT-TRAITS.md) -- context traits: portable I/O and textual paths
 - [IMPORTS.md](IMPORTS.md) -- imports: explicit namespace dependencies
@@ -117,6 +119,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [C-FFI.md](C-FFI.md) -- `extern c library` and `extern c fn`: real link-time C calls with the platform ABI, linked by the system linker; contracts, byte borrowing and write-back through real C, truthful pointer results, retaining calls as direct authority; the Tcl and BoringSSL SHA-256 acceptance
 - [C-BINDGEN.md](C-BINDGEN.md) -- automatic C binding generation (`tools/c-bindgen.tcl`): ordinary Botlish bindings generated from real C headers by interrogating the C compiler (ABI, symbol and evidence probes), thunks for macros and static inline functions, explicit contracts, a deterministic report and manifest, `ffi::c::Bool`; the Tcl, BoringSSL and SDL3 acceptance
 - [C-BINDGEN-LAYOUTS.md](C-BINDGEN-LAYOUTS.md) -- generated native record layouts: an ordinary `layout` per complete C record whose fields a layout represents, with the target C compiler's sizes, alignments and offsets (verified statically, by a second compiler and by a runtime C oracle), the blocked records and their reasons, layout and API pressure; the windows-x86_64-gnu target and the Win32 binding generated with MinGW-w64
+- [C-FFI-ERROR-CAPTURE-MILESTONE-1.md](C-FFI-ERROR-CAPTURE-MILESTONE-1.md) -- the C FFI's error-capture window: a write-exposing C call's write-back value represented as fields (the C result, each private copy's storage) and its MutableBytes built at their use, `keepalive` without a machine call, so nothing the compiler emits allocates, collects or calls between a C function's return and the program's errno read; NIR, object-file and single-step detectors with positive controls, an errno-changing allocator, Linux and macOS evidence (completion report)
 - [C-FLOAT-FFI-MILESTONE-1.md](C-FLOAT-FFI-MILESTONE-1.md) -- C `float` and `double` across the C FFI: `ffi::c::Float` (binary32, carrier Float64; no Botlish Float32) and `ffi::c::Double` as C representations in extern signatures, function pointers, pointees, layout fields, arrays and unions; finite-only admission, exact widening, checked round-to-nearest-even narrowing (`NonFiniteFloat`, never clamped), the same rule at compile time; native f32/f64 lowering (SysV, AAPCS64, Apple, Win64); the binding generator's float and double, `long double` diagnosed (completion report)
 - [ABI-NUMERIC-DOMAINS.md](ABI-NUMERIC-DOMAINS.md) -- `abi::I8` ... `abi::Usize`
 - [LINUX-X86-64-SYSCALL.md](LINUX-X86-64-SYSCALL.md) -- direct Linux x86-64 syscalls
@@ -253,6 +256,7 @@ Botlish to find what the language, library, compiler and tools need.
 - [DIAGNOSTIC-RECOVERY.md](DIAGNOSTIC-RECOVERY.md) -- after the first 15-puzzle run: failed method sugar is poison and the explicit spelling's MISSING-IMPORT (never `any`), one compilation reports every independent error (past resolution failures, a call's whole unhandled set, every rejected reference), and one malformed construct is one error; the diagnostic-efficiency corpus
 - [HASH-TABLE-EXPERIMENT.md](HASH-TABLE-EXPERIMENT.md) -- hash tables, set membership and the compiler/runtime division of labor: sixteen Botlish table variants against a Rust reference of the same algorithms, five general compiler prototypes (value-semantics precision, inline arrays, raw `mod`, an allocation-free hash, bounds theorems), a probe primitive measured and rejected, constant membership as a compiler representation choice, the adversarial review that found and fixed twelve soundness bugs, and the answers to the milestone's twelve questions (`audit/hash-table/`)
 - [HASH-TABLE-COMPILER-PRESSURE.md](HASH-TABLE-COMPILER-PRESSURE.md) -- its catalogue: every compiler and runtime deficiency the experiment found (VS, CP, CG, RO, CO, RT, AR entries), each with its minimal source, evidence, consequence, generality, candidate fix and, where prototyped, the result
+- [ICY-TOWER-VERTICAL-SLICE-1.md](ICY-TOWER-VERTICAL-SLICE-1.md) -- a playable Icy Tower-style game on Linux (`examples/games/icy-tower/`): real-time loop, physics, collisions, camera, score and restart over the generated SDL3 binding (C floats, native layouts, a variadic call), a Linux executable (`audit/icy-tower/artifacts/`), headless and Xvfb validation, an independent oracle, 26 mutants, the allocation and FFI profile, and what the application exposed in the language, runtime, stdlib and FFI
 
 ## Audits, censuses and investigations
 

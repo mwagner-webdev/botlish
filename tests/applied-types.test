@@ -220,12 +220,12 @@ appliedtypeslib::consume(appliedtypeslib::make_smalls())
 # List construction inference: homogeneous, sibling LUB, heterogeneous, empty
 # (spec 15-21)
 
-test applied-type-construct-homogeneous {[one(), two()] infers List[Small] with no source annotation on the binding} -body {
+test applied-type-construct-homogeneous {[one(), two()] infers List[Small] with no source annotation on the binding (a List literal's exact length is part of its type: LIST-CARDINALITY-REFINEMENTS.md)} -body {
     set h [surface::compile [format {%sxs = [one(), two()]
 1} $::smallDecl] homog.bot -strict 0]
     set bindExpr [lindex [hirFind $h bind xs] 0]
     hir::types::show [hir::typeOf $h $bindExpr]
-} -result {List[int[Small]]}
+} -result {List[int[Small]]{length: 2}}
 
 test applied-type-construct-lub-sibling {[tinyValue, smallValue] infers List[Small] when lub(Tiny, Small) = Small} -body {
     surface::compile [format {%stype Tiny = Small in 0..3
@@ -237,7 +237,7 @@ consume([t(), one()])} $::smallDecl] lubsib.bot
     set ok 1
 } -result 1
 
-test applied-type-construct-same-domain-siblings-not-conflated {same-domain siblings A, B do not become List[A]/List[B]; the common type is the broad Int} -body {
+test applied-type-construct-same-domain-siblings-not-conflated {same-domain siblings A, B do not become List[A]/List[B]; the common type is the broad Int (the literal's length kept: LIST-CARDINALITY-REFINEMENTS.md)} -body {
     set h [surface::compile {type A = Int in 0..3
 type B = Int in 0..3
 
@@ -249,7 +249,7 @@ xs = [make_a(), make_b()]
 1} siblings.bot -strict 0]
     set bindExpr [lindex [hirFind $h bind xs] 0]
     hir::types::show [hir::typeOf $h $bindExpr]
-} -result {List[int]}
+} -result {List[int]{length: 2}}
 
 test applied-type-construct-heterogeneous {[1, "x"] does not become a false precise List[T]; it stays the existing broad/aggregate representation} -body {
     appliedTypeRejects {fn f(xs: List[int]) -> int:

@@ -119,7 +119,7 @@ hierarchy (`ns-no-nested-stdlib`):
 | `mutable_array` | `allocate capacity at set copy freeze` | `from_list create` (moved from the old `mutarray` module), `get` (new) |
 | `immutable_set` | `from_list contains` | none |
 | `char` | `scalar_value` | none (no module file since §11) |
-| `float64` (FLOAT64-MILESTONE-1.md) | `from_int truncate` | none (no module file) |
+| `float64` (FLOAT64-MILESTONE-1.md) | `from_int truncate` (and `from_decimal_rounded`, DECIMAL-ROUNDED-MILESTONE-1.md) | `min max abs clamp` (`lib/float64.bot`, ICY-TOWER-VERTICAL-SLICE-1.md) |
 | `linux::abi::x86_64` (was `linux::abi`), `linux::abi::aarch64` (LINUX-SYSCALL-TRANSPORTS.md) | `syscall` | (unchanged) |
 | `binary::native` (NATIVE-LAYOUT-VIEWS.md) | `view` | none (lib/binary.bot's comment) |
 | `coroutine` | `done?` (COROUTINES.md; its other operations are internal `coroutine#...` root natives no source spells) | none (no module file) |

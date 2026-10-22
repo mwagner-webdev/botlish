@@ -183,12 +183,18 @@ fn top() -> int:
 top()
 }
 
-test ht-coroutine-protocols {the coroutine protocols are inferred again when the text is read, as a build infers them (the built HIR's, without the yield effect hir::coroutines::verify adds, which the text prints), so native lowering types a resume through a structural Coroutine contract (e.value) on the read HIR as on the built one} -constraints nativeBuilt -constraints nativeCoroutines -body {
+test ht-coroutine-protocols {the coroutine protocols are inferred again when the text is read, as a build infers them (the built HIR's, without the yield effect hir::coroutines::verify adds, which the text prints), and the read HIR runs the coroutine program to the built one's outcome on the Tcl backends} -body {
     set hir [htHir $::htCoroutine]
     lassign [htRoundTrip $hir] text read
     list [expr {[dict get $read coroutines] eq [dict remove [dict get $hir coroutines] mayYield next]}] \
         [dict exists $read coroutines mayYield] \
-        [htOutcomes $hir $read {interp compile cranelift-generic cranelift}]
-} -result {1 0 {interp 1 -1 compile 1 -1 cranelift-generic 1 -1 cranelift 1 -1}}
+        [htOutcomes $hir $read {interp compile}]
+} -result {1 0 {interp 1 -1 compile 1 -1}}
+
+test ht-coroutine-protocols-native {native lowering types a resume through a structural Coroutine contract (e.value) from the coroutine protocols reading inferred again, on the read HIR as on the built one} -constraints {nativeBuilt nativeCoroutines} -body {
+    set hir [htHir $::htCoroutine]
+    lassign [htRoundTrip $hir] text read
+    htOutcomes $hir $read {cranelift-generic cranelift}
+} -result {cranelift-generic 1 -1 cranelift 1 -1}
 
 cleanupTests

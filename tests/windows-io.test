@@ -367,7 +367,7 @@ test wi-c-declarations {lib/windows.bot declares kernel32's GetStdHandle, WriteF
     list $foreign [hir::foreign::links $hir] $contracts
 } -result {{{GetLastError {} u32} {GetStdHandle u32 ptr} {WriteFile {ptr ptr u32 ptr ptr} i32}} kernel32 {{windows::c_get_std_handle {{which - -}} unknown} {windows::c_write_file {{file unknown declared-noescape} {buffer read declared-noescape} {count - -} {written write declared-noescape} {overlapped unknown declared-noescape}} unknown} {windows::c_get_last_error {} unknown}}}
 
-test wi-last-error-read-first {a failed WriteFile's last-error code is read before anything else can change it: in windows::write_file nothing runs between the WriteFile call and GetLastError but the write-back value of the byte count's exposure (two small objects built right after the call) and the test of WriteFile's BOOL -- no other C call, no Botlish call} -body {
+test wi-last-error-read-first {a failed WriteFile's last-error code is read before anything else can change it: in windows::write_file nothing runs between the WriteFile call and GetLastError but the keepalives of its exposures (no machine code), the result's unboxing and the test of WriteFile's BOOL -- no allocation, no other C call, no Botlish call: the byte count's write-back value is built only after GetLastError (C-FFI-ERROR-CAPTURE-MILESTONE-1.md)} -body {
     set nir [native::nir [wiHir $::rawText]]
     set body [nirBody $nir windows::write_file]
     set from [lsearch -glob $body "*foreigncall 1 *"]
@@ -381,7 +381,7 @@ test wi-last-error-read-first {a failed WriteFile's last-error code is read befo
             continue
         }
     }
-} -result {keepalive keepalive structnew structnew structget runbox rieq br}
+} -result {keepalive keepalive runbox rieq br}
 
 test wi-request-is-a-dword {WriteFile is asked for at most a DWORD's worth of bytes: the count is DATA's length when it fits 32 bits and 4294967295 otherwise, proven an ffi::c::ULong (LLP64's unsigned long, 32 bits) with no run-time check; a longer Bytes is a short write by construction} -body {
     set nir [native::nir [wiHir $::rawText]]

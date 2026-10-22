@@ -109,7 +109,7 @@ Before anything was designed, the existing path was read end to end
 | how `Bytes` reaches a pointer argument | `abi::x86_64::from_bytes(data)` (a root native, hir/syscall.tcl's `BytesProblems` holds its argument to `abi::bytes::Bytes`) lowers to `StorageOf` (the opaque struct's one `storage` field: a virtual field register, else `structget`) and `op bytesaddr %s` (`rt_bytes_addr`: object + 16, as a small Int). The word is a `Register64`'s; `linux::abi::x86_64::syscall` unboxes it (`register_word`) into rsi |
 | how writable storage reaches a writing syscall | the same with `from_mutable_bytes` and `op mbytesaddr` (`rt_mbytes_addr`), the writable kind's op: the two ops are two run-time kind checks, never interchanged |
 | pinned, stable, copied? | stable: the collector never moves an object, so an address is valid exactly while its storage is live. Nothing is pinned or copied by the bridge |
-| what keeps it alive | `fn keepAddr` (address register -> storages) and `op keepalive %s` after the syscall (`SyscallCall`), also after a call that takes an address-carrying operand (`AddressFlowAcrossCall`); `rt_keepalive` is a real helper call (`black_box`), so the storage is a root in the stack map of every safepoint up to the syscall's own |
+| what keeps it alive | `fn keepAddr` (address register -> storages) and `op keepalive %s` after the syscall (`SyscallCall`), also after a call that takes an address-carrying operand (`AddressFlowAcrossCall`); the keepalive is a use of the storage in NIR, so the root plan keeps the storage a root in the stack map of every safepoint up to the syscall's own (it was a call of the helper `rt_keepalive` until C-FFI-ERROR-CAPTURE-MILESTONE-1.md made it no machine code) |
 | a Botlish Ptr-like value? | no: the address is a `Register64` word (an Int). It *can* leave the function (returned, stored), which is the raw layer's documented sharp edge; provenance is tracked through structs, Lists, `if` joins and calls, not through module statics or closures |
 | HIR/NIR representation | HIR: an ordinary call of the bridge native, an ordinary `struct` literal for the registers; NIR: `bytesaddr`/`mbytesaddr`, `syscall_linux_x86_64`, `keepalive` |
 | read vs write distinguished? | by the owner type (two bridges, two ops); the syscall itself does not know which register points at what |
@@ -322,8 +322,11 @@ keepalive) stays.
   read-and-modify, and no third mode (`inout`) is needed. Two modes, read and
   write, is what real current use requires.
 * **Copy cost**, measured (section 18): one fresh storage of the owner's
-  length and one copy of its bytes per write exposure, beside two small
-  objects when the write-back result is used. A fresh owner
+  length and one copy of its bytes per write exposure, beside one small
+  object, the copy's MutableBytes, when the updated buffer is read whole;
+  the write-back struct is never built when its fields are read
+  (C-FFI-ERROR-CAPTURE-MILESTONE-1.md; it was built at every call, with the
+  MutableBytes, before). A fresh owner
   (`abi::bytes::zeroed(...)` written inline) is copied all the same, as
   `linux::read` copies a fresh buffer: eliding it needs uniqueness or
   deadness facts the compiler does not have (MUTABLE-BYTES.md, "How
@@ -344,10 +347,32 @@ HIR node has `borrows`):
    MutableBytes read exposure also uses `mbytesaddr`);
 3. the operation, given the addresses (here the fixture's `op ffifixture*`;
    the next milestone's C call);
-4. `KeepExposedAlive`: `op keepalive` of every exposed storage;
-5. with a write exposure, the write-back struct (`structnew` of the copy's
-   MutableBytes, then of the anonymous struct), unless the call is a
-   statement.
+4. `KeepExposedAlive`: `op keepalive` of every exposed storage -- a use
+   of it in NIR, no machine code (the root plan's liveness is what keeps the
+   storage a root through the operation's safepoint);
+5. with a write exposure, the write-back value: as fields where escape
+   analysis made it a virtual value -- the C result's register and, for
+   each written parameter, the copy's storage register (its MutableBytes
+   opened) -- built only where a use needs an object (below); as the
+   struct (`structnew` of the copy's MutableBytes, then of the anonymous
+   struct) only where the value must be one at the call, and not at all
+   when the call is a statement.
+
+**The write-back value** (C-FFI-ERROR-CAPTURE-MILESTONE-1.md). Nothing is
+built between the operation and the code that reads its result: escape
+analysis recognizes the call as a construction of its anonymous struct
+(`hir::escape::WriteBackResult`, like a struct literal or a syscall's
+Register64), and the representation class it reaches opens each
+MutableBytes field (`WriteBackTree`) -- also where a use reads it whole
+(`r.buf`), as long as that use runs as often as the binding (the same
+innermost loop; a parameter's never): the MutableBytes is built there, at
+the use, once per scope (`native::lower::OpenedFieldObject`). An exposed
+`r.buf` handed to another foreign call is read for its storage alone
+(`OpenedOwnerStorage`). So a C function that fails with a sentinel and
+leaves its reason in errno has its errno read before anything allocates or
+calls the runtime: read(2) through `darwin::read` is `foreigncall`,
+`keepalive`, the comparison, `call errno` (`di-errno-read-first`,
+`tests/c-ffi-error-capture.test`).
 
 The address is a tagged small Int (`bytesaddr`'s result: what the syscall
 path's register words are too), never a `cptr` word: "Bytes -> backing
@@ -386,7 +411,7 @@ for the call, a copy back for a write).
 | copied? | no | no (an immutable Tcl value is shared) |
 | owner keepalive | `op keepalive %storage` after the operation: a GC root in the stack map of every safepoint up to and including the operation's own | the argument value is held by the call's frame; the table entry is closed when the call ends |
 | **MutableBytes, read** | its own storage, exposed as it is (`mbytesaddr`), no copy, kept alive the same way | its hex, no copy |
-| **MutableBytes, write** stable how? | a private copy (`rt_mbytes_clone`: a fresh `16 + n`-byte object), non-moving, kept alive by the keepalive (and by the write-back struct when the result is used) | the exposure's own hex, rewritten by `StoreExposed` |
+| **MutableBytes, write** stable how? | a private copy (`rt_mbytes_clone`: a fresh `16 + n`-byte object), non-moving, kept alive by the keepalive (and afterwards by the write-back value's field register, or its object, while the result is used) | the exposure's own hex, rewritten by `StoreExposed` |
 | copied? | yes: the detach, one copy of n bytes | the hex is a copy by nature (Tcl values are immutable) |
 | copy back? | none: the copy C wrote *is* the result's MutableBytes (no second copy) | none: the final hex becomes the result's `{mutbytes HEX}` |
 | exclusivity | by construction: the copy is private to the call | likewise: the exposure entry belongs to the call |
@@ -673,15 +698,22 @@ same behaviors are `core::cabi::FixtureImpl` over the exposure model.
   pinned by `cb-nir-read`, `cb-nir-read-mutable` and `cb-nir-write`
   (operand identities checked register by register: the operation's
   address is the address op's result, the keepalive's operand the exposed
-  storage, the copy's operand the owner's storage).
+  storage, the copy's operand the owner's storage). Since
+  C-FFI-ERROR-CAPTURE-MILESTONE-1.md the two `structnew`s are gone: `r` is
+  fields (`%7` and `%10`), and `r.output` read whole is one `structnew 0
+  %7` at that use.
 * **Allocations** (`cb-allocations`; what the exposure itself costs beside
   the same program without the call, natively, {Bytes MutableBytes Struct
   List}): a read exposure of a Bytes or a MutableBytes held in a binding:
   `0 0 0 1` (the List is the operation's result); of a Bytes written inline
   as the argument: `0 0 1 1` (its one-field wrapper, the bridge's existing
-  frontier); a write exposure whose result is used: `0 1 2 0` (the copy,
-  its MutableBytes wrapper, the write-back struct); as a statement: `0 1 0
-  0`.
+  frontier); a write exposure whose updated buffer is used: `0 1 1 0`
+  (the copy and its MutableBytes; `0 1 2 0`, the write-back struct too,
+  before C-FFI-ERROR-CAPTURE-MILESTONE-1.md); as a statement: `0 1 0 0`.
+  `cb-write-back-allocations` pins the shapes: a write-back value bound but
+  unread or discarded costs the copy alone, its buffer read whole the copy
+  and one MutableBytes, once per scope however often it is read, and once
+  at the call when a loop deeper than the binding reads it.
 * **Executables**: a standalone executable (rustc linker, and the stub
   linker) of a program with read and write exposures prints what every
   in-process backend computes (`cb-executable`).
@@ -710,13 +742,15 @@ a quiet 4-core container):
 | `linux::read` | 0 | 1 | 1 | 0 |
 
 * **Read exposure: fixed cost, no allocation, no copy.** Two helper calls
-  (`rt_bytes_addr`/`rt_mbytes_addr`, `rt_keepalive`) beside the operation,
+  (`rt_bytes_addr`/`rt_mbytes_addr`, `rt_keepalive`; one since
+  C-FFI-ERROR-CAPTURE-MILESTONE-1.md, where the keepalive is no call) beside the operation,
   independent of the size: the read rows do not grow with S, and their
   differences from the raw row are within this method's noise (the
   subtracted baseline is a different program; tens of ns either way).
 * **Write exposure: linear in the size, the detach.** One fresh storage and
   one copy of S bytes: about 0.06 ns per byte at 64 KiB (3.7 us), and two
-  small objects (~200 ns) when the write-back result is used -- exactly
+  small objects (~200 ns) when the write-back result is used (one since
+  C-FFI-ERROR-CAPTURE-MILESTONE-1.md, which measures the difference) -- exactly
   `linux::read`'s detach cost, which the syscall row shows beside its
   syscall (~260 ns for EBADF). Pinning is never needed (the collector does
   not move objects), and nothing is materialized but the copy.
@@ -860,10 +894,14 @@ the fixture (`core/cabi.tcl`), `-foreign` (`core/native.tcl`), the
 `-foreign` cases of `hir/types.tcl`'s `Call` or `hir/range.tcl`'s
 `VerifyCall`, the shared exposure lowering (`native/lower.tcl`'s
 `ExposeStorage`, `KeepExposedAlive`, `BorrowCall`), the exposed-argument
-case of `hir/escape.tcl`, the `borrowRefused` replay (`hir/lower.tcl`,
-`compiler/compiler.tcl`) or `runtime/ffifixture.rs`, run
-`tests/c-pointer-borrowing.test` and `tests/c-byte-borrowing.test` (both
-also under `BOTLISH_NATIVE_GC_STRESS=1`),
+case of `hir/escape.tcl`, the write-back value's representation
+(`hir/escape.tcl`'s `WriteBackResult`, `WriteBackTree`, the write-back cases
+of `NestingPlan`; `native/lower.tcl`'s `FieldValue`, `OpenedFieldObject`,
+`OpenedOwnerStorage`), the keepalive's codegen, the `borrowRefused` replay
+(`hir/lower.tcl`, `compiler/compiler.tcl`) or `runtime/ffifixture.rs`, run
+`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test` and
+`tests/c-ffi-error-capture.test` (all also under
+`BOTLISH_NATIVE_GC_STRESS=1`),
 `audit/c-pointer-borrowing/tools/fuzz.tcl` (several seeds, once with
 `-gc-stress 1`) and `audit/c-pointer-borrowing/tools/mutate.tcl` (every
 mutant in its `mutants.txt` that applies to the host must still apply and

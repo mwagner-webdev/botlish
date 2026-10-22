@@ -239,7 +239,10 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 zipkit holding main.tcl, the compiler stack and both native executables,
 needing only glibc. The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`). Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`), then publishes it as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
+README's download button links to that tag and asset name: rename either
+only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -723,6 +726,55 @@ diagnostic kinds and the calls they are reported at). A change to that gate,
 to those kinds or to where they are anchored also needs
 `tests/static-economics.test` (`se-property-plan-gate`, `se-equal-plan-gate`)
 and the static-decision harnesses (Static intrinsics, below).
+
+## Hashable and the keyed table hash
+
+`Hashable` (HASHABLE-AND-KEYED-HASH.md) is an intrinsic trait: an ordinary
+trait to its clients (a parameter, a view, a requirement `hash`), whose
+witnesses only the language implementation supplies. A type is a witness
+when every value of it has total equality and total hashing
+(`hir::types::HashClass`, read from the runtimes' own refusal lists
+`core::value::incomparable` and `core::hashing::unhashable`); `any`, an
+imprint variable and a view of another trait are unknown, never witnesses.
+The public `hash` is unchanged (outputs pinned) and admits `checked`: a
+statically non-Hashable argument is TRAIT-NOT-SATISFIED, a Hashable one
+lowers to the total `hashtotal` (no EQUALITY edge), anything else stays the
+dynamic hash. `table_hash::of` is the private keyed hash: SipHash-1-3 of the
+canonical walk (never a mix of the public hash), keyed by a process-local
+secret drawn once from the system, `required` Hashable, internal to the
+standard library. Keep it so:
+
+* No user witness: never let a declaration, an `impl`, a field or a name
+  make a type Hashable, and never add custom hashing, identity hashing, an
+  `Equatable` or a derive. A user trait, struct, enum, layout or type named
+  `Hashable` stays a collision.
+* No Botlish value of the secret, no key argument, no way to read or set it
+  but the test hooks (`core::hashing::useTableHashKey`, the driver's
+  `--table-hash-key`, which only `native/native.tcl` passes), and no
+  observable table hash: the namespace `table_hash` is internal
+  (`core::native::declareInternalNamespace`): INTERNAL-NAMESPACE for an
+  import or a qualified name outside the standard library,
+  INTERNAL-INTRINSIC-VALUE for its native taken as a value.
+* Admission is registration metadata (`-hashing {K required|checked}`),
+  never a check keyed on a native's name; the totality walk is one
+  statement for both operations: never a second list of kinds.
+* The two folds share one canonical walk per runtime
+  (`core::hashing::Encode`; ops.rs's `walk` over a `CanonicalSink`): change
+  both runtimes together, and the oracle (`audit/hashable/tools/oracle.py`)
+  with them.
+
+If you change any of that (the report's "What to run when changing this"
+lists the files), run `tests/hashable.test`, `tests/native-hashing.test`,
+`tests/traits.test`, the golden suites `hashable.bot` and
+`hashable-admission.bot` (`tclsh9.0 tests/local.tcl
+tests/golden/hashable.bot tests/golden/hashable-admission.bot`),
+`audit/hashable/tools/fuzz.tcl` (several seeds, once with `-gc-stress 1`),
+`audit/hashable/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), `python3 -I
+audit/hashable/tools/oracle.py selftest` and `cargo test --release
+--manifest-path native/Cargo.toml --lib hash`. `audit/hashable/tools/census.tcl`
+regenerates the witness census; `bench/hashable.tcl` the performance report.
 
 ## Context traits
 
@@ -1237,9 +1289,9 @@ core/cabi.tcl's `platforms` (Compilation targets, below). Keep it so:
   could call C (`di-errno-read-first` pins the NIR). errno is read through
   `__error()` and a native view of a one-field layout: no pointer
   dereference operator, no stored or cached errno pointer, no global errno.
-  `darwin::read`'s write-back value is built between its call and the errno
-  read (two allocations; MACOS-AARCH64-MILESTONE-8.md, section 7): do not
-  add a third thing there.
+  Nothing runs between `darwin::read`'s call and its errno read but the
+  keepalive (no machine code) and the comparison: its write-back value is
+  fields (C FFI error capture, below); never add a statement there.
 * `open` is declared with its genuine variadic prototype; the creation mode
   is its one trailing argument, an `ffi::c::UShort` (macOS's `mode_t`).
   Never declare a variadic C function with a fixed trailing parameter: on
@@ -1358,6 +1410,56 @@ when changing this", lists the files), run `tests/decimal-rounded.test`,
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule) and `cargo test
 --release --manifest-path native/Cargo.toml --lib decimal`.
+
+## List length refinements
+
+`List[T]{length: N}` (LIST-CARDINALITY-REFINEMENTS.md) is the scalar-refinement
+schema's second family (`hir/refinements.tcl`): an ordinary immutable List
+whose exact length the compiler knows. Keep it so:
+
+* A refinement is knowledge, never representation: no tag, header, wrapper,
+  check or allocation for a refined List on any backend, no conversion at
+  decay, and no specialization or instance keyed by a length. Its one
+  run-time operation is the explicit validator `list::with_length[T](xs)`
+  (`list#with_length`, `listwithlen`), which returns its operand.
+* One canonical representation: a constant List length is stated by the
+  type (`{srefined List {length N} BASE}`) and read from it
+  (`hir::cardinality::DefinedLength`, `TypedLength`,
+  `hir::types::MeasuredValue`); never add a second constant-length fact
+  beside it. A new source mints through `-result-length` (core/native.tcl)
+  or the type rules, never by a native's name, and the schema names no
+  parameter outside its table (`llr-schema-generic`).
+* Exact length is an equality fact: never order it like a bound, invent a
+  range in a join, or mint it from an inequality. Admission never inserts a
+  length check: recovering a length takes a proof or the validator.
+* A minted length is an implementation fact: it crosses a function boundary
+  only as a declaration (the family's `declared` interface,
+  `hir::types::ForgetInferred`): undeclared results, semantic instances,
+  imprint bindings, trait witnesses, callable contracts, mutable element
+  contracts and handler admission forget it.
+* No MutableVector or MutableArray length refinement, no symbolic or
+  relational length, no user-defined key. FIXED-ARITY-LIST-RETURN reads no
+  refinement: a declared `List[T]{length: N}` result is a list result type
+  like `List[T]`, and an undeclared literal exit warns as before.
+
+If you change the List row or the schema's `exactly`, applied-base or
+interface machinery, the refined-List cases of `hir/types.tcl`, the length
+guard (`hir/refine.tcl`'s `MeasuredEquality`), admission and its messages
+(`hir/range.tcl`), the size forms (`hir/cardinality.tcl`), the proofs that
+read them (`hir/completions.tcl`), the copy types (`hir/layouts.tcl`'s
+`CopyType`, `CopiedFieldType`), a forgetting boundary, the validator
+(`hir/listlength.tcl`, `core/listlength.tcl`, `listwithlen`) or a
+`-result-length`/`-measures` registration, run
+`tests/list-length-refinement.test`,
+`audit/list-length-refinement/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/list-length-refinement/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `cargo test --release --manifest-path native/Cargo.toml
+--lib list_with_length`, plus `tests/decimal-rounded.test` with its fuzzer
+and mutants for a schema change, `tests/fixed-arity-list-return.test`, and
+the layout harnesses (above) for a change to copy types or extent proofs.
+`bench/list-length-refinement.tcl` regenerates the performance report.
 
 ## Enums
 
@@ -2005,6 +2107,59 @@ static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
 
+## C FFI error capture
+
+A C function that fails the POSIX way (a sentinel result, the reason in
+errno) is read by its binding right after the call -- a C call of
+`__errno_location()`/`__error()` and a native view -- and nothing the
+compiler inserts may run in between (C-FFI-ERROR-CAPTURE-MILESTONE-1.md):
+no allocation, no safepoint that can collect, no runtime or C call. Keep it
+so:
+
+* A write exposure's write-back value `{result: R, NAME: MutableBytes}` is a
+  construction escape analysis recognizes (`hir::escape::WriteBackResult`),
+  represented as fields -- the C result and each private copy's storage, its
+  MutableBytes opened (`WriteBackTree`) -- and built only where a use needs
+  an object: a MutableBytes read whole at that use (`OpenedFieldObject`),
+  the struct where the value must be one. Never build it at the call again,
+  and never open a MutableBytes past a use that runs more often than its
+  binding (a deeper loop, a parameter's use).
+* `op keepalive` is no machine code: what keeps an exposed storage a root
+  is its NIR use (codegen::roots's liveness, the stack maps). Never turn it
+  back into a call, and never weaken the NIR keepalive itself.
+* The compiler knows no error convention: no errno intrinsic, no automatic
+  errno field, no error translation, no annotation, no rule keyed on a C
+  function's name. A binding reads its function's error state itself, right
+  after the call; the compiler only adds nothing in between.
+* Windows' convention is the Win32 one, GetLastError: lib/windows.bot's
+  `write_file` reads it right after WriteFile the same way
+  (`wi-last-error-read-first` pins the window). c-ffi-error-capture.test's
+  C tests run POSIX's convention (errno, read, open, close) and need
+  `posixErrno`: they skip on Windows, whose C runtime has neither.
+
+If you change the write-back value's representation (the `WriteBackResult`,
+`WriteBackTree`, `WriteBackPaths`, `WriteBackCut` and write-back cases of
+`NestingPlan` in hir/escape.tcl; `BorrowCall`, `FieldValue`,
+`OpenedFieldObject`, `OpenedOwnerStorage`, the opened-call case of
+`StructFields` in native/lower.tcl), the keepalive's codegen, a foreign
+call's result conversion or what errno() lowers to, run
+`tests/c-ffi-error-capture.test` (its machine-code tests read the object
+file with `objdump`; its trace needs Linux and ptrace),
+`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test`,
+`tests/windows-io.test`,
+`tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
+acceptance tier of every branch push, and under GC stress a `[ci-full]`
+push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
+under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
+(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
+`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule; its
+error-capture mutants are killed by tests/c-ffi-error-capture.test, which
+it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`.
+`bench/c-ffi-error-capture.tcl` (`-root DIR` for a baseline checkout; the
+tier item `c-capture-bench` on macOS) is the performance report.
+
 ## C floating types (ffi::c::Float, ffi::c::Double)
 
 C `float` and `double` are C representations whose values are Float64s
@@ -2433,6 +2588,43 @@ no Tcl test, so they have no manifest rows. The workload keeps its
 workarounds for what Botlish lacks (no Int-to-String, division, fold, typed
 empty vector, List length facts, ...): they are its evidence
 (POST-2048-PRODUCT-FIXES.md); do not rewrite them with a new convenience.
+
+## Workloads (examples/games/icy-tower)
+
+`examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
+SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 over the
+generated SDL3 binding. Keep its layering:
+
+* `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
+  (text) and `options.bot` (the command line) are pure: no SDL, no clock,
+  no input device. They run, and `golden.bot` and `headless.bot` test them,
+  on every backend. Never import SDL or `sdl` into them.
+* `sdl.bot` is the one module with raw authority: every function of it
+  that makes a retaining C call or a native view or edit requires its own
+  `Sdl` context, so `render.bot` and `main.bot` stay ordinary modules
+  (`workload-icy-tower-sdl-modules-warning-clean` checks
+  `hir::direct::summary`). Do not mark a game module `direct module`.
+* The SDL binding is the committed generated one (generated/c/sdl3/), staged
+  beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
+  into the example directory or hand-write a parallel SDL declaration.
+* `build.sh` builds the stripped executable at
+  `audit/icy-tower/artifacts/icy-tower`, which is committed: rebuild and
+  commit it in the same change as anything it is built from.
+* `audit/icy-tower/oracle.py` is an independent implementation of the
+  rules, written from the report's rules section: a rule change changes
+  the report, the oracle and the golden suite's expectations together.
+
+If you change the game, `lib/float64.bot` or what it relies on, run
+`tests/workload-icy-tower.test` (its executable tests need the
+package-owned libSDL3.so, `tclsh9.0 tests/cffi/sdl3.tcl`, and are skipped
+without it), `audit/icy-tower/mutate.tcl` (every mutant in
+`audit/icy-tower/mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `python3 audit/icy-tower/oracle.py compare EXECUTABLE`;
+`audit/icy-tower/tools/xvfb-session.py` plays the executable in a real X11
+window (an SDL3 built with the x11 driver: build.sh says how) and
+`audit/icy-tower/tools/perf.tcl` is the performance report. CI's
+`icy-tower` workflow (`.github/workflows/icy-tower.yml`) runs all of it.
 
 ## Application modules, native program output, the recursion limit
 

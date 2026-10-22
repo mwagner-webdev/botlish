@@ -2258,6 +2258,12 @@ proc surface::parser::TypeExpr {pVar what} {
     Advance p
     set arg [TypeExpr p "a type argument after \"\["]
     Expect p \] "\"\]\" after the type argument"
+    if {[Kind p] eq "\{"} {
+        # NAME[ARG]{param: N ...}: a scalar refinement of an applied type
+        # (LIST-CARDINALITY-REFINEMENTS.md), List[int]{length: 4} -- the
+        # same refinement grammar, its base the applied type before it.
+        return [ScalarRefinement p $name [list $name $arg]]
+    }
     return [list $name $arg]
 }
 
@@ -2280,8 +2286,10 @@ proc surface::parser::TypeExpr {pVar what} {
 # A value is an integer literal, optionally negative so that resolution can
 # say what range it must be in. Returns {refine NAME FIELDS}, FIELDS the
 # {PARAM TEXT} pairs in written order: three words whose first is "refine",
-# like no applied type {NAME ARG} and no array {array N ELEMENT}.
-proc surface::parser::ScalarRefinement {pVar name} {
+# like no applied type {NAME ARG} and no array {array N ELEMENT}. A
+# refinement of an applied type BASE (`List[int]{length: 4}`, BASE {List
+# int}) is {refine NAME FIELDS BASE}: four words.
+proc surface::parser::ScalarRefinement {pVar name {base ""}} {
     upvar 1 $pVar p
     set open [Advance p]
     set fields {}
@@ -2325,6 +2333,9 @@ proc surface::parser::ScalarRefinement {pVar name} {
         }
     }
     Advance p
+    if {$base ne ""} {
+        return [list refine $name $fields $base]
+    }
     return [list refine $name $fields]
 }
 

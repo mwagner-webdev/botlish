@@ -34,6 +34,13 @@ pub enum OpCode {
     IGe,
     IEq,
     VEq,
+    /// VEq at a call site native/lower.tcl's `NativeCallOp` (`equality`) has
+    /// proven equality-total: both operands' static types are
+    /// `hir::types::IsEqualityTotal` (HASHABLE-AND-KEYED-HASH.md, "Total
+    /// lowering"), so `equal` can never refuse a kind. The same helper
+    /// (`rt_value_eq`) and the same inline fast path as VEq; only the
+    /// NO_VALUE check and the `may_error` effect are gone.
+    VEqTotal,
     StrEq,
     /// `==` of two operands statically UnicodeChar (native/lower.tcl's
     /// NativeCallOp): word equality of the two immediates; never fails.
@@ -55,6 +62,11 @@ pub enum OpCode {
     ListLen,
     ListGet,
     ListAppend,
+    /// `list#with_length(L, N)` (core/listlength.tcl, LIST-CARDINALITY-
+    /// REFINEMENTS.md): L itself when it has exactly N elements, else the
+    /// declared LengthMismatch -- the explicit validator of the List
+    /// length refinement; never a copy.
+    ListWithLength,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
     /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
@@ -188,6 +200,18 @@ pub enum OpCode {
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
     /// header and ops.rs's `rt_hash`.
     Hash,
+    /// Hash at a call site whose operand native/lower.tcl's `NativeCallOp`
+    /// (`hashing`) has proven Hashable (`hir::types::IsHashable`): the same
+    /// helper (`rt_hash`), which can never refuse such a value, so no
+    /// NO_VALUE check and no `may_error` (HASHABLE-AND-KEYED-HASH.md).
+    HashTotal,
+    /// The private table hash (core/hashing.tcl's tableHash, ops.rs's
+    /// rt_table_hash): SipHash-1-3 of the operand's canonical input under the
+    /// runtime's process key, masked to 61 bits. The dynamically dispatched
+    /// entry (`impl=`) only: a call the compiler admitted is TableHashTotal.
+    TableHash,
+    /// TableHash of an operand proven Hashable: never fails.
+    TableHashTotal,
     /// Validates a StringRegion's bounds (base String, start, end: character
     /// indices) exactly as `Substr` would, without allocating or copying:
     /// UNIT on success, RANGE on failure. Emitted once, at the point in
@@ -317,7 +341,10 @@ pub enum OpCode {
     /// paired by native/lower.tcl with a `keepalive` of the storage after it.
     MBytesAddr,
     /// `%u = op keepalive %b`: a use of %b that is never removed and does
-    /// nothing, so %b stays a GC root until here. Result unit.
+    /// nothing, so %b stays a GC root until here (codegen::roots's liveness:
+    /// %b's slot is in the stack map of every safepoint before it). No
+    /// machine code: it is no call (C-FFI-ERROR-CAPTURE-MILESTONE-1.md).
+    /// Result unit.
     KeepAlive,
     /// Fixed binary layouts (BINARY-LAYOUT.md, core/binary.tcl): the
     /// straight-line code native/lower.tcl emits for one statically known
@@ -717,6 +744,7 @@ op_spellings! {
     "ige" => IGe,
     "ieq" => IEq,
     "veq" => VEq,
+    "veqtotal" => VEqTotal,
     "streq" => StrEq,
     "chareq" => CharEq,
     "enumeq" => EnumEq,
@@ -729,6 +757,7 @@ op_spellings! {
     "listlen" => ListLen,
     "listget" => ListGet,
     "listappend" => ListAppend,
+    "listwithlen" => ListWithLength,
     "setfromlist" => SetFromList,
     "setfromlisttotal" => SetFromListTotal,
     "setcontains" => SetContains,
@@ -791,6 +820,9 @@ op_spellings! {
     "mkok" => MkOk,
     "mkerror" => MkError,
     "hash" => Hash,
+    "hashtotal" => HashTotal,
+    "tablehash" => TableHash,
+    "tablehashtotal" => TableHashTotal,
     "regioncheck" => RegionCheck,
     "regioneq" => RegionEq,
     "decodecharat" => DecodeCharAt,
@@ -954,7 +986,7 @@ impl OpCode {
             Argv | CPtrNull => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
-            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | D64Neg
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen

@@ -136,6 +136,7 @@ program lib/binary.bot
 program lib/byte.bot
 program lib/compiler.bot
 program lib/darwin.bot
+program lib/float64.bot
 fails lib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import io`)
 program lib/linux.bot
 fails lib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import list`)

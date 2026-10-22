@@ -31,10 +31,10 @@
 # Windows reports a failure as its API does: the call returns FALSE and the
 # reason is the thread's last-error code (GetLastError), which a later call
 # may change. write_file reads it right after WriteFile returns, before any
-# other Win32 call: what runs between the two is the write-back value of the
-# byte count's exposure (C-POINTER-BORROWING.md: two small allocations,
-# which may collect), and the allocator and the collector make no Win32 call
-# that sets the last-error code. A result never encodes the code in its
+# other call: nothing runs between the two but the test of WriteFile's BOOL,
+# and the byte count's write-back value is built only after it
+# (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); neither the allocator nor the
+# collector makes a Win32 call that sets the code. A result never encodes the code in its
 # count: it holds WriteFile's own success, the count it reported, and,
 # separately, the code a failed call left (`last_error`) (0 when it succeeded: the code is
 # never read after a success, where it means nothing).
