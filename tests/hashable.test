@@ -112,9 +112,28 @@ proc hbMayError {nir name} {
     return [lsort -unique $result]
 }
 
+# JSON TEXT with every non-ASCII character escaped (\uXXXX, a surrogate pair
+# beyond the BMP): the hand-off to the oracle is ASCII, so no pipe encoding
+# (Windows' code page) can change a String's text.
+proc hbAsciiJson {text} {
+    set out ""
+    foreach c [split $text ""] {
+        scan $c %c cp
+        if {$cp < 0x80} {
+            append out $c
+        } elseif {$cp < 0x10000} {
+            append out [format {\u%04x} $cp]
+        } else {
+            set v [expr {$cp - 0x10000}]
+            append out [format {\u%04x\u%04x} [expr {0xD800 + ($v >> 10)}] [expr {0xDC00 + ($v & 0x3FF)}]]
+        }
+    }
+    return $out
+}
+
 # The public and table hashes of the oracle's JSON values under KEY.
 proc hbOracle {jsons key} {
-    set out [exec python3 -I [file join $::projectRoot audit hashable tools oracle.py] hash {*}$key << [join $jsons \n]]
+    set out [exec python3 -I [file join $::projectRoot audit hashable tools oracle.py] hash {*}$key << [hbAsciiJson [join $jsons \n]]]
     return [split $out \n]
 }
 
@@ -638,7 +657,11 @@ fn e6(a: P, b) -> bool:
         [hbMayError $nir e1] [hbMayError $nir e2] [hbMayError $nir e3] [hbMayError $nir e4] [hbMayError $nir e5<P,P>] [hbMayError $nir e6]
 } -result {4 2 false false false true false true}
 
-test hb-nir-table-hash-total {the table hash of an admitted (Hashable) argument is tablehashtotal: no error edge, and the function making it is may_error=false and no safepoint} -body {
+# slot's Botlish call makes it fallible where the depth check bounds
+# recursion (nativeDepthChecked: NATIVE LIMIT STACK from its prologue).
+set ::hbSlotMayError [if {[testConstraint nativeDepthChecked]} {string cat true} else {string cat false}]
+
+test hb-nir-table-hash-total {the table hash of an admitted (Hashable) argument is tablehashtotal: no error edge, and the function making it is may_error=false and no safepoint (slot, which calls it, is may_error=true where the depth check makes its Botlish call fallible, nativeDepthChecked)} -body {
     set nir [hbNir [string cat "import hashfix\n" $::hbPrelude {fn slot(p: P) -> int:
     hashfix::keyed(p)
 
@@ -648,7 +671,7 @@ test hb-nir-table-hash-total {the table hash of an admitted (Hashable) argument 
     list [regexp -all {op tablehashtotal} $nir] [regexp -all {op tablehash } $nir] \
         [hbMayError $nir slot] [hbMayError $nir hashfix::keyed<P>] [hbMayError $nir hashfix::keyed<str>] \
         [lsort -unique [lmap line $calls {if {![string match *keyed* $line]} continue; lindex [regexp -inline {may_gc=(\w+)} $line] 1}]]
-} -result {3 0 false false false false}
+} -result [list 3 0 $::hbSlotMayError false false false]
 
 test hb-total-results-agree {the total lowerings compute what the fallible ones do, on every backend} -body {
     sourceAgree [string cat $::hbPrelude {fn e(a: Q, b: Q) -> bool:

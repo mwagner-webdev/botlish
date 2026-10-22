@@ -779,6 +779,20 @@ Run on Linux x86-64 (4 cores) on the final tree.
   mutant touches (all still apply) and `gf-code-name-complete` checks.
 * **Fuzzing**: the hashable fuzzer on the final tree, `-n 30 -seed 7`: 30
   programs, no disagreement.
+* **Windows CI** (the first push) failed three `hashable.test` tests, all
+  defects of the test harness, not of the hashes:
+  * `hb-public-hash-oracle` and `hb-keyed-oracle` disagreed with the oracle
+    on non-ASCII Strings only: `exec <<` wrote the JSON in the system code
+    page and Python read it in its own. The hand-off is ASCII now (non-ASCII
+    characters as `\u` escapes, in the test and the fuzzer), and the oracle
+    decodes its input as UTF-8 whatever the locale. Under a non-UTF-8 system
+    encoding (`LC_ALL=C`) the old hand-off fails here too, and the new one
+    passes.
+  * `hb-nir-table-hash-total` expected the frame-walk hosts' call effect of
+    a function making a Botlish call. Where the depth check bounds recursion
+    (`nativeDepthChecked`), such a function is `may_error=true`; the test
+    now expects the host's value. A `fallback-roots` driver on Linux gives
+    exactly Windows' answer.
 * **Not run here.** CI's Linux workflows (`tests.yml`, `tests-arm64.yml`)
   run on pull requests and on main. The batched-against-sequential
   comparison of static decisions (`static-decisions.yml`) is CI's alone

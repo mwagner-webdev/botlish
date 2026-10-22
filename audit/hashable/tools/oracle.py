@@ -11,9 +11,9 @@
 # SipHash-c-d, written from the SipHash paper (Aumasson and Bernstein, 2012)
 # and checked against its published SipHash-2-4 test vectors (`selftest`).
 #
-# `hash K0 K1` reads one value per line and prints, per line, the public hash
-# and the table hash under the key K0, K1 (decimal 64-bit words), both masked
-# to 61 bits. A value is one of
+# `hash K0 K1` reads one value per line (UTF-8, whatever the locale) and
+# prints, per line, the public hash and the table hash under the key K0, K1
+# (decimal 64-bit words), both masked to 61 bits. A value is one of
 #
 #   {"int": "DECIMAL"}            {"str": "TEXT"}        {"bool": true}
 #   {"unit": null}                {"char": CODEPOINT}    {"float": NUMBER}
@@ -169,7 +169,9 @@ def main():
     if len(sys.argv) != 4 or sys.argv[1] != "hash":
         sys.exit("usage: oracle.py selftest | hash K0 K1 < VALUES.jsonl")
     key = (int(sys.argv[2]), int(sys.argv[3]))
-    for line in sys.stdin:
+    # The bytes, decoded as UTF-8: never the locale's encoding (Windows'
+    # code page would read a non-ASCII String as other text).
+    for line in sys.stdin.buffer.read().decode("utf-8").split("\n"):
         if not line.strip():
             continue
         v = json.loads(line)

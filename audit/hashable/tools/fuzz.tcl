@@ -411,8 +411,27 @@ proc Observed {value} {
     return [lindex [string map {, "" [ "{" ] "}"} $value] 0]
 }
 
+# JSON TEXT with every non-ASCII character escaped (\uXXXX, a surrogate pair
+# beyond the BMP): the hand-off to the oracle is ASCII, so no pipe encoding
+# (Windows' code page) can change a String's text.
+proc AsciiJson {text} {
+    set out ""
+    foreach c [split $text ""] {
+        scan $c %c cp
+        if {$cp < 0x80} {
+            append out $c
+        } elseif {$cp < 0x10000} {
+            append out [format {\u%04x} $cp]
+        } else {
+            set v [expr {$cp - 0x10000}]
+            append out [format {\u%04x\u%04x} [expr {0xD800 + ($v >> 10)}] [expr {0xDC00 + ($v & 0x3FF)}]]
+        }
+    }
+    return $out
+}
+
 proc Oracle {jsons key} {
-    set out [exec python3 -I [file join $::root audit hashable tools oracle.py] hash {*}$key << [join $jsons \n]]
+    set out [exec python3 -I [file join $::root audit hashable tools oracle.py] hash {*}$key << [AsciiJson [join $jsons \n]]]
     return [split $out \n]
 }
 
