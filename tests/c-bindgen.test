@@ -495,7 +495,7 @@ test cb-fixture-compiles {every target's generated modules are ordinary Botlish:
     }
 } -cleanup removeScratch -result {{linux-x86_64 ordinary ordinary ordinary ordinary ordinary ordinary} {linux-aarch64 ordinary ordinary ordinary ordinary ordinary ordinary} {macos-aarch64 ordinary ordinary ordinary ordinary ordinary ordinary} {windows-x86_64-gnu ordinary ordinary ordinary ordinary ordinary ordinary}}
 
-test cb-fixture-run {the generated binding links and runs: demo.bot (a Botlish caller) and caller.c (a C caller of the header's own API) compute the same values -- direct calls, aliases, link names, a stub-table thunk, inline and macro thunks, a declared function its macro shadows, typed constants, C _Bool, opaque handles, byte borrowing and write-back -- on both native backends} -constraints nativeRun -body {
+test cb-fixture-run {the generated binding links and runs: demo.bot (a Botlish caller) and caller.c (a C caller of the header's own API) compute the same values -- direct calls, aliases, link names, a stub-table thunk, inline and macro thunks, a declared function its macro shadows, typed constants, C _Bool, opaque handles, byte borrowing and write-back -- on both native backends} -constraints {nativeRun fixtureHostBinding} -body {
     set dir [staged $::fixture $::hostTarget [file join $::fixtureDir demo demo.bot]]
     set shim [shimOf $::fixture $::hostTarget [file join $dir .shim]]
     set values [stagedValues $dir demo.bot {cranelift cranelift-generic} [list [bgfLib] $shim]]
@@ -503,7 +503,7 @@ test cb-fixture-run {the generated binding links and runs: demo.bot (a Botlish c
     list [expr {[lindex $values 0] eq $c}] [expr {[lindex $values 1] eq $c}] $c
 } -cleanup removeScratch -result [list 1 1 $::demoValues]
 
-test cb-fixture-only-reached-externs {a program's foreign table holds only the C functions it calls, and its link plan each library once, however many modules declare it: importing a generated module adds its libraries, never its unreached symbols} -constraints nativeRun -body {
+test cb-fixture-only-reached-externs {a program's foreign table holds only the C functions it calls, and its link plan each library once, however many modules declare it: importing a generated module adds its libraries, never its unreached symbols} -constraints {nativeRun fixtureHostBinding} -body {
     set dir [staged $::fixture $::hostTarget [file join $::fixtureDir demo demo.bot]]
     writeText [file join $dir one.bot] "import bgf::bgf\nimport bgf::thunks::bgf\n\nbgf::bgf::bgf_count()\n"
     set nir [native::nir [stagedHir $dir one.bot]]
@@ -527,7 +527,7 @@ test cb-fixture-no-c-at-compile-time {compiling a program over a generated bindi
     }
 } -cleanup removeScratch -result [dict getdef {linux-x86_64 43 linux-aarch64 44 macos-aarch64 44} $::hostTarget {}]
 
-test cb-fixture-interchange {a program over a generated binding written as HIR interchange and run in a fresh process, with no header, generator input or binding module left, behaves identically} -constraints nativeRun -body {
+test cb-fixture-interchange {a program over a generated binding written as HIR interchange and run in a fresh process, with no header, generator input or binding module left, behaves identically} -constraints {nativeRun fixtureHostBinding} -body {
     set dir [staged $::fixture $::hostTarget [file join $::fixtureDir demo demo.bot]]
     set shim [shimOf $::fixture $::hostTarget [file join [scratch] shim]]
     exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-hir-interchange [file join $dir demo.bot] 2>@1
@@ -869,7 +869,7 @@ test cb-layout-second-compiler {GCC agrees with clang on every emitted fixture l
     dict map {t v} $out {expr {$v eq "" ? "agrees" : $v}}
 } -match glob -result {*agrees*}
 
-test cb-layout-oracle-fixture {every emitted fixture layout agrees with C at run time, on both native backends: C writes every field with its own typed stores and Botlish reads them through binary::native::view; Botlish writes every field through binary::native::edit and C reads them, the padding untouched; Botlish builds the record in MutableBytes with binary::write and binary::write_foreign and C reads that image, its padding zero; binary::parse reads it back; layout_length and layout_alignment are C's sizeof and _Alignof} -constraints nativeRun -body {
+test cb-layout-oracle-fixture {every emitted fixture layout agrees with C at run time, on both native backends: C writes every field with its own typed stores and Botlish reads them through binary::native::view; Botlish writes every field through binary::native::edit and C reads them, the padding untouched; Botlish builds the record in MutableBytes with binary::write and binary::write_foreign and C reads that image, its padding zero; binary::parse reads it back; layout_length and layout_alignment are C's sizeof and _Alignof} -constraints {nativeRun fixtureHostBinding} -body {
     lassign [layoutOracle $::fixture all] checks a b
     list [expr {$checks > 250}] $a $b
 } -cleanup removeScratch -result {1 {} {}}

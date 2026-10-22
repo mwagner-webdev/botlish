@@ -2,7 +2,8 @@
 # (game2048.bot) and prints it, on Linux: the game and its presentation are
 # demo_play.bot's (an application module beside it), and only the installed
 # io::IO context is this file's -- linux::io's, whose writes are the raw
-# write(2) syscall. demo-darwin.bot is the same program on macOS.
+# write(2) syscall. demo-darwin.bot is the same program on macOS,
+# demo-windows.bot on Windows.
 #
 # Output goes through io::print_line, which needs the native backend:
 #

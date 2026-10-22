@@ -9,20 +9,27 @@
 # at run time (NATIVE-ONLY).
 #
 # The C side of most tests is tests/cffi/fixture.c, compiled here with the
-# host C compiler (GCC or Clang on Linux, Apple clang on macOS) into a static
-# archive in a private directory (test infrastructure only) and bound by the
-# module text below. The Tcl and BoringSSL acceptance tests run examples/ffi/
+# host's C toolchain (tests/ctoolchain.tcl: GCC or Clang on Linux, Apple clang
+# on macOS, MSVC's cl -- with ml64 for its Win64 assembly,
+# tests/cffi/fixture-win64.asm -- on Windows) into a static library in a
+# private directory (test infrastructure only) and bound by the module text
+# below. The Tcl and BoringSSL acceptance tests run examples/ffi/
 # against the installed libtcl9.0 and the package-owned static BoringSSL
 # (tests/cffi/boringssl.tcl; skipped when it is not built). Every
 # application is a fresh directory of the tcltest temporary directory.
 #
 # C calls run on every host the native backend links them on (nativeCCalls:
-# Linux x86-64 and AArch64, macOS AArch64). What differs by target is the
-# target's own C ABI, which the tests below model from the ABI documents
-# (`::abi`) -- plain char's signedness, how many arguments go in registers,
-# how stack arguments are laid out, which bits of a narrow argument the
-# caller defines -- and check against the machine state a call arrives in
-# and against calls the C compiler makes itself (MACOS-AARCH64-MILESTONE-6.md).
+# Linux x86-64 and AArch64, macOS AArch64, Windows x86-64). What differs by
+# target is the target's own C ABI, which the tests below model from the ABI
+# documents (`::abi`) -- plain char's signedness, the width of long, how many
+# arguments go in registers and whether by kind or by position, how stack
+# arguments are laid out and where they start, which bits of a narrow
+# argument the caller defines -- and check against the machine state a call
+# arrives in and against calls the C compiler makes itself
+# (MACOS-AARCH64-MILESTONE-6.md, WINDOWS-X86-64-MILESTONE-2.md). Variadic
+# calls are lowered for the System V and Apple conventions only
+# (nativeCVariadics): on Windows a variadic call is a codegen error
+# (cf-va-win64-refused).
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -30,7 +37,7 @@ source [file join $::projectRoot native native.tcl]
 source [file join $::projectRoot tests cffi boringssl.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 testConstraint linuxX86_64 [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
 set ::hostTarget [core::cabi::hostTarget]
 # The host compiles C with Apple clang for macOS, whose __builtin_available
@@ -42,18 +49,22 @@ set ::appCounter 0
 
 # The fixture library: built once, in a private directory, when a C compiler
 # is there.
+set ::windowsHost [expr {$::tcl_platform(platform) eq "windows"}]
+testConstraint windowsHost $::windowsHost
 set ::fixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
     set ::fixtureDir [makeDirectory cffi-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
-        exec ar rcs [file join $::fixtureDir libbotlish_cffi_fixture.a] [file join $::fixtureDir fixture.o]
-        # A second archive that depends on the first (cf-link-order).
+        set sources [list [file join $::projectRoot tests cffi fixture.c]]
+        if {$::windowsHost} {
+            lappend sources [file join $::projectRoot tests cffi fixture-win64.asm]
+        }
+        ctool::staticLibrary $::fixtureDir botlish_cffi_fixture {*}$sources
+        # A second library that depends on the first (cf-link-order).
         set channel [open [file join $::fixtureDir dependent.c] w]
         puts $channel "int bcf_add(int a, int b);\nint bcf_add_twice(int a, int b) { return 2 * bcf_add(a, b); }"
         close $channel
-        exec cc -c -O2 -fPIC [file join $::fixtureDir dependent.c] -o [file join $::fixtureDir dependent.o]
-        exec ar rcs [file join $::fixtureDir libbotlish_cffi_dependent.a] [file join $::fixtureDir dependent.o]
+        ctool::staticLibrary $::fixtureDir botlish_cffi_dependent [file join $::fixtureDir dependent.c]
     } message]} {
         puts stderr "c-ffi.test: the fixture library did not build: $message"
         set ::fixtureDir ""
@@ -71,7 +82,7 @@ proc tclLinkable {} {
     set channel [open $src w]
     puts $channel "void *Tcl_CreateInterp(void);\nint main(void) { return Tcl_CreateInterp() == 0; }"
     close $channel
-    set ok [expr {![catch {exec cc $src -o [file join $dir probe] -ltcl9.0}]}]
+    set ok [expr {[auto_execok cc] ne "" && ![catch {exec cc $src -o [file join $dir probe] -ltcl9.0}]}]
     file delete -force $dir
     return $ok
 }
@@ -86,25 +97,49 @@ set ::cConvention [expr {[testConstraint nativeBuilt] && $::hostTarget ne ""
 
 # The host target's C ABI as these tests model it, from the platform ABI
 # documents (the SysV x86-64 psABI, AAPCS64, Apple's "Writing ARM64 code for
-# Apple platforms") -- never from core::cabi or the compiler:
+# Apple platforms", Microsoft's "x64 calling convention") -- never from
+# core::cabi or the compiler:
 #
-#   registers  integer argument registers: six on x86-64, eight on AArch64
+#   registers  argument registers: six integer ones on x86-64 System V,
+#              eight on AArch64; four positions on Win64
+#   positional 1 when a parameter's register is its position's, whatever its
+#              kind (Win64: the first four parameters in rcx, rdx, r8, r9 or
+#              xmm0-xmm3 by position, a double's integer register unused);
+#              0 when integer and floating-point registers are counted apart
+#              (System V, AAPCS64: doubles in v0-v7 or xmm0-xmm7)
 #   stack      how stack arguments are laid out: `natural` (Apple: each at its
 #              natural size and alignment, packed: a char one byte) or
 #              `slot8` (each in its own 8-byte slot)
+#   base       where the first stack argument is, from the stack pointer at
+#              the call: 0, or Win64's 32 (the caller's shadow space for the
+#              four register parameters comes first)
 #   extended   how many low bits of a narrow argument's register the caller
 #              defines: 32 (extended to 32 bits by its type: Apple's rule,
-#              and x86-64's as GCC and Clang callers make it and their callees
-#              read it), or 0 (only the argument's own width: AAPCS64, whose
-#              callee extends)
+#              and x86-64 System V's as GCC and Clang callers make it and
+#              their callees read it), or 0 (only the argument's own width:
+#              AAPCS64 and Win64, whose callee extends -- MSVC's callees do)
+#   floats     the floating-point argument registers bcf_capture records:
+#              Win64's four (xmm0-xmm3); none elsewhere, where a double's
+#              register is not observed and only its integers' places are
+#   long       the bytes of a C long: 8 on LP64, 4 on LLP64 (Windows)
 switch -- $::hostTarget {
-    macos-aarch64 { set ::abi {registers 8 stack natural extended 32} }
-    linux-aarch64 { set ::abi {registers 8 stack slot8 extended 0} }
-    default { set ::abi {registers 6 stack slot8 extended 32} }
+    macos-aarch64 { set ::abi {registers 8 positional 0 stack natural base 0 extended 32 floats 0 long 8} }
+    linux-aarch64 { set ::abi {registers 8 positional 0 stack slot8 base 0 extended 0 floats 0 long 8} }
+    windows-x86_64 { set ::abi {registers 4 positional 1 stack slot8 base 32 extended 0 floats 4 long 4} }
+    default { set ::abi {registers 6 positional 0 stack slot8 base 0 extended 32 floats 0 long 8} }
 }
+# A C long's range on this host's target, for the values the tests pass.
+set ::cfLongBits [expr {8 * [dict get $::abi long]}]
+set ::cfLongMin [expr {-(1 << ($::cfLongBits - 1))}]
+set ::cfLongMax [expr {(1 << ($::cfLongBits - 1)) - 1}]
+set ::cfULongMax [expr {(1 << $::cfLongBits) - 1}]
+# The Cranelift type of a C long in a foreign signature, and its ABI class.
+set ::cfLongClif [expr {$::cfLongBits == 64 ? "i64" : "i32"}]
+set ::cfULongClass [expr {$::cfLongBits == 64 ? "u64" : "u32"}]
 
 # The C types the ABI tests pass: Botlish name -> {bytes signed}, plain char
-# at the host target's signedness (cfCharRange, below).
+# at the host target's signedness (cfCharRange, below), a long at the
+# target's width; a Double {8 f}.
 proc cType {name} {
     switch -- $name {
         SChar { return {1 1} }
@@ -114,21 +149,38 @@ proc cType {name} {
         UShort { return {2 0} }
         Int { return {4 1} }
         UInt { return {4 0} }
-        Long - LongLong { return {8 1} }
-        ULong - ULongLong - Ptr { return {8 0} }
+        Long { return [list [dict get $::abi long] 1] }
+        ULong { return [list [dict get $::abi long] 0] }
+        LongLong { return {8 1} }
+        ULongLong - Ptr { return {8 0} }
+        Double { return {8 f} }
     }
     error "no C type $name"
 }
 
-# Where the parameters of C types TYPES arrive under ::abi: {reg N} or
-# {stack OFFSET} each, OFFSET from the stack pointer at the call.
+# Where the parameters of C types TYPES arrive under ::abi: {reg N}, {freg
+# N} or {stack OFFSET} each, OFFSET from the stack pointer at the call.
 proc abiLocations {types} {
     set out {}
     set reg 0
-    set next 0
+    set freg 0
+    set position 0
+    set next [dict get $::abi base]
     foreach type $types {
         set size [lindex [cType $type] 0]
-        if {$reg < [dict get $::abi registers]} {
+        set double [expr {$type eq "Double"}]
+        if {[dict get $::abi positional]} {
+            if {$position < [dict get $::abi registers]} {
+                lappend out [list [expr {$double ? "freg" : "reg"}] $position]
+                incr position
+                continue
+            }
+            incr position
+        } elseif {$double && $freg < 8} {
+            lappend out [list freg $freg]
+            incr freg
+            continue
+        } elseif {!$double && $reg < [dict get $::abi registers]} {
             lappend out [list reg $reg]
             incr reg
             continue
@@ -145,24 +197,43 @@ proc abiLocations {types} {
     return $out
 }
 
+# The 64 bits a C argument of type TYPE and VALUE is (a double's IEEE bits).
+proc abiBits {type value} {
+    if {$type eq "Double"} {
+        binary scan [binary format d $value] w bits
+        return [expr {$bits & 0xffffffffffffffff}]
+    }
+    return [expr {$value & 0xffffffffffffffff}]
+}
+
 # The mismatches between what a call of C types TYPES with VALUES arrived in
-# -- REGS (each register's low 32 bits) and STACK (the bytes at the stack
-# pointer) -- and ::abi: in a register, the low 32 bits (`extended` 32) or
-# the argument's own width, as its value extended by its type; on the stack,
-# the argument's own bytes at its offset, little-endian. Bytes and bits the
-# ABI leaves undefined (padding, the rest of a slot or a register) are not
-# read. Empty when everything matches.
-proc abiMismatches {who types values regs stack} {
+# -- REGS (each integer register's low 32 bits), STACK (the bytes at the
+# stack pointer) and FREGS (the floating-point registers' 64 bits, those
+# ::abi's floats says the capture records) -- and ::abi: in an integer
+# register, the low 32 bits (`extended` 32) or the argument's own width, as
+# its value extended by its type; in a floating-point register, the double's
+# 64 bits; on the stack, the argument's own bytes at its offset,
+# little-endian. Bytes and bits the ABI leaves undefined (padding, the rest
+# of a slot or a register) are not read, nor a register the capture does not
+# record. Empty when everything matches.
+proc abiMismatches {who types values regs stack {fregs {}}} {
     set mismatches {}
     foreach type $types value $values location [abiLocations $types] {
         lassign [cType $type] size
         lassign $location where at
+        set bits [abiBits $type $value]
         if {$where eq "reg"} {
-            set bits [expr {$size < 4 && [dict get $::abi extended] == 32 ? 32 : min(8 * $size, 32)}]
-            set expected [expr {$value & ((1 << $bits) - 1)}]
-            set observed [expr {[lindex $regs $at] & ((1 << $bits) - 1)}]
+            set width [expr {$size < 4 && [dict get $::abi extended] == 32 ? 32 : min(8 * $size, 32)}]
+            set expected [expr {$bits & ((1 << $width) - 1)}]
+            set observed [expr {[lindex $regs $at] & ((1 << $width) - 1)}]
+        } elseif {$where eq "freg"} {
+            if {$at >= [dict get $::abi floats]} {
+                continue
+            }
+            set expected $bits
+            set observed [lindex $fregs $at]
         } else {
-            set expected [lmap i [lrange {0 1 2 3 4 5 6 7} 0 $size-1] {expr {($value >> (8 * $i)) & 0xff}}]
+            set expected [lmap i [lrange {0 1 2 3 4 5 6 7} 0 $size-1] {expr {($bits >> (8 * $i)) & 0xff}}]
             set observed [lrange $stack $at [expr {$at + $size - 1}]]
         }
         if {$expected != $observed} {
@@ -178,13 +249,23 @@ proc botlishList {text} {
 }
 
 # The dynamic libraries executable EXE loads, as the host's tools list them:
-# otool -L on macOS, ldd elsewhere.
+# otool -L on macOS, ldd on Linux; on Windows the DLLs of its PE import
+# directory (tests/binary-header.tcl's peFacts).
 proc dynamicLibraries {exe} {
     if {$::tcl_platform(os) eq "Darwin"} {
         return [exec otool -L $exe]
     }
+    if {$::windowsHost} {
+        return [join [dict get [peFacts $exe] imports] \n]
+    }
     return [exec ldd $exe]
 }
+
+# The file of the fixture's static library NAME in DIR (libNAME.a, NAME.lib).
+proc fixtureLibrary {name {dir ""}} {
+    return [file join [expr {$dir eq "" ? $::fixtureDir : $dir}] [ctool::staticName $name]]
+}
+
 
 # A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}): its
 # absolute path.
@@ -328,6 +409,12 @@ extern c fn pick named "bcf_pick"(which: ffi::c::Int, a1: ffi::c::SChar, a2: ffi
 extern c fn captured_register named "bcf_captured_register"(i: ffi::c::Int) -> ffi::c::ULongLong
 extern c fn captured_register32 named "bcf_captured_register32"(i: ffi::c::Int) -> ffi::c::UInt
 extern c fn captured_stack_byte named "bcf_captured_stack_byte"(i: ffi::c::Int) -> ffi::c::UChar
+extern c fn captured_float named "bcf_captured_float"(i: ffi::c::Int) -> ffi::c::ULongLong
+extern c fn captured_alignment named "bcf_captured_alignment"() -> ffi::c::Int
+extern c fn reference_float named "bcf_reference_float"(i: ffi::c::Int) -> ffi::c::ULongLong
+extern c fn capture_mixed named "bcf_capture"(a: ffi::c::Double, b: ffi::c::Int, c: ffi::c::Double, d: ffi::c::LongLong, e: ffi::c::Double, f: ffi::c::SChar, g: ffi::c::Double, h: ffi::c::UShort, i: ffi::c::Double, j: ffi::c::Int) -> ffi::c::Int
+extern c fn reference_mixed named "bcf_reference_mixed"() -> ffi::c::Int
+extern c fn capture_odd named "bcf_capture"(a: ffi::c::Int, b: ffi::c::Int, c: ffi::c::Int, d: ffi::c::Int, e: ffi::c::Int, f: ffi::c::Int, g: ffi::c::Int, h: ffi::c::Int, i: ffi::c::Int) -> ffi::c::Int
 extern c fn reference_register32 named "bcf_reference_register32"(i: ffi::c::Int) -> ffi::c::UInt
 extern c fn reference_stack_byte named "bcf_reference_stack_byte"(i: ffi::c::Int) -> ffi::c::UChar
 extern c fn reference_narrow8 named "bcf_reference_narrow8"() -> ffi::c::Int
@@ -416,18 +503,38 @@ fn len(d: abi::bytes::Bytes) -> ffi::c::ULong:
     abi::bytes::length(d).value
 
 }
+# A storage length is a Usize, 64 bits; the fixture's count an
+# ffi::c::ULong, the target's unsigned long. Where unsigned long is 32 bits
+# (Windows, LLP64) len proves it with a mod -- a no-op for any storage a test
+# makes -- on the same line, so every location after the prelude stays where
+# it is (c-pointer-borrowing.test's prelude does the same).
+if {$::cfLongBits < 64} {
+    set ::bytesPrelude [string map [list "    abi::bytes::length(d).value\n" "    mod(abi::bytes::length(d).value, [expr {2 ** $::cfLongBits}])\n"] $::bytesPrelude]
+}
 
 # An application of the fixture binding and MAIN (an entry program's text).
 proc bcfApp {main {extra {}}} {
     return [app [concat [list main.bot $main bcf.bot $::bcfModule] $extra]]
 }
 
-test cf-fixture-built {the C fixture builds with the host's C compiler wherever C calls run -- a fixture that does not build would leave every test that needs it skipped, never failed -- as an object of the host's format and architecture, its archive defining the fixture's functions under their C names in the object format's spelling (Mach-O's `_` user label prefix on macOS)} -constraints {cCompiler nativeCCalls nativeBuilt rustcLinker} -body {
+test cf-fixture-built {the C fixture builds with the host's C toolchain wherever C calls run -- a fixture that does not build would leave every test that needs it skipped, never failed -- as an object of the host's format and architecture, its library defining the fixture's functions under their C names in the object format's spelling (Mach-O's `_` user label prefix on macOS; on Windows the C object cl compiled and the Win64 assembly ml64 assembled, archived by lib)} -constraints {cCompiler nativeCCalls nativeBuilt rustcLinker} -body {
     set prefix [expr {$::tcl_platform(os) eq "Darwin" ? "_" : ""}]
-    set defined [lmap line [split [exec nm -g [file join $::fixtureDir libbotlish_cffi_fixture.a]] \n] {
-        expr {[regexp {^[0-9a-fA-F]+ T (\S+)$} $line -> symbol] ? $symbol : [continue]}
-    }]
-    list [expr {$::fixtureDir ne ""}] [binaryHeader [file join $::fixtureDir fixture.o]] \
+    if {$::windowsHost} {
+        # The objects' own COFF symbol tables (tests/binary-header.tcl):
+        # every external symbol a section defines.
+        set defined {}
+        foreach source {fixture.c fixture-win64.asm} {
+            foreach symbol [dict get [coffFacts [ctool::objectFile $source $::fixtureDir]] symbols] {
+                lassign $symbol name section class
+                if {$class == 2 && $section > 0} { lappend defined $name }
+            }
+        }
+    } else {
+        set defined [lmap line [split [exec nm -g [fixtureLibrary botlish_cffi_fixture]] \n] {
+            expr {[regexp {^[0-9a-fA-F]+ T (\S+)$} $line -> symbol] ? $symbol : [continue]}
+        }]
+    }
+    list [expr {$::fixtureDir ne "" && [file isfile [fixtureLibrary botlish_cffi_fixture]]}] [binaryHeader [ctool::objectFile fixture.c $::fixtureDir]] \
         [lmap name {bcf_add bcf_capture bcf_dirty_short bcf_pick bcf_deep} {expr {"$prefix$name" in $defined}}]
 } -result [list 1 [hostBinaryHeader object] {1 1 1 1 1}]
 
@@ -626,18 +733,39 @@ test cf-wild-address {a returned address the C pointer word cannot hold is a NAT
 # (signed on x86-64, and on Apple AArch64, whose C ABI is not Linux's).
 set cfCharRange [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {aarch64 arm64} ? {0 255} : {-128 127}}]
 
-test cf-scalar-transport {every C integer scalar crosses both ways at its own width and signedness, at both bounds (plain char's the host target's: signed on x86-64 and Apple AArch64, unsigned on Linux AArch64); 64-bit values beyond the small Int range as BigInts, both ways} -constraints cfFixture -body {
+# A C long's two bounds and unsigned long's maximum and most significant bit
+# on this host's target: 64-bit values beyond the small Int range on LP64,
+# 32-bit ones on LLP64 (Windows).
+set ::cfLongValues [list $::cfLongMin $::cfLongMax $::cfULongMax [expr {1 << ($::cfLongBits - 2)}]]
+# The long of bcf_pick's prototype (its s15): all 64 bits of an LP64 long,
+# all 32 of an LLP64 one -- fixture.c's BCF_PICK_LONG.
+set ::cfPickLong [expr {$::cfLongBits == 64 ? -81985529216486895 : -1985229329}]
+# bcf_pointer_mix's long (fixture.c's BCF_MIX_LONG): beyond 32 bits on LP64.
+set ::cfMixLong [expr {$::cfLongBits == 64 ? -1234567890123 : -1234567890}]
+
+test cf-scalar-transport {every C integer scalar crosses both ways at its own width and signedness, at both bounds (plain char's the host target's: signed on x86-64 and Apple AArch64, unsigned on Linux AArch64; long's the target's: 64 bits on LP64, 32 on LLP64); 64-bit values beyond the small Int range as BigInts, both ways} -constraints cfFixture -body {
     lassign $::cfCharRange charMin charMax
-    appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::echo_schar(-128), bcf::echo_schar(127), bcf::echo_uchar(0), bcf::echo_uchar(255), bcf::echo_char($charMin), bcf::echo_char($charMax), bcf::echo_short(-32768), bcf::echo_short(32767), bcf::echo_ushort(65535), bcf::echo_int(-2147483648), bcf::echo_int(2147483647), bcf::echo_uint(4294967295), bcf::echo_long(-9223372036854775808), bcf::echo_long(9223372036854775807), bcf::echo_ulong(18446744073709551615), bcf::echo_ulong(4611686018427387904), bcf::echo_longlong(-4611686018427387905), bcf::echo_ulonglong(18446744073709551615)\]\n"] {cranelift cranelift-generic}
-} -cleanup removeApps -result [lrepeat 2 "\[-128, 127, 0, 255, [join $::cfCharRange {, }], -32768, 32767, 65535, -2147483648, 2147483647, 4294967295, -9223372036854775808, 9223372036854775807, 18446744073709551615, 4611686018427387904, -4611686018427387905, 18446744073709551615\]"]
+    lassign $::cfLongValues longMin longMax ulongMax ulongHigh
+    appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::echo_schar(-128), bcf::echo_schar(127), bcf::echo_uchar(0), bcf::echo_uchar(255), bcf::echo_char($charMin), bcf::echo_char($charMax), bcf::echo_short(-32768), bcf::echo_short(32767), bcf::echo_ushort(65535), bcf::echo_int(-2147483648), bcf::echo_int(2147483647), bcf::echo_uint(4294967295), bcf::echo_long($longMin), bcf::echo_long($longMax), bcf::echo_ulong($ulongMax), bcf::echo_ulong($ulongHigh), bcf::echo_longlong(-4611686018427387905), bcf::echo_ulonglong(18446744073709551615)\]\n"] {cranelift cranelift-generic}
+} -cleanup removeApps -result [lrepeat 2 "\[-128, 127, 0, 255, [join $::cfCharRange {, }], -32768, 32767, 65535, -2147483648, 2147483647, 4294967295, [join $::cfLongValues {, }], -4611686018427387905, 18446744073709551615\]"]
 
 test cf-scalar-extension {C sees a narrow argument sign- or zero-extended by its own type; a narrow result is extended by Botlish from its width, whatever the callee left in the register's other bits (GCC leaves them)} -constraints {cfFixture} -body {
     appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::widen_schar(-1), bcf::widen_uchar(255), bcf::widen_short(-2), bcf::widen_ushort(65535), bcf::widen_int(-3), bcf::widen_uint(4294967295), bcf::dirty_uchar(), bcf::dirty_schar(), bcf::dirty_ushort(), bcf::dirty_short(), bcf::dirty_uint(), bcf::dirty_int()\]\n"] {cranelift}
 } -cleanup removeApps -result {{[-1, 255, -2, 65535, -3, 4294967295, 128, -128, 32768, -32768, 4294967280, -16]}}
 
-test cf-stack-arguments {ten arguments of mixed classes: the ones past the argument registers on the stack, each at its own weight} -constraints cfFixture -body {
-    appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), bcf::many(-1, -2, -3, -4, 255, 65535, 4294967295, 18446744073709551615, -9, -10), bcf::tenth(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), bcf::tenth(0, 0, 0, 0, 0, 0, 0, 0, 0, -2147483648)\]\n"] {cranelift cranelift-generic}
-} -cleanup removeApps -result {{[763, 55835297053, 10, -2147483648]} {[763, 55835297053, 10, -2147483648]}}
+# bcf_many's checksum of its ten arguments (fixture.c), computed here as C
+# computes it: in long long, the unsigned long H converted to it first (the
+# 64-bit maximum is -1 there, a 32-bit one 4294967295), the sum wrapping at
+# 64 bits.
+proc manySum {a b c d e f g h i j} {
+    set h [expr {$h >= 2 ** 63 ? $h - 2 ** 64 : $h}]
+    set sum [expr {($a + 2 * $b + 3 * $c + 5 * $d + 7 * $e + 11 * $f + 13 * $g + 17 * $h + 19 * $i + 23 * $j) & (2 ** 64 - 1)}]
+    expr {$sum >= 2 ** 63 ? $sum - 2 ** 64 : $sum}
+}
+
+test cf-stack-arguments {ten arguments of mixed classes: the ones past the argument registers on the stack, each at its own weight (unsigned long's maximum the target's)} -constraints cfFixture -body {
+    appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::many(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), bcf::many(-1, -2, -3, -4, 255, 65535, 4294967295, $::cfULongMax, -9, -10), bcf::tenth(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), bcf::tenth(0, 0, 0, 0, 0, 0, 0, 0, 0, -2147483648)\]\n"] {cranelift cranelift-generic}
+} -cleanup removeApps -result [lrepeat 2 "\[763, [manySum -1 -2 -3 -4 255 65535 4294967295 $::cfULongMax -9 -10], 10, -2147483648\]"]
 
 test cf-bool-type {ffi::c::Bool is C _Bool's name for Botlish's bool: a parameter takes and a result is a bool (true, false), a pointer may point to one and a function pointer's signature may have one; its ABI class is bool; it is a type, never a value, and an Int is no bool} -constraints cfFixture -body {
     set hir [appHir [bcfApp "import ffi::c\nimport bcf\n\nfn f(b: ffi::c::Bool) -> bool:\n    b\n\n\[f(true), bcf::is_positive(3)\]\n"]]
@@ -697,14 +825,14 @@ test cf-nir {the call lowers to one foreigncall of the program's foreign table -
         [lindex [regexp -inline {op mbytesaddr} [lindex $lines [expr {$call - 1}]]] 0] \
         [lindex [regexp -inline {op keepalive} [lindex $lines [expr {$call + 1}]]] 0] \
         [lindex [regexp -inline {op keepalive} [lindex $lines [expr {$call + 2}]]] 0]
-} -cleanup removeApps -result {{{link "botlish_cffi_fixture"} {foreign 0 "bcf_reverse" params="ptr u64 ptr" result=ptr alias=2 name="bcf::reverse"} {foreign 1 "bcf_add" params="i32 i32" result=i32 name="bcf::add"}} {op mbytesclone} {op bytesaddr} {op mbytesaddr} {op keepalive} {op keepalive}}
+} -cleanup removeApps -result [subst -nocommands -nobackslashes {{{link "botlish_cffi_fixture"} {foreign 0 "bcf_reverse" params="ptr $::cfULongClass ptr" result=ptr alias=2 name="bcf::reverse"} {foreign 1 "bcf_add" params="i32 i32" result=i32 name="bcf::add"}} {op mbytesclone} {op bytesaddr} {op mbytesaddr} {op keepalive} {op keepalive}}]
 
 test cf-clif {natively the call is one direct call of the imported symbol with the platform C signature -- the host target's C convention, narrow parameters extended by their class, the result at its width -- no helper, no lookup, no Tcl} -constraints {cfFixture} -body {
     set hir [appHir [bcfApp "import ffi::c\nimport bcf\n\nfn f(x: ffi::c::UChar, y: ffi::c::Short) -> int:\n    bcf::widen_uchar(x) + bcf::widen_short(y)\n\nf(1, 2)\n"]]
     set clif [native::clif $hir]
     regexp {; u0:(\d+) = bcf_widen_uchar \(C bcf::widen_uchar\)} $clif -> id
     regexp "fn(\\d+) = u0:$id (sig\\d+)" $clif -> fn sig
-    list [regexp "$sig = \\(i8 uext\\) -> i64 $::cConvention" $clif] [regexp "sig\\d+ = \\(i16 sext\\) -> i64 $::cConvention" $clif] \
+    list [regexp "$sig = \\(i8 uext\\) -> $::cfLongClif $::cConvention" $clif] [regexp "sig\\d+ = \\(i16 sext\\) -> $::cfLongClif $::cConvention" $clif] \
         [regexp "= call fn$fn\\(v\\d+\\)" $clif]
 } -cleanup removeApps -result {1 1 1}
 
@@ -716,6 +844,8 @@ test cf-clif-stack-parameters {a narrow parameter past the eight argument regist
     set params
 } -cleanup removeApps -result [expr {$::cConvention eq "apple_aarch64"
     ? "i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, i16, i8"
+    : $::cfLongClif eq "i32"
+    ? "i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i32 sext, i16 sext, i8 sext"
     : "i64, i64, i64, i64, i64, i64, i64, i64, i64, i32 sext, i16 sext, i8 sext"}]
 
 # ---------------------------------------------------------------------------
@@ -738,20 +868,26 @@ test cf-strict0-replay {an unchecked (-strict 0) program's refused exposure repl
 # ---------------------------------------------------------------------------
 # Linking
 
+# How the host's linker is given library NAME, as NATIVE LINK messages name
+# it: -lNAME, or NAME.lib for link.exe.
+proc linkedName {name} {
+    return [expr {$::windowsHost ? "$name.lib" : "-l$name"}]
+}
+
 test cf-missing-library {a library the linker cannot find compiles through the front end and fails at the native link, with the linker's own words, as NATIVE LINK -- never an UNKNOWN-NAMESPACE, a TYPE or a HIR error} -constraints {nativeBuilt rustcLinker nativeCCalls} -body {
     set dir [app [list main.bot "extern c library \"definitely_missing_botlish_lib\"\n1 + 1\n"]]
     set hir [appHir $dir]
     lassign [native::withLinkDirs {} {outcomeUnderHir cranelift $hir}] tag code message
     list [hir::foreign::links $hir] [outcomeUnderHir interp $hir] $code \
-        [string match "native link failed: the system linker could not link this program with the C functions and libraries it declares (libraries -ldefinitely_missing_botlish_lib):*" $message] \
-        [regexp {(cannot|unable to) find[^\n]*definitely_missing_botlish_lib|library '?definitely_missing_botlish_lib'? not found|library not found for -ldefinitely_missing_botlish_lib} $message]
+        [string match "native link failed: the system linker could not link this program with the C functions and libraries it declares (libraries [linkedName definitely_missing_botlish_lib]):*" $message] \
+        [regexp {(cannot|unable to) find[^\n]*definitely_missing_botlish_lib|library '?definitely_missing_botlish_lib'? not found|library not found for -ldefinitely_missing_botlish_lib|LNK1181: cannot open input file 'definitely_missing_botlish_lib\.lib'} $message]
 } -cleanup removeApps -result {definitely_missing_botlish_lib {value 2 {}} {NATIVE LINK} 1 1}
 
 test cf-undefined-symbol {a symbol no library defines is the linker's undefined symbol, reported as NATIVE LINK; an unused declaration needs no definition} -constraints cfFixture -body {
     set used [bcfApp "import ffi::c\nimport m\n\nm::nope(1)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     set unused [bcfApp "import ffi::c\nimport m\nimport bcf\n\nbcf::add(1, 2)\n" [list m.bot "import ffi::c\n\nextern c fn nope named \"botlish_no_such_symbol\"(x: ffi::c::Int) -> ffi::c::Int\n"]]
     lassign [lindex [appValues $used {cranelift}] 0] code message
-    list $code [regexp -nocase {undefined (symbol|reference).*botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
+    list $code [regexp -nocase {undefined (symbol|reference).*botlish_no_such_symbol|LNK20(19|01): unresolved external symbol botlish_no_such_symbol} $message] [appValues $unused {cranelift}]
 } -cleanup removeApps -result {{NATIVE LINK} 1 3}
 
 test cf-named-symbol {`named` changes exactly the link symbol: the Botlish name stays the declaration's; without it the symbol is the name} -constraints cfFixture -body {
@@ -768,14 +904,14 @@ test cf-link-order {the declared libraries link as one group, so their order nev
 } -cleanup removeApps -result {42 42}
 
 test cf-executable {a program that calls C links as a standalone executable with the libraries it declares and runs with no Tcl, no rustc and no source: moved out of its build directory, its application deleted, with an empty environment} -constraints cfFixture -body {
-    set dir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nr = bcf::reverse(src, len(src), abi::bytes::zeroed(abi::usize(5)))\n\[bcf::add(40, 2), abi::bytes::freeze(r.out) == text(\"olleh\"), bcf::pick(15, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, -81985529216486895, 128, -2, 2147483649, -1)\]\n"]
-    set exe [file join $dir program]
-    native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+    set dir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nr = bcf::reverse(src, len(src), abi::bytes::zeroed(abi::usize(5)))\n\[bcf::add(40, 2), abi::bytes::freeze(r.out) == text(\"olleh\"), bcf::pick(15, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1)\]\n"]
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
     set elsewhere [makeDirectory cf-moved-[pid]]
-    file rename $exe [file join $elsewhere program]
+    set moved [file join $elsewhere [file tail $exe]]
+    file rename $exe $moved
     file delete -force $dir
-    list [binaryHeader [file join $elsewhere program]] [string trim [exec env -i PATH=/nonexistent [file join $elsewhere program]]]
-} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-moved-[pid]]} -result [list [hostBinaryHeader executable] {[42, true, -81985529216486895]}]
+    list [binaryHeader $moved] [string trim [runBare $moved]]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-moved-[pid]]} -result [list [hostBinaryHeader executable] "\[42, true, $::cfPickLong\]"]
 
 test cf-stub-linker {the stub linker links no native library: it refuses a program that calls C or declares a library, naming what it calls and links and the linker that can} -constraints {cfFixture} -body {
     set calls [bcfApp "import ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
@@ -790,7 +926,7 @@ test cf-stub-linker {the stub linker links no native library: it refuses a progr
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_LINKER) } else { set ::env(BOTLISH_NATIVE_LINKER) $saved }
     }
-} -cleanup removeApps -result {{{NATIVE LINK} {native link failed: this program calls C or declares a C library (symbols bcf_add; libraries -lbotlish_cffi_fixture), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)}} {{NATIVE LINK} {native link failed: this program calls C or declares a C library (libraries -lbotlish_cffi_fixture), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)}}}
+} -cleanup removeApps -result [list [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (symbols bcf_add; libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"] [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"]]
 
 test cf-main-tcl {main.tcl -backend cranelift -L DIR compiles, links with the declared libraries, runs and reports the value, the program's own output in its place (native program output is main.tcl's own)} -constraints cfFixture -body {
     set dir [bcfApp "import ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
@@ -994,60 +1130,105 @@ test cf-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at eve
 # char is -3 where it is signed, 253 where not (C's own (char)-3).
 set ::pickTypes {SChar UChar Short UShort Int UInt Char SChar UChar Short SChar UShort Int SChar Long UChar Short UInt SChar}
 set ::pickValues [list -2 253 -1234 65244 -123456789 4275878552 [expr {[lindex $::cfCharRange 0] < 0 ? -3 : 253}] \
-    -4 247 -30000 -128 48879 -2000000000 127 -81985529216486895 128 -2 2147483649 -1]
+    -4 247 -30000 -128 48879 -2000000000 127 $::cfPickLong 128 -2 2147483649 -1]
 set ::narrowTypes {SChar UChar Short UShort Int UInt Bool Char}
 set ::narrowValues [list -2 253 -1234 65244 -123456789 4275878552 1 [expr {[lindex $::cfCharRange 0] < 0 ? -3 : 253}]]
 
 # What a call of CALL (a capture binding, its arguments) arrived in, and
 # what the C compiler's own call REFERENCE (bcf_reference_*: the same
 # prototype and values) arrived in: {REGS STACK REFERENCE-REGS
-# REFERENCE-STACK} on BACKEND, each register's low 32 bits and 128 stack
-# bytes. The capture is read back before the reference call overwrites it.
+# REFERENCE-STACK FREGS REFERENCE-FREGS ALIGNMENT REFERENCE-ALIGNMENT} on
+# BACKEND, each integer register's low 32 bits, 256 stack bytes, the
+# floating-point registers the capture records (Win64's xmm0-xmm3; zeros
+# elsewhere) and the stack pointer at the call modulo 16. The capture is read
+# back before the reference call overwrites it.
 proc captureOf {call reference backend} {
-    set dir [bcfApp "import ffi::c\nimport bcf\n\nr = bcf::$call\nregs = loop i from 0 to 8:\n    bcf::captured_register32(i)\nstack = loop i from 0 to 128:\n    bcf::captured_stack_byte(i)\nq = bcf::${reference}()\nrregs = loop i from 0 to 8:\n    bcf::reference_register32(i)\nrstack = loop i from 0 to 128:\n    bcf::reference_stack_byte(i)\n\[r, q, regs, stack, rregs, rstack\]\n"]
+    set dir [bcfApp "import ffi::c\nimport bcf\n\nr = bcf::$call\nregs = loop i from 0 to 8:\n    bcf::captured_register32(i)\nfregs = loop i from 0 to 4:\n    bcf::captured_float(i)\nstack = loop i from 0 to 256:\n    bcf::captured_stack_byte(i)\nalign = bcf::captured_alignment()\nq = bcf::${reference}()\nrregs = loop i from 0 to 8:\n    bcf::reference_register32(i)\nrfregs = loop i from 0 to 4:\n    bcf::reference_float(i)\nrstack = loop i from 0 to 256:\n    bcf::reference_stack_byte(i)\nralign = bcf::captured_alignment()\n\[r, q, regs, stack, rregs, rstack, fregs, rfregs, align, ralign\]\n"]
     set value [lindex [appValues $dir [list $backend]] 0]
-    lassign [botlishList $value] r q regs stack rregs rstack
+    lassign [botlishList $value] r q regs stack rregs rstack fregs rfregs align ralign
     if {$r != 0 || $q != 0} {
         error "capture failed: $value"
     }
-    return [list $regs $stack $rregs $rstack]
+    return [list $regs $stack $rregs $rstack $fregs $rfregs $align $ralign]
 }
 
-test cf-abi-register-extension {narrow arguments in registers -- one of every narrow class, _Bool and plain char, exactly the argument registers of AArch64 -- arrive extended by their type to the bits the target's ABI makes the caller define (32 on Apple AArch64 and x86-64, the argument's own width on Linux AArch64), as the C compiler's own call of the same prototype makes them: observed in the registers at entry, where no C code can extend them first} -constraints cfFixture -body {
+test cf-abi-register-extension {narrow arguments in registers -- one of every narrow class, _Bool and plain char, exactly the argument registers of AArch64, the first four of them Win64's -- arrive extended by their type to the bits the target's ABI makes the caller define (32 on Apple AArch64 and x86-64 System V, the argument's own width on Linux AArch64 and Win64), as the C compiler's own call of the same prototype makes them: observed in the registers at entry, where no C code can extend them first (and, past Win64's four registers, in their stack slots)} -constraints cfFixture -body {
     set call "capture8([join [lreplace $::narrowValues 6 6 true] {, }])"
     lmap backend {cranelift cranelift-generic} {
-        lassign [captureOf $call reference_narrow8 $backend] regs stack rregs rstack
-        concat [abiMismatches botlish $::narrowTypes $::narrowValues $regs $stack] \
-            [abiMismatches reference $::narrowTypes $::narrowValues $rregs $rstack]
+        lassign [captureOf $call reference_narrow8 $backend] regs stack rregs rstack fregs rfregs
+        concat [abiMismatches botlish $::narrowTypes $::narrowValues $regs $stack $fregs] \
+            [abiMismatches reference $::narrowTypes $::narrowValues $rregs $rstack $rfregs]
     }
 } -cleanup removeApps -result {{} {}}
 
-test cf-abi-doubles-before-integers {eight doubles, then the narrow integers of cf-abi-register-extension: the doubles take the floating-point registers, so the integers arrive exactly where and as they do without them (x0-x7, extended, on Apple AArch64), as the C compiler's own call of the same prototype puts them -- the integer registers are counted apart from the doubles, never by a parameter's position} -constraints cfFixture -body {
-    set call "capture_d8n8(0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, [join [lreplace $::narrowValues 6 6 true] {, }])"
+test cf-abi-doubles-before-integers {eight doubles, then the narrow integers of cf-abi-register-extension: where the kinds are counted apart (System V, AAPCS64, Apple) the doubles take the floating-point registers, so the integers arrive exactly where and as they do without them (x0-x7, extended, on Apple AArch64); on Win64, which assigns by position, the first four doubles take xmm0-xmm3 and everything after them is on the stack, eight bytes each -- as the C compiler's own call of the same prototype puts them} -constraints cfFixture -body {
+    set doubles {0.5 1.5 2.5 3.5 4.5 5.5 6.5 7.5}
+    set call "capture_d8n8([join $doubles {, }], [join [lreplace $::narrowValues 6 6 true] {, }])"
+    set types [concat [lrepeat 8 Double] $::narrowTypes]
+    set values [concat $doubles $::narrowValues]
     lmap backend {cranelift cranelift-generic} {
-        lassign [captureOf $call reference_d8n8 $backend] regs stack rregs rstack
-        concat [abiMismatches botlish $::narrowTypes $::narrowValues $regs $stack] \
-            [abiMismatches reference $::narrowTypes $::narrowValues $rregs $rstack]
+        lassign [captureOf $call reference_d8n8 $backend] regs stack rregs rstack fregs rfregs
+        concat [abiMismatches botlish $types $values $regs $stack $fregs] \
+            [abiMismatches reference $types $values $rregs $rstack $rfregs]
     }
 } -cleanup removeApps -result {{} {}}
 
-test cf-abi-stack-layout {twenty arguments, twelve and more past the argument registers, of mixed width and signedness -- adjacent narrow ones, a 64-bit one after narrow ones, narrow ones after it: each arrives at the target's own place (Apple's natural size and alignment, packed; one 8-byte slot each elsewhere) with its own bytes, exactly where the C compiler's own call of the same prototype puts it} -constraints cfFixture -body {
+# Doubles and integers interleaved (fixture.c's bcf_reference_mixed).
+set ::mixedTypes {Double Int Double LongLong Double SChar Double UShort Double Int}
+set ::mixedValues {0.5 -7 -1.25 -81985529216486895 6.0 -100 -0.375 65000 2.5 123456789}
+
+test cf-abi-mixed-positions {doubles and integers interleaved, ten of them: Win64 assigns the first four by position -- a double at position 0 and 2 in xmm0 and xmm2, an integer at 1 and 3 in rdx and r9, the other register of each position unused -- and the other six to 8-byte stack slots after the 32-byte shadow space, doubles like integers; System V and AAPCS64 count the kinds apart and keep all ten in registers (the integers' observed in the first five integer registers) -- exactly where the C compiler's own call of the same prototype puts them} -constraints cfFixture -body {
+    set call "capture_mixed([join $::mixedValues {, }])"
+    lmap backend {cranelift cranelift-generic} {
+        lassign [captureOf $call reference_mixed $backend] regs stack rregs rstack fregs rfregs
+        concat [abiMismatches botlish $::mixedTypes $::mixedValues $regs $stack $fregs] \
+            [abiMismatches reference $::mixedTypes $::mixedValues $rregs $rstack $rfregs]
+    }
+} -cleanup removeApps -result {{} {}}
+
+test cf-abi-mixed-model {the ABI model's places of the interleaved prototype: Win64 by position (xmm0, rdx, xmm2, r9, then the stack from 32), System V and AAPCS64 by kind (floating-point and integer registers counted apart, nothing on the stack)} -body {
+    lmap location [abiLocations $::mixedTypes] {
+        expr {[lindex $location 0] eq "stack" ? [lindex $location 1] : "[string index [lindex $location 0] 0][lindex $location 1]"}
+    }
+} -result [switch -- $::hostTarget {
+    windows-x86_64 { list f0 r1 f2 r3 32 40 48 56 64 72 }
+    default { list f0 r0 f1 r1 f2 r2 f3 r3 f4 r4 }
+}]
+
+test cf-abi-stack-alignment {the stack pointer is 16-byte aligned at every call, whatever the number of stack arguments -- none, an odd number of 8-byte slots, sixteen -- in Botlish's calls and the C compiler's own (every ABI here requires it; Win64's shadow space included)} -constraints cfFixture -body {
+    set results {}
+    foreach {call reference} [list \
+        "capture8([join [lreplace $::narrowValues 6 6 true] {, }])" reference_narrow8 \
+        "capture_pick([join [concat 0 $::pickValues] {, }])" reference_pick \
+        "capture_mixed([join $::mixedValues {, }])" reference_mixed] {
+        foreach backend {cranelift cranelift-generic} {
+            lassign [captureOf $call $reference $backend] - - - - - - align ralign
+            lappend results $align $ralign
+        }
+    }
+    set odd [bcfApp "import ffi::c\nimport bcf\n\nr = bcf::capture_odd(1, 2, 3, 4, 5, 6, 7, 8, 9)\n\[r, bcf::captured_alignment()\]\n"]
+    lappend results {*}[lmap value [appValues $odd {cranelift cranelift-generic}] {lindex [botlishList $value] 1}]
+    set results
+} -cleanup removeApps -result [lrepeat 14 0]
+
+test cf-abi-stack-layout {twenty arguments, twelve and more past the argument registers, of mixed width and signedness -- adjacent narrow ones, a 64-bit one after narrow ones, narrow ones after it: each arrives at the target's own place (Apple's natural size and alignment, packed; one 8-byte slot each elsewhere, on Win64 after the caller's 32-byte shadow space) with its own bytes, exactly where the C compiler's own call of the same prototype puts it} -constraints cfFixture -body {
     set types [concat Int $::pickTypes]
     set values [concat 0 $::pickValues]
     set call "capture_pick([join $values {, }])"
     lmap backend {cranelift cranelift-generic} {
-        lassign [captureOf $call reference_pick $backend] regs stack rregs rstack
-        concat [abiMismatches botlish $types $values $regs $stack] [abiMismatches reference $types $values $rregs $rstack]
+        lassign [captureOf $call reference_pick $backend] regs stack rregs rstack fregs rfregs
+        concat [abiMismatches botlish $types $values $regs $stack $fregs] [abiMismatches reference $types $values $rregs $rstack $rfregs]
     }
 } -cleanup removeApps -result {{} {}}
 
-test cf-abi-stack-layout-model {the ABI model's stack offsets of the twenty-argument prototype: Apple packs the twelve stack arguments at 0, 1, 2, 4, 6, 8, 12, 16, 24, 26, 28 and 32 (MACOS-AARCH64-MILESTONE-6.md); AAPCS64 gives each its own 8-byte slot after eight registers, SysV x86-64 after six} -body {
+test cf-abi-stack-layout-model {the ABI model's stack offsets of the twenty-argument prototype: Apple packs the twelve stack arguments at 0, 1, 2, 4, 6, 8, 12, 16, 24, 26, 28 and 32 (MACOS-AARCH64-MILESTONE-6.md); AAPCS64 gives each its own 8-byte slot after eight registers, SysV x86-64 after six, Win64 after four and the 32 bytes of shadow space} -body {
     lmap location [abiLocations [concat Int $::pickTypes]] {
         expr {[lindex $location 0] eq "reg" ? "r" : [lindex $location 1]}
     }
 } -result [switch -- $::hostTarget {
     macos-aarch64 { list r r r r r r r r 0 1 2 4 6 8 12 16 24 26 28 32 }
     linux-aarch64 { list r r r r r r r r 0 8 16 24 32 40 48 56 64 72 80 88 }
+    windows-x86_64 { list r r r r 32 40 48 56 64 72 80 88 96 104 112 120 128 136 144 152 }
     default { list r r r r r r 0 8 16 24 32 40 48 56 64 72 80 88 96 104 }
 }]
 
@@ -1087,7 +1268,7 @@ test cf-scalar-values {every C integer scalar both ways at zero, one, a small va
     set expected {}
     foreach {type fn bits signed} [list SChar schar 8 1 UChar uchar 8 0 Char char 8 [expr {$charMin < 0}] \
             Short short 16 1 UShort ushort 16 0 Int int 32 1 UInt uint 32 0 \
-            Long long 64 1 ULong ulong 64 0 LongLong longlong 64 1 ULongLong ulonglong 64 0] {
+            Long long $::cfLongBits 1 ULong ulong $::cfLongBits 0 LongLong longlong 64 1 ULongLong ulonglong 64 0] {
         if {$signed} {
             set lo [expr {-(1 << ($bits - 1))}]
             set hi [expr {(1 << ($bits - 1)) - 1}]
@@ -1099,7 +1280,7 @@ test cf-scalar-values {every C integer scalar both ways at zero, one, a small va
         foreach v $values {
             lappend calls "bcf::echo_$fn\($v\)"
             lappend expected $v
-            if {$bits < 64 && $fn ni {uint int}} {
+            if {$fn in {schar uchar char short ushort}} {
                 lappend calls "bcf::widen_$fn\($v\)"
                 lappend expected $v
             }
@@ -1119,7 +1300,7 @@ test cf-char-target {plain C char is the target's own: signed on x86-64 and Appl
 } -cleanup removeApps -result [list [lrepeat 2 "\[[join [expr {[lindex $::cfCharRange 0] < 0 ? {-1 -128 127 -2} : {255 128 0 254}}] {, }], [join $::cfCharRange {, }]\]"] "TYPE: main.bot:4:16: argument 1 of bcf::echo_char cannot be proven to satisfy ffi::c::Char (argument type: int)"]
 
 test cf-pointer-mix {pointers among integers, in registers and on the stack: every argument arrives exactly (C checks each against its own expectation: a bit each, 0xfff for all) -- C's static addresses, NULL, the top of the 47-bit user space and an address with every high bit set} -constraints cfFixture -body {
-    appValues [bcfApp "import ffi::c\nimport bcf\n\np = bcf::address()\nq = bcf::address2()\nz = ffi::c::null\[ffi::c::Void\]()\nh = bcf::high_address()\nt = bcf::user_top()\nbcf::pointer_mix(p, -5, z, 65000, -1234567890123, q, -7, h, p, -128, t, -32768)\n"] {cranelift cranelift-generic}
+    appValues [bcfApp "import ffi::c\nimport bcf\n\np = bcf::address()\nq = bcf::address2()\nz = ffi::c::null\[ffi::c::Void\]()\nh = bcf::high_address()\nt = bcf::user_top()\nbcf::pointer_mix(p, -5, z, 65000, $::cfMixLong, q, -7, h, p, -128, t, -32768)\n"] {cranelift cranelift-generic}
 } -cleanup removeApps -result {4095 4095}
 
 test cf-pointer-width {a pointer crosses with all 64 bits: C's static address needs more than 32 of them, an address with every high bit set and the top of user space round-trip with their identity (C compares), NULL stays NULL} -constraints cfFixture -body {
@@ -1133,11 +1314,17 @@ test cf-error-sentinel {a C function's own error sentinel is a value: Botlish so
 # ---------------------------------------------------------------------------
 # System libraries, shared libraries, search directories, the linker's words
 
-test cf-system-library {functions of the system C library, declared by their C prototypes, through the platform linker -- libc's (glibc's, libSystem's on macOS), with and without `extern c library "m"`, one by another link symbol} -constraints {nativeBuilt rustcLinker nativeCCalls} -body {
+# A system library a C program may name beside the C library's functions,
+# which changes nothing about where they come from: the math library on
+# Linux and macOS (libSystem's on macOS), kernel32's import library on
+# Windows (which has no separate math library: the C runtime holds it).
+set ::systemLibrary [expr {$::windowsHost ? "kernel32" : "m"}]
+
+test cf-system-library {functions of the system C library, declared by their C prototypes, through the platform linker -- libc's (glibc's, libSystem's on macOS, the C runtime every Windows executable links), with and without a system library declared (`extern c library "m"`; "kernel32" on Windows), one by another link symbol} -constraints {nativeBuilt rustcLinker nativeCCalls} -body {
     set decls "extern c fn labs(x: ffi::c::Long) -> ffi::c::Long\nextern c fn abs(x: ffi::c::Int) -> ffi::c::Int\nextern c fn magnitude named \"llabs\"(x: ffi::c::LongLong) -> ffi::c::LongLong\n"
     set call "\[labs(-42), abs(-7), magnitude(-9223372036854775807)\]\n"
     list [appValues [app [list main.bot "import ffi::c\n\n${decls}\n$call"]] {cranelift cranelift-generic}] \
-        [appValues [app [list main.bot "import ffi::c\n\nextern c library \"m\"\n${decls}\n$call"]] {cranelift}]
+        [appValues [app [list main.bot "import ffi::c\n\nextern c library \"$::systemLibrary\"\n${decls}\n$call"]] {cranelift}]
 } -cleanup removeApps -result {{{[42, 7, 9223372036854775807]} {[42, 7, 9223372036854775807]}} {{[42, 7, 9223372036854775807]}}}
 
 # The C library a symbol of executable EXE is imported from, as the host's
@@ -1161,51 +1348,72 @@ proc importedFrom {exe symbol} {
 }
 testConstraint nm [expr {[auto_execok nm] ne ""}]
 
-test cf-system-symbol-resolved {the intended system function is what the executable calls: labs is imported from the system C library (libSystem on macOS, glibc on Linux) by the platform's dynamic linker, never defined inside the executable by another object of the link} -constraints {nativeBuilt rustcLinker nativeCCalls nm} -body {
+test cf-system-symbol-resolved {the intended system function is what the executable calls: labs is imported from the system C library (libSystem on macOS, glibc on Linux) by the platform's dynamic linker, never defined inside the executable by another object of the link} -constraints {nativeBuilt rustcLinker nativeCCalls nm dynamicSystemCLibrary} -body {
     set dir [app [list main.bot "import ffi::c\n\nextern c fn labs(x: ffi::c::Long) -> ffi::c::Long\n\nlabs(-42)\n"]]
-    set exe [file join $dir program]
-    native::executable [appHir $dir] $exe
+    set exe [native::executable [appHir $dir] [file join $dir program]]
     list [string trim [exec $exe]] [importedFrom $exe labs]
 } -cleanup removeApps -result [list 42 [expr {$::tcl_platform(os) eq "Darwin" ? "libSystem" : "GLIBC"}]]
+
+# The DLL whose import directory entry of executable EXE names function
+# SYMBOL (tests/binary-header.tcl's peFacts), or "" when EXE imports it from
+# none.
+proc importedFromDll {exe symbol} {
+    dict for {dll names} [dict get [peFacts $exe] functions] {
+        if {$symbol in $names} {
+            return $dll
+        }
+    }
+    return ""
+}
+test cf-system-symbol-resolved-windows {Windows: a kernel32 function a program declares is imported from KERNEL32.dll by the loader, and the C library's labs is the static C runtime's, linked into the executable, which imports it from no DLL and imports no C runtime DLL at all -- one C runtime, the executable's own (codegen/aot.rs's crt_args)} -constraints {nativeBuilt rustcLinker nativeCCalls windowsHost} -body {
+    set dir [app [list main.bot "import ffi::c\n\nextern c library \"kernel32\"\n\nextern c fn labs(x: ffi::c::Long) -> ffi::c::Long\nextern c fn GetCurrentProcessId() -> ffi::c::ULong\n\n\[labs(-42), GetCurrentProcessId() > 0\]\n"]]
+    set exe [native::executable [appHir $dir] [file join $dir program]]
+    set imports [dict get [peFacts $exe] imports]
+    list [string trim [exec $exe]] [string toupper [importedFromDll $exe GetCurrentProcessId]] [importedFromDll $exe labs] \
+        [lsearch -all -inline -regexp -nocase $imports {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}]
+} -cleanup removeApps -result {{[42, true]} KERNEL32.DLL {} {}}
 
 # A shared library of one function, in a directory of its own, and how an
 # executable linked against it finds it at run time without any rpath of
 # Botlish's: on macOS its install name is its absolute path (what the
-# executable records), elsewhere LD_LIBRARY_PATH names the directory.
+# executable records), on Linux LD_LIBRARY_PATH names the directory, on
+# Windows PATH does (the loader searches it for a DLL, after the
+# executable's own directory and the system's). On Windows the library is a
+# DLL that cl /LD links with its import library, NAME.lib, which the program
+# links (tests/ctoolchain.tcl): {LIBRARY-FILE THE-VARIABLE}.
 proc sharedFixture {} {
     set dir [makeDirectory cf-shared-[pid]]
     set src [file join $dir shared.c]
     set channel [open $src w]
-    puts $channel "int bcfs_triple(int x) { return 3 * x; }"
+    puts $channel "#if defined(_WIN32)\n__declspec(dllexport)\n#endif\nint bcfs_triple(int x) { return 3 * x; }"
     close $channel
-    if {$::tcl_platform(os) eq "Darwin"} {
-        set lib [file join $dir libbotlish_cffi_shared.dylib]
-        exec cc -dynamiclib -O2 $src -install_name $lib -o $lib
-    } else {
-        set lib [file join $dir libbotlish_cffi_shared.so]
-        exec cc -shared -fPIC -O2 $src -o $lib
-    }
-    return $lib
+    set lib [lindex [ctool::sharedLibrary $dir botlish_cffi_shared $src] 0]
+    return [list $lib [expr {$::windowsHost ? "PATH" : $::tcl_platform(os) eq "Darwin" ? "" : "LD_LIBRARY_PATH"}]]
 }
 
-test cf-shared-library {a shared C library: linked by -lNAME from a -L directory (the linker prefers it as it would for C), recorded as a dependency of the executable, loaded at run time from where the platform's loader looks -- the native backends' linked run and a standalone executable -- and needed: without the file the executable does not start} -constraints {cfFixture} -body {
-    set lib [sharedFixture]
+test cf-shared-library {a shared C library: linked by -lNAME (on Windows its import library NAME.lib) from a -L directory (the linker prefers it as it would for C), recorded as a dependency of the executable, loaded at run time from where the platform's loader looks -- the native backends' linked run and a standalone executable -- and needed: without the file the executable does not start} -constraints {cfFixture} -body {
+    lassign [sharedFixture] lib variable
     set libDir [file dirname $lib]
     set dir [app [list main.bot "import ffi::c\n\nextern c library \"botlish_cffi_shared\"\n\nextern c fn triple named \"bcfs_triple\"(x: ffi::c::Int) -> ffi::c::Int\n\ntriple(14)\n"]]
     set hir [appHir $dir]
-    set exe [file join $dir program]
-    set saved [expr {[info exists ::env(LD_LIBRARY_PATH)] ? $::env(LD_LIBRARY_PATH) : ""}]
+    set saved [expr {$variable ne "" && [info exists ::env($variable)] ? [list $::env($variable)] : {}}]
     try {
-        if {$::tcl_platform(os) ne "Darwin"} { set ::env(LD_LIBRARY_PATH) $libDir }
+        if {$variable eq "PATH"} {
+            set ::env(PATH) "[file nativename $libDir];$::env(PATH)"
+        } elseif {$variable ne ""} {
+            set ::env($variable) $libDir
+        }
         set ran [native::withLinkDirs [list $libDir] {lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}}]
-        native::withLinkDirs [list $libDir] {native::executable $hir $exe}
+        set exe [native::withLinkDirs [list $libDir] {native::executable $hir [file join $dir program]}]
         set standalone [string trim [exec $exe]]
-        set recorded [regexp {libbotlish_cffi_shared} [dynamicLibraries $exe]]
+        set recorded [regexp {botlish_cffi_shared} [dynamicLibraries $exe]]
         file rename $lib $lib.moved
         set missing [catch {exec $exe} message]
         file rename $lib.moved $lib
     } finally {
-        if {$saved eq ""} { unset -nocomplain ::env(LD_LIBRARY_PATH) } else { set ::env(LD_LIBRARY_PATH) $saved }
+        if {$variable ne ""} {
+            if {$saved eq {}} { unset -nocomplain ::env($variable) } else { set ::env($variable) [lindex $saved 0] }
+        }
         file delete -force $libDir
     }
     list $ran $standalone $recorded $missing
@@ -1213,9 +1421,9 @@ test cf-shared-library {a shared C library: linked by -lNAME from a -L directory
 
 test cf-link-directories {-L directories: one whose path has spaces, two at once (each library in its own), one that does not exist beside one that does (a warning at most, never a failure), and a relative one main.tcl resolves against its working directory} -constraints cfFixture -body {
     set spaced [makeDirectory "cf dir with spaces [pid]"]
-    file copy -force [file join $::fixtureDir libbotlish_cffi_fixture.a] $spaced
+    file copy -force [fixtureLibrary botlish_cffi_fixture] $spaced
     set second [makeDirectory cf-second-[pid]]
-    file copy -force [file join $::fixtureDir libbotlish_cffi_dependent.a] $second
+    file copy -force [fixtureLibrary botlish_cffi_dependent] $second
     set dependent [app [list main.bot "import ffi::c\nimport m\n\nm::add_twice(20, 1)\n" m.bot "import ffi::c\n\nextern c library \"botlish_cffi_fixture\"\nextern c library \"botlish_cffi_dependent\"\n\nextern c fn add_twice named \"bcf_add_twice\"(a: ffi::c::Int, b: ffi::c::Int) -> ffi::c::Int\n"]]
     set simple [bcfApp "import ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
     set results {}
@@ -1234,13 +1442,22 @@ test cf-link-directories {-L directories: one whose path has spaces, two at once
 
 # A static archive of a function compiled for another architecture than the
 # host's: Apple clang's -arch x86_64 on macOS, clang's other Linux target on
-# Linux (no header needed). Empty when this host cannot make one.
+# Linux (no header needed), on Windows clang's ARM64 Windows target, archived
+# by MSVC's lib for that machine. Empty when this host cannot make one.
 proc foreignArchive {} {
     set dir [makeDirectory cf-foreign-arch-[pid]]
     set src [file join $dir foreign.c]
     set channel [open $src w]
     puts $channel "int bcfx_add(int a, int b) { return a + b; }"
     close $channel
+    if {$::windowsHost} {
+        set object [file join $dir foreign.obj]
+        if {[auto_execok clang] eq "" || [catch {exec clang --target=aarch64-pc-windows-msvc -c $src -o $object}]
+                || [catch {ctool::msvc lib /nologo /MACHINE:ARM64 /OUT:[file nativename [file join $dir botlish_cffi_foreign.lib]] [file nativename $object]}]} {
+            return ""
+        }
+        return $dir
+    }
     set object [file join $dir foreign.o]
     if {$::tcl_platform(os) eq "Darwin"} {
         set compile [list cc -arch x86_64 -c $src -o $object]
@@ -1258,11 +1475,13 @@ proc foreignArchive {} {
 set ::foreignArchiveDir [expr {[testConstraint cfFixture] ? [foreignArchive] : ""}]
 testConstraint foreignArchive [expr {$::foreignArchiveDir ne ""}]
 
-test cf-wrong-architecture {a library of another architecture is the linker's to refuse: NATIVE LINK with the linker's own words about it -- a line naming the library's file and what is wrong with it (lld's "is incompatible with", GNU ld's "skipping incompatible" or "Relocations in generic ELF", Apple ld's architecture it found) -- never a run of anything} -constraints {cfFixture foreignArchive} -body {
+test cf-wrong-architecture {a library of another architecture is the linker's to refuse: NATIVE LINK with the linker's own words about it -- a line naming the library's file and what is wrong with it (lld's "is incompatible with", GNU ld's "skipping incompatible" or "Relocations in generic ELF", Apple ld's architecture it found, link.exe's conflicting machine type) -- never a run of anything} -constraints {cfFixture foreignArchive} -body {
     set dir [app [list main.bot "import ffi::c\n\nextern c library \"botlish_cffi_foreign\"\n\nextern c fn add named \"bcfx_add\"(a: ffi::c::Int, b: ffi::c::Int) -> ffi::c::Int\n\nadd(40, 2)\n"]]
     lassign [native::withLinkDirs [list $::foreignArchiveDir] {outcomeUnderHir cranelift [appHir $dir]}] tag code message
-    set named [lsearch -inline -regexp [split $message \n] {libbotlish_cffi_foreign\.a}]
-    list $tag $code [regexp -nocase {incompatible|architecture|wrong format|file format not recognized|Relocations in generic ELF} $named] \
+    # The linker's lines, after the message's own first line (which names
+    # the library as the link plan spells it: NAME.lib on Windows).
+    set named [lsearch -inline -regexp [lrange [split $message \n] 1 end] [string map {. \\.} [ctool::staticName botlish_cffi_foreign]]]
+    list $tag $code [regexp -nocase {incompatible|architecture|wrong format|file format not recognized|Relocations in generic ELF|machine type} $named] \
         [string match "native link failed: the system linker could not link this program*" $message]
 } -cleanup removeApps -result {error {NATIVE LINK} 1 1}
 
@@ -1270,9 +1489,8 @@ test cf-link-failure-keeps-executable {a failed link of a program that calls C p
     set good [bcfApp "import ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
     set bad [app [list main.bot "import ffi::c\n\nextern c library \"definitely_missing_botlish_lib\"\n\nextern c fn add named \"bcf_add\"(a: ffi::c::Int, b: ffi::c::Int) -> ffi::c::Int\n\nadd(1, 2)\n"]]
     set out [makeDirectory cf-keep-[pid]]
-    set exe [file join $out program]
-    native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $good] $exe}
-    set failed [catch {native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $bad] $exe}} message options]
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $good] [file join $out program]}]
+    set failed [catch {native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $bad] [file join $out program]}} message options]
     list $failed [lrange [dict get $options -errorcode] 0 1] [string trim [exec $exe]] [glob -nocomplain -tails -directory $out .botlish-aot-*]
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-keep-[pid]]} -result {1 {NATIVE LINK} 42 {}}
 
@@ -1284,13 +1502,12 @@ test cf-availability-check {macOS: a C library compiled by Apple clang that chec
 # The collector, coroutines and the stack guard around C calls
 
 test cf-gc-calls {C calls inside allocation-heavy loops, under GC stress, on both backends and in an executable: Strings and Lists held across every call survive the collections between them, and C results stored into managed values stay exact} -constraints cfFixture -body {
-    set dir [bcfApp "import ffi::c\nimport list\nimport str\nimport bcf\n\nfn step(i: ffi::c::Int) -> int:\n    held = \"held\".concat(\"-\").concat(\"value\")\n    xs = \[bcf::add(i, 1), bcf::add(i, 2)\]\n    w = bcf::widen_schar(-1)\n    ys = \[xs, \[w\]\]\n    held.length() + xs.get(1, 0) + bcf::pick(19, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, -81985529216486895, 128, -2, 2147483649, -1) + list::length(ys)\n\nsteps = loop i from 0 to 400:\n    step(i)\n\[list::length(steps), steps.get(0, 0), steps.get(399, 0)\]\n"]
+    set dir [bcfApp "import ffi::c\nimport list\nimport str\nimport bcf\n\nfn step(i: ffi::c::Int) -> int:\n    held = \"held\".concat(\"-\").concat(\"value\")\n    xs = \[bcf::add(i, 1), bcf::add(i, 2)\]\n    w = bcf::widen_schar(-1)\n    ys = \[xs, \[w\]\]\n    held.length() + xs.get(1, 0) + bcf::pick(19, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1) + list::length(ys)\n\nsteps = loop i from 0 to 400:\n    step(i)\n\[list::length(steps), steps.get(0, 0), steps.get(399, 0)\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [file join $dir program]
-        native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
@@ -1299,13 +1516,12 @@ test cf-gc-calls {C calls inside allocation-heavy loops, under GC stress, on bot
 } -cleanup removeApps -result [lrepeat 3 {[400, 13, 412]}]
 
 test cf-coroutine-calls {C calls inside a coroutine, before its first yield and between later ones, with managed values held across the yields and the calls, under GC stress: on both backends and in an executable, as the C calls of the main program} -constraints {cfFixture nativeCoroutines} -body {
-    set dir [bcfApp "import ffi::c\nimport list\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: ffi::c::Int) -> Event:\n    held = \[bcf::add(n, 1), n\]\n    yield Event {value: held.get(0, 0)}\n    t = bcf::stack_tail(1, 2, 3, 4, 5, 6, 7, 8, 9, -10, -11, -12)\n    yield Event {value: t + held.get(1, 0)}\n    return Event {value: bcf::pick(17, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, -81985529216486895, 128, -2, 2147483649, -1) + list::length(held)}\n\nfn run(n: ffi::c::Int) -> List\[int\]:\n    coroutine {step, first} = worker(n)\n    second = step()\n    third = step()\n    \[first.value, second.value, third.value\]\n\nruns = loop i from 0 to 100:\n    run(i)\n\[run(5), list::length(runs), bcf::add(1, 1)\]\n"]
+    set dir [bcfApp "import ffi::c\nimport list\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: ffi::c::Int) -> Event:\n    held = \[bcf::add(n, 1), n\]\n    yield Event {value: held.get(0, 0)}\n    t = bcf::stack_tail(1, 2, 3, 4, 5, 6, 7, 8, 9, -10, -11, -12)\n    yield Event {value: t + held.get(1, 0)}\n    return Event {value: bcf::pick(17, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1) + list::length(held)}\n\nfn run(n: ffi::c::Int) -> List\[int\]:\n    coroutine {step, first} = worker(n)\n    second = step()\n    third = step()\n    \[first.value, second.value, third.value\]\n\nruns = loop i from 0 to 100:\n    run(i)\n\[run(5), list::length(runs), bcf::add(1, 1)\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [file join $dir program]
-        native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
@@ -1322,8 +1538,7 @@ test cf-c-stack-overflow {C recursion that exhausts the native stack it runs on 
     try {
         set results [list [lindex [appValues $deep {cranelift}] 0] [appValues $finite {cranelift}] [lindex [appValues $inCoroutine {cranelift}] 0]]
         foreach dir [list $deep $inCoroutine] {
-            set exe [file join $dir program]
-            native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+            set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
             set code [catch {exec $exe 2>@1} message options]
             lappend results [list $code [lrange [dict get $options -errorcode] 0 0] [lindex [dict get $options -errorcode] end] $message]
         }
@@ -1451,7 +1666,7 @@ proc vaArg {type value} {
     return "bcf::c_[string tolower $type]($value)"
 }
 
-test cf-va-values {every C scalar class as a trailing argument at both its bounds (char and short promoted to int, unsigned ones too; _Bool to int; unsigned int, long, unsigned long, long long and unsigned long long at their own width), doubles and null and non-null pointers, read back by genuine C va_arg code: 30 trailing arguments, past every register, in one call} -constraints cfFixture -body {
+test cf-va-values {every C scalar class as a trailing argument at both its bounds (char and short promoted to int, unsigned ones too; _Bool to int; unsigned int, long, unsigned long, long long and unsigned long long at their own width), doubles and null and non-null pointers, read back by genuine C va_arg code: 30 trailing arguments, past every register, in one call} -constraints {cfFixture nativeCVariadics} -body {
     lassign $::cfCharRange charMin charMax
     set args [list SChar -128 SChar 127 UChar 0 UChar 255 Char $charMin Char $charMax Short -32768 Short 32767 \
         UShort 65535 Int -2147483648 Int 2147483647 UInt 4294967295 Long -9223372036854775808 Long 9223372036854775807 \
@@ -1488,20 +1703,20 @@ test cf-va-values {every C scalar class as a trailing argument at both its bound
     }
 } -cleanup removeApps -result {{30 {}} {30 {}}}
 
-test cf-va-arities {one variadic C function called with different numbers and C types of trailing arguments in one program -- none, one, several, more than the integer registers hold, negative and boundary ints -- each call its own signature} -constraints cfFixture -body {
+test cf-va-arities {one variadic C function called with different numbers and C types of trailing arguments in one program -- none, one, several, more than the integer registers hold, negative and boundary ints -- each call its own signature} -constraints {cfFixture nativeCVariadics} -body {
     set ints [lmap n {1 2 3 4 5 6 7 8 9 10 11} {string cat "bcf::c_int($n)"}]
     appValues [bcfApp "import ffi::c\nimport bcf\n\n\[bcf::vsum(0), bcf::vsum(1, bcf::c_int(-7)), bcf::vsum(3, bcf::c_int(1), bcf::c_int(2), bcf::c_int(3)), bcf::vsum(12, [join $ints {, }], bcf::c_int(-1000)), bcf::vsum(2, bcf::c_int(-2147483648), bcf::c_int(2147483647)), bcf::vsum(2, bcf::c_schar(-3), bcf::c_ushort(65535))\]\n"] {cranelift cranelift-generic}
 } -cleanup removeApps -result [lrepeat 2 {[0, -7, 6, -934, -1, 65532]}]
 
-test cf-va-position-types {the same trailing position of one function passes another C type in another call: an int, a double, a pointer, a long} -constraints cfFixture -body {
+test cf-va-position-types {the same trailing position of one function passes another C type in another call: an int, a double, a pointer, a long} -constraints {cfFixture nativeCVariadics} -body {
     appValues [bcfApp "direct module\n\nimport ffi::c\nimport bcf\n\np = bcf::vaddress()\na = bcf::vrecord(1, 1, 0, bcf::c_int(-9))\nx = bcf::vseen_bits(0)\nb = bcf::vrecord(1, 7, 0, 0.5)\ny = bcf::vseen_bits(0)\nc = bcf::vrecord(2, 136, 0, p, p)\nw = bcf::vseen_bits(1) == bcf::vaddress_bits()\nd = bcf::vrecord(1, 3, 0, bcf::c_long(-5))\nv = bcf::vseen_bits(0)\n\[a, b, c, d, x, y, w, v\]\n"] {cranelift cranelift-generic}
 } -cleanup removeApps -result [lrepeat 2 {[1, 1, 2, 1, 18446744073709551607, 4602678819172646912, true, 18446744073709551611]}]
 
-test cf-va-doubles {doubles: one, several, more than the floating-point registers hold, interleaved with ints, and after a fixed double before the variadic boundary} -constraints cfFixture -body {
+test cf-va-doubles {doubles: one, several, more than the floating-point registers hold, interleaved with ints, and after a fixed double before the variadic boundary} -constraints {cfFixture nativeCVariadics} -body {
     appValues [bcfApp "import ffi::c\nimport bcf\n\nfn scaled(f: Float64, n: ffi::c::Int) -> Float64:\n    r = bcf::vscale(f, n, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0):\n        on NonFiniteFloat:\n            -1.0\n    r\nnone = bcf::vscale(3.0, 0):\n    on NonFiniteFloat:\n        -1.0\none = bcf::vscale(3.0, 1, 0.25):\n    on NonFiniteFloat:\n        -1.0\nmixed = bcf::vrecord(4, 5911, 0, 1.5, bcf::c_int(2), 2.5, bcf::c_int(-3))\nseen = loop i from 0 to 4:\n    bcf::vseen_bits(i)\n\[scaled(2.0, 10), scaled(1.0, 3), none, one, mixed, seen\]\n"] {cranelift cranelift-generic}
 } -cleanup removeApps -result [lrepeat 2 {[55.0, 3.0, 0.0, 0.75, 4, [4609434218613702656, 2, 4612811918334230528, 18446744073709551613]]}]
 
-test cf-va-sentinel {a sentinel-terminated pointer list, as real C APIs take: the callee reads pointers up to a typed null pointer, none, three, and eleven of them (past every register)} -constraints cfFixture -body {
+test cf-va-sentinel {a sentinel-terminated pointer list, as real C APIs take: the callee reads pointers up to a typed null pointer, none, three, and eleven of them (past every register)} -constraints {cfFixture nativeCVariadics} -body {
     set many [join [lrepeat 11 p] {, }]
     appValues [bcfApp "direct module\n\nimport ffi::c\nimport bcf\n\np = bcf::vaddress()\nq = bcf::vaddress()\nz = ffi::c::null\[ffi::c::Void\]()\n\[bcf::vsentinel(0, z), bcf::vsentinel(0, p, q, p, z), bcf::vsentinel(0, $many, z), bcf::vseen_bits(10) == bcf::vaddress_bits()\]\n" {} ] {cranelift cranelift-generic}
 } -cleanup removeApps -result [lrepeat 2 {[0, 3, 11, true]}]
@@ -1517,7 +1732,7 @@ test cf-va-nir {the foreign table marks the function variadic, its fixed paramet
         [lmap line [lsearch -all -inline -regexp [split $nir \n] {foreigncall .*(varargs|\s@e)}] {regsub {^\s*%[0-9]+ = (foreigncall [0-9]+)( %[0-9]+)*} $line {\1}}]
 } -cleanup removeApps -match glob -result {{{foreign * "bcf_vsum" params="i32" result=i64 variadic=1 name="bcf::vsum"} {foreign * "bcf_vrecord" params="i32 u64 u64" result=i32 variadic=1 name="bcf::vrecord"}} {{foreigncall * @e*} {foreigncall * varargs=u8:i32,f64:f64,ptr:ptr @e*}}}
 
-test cf-va-clif {the call's machine signature is its own: the fixed parameters, then each trailing argument as its promoted type -- under System V one more parameter of it (on x86-64 the call goes through the %al stub of its vector register count), under Apple's convention padding for the registers the fixed ones left free, then 8-byte stack words} -constraints cfFixture -body {
+test cf-va-clif {the call's machine signature is its own: the fixed parameters, then each trailing argument as its promoted type -- under System V one more parameter of it (on x86-64 the call goes through the %al stub of its vector register count), under Apple's convention padding for the registers the fixed ones left free, then 8-byte stack words} -constraints {cfFixture nativeCVariadics} -body {
     set clif [native::clif [appHir [bcfApp "import ffi::c\nimport bcf\n\nbcf::vrecord(3, 0, 0, bcf::c_uchar(1), 2.5, bcf::c_ulong(7))\n"]]]
     foreach {- id symbol what} [regexp -all -inline {; u0:(\d+) = (bcf_vrecord|botlish_va_\d+_\d+) \(([^)]*)\)} $clif] {
         if {[regexp "fn(\\d+) = u0:$id (sig\\d+)" $clif -> fn sig]} break
@@ -1534,6 +1749,19 @@ test cf-va-clif {the call's machine signature is its own: the fixed parameters, 
         }
     }
 }]
+
+test cf-va-win64-refused {Windows x86-64: no variadic C call is lowered for the Win64 convention (VARIADICS-VERTICAL-SLICE-1.md lowers System V's and Apple's only; Win64 passes a variadic double in an integer register as well, which no signature Botlish builds states): its machine code is a codegen error naming the call and the convention, from the CLIF listing, the native backends' linked run and an executable alike, before anything links or runs -- while the front end takes the program (its trailing classes are the target's) and the Tcl backends refuse the C call as they refuse any} -constraints {cfFixture windowsHost} -body {
+    set dir [bcfApp "import ffi::c\nimport bcf\n\nbcf::vsum(2, bcf::c_int(40), bcf::c_int(2))\n"]
+    set hir [appHir $dir]
+    set why "variadic C call of bcf::vsum: no variadic call lowering for the windows_fastcall convention"
+    catch {native::clif $hir} clif options
+    set clifCode [lrange [dict get $options -errorcode] 0 1]
+    set linked [lindex [appValues $dir {cranelift cranelift-generic}] 0]
+    set failed [catch {native::withLinkDirs [list $::fixtureDir] {native::executable $hir [file join $dir program]}} message options]
+    list $clifCode [string match "*$why*" $clif] [lindex $linked 0] [string match "*$why*" [lindex $linked 1]] \
+        $failed [lrange [dict get $options -errorcode] 0 1] [string match "*$why*" $message] \
+        [glob -nocomplain -directory $dir program*] [lindex [appCode $dir interp] end]
+} -cleanup removeApps -result {{NATIVE CODEGEN} 1 {NATIVE LINK} 1 1 {NATIVE LINK} 1 {} NATIVE-ONLY}
 
 # The variadic call ABI of the host target, from the platform documents
 # (the SysV x86-64 psABI, AAPCS64, Apple's "Writing ARM64 code for Apple
@@ -1660,7 +1888,7 @@ proc vaCaptureMismatches {name backend} {
         [vabiMismatches reference $fixed $trailing $rregs $rfregs $ral $rstack]
 }
 
-test cf-va-abi-model {the model's places of the scenarios' trailing arguments: SysV x86-64 and AAPCS64 pass them as named arguments (registers, then 8-byte stack slots; %al the vector register count on x86-64), Apple every one in its own 8-byte stack slot even while every register is free} -body {
+test cf-va-abi-model {the model's places of the scenarios' trailing arguments: SysV x86-64 and AAPCS64 pass them as named arguments (registers, then 8-byte stack slots; %al the vector register count on x86-64), Apple every one in its own 8-byte stack slot even while every register is free (a host whose variadic calls are lowered: nativeCVariadics)} -constraints nativeCVariadics -body {
     lmap name {small mixed fixedd} {
         lassign [dict get $::vaScenarios $name] fn fixed trailing
         lassign [vabiLocations $fixed $trailing] locations al
@@ -1673,7 +1901,7 @@ test cf-va-abi-model {the model's places of the scenarios' trailing arguments: S
 }]
 
 foreach name {none small ints mixed fixedd} {
-    test cf-va-abi-$name "the machine state a variadic call ($name) arrives in, captured at the callee's entry before any compiled code runs: every argument's defined bits where the host's variadic ABI puts it (and %al on x86-64), as the C compiler's own variadic call of the same prototype and values puts them" -constraints cfFixture -body {
+    test cf-va-abi-$name "the machine state a variadic call ($name) arrives in, captured at the callee's entry before any compiled code runs: every argument's defined bits where the host's variadic ABI puts it (and %al on x86-64), as the C compiler's own variadic call of the same prototype and values puts them" -constraints {cfFixture nativeCVariadics} -body {
         lmap backend {cranelift cranelift-generic} {vaCaptureMismatches $name $backend}
     } -cleanup removeApps -result {{} {}}
 }
@@ -1693,7 +1921,7 @@ test cf-va-static-compile {a static block diagnoses a variadic C call like any c
     }
 } -cleanup removeApps -result {1 1}
 
-test cf-va-interchange {HIR interchange carries a variadic declaration and each call's trailing classes: read back in a fresh process it lowers to the identical NIR and runs} -constraints cfFixture -body {
+test cf-va-interchange {HIR interchange carries a variadic declaration and each call's trailing classes: read back in a fresh process it lowers to the identical NIR and runs} -constraints {cfFixture nativeCVariadics} -body {
     set dir [bcfApp "import ffi::c\nimport bcf\n\nr = bcf::vscale(2.0, 3, 1.0, 2.0, 3.0):\n    on NonFiniteFloat:\n        -1.0\n\[bcf::vsum(2, bcf::c_int(40), bcf::c_uchar(2)), r\]\n"]
     set hir [appHir $dir]
     set path [file join $dir main.hirx]
@@ -1717,7 +1945,7 @@ test cf-va-target-identity {a variadic call's HIR keeps its target: interchange 
     list [catch {hir::interchange::decode $text -target $::hostTarget} message options] [lrange [dict get $options -errorcode] 0 1]
 } -cleanup removeApps -result {1 {HIR INTERCHANGE}}
 
-test cf-va-cache {the front-end cache keeps a variadic program as its build (a hit runs identically), and a changed variadic declaration is a miss} -constraints cfFixture -body {
+test cf-va-cache {the front-end cache keeps a variadic program as its build (a hit runs identically), and a changed variadic declaration is a miss} -constraints {cfFixture nativeCVariadics} -body {
     set dir [bcfApp "import ffi::c\nimport bcf\n\nbcf::vsum(2, bcf::c_int(40), bcf::c_int(2))\n"]
     set cache [makeDirectory cf-va-cache-[pid]]
     set path [file join $dir main.bot]
@@ -1731,14 +1959,13 @@ test cf-va-cache {the front-end cache keeps a variadic program as its build (a h
         [expr {[dict get [dict get $changed foreign] bcf::vsum contract params] ne [dict get [dict get $first foreign] bcf::vsum contract params]}]
 } -cleanup {removeApps; removeDirectory cf-va-cache-[pid]} -result {1 42 1}
 
-test cf-va-executable-gc-coroutine {variadic C calls with managed values held across them -- in the main program, in a loop, inside a coroutine between its yields -- under GC stress, on both backends and in a standalone executable} -constraints {cfFixture nativeCoroutines} -body {
+test cf-va-executable-gc-coroutine {variadic C calls with managed values held across them -- in the main program, in a loop, inside a coroutine between its yields -- under GC stress, on both backends and in a standalone executable} -constraints {cfFixture nativeCoroutines nativeCVariadics} -body {
     set dir [bcfApp "import ffi::c\nimport list\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: ffi::c::Int) -> Event:\n    held = \[bcf::vsum(2, n, n), n\]\n    yield Event {value: held.get(0, 0)}\n    s = bcf::vscale(1.0, 9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0):\n        on NonFiniteFloat:\n            -1.0\n    yield Event {value: bcf::vsum(9, n, n, n, n, n, n, n, n, n) + held.get(1, 0)}\n    return Event {value: bcf::vrecord(3, 881, 0, n, 0.5, bcf::c_long(-1)) + list::length(held)}\n\nfn run(n: ffi::c::Int) -> List\[int\]:\n    kept = \[n, n\]\n    coroutine {step, first} = worker(n)\n    second = step()\n    third = step()\n    \[first.value, second.value, third.value, list::length(kept)\]\n\nruns = loop i from 0 to 60:\n    run(i)\n\[run(5), list::length(runs), runs.get(59, \[\])\]\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [file join $dir program]
-        native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }

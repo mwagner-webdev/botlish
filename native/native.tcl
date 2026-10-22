@@ -135,6 +135,10 @@ namespace eval native {
 #   jit          the in-process native backends (cranelift, cranelift-generic)
 #   executables  standalone executables (codegen/aot.rs's EXECUTABLES)
 #   cCalls       programs that call C (C_CALLS)
+#   cVariadics   calls of variadic C functions (VARIADICS-VERTICAL-SLICE-1.md:
+#                codegen/clif.rs's c_call_signature lowers them for System V
+#                x86-64 and AArch64 and for Apple AArch64; on another C
+#                convention a variadic call is a codegen error)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   frameRoots   GC roots in native frames, found by the frame walk
@@ -144,14 +148,16 @@ namespace eval native {
 #                native-frame plan then fail, by design.
 #
 # Windows x86-64 (MSVC) runs native code and links executables since
-# WINDOWS-X86-64-MILESTONE-1.md; its C calls, coroutines and stack guard are
-# later milestones'; its GC roots are on the shadow stack (the frame walk
-# cannot climb Win64 frames).
+# WINDOWS-X86-64-MILESTONE-1.md and C calls since WINDOWS-X86-64-MILESTONE-2.md
+# (the Win64 C ABI, link.exe's link plan); its variadic C calls, coroutines
+# and stack guard are later milestones'; its GC roots are on the shadow
+# stack (the frame walk cannot climb Win64 frames).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        cCalls {linux-x86_64 linux-aarch64 macos-aarch64} \
+        cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64}]

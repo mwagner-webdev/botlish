@@ -1,6 +1,7 @@
 # mutate.tcl -- mutation testing of context traits, validator proofs, the
-# Linux and Darwin I/O and path libraries and the portable io library
-# (CONTEXT-TRAITS.md, MACOS-AARCH64-MILESTONE-8.md).
+# Linux, Darwin and Windows I/O and path libraries and the portable io library
+# (CONTEXT-TRAITS.md, MACOS-AARCH64-MILESTONE-8.md,
+# WINDOWS-X86-64-MILESTONE-2.md).
 #
 #   tclsh9.0 audit/context-traits/tools/mutate.tcl ?-only PATTERN,...?
 #        ?-tests FILES? ?-fuzz-count N? ?-fuzz-seed N? ?-timeout SECONDS?
@@ -8,17 +9,18 @@
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
 # once. A mutant whose killing tests run only on some hosts (a `%% TARGET
-# ...` line after its header: linux-x86_64, linux-aarch64, macos-aarch64 --
-# Darwin I/O runs on macos-aarch64 only) is SKIPPED elsewhere, never counted
-# as killed. -only selects mutants by name or glob pattern (`darwin-*`). For
+# ...` line after its header: linux-x86_64, linux-aarch64, macos-aarch64,
+# windows-x86_64 -- Darwin I/O runs on macos-aarch64 only, Windows I/O on
+# windows-x86_64) is SKIPPED elsewhere, never counted as killed. -only
+# selects mutants by name or glob pattern (`darwin-*`, `windows-*`). For
 # each, a private copy of the compiler and library (a temporary directory;
 # native/target is a symlink to this checkout's, so the native backend is
 # the built one) gets the replacements, and two detectors run against it:
 #
 #   * the test files FILES (default tests/context-traits.test,
-#     tests/portable-io.test, tests/linux-path.test and
-#     tests/darwin-io.test; each with a private -tmpdir): killed if any test
-#     fails or a file does not complete;
+#     tests/portable-io.test, tests/linux-path.test, tests/darwin-io.test
+#     and tests/windows-io.test; each with a private -tmpdir): killed if any
+#     test fails or a file does not complete;
 #   * audit/context-traits/tools/fuzz.tcl -n N -seed S: killed if it reports
 #     a disagreement or does not complete.
 #
@@ -30,7 +32,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {context-traits.test portable-io.test linux-path.test darwin-io.test} \
+set options [dict create -only "" -tests {context-traits.test portable-io.test linux-path.test darwin-io.test windows-io.test} \
     -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
@@ -38,8 +40,8 @@ foreach {option value} $argv {
 }
 
 # This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64).
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
+# linux-aarch64, macos-aarch64, windows-x86_64).
+set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : $::tcl_platform(platform) eq "windows" ? "windows" : [string tolower $::tcl_platform(os)]}] - \
     [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
 
 # The mutants of mutants.txt (its header has the format), as
@@ -129,10 +131,12 @@ foreach entry [glob -directory $root -types f *.tcl] {
 
 # {STATUS OUTPUT} of ARGS, its standard error merged into its output;
 # STATUS is "timeout" (the process killed) when it runs longer than TIMEOUT
-# seconds (audit/c-ffi/tools/mutate.tcl's run).
+# seconds (audit/c-ffi/tools/mutate.tcl's run). Its lines end in \n whatever
+# the process writes: a tclsh on Windows writes \r\n, and a line read as
+# "... FAILED\r" is no failed test to the patterns below.
 proc run {timeout args} {
     set pipe [open |[concat $args [list 2>@1]] r]
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {
@@ -143,7 +147,11 @@ proc run {timeout args} {
     vwait ::runDone
     after cancel $timer
     if {$::runDone eq "timeout"} {
-        catch {exec kill -9 {*}[pid $pipe]}
+        if {$::tcl_platform(platform) eq "windows"} {
+            foreach p [pid $pipe] { catch {exec taskkill /F /T /PID $p} }
+        } else {
+            catch {exec kill -9 {*}[pid $pipe]}
+        }
         catch {close $pipe}
         return [list timeout $::runOutput]
     }

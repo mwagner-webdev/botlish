@@ -1937,7 +1937,10 @@ flags: `sum()` is `sum([])`, `sum(1, 2, 3)` is `sum([1, 2, 3])`,
     direct authority (concept.direct-modules). The call's machine
     signature is built per call: x86-64 System V (with its %al count of
     vector registers), Linux AArch64 (AAPCS64) and Apple AArch64 (every
-    trailing argument on the stack, in an 8-byte slot).
+    trailing argument on the stack, in an 8-byte slot). Windows x86-64 has
+    no variadic lowering yet: such a call is a NATIVE CODEGEN error there
+    (error.native-codegen), while the front end and every other call take
+    the program.
 
 == WHY
 A function of "any number of values of one type" is a List parameter whose

@@ -938,7 +938,10 @@ At compile time, on the native backends; a bug in the native backend, or
 a host Cranelift cannot generate code for. The driver translates NIR to
 Cranelift IR (shown by -emit-clif); when Cranelift's verifier or its code
 generation fails, or its ISA builder rejects the host, the message is
-Cranelift's own, usually naming the function.
+Cranelift's own, usually naming the function. One refusal is the native
+backend's own: "variadic C call of NAME: no variadic call lowering for the
+windows_fastcall convention" -- a variadic C call (concept.variadics) on
+Windows x86-64, which has none yet.
 
 == WHAT TO DO
 Check that the host is a supported platform (backend.platforms). Otherwise
@@ -1126,7 +1129,9 @@ NATIVE LINK:
   reference to", "cannot find -lNAME", "unable to find library"), Apple
   ld's on macOS ("Undefined symbols for architecture arm64:" and a
   `"_SYMBOL", referenced from:` line per symbol, "ld: library 'NAME' not
-  found", "found architecture 'x86_64', required architecture 'arm64'").
+  found", "found architecture 'x86_64', required architecture 'arm64'"),
+  link.exe's on Windows ("error LNK2019: unresolved external symbol NAME",
+  "fatal error LNK1181: cannot open input file 'NAME.lib'").
 NATIVE AOT:
   * "executable link failed (STATUS): ..." with rustc's output, the system
     linker's own lines among it;
@@ -1140,7 +1145,15 @@ NATIVE AOT:
 For C: install the library (for the host's architecture), pass its
 directory with -L DIR, and check each `named` symbol against the library:
 a symbol is its C name, never Mach-O's `_`-prefixed spelling, which the
-toolchain adds. The Tcl backends never call C. For NATIVE AOT:
+toolchain adds. On Windows `extern c library "NAME"` is the file NAME.lib
+-- a static library, or a DLL's import library (the DLL itself must then
+be beside the executable or on PATH when it runs) -- and every executable
+links the static release C runtime (/MT, cl's default), so build a static
+C library with /MT: a /MD one calls the C runtime through `__imp_` imports
+the static runtime does not define, and link.exe reports them unresolved
+("error LNK2019: unresolved external symbol __imp_NAME"; the message then
+says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
+C runtime"). The Tcl backends never call C. For NATIVE AOT:
 the default (rustc) linker needs rustc and a built native backend in the
 checkout, and on macOS the Xcode command line tools (the system linker);
 the stub linker needs neither but is Linux x86-64 only and links no C.

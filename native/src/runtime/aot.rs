@@ -80,6 +80,55 @@ pub fn wtf8_from_utf16(units: impl IntoIterator<Item = u16>) -> Vec<u8> {
     bytes
 }
 
+/// The UTF-16 code units whose WTF-8 encoding (`wtf8_from_utf16`) is BYTES:
+/// its exact inverse, for the driver writing a Windows command line from an
+/// argument snapshot (WINDOWS-X86-64-MILESTONE-2.md, "Linked runs"). None
+/// when BYTES encodes no units: bytes that are not well-formed generalized
+/// UTF-8 (a stray or missing continuation byte, an overlong form, a value
+/// past U+10FFFF), or a surrogate pair written as two three-byte surrogates
+/// -- WTF-8 writes a pair as its scalar's four bytes, so decoding those six
+/// bytes would give units that encode back to other bytes.
+pub fn utf16_from_wtf8(bytes: &[u8]) -> Option<Vec<u16>> {
+    let mut units = Vec::with_capacity(bytes.len());
+    // Whether the last unit pushed was a lead surrogate written alone.
+    let mut lone_lead = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let first = bytes[i];
+        let (length, initial, minimum) = match first {
+            0x00..=0x7F => (1, first as u32, 0),
+            0xC0..=0xDF => (2, (first & 0x1F) as u32, 0x80),
+            0xE0..=0xEF => (3, (first & 0x0F) as u32, 0x800),
+            0xF0..=0xF7 => (4, (first & 0x07) as u32, 0x1_0000),
+            _ => return None,
+        };
+        let tail = bytes.get(i + 1..i + length)?;
+        let mut code = initial;
+        for &b in tail {
+            if b & 0xC0 != 0x80 {
+                return None;
+            }
+            code = (code << 6) | (b & 0x3F) as u32;
+        }
+        if code < minimum || code > 0x10_FFFF {
+            return None;
+        }
+        i += length;
+        if (0xD800..=0xDFFF).contains(&code) {
+            if code >= 0xDC00 && lone_lead {
+                return None;
+            }
+            lone_lead = code < 0xDC00;
+            units.push(code as u16);
+            continue;
+        }
+        lone_lead = false;
+        let mut buffer = [0u16; 2];
+        units.extend_from_slice(char::from_u32(code)?.encode_utf16(&mut buffer));
+    }
+    Some(units)
+}
+
 pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
     let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
         .ok()

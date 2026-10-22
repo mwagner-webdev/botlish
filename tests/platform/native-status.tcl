@@ -7,11 +7,13 @@
 # under stress, a native stack overflow (of the thread's stack and of a
 # coroutine's), coroutines, a Linux syscall, a C call, byte storage exposed
 # to the system C library, Darwin I/O (libSystem's read and write, errno,
-# the portable io::IO through DarwinIO, an executable), a program object and
-# a standalone executable -- and of the target boundary (the
-# driver's reading of the host target's triple, the C calling convention of
-# a foreign signature, a program built for the other operating system of the
-# host's architecture) and compares each outcome with the expectation
+# the portable io::IO through DarwinIO, an executable), Windows I/O
+# (kernel32's WriteFile, the portable io::IO through WindowsIO, an
+# executable), a program object and a standalone executable -- and of the
+# target boundary (the driver's reading of the host target's triple, the C
+# calling convention of a foreign signature and of a variadic call's, a
+# program built for the other operating system of the host's architecture)
+# and compares each outcome with the expectation
 # recorded below for the host target (core::cabi::hostTarget).
 # On Linux every capability is supported. On macOS arm64 and Windows x86-64
 # some are not yet, and the expectation is the explicit refusal they fail
@@ -126,13 +128,14 @@ import abi::bytes
 import byte
 import ffi::c
 
-extern c fn memcmp(a: ffi::c::Ptr[ffi::c::Void] read noescape, b: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULong) -> ffi::c::Int
-extern c fn memset(dst: ffi::c::Ptr[ffi::c::Void] write noescape, c: ffi::c::Int, n: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void] alias dst
+extern c fn memcmp(a: ffi::c::Ptr[ffi::c::Void] read noescape, b: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULongLong) -> ffi::c::Int
+extern c fn memset(dst: ffi::c::Ptr[ffi::c::Void] write noescape, c: ffi::c::Int, n: ffi::c::ULongLong) -> ffi::c::Ptr[ffi::c::Void] alias dst
 
 # Bytes and MutableBytes exposed to the system C library's memcmp (read
 # noescape) and memset (write noescape: a private copy, the write-back
 # value): [1, 200] sorts before the [200, 200] memset wrote, and the
-# zeroed owner stays zeroed.
+# zeroed owner stays zeroed. size_t is declared unsigned long long, its
+# width on every target (LP64's unsigned long, LLP64's unsigned long long).
 a = abi::bytes::from_list([byte::from_int(1), byte::from_int(200)])
 z = abi::bytes::zeroed(abi::usize(2))
 c = abi::bytes::freeze(memset(z, 200, 2).dst)
@@ -188,6 +191,55 @@ with context darwin::io::create()
 hello():
     on io::WriteFailed:
         unit
+} {}] \
+    windows-write [list program {import abi
+import abi::bytes
+import windows
+
+# kernel32's WriteFile of nothing to the process's standard output, through
+# lib/windows.bot: TRUE, 0 bytes written, no last-error code.
+r = windows::standard_handle(windows::StandardDevice::Output).write_file(abi::bytes::from_list([]))
+[r.ok, r.count, r.last_error]
+} {}] \
+    windows-io [list program {import io
+import windows::io
+
+# The portable io::IO through the installed WindowsIO context: an empty
+# print (no WriteFile at all) and the value saying it succeeded.
+fn quiet() -> str errors io::WriteFailed:
+    io::print("")
+    "ok"
+
+with context windows::io::create()
+
+quiet():
+    on io::WriteFailed:
+        "failed"
+} {}] \
+    windows-executable [list executable {import io
+import windows::io
+
+fn hello() errors io::WriteFailed:
+    io::print_line("Hello, world!")
+
+with context windows::io::create()
+
+hello():
+    on io::WriteFailed:
+        unit
+} {}] \
+    c-variadic [list convention {import ffi::c
+
+extern c fn printf(format: ffi::c::Ptr[ffi::c::Char] noescape, variadic) -> ffi::c::Int
+
+fn c_int(x: ffi::c::Int) -> ffi::c::Int:
+    x
+
+# A variadic C call's machine signature (VARIADICS-VERTICAL-SLICE-1.md): its
+# convention where variadic calls are lowered, the codegen refusal where they
+# are not (Windows x86-64). Compiled to CLIF only: nothing runs.
+format = ffi::c::null[ffi::c::Char]()
+printf(format, c_int(1))
 } {}] \
     object [list object {fn fib(n):
     if n <= 1:
@@ -256,9 +308,18 @@ f(1)
 # On windows-x86_64 (WINDOWS-X86-64-MILESTONE-1.md, MSVC's toolchain) the
 # JIT, the collector -- with the fallback root plan, no frame walk -- program
 # objects (COFF) and standalone executables (PE) work; a program built for
-# Linux or for windows-x86_64-gnu (MinGW's environment) is NATIVE TARGET; a
-# C call is refused before the linker runs (C calls are the next
-# milestone's), and so are coroutines (NATIVE UNSUPPORTED); there is no
+# Linux or for windows-x86_64-gnu (MinGW's environment) is NATIVE TARGET.
+# Since milestone 2 (WINDOWS-X86-64-MILESTONE-2.md) a C call is linked by
+# link.exe and runs, returning 5, and byte storage exposed to the C library
+# gives the values every other host gives -- until then both were refused
+# before the linker ran (NATIVE LINK, "C calls are linked on Linux glibc
+# (x86_64, aarch64) and macOS (aarch64) only") -- and Windows I/O
+# (lib/windows.bot, lib/windows/io.bot: kernel32's GetStdHandle, WriteFile
+# and GetLastError; the portable io::IO through WindowsIO; a PE executable
+# printing through it) runs, refused everywhere else (`windows` is the
+# Windows platform's namespace: UNSUPPORTED-PLATFORM). A variadic C call is
+# still a codegen error on Windows (no Win64 variadic lowering), as are
+# coroutines (NATIVE UNSUPPORTED); there is no
 # stack guard: a native stack exhausted before the shadow stack's depth
 # check fires kills the driver (Rust's own stack overflow report, recorded
 # as the probe's NATIVE BUG), while the default 1 GiB stack outlasts the
@@ -287,8 +348,12 @@ set linux [dict create \
     darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target linux-*}} \
     darwin-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
     darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target linux-*}} \
+    windows-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows" belongs to the Windows platform (the standard namespace windows*unavailable for target linux-*}} \
+    windows-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows::io" belongs to the Windows platform*unavailable for target linux-*}} \
+    windows-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows::io" belongs to the Windows platform*unavailable for target linux-*}} \
     target {value {format elf c-call-conv system_v runs 1}} \
     c-convention {value {labs system_v abs system_v}} \
+    c-variadic {value {printf system_v}} \
     other-target {error {NATIVE TARGET} {this program was built for target macos-* and native code runs only on its own target's host*matching architecture is not a matching target*}}]
 set expected [dict create \
     linux-x86_64 [dict merge $linux {
@@ -314,10 +379,14 @@ set expected [dict create \
         darwin-io {value {"ok"}} \
         darwin-executable {value {{macho arm64 execute} {Hello, world!
 unit}}} \
+        windows-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
+        windows-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows::io" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
+        windows-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "windows::io" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         object {value {macho arm64 object}} \
         executable {value {{macho arm64 execute} 6765}} \
         target {value {format macho c-call-conv apple_aarch64 runs 1}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
+        c-variadic {value {printf apple_aarch64}} \
         other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}}] \
     windows-x86_64 [dict create \
         jit {value 6765} \
@@ -328,16 +397,21 @@ unit}}} \
         coroutine-stack-overflow {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
         coroutine {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "linux" belongs to the Linux platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
-        c-call {error {NATIVE LINK} {native link failed: this program calls C*C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only*}} \
-        c-byte-borrow {error {NATIVE LINK} {native link failed: this program calls C*C calls are linked on Linux glibc (x86_64, aarch64) and macOS (aarch64) only*}} \
+        c-call {value 5} \
+        c-byte-borrow {value {[true, true, 0, true, 0]}} \
         darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         darwin-io {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         darwin-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "darwin::io" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
+        windows-write {value {[true, 0, 0]}} \
+        windows-io {value {"ok"}} \
+        windows-executable {value {{pe x86_64 executable} {Hello, world!
+unit}}} \
         object {value {coff x86_64 object}} \
         executable {value {{pe x86_64 executable} 6765}} \
         target {value {format coff c-call-conv windows_fastcall runs 1}} \
         c-convention {value {labs windows_fastcall abs windows_fastcall}} \
+        c-variadic {error {NATIVE CODEGEN} {*variadic C call of printf: no variadic call lowering for the windows_fastcall convention*}} \
         other-target {error {NATIVE TARGET} {this program was built for target linux-x86_64 (x86_64-unknown-linux-gnu)*Both are x86_64, but a matching architecture is not a matching target*}} \
         other-environment {error {NATIVE TARGET} {this program was built for target windows-x86_64-gnu (x86_64-pc-windows-gnu)*Both are x86_64 windows, but the C toolchain environment is part of the target: gnu for this program, msvc here*}}]]
 
@@ -431,11 +505,13 @@ proc observe {name} {
 }
 
 # {SYMBOL CONVENTION ...}: the calling convention of every foreign C
-# function's signature in the CLIF text CLIF (`; u0:N = NAME (C SYMBOL)`,
-# then a function's `fnK = u0:N sigM` and its `sigM = (...) -> ... CONV`).
+# function's signature in the CLIF text CLIF (`; u0:N = NAME (C SYMBOL)`, or
+# a variadic call's `; u0:N = NAME (%al=K stub of C SYMBOL)` on x86-64
+# System V, then a function's `fnK = u0:N sigM` and its `sigM = (...) -> ...
+# CONV`).
 proc foreignConventions {clif} {
     set symbols [dict create]
-    foreach {- ref symbol} [regexp -all -inline -line {^; (u0:[0-9]+) = \S+ \(C (\S+)\)$} $clif] {
+    foreach {- ref symbol} [regexp -all -inline -line {^; (u0:[0-9]+) = \S+ \((?:%al=[0-9]+ stub of )?C (\S+)\)$} $clif] {
         dict set symbols $ref $symbol
     }
     set result [dict create]

@@ -19,7 +19,7 @@
 #   systems   OS -> its name in messages (Linux, macOS, Windows)
 #   platforms NAMESPACE-ROOT -> OS: the standard namespace trees that are an
 #             operating system's platform interface (linux -> linux,
-#             darwin -> macos)
+#             darwin -> macos, windows -> windows)
 #
 # A target is an operating system *and* an architecture: linux-aarch64 and
 # macos-aarch64 share an instruction set, a pointer width and a data model,
@@ -137,10 +137,12 @@ namespace eval core::cabi {
     # interface -- ROOT -> OS: the namespace ROOT and every namespace under
     # it are OS's, importable only for a target of OS (surface/modules.tcl's
     # PlatformCheck). Designated here, never inferred from a name: `linux`
-    # (lib/linux.bot, lib/linux/*, the syscall transports linux::abi::*) and
+    # (lib/linux.bot, lib/linux/*, the syscall transports linux::abi::*),
     # `darwin` (lib/darwin.bot, lib/darwin/*: macOS's libSystem interface,
-    # MACOS-AARCH64-MILESTONE-8.md).
-    variable platforms [dict create linux linux darwin macos]
+    # MACOS-AARCH64-MILESTONE-8.md) and `windows` (lib/windows.bot,
+    # lib/windows/*: Windows' kernel32 interface,
+    # WINDOWS-X86-64-MILESTONE-2.md).
+    variable platforms [dict create linux linux darwin macos windows windows]
     # In declaration (and HIR text) order.
     variable scalars [dict create \
         Char      {c char width char signed char} \

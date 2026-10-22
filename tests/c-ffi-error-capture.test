@@ -60,9 +60,19 @@ proc ecWrite {path text} {
     close $channel
 }
 
+# The C error convention these tests run is POSIX's: errno through the
+# platform's location function (ecErrnoSymbol) and the C library's read,
+# open and close. A Windows target has neither: its C runtime's errno is
+# _errno(), its _read of a bad descriptor ends the process (the
+# invalid-parameter handler), open is variadic (no Win64 lowering), and its
+# own convention is GetLastError, whose window windows-io.test pins
+# (wi-last-error-read-first, wi-real-failures; WINDOWS-X86-64-MILESTONE-2.md,
+# section 8).
+testConstraint posixErrno [expr {[string match linux-* $::hostTarget] || [string match macos-* $::hostTarget]}]
+
 # The fixture library (c-ffi.test's), built once.
 set ::fixtureDir ""
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint posixErrno]} {
     set ::fixtureDir [file join $::scratch fixture]
     file mkdir $::fixtureDir
     if {[catch {

@@ -37,7 +37,7 @@ core::cabi::installTestFixture
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set neBackends {interp compile cranelift-generic cranelift}
 set neNative {cranelift-generic cranelift}
@@ -976,11 +976,13 @@ test ne-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every alloc
 # exposed to C for one noescape call: the caller-constructed native record.
 
 set ::neFixtureDir ""
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
+# The oracle's record is LP64's (its static assertions pin a C long's
+# offsets): on an LLP64 target (Windows) it is not built, and the tests that
+# need it are skipped by lp64Target, never failed.
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker] && [testConstraint lp64Target]} {
     set ::neFixtureDir [makeDirectory nedit-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi nedit-fixture.c] -o [file join $::neFixtureDir fixture.o]
-        exec ar rcs [file join $::neFixtureDir libbotlish_nedit_fixture.a] [file join $::neFixtureDir fixture.o]
+        ctool::staticLibrary $::neFixtureDir botlish_nedit_fixture [file join $::projectRoot tests cffi nedit-fixture.c]
     } message]} {
         puts stderr "native-edit.test: the C fixture did not build: $message"
         set ::neFixtureDir ""

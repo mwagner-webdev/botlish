@@ -19,15 +19,14 @@ source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 # The C fixture, built where C calls run (nativeCCalls).
 set ::cflFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt]} {
     set ::cflFixtureDir [makeDirectory cfloat-cffi-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi cfloat-fixture.c] -o [file join $::cflFixtureDir fixture.o]
-        exec ar rcs [file join $::cflFixtureDir libbotlish_cfloat_fixture.a] [file join $::cflFixtureDir fixture.o]
+        ctool::staticLibrary $::cflFixtureDir botlish_cfloat_fixture [file join $::projectRoot tests cffi cfloat-fixture.c]
     } message]} {
         puts stderr "c-float-ffi.test: the C fixture did not build: $message"
         set ::cflFixtureDir ""
@@ -443,10 +442,10 @@ set ::cflPickBindings [string cat \
     "extern c fn sum16 named \"cff_sum16f\"(a: ffi::c::Float, b: ffi::c::Float, c: ffi::c::Float, d: ffi::c::Float, e: ffi::c::Float, f: ffi::c::Float, g: ffi::c::Float, h: ffi::c::Float, i: ffi::c::Float, j: ffi::c::Float, k: ffi::c::Float, l: ffi::c::Float, m: ffi::c::Float, n: ffi::c::Float, o: ffi::c::Float, p: ffi::c::Float) -> ffi::c::Float\n" \
     "extern c fn bits9 named \"cff_float_bits9\"(w: ffi::c::Int, a0: ffi::c::Float, a1: ffi::c::Float, a2: ffi::c::Float, a3: ffi::c::Float, a4: ffi::c::Float, a5: ffi::c::Float, a6: ffi::c::Float, a7: ffi::c::Float, a8: ffi::c::Float) -> ffi::c::UInt\n"]
 
-test cfl-c-register-exhaustion {more C floats than there are floating-point argument registers on any target, then the stack; floats, doubles and integers of every width interleaved, each class in its own registers before the stack; every argument arrives as exactly the value (or the bits) it was} -constraints cfloatFixture -body {
+test cfl-c-register-exhaustion {more C floats than there are floating-point argument registers on any target, then the stack; floats, doubles and integers of every width interleaved, each class in its own registers before the stack; every argument arrives as exactly the value (or the bits) it was (the long a value of every target's long: 32 bits on Windows, LLP64; long long carries the 64-bit one)} -constraints cfloatFixture -body {
     set floats {0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5}
     set picks [lmap i {0 1 2 3 4 5 6 7 8 9 10 11} {string cat "pick($i, $floats)"}]
-    set margs "0.25, 1.0e300, -3, -0.75, 2.5e-300, -1234567890123, 1.0e-30, 3.0e150, -321, 1.0e30, -7.0e-200, 2147483647, 65504.0, 1.25, -9223372036854775807, 0.125, 6.0, 255, 3.0e38, -1.0e-310"
+    set margs "0.25, 1.0e300, -3, -0.75, 2.5e-300, -1234567890, 1.0e-30, 3.0e150, -321, 1.0e30, -7.0e-200, 2147483647, 65504.0, 1.25, -9223372036854775807, 0.125, 6.0, 255, 3.0e38, -1.0e-310"
     set mixed [lmap i [lsearch -all [lrepeat 20 x] x] {string cat "mixed($i, $margs)"}]
     set bits [lmap i {0 1 2 3 4 5 6 7 8} {string cat "bits9($i, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.401298464324817e-45, 3.4028234663852886e38)"}]
     set main [string cat \
@@ -454,9 +453,9 @@ test cfl-c-register-exhaustion {more C floats than there are floating-point argu
         "    \[\[[join $picks {, }]\], \[[join $mixed {, }]\], sum16(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0), \[[join $bits {, }]\]\]\n" \
         "calls():\n    on NonFiniteFloat:\n        \[\]\n"]
     cflNative "$::cflPickBindings$main"
-} -result {value {[[0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5], [0.25, 1.0e300, -3.0, -0.75, 2.5e-300, -1234567890123.0, 1.0000000031710769e-30, 3.0e150, -321.0, 1.0000000150474662e30, -7.0e-200, 2147483647.0, 65504.0, 1.25, -9.223372036854776e18, 0.125, 6.0, 255.0, 3.0000000054977558e38, -1.0e-310], 136.0, [1036831949, 1045220557, 1050253722, 1053609165, 1056964608, 1058642330, 1060320051, 1, 2139095039]]}}
+} -result {value {[[0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5], [0.25, 1.0e300, -3.0, -0.75, 2.5e-300, -1234567890.0, 1.0000000031710769e-30, 3.0e150, -321.0, 1.0000000150474662e30, -7.0e-200, 2147483647.0, 65504.0, 1.25, -9.223372036854776e18, 0.125, 6.0, 255.0, 3.0000000054977558e38, -1.0e-310], 136.0, [1036831949, 1045220557, 1050253722, 1053609165, 1056964608, 1058642330, 1060320051, 1, 2139095039]]}}
 
-test cfl-c-variadic-fixed-floats {a variadic C function whose fixed parameters include C floats (SDL_RenderDebugTextFormat's shape): each fixed float is narrowed and takes a floating-point register as a double would, so the trailing ints and doubles C reads with va_arg -- past the registers, onto the stack -- are exactly the ones passed, on every target's placement (System V's %al counts the fixed floats, Apple's padding starts after them)} -constraints cfloatFixture -body {
+test cfl-c-variadic-fixed-floats {a variadic C function whose fixed parameters include C floats (SDL_RenderDebugTextFormat's shape): each fixed float is narrowed and takes a floating-point register as a double would, so the trailing ints and doubles C reads with va_arg -- past the registers, onto the stack -- are exactly the ones passed, on every target's placement (System V's %al counts the fixed floats, Apple's padding starts after them; Windows has no variadic lowering: nativeCVariadics)} -constraints {cfloatFixture nativeCVariadics} -body {
     set pairs [join [lmap i {0 1 2 3 4 5 6 7 8} {string cat "c_int([expr {10 + $i}]), $i.25"}] {, }]
     set picks [lmap w {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19} {string cat "vpick($w, 0.1, 1.5, 9, $pairs)"}]
     set main [string cat \
@@ -776,9 +775,8 @@ test cfl-executable {a program that passes and receives C floats and doubles lin
         "go():\n    on NonFiniteFloat:\n        \[\]\n"]
     set hir [cflHir $source]
     set dir [makeDirectory cfl-exe-[pid]]
-    set exe [file join $dir program]
-    native::withLinkDirs [list $::cflFixtureDir] {native::executable $hir $exe}
-    list [string trim [exec env -i PATH=/nonexistent $exe]] [lindex [cflRun $hir cranelift] 1]
+    set exe [native::withLinkDirs [list $::cflFixtureDir] {native::executable $hir [file join $dir program]}]
+    list [string trim [runBare $exe]] [lindex [cflRun $hir cranelift] 1]
 } -cleanup {file delete -force [file join [temporaryDirectory] cfl-exe-[pid]]} -result {{[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]} {[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]}}
 
 test cfl-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at every allocation site) every float crossing keeps its value: C results widened into fresh Float64s, a NonFiniteFloat payload, view reads, element reads and whole copies of float arrays, edits, all in a loop that allocates throughout} -constraints cfloatFixture -body {

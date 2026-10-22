@@ -1,6 +1,6 @@
-# Mutants of context traits, validator proofs, the Linux path library and the
-# portable io library (audit/context-traits/tools/mutate.tcl;
-# CONTEXT-TRAITS.md).
+# Mutants of context traits, validator proofs, the Linux path library, the
+# Darwin and Windows I/O libraries and the portable io library
+# (audit/context-traits/tools/mutate.tcl; CONTEXT-TRAITS.md).
 #
 #   @@ NAME DESCRIPTION
 #   ## FILE
@@ -255,17 +255,17 @@ fn print_line(text: str, context io: IO) -> unit errors WriteFailed:
 @@ darwin-import-on-linux the darwin namespace is designated no platform's, so a Linux or Windows program may import it
 ## core/cabi.tcl
 <<<<
-    variable platforms [dict create linux linux darwin macos]
+    variable platforms [dict create linux linux darwin macos windows windows]
 ====
-    variable platforms [dict create linux linux]
+    variable platforms [dict create linux linux windows windows]
 >>>>
 
 @@ darwin-falls-back-to-linux the darwin namespace is designated Linux's platform interface (Darwin I/O on Linux's terms)
 ## core/cabi.tcl
 <<<<
-    variable platforms [dict create linux linux darwin macos]
+    variable platforms [dict create linux linux darwin macos windows windows]
 ====
-    variable platforms [dict create linux linux darwin linux]
+    variable platforms [dict create linux linux darwin linux windows windows]
 >>>>
 
 @@ darwin-write-unsigned-result write(2)'s ssize_t result is declared unsigned, so -1 reads as a huge byte count
@@ -451,4 +451,140 @@ fn write_all(fd: FileDescriptor, bytes: List[Byte]) -> unit errors io::WriteFail
     r = fd.c_read(data, abi::bytes::mutable_length(data).value)
     if r.result < 0:
         failure = early
+>>>>
+
+# --- Windows I/O (lib/windows.bot, lib/windows/io.bot; WINDOWS-X86-64-MILESTONE-2.md)
+#
+# Mutants with a `%% windows-x86_64` line are killed by what a run on
+# Windows shows (tests/windows-io.test's execution tests: real files and
+# pipes, the WriteFile injector, the launcher's refused handles); elsewhere
+# they are SKIPPED. The others are killed on every host by the front end's
+# tests (the platform rule, the C declarations, NIR, the pure parts on the
+# Tcl backends).
+
+@@ windows-import-elsewhere the windows namespace is designated no platform's, so a Linux or macOS program may import it
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create linux linux darwin macos windows windows]
+====
+    variable platforms [dict create linux linux darwin macos]
+>>>>
+
+@@ windows-falls-back-to-linux the windows namespace is designated Linux's platform interface
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create linux linux darwin macos windows windows]
+====
+    variable platforms [dict create linux linux darwin macos windows linux]
+>>>>
+
+@@ windows-buffer-writable WriteFile's buffer is declared writable, so it is detached and comes back as a write-back value
+## lib/windows.bot
+<<<<
+buffer: ffi::c::Ptr[ffi::c::Void] read noescape, count: ffi::c::ULong
+====
+buffer: ffi::c::Ptr[ffi::c::Void] write noescape, count: ffi::c::ULong
+>>>>
+
+@@ windows-count-not-a-dword WriteFile's DWORD count is declared 64 bits wide (LP64's unsigned long, not LLP64's)
+## lib/windows.bot
+<<<<
+read noescape, count: ffi::c::ULong, written:
+====
+read noescape, count: ffi::c::ULongLong, written:
+>>>>
+
+@@ windows-last-error-late a failed WriteFile's last-error code is read only after the byte count is decoded (a Botlish call between them)
+## lib/windows.bot
+<<<<
+    if r.result == 0:
+        failure = c_get_last_error()
+        return WriteResult {ok: false, count: written(r.written), last_error: failure}
+====
+    if r.result == 0:
+        count = written(r.written)
+        failure = c_get_last_error()
+        return WriteResult {ok: false, count: count, last_error: failure}
+>>>>
+
+@@ windows-output-selector-is-error the output device's selector is STD_ERROR_HANDLE's
+## lib/windows.bot
+<<<<
+    if device == StandardDevice::Output:
+        return 4294967285
+====
+    if device == StandardDevice::Output:
+        return 4294967284
+>>>>
+
+@@ windows-request-off-by-one a request asks for one byte fewer than the data holds
+## lib/windows.bot
+<<<<
+    if n > 4294967295:
+        return 4294967295
+    n
+====
+    if n > 4294967295:
+        return 4294967295
+    if n == 0:
+        return 0
+    n - 1
+>>>>
+
+@@ windows-error-code-dropped a failed WriteFile's last-error code is not reported (0, as if it had none)
+%% windows-x86_64
+## lib/windows.bot
+<<<<
+        return WriteResult {ok: false, count: written(r.written), last_error: failure}
+====
+        return WriteResult {ok: false, count: written(r.written), last_error: 0}
+>>>>
+
+@@ windows-short-write-complete WindowsIO treats a short write as complete
+%% windows-x86_64
+## lib/windows/io.bot
+<<<<
+    if written < n:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+====
+    if written < 0:
+        # The unwritten suffix: indices WRITTEN..n-1, which the checks above
+>>>>
+
+@@ windows-short-write-repeats-prefix WindowsIO completes a short write by writing the whole text again
+%% windows-x86_64
+## lib/windows/io.bot
+<<<<
+        remaining = loop i from written to n:
+====
+        remaining = loop i from 0 to n:
+>>>>
+
+@@ windows-zero-write-retried WindowsIO retries a write that made no progress instead of failing
+%% windows-x86_64
+## lib/windows/io.bot
+<<<<
+    if written <= 0:
+        fail io::WriteFailed
+====
+    if written < 0:
+        fail io::WriteFailed
+>>>>
+
+@@ windows-error-to-stdout WindowsIO writes the portable error stream to standard output
+%% windows-x86_64
+## lib/windows/io.bot
+<<<<
+    io.stderr.write_all(str::encode_utf8(text))
+====
+    io.stdout.write_all(str::encode_utf8(text))
+>>>>
+
+@@ windows-raw-write-to-stderr windows::io::write writes to the context's standard error
+%% windows-x86_64
+## lib/windows/io.bot
+<<<<
+    windows::standard_handle(io.stdout).write_file(data)
+====
+    windows::standard_handle(io.stderr).write_file(data)
 >>>>

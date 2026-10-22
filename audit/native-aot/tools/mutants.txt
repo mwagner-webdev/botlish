@@ -33,13 +33,13 @@
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
+const EXECUTABLES: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
     all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
-));
 ====
+const EXECUTABLES: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
     all(target_os = "macos", target_arch = "aarch64", target_env = "gnu"),
-    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
-));
 >>>>
 
 @@ linux-aot-rejected Linux left out of the hosts that link executables
@@ -57,12 +57,27 @@ const EXECUTABLES: bool = cfg!(any(
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-    all(target_os = "macos", target_arch = "aarch64")
+const C_CALLS: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64"),
+====
+const C_CALLS: bool = cfg!(any(
+    all(target_os = "linux", target_env = "gnu", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu"),
+>>>>
+
+@@ c-calls-refused-on-windows C calls refused on Windows x86-64 (MSVC), where they link since WINDOWS-X86-64-MILESTONE-2.md
+%% windows-x86_64
+## native/src/codegen/aot.rs
+<<<<
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "msvc", target_arch = "x86_64")
 ));
 
 /// The file an executable emitted for DESTINATION is
 ====
-    all(target_os = "macos", target_arch = "aarch64", target_env = "gnu")
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_env = "gnu", target_arch = "x86_64")
 ));
 
 /// The file an executable emitted for DESTINATION is
@@ -209,15 +224,35 @@ const C_CALLS: bool = cfg!(any(
 @@ msvc-crt-dynamic an MSVC executable links rustc's dynamic C runtime, which needs the Visual C++ redistributable's VCRUNTIME140.dll
 ## native/src/codegen/aot.rs
 <<<<
-    if flavor == LinkerFlavor::Msvc && !calls_c(program) {
+    let mut args = vec!["-C".to_string(), "target-feature=+crt-static".to_string()];
 ====
-    if flavor == LinkerFlavor::Msvc && calls_c(program) && !calls_c(program) {
+    let mut args = vec!["-C".to_string(), "target-feature=-crt-static".to_string()];
 >>>>
 
-@@ msvc-crt-imposed-on-c-programs the static C runtime is imposed on a program that calls C, whose C libraries chose their own
+@@ msvc-crt-dynamic-for-c-programs a program that calls C links the dynamic C runtime (milestone 1's placeholder): its executable needs VCRUNTIME140.dll, a console program that writes through kernel32 included
 ## native/src/codegen/aot.rs
 <<<<
-    if flavor == LinkerFlavor::Msvc && !calls_c(program) {
+fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
+    if flavor != LinkerFlavor::Msvc {
 ====
-    if flavor == LinkerFlavor::Msvc {
+fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
+    if flavor != LinkerFlavor::Msvc || calls_c(_program) {
+>>>>
+
+@@ msvc-other-runtimes-linked the other Microsoft runtimes are not excluded, so a C library's default-library directive links a second C runtime beside the static one
+## native/src/codegen/aot.rs
+<<<<
+    for library in OTHER_MSVC_RUNTIMES {
+        args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
+====
+    for library in OTHER_MSVC_RUNTIMES.iter().take(0) {
+        args.extend(["-C".to_string(), format!("link-arg=/NODEFAULTLIB:{library}")]);
+>>>>
+
+@@ msvc-link-hint-silent link.exe's unresolved __imp_ imports (a /MD library in a static-runtime executable) come with no explanation of the C runtime policy
+## native/src/codegen/aot.rs
+<<<<
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
+====
+    if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp__") {
 >>>>

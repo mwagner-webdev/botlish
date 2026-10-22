@@ -49,7 +49,9 @@ hello():
 == WHERE IT WORKS
 Native backends (-backend cranelift or cranelift-generic) and standalone
 executables, on Linux: linux::io makes raw system calls, which interp and
-compile refuse at run time (NATIVE-ONLY; backend.io). For output on every
+compile refuse at run time (NATIVE-ONLY; backend.io). On macOS install
+darwin::io's context instead, on Windows windows::io's
+(examples/io/hello-windows.bot): hello() stays the same. For output on every
 backend, make the text the program's value: the compiler prints it after
 "value:", and an executable prints it last.
 

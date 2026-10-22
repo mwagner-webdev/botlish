@@ -99,6 +99,7 @@
 //! check ends the process (WINDOWS-X86-64-MILESTONE-1.md).
 
 mod codegen;
+mod launch;
 use botlish_native::{nir, runtime};
 
 use codegen::{Backend, CompileOptions, CraneliftJit, Site};
@@ -473,33 +474,27 @@ fn run_linked(
     };
     let argv: Vec<Vec<u8>> = snapshot
         .unwrap_or_else(|| runtime::vm::DEFAULT_ARGV.iter().map(|a| a.as_bytes().to_vec()).collect());
-    let Some((first, rest)) = argv.split_first() else {
+    if argv.is_empty() {
         emit_error(
             &["NATIVE", "UNSUPPORTED", "foreign"],
             "a program that calls C runs as a process, which has at least one argument: an empty argument vector cannot be given to it",
         );
         return 0;
-    };
+    }
     let result = work.join("result");
-    let mut child = match linked_command(&executable, first, rest) {
-        Ok(child) => child,
-        Err(message) => {
+    let environment = [
+        ("BOTLISH_NATIVE_RESULT", Some(result.clone().into_os_string())),
+        ("BOTLISH_NATIVE_COMPILE_US", Some(started.elapsed().as_micros().to_string().into())),
+        ("BOTLISH_NATIVE_RUNS", (command == "bench").then(|| runs.to_string().into())),
+    ];
+    let status = match run_linked_executable(&executable, &argv, &environment) {
+        Ok(status) => status,
+        Err(launch::LaunchError::Arguments(message)) => {
             emit_error(&["NATIVE", "UNSUPPORTED", "foreign"], &message);
             return 0;
         }
-    };
-    child
-        .env("BOTLISH_NATIVE_RESULT", &result)
-        .env("BOTLISH_NATIVE_COMPILE_US", started.elapsed().as_micros().to_string());
-    if command == "bench" {
-        child.env("BOTLISH_NATIVE_RUNS", runs.to_string());
-    } else {
-        child.env_remove("BOTLISH_NATIVE_RUNS");
-    }
-    let status = match child.status() {
-        Ok(status) => status,
-        Err(e) => {
-            emit_error(&["NATIVE", "IO"], &format!("cannot run the linked program: {e}"));
+        Err(launch::LaunchError::System(message)) => {
+            emit_error(&["NATIVE", "IO"], &format!("cannot run the linked program: {message}"));
             return 2;
         }
     };
@@ -517,27 +512,57 @@ fn run_linked(
     0
 }
 
-/// The command that runs the linked EXECUTABLE with the argument vector
-/// FIRST, REST... (argument zero first), byte for byte.
+/// Runs the linked EXECUTABLE with the argument vector ARGV (argument zero
+/// first), byte for byte, and ENVIRONMENT's variables set (or removed, for
+/// None) in its environment, and waits for it: how it ended, for messages.
+/// Its standard input, output and error are this driver's.
 #[cfg(unix)]
-fn linked_command(executable: &std::path::Path, first: &[u8], rest: &[Vec<u8>]) -> Result<std::process::Command, String> {
+fn run_linked_executable(
+    executable: &std::path::Path,
+    argv: &[Vec<u8>],
+    environment: &[(&str, Option<std::ffi::OsString>)],
+) -> Result<String, launch::LaunchError> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::process::CommandExt;
+    let (first, rest) = argv.split_first().expect("run_linked checks for argument zero");
     let mut child = std::process::Command::new(executable);
     child.arg0(std::ffi::OsStr::from_bytes(first)).args(rest.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
-    Ok(child)
+    for (name, value) in environment {
+        match value {
+            Some(value) => child.env(name, value),
+            None => child.env_remove(name),
+        };
+    }
+    child.status().map(|status| status.to_string()).map_err(|e| launch::LaunchError::System(e.to_string()))
 }
 
 /// A Windows process has no argument vector of its own, only a command
-/// line, which std::process writes with the executable's path as argument
-/// zero: passing the snapshot's own argument zero (ARGV.md, "Windows") needs
-/// a CreateProcessW of a command line written here. No linked run reaches
-/// this yet -- a program that calls C does not link on Windows (codegen::
-/// aot's C_CALLS refuses it first) -- so it is refused rather than run with
-/// another argument zero.
+/// line: launch.rs writes the one the program's runtime splits back into
+/// ARGV, argument zero included, and starts it with CreateProcessW
+/// (ARGV.md, "Windows"). The environment is this driver's, with
+/// ENVIRONMENT's variables set or removed first.
 #[cfg(windows)]
-fn linked_command(_executable: &std::path::Path, _first: &[u8], _rest: &[Vec<u8>]) -> Result<std::process::Command, String> {
-    Err("a linked run on Windows cannot pass the argument snapshot's argument zero to the program yet (ARGV.md, \"Windows\")".to_string())
+fn run_linked_executable(
+    executable: &std::path::Path,
+    argv: &[Vec<u8>],
+    environment: &[(&str, Option<std::ffi::OsString>)],
+) -> Result<String, launch::LaunchError> {
+    // Checked before the environment changes: a refused vector runs nothing.
+    launch::command_line(&launch::utf16_arguments(argv).map_err(launch::LaunchError::Arguments)?)
+        .map_err(launch::LaunchError::Arguments)?;
+    for (name, value) in environment {
+        // SAFETY: the driver is single-threaded here -- it compiled and
+        // linked the program on this thread and starts no other -- and
+        // exits after the run, so nothing else reads its environment.
+        unsafe {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+    let code = launch::run(executable, argv)?;
+    Ok(format!("exit code: {code} ({code:#010x})"))
 }
 
 fn call_effect_report(program: &nir::Program) -> String {

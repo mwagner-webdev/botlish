@@ -3117,12 +3117,12 @@ Pass the target explicitly: `botlish -target linux-x86_64 PROGRAM.bot`.
 
 @topic error.unsupported-platform
 title: UNSUPPORTED-PLATFORM: a platform's namespace imported for another system
-summary: A namespace of the Linux platform (linux::*) or of the macOS platform (darwin::*) is imported for a target of another operating system; compile for that platform or drop the import.
+summary: A platform's namespace (linux::*, darwin::* or windows::*) is imported for a target of another operating system; compile for that platform or drop the import.
 index: errors
-alias: Linux platform; linux namespace on macOS; darwin namespace on Linux; macOS platform
-keywords: platform, linux, linux::io, linux::sys, linux::path, darwin, darwin::io, darwin::path, macOS, Windows, target, -target, operating system
+alias: Linux platform; linux namespace on macOS; darwin namespace on Linux; macOS platform; Windows platform; windows namespace on Linux
+keywords: platform, linux, linux::io, linux::sys, linux::path, darwin, darwin::io, darwin::path, windows, windows::io, macOS, Windows, target, -target, operating system
 related: error.unknown-target error.unsupported-architecture backend.platforms backend.targets cli.options concept.modules
-docs: MACOS-AARCH64-MILESTONE-2.md MACOS-AARCH64-MILESTONE-8.md LINUX-SYSCALL-TRANSPORTS.md C-ABI-TYPES.md
+docs: MACOS-AARCH64-MILESTONE-2.md MACOS-AARCH64-MILESTONE-8.md WINDOWS-X86-64-MILESTONE-2.md LINUX-SYSCALL-TRANSPORTS.md C-ABI-TYPES.md
 code: SURFACE MODULE UNSUPPORTED-PLATFORM
 
 == MEANING
@@ -3143,8 +3143,11 @@ of another operating system, they are refused at the import:
 The macOS platform's namespaces are refused the same way for every Linux
 and Windows target: `darwin` and every namespace under it (`darwin::io`,
 `darwin::path`), which call macOS's libSystem, name the root `darwin` in
-the message. Which namespace trees are a platform's is the target table's
-designation (core/cabi.tcl's platforms), never a namespace's spelling.
+the message; and the Windows platform's for every Linux and macOS target:
+`windows` and `windows::io`, which call kernel32, name the root `windows`
+(both Windows targets, MSVC's and MinGW's, have it). Which namespace trees
+are a platform's is the target table's designation (core/cabi.tcl's
+platforms), never a namespace's spelling.
 
 A matching architecture is not enough: linux-aarch64 and macos-aarch64
 share an instruction set, not an operating system, and no macOS module
@@ -3159,6 +3162,8 @@ there is no example program for it.
     `linux` directly) on macOS or Windows, or with -target naming one.
   * Compiling a program that prints through `darwin::io` on Linux or
     Windows (examples/io/hello-darwin.bot outside a Mac).
+  * Compiling a program that prints through `windows::io` on Linux or
+    macOS (examples/io/hello-windows.bot outside Windows).
 
 == HOW TO INVESTIGATE
 The message names the namespace and the target, with its operating
@@ -3171,7 +3176,8 @@ PROGRAM.bot`, `-target macos-aarch64`): the Tcl backends check the result
 on any host, while native code runs only on its own target's host (NATIVE
 TARGET). Or install the host's own context instead: a function printing
 through the portable io needs no change, only the entry program's import
-and `with context` (linux::io on Linux, darwin::io on macOS). The portable
+and `with context` (linux::io on Linux, darwin::io on macOS, windows::io
+on Windows). The portable
 standard library (io, io::path) has no platform.
 
 @topic error.unsupported-architecture

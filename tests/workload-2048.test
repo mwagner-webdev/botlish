@@ -181,26 +181,28 @@ test workload-2048-demo-executable {the demo as a standalone executable prints t
     }
 } -result {1 1}
 
-# The demo on macOS (MACOS-AARCH64-MILESTONE-8.md): demo-darwin.bot is
-# demo.bot with darwin::io's context installed instead of linux::io's; the
-# game and its presentation are one application module, demo_play.bot,
-# printing through the portable io::print_line.
-test workload-2048-demo-two-platforms {demo.bot and demo-darwin.bot are one program on two platforms: their statements are identical but for the platform import and the installed context, each compiles for its own platform's target warning-free, the game's module is the same file, and each selects its platform's io::IO implementation} -body {
-    set code [lmap name {demo.bot demo-darwin.bot} {
+# The demo on macOS (MACOS-AARCH64-MILESTONE-8.md) and Windows
+# (WINDOWS-X86-64-MILESTONE-2.md): demo-darwin.bot and demo-windows.bot are
+# demo.bot with darwin::io's or windows::io's context installed instead of
+# linux::io's; the game and its presentation are one application module,
+# demo_play.bot, printing through the portable io::print_line.
+test workload-2048-demo-two-platforms {demo.bot, demo-darwin.bot and demo-windows.bot are one program on three platforms: their statements are identical but for the platform import and the installed context, each compiles for its own platform's target warning-free, the game's module is the same file, and each selects its platform's io::IO implementation} -body {
+    set code [lmap name {demo.bot demo-darwin.bot demo-windows.bot} {
         join [lmap line [split [core::ReadFile [file join $gameDir $name]] \n] {
-            expr {[string match #* $line] || [string match *linux::io* $line] || [string match *darwin::io* $line] ? [continue] : $line}
+            expr {[string match #* $line] || [string match *linux::io* $line] || [string match *darwin::io* $line] || [string match *windows::io* $line] ? [continue] : $line}
         }] \n
     }]
-    set selections [lmap {name target} [list demo.bot [linuxTarget] demo-darwin.bot macos-aarch64] {
+    set selections [lmap {name target} [list demo.bot [linuxTarget] demo-darwin.bot macos-aarch64 demo-windows.bot windows-x86_64] {
         set hir [surface::readProgramFile [file join $gameDir $name] -warnings error -warning-channel "" -cache "" -target $target]
         set modules [lmap {id file} [dict get $hir files] {
             expr {[file tail [dict get $file path]] eq "demo_play.bot" ? [dict get $file path] : [continue]}
         }]
         list $modules [dict values [dict get [dict get $hir traitSource] contexts selections]]
     }]
-    list [expr {[lindex $code 0] eq [lindex $code 1]}] $selections
+    list [expr {[lindex $code 0] eq [lindex $code 1] && [lindex $code 0] eq [lindex $code 2]}] $selections
 } -result [list 1 [list [list [list [file join $gameDir demo_play.bot]] {{io::IO linux::io::LinuxIO}}] \
-    [list [list [file join $gameDir demo_play.bot]] {{io::IO darwin::io::DarwinIO}}]]]
+    [list [list [file join $gameDir demo_play.bot]] {{io::IO darwin::io::DarwinIO}}] \
+    [list [list [file join $gameDir demo_play.bot]] {{io::IO windows::io::WindowsIO}}]]]
 
 test workload-2048-demo-darwin-executable {(where Darwin I/O runs) demo-darwin.bot as a standalone executable prints the whole game through libSystem, the same bytes as the Linux demo, identically under GC stress} -constraints {executableAot darwinIO} -body {
     set dir [makeDirectory workload-2048-demo-darwin]
@@ -212,6 +214,23 @@ test workload-2048-demo-darwin-executable {(where Darwin I/O runs) demo-darwin.b
         removeDirectory workload-2048-demo-darwin
     }
 } -result {1 1}
+
+test workload-2048-demo-windows-executable {(where Windows I/O runs) demo-windows.bot as a standalone executable prints the whole game through kernel32's WriteFile, the same bytes as the Linux demo, identically under GC stress, with nothing on PATH; and main.tcl -backend cranelift (and cranelift-generic) runs it as a linked executable and prints the game before its value} -constraints {executableAot windowsIO} -body {
+    set dir [makeDirectory workload-2048-demo-windows]
+    try {
+        set hir [surface::readProgramFile [file join $gameDir demo-windows.bot] -warnings off]
+        set exe [native::executable $hir [file join $dir demo]]
+        set game [string range $demoOutput 0 end-[string length unit]]
+        set main [lmap backend {cranelift cranelift-generic} {
+            string equal [string map {\r ""} [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
+                -backend $backend [file join $gameDir demo-windows.bot]]] \
+                "== demo-windows.bot ($backend)\n${game}   value: unit"
+        }]
+        list [string equal [runStandalone $exe] $demoOutput] [string equal [runStandalone $exe BOTLISH_NATIVE_GC_STRESS 1] $demoOutput] $main
+    } finally {
+        removeDirectory workload-2048-demo-windows
+    }
+} -result {1 1 {1 1}}
 
 # The benchmark as a standalone executable, as an application is built and
 # shipped: bench.bot and its application module game2048.bot copied out of

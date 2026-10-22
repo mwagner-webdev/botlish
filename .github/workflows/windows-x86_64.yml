@@ -1,6 +1,7 @@
 name: tests (windows x86-64)
 
-# The Windows x86-64 port's CI (WINDOWS-X86-64-MILESTONE-1.md, section 7):
+# The Windows x86-64 port's CI (WINDOWS-X86-64-MILESTONE-1.md, section 7;
+# WINDOWS-X86-64-MILESTONE-2.md, section 7):
 # real Windows Server 2025 runners, MSVC's toolchain -- the native driver and
 # runtime built for x86_64-pc-windows-msvc, executables linked by rustc with
 # Microsoft's link.exe, which rustc finds with the Windows SDK by itself (no
@@ -16,7 +17,12 @@ name: tests (windows x86-64)
 #                capability works or is refused as recorded); program
 #                objects (COFF) and executables (PE: console subsystem,
 #                imports only the system's DLLs -- the C runtime linked
-#                statically); the allocation-heavy workloads on both native
+#                statically); C calls linked by link.exe against libraries
+#                cl and lib build here, and the C runtime matrix (/MT and
+#                /MD static libraries and DLLs); Windows I/O (kernel32's
+#                WriteFile through the portable io::IO) of hello and the
+#                2048 demo into files and pipes, through bash, cmd and
+#                PowerShell; the allocation-heavy workloads on both native
 #                backends and as executables, plainly and repeatedly under
 #                GC stress; the census's pure program, URI workload and 2048
 #                benchmark through main.tcl on both Cranelift backends,
@@ -24,7 +30,9 @@ name: tests (windows x86-64)
 #                executable and MSVC's own
 #                dumpbin's reading of the object and the executable; the
 #                smoke tier and the Windows-relevant test files
-#                (argv, targets, executables, the command line)
+#                (argv, targets, executables, the command line, the C FFI
+#                and its Win64 ABI checks against MSVC-built fixtures,
+#                Windows I/O)
 #   acceptance   every push, four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
 #                golden suite (native backends excluded by the golden
@@ -144,7 +152,8 @@ jobs:
       # Each native capability works or is refused exactly as recorded for
       # windows-x86_64 (tests/platform/native-status.tcl): the JIT, GC
       # stress, objects, executables, the target boundary (another
-      # operating system, the other Windows environment), C calls and
+      # operating system, the other Windows environment), C calls and byte
+      # exposure to the C library, Windows I/O, variadic C calls and
       # coroutines refused, the stack without its guard.
       - name: Native status
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -152,7 +161,11 @@ jobs:
 
       # The COFF object and the PE executable, read here (no MSVC tool):
       # symbols, relocations, subsystem, imported DLLs (the system's only),
-      # the standalone runs.
+      # the standalone runs; then C calls with MSVC's cl and lib (the
+      # tests' C toolchain, tests/ctoolchain.tcl: vcvars64.bat's
+      # environment for those tools alone) -- link.exe's command line and
+      # its own words for a missing library and an undefined symbol -- and
+      # the C runtime matrix.
       - name: Native objects and executables
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1 2>&1 | tee aot-facts.log
@@ -205,6 +218,39 @@ jobs:
           echo "bench.exe under GC stress: $value"
           test "$value" = 2002720
 
+      # Windows I/O as a user meets it (WINDOWS-X86-64-MILESTONE-2.md,
+      # section 5): hello-windows.bot and the 2048 demo as executables,
+      # their standard output a file, a pipe and (for stderr) its own file,
+      # redirected by bash, cmd and PowerShell -- the bytes exactly the
+      # program's (UTF-8, LF, no code page applied), byte-compared with the
+      # Linux demo's expected game. A runner's output is never a console:
+      # what a console shows is the console's, not checked here.
+      - name: Windows I/O (hello, the 2048 demo; files and pipes through bash, cmd and PowerShell)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p wio
+          cp examples/io/hello-windows.bot wio/hello.bot
+          cp examples/games/2048/demo-windows.bot examples/games/2048/demo_play.bot examples/games/2048/game2048.bot wio/
+          tclsh9.0 main.tcl -warnings off -emit-native-executable wio/hello.bot wio/demo-windows.bot
+          printf 'Hello, world!\nunit\n' > wio/hello.expected
+          ./wio/hello.exe > wio/hello.file 2> wio/hello.err
+          cmp wio/hello.file wio/hello.expected
+          test ! -s wio/hello.err
+          ./wio/hello.exe | cat > wio/hello.pipe
+          cmp wio/hello.pipe wio/hello.expected
+          cmd //c 'wio\hello.exe > wio\hello.cmd 2>&1'
+          cmp wio/hello.cmd wio/hello.expected
+          pwsh -NoProfile -Command '$p = Start-Process -FilePath .\wio\hello.exe -NoNewWindow -Wait -PassThru -RedirectStandardOutput wio\hello.pwsh -RedirectStandardError wio\hello.pwsh-err; exit $p.ExitCode'
+          cmp wio/hello.pwsh wio/hello.expected
+          ./wio/demo-windows.exe > wio/demo.file
+          BOTLISH_NATIVE_GC_STRESS=1 ./wio/demo-windows.exe | cat > wio/demo.pipe
+          cmp wio/demo.file wio/demo.pipe
+          tclsh9.0 tests/workload-2048.test -match 'workload-2048-demo-windows-*' 2>&1 | tee wio/demo-test.log
+          grep -q 'Failed	0' wio/demo-test.log
+          grep -q 'Passed	1' wio/demo-test.log
+          echo "hello: $(od -An -c wio/hello.file | tr -s ' ')"
+          echo "demo: $(wc -c < wio/demo.file) bytes, $(grep -c . wio/demo.file) lines"
+
       # A second opinion on the files tests/binary-header.tcl reads: MSVC's
       # own dumpbin (the only step that enters vcvars64.bat).
       - name: dumpbin (MSVC) on the object and the executables
@@ -223,13 +269,15 @@ jobs:
 
       # The smoke tier (examples on all four backends, front-end files) and
       # the test files the port changes most: argv (the Windows argument
-      # tests), targets, executables, the command line, applications, the
-      # 2048 workload.
+      # tests, linked runs among them), targets, executables, the command
+      # line, applications, the 2048 workload, the C FFI (the Win64 ABI
+      # against MSVC-built fixtures), byte exposure, C floats, Windows I/O.
       - name: Smoke tier and the Windows-relevant test files
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
-            main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test 2>&1 | tee tier.log
+            main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
+            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test 2>&1 | tee tier.log
 
       - name: Publish summary
         if: always()

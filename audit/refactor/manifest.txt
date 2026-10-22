@@ -101,6 +101,7 @@ program examples/io/child-path.bot
   ONE-CHAR-STRING-LITERAL 19:59 none -- char->text: the " " that separates the two printed paths is a single character appended as text (str::concat)
 program examples/io/hello.bot
 program examples/io/hello-darwin.bot
+program examples/io/hello-windows.bot
 program examples/io/show-path.bot
 program examples/abi/numeric-domains.bot
 program examples/binary/c-structs.bot
@@ -166,6 +167,7 @@ program lib/web.bot
   ONE-CHAR-STRING-LITERAL 219:85 none -- char->text: the digit "E", as above
   ONE-CHAR-STRING-LITERAL 219:90 none -- char->text: the digit "F", as above
   ONE-CHAR-STRING-LITERAL 275:9 none -- char->text: pct's "%" begins every escape it writes as text
+program lib/windows.bot
 program lib/abi/aarch64.bot
 program lib/abi/bytes.bot
 program lib/abi/x86_64.bot
@@ -179,3 +181,4 @@ program lib/linux/path.bot
   ONE-CHAR-STRING-LITERAL 84:39 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
 program lib/linux/sys.aarch64.bot
 program lib/linux/sys.x86_64.bot
+fails lib/windows/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for lib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import windows::io`)

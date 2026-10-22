@@ -950,5 +950,113 @@ test argv-windows-large-vector {hundreds of arguments through one Windows comman
     list [expr {$shown eq $expected}] [expr {$stressed eq $expected}]
 } -result {1 1}
 
+# ---------------------------------------------------------------------------
+# Linked runs (C-FFI.md; WINDOWS-X86-64-MILESTONE-2.md, "Linked runs"): a
+# program that calls C runs on the native backends as an executable the
+# driver links for the run and starts with the run's snapshot -- on Unix a
+# process whose vector is the snapshot's bytes, argument zero included; on
+# Windows a process whose command line the driver writes
+# (native/src/launch.rs) so that the program's runtime splits it back into
+# the snapshot. Either way argv() reads what an in-process run of the same
+# snapshot reads, and what the same program built as a standalone
+# executable reads when it is started with those arguments.
+
+testConstraint processLauncher [expr {[testConstraint bashLauncher] || [testConstraint windowsProcess]}]
+
+# transformProgram with one C call -- the C library's labs, which every host
+# links (glibc, libSystem, the static C runtime on Windows) -- so that it
+# runs linked: its value is the transform's with labs(-1) appended.
+set linkedTransform {import ffi::c
+import str
+
+extern c fn labs(x: ffi::c::Long) -> ffi::c::Long
+
+fn shout(s: str) -> str:
+    str::concat(str::lowercase(s), "!")
+args = argv():
+    on InvalidArgumentEncoding:
+        ["<invalid>"]
+lens = loop a in args:
+    str::length(a)
+shouted = loop a in args:
+    shout(a)
+[args, lens, shouted, labs(-1)]}
+
+# The linked runs' outcomes of linkedTransform on both native backends with
+# the snapshot VEC.
+proc linkedOutcomes {vec} {
+    set hir [argvHir $::linkedTransform]
+    return [core::process::withArgv $vec {
+        lmap backend {cranelift cranelift-generic} {outcomeUnderHir $backend $hir}
+    }]
+}
+
+# The value an in-process run of transformProgram shows with VEC, as
+# linkedTransform shows it (labs(-1) appended).
+proc inProcessTransform {vec} {
+    set shown [lindex [lindex [outcomesOf [argvHir $::transformProgram] $vec] 0] 1]
+    return "[string range $shown 0 end-1], 1\]"
+}
+
+# Arguments every host's process can carry: argument zero with a space and
+# backslashes, the empty argument, spaces, a tab, quotes, backslashes before
+# a quote and at the end, a UNC-like path, environment syntax, NFC and NFD,
+# BMP and astral scalars.
+set linkedTexts [list "C:\\dir with space\\prog" "" "a b" " lead" "tab\there" "q\"uote" "back\\" "a\\\"b" \
+    "\\\\server\\share\\" "%PATH%" "\u00c4B" "e\u0301" "\U0001F600\u4e2d"]
+
+test argv-linked-run-same-values-as-in-process {a linked run's argv() is the snapshot's, argument zero included, on both native backends: what an in-process run of the same snapshot reads, under GC stress too} -constraints {nativeCCalls rustcLinker} -body {
+    set vec [lmap t $::linkedTexts {T $t}]
+    set expected [inProcessTransform $vec]
+    set plain [linkedOutcomes $vec]
+    underGcStress {set stressed [linkedOutcomes $vec]}
+    list [lmap o $plain {expr {[lindex $o 0] eq "value" && [lindex $o 1] eq $expected}}] [expr {$stressed eq $plain}]
+} -result {{1 1} 1}
+
+test argv-linked-run-one-argument {a snapshot of argument zero alone is a process with one argument; a vector of many short ones is all of them} -constraints {nativeCCalls rustcLinker} -body {
+    set one [list [T ./alone]]
+    set many [list [T ./many]]
+    for {set i 0} {$i < 200} {incr i} { lappend many [T "arg $i"] }
+    lmap vec [list $one $many] {
+        expr {[lsort -unique [lmap o [linkedOutcomes $vec] {lindex $o 1}]] eq [list [inProcessTransform $vec]]}
+    }
+} -result {1 1}
+
+test argv-linked-run-unpaired-surrogate-is-the-declared-error {an argument holding an unpaired surrogate's three-byte form fails argv() with InvalidArgumentEncoding in a linked run, as it does in-process: on Unix the bytes are invalid UTF-8, on Windows the driver passes the surrogate itself (WTF-8 is its form) and the program's runtime reads it back as no Unicode scalar} -constraints {nativeCCalls rustcLinker} -body {
+    set vec [list [T ./p] [T ok] [H 61eda080]]
+    list [lsort -unique [lmap o [linkedOutcomes $vec] {lindex $o 1}]] [inProcessTransform $vec]
+} -result {{{[["<invalid>"], [9], ["<invalid>!"], 1]}} {[["<invalid>"], [9], ["<invalid>!"], 1]}}
+
+test argv-linked-run-empty-vector-refused {a process has at least one argument: a linked run of the empty snapshot is NATIVE UNSUPPORTED foreign, never a run with a synthetic argument zero} -constraints {nativeCCalls rustcLinker} -body {
+    lmap o [linkedOutcomes {}] {lrange [lindex $o 1] 0 2}
+} -result {{NATIVE UNSUPPORTED foreign} {NATIVE UNSUPPORTED foreign}}
+
+test argv-linked-run-unix-bytes {on Unix a linked run's process vector is the snapshot's bytes: invalid UTF-8 reaches argv() (the declared error) and argument zero may hold a quotation mark} -constraints {nativeCCalls rustcLinker bashLauncher} -body {
+    set invalid [list [T ./p] [H ff]]
+    set quoted [list [T "./q\"uote"] [T x]]
+    list [lsort -unique [lmap o [linkedOutcomes $invalid] {lindex $o 1}]] \
+        [expr {[lsort -unique [lmap o [linkedOutcomes $quoted] {lindex $o 1}]] eq [list [inProcessTransform $quoted]]}]
+} -result {{{[["<invalid>"], [9], ["<invalid>!"], 1]}} 1}
+
+test argv-linked-run-windows-refusals {on Windows a snapshot no Windows process can receive is refused before anything runs, never replaced: bytes that are no WTF-8 (a process's arguments are UTF-16) and a quotation mark in argument zero (which the command line's rule for argument zero cannot express) are NATIVE UNSUPPORTED foreign, naming the argument} -constraints {nativeCCalls rustcLinker windowsProcess} -body {
+    set outcomes [concat [linkedOutcomes [list [T ./p] [H ff]]] [linkedOutcomes [list [T "./q\"uote"] [T x]]]]
+    lmap o $outcomes {list [lrange [lindex $o 1] 0 2] [regexp {argument (1|zero)} [lindex $o 2]]}
+} -result {{{NATIVE UNSUPPORTED foreign} 1} {{NATIVE UNSUPPORTED foreign} 1} {{NATIVE UNSUPPORTED foreign} 1} {{NATIVE UNSUPPORTED foreign} 1}}
+
+test argv-linked-run-same-as-standalone {a linked run and the same program built as a standalone executable read the same arguments: the standalone one started with them (Tcl's exec on Windows, the raw launcher on Unix), the linked one given its argument zero and them as the snapshot} -constraints {nativeCCalls rustcLinker executableAot processLauncher} -body {
+    set exe [buildOnce argv-linked $::linkedTransform]
+    set texts [lrange $::linkedTexts 1 end]
+    if {[testConstraint windowsProcess]} {
+        set standalone [exec $exe {*}$texts]
+        regexp {^\[\["((?:[^"\\]|\\.)*)"} $standalone -> arg0
+        set arg0 [subst -nocommands -novariables $arg0]
+    } else {
+        set arg0 [lindex $::linkedTexts 0]
+        set standalone [launch $exe [lmap t [concat [list $arg0] $texts] {T $t}]]
+    }
+    set linked [lmap o [linkedOutcomes [lmap t [concat [list $arg0] $texts] {T $t}]] {lindex $o 1}]
+    list [expr {[lindex $linked 0] eq $standalone}] [expr {[lindex $linked 1] eq $standalone}]
+} -result {1 1}
+
 removeDirectory argv-aot
 cleanupTests

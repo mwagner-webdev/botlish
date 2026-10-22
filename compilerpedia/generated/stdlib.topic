@@ -10933,3 +10933,547 @@ Ordinary Botlish. A program that imports web also prints the module's own
 ONE-CHAR-STRING-LITERAL findings (its tables of one-character Strings),
 which are listed in the warning gate's manifest; they are not about the
 importing program.
+
+@topic stdlib.windows::c_get_std_handle
+title: windows::c_get_std_handle -- Externfn of module windows
+summary: HANDLE GetStdHandle(DWORD nStdHandle)
+index: stdlib
+symbol: windows::c_get_std_handle
+related: stdlib.module.windows
+
+== DECLARATION
+    extern c fn c_get_std_handle named "GetStdHandle"(which: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void]
+
+== MODULE
+lib/windows.bot: import windows, then write windows::c_get_std_handle.
+
+== DESCRIPTION
+HANDLE GetStdHandle(DWORD nStdHandle)
+
+@topic stdlib.windows::c_write_file
+title: windows::c_write_file -- Externfn of module windows
+summary: BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,                LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlappe...
+index: stdlib
+symbol: windows::c_write_file
+related: stdlib.module.windows
+
+== DECLARATION
+    extern c fn c_write_file named "WriteFile"(file: ffi::c::Ptr[ffi::c::Void] noescape, buffer: ffi::c::Ptr[ffi::c::Void] read noescape, count: ffi::c::ULong, written: ffi::c::Ptr[ffi::c::Void] write noescape, overlapped: ffi::c::Ptr[ffi::c::Void] noescape) -> ffi::c::Int
+
+== MODULE
+lib/windows.bot: import windows, then write windows::c_write_file.
+
+== DESCRIPTION
+BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,
+               LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped)
+
+lpNumberOfBytesWritten is a DWORD *: byte storage, so its pointee is
+declared void (an exposure's pointee is byte-sized or void), and the four
+bytes are read back by the Written layout. lpOverlapped is always NULL:
+synchronous I/O.
+
+@topic stdlib.windows::c_get_last_error
+title: windows::c_get_last_error -- Externfn of module windows
+summary: DWORD GetLastError(void)
+index: stdlib
+symbol: windows::c_get_last_error
+related: stdlib.module.windows
+
+== DECLARATION
+    extern c fn c_get_last_error named "GetLastError"() -> ffi::c::ULong
+
+== MODULE
+lib/windows.bot: import windows, then write windows::c_get_last_error.
+
+== DESCRIPTION
+DWORD GetLastError(void)
+
+@topic stdlib.windows::StandardDevice
+title: windows::StandardDevice -- Enum of module windows
+summary: The process's standard devices
+index: stdlib
+symbol: windows::StandardDevice
+related: stdlib.module.windows
+
+== DECLARATION
+    enum StandardDevice:
+        Input,
+        Output,
+        Error,
+
+== MODULE
+lib/windows.bot: import windows, then write windows::StandardDevice.
+
+== DESCRIPTION
+The process's standard devices: GetStdHandle's nStdHandle.
+
+@topic stdlib.windows::Written
+title: windows::Written -- Layout of module windows
+summary: The DWORD WriteFile reports its count in.
+index: stdlib
+symbol: windows::Written
+related: stdlib.module.windows
+
+== DECLARATION
+    layout Written:
+        size 4
+        align 4
+        field count: binary::U32 at 0
+
+== MODULE
+lib/windows.bot: import windows, then write windows::Written.
+
+== DESCRIPTION
+The DWORD WriteFile reports its count in.
+
+@topic stdlib.windows::WriteResult
+title: windows::WriteResult -- Struct of module windows
+summary: What one WriteFile did
+index: stdlib
+symbol: windows::WriteResult
+related: stdlib.module.windows
+
+== DECLARATION
+    struct WriteResult:
+        ok: bool
+        count: int
+        last_error: int
+
+== MODULE
+lib/windows.bot: import windows, then write windows::WriteResult.
+
+== DESCRIPTION
+What one WriteFile did: OK its BOOL (WriteFile returned TRUE), COUNT the
+bytes it reported written (fewer than asked is a short write, not an error;
+0 when it failed), LAST_ERROR the thread's last-error code when it failed,
+read right after it (0 exactly when OK).
+
+@topic stdlib.windows::selector
+title: windows::selector -- Function of module windows
+summary: STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+index: stdlib
+symbol: windows::selector
+related: stdlib.module.windows
+
+== DECLARATION
+    fn selector(device: StandardDevice) -> ffi::c::ULong:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::selector or, as a
+method, receiver.selector(...).
+
+== DESCRIPTION
+STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE: (DWORD)-10, -11, -12.
+
+@topic stdlib.windows::standard_handle
+title: windows::standard_handle -- Function of module windows
+summary: The process's standard handle of DEVICE, as it is now (GetStdHandle reads the process's slot each time
+index: stdlib
+symbol: windows::standard_handle
+related: stdlib.module.windows
+
+== DECLARATION
+    fn standard_handle(device: StandardDevice) -> ffi::c::Ptr[ffi::c::Void]:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::standard_handle or,
+as a method, receiver.standard_handle(...).
+
+== DESCRIPTION
+The process's standard handle of DEVICE, as it is now (GetStdHandle reads
+the process's slot each time: SetStdHandle may have changed it): NULL when
+the process has none, INVALID_HANDLE_VALUE when GetStdHandle failed.
+Borrowed: never close it.
+
+@topic stdlib.windows::last_error
+title: windows::last_error -- Function of module windows
+summary: The calling thread's last-error code, as it is now.
+index: stdlib
+symbol: windows::last_error
+related: stdlib.module.windows
+
+== DECLARATION
+    fn last_error() -> int:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::last_error or, as a
+method, receiver.last_error(...).
+
+== DESCRIPTION
+The calling thread's last-error code, as it is now. Meaningful only right
+after a call that reported a failure.
+
+@topic stdlib.windows::request
+title: windows::request -- Function of module windows
+summary: How many of DATA's bytes one WriteFile asks for
+index: stdlib
+symbol: windows::request
+related: stdlib.module.windows
+
+== DECLARATION
+    fn request(data: abi::bytes::Bytes) -> ffi::c::ULong:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::request or, as a
+method, receiver.request(...).
+
+== DESCRIPTION
+How many of DATA's bytes one WriteFile asks for: all of them, or a DWORD's
+maximum.
+
+@topic stdlib.windows::written
+title: windows::written -- Function of module windows
+summary: The count WriteFile wrote into CELL.
+index: stdlib
+symbol: windows::written
+related: stdlib.module.windows
+
+== DECLARATION
+    fn written(cell: abi::bytes::MutableBytes) -> int:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::written or, as a
+method, receiver.written(...).
+
+== DESCRIPTION
+The count WriteFile wrote into CELL.
+
+@topic stdlib.windows::write_file
+title: windows::write_file -- Function of module windows
+summary: WriteFile of DATA's bytes to HANDLE, by one kernel32 call (synchronous
+index: stdlib
+symbol: windows::write_file
+related: stdlib.module.windows
+
+== DECLARATION
+    fn write_file(handle: ffi::c::Ptr[ffi::c::Void], data: abi::bytes::Bytes) -> WriteResult:
+
+== MODULE
+lib/windows.bot: import windows, then write windows::write_file or, as a
+method, receiver.write_file(...).
+
+== DESCRIPTION
+WriteFile of DATA's bytes to HANDLE, by one kernel32 call (synchronous: no
+overlapped structure).
+
+@topic stdlib.module.windows
+title: windows -- standard namespace
+summary: The Windows platform's low-level output operations, thin ordinary-Botlish wrappers over kernel32 (WINDOWS-X86-64-MILESTONE-2.md).
+index: stdlib
+symbol: windows
+
+== DESCRIPTION
+  windows::standard_handle(device)   GetStdHandle: the process's standard
+                                     handle of DEVICE, as it is now
+  windows::write_file(handle, data)  WriteFile: ONE kernel32 call, all of
+                                     DATA asked (or a DWORD's worth); a
+                                     WriteResult
+  windows::last_error()              GetLastError: the calling thread's
+                                     last-error code, as it is now
+
+kernel32 is the boundary: the Windows system interface is its DLLs' exports,
+which this module calls through ordinary `extern c fn` declarations of their
+documented prototypes (C-FFI.md), linked through kernel32's import library
+(`extern c library "kernel32"`): no system call number, no C runtime
+function, and no compiler knowledge of I/O.
+
+A HANDLE is an opaque pointer-sized value, `void *` -- an ffi::c::Ptr[
+ffi::c::Void] here, never an integer or a POSIX descriptor. A standard
+handle is the process's (its STD_INPUT_HANDLE, STD_OUTPUT_HANDLE and
+STD_ERROR_HANDLE slots), *borrowed*: this module never closes one, and has
+no CloseHandle. GetStdHandle documents two results that are no usable
+handle: NULL when the process has no handle for the device (a process
+started without one), and INVALID_HANDLE_VALUE when the call itself failed.
+NULL is told apart (`null?`); INVALID_HANDLE_VALUE is a pointer value
+Botlish cannot compare with (a C pointer has no equality, C-ABI-TYPES.md),
+and is left to WriteFile, which refuses it with ERROR_INVALID_HANDLE (6),
+the error a WriteResult then carries.
+
+Windows reports a failure as its API does: the call returns FALSE and the
+reason is the thread's last-error code (GetLastError), which a later call
+may change. write_file reads it right after WriteFile returns, before any
+other call: nothing runs between the two but the test of WriteFile's BOOL,
+and the byte count's write-back value is built only after it
+(C-FFI-ERROR-CAPTURE-MILESTONE-1.md); neither the allocator nor the
+collector makes a Win32 call that sets the code. A result never encodes the
+code in its count: it holds WriteFile's own success, the count it reported,
+and, separately, the code a failed call left (`last_error`) (0 when it
+succeeded: the code is never read after a success, where it means nothing).
+
+Byte storage reaches C only through the borrowing contract
+(C-POINTER-BORROWING.md): the buffer is `read noescape` (exposed as it is,
+no copy) and its count derived from the ONE value -- there is no count
+parameter; the DWORD WriteFile writes its count into is a 4-byte
+MutableBytes, `write noescape` (a private copy C writes, read back as a
+binary layout). A DWORD holds at most 4294967295, so a larger Bytes is asked
+for in part: a short write by construction, which the count says.
+
+Thin by design: ONE kernel32 call per operation, no loop, no retry, no
+console mode, code page or UTF-16 conversion (the bytes are written as they
+are: WriteFile writes bytes to a console, a file or a pipe alike), no
+buffering, no overlapped I/O, no handle ownership. The standard streams as a
+context and the portable io::IO implementation are windows::io's.
+
+An ordinary module (DIRECT-MODULES.md): every C call here retains nothing --
+every pointer parameter is noescape -- so none is a direct edge. Any code
+may ask the process for its standard handles; a handle authorizes only the
+writes its device takes.
+
+== SOURCE
+lib/windows.bot (import windows).
+
+== MEMBERS
+    windows::StandardDevice        enum -- The process's standard devices
+    windows::WriteResult           struct -- What one WriteFile did
+    windows::Written               layout -- The DWORD WriteFile reports it...
+    windows::c_get_last_error      externfn -- DWORD GetLastError(void)
+    windows::c_get_std_handle      externfn -- HANDLE GetStdHandle(DWORD nS...
+    windows::c_write_file          externfn -- BOOL WriteFile(HANDLE hFile,...
+    windows::last_error            function -- The calling thread's last-er...
+    windows::request               function -- How many of DATA's bytes one...
+    windows::selector              function -- STD_INPUT_HANDLE, STD_OUTPUT...
+    windows::standard_handle       function -- The process's standard handl...
+    windows::write_file            function -- WriteFile of DATA's bytes to...
+    windows::written               function -- The count WriteFile wrote in...
+
+Each member is a topic: -help NAME (e.g. -help windows::StandardDevice).
+
+@topic stdlib.windows::io::WindowsIO
+title: windows::io::WindowsIO -- Opaque context struct of module windows::io
+summary: The process's output environment
+index: stdlib
+symbol: windows::io::WindowsIO
+related: stdlib.module.windows::io
+
+== DECLARATION
+    opaque context struct WindowsIO:
+        stdout: windows::StandardDevice
+        stderr: windows::StandardDevice
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::WindowsIO.
+
+== DESCRIPTION
+The process's output environment: its standard output and standard error
+devices (never their handles). One context.
+
+@topic stdlib.windows::io::create
+title: windows::io::create -- Function of module windows::io
+summary: The standard process output environment.
+index: stdlib
+symbol: windows::io::create
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn create() -> WindowsIO:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::create or,
+as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard process output environment. An ordinary constructor; `with
+context windows::io::create()` installs its value.
+
+@topic stdlib.windows::io::write
+title: windows::io::write -- Function of module windows::io
+summary: WriteFile of DATA to the context's standard output
+index: stdlib
+symbol: windows::io::write
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write(data: abi::bytes::Bytes, context io: WindowsIO) -> windows::WriteResult:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::write or,
+as a method, receiver.write(...).
+
+== DESCRIPTION
+WriteFile of DATA to the context's standard output: ONE kernel32 call,
+windows::write_file's result unchanged (lib/windows.bot). With no standard
+output handle (NULL) WriteFile refuses the call: ERROR_INVALID_HANDLE.
+
+@topic stdlib.windows::io::write_error
+title: windows::io::write_error -- Function of module windows::io
+summary: WriteFile of DATA to the context's standard error.
+index: stdlib
+symbol: windows::io::write_error
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write_error(data: abi::bytes::Bytes, context io: WindowsIO) -> windows::WriteResult:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write
+windows::io::write_error or, as a method, receiver.write_error(...).
+
+== DESCRIPTION
+WriteFile of DATA to the context's standard error.
+
+@topic stdlib.windows::io::progress
+title: windows::io::progress -- Function of module windows::io
+summary: The progress one WriteFile made
+index: stdlib
+symbol: windows::io::progress
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn progress(r: windows::WriteResult) -> int:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::progress
+or, as a method, receiver.progress(...).
+
+== DESCRIPTION
+The progress one WriteFile made: the bytes it wrote, none when it failed.
+
+@topic stdlib.windows::io::write_some
+title: windows::io::write_some -- Function of module windows::io
+summary: How many of BYTES one WriteFile wrote to DEVICE's current handle
+index: stdlib
+symbol: windows::io::write_some
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write_some(device: windows::StandardDevice, bytes: List[Byte]) -> int:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::write_some
+or, as a method, receiver.write_some(...).
+
+== DESCRIPTION
+How many of BYTES one WriteFile wrote to DEVICE's current handle: 0 when the
+process has no handle for it (GetStdHandle's NULL) or WriteFile reported a
+failure.
+
+@topic stdlib.windows::io::write_all
+title: windows::io::write_all -- Function of module windows::io
+summary: Writes every byte of BYTES to DEVICE's current handle.
+index: stdlib
+symbol: windows::io::write_all
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write_all(device: windows::StandardDevice, bytes: List[Byte]) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::write_all
+or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes every byte of BYTES to DEVICE's current handle. One WriteFile of the
+whole text in the common case; a short write (fewer bytes than asked, but
+some) is completed by writing the rest, again and again, so the caller only
+ever sees all or io::WriteFailed. A device with no handle, a failed write
+and one that makes no progress are io::WriteFailed; no count or error code
+escapes.
+
+@topic stdlib.windows::io::write_text
+title: windows::io::write_text -- Function of module windows::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard output
+index: stdlib
+symbol: windows::io::write_text
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write_text(text: str, context io: WindowsIO) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write windows::io::write_text
+or, as a method, receiver.write_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard output;
+io::WriteFailed when Windows reports an error, the write stops making
+progress or the process has no standard output. Never a byte count.
+
+@topic stdlib.windows::io::write_error_text
+title: windows::io::write_error_text -- Function of module windows::io
+summary: All of TEXT, UTF-8 encoded, on the context's standard error.
+index: stdlib
+symbol: windows::io::write_error_text
+related: stdlib.module.windows::io
+
+== DECLARATION
+    fn write_error_text(text: str, context io: WindowsIO) -> unit errors io::WriteFailed:
+
+== MODULE
+lib/windows/io.bot: import windows::io, then write
+windows::io::write_error_text or, as a method,
+receiver.write_error_text(...).
+
+== DESCRIPTION
+All of TEXT, UTF-8 encoded, on the context's standard error.
+
+@topic stdlib.module.windows::io
+title: windows::io -- standard namespace
+summary: The process's standard output and error on Windows as one execution-environment context (CONTEXTS.md.
+index: stdlib
+symbol: windows::io
+
+== DESCRIPTION
+  with context windows::io::create()      install it (entry program)
+  windows::io::write(data)                WriteFile to the context's
+                                          standard output: a
+                                          windows::WriteResult
+  windows::io::write_error(data)          the same to its standard error
+
+WindowsIO is linux::io::LinuxIO's and darwin::io::DarwinIO's Windows
+sibling: ONE context, the process's output environment. A function that uses
+it says so once (`context io: WindowsIO`) and is called with its ordinary
+arguments; code between the entry program and it declares nothing (the
+compiler derives the requirement), and a call before `with context
+windows::io::create()` is MISSING-CONTEXT at compile time.
+
+What the context holds is the process's standard *devices* -- its output and
+its error -- never a handle: a Windows standard handle is the process's
+slot, read with GetStdHandle when a write needs it (windows::
+standard_handle), and a C pointer cannot live in a context anyway (an
+installed context is erased: AFFINE-ERASURE-UNSUPPORTED, C-ABI-TYPES.md). So
+every write uses the handle the process has at that moment -- a console, a
+file or a pipe, whatever the launcher redirected it to -- and the context
+owns nothing: no handle is opened, duplicated or closed here.
+
+Representation authority. WindowsIO is opaque (OPAQUE-STRUCTS.md): only this
+module may construct it or look inside; a WindowsIO a function receives as
+its context can be held and passed but not taken apart.
+
+WindowsIO implements the portable io::IO context trait (CONTEXT-TRAITS.md)
+with write_text and write_error_text below: ordinary functions of this
+module whose one context parameter is a WindowsIO and whose signatures match
+io::IO's requirements. Nothing registers them: where a call needs io::IO and
+WindowsIO is the one installed context that implements it, the compiler
+binds `io.write_text(...)` to a direct call of windows::io:: write_text --
+no dispatch, no hidden argument, no provider table at run time.
+
+The completion policy is LinuxIO's and DarwinIO's, so io::IO means the same
+on every platform: all of the text, or io::WriteFailed. A short write is
+completed by writing the rest; a write WriteFile reports failed (whatever
+its last-error code: no retry), one that makes no progress, and a device the
+process has no handle for (GetStdHandle's NULL) are io::WriteFailed; no
+count, handle or error code escapes. The text is written as its UTF-8 bytes,
+exactly: no UTF-16 conversion, no console code page applied, no newline
+translation (a redirected output receives the bytes; a console shows them
+through its output code page, which WINDOWS-X86-64-MILESTONE-2.md's "Text
+and encoding" describes).
+
+Not here (deliberately): input, files, the error code beyond io::WriteFailed
+(the raw windows::write_file and windows::io::write keep it), console modes,
+WriteConsoleW, buffering.
+
+== SOURCE
+lib/windows/io.bot (import windows::io).
+
+== MEMBERS
+    windows::io::WindowsIO         opaque context struct -- The process's o...
+    windows::io::create            function -- The standard process output ...
+    windows::io::progress          function -- The progress one WriteFile made
+    windows::io::write             function -- WriteFile of DATA to the con...
+    windows::io::write_all         function -- Writes every byte of BYTES t...
+    windows::io::write_error       function -- WriteFile of DATA to the con...
+    windows::io::write_error_text  function -- All of TEXT, UTF-8 encoded, ...
+    windows::io::write_some        function -- How many of BYTES one WriteF...
+    windows::io::write_text        function -- All of TEXT, UTF-8 encoded, ...
+
+Each member is a topic: -help NAME (e.g. -help windows::io::WindowsIO).

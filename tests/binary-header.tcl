@@ -61,10 +61,12 @@ proc peHeader {path} {
 }
 
 # The PE image PATH's facts, read from its headers: a dict {subsystem N
-# imports {DLL ...}}, N the optional header's Subsystem (3: the Windows
-# console, 2: the GUI) and DLL every DLL its import directory names, in
-# order -- what `dumpbin /dependents` lists, read without a tool. Errors for
-# a file that is no PE32+ image.
+# imports {DLL ...} functions {DLL {NAME ...} ...}}, N the optional header's
+# Subsystem (3: the Windows console, 2: the GUI), DLL every DLL its import
+# directory names, in order -- what `dumpbin /dependents` lists -- and NAME
+# every function imported from it by name (#ORDINAL for one imported by
+# ordinal), what `dumpbin /imports` lists; read without a tool. Errors for a
+# file that is no PE32+ image.
 proc peFacts {path} {
     set channel [open $path rb]
     try {
@@ -100,18 +102,37 @@ proc peFacts {path} {
         error "RVA [format 0x%x $rva] is in no section"
     }}}
     set imports {}
+    set functions [dict create]
     if {$importRva != 0} {
         set at [{*}$offsetOf $ranges $importRva]
-        # IMAGE_IMPORT_DESCRIPTOR: 20 bytes, its Name RVA at 12; an
-        # all-zero one ends the table.
+        # IMAGE_IMPORT_DESCRIPTOR: 20 bytes, its import lookup table's RVA
+        # at 0 (the import address table's at 16 when there is none), its
+        # Name RVA at 12; an all-zero one ends the table.
         while {[binary scan $bytes @[expr {$at + 12}]iu nameRva] == 1 && $nameRva != 0} {
             set name [{*}$offsetOf $ranges $nameRva]
             set end [string first \0 $bytes $name]
-            lappend imports [string range $bytes $name [expr {$end - 1}]]
+            set dll [string range $bytes $name [expr {$end - 1}]]
+            lappend imports $dll
+            binary scan $bytes @${at}iu@[expr {$at + 16}]iu lookupRva addressRva
+            set names {}
+            set entry [{*}$offsetOf $ranges [expr {$lookupRva != 0 ? $lookupRva : $addressRva}]]
+            # 8-byte entries: bit 63 an ordinal import, else the RVA of a
+            # 2-byte hint and the name; 0 ends the list.
+            while {[binary scan $bytes @${entry}wu value] == 1 && $value != 0} {
+                if {$value >> 63} {
+                    lappend names "#[expr {$value & 0xffff}]"
+                } else {
+                    set hint [{*}$offsetOf $ranges [expr {$value & 0x7fffffff}]]
+                    set end [string first \0 $bytes [expr {$hint + 2}]]
+                    lappend names [string range $bytes [expr {$hint + 2}] [expr {$end - 1}]]
+                }
+                incr entry 8
+            }
+            dict set functions $dll $names
             incr at 20
         }
     }
-    return [dict create subsystem $subsystem imports $imports]
+    return [dict create subsystem $subsystem imports $imports functions $functions]
 }
 
 # The COFF object PATH's sections, symbols and relocations, read from its

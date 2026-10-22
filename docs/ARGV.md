@@ -236,12 +236,25 @@ happens at the call (WINDOWS-X86-64-MILESTONE-1.md, section 4).
   snapshot may hold bytes no Windows argument has (invalid UTF-8 that is not
   a surrogate's form): `argv()` refuses it the same way.
 * **Linked runs.** The driver runs a program that calls C as a linked
-  executable (C-FFI.md). On Windows, `std::process` writes the command line
-  with the executable's path as argument zero, so passing the snapshot's own
-  argument zero would need a `CreateProcessW` of a command line written by
-  the driver; since no program that calls C links on Windows yet, a linked
-  run is refused (`NATIVE UNSUPPORTED foreign`, main.rs's `linked_command`)
-  rather than run with another argument zero. The C call milestone owns it.
+  executable (C-FFI.md), started with the run's snapshot. `std::process`
+  writes the command line with the executable's path as argument zero, so
+  on Windows the driver writes the command line itself
+  (`native/src/launch.rs`, WINDOWS-X86-64-MILESTONE-2.md section 4) and
+  starts the executable with `CreateProcessW`, naming it separately: each
+  snapshot argument decoded from WTF-8 to its UTF-16 (an unpaired
+  surrogate's form to that surrogate), argument zero between quotes (its
+  rule has no escapes), every other argument quoted by the Microsoft C
+  runtime's rules (a quotation mark as `\"`, the backslashes before one or
+  before the closing quote doubled). The program's runtime splits the line
+  back into exactly the snapshot, so `argv()` reads in a linked run what it
+  reads in-process (`argv-linked-run-*`, on every host that calls C). A
+  snapshot no Windows process can receive is refused before anything runs
+  (`NATIVE UNSUPPORTED foreign`, naming the argument), never replaced:
+  bytes that are no WTF-8, a NUL, a quotation mark in argument zero, a
+  command line over 32767 UTF-16 units. On Unix the snapshot's bytes are
+  the process's vector, argument zero included (`CommandExt::arg0`). The
+  empty snapshot is refused on every host: a process has an argument
+  zero.
 
 Tested on a real Windows host (`tests/argv.test`'s `argv-windows-*`, the
 Windows workflow): every argument of a set of spaces, tabs, quotes,
@@ -500,8 +513,9 @@ Measured on the sandbox (Linux x86_64, Tcl 9.0.1, rustc 1.97):
 * No OS-string type and no portable byte-string abstraction: a Windows
   argument that is no valid UTF-16 (an unpaired surrogate) is refused by
   `argv()`, as invalid UTF-8 is on Linux, and its code units are not
-  observable. On Windows a linked run of a program that calls C cannot pass
-  the snapshot's argument zero yet (section "Windows").
+  observable. A linked run on Windows refuses a snapshot no Windows
+  process can receive, a quotation mark in argument zero among them
+  (section "Windows").
 * `argv()[0]` is not an executable-path API. A separate intrinsic would be
   needed; deliberately not added.
 * No environment variables, working directory, stdin/stdout, process id,

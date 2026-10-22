@@ -30,15 +30,15 @@
 # Programs run on both native backends (cranelift, cranelift-generic), which
 # must agree; a C call never runs on the Tcl backends (NATIVE-ONLY). The
 # tests need a host that links C calls (nativeCCalls: Linux x86-64 and
-# AArch64, macOS AArch64), a C compiler and the rustc linker -- never Linux
-# as such.
+# AArch64, macOS AArch64, Windows x86-64), its C toolchain
+# (tests/ctoolchain.tcl) and the rustc linker -- never Linux as such.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 set ::hostTarget [core::cabi::hostTarget]
 set ::hostArch [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : "x86_64"}]
 set ::appCounter 0
@@ -48,8 +48,11 @@ set ::fixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
     set ::fixtureDir [makeDirectory bb-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
-        exec ar rcs [file join $::fixtureDir libbotlish_cffi_fixture.a] [file join $::fixtureDir fixture.o]
+        set sources [list [file join $::projectRoot tests cffi fixture.c]]
+        if {$::tcl_platform(platform) eq "windows"} {
+            lappend sources [file join $::projectRoot tests cffi fixture-win64.asm]
+        }
+        ctool::staticLibrary $::fixtureDir botlish_cffi_fixture {*}$sources
     } message]} {
         puts stderr "c-byte-borrowing.test: the fixture library did not build: $message"
         set ::fixtureDir ""
@@ -111,6 +114,10 @@ proc appValue {dir} {
 # `stderr`, never taken for a failure.
 proc appExecutable {dir {environment {}}} {
     set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+    if {$::tcl_platform(platform) eq "windows"} {
+        # Windows has no env(1).
+        return [string trim [withEnvironment $environment {exec $exe 2> [file join $dir stderr]}]]
+    }
     # env(1) gives the variables to the executable alone. How they reach it
     # does not decide what Guard Malloc catches: bb-guard-malloc's former
     # control, a one-byte over-read of a 4080-byte storage, did not fault
@@ -148,15 +155,21 @@ extern c fn reverse named "bcf_reverse"(data: ffi::c::Ptr[ffi::c::UChar] read no
 extern c fn fill_upto named "bcf_fill_upto"(out: ffi::c::Ptr[ffi::c::UChar] write noescape, count: ffi::c::ULong, limit: ffi::c::ULong, seed: ffi::c::UChar) -> ffi::c::Long
 }
 
-# The system C library's byte functions (libSystem on macOS, glibc on Linux:
-# linked by default, no library declared). size_t is ffi::c::ULong on every
-# LP64 target; the results are exactly DST (alias dst).
+# The system C library's byte functions (libSystem on macOS, glibc on Linux,
+# the C runtime linked into every executable on Windows: no library
+# declared). size_t is the target's: ffi::c::ULong on every LP64 target,
+# ffi::c::ULongLong on LLP64 (Windows, where unsigned long is 32 bits); the
+# results are exactly DST (alias dst).
 set sysModule {import ffi::c
 
 extern c fn memcmp(a: ffi::c::Ptr[ffi::c::Void] read noescape, b: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULong) -> ffi::c::Int
 extern c fn memcpy(dst: ffi::c::Ptr[ffi::c::Void] write noescape, src: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void] alias dst
 extern c fn memmove(dst: ffi::c::Ptr[ffi::c::Void] write noescape, src: ffi::c::Ptr[ffi::c::Void] read noescape, n: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void] alias dst
 extern c fn memset(dst: ffi::c::Ptr[ffi::c::Void] write noescape, c: ffi::c::Int, n: ffi::c::ULong) -> ffi::c::Ptr[ffi::c::Void] alias dst
+}
+set ::bbLongBits [dict get [core::cabi::target [core::cabi::hostTarget]] long]
+if {$::bbLongBits < 64} {
+    set sysModule [string map {"n: ffi::c::ULong)" "n: ffi::c::ULongLong)"} $sysModule]
 }
 
 # The entry program's prelude: owners of known bytes, their C counts, and
@@ -198,6 +211,16 @@ fn mbridge(d: abi::bytes::MutableBytes) -> int:
     abi::ARCH::to_int(abi::ARCH::from_mutable_bytes(d))
 
 }]
+# A storage length is a Usize, 64 bits; a C count an ffi::c::ULong, the
+# target's unsigned long. Where that is 32 bits (Windows, LLP64) len and
+# mlen prove it with a mod -- a no-op for any storage a test makes -- on the
+# same line, so no location after the prelude moves (c-pointer-borrowing.test
+# does the same).
+if {$::bbLongBits < 64} {
+    set bbPrelude [string map [list \
+        "    abi::bytes::length(d).value\n" "    mod(abi::bytes::length(d).value, [expr {2 ** $::bbLongBits}])\n" \
+        "    abi::bytes::mutable_length(d).value\n" "    mod(abi::bytes::mutable_length(d).value, [expr {2 ** $::bbLongBits}])\n"] $bbPrelude]
+}
 
 # An application of the fixture binding, the system binding and MAIN (the
 # entry program's statements after the prelude).
@@ -412,7 +435,7 @@ proc bbRefusal {decls statement target} {
         surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $target
         return accepted
     } on error {message options} {
-        regsub {^[^:]*:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
         return [list [lindex [dict get $options -errorcode] end] $message]
     } finally {
         file delete -force $dir
@@ -592,10 +615,9 @@ test bb-system-library-gc-stress {the same calls of the system C library under a
 # The system library's functions an executable imports, as the host's tools
 # name them: nm -m on macOS ("(undefined) external _NAME (from libSystem)"),
 # nm -D on Linux ("U NAME@GLIBC_...").
-test bb-system-symbols {the executable imports memcmp, memcpy, memmove and memset from the system C library (libSystem on macOS, glibc on Linux): none is defined in it, so the calls above are the system's own code} -constraints {bbFixture} -body {
+test bb-system-symbols {the executable imports memcmp, memcpy, memmove and memset from the system C library (libSystem on macOS, glibc on Linux): none is defined in it, so the calls above are the system's own code} -constraints {bbFixture dynamicSystemCLibrary} -body {
     set dir [bbApp $::bbSystem]
-    set exe [file join $dir program]
-    native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] $exe}
+    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
     if {$::tcl_platform(os) eq "Darwin"} {
         set table [exec nm -m $exe]
         lmap name {memcmp memcpy memmove memset} {

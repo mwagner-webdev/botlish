@@ -1045,8 +1045,10 @@ test trait-context-orthogonal {a context struct value may be a trait witness lik
 # ===========================================================================
 # 111. The intended later use: a Path trait over a refinement and a struct
 
+# (A module of its own, winpath: `windows` is the Windows platform's
+# namespace, WINDOWS-X86-64-MILESTONE-2.md.)
 test trait-future-path-shape {a Path-like trait with a non-receiver parameter and self results specializes to a refined str and to a module struct, with no erased path object} -body {
-    set lib {windows.bot {import str
+    set lib {winpath.bot {import str
 
 struct WindowsPath:
     text: str
@@ -1061,7 +1063,7 @@ fn render(path: WindowsPath) -> str:
     path.text
 }}
     set source {import str
-import windows
+import winpath
 
 trait Path:
     fn concat(path: Path, component: str) -> Path
@@ -1097,12 +1099,12 @@ lin = if linux?(h):
     somewhere(h).render()
 else:
     ""
-[lin, somewhere(windows::WindowsPath {text: "C:"}).parent().render()]
+[lin, somewhere(winpath::WindowsPath {text: "C:"}).parent().render()]
 }
     list [moduleAgree $lib $source] \
          [lsort [lsearch -all -inline -glob [functionNames [moduleHir $lib $source]] somewhere*]] \
          [traitFree [moduleHir $lib $source]]
-} -result {{value {["/home/child", "C:\\child"]}} {somewhere<LinuxPath> somewhere<windows::WindowsPath>} 1}
+} -result {{value {["/home/child", "C:\\child"]}} {somewhere<LinuxPath> somewhere<winpath::WindowsPath>} 1}
 
 # ===========================================================================
 # 103. Tooling

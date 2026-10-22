@@ -530,13 +530,13 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
     let object_path = work.0.join("program.o");
 >>>>
 
-@@ fixture-wrong-architecture the C fixture is compiled for x86-64 on macOS: every link of it fails (the tests' own fixture build)
+@@ fixture-wrong-architecture the C fixture is compiled for x86-64 on macOS: every link of it fails (the tests' own fixture build, tests/ctoolchain.tcl's)
 %% macos-aarch64
-## tests/c-ffi.test
+## tests/ctoolchain.tcl
 <<<<
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
+            exec cc -c -O2 -fPIC $source -o $object
 ====
-        exec cc -arch x86_64 -c -O2 -fPIC [file join $::projectRoot tests cffi fixture.c] -o [file join $::fixtureDir fixture.o]
+            exec cc -arch x86_64 -c -O2 -fPIC $source -o $object
 >>>>
 
 # --- variadic C calls (VARIADICS-VERTICAL-SLICE-1.md) --------------------------

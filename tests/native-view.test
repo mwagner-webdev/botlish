@@ -35,7 +35,7 @@ core::cabi::installTestFixture
 # standalone executable a host that links them (tests/helpers.tcl).
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set nvBackends {interp compile cranelift-generic cranelift}
 set nvNative {cranelift-generic cranelift}
@@ -679,11 +679,13 @@ test nv-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every alloc
 # copied by C into a MutableBytes, are the same record as byte storage.
 
 set ::nvFixtureDir ""
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
+# The oracle's record is LP64's (its static assertions pin a C long's
+# offsets): on an LLP64 target (Windows) it is not built, and the tests that
+# need it are skipped by lp64Target, never failed.
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker] && [testConstraint lp64Target]} {
     set ::nvFixtureDir [makeDirectory nview-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi nview-fixture.c] -o [file join $::nvFixtureDir fixture.o]
-        exec ar rcs [file join $::nvFixtureDir libbotlish_nview_fixture.a] [file join $::nvFixtureDir fixture.o]
+        ctool::staticLibrary $::nvFixtureDir botlish_nview_fixture [file join $::projectRoot tests cffi nview-fixture.c]
     } message]} {
         puts stderr "native-view.test: the C fixture did not build: $message"
         set ::nvFixtureDir ""

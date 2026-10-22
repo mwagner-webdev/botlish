@@ -185,14 +185,71 @@ proc runStandalone {path args} {
     }
 }
 
+# Evaluates SCRIPT in the caller with the environment variables NAME VALUE
+# ... of PAIRS set, as `env NAME=VALUE ... COMMAND` runs a command on Unix,
+# on any host (Windows has no env): its result; the environment is this
+# process's again afterwards.
+proc withEnvironment {pairs script} {
+    set saved [dict create]
+    foreach {name value} $pairs {
+        if {![dict exists $saved $name]} { dict set saved $name [array get ::env $name] }
+        set ::env($name) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        dict for {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 1] }
+        }
+    }
+}
+
+# Runs the executable FILE (the path native::executable returned) with no
+# environment and nothing to find on PATH -- `env -i PATH=/nonexistent FILE`
+# on Unix; on Windows, which has no env, with PATH empty (runStandalone):
+# its standard output, as exec returns it.
+proc runBare {file} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        return [runStandalone $file]
+    }
+    return [exec env -i PATH=/nonexistent $file]
+}
+
 # C calls (extern c fn, C-FFI.md): the native backends link a program that
 # calls C with the system linker and its declared libraries and run it, on
-# Linux x86-64 and AArch64 (GNU ld's link plan, the SysV and AAPCS64 C ABIs)
-# and on macOS AArch64 (Apple's ld, the Apple arm64 C ABI,
-# MACOS-AARCH64-MILESTONE-6.md): codegen/aot.rs's C_CALLS. A capability, not
-# an operating system: a test that links and runs a C fixture carries this
-# one (and its fixture's own constraint: a C compiler, the rustc linker).
+# Linux x86-64 and AArch64 (GNU ld's link plan, the SysV and AAPCS64 C ABIs),
+# on macOS AArch64 (Apple's ld, the Apple arm64 C ABI,
+# MACOS-AARCH64-MILESTONE-6.md) and on Windows x86-64 (link.exe, the Win64 C
+# ABI, WINDOWS-X86-64-MILESTONE-2.md): codegen/aot.rs's C_CALLS. A
+# capability, not an operating system: a test that links and runs a C
+# fixture carries this one (and its fixture's own constraint: the host's C
+# toolchain, cToolchain below, and the rustc linker).
 testConstraint nativeCCalls [native::hostSupports cCalls]
+
+# Variadic C calls (VARIADICS-VERTICAL-SLICE-1.md): lowered for the System V
+# and Apple AArch64 C conventions only; on Windows x86-64 a variadic call is
+# a codegen error. A test that compiles one to machine code, or runs one,
+# carries this beside nativeCCalls.
+testConstraint nativeCVariadics [native::hostSupports cVariadics]
+
+# The host's own C toolchain, the one C fixtures are built with
+# (tests/ctoolchain.tcl): cc and ar on Linux and macOS, MSVC's cl, ml64 and
+# lib on Windows (found through vswhere, used in vcvars64's environment for
+# those tools alone -- never for Botlish's own link).
+source [file join $::projectRoot tests ctoolchain.tcl]
+testConstraint cToolchain [ctool::available]
+
+# The host target's C data model is LP64 (a C long and a pointer 64 bits:
+# Linux, macOS), not Windows' LLP64 (a 32-bit long): a C oracle whose record
+# layout holds a long (native-view's, native-edit's) is LP64's.
+testConstraint lp64Target [expr {[core::cabi::hostTarget] ne ""
+    && [dict get [core::cabi::target [core::cabi::hostTarget]] model] eq "LP64"}]
+
+# The system C library is a dynamic library an executable imports its
+# functions from (glibc, libSystem): a test that reads an executable's
+# imports of it carries this. On Windows the C runtime is linked into every
+# executable (codegen/aot.rs's crt_args): nothing is imported from one.
+testConstraint dynamicSystemCLibrary [expr {$::tcl_platform(platform) ne "windows"}]
 
 # Darwin I/O (lib/darwin.bot, lib/darwin/io.bot, MACOS-AARCH64-MILESTONE-8.md):
 # the darwin namespace is this host's platform interface (core/cabi.tcl's
@@ -202,6 +259,15 @@ testConstraint nativeCCalls [native::hostSupports cCalls]
 # a program importing darwin::* carries it.
 testConstraint darwinIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
     && [core::cabi::platformOf darwin] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
+
+# Windows I/O (lib/windows.bot, lib/windows/io.bot, WINDOWS-X86-64-MILESTONE-2.md):
+# the windows namespace is this host's platform interface (core/cabi.tcl's
+# platforms designates it Windows') and the native backend links C calls
+# here, so kernel32's GetStdHandle and WriteFile run: Windows x86-64 today. A
+# capability read from the target table, never from the operating system's
+# name: a test that runs a program importing windows::* carries it.
+testConstraint windowsIO [expr {[core::cabi::hostTarget] ne "" && [testConstraint nativeCCalls]
+    && [core::cabi::platformOf windows] eq [dict get [core::cabi::target [core::cabi::hostTarget]] os]}]
 
 # binaryHeader PATH and hostBinaryHeader KIND: what a program object or an
 # executable is, and what this host's are.

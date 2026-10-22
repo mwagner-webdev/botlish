@@ -32,7 +32,7 @@ core::cabi::installTestFixture
 # standalone executable a host that links them (tests/helpers.tcl).
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set laBackends {interp compile cranelift-generic cranelift}
 set laNative {cranelift-generic cranelift}
@@ -1071,8 +1071,7 @@ set ::laFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
     set ::laFixtureDir [makeDirectory narray-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi narray-fixture.c] -o [file join $::laFixtureDir fixture.o]
-        exec ar rcs [file join $::laFixtureDir libbotlish_narray_fixture.a] [file join $::laFixtureDir fixture.o]
+        ctool::staticLibrary $::laFixtureDir botlish_narray_fixture [file join $::projectRoot tests cffi narray-fixture.c]
     } message]} {
         puts stderr "layout-arrays.test: the C fixture did not build: $message"
         set ::laFixtureDir ""

@@ -16,7 +16,7 @@ source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux"
     && $::tcl_platform(machine) in {x86_64 amd64 aarch64 arm64}}]
 
@@ -562,8 +562,7 @@ set ::floatFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt]} {
     set ::floatFixtureDir [makeDirectory float-cffi-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi float-fixture.c] -o [file join $::floatFixtureDir fixture.o]
-        exec ar rcs [file join $::floatFixtureDir libbotlish_float_fixture.a] [file join $::floatFixtureDir fixture.o]
+        ctool::staticLibrary $::floatFixtureDir botlish_float_fixture [file join $::projectRoot tests cffi float-fixture.c]
     } message]} {
         puts stderr "float64.test: the C fixture did not build: $message"
         set ::floatFixtureDir ""

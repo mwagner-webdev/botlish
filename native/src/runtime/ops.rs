@@ -4510,6 +4510,67 @@ mod tests {
         assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
     }
 
+    /// The driver's inverse of the Windows encoding, for a linked run's
+    /// command line (WINDOWS-X86-64-MILESTONE-2.md): every unit sequence --
+    /// lone surrogates of both kinds, pairs, a pair split by another unit,
+    /// every boundary scalar -- decodes back from its WTF-8 exactly, and
+    /// bytes that are no WTF-8 of anything decode to nothing: stray and
+    /// missing continuations, overlong forms, values past U+10FFFF, 0xFF,
+    /// and a pair written as two three-byte surrogates (which would encode
+    /// back to the scalar's four bytes).
+    #[test]
+    fn argv_windows_wtf8_decodes_back_to_its_units() {
+        use crate::runtime::aot::{utf16_from_wtf8, wtf8_from_utf16};
+        let cases: Vec<Vec<u16>> = vec![
+            vec![],
+            "C:\\dir with space\\prog.exe".encode_utf16().collect(),
+            "\u{e9}e\u{301}\u{1f600}\u{ffff}\u{10ffff}\u{7f}\u{80}\u{7ff}\u{800}".encode_utf16().collect(),
+            vec![0xD800],
+            vec![0xDFFF],
+            vec![0x61, 0xDC00, 0x62],
+            vec![0xD83D, 0x20, 0xDE00],
+            vec![0xD83D, 0xDE00],
+            vec![0xDE00, 0xD83D],
+            vec![0xD800, 0xD800, 0xDC00],
+            vec![0],
+        ];
+        for units in &cases {
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16(units.iter().copied())).as_ref(), Some(units), "{units:x?}");
+        }
+        // Every single unit, and a pseudo-random sample of short sequences.
+        for unit in 0..=0xFFFFu16 {
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16([unit])), Some(vec![unit]), "{unit:#x}");
+        }
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..20000 {
+            let units: Vec<u16> = (0..(state % 7))
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    [0x41, 0x7FF, 0x800, 0xD800, 0xDBFF, 0xDC00, 0xDFFF, 0xFFFF, (state >> 16) as u16][(state % 9) as usize]
+                })
+                .collect();
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            assert_eq!(utf16_from_wtf8(&wtf8_from_utf16(units.iter().copied())), Some(units.clone()), "{units:x?}");
+        }
+        for bad in [
+            &b"\x80"[..],
+            b"a\xC3",
+            b"\xC3\x28",
+            b"\xC0\xAF",
+            b"\xE0\x80\xAF",
+            b"\xF0\x80\x80\xAF",
+            b"\xF4\x90\x80\x80",
+            b"\xFF",
+            b"\xED\xA0\xBD\xED\xB8\x80",
+        ] {
+            assert_eq!(utf16_from_wtf8(bad), None, "{bad:x?}");
+        }
+        // A lone trail before a lone lead is no pair: both stay.
+        assert_eq!(utf16_from_wtf8(b"\xED\xB8\x80\xED\xA0\xBD"), Some(vec![0xDE00, 0xD83D]));
+    }
+
     #[test]
     fn argv_zero_arguments_is_the_empty_list() {
         let mut vm = vm();

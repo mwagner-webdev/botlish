@@ -1050,12 +1050,43 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   the same COFF for both Windows environments; never add a target-specific
   object transformation.
 * The link plan is `LinkerFlavor::Msvc`'s (`/LIBPATH:DIR`, `NAME.lib`, no
-  group): never a GNU flag to link.exe. An executable of a program that
-  calls no C links the C runtime statically (`crt_args`, `+crt-static`), so
-  it imports only the system's DLLs: never let it import `VCRUNTIME140.dll`
-  or the UCRT, and never impose that runtime on anything else (the driver,
-  C libraries). C calls stay refused on Windows (`C_CALLS`) until their
-  milestone validates the Win64 C ABI against real callees.
+  group): never a GNU flag to link.exe. Every executable -- one that calls
+  C too -- links the static release C runtime (`crt_args`, `+crt-static`)
+  and excludes every other Microsoft runtime library (`/NODEFAULTLIB:`,
+  `OTHER_MSVC_RUNTIMES`), so it holds one C runtime and imports only the
+  system's DLLs: never let it import `VCRUNTIME140.dll` or the UCRT, never
+  link a second runtime beside the static one, and never impose the
+  executable's runtime on anything else (the driver; a DLL keeps its own)
+  (WINDOWS-X86-64-MILESTONE-2.md, "The C runtime"). A static C library must
+  be `/MT`: a `/MD` one's `__imp_` imports of the runtime fail to link
+  (LNK2019; `link_hint` explains them), and that is the policy's answer,
+  never a reason to link the dynamic runtime.
+* C calls run on Windows (`C_CALLS`; WINDOWS-X86-64-MILESTONE-2.md): the
+  Win64 convention is Cranelift's `windows_fastcall`, checked against
+  MSVC-built callees (tests/cffi/fixture.c with fixture-win64.asm's
+  register and stack capture; c-ffi.test's `cf-abi-*` Win64 model:
+  positional registers, the 32-byte shadow space, 8-byte stack slots,
+  LLP64's 32-bit `long`). A variadic C call has no Win64 lowering and is a
+  codegen error there (`nativeCVariadics`): never lower one without
+  checking Win64's variadic rules (a double in both registers) against
+  real callees first. The tests build their C fixtures with MSVC's cl, lib
+  and ml64 through tests/ctoolchain.tcl, whose vcvars64.bat environment is
+  set for those tools' runs alone: Botlish's own links never run in it.
+* A linked run (a program that calls C, run by the native backends) starts
+  its executable with the run's argument snapshot: on Windows with a
+  command line the driver writes (`native/src/launch.rs`) and
+  `CreateProcessW`, never `std::process` (whose argument zero is the
+  executable's path), a shell or a naive join; a snapshot no Windows
+  process can receive (no WTF-8, a NUL, a quotation mark in argument zero,
+  a line over 32767 units) is NATIVE UNSUPPORTED, never replaced.
+* Windows I/O (lib/windows.bot, lib/windows/io.bot): the `windows`
+  namespace is the Windows platform's (core/cabi.tcl's `platforms`);
+  kernel32's GetStdHandle, WriteFile and GetLastError through ordinary
+  `extern c fn`s, the last-error code read right after the failed call. A
+  standard handle is borrowed: never close one, never cache it in a
+  context (WindowsIO holds devices; a C pointer cannot live in a context).
+  No Win32 call in `io` or any portable module, no console mode, code page
+  or UTF-16 conversion of the bytes, no compiler knowledge of printing.
 * An executable's name ends in `.exe` (`codegen::aot::executable_path`: a
   name without an extension gets it); `native::executable` returns the
   file, and a test runs that file, never the name it passed.
@@ -1101,23 +1132,30 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
 * CI: `.github/workflows/windows-x86_64.yml` on every push (windows-2025,
   production code, Tcl 9.0.1 built by `tests/platform/setup-windows.ps1`):
   the smoke job (the Rust tests, `native-status.tcl`, `aot-facts.tcl`'s
-  COFF/PE checks, `tests/platform/gc-workloads.tcl` under GC stress, the
-  2048 executable, dumpbin, the smoke tier and the Windows-relevant test
-  files) and the acceptance tier in four shards; `[ci-full]` or a manual
-  run adds the GC-stress tier. Neither Wine nor WSL is an authority for
-  Windows; a `-gnu` cross build under Wine is a development aid only.
+  COFF/PE checks, C calls through link.exe and the C runtime matrix,
+  `tests/platform/gc-workloads.tcl` under GC stress, the 2048 executable,
+  Windows I/O redirected by bash, cmd and PowerShell, dumpbin, the smoke
+  tier and the Windows-relevant test files) and the acceptance tier in
+  four shards; `[ci-full]` or a manual run adds the GC-stress tier.
+  Neither Wine nor WSL is an authority for Windows; a `-gnu` cross build
+  under Wine is a development aid only.
 
 If you change the Windows link plan, the CRT policy, executable naming,
 `EXECUTABLES`/`C_CALLS`, `same_target`, `NATIVE_FRAME_ROOTS` or what reads
-it, the stack probes or the Windows argument encoding, run the Rust tests,
-`tests/native-executable.test`, `tests/target-model.test`,
-`tests/argv.test`, `tests/platform/native-status.tcl`,
-`tests/platform/aot-facts.tcl`, `tests/platform/gc-workloads.tcl` (also
-with a `fallback-roots` driver: `cargo build --release --features
-fallback-roots` into another target directory, `BOTLISH_NATIVE_BIN`
-pointing at it), `audit/native-aot/tools/mutate.tcl` and
+it, the stack probes, the Windows argument encoding or the linked-run
+launcher, run the Rust tests, `tests/native-executable.test`,
+`tests/target-model.test`, `tests/argv.test`, `tests/c-ffi.test`,
+`tests/platform/native-status.tcl`, `tests/platform/aot-facts.tcl`,
+`tests/platform/gc-workloads.tcl` (also with a `fallback-roots` driver:
+`cargo build --release --features fallback-roots` into another target
+directory, `BOTLISH_NATIVE_BIN` pointing at it),
+`audit/native-aot/tools/mutate.tcl` and
 `audit/target-model/tools/mutate.tcl` on Linux, and the Windows workflow on
-the branch.
+the branch. If you change lib/windows.bot or lib/windows/io.bot, run
+`tests/windows-io.test`, `tests/portable-io.test`,
+`tests/context-traits.test` and `audit/context-traits/tools/mutate.tcl
+-only 'windows-*'` (its `%% windows-x86_64` mutants on Windows: the tier
+item `windows-io-mutants`), and the warning gate.
 
 ## Compilation targets
 
@@ -2049,16 +2087,19 @@ so:
   declaration designates nothing.
 * The registry is a declaration registry (`hir::foreign::capture`/`Install`):
   compilation isolation and HIR interchange carry it.
-* C calls run on Linux x86-64 and AArch64 and on macOS AArch64
-  (MACOS-AARCH64-MILESTONE-6.md). The link plan is the platform linker's
-  (codegen/aot.rs's `LinkerFlavor`): GNU ld's archive group on Linux,
-  byte for byte, the bare `-L`/`-l` list on macOS, whose ld rejects the
-  group; never a GNU-only flag in Apple's plan, an rpath, an SDK path or a
+* C calls run on Linux x86-64 and AArch64, on macOS AArch64
+  (MACOS-AARCH64-MILESTONE-6.md) and on Windows x86-64 with MSVC's
+  toolchain (WINDOWS-X86-64-MILESTONE-2.md). The link plan is the platform
+  linker's (codegen/aot.rs's `LinkerFlavor`): GNU ld's archive group on
+  Linux, byte for byte, the bare `-L`/`-l` list on macOS, whose ld rejects
+  the group, link.exe's `/LIBPATH:DIR` and `NAME.lib` on Windows; never a
+  GNU-only flag in Apple's or Microsoft's plan, an rpath, an SDK path or a
   decorated (`_`) symbol of ours. The target's C ABI is checked against
   real callees and the C compiler's own calls (c-ffi.test's `cf-abi-*`,
-  `bcf_capture`): a change to a foreign signature's types or extension
-  attributes needs them on macOS (the acceptance tier) and Linux AArch64
-  (tests-arm64.yml), not only here.
+  `bcf_capture`; on Windows fixture-win64.asm's): a change to a foreign
+  signature's types or extension attributes needs them on macOS (the
+  acceptance tier), Linux AArch64 (tests-arm64.yml) and Windows (the
+  Windows workflow), not only here.
 
 If you change any of that (C-FFI.md, "What to run when changing this", lists
 the files), run `tests/c-ffi.test` (also under `BOTLISH_NATIVE_GC_STRESS=1`),
@@ -2119,6 +2160,11 @@ collect, no runtime or C call -- whatever the lowering. Keep it so:
   after the call, in the function that made it (a value returned unread
   leaves the error state to the caller's code); the compiler only adds
   nothing in between.
+* Windows' convention is the Win32 one, GetLastError: lib/windows.bot's
+  `write_file` reads it right after WriteFile the same way
+  (`wi-last-error-read-first` pins the window). c-ffi-error-capture.test's
+  C tests run POSIX's convention (errno, read, open, close) and need
+  `posixErrno`: they skip on Windows, whose C runtime has neither.
 
 If you change the write-back value's representation (the `WriteBackResult`,
 `WriteBackTree`, `WriteBackPaths`, `WriteBackCut` and write-back cases of
@@ -2133,13 +2179,14 @@ call's result conversion or what errno() lowers to, run
 `tests/c-ffi-error-capture.test` (its machine-code tests read the object
 file with `objdump`; its trace needs Linux and ptrace; its `ec-modes-*`
 tests every lowering mode), `tests/c-pointer-borrowing.test`,
-`tests/c-byte-borrowing.test`, `tests/darwin-io.test` (its
-`di-errno-allocator` runs on macOS: the acceptance tier of every branch
-push, and under GC stress a `[ci-full]` push with `CI-Tests: darwin-io.test
-c-ffi-error-capture.test`), all also under `BOTLISH_NATIVE_GC_STRESS=1`,
-the struct and transport tests (`tests/struct-scalar-replacement.test`,
-`tests/value-transport.test`), `cargo test --release --manifest-path
-native/Cargo.toml -- c_word ffi_word_cmp ffi_int_word`,
+`tests/c-byte-borrowing.test`, `tests/windows-io.test`,
+`tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
+acceptance tier of every branch push, and under GC stress a `[ci-full]`
+push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
+under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
+(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
+`cargo test --release --manifest-path native/Cargo.toml -- c_word
+ffi_word_cmp ffi_int_word`,
 `audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
 you change the code it mutates, keeping it a mutant of the same rule; its

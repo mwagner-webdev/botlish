@@ -1,0 +1,15 @@
+# demo-windows.bot -- demo.bot on Windows (WINDOWS-X86-64-MILESTONE-2.md):
+# the same game and presentation (demo_play.bot), with Windows' io::IO
+# context installed -- windows::io's, whose writes are kernel32's WriteFile.
+#
+#   tclsh9.0 main.tcl -backend cranelift examples/games/2048/demo-windows.bot
+#   tclsh9.0 main.tcl -emit-native-executable examples/games/2048/demo-windows.bot
+import demo_play
+import io
+import windows::io
+
+with context windows::io::create()
+
+demo_play::main():
+    on io::WriteFailed:
+        unit

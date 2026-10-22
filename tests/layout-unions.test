@@ -30,7 +30,7 @@ core::cabi::installTestFixture
 
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint executableAot [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
-testConstraint cCompiler [expr {[auto_execok cc] ne ""}]
+testConstraint cCompiler [testConstraint cToolchain]
 
 set luBackends {interp compile cranelift-generic cranelift}
 set luNative {cranelift-generic cranelift}
@@ -1050,8 +1050,7 @@ set ::luFixtureDir ""
 if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
     set ::luFixtureDir [makeDirectory nunion-fixture-[pid]]
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $::projectRoot tests cffi nunion-fixture.c] -o [file join $::luFixtureDir fixture.o]
-        exec ar rcs [file join $::luFixtureDir libbotlish_nunion_fixture.a] [file join $::luFixtureDir fixture.o]
+        ctool::staticLibrary $::luFixtureDir botlish_nunion_fixture [file join $::projectRoot tests cffi nunion-fixture.c]
     } message]} {
         puts stderr "layout-unions.test: the C fixture did not build: $message"
         set ::luFixtureDir ""

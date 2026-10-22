@@ -710,9 +710,30 @@ lib/darwin.bot declares libSystem's `write`, `read`, `open` (variadic),
 lib/darwin/io.bot puts them behind `io::IO`; no extern c library is needed,
 libSystem being in every macOS executable's link.
 
-Elsewhere the native backends already refuse executables (Linux glibc
-and macOS AArch64 only), so they refuse a program that calls C the same
-way. A `-target`
+**Windows x86-64** (WINDOWS-X86-64-MILESTONE-2.md): the same code path,
+with the Win64 C ABI (Cranelift's `windows_fastcall`: four positional
+registers shared by the integer and floating kinds, a 32-byte shadow space,
+every further argument in its own 8-byte stack slot, LLP64's 32-bit
+`long`) and Microsoft's link.exe through rustc: `extern c library "NAME"`
+is `NAME.lib` (a static library or a DLL's import library), `-L DIR` is
+`/LIBPATH:DIR`, and there is no archive group (link.exe searches every
+library until nothing more resolves). Every executable links the static
+release C runtime and excludes every other Microsoft runtime, so a static
+C library compiled for `/MT` (cl's default) shares it, and one compiled for
+`/MD` does not link: its calls of the runtime are `__imp_` imports, which
+link.exe resolves against the static runtime only for a function something
+else linked anyway (LNK4217) and otherwise refuses (LNK2019, NATIVE LINK
+with the driver's explanation). A DLL keeps its own runtime, `/MT` or `/MD`
+(section "The C runtime" of the milestone report). The machine state each call arrives in is checked
+against MSVC-built callees (tests/cffi/fixture.c with
+tests/cffi/fixture-win64.asm's capture). A variadic C call is a codegen
+error on Windows (no Win64 variadic lowering yet). Windows I/O is a binding
+of this kind: lib/windows.bot declares kernel32's GetStdHandle, WriteFile
+and GetLastError, lib/windows/io.bot puts them behind `io::IO`.
+
+Elsewhere the native backends already refuse executables (Linux glibc,
+macOS AArch64 and Windows x86-64 only), so they refuse a program that calls
+C the same way. A `-target`
 other than the host's chooses the ABI classes of a compilation (its HIR),
 never a cross-link: linking is for the host, and the driver refuses to run
 or link a program built for another target at all (`NATIVE TARGET`,
@@ -723,7 +744,8 @@ a Linux C function.
 convention, selected where its signature is built
 (`native/src/codegen/target.rs`'s `c_call_conv`, called by `clif.rs`'s
 `c_signature`): `system_v` on Linux, `apple_aarch64` on macOS AArch64 --
-never the generic AArch64 one there -- and Cranelift lowers it (registers,
+never the generic AArch64 one there -- `windows_fastcall` on Windows
+x86-64, and Cranelift lowers it (registers,
 stack placement, narrow-argument extension). Botlish-to-Botlish calls and
 runtime helper calls keep the ISA's default convention. The one exception
 Botlish makes to Cranelift's lowering is what it asks of it: no extension
@@ -1057,7 +1079,9 @@ libraries, `-L` directories, a wrong-architecture library, a failed link,
 and GC stress, coroutines and the stack guard around C calls. Its C side is
 `tests/cffi/fixture.c`, compiled with the host C compiler into a static
 archive in a private directory (test infrastructure only); it runs wherever
-C calls do (`nativeCCalls`: Linux x86-64 and AArch64, macOS AArch64); the
+C calls do (`nativeCCalls`: Linux x86-64 and AArch64, macOS AArch64,
+Windows x86-64, where tests/ctoolchain.tcl builds it with MSVC's cl, lib
+and ml64); the
 Tcl tests need a linkable `libtcl9.0`, the BoringSSL ones the package-owned
 build (skipped when it is not built).
 
