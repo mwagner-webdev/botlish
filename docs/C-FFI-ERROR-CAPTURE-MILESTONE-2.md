@@ -912,6 +912,27 @@ GitHub Actions, `.github/workflows/tests.yml` (dispatched on the branch):
 | [39736853106](https://github.com/mwagner-webdev/botlish/actions/runs/39736853106) | 188a58f | success: interp, compile, cranelift and cranelift-generic coverage, the native Rust unit tests, the stub-linked executables, golden shards 1-4, the warning gate, the method-call kind filter (the GC-stress job runs on pushes to main only; the GC-stress runs above cover it) |
 | [39747067898](https://github.com/mwagner-webdev/botlish/actions/runs/39747067898) | 9e38f24 (the final code: later commits change the benchmark script and documents only) | success: the same jobs |
 
+**Merged into main.** main moved twice while this ran, so the branch
+merged it twice before going in: the Hashable trait (one conflict, nir.rs's
+arity list, where its hash ops and `cwbox` are all one-operand ops) and
+Windows x86-64 milestone 2 (two, AGENTS.md's run list and tier.tcl's check
+list, both kept whole). On each merged tree: `tests/local.tcl`, every Tcl
+test file on interp and compile and every golden suite on all four
+backends, 0 failed; the Rust unit tests; the regenerated golden manifest
+equal to the committed one; every mutant of every `mutants.txt` still
+applying; `tools/compilerpedia.tcl check`. The transport changes the
+committed Icy Tower executable (`audit/icy-tower/artifacts/icy-tower`,
+rebuilt: 960,448 bytes on the final tree; main's own tree rebuilds the old
+one byte for byte except its build ID), and with libSDL3.so present
+tests/workload-icy-tower.test passes 15/15 with nothing skipped and the
+oracle finds 0 differences. CI of the merges:
+
+| run | commit | result |
+|---|---|---|
+| icy-tower [39768188992](https://github.com/mwagner-webdev/botlish/actions/runs/39768188992), [39777362200](https://github.com/mwagner-webdev/botlish/actions/runs/39777362200) | 68f19ef, 194d341 | success: build, tests, oracle, mutants, Xvfb |
+| macOS [39769207256](https://github.com/mwagner-webdev/botlish/actions/runs/39769207256), [39777337389](https://github.com/mwagner-webdev/botlish/actions/runs/39777337389) | e23c4c5, 194d341 | success |
+| Windows [39769207249](https://github.com/mwagner-webdev/botlish/actions/runs/39769207249), [39777337342](https://github.com/mwagner-webdev/botlish/actions/runs/39777337342) | e23c4c5, 194d341 | success |
+
 ## 29. Linux AArch64 CI
 
 `.github/workflows/tests-arm64.yml` on GitHub's `ubuntu-24.04-arm` runners
@@ -964,9 +985,11 @@ variadic and byte-borrowing behavior (c-ffi.test, c-byte-borrowing.test,
 
 ## 31. Windows regression
 
-The shared lowering is the same code on Windows; C calls are not (they are
-refused there, `C_CALLS`), so what Windows validates is the shared
-compiler, never the foreign-error behavior:
+The shared lowering is the same code on Windows. While this milestone was
+developed, C calls were refused there (`C_CALLS`), so what Windows
+validated was the shared compiler, never the foreign-error behavior;
+WINDOWS-X86-64-MILESTONE-2.md, merged into main beside this milestone
+(below), runs C calls on Windows:
 
 * **Shared lowering, validated by the Windows tests**:
   `.github/workflows/windows-x86_64.yml` on the pushes of 9e38f24 --
@@ -978,15 +1001,24 @@ compiler, never the foreign-error behavior:
   under GC stress with the fallback root plan, the 2048 executable) and the
   acceptance tier's four shards (every test file; c-ffi-error-capture.test's
   NIR tests compile their programs for linux-x86_64 and macos-aarch64 on
-  the Windows host and pass; its executable tests need C calls and skip).
+  the Windows host and pass; its executable tests need C calls and skip,
+  and after the merge `posixErrno` too: the fixture runs POSIX's
+  convention, which Windows' C runtime does not have).
   Words are `scalar_regs`, so the fallback root plan never shadows one.
 * **C return-value transport, validated on Linux and macOS** (sections 28
   to 30).
-* **Windows native foreign-error behavior: not executable yet.** No
-  Windows program calls C; `GetLastError()` read by an `extern c fn` right
-  after the call will need no new mechanism -- a `DWORD` is a 32-bit C
-  scalar (no word), a 64-bit result is a word like any other -- but nothing
-  here claims Windows runtime correctness for it.
+* **Windows native foreign-error behavior: Windows milestone 2's.** On
+  this branch no Windows program called C. WINDOWS-X86-64-MILESTONE-2.md's
+  `windows::write_file` reads `GetLastError()` right after WriteFile with
+  no new mechanism -- a `DWORD` is a 32-bit C scalar (no word) -- and
+  `wi-last-error-read-first` pins its window; on the merged tree the
+  Windows run below passes it. This milestone's own errno tests stay
+  POSIX's (`posixErrno`).
+* **The merged tree**: the Windows run of the merge with Windows milestone
+  2, 194d341 --
+  [39777337342](https://github.com/mwagner-webdev/botlish/actions/runs/39777337342):
+  success, the smoke job (its Windows I/O step included) and the
+  acceptance tier's four shards.
 
 ## 32. Remaining limits of the guarantee
 
@@ -1027,7 +1059,9 @@ compiler, never the foreign-error behavior:
 * Words across exact calls (a raw-ABI result of a C word) -- unneeded while
   the function that calls C reads its error state.
 * Windows: `GetLastError()` read through an `extern c fn` right after the
-  call needs nothing more once C calls run on Windows (`C_CALLS`): the words,
-  the deferral and the detectors are target-independent.
+  call needed nothing more once C calls ran on Windows (Windows milestone
+  2's `write_file` does it): the words, the deferral and the detectors are
+  target-independent. A Windows `_errno()` binding and a Windows fixture
+  for this milestone's tests remain undone.
 * An inline `NativeView` load of a fixed-width field (no helper between
   `__errno_location` and the load).
