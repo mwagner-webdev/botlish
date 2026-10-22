@@ -443,7 +443,7 @@ the link.
 |---|---|
 | path | `audit/icy-tower/artifacts/icy-tower` (committed; rebuilt by `build.sh`) |
 | target | `x86_64-unknown-linux-gnu` (Botlish target `linux-x86_64`) |
-| kind | ELF 64-bit PIE executable, dynamically linked, stripped, 960,576 bytes |
+| kind | ELF 64-bit PIE executable, dynamically linked, stripped, 959,808 bytes |
 | needs | `libSDL3.so.0` (SDL 3.x; built and tested with 3.4.18, soname `libSDL3.so.0`), `libc.so.6` (glibc >= 2.34), `libm.so.6`, `libgcc_s.so.1` |
 | rpath | none: Botlish adds no rpath (C-FFI.md); the loader finds SDL on the system path or `LD_LIBRARY_PATH` |
 | assets | none: nothing has to stay beside it; it runs from any directory |
