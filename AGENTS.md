@@ -382,6 +382,12 @@ What it costs, measured on a 4-core container (2026-10-15):
     stress) and, except on pull requests, the GC-stress run. Run it on a
     branch with workflow_dispatch.
 
+  A push or pull request that changes only Markdown files and `docs/` starts
+  no workflow (their `paths-ignore`). Renaming or removing a design document
+  can still fail a test: `tools/compilerpedia.tcl check` takes a code-shaped
+  word the sources cite as a document's name only while `docs/NAME.md`
+  exists. Run `tclsh9.0 tools/compilerpedia.tcl check` before pushing one.
+
   Never set `BOTLISH_SKIP_GOLDEN_DUPLICATES` or run `tests/local.tcl` in a
   workflow: `tests/golden-duplicates.test` fails if one does.
 * **The skipped set is the manifest's, never a list kept by hand.** A Tcl
