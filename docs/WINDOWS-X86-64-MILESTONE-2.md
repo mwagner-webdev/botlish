@@ -63,7 +63,7 @@ Botlish -> HIR -> NIR (windows-x86_64) -> Cranelift (windows_fastcall) -> COFF o
 | Windows `io::IO` through GetStdHandle/WriteFile/GetLastError | real Windows | windows-io.test (section 5) |
 | Real programs use it (2048 demo, examples) | real Windows | the workflow's Windows I/O step; workload-2048.test's `workload-2048-demo-windows-executable` |
 | GC across C calls under `BOTLISH_NATIVE_GC_STRESS=1` | real Windows | `cf-gc-calls`, byte-borrowing's stress tests, `wi-gc-stress`, `wi-short-write-completed` (section 6) |
-| Linux x86-64, Linux AArch64 and macOS unchanged | CI and locally | Linux x86-64 and AArch64 green; macOS green but for one test that fails on main too (section 7.4) |
+| Linux x86-64, Linux AArch64 and macOS unchanged | CI and locally | Linux x86-64 and AArch64 green; macOS green after merging main, whose change fixed its one failure (sections 7.4, 7.7) |
 
 ## Contents
 
@@ -673,7 +673,8 @@ Windows I/O or C FFI test that could run.
   over-read no longer faults under Guard Malloc), with this milestone's
   files exactly main's in it (c-byte-borrowing.test's appExecutable is
   main's again on Unix). It is left to its owner, MACOS-AARCH64-MILESTONE-7.md's
-  Guard Malloc check; nothing of this milestone is in its path on macOS.
+  Guard Malloc check; nothing of this milestone is in its path on macOS. Main
+  has since changed the test, and after the merge it passes (section 7.7).
 
 The changes outside Windows are: `C_CALLS` (a cfg list, unchanged for the
 other hosts), `crt_args` (MSVC only), `link_hint` (MSVC only), the
@@ -806,7 +807,17 @@ failed; every golden suite on all four backends: 103 suites, 0 failed),
 the native Rust tests (lib 285, driver 64), Windows run
 [39743665389](https://github.com/mwagner-webdev/botlish/actions/runs/39743665389)
 (smoke and the four acceptance shards) and macOS run 39743665357 green;
-LINUX_RESULTS
+tests.yml run
+[39743681424](https://github.com/mwagner-webdev/botlish/actions/runs/39743681424)
+green in every job it runs on a branch (the Tcl suite on interp and compile,
+cranelift and cranelift-generic coverage, the golden suites beside their
+Tcl originals, the Rust tests, the stub-linked executables, the warning
+gate, the method-call filter audit; its GC-stress job runs on main only)
+and tests-arm64.yml run
+[39743684422](https://github.com/mwagner-webdev/botlish/actions/runs/39743684422)
+AARCH64_GC. Main had moved four commits meanwhile (c011e55: workflow path
+filters, the README, the Icy Tower CI); merged again (fa3eb8c), they change
+no code, and the two workflows this milestone also edits merged cleanly.
 
 ## 8. Remaining limitations
 
