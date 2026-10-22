@@ -664,6 +664,28 @@ test cs-facts-explicit {every fact of a query is either answered or listed unava
     set result
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir result position q answered missing} -result {1 {} 1 {binding definition references} 1 {construct binding type hover definition references}}
 
+test cs-declarations-only-module {a module that declares no expression (an enum alone, as lib/compiler.bot) is still a file of the revision: every position of it answers, with its syntax facts and the semantic ones unavailable} -body {
+    set dir [cs::Dir declarations]
+    cs::Put $dir/main.bot "import shape\n\nx = 1\nx\n"
+    set text "enum Shape:\n    Circle,\n    Square\n"
+    cs::Put $dir/shape.bot $text
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    set files [lmap entry [dict values [dict get [service::hir $rev] files]] {file tail [dict get $entry path]}]
+    set failures {}
+    set lines [split $text \n]
+    for {set line 1} {$line <= [llength $lines]} {incr line} {
+        for {set column 1} {$column <= [string length [lindex $lines $line-1]] + 1} {incr column} {
+            if {[catch {service::at $rev $dir/shape.bot $line $column} q]} {
+                lappend failures $line:$column $q
+            }
+        }
+    }
+    set q [service::at $rev $dir/shape.bot 2 5]
+    list [dict get [service::revision $rev] outcome] [expr {"shape.bot" in $files}] $failures \
+        [dict exists $q syntax] [lsort [dict keys [dict get $q unavailable]]]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir text ws rev files failures lines line column q} -result {ok 1 {} 1 {binding construct definition hover references type}}
+
 test cs-semantic-error-queries {a revision with semantic errors still answers from its lenient HIR: resolved names have their bindings and types; an unresolved one says it is unresolved; the diagnostics at the position come with their topic} -body {
     set dir [cs::Dir semantic]
     set text "fn add(a: int, b: int) -> int:\n    a + nosuch\n\nx = add(1, \"two\")\nx\n"

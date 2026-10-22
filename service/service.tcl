@@ -723,11 +723,14 @@ proc service::SemanticIndex {revision} {
     set hir [QueryHir $revision]
     set files [dict create]
     set ids [dict create]
+    # Every file has an index, the empty one when no expression is written
+    # there (a module of declarations only).
+    set items [dict create]
     dict for {f entry} [dict get $hir files] {
         dict set files $f [dict get $entry path]
         dict set ids [dict get $entry path] $f
+        dict set items $f {}
     }
-    set items [dict create]
     set references [dict create]
     foreach e [hir::walk $hir] {
         set node [dict get $hir exprs $e]

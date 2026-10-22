@@ -941,6 +941,7 @@ tests/compiler-service.test cs-compilerpedia-standalone pass
 tests/compiler-service.test cs-corpus-equivalence pass
 tests/compiler-service.test cs-corpus-text-locations pass
 tests/compiler-service.test cs-declaration-sites pass
+tests/compiler-service.test cs-declarations-only-module pass
 tests/compiler-service.test cs-deferred-references-located pass
 tests/compiler-service.test cs-definition-intrinsic pass
 tests/compiler-service.test cs-definition-names pass
