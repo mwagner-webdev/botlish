@@ -2049,8 +2049,9 @@ collect, no runtime or C call -- whatever the lowering. Keep it so:
   `cword`, `cwbox`, `cwlt` ...): the word C returned, compared as it is
   (`WordComparison`), boxed at its first use that needs an Int
   (`WordTagged`, after every operand of that use). A word is never an
-  argument, a result, a capture, a join of two kinds or a tagged operand
-  (nir.rs's validate rejects each); every consumer of field registers takes
+  argument, a parameter, a result, a capture, a join of two kinds or the
+  operand of anything but `cwbox` and the word comparisons (nir.rs's
+  validate rejects each); every consumer of field registers takes
   `TaggedFields`. A comparison never allocates: a BigInt operand goes to
   `rt_ffi_word_cmp`, and `rt_int_cmp` and `rt_ffi_int_word` borrow BigInts,
   never copy them.
@@ -2083,12 +2084,12 @@ push, and under GC stress a `[ci-full]` push with `CI-Tests: darwin-io.test
 c-ffi-error-capture.test`), all also under `BOTLISH_NATIVE_GC_STRESS=1`,
 the struct and transport tests (`tests/struct-scalar-replacement.test`,
 `tests/value-transport.test`), `cargo test --release --manifest-path
-native/Cargo.toml -- c_word ffi_word_cmp ffi_int_word`, `audit/c-pointer-borrowing/tools/
-mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
-killed: update a mutant's text when you change the code it mutates, keeping
-it a mutant of the same rule; its error-capture mutants are killed by
-tests/c-ffi-error-capture.test, which it runs) and the `native/lower.tcl`
-mutants of `audit/c-ffi/tools/mutate.tcl`. `bench/c-ffi-error-capture.tcl`
+native/Cargo.toml -- c_word ffi_word_cmp ffi_int_word`,
+`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule; its
+error-capture mutants are killed by tests/c-ffi-error-capture.test, which
+it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`. `bench/c-ffi-error-capture.tcl`
 (`-root DIR` for a baseline checkout; the tier item `c-capture-bench` on
 macOS; its `errno` part every shape and lowering) is the performance
 report.

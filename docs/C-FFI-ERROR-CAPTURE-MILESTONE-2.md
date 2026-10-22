@@ -38,13 +38,14 @@ fn large(failing: ffi::c::Int) -> list:
 lowers, in every mode, to
 
 ```text
-    %1 = foreigncall 1 %0                 ; %1 a u64 register: the word C returned
+    %1 = foreigncall 2 %0                 ; %1 a u64 register: the word C returned
     %2 = cword 18446744073709551615       ; the sentinel, a u64 constant
     %3 = op cweq %1 %2                    ; one machine comparison
     br %3 L0 L1
   label L0
     %5 = call 5                           ; errno()
     %6 = op cwbox %1                      ; the Int 2^64 - 1, after errno()
+    %7 = op listnew %6 %5
 ```
 
 where Milestone 1 had `foreigncall` (boxing 2^64 - 1 into a BigInt inside
@@ -85,13 +86,43 @@ What changed:
   tests/cffi/window.tcl (`window::nirBoxedResults`, the C word ops),
   tests/cffi/fixture.c (`bcf_large_error`, `bcf_fill_size`,
   `bcf_unsigned_errno`, `bcf_signed_errno`), `cb-write-back-allocations`,
-  `di-errno-read-first`, `di-errno-allocator`; 15 mutants (four of
-  Milestone 1's retargeted, eleven new); Rust unit tests; the `errno` part
-  of bench/c-ffi-error-capture.tcl.
+  `di-errno-read-first`, `di-errno-allocator`; 18 mutants (five of
+  Milestone 1's retargeted, thirteen new); Rust unit tests; the `errno`
+  part of bench/c-ffi-error-capture.tcl and its `allocations` part per
+  lowering mode.
 
 No HIR node, HIR fact, syntax, type, interchange field or runtime object was
 added; NIR gained two register kinds, one constant instruction and six
 operations, all internal to one function (section 6).
+
+### Before and after
+
+Each cell is what the detectors found -- the NIR window (section 15), the
+object file's calls on any path of the window (section 16), and the
+executables with the errno-changing allocator (section 18) -- on e2ae884
+(Milestone 1) and on this milestone's tree, Linux x86-64; section 30 has
+macOS and section 29 Linux AArch64, where the same tests run.
+
+| case | Milestone 1 | Milestone 2 |
+|---|---|---|
+| small C `int` sentinel (`close(-1)`), any mode | safe | safe |
+| small 64-bit sentinel (`long` -1), any mode | safe: the call's boxing path (`rt_ffi_box_i64`) and `rt_int_cmp` on paths -1 does not take | safe: no call on any path |
+| write-back status (`darwin::read`'s shape), optimized | safe (the boxing path as above) | safe |
+| write-back status, `-struct-opt 0`, `-escape-opt 0`, both flags | unsafe: struct and MutableBytes built at the call | safe |
+| write-back status, legacy width policy, `-struct-nesting 0` | unsafe: the MutableBytes built at the call | safe |
+| write-back status, generic lowering (`-specialize 0`) | safe | safe |
+| later closure capture (any path, nested function), any mode | unsafe | safe |
+| later aggregate escape (List, struct, an argument), optimized / `-specialize 0` | safe | safe |
+| later aggregate escape, `-struct-opt 0` | unsafe | safe |
+| later use in a deeper loop | unsafe: the MutableBytes built at the call | safe: built once at the loop's entry, after the read |
+| returned by the function after the read, optimized / `-struct-opt 0` | safe / unsafe | safe / safe |
+| large unsigned sentinel (`(size_t)-1`), any mode | unsafe: `rt_ffi_box_u64` and two BigInt copies before the comparison | safe |
+| large signed results (`LONG_MIN`, below -2^62), any mode | unsafe | safe |
+| large results read errno-first (2^62, 2^63, `ULONG_MAX`) | unsafe | safe |
+| large sentinel in a coroutine, before and after a `yield` | unsafe | safe |
+| generic lowering, error state read in the calling function | partially safe (write-back safe, large results not) | safe for immediate local capture |
+| value returned *unread* to a caller that reads errno (`via_raw`), `-specialize 0` or `-struct-opt 0` | unsafe | unsafe: outside the guarantee (section 32) |
+| the program's own struct literal around the value before the read (`wrapped`), `-struct-opt 0` | unsafe | unsafe: the program's construction (section 32) |
 
 ## 1. Starting state
 
@@ -382,15 +413,149 @@ frame walk) reads the same `scalar_regs`.
 macos-aarch64 alike; "before" is e2ae884 or, for the eager representation,
 `-fault eager-foreign-result`)
 
-<<NIR-TABLE>>
+Every window from a C call to its `errno()` call, as `window::nirOps`
+prints it (the census tool beside the tests; the shapes are
+tests/c-ffi-error-capture.test's). Before: e2ae884, whose `-specialize 0`
+equals its default and `-escape-opt 0` and both flags its `-struct-opt 0`.
+After: every mode -- default, `-struct-opt 0`, `-specialize 0`, both,
+`-escape-opt 0`, the legacy width policy, `-struct-nesting 0` -- gives the
+same window, except where noted.
+
+| shape | before: default | before: `-struct-opt 0` | before: legacy, `-struct-nesting 0` | after: every mode |
+|---|---|---|---|---|
+| fill, read, status only, alias, an `if` of two calls, suspended (each window) | `keepalive ilt` | `keepalive structnew structnew structget ilt` | `keepalive structnew ilt` | `keepalive cwlt` |
+| straight off the call | `keepalive ilt` | `keepalive structnew structnew structget ilt` | `keepalive ilt` | `keepalive cwlt` |
+| two written parameters | `keepalive keepalive ilt` | `keepalive keepalive structnew structnew structnew structget ilt` | `keepalive keepalive structnew structnew ilt` | `keepalive keepalive cwlt` |
+| in a loop | `keepalive ilt` | `keepalive structnew structnew structget ilt structget` | `keepalive structnew ilt` | `keepalive cwlt` |
+| captured after the read, on the success path, on the failure path, nested | `keepalive structnew structnew structget ilt` | the same | the same | `keepalive cwlt` |
+| stored in a List, in a struct, passed, returned | `keepalive ilt` | `keepalive structnew structnew structget ilt` | `keepalive structnew ilt` | `keepalive cwlt` |
+| read whole in a loop after the read | `keepalive structnew ilt` | `keepalive structnew structnew structget ilt` | `keepalive structnew ilt` | `keepalive cwlt` |
+| write-back value with a `size_t` result | `keepalive ieq` | `keepalive structnew structnew structget ieq` | `keepalive structnew ieq` | `keepalive cweq` |
+| `(size_t)-1` bound, straight off the call, in a coroutine (two) | `ieq` | `ieq` | `ieq` | `cweq` |
+| `long` compared (`signed_cmp`) | `ilt` | `ilt` | `ilt` | `cwlt` |
+| errno read first (`unsigned_first`, `signed_first`: the test is of the parameter) | `runbox rieq` | the same | the same | `runbox rieq` |
+| `close(-1)` (a C `int`) | `runbox rilt` | the same | the same | `runbox rilt` |
+| `wrapped` (`w = {r: fill(...), tag: 1}`) | `keepalive ilt` | `keepalive structnew structnew structnew structget structget ilt` | `keepalive structnew structnew structget ilt` | `keepalive cwlt`; with `-struct-opt 0` or `-escape-opt 0`: `keepalive structnew cwbox structnew structnew structget structget ilt` (the program's literal, section 32) |
+
+`ilt`/`ieq` in the "before" columns hide work NIR does not show: the
+`foreigncall` itself converted its 64-bit result, `rt_ffi_box_*` beyond the
+small range (`window::nirBoxedResults` makes that visible:
+`ec-boxed-results`). With the fault the "after" tree reproduces the "before"
+columns: `-fault eager-foreign-result -struct-opt 0` gives exactly the
+`-struct-opt 0` column, write-back shapes and large results alike.
+
+`returned` (the value returned by the function that read its errno):
+
+```botlish
+fn returned(data: abi::bytes::MutableBytes, err: ffi::c::Int):
+    r = ec::fill_errno(data, ec::mlen(data), 11, err, 0)
+    if r.result < 0:
+        if ec::errno() != err:
+            return ec::fill_errno(empty(), 0, 0, 0, 0)
+    r
+```
+
+```text
+-struct-opt 0, before (e2ae884):
+    %10 = foreigncall 0 %9 %3 %4 %1 %6 exposed=0   ; tagged by the call (rt_ffi_box_i64 beyond the small range)
+    %11 = op keepalive %8
+    %12 = structnew 1 %8                          ; the MutableBytes
+    %13 = structnew 2 %12 %10                     ; {out, result}
+    %14 = structget 1 %13
+    %15 = int 0
+    %17 = op ilt %14 %15
+    br %17 L0 L1
+  label L0
+    %20 = call 4                                  ; errno()
+-struct-opt 0, after (i64regs="10 12 32"):
+    %10 = foreigncall 0 %9 %3 %4 %1 %6 exposed=0   ; the long C returned
+    %11 = op keepalive %8
+    %12 = cword 0
+    %13 = op cwlt %10 %12
+    br %13 L0 L1
+  label L0
+    %16 = call 4                                  ; errno()
+```
 
 ## 16. Before and after: machine code
 
-<<MACHINE>>
+The object file's calls on any path from a C call's return to the call of
+`errno()` (`window::machineWindow`, objdump with relocations; Linux
+x86-64 here; `ec-modes-machine-windows` runs the same check on every host
+that runs the suite, section 29 and 30), every shape of section 15:
+
+| | before (e2ae884) | after |
+|---|---|---|
+| every shape with a `long` result, default and `-specialize 0` | `rt_ffi_box_i64`, `rt_int_cmp` (the paths beyond the small range: -1 takes neither) | none |
+| the same, `-struct-opt 0` (and wherever the value was built: captured, the loop, legacy) | `rt_ffi_box_i64`, `rt_int_cmp`, `rt_struct_new` | none |
+| `(size_t)-1` and the other 64-bit sentinels | `rt_ffi_box_u64` (taken: (size_t)-1 is beyond the small range), `rt_int_cmp` | none |
+| `close(-1)` | none | none |
+| `wrapped`, `-struct-opt 0` | `rt_ffi_box_i64`, `rt_int_cmp`, `rt_struct_new` | the same (the program's literal) |
+| any shape, the eager-foreign-result fault | -- | `rt_ffi_box_*`, `rt_int_cmp`, `rt_struct_new` (the before column) |
+
+So every call the static CFG held in Milestone 1's windows is gone, not
+only the ones the tested sentinel takes: the after windows have no call on
+any path. The one helper a word comparison can still call,
+`rt_ffi_word_cmp`, is on the path of a comparison with a BigInt that is no
+constant -- none of the error-capture shapes has one (`ec-word-comparisons`
+exercises it, outside any window).
+
+`large` (the Result section's function), Linux x86-64, from the return of
+`bcf_large_error` to the call of `errno()` (`botlish_fn_1`), default
+lowering. Before:
+
+```text
+ 197:  call   rax                                  ; bcf_large_error
+ 199:  cmp    rax,QWORD PTR [rip+0x140]            ; below 2^62?
+ 1a3:  jb     1b9
+ 1ac:  call   rt_ffi_box_u64                       ; (size_t)-1: a BigInt (malloc)
+ 1b4:  jmp    1c9
+ 1b9:  shl/or ...                                  ; small: tagged inline
+ 1c9:  ...                                         ; is either operand a BigInt?
+ 1f0:  call   rt_int_cmp                           ; yes: (size_t)-1 == 2^64-1
+ ...
+ 220:  cmp    rcx,0x6                              ; the comparison's Bool
+ 224:  je     26f
+ 26f:  mov    r12,rax
+ 275:  call   botlish_fn_1                         ; errno()
+```
+
+After:
+
+```text
+ 197:  call   rax                                  ; bcf_large_error
+ 199:  cmp    rax,0xffffffffffffffff               ; the u64 word against (size_t)-1
+ 19d:  je     219
+ ...                                               ; success: cwbox, the List
+ 219:  mov    r12,rax
+ 21c:  mov    rdi,rbx
+ 21f:  call   botlish_fn_1                         ; errno()
+```
+
+The success path boxes the word (`rt_ffi_box_u64` only when it is beyond
+the small range) and builds the List the function returns: after the
+branch, on the path that reads no errno.
 
 ## 17. Dynamic trace
 
-<<TRACE>>
+tests/cffi/window-trace.c single-steps the executable (ptrace) from the
+instruction after the C call's return to the load of errno
+(`rt_native_load`), and the tests name every function a step lands in
+(Linux; x86-64 here, AArch64 in tests-arm64.yml, section 29):
+
+| test | lowering | functions executed |
+|---|---|---|
+| `ec-trace` (`ec::fill`, darwin::read's shape) | default | `ec::fill`, `ec::errno`, `__errno_location`, `ec::errno` |
+| `ec-trace-large-sentinel` (`(size_t)-1`) | default | `large`, `ec::errno`, `__errno_location`, `ec::errno` |
+| | `-struct-opt 0 -specialize 0` | the same |
+| | eager-foreign-result fault | `rt_ffi_box_u64`, then the C library's allocator (traced up to its entry) |
+| `ec-trace-captured` (captured by a closure after the read) | default | `captured`, `ec::errno`, `__errno_location`, `ec::errno` |
+| | `-struct-opt 0` | the same |
+| | eager-foreign-result fault | `rt_struct_new`, then the C library's allocator |
+
+No runtime helper, no allocator and no other C function runs between the C
+function's return and the errno load; the faulty executables enter the
+allocator there.
 
 ## 18. Adversarial errno-clobber tests
 
@@ -428,11 +593,14 @@ with `-struct-opt 0`), which read 77 there and nowhere else.
 ## 19. Positive control
 
 `-fault eager-foreign-result` (native/lower.tcl's `fault`, also
-`BOTLISH_NATIVE_FAULT`; test-only, never a program's option) re-creates
-Milestone 1's representation and the pre-Milestone-1 one with it: no C
-words (the call converts its 64-bit result, `rt_ffi_box_*` beyond the small
-range), every write-back MutableBytes and the write-back struct built right
-after the call, no mandatory deferral. Every detector sees it:
+`BOTLISH_NATIVE_FAULT`; test-only, never a program's option) re-creates the
+eager representation -- what Milestone 1 emitted with scalar replacement
+off and what every lowering emitted before Milestone 1: no C words (the call
+converts its 64-bit result, `rt_ffi_box_*` beyond the small range), every
+write-back MutableBytes and the write-back struct built right after the
+call, no mandatory deferral. With `-struct-opt 0` it is Milestone 1's
+`-struct-opt 0` lowering instruction for instruction (section 15). Every
+detector sees it:
 
 | detector | with the fault |
 |---|---|
@@ -447,7 +615,39 @@ program that builds a String between the call and its read reads 77).
 
 ## 20. Linux C fixture results
 
-<<LINUX-FIXTURE>>
+`ec-escapes-values` runs the escapes program (section 18) on both native
+backends, linked with tests/cffi/fixture.c (the host's C compiler), and
+compares it with the oracle; `ec-modes-executables` runs it in the four
+modes, plain, under GC stress, with the allocator and with both. Linux
+x86-64, every mode, every run:
+
+| function | value |
+|---|---|
+| `captured_after(m, 41)` and the closure | `[41, 03284d72]` (the buffer C wrote, read through the closure) |
+| `captured_success(m, 0)`, `(m, 42)` | `[0, 04294e73]`, `[42, (empty)]` |
+| `captured_failure(m, 43)`, `(m, 0)` | `[43, 052a4f74]`, `[0, (empty)]` |
+| `nested(m, 44)` | `[44, 062b5075]` |
+| `stored_list`, `stored_struct`, `passed`, `loop_after` | errnos 45 to 48, each value `{out: ..., result: -1}` beside it |
+| `returned(m, 61)`, `returned(m, 0)` | `{out: 0b30557a, result: -1}`, `{out: 0b30557a, result: 4}` (a wrong errno would return `{out: (empty), result: 0}`) |
+| `write_back_large(m, 49)`, `(m, 0)` | `[18446744073709551615, 49, 0c31567b]`, `[4, 0, 0c31567b]` |
+| `large(50)`, `large(0)`, `large_direct(51)`, `large_direct(0)` | `[18446744073709551615, 50]`, `[42, 0]`, `51`, `0` |
+| `unsigned_first` (2^64 - 1, 2^62 - 1, 2^62, 2^63) | `[18446744073709551615, 52]`, `[4611686018427387903, 0]`, `[4611686018427387904, 53]`, `[9223372036854775808, 0]` |
+| `signed_cmp` (`LONG_MIN`, -1, `LONG_MAX`, -2^62 - 1, -2^62) | errnos 54 to 57 beside each, 0 for `LONG_MAX` |
+| `signed_first` (-2^62 - 1, -2^62) | `[-4611686018427387905, 58]`, `[-4611686018427387904, 0]` |
+| `in_coroutine(59, 60)` | `[59, 59060]`: 59 before the `yield`, 60 after (+ 1000 x 59) |
+| `int_sentinel()` (`close(-1)`) | `[-1, 9]` (EBADF, the host's own) |
+| the caller's `m` | `00000000`: unchanged |
+
+`ec-word-comparisons` compares every word of the fixture's two tables
+(`bcf_unsigned_errno`: 0, 5, 2^62 - 1, 2^62, 2^63, 2^64 - 2, 2^64 - 1;
+`bcf_signed_errno`: 0, -1, 2^62 - 1, 2^62, `LONG_MAX`, -2^62, -2^62 - 1,
+`LONG_MIN`) against constants that fit the word and that do not, and
+against BigInt values that are no constants, on both sides, with arithmetic
+on the boxed values: equal to the interpreter's arithmetic on the same
+numbers. tests/c-ffi.test (112 tests, its `cf-va-*` variadic calls and
+pointer results among them), tests/c-byte-borrowing.test and
+tests/c-pointer-borrowing.test pass unchanged but for
+`cb-write-back-allocations`' `-struct-opt 0` row (section 26).
 
 ## 21. Darwin IO results
 
@@ -494,7 +694,34 @@ format, the front-end cache and their keys are unchanged.
 
 ## 26. Allocation counts
 
-<<ALLOCATIONS>>
+Heap objects of one call, in process (bench/c-ffi-error-capture.tcl's
+`allocations` part: the borrow fixture's write exposure, Bytes /
+MutableBytes / Struct / List beside the loop without the call; the one
+MutableBytes is the private copy, which the value semantics require):
+
+| shape | default before -> after | `-struct-opt 0` before -> after | `-specialize 0` before -> after | both before -> after |
+|---|---|---|---|---|
+| discarded (`fill(m, 0, 0)` as a statement) | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` |
+| the C result alone | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` |
+| the result and the buffer | `0 1 1 0` -> `0 1 1 0` | `0 1 3 0` -> `0 1 2 0` | `0 1 2 0` -> `0 1 2 0` | `0 1 3 0` -> `0 1 2 0` |
+| returned unread, its buffer read by the caller | `0 1 1 0` -> `0 1 1 0` | `0 1 3 0` -> `0 1 3 0` | `0 1 3 0` -> `0 1 3 0` | `0 1 3 0` -> `0 1 3 0` |
+| detach of 64 KiB, discarded | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` | `0 1 0 0` -> `0 1 0 0` | `0 1 2 0` -> `0 1 0 0` |
+
+The remaining Structs are uses' own: the MutableBytes a use reads whole
+(`mutable_length(r.output)`), `mutable_length`'s `abi::Usize` result, an
+ordinary struct with scalar replacement off, and the return of a value
+nobody read (outside the guarantee). `cb-write-back-allocations` pins the
+same counts for its five shapes; before the protected window the counts are
+zero in every mode (the NIR window holds no allocating instruction,
+section 15, and the `errno` part's `before` column, section 27).
+
+Per call, the executables of the `errno` part (real C) have, in the
+wrapper, the allocating instructions its uses ask for after the read
+(`sites`: `cwbox` of a large result returned in a List, the closure and the
+value it captures, the List and the value stored in it) and none in the
+window, in every mode; with the fault the write-back shapes' windows hold
+two or three (the eager struct and MutableBytes), and the 64-bit results'
+boxing is inside the call (the `helpers` column).
 
 ## 27. Performance
 

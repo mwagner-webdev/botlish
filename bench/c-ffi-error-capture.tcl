@@ -28,7 +28,9 @@
 #                   detach 64K  fill on a 64 KiB buffer, discarded: the
 #                               required private copy dominating
 #   allocations   the heap objects of one call of each shape (Bytes,
-#                 MutableBytes, Struct, List), beside the loop without it
+#                 MutableBytes, Struct, List), beside the loop without it,
+#                 in each lowering (default, -struct-opt 0, -specialize 0,
+#                 both)
 #   read          per-iteration time of a standalone executable looping READ-N
 #                 times over the C library's read(2) (glibc, libSystem)
 #                 through a write exposure and an errno read on failure
@@ -119,8 +121,8 @@ proc best {text} {
     return $best
 }
 
-proc allocations {text} {
-    set report [native::allocationReport [surface::compile $text -warnings off] summary]
+proc allocations {text {lowering {}}} {
+    set report [native::allocationReport [surface::compile $text -warnings off] summary 1 {*}$lowering]
     lmap kind {Bytes MutableBytes Struct List} {
         expr {[dict exists $report byKind $kind] ? [dict get $report byKind $kind allocations] : 0}
     }
@@ -148,12 +150,14 @@ if {"shapes" in [dict get $options -parts]} {
     }
 }
 if {"allocations" in [dict get $options -parts]} {
-    puts "\nallocations of one call {Bytes MutableBytes Struct List}, beside the loop without it:"
-    foreach {name shape} $shapes {
-        lassign $shape setup body
-        set without [allocations [program $setup 0 1]]
-        set with [allocations [program $setup $body 1]]
-        puts [format "  %-11s %s" $name [lmap a $without b $with {expr {$b - $a}}]]
+    puts "\nallocations of one call {Bytes MutableBytes Struct List}, beside the loop without it, by lowering:"
+    foreach {mode lowering} {default {} {-struct-opt 0} {-struct-opt 0} {-specialize 0} {-specialize 0} both {-struct-opt 0 -specialize 0}} {
+        foreach {name shape} $shapes {
+            lassign $shape setup body
+            set without [allocations [program $setup 0 1] $lowering]
+            set with [allocations [program $setup $body 1] $lowering]
+            puts [format "  %-11s %-14s %s" $name $mode [lmap a $without b $with {expr {$b - $a}}]]
+        }
     }
 }
 
@@ -312,7 +316,7 @@ fn mlen(d: abi::bytes::MutableBytes) -> ffi::c::ULong:
     if {![catch {native::nir [surface::readProgramFile [file join $dir probe.bot] -warnings off -cache ""] -fault eager-foreign-result}]} {
         # (A tree before the milestone has no fault: its default lowering is
         # Milestone 1's representation.)
-        dict set modes {M1 (fault)} {-fault eager-foreign-result}
+        dict set modes {eager (fault)} {-fault eager-foreign-result}
     }
     proc mainOf {wrapper body iterations} {
         # (The empty loop calls nothing direct: it may not say it is.)

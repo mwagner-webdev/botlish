@@ -838,6 +838,13 @@ fn loop_after(data: abi::bytes::MutableBytes, err: ffi::c::Int) -> list:
         [i, r.out]
     [failure, lens]
 
+fn returned(data: abi::bytes::MutableBytes, err: ffi::c::Int):
+    r = ec::fill_errno(data, ec::mlen(data), 11, err, 0)
+    if r.result < 0:
+        if ec::errno() != err:
+            return ec::fill_errno(empty(), 0, 0, 0, 0)
+    r
+
 fn write_back_large(data: abi::bytes::MutableBytes, err: ffi::c::Int) -> list:
     r = ec::fill_size(data, ec::mlen(data), 12, err)
     if r.result == 18446744073709551615:
@@ -911,7 +918,7 @@ f = captured_failure(m, 43)
 f2 = captured_failure(m, 0)
 n = nested(m, 44)
 [[a.errno, (a.fetch)()], [s.errno, (s.fetch)()], [s2.errno, (s2.fetch)()], [f.errno, (f.fetch)()], [f2.errno, (f2.fetch)()], [n.errno, (n.fetch)()],
- stored_list(m, 45), stored_struct(m, 46), passed(m, 47), loop_after(m, 48), write_back_large(m, 49), write_back_large(m, 0),
+ stored_list(m, 45), stored_struct(m, 46), passed(m, 47), loop_after(m, 48), returned(m, 61), returned(m, 0), write_back_large(m, 49), write_back_large(m, 0),
  large(50), large(0), large_direct(51), large_direct(0),
  unsigned_first(6, 52), unsigned_first(2, 0), unsigned_first(3, 53), unsigned_first(4, 0),
  signed_cmp(7, 54), signed_cmp(1, 55), signed_cmp(4, 0), signed_cmp(6, 56), signed_cmp(5, 57),
@@ -931,6 +938,7 @@ proc ecEscapesValue {{clobbered 0}} {
     return [join [list \
         "\[\[[apply $e 41], [ecMut 03284d72]\], \[0, [ecMut 04294e73]\], \[[apply $e 42], [ecMut {}]\], \[[apply $e 43], [ecMut 052a4f74]\], \[0, [ecMut {}]\], \[[apply $e 44], [ecMut 062b5075]\]" \
         "\[[apply $e 45], [ecWb -1 072c5176]\], {errno: [apply $e 46], wb: [ecWb -1 082d5277]}, \[[apply $e 47], \[[ecWb -1 092e5378], [ecWb -1 092e5378]\], [ecMut 092e5378]\], \[[apply $e 48], \[\[0, [ecMut 0a2f5479]\], \[1, [ecMut 0a2f5479]\], \[2, [ecMut 0a2f5479]\]\]\]" \
+        "[if {[apply $e 61] == 61} {ecWb -1 0b30557a} else {ecWb 0 {}}], [ecWb 4 0b30557a]" \
         "\[18446744073709551615, [apply $e 49], [ecMut 0c31567b]\], \[4, 0, [ecMut 0c31567b]\]" \
         "\[18446744073709551615, [apply $e 50]\], \[42, 0\], [apply $e 51], 0" \
         "\[18446744073709551615, [apply $e 52]\], \[4611686018427387903, 0\], \[4611686018427387904, [apply $e 53]\], \[9223372036854775808, 0\]" \
@@ -944,7 +952,7 @@ proc ecEscapesShown {{clobbered 0}} {
 }
 
 # The lowering modes whose results must agree and whose error capture must
-# hold (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "The guarantee").
+# hold (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4).
 set ecModes {{} {-struct-opt 0} {-specialize 0} {-struct-opt 0 -specialize 0}}
 
 # The NIR windows (their ops) from each C call of escapesMain's functions to
@@ -952,13 +960,13 @@ set ecModes {{} {-struct-opt 0} {-specialize 0} {-struct-opt 0 -specialize 0}}
 proc ecEscapeWindows {target options} {
     set nir [native::nir [ecHir [ecApp $::escapesMain $target] $target] {*}$options]
     set result {}
-    foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
+    foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after returned write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
         lappend result $name [lmap w [window::nirWindows $nir $name ec::errno] {window::nirOps $w}]
     }
     return $result
 }
 
-test ec-modes-nir-windows {in every lowering mode -- specialized and generic, struct scalar replacement on and off -- every function's window from its C call to its call of errno() holds the keepalives of its exposures and the comparison of the result, nothing else: the write-back value is never built there because a closure captures it afterwards (on every path, on the success path only, on the failure path only, inside a nested function), because it is stored in a List or a struct afterwards, passed to another function, or used in a loop; a 64-bit result outside the small-Int range is compared as the C word C returned (cweq/cwlt against a cword constant, unsigned for size_t and unsigned long, signed for long) and never boxed; a result read only after errno() is not even compared; the same inside a coroutine, before and after its suspension; and the Milestone 1 shapes too, with struct scalar replacement off -- but for the one shape whose program builds a struct of the write-back value before reading errno (wrapped: with scalar replacement off, that struct literal is an object the program asked for, C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "Limits")} -body {
+test ec-modes-nir-windows {in every lowering mode -- specialized and generic, struct scalar replacement on and off -- every function's window from its C call to its call of errno() holds the keepalives of its exposures and the comparison of the result, nothing else: the write-back value is never built there because a closure captures it afterwards (on every path, on the success path only, on the failure path only, inside a nested function), because it is stored in a List or a struct afterwards, passed to another function, returned by the function, or used in a loop; a 64-bit result outside the small-Int range is compared as the C word C returned (cweq/cwlt against a cword constant, unsigned for size_t and unsigned long, signed for long) and never boxed; a result read only after errno() is not even compared; the same inside a coroutine, before and after its suspension; and the Milestone 1 shapes too, with struct scalar replacement off -- but for the one shape whose program builds a struct of the write-back value before reading errno (wrapped: with scalar replacement off, that struct literal is an object the program asked for, C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32)} -body {
     set result {}
     foreach target {linux-x86_64 macos-aarch64} {
         foreach options $::ecModes {
@@ -970,15 +978,15 @@ test ec-modes-nir-windows {in every lowering mode -- specialized and generic, st
     }
     lsort -unique $result
 } -result [list \
-    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}}] \
-    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive structnew cwbox structnew structnew structget structget ilt}}]]
+    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} returned {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}}] \
+    [list {captured_after {{keepalive cwlt}} captured_success {{keepalive cwlt}} captured_failure {{keepalive cwlt}} nested {{keepalive cwlt}} stored_list {{keepalive cwlt}} stored_struct {{keepalive cwlt}} passed {{keepalive cwlt}} loop_after {{keepalive cwlt}} returned {{keepalive cwlt}} write_back_large {{keepalive cweq}} large cweq large_direct cweq unsigned_first {{runbox rieq}} signed_cmp cwlt signed_first {{runbox rieq}} co_large {cweq cweq} int_sentinel {{runbox rilt}}} {{keepalive cwlt}} {{keepalive keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive cwlt}} {{keepalive cwlt} {keepalive cwlt}} {{keepalive structnew cwbox structnew structnew structget structget ilt}}]]
 
 
 test ec-modes-nir-no-hazard {no window of the escapes program holds anything that may allocate, call or collect (window::nirHazards), in any lowering mode} -body {
     set hazards {}
     foreach options $::ecModes {
         set nir [native::nir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64] {*}$options]
-        foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
+        foreach name {captured_after captured_success captured_failure nested stored_list stored_struct passed loop_after returned write_back_large large large_direct unsigned_first signed_cmp signed_first co_large int_sentinel} {
             foreach w [window::nirWindows $nir $name ec::errno] {
                 lappend hazards {*}[window::nirHazards $w]
             }
@@ -991,7 +999,7 @@ test ec-boxed-results {no C call's 64-bit integer result is converted as part of
     set hir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64]
     list [lmap options $::ecModes {window::nirBoxedResults [native::nir $hir {*}$options]}] \
         [lsort -unique [lmap boxed [window::nirBoxedResults [native::nir $hir -fault eager-foreign-result]] {lindex $boxed 0}]]
-} -result {{{} {} {} {}} {captured_after captured_failure captured_success co_large large large_direct loop_after nested passed signed_cmp signed_first stored_list stored_struct unsigned_first write_back_large}}
+} -result {{{} {} {} {}} {captured_after captured_failure captured_success co_large large large_direct loop_after nested passed returned signed_cmp signed_first stored_list stored_struct unsigned_first write_back_large}}
 
 test ec-large-sentinel-nir {(size_t)-1 is compared as the unsigned word C returned: the result register is declared u64 (unsigned long and size_t; long is i64), the sentinel is a cword constant of the same kind, the comparison cweq; the Int is built (cwbox) only after errno(), for the List the function returns} -body {
     set nir [native::nir [ecHir [ecApp $::escapesMain linux-x86_64] linux-x86_64]]
@@ -1064,13 +1072,13 @@ test ec-word-comparisons {a C word compared with an Int is compared exactly, as 
     ecOutcome [ecApp $::compareMain]
 } -result [list value [ecCompareExpected]]
 
-test ec-escapes-values {the escapes program on both native backends: every errno its C call set (41 to 59, distinct, in succession), 0 after each success; a closure that captured the write-back value after the errno read, on the success path only, on the failure path only, inside a nested function, each returning the buffer C wrote; the value stored in a List, in a struct, passed to a function and used in a loop afterwards; a size_t result of (size_t)-1 compared, its errno read and the full 2^64 - 1 kept, also as a write-back value's result beside its buffer; the boundary values of the small-Int range on both sides, signed and unsigned; the same in a coroutine, before and after a suspension; an ordinary C int failing with -1 (close(-1): EBADF, the host's own); the caller's MutableBytes unchanged} -constraints ecFixture -body {
+test ec-escapes-values {the escapes program on both native backends: every errno its C call set (41 to 61, distinct, in succession), 0 after each success; a closure that captured the write-back value after the errno read, on the success path only, on the failure path only, inside a nested function, each returning the buffer C wrote; the value stored in a List, in a struct, passed to a function and used in a loop afterwards; the value returned by the function that read its errno (or, with the wrong errno, another value); a size_t result of (size_t)-1 compared, its errno read and the full 2^64 - 1 kept, also as a write-back value's result beside its buffer; the boundary values of the small-Int range on both sides, signed and unsigned; the same in a coroutine, before and after a suspension; an ordinary C int failing with -1 (close(-1): EBADF, the host's own); the caller's MutableBytes unchanged} -constraints ecFixture -body {
     ecOutcome [ecApp $::escapesMain]
 } -result [list value [ecEscapesValue]]
 
 # What shapesMain's executable lowered with OPTIONS prints with the
 # errno-changing allocator: its plain value, but for the two shapes outside
-# the guarantee (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "Limits") where the
+# the guarantee (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32) where the
 # lowering builds the value at the program's request -- `raw` returns its C
 # call's write-back value before anyone reads errno (an object, built before
 # the return, wherever the return transport carries no fields: the generic
@@ -1089,7 +1097,7 @@ proc ecShownClobbered {options} {
     return $shown
 }
 
-test ec-modes-executables {the escapes program and Milestone 1's shapes as standalone executables, lowered in every mode (specialized and generic, struct scalar replacement on and off): every mode prints the same value, and prints it again under GC stress; with the allocator that sets errno to 77 on every allocation, and with both at once, every errno is the C call's own whatever the lowering (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "The guarantee") -- but where the program itself asks for the value before its errno read: a function returning its C call's write-back value unread (via_raw's raw: built for the return when the return carries no fields, the generic lowering and struct scalar replacement off) and a struct literal built around it (wrapped, with struct scalar replacement off)} -constraints ecClobber -body {
+test ec-modes-executables {the escapes program and Milestone 1's shapes as standalone executables, lowered in every mode (specialized and generic, struct scalar replacement on and off): every mode prints the same value, and prints it again under GC stress; with the allocator that sets errno to 77 on every allocation, and with both at once, every errno is the C call's own whatever the lowering (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4) -- but where the program itself asks for the value before its errno read: a function returning its C call's write-back value unread (via_raw's raw: built for the return when the return carries no fields, the generic lowering and struct scalar replacement off) and a struct literal built around it (wrapped, with struct scalar replacement off)} -constraints ecClobber -body {
     set escapes [ecApp $::escapesMain]
     set shapes [ecApp $::shapesMain]
     set result {}
@@ -1113,7 +1121,7 @@ test ec-modes-positive-control {the eager-foreign-result fault (Milestone 1's ea
 test ec-modes-machine-windows {in the object file (objdump with relocations), in every lowering mode, the calls on any path from each escaping shape's and each 64-bit result's C call to its call of errno() are at most the BigInt path of a comparison with a BigInt that is no constant (rt_int_cmp, rt_ffi_word_cmp: neither allocates) -- no boxing (rt_ffi_box_i64/_u64), no allocation, no helper; the 64-bit results' windows hold no call at all, (size_t)-1 compared inline with its constant -- and the detector sees the boxing and the eager write-back value the eager-foreign-result fault re-creates (rt_ffi_box_u64 after (size_t)-1, rt_struct_new after a write exposure)} -constraints {ecFixture objdump} -body {
     set dir [ecApp $::escapesMain]
     set shapes {captured_after bcf_fill_errno captured_success bcf_fill_errno captured_failure bcf_fill_errno nested bcf_fill_errno
-        stored_list bcf_fill_errno stored_struct bcf_fill_errno passed bcf_fill_errno loop_after bcf_fill_errno
+        stored_list bcf_fill_errno stored_struct bcf_fill_errno passed bcf_fill_errno loop_after bcf_fill_errno returned bcf_fill_errno
         write_back_large bcf_fill_size large bcf_large_error large_direct bcf_large_error signed_cmp bcf_signed_errno co_large bcf_large_error int_sentinel close}
     set windows {}
     foreach options [concat $::ecModes {{-fault eager-foreign-result}}] {
@@ -1131,7 +1139,7 @@ test ec-modes-machine-windows {in the object file (objdump with relocations), in
     }
     list [lsort -unique [lrange $windows 0 end-1]] [dict get [lindex $windows end] large] [dict get [lindex $windows end] large_direct] \
         [expr {"rt_struct_new" in [dict get [lindex $windows end] captured_after]}]
-} -result {{{captured_after {} captured_success {} captured_failure {} nested {} stored_list {} stored_struct {} passed {} loop_after {} write_back_large {} large {} large_direct {} signed_cmp {} co_large {} int_sentinel {}}} rt_ffi_box_u64 rt_ffi_box_u64 1}
+} -result {{{captured_after {} captured_success {} captured_failure {} nested {} stored_list {} stored_struct {} passed {} loop_after {} returned {} write_back_large {} large {} large_direct {} signed_cmp {} co_large {} int_sentinel {}}} rt_ffi_box_u64 rt_ffi_box_u64 1}
 
 test ec-trace-large-sentinel {the instructions actually executed (ptrace single-stepping the executable) from the return of bcf_large_error's (size_t)-1 to the load of errno: the wrapper's inline comparison of the word with (size_t)-1 and its branch, errno()'s entry, the C library's __errno_location, errno() again -- no boxing, no allocator, on the specialized and the generic lowering with struct scalar replacement off; the eager-foreign-result fault's executable boxes the word (rt_ffi_box_u64) and enters the C library's allocator there} -constraints ecTrace -body {
     set dir [ecApp "direct module\nimport ffi::c\nimport ec\nfn large(failing: ffi::c::Int) -> list:\n    r = ec::large_error(failing)\n    if r == 18446744073709551615:\n        failure = ec::errno()\n        return \[r, failure\]\n    \[r, 0\]\nlarge(34)\n"]

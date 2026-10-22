@@ -351,7 +351,7 @@ adds no field, translates nothing -- it only adds nothing. What it does not
 cover: a C `float`/`double` result (a Float64 is a heap object, built by
 the call), a value returned from the function that made the call before
 anything read errno, and what the program itself builds before its read
-(C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "Limits"). `tests/c-ffi-error-
+(C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32). `tests/c-ffi-error-
 capture.test` proves it in NIR, in the object file's machine code, by
 single-stepping the executable, and with an allocator that changes errno,
 in every lowering mode.

@@ -752,3 +752,19 @@ proc native::lower::MandatoryWriteBack {e} {
 ====
                 lappend values [lindex [Access fn $b] 1 0]
 >>>>
+
+@@ returned-write-back-eager a write-back value its function returns after reading errno is built right after its C call when no analysis keeps it as fields (-struct-opt 0, -escape-opt 0): the transport defers only values the function keeps to itself
+## native/lower.tcl
+<<<<
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {$mandatory ne ""} {
+====
+            set mandatory [MandatoryWriteBack $valueExpr]
+            if {[dict get $fn region] ne "program"} {
+                set last [lindex [hir::get $hir [dict get $fn region] body] end]
+                if {[hir::kind $hir $last] eq "ref" && [hir::get $hir $last binding] eq $b} {
+                    set mandatory ""
+                }
+            }
+            if {$mandatory ne ""} {
+>>>>
