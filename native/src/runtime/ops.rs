@@ -90,7 +90,7 @@ use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
     rt_ffi_fixture_read_reentrant,
 };
-use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word};
+use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp};
 use super::nview::{
     rt_cptr_fixture_bytes, rt_cptr_fixture_memory, rt_cptr_offset, rt_mbytes_write, rt_mbytes_write_ptr, rt_native_load,
     rt_bin_load_array, rt_native_load_array, rt_bin_store_array, rt_native_store_array, rt_bin_store_ptr,
@@ -160,6 +160,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // The raw result register is boxed as a BigInt when it is outside
             // the small-Int range (runtime/syscall.rs).
             | SyscallLinuxX86_64 | SyscallLinuxAarch64
+            // A C word outside the small-Int range is boxed as a BigInt
+            // (C-FFI-ERROR-CAPTURE-MILESTONE-2.md); the word comparisons
+            // allocate nothing.
+            | CWBox
             // The borrow test fixture's foreign operations
             // (runtime/ffifixture.rs): a foreign call may run Botlish code
             // (read_reentrant collects and allocates on purpose), and read
@@ -537,10 +541,25 @@ pub extern "C" fn rt_int_shr(p: *mut Vm, a: Value, b: Value) -> Value {
     vm(p).new_big(int_to_big(a) >> (k as usize))
 }
 
+/// The order of two Ints, read in place: a BigInt is borrowed, never
+/// copied, so no comparison allocates (a C call's error state survives one
+/// that runs before it is read: C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
 fn int_compare(a: Value, b: Value) -> Ordering {
     match (int_small(a), int_small(b)) {
         (Some(x), Some(y)) => x.cmp(&y),
-        _ => int_to_big(a).cmp(&int_to_big(b)),
+        (Some(x), None) => small_big_order(x, big_of(b)),
+        (None, Some(y)) => small_big_order(y, big_of(a)).reverse(),
+        (None, None) => big_of(a).cmp(big_of(b)),
+    }
+}
+
+/// The order of the small Int X against the BigInt N.
+fn small_big_order(x: i64, n: &BigInt) -> Ordering {
+    use num_traits::ToPrimitive;
+    match n.to_i64() {
+        Some(y) => x.cmp(&y),
+        None if n.is_negative() => Ordering::Greater,
+        None => Ordering::Less,
     }
 }
 
@@ -2988,6 +3007,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CoRelease => rt_co_release(p, a[0]),
         AffineDrop => rt_affine_drop(p, a[0], a[1]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
+        // A C word exists only between a C call and its uses, in one
+        // function (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): never a value.
+        | CWBox | CWLt | CWLe | CWGt | CWGe | CWEq
         | RIShr | RIShl | RIAnd | RIOr | RIXor | RIMod | RIModTotal | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum
@@ -3051,6 +3073,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_ffi_int_word, 2),
         h!(rt_ffi_box_i64, 2),
         h!(rt_ffi_box_u64, 2),
+        h!(rt_ffi_word_cmp, 4),
         h!(rt_ffi_bad_address, 3),
         h!(rt_ffi_bad_bool, 3),
         h!(rt_ffi_contract_violation, 4),

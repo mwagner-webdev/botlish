@@ -2022,47 +2022,76 @@ Botlish's cache (never the repository); without it they are skipped.
 A C function that fails the POSIX way (a sentinel result, the reason in
 errno) is read by its binding right after the call -- a C call of
 `__errno_location()`/`__error()` and a native view -- and nothing the
-compiler inserts may run in between (C-FFI-ERROR-CAPTURE-MILESTONE-1.md):
-no allocation, no safepoint that can collect, no runtime or C call. Keep it
-so:
+compiler inserts may run in between (C-FFI-ERROR-CAPTURE-MILESTONE-1.md,
+C-FFI-ERROR-CAPTURE-MILESTONE-2.md): no allocation, no safepoint that can
+collect, no runtime or C call -- whatever the lowering. Keep it so:
 
-* A write exposure's write-back value `{result: R, NAME: MutableBytes}` is a
-  construction escape analysis recognizes (`hir::escape::WriteBackResult`),
-  represented as fields -- the C result and each private copy's storage, its
-  MutableBytes opened (`WriteBackTree`) -- and built only where a use needs
-  an object: a MutableBytes read whole at that use (`OpenedFieldObject`),
-  the struct where the value must be one. Never build it at the call again,
-  and never open a MutableBytes past a use that runs more often than its
-  binding (a deeper loop, a parameter's use).
+* The foreign-result transport is a correctness rule of native lowering,
+  never an optimization (native/lower.tcl's "Foreign-result transport"):
+  `-struct-opt 0`, `-escape-opt 0`, `-specialize 0`, the legacy width
+  policy and `-struct-nesting 0` turn off aggregate optimization, never
+  the transport. Never gate `MandatoryWriteBack`, the C words or the
+  pending objects on an optimization flag, and never re-create the eager
+  representation as an option: the one way to it is the test-only fault
+  injection `-fault eager-foreign-result` (BOTLISH_NATIVE_FAULT), the
+  detectors' positive control.
+* A write-back value `{result: R, NAME: MutableBytes}` is fields
+  (`hir::escape::WriteBackResult`, `WriteBackTree`, `WriteBackCut`, the
+  write-back cases of `NestingPlan`; and where the analysis does not take
+  it, `MandatoryWriteBack`), built only where a use needs an object: a
+  MutableBytes read whole (`OpenedFieldObject`), a closed one a pending
+  object (`PendingObject`, built by `TaggedField`), the struct where the
+  value must be one (`MaterializeVirtual`, a capture's included), a loop
+  body's at the loop's entry (`HoistDeferredUses`). Never build one at the
+  call, and never open a MutableBytes past a use that runs more often than
+  its binding without building it at the loop's entry.
+* A 64-bit C integer result is a C word (nir.rs's `i64`/`u64` kinds,
+  `cword`, `cwbox`, `cwlt` ...): the word C returned, compared as it is
+  (`WordComparison`), boxed at its first use that needs an Int
+  (`WordTagged`, after every operand of that use). A word is never an
+  argument, a result, a capture, a join of two kinds or a tagged operand
+  (nir.rs's validate rejects each); every consumer of field registers takes
+  `TaggedFields`. A comparison never allocates: a BigInt operand goes to
+  `rt_ffi_word_cmp`, and `rt_int_cmp` and `rt_ffi_int_word` borrow BigInts,
+  never copy them.
 * `op keepalive` is no machine code: what keeps an exposed storage a root
   is its NIR use (codegen::roots's liveness, the stack maps). Never turn it
   back into a call, and never weaken the NIR keepalive itself.
 * The compiler knows no error convention: no errno intrinsic, no automatic
   errno field, no error translation, no annotation, no rule keyed on a C
   function's name. A binding reads its function's error state itself, right
-  after the call; the compiler only adds nothing in between.
+  after the call, in the function that made it (a value returned unread
+  leaves the error state to the caller's code); the compiler only adds
+  nothing in between.
 
 If you change the write-back value's representation (the `WriteBackResult`,
 `WriteBackTree`, `WriteBackPaths`, `WriteBackCut` and write-back cases of
-`NestingPlan` in hir/escape.tcl; `BorrowCall`, `FieldValue`,
-`OpenedFieldObject`, `OpenedOwnerStorage`, the opened-call case of
-`StructFields` in native/lower.tcl), the keepalive's codegen, a foreign
+`NestingPlan` in hir/escape.tcl; `BorrowCall`, `FieldValue`, `FieldOut`,
+`OpenedFieldObject`, `OpenedOwnerStorage`, `MandatoryWriteBack`,
+`PendingObject`, `TaggedField(s)`, `JoinWordKinds`, `HoistDeferredUses` and
+the opened-call case of `StructFields` in native/lower.tcl), the C words
+(`AssignWord`, `WordTagged`, `WordComparison`; nir.rs's word kinds and ops;
+codegen::clif's `box_word`, `word_compare` and foreign result;
+runtime/ffi.rs's `rt_ffi_word_cmp`), the keepalive's codegen, a foreign
 call's result conversion or what errno() lowers to, run
 `tests/c-ffi-error-capture.test` (its machine-code tests read the object
-file with `objdump`; its trace needs Linux and ptrace),
-`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test`,
-`tests/darwin-io.test` (its `di-errno-allocator` runs on macOS: the
-acceptance tier of every branch push, and under GC stress a `[ci-full]`
-push with `CI-Tests: darwin-io.test c-ffi-error-capture.test`), all also
-under `BOTLISH_NATIVE_GC_STRESS=1`, the struct and transport tests
-(`tests/struct-scalar-replacement.test`, `tests/value-transport.test`),
-`audit/c-pointer-borrowing/tools/mutate.tcl` (every mutant in its
-`mutants.txt` must still apply and be killed: update a mutant's text when
-you change the code it mutates, keeping it a mutant of the same rule; its
-error-capture mutants are killed by tests/c-ffi-error-capture.test, which
-it runs) and the `native/lower.tcl` mutants of `audit/c-ffi/tools/mutate.tcl`.
-`bench/c-ffi-error-capture.tcl` (`-root DIR` for a baseline checkout; the
-tier item `c-capture-bench` on macOS) is the performance report.
+file with `objdump`; its trace needs Linux and ptrace; its `ec-modes-*`
+tests every lowering mode), `tests/c-pointer-borrowing.test`,
+`tests/c-byte-borrowing.test`, `tests/darwin-io.test` (its
+`di-errno-allocator` runs on macOS: the acceptance tier of every branch
+push, and under GC stress a `[ci-full]` push with `CI-Tests: darwin-io.test
+c-ffi-error-capture.test`), all also under `BOTLISH_NATIVE_GC_STRESS=1`,
+the struct and transport tests (`tests/struct-scalar-replacement.test`,
+`tests/value-transport.test`), `cargo test --release --manifest-path
+native/Cargo.toml -- c_word ffi_word_cmp ffi_int_word`, `audit/c-pointer-borrowing/tools/
+mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
+killed: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule; its error-capture mutants are killed by
+tests/c-ffi-error-capture.test, which it runs) and the `native/lower.tcl`
+mutants of `audit/c-ffi/tools/mutate.tcl`. `bench/c-ffi-error-capture.tcl`
+(`-root DIR` for a baseline checkout; the tier item `c-capture-bench` on
+macOS; its `errno` part every shape and lowering) is the performance
+report.
 
 ## C floating types (ffi::c::Float, ffi::c::Double)
 

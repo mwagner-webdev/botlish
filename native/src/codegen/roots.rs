@@ -200,6 +200,7 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } => (vec![*dst], vec![]),
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
+        | Inst::CWord { dst, .. }
         | Inst::ShortLit { dst, .. }
         | Inst::AsciiLit { dst, .. }
         | Inst::Str { dst, .. }

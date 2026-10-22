@@ -148,6 +148,58 @@ long bcf_reverse_errno(const unsigned char *src, unsigned long count, unsigned c
     return (long)count;
 }
 
+/* 64-bit results outside Botlish's small-Int range (|v| >= 2^62; C-FFI-
+ * ERROR-CAPTURE-MILESTONE-2.md). bcf_large_error is iconv(3)'s convention:
+ * failing (FAIL not 0), errno FAIL and (size_t)-1; succeeding, the count 42.
+ * bcf_unsigned_errno and bcf_signed_errno return entry WHICH of a table of
+ * the small-Int boundary, setting errno to ERR when ERR is not 0 (a failure
+ * with that sentinel) and leaving it alone otherwise. */
+size_t bcf_large_error(int fail) {
+    if (fail != 0) {
+        errno = fail;
+        return (size_t)-1;
+    }
+    return 42;
+}
+
+/* bcf_fill_errno's shape with a size_t result: OUT filled from SEED, then,
+ * when ERR is not 0, errno ERR and (size_t)-1 -- a write-back value whose
+ * result is outside the small-Int range. */
+size_t bcf_fill_size(unsigned char *out, unsigned long count, unsigned char seed, int err) {
+    bcf_fill(out, count, seed);
+    if (err != 0) {
+        errno = err;
+        return (size_t)-1;
+    }
+    return count;
+}
+
+static const uint64_t bcf_unsigned_words[] = {
+    0, 5, 4611686018427387903u /* 2^62 - 1, the largest small Int */,
+    4611686018427387904u /* 2^62 */, 9223372036854775808u /* 2^63 */,
+    18446744073709551614u, 18446744073709551615u /* the largest 64-bit word */,
+};
+
+unsigned long bcf_unsigned_errno(int which, int err) {
+    if (err != 0) {
+        errno = err;
+    }
+    return (unsigned long)bcf_unsigned_words[which];
+}
+
+static const int64_t bcf_signed_words[] = {
+    0, -1, 4611686018427387903 /* 2^62 - 1 */, 4611686018427387904 /* 2^62 */,
+    INT64_MAX, -4611686018427387904 /* -2^62, the smallest small Int */,
+    -4611686018427387904 - 1 /* -2^62 - 1 */, INT64_MIN,
+};
+
+long bcf_signed_errno(int which, int err) {
+    if (err != 0) {
+        errno = err;
+    }
+    return (long)bcf_signed_words[which];
+}
+
 /* A counter, 1, 2, 3, ... on successive calls: how often and in what order
  * a call's arguments are evaluated. */
 static unsigned char bcf_ticks;

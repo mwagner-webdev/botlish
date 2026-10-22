@@ -1231,6 +1231,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         exposed: &[bool],
         discard: bool,
         varargs: &[nir::VarArg],
+        word: bool,
     ) -> Result<ir::Value, BackendError> {
         let (id, decl) = self.symbols.foreigns[foreign as usize].clone();
         let (signature, padding) = c_call_signature(&*self.module, &decl, varargs)?;
@@ -1321,6 +1322,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             return Ok(self.iconst(UNIT));
         }
         let Some(returned) = returned else { return Ok(self.iconst(UNIT)) };
+        if word {
+            // A C word destination (nir.rs validated the 64-bit integer
+            // class): the machine word itself.
+            return Ok(returned);
+        }
         Ok(self.foreign_result(&decl, returned))
     }
 
@@ -1417,7 +1423,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             return self.b.ins().bor_imm_s(shifted, 1);
         }
         // A 64-bit result: tagged when it fits the small range, else boxed.
-        let (fits, helper) = if class.signed() {
+        self.box_word(returned, class.signed())
+    }
+
+    /// The Int of the 64-bit C word WORD (signed or not): tagged inline when
+    /// it fits the small range, else a BigInt (`rt_ffi_box_i64`/`_u64`, the
+    /// one path that allocates). A C call's 64-bit result tagged as part of
+    /// the call, and `cwbox` of a C word kept until its first use that
+    /// needs the Int (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
+    fn box_word(&mut self, returned: ir::Value, signed: bool) -> ir::Value {
+        let (fits, helper) = if signed {
             let shifted = self.b.ins().ishl_imm_s(returned, 1);
             let back = self.b.ins().sshr_imm_s(shifted, 1);
             (self.b.ins().icmp(IntCC::Equal, back, returned), "rt_ffi_box_i64")
@@ -1791,6 +1806,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let v = self.b.ins().iconst(I64, n);
                 self.def_raw(*dst, v);
             }
+            Inst::CWord { dst, digits } => {
+                // The word's bits: a signed word's two's complement, an
+                // unsigned word's binary (validated against its kind).
+                let bits = match digits.parse::<i64>() {
+                    Ok(n) => n,
+                    Err(_) => digits.parse::<u64>().expect("validated cword literal") as i64,
+                };
+                let v = self.b.ins().iconst(I64, bits);
+                self.def_raw(*dst, v);
+            }
             Inst::ShortLit { dst, value } | Inst::AsciiLit { dst, value } => {
                 let v = self.b.ins().iconst(I64, *value);
                 self.def_raw(*dst, v);
@@ -2040,8 +2065,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.def(*dst, v);
             }
             Inst::ForeignCall { dst, foreign, args, exposed, discard, varargs } => {
-                let v = self.foreign_call(*foreign, args, exposed, *discard, varargs)?;
-                self.def(*dst, v);
+                // A destination declared a C word keeps the 64-bit result as
+                // C returned it (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): no
+                // conversion runs after the call; `cwbox` makes the Int at
+                // its first use that needs one.
+                let word = self.f.kind_of(*dst).is_word();
+                let v = self.foreign_call(*foreign, args, exposed, *discard, varargs, word)?;
+                if word {
+                    self.def_raw(*dst, v);
+                } else {
+                    self.def(*dst, v);
+                }
             }
             Inst::Tail { args } | Inst::TailEnv { args, .. } => {
                 let values: Vec<_> = args.iter().map(|r| self.get(*r)).collect();
@@ -2312,6 +2346,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // arithmetic/comparison: lower.tcl emits these only where range
             // analysis proved they are safe (see the "Representation"
             // section of native/lower.tcl), so no check is needed here.
+            // C words (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): the operand's
+            // kind is its signedness.
+            CWBox => {
+                let signed = self.f.kind_of(args[0]) == nir::RegKind::I64;
+                self.box_word(a[0], signed)
+            }
+            CWLt | CWLe | CWGt | CWGe | CWEq => {
+                let signed = self.f.kind_of(args[0]) == nir::RegKind::I64;
+                let word = self.f.kind_of(args[1]).is_word();
+                self.word_compare(op, a[0], a[1], signed, word)
+            }
             RBox => {
                 // a[0] is raw and proven within the small-Int range.
                 let shifted = self.b.ins().ishl_imm_s(a[0], 1);
@@ -3071,6 +3116,54 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.switch_to_block(slow);
         let order = self.call_helper("rt_int_cmp", &[self.vm, a, b]);
         let flag = self.b.ins().icmp_imm_s(cc, order, 0);
+        let r = self.bool_of(flag);
+        self.b.ins().jump(done, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(done);
+        result
+    }
+
+    /// The comparison OP (`cwlt` ...) of the C word W -- signed when SIGNED,
+    /// else unsigned -- with OTHER: a word of the same signedness when WORD
+    /// (one machine comparison), else a tagged Int. A small Int is untagged
+    /// and compared inline (a negative one is below every unsigned word); a
+    /// BigInt goes to `rt_ffi_word_cmp`, which compares in place and
+    /// allocates nothing. Either way exact, and no value is boxed: the C
+    /// error state the comparison guards is still intact after it.
+    fn word_compare(&mut self, op: OpCode, w: ir::Value, other: ir::Value, signed: bool, word: bool) -> ir::Value {
+        let (scc, ucc) = match op {
+            OpCode::CWLt => (IntCC::SignedLessThan, IntCC::UnsignedLessThan),
+            OpCode::CWLe => (IntCC::SignedLessThanOrEqual, IntCC::UnsignedLessThanOrEqual),
+            OpCode::CWGt => (IntCC::SignedGreaterThan, IntCC::UnsignedGreaterThan),
+            OpCode::CWGe => (IntCC::SignedGreaterThanOrEqual, IntCC::UnsignedGreaterThanOrEqual),
+            _ => (IntCC::Equal, IntCC::Equal),
+        };
+        let cc = if signed { scc } else { ucc };
+        if word {
+            let flag = self.b.ins().icmp(cc, w, other);
+            return self.bool_of(flag);
+        }
+        let small = self.b.create_block();
+        let big = self.b.create_block();
+        let done = self.b.create_block();
+        let result = self.b.append_block_param(done, I64);
+        let tag = self.b.ins().band_imm_s(other, 1);
+        self.b.ins().brif(tag, small, &[], big, &[]);
+        self.b.switch_to_block(small);
+        let n = self.b.ins().sshr_imm_s(other, 1);
+        let mut flag = self.b.ins().icmp(cc, w, n);
+        if !signed {
+            // Every unsigned word is above a negative Int.
+            let negative = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, n, 0);
+            let above = matches!(op, OpCode::CWGt | OpCode::CWGe);
+            let fixed = self.b.ins().iconst(types::I8, above as i64);
+            flag = self.b.ins().select(negative, fixed, flag);
+        }
+        let r = self.bool_of(flag);
+        self.b.ins().jump(done, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(big);
+        let s = self.iconst(signed as u64);
+        let order = self.call_helper("rt_ffi_word_cmp", &[self.vm, w, s, other]);
+        let flag = self.b.ins().icmp_imm_s(scc, order, 0);
         let r = self.bool_of(flag);
         self.b.ins().jump(done, &[BlockArg::Value(r)]);
         self.b.switch_to_block(done);

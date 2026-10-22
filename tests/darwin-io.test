@@ -244,7 +244,7 @@ test di-c-declarations {lib/darwin.bot declares libSystem's write, read, open, c
     list $foreign $contracts [regexp -inline {varargs=\S+} $nir]
 } -result {{{__error {} ptr 0} {close i32 i32 0} {open {ptr i32} i32 1} {read {i32 ptr u64} i64 0} {write {i32 ptr u64} i64 0}} {{darwin::c_write {fd {buf read declared-noescape} nbyte} 0 unknown} {darwin::c_read {fd {buf write declared-noescape} nbyte} 0 unknown} {darwin::c_open {{path read declared-noescape} oflag} 1 unknown} {darwin::c_close fd 0 unknown} {darwin::c_errno_location {} 0 independent}} varargs=u16:i32}
 
-test di-errno-read-first {a failed call's errno is read before anything else runs: in darwin::write, read, open (both forms: open_with, and open_mode behind create and create_new) and close nothing comes between the C call and errno() but the keepalive of an exposure (no machine code), the result's unboxing and the comparison -- no allocation, no other call: read's write-back value is never built, its MutableBytes only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); and errno() is one C call of __error and one load through the native view} -body {
+test di-errno-read-first {a failed call's errno is read before anything else runs: in darwin::write, read, open (both forms: open_with, and open_mode behind create and create_new) and close nothing comes between the C call and errno() but the keepalive of an exposure (no machine code) and the comparison -- of the C word write(2) and read(2) return (cwlt: their ssize_t compared as it is, never boxed, C-FFI-ERROR-CAPTURE-MILESTONE-2.md), of the unboxed int open(2) and close(2) return -- no allocation, no other call: read's write-back value is never built, its MutableBytes only after errno() (C-FFI-ERROR-CAPTURE-MILESTONE-1.md); and errno() is one C call of __error and one load through the native view} -body {
     set nir [native::nir [diHir "direct module\nimport abi\nimport abi::bytes\nimport darwin\nimport darwin::path\nimport io::path\nfn f(p: str) -> List\[int\] errors io::path::NotAPath:\n    darwin::path::validate(p)\n    w = darwin::write(1, abi::bytes::from_list(\[\]))\n    r = darwin::read(0, abi::bytes::zeroed(abi::usize(1)))\n    o = darwin::open(p, darwin::Access::ReadOnly)\n    m = darwin::create(p, darwin::Access::WriteOnly, 384)\n    c = darwin::close(o.fd)\n    \[w.count, w.errno, r.count, r.errno, o.fd, o.errno, m.fd, m.errno, c.status, c.errno\]\nf(\"x\"):\n    on io::path::NotAPath:\n        \[\]\n"]]
     set errno [nirId $nir darwin::errno]
     set between [lmap name {darwin::write darwin::read darwin::open_with darwin::open_mode darwin::close} {
@@ -262,7 +262,7 @@ test di-errno-read-first {a failed call's errno is read before anything else run
     list $between [lmap line [nirBody $nir darwin::errno] {
         expr {[regexp {= (foreigncall|op nativeload)} $line -> what] ? $what : [continue]}
     }]
-} -result {{{keepalive ilt} {keepalive ilt} {keepalive runbox rilt} {keepalive runbox rilt} {runbox rilt}} {foreigncall {op nativeload}}}
+} -result {{{keepalive cwlt} {keepalive cwlt} {keepalive runbox rilt} {keepalive runbox rilt} {runbox rilt}} {foreigncall {op nativeload}}}
 
 # ---------------------------------------------------------------------------
 # io::IO through DarwinIO: static selection, no dispatch
@@ -624,18 +624,20 @@ proc clobberLibrary {} {
     return $::clobberLibrary
 }
 
-test di-errno-allocator {nothing allocates between a libSystem call and its errno read: di-errno's program prints the same with an allocator that sets errno to 77 on every allocation (DYLD_INSERT_LIBRARIES), also under GC stress -- while the lowering before C-FFI-ERROR-CAPTURE-MILESTONE-1.md (-struct-opt 0: read's write-back value built right after the call) reports that 77 as read's errno, and only read's: write, open and close never allocated there} -constraints {writeInject posixShell nativeCoroutines} -body {
+test di-errno-allocator {nothing allocates between a libSystem call and its errno read: di-errno's program prints the same with an allocator that sets errno to 77 on every allocation (DYLD_INSERT_LIBRARIES), also under GC stress, and so does it with struct scalar replacement off (-struct-opt 0: the write-back value's transport is no optimization, C-FFI-ERROR-CAPTURE-MILESTONE-2.md) -- while the lowering before C-FFI-ERROR-CAPTURE-MILESTONE-1.md (the eager-foreign-result fault injection with -struct-opt 0: read's write-back value built right after the call) reports that 77 as read's errno, and only read's: write, open and close never allocated there} -constraints {writeInject posixShell nativeCoroutines} -body {
     set dir [makeDirectory darwin-io-allocator-[pid]]
     set text $::errnoText
     append text "\nall(\"$dir\"):\n    on io::path::NotAPath:\n        \[\]\n"
     set exe [diExecutable $text]
-    set eager [diExecutable $text {} {-struct-opt 0}]
+    set unoptimized [diExecutable $text {} {-struct-opt 0}]
+    set eager [diExecutable $text {} {-struct-opt 0 -fault eager-foreign-result}]
     set plain [lindex [diRun $exe] 0]
     set clobber [list DYLD_INSERT_LIBRARIES=[clobberLibrary] BCF_ERRNO_CLOBBER=77]
     list [expr {[lindex [diRun [list env {*}$clobber $exe]] 0] eq $plain}] \
         [expr {[lindex [diRun [list env {*}$clobber BOTLISH_NATIVE_GC_STRESS=1 $exe]] 0] eq $plain}] \
+        [expr {[lindex [diRun [list env {*}$clobber $unoptimized]] 0] eq $plain}] \
         [expr {[lindex [diRun $eager] 0] eq $plain}] [lindex [diRun [list env {*}$clobber $eager]] 0]
-} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-allocator-[pid]]} -result [list 1 1 1 "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 77\], 20, true, 2, 17\]\n"]
+} -cleanup {file delete -force [file join [temporaryDirectory] darwin-io-allocator-[pid]]} -result [list 1 1 1 1 "\[\[-1, 2, -1, 9, 8, 0, -1, 17, -1, 21, 0, 0, -1, 9, -1, 77\], 20, true, 2, 17\]\n"]
 
 # ---------------------------------------------------------------------------
 # Standard input (darwin::io::read)

@@ -311,7 +311,12 @@ records it; this milestone does not change the borrowing lowering.
 > (`di-errno-read-first`), its machine code calls nothing in between on the
 > -1 path, and an allocator that changes errno on every allocation no longer
 > changes what read reports (`di-errno-allocator`). The table and the
-> paragraphs above record this milestone as it was.
+> paragraphs above record this milestone as it was. C-FFI-ERROR-CAPTURE-
+> MILESTONE-2.md made it independent of the lowering: read's `ssize_t` is
+> compared as the word read(2) returned (`cwlt`), and the window holds with
+> struct scalar replacement off too (`di-errno-allocator` runs that
+> executable with the errno-changing allocator), the same `darwin::read`
+> source unchanged.
 
 **Threads and coroutines.** A Botlish program runs on one native thread;
 coroutines switch stacks, never threads (COROUTINES.md), so the errno a

@@ -374,6 +374,21 @@ calls the runtime: read(2) through `darwin::read` is `foreigncall`,
 `keepalive`, the comparison, `call errno` (`di-errno-read-first`,
 `tests/c-ffi-error-capture.test`).
 
+Since C-FFI-ERROR-CAPTURE-MILESTONE-2.md that holds whatever escape analysis
+decides and whatever the optimization flags: the write-back value's
+transport is a correctness rule of native lowering ("Foreign-result
+transport"), not part of struct scalar replacement. A write-back value the
+analysis leaves alone -- `-struct-opt 0`, a binding a closure captures, an
+`if` of two calls with scalar replacement off -- is held as fields all the
+same (`MandatoryWriteBack`); a MutableBytes its representation keeps closed
+(a use in a deeper loop, a parameter's) is a pending object, built at its
+first use that needs it, never at the call (a loop's at the loop's entry,
+`HoistDeferredUses`); and the C result, when it is a 64-bit integer, is the
+word C returned (`cwlt` against the sentinel: read(2)'s `ssize_t` is
+`foreigncall`, `keepalive`, `cwlt`, `call errno`). `cb-write-back-
+allocations` counts the same objects with `-struct-opt 0` as without, but
+for `abi::bytes::mutable_length`'s own `abi::Usize`, an ordinary struct.
+
 The address is a tagged small Int (`bytesaddr`'s result: what the syscall
 path's register words are too), never a `cptr` word: "Bytes -> backing
 storage address -> raw machine pointer argument", the unboxing being the

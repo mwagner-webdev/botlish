@@ -215,7 +215,13 @@ fixed candidate set, representation planning cannot oscillate.
   `{result: R, NAME: MutableBytes}` (`WriteBackResult`), its MutableBytes
   opened to the private copy's storage (VALUE-TRANSPORT-MATERIALIZATION.md,
   "Independent nested lifetime"), so a C call's result is read before
-  anything is built.
+  anything is built. That one is no optimization (C-FFI-ERROR-CAPTURE-
+  MILESTONE-2.md): `-struct-opt 0` turns off the analysis, not the
+  write-back value's transport -- native lowering holds a write-back value
+  the analysis does not take as fields all the same (`MandatoryWriteBack`),
+  because building it right after the C call may change the C function's
+  error state. What `-struct-opt 0` still builds is every ordinary struct,
+  a struct literal holding a write-back value included.
 
 ## Materialization model
 

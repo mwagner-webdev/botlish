@@ -1049,3 +1049,48 @@ mod euclid_mod_tests {
         }
     }
 }
+
+/// C words compiled and run (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): `cword`
+/// constants of both kinds, the word comparisons against words and against
+/// tagged Ints (small, negative, BigInt), and `cwbox` on both sides of the
+/// small-Int boundary.
+#[cfg(test)]
+mod c_word_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::ProgramInfo;
+    use std::rc::Rc;
+
+    #[test]
+    fn c_word_comparisons_and_boxing_run() {
+        let text = concat!(
+            "nir 1 call-effects=1 statics=0\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=28 pnames=\"\" captures=0 u64regs=\"0 1 2 3\" i64regs=\"4 5 6\"\n",
+            "    %0 = cword 18446744073709551615\n    %1 = cword 18446744073709551614\n",
+            "    %2 = cword 4611686018427387904\n    %3 = cword 4611686018427387903\n",
+            "    %4 = cword -9223372036854775808\n    %5 = cword -1\n    %6 = cword -4611686018427387905\n",
+            "    %7 = int 0\n    %8 = int -1\n    %9 = int 18446744073709551614\n    %10 = int -9223372036854775809\n",
+            "    %11 = op cwgt %0 %1\n    %12 = op cweq %0 %9\n    %13 = op cweq %1 %9\n    %14 = op cwlt %0 %7\n",
+            "    %15 = op cwgt %0 %8\n    %16 = op cwlt %4 %8\n    %17 = op cwlt %4 %5\n    %18 = op cwge %2 %9\n",
+            "    %19 = op cwgt %4 %10\n    %20 = op cwle %6 %8\n",
+            "    %21 = op cwbox %0\n    %22 = op cwbox %4\n    %23 = op cwbox %5\n    %24 = op cwbox %2\n    %25 = op cwbox %3\n    %26 = op cwbox %6\n",
+            "    %27 = op listnew %11 %12 %13 %14 %15 %16 %17 %18 %19 %20 %21 %22 %23 %24 %25 %26\n",
+            "    ret %27\nend\n",
+        );
+        let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            AllocMode::Off,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        let result = (compiled.entry)(&mut *vm);
+        assert_eq!(
+            crate::runtime::show::show(result),
+            "[true, false, true, false, true, true, true, false, true, true, 18446744073709551615, -9223372036854775808, -1, 4611686018427387904, 4611686018427387903, -4611686018427387905]"
+        );
+    }
+}
+

@@ -265,12 +265,12 @@
         if {[dict get $node layout] ne $layout} {
             throw {NATIVE BUG} "native lowering: the payload of fail $name has fields ([dict get $node layout]), not ($layout) ($e)"
         }
-        return [StructFields fn $value $node]
+        return [TaggedFields fn [StructFields fn $value $node] $e]
     }
 ====
     if {[hir::kind $hir $value] eq "struct"} {
         set node [hir::node $hir $value]
-        set ordered [StructFields fn $value $node]
+        set ordered [TaggedFields fn [StructFields fn $value $node] $e]
         if {$ordered eq "never"} {
             return never
         }

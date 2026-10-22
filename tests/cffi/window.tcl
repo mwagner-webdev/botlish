@@ -15,6 +15,11 @@
 #   window::nirHazards WINDOW    the instructions of a window that may run
 #                                anything but the program's own straight-line
 #                                code: an allocation, a call, a safepoint
+#   window::nirBoxedResults NIR  every C call of NIR whose 64-bit integer
+#                                result is converted to an Int as part of the
+#                                call (its destination no C word: C-FFI-
+#                                ERROR-CAPTURE-MILESTONE-2.md), as
+#                                {FUNCTION REGISTER}
 #   window::machine OBJECT ?SYMBOL?
 #                                the functions of object file OBJECT
 #                                (`objdump -dr`; SYMBOL's alone, GNU
@@ -188,7 +193,7 @@ proc window::nirOps {window} {
         if {[regexp {^%[0-9]+ = op (\S+)} $line -> op]} {
             lappend ops $op
         } elseif {[regexp {^%[0-9]+ = (\S+)} $line -> word]} {
-            if {$word ni {int rawint unit move}} {
+            if {$word ni {int rawint cword unit move}} {
                 lappend ops $word
             }
         } elseif {![regexp {^(label|jump|br) } $line]} {
@@ -199,11 +204,14 @@ proc window::nirOps {window} {
 }
 
 # The ops whose machine code is the program's own straight-line code: no
-# allocation, no call -- but for the tagged comparisons' BigInt slow path
-# (`rt_int_cmp`, reached only when an operand is no small Int) -- and no
-# safepoint. `keepalive` is no machine code at all.
+# allocation, no call -- but for the tagged comparisons' BigInt slow paths
+# (`rt_int_cmp`, `rt_ffi_word_cmp`, reached only when an operand is a
+# BigInt, and allocating nothing) -- and no safepoint. `keepalive` is no
+# machine code at all; the C word comparisons (`cwlt` ...) compare the word
+# C returned as it is (C-FFI-ERROR-CAPTURE-MILESTONE-2.md). `cwbox` is not
+# among them: it allocates a BigInt for a word outside the small range.
 proc window::PureOps {} {
-    return {keepalive ilt ile igt ige ieq runbox rilt rile rigt rige rieq cptrisnull charcodepoint}
+    return {keepalive ilt ile igt ige ieq runbox rilt rile rigt rige rieq cwlt cwle cwgt cwge cweq cptrisnull charcodepoint}
 }
 
 proc window::nirHazards {window} {
@@ -214,7 +222,7 @@ proc window::nirHazards {window} {
                 lappend hazards $line
             }
         } elseif {[regexp {^%[0-9]+ = (\S+)} $line -> word]} {
-            if {$word ni {int rawint unit move}} {
+            if {$word ni {int rawint cword unit move}} {
                 lappend hazards $line
             }
         } elseif {![regexp {^(label|jump|br) } $line]} {
@@ -222,6 +230,34 @@ proc window::nirHazards {window} {
         }
     }
     return $hazards
+}
+
+proc window::nirBoxedResults {nir} {
+    set results [dict create]
+    foreach line [split $nir \n] {
+        if {[regexp {^foreign ([0-9]+) .* result=(\S+)} $line -> id class]} {
+            dict set results $id $class
+        }
+    }
+    set boxed {}
+    set name ""
+    set words {}
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> name]} {
+            set words {}
+            foreach attribute {i64regs u64regs} {
+                if {[regexp "$attribute=\"(\[^\"\]*)\"" $line -> list]} {
+                    lappend words {*}[lmap r $list {string cat % $r}]
+                }
+            }
+            continue
+        }
+        if {[regexp {^\s*(%[0-9]+) = foreigncall ([0-9]+) } $line -> dst id]
+                && [dict getdef $results $id ""] in {i64 u64} && $dst ni $words} {
+            lappend boxed [list $name $dst]
+        }
+    }
+    return $boxed
 }
 
 # ---------------------------------------------------------------------------
@@ -478,5 +514,5 @@ proc window::machineCalls {functions function} {
 # range and a tagged comparison's BigInt path. Neither runs for a small Int
 # (a C failure sentinel such as -1); every other call is a hazard.
 proc window::bigIntPaths {} {
-    return {rt_ffi_box_i64 rt_ffi_box_u64 rt_int_cmp}
+    return {rt_ffi_box_i64 rt_ffi_box_u64 rt_int_cmp rt_ffi_word_cmp}
 }

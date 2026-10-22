@@ -8,6 +8,15 @@ capture: a C call's error state survives the representation of its result.
 > borrowed storage available without heap materialization until the program
 > actually needs their materialized representation.
 
+> **Follow-up.** C-FFI-ERROR-CAPTURE-MILESTONE-2.md closes the three limits
+> of section 29: the capture no longer depends on struct scalar replacement
+> (`-struct-opt 0`) or on the value staying local, and a 64-bit result
+> outside the small-Int range -- `(size_t)-1` -- is compared as the word C
+> returned, never boxed first. Its NIR spells the comparison `cwlt`/`cweq`
+> where this report shows `ilt`, and `-struct-opt 0` is no longer the
+> positive control: the `eager-foreign-result` fault injection is. This
+> report records Milestone 1 as it was.
+
 MACOS-AARCH64-MILESTONE-8.md, section 7, found that `darwin::read` built its
 write-back value -- two heap objects -- between `read(2)` returning -1 and
 the read of `errno`, and relied on Apple's allocator leaving errno alone.

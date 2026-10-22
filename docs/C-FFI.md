@@ -328,20 +328,33 @@ by a `keepalive` of each exposed storage after the call (NIR in section 10);
 an unchecked (`-strict 0`) program's refused exposure replays the refusal at
 run time, the C call never made (`cf-strict0-replay`).
 
-**C error state** (C-FFI-ERROR-CAPTURE-MILESTONE-1.md). A C function that
-fails the POSIX way returns a sentinel and leaves the reason in errno; its
-binding reads errno right after the call (`darwin::errno()`: a C call of
-`__error()`, `__errno_location()` on glibc, and a native view). Nothing the
-compiler inserts runs in between: the keepalive is no machine code, and a
-write-back value is fields -- the C result and the private copies --
-built only where a use needs an object, so the comparison of the result
-and the errno read follow the call directly, with no allocation, safepoint
-or runtime call (on the path a small-Int result takes; a 64-bit result
-outside the small-Int range is boxed as a BigInt first). The compiler knows
-no error convention: it reads no errno, adds no field, translates nothing --
-it only adds nothing. `tests/c-ffi-error-capture.test` proves it in NIR, in
-the object file's machine code, by single-stepping the executable, and
-with an allocator that changes errno.
+**C error state** (C-FFI-ERROR-CAPTURE-MILESTONE-1.md,
+C-FFI-ERROR-CAPTURE-MILESTONE-2.md). A C function that fails the POSIX way
+returns a sentinel and leaves the reason in errno; its binding reads errno
+right after the call (`darwin::errno()`: a C call of `__error()`,
+`__errno_location()` on glibc, and a native view). Nothing the compiler
+inserts runs in between: the keepalive is no machine code, a write-back
+value is fields -- the C result and the private copies -- built only where
+a use needs an object, and a 64-bit integer result is the machine word C
+returned (a C word, section 8), compared with its sentinel as it is --
+`(size_t)-1` included -- and boxed only at its first use that needs an Int.
+So the comparison of the result and the errno read follow the call
+directly, with no allocation, safepoint or runtime call, whatever the
+result's value and whatever the lowering: this foreign-result transport is
+a correctness rule of native lowering, not an optimization, and
+`-struct-opt 0`, `-specialize 0` and the other representation policies
+keep it (a write-back value escape analysis leaves alone -- a binding a
+closure captures, struct scalar replacement off -- is held as fields all
+the same, and built at its first use that needs it, a loop's at the
+loop's entry). The compiler knows no error convention: it reads no errno,
+adds no field, translates nothing -- it only adds nothing. What it does not
+cover: a C `float`/`double` result (a Float64 is a heap object, built by
+the call), a value returned from the function that made the call before
+anything read errno, and what the program itself builds before its read
+(C-FFI-ERROR-CAPTURE-MILESTONE-2.md, "Limits"). `tests/c-ffi-error-
+capture.test` proves it in NIR, in the object file's machine code, by
+single-stepping the executable, and with an allocator that changes errno,
+in every lowering mode.
 
 ## 7. Pointer results
 
@@ -374,7 +387,7 @@ so none is.
 | Botlish word | to C | from C |
 |---|---|---|
 | small Int (`(n << 1) \| 1`), a narrow scalar | `n`, reduced to the class width; extended by the call's signature (`sext`/`uext`) | sign- or zero-extended from the class width by Botlish, whatever the callee left in the register's other bits, then tagged |
-| Int, a 64-bit scalar | `n`: inline for a small Int, `rt_ffi_int_word` for a BigInt | tagged when it fits the small range, else a BigInt (`rt_ffi_box_i64`, `rt_ffi_box_u64`) |
+| Int, a 64-bit scalar | `n`: inline for a small Int, `rt_ffi_int_word` for a BigInt | the machine word itself, a C word (an `i64` or `u64` register: C-FFI-ERROR-CAPTURE-MILESTONE-2.md), compared as it is (`cwlt` ... against a `cword` constant or an Int) and made an Int at its first use that needs one (`cwbox`: tagged when it fits the small range, else a BigInt, `rt_ffi_box_i64`, `rt_ffi_box_u64`) |
 | C address word (`(a << 4) \| 0b1110`) | `a` (an arithmetic shift: null, word 14, is 0) | `(a << 4) \| 0b1110` when `a` fits the word's sign-extended 60 bits, else a `NATIVE ADDRESS` failure |
 | exposure address (a small Int, `bytesaddr`/`mbytesaddr`) | the address | -- |
 | bool (`false`, `true`) | the byte 0 or 1, zero-extended to the register like an `unsigned char` (on x86-64 to its 32 low bits, as GCC and Clang callees read a `_Bool`) | the result byte: 0 is `false`, 1 is `true`, anything else a `NATIVE BOOL` failure naming the function and the byte, never a bool made of one bit (`cf-bool-invalid`) |
