@@ -403,9 +403,11 @@ pub mod windows {
     }
 
     /// The check's summary for a run's end (main.rs, runtime::aot): how many
-    /// functions' entries and Botlish frames it compared, when it is on.
+    /// functions' entries and Botlish frames it compared, when it is on and
+    /// a program ran (a command that only compiles or links has nothing to
+    /// account for, and prints nothing).
     pub fn summary() -> Option<String> {
-        unwind_check().then(|| {
+        (unwind_check() && CHECKED_FUNCTIONS.load(Ordering::Relaxed) > 0).then(|| {
             format!(
                 "native unwind check: {} functions, {} Botlish frames, every one as Windows unwinds it; {} walks unwound {} other frames",
                 CHECKED_FUNCTIONS.load(Ordering::Relaxed),

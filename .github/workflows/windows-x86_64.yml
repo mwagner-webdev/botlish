@@ -289,17 +289,38 @@ jobs:
           dumpbin /nologo /dependents artifacts\bench.exe | findstr /i "vcruntime ucrtbase api-ms-win-crt" && (echo bench.exe imports the C runtime & exit /b 1)
           dumpbin /nologo /headers artifacts\bench.exe | findstr /i "subsystem machine" || exit /b 1
           rem Windows unwind information (WINDOWS-X86-64-MILESTONE-3.md): the
-          rem object's function table, each Botlish function's prologue codes,
-          rem and the executable's exception directory.
-          dumpbin /nologo /unwindinfo artifacts\fib.obj > artifacts\fib-unwind.txt || exit /b 1
-          type artifacts\fib-unwind.txt
-          findstr /c:"botlish_fn_0" artifacts\fib-unwind.txt || exit /b 1
-          findstr /c:"botlish_entry_0" artifacts\fib-unwind.txt || exit /b 1
-          findstr /i /c:"SET_FPREG" artifacts\fib-unwind.txt || exit /b 1
+          rem object's function table (an object's entries are relocations:
+          rem dumpbin lists them undecoded), the executables' exception
+          rem directories, and fib.exe's every entry decoded (the next step
+          rem picks out the Botlish functions' by their names in its PDB).
+          dumpbin /nologo /unwindinfo artifacts\fib.obj > artifacts\fib-obj-unwind.txt || exit /b 1
+          type artifacts\fib-obj-unwind.txt
+          findstr /c:"Function Table" artifacts\fib-obj-unwind.txt || exit /b 1
+          dumpbin /nologo /headers artifacts\fib.exe | findstr /i /c:"Exception Directory" || exit /b 1
+          dumpbin /nologo /unwindinfo artifacts\fib.exe > artifacts\fib-unwind.txt || exit /b 1
           dumpbin /nologo /headers artifacts\bench.exe | findstr /i /c:"Exception Directory" || exit /b 1
           dumpbin /nologo /unwindinfo artifacts\bench.exe > artifacts\bench-unwind.txt || exit /b 1
           findstr /i /c:"Function Table" artifacts\bench-unwind.txt || exit /b 1
           exit /b 0
+
+      # dumpbin's decoding of each Botlish function's UNWIND_INFO in fib.exe,
+      # found by name: as many entries as the object has, each the frame
+      # this milestone describes (its frame pointer set from RBP, RBP pushed).
+      - name: dumpbin's decoding of the Botlish functions' unwind information
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          [ -f artifacts/fib-unwind.txt ] || { echo "no dumpbin listing of fib.exe"; exit 1; }
+          tr -d '\r' < artifacts/fib-unwind.txt | awk '
+            /^  [0-9A-Fa-f]{8} / { on = ($0 ~ /botlish_(fn|entry)_[0-9]+/) }
+            /^ *Summary/ { on = 0 }
+            on { print }' > artifacts/fib-botlish-unwind.txt
+          cat artifacts/fib-botlish-unwind.txt
+          expected=$(tr -d '\r' < artifacts/fib-obj-unwind.txt | sed -n 's/^Function Table #[0-9]* (\([0-9]*\)).*/\1/p' | head -n 1)
+          entries=$(grep -cE '^  [0-9A-Fa-f]{8} ' artifacts/fib-botlish-unwind.txt)
+          fpreg=$(grep -ci 'SET_FPREG' artifacts/fib-botlish-unwind.txt)
+          push=$(grep -ciE 'PUSH_NONVOL.*rbp' artifacts/fib-botlish-unwind.txt)
+          echo "the object's function table: $expected entries; fib.exe's Botlish entries: $entries, SET_FPREG: $fpreg, PUSH_NONVOL rbp: $push"
+          [ -n "$expected" ] && [ "$entries" = "$expected" ] && [ "$fpreg" = "$entries" ] && [ "$push" = "$entries" ]
 
       # The smoke tier (examples on all four backends, front-end files) and
       # the test files the port changes most: argv (the Windows argument
@@ -342,11 +363,11 @@ jobs:
               awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
               echo '```'
             fi
-            for listing in artifacts/unwind-check.txt artifacts/fib-unwind.txt artifacts/bench-unwind.txt; do
+            for listing in artifacts/unwind-check.txt artifacts/fib-botlish-unwind.txt artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt; do
               if [ -f "$listing" ]; then
                 echo "### $listing"
                 echo '```'
-                head -n 60 "$listing"
+                tr -d '\r' < "$listing" | head -n 60
                 echo '```'
               fi
             done

@@ -333,9 +333,16 @@ pub(crate) mod tests {
     use crate::runtime::value::{make_small, Value};
     use crate::runtime::vm::{ProgramInfo, Vm};
     use std::cell::RefCell;
+    use std::collections::{HashMap, HashSet};
     use std::rc::Rc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use windows_sys::Win32::System::Diagnostics::Debug::{KNONVOLATILE_CONTEXT_POINTERS, RtlLookupFunctionEntry};
+    use windows_sys::Win32::Foundation::STATUS_SINGLE_STEP;
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        AddVectoredExceptionHandler, CONTEXT, EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
+        KNONVOLATILE_CONTEXT_POINTERS, RemoveVectoredExceptionHandler, RtlLookupFunctionEntry,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 
     /// The address the test's foreign C function SYMBOL resolves to in the
     /// JIT (codegen::CraneliftJit; everywhere else foreign symbols resolve to
@@ -413,13 +420,18 @@ pub(crate) mod tests {
     }
 
     /// Calls ENTRY(VM) with MAGICS in the callee-saved registers, recording
-    /// in LABEL where the call returns to.
-    fn call_with_magics(entry: super::super::ProgramEntry, vm: *mut Vm) -> Value {
+    /// in LABEL where the call returns to (one place: never inlined). With
+    /// STEP, the call runs with the trap flag set: the first single-step
+    /// exception comes at the entry's first instruction.
+    #[inline(never)]
+    fn call_with_magics(entry: super::super::ProgramEntry, vm: *mut Vm, step: bool) -> Value {
         let result: u64;
         // SAFETY: a Win64 call of the program's entry; RBX is saved and
         // restored around it, the other callee-saved registers are inputs the
         // callee preserves, and the stack is 16-byte aligned at the call
-        // (8 pushed + 40 = 48 below the block's aligned stack pointer).
+        // (8 pushed + 40 = 48 below the block's aligned stack pointer; the
+        // flags' push and pop balance). Setting the trap flag needs the
+        // single-step handler installed (`windows_unwinds_every_instruction_of_jit_code`).
         unsafe {
             std::arch::asm!(
                 "push rbx",
@@ -427,6 +439,12 @@ pub(crate) mod tests {
                 "lea r9, [rip + 2f]",
                 "mov [rdx], r9",
                 "sub rsp, 40",
+                "test r11, r11",
+                "jz 3f",
+                "pushfq",
+                "or qword ptr [rsp], 0x100",
+                "popfq",
+                "3:",
                 "call r10",
                 "2:",
                 "add rsp, 40",
@@ -434,6 +452,7 @@ pub(crate) mod tests {
                 rbx = const MAGICS[0],
                 in("rdx") LABEL.as_ptr(),
                 in("r10") entry,
+                in("r11") u64::from(step),
                 in("rcx") vm,
                 in("rsi") MAGICS[1],
                 in("rdi") MAGICS[2],
@@ -465,18 +484,8 @@ pub(crate) mod tests {
 
     /// `<program>` calls `wide`, which holds eight values across its call of
     /// `down`, which recurses DEPTH times with one value live across each
-    /// call, then calls the probe and allocates a list. `big` (unused here)
-    /// is not.
+    /// call, then calls the probe and allocates a list.
     fn chain(depth: u32) -> String {
-        let wide: String = concat!(
-            "    %1 = op imul %0 %0\n    %2 = op iadd %1 %0\n    %3 = op imul %2 %0\n    %4 = op iadd %3 %1\n",
-            "    %5 = op imul %4 %0\n    %6 = op iadd %5 %2\n    %7 = op imul %6 %3\n    %8 = op iadd %7 %4\n",
-            "    %9 = call 2 %0\n",
-            "    %10 = op iadd %9 %1\n    %11 = op iadd %10 %2\n    %12 = op iadd %11 %3\n    %13 = op iadd %12 %4\n",
-            "    %14 = op iadd %13 %5\n    %15 = op iadd %14 %6\n    %16 = op iadd %15 %7\n    %17 = op iadd %16 %8\n",
-            "    ret %17\n",
-        )
-        .to_string();
         format!(
             concat!(
                 "nir 1 call-effects=1 statics=0\n",
@@ -490,9 +499,19 @@ pub(crate) mod tests {
                 "  label L1\n    %6 = op isub %0 %1\n    %7 = call 2 %6\n    %8 = op iadd %7 %0\n    %9 = op iadd %8 %6\n    ret %9\nend\n",
             ),
             depth = depth,
-            wide = wide,
+            wide = WIDE,
         )
     }
+
+    /// `wide`'s body: eight values held across its call of function 2.
+    const WIDE: &str = concat!(
+        "    %1 = op imul %0 %0\n    %2 = op iadd %1 %0\n    %3 = op imul %2 %0\n    %4 = op iadd %3 %1\n",
+        "    %5 = op imul %4 %0\n    %6 = op iadd %5 %2\n    %7 = op imul %6 %3\n    %8 = op iadd %7 %4\n",
+        "    %9 = call 2 %0\n",
+        "    %10 = op iadd %9 %1\n    %11 = op iadd %10 %2\n    %12 = op iadd %11 %3\n    %13 = op iadd %12 %4\n",
+        "    %14 = op iadd %13 %5\n    %15 = op iadd %14 %6\n    %16 = op iadd %15 %7\n    %17 = op iadd %16 %8\n",
+        "    ret %17\n",
+    );
 
     /// The value `chain(depth)` computes.
     fn chain_value(depth: i64) -> i64 {
@@ -567,7 +586,7 @@ pub(crate) mod tests {
         let depth = 4;
         let compiled = compile(&chain(depth));
         let mut vm = vm(&compiled, false);
-        let result = call_with_magics(compiled.entry, &mut *vm);
+        let result = call_with_magics(compiled.entry, &mut *vm, false);
         assert_eq!(result, make_small(chain_value(depth as i64)), "the program's value");
         let frames = FRAMES.with(|f| f.borrow().clone());
         let label = LABEL.load(Ordering::Relaxed);
@@ -669,5 +688,217 @@ pub(crate) mod tests {
         assert_eq!(result, make_small(chain_value(depth as i64)));
         assert!(vm.heap.collections > 0);
         assert!(walk::checked_frames() >= before + depth as usize + 3, "every Botlish frame of the collection checked");
+    }
+
+    /// What Win64 preserves across a call: RBX, RBP, RSI, RDI, R12-R15 and
+    /// XMM6-XMM15.
+    type Preserved = ([u64; 8], [(u64, i64); 10]);
+
+    fn preserved(c: &CONTEXT) -> Preserved {
+        // SAFETY: the XMM registers' view of CONTEXT's floating-point area.
+        let x = unsafe { &c.Anonymous.Anonymous };
+        let xmm = [x.Xmm6, x.Xmm7, x.Xmm8, x.Xmm9, x.Xmm10, x.Xmm11, x.Xmm12, x.Xmm13, x.Xmm14, x.Xmm15].map(|r| (r.Low, r.High));
+        ([c.Rbx, c.Rbp, c.Rsi, c.Rdi, c.R12, c.R13, c.R14, c.R15], xmm)
+    }
+
+    /// A Botlish function's activation while the program is single-stepped:
+    /// where its call left the stack pointer and the return address, and
+    /// what its caller expects back.
+    struct Activation {
+        start: usize,
+        entry_rsp: u64,
+        ret: u64,
+        preserved: Preserved,
+    }
+
+    /// The single-stepped run's state, kept by the exception handler.
+    #[derive(Default)]
+    struct Stepping {
+        thread: u32,
+        functions: Vec<(usize, usize)>,
+        activations: Vec<Activation>,
+        checked: usize,
+        offsets: HashSet<(usize, usize)>,
+        deepest: HashMap<usize, u64>,
+        returns: usize,
+        elsewhere: usize,
+        failures: Vec<String>,
+    }
+
+    static STEPPING: Mutex<Option<Stepping>> = Mutex::new(None);
+
+    impl Stepping {
+        /// The instruction at CONTEXT's RIP, about to run: one step of
+        /// Windows' unwinder from here must reach the innermost activation's
+        /// caller -- its return address, the stack pointer above it, and
+        /// every preserved register as the function found it.
+        fn instruction(&mut self, context: &CONTEXT) {
+            let (rip, rsp) = (context.Rip, context.Rsp);
+            while self.activations.last().is_some_and(|a| a.ret == rip && a.entry_rsp + 8 == rsp) {
+                self.activations.pop();
+            }
+            let Some(&(start, _)) = self.functions.iter().find(|&&(s, e)| s <= rip as usize && (rip as usize) < e) else {
+                self.elsewhere += 1;
+                return;
+            };
+            let offset = rip as usize - start;
+            if offset == 0 {
+                // SAFETY: the return address the call just pushed.
+                let ret = unsafe { *(rsp as *const u64) };
+                self.activations.push(Activation { start, entry_rsp: rsp, ret, preserved: preserved(context) });
+            }
+            let Some(top) = self.activations.last() else {
+                self.failures.push(format!("{start:#x}+{offset}: Botlish code outside any activation"));
+                return;
+            };
+            if top.start != start {
+                self.failures.push(format!("{start:#x}+{offset}: the innermost activation is {:#x}'s", top.start));
+                return;
+            }
+            let depth = self.deepest.entry(start).or_default();
+            *depth = (*depth).max(top.entry_rsp - rsp);
+            // SAFETY: the function's code, readable while the program exists.
+            if unsafe { *(rip as *const u8) } == 0xc3 {
+                self.returns += 1;
+            }
+            let mut unwound = Context(*context);
+            // SAFETY: this thread's exact context at an instruction boundary,
+            // unwound one frame; nothing is written but the copy.
+            let found = unsafe { walk::unwind_one(&mut unwound, None) };
+            self.checked += 1;
+            self.offsets.insert((start, offset));
+            let got = (unwound.0.Rip, unwound.0.Rsp, preserved(&unwound.0));
+            let want = (top.ret, top.entry_rsp + 8, top.preserved);
+            if !found || got != want {
+                self.failures.push(format!("{start:#x}+{offset}: entry found {found}; unwound to {got:#x?}, the caller is {want:#x?}"));
+            }
+        }
+    }
+
+    /// The vectored exception handler of the single-stepped run: each trap
+    /// of its thread is an instruction to check, and the trap flag is set
+    /// again until the run is back at LABEL.
+    unsafe extern "system" fn single_step(pointers: *mut EXCEPTION_POINTERS) -> i32 {
+        // SAFETY: Windows passes the exception's record and the thread's context.
+        let (code, context) = unsafe { ((*(*pointers).ExceptionRecord).ExceptionCode, &mut *(*pointers).ContextRecord) };
+        if code != STATUS_SINGLE_STEP {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        let mut stepping = STEPPING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // SAFETY: no precondition.
+        let thread = unsafe { GetCurrentThreadId() };
+        let Some(s) = stepping.as_mut().filter(|s| s.thread == thread) else {
+            return EXCEPTION_CONTINUE_SEARCH;
+        };
+        if context.Rip as usize != LABEL.load(Ordering::Relaxed) {
+            s.instruction(context);
+            context.EFlags |= 0x100;
+        }
+        EXCEPTION_CONTINUE_EXECUTION
+    }
+
+    /// `<program>` calls `wide` (eight values across its call of `down`, a
+    /// recursion of depth 3) and two functions that hold SMALL and LARGE raw
+    /// integers across their call of the leaf `pass` (the call's argument is
+    /// the last of them, so all are computed before it): frames of more than
+    /// one page and of more than five, which Cranelift probes
+    /// (codegen::stack_probes) unrolled and in a loop. Raw integers are no
+    /// roots, and nothing allocates or calls the runtime: every instruction
+    /// is Botlish code.
+    fn stepped(small: usize, large: usize) -> String {
+        let spill = |id: usize, k: usize| {
+            let raw: Vec<String> = (1..=k).chain(k + 3..=2 * k + 3).map(|r| r.to_string()).collect();
+            let mut text = format!(
+                "func {id} \"spill{k}\" params=1 env=0 regs={} pnames=\"n\" captures=0 rawregs=\"{}\"\n    %1 = op runbox %0\n",
+                2 * k + 5,
+                raw.join(" ")
+            );
+            for i in 2..=k {
+                text.push_str(&format!("    %{i} = op riadd %{} %1\n", i - 1));
+            }
+            text.push_str(&format!("    %{} = op rbox %{k}\n    %{} = call 5 %{}\n    %{} = op runbox %{}\n", k + 1, k + 2, k + 1, k + 3, k + 2));
+            for i in 1..=k {
+                text.push_str(&format!("    %{} = op riadd %{} %{i}\n", k + 3 + i, k + 2 + i));
+            }
+            text.push_str(&format!("    %{} = op rbox %{}\n    ret %{}\nend\n", 2 * k + 4, 2 * k + 3, 2 * k + 4));
+            text
+        };
+        format!(
+            concat!(
+                "nir 1 call-effects=1 statics=0\n\n",
+                "func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0\n",
+                "    %0 = int 3\n    %1 = call 1 %0\n    %2 = call 3 %0\n    %3 = call 4 %0\n",
+                "    %4 = op iadd %1 %2\n    %5 = op iadd %4 %3\n    ret %5\nend\n\n",
+                "func 1 \"wide\" params=1 env=0 regs=18 pnames=\"n\" captures=0\n{wide}end\n\n",
+                "func 2 \"down\" params=1 env=0 regs=8 pnames=\"n\" captures=0\n",
+                "    %1 = int 1\n    %2 = op ilt %0 %1\n    br %2 L0 L1\n",
+                "  label L0\n    %3 = int 3\n    ret %3\n",
+                "  label L1\n    %4 = op isub %0 %1\n    %5 = call 2 %4\n    %6 = op iadd %5 %0\n    %7 = op iadd %6 %4\n    ret %7\nend\n\n",
+                "{small}\n{large}\n",
+                "func 5 \"pass\" params=1 env=0 regs=1 pnames=\"x\" captures=0\n    ret %0\nend\n",
+            ),
+            wide = WIDE,
+            small = spill(3, small),
+            large = spill(4, large),
+        )
+    }
+
+    /// The value `stepped(small, large)` computes: `wide`'s, and each spill
+    /// function's K*3 + (1 + ... + K)*3.
+    fn stepped_value(small: i64, large: i64) -> i64 {
+        let spilled = |k: i64| 3 * (k + k * (k + 1) / 2);
+        chain_value(3) + spilled(small) + spilled(large)
+    }
+
+    /// Windows' unwinder at every instruction of JIT code, not only at its
+    /// calls: the program runs single-stepped (the trap flag; a vectored
+    /// exception handler sees each instruction before it runs), and from
+    /// each instruction of a Botlish function one RtlVirtualUnwind step
+    /// must reach the function's caller exactly -- through its prologue (the
+    /// push, the frame pointer, the stack probes, the allocation, the
+    /// saves), its body and its epilogue to its `ret`.
+    #[test]
+    fn windows_unwinds_every_instruction_of_jit_code() {
+        let (small, large) = (700, 3000);
+        let compiled = compile(&stepped(small, large));
+        let mut vm = vm(&compiled, false);
+        let functions: Vec<(usize, usize)> = compiled
+            .direct_entries
+            .iter()
+            .chain(&compiled.generic_entries)
+            .map(|&start| {
+                let entry = compiled.framemap.find(start).expect("in the stack-map table");
+                (entry.code_start, entry.code_end)
+            })
+            .collect();
+        // SAFETY: no precondition.
+        let thread = unsafe { GetCurrentThreadId() };
+        *STEPPING.lock().unwrap() = Some(Stepping { thread, functions, ..Stepping::default() });
+        // SAFETY: a handler that only acts on this thread's single steps.
+        let handler = unsafe { AddVectoredExceptionHandler(1, Some(single_step)) };
+        assert!(!handler.is_null());
+        let result = call_with_magics(compiled.entry, &mut *vm, true);
+        // SAFETY: the handler added above.
+        unsafe { RemoveVectoredExceptionHandler(handler) };
+        let s = STEPPING.lock().unwrap().take().unwrap();
+        assert_eq!(result, make_small(stepped_value(small as i64, large as i64)), "the program's value");
+        assert!(s.failures.is_empty(), "{} of {} instructions unwound wrongly; the first: {:#?}", s.failures.len(), s.checked, &s.failures[..s.failures.len().min(6)]);
+        assert!(s.activations.is_empty(), "every activation returned");
+        for (id, &start) in compiled.direct_entries.iter().enumerate() {
+            for offset in [0, 1, 4] {
+                assert!(s.offsets.contains(&(start, offset)), "function {id}: offset {offset} not stepped");
+            }
+        }
+        let frame = |id: usize| s.deepest[&compiled.direct_entries[id]];
+        assert!(frame(3) > 4096 && frame(4) > 5 * 4096, "frames of more than one and five pages: {} and {}", frame(3), frame(4));
+        assert!(s.returns >= 6 + 4, "every function's ret stepped: {}", s.returns);
+        eprintln!(
+            "windows_unwinds_every_instruction_of_jit_code: {} instructions unwound ({} distinct), {} elsewhere; frames of {} and {} bytes",
+            s.checked,
+            s.offsets.len(),
+            s.elsewhere,
+            frame(3),
+            frame(4)
+        );
     }
 }
