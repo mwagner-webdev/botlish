@@ -609,12 +609,57 @@ pub(crate) mod tests {
         assert_eq!(frames.last().unwrap().registers, MAGICS, "the entry's caller's callee-saved registers, restored");
     }
 
+    /// Without a stack guard, the stack-limit check ends a recursion deeper
+    /// than its thread's stack in NATIVE LIMIT STACK, an error the program
+    /// returns -- on a 1 MiB thread, where the shadow stack's slot count did
+    /// not fire before the stack was exhausted (WINDOWS-X86-64-MILESTONE-1.md,
+    /// section 5) -- and a shallower one runs.
+    #[test]
+    fn the_stack_limit_ends_a_recursion_deeper_than_the_stack() {
+        if !crate::runtime::native_stack::stack_limit_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS) {
+            return; // a fallback-roots build: the shadow stack's depth is the bound
+        }
+        let text = |depth: u32| {
+            format!(
+                concat!(
+                    "nir 1 call-effects=1 statics=0\n\n",
+                    "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+                    "    %0 = int {depth}\n    %1 = call 1 %0\n    ret %1\nend\n\n",
+                    "func 1 \"down\" params=1 env=0 regs=6 pnames=\"n\" captures=0\n",
+                    "    %1 = int 1\n    %2 = op ilt %0 %1\n    br %2 L0 L1\n",
+                    "  label L0\n    ret %0\n",
+                    "  label L1\n    %3 = op isub %0 %1\n    %4 = call 1 %3\n    %5 = op iadd %4 %1\n    ret %5\nend\n",
+                ),
+                depth = depth
+            )
+        };
+        let outcome = |depth: u32| {
+            let text = text(depth);
+            std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || {
+                    let compiled = compile(&text);
+                    let mut vm = vm(&compiled, false);
+                    let result = (compiled.entry)(&mut *vm);
+                    (result, vm.error.take().map(|e| e.error_code().join(" ")))
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        assert_eq!(outcome(1000), (make_small(1000), None));
+        assert_eq!(outcome(10_000_000), (crate::runtime::value::NO_VALUE, Some("NATIVE LIMIT STACK".to_string())));
+    }
+
     /// The collector's own walk over the same frames under GC stress, every
     /// Botlish frame of every collection checked against Windows' unwind
     /// (BOTLISH_NATIVE_UNWIND_CHECK's check, forced on: a mismatch ends the
     /// test process), and the value right.
     #[test]
     fn the_collectors_walk_agrees_with_windows_on_jit_frames() {
+        if !crate::runtime::framewalk::NATIVE_FRAME_ROOTS {
+            return; // a fallback-roots build: no frame is walked
+        }
         walk::force_unwind_check();
         let before = walk::checked_frames();
         let depth = 6;

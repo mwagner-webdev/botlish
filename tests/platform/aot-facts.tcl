@@ -735,7 +735,7 @@ proc windowsChecks {} {
     # every Botlish frame of every collection unwinds by it exactly as by its
     # frame record, restoring callee-saved registers from inside the frame.
     set outcome [windowsRun $cwdDir $moved {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
-    set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it\n$} [lindex $outcome 2] - functionsChecked framesChecked]
+    set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames\n$} [lindex $outcome 2] - functionsChecked framesChecked]
     check standalone-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 "$programValue\n"] && $checked
             && $functionsChecked == [llength $functions] && $framesChecked > 0}] [shown $outcome]
     set standalone {apply {{runDir cwdDir name text environment} {

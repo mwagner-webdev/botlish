@@ -1261,3 +1261,66 @@ mod c_word_tests {
     }
 }
 
+
+/// A caller's live root, found while its callee collects
+/// (WINDOWS-X86-64-MILESTONE-3.md, section 4): `<program>` builds a list,
+/// holds it -- its only reference -- across two calls of `churn`, one direct
+/// and one through a function value (rt_call_value: a Rust frame between
+/// the two Botlish frames), and sums it afterwards. Under GC stress every
+/// allocation of `churn` (a list of eight 999s, the size of the caller's)
+/// collects first. A walk that missed the caller's frame -- below its
+/// callee's, or above a Rust frame -- would free the list at the first one,
+/// and the allocator would hand its memory to `churn`'s next list: the sum
+/// would read 999s. Every host's root plan: native frames (the frame walk;
+/// on Windows across Rust frames by Windows' unwinder) or the fallback
+/// plan's shadow stack (a `fallback-roots` build).
+#[cfg(test)]
+mod caller_root_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::{FunctionInfo, ProgramInfo};
+    use std::rc::Rc;
+
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1 statics=0\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=12 pnames=\"\" captures=0\n",
+        "    %0 = int 7\n    %1 = int 11\n    %2 = int 13\n",
+        "    %3 = op listnew %0 %1 %2 %0 %1 %2 %0 %1\n",
+        "    %4 = fnvalue 2\n    %5 = int 30\n",
+        "    %6 = callvalue %4 %5\n",
+        "    %7 = call 2 %5\n",
+        "    %8 = call 1 %3\n",
+        "    %9 = op iadd %6 %7\n    %10 = op iadd %9 %8\n    ret %10\nend\n\n",
+        "func 1 \"sum\" params=1 env=0 regs=20 pnames=\"l\" captures=0\n",
+        "    %1 = int 0\n    %2 = int 1\n    %3 = int 2\n    %4 = int 3\n    %5 = int 4\n    %6 = int 5\n    %7 = int 6\n    %8 = int 7\n",
+        "    %9 = op listget %0 %1\n    %10 = op listget %0 %2\n    %11 = op listget %0 %3\n    %12 = op listget %0 %4\n",
+        "    %13 = op listget %0 %5\n    %14 = op listget %0 %6\n    %15 = op listget %0 %7\n    %16 = op listget %0 %8\n",
+        "    %17 = op iadd %9 %10\n    %17 = op iadd %17 %11\n    %17 = op iadd %17 %12\n    %17 = op iadd %17 %13\n",
+        "    %17 = op iadd %17 %14\n    %17 = op iadd %17 %15\n    %17 = op iadd %17 %16\n    ret %17\nend\n\n",
+        "func 2 \"churn\" params=1 env=0 regs=10 pnames=\"n\" captures=0\n",
+        "    %1 = int 1\n    %2 = op ilt %0 %1\n    br %2 L0 L1\n",
+        "  label L0\n    %3 = int 0\n    ret %3\n",
+        "  label L1\n    %4 = int 999\n    %5 = op listnew %4 %4 %4 %4 %4 %4 %4 %4\n",
+        "    %6 = op isub %0 %1\n    %7 = call 2 %6\n    %8 = op listlen %5\n    %9 = op iadd %7 %8\n    ret %9\nend\n",
+    );
+
+    #[test]
+    fn a_callers_root_survives_its_callees_collections() {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).unwrap_or_else(|e| panic!("{}", e.message()));
+        for stress in [false, true] {
+            let functions = [(0, ""), (1, "l"), (1, "n")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
+            let mut vm = Vm::new(
+                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+                AllocMode::Off,
+            );
+            compiled.install_constants(&mut vm);
+            vm.set_framemap(compiled.framemap.clone());
+            vm.heap.set_stress_for_test(stress);
+            let result = (compiled.entry)(&mut *vm);
+            assert_eq!(result, make_small(240 + 240 + 80), "stress {stress}: churn(30) twice, and the caller's list summed");
+            assert_eq!(vm.heap.collections > 0, stress);
+        }
+    }
+}
