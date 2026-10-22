@@ -790,13 +790,23 @@ and 8's follow-ups. Where they meet this milestone:
 * **bb-guard-malloc, the macOS failure of section 7.4, is main's, and main
   changed it**: it exposes 16-byte storages now (MACOS-AARCH64-MILESTONE-7.md,
   section 8); `appExecutable` keeps main's comment and this milestone's
-  Windows branch. MERGED_MACOS_RESULT
+  Windows branch. On the merge, macOS run
+  [39743665357](https://github.com/mwagner-webdev/botlish/actions/runs/39743665357)
+  is green in every job, bb-guard-malloc included.
 * The rest merged as both sides wrote it: the tier items `c-capture-bench`
   and `windows-io-mutants` side by side, main's Darwin errno mutant beside
   the Windows I/O mutants, fixture.c's `errno.h` and `limits.h`, main's
   split of `ht-coroutine-protocols` (the native half behind
   `nativeCoroutines`, as this milestone had done). The golden manifest and
   Compilerpedia's generated stdlib were regenerated, identical to the merge.
+
+The merge (1d51e96), validated before main took it: `tests/local.tcl`
+(every Tcl test file on interp and compile: 6669 and 6664 passed, 0
+failed; every golden suite on all four backends: 103 suites, 0 failed),
+the native Rust tests (lib 285, driver 64), Windows run
+[39743665389](https://github.com/mwagner-webdev/botlish/actions/runs/39743665389)
+(smoke and the four acceptance shards) and macOS run 39743665357 green;
+LINUX_RESULTS
 
 ## 8. Remaining limitations
 
