@@ -120,7 +120,7 @@ macOS and section 29 Linux AArch64, where the same tests run.
 | large signed results (`LONG_MIN`, below -2^62), any mode | unsafe | safe |
 | large results read errno-first (2^62, 2^63, `ULONG_MAX`) | unsafe | safe |
 | large sentinel in a coroutine, before and after a `yield` | unsafe | safe |
-| generic lowering, error state read in the calling function | partially safe (write-back safe, large results not) | safe for immediate local capture |
+| generic lowering, error state read in the calling function | partially safe (a write-back value read locally safe; captured or looped values and large results not) | safe for immediate local capture |
 | value returned *unread* to a caller that reads errno (`via_raw`), `-specialize 0` or `-struct-opt 0` | unsafe | unsafe: outside the guarantee (section 32) |
 | the program's own struct literal around the value before the read (`wrapped`), `-struct-opt 0` | unsafe | unsafe: the program's construction (section 32) |
 
@@ -338,11 +338,11 @@ binding of a write-back call, an alias of one, a projection off one and an
 `if` of two are held as fields by `MandatoryWriteBack` whatever the
 analysis said; the discarded call builds nothing (the `discarded` rule was
 gated on `structOpt` and is not any more). `cb-write-back-allocations`
-counts it: with `-struct-opt 0` the objects per call are the same as
-without -- `1 0`, `1 0`, `1 1`, `1 2`, `1 10` against `1 0`, `1 0`, `1 1`,
-`1 1`, `1 1`; the difference is the extra `abi::Usize` of each
-`mutable_length` call, an ordinary struct -- where Milestone 1 built two
-write-back objects at every call (`1 2`, `1 2`, `1 2`, `1 3`, `1 11`).
+counts it: with `-struct-opt 0` the objects per call -- `1 0`, `1 0`, `1 1`,
+`1 2`, `1 10` against the default's `1 0`, `1 0`, `1 1`, `1 1`, `1 1` --
+differ only by the `abi::Usize` of each `mutable_length` call, an ordinary
+struct, where Milestone 1 built two write-back objects at every call (`1
+2`, `1 2`, `1 2`, `1 3`, `1 11`).
 
 ## 11. Closed and captured write-back handling
 
@@ -404,18 +404,15 @@ A C word is in `scalar_regs` (never a root, never stored to the shadow
 stack: the collector would misread `0xffff...` as a pointer). A hoisted
 build at a loop's entry is a tagged register live through the loop. The
 collector's ownership and pinning model is unchanged; nothing is pinned.
-GC stress: section 20 and 26; Windows' fallback root plan (shadow stack, no
+GC stress: section 28 (and section 30's macOS run); Windows' fallback root plan (shadow stack, no
 frame walk) reads the same `scalar_regs`.
 
 ## 15. Before and after: NIR
 
-(tests/c-ffi-error-capture.test's shapes compiled for linux-x86_64 and
-macos-aarch64 alike; "before" is e2ae884 or, for the eager representation,
-`-fault eager-foreign-result`)
-
 Every window from a C call to its `errno()` call, as `window::nirOps`
 prints it (the census tool beside the tests; the shapes are
-tests/c-ffi-error-capture.test's). Before: e2ae884, whose `-specialize 0`
+tests/c-ffi-error-capture.test's, whose `ec-modes-nir-windows` checks the
+after column for linux-x86_64 and macos-aarch64 alike). Before: e2ae884, whose `-specialize 0`
 equals its default and `-escape-opt 0` and both flags its `-struct-opt 0`.
 After: every mode -- default, `-struct-opt 0`, `-specialize 0`, both,
 `-escape-opt 0`, the legacy width policy, `-struct-nesting 0` -- gives the
@@ -565,16 +562,17 @@ tests/cffi/errno-clobber.c (Milestone 1's: every successful `malloc`,
 `__DATA,__interpose` on macOS), loaded into the executables of two
 programs:
 
-* **the escapes program** (new): sixteen errno-reading functions --
+* **the escapes program** (new): seventeen errno-reading functions --
   captured after the read, on the success path only (then the failure path
   too), on the failure path only (then the success path), inside a nested
   function; stored in a List, in a struct; passed to a function; read whole
-  in a loop; a write-back value with a `size_t` result failing with
+  in a loop; returned by the function after the read (which, should it read
+  a wrong errno, returns another value instead); a write-back value with a `size_t` result failing with
   `(size_t)-1` (and succeeding); `(size_t)-1` bound and compared, compared
   straight off the call; `ULONG_MAX`, 2^62 - 1, 2^62, 2^63 read errno-first;
   `LONG_MIN`, -1, `LONG_MAX`, -2^62 - 1, -2^62 compared; -2^62 - 1 and -2^62
   errno-first; a coroutine failing with `(size_t)-1` before and after a
-  suspension; `close(-1)`, a C `int`. Errnos 41 to 60 and EBADF, distinct, in
+  suspension; `close(-1)`, a C `int`. Errnos 41 to 61 and EBADF, distinct, in
   succession, successes between them reporting 0.
 * **Milestone 1's shapes**: bound, status only, straight off the call, two
   written parameters (one owner passed twice), a read and a write exposure
@@ -1006,9 +1004,10 @@ compiler, never the foreign-error behavior:
   result (`strtod`'s ERANGE) can see it changed. A deferred floating word
   -- the same transport with an `f64` kind -- is follow-on work (section
   33); none of the libraries does this today.
-* **A loop's entry.** A deferred value a loop needs built is built at the
-  loop's entry, once: a program that reads, inside that loop, the errno of
-  a call made before it, after the loop started, reads it after that build.
+* **A loop's entry.** A deferred value a loop's body needs built is built
+  once, at the loop's entry: a program whose loop body reads the errno of a
+  C call made before the loop reads it after that build. Read the error
+  state before the loop.
 * **A word comparison against a BigInt that is no constant** takes
   `rt_ffi_word_cmp` (no allocation, no errno) on the path where the operand
   is a BigInt: a call, though not an error-clobbering one.
