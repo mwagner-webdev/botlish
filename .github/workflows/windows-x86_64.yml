@@ -308,24 +308,16 @@ jobs:
           findstr /i /c:"Function Table" artifacts\bench-unwind.txt || exit /b 1
           exit /b 0
 
-      # dumpbin's decoding of each Botlish function's UNWIND_INFO in fib.exe,
-      # found by name: as many entries as the object has, each the frame
-      # this milestone describes (its frame pointer set from RBP, RBP pushed).
+      # dumpbin's decoding of each Botlish function's UNWIND_INFO in fib.exe.
+      # An image's listing names no function: the Botlish entries are the
+      # one run of entries matching the object's own table (sizes, and
+      # distances between their UNWIND_INFO), each the frame codegen::unwind
+      # describes (audit/windows-unwind/tools/dumpbin-entries.tcl).
       - name: dumpbin's decoding of the Botlish functions' unwind information
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          [ -f artifacts/fib-unwind.txt ] || { echo "no dumpbin listing of fib.exe"; exit 1; }
-          tr -d '\r' < artifacts/fib-unwind.txt | awk '
-            /^  [0-9A-Fa-f]{8} / { on = ($0 ~ /botlish_(fn|entry)_[0-9]+/) }
-            /^ *Summary/ { on = 0 }
-            on { print }' > artifacts/fib-botlish-unwind.txt
+          tclsh9.0 audit/windows-unwind/tools/dumpbin-entries.tcl artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt artifacts/fib-botlish-unwind.txt | tee artifacts/fib-botlish-found.txt
           cat artifacts/fib-botlish-unwind.txt
-          expected=$(tr -d '\r' < artifacts/fib-obj-unwind.txt | sed -n 's/^Function Table #[0-9]* (\([0-9]*\)).*/\1/p' | head -n 1)
-          entries=$(grep -cE '^  [0-9A-Fa-f]{8} ' artifacts/fib-botlish-unwind.txt)
-          fpreg=$(grep -ci 'SET_FPREG' artifacts/fib-botlish-unwind.txt)
-          push=$(grep -ciE 'PUSH_NONVOL.*rbp' artifacts/fib-botlish-unwind.txt)
-          echo "the object's function table: $expected entries; fib.exe's Botlish entries: $entries, SET_FPREG: $fpreg, PUSH_NONVOL rbp: $push"
-          [ -n "$expected" ] && [ "$entries" = "$expected" ] && [ "$fpreg" = "$entries" ] && [ "$push" = "$entries" ]
 
       # The smoke tier (examples on all four backends, front-end files) and
       # the test files the port changes most: argv (the Windows argument
@@ -368,7 +360,7 @@ jobs:
               awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
               echo '```'
             fi
-            for listing in artifacts/unwind-check.txt artifacts/fib-botlish-unwind.txt artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt; do
+            for listing in artifacts/unwind-check.txt artifacts/fib-botlish-found.txt artifacts/fib-botlish-unwind.txt artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt; do
               if [ -f "$listing" ]; then
                 echo "### $listing"
                 echo '```'
