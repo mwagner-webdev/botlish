@@ -100,8 +100,8 @@ pub struct CompiledProgram {
     /// Address of each function's generic entry.
     pub generic_entries: Vec<usize>,
     /// Address of each function's direct function (`botlish_fn_N`), for
-    /// tests that follow its code.
-    #[cfg(test)]
+    /// the tests that follow its code (codegen::jitunwind's).
+    #[cfg(all(test, windows, target_arch = "x86_64"))]
     pub direct_entries: Vec<usize>,
     pub clif: Option<String>,
     /// Pre-regalloc Cranelift VCode emitted by the lowering pipeline.
@@ -192,7 +192,7 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
 
 /// The ISA of the target TRIPLE with the flags of `isa(true)`: for tests
 /// that read another target's object (only its code is made, never run).
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 fn isa_for(triple: &str) -> OwnedTargetIsa {
     use std::str::FromStr;
     let triple = target_lexicon::Triple::from_str(triple).unwrap();
@@ -308,7 +308,7 @@ impl CraneliftJit {
             entry,
             pool,
             generic_entries,
-            #[cfg(test)]
+            #[cfg(all(test, windows, target_arch = "x86_64"))]
             direct_entries,
             clif: listing,
             vcode: None,
@@ -1018,7 +1018,8 @@ mod object_format_tests {
     /// function's own symbol, the end's addend its size) and its
     /// UNWIND_INFO in `.xdata` (against that section). WINDOWS-X86-64-
     /// MILESTONE-3.md; aot-facts.tcl and dumpbin read the linked executable
-    /// on Windows.
+    /// on Windows. An x86-64 host's: an AArch64 build has no x86-64 backend.
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn a_windows_object_has_an_unwind_entry_for_every_function() {
         use cranelift_object::object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};

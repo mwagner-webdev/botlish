@@ -190,7 +190,10 @@ pub fn unwind_info(code: &[u8], prologue: &[(u32, UnwindInst)]) -> Result<Option
     Ok(Some(out))
 }
 
-#[cfg(test)]
+/// Made for x86_64-pc-windows-msvc on any x86-64 host (only the code is made,
+/// never run): an AArch64 build has no x86-64 backend to ask, as an x86-64
+/// build has no AArch64 one (clif.rs's `apple_tests`).
+#[cfg(all(test, target_arch = "x86_64"))]
 mod tests {
     use super::*;
     use cranelift_codegen::ir::{self, types, AbiParam, InstBuilder, StackSlotData, StackSlotKind};
