@@ -423,6 +423,7 @@ docs: README.md SINGLE-EXECUTABLE.md
     botlish FILE.bot                run the program on interp
     botlish -backend cranelift FILE.bot
     botlish -emit-native-executable FILE.bot     build ./FILE
+    botlish -check FILE.bot         report its diagnostics, run nothing
     botlish -help [QUERY...]        Compilerpedia
     botlish -version                the build identity
     botlish                         the usage summary (exit 0)
@@ -441,10 +442,10 @@ header.
 
 @topic cli.options
 title: Every command-line option
-summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, inspection output, and the reference.
+summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
 related: cli.usage cli.output cli.exit-status lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
 docs: README.md
 
@@ -479,6 +480,15 @@ own process arguments.
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
 
+== CHECKING (nothing runs, nothing is built or written)
+    -check            analyze each .bot input and report what compiling it
+                      reports: the same error lines (and help lines), its
+                      warnings on stderr, "ok" when it has no error; exit
+                      status 1 when an input has one. Only -warnings and
+                      -target combine with it (they decide the analysis);
+                      any other option, or an input that is not a .bot
+                      file, is a malformed invocation.
+
 == INSPECTING (printed before the program runs)
     -code             the Tcl code the compile backend generates
     -hir              the program's semantic HIR
@@ -508,9 +518,10 @@ own process arguments.
 
 == MALFORMED INVOCATIONS
 An unknown option, an option without its argument (`-backend` last), an
-unknown backend, mode or target, a malformed -argv-hex, or options without
-an input file print a message on stderr and exit with status 2; nothing is
-compiled.
+unknown backend, mode or target, a malformed -argv-hex, -check beside an
+option it does not take or with an input that is not Botlish source, or
+options without an input file print a message on stderr and exit with
+status 2; nothing is compiled.
 
 @topic cli.output
 title: What a run prints
@@ -543,6 +554,13 @@ Printed on stderr as they are found, `FILE:LINE:COL: warning: MESSAGE
 (CODE)` with `note:` lines for related locations, then one `help:` line per
 distinct code. Standard output stays the program's.
 
+== A CHECK
+    == game.bot (check)
+       ok
+With -check (cli.options) the header names no backend and nothing runs: a
+program without an error gets "ok"; a rejected one the same "error:" and
+"help:" lines a run prints, and its warnings go to stderr as a run's do.
+
 @topic cli.exit-status
 title: Exit statuses of the compiler and of executables
 summary: botlish exits 0 when every input compiled and ran, 1 when any failed, 2 for a malformed invocation; -help exits 1 when nothing matches; an executable exits 0 or, after a run-time error, nonzero.
@@ -552,8 +570,8 @@ keywords: exit, status, 0, 1, 2, failure
 related: cli.usage capability.process-exit-status backend.native-executable
 
 == THE COMPILER
-    0   every input compiled and ran (or was built), or usage, -help with a
-        match, -version
+    0   every input compiled and ran (or was built, or checked without an
+        error), or usage, -help with a match, -version
     1   some input was rejected or failed at run time; or -help found no
         topic (near matches on stderr)
     2   a malformed invocation (stderr says what)

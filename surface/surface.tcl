@@ -13,6 +13,9 @@
 #   surface::readProgramFile PATH ?-strict 1|0?        compile a .bot file,
 #       loading the modules its `import`s name and resolving its qualified
 #       (mod::name) references across files (surface/modules.tcl, IMPORTS.md)
+#   surface::source::text PATH / exists PATH   program source, through the
+#       source provider in force (source.tcl: the disk unless a caller --
+#       the compiler service -- supplies unsaved buffers), normalized
 #
 # Pipeline:
 #
@@ -50,14 +53,18 @@ proc surface::compile {source args} {
 # module is loaded by an import and by nothing else -- see modules.tcl's
 # header, IMPORTS.md).
 proc surface::readProgramFile {path args} {
-    foreach name [core::programFileRequires $path] {
-        core::loadLibrary $name
-    }
-    return [surface::modules::compileProgramFile $path {*}$args]
+    # One snapshot of the sources for the whole compilation, the text the
+    # requires comments are read from included (surface/source.tcl).
+    return [surface::source::session {
+        foreach name [core::RequiresOf [surface::source::text $path]] {
+            core::loadLibrary $name
+        }
+        surface::modules::compileProgramFile $path {*}$args
+    }]
 }
 
 apply {{dir} {
-    foreach name {ast lexer parser lower modules cache} {
+    foreach name {ast lexer parser lower source modules cache} {
         uplevel #0 [list source [file join $dir $name.tcl]]
     }
 }} $surface::home

@@ -59,6 +59,19 @@ proc core::semanticError {kind message} {
 # return option -diagnostics, for a caller that presents them one by one
 # (main.tcl). A single diagnostic raises exactly what core::semanticError (or
 # the parser's or the loader's own error) would.
+#
+# The front end's producers also give each entry its location as data
+# (COMPILER-SERVICE-MILESTONE-1.md, "Structured diagnostics"), beside the
+# text, so a consumer never parses it out of TEXT:
+#
+#   summary   the message without its "FILE:LINE:COLUMN: " prefix
+#   location  the source span TEXT names, {file PATH start S end E line L
+#             column C endLine L2 endColumn C2} (offsets and columns count
+#             Unicode scalar values of the normalized text, lines and columns
+#             1-based, END exclusive), or "" when the diagnostic has none
+#   related   the further spans it names, in order (a list of such spans)
+#   record    the producer's own richer record, when it has one (a HIR
+#             diagnostic, a warning, a syntax diagnostic)
 proc core::raiseDiagnostics {diagnostics} {
     set first [lindex $diagnostics 0]
     set message [dict get $first message]

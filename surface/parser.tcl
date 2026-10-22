@@ -414,13 +414,27 @@ proc surface::parse {source args} {
     set diagnostics [surface::parser::Independent $lexed $program]
     dict unset program failed
     if {!$recover && $diagnostics ne ""} {
-        core::raiseDiagnostics [lmap diagnostic $diagnostics {
-            dict create errorcode [list SURFACE SYNTAX $diagnostic] shown {SURFACE SYNTAX} \
-                message "[dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message]"
-        }]
+        surface::raiseSyntax $diagnostics
     }
     dict set program diagnostics $diagnostics
     return [surface::ast::assignIds $program]
+}
+
+# The syntax DIAGNOSTICS (a parse's, in its order) as core::raiseDiagnostics
+# entries: what a strict parse raises, each located as data too.
+proc surface::syntaxEntries {diagnostics} {
+    return [lmap diagnostic $diagnostics {
+        dict create errorcode [list SURFACE SYNTAX $diagnostic] shown {SURFACE SYNTAX} \
+            message "[dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message]" \
+            summary [dict get $diagnostic message] location [surface::diagnosticSpan $diagnostic] \
+            related {} record $diagnostic
+    }]
+}
+
+# Raises the syntax DIAGNOSTICS of a parse as one error, the first one's
+# (core::raiseDiagnostics): what surface::parse without -recover raises.
+proc surface::raiseSyntax {diagnostics} {
+    core::raiseDiagnostics [surface::syntaxEntries $diagnostics]
 }
 
 # The syntax diagnostics of a parse -- LEXED the lexer's result

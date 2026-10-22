@@ -162,12 +162,14 @@
 # qualified reference always names an established binding of another unit.
 
 namespace eval surface::modules {
-    # Module ASTs by {PATH SOURCE}: surface::parse is a pure function of a
-    # file's text and path, so a module whose file still has exactly the
-    # text it had is not lexed and parsed again by the next compilation in
-    # the same process (a test file, a batch driver). Keyed by the text
-    # itself, never by a timestamp, so it cannot go stale; a file that does
-    # not parse raises and is never stored. Cleared whole past 64 entries.
+    # Program file ASTs by {PATH SOURCE} (Parse): surface::parse is a pure
+    # function of a file's text and path, so a file that still has exactly
+    # the text it had -- a module, or an entry program a caller parsed first
+    # (main.tcl, the compiler service) -- is not lexed and parsed again by
+    # the next compilation in the same process (a test file, a batch
+    # driver). Keyed by the text itself, never by a timestamp, so it cannot
+    # go stale; a file that does not parse is never stored. Cleared whole
+    # past 64 entries.
     variable parsed [dict create]
     # The module files read since the last compileProgramFile began: PATH ->
     # the text read. The front-end cache keeps these as the entry's
@@ -176,21 +178,36 @@ namespace eval surface::modules {
     variable reads [dict create]
 }
 
-# The AST of the module file PATH (see `parsed` above).
+# The AST of the module file PATH (see `parsed` above); its syntax errors
+# raised as surface::parse raises them.
 proc surface::modules::ParseModule {path} {
-    variable parsed
     variable reads
-    set source [core::ReadFile $path]
+    set source [surface::source::text $path]
     dict set reads $path $source
+    set ast [Parse $path $source]
+    if {[dict get $ast diagnostics] ne ""} {
+        surface::raiseSyntax [dict get $ast diagnostics]
+    }
+    return $ast
+}
+
+# The AST of the program file PATH whose text is SOURCE, parsed with recovery
+# (surface::parse -recover 1: its `diagnostics` lists every syntax error),
+# from `parsed` when it holds it. A file with no syntax error has the AST a
+# strict parse returns.
+proc surface::modules::Parse {path source} {
+    variable parsed
     set key [list $path $source]
     if {[dict exists $parsed $key]} {
         return [dict get $parsed $key]
     }
-    set ast [surface::parse $source $path]
-    if {[dict size $parsed] >= 64} {
-        set parsed [dict create]
+    set ast [surface::parse $source $path -recover 1]
+    if {[dict get $ast diagnostics] eq ""} {
+        if {[dict size $parsed] >= 64} {
+            set parsed [dict create]
+        }
+        dict set parsed $key $ast
     }
-    dict set parsed $key $ast
     return $ast
 }
 
@@ -247,7 +264,7 @@ proc surface::modules::IsApplicationFile {state key} {
 # (an application root inside lib/), else "".
 proc surface::modules::ApplicationFile {state name} {
     set path [NamespaceFile [dict get $state root] $name]
-    if {![file isfile $path] || [file normalize $path] eq [file normalize [ModulePath $name]]} {
+    if {![surface::source::exists $path] || [file normalize $path] eq [file normalize [ModulePath $name]]} {
         return ""
     }
     return $path
@@ -387,7 +404,7 @@ proc surface::modules::ArchModuleFiles {name} {
     set files {}
     foreach arch [core::cabi::architectures] {
         set path [ArchModulePath $name $arch]
-        if {[file exists $path]} {
+        if {[surface::source::exists $path]} {
             lappend files $arch $path
         }
     }
@@ -397,13 +414,13 @@ proc surface::modules::ArchModuleFiles {name} {
 # 1 if namespace NAME has a module source: its file, or architecture-specific
 # files (whether or not one is the compilation target's).
 proc surface::modules::HasModule {name} {
-    return [expr {[file exists [ModulePath $name]] || [ArchModuleFiles $name] ne ""}]
+    return [expr {[surface::source::exists [ModulePath $name]] || [ArchModuleFiles $name] ne ""}]
 }
 
 # The standard library's files of namespace NAME, for a message: its module
 # file, or its architecture-specific files.
 proc surface::modules::StandardFiles {name} {
-    if {[file exists [ModulePath $name]]} {
+    if {[surface::source::exists [ModulePath $name]]} {
         return [ModulePath $name]
     }
     return [join [dict values [ArchModuleFiles $name]] {, }]
@@ -425,7 +442,7 @@ proc surface::modules::IsStandardFile {name path} {
 proc surface::modules::ModuleFile {name target usedAtSpan} {
     set path [ModulePath $name]
     set archFiles [ArchModuleFiles $name]
-    if {[file exists $path]} {
+    if {[surface::source::exists $path]} {
         if {$archFiles ne ""} {
             Error AMBIGUOUS-MODULE $usedAtSpan "namespace \"$name\" has both a module file $path and architecture-specific module files ([join [dict values $archFiles] {, }]): a namespace is either the same on every architecture or specific to each, never both"
         }
@@ -446,12 +463,16 @@ proc surface::modules::ModuleFile {name target usedAtSpan} {
 
 # Raises {SURFACE MODULE KIND} "LOCATION: MESSAGE" (or just MESSAGE if SPAN
 # is "", for callers with no source span -- e.g. the native backend's
-# module-native bridge, native/native.tcl).
+# module-native bridge, native/native.tcl), as one diagnostic of
+# core::raiseDiagnostics whose `location` is SPAN itself: the span the text
+# names, as data (COMPILER-SERVICE-MILESTONE-1.md).
 proc surface::modules::Error {kind span message} {
-    if {$span eq ""} {
-        throw [list SURFACE MODULE $kind] $message
+    set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
+        summary $message location $span related {}]
+    if {$span ne ""} {
+        dict set entry message "[surface::ast::location $span]: $message"
     }
-    throw [list SURFACE MODULE $kind] "[surface::ast::location $span]: $message"
+    core::raiseDiagnostics [list $entry]
 }
 
 # {NAMESPACE NAME SPAN KIND} of every mod::name reference in AST (a program
@@ -836,7 +857,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     if {$path eq ""} {
         set path [ModuleFile $name [dict get $state target] $usedAtSpan]
     }
-    if {![file exists $path]} {
+    if {![surface::source::exists $path]} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
     if {![IsStandardFile $name $path]} {
@@ -1196,8 +1217,9 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             try {
                 CheckRef state $ast $own $key $env $imported $ref
             } trap {SURFACE MODULE} {message options} {
-                dict lappend state referenceErrors [dict create \
-                    errorcode [dict get $options -errorcode] message $message]
+                # Kept whole, its location included (Error's entry).
+                dict lappend state referenceErrors {*}[dict getdef $options -diagnostics \
+                    [list [dict create errorcode [dict get $options -errorcode] message $message]]]
             }
             continue
         }
@@ -1653,6 +1675,12 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
 # front-end cache in DIR when it holds this compilation's, and keeps it there
 # otherwise (surface/cache.tcl; "" for none, the default
 # surface::cache::directory).
+#
+# The program's source -- PATH's text and every module file and candidate
+# path the loader asks about -- comes from the source provider in force
+# (surface/source.tcl: the disk, unless the caller runs the compilation in
+# a snapshot of another provider, as the compiler service does), and the
+# whole compilation sees one snapshot of it.
 proc surface::modules::compileProgramFile {path args} {
     set options [dict create -strict 1 -warnings [hir::warnings::defaultMode] -warning-channel stderr \
         -cache [surface::cache::directory] -target ""]
@@ -1662,7 +1690,11 @@ proc surface::modules::compileProgramFile {path args} {
         }
         dict set options $option $value
     }
-    set source [core::ReadFile $path]
+    return [surface::source::session [list surface::modules::CompileProgramFile $path $options]]
+}
+
+proc surface::modules::CompileProgramFile {path options} {
+    set source [surface::source::text $path]
     set strict [dict get $options -strict]
     set mode [dict get $options -warnings]
     if {$mode eq ""} {
@@ -1681,7 +1713,10 @@ proc surface::modules::compileProgramFile {path args} {
     }
     variable reads
     set reads [dict create]
-    set ast [surface::parse $source $path]
+    set ast [Parse $path $source]
+    if {[dict get $ast diagnostics] ne ""} {
+        surface::raiseSyntax [dict get $ast diagnostics]
+    }
     set hir [surface::lower::Finish [BuildProgram $ast $strict $target $root] $strict $mode $channel]
     surface::cache::store $cache $path $source $mode $strict $hir $reads $target $root
     return $hir

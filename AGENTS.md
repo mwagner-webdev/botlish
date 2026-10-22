@@ -249,7 +249,7 @@ a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
 the test suite, still install the `.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
-  `compiler/`, `hir/`, `surface/`, `native/*.tcl`, `lib/`,
+  `compiler/`, `hir/`, `surface/`, `service/`, `native/*.tcl`, `lib/`,
   `compilerpedia/compilerpedia.tcl`, `compilerpedia/topics/` and
   `compilerpedia/generated/`, plus a `BUILD` file naming the source
   revision. If the compiler starts reading another file at run time, add
@@ -2740,6 +2740,57 @@ lexer's recovery, run `tests/diagnostic-recovery.test`,
 you change the code it mutates, keeping it a mutant of the same rule) and
 `audit/diagnostic-recovery/tools/efficiency.tcl` (the corpus: every known
 primary in the first compilation, no cascade, every case clean once fixed).
+
+## The compiler service and the source seam
+
+`service/service.tcl` (COMPILER-SERVICE-MILESTONE-1.md) is the compiler's
+analysis as one in-process Tcl interface: workspaces with unsaved documents,
+immutable analysis revisions, their diagnostics, position queries and
+Compilerpedia topics; `main.tcl -check` is its command-line client. It has
+no semantics of its own. Keep it so:
+
+* Program source enters the front end only through `surface::source`
+  (surface/source.tcl): `exists` and `text`, answered by the provider in
+  force (the disk unless a caller runs a compilation in a snapshot of an
+  overlay) and recorded per compilation. Never read a program's or a
+  module's path with `core::ReadFile`, `open`, `file exists` or `file isfile`
+  in the front end; a new place that acquires source goes through the seam.
+  Never substitute sources by wrapping or renaming a command (`file`,
+  `core::ReadFile`, a compiler procedure): it is not a seam, and renaming a
+  compiled command makes the next build recompile the compiler
+  (COMPILER-SERVICE-CENSUS.md, "A measurement artifact").
+* Line endings are normalized once, by `surface::source::normalize` at the
+  seam, for files and buffers alike: never a second normalization or a
+  second definition of the text. A provider answers for the paths it is
+  given and never decides resolution (the loader's, search-free).
+* The front-end cache validates an entry by the snapshot's contents, and
+  keeps only a compilation whose every answer came from the disk
+  (`surface::source::persistable`): never key or validate by "is it a
+  buffer", never store one.
+* A diagnostic's location is data at its producer -- the parser's
+  `surface::syntaxEntries`, the loader's `Error`, `hir::recovery::entries`,
+  `hir::warnings::Rejection` and `entry` (core::raiseDiagnostics' `summary`,
+  `location`, `related`) -- never parsed out of its text. A new producer of
+  raised diagnostics gives them too.
+* The service reports the strict compilation's diagnostics -- the very
+  entries it raises, in its order, `hir::recovery::reported` deciding what
+  is dependent -- and the warnings the compilation attached: never filter,
+  merge, reword or add one. Every query reads its revision through
+  `service::Use`, which activates the revision's HIR (COMPILATION-ISOLATION.md);
+  a revision never changes once made (derived indexes are computed from it
+  on first use and released with it); no query runs or compiles code; no
+  protocol, JSON, URI, UTF-16 column or event loop in the service (a
+  transport's). Hover text never shows an internal id: types through
+  `hir::types::presented`, functions through `hir::signatures::text`.
+
+If you change the seam, the cache's use of it, a diagnostic producer, or the
+service, run `tests/compiler-service.test`, `tests/main-cli.test`,
+`tests/diagnostic-recovery.test`, `tests/hir-cache.test`,
+`audit/diagnostic-recovery/tools/mutate.tcl`,
+`audit/hir-interchange/tools/mutate.tcl` and
+`audit/hir-interchange/tools/roundtrip.tcl -via cache` (each mutant must
+still apply and be killed); `bench/compiler-service.tcl` regenerates the
+performance report.
 
 ## Compilerpedia (the built-in reference)
 

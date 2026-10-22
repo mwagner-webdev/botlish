@@ -5,6 +5,7 @@
 #   hir::warnings::of HIR                    the warnings run attached
 #   hir::warnings::collect HIR               discover every warning (no policy)
 #   hir::warnings::render HIR WARNING        diagnostic text
+#   hir::warnings::entry HIR WARNING         the same, located as data
 #
 # A warning states a *semantic fact the compiler can prove* about a program
 # that is perfectly legal -- never a style rule. It has a stable CODE, a
@@ -135,8 +136,9 @@ proc hir::warnings::run {hir mode {channel stderr}} {
     # A monomorphized trait program (TRAITS.md) is warned about as written:
     # its checked source build, where each function exists once.
     set warnings [collect [dict getdef $hir traitSource $hir]]
-    if {$mode eq "error" && $warnings ne ""} {
-        Raise $hir [lindex $warnings 0]
+    set rejection [Rejection $hir $warnings $mode]
+    if {$rejection ne ""} {
+        core::raiseDiagnostics [list $rejection]
     }
     dict set hir warnings $warnings
     if {$channel ne ""} {
@@ -218,15 +220,44 @@ proc hir::warnings::render {hir warning} {
     return [join $lines \n]
 }
 
-# Raises WARNING as a compilation error. Its identity is its own code
-# ({CORE SEMANTIC SAME-RETURN-VALUE}); the message is the warning's, located
-# like any semantic error, with the related locations after it.
-proc hir::warnings::Raise {hir warning} {
-    set text "[hir::originLocation $hir [dict get $warning primary]]: [dict get $warning message]"
-    if {[dict get $warning secondary] ne ""} {
-        append text " (also at [join [lmap o [dict get $warning secondary] {hir::originLocation $hir $o}] {, }])"
+# The error a compilation under warning MODE that found WARNINGS (collect's,
+# in order) is rejected with, as a core::raiseDiagnostics entry, or "" when
+# the policy rejects nothing: the first warning, under `error` (above). Its
+# identity is its own code ({CORE SEMANTIC SAME-RETURN-VALUE}); the message
+# is the warning's, located like any semantic error, with the related
+# locations after it. The one statement of the policy's rejection, which run
+# raises and the compiler service reports (COMPILER-SERVICE-MILESTONE-1.md).
+proc hir::warnings::Rejection {hir warnings mode} {
+    if {$mode ne "error" || $warnings eq ""} {
+        return ""
     }
-    core::semanticError [dict get $warning code] $text
+    return [ErrorEntry $hir [lindex $warnings 0]]
+}
+
+# WARNING as the compilation error that rejects a program (Rejection), as a
+# core::raiseDiagnostics entry: its text, its primary and secondary locations
+# as data.
+proc hir::warnings::ErrorEntry {hir warning} {
+    set summary [dict get $warning message]
+    if {[dict get $warning secondary] ne ""} {
+        append summary " (also at [join [lmap o [dict get $warning secondary] {hir::originLocation $hir $o}] {, }])"
+    }
+    set primary [dict get $warning primary]
+    return [dict create errorcode [list CORE SEMANTIC [dict get $warning code]] \
+        message "[hir::originLocation $hir $primary]: $summary" summary $summary \
+        location [hir::originSpan $hir $primary] \
+        related [lmap o [dict get $warning secondary] {hir::originSpan $hir $o}] record $warning]
+}
+
+# WARNING as a diagnostic entry of the shape core::raiseDiagnostics takes,
+# without raising it: `message` its rendered text (render, its note lines
+# included), `errorcode` its code, `location` and `related` its primary and
+# secondary origins as spans. What a tool that reports warnings beside errors
+# reads (the compiler service: COMPILER-SERVICE-MILESTONE-1.md).
+proc hir::warnings::entry {hir warning} {
+    return [dict create errorcode [dict get $warning code] message [render $hir $warning] \
+        summary [dict get $warning message] location [hir::originSpan $hir [dict get $warning primary]] \
+        related [lmap o [dict get $warning secondary] {hir::originSpan $hir $o}] record $warning]
 }
 
 # ---------------------------------------------------------------------------

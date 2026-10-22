@@ -161,6 +161,12 @@ foreach {name arguments message} {
     bad-argv-hex          {-argv-hex xyz x.bot}              {-argv-hex needs an even number of hexadecimal digits*}
     no-input-file         {-backend compile}                 {no input file}
     no-input-file-emit    {-emit-native-executable}          {no input file}
+    no-input-file-check   {-check}                           {no input file}
+    check-backend         {-check -backend compile x.bot}    {-check cannot be combined with -backend*}
+    check-inspect         {-hir -check x.bot}                {-check cannot be combined with -hir*}
+    check-argv            {-check -argv a x.bot}             {-check cannot be combined with -argv*}
+    check-emit            {-check -emit-hir-interchange x.bot}   {-check cannot be combined with -emit-hir-interchange*}
+    check-not-source      {-check x.hirx}                    {-check analyzes Botlish source files (.bot), and x.hirx is not one}
 } {
     test cli-malformed-$name "a malformed invocation ($arguments) is a message on stderr and exit status 2; nothing runs" -body {
         set r [runMain {*}$arguments]
@@ -208,5 +214,110 @@ test cli-help-lines-do-not-change-diagnostics {the diagnostics main.tcl prints a
     catch {surface::readProgramFile $path -warnings off} message options
     list [llength $errors] [expr {[lmap e $errors {regsub {^   error: } $e {}}] eq [lmap d [dict get $options -diagnostics] {string cat [dict get $d message] " (" [core::ShownCode $d] ")"}]}]
 } -cleanup {removeFile cli-two.bot; unset -nocomplain path out errors message options} -result {2 1}
+
+# ---------------------------------------------------------------------------
+# -check: analysis without running or building (COMPILER-SERVICE-MILESTONE-1.md)
+
+# Writes FILES (NAME TEXT ...) into a fresh directory and returns it.
+proc checkApp {name files} {
+    set dir [makeDirectory cli-check-$name]
+    foreach {file text} $files {
+        set channel [open [file join $dir $file] w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+# The "error:" and "help:" lines of an output.
+proc checkLines {out} {
+    return [lsearch -all -inline -regexp [split $out \n] {^   (error|help): }]
+}
+
+test cli-check-ok {-check of a valid program prints "ok" under its header and exits 0; its value is never computed, and nothing is written beside it} -body {
+    set dir [checkApp ok {main.bot "fn f(n: int) -> int:\n    n * 2\n\nf(21)\n"}]
+    set r [runMain -check [file join $dir main.bot]]
+    list [dict get $r status] [dict get $r out] [dict get $r err] [lsort [glob -directory $dir -tails *]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir r} -result {0 {== main.bot (check)
+   ok} {} main.bot}
+
+test cli-check-runs-nothing {-check never evaluates the program: one that would run forever is checked at once} -body {
+    set dir [checkApp spin {main.bot "fn spin(n: int) -> int:\n    loop:\n        n\n\nspin(1)\n"}]
+    set r [runMain -check [file join $dir main.bot]]
+    list [dict get $r status] [dict get $r out]
+} -cleanup {file delete -force $dir; unset -nocomplain dir r} -result {0 {== main.bot (check)
+   ok}}
+
+test cli-check-no-native {-check generates no native code: it checks a program with the native backend's driver missing} -body {
+    set dir [checkApp native {main.bot "1 + 2\n"}]
+    set saved [array get ::env BOTLISH_NATIVE_BIN]
+    set ::env(BOTLISH_NATIVE_BIN) [file join $dir no-such-driver]
+    try {
+        set r [runMain -check [file join $dir main.bot]]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_BIN)
+        array set ::env $saved
+    }
+    list [dict get $r status] [dict get $r out]
+} -cleanup {file delete -force $dir; unset -nocomplain dir r saved} -result {0 {== main.bot (check)
+   ok}}
+
+# Each program: the same error and help lines from -check as from a run,
+# and exit status 1 from both.
+foreach {name files} {
+    entry-syntax    {main.bot "x = 1 +\ny = (2\n"}
+    module-syntax   {main.bot "import util\nx = util::f(1)\nx\n" util.bot "fn f(n: int) -> int:\n    n +\n"}
+    loader          {main.bot "import util\nx = util::f(1)\nx\n" util.bot "import nosuch\nfn f(n: int) -> int:\n    n\n"}
+    references      {main.bot "x = str::concat(\"a\", \"b\")\ny = nosuch::g(1)\nx\n"}
+    semantic        {main.bot "fn add(a: int, b: int) -> int:\n    a + nosuch\n\nfn g(s: str) -> int:\n    s + 1\n\nx = add(1, \"two\")\nx\n"}
+    bounds          {main.bot "import list\n\nfn a(xs: List\[int\], i: int) -> int:\n    xs.at(i + 1)\n\nfn b(xs: List\[int\], i: int) -> int:\n    xs.at(i + 2)\n\n0\n"}
+} {
+    test cli-check-matches-run-$name "-check reports exactly the error and help lines a run of the same program prints ($name), and exits 1 like it" -body {
+        set dir [checkApp $name $files]
+        set path [file join $dir main.bot]
+        set run [runMain -warnings off $path]
+        set check [runMain -warnings off -check $path]
+        list [dict get $run status] [dict get $check status] \
+            [expr {[checkLines [dict get $run out]] eq [checkLines [dict get $check out]]}] \
+            [expr {[llength [checkLines [dict get $check out]]] > 0}] \
+            [lindex [split [dict get $check out] \n] 0]
+    } -cleanup {file delete -force $dir; unset -nocomplain dir path run check} -result {1 1 1 1 {== main.bot (check)}}
+}
+
+test cli-check-diagnostic-recovery-corpus {on every case of the diagnostic-recovery corpus, -check prints the error and help lines a run prints} -body {
+    set differ {}
+    foreach dir [lsort [glob -directory [file join $::projectRoot audit diagnostic-recovery corpus] -type d *]] {
+        set path [file join $dir program.bot]
+        if {[checkLines [dict get [runMain -warnings off $path] out]] ne [checkLines [dict get [runMain -warnings off -check $path] out]]} {
+            lappend differ [file tail $dir]
+        }
+    }
+    set differ
+} -cleanup {unset -nocomplain differ dir path} -result {}
+
+test cli-check-warnings {-check prints a program's warnings and their help lines on stderr exactly as a run does, and they do not fail it; -warnings error rejects it as a run does} -body {
+    set dir [checkApp warnings {main.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\n\nf(2)\n"}]
+    set path [file join $dir main.bot]
+    set run [runMain -warnings default $path]
+    set check [runMain -warnings default -check $path]
+    set runError [runMain -warnings error $path]
+    set checkError [runMain -warnings error -check $path]
+    list [dict get $check status] [expr {[dict get $run err] eq [dict get $check err]}] \
+        [string match "*SAME-RETURN-VALUE*help:*" [dict get $check err]] \
+        [dict get $checkError status] [expr {[checkLines [dict get $runError out]] eq [checkLines [dict get $checkError out]]}] \
+        [string match "*(CORE SEMANTIC SAME-RETURN-VALUE)" [lindex [checkLines [dict get $checkError out]] 0]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path run check runError checkError} -result {0 1 1 1 1 1}
+
+test cli-check-several-files {-check takes several inputs, one header each; the run fails if one of them has an error} -body {
+    set dir [checkApp several {good.bot "1\n" bad.bot "x = nosuch\nx\n"}]
+    set r [runMain -check [file join $dir good.bot] [file join $dir bad.bot]]
+    list [dict get $r status] [lsearch -all -inline [split [dict get $r out] \n] "== *"] [llength [checkLines [dict get $r out]]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir r} -result {1 {{== good.bot (check)} {== bad.bot (check)}} 2}
+
+test cli-check-missing-file {-check of a file that does not exist reports it as an error of that file and exits 1} -body {
+    set r [runMain -check [file join [temporaryDirectory] no-such-file.bot]]
+    list [dict get $r status] [string match "*error: couldn't open*no-such-file.bot*no such file or directory*" [dict get $r out]]
+} -cleanup {unset -nocomplain r} -result {1 1}
 
 cleanupTests

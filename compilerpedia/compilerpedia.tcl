@@ -10,6 +10,8 @@
 #   compilerpedia::topicForDiagnostic CODE MESSAGE
 #                                         the topic a printed diagnostic
 #                                         points at ("" for none)
+#   compilerpedia::symbolTopics SYMBOL    the topics documenting exactly that
+#                                         standard-library symbol
 #   compilerpedia::topics / topic ID      the catalogue
 #   compilerpedia::validate               the catalogue's structural problems
 #
@@ -514,6 +516,14 @@ proc compilerpedia::indexNames {} {
 proc compilerpedia::codeTopics {code} {
     set codes [dict get [Load] codes]
     return [dict getdef $codes $code {}]
+}
+
+# The topics that document SYMBOL exactly (a standard-library symbol's
+# canonical name, e.g. list::at, as a topic's `symbol:` header spells it):
+# never a search, so a name that only resembles one finds nothing.
+proc compilerpedia::symbolTopics {symbol} {
+    set symbols [dict get [Load] symbols]
+    return [dict getdef $symbols $symbol {}]
 }
 
 # The topic a printed diagnostic of error code CODE with MESSAGE (its text,

@@ -1,0 +1,833 @@
+# compiler-service.test -- the compiler service (COMPILER-SERVICE-MILESTONE-1.md):
+# structured front-end diagnostics, the source-provider seam, immutable
+# analysis revisions and their position queries (service/service.tcl).
+#
+# The oracle of every diagnostic test is the compiler's strict compilation
+# itself: what surface::readProgramFile raises (its -diagnostics entries,
+# located as data) is what the service must report for the same sources,
+# compared field by field -- never recovered from formatted text. The census
+# probes (audit/compiler-service/probes/) are rebuilt here on the service's
+# own interface: no command is wrapped or renamed.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+interp recursionlimit {} 100000
+
+namespace eval cs {}
+
+# A fresh directory DIR under the tcltest temporary directory.
+proc cs::Dir {name} {
+    set dir [file join [temporaryDirectory] cs-$name-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    return [file normalize $dir]
+}
+
+# Writes TEXT to PATH exactly (its line endings as they are).
+proc cs::Put {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# A workspace with no front-end cache, warnings MODE.
+proc cs::Workspace {{mode off} args} {
+    return [service::workspace -warnings $mode -cache "" {*}$args]
+}
+
+# The diagnostics of revision REV as {SEVERITY CODE RANGE MESSAGE} lists,
+# RANGE "LINE:COLUMN-ENDLINE:ENDCOLUMN" (or none).
+proc cs::Brief {rev} {
+    return [lmap d [service::diagnostics $rev] {
+        set where none
+        if {[dict get $d range] ne "none"} {
+            set where "[file tail [dict get $d file]]:[dict get $d line]:[dict get $d column]-[dict get $d endLine]:[dict get $d endColumn]"
+        }
+        list [dict get $d severity] [dict get $d code] $where [dict get $d message]
+    }]
+}
+
+# What a strict compilation of the program file PATH reports, as the service
+# reports it: accepted, or each -diagnostics entry as {code text location
+# related}, the location {file start end line column endLine endColumn} or "".
+proc cs::Strict {path args} {
+    if {![catch {surface::readProgramFile $path -warnings off -cache "" {*}$args} hir options]} {
+        return accepted
+    }
+    return [lmap entry [dict get $options -diagnostics] {
+        set location [dict getdef $entry location ""]
+        if {$location ne ""} {
+            set location [service::Range $location]
+        }
+        list [core::ShownCode $entry] [dict get $entry message] $location \
+            [lmap r [dict getdef $entry related {}] {service::Range $r}]
+    }]
+}
+
+# The service's errors for the program file PATH, as cs::Strict reports a
+# strict compilation's.
+proc cs::Service {path args} {
+    set ws [cs::Workspace off {*}$args]
+    try {
+        set rev [service::analyze $ws $path]
+        if {[dict get [service::revision $rev] outcome] eq "ok"} {
+            return accepted
+        }
+        return [lmap d [service::diagnostics $rev -severity error] {
+            set location ""
+            if {[dict get $d range] ne "none"} {
+                set location [service::Range $d]
+            }
+            list [dict get $d code] [dict get $d text] $location [dict get $d related]
+        }]
+    } finally {
+        service::closeWorkspace $ws
+    }
+}
+
+# The text of PATH between two offsets of revision REV's snapshot.
+proc cs::Text {rev range} {
+    return [string range [service::sourceText $rev [dict get $range file]] [dict get $range start] [expr {[dict get $range end] - 1}]]
+}
+
+# Line and column of the first NEEDLE in TEXT (after SKIP characters).
+proc cs::At {text needle {skip 0}} {
+    set i [string first $needle $text $skip]
+    set before [string range $text 0 [expr {$i - 1}]]
+    return [list [expr {[regexp -all \n $before] + 1}] [expr {$i - [string last \n $before]}]]
+}
+
+# ---------------------------------------------------------------------------
+# Structured front-end diagnostics
+
+test cs-syntax-diagnostic-ends {a syntax diagnostic carries its end: the parser's dict, a strict parse's raised entry and the service's diagnostic all locate exactly the unterminated string} -body {
+    set ast [surface::parse "x = 1\ny = \"abc\n" demo.bot -recover 1]
+    set d [lindex [dict get $ast diagnostics] 0]
+    catch {surface::parse "x = 1\ny = \"abc\n" demo.bot} message options
+    set entry [lindex [dict get $options -diagnostics] 0]
+    list [dict get $d line] [dict get $d column] [dict get $d endLine] [dict get $d endColumn] \
+        [service::Range [dict get $entry location]] [dict get $entry summary] [dict get $entry message]
+} -cleanup {unset -nocomplain ast d message options entry} -result {2 5 2 9 {file demo.bot start 10 end 14 line 2 column 5 endLine 2 endColumn 9} {unterminated string} {demo.bot:2:5: unterminated string}}
+
+test cs-loader-diagnostic-location {a loader diagnostic's location is data -- the span its text names, the imported namespace's -- in the strict compilation's entry and in the service's diagnostic alike} -body {
+    set dir [cs::Dir loader]
+    set path [cs::Put $dir/main.bot "import nosuch\nx = 1\n"]
+    set strict [cs::Strict $path]
+    list [lindex $strict 0 0] [dict remove [lindex $strict 0 2] file] [expr {$strict eq [cs::Service $path]}] \
+        [string match "$path:1:8: unknown namespace*" [lindex $strict 0 1]]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path strict} -result {{SURFACE MODULE UNKNOWN-NAMESPACE} {start 7 end 13 line 1 column 8 endLine 1 endColumn 14} 1 1}
+
+test cs-deferred-references-located {the loader's deferred reference errors (every qualified reference the file may not make, raised together) keep each one's location} -body {
+    set dir [cs::Dir deferred]
+    set path [cs::Put $dir/main.bot "x = str::concat(\"a\", \"b\")\ny = list::at(\[1\], 0)\nz = nosuch::f(1)\n"]
+    set strict [cs::Strict $path]
+    list [lmap e $strict {list [lindex $e 0] [dict get [lindex $e 2] line] [dict get [lindex $e 2] column] [dict get [lindex $e 2] endColumn]}] \
+        [expr {$strict eq [cs::Service $path]}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path strict} -result {{{{SURFACE MODULE MISSING-IMPORT} 1 5 16} {{SURFACE MODULE MISSING-IMPORT} 2 5 13} {{SURFACE MODULE UNKNOWN-NAMESPACE} 3 5 14}} 1}
+
+set ::csMoveProgram {import coroutine
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn consume(s: Coroutine{args: [Message], return: Event}, n: int) -> int:
+    e = s(Message {value: n})
+    e.value
+
+fn probe() -> int:
+    coroutine {step} = worker(10)
+    consume(step, 1)
+    consume(step, 2)
+
+probe()
+}
+
+test cs-related-locations {a semantic diagnostic's related locations are ranges: a use after move is located at the use, and its move is its related range} -body {
+    set dir [cs::Dir related]
+    set path [cs::Put $dir/main.bot $::csMoveProgram]
+    set strict [cs::Strict $path]
+    set d [lindex $strict 0]
+    list [lindex $d 0] [dict get [lindex $d 2] line] [dict get [lindex $d 2] column] \
+        [lmap r [lindex $d 3] {list [dict get $r line] [dict get $r column] [dict get $r endColumn]}] \
+        [expr {$strict eq [cs::Service $path]}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path strict d} -result {{CORE SEMANTIC USE-AFTER-MOVE} 20 13 {{19 13 17}} 1}
+
+test cs-warning-origins {a warning keeps its primary and secondary origins: its range and related ranges, its text the compilation's own rendering (notes included)} -body {
+    set dir [cs::Dir warning]
+    set path [cs::Put $dir/main.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\n\nf(2)\n"]
+    set ws [cs::Workspace default]
+    set rev [service::analyze $ws $path]
+    set w [lindex [service::diagnostics $rev -severity warning] 0]
+    set channel [file tempfile log]
+    surface::readProgramFile $path -warnings default -warning-channel $channel -cache ""
+    seek $channel 0
+    set printed [string trimright [read $channel] \n]
+    close $channel
+    file delete $log
+    list [dict get $w code] [dict get $w line]:[dict get $w column] [dict get $w range] \
+        [lmap r [dict get $w related] {string cat [dict get $r line]:[dict get $r column]}] \
+        [expr {[dict get $w text] eq $printed}] [dict get [service::revision $rev] outcome]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir path ws rev w channel log printed} -result {SAME-RETURN-VALUE 3:9 span 4:5 1 ok}
+
+test cs-range-fallbacks {a diagnostic with no source location is range none (no invented position); one with a start and no end is range point (zero-width at its start)} -body {
+    set none [service::Record error [dict create errorcode {POSIX EACCES {permission denied}} message {couldn't open "x.bot": permission denied}]]
+    set point [service::Record error [dict create errorcode {X Y} message m location [dict create file f.bot start 4 line 1 column 5]]]
+    list [dict get $none range] [dict get $none file] [dict get $none line] [dict get $none code] \
+        [dict get $point range] [dict get $point end] [dict get $point endLine] [dict get $point endColumn]
+} -cleanup {unset -nocomplain none point} -result {none {} {} {POSIX EACCES {permission denied}} point 4 1 5}
+
+# ---------------------------------------------------------------------------
+# Diagnostic authority: the service reports what a strict compilation reports
+
+set ::csCorpus [file join $::projectRoot audit diagnostic-recovery corpus]
+
+test cs-corpus-equivalence {on every case of the diagnostic-recovery corpus the service's errors are a strict compilation's: code, text, location and related locations, in order} -body {
+    set differ {}
+    foreach dir [lsort [glob -directory $::csCorpus -type d *]] {
+        set path [file join $dir program.bot]
+        set strict [cs::Strict $path]
+        if {$strict eq "accepted" || $strict ne [cs::Service $path]} {
+            lappend differ [file tail $dir]
+        }
+    }
+    set differ
+} -cleanup {unset -nocomplain differ dir path strict} -result {}
+
+test cs-corpus-text-locations {every corpus diagnostic's structured location is the one its text names (P1's acceptance: data and text agree)} -body {
+    set disagree {}
+    foreach dir [lsort [glob -directory $::csCorpus -type d *]] {
+        foreach e [cs::Strict [file join $dir program.bot]] {
+            lassign $e code text location
+            if {$location eq "" || [string first "[dict get $location file]:[dict get $location line]:[dict get $location column]: " $text] != 0} {
+                lappend disagree [list [file tail $dir] $code]
+            }
+        }
+    }
+    set disagree
+} -cleanup {unset -nocomplain disagree dir e code text location} -result {}
+
+test cs-dependent-diagnostics-suppressed {the service reports hir::recovery::reported, never the lenient HIR's whole list: the dependent diagnostics of a resolution failure stay suppressed} -body {
+    set dir [cs::Dir dependent]
+    set path [cs::Put $dir/main.bot "fn add(a: int, b: int) -> int:\n    a + nosuch\n\nx = add(1, \"two\")\nx\n"]
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $path]
+    set hir [service::hir $rev]
+    list [expr {[llength [hir::diagnostics $hir]] > [llength [hir::recovery::reported $hir]]}] \
+        [expr {[llength [service::diagnostics $rev]] == [llength [hir::recovery::reported $hir]]}] \
+        [dict get [service::revision $rev] outcome] [expr {[cs::Service $path] eq [cs::Strict $path]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir path ws rev hir} -result {1 1 semantic 1}
+
+test cs-warnings-error-policy {under -warnings error the service reports what the strict compilation raises -- the first warning as an error with its own code -- and keeps the HIR for queries} -body {
+    set dir [cs::Dir policy]
+    set path [cs::Put $dir/main.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\n\nf(2)\n"]
+    catch {surface::readProgramFile $path -warnings error -cache ""} message options
+    set entry [lindex [dict get $options -diagnostics] 0]
+    set ws [cs::Workspace error]
+    set rev [service::analyze $ws $path]
+    set d [lindex [service::diagnostics $rev] 0]
+    list [dict get $d code] [expr {[dict get $d text] eq [dict get $entry message]}] \
+        [expr {[service::Range $d] eq [service::Range [dict get $entry location]]}] \
+        [llength [service::diagnostics $rev]] [dict get [service::revision $rev] outcome] \
+        [expr {[service::hir $rev] ne ""}] [dict get [service::at $rev $path 6 1] hover]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir path message options entry ws rev d} -result {{CORE SEMANTIC SAME-RETURN-VALUE} 1 1 1 semantic 1 {fn f(x: int) -> int}}
+
+test cs-warnings-off-policy {under -warnings off no warning pass runs: the service reports none} -body {
+    set dir [cs::Dir off]
+    set path [cs::Put $dir/main.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\n\nf(2)\n"]
+    set ws [cs::Workspace off]
+    set rev [service::analyze $ws $path]
+    list [service::diagnostics $rev] [dict get [service::revision $rev] outcome]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir path ws rev} -result {{} ok}
+
+# ---------------------------------------------------------------------------
+# The source-provider seam (the census's overlay probe, on the real seam)
+
+set ::csMain "import util\nimport list\n\nx = util::f(2)\n\[x + 1, list::get(\[1, 2\], 5, 0)\]\n"
+set ::csUtil "fn f(n: int) -> int:\n    n * 10\n"
+
+# {OUTCOME DIAGNOSTICS VALUE} of revision REV, VALUE its program's value on
+# the compile backend when it has no error (a test of the analysis; the
+# service itself never runs anything).
+proc cs::Summary {rev} {
+    set value ""
+    if {[dict get [service::revision $rev] outcome] eq "ok"} {
+        set value [core::value::show [core::compiler::evalHir [service::hir $rev]] 1]
+    }
+    return [list [dict get [service::revision $rev] outcome] \
+        [lmap d [service::diagnostics $rev] {string cat [lindex [dict get $d code] end] @ [file tail [dict get $d file]]:[dict get $d line]}] \
+        $value]
+}
+
+test cs-overlay-memory-only {a workspace that exists only in memory -- a directory never written -- analyzes exactly like the same files on disk, and nothing is created} -body {
+    set dir [cs::Dir disk]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace default]
+    set disk [cs::Summary [service::analyze $ws $dir/main.bot]]
+    set ghost [file join [temporaryDirectory] cs-ghost-[pid]]
+    service::setDocument $ws $ghost/main.bot $::csMain
+    service::setDocument $ws $ghost/util.bot $::csUtil
+    set rev [service::analyze $ws $ghost/main.bot]
+    list $disk [expr {[cs::Summary $rev] eq $disk}] [file exists $ghost] \
+        [lmap {f e} [dict get [service::hir $rev] files] {file tail [dict get $e path]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws disk ghost rev} -result {{ok METHOD-ELIGIBLE@main.bot:5 {[21, 0]}} 1 0 {main.bot util.bot list.bot}}
+
+test cs-overlay-entry-buffers {an unsaved buffer of the entry wins over the file: a fix of an error on disk analyzes clean, an error typed into valid source is reported} -body {
+    set dir [cs::Dir entry]
+    cs::Put $dir/util.bot $::csUtil
+    cs::Put $dir/broken.bot "import util\nutil::f(\"no\")\n"
+    cs::Put $dir/fine.bot "import util\nutil::f(1)\n"
+    set ws [cs::Workspace]
+    set onDisk [cs::Summary [service::analyze $ws $dir/broken.bot]]
+    service::setDocument $ws $dir/broken.bot "import util\nutil::f(1)\n"
+    set fixed [cs::Summary [service::analyze $ws $dir/broken.bot]]
+    service::setDocument $ws $dir/fine.bot "import util\nutil::f(\"no\")\n"
+    set introduced [cs::Summary [service::analyze $ws $dir/fine.bot]]
+    list $onDisk $fixed $introduced
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws onDisk fixed introduced} -result {{semantic TYPE@broken.bot:2 {}} {ok {} 10} {semantic TYPE@fine.bot:2 {}}}
+
+test cs-overlay-imported-module {an imported module's unsaved buffer changes its interface for its importer; the disk analysis is unchanged afterwards} -body {
+    set dir [cs::Dir imported]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace]
+    set before [cs::Summary [service::analyze $ws $dir/main.bot]]
+    service::setDocument $ws $dir/util.bot "fn f(n: str) -> int:\n    1\n"
+    set edited [cs::Summary [service::analyze $ws $dir/main.bot]]
+    service::clearDocument $ws $dir/util.bot
+    list $before $edited [expr {[cs::Summary [service::analyze $ws $dir/main.bot]] eq $before}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws before edited} -result {{ok {} {[21, 0]}} {semantic TYPE@main.bot:4 {}} 1}
+
+test cs-overlay-alternation {successive versions of one module, alternated v1, v2, v1, v2: each analysis sees its own (no parse or HIR of another version is reused)} -body {
+    set dir [cs::Dir alternate]
+    cs::Put $dir/main.bot $::csMain
+    set ws [cs::Workspace]
+    set results {}
+    foreach body {{n * 10} {n * 100} {n * 10} {n * 100}} {
+        service::setDocument $ws $dir/util.bot "fn f(n: int) -> int:\n    $body\n"
+        lappend results [lindex [cs::Summary [service::analyze $ws $dir/main.bot]] 2]
+    }
+    set results
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws results body} -result {{[21, 0]} {[201, 0]} {[21, 0]} {[201, 0]}}
+
+test cs-overlay-created-and-deleted {a module created in the editor (never saved) resolves; one deleted in the editor (still on disk) is UNKNOWN-NAMESPACE; an unsaved application file named like a standard namespace is MODULE-COLLISION, as on disk} -body {
+    set dir [cs::Dir created]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace]
+    service::setDocument $ws $dir/fresh.bot "fn g() -> int:\n    7\n"
+    service::setDocument $ws $dir/main.bot "import fresh\nfresh::g()\n"
+    set created [cs::Summary [service::analyze $ws $dir/main.bot]]
+    service::clearDocument $ws $dir/main.bot
+    service::deleteDocument $ws $dir/util.bot
+    set deleted [cs::Summary [service::analyze $ws $dir/main.bot]]
+    service::clearDocument $ws $dir/util.bot
+    service::setDocument $ws $dir/list.bot "fn get() -> int:\n    1\n"
+    set collision [cs::Summary [service::analyze $ws $dir/main.bot]]
+    list $created $deleted $collision [file exists $dir/fresh.bot] [file exists $dir/util.bot] [file exists $dir/list.bot]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws created deleted collision} -result {{ok {} 7} {loader UNKNOWN-NAMESPACE@main.bot:1 {}} {loader MODULE-COLLISION@main.bot:2 {}} 0 1 0}
+
+test cs-overlay-stdlib-module {a standard-library module's buffer is read like any other file's (the provider answers for paths; resolution stays the loader's)} -body {
+    set dir [cs::Dir stdlib]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace]
+    service::setDocument $ws [file join $::core::libraryDir list.bot] "fn get(xs, index, default):\n    99\n"
+    lindex [cs::Summary [service::analyze $ws $dir/main.bot]] 2
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws} -result {[21, 99]}
+
+test cs-overlay-module-syntax {a syntax error in an imported module's buffer is a syntax outcome with no HIR, located in the module} -body {
+    set dir [cs::Dir modsyntax]
+    cs::Put $dir/main.bot $::csMain
+    set ws [cs::Workspace]
+    service::setDocument $ws $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
+    set rev [service::analyze $ws $dir/main.bot]
+    cs::Put $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
+    list [cs::Brief $rev] [service::hir $rev] [expr {[cs::Service $dir/main.bot] eq [cs::Strict $dir/main.bot]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{{error {SURFACE SYNTAX} util.bot:2:8-2:9 {expected an expression, found end of line}}} {} 1}
+
+test cs-snapshot-records-sources {a revision records every source its analysis read (with the text and whether a buffer or the disk said so) and every path it found no file at} -body {
+    set dir [cs::Dir snapshot]
+    cs::Put $dir/main.bot $::csMain
+    set ws [cs::Workspace]
+    service::setDocument $ws $dir/util.bot $::csUtil -version 4
+    set sources [dict get [service::revision [service::analyze $ws $dir/main.bot]] sources]
+    list [dict get $sources $dir/main.bot] [dict get $sources $dir/util.bot] \
+        [dict get $sources [file join $::core::libraryDir util.bot]] [dict get $sources [file join $::core::libraryDir list.bot] read]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws sources} -result {{exists 1 from disk read 1} {exists 1 from buffer version 4 read 1} {exists 0 from disk read 0} 1}
+
+test cs-seam-is-not-wrapping {source acquisition is a seam, not wrapping: the front end calls surface::source, and neither core::ReadFile nor `file` is renamed or redefined to serve a buffer} -body {
+    set dir [cs::Dir seam]
+    set ws [cs::Workspace]
+    service::setDocument $ws $dir/main.bot "1 + 2\n"
+    service::analyze $ws $dir/main.bot
+    list [info procs ::file] [string match *ReadFile* [info body ::surface::modules::ParseModule]] \
+        [string match {*surface::source::text*} [info body ::surface::modules::ParseModule]]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws} -result {{} 0 1}
+
+# ---------------------------------------------------------------------------
+# Text normalization: one text, one analysis
+
+test cs-normalize-one-operation {normalization is one explicit operation: CRLF and a lone CR are LF, and nothing else changes} -body {
+    list [surface::source::normalize "a\r\nb\rc\n\r\nd\r"] [surface::source::normalize "é\t x"]
+} -result [list "a\nb\nc\n\nd\n" "é\t x"]
+
+test cs-normalize-disk-equals-buffer {the same document as LF, CRLF and lone-CR files and buffers analyzes identically: the same diagnostics at the same positions, the same facts, the same text} -body {
+    set dir [cs::Dir newlines]
+    set lf "import list\n\nfn add(a: int, b: int) -> int:\n    a + b\n\ntarget = add(1, 2)\nmissing + target\n"
+    set results {}
+    foreach {how ending} {disk \n disk \r\n disk \r buffer \n buffer \r\n buffer \r} {
+        set text [string map [list \n $ending] $lf]
+        set ws [cs::Workspace]
+        if {$how eq "disk"} {
+            cs::Put $dir/main.bot $text
+        } else {
+            cs::Put $dir/main.bot "garbage that must not be read\n"
+            service::setDocument $ws $dir/main.bot $text
+        }
+        set rev [service::analyze $ws $dir/main.bot]
+        set q [service::at $rev $dir/main.bot 7 11]
+        lappend results [list [service::diagnostics $rev] [service::sourceText $rev $dir/main.bot] \
+            [dict get $q construct range] [dict get $q hover] [dict get $q definition]]
+        service::closeWorkspace $ws
+    }
+    set range [lindex $results 0 2]
+    list [llength [lsort -unique $results]] [llength [lindex $results 0 0]] [dict get $range line]:[dict get $range column]-[dict get $range endColumn] \
+        [expr {[dict get $range start] == [string first "target\n" $lf]}] [lindex $results 0 3] [expr {[lindex $results 0 1] eq $lf}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir lf results how ending text ws rev q range} -result {1 1 7:11-17 1 {target: int} 1}
+
+# ---------------------------------------------------------------------------
+# Revisions
+
+test cs-revision-immutable {editing the workspace never changes a retained revision: an older revision keeps its text, diagnostics and answers, while a newer one has the edit's} -body {
+    set dir [cs::Dir immutable]
+    cs::Put $dir/main.bot "fn f(n: int) -> int:\n    n + 1\n\nf(2)\n"
+    set ws [cs::Workspace]
+    set old [service::analyze $ws $dir/main.bot]
+    set before [list [service::sourceText $old $dir/main.bot] [service::diagnostics $old] [service::at $old $dir/main.bot 4 1]]
+    service::setDocument $ws $dir/main.bot "fn f(n: str) -> int:\n    1\n\nf(2)\n"
+    set new [service::analyze $ws $dir/main.bot]
+    set after [list [service::sourceText $old $dir/main.bot] [service::diagnostics $old] [service::at $old $dir/main.bot 4 1]]
+    list [expr {$before eq $after}] [dict get [service::revision $old] outcome] [dict get [service::revision $new] outcome] \
+        [dict get [service::at $old $dir/main.bot 4 1] hover] [dict get [service::at $new $dir/main.bot 4 1] hover]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws old new before after} -result {1 ok semantic {fn f(n: int) -> int} {fn f(n: str) -> int}}
+
+test cs-revision-staleness {stale names the sources that changed since a revision was made, without touching it; a query naming another version of a buffer than the revision read is refused, never answered with the wrong text's positions} -body {
+    set dir [cs::Dir stale]
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace]
+    service::setDocument $ws $dir/main.bot "import util\nutil::f(2)\n" -version 1
+    set rev [service::analyze $ws $dir/main.bot -version 1]
+    set fresh [service::stale $rev]
+    service::setDocument $ws $dir/main.bot "import util\n\nutil::f(2)\n" -version 2
+    set changed [service::stale $rev]
+    set refused [catch {service::at $rev $dir/main.bot 2 1 -version 2} message options]
+    list $fresh [dict keys $changed] [dict get $changed $dir/main.bot was version] [dict get $changed $dir/main.bot now version] \
+        $refused [dict get $options -errorcode] [dict exists [service::at $rev $dir/main.bot 2 1 -version 1] construct] \
+        [dict get [service::revision $rev] version]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev fresh changed refused message options} -result [list {} [list [file join [file normalize [temporaryDirectory]] cs-stale-[pid] main.bot]] 1 2 1 {SERVICE STALE} 1 1]
+
+test cs-revision-release {release drops everything the service holds of a revision; closing a workspace releases its revisions; a released revision is an error to use} -body {
+    set dir [cs::Dir release]
+    cs::Put $dir/main.bot "fn f(n: int) -> int:\n    n + 1\n\nf(2)\n"
+    set base [service::state]
+    set ws [cs::Workspace]
+    set a [service::analyze $ws $dir/main.bot]
+    set b [service::analyze $ws $dir/main.bot]
+    service::prepare $a
+    set held [dict get [service::state] revisions]
+    service::release $a
+    set one [service::revisions $ws]
+    set failed [catch {service::at $a $dir/main.bot 1 1} message options]
+    service::closeWorkspace $ws
+    list $held $one $failed [dict get $options -errorcode] [expr {[service::state] eq $base}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir base ws a b held one failed message options} -result {2 rev* 1 {SERVICE UNKNOWN-REVISION} 1} -match glob
+
+test cs-revision-bounded {analyzing, querying and releasing again and again leaves the service holding one revision, and the loader's parse cache within its bound} -body {
+    set dir [cs::Dir bounded]
+    set ws [cs::Workspace]
+    set counts {}
+    for {set i 0} {$i < 30} {incr i} {
+        service::setDocument $ws $dir/main.bot "fn f(n: int) -> int:\n    n + $i\n\nf(2)\n"
+        set rev [service::analyze $ws $dir/main.bot]
+        service::at $rev $dir/main.bot 4 1
+        lappend counts [dict get [service::state] revisions]
+        service::release $rev
+    }
+    list [lsort -unique $counts] [dict get [service::state] revisions] [expr {[dict size $::surface::modules::parsed] <= 64}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws counts i rev} -result {1 0 1}
+
+# ---------------------------------------------------------------------------
+# Activation: a retained revision answers about its own declarations
+
+set ::csGeoA {struct Point:
+    x: int
+    y: int
+
+type Small = Int in 0..10
+
+fn make(n: Small) -> Point:
+    Point {x: n, y: n + 1}
+}
+set ::csGeoB {struct Point:
+    x: str
+
+type Small = Int in 100..200
+
+fn make(n: Small) -> Point:
+    Point {x: "b"}
+}
+
+test cs-activation-interleaved {queries of retained revisions whose programs declare conflicting types alternate with other analyses and answer exactly as right after their own analysis; without activation the registries would answer for another program} -body {
+    set dir [cs::Dir activation]
+    cs::Put $dir/a/geo.bot $::csGeoA
+    cs::Put $dir/a/main.bot "import geo\n\np = geo::make(3)\np.x\n"
+    cs::Put $dir/b/geo.bot $::csGeoB
+    cs::Put $dir/b/main.bot "import geo\n\np = geo::make(150)\np.x\n"
+    cs::Put $dir/c/main.bot "z = 1\nz\n"
+    set ws [cs::Workspace]
+    set positions {{3 1} {3 5} {3 15} {4 1} {4 3}}
+    set a [service::analyze $ws $dir/a/main.bot]
+    set answersA [lmap p $positions {service::at $a $dir/a/main.bot {*}$p}]
+    set b [service::analyze $ws $dir/b/main.bot]
+    set answersB [lmap p $positions {service::at $b $dir/b/main.bot {*}$p}]
+    service::analyze $ws $dir/c/main.bot
+    set again {}
+    foreach round {1 2} {
+        lappend again [expr {[lmap p $positions {service::at $a $dir/a/main.bot {*}$p}] eq $answersA}]
+        lappend again [expr {[lmap p $positions {service::at $b $dir/b/main.bot {*}$p}] eq $answersB}]
+        service::analyze $ws $dir/c/main.bot
+    }
+    list $again [dict get [lindex $answersA 1] hover] [dict get [lindex $answersB 1] hover] \
+        [dict get [lindex $answersA 4] type text] [dict get [lindex $answersB 4] type text]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws positions a b answersA answersB again round} -result {{1 1 1 1} {fn geo::make(n: int[geo::Small]) -> geo::Point} {fn geo::make(n: int[geo::Small]) -> geo::Point} int str}
+
+test cs-activation-control {the registries a query reads really are another program's after a later analysis: a retained revision's refined type, shown without activation, is unknown; through the service it is shown} -body {
+    set dir [cs::Dir control]
+    cs::Put $dir/a/geo.bot $::csGeoA
+    cs::Put $dir/a/main.bot "import geo\n\nfn id(n: geo::Small) -> geo::Small:\n    n\n\nid(3)\n"
+    cs::Put $dir/c/main.bot "z = 1\nz\n"
+    set ws [cs::Workspace]
+    set a [service::analyze $ws $dir/a/main.bot]
+    set b [dict get [service::at $a $dir/a/main.bot 3 4] binding id]
+    service::analyze $ws $dir/c/main.bot
+    set hir [service::hir $a]
+    set block [dict get $hir exprs [dict get $hir bindings $b declaredBy] value]
+    set failed [catch {hir::types::show [hir::type $hir [dict get $hir exprs $block resultType]]} message]
+    list $failed [dict get [service::at $a $dir/a/main.bot 3 4] hover]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws a b hir block failed message} -result {1 {fn id(n: int[geo::Small]) -> int[geo::Small]}}
+
+# ---------------------------------------------------------------------------
+# Position queries
+
+set ::csProgram {import util
+import list
+
+fn add(a: int, b) -> int:
+    t = a + b
+    t
+
+fn twice(f: Fn{args: [int], return: int}, n: int) -> int:
+    f(f(n))
+
+fn inc(n: int) -> int:
+    n + 1
+
+{left: l, right: r} = {left: 1, right: 2}
+xs = [1, 2, 3]
+total = loop x in xs:
+    add(x, l)
+q = util::f(2)
+fns = [inc, inc]
+w = twice(inc, r)
+list::at(xs, 0)
+}
+
+# A revision of csProgram (util.bot beside it), and its path: {REV PATH WS}.
+proc cs::Program {{name program}} {
+    set dir [cs::Dir $name]
+    cs::Put $dir/main.bot $::csProgram
+    cs::Put $dir/util.bot $::csUtil
+    set ws [cs::Workspace]
+    return [list [service::analyze $ws $dir/main.bot] $dir/main.bot $ws $dir]
+}
+
+# The query at the first NEEDLE of csProgram (SKIP as cs::At's).
+proc cs::Query {rev path needle {skip 0}} {
+    return [service::at $rev $path {*}[cs::At $::csProgram $needle $skip]]
+}
+
+test cs-definition-names {a definition is the declaration's name where the source writes it -- a function's, a local's, a parameter's, a destructured field's, a loop variable's, an imported module function's -- never the whole statement} -body {
+    lassign [cs::Program definitions] rev path ws dir
+    set result {}
+    foreach {needle skip} {"add(x" 0 "t\n\nfn twice" 0 "a + b" 0 "l)" 0 "x, l" 0 "util::f(2)" 0 "inc," 0} {
+        set q [cs::Query $rev $path $needle $skip]
+        set d [dict get $q definition]
+        lappend result [list [file tail [dict get $d file]] [dict get $d line] [cs::Text $rev $d]]
+    }
+    set result
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir result needle skip q d} -result {{main.bot 4 add} {main.bot 5 t} {main.bot 4 a} {main.bot 14 l} {main.bot 16 x} {util.bot 1 f} {main.bot 11 inc}}
+
+test cs-declaration-sites {a declaration's name is a construct of its own: at it, the binding, its type, its definition (itself) and its references; a binding the front end introduced (a destructuring's temporary) has no name to be at} -body {
+    lassign [cs::Program declarations] rev path ws dir
+    set q [cs::Query $rev $path "add(a"]
+    set field [cs::Query $rev $path "left: l"]
+    list [dict get $q construct kind] [dict get $q binding name] [dict get $q hover] \
+        [expr {[dict get $q definition] eq [dict get $q construct range]}] [llength [dict get $q references]] \
+        [dict get $field construct kind] [string match *#* [dict getdef $field binding name ""]]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir q field} -result {declaration add {fn add(a: int, b: int) -> int} 1 1 project 0}
+
+test cs-definition-intrinsic {a compiler intrinsic has a binding and a type but no definition, and says why} -body {
+    lassign [cs::Program intrinsic] rev path ws dir
+    set q [cs::Query $rev $path "list::at"]
+    list [dict get $q binding name] [dict get $q binding kind] [dict exists $q definition] [dict get $q unavailable definition]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir q} -result {list::at root 0 {a compiler intrinsic: no source declares it}}
+
+test cs-references-by-identity {references are every reference resolved to the same binding, never the same name: two bindings named n, in two functions, have their own; a module's f and a qualified call of it are one} -body {
+    lassign [cs::Program references] rev path ws dir
+    set inc [cs::Query $rev $path "n: int) -> int:\n    n + 1"]
+    set twice [cs::Query $rev $path "n: int) -> int:\n    f(f"]
+    set incRefs [lmap r [dict get $inc references] {dict get $r line}]
+    set twiceRefs [lmap r [dict get $twice references] {dict get $r line}]
+    set fRefs [lmap r [dict get [cs::Query $rev $path "f(f(n"] references] {list [dict get $r line] [dict get $r column]}]
+    list $incRefs $twiceRefs $fRefs [expr {[dict get $inc binding id] ne [dict get $twice binding id]}] \
+        [lmap r [dict get [cs::Query $rev $path "util::f"] references] {file tail [dict get $r file]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir inc twice incRefs twiceRefs fRefs} -result {12 9 {{9 5} {9 7}} 1 main.bot}
+
+test cs-references-match-a-walk {for every binding the program refers to, the references the service returns are exactly the HIR's refs of that binding} -body {
+    lassign [cs::Program walk] rev path ws dir
+    set hir [service::hir $rev]
+    set wrong {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || [dict get $node binding] eq ""} continue
+        set origin [lrange [dict get $node origin] 2 end]
+        if {[dict get $hir files [lindex [dict get $node origin] 1] path] ne $path} continue
+        set q [service::at $rev $path [dict get $origin line] [dict get $origin column]]
+        if {![dict exists $q binding] || [dict get $q binding id] ne [dict get $node binding]} continue
+        set expected {}
+        foreach x [hir::walk $hir] {
+            if {[dict get $hir exprs $x kind] eq "ref" && [dict get $hir exprs $x binding] eq [dict get $node binding]} {
+                lappend expected [service::OriginRange $hir [dict get $hir exprs $x origin]]
+            }
+        }
+        if {$expected ne [dict get $q references]} {
+            lappend wrong [dict get $node name]
+        }
+    }
+    set wrong
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir hir wrong e node origin q expected x} -result {}
+
+test cs-hover-signatures {hover names a function by its signature and a value by its type, the way source spells them: never an expression id} -body {
+    lassign [cs::Program hover] rev path ws dir
+    lmap needle {"add(x" "twice(inc" "inc, inc" "fns =" "total =" "util::f" "list::at" "q ="} {
+        dict get [cs::Query $rev $path $needle] hover
+    }
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir} -result {{fn add(a: int, b: int) -> int} {fn twice(f: Fn{args: [int], return: int, errors: []}, n: int) -> int} {fn inc(n: int) -> int} {fns: List[Fn{args: [int], return: int, errors: []}]{length: 2}} {total: List[int]{length: 3}} {fn util::f(n: int) -> int} {list::at: Fn{args: [any, any], return: any, errors: [IndexNotFound]}} {q: int}}
+
+test cs-hover-no-internal-ids {at every position of the program, no type or hover text shows an internal id (block(eN), function eN, a BindingId)} -body {
+    lassign [cs::Program noids] rev path ws dir
+    set leaks {}
+    set line 0
+    foreach text [split $::csProgram \n] {
+        incr line
+        for {set column 1} {$column <= [string length $text] + 1} {incr column} {
+            set q [service::at $rev $path $line $column]
+            foreach fact {hover type} {
+                if {[dict exists $q $fact] && [regexp {block\(|\me[0-9]+\M|\mb[0-9]+\M} [dict get $q $fact]]} {
+                    lappend leaks [list $line $column [dict get $q $fact]]
+                }
+            }
+        }
+    }
+    set leaks
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir leaks line text column q fact} -result {}
+
+test cs-facts-explicit {every fact of a query is either answered or listed unavailable with a reason, never both, never neither: at a name, at a literal, in whitespace} -body {
+    lassign [cs::Program explicit] rev path ws dir
+    set result {}
+    foreach position {{4 4} {14 30} {3 1}} {
+        set q [service::at $rev $path {*}$position]
+        set answered [lmap fact $::service::facts {if {[dict exists $q $fact]} {set fact} else continue}]
+        set missing [dict keys [dict get $q unavailable]]
+        lappend result [expr {[lsort [concat $answered $missing]] eq [lsort $::service::facts] && [llength [concat $answered $missing]] == [llength $::service::facts]}] $missing
+    }
+    set result
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir result position q answered missing} -result {1 {} 1 {binding definition references} 1 {construct binding type hover definition references}}
+
+test cs-semantic-error-queries {a revision with semantic errors still answers from its lenient HIR: resolved names have their bindings and types; an unresolved one says it is unresolved; the diagnostics at the position come with their topic} -body {
+    set dir [cs::Dir semantic]
+    set text "fn add(a: int, b: int) -> int:\n    a + nosuch\n\nx = add(1, \"two\")\nx\n"
+    cs::Put $dir/main.bot $text
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    set unbound [service::at $rev $dir/main.bot 2 9]
+    set call [service::at $rev $dir/main.bot 4 12]
+    set x [service::at $rev $dir/main.bot 5 1]
+    list [dict get [service::revision $rev] outcome] [lmap d [service::diagnostics $rev] {lindex [dict get $d code] end}] \
+        [dict get $unbound construct kind] [dict get $unbound unavailable binding] \
+        [lmap d [dict get $unbound diagnostics] {lindex [dict get $d code] end}] [lmap t [dict get $unbound topics] {dict get $t id}] \
+        [dict get $x hover] [dict get $x definition line]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir text ws rev unbound call x} -result {semantic UNBOUND ref {the name is not resolved (its diagnostic says why)} UNBOUND error.unbound {x: int} 4}
+
+test cs-syntax-error-queries {a revision of a program with a syntax error has no HIR and says so: syntax facts of the recovered AST and the diagnostics remain, every semantic fact is unavailable with the reason; a module that fails to parse has its syntax facts too} -body {
+    set dir [cs::Dir syntax]
+    cs::Put $dir/main.bot "import util\nx = util::f(1) +\ny = 2\n"
+    cs::Put $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    set q [service::at $rev $dir/main.bot 3 1]
+    set entry [list [dict get [service::revision $rev] outcome] [service::hir $rev] [dict get $q syntax kind] \
+        [lsort [dict keys [dict get $q unavailable]]] [string match "no semantic analysis*syntax*" [dict get $q unavailable type]]]
+    service::setDocument $ws $dir/main.bot "import util\nx = util::f(1)\n"
+    set rev [service::analyze $ws $dir/main.bot]
+    list $entry [dict get [service::revision $rev] outcome] [dict get [service::at $rev $dir/util.bot 2 5] syntax kind] \
+        [dict get [service::at $rev $dir/main.bot 2 1] syntax kind]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev q entry} -result {{syntax {} bind {binding construct definition hover references type} 1} syntax error bind}
+
+test cs-unicode-positions {positions count Unicode scalar values of the analyzed text: after BMP, astral and combining characters on the same line, a name is found at its scalar column} -body {
+    set dir [cs::Dir unicode]
+    set result {}
+    foreach prefix [list "\"ab\"" "\"éé\"" "\"\U0001F600\"" "\"é\""] {
+        set text "target = 1\n# $prefix\ny = \[$prefix, target\]\n"
+        cs::Put $dir/main.bot $text
+        set ws [cs::Workspace]
+        set rev [service::analyze $ws $dir/main.bot]
+        set column [expr {[string first target [lindex [split $text \n] 2]] + 1}]
+        set q [service::at $rev $dir/main.bot 3 $column]
+        lappend result [list $column [dict get $q construct kind] [dict get $q binding name] [dict get $q construct range column] \
+            [expr {[dict get $q position offset] == [string first "target\]" $text]}]]
+        service::closeWorkspace $ws
+    }
+    set result
+} -cleanup {file delete -force $dir; unset -nocomplain dir result prefix text ws rev column q} -result {{12 ref target 12 1} {12 ref target 12 1} {11 ref target 11 1} {12 ref target 12 1}}
+
+test cs-position-checks {a position outside the analyzed text, and a path the revision read no text at, are errors of the query} -body {
+    lassign [cs::Program positions] rev path ws dir
+    list [catch {service::at $rev $path 999 1} m o] [dict get $o -errorcode] \
+        [catch {service::at $rev $path 1 99} m o] [dict get $o -errorcode] \
+        [catch {service::at $rev [file join $dir nowhere.bot] 1 1} m o] [dict get $o -errorcode] \
+        [dict exists [service::at $rev $path 1 12] position]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir m o} -result {1 {SERVICE POSITION} 1 {SERVICE POSITION} 1 {SERVICE NOT-A-SOURCE} 1}
+
+# The innermost expression of HIR at OFFSET of file F, by a scan of every
+# expression (the census's linear lookup): the smallest range holding it,
+# the first in pre-order among equal ones.
+proc cs::ScanInnermost {hir f offset} {
+    set best ""
+    foreach e [hir::walk $hir] {
+        set origin [dict get $hir exprs $e origin]
+        if {[lindex $origin 0] ne "file" || [lindex $origin 1] ne $f} continue
+        set o [lrange $origin 2 end]
+        set s [dict get $o start]
+        set x [dict get $o end]
+        if {!(($s <= $offset && $offset < $x) || ($s == $x && $offset == $s))} continue
+        if {$best eq "" || $x - $s < [lindex $best 1]} {
+            set best [list $e [expr {$x - $s}]]
+        }
+    }
+    return [lindex $best 0]
+}
+
+test cs-index-matches-scan {the position index finds, at every offset of a program and of the standard library module it loads, the innermost expression a scan of every expression finds} -body {
+    lassign [cs::Program index] rev path ws dir
+    set hir [service::hir $rev]
+    set differ {}
+    dict for {f entry} [dict get $hir files] {
+        set file [dict get $entry path]
+        set text [service::sourceText $rev $file]
+        set starts [service::LineStarts $text]
+        for {set offset 0} {$offset <= [string length $text]} {incr offset} {
+            set line [llength [lmap s $starts {if {$s <= $offset} {set s} else continue}]]
+            set column [expr {$offset - [lindex $starts [expr {$line - 1}]] + 1}]
+            set q [service::at $rev $file $line $column]
+            set found [expr {[dict exists $q construct expr] ? [dict get $q construct expr] : ""}]
+            if {[dict exists $q construct] && [dict get $q construct kind] eq "declaration"} continue
+            set scanned [cs::ScanInnermost $hir $f $offset]
+            if {$found ne $scanned} {
+                lappend differ [list [file tail $file] $offset $found $scanned]
+            }
+        }
+    }
+    lrange $differ 0 4
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir hir differ f entry file text starts offset line column q found scanned} -result {}
+
+# ---------------------------------------------------------------------------
+# Compilerpedia
+
+test cs-topics-diagnostic {a diagnostic's topic is the one main.tcl's help line names: compilerpedia::topicForDiagnostic of its code and text} -body {
+    set dir [cs::Dir topic]
+    cs::Put $dir/main.bot "import list\n\nfn backwards(xs: List\[int\]) -> List\[int\]:\n    loop i down from xs.length() - 1 through 0:\n        xs.at(i)\n\n0\n"
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    set d [lindex [service::diagnostics $rev] 0]
+    list [dict get [service::explain $d] id] [expr {[dict get [service::explain $d] id] eq [compilerpedia::topicForDiagnostic [dict get $d code] [dict get $d text]]}] \
+        [lmap t [dict get [service::at $rev $dir/main.bot [dict get $d line] [dict get $d column]] topics] {list [dict get $t id] [lindex [dict get $t for] 0]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev d} -result {proof.list-bounds 1 {{proof.list-bounds diagnostic}}}
+
+test cs-topics-symbol {a standard-library symbol the program resolves to has its topic, by its exact identity; a program's own function named like one has none} -body {
+    set dir [cs::Dir symbol]
+    cs::Put $dir/main.bot "import list\n\nfn at(xs, i):\n    i\n\nys = \[1, 2\]\nlist::at(ys, 0)\nlist::get(ys, 0, 9)\nat(ys, 1)\n"
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $dir/main.bot]
+    lmap position {{7 1} {8 1} {9 1}} {
+        lmap t [dict get [service::at $rev $dir/main.bot {*}$position] topics] {list [dict get $t id] [dict get $t for]}
+    }
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{{stdlib.list::at {symbol list::at}}} {{stdlib.list::get {symbol list::get}}} {}}
+
+test cs-compilerpedia-standalone {Compilerpedia stays a catalogue: it never calls the service, and its lookups -- a page, a diagnostic's topic, a symbol's -- run with neither the service nor the compiler loaded} -body {
+    set channel [open [file join $::projectRoot compilerpedia compilerpedia.tcl]]
+    set source [read $channel]
+    close $channel
+    set probe [makeFile "source [list [file join $::projectRoot compilerpedia compilerpedia.tcl]]\ncompilerpedia::lookup cli.options\nset t \[compilerpedia::topicForDiagnostic {CORE SEMANTIC UNBOUND} x\]\nset s \[compilerpedia::symbolTopics list::at\]\nputs \[list \$t \$s \[namespace exists ::service\] \[namespace exists ::hir\] \[namespace exists ::surface\]\]\n" cs-pedia.tcl]
+    list [regexp {service::} $source] [exec [info nameofexecutable] $probe]
+} -cleanup {removeFile cs-pedia.tcl; unset -nocomplain channel source probe} -result {0 {error.unbound stdlib.list::at 0 0 0}}
+
+# ---------------------------------------------------------------------------
+# The front-end cache: content, never buffers
+
+test cs-cache-not-from-buffers {an analysis that read a buffer leaves the persistent cache alone (stats: buffered); one that read only the disk is kept, and a later analysis whose buffers equal the disk is served by it -- validity is contents} -body {
+    set dir [cs::Dir cache]
+    set cache [cs::Dir cachedir]
+    cs::Put $dir/main.bot $::csMain
+    cs::Put $dir/util.bot $::csUtil
+    set ws [service::workspace -warnings off -cache $cache]
+    service::setDocument $ws $dir/util.bot "fn f(n: int) -> int:\n    n * 100\n"
+    surface::cache::resetStats
+    set buffered [cs::Summary [service::analyze $ws $dir/main.bot]]
+    set afterBuffer [list [dict get [surface::cache::stats] buffered] [llength [glob -nocomplain -directory $cache *.hirc]]]
+    service::clearDocument $ws $dir/util.bot
+    surface::cache::resetStats
+    set disk [cs::Summary [service::analyze $ws $dir/main.bot]]
+    set afterDisk [list [dict get [surface::cache::stats] stores] [llength [glob -nocomplain -directory $cache *.hirc]]]
+    service::setDocument $ws $dir/util.bot $::csUtil
+    surface::cache::resetStats
+    set same [cs::Summary [service::analyze $ws $dir/main.bot]]
+    set hits [dict get [surface::cache::stats] hits]
+    service::setDocument $ws $dir/util.bot "fn f(n: int) -> int:\n    n * 1000\n"
+    surface::cache::resetStats
+    set edited [cs::Summary [service::analyze $ws $dir/main.bot]]
+    list $buffered $afterBuffer $disk $afterDisk $same $hits $edited [dict get [surface::cache::stats] stale]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir $cache; unset -nocomplain dir cache ws buffered afterBuffer disk afterDisk same hits edited} -result {{ok {} {[201, 0]}} {1 0} {ok {} {[21, 0]}} {1 1} {ok {} {[21, 0]}} 1 {ok {} {[2001, 0]}} 1}
+
+test cs-cache-lenient-entry {a lenient analysis served from the cache reports exactly what its build did} -body {
+    set dir [cs::Dir lenient]
+    set cache [cs::Dir lenientcache]
+    set path [file join $::csCorpus resolution-taint program.bot]
+    set ws [service::workspace -warnings off -cache $cache]
+    set built [service::diagnostics [service::analyze $ws $path]]
+    surface::cache::resetStats
+    set read [service::diagnostics [service::analyze $ws $path]]
+    list [dict get [surface::cache::stats] hits] [expr {$built eq $read}] [llength $built]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir $cache; unset -nocomplain dir cache path ws built read} -result {1 1 2}
+
+cleanupTests

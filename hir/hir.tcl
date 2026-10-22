@@ -1437,6 +1437,23 @@ proc hir::originLocation {hir origin} {
     return "$path:[dict get $fields line]:[dict get $fields column]"
 }
 
+# The source span of ORIGIN in HIR -- {file PATH start S end E line L column
+# C endLine L2 endColumn C2}, PATH its file's path, the span a surface
+# AST records -- or "" for an origin that is not a source span ({ir PATH}).
+# Where originLocation gives a diagnostic's text its location, this gives it
+# as data (core::raiseDiagnostics' `location`).
+proc hir::originSpan {hir origin} {
+    if {[lindex $origin 0] ne "file"} {
+        return ""
+    }
+    set fields [lrange $origin 2 end]
+    set span [dict create file [dict get [sourceFile $hir [lindex $origin 1]] path]]
+    foreach key {start end line column endLine endColumn} {
+        dict set span $key [dict get $fields $key]
+    }
+    return $span
+}
+
 # The type form of TypeId T.
 proc hir::type {hir t} {
     return [dict get $hir types $t]

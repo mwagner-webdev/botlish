@@ -173,7 +173,7 @@ test lex-spans {tokens carry file, offsets, line and column} -body {
 test lex-error-code {syntax errors carry a diagnostic and a located message} -body {
     catch {surface::lex "x = \"abc" demo.bot} message options
     list $message [lrange [dict get $options -errorcode] 0 1] [lindex [dict get $options -errorcode] 2]
-} -result {{demo.bot:1:5: unterminated string} {SURFACE SYNTAX} {file demo.bot line 1 column 5 start 4 end 8 message {unterminated string}}}
+} -result {{demo.bot:1:5: unterminated string} {SURFACE SYNTAX} {file demo.bot line 1 column 5 start 4 end 8 message {unterminated string} endLine 1 endColumn 9}}
 
 test lex-empty {empty and comment-only input} -body {
     list [tokens ""] [tokens "# nothing\n\n"]
