@@ -4,6 +4,7 @@
 #
 #   tclsh9.0 bench/root-plans.tcl -fallback BINARY ?-runs N? ?-rounds R?
 #                                 ?-stress-runs N? ?-executables 0|1? ?-name NAME?
+#                                 ?-workloads NAME,...? ?-code NAME,...?
 #
 # BINARY is a driver built from this checkout with the `fallback-roots`
 # feature (cargo build --release --features fallback-roots --target-dir
@@ -37,7 +38,9 @@
 #
 # -name names BINARY in the report (default "fallback"), for comparing a
 # driver of another build -- a probe's (audit/windows-unwind) -- the same
-# way.
+# way. -workloads runs only those; -code prints, after each named
+# workload's rows, the machine code each driver compiles it to
+# (botlish-native vcode): where a difference comes from.
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 set args $argv
@@ -46,10 +49,10 @@ source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root tests binary-header.tcl]
 
-set options [dict create -fallback "" -runs 20 -rounds 5 -stress-runs 3 -executables 1 -name fallback]
+set options [dict create -fallback "" -runs 20 -rounds 5 -stress-runs 3 -executables 1 -name fallback -workloads "" -code ""]
 foreach {option value} $args {
     if {![dict exists $options $option]} {
-        puts stderr "usage: tclsh9.0 bench/root-plans.tcl -fallback BINARY ?-runs N? ?-rounds R? ?-stress-runs N? ?-executables 0|1? ?-name NAME?"
+        puts stderr "usage: tclsh9.0 bench/root-plans.tcl -fallback BINARY ?-runs N? ?-rounds R? ?-stress-runs N? ?-executables 0|1? ?-name NAME? ?-workloads NAME,...? ?-code NAME,...?"
         exit 2
     }
     dict set options $option $value
@@ -60,6 +63,8 @@ set stressRuns [dict get $options -stress-runs]
 set executables [dict get $options -executables]
 set fallback [dict get $options -fallback]
 set otherName [dict get $options -name]
+set only [split [dict get $options -workloads] ,]
+set code [split [dict get $options -code] ,]
 if {$fallback eq "" || ![file isfile $fallback]} {
     puts stderr "usage: tclsh9.0 bench/root-plans.tcl -fallback BINARY ...: BINARY is a fallback-roots driver"
     exit 2
@@ -199,6 +204,7 @@ puts "  native:   $native"
 puts "  $otherName: $fallback"
 try {
     dict for {name workload} $workloads {
+        if {$only ne {} && $name ni $only} continue
         lassign $workload kind what
         if {$kind eq "file"} {
             set hir [surface::readProgramFile $what -warnings off]
@@ -249,6 +255,17 @@ try {
             append line [format "%s code %d bytes%s   " [label $which] $total $unwind]
         }
         puts $line
+        if {$name in $code} {
+            foreach which {native fallback} {
+                withEnv [list BOTLISH_NATIVE_BIN [dict get $drivers $which]] {
+                    set lines [native::Driver vcode $text]
+                }
+                puts "  code ([label $which]):"
+                foreach line $lines {
+                    puts "    $line"
+                }
+            }
+        }
     }
 } finally {
     file delete -force $work

@@ -1023,12 +1023,20 @@ mod object_format_tests {
     #[test]
     fn a_windows_object_has_an_unwind_entry_for_every_function() {
         use cranelift_object::object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
+        // `g` holds six values across its call: its frame saves callee-saved
+        // registers, the others' do not, so each entry must name its own.
         let text = concat!(
             "nir 1\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
-            "    %0 = int 7\n    %1 = call 1 %0\n    ret %1\nend\n\n",
+            "    %0 = int 7\n    %1 = call 2 %0\n    ret %1\nend\n\n",
             "func 1 \"f\" params=1 env=0 regs=2 pnames=\"x\" captures=0\n",
-            "    %1 = op listnew %0 %0\n    ret %1\nend\n",
+            "    %1 = op listnew %0 %0\n    ret %1\nend\n\n",
+            "func 2 \"g\" params=1 env=0 regs=15 pnames=\"x\" captures=0\n",
+            "    %1 = op imul %0 %0\n    %2 = op iadd %1 %0\n    %3 = op imul %2 %0\n",
+            "    %4 = op iadd %3 %1\n    %5 = op imul %4 %0\n    %6 = op iadd %5 %2\n",
+            "    %7 = call 1 %0\n    %8 = op listlen %7\n",
+            "    %9 = op iadd %8 %1\n    %10 = op iadd %9 %2\n    %11 = op iadd %10 %3\n",
+            "    %12 = op iadd %11 %4\n    %13 = op iadd %12 %5\n    %14 = op iadd %13 %6\n    ret %14\nend\n",
         );
         let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
         let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc")).unwrap_or_else(|e| panic!("{}", e.message()));
@@ -1048,6 +1056,7 @@ mod object_format_tests {
             }
         }
         expected.sort_by_key(|e| e.0);
+        assert!(expected.iter().any(|e| e.3 != expected[0].3), "frames of more than one shape: {expected:x?}");
         assert_eq!(pbytes.len(), 12 * expected.len());
         assert_eq!(relocations.len(), 3 * expected.len());
         let xdata_symbol = file.symbols().find(|s| s.section_index() == Some(xdata.index()) && s.kind() == cranelift_object::object::SymbolKind::Section).unwrap();
