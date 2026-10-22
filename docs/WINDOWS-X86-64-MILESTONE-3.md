@@ -752,9 +752,12 @@ check; on Windows aot-facts.
 | `effects-infallible` | a function with a Botlish call proven infallible: callers do not check | skipped | killed: rust (`a_botlish_call_fails_exactly_where_depth_is_checked`, `call_effects_propagate_transitively_and_recursively`) |
 
 On Linux x86-64 (controlled experiment, this container): the nine
-host-independent mutants all killed, by the Rust tests, which build Windows
-objects and unwind information on any x86-64 host; the eleven Windows-only
-mutants (`%% windows-x86_64`) skipped.
+x86-64 mutants (`%% linux-x86_64 windows-x86_64`) all killed, by the Rust
+tests, which build Windows objects and unwind information on any x86-64
+host; the eleven Windows-only mutants (`%% windows-x86_64`) skipped. On
+an AArch64 host all twenty are skipped: its build has no x86-64 backend to
+make Windows code with, so the tests that detect the nine do not exist
+there. @@MACOS-MUTANTS
 On Windows x86-64 (real Windows: run
 [39850963305](https://github.com/mwagner-webdev/botlish/actions/runs/39850963305),
 96e2296, the full tier's item `windows-unwind-mutants`): all twenty
@@ -849,6 +852,7 @@ walk and stack guard are unchanged.
 | ac93df3's (both builds) | the single-step test: "every activation returned" | the test's own bookkeeping: its last trap, back in the test, returned before popping the program entry's activation; no instruction unwound wrongly | popped there too (19a04b2) |
 | the same | dumpbin's Botlish entries not found | dumpbin's listing of the image names no function | the entries are the one run matching the object's table: `audit/windows-unwind/tools/dumpbin-entries.tcl` (19a04b2) |
 | dbbbcdd's mutation run | `walk-stops-at-rust` survived every detector | no test collected with a Rust frame between Botlish frames: the caller-root test's function-value call goes through `rt_call_value`, which jumps to the closure (section 7.3) | the caller-root test calls `mutable_array::generate`, whose factory collects; the comments and AGENTS.md that named `rt_call_value` corrected (ee1559e) |
+| 96e2296's macOS run | the full tier's `windows-unwind-mutants` failed on macOS arm64 | the nine encoder and object mutants applied to every host, but the tests that kill them are x86-64 hosts' only (an AArch64 build has no x86-64 backend): on macOS they survive | they apply to x86-64 hosts only (@@HOSTCOMMIT) |
 | ee1559e's mutation run | `walk-stops-at-rust` survived again, killed on Linux by the same test | the list freed by the missed root was never reused before the program read it: the use after free read intact memory | the collector poisons what it frees in that test (`Heap::set_poison_for_test`, 96e2296) |
 
 ## 8. Performance

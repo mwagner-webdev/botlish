@@ -13,15 +13,18 @@
 #   replacement
 #   >>>>
 #
-# A mutant with no %% line applies on every host: the encoder and the
-# object's sections are code every host compiles and unit-tests (a Windows
-# object is made on any host). One that only Windows runs is
-# `%% windows-x86_64`. Lines starting with # outside an edit are comments.
+# The encoder's and the object's mutants apply on every x86-64 host
+# (`%% linux-x86_64 windows-x86_64`): the Rust tests that detect them make
+# Windows x86-64 code, which any x86-64 build can and an AArch64 build
+# cannot (it has no x86-64 backend; on macOS and Linux AArch64 they are
+# skipped). One that only Windows runs is `%% windows-x86_64`. Lines
+# starting with # outside an edit are comments.
 
 # ---------------------------------------------------------------------------
 # The UNWIND_INFO encoder (codegen/unwind.rs)
 
 @@ unwind-frame-offset-zero the frame offset left 0, Cranelift's own encoding: the establisher frame at RBP, above the saves
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/unwind.rs
 <<<<
         RBP | ((clobbers / 16) as u8) << 4,
@@ -30,6 +33,7 @@
 >>>>
 
 @@ unwind-save-scaled-by-16 a general register's save offset counted in 16 bytes, as Cranelift does
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/unwind.rs
 <<<<
             RegClass::Int => (UWOP_SAVE_NONVOL, 8),
@@ -38,6 +42,7 @@
 >>>>
 
 @@ unwind-no-clobber-allocation no allocation code for the clobber area: the unwinder's RSP stays at the establisher frame
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/unwind.rs
 <<<<
     if clobbers > 0 {
@@ -48,6 +53,7 @@
 >>>>
 
 @@ unwind-frame-pointer-at-definition the frame pointer's code where Cranelift defines the frame (after the probes), not where it is set
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/unwind.rs
 <<<<
     let established = FRAME_SETUP.len() as u8;
@@ -56,6 +62,7 @@
 >>>>
 
 @@ unwind-no-prologue-check any prologue taken for Cranelift's: no check of the push and the move
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/unwind.rs
 <<<<
         Some((1, UnwindInst::PushFrameRegs { offset_upward_to_caller_sp: 16 })) if code.starts_with(&FRAME_SETUP) => {}
@@ -67,6 +74,7 @@
 # The object's .pdata and .xdata (codegen/mod.rs)
 
 @@ pdata-missing no unwind sections in the object: Windows takes every Botlish frame for a leaf
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/mod.rs
 <<<<
     if entries.is_empty() {
@@ -81,6 +89,7 @@
 >>>>
 
 @@ pdata-end-short every function's entry one byte short of its code
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/mod.rs
 <<<<
         let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, info as i64)];
@@ -89,6 +98,7 @@
 >>>>
 
 @@ pdata-unsorted the function table in declaration order, not address order
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/mod.rs
 <<<<
     entries.sort_by_key(|e| (e.0, e.1));
@@ -97,6 +107,7 @@
 >>>>
 
 @@ pdata-wrong-unwind-info every function's entry naming the first UNWIND_INFO
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/mod.rs
 <<<<
         let fields = [(entry.2, 0), (entry.2, i64::from(entry.3)), (xdata_symbol, info as i64)];
