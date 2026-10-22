@@ -68,7 +68,7 @@
 #   c-borrow-bench        tclsh9.0 bench/c-pointer-borrowing.tcl
 #   darwin-io-mutants     tclsh9.0 audit/context-traits/tools/mutate.tcl -only darwin-*
 #   darwin-io-bench       tclsh9.0 bench/darwin-io.tcl
-#   c-capture-bench       tclsh9.0 bench/c-ffi-error-capture.tcl
+#   c-capture-bench       tclsh9.0 bench/c-ffi-error-capture.tcl -baseline-rev 8c29f7e
 #
 # -gc-stress 1 runs everything with BOTLISH_NATIVE_GC_STRESS=1. -shard I/N
 # (1 <= I <= N) keeps the Ith of every N test files and of every N suites,
@@ -315,7 +315,9 @@ foreach check $checks {
             lappend commands [list "platform I/O performance" {} [list $tclsh [file join $root bench darwin-io.tcl]] plain]
         }
         c-capture-bench {
-            lappend commands [list "C error capture performance" {} [list $tclsh [file join $root bench c-ffi-error-capture.tcl]] plain]
+            # Against the commit before C-FFI-ERROR-CAPTURE-MILESTONE-1, the
+            # report's baseline, built on the same runner.
+            lappend commands [list "C error capture performance" {} [list $tclsh [file join $root bench c-ffi-error-capture.tcl] -baseline-rev 8c29f7edd13a515b725415190f5d9c07294615c5] plain]
         }
         default {
             if {[regexp {^c-ffi-mutants(?:=(.*))?$} $check -> only]} {

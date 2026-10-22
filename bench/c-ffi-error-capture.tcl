@@ -2,12 +2,18 @@
 # natively, and what representing it as fields saves
 # (C-FFI-ERROR-CAPTURE-MILESTONE-1.md, "Performance").
 #
-#   tclsh9.0 bench/c-ffi-error-capture.tcl ?-root DIR? ?-runs N? ?-n N?
-#                                          ?-read-n N? ?-parts LIST?
+#   tclsh9.0 bench/c-ffi-error-capture.tcl ?-root DIR? ?-baseline-rev REV?
+#                                          ?-runs N? ?-n N? ?-read-n N?
+#                                          ?-parts LIST?
 #
 # -root DIR measures another checkout's compiler and native backend (its own
 # native/target build): the same programs, so two runs -- this tree and a
 # checkout of the commit before the milestone -- compare the lowerings.
+# -baseline-rev REV makes both runs on one host: revision REV's compiler and
+# native backend first (a commit or a branch of origin, fetched if this
+# clone lacks it, built in a temporary worktree removed afterwards: how CI
+# compares on a macOS runner, tests/platform/tier.tcl's c-capture-bench),
+# then ROOT's.
 # Parts (-parts, default `shapes allocations read`):
 #
 #   shapes        in-process time per call (cranelift, specialized; best of
@@ -36,7 +42,7 @@
 
 set args $argv
 set argv {}
-set options [dict create -root "" -runs 5 -n 20000 -read-n 100000 -parts {shapes allocations read}]
+set options [dict create -root "" -baseline-rev "" -runs 5 -n 20000 -read-n 100000 -parts {shapes allocations read}]
 foreach {option value} $args {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -46,6 +52,27 @@ if {$root eq ""} {
     set root [file dirname [file dirname [file normalize [info script]]]]
 }
 set root [file normalize $root]
+set baselineRev [dict get $options -baseline-rev]
+if {$baselineRev ne ""} {
+    # REV's tree, its driver built in it (cargo finds the worktree's
+    # .cargo/config.toml from its working directory), measured by this
+    # script with -root.
+    if {[catch {exec git -C $root rev-parse --verify --quiet "$baselineRev^{commit}"} commit]} {
+        exec git -C $root fetch --quiet --depth 1 origin $baselineRev
+        set commit [exec git -C $root rev-parse FETCH_HEAD]
+    }
+    set worktree [file join [file tempdir botlish-capture-bench] tree]
+    exec git -C $root worktree add --quiet --detach $worktree $commit
+    set here [pwd]
+    cd $worktree
+    exec cargo build --release --quiet --manifest-path [file join $worktree native Cargo.toml] 2>@stderr
+    cd $here
+    puts "baseline: revision $baselineRev"
+    exec [info nameofexecutable] [info script] {*}[dict replace $options -root $worktree -baseline-rev ""] >@stdout 2>@stderr
+    exec git -C $root worktree remove --force $worktree
+    file delete -force [file dirname $worktree]
+    puts ""
+}
 set ::env(BOTLISH_NATIVE_BIN) [file join $root native target release botlish-native]
 source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]

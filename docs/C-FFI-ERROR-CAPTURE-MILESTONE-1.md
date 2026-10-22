@@ -683,8 +683,8 @@ semantic and GC-stress ones for values and lifetimes:
 | a managed root lost when the aggregate is scalarized | `write-back-copy-not-a-root` (new) | lifetime | 7 tests, among them the GC-stress ones: `bb-gc-stress`, `bb-system-library-gc-stress`, `cb-failure-gc-stress`, `cb-gc-stress-programs`, `ec-fixture-executable` |
 | materialization omitted where the value escapes | `opened-buffer-not-built` | value | 21 tests, among them `bb-read-write-one-owner`, `bb-write-chain`, `bb-write-failure-sentinel`, `bb-gc-stress` |
 | the raw C failure result changed while unboxing | `write-back-result-changed` | value | 43 tests |
-| errno read before the C call | `darwin-errno-before-call` (context-traits) | value (macOS) | «k11» |
-| errno read after an unrelated call | `darwin-errno-after-another-call` (existing), `allocation-after-c-call` | value, window | «k12» (macOS); 15 tests |
+| errno read before the C call | `darwin-errno-before-call` (context-traits) | value (macOS) | 3 tests on macOS: `di-errno-allocator`, `di-errno-read-first`, `di-stdin` |
+| errno read after an unrelated call | `darwin-errno-after-another-call` (existing), `allocation-after-c-call` | value, window | 4 tests on macOS (`di-errno`, `di-errno-allocator`, `di-errno-read-first`, `di-file-errors`); 15 tests |
 | an argument evaluated twice | `write-back-argument-twice` | value | 3 tests: `ec-arguments-once`, `cb-exposure-after-arguments`, `cb-exposure-after-arguments-nir` |
 | the foreign call reordered with the program's own operations | `detach-before-later-arguments` (new) | order | 1 test: `cb-exposure-after-arguments-nir` (no value changes: arguments cannot reach the owner, a value) |
 | (performance) a buffer built once per iteration | `write-back-buffer-built-per-iteration` | allocation | 1 test: `cb-write-back-allocations` (no value changes) |
@@ -697,12 +697,17 @@ The runs (Linux x86-64, this container, d152dfe's tree):
 | `audit/c-ffi/tools/mutate.tcl`, the six of `native/lower.tcl`'s foreign-call lowering (`argument-after-exposure`, `keepalive-dropped`, `original-mutablebytes-mutated`, `read-bytes-copied`, `botlish-name-as-symbol`, `va-trailing-classes-reversed`) | 6 | 6 | 0 | 0 |
 | `audit/abi-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 |
 | `audit/mutable-bytes/tools/mutate.tcl -only no-keepalive` | 1 | 1 (10 liveness tests) | 0 | 0 |
-| `audit/context-traits/tools/mutate.tcl -only darwin-*` (macOS, tier item `darwin-io-mutants`) | «darwin mutants» | | | |
+| `audit/c-pointer-borrowing/tools/mutate.tcl` on macOS (the tier item `c-borrow-mutants=...`: this milestone's 13 and `apple-exposure-tagged`; run [39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246), 2d64ae6) | 14 | 14 | 0 | 0 |
+| `audit/context-traits/tools/mutate.tcl -only darwin-*` (macOS, tier item `darwin-io-mutants`; the same run) | 20 | 20 | 0 | 0 |
 
 The borrowing harness's 30 earlier mutants still apply to the changed code;
 the 29 this host runs are still killed (the 30th is `apple-exposure-tagged`).
 (The harness names at most six of a mutant's failing tests; "among them"
-lists those.) No native mutant failed to build. The
+lists those.) No native mutant failed to build. On macOS the 14 were
+killed as well: `apple-exposure-tagged` by 23 tests, `keepalive-is-a-call`
+by `ec-machine-window` alone (the Mach-O object's window: in NIR the
+keepalive is unchanged), `write-back-copy-not-a-root` by 7 GC-stress tests,
+`ec-fixture-executable` among them. The
 borrowing fuzzer (15 programs of every owner, contract and pointee kind on
 every backend) killed none of the new mutants: its programs read no errno
 and compare values, which every window mutant keeps; the structural
@@ -805,7 +810,7 @@ runs it stands for):
 | run | commit | result |
 |---|---|---|
 | [39690210610](https://github.com/mwagner-webdev/botlish/actions/runs/39690210610) | d152dfe (the compiler as merged) | every job passed: interp (8827 tests: 8759 passed, 68 skipped, 0 failed), compile (8754 passed, 73 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust unit tests, the stub-linked executables, the warning gate, the method-call filter audit |
-| [39699274358](https://github.com/mwagner-webdev/botlish/actions/runs/39699274358) | 2d64ae6 (the tracer's AArch64 fix, test code only) | «x86 2d64ae6» |
+| [39699274358](https://github.com/mwagner-webdev/botlish/actions/runs/39699274358) | 2d64ae6 (the tracer's AArch64 fix, test code only) | every job passed: interp (8827 tests: 8759 passed, 68 skipped, 0 failed), compile (8754 passed, 73 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests, the stub-linked executables, the warning gate, the method-call filter audit |
 
 ## 26. Linux AArch64 CI
 
@@ -814,7 +819,7 @@ Dispatched runs of `.github/workflows/tests-arm64.yml` (ubuntu-24.04-arm):
 | run | commit | result |
 |---|---|---|
 | [39690213504](https://github.com/mwagner-webdev/botlish/actions/runs/39690213504) | d152dfe | every job passed: interp (8827 tests: 8705 passed, 122 skipped, 0 failed), compile (8700 passed, 127 skipped), the whole suite under `BOTLISH_NATIVE_GC_STRESS=1` (8698 passed, 129 skipped, 0 failed), cranelift and cranelift-generic coverage, the four golden shards, the native Rust unit tests also under GC stress. c-ffi-error-capture.test ran its NIR, object-file (AArch64 ELF: GOT loads and `blr`), fixture, executable and errno-changing-allocator tests; `ec-trace` was skipped (`ecTrace`: the tracer did not build) |
-| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | compile: 8827 tests, 8701 passed, 126 skipped, 0 failed -- `ec-trace` runs and passes on AArch64 (no `ecTrace` skip); the native Rust unit tests (also under GC stress) and golden shards 2 and 4 passed; «arm64 2d64ae6 rest» |
+| [39699271553](https://github.com/mwagner-webdev/botlish/actions/runs/39699271553) | 2d64ae6 | compile: 8827 tests, 8701 passed, 126 skipped, 0 failed -- `ec-trace` runs and passes on AArch64 (no `ecTrace` skip); the native Rust unit tests (also under GC stress) and golden shards 2 and 4 passed; interp (8706 passed, 121 skipped, 0 failed: `ec-trace` the one test more than d152dfe's), cranelift and cranelift-generic coverage and golden shards 1 and 3 passed; the GC-stress job was still running when this report was written |
 
 ## 27. macOS AArch64 CI
 
@@ -824,7 +829,7 @@ Silicon); the shared development Mac was not used:
 | run | commit | result |
 |---|---|---|
 | [39690463966](https://github.com/mwagner-webdev/botlish/actions/runs/39690463966) | 87e5d87 (dispatch, Tier C under GC stress) | every job passed: smoke (Tier A: the native build and its Rust unit tests, native-status, the Mach-O object and executable checks, the smoke tier), the acceptance tier in two shards (shard 1: 105 Tcl test files on interp and 51 golden suites on all four backends, 0 failed; shard 2 passed), the Linux control, and Tier C: c-ffi-error-capture, darwin-io, c-byte-borrowing, c-pointer-borrowing, c-ffi, coroutines, affine, abi-mutable-bytes and workload-2048 under GC stress, hosted by interp and by compile (452 tests each: 418 passed, 34 skipped, 0 failed) |
-| [39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246) | 2d64ae6 (dispatch, Tier C: the macOS mutants and benchmarks) | «macOS 2d64ae6» |
+| [39699340246](https://github.com/mwagner-webdev/botlish/actions/runs/39699340246) | 2d64ae6 (dispatch, Tier C: the macOS mutants and benchmarks) | every job passed: smoke, the Linux control, both acceptance shards (the tracer change runs nothing on macOS: `ec-trace` needs Linux's ptrace), and Tier C's `c-borrow-mutants=...` (14 of 14 killed), `darwin-io-mutants` (20 of 20 killed), `c-capture-bench` and `darwin-io-bench` (section 24) |
 
 ## 28. Windows
 
