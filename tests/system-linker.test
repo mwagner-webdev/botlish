@@ -259,7 +259,14 @@ test system-linker-outcomes {a system-linked executable prints its value, report
         if {$name ni {enums coroutines error argv}} continue
         set exe [linkWith system [surface::compile $text $name.bot] [file join $dir $name]]
         lassign [runCaptured $exe "" BOTLISH_NATIVE_GC_STRESS=1] status stdout stderr
-        lappend results $name $status [string map [list [file rootname $exe] EXE] $stdout] [string match {*(CORE SEMANTIC RANGE)*} $stderr]
+        # Argument zero is the path exec ran, as the host spells it (on
+        # Windows with backslashes, shown escaped).
+        lappend results $name $status [string map [list [string map {\\ \\\\} [file nativename $exe]] EXE] $stdout] [string match {*(CORE SEMANTIC RANGE)*} $stderr]
+        # A host without native coroutines refuses them when one is made,
+        # as every native backend there does.
+        if {$name eq "coroutines" && ![testConstraint nativeCoroutines]} {
+            lappend results [string match "*native coroutines need stack switching*(NATIVE UNSUPPORTED*" $stderr]
+        }
     }
     if {[string match linux-* $::hostTarget]} {
         set exe [linkWith system [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot] -warnings off -cache ""] [file join $dir read-stdin]]
@@ -270,8 +277,12 @@ test system-linker-outcomes {a system-linked executable prints its value, report
     }
     removeDirectory system-linker-outcomes
     set results
-} -result {enums 0 {[Color::Green, Color::Red]} 0 coroutines 0 {[[0, 0], 200, [199, 39601], "done"]} 0 error 1 {} 1 argv 0 {["EXE"]} 0 stdin {0 {hello from stdin
-17}}}
+} -result [list enums 0 {[Color::Green, Color::Red]} 0 coroutines {*}[if {[testConstraint nativeCoroutines]} {
+    list 0 {[[0, 0], 200, [199, 39601], "done"]} 0
+} else {
+    list 1 {} 0 1
+}] error 1 {} 1 argv 0 {["EXE"]} 0 stdin {0 {hello from stdin
+17}}]
 
 # How EXECUTABLE ends when what reads its standard output stops after a few
 # bytes: {CHILDSTATUS 1} when its write fails (EPIPE: SIGPIPE ignored, as a
@@ -604,11 +615,14 @@ proc descriptionMetadata {bytes} {
 test system-linker-auto {auto, the single executable's choice, links a program that calls C or declares a library with the system linker and any other with the stub, where there is one: never with rustc} -constraints {systemLinker} -body {
     set dir [makeDirectory system-linker-auto]
     set results {}
-    foreach {name text} {
-        plain "1 + 2"
-        declares "extern c library \"m\"\n1 + 2"
-        calls "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 3)"
-    } {
+    # A system library every host's linker finds: the C math library, which
+    # on Windows is part of the C runtime (no m.lib) -- there kernel32.
+    set library [expr {$::windowsHost ? "kernel32" : "m"}]
+    foreach {name text} [list \
+        plain "1 + 2" \
+        declares "extern c library \"$library\"\n1 + 2" \
+        calls "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 3)" \
+    ] {
         set exe [linkWith auto [surface::compile $text $name.bot] [file join $dir $name]]
         set channel [open $exe rb]; set bytes [read $channel]; close $channel
         set stub [expr {[string range $bytes end-7 end] eq "BOTLIMG1"}]
@@ -714,7 +728,10 @@ test system-linker-link-failures {a library the linker cannot find and a symbol 
     # A destination that cannot be written (its directory is a file).
     set file [writeFile [file join $dir not-a-directory] ""]
     catch {linkWith system [surface::compile "1 + 2" one.bot] [file join $file program]} message options
-    lappend results [dict get $options -errorcode] [string match "native link failed: cannot write the executable [file join $file program]*: *" $message]
+    # The driver names the destination as an absolute path in the host's
+    # spelling (std::path::absolute: backslashes on Windows) with its suffix.
+    set prefix "native link failed: cannot write the executable [file nativename [file normalize [native::executableFile [file join $file program]]]]: "
+    lappend results [dict get $options -errorcode] [expr {[string first $prefix $message] == 0}]
     removeDirectory system-linker-link-libs
     removeDirectory system-linker-link
     set results

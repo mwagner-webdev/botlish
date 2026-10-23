@@ -799,21 +799,40 @@ AArch64 `auto` links it with the system linker, because there is no stub
 (section 35). The arithmetic is x86-64's, byte for byte. The artifact is
 uploaded (`botlish-linux-aarch64`) but not published.
 
-**The test files: PENDING-ARM64-TESTS**
+**The test files** (**executed**: tests-arm64.yml's `system-linker` job
+on 658737d8, ubuntu-24.04-arm, rustc 1.99.1, the compile backend, with
+`BOTLISH_NATIVE_LINKER=system` for the whole job):
+
+* `botlish-native system-linker`: `flavor gnu linux-aarch64`, `tool
+  /usr/bin/cc`, `runtime .../libbotlish_runtime.a {ELF AArch64}`,
+  `libraries -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc`. The library
+  check agrees with rustc.
+* The 61 test files that build an executable or link C: **3,266 tests,
+  3,140 passed, 126 skipped, 0 failed**. The skipped ones are other
+  hosts' tests (`linuxX86_64` 40, Darwin IO 12 and macOS's own 6,
+  Windows 24), the stub's (`stubLinker` 7, and the stub-against-rustc
+  parity, 1), packages not installed (BoringSSL, SDL3, Tcl sources,
+  MinGW: 34) and rustc's own invocation (`rustcLinker` 2).
+  system-linker.test's own comparisons with the rustc linker (startup
+  parity, the helpers kept) ran.
+* Under `BOTLISH_NATIVE_GC_STRESS=1`, system-linker.test, c-ffi.test,
+  c-byte-borrowing.test, c-ffi-error-capture.test and coroutines.test:
+  **260 tests, 253 passed, 7 skipped, 0 failed**. Coroutines switch
+  native stacks with the AArch64 switch there.
 
 ## 26. macOS AArch64
 
 **Executed** (macos-15-arm64, macOS 15.7.9, Apple clang 17, rustc 1.99.1:
-macos-arm64.yml's `system-linker` job on this milestone's head, with
+macos-arm64.yml's `system-linker` job on 658737d8, with
 `BOTLISH_NATIVE_LINKER=system` for the whole job):
 
 * `botlish-native system-linker`: `flavor apple macos-aarch64`, `tool
   /usr/bin/cc`, `runtime .../libbotlish_runtime.a {Mach-O arm64}`,
   `libraries -liconv -lSystem -lc -lm`. The library check agrees.
 * hello-darwin.bot linked and run (section 16).
-* `tests/system-linker.test` on both Tcl backends: 10 passed, 3 skipped
-  (`linuxHost`: the closed-pipe and closed-descriptor run, the ELF
-  checks, the strace of the link). Startup parity is checked against the
+* `tests/system-linker.test` on both Tcl backends: 14 tests, 10 passed,
+  4 skipped (`linuxHost`: the closed-pipe and closed-descriptor run, the
+  ELF checks, the strace of the link, the `nm` of the helpers kept). Startup parity is checked against the
   rustc linker: the startup reports of the two executables are identical
   and they print, fail and exit alike, plainly and under GC stress. The C
   acceptance program (libc, two static libraries, borrowed Bytes and
@@ -824,13 +843,13 @@ macos-arm64.yml's `system-linker` job on this milestone's head, with
   libraries and the archive copy are deleted, and `otool -L` names no
   Botlish or fixture library.
 * `tests/all.tcl` over the 61 test files that build an executable or link
-  C: **3,265 tests, 3,076 passed, 189 skipped, 0 failed**. The skipped
+  C: **3,266 tests, 3,076 passed, 190 skipped, 0 failed**. The skipped
   ones are other hosts' tests (`linuxX86_64` 40, `nativeLinux` 70,
-  Windows 24), BoringSSL, SDL3 and Tcl acceptance without their packages,
+  Windows 24), the stub's (8), BoringSSL, SDL3 and Tcl acceptance without their packages,
   MinGW, and rustc's own invocation (`rustcLinker` 2).
 * Under `BOTLISH_NATIVE_GC_STRESS=1`, system-linker.test, c-ffi.test,
   darwin-io.test, c-byte-borrowing.test, c-ffi-error-capture.test and
-  coroutines.test on both backends: **287 tests, 274 passed, 13 skipped,
+  coroutines.test on both backends: **288 tests, 274 passed, 14 skipped,
   0 failed** on each backend. darwin-io.test is Darwin IO through
   libSystem's C functions; coroutines.test's executables switch native
   stacks.
@@ -842,7 +861,50 @@ too and was fixed there; the fix is merged.
 
 ## 27. Windows x86-64
 
-PENDING-WINDOWS
+**Executed** (windows-2025, Visual Studio 18 Enterprise, MSVC 14.51:
+windows-x86_64.yml's `system-linker` job on 658737d8, inside vcvars64.bat's
+environment, with `BOTLISH_NATIVE_LINKER=system`):
+
+* `botlish-native system-linker`: `flavor msvc windows-x86_64`, `tool
+  ...\VC\Tools\MSVC\14.51.36231\bin\HostX64\x64\link.exe`, `runtime
+  ...\botlish_runtime.lib {COFF x86-64}`, `libraries kernel32.lib
+  ntdll.lib userenv.lib ws2_32.lib dbghelp.lib`. The library check
+  agrees with rustc.
+* hello-windows.bot linked by link.exe, ran and printed `Hello, world!`
+  (section 17 has the command and `dumpbin /dependents`).
+* The Windows-relevant executable and C test files (c-ffi.test,
+  windows-io.test, argv.test, native-executable.test, c-float-ffi.test,
+  workload-2048.test): **288 tests, 243 passed, 45 skipped, 0 failed** on
+  each Tcl backend. The skipped ones: variadic C calls, which have no
+  Win64 lowering (15); native coroutines and the stack guard (5); Linux's
+  and macOS's own tests (5); launchers through bash and Python (14);
+  BoringSSL (2), a dynamic system C library (1) and Tcl's library (1);
+  rustc's own invocation (`rustcLinker`, 2).
+* `tests/system-linker.test`, the first time it ran on Windows (until the
+  ctool fix, section 34, every test of it was skipped there): 14 tests, 5
+  passed, 6 skipped (`linuxHost` 4, `posixErrno`, `unixShell`) and **3
+  failed** on each backend, and the same 3 under GC stress (with
+  c-ffi.test: 132 tests, 100 passed, 29 skipped). All three were the
+  tests' assumptions, not the linker's:
+  * `system-linker-outcomes` expected native coroutines, which Windows
+    has not got (a coroutine is NATIVE UNSUPPORTED there on every native
+    backend, the rustc-linked executable's included), and argument zero
+    spelled as Tcl spells the path; Windows passes `D:\a\...\argv.exe`.
+  * `system-linker-auto` declared `extern c library "m"`; Windows' C math
+    is in the C runtime and there is no `m.lib` (LNK1181).
+  * `system-linker-link-failures` matched the unwritable destination's
+    message against the path as Tcl spells it; the driver makes it
+    absolute with `std::path::absolute`, which on Windows writes
+    backslashes.
+
+  The tests now expect the host's: the coroutine refusal where
+  `nativeCoroutines` is false, argument zero in the host's spelling,
+  `kernel32` as the declared library on Windows, and the driver's
+  absolute native path. On Linux x86-64 the changed file passes, 14 of
+  14 on both backends (executed). On Windows its run is PENDING-WINDOWS-RERUN.
+* The same three failures were acceptance shard 4/4's only ones (the
+  tier runs system-linker.test too: 2,024 tests, 3 failed). Shards 1 to
+  3, the smoke job and the root-plans job passed.
 
 ## 28. Mutation testing
 
@@ -1058,16 +1120,26 @@ into place, costs about 20 ms, once per build of the compiler.
 
 The jobs this milestone adds:
 
-* **tests.yml `system-linker`** (ubuntu-latest, every push and pull
-  request). It builds the native backend, prints `botlish-native
+* **tests.yml `system-linker`** (ubuntu-latest; tests.yml runs on pushes
+  to main, pull requests and dispatch). It builds the native backend, prints `botlish-native
   system-linker` and runs the library check. Then every test file that
   builds an executable or links C runs with `BOTLISH_NATIVE_LINKER=system`
   (`tests/all.tcl -file`, the compile backend). Finally system-linker.test,
   c-ffi.test, c-byte-borrowing.test, c-ffi-error-capture.test and
   coroutines.test run again under `BOTLISH_NATIVE_GC_STRESS=1`.
-  PENDING-TESTS-YML
+  **Passed** on 658737d8 (dispatched on this branch, run 39971743487): the
+  library check, then **3,266 tests, 3,186 passed, 80 skipped, 0 failed**
+  over the 61 files, and under GC stress **260 tests, 254 passed, 6
+  skipped, 0 failed**. The same run's interp suite, golden shard 3,
+  stub-linked executables, native Rust unit tests, warning gate and
+  method-filter audit passed too; its compile suite, golden shards 1, 2
+  and 4 and the cranelift and cranelift-generic coverage were still
+  queued or running when this was written.
 * **tests-arm64.yml `system-linker`** (ubuntu-24.04-arm): the same on
-  AArch64. PENDING-ARM64-YML
+  AArch64. **Passed** on 658737d8 (run 39971747629; section 25 has the
+  numbers), and so did every other job of that run: interp, compile,
+  cranelift and cranelift-generic coverage, the four golden shards, the
+  native Rust unit tests (also under GC stress) and the GC-stress run.
 * **single-executable.yml**:
   * `build` (ubuntu-24.04): `single/build.sh`, which runs the library
     check, then smoke-test.sh and ffi-smoke-test.sh on the build machine.
@@ -1080,12 +1152,15 @@ The jobs this milestone adds:
   * `ffi-smoke` (new; the same images): `apt-get install gcc libc6-dev
     binutils`, and the job fails if `rustc` or `cargo` exists. It deletes
     the checkout, keeping only ffi-smoke-test.sh and the C fixture, and
-    runs the downloaded executable. `ubuntu:latest` (gcc 15.2): **passed**,
-    applications A to E as on the build machine.
+    runs the downloaded executable. `ubuntu:latest` (gcc 15.2) and
+    `ubuntu:24.04`: **passed**, applications A to E as on the build
+    machine.
   * `release` now needs `ffi-smoke` as well, and its notes say what a
     program that calls C needs.
 
-  PENDING-SINGLE-YML
+  On 658737d8 (dispatched on this branch, run 39971751378) every job
+  **passed**: `build`, `build-arm64`, `smoke` on both images and
+  `ffi-smoke` on both. `release` is skipped off main.
 
 The Linux results quoted elsewhere in this report come from this
 milestone's machine (Ubuntu 24.04 x86-64, gcc 13.3). There:
@@ -1131,7 +1206,17 @@ Its first run found two problems, neither in the system linker:
 
 The smoke job (rustc-linked, unchanged) **passed** on the merged head;
 before the merge, its one failure was `cf-renamed-binding-native-name`
-(fixed on main). PENDING-WINDOWS-LAST
+(fixed on main).
+
+Its second run (658737d8, run 39971727264), the first in which
+system-linker.test ran on Windows, found three more, again in the tests'
+assumptions and not in the linker (section 27 has them and their fix).
+They failed the system-linker job and acceptance shard 4/4, whose tier
+runs system-linker.test too. Everything else passed: the library check,
+hello-windows.bot, the Windows executable and C test files under the
+system linker (288 tests, 0 failed, on each backend), the smoke job, the
+root-plans job and acceptance shards 1 to 3. The run with the fixed tests
+is PENDING-WINDOWS-RERUN.
 
 ## 35. Remaining distribution work
 
