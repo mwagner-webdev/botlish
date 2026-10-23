@@ -70,6 +70,23 @@ fib(20)
     gc-frame-walk [list driver build400.nir {BOTLISH_NATIVE_GC_STRESS 1}] \
     stack-overflow [list driver stack_overflow.ir {BOTLISH_NATIVE_STACK_BYTES 4194304}] \
     stack-depth-limit [list driver stack_overflow.ir {}] \
+    runtime-stack-overflow [list program {import std::mutable_array
+
+# A List nested a million deep, built by a loop, compared with another:
+# the runtime's equality (Rust) recurses once per level and exhausts the
+# 16 MiB thread stack inside the runtime, not in Botlish code.
+fn empty() -> List[any]:
+    []
+
+fn nest(n: int) -> List[any]:
+    cell = std::mutable_array::create(1, empty())
+    loop i from 0 to n:
+        cell.set(0, [cell.at(0)])
+    cell.at(0)
+
+nest(1000000) == nest(1000000)
+} {BOTLISH_NATIVE_STACK_BYTES 16777216}] \
+    large-frame-overflow [list driver large_frame_overflow.nir {BOTLISH_NATIVE_STACK_BYTES 4194304}] \
     recursion-limit [list program {fn down(n: int) -> int:
     if n == 0:
         return 0
@@ -341,6 +358,8 @@ set linux [dict create \
     jit {value 6765} \
     gc-frame-walk [list value [list str [string repeat xy 400]]] \
     stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+    runtime-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+    large-frame-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine {value {[10, 7]}} \
@@ -371,6 +390,8 @@ set expected [dict create \
         jit {value 6765} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
         stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        runtime-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        large-frame-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine {value {[10, 7]}} \
@@ -396,6 +417,8 @@ unit}}} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
         stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         stack-depth-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        runtime-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        large-frame-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine-stack-overflow {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
         coroutine {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \

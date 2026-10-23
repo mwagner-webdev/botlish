@@ -4736,6 +4736,7 @@ tests/native-stack-overflow.test ns-main-finite pass
 tests/native-stack-overflow.test ns-main-shapes pass
 tests/native-stack-overflow.test ns-main-small-stack pass
 tests/native-stack-overflow.test ns-main-with-suspended-coroutines pass
+tests/native-stack-overflow.test ns-runtime-helper pass
 tests/native-string-region.test region-bounds-empty-1 pass
 tests/native-string-region.test region-bounds-end-of-string-1 pass
 tests/native-string-region.test region-bounds-handled-1 pass
@@ -8473,6 +8474,7 @@ tests/c-ffi.test cf-link-failure-keeps-executable pass
 tests/c-ffi.test cf-gc-calls pass
 tests/c-ffi.test cf-coroutine-calls pass
 tests/c-ffi.test cf-c-stack-overflow pass
+tests/c-ffi.test cf-c-stack-overflow-coroutine pass
 tests/c-ffi.test cf-va-parse pass
 tests/c-ffi.test cf-va-parse-errors pass
 tests/c-ffi.test cf-va-hir pass

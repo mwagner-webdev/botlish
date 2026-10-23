@@ -175,8 +175,8 @@ fn extract_result(args: &[String]) -> Result<Vec<String>, String> {
         if args[i] == "--result" {
             let path = args.get(i + 1).ok_or("--result needs a file")?;
             let file = std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?;
-            #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
-            runtime::platform::set_result_fd(std::os::unix::io::AsRawFd::as_raw_fd(&file));
+            #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+            runtime::platform::set_result_file(&file);
             RESULT.set(Mutex::new(file)).map_err(|_| "--result given twice".to_string())?;
             i += 2;
             continue;
@@ -705,10 +705,10 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     }
     compiled.install_constants(&mut vm);
     vm.set_framemap(compiled.framemap.clone());
-    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     let _overflow_guard = {
-        let stack = runtime::native_stack::NativeStack::current().expect("pthread stack bounds");
-        runtime::platform::OverflowGuard::install(&stack).expect("pthread stack guard")
+        let stack = runtime::native_stack::NativeStack::current().expect("the thread's stack bounds");
+        runtime::platform::OverflowGuard::install(&stack).expect("the stack-overflow guard")
     };
 
     let mut best = u128::MAX;

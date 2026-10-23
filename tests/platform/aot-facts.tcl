@@ -178,6 +178,23 @@ set downProgram {fn down(n: int) -> int:
 down(DEPTH)
 }
 
+# A List nested a million deep, built by a loop, compared with another: the
+# runtime's equality (Rust) recurses once per level, so on a 16 MiB stack
+# the stack is exhausted inside the runtime, not in Botlish code.
+set runtimeOverflowProgram {import std::mutable_array
+
+fn empty() -> List[any]:
+    []
+
+fn nest(n: int) -> List[any]:
+    cell = std::mutable_array::create(1, empty())
+    loop i from 0 to n:
+        cell.set(0, [cell.at(0)])
+    cell.at(0)
+
+nest(1000000) == nest(1000000)
+}
+
 set coroutineOverflowProgram {struct Event:
     value: int
 
@@ -420,7 +437,7 @@ proc cCalls {} {
 
 proc checks {} {
     global work facts prefix macos root program programValue coroutineProgram downProgram
-    global coroutineOverflowProgram errorProgram overflowLine runDir cwdDir
+    global coroutineOverflowProgram errorProgram overflowLine runDir cwdDir runtimeOverflowProgram
     set sourceDir [file join $work "source dir"]
     set buildDir [file join $work "build dir"]
     set runDir [file join $work "run dir"]
@@ -597,6 +614,8 @@ proc checks {} {
     check standalone-stack-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "[shown $outcome] ($overflowMs ms, link included)"
     set outcome [run env -i [file join $runDir overflow]]
     check standalone-overflow-default [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "1 GiB stack: [shown $outcome]"
+    set outcome [standalone runtime-overflow $runtimeOverflowProgram {BOTLISH_NATIVE_STACK_BYTES=16777216}]
+    check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
     set outcome [standalone co-overflow $coroutineOverflowProgram {}]
     check standalone-co-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] [shown $outcome]
 
@@ -639,7 +658,7 @@ if {$::tcl_platform(platform) eq "windows"} {
     set systemDir [file join [if {[info exists ::env(SystemRoot)]} {set ::env(SystemRoot)} else {set ::env(WINDIR)}] System32]
 }
 proc windowsChecks {} {
-    global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root
+    global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root runtimeOverflowProgram
     set sourceDir [file join $work "source dir"]
     set buildDir [file join $work "build dir"]
     set runDir [file join $work "run dir"]
@@ -762,6 +781,12 @@ proc windowsChecks {} {
     check standalone-depth-limit [expr {$outcome eq $limited}] "1 GiB stack: [shown $outcome]"
     set outcome [windowsRun $cwdDir [file join $runDir overflow.exe] {BOTLISH_NATIVE_STACK_BYTES 16777216}]
     check standalone-stack-overflow [expr {$outcome eq $limited}] "16 MiB stack: [shown $outcome]"
+    # An exhaustion inside the runtime (Rust), which no check of generated
+    # code sees: the stack guard's own line on standard error and exit
+    # status 1, as on every host (WINDOWS-X86-64-MILESTONE-4.md); until
+    # then the process died in Rust's own report (STATUS_STACK_OVERFLOW).
+    set outcome [{*}$standalone $runDir $cwdDir runtime-overflow $runtimeOverflowProgram {BOTLISH_NATIVE_STACK_BYTES 16777216}]
+    check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
     set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
     check standalone-coroutine-refused [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
         && [string match "native coroutines need stack switching*(NATIVE UNSUPPORTED value)\n" [lindex $outcome 2]]}] [shown $outcome]

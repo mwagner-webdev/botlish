@@ -143,10 +143,10 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
         if let Some(path) = protocol {
             return driver_protocol(std::path::Path::new(&path), &mut vm, entry);
         }
-        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
         let _guard = {
-            let stack = super::native_stack::NativeStack::current().expect("pthread stack bounds");
-            super::platform::OverflowGuard::install_executable(&stack).expect("pthread stack guard")
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
         let result = entry(&mut *vm);
         if result == NO_VALUE {
@@ -198,11 +198,11 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
             return 2;
         }
     };
-    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     let _guard = {
-        super::platform::set_result_fd(std::os::unix::io::AsRawFd::as_raw_fd(&file));
-        let stack = super::native_stack::NativeStack::current().expect("pthread stack bounds");
-        super::platform::OverflowGuard::install(&stack).expect("pthread stack guard")
+        super::platform::set_result_file(&file);
+        let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+        super::platform::OverflowGuard::install(&stack).expect("the stack-overflow guard")
     };
     let runs = std::env::var("BOTLISH_NATIVE_RUNS").ok().and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
     let mut lines = Vec::new();

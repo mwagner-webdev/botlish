@@ -23,23 +23,13 @@ impl NativeStack {
         self.state == StackState::Active && address >= self.guard_low && address < self.low_bound
     }
 
-    /// The calling thread's own stack, as its host reports it, with the guard
-    /// confirmed below it (runtime::platform).
-    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+    /// The calling thread's own stack, as its host reports it
+    /// (runtime::platform): on Linux and macOS with the guard confirmed below
+    /// it; on Windows the whole reservation the system made for it, which
+    /// grows by Windows' own guard page (no guard range: `guard_low ==
+    /// low_bound`, platform/windows.rs).
+    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     pub fn current() -> std::io::Result<Self> { super::platform::current_stack() }
-
-    /// The calling thread's own stack on Windows: the range the system
-    /// reserved for it (`GetCurrentThreadStackLimits`), with no guard
-    /// confirmed (`guard_low == low_bound`): Windows has no stack guard of
-    /// Botlish's yet. Its bounds limit the frame walk and give the stack
-    /// limit (`stack_limit`).
-    #[cfg(all(windows, target_arch = "x86_64"))]
-    pub fn current() -> std::io::Result<Self> {
-        let (mut low, mut high) = (0, 0);
-        // SAFETY: writes the two bounds.
-        unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadStackLimits(&mut low, &mut high) };
-        Ok(NativeStack { low_bound: low, high_bound: high, guard_low: low, saved_sp: None, state: StackState::Active })
-    }
 
     /// The lowest stack pointer a frame that checks its stack
     /// (`stack_limit_checked`) may run at on this stack: its low bound plus

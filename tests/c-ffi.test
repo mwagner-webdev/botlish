@@ -1571,25 +1571,37 @@ test cf-coroutine-calls {C calls inside a coroutine, before its first yield and 
     set results
 } -cleanup removeApps -result [lrepeat 3 {[[6, -75, 0], 100, 2]}]
 
-test cf-c-stack-overflow {C recursion that exhausts the native stack it runs on -- the worker thread's or a coroutine's -- ends in the stack guard's NATIVE LIMIT STACK, in the native backends' linked run and as an executable's exit status 1 and line on standard error, never a signal; a finite C recursion returns} -constraints {cfFixture nativeStackGuard} -body {
+test cf-c-stack-overflow {C recursion that exhausts the worker thread's stack ends in the stack guard's NATIVE LIMIT STACK, in the native backends' linked run and as an executable's exit status 1 and line on standard error, never a crash; a finite C recursion returns} -constraints {cfFixture nativeStackGuard} -body {
     set deep [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::deep(100000000)\n"]
     set finite [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::deep(2000)\n"]
-    set inCoroutine [bcfApp "import std::ffi::c\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: std::ffi::c::Long) -> Event:\n    yield Event {value: 0}\n    return Event {value: bcf::deep(n)}\n\ncoroutine {step, first} = worker(100000000)\nstep().value\n"]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 16777216
     try {
-        set results [list [lindex [appValues $deep {cranelift}] 0] [appValues $finite {cranelift}] [lindex [appValues $inCoroutine {cranelift}] 0]]
-        foreach dir [list $deep $inCoroutine] {
-            set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
-            set code [catch {exec $exe 2>@1} message options]
-            lappend results [list $code [lrange [dict get $options -errorcode] 0 0] [lindex [dict get $options -errorcode] end] $message]
-        }
+        set results [list [lindex [appValues $deep {cranelift}] 0] [appValues $finite {cranelift}]]
+        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $deep] [file join $deep program]}]
+        set code [catch {exec $exe 2>@1} message options]
+        lappend results [list $code [lrange [dict get $options -errorcode] 0 0] [lindex [dict get $options -errorcode] end] $message]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
     }
     set results
-} -cleanup removeApps -result [list {{LIMIT STACK} {native stack exhausted: too many nested calls}} 2000 {{LIMIT STACK} {native stack exhausted: too many nested calls}} {1 CHILDSTATUS 1 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}
-child process exited abnormally}} {1 CHILDSTATUS 1 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}
+} -cleanup removeApps -result [list {{LIMIT STACK} {native stack exhausted: too many nested calls}} 2000 {1 CHILDSTATUS 1 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}
+child process exited abnormally}}]
+
+test cf-c-stack-overflow-coroutine {C recursion that exhausts a coroutine's stack ends in the stack guard's NATIVE LIMIT STACK, in the native backends' linked run and as an executable's exit status 1 and line on standard error, never a crash} -constraints {cfFixture nativeStackGuard nativeCoroutines} -body {
+    set inCoroutine [bcfApp "import std::ffi::c\nimport bcf\n\nstruct Event:\n    value: int\n\nfn worker(n: std::ffi::c::Long) -> Event:\n    yield Event {value: 0}\n    return Event {value: bcf::deep(n)}\n\ncoroutine {step, first} = worker(100000000)\nstep().value\n"]
+    set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
+    set ::env(BOTLISH_NATIVE_STACK_BYTES) 16777216
+    try {
+        set results [list [lindex [appValues $inCoroutine {cranelift}] 0]]
+        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $inCoroutine] [file join $inCoroutine program]}]
+        set code [catch {exec $exe 2>@1} message options]
+        lappend results [list $code [lrange [dict get $options -errorcode] 0 0] [lindex [dict get $options -errorcode] end] $message]
+    } finally {
+        if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
+    }
+    set results
+} -cleanup removeApps -result [list {{LIMIT STACK} {native stack exhausted: too many nested calls}} {1 CHILDSTATUS 1 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}
 child process exited abnormally}}]
 
 # ---------------------------------------------------------------------------

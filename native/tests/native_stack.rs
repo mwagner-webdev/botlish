@@ -1,5 +1,6 @@
 //! Native stack bounds and guards, as the host's thread library and kernel
-//! report and enforce them (MACOS-AARCH64-MILESTONE-4.md).
+//! report and enforce them (MACOS-AARCH64-MILESTONE-4.md,
+//! WINDOWS-X86-64-MILESTONE-4.md).
 //!
 //! Not a libtest harness (`harness = false` in Cargo.toml): `main` runs on
 //! the process's own main thread, which libtest never runs a test on, so the
@@ -12,21 +13,30 @@
 //! Prints one line per check (and the raw facts each one saw, for the CI
 //! log) and exits 1 if any check failed.
 //!
-//! Only on the hosts with the native stack guard (runtime::native_stack's
-//! `native_stack_overflow_supported`): Linux x86-64 and AArch64, macOS
-//! AArch64. Elsewhere -- Windows, whose guard is a later milestone
-//! (WINDOWS-X86-64-MILESTONE-1.md) -- it says so and checks nothing. The
-//! checks are the module `guarded`, which spans the rest of the file (not
-//! indented, to keep its history).
+//! On the hosts with the native stack guard (runtime::native_stack's
+//! `native_stack_overflow_supported`): Linux x86-64 and AArch64 and macOS
+//! AArch64, whose checks are the module `guarded` (it spans the rest of this
+//! file, not indented, to keep its history), and Windows x86-64 (MSVC),
+//! whose guard is a vectored exception handler and whose checks are
+//! native_stack/windows.rs. Elsewhere it says so and checks nothing.
 #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 fn main() {
     guarded::main()
 }
 
-#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+fn main() {
+    windows_guarded::main()
+}
+
+#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
 fn main() {
     println!("native_stack: this host has no native stack guard (runtime::native_stack::native_stack_overflow_supported): nothing to check");
 }
+
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+#[path = "native_stack/windows.rs"]
+mod windows_guarded;
 
 #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
 mod guarded {
@@ -577,7 +587,7 @@ fn child(scenario: &str) -> ! {
                 if mode == "result-file" {
                     let path = std::env::var("BOTLISH_STACK_TEST_RESULT").expect("a result file");
                     let file = std::fs::File::create(path).expect("the result file");
-                    platform::set_result_fd(std::os::unix::io::AsRawFd::as_raw_fd(&file));
+                    platform::set_result_file(&file);
                     std::mem::forget(file);
                 }
                 if mode == "touch-guard-bottom" {
