@@ -888,4 +888,88 @@ test cs-entry-syntax-first {the entry's syntax errors are what is reported even 
         [catch {surface::readProgramFile $dir/main.bot -warnings off -cache ""} message] [string match "*no library*" $message]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev message} -result {syntax {{error {SURFACE SYNTAX} main.bot:2:8-2:9 {expected an expression, found end of line}}} 1 1}
 
+
+# ---------------------------------------------------------------------------
+# Revisions across processes (service::export, service::import:
+# LSP-MILESTONE-1.md, "Scheduling")
+
+# Every fact service::at answers at every position of every source revision
+# REV read, without the revision's id.
+proc cs::AllFacts {rev} {
+    set facts {}
+    dict for {path observation} [dict get [service::revision $rev] sources] {
+        if {![dict get $observation read]} continue
+        set lines [split [service::sourceText $rev $path] \n]
+        for {set l 1} {$l <= [llength $lines]} {incr l} {
+            for {set c 1} {$c <= [string length [lindex $lines $l-1]] + 1} {incr c} {
+                lappend facts [dict remove [service::at $rev $path $l $c] revision]
+            }
+        }
+    }
+    return $facts
+}
+
+test cs-export-import-agrees {a revision exported and imported into another workspace -- after other programs with conflicting declarations were analyzed -- is the same revision: its summary, diagnostics, texts and the facts at every position of every source} -body {
+    lassign [cs::Program export] rev path ws dir
+    set direct [cs::AllFacts $rev]
+    set text [service::export $rev]
+    cs::Put $dir/b/geo.bot $::csGeoB
+    cs::Put $dir/b/main.bot "import geo\n\np = geo::make(150)\np.x\n"
+    set other [service::analyze $ws $dir/b/main.bot]
+    set ws2 [cs::Workspace]
+    set imported [service::import $ws2 $text -version v9]
+    set summary [lmap r [list $rev $imported] {dict remove [service::revision $r] id workspace version}]
+    list [expr {[lindex $summary 0] eq [lindex $summary 1]}] [dict get [service::revision $imported] version] \
+        [expr {[service::diagnostics $rev] eq [service::diagnostics $imported]}] \
+        [expr {[service::sourceText $rev $path] eq [service::sourceText $imported $path]}] \
+        [expr {[cs::AllFacts $imported] eq $direct}] [expr {[llength $direct] > 500}]
+} -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain rev path ws dir direct text other ws2 imported summary} -result {1 v9 1 1 1 1}
+
+test cs-export-import-activation {an imported revision's queries read its own declarations: a refined type of a module is shown after another program with conflicting declarations was analyzed, as for the revision analyzed here} -body {
+    set dir [cs::Dir importactivation]
+    cs::Put $dir/a/geo.bot $::csGeoA
+    cs::Put $dir/a/main.bot "import geo\n\nfn id(n: geo::Small) -> geo::Small:\n    n\n\nid(3)\n"
+    cs::Put $dir/b/geo.bot $::csGeoB
+    cs::Put $dir/b/main.bot "import geo\n\np = geo::make(150)\np.x\n"
+    set ws [cs::Workspace]
+    set text [service::export [service::analyze $ws $dir/a/main.bot]]
+    set b [service::analyze $ws $dir/b/main.bot]
+    set a [service::import $ws $text]
+    list [dict get [service::at $a $dir/a/main.bot 3 4] hover] [dict get [service::at $b $dir/b/main.bot 3 5] hover] \
+        [dict get [service::at $a $dir/a/main.bot 3 4] hover]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws text b a} -result {{fn id(n: int[geo::Small]) -> int[geo::Small]} {fn geo::make(n: int[geo::Small]) -> geo::Point} {fn id(n: int[geo::Small]) -> int[geo::Small]}}
+
+test cs-export-import-outcomes {revisions without a HIR -- a syntax error, a loader error -- and a trait program (its queries read the checked source build) export and import with their diagnostics and facts} -body {
+    set dir [cs::Dir importoutcomes]
+    cs::Put $dir/syntax.bot "x = 1 +\ny = 2\n"
+    cs::Put $dir/loader.bot "import nosuch\nx = 1\n"
+    cs::Put $dir/traits.bot "trait Named:\n    fn name(value: Named) -> str\n\nstruct Person:\n    value: str\n\nfn name(value: Person) -> str:\n    value.value\n\nfn describe(value: Named) -> str:\n    value.name()\n\ndescribe(Person {value: \"a\"})\n"
+    set ws [cs::Workspace]
+    set out {}
+    foreach file {syntax loader traits} {
+        set rev [service::analyze $ws $dir/$file.bot]
+        set imported [service::import $ws [service::export $rev]]
+        lappend out [dict get [service::revision $imported] outcome] [dict get [service::revision $imported] hir] \
+            [expr {[service::diagnostics $rev] eq [service::diagnostics $imported] && [cs::AllFacts $rev] eq [cs::AllFacts $imported]}]
+    }
+    set out
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws out file rev imported} -result {syntax 0 1 loader 0 1 ok 1 1}
+
+test cs-import-refuses {import refuses text that is no exported revision, an exported revision of another configuration (another front end), and HIR built by another front end} -body {
+    lassign [cs::Program refuse] rev path ws dir
+    set text [service::export $rev]
+    set out {}
+    lappend out [catch {service::import $ws "not a revision"} message options][dict get $options -errorcode]
+    set body [string range $text [expr {[string first \n $text] + 1}] end]
+    dict set body config frontEnd other
+    lappend out [catch {service::import $ws "botlish-service-revision 1\n$body"} message options][dict get $options -errorcode]
+    set body [string range $text [expr {[string first \n $text] + 1}] end]
+    set hir [dict get $body hir]
+    set hirBody [string range $hir [expr {[string first \n $hir] + 1}] end]
+    dict set hirBody compiler other
+    dict set body hir "[lindex [split $hir \n] 0]\n$hirBody"
+    lappend out [catch {service::import $ws "botlish-service-revision 1\n$body"} message options][dict get $options -errorcode]
+    lappend out [llength [service::revisions $ws]]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir text out message options body hir hirBody} -result {{1SERVICE IMPORT} {1SERVICE IMPORT} {1HIR INTERCHANGE COMPILER} 1}
+
 cleanupTests

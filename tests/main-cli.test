@@ -167,6 +167,14 @@ foreach {name arguments message} {
     check-argv            {-check -argv a x.bot}             {-check cannot be combined with -argv*}
     check-emit            {-check -emit-hir-interchange x.bot}   {-check cannot be combined with -emit-hir-interchange*}
     check-not-source      {-check x.hirx}                    {-check analyzes Botlish source files (.bot), and x.hirx is not one}
+    lsp-input-file        {-lsp x.bot}                       {-lsp takes no input file: the editor sends the documents*}
+    lsp-backend           {-lsp -backend compile}            {-lsp cannot be combined with -backend*}
+    lsp-check             {-check -lsp}                      {-lsp cannot be combined with -check*}
+    lsp-scheduler         {-lsp -lsp-scheduler fast}         {unknown language server scheduler "fast"*}
+    lsp-scheduler-alone   {-lsp-scheduler sync x.bot}        {-lsp-scheduler is an option of -lsp}
+    lsp-worker-scheduler  {-lsp-worker -lsp-scheduler sync}  {-lsp-scheduler is an option of -lsp}
+    lsp-and-worker        {-lsp -lsp-worker}                 {-lsp and -lsp-worker cannot be combined}
+    lsp-target            {-lsp -target vax}                 {unknown C ABI target "vax"*}
 } {
     test cli-malformed-$name "a malformed invocation ($arguments) is a message on stderr and exit status 2; nothing runs" -body {
         set r [runMain {*}$arguments]
@@ -319,5 +327,19 @@ test cli-check-missing-file {-check of a file that does not exist reports it as 
     set r [runMain -check [file join [temporaryDirectory] no-such-file.bot]]
     list [dict get $r status] [string match "*error: couldn't open*no-such-file.bot*no such file or directory*" [dict get $r out]]
 } -cleanup {unset -nocomplain r} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# -lsp (LSP-MILESTONE-1.md; the protocol itself is tests/lsp.test's)
+
+test cli-lsp-end-of-input {-lsp takes no file and reads the protocol on stdin: input that ends before shutdown ends it with status 1, having written nothing to stdout} -body {
+    set errFile [file join [temporaryDirectory] main-cli-lsp-[pid].txt]
+    set status 0
+    if {[catch {exec [info nameofexecutable] $::mainScript -lsp -warnings off << "" 2> $errFile} out options]} {
+        set status [lindex [dict get $options -errorcode] 2]
+        regsub {\n?child process exited abnormally$} $out {} out
+    }
+    file delete $errFile
+    list $status $out
+} -cleanup {unset -nocomplain errFile status out options} -result {1 {}}
 
 cleanupTests

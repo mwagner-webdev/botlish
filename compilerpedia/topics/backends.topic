@@ -429,6 +429,7 @@ docs: README.md SINGLE-EXECUTABLE.md
     botlish -backend cranelift FILE.bot
     botlish -emit-native-executable FILE.bot     build ./FILE
     botlish -check FILE.bot         report its diagnostics, run nothing
+    botlish -lsp                    the language server, for an editor
     botlish -help [QUERY...]        Compilerpedia
     botlish -version                the build identity
     botlish                         the usage summary (exit 0)
@@ -447,11 +448,11 @@ header.
 
 @topic cli.options
 title: Every command-line option
-summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, inspection output, and the reference.
+summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
 docs: README.md
 
 == RUNNING
@@ -494,6 +495,20 @@ own process arguments.
                       any other option, or an input that is not a .bot
                       file, is a malformed invocation.
 
+== LANGUAGE SERVER (cli.lsp; no input file)
+    -lsp              run the language server: the Language Server
+                      Protocol on stdin and stdout, for an editor. It
+                      analyzes what the editor opens exactly as -check
+                      does, runs and builds nothing, and takes only
+                      -warnings, -target and -lsp-scheduler.
+    -lsp-scheduler NAME   where -lsp analyzes: worker (the default: a
+                      persistent worker process, so the server keeps
+                      answering while an analysis runs) or sync (in the
+                      server's own process, the reference design)
+    -lsp-worker       internal: the analysis worker -lsp starts itself
+                      (a private protocol on stdin and stdout); not for
+                      direct use
+
 == INSPECTING (printed before the program runs)
     -code             the Tcl code the compile backend generates
     -hir              the program's semantic HIR
@@ -520,13 +535,16 @@ own process arguments.
                                          given no -warnings
     BOTLISH_HIR_CACHE=DIR                the front-end cache
     BOTLISH_NATIVE_LINKER=rustc|stub     how executables are linked
+    BOTLISH_LSP_STATS=FILE               -lsp writes its measurements to
+                                         FILE when it exits
 
 == MALFORMED INVOCATIONS
 An unknown option, an option without its argument (`-backend` last), an
 unknown backend, mode or target, a malformed -argv-hex, -check beside an
-option it does not take or with an input that is not Botlish source, or
-options without an input file print a message on stderr and exit with
-status 2; nothing is compiled.
+option it does not take or with an input that is not Botlish source, -lsp
+beside an option it does not take or with an input file, an unknown
+-lsp-scheduler, or options without an input file print a message on stderr
+and exit with status 2; nothing is compiled.
 
 @topic cli.output
 title: What a run prints
@@ -580,8 +598,55 @@ related: cli.usage capability.process-exit-status backend.native-executable
     1   some input was rejected or failed at run time; or -help found no
         topic (near matches on stderr)
     2   a malformed invocation (stderr says what)
+With -lsp: 0 when the editor ended the session in order (shutdown, then
+exit), 1 otherwise (exit without shutdown, the end of its input, input that
+cannot be read as protocol messages).
 
 == A STANDALONE EXECUTABLE
 0 after printing the program's value; nonzero after a run-time error (on
 stderr). The program cannot choose its own exit status
 (capability.process-exit-status).
+
+@topic cli.lsp
+title: The language server (editor integration)
+summary: botlish -lsp speaks the Language Server Protocol on stdin and stdout: an editor gets the compiler's own diagnostics, hover, go-to-definition and find-references for unsaved Botlish source, without running anything.
+index: backends
+alias: lsp; language server; editor; neovim; vscode; ide; editor support
+keywords: -lsp, LSP, hover, definition, references, diagnostics, editor, neovim
+related: cli.options cli.usage cli.exit-status concept.modules
+docs: LSP-MILESTONE-1.md COMPILER-SERVICE-MILESTONE-1.md
+
+== STARTING IT
+    botlish -lsp                    (tclsh9.0 main.tcl -lsp in a checkout)
+An editor starts the server and talks to it on its stdin and stdout; the
+server writes nothing else there (its log goes to stderr). It needs no
+daemon, socket or configuration. A Neovim configuration is in the
+repository's editors/neovim/ directory.
+
+== WHAT IT DOES
+    diagnostics   textDocument/publishDiagnostics: exactly what -check
+                  reports, errors and warnings, each at its range, with
+                  its code; a module's in that module's file
+    hover         textDocument/hover: a function's signature, a binding's
+                  type, as the compiler shows them
+    definition    textDocument/definition: the declaration's name, in the
+                  program, its modules or the standard library
+    references    textDocument/references: every reference to the same
+                  binding in the analyzed program (by resolution, never
+                  by spelling)
+Documents are synchronized whole (didOpen, didChange, didSave, didClose):
+an open document's unsaved text is what the compiler analyzes, and the
+server never writes a file. Positions are UTF-16 (or UTF-32 when the
+editor prefers it).
+
+== PROGRAMS AND STALENESS
+Each open document is analyzed as a program unless another open program
+imports it; then it is that program's module. During a syntax error the
+last analysis still answers where the text is unchanged, its hover marked
+stale. An analysis runs after a short pause in typing, in a worker process,
+so the server answers while it runs.
+
+== NOT YET
+Completion, signature help, rename, code actions, formatting, semantic
+tokens, workspace symbols and references across programs are not
+implemented (LSP-MILESTONE-1.md, "Limitations").

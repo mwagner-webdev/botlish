@@ -1,0 +1,83 @@
+# lsp-neovim.test -- Botlish's language server under a real editor: Neovim's
+# built-in LSP client, headless, with the repository's own configuration
+# (editors/neovim/botlish.lua), driven by tests/lsp-neovim.lua
+# (LSP-MILESTONE-1.md, "Editors"). Neovim is not a dependency: these tests
+# need it (0.10 or later) as `nvim` on PATH or BOTLISH_NVIM=PATH, and are
+# skipped without it (CI installs a pinned release: .github/workflows/tests.yml).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+# The Neovim executable, or "".
+proc ltNvim {} {
+    if {[info exists ::env(BOTLISH_NVIM)] && $::env(BOTLISH_NVIM) ne ""} {
+        set nvim $::env(BOTLISH_NVIM)
+    } else {
+        set nvim [lindex [auto_execok nvim] 0]
+    }
+    if {$nvim eq "" || [catch {exec $nvim --version} version]
+            || ![regexp {NVIM v(\d+)\.(\d+)} $version -> major minor]
+            || !($major > 0 || $minor >= 10)} {
+        return ""
+    }
+    return $nvim
+}
+testConstraint neovim [expr {[ltNvim] ne ""}]
+
+proc ltField {r key} {
+    return [lsp::json::get $r $key]
+}
+
+# Where a jump landed, as FILE:LINE:COLUMN (Neovim's cursor: line 1-based).
+proc ltLanded {landed} {
+    lassign [lsp::json::elements [lsp::json::get $landed cursor]] line column
+    return "[lsp::json::text [lsp::json::get $landed file]]:[lsp::json::integer $line]:[lsp::json::integer $column]"
+}
+
+proc ltPut {path text} {
+    set f [open $path w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f $text
+    close $f
+}
+
+test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botlish.lua, on a two-module program: the .bot filetype, the server attached with UTF-16 positions, the compiler's diagnostics as Neovim shows them, hover, go-to-definition into the module and into std::list, references across files, unsaved edits the client sends, a syntax error during which hover answers stale, and recovery -- and no file written} -constraints neovim -body {
+    set dir [file join [temporaryDirectory] lsp-neovim-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    set dir [file normalize $dir]
+    ltPut $dir/shapes.bot "fn area(w: int, h: int) -> int:\n    w * h\n"
+    set main "import shapes\nimport std::list\n\na = shapes::area(3, 4)\nb = std::list::get(\[1, 2\], 5, 0)\na + b + nosuch\n"
+    ltPut $dir/main.bot $main
+    set out [file join $dir out.json]
+    set cmd [list [info nameofexecutable] [file join $::projectRoot main.tcl] -lsp -warnings default]
+    withEnvironment [list BOTLISH_NVIM_OUT $out BOTLISH_NVIM_CMD [lsp::json::write [lsp::json::arrayOf [lmap a $cmd {lsp::json::str $a}]]]] {
+        exec [ltNvim] --headless --clean --cmd "lua vim.g.botlish_lsp_cmd = vim.json.decode(os.getenv('BOTLISH_NVIM_CMD'))" \
+            -u [file join $::projectRoot editors neovim botlish.lua] \
+            -c "luafile [file join $::projectRoot tests lsp-neovim.lua]" $dir/main.bot 2>@1
+    }
+    set f [open $out]
+    set r [lsp::json::parse [read $f]]
+    close $f
+    if {[ltField $r ok] ne {bool 1}} {
+        error "the Neovim session failed: [lsp::json::write $r]"
+    }
+    set first [lindex [lsp::json::elements [ltField $r initial]] 0]
+    set syntax [lindex [lsp::json::elements [ltField $r syntax]] 0]
+    list [ltField $r ok] [ltField $r error] [ltField $r filetype] [ltField $r server] [ltField $r encoding] \
+        [lsp::json::get $first code] [lsp::json::get $first message] [lsp::json::get $first line] [lsp::json::get $first col] \
+        [ltField $r hover] [ltLanded [ltField $r definition]] [ltLanded [ltField $r std_definition]] \
+        [lsp::json::write [ltField $r references_area]] [ltField $r fixed_waited] \
+        [ltField $r syntax_waited] [lsp::json::get $syntax code] [ltField $r stale_hover] \
+        [ltField $r recovered_waited] [ltField $r recovered_hover] [ltField $r modified] \
+        [expr {[file exists $out] && [compilerpedia_ReadFile $dir/main.bot] eq $main}]
+} -setup {
+    proc compilerpedia_ReadFile {path} { set f [open $path]; fconfigure $f -encoding utf-8; set t [read $f]; close $f; return $t }
+} -cleanup {file delete -force $dir; unset -nocomplain dir main out cmd r first syntax} -result [list {bool 1} {str {}} {str botlish} {str botlish} {str utf-16} \
+    {str {CORE SEMANTIC UNBOUND}} {str {unbound name "nosuch"}} {num 5} {num 8} \
+    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" shapes.bot:1:3 list.bot:76:3 \
+    {["shapes.bot:0","main.bot:3"]} {bool 1} {bool 1} {str {SURFACE SYNTAX}} \
+    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```\n\n*stale: analyzed before the latest changes to main.bot*}" \
+    {bool 1} "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" {bool 1} 1]
+
+cleanupTests

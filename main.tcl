@@ -19,6 +19,9 @@
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
 #   -check                 analyze each .bot input, report its diagnostics,
 #                          run and build nothing (the compiler service)
+#   -lsp ?-lsp-scheduler worker|sync?    the language server, on stdin and
+#                          stdout (no input file); -lsp-worker is its
+#                          analysis worker, started by -lsp itself
 #   -help [QUERY...]       Compilerpedia, the built-in reference
 #                          (compilerpedia/, COMPILERPEDIA.md); everything
 #                          after -help is the query
@@ -116,6 +119,18 @@
 # -warnings and -target (which decide the analysis) combine with it; the
 # rest run, build or inspect, and -check does none of that, so naming one
 # beside it is a usage error, as is an input that is not Botlish source.
+#
+# -lsp runs Botlish's language server (lsp/server.tcl, LSP-MILESTONE-1.md):
+# the Language Server Protocol on stdin and stdout, for an editor, with
+# nothing else on stdout (its log goes to stderr). It takes no input file
+# (the editor sends the documents) and analyzes what the editor opens with
+# the compiler service, as -check does -- never running, building or
+# writing anything -- so only -warnings and -target combine with it, and
+# -lsp-scheduler NAME, which says where its analyses run: worker (the
+# default; a persistent analysis worker process the server starts itself as
+# `-lsp-worker`, so it keeps answering while an analysis runs) or sync (in
+# its own process, the reference design). It exits 0 when the editor ends
+# the session in order (shutdown, then exit) and 1 otherwise.
 #
 # -L DIR adds DIR to the system linker's library search path (-LDIR) for a
 # program that calls C (C-FFI.md: `extern c library` and `extern c fn`), which
@@ -818,6 +833,9 @@ foreach option [dict get $commandLine options] {
         -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
         -L {
             lappend native::linkDirs [file normalize $value]
+        }
+        -lsp-scheduler {
+            usageError "-lsp-scheduler is an option of -lsp"
         }
     }
 }
