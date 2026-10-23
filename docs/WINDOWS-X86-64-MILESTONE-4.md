@@ -469,5 +469,268 @@ ended.
 | an exception on another thread | not claimed | native_stack `fault other-thread` (an exhausted thread), `fault other-thread-raised` (a record naming the guarded stack) | ⟨W⟩ |
 | deep recursion that fits | completes | native-status `jit`; `ns-main-finite`; aot-facts `standalone-deep-finite`; native_stack `finite`; before-after `finite` | ⟨W⟩ |
 
-⟨TESTS-REST⟩
-⟨SECTIONS 8-10⟩
+### 7.2 The guard's own checks
+
+`native/tests/native_stack/windows.rs` (`cargo test --release --test
+native_stack`, the smoke job's "Native stack guard checks" step) runs each
+scenario in a child process of the test executable and compares the result
+with what it must be:
+
+| Check | Scenario | Must end |
+|---|---|---|
+| `facts THREAD` | the stack as `NativeStack::current` reads it on the main thread, std's default thread, 1 MiB and 1 GiB std threads, a 1 MiB thread made by `CreateThread` | the stack pointer inside it, the guard page confirmed above an uncommitted reservation, no guard range (`guard_low == low_bound`) |
+| `guarantee` | the guard installed, then dropped, on a thread of `CreateThread`'s (no guarantee of its own) | its guarantee at least `GUARANTEE` while installed, and the same after the drop (Windows lowers none) |
+| `guard THREAD driver` | each of those threads, the guard in the driver's mode, 256-byte frames | the overflow line on standard output, exit 0 |
+| `guard std-1MiB executable` | an executable's mode | nothing on standard output, the line on standard error, exit 1 |
+| `guard std-1MiB result-file` | the driver with `set_result_file` | the line in the file and nothing on standard output, exit 0 |
+| `guard std-1MiB wide`, `probe-loop` | 64 KiB frames (`__chkstk`); Cranelift's probe pattern | the line, exit 0 |
+| `guard std-1MiB finite` | a recursion that fits | it returns |
+| `guard std-1MiB dropped` | a guard installed and dropped, then exhaustion | exactly what an unguarded thread does: Rust's report, 0xC00000FD, no line |
+| `guard std-1MiB reinstalled` | a second guard after the first was dropped | the line |
+| `fault null`, `fault reserved` | a read of address 8; a read of the guarded stack's uncommitted reservation | 0xC0000005, exactly as without the guard, no line |
+| `fault guard-page` | a read of the system's guard page | the stack grows and the program goes on, as without the guard |
+| `fault raised`, `raised-in-stack` | `RaiseException(STATUS_STACK_OVERFLOW)` with no parameters; on the guarded thread with parameters naming its own stack | Rust's report, 0xC00000FD, as without the guard |
+| `fault other-thread`, `other-thread-raised` | another thread's exhausted stack; another thread raising an exception that names the guarded stack | the same |
+
+Each `fault` scenario also runs without the guard, and the two must end
+identically (exit status and standard output).
+
+On Windows every check passed (real Windows: the smoke job of run
+[39944775051](https://github.com/mwagner-webdev/botlish/actions/runs/39944775051),
+eee16a5):
+
+* **The threads.** The main thread (1 MiB), std's default thread (2 MiB)
+  and the 1 MiB and 1 GiB std threads had Rust's 20,480-byte guarantee.
+  The `CreateThread` thread had none. Every one had its guard page
+  confirmed.
+* **The guarantee.** The guard raised the `CreateThread` thread's to
+  32,768 bytes, and it stayed 32,768 after the drop.
+* **The overflows.** Each of the five threads ended in the line with exit
+  0, and so did the 64 KiB frames and the probe loop. The executable mode
+  gave exit 1 and the line on standard error. The result-file mode put the
+  line in the file and left standard output empty.
+* **Without the guard.** A dropped guard and a guard never installed both
+  ended in Rust's own report, `thread '<unknown>' (...) has overflowed its
+  stack`, with 0xC00000FD.
+* **The faults.** Each ended exactly as without the guard: 0xC0000005 for
+  `null` and `reserved`, the program going on for `guard-page`, and Rust's
+  report with 0xC00000FD for the four `STATUS_STACK_OVERFLOW`s the guard
+  must not claim.
+
+### 7.3 Unit tests
+
+* `runtime::platform::windows` (Windows only):
+  - `this_threads_stack_contains_the_stack_pointer_and_grows_by_a_guard_page`;
+  - `a_guard_page_is_confirmed_only_above_an_uncommitted_reservation`: a
+    reservation laid out with `VirtualAlloc`, with and without a guard
+    page, committed with and without one;
+  - `only_the_guarded_stacks_overflow_is_claimed`: the classifier over
+    every row of section 3.3's table.
+* `runtime::platform`: `the_overflow_line_is_the_drivers_line_for_a_stack_overflow`
+  pins `OVERFLOW_LINE` to the driver's line for `RtError::StackOverflow`
+  on every host.
+* `runtime::native_stack::the_depth_is_checked_only_on_the_fallback_plan`
+  and `nir`'s `a_botlish_call_fails_exactly_where_depth_is_checked`: with
+  native-frame roots, no depth check and no fallible Botlish call; with
+  `fallback-roots`, both.
+
+### 7.4 NIR and machine code
+
+The Tcl tests that read the compiler's output expect the host's behavior
+by capability (`nativeStackGuard`, `nativeDepthChecked`), never by
+operating system. They ran on Windows in the acceptance tier and now
+expect what Linux and macOS have:
+
+* native-stack-map.test, `stack-map-fib-1` and `stack-map-fib-2`: `fib`
+  reserves no depth, and its CLIF imports no `rt_stack_overflow`;
+* native-root-storage.test, `storage-call-crossing-2`: the same for a
+  function whose roots cross a call;
+* hashable.test's `hb-nir-table-hash-total` and the `may_error` tests of
+  setcontains-equality-total.test and setfromlist-equality-total.test:
+  a function whose only fallible operation was its Botlish call is now
+  `may_error=false` in the NIR;
+* native.test's `native-aot-2` (Linux x86-64 only: ELF relocations) now
+  expects the helper's relocation where `nativeDepthChecked` holds, not by
+  operating system.
+
+Section 8 counts the same on real Windows, before and after, over the
+benchmark workloads.
+
+### 7.5 GC
+
+⟨GC⟩
+
+### 7.6 Mutation testing
+
+⟨MUTANTS⟩
+
+### 7.7 Linux and macOS
+
+⟨OTHER-HOSTS⟩
+
+### 7.8 The CI runs
+
+⟨RUNS⟩
+## 8. Performance
+
+Real Windows: the roots job of run
+[39944775051](https://github.com/mwagner-webdev/botlish/actions/runs/39944775051)
+(eee16a5, a manual run with `probes`), on one `windows-2025` runner. That
+step builds the driver of 85753d9 -- main before this milestone: the
+stack-limit check in every function with a Botlish call, every such call
+checked for its error, no guard -- next to this branch's. It runs
+`audit/windows-stack-guard/tools/before-after.tcl` (8.1) and
+`bench/root-plans.tcl -name checks` (8.2) with both drivers. Both drivers
+compile the same NIR, which this branch's front end lowers once per
+program. So the only differences are the root plan's depth reservation, the
+call effects and the prologue.
+
+### 8.1 What each driver does with an exhausted stack
+
+Each program runs on a 16 MiB stack, in the JIT (`botlish-native run`) and
+as the standalone executable it links:
+
+* `down`: Botlish recursion with no end;
+* `huge-frame`: a recursion whose frame holds 3,000 live Strings, about
+  24 KiB, which Cranelift probes with its loop;
+* `runtime-overflow`: a List nested a million deep, compared by the
+  runtime's recursive equality;
+* `finite`: a recursion 100,000 deep that fits.
+
+| Program | 85753d9 (the check), JIT | 85753d9, executable | this branch, JIT | this branch, executable |
+|---|---|---|---|---|
+| `down` | exit 0, `error {NATIVE LIMIT STACK} {...}` | exit 1, `native stack exhausted: too many nested calls (NATIVE LIMIT STACK)` | exit 0, the guard's line | exit 1, the guard's line on standard error |
+| `huge-frame` | the same as `down` | the same as `down` | the same as `down` | the same as `down` |
+| `runtime-overflow` | killed by the exception, `thread '<unknown>' (2328) has overflowed its stack`, nothing on standard output | the same (`(8152)`) | exit 0, the guard's line | exit 1, the guard's line |
+| `finite` | `100000` | `100000` | `100000` | `100000` |
+
+Tcl reports the killed processes as `CHILDKILLED ... SIGSEGV`: its Windows
+pipe code maps an exception's exit status to a signal name. The fallback
+driver (`fallback-roots`, this branch) ends every program as this branch's
+does, with the guard's line, including the executable's format. Its native
+frames run out long before its shadow stack's 2^22 slots, so the guard
+reports where until now the process died (section 6).
+
+The line is the same as before wherever the check reported one: in the
+driver, `error {NATIVE LIMIT STACK} {native stack exhausted: too many
+nested calls}`. An executable used to print the run-time error's own
+format and now prints the guard's line, as on Linux and macOS
+(`aot-facts`' `standalone-depth-limit` pins it).
+
+### 8.2 Code, checks and time
+
+`bench/root-plans.tcl`, 20 runs by 7 rounds, the drivers alternating
+within each round. Times are the median per-run time, the ratio this
+branch / 85753d9, and each round's median range:
+
+| Workload | Botlish calls checked for an error | Prologue depth checks | Machine code (bytes) | JIT time, ratio (rounds) | Executable time, ratio |
+|---|---|---|---|---|---|
+| fib | 3 of 3 → 0 of 3 | 2 → 0 | 416 → 208 (−50 %) | 507.1 → 510.8 µs, 1.007 (505-512 / 511-514) | 1.002 |
+| calls | 2 of 2 → 0 of 2 | 2 → 0 | 803 → 646 (−20 %) | 785.9 → 783.9 µs, 0.997 | 0.983 |
+| uri | 21 of 25 → 18 of 25 | 12 → 0 | 7,230 → 6,313 (−13 %) | 2,081 → 2,140 µs, 1.028 (2074-2108 / 2068-2225) | 0.996 |
+| 2048 | 53 of 55 → 53 of 55 | 23 → 0 | 24,130 → 22,344 (−7 %) | 3,851 → 3,892 µs, 1.011 | 1.011 |
+| strings | 1 of 1 → 1 of 1 | 1 → 0 | 407 → 367 (−10 %) | 13,846 → 13,791 µs, 0.996 | 0.998 |
+| lists | 3 of 3 → 3 of 3 | 3 → 0 | 888 → 734 (−17 %) | 7,510 → 7,491 µs, 0.997 | 1.042 (7460-7706 / 7240-8601) |
+
+The stack-limit check's cost was its code, not its time:
+
+* **Code.** Every function with a Botlish call lost its prologue compare
+  and cold block, and every call whose only possible error was the stack
+  lost its status check and error edge. Machine code shrank by 7 to 50 %.
+  Unwind information shrank only where a cold block had needed its own
+  (`.xdata` 48 → 44 bytes for fib, 556 → 548 for uri).
+* **Calls checked.** These fall where the stack was a call's only possible
+  error (fib, calls, uri's three). Where a callee can fail for another
+  reason (2048, strings, lists), its calls stay checked, as on Linux.
+* **Time.** No change outside the noise. The ratios run from 0.983 to
+  1.042, both ways, inside the rounds' own spread. The check was a compare
+  and a predicted branch per call, and the status check a load and a
+  predicted branch, so on this runner neither showed in a call-bound
+  recursion (fib) or a workload.
+* **The collector.** Under GC stress, collections cost what they did
+  (uri 1.39 → 1.33 µs, 2048 1.76 → 1.79 µs, lists 4.38 → 4.17 µs per
+  collection): the frames it walks only lost instructions.
+
+The same job compares the native-frame plan with the fallback plan (its
+milestone 3 role) on this branch. The fallback still checks depth (2 to 23
+prologue checks per workload) and every call it must, and the numbers are
+in the run's summary.
+
+## 9. Remaining limitations
+
+* **Interactive consoles are untested.** Every Windows run above wrote the
+  line to a pipe or a file: GitHub's runners have no console. On a console
+  handle `WriteFile` goes to the console driver (`condrv`) as an ordinary
+  `NtWriteFile` on Windows 8 and later. That is code inspection of the
+  documented behavior, not a measurement of its stack use in the handler.
+* **An access violation stays an access violation.** Code that steps over
+  the system's guard page -- a frame larger than a page that probes
+  nothing -- faults on the uncommitted reservation, and the guard passes
+  that on (`fault reserved`). The process then ends in 0xC0000005, as it
+  did before. Botlish code, Rust and MSVC-compiled C probe large frames
+  (Cranelift's probes, `__chkstk`), so none of this project's code does
+  this. A C library compiled without probes (`/Gs` with a huge threshold)
+  would; that is the library's bug, and the guard never relabels it.
+* **One stack per guard.** The guard watches the thread that installed
+  it: the worker that runs Botlish code. An exhaustion on any other
+  thread -- the driver's main thread, a thread C code starts -- is passed
+  on to Rust's handler and the system, as on Linux and macOS. There are no
+  native coroutines on Windows (next section), so no second stack runs
+  Botlish code there.
+* **The guarantee outlives the guard.** `SetThreadStackGuarantee` cannot
+  lower a guarantee, so the worker thread keeps 32 KiB after the guard is
+  dropped. The thread ends with the run, so this costs nothing in practice.
+* **Another first handler comes first.** A vectored handler that C code
+  adds later with `First = 1` runs before the guard's. If it consumes
+  `STATUS_STACK_OVERFLOW` or uses up the guarantee, the guard never sees
+  the exception. No C code this project calls does that.
+* **The write is best effort.** A destination that refuses the write (a
+  closed pipe, no standard error) loses the line; the exit status is still
+  the guard's. That matches the POSIX guard.
+* **The fail-fast path is unobserved.** `TerminateProcess` of the calling
+  process never returned in any experiment or test, so the
+  `int 0x29` after it is code inspection only.
+* **What remains of the stack check is the fallback plan's.** A build with
+  `fallback-roots` still checks its shadow stack's depth in every function
+  with a Botlish call and keeps those call effects (section 5). That is
+  by design, not a leftover of milestone 3.
+
+## 10. Next milestone
+
+With the guard in place, Windows x86-64 lacks two native capabilities that
+Linux and macOS have (`native/native.tcl`'s `capabilities`, the
+windows-x86_64 row of `tests/platform/native-status.tcl`):
+
+* **Native coroutines** (`coroutines`). They are the larger of the two,
+  and this milestone removes their prerequisite: AGENTS.md holds that a host
+  with native coroutines needs native-frame roots, and native-frame roots
+  need a guard (section 5). A coroutine's stack on Windows needs:
+  - a reservation of its own with a guard page below its committed top,
+    so Windows grows it as it grows a thread's;
+  - a switch that also exchanges NT_TIB's `StackBase` and `StackLimit` and
+    the TEB's `DeallocationStack` (gs:0x08, gs:0x10, gs:0x1478). Windows
+    reads these to decide whether a fault grows the stack or raises
+    `STATUS_STACK_OVERFLOW`, and `GetCurrentThreadStackLimits` reads them;
+  - a guarantee on every coroutine stack. A stack guarantee belongs to the
+    thread (the TEB's `GuaranteedStackBytes`), so the switch must carry it
+    too, or every coroutine stack must keep the room;
+  - publication of the running stack's reservation to the guard
+    (`STACK_LOW`/`STACK_HIGH` today), on arrival, as the POSIX switch
+    publishes;
+  - Win64's callee-saved registers in the switch: XMM6 to XMM15, beside the
+    integer ones;
+  - unwind information for the switch and the trampoline, so that the
+    collector's walk (`RtlVirtualUnwind`, milestone 3) can cross a resumer's
+    frames.
+
+  The alternative is Windows' own fibers (`CreateFiber`,
+  `SwitchToFiber`), which keep the TIB fields themselves. Choosing between
+  them is that milestone's first experiment.
+* **Variadic C calls** (`cVariadics`). They need a Win64 lowering checked
+  against MSVC-built callees, with a double passed in both registers
+  (AGENTS.md, "Windows x86-64 (MSVC)"). This is the smaller one.
+
+The recommendation is native coroutines next. The guard it needs is the
+one this milestone built, and the Windows guard's design (one stack's
+bounds, published, read by the handler) already leaves room for a running
+stack that changes.
