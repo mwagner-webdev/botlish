@@ -296,7 +296,11 @@ proc memory {name scheduler rounds} {
     for {set k 1} {$k <= $rounds} {incr k} {
         lspc::didChange $c $module [expr {$k + 1}] [string map [list [dict get $w old] "[dict get $w new] # round $k"] $moduleText]
         lspc::until $c {[published $c $module] >= $k + 1} -timeout 600000
-        lspc::hover $c $entry {*}[position [readFile [file join $dir [dict get $w entry]]]]
+        if {[dict exists $w at]} {
+            lspc::hover $c $entry {*}[dict get $w at]
+        } else {
+            lspc::hover $c $entry {*}[position [readFile [file join $dir [dict get $w entry]]]]
+        }
         set samples(server) {}
         set samples(worker) {}
         sample $c samples
@@ -388,7 +392,8 @@ if {$memories ne {}} {
             string cat [fmt $server] / [fmt $worker]
         }]
         set maxServer [tcl::mathfunc::max {*}[lmap r $rows {expr {[lindex $r 1] eq "" ? 0 : [lindex $r 1]}}]]
-        set maxWorker [tcl::mathfunc::max {*}[lmap r $rows {expr {[lindex $r 2] eq "" ? 0 : [lindex $r 2]}}]]
+        set workers [lmap r $rows {if {[lindex $r 2] eq ""} continue; lindex $r 2}]
+        set maxWorker [if {$workers eq {}} {list -} else {tcl::mathfunc::max {*}$workers}]
         lappend lines "| [lindex $key 0] | [lindex $key 1] | [join $cells { | }] | [fmt $maxServer] / [fmt $maxWorker] |"
     }
 }
