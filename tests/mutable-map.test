@@ -1,0 +1,273 @@
+# mutable-map.test -- std::mutable_map::MutableMap[K satisfies Hashable, V]
+# (ORDERED-MUTABLE-MAP-SET.md).
+#
+# A MutableMap is a mutable value whose iteration order is insertion order:
+# a new key is added last, replacing a key's value keeps its place (and its
+# stored key), removing a key and setting it again adds it last. Keys are
+# compared by Botlish equality and placed by the private keyed table hash,
+# which no observation depends on: lengths, lookups, removals and the
+# iteration order are the same on every backend, in every process, under
+# every hidden key. Resizing and compaction never change the order. Copies
+# are independent through every mutation.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set mmDecls {import std::list
+import std::mutable_map
+import std::mutable_vector
+import std::mutable_array
+
+fn entries(m: std::mutable_map::MutableMap[str, int]) -> List[List[str]]:
+    loop e in m:
+        [e.key]
+
+fn items(m: std::mutable_map::MutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn at_or(m: std::mutable_map::MutableMap[int, int], k: int, d: int) -> int:
+    v = m.at(k):
+        on std::mutable_map::KeyNotFound:
+            d
+    v
+
+fn int_map() -> std::mutable_map::MutableMap[int, int]:
+    std::mutable_map::create[int, int]()
+
+}
+
+proc mmRun {body {backends {interp compile cranelift-generic cranelift}}} {
+    return [sourceAgree "$::mmDecls$body" $backends]
+}
+
+proc mmDiagnostics {body} {
+    set offset [llength [split $::mmDecls \n]]
+    if {![catch {surface::compile "$::mmDecls$body" -warnings off} message options]} {
+        return {}
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] {
+        set line ""
+        regexp {^[^:]*:([0-9]+):} [dict get $d message] -> line
+        if {$line ne ""} {
+            set line [expr {$line - $offset + 1}]
+        }
+        lappend result [list [lindex [dict get $d errorcode] end] $line]
+    }
+    return $result
+}
+
+# The keys of the collision corpus (audit/hashable/data/int-collide-1024.txt:
+# 1024 Ints whose public hash is 0 mod 1024), the first N.
+proc mmCollide {n} {
+    set keys [string trim [core::ReadFile [file join $::projectRoot audit hashable data int-collide-1024.txt]]]
+    return [lrange $keys 0 [expr {$n - 1}]]
+}
+
+# The NIR operations of function NAME's instance INSTANCE in NIR text.
+proc mmOps {nir name instance} {
+    set ops {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)" .* instance="([^"]*)"} $line -> fname finstance]} {
+            set inside [expr {$fname eq $name && $finstance eq $instance}]
+            continue
+        }
+        if {$inside && [regexp {op ([a-z]+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return [lsort -unique $ops]
+}
+
+# ---------------------------------------------------------------------------
+# The API
+
+test mm-basics {create, length, empty?, contains, at, set, remove and clear} -body {
+    mmRun "m = std::mutable_map::create\[str, int\]()\ne0 = m.empty?()\nm.set(\"a\", 1)\nm.set(\"b\", 2)\nn = m.length()\nc = \[m.contains(\"a\"), m.contains(\"z\")\]\nv = m.at(\"b\"):\n    on std::mutable_map::KeyNotFound:\n        -1\nr = m.remove(\"a\"):\n    on std::mutable_map::KeyNotFound:\n        -1\nafter = \[m.length(), m.contains(\"a\"), m.empty?()\]\nm.clear()\n\[e0, n, c, v, r, after, m.length(), m.empty?(), m.contains(\"b\")\]\n"
+} -result {value {[true, 2, [true, false], 2, 1, [1, false, false], 0, true, false]}}
+
+test mm-with-capacity {with_capacity is a performance request only: the map is empty, and behaves as a created one} -body {
+    mmRun "m = std::mutable_map::with_capacity\[int, int\](100)\nloop i from 0 to 30:\n    m.set(i * 3, i)\n\[m.length(), at_or(m, 27, -1), std::list::length(items(m))\]\n"
+} -result {value {[30, 9, 30]}}
+
+test mm-missing-key {a missing key is the error std::mutable_map::KeyNotFound for at and remove, and the map is unchanged by a failed remove} -body {
+    mmRun "m = int_map()\nm.set(1, 10)\nm.set(2, 20)\na = m.at(3):\n    on std::mutable_map::KeyNotFound:\n        -1\nr = m.remove(3):\n    on std::mutable_map::KeyNotFound:\n        -2\n\[a, r, items(m)\]\n"
+} -result {value {[-1, -2, [[1, 10], [2, 20]]]}}
+
+test mm-missing-key-propagates {KeyNotFound is a declared error of at and remove: unhandled, it is UNHANDLED-ERROR; declared, it propagates} -body {
+    list [lindex [mmDiagnostics "m = int_map()\nm.at(1)\n"] 0] \
+        [mmRun "fn f(m: std::mutable_map::MutableMap\[int, int\]) -> int errors std::mutable_map::KeyNotFound:\n    m.at(5)\nr = f(int_map()):\n    on std::mutable_map::KeyNotFound:\n        -7\nr\n"]
+} -result {{UNHANDLED-ERROR 2} {value -7}}
+
+# ---------------------------------------------------------------------------
+# Semantic order
+
+test mm-order-insertion {iteration is insertion order} -body {
+    mmRun "m = std::mutable_map::create\[str, int\]()\nloop k in \[\"pear\", \"fig\", \"apple\", \"kiwi\", \"date\"\]:\n    m.set(k, 0)\nentries(m)\n"
+} -result {value {[["pear"], ["fig"], ["apple"], ["kiwi"], ["date"]]}}
+
+test mm-replace-keeps-position {setting an existing key replaces its value only: the length is unchanged, the key keeps its place} -body {
+    mmRun "m = int_map()\nloop k in \[5, 3, 9, 1\]:\n    m.set(k, k)\nm.set(3, 33)\nm.set(5, 55)\nm.set(3, 333)\n\[m.length(), items(m)\]\n"
+} -result {value {[4, [[5, 55], [3, 333], [9, 9], [1, 1]]]}}
+
+test mm-remove-reinsert-moves-last {removing a key removes it from iteration; setting it again adds it last} -body {
+    mmRun "m = int_map()\nloop k in \[1, 2, 3, 4\]:\n    m.set(k, k * 10)\nr = m.remove(2):\n    on std::mutable_map::KeyNotFound:\n        -1\na = items(m)\nm.set(2, 7)\nb = items(m)\nr2 = m.remove(1):\n    on std::mutable_map::KeyNotFound:\n        -1\nm.set(1, 8)\n\[r, a, b, items(m)\]\n"
+} -result {value {[20, [[1, 10], [3, 30], [4, 40]], [[1, 10], [3, 30], [4, 40], [2, 7]], [[3, 30], [4, 40], [2, 7], [1, 8]]]}}
+
+test mm-equal-keys {keys are compared by Botlish equality, never identity: an equal but independently built struct or List key finds, replaces and removes the entry} -body {
+    mmRun "struct P:\n    x: int\n    tags: List\[str\]\nfn tag(x: int) -> str:\n    if x.mod(2) == 0:\n        return \"u\"\n    \"v\"\nfn p(x: int) -> P:\n    P {x: x, tags: \[\"t\", tag(x)\]}\nm = std::mutable_map::create\[P, int\]()\nm.set(p(1), 1)\nm.set(P {x: 1, tags: \[\"t\", \"v\"\]}, 2)\nm.set(p(2), 3)\nc = m.contains(P {x: 2, tags: \[\"t\", \"u\"\]})\nr = m.remove(p(2)):\n    on std::mutable_map::KeyNotFound:\n        -1\nv = m.at(P {x: 1, tags: \[\"t\", \"v\"\]}):\n    on std::mutable_map::KeyNotFound:\n        -1\n\[m.length(), c, r, v\]\n"
+} -result {value {[1, true, 3, 2]}}
+
+test mm-growth-keeps-order {growth from 8 slots through several rebuilds never changes the order or loses an entry (300 keys in a scrambled order)} -body {
+    set keys [lmap i [lrange [lsort -command {apply {{a b} {expr {(($a * 7919) % 1009) - (($b * 7919) % 1009)}}}} [lsort -integer [lmap i [lrepeat 300 0] {incr ::mmCounter}]]] 0 end] {expr {$i * 37 - 4000}}]
+    set ::mmCounter 0
+    set list [join $keys {, }]
+    set result [mmRun "ks = \[$list\]\nm = int_map()\nloop k in ks:\n    m.set(k, k + 1)\nok = loop k in ks:\n    if at_or(m, k, 0) != k + 1:\n        break\n    k\norder = loop e in m:\n    e.key\n\[m.length(), std::list::length(ok), order\]\n"]
+    list [lindex $result 0] [expr {[lindex $result 1] eq "\[300, 300, \[$list\]\]"}]
+} -setup {set ::mmCounter 0} -cleanup {unset -nocomplain keys list result} -result {value 1}
+
+test mm-compaction-keeps-order {removing most of the entries (rebuilds and compactions on the way) keeps the survivors' order; keys set again after it are last} -body {
+    mmRun "m = int_map()\nloop i from 0 to 200:\n    m.set(i, i)\nloop i from 0 to 200:\n    if i.mod(10) != 3:\n        r = m.remove(i):\n            on std::mutable_map::KeyNotFound:\n                -1\nm.set(5, 50)\nm.set(13, 130)\nks = loop e in m:\n    e.key\nvs = loop e in m:\n    e.value\nv1 = std::list::at(vs, 1):\n    on IndexNotFound:\n        -1\n\[m.length(), ks, v1\]\n"
+} -result {value {[21, [3, 13, 23, 33, 43, 53, 63, 73, 83, 93, 103, 113, 123, 133, 143, 153, 163, 173, 183, 193, 5], 130]}}
+
+test mm-churn {insert and remove one key 3000 times, then several: the map ends with exactly its live keys, in order, its lookups right} -body {
+    mmRun "m = int_map()\nloop i from 0 to 3000:\n    m.set(i, i)\n    r = m.remove(i):\n        on std::mutable_map::KeyNotFound:\n            -1\nloop i from 0 to 3000:\n    m.set(i.mod(5), i)\n    if i.mod(7) == 0:\n        r = m.remove(i.mod(5)):\n            on std::mutable_map::KeyNotFound:\n                -1\n\[m.length(), items(m)\]\n" {compile cranelift-generic cranelift}
+} -result {value {[4, [[3, 2998], [0, 2995], [2, 2997], [4, 2999]]]}}
+
+test mm-clear {clear empties the map: no entry is iterated or found, and the map grows again from nothing} -body {
+    mmRun "m = int_map()\nloop i from 0 to 40:\n    m.set(i, i)\nm.clear()\na = \[m.length(), items(m), m.contains(3)\]\nloop i from 0 to 12:\n    m.set(12 - i, i)\nlast = std::list::at(items(m), 11):\n    on IndexNotFound:\n        \[\]\n\[a, m.length(), at_or(m, 12, -1), last\]\n"
+} -result {value {[[0, [], false], 12, 0, [1, 11]]}}
+
+# ---------------------------------------------------------------------------
+# Value semantics: copies
+
+test mm-copies-independent {a copy (binding, argument, result, struct field, List element) never observes a later mutation of the original, nor the original one of the copy -- through set, replace, remove, growth, compaction and clear} -body {
+    mmRun "struct Box:\n    m: std::mutable_map::MutableMap\[int, int\]\nfn keep(m: std::mutable_map::MutableMap\[int, int\]) -> std::mutable_map::MutableMap\[int, int\]:\n    m\na = int_map()\nloop i from 0 to 10:\n    a.set(i, i)\nb = a\nbox = Box {m: a}\nxs = \[a\]\nk = keep(a)\nloop i from 10 to 60:\n    a.set(i, i)\na.set(0, 100)\nloop i from 1 to 9:\n    r = a.remove(i):\n        on std::mutable_map::KeyNotFound:\n            -1\nb.set(0, -5)\nb.set(77, 77)\nc = b\nb.clear()\nx0 = std::list::at(xs, 0):\n    on IndexNotFound:\n        int_map()\n\[a.length(), at_or(a, 0, -1), b.length(), c.length(), at_or(c, 0, -1), box.m.length(), at_or(box.m, 0, -1), std::list::length(items(x0)), k.length(), at_or(k, 5, -1)\]\n"
+} -result {value {[52, 100, 0, 11, -5, 10, 0, 10, 10, 5]}}
+
+test mm-copies-adversarial {a, b = a, c = b mutated in turn across growth, deletion, compaction and clear: each is exactly its own history (the arrays of one logical version are never mixed with another's)} -body {
+    mmRun "a = int_map()\nloop i from 0 to 6:\n    a.set(i, i)\nb = a\nloop i from 6 to 40:\n    a.set(i, i)\nc = b\nloop i from 0 to 6:\n    r = b.remove(i):\n        on std::mutable_map::KeyNotFound:\n            -1\nb.set(100, 100)\nloop i from 0 to 40:\n    if i.mod(2) == 0:\n        r = a.remove(i):\n            on std::mutable_map::KeyNotFound:\n                -1\nc.set(3, 33)\nd = c\nc.clear()\nc.set(9, 9)\na0 = std::list::at(items(a), 0):\n    on IndexNotFound:\n        \[\]\n\[std::list::length(items(a)), a0, items(b), items(c), items(d)\]\n"
+} -result {value {[20, [1, 1], [[100, 100]], [[9, 9]], [[0, 0], [1, 1], [2, 2], [3, 33], [4, 4], [5, 5]]]}}
+
+test mm-key-copy-semantics {a key holding a collection copy is the value inserted: mutating the source collection afterwards changes neither the stored key nor what finds it} -body {
+    mmRun "fn snapshot(v: MutableVector\[int\]) -> List\[int\]:\n    loop x in v:\n        x\nv = std::mutable_vector::from_list(\[1, 2\])\nm = std::mutable_map::create\[List\[int\], int\]()\nm.set(snapshot(v), 1)\nv.push(3)\nm.set(snapshot(v), 2)\n\[m.length(), m.contains(\[1, 2\]), m.contains(\[1, 2, 3\])\]\n"
+} -result {value {[2, true, true]}}
+
+# ---------------------------------------------------------------------------
+# Keys: kinds, collisions, the hidden key
+
+test mm-key-kinds {String (astral and combining), BigInt, enum, struct, nested struct and List keys} -body {
+    mmRun "enum Color:\n    Red, Green\nstruct In:\n    a: int\nstruct Out:\n    in: In\n    c: Color\ns = std::mutable_map::create\[str, int\]()\ns.set(\"\U0001F600\", 1)\ns.set(\"e\u0301\", 2)\ns.set(\"\u00E9\", 3)\nb = std::mutable_map::create\[int, int\]()\nb.set(100000000000000000000000000000, 1)\nb.set(-100000000000000000000000000000, 2)\nn = std::mutable_map::create\[Out, int\]()\nn.set(Out {in: In {a: 1}, c: Color::Red}, 1)\nn.set(Out {in: In {a: 1}, c: Color::Green}, 2)\nn.set(Out {in: In {a: 1}, c: Color::Red}, 3)\nl = std::mutable_map::create\[List\[Color\], int\]()\nl.set(\[Color::Red, Color::Green\], 1)\nl.set(\[Color::Green, Color::Red\], 2)\n\[s.length(), s.contains(\"\u00E9\"), s.contains(\"e\"), b.length(), b.contains(100000000000000000000000000000), n.length(), l.length(), l.contains(\[Color::Green, Color::Red\])\]\n"
+} -result {value {[3, true, false, 2, true, 2, 2, true]}}
+
+test mm-collision-corpus {the hash-table experiment's adversarial keys (all on one home slot under the public hash) are ordinary keys to the table: every lookup, removal and the order are right (256 keys)} -body {
+    set keys [mmCollide 256]
+    set list [join $keys {, }]
+    set result [mmRun "ks = \[$list\]\nm = int_map()\nloop k in ks:\n    m.set(k, 1)\nhits = loop k in ks:\n    if not m.contains(k):\n        break\n    k\nloop k in ks:\n    if k.mod(3) == 0:\n        r = m.remove(k):\n            on std::mutable_map::KeyNotFound:\n                -1\nrest = loop e in m:\n    e.key\n\[std::list::length(hits), rest\]\n"]
+    set expected [lmap k $keys {if {$k % 3 == 0} continue; set k}]
+    expr {$result eq "value {\[256, \[[join $expected {, }]\]\]}"}
+} -cleanup {unset -nocomplain keys list result expected} -result 1
+
+test mm-full-hash-collisions {genuine collisions of the stored keyed hash itself -- injected by a private library whose map hashes keys into only 4 values -- are resolved by equality: the hash is a filter, the key decides} -body {
+    withPrivateLibrary {
+        set path [file join $::core::libraryDir mutable_map.bot]
+        set text [string map {{std::table_hash::of(key)} {bit_and(std::table_hash::of(key), 3)}} [core::ReadFile $path]]
+        set f [open $path w]
+        puts -nonewline $f $text
+        close $f
+        set result [sourceAgree "$::mmDecls\nm = int_map()\nloop i from 0 to 60:\n    m.set(i * 11, i)\nloop i from 0 to 60:\n    if i.mod(4) == 1:\n        r = m.remove(i * 11):\n            on std::mutable_map::KeyNotFound:\n                -1\nm.set(11, 99)\nhits = loop i from 0 to 60:\n    at_or(m, i * 11, -1)\nlast = std::list::at(items(m), 45):\n    on IndexNotFound:\n        \[\]\n\[m.length(), hits, last\]\n"]
+    }
+    list [regexp {bit_and\(std::table_hash::of\(key\), 3\)} $text] $result
+} -cleanup {unset -nocomplain path text f result} -result {1 {value {[46, [0, 99, 2, 3, 4, -1, 6, 7, 8, -1, 10, 11, 12, -1, 14, 15, 16, -1, 18, 19, 20, -1, 22, 23, 24, -1, 26, 27, 28, -1, 30, 31, 32, -1, 34, 35, 36, -1, 38, 39, 40, -1, 42, 43, 44, -1, 46, 47, 48, -1, 50, 51, 52, -1, 54, 55, 56, -1, 58, 59], [11, 99]]}}}
+
+test mm-secret-independent {the same operations under two different hidden keys (and the processes' own drawn keys, which every backend draws apart) give the same lengths, lookups, removed values and iteration order} -body {
+    set body "m = int_map()\nloop i from 0 to 80:\n    m.set((i * 7919).mod(1000), i)\nloop i from 0 to 80:\n    if i.mod(3) == 0:\n        r = m.remove((i * 7919).mod(1000)):\n            on std::mutable_map::KeyNotFound:\n                -1\nm.set(919, -1)\n\[m.length(), items(m)\]\n"
+    set outcomes {}
+    foreach key {{1 2} {0x123456789abcdef0 0x0fedcba987654321} ""} {
+        core::hashing::useTableHashKey $key
+        try {
+            lappend outcomes [mmRun $body]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+} -cleanup {unset -nocomplain body outcomes key} -result {1 {value {[53, [[919, -1], [838, 2], [676, 4], [595, 5], [433, 7], [352, 8], [190, 10], [109, 11], [947, 13], [866, 14], [704, 16], [623, 17], [461, 19], [380, 20], [218, 22], [137, 23], [975, 25], [894, 26], [732, 28], [651, 29], [489, 31], [408, 32], [246, 34], [165, 35], [3, 37], [922, 38], [760, 40], [679, 41], [517, 43], [436, 44], [274, 46], [193, 47], [31, 49], [950, 50], [788, 52], [707, 53], [545, 55], [464, 56], [302, 58], [221, 59], [59, 61], [978, 62], [816, 64], [735, 65], [573, 67], [492, 68], [330, 70], [249, 71], [87, 73], [6, 74], [844, 76], [763, 77], [601, 79]]]}}}
+
+# ---------------------------------------------------------------------------
+# Admission, equality and hashing
+
+test mm-key-must-be-hashable {a key type must satisfy Hashable, wherever the application is written: a function, a MutableVector or an untyped key is TRAIT-NOT-SATISFIED} -body {
+    list [lindex [mmDiagnostics "m = std::mutable_map::create\[Fn{args: \[int\], return: int}, int\]()\n1\n"] 0 0] \
+        [lindex [mmDiagnostics "fn f(m: std::mutable_map::MutableMap\[MutableVector\[int\], int\]) -> int:\n    0\n1\n"] 0 0] \
+        [lindex [mmDiagnostics "fn f(m: std::mutable_map::MutableMap\[any, int\]) -> int:\n    0\n1\n"] 0 0]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test mm-not-hashable {a MutableMap is no Hashable value (it holds MutableVectors, which are not): hash and a Hashable parameter refuse it statically} -body {
+    list [lindex [mmDiagnostics "m = int_map()\nhash(m)\n"] 0 0] \
+        [lindex [mmDiagnostics "fn h(x: Hashable) -> int:\n    hash(x)\nh(int_map())\n"] 0 0]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test mm-no-equality {`==` of two maps is refused at run time (EQUALITY), and the refusal names the opaque values, never their representation} -body {
+    set outcome [mmRun "a = int_map()\nb = int_map()\na == b\n"]
+    list [lindex $outcome 1] [lindex $outcome 2]
+} -result {{CORE SEMANTIC EQUALITY} {== is not defined for callables: <opaque std::mutable_map::MutableMap> == <opaque std::mutable_map::MutableMap>}}
+
+test mm-content-comparison {an order-independent content comparison is ordinary Botlish over the public API (same length, every key present with an equal value): insertion order is no part of it} -body {
+    mmRun "fn same(a: std::mutable_map::MutableMap\[int, int\], b: std::mutable_map::MutableMap\[int, int\]) -> bool:\n    if a.length() != b.length():\n        return false\n    bad = loop e in a:\n        if at_or(b, e.key, e.value + 1) == e.value:\n            continue\n        e.key\n    std::list::length(bad) == 0\na = int_map()\nb = int_map()\na.set(1, 10)\na.set(2, 20)\nb.set(2, 20)\nb.set(1, 10)\nc = b\nc.set(1, 11)\n\[same(a, b), same(a, c)\]\n"
+} -result {value {[true, false]}}
+
+test mm-opaque {the representation is opaque: no program constructs a MutableMap or reads its fields} -body {
+    list [lindex [mmDiagnostics "m = int_map()\nm.table\n"] 0 0] [lindex [mmDiagnostics "m = int_map()\nm.vals\n"] 0 0]
+} -result {OPAQUE-REPRESENTATION OPAQUE-REPRESENTATION}
+
+# ---------------------------------------------------------------------------
+# Typed storage and lowering
+
+test mm-typed-probe {a key read back from the table keeps its type: natively the probe of a MutableMap[str, V] compares keys with streq and of a MutableMap[int, V] with Int equality; never the fallible veq, even unspecialized (veqtotal)} -constraints nativeBuilt -body {
+    set hir [surface::compile "${::mmDecls}a = std::mutable_map::create\[str, int\]()\na.set(\"x\", 1)\nb = int_map()\nb.set(1, 2)\n\[a.contains(\"x\"), b.contains(1)\]\n" -warnings off]
+    set nir [native::nir $hir]
+    set generic [native::nir $hir -specialize 0]
+    list [expr {"streq" in [mmOps $nir std::ordered_table::probe {std::ordered_table::Table[str], int, str, int}]}] \
+        [expr {[llength [lsearch -all -inline -regexp [mmOps $nir std::ordered_table::probe {std::ordered_table::Table[int], int, int, int}] {^r?ieq$}]] > 0}] \
+        [regexp -all {op veq } $nir] [regexp -all {op veq } $generic] [expr {[regexp -all {op veqtotal } $generic] > 0}]
+} -cleanup {unset -nocomplain hir nir generic} -result {1 1 0 0 1}
+
+test mm-one-keyed-hash {every operation computes the keyed hash of its key once (one tablehashtotal per contains, at, set, remove), and never the public hash} -constraints nativeBuilt -body {
+    set nir [native::nir [surface::compile "${::mmDecls}m = int_map()\nm.set(1, 2)\nc = m.contains(1)\nv = at_or(m, 1, 0)\nr = m.remove(1):\n    on std::mutable_map::KeyNotFound:\n        -1\n\[c, v, r\]\n" -warnings off]]
+    set counts {}
+    foreach f {std::mutable_map::set std::mutable_map::contains std::mutable_map::at std::mutable_map::remove} {
+        set n 0
+        set inside 0
+        foreach line [split $nir \n] {
+            if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+                set inside [expr {$fname eq $f}]
+                continue
+            }
+            if {$inside && [string match {*op tablehash*} $line]} {
+                incr n
+            }
+        }
+        lappend counts $n
+    }
+    list $counts [regexp -all {op hash(total)? } $nir]
+} -cleanup {unset -nocomplain nir counts f n inside line fname} -result {{1 1 1 1} 0}
+
+test mm-lookups-allocate-nothing {natively, once a map is built, contains, at (hit and miss) and replacing a value allocate nothing: 2000 of each allocate what 0 do} -constraints nativeBuilt -body {
+    set rows [lmap n {0 2000} {
+        set hir [surface::compile "${::mmDecls}fn work(place m: std::mutable_map::MutableMap\[int, int\], acc: MutableArray\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    if m.contains(i.mod(300) * 7):\n        acc.set(0, at_or(m, i.mod(600) * 7, 0)):\n            on IndexNotFound:\n                unit\n    m.set(i.mod(300) * 7, i)\n    work(m, acc, i + 1, n)\nm = int_map()\nloop i from 0 to 300:\n    m.set(i * 7, i)\nacc = std::mutable_array::create(1, 0)\nwork(m, acc, 0, $n)\nm.length()\n" -warnings off]
+        dict get [native::allocationReport $hir summary] total allocations
+    }]
+    expr {[lindex $rows 0] == [lindex $rows 1]}
+} -cleanup {unset -nocomplain rows hir n} -result 1
+
+test mm-no-copies {a map threaded through place calls is never copied: building and updating 3000 entries makes no logical copy and no detach of any of its vectors} -constraints nativeBuilt -body {
+    set hir [surface::compile "${::mmDecls}m = int_map()\nloop i from 0 to 3000:\n    m.set(i, i)\nloop i from 0 to 3000:\n    if i.mod(2) == 0:\n        r = m.remove(i):\n            on std::mutable_map::KeyNotFound:\n                -1\nm.set(1, 5)\nm.length()\n" -warnings off]
+    set report [native::allocationReport $hir summary]
+    list [dict get $report mutableVector shares] [dict get $report mutableVector detaches] [dict get $report mutableArray shares] [dict get $report mutableArray detaches]
+} -cleanup {unset -nocomplain hir report} -result {0 0 0 0}
+
+cleanupTests

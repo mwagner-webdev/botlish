@@ -146,6 +146,16 @@ proc hir::iteration::ElementOf {hir type} {
     return [ResultOn $hir [lindex [dict get $protocol at] 1] $type]
 }
 
+# 1 if lockstep loop NODE has a clause over an iterable struct (Protocol).
+proc hir::iteration::IterableDomain {hir node} {
+    foreach d [dict get $node domains] {
+        if {[dict get $d kind] eq "list" && [Protocol $hir [hir::typeOf $hir [dict get $d iterable]]] ne ""} {
+            return 1
+        }
+    }
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Verification (hir::check)
 

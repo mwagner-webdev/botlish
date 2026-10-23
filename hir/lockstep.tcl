@@ -36,6 +36,11 @@ proc hir::lockstep::verify {hirVar} {
         if {[dict get $node kind] ne "lockloop"} {
             continue
         }
+        if {[hir::iteration::IterableDomain $hir $node]} {
+            # A clause over a collection struct is refused on its own
+            # (hir/iteration.tcl's verify): no count to compare.
+            continue
+        }
         set domains [hir::cardinality::domains $hir $e]
         set steps 0
         set first [hir::cardinality::of_domain $hir [lindex $domains 0] steps]

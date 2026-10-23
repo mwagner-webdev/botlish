@@ -1,0 +1,111 @@
+# vector-bounds.test -- index proofs for std::mutable_vector::at
+# (ORDERED-MUTABLE-MAP-SET.md, "Compiler changes"; proof.list-bounds).
+#
+# A MutableVector's element read is proven in range by the forms that prove
+# a List's or a MutableArray's -- a counted loop over its length, a guard on
+# a name, an index reduced by its length -- exactly when the vector's length
+# cannot change between the length read and the element read: the length
+# hir/cardinality.tcl's VectorLength gives, the length of a place nothing in
+# the program resizes (no push, pop, take or clear on it, no call giving a
+# place overlapping it to a place parameter), its root never a context
+# parameter. Every other read is unproven, as before.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set vbDecls {import std::mutable_vector
+
+struct Bag:
+    items: MutableVector[int]
+
+fn three() -> MutableVector[int]:
+    std::mutable_vector::from_list([10, 20, 30])
+
+}
+
+# The codes and lines (from the body's first) of TEXT's diagnostics.
+proc vbDiagnostics {body} {
+    set offset [llength [split $::vbDecls \n]]
+    if {![catch {surface::compile "$::vbDecls$body" -warnings off} message options]} {
+        return {}
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] {
+        set line ""
+        regexp {^[^:]*:([0-9]+):} [dict get $d message] -> line
+        if {$line ne ""} {
+            set line [expr {$line - $offset + 1}]
+        }
+        lappend result [list [lindex [dict get $d errorcode] end] $line]
+    }
+    return $result
+}
+
+proc vbRun {body} {
+    return [sourceAgree "$::vbDecls$body"]
+}
+
+# ---------------------------------------------------------------------------
+# Proven
+
+test vb-guard {a guard on a name against the vector's own length proves the read: no IndexNotFound to handle, and the value on every backend} -body {
+    list [vbDiagnostics "fn get(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        return v.at(i)\n    -1\nget(three(), 1)\n"] \
+        [vbRun "fn get(v: MutableVector\[int\], i: int) -> int:\n    if i < 0 or i >= v.length():\n        return -1\n    v.at(i)\n\[get(three(), 0), get(three(), 2), get(three(), 3), get(three(), -1)\]\n"]
+} -result {{} {value {[10, 30, -1, -1]}}}
+
+test vb-counted-loop {a counted loop over the vector's own length proves the read} -body {
+    vbRun "fn all(v: MutableVector\[int\]) -> List\[int\]:\n    loop i from 0 to v.length():\n        v.at(i)\nall(three())\n"
+} -result {value {[10, 20, 30]}}
+
+test vb-reduced {an index reduced by the vector's length (mod) or masked by it minus one after a zero guard proves the read, whatever the index} -body {
+    vbRun "fn wrap(v: MutableVector\[int\], h: int) -> int:\n    v.at(h.mod(v.length()))\nfn mask(v: MutableVector\[int\], h: int) -> int:\n    if v.length() == 0:\n        return -1\n    v.at(bit_and(h, v.length() - 1))\n\[wrap(three(), 7), wrap(three(), -1), wrap(three(), 100000000000000000000), mask(std::mutable_vector::from_list(\[1, 2, 3, 4\]), 6)\]\n"
+} -result {value {[20, 30, 20, 3]}}
+
+test vb-field-path {a field path is one place however often it is written: the guard and the read through `b.items` agree} -body {
+    vbRun "fn get(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        return b.items.at(i)\n    -1\nget(Bag {items: three()}, 2)\n"
+} -result {value 30}
+
+test vb-keeps-length {a swap between the guard and the read only replaces an element: the length is the same, the read proven} -body {
+    vbRun "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        old = v.swap(0, 99):\n            on IndexNotFound:\n                0\n        return v.at(i)\n    -1\nf(three(), 0)\n"
+} -result {value 99}
+
+test vb-copy-pushed {a copy of the vector pushed into is another value: the original's length is unchanged and its read still proven} -body {
+    vbRun "fn f(v: MutableVector\[int\], i: int) -> int:\n    w = v\n    w.push(1)\n    if i >= 0 and i < v.length():\n        return v.at(i) + w.length()\n    -1\nf(three(), 2)\n"
+} -result {value 34}
+
+# ---------------------------------------------------------------------------
+# Unproven: the length may change
+
+test vb-unproven-resize-between {a push, pop or clear of the vector anywhere in its function leaves the read unproven (UNHANDLED-ERROR), wherever it sits} -body {
+    lmap op {"v.push(1)" "x = v.pop():\n            on IndexNotFound:\n                0" "v.clear()"} {
+        vbDiagnostics "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        $op\n        return v.at(i)\n    -1\n1\n"
+    }
+} -result {{{UNHANDLED-ERROR 4}} {{UNHANDLED-ERROR 6}} {{UNHANDLED-ERROR 4}}}
+
+test vb-unproven-resize-after {a resize after the read in the same function counts too: a place resized anywhere is no stable length (the guard may have been read in an earlier iteration)} -body {
+    vbDiagnostics "fn f(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        x = v.at(i)\n        v.push(x)\n        return x\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 3}}
+
+test vb-unproven-place-call {a call giving the vector, or a struct holding it, to a place parameter may resize it} -body {
+    list [vbDiagnostics "fn grow(place b: Bag) -> unit:\n    b.items.push(1)\nfn f(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        grow(b)\n        return b.items.at(i)\n    -1\n1\n"] \
+        [vbDiagnostics "fn shrink(place v: MutableVector\[int\]) -> unit:\n    v.clear()\nfn f(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        shrink(b.items)\n        return b.items.at(i)\n    -1\n1\n"]
+} -result {{{UNHANDLED-ERROR 6}} {{UNHANDLED-ERROR 6}}}
+
+test vb-unproven-context-member {a context parameter's vector may change in any function sharing the context: its reads are never proven by a length} -body {
+    vbDiagnostics "context struct Log:\n    lines: MutableVector\[int\]\nfn f(i: int, context log: Log) -> int:\n    if i >= 0 and i < log.lines.length():\n        return log.lines.at(i)\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 5}}
+
+test vb-unproven-other-vector {a guard against one vector proves nothing about another} -body {
+    vbDiagnostics "fn f(v: MutableVector\[int\], w: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        return w.at(i)\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 3}}
+
+test vb-unproven-mask-without-guard {a mask by the length minus one needs the length proven nonzero} -body {
+    vbDiagnostics "fn f(v: MutableVector\[int\], h: int) -> int:\n    v.at(bit_and(h, v.length() - 1))\n1\n"
+} -result {{UNHANDLED-ERROR 2}}
+
+test vb-proven-reads-run {every proven read the tests above compile runs in range on every backend (the proof's claim, observed): a sweep of guarded and reduced indices over vectors of lengths 0 to 5} -body {
+    vbRun "fn get(v: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        return v.at(i)\n    -1\nfn wrap(v: MutableVector\[int\], h: int) -> int:\n    if v.length() == 0:\n        return -1\n    v.at(h.mod(v.length()))\nfn sized(n: int) -> MutableVector\[int\]:\n    v = three()\n    v.clear()\n    loop k from 0 to n:\n        v.push(k * k)\n    v\nrows = loop n from 0 through 5:\n    v = sized(n)\n    xs = loop i from -2 to 8:\n        get(v, i) + wrap(v, i * 3)\n    xs\nrows\n"
+} -result {value {[[-2, -2, -2, -2, -2, -2, -2, -2, -2, -2], [-1, -1, 0, -1, -1, -1, -1, -1, -1, -1], [-1, 0, 0, 2, -1, 0, -1, 0, -1, 0], [-1, -1, 0, 1, 4, -1, -1, -1, -1, -1], [3, 0, 0, 10, 8, 10, -1, 8, 3, 0], [15, 3, 0, 10, 5, 25, 20, -1, 8, 0]]}}
+
+cleanupTests
