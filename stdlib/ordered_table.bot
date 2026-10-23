@@ -78,11 +78,13 @@ fn slots_for(count: int) -> int:
 # ---------------------------------------------------------------------------
 # Construction and observation
 
-# An empty table whose index holds COUNT entries without a rebuild.
+# An empty table whose index holds COUNT entries without a rebuild. The
+# empty index is one filled array, frozen (a loop collecting -1 per slot
+# cost a List construction per slot: a quarter of a presized insertion).
 fn fresh(count: int) -> Table[K]:
     cap = slots_for(count)
-    blank = loop i from 0 to cap:
-        -1
+    filled = std::mutable_array::create(cap, -1)
+    blank = filled.freeze(filled.capacity())
     Table[K] {index: std::mutable_vector::from_list(blank), hashes: std::mutable_vector::from_list([]), keys: std::mutable_vector::from_list([]), live: std::mutable_array::create(1, 0)}
 
 # The live entry count.

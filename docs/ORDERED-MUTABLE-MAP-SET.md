@@ -506,8 +506,11 @@ proofs", "Opaque equality refusals").
    Why: the engine's total reads -- `key_at`, a map's `iteration_at` -- read
    a K or a V at a position reduced into the vector's own length, which no
    default value can stand in for (a handler needs a value of the element
-   type, and K has none in general). A proven read is also a bare load
-   natively. Evidence: 13 Tcl tests (6 proven, 6 unproven, and a sweep
+   type, and K has none in general). The proof is the analysis's only:
+   natively a proven vector read is still the checked runtime call
+   (`mvat`, `rt_mv_at`), because native lowering's check-free siblings
+   (`provenOps`) cover List and MutableArray reads but not MutableVector's
+   (Performance, "Where the instructions go"). Evidence: 13 Tcl tests (6 proven, 6 unproven, and a sweep
    running every proven read in range on every backend), their golden
    ports, and 4 wrong-fact mutants (a length that ignores resizes, ignores
    place calls, is one form for every vector, or trusts a context member),
