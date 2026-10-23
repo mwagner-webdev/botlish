@@ -452,22 +452,25 @@ small stack whose native frames run out before its shadow stack does
 Every case runs the program in a process of its own -- the driver, an
 executable, or a child of the native stack test -- so a terminal failure
 never ends the harness. No case asserts a depth: each asserts how the run
-ended.
+ended. The Windows column is real Windows: the smoke and `roots` jobs of
+run 39944775051 (eee16a5) and the smoke, `roots` and acceptance jobs of
+run [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512)
+(62ba9cd).
 
 | Case | Required | Where tested | On Windows |
 |---|---|---|---|
-| deep Botlish recursion, default 1 GiB stack | terminal NATIVE LIMIT STACK | native-status `stack-depth-limit`, `recursion-limit`; native-stack-overflow.test `native-stack-overflow-default-size`; aot-facts `standalone-depth-limit`; before-after `down` | ⟨W⟩ |
-| deep Botlish recursion, small stack (1, 4, 16 MiB) | the same | native-status `stack-overflow`; native-stack-overflow.test `native-stack-overflow-1`, `ns-main-small-stack`, `ns-main-shapes`; aot-facts `standalone-stack-overflow`; native-executable.test | ⟨W⟩ |
-| deep recursion with many live roots | the same | `ns-main-shapes` (a String, six Ints held across the call), `ns-gc-stress-main` (allocating, under GC stress, 1 MiB) | ⟨W⟩ |
-| a large frame | growth, or the report | native-status `large-frame-overflow`, `native-stack-overflow-wide-1` (600 live values, unrolled probes) | ⟨W⟩ |
-| frames using Cranelift's probe loop | the same | `native-stack-overflow-probe-loop` (3000 live values, about 24 KiB a frame); native_stack's `probe-loop` (the loop's access pattern in Rust); milestone 3's single-step unwind of probe loops (unchanged, green) | ⟨W⟩ |
-| exhaustion in a Rust helper | terminal report | native-status `runtime-stack-overflow`, `ns-runtime-helper` (a List equality a million deep on 16 MiB), aot-facts `standalone-runtime-overflow`, native-executable.test; native_stack's Rust recursions (small frames, 64 KiB frames) | ⟨W⟩ |
-| exhaustion in a C function | terminal report | c-ffi.test `cf-c-stack-overflow` (MSVC-compiled `bcf_deep`), in the linked run and as an executable | ⟨W⟩ |
-| linked run | the driver's report, exit 0 | `cf-c-stack-overflow` (the driver protocol) | ⟨W⟩ |
-| standalone executable | the line on standard error, exit 1 | aot-facts, native-executable.test, native_stack `executable` | ⟨W⟩ |
-| an ordinary invalid access | not NATIVE LIMIT STACK | native-status `c-access-violation` (memset through null, in C, through the real driver); native_stack `fault null`, `fault reserved` | ⟨W⟩ |
-| an exception on another thread | not claimed | native_stack `fault other-thread` (an exhausted thread), `fault other-thread-raised` (a record naming the guarded stack) | ⟨W⟩ |
-| deep recursion that fits | completes | native-status `jit`; `ns-main-finite`; aot-facts `standalone-deep-finite`; native_stack `finite`; before-after `finite` | ⟨W⟩ |
+| deep Botlish recursion, default 1 GiB stack | terminal NATIVE LIMIT STACK | native-status `stack-depth-limit`, `recursion-limit`; native-stack-overflow.test `native-stack-overflow-default-size`; aot-facts `standalone-depth-limit`; before-after `down` | passed: native-status, aot-facts (smoke); the test file (acceptance); before-after |
+| deep Botlish recursion, small stack (1, 4, 16 MiB) | the same | native-status `stack-overflow`; native-stack-overflow.test `native-stack-overflow-1`, `ns-main-small-stack`, `ns-main-shapes`; aot-facts `standalone-stack-overflow`; native-executable.test | passed: native-status, aot-facts, native_stack's five threads (smoke); the test files (acceptance) |
+| deep recursion with many live roots | the same | `ns-main-shapes` (a String, six Ints held across the call), `ns-gc-stress-main` (allocating, under GC stress, 1 MiB) | passed (acceptance), `ns-gc-stress-main` under GC stress |
+| a large frame | growth, or the report | native-status `large-frame-overflow`, `native-stack-overflow-wide-1` (600 live values, unrolled probes) | passed: native-status (smoke); `native-stack-overflow-wide-1` (acceptance); before-after `huge-frame` |
+| frames using Cranelift's probe loop | the same | `native-stack-overflow-probe-loop` (3000 live values, about 24 KiB a frame); native_stack's `probe-loop` (the loop's access pattern in Rust); milestone 3's single-step unwind of probe loops (unchanged, green) | passed: native_stack `probe-loop` (smoke); the test (acceptance) |
+| exhaustion in a Rust helper | terminal report | native-status `runtime-stack-overflow`, `ns-runtime-helper` (a List equality a million deep on 16 MiB), aot-facts `standalone-runtime-overflow`, native-executable.test; native_stack's Rust recursions (small frames, 64 KiB frames) | passed: native-status, aot-facts (smoke); the test files (acceptance); before-after (until now: Rust's report, the process killed) |
+| exhaustion in a C function | terminal report | c-ffi.test `cf-c-stack-overflow` (MSVC-compiled `bcf_deep`), in the linked run and as an executable | passed: smoke and acceptance (shard 4) |
+| linked run | the driver's report, exit 0 | `cf-c-stack-overflow` (the driver protocol) | passed: the same |
+| standalone executable | the line on standard error, exit 1 | aot-facts, native-executable.test, native_stack `executable` | passed: aot-facts' three, native_stack (smoke); native-executable.test (acceptance) |
+| an ordinary invalid access | not NATIVE LIMIT STACK | native-status `c-access-violation` (memset through null, in C, through the real driver); native_stack `fault null`, `fault reserved` | passed: `c-access-violation` ended 0xC0000005 with the driver's "no result"; `fault null`, `fault reserved` as without the guard |
+| an exception on another thread | not claimed | native_stack `fault other-thread` (an exhausted thread), `fault other-thread-raised` (a record naming the guarded stack) | passed: both ended as without the guard (Rust's report, 0xC00000FD) |
+| deep recursion that fits | completes | native-status `jit`; `ns-main-finite`; aot-facts `standalone-deep-finite`; native_stack `finite`; before-after `finite` | passed: native-status `jit`, aot-facts (100,000 levels), native_stack `finite` (smoke); `ns-main-finite` (acceptance); before-after |
 
 ### 7.2 The guard's own checks
 
@@ -558,7 +561,54 @@ benchmark workloads.
 
 ### 7.5 GC
 
-⟨GC⟩
+What section 6 claims, checked:
+
+* **Windows, the collector's walk.** Real Windows, the smoke job of runs
+  39944775051 (eee16a5) and
+  [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512)
+  (62ba9cd).
+  - `tests/platform/gc-workloads.tcl` under GC stress: 133 runs on
+    cranelift, cranelift-generic and as executables, 0 failed.
+  - The same workloads under Windows' unwind check: 70 runs, 0 failed.
+    Every Botlish frame the collector walked was the frame Windows
+    unwinds to, 188,079 frames in 33,508 walks for the 2048 engine alone.
+  - The census's programs through main.tcl, under GC stress and under the
+    unwind check: green.
+* **Windows, the fallback plan.** The `roots` job: its Rust tests (274 and
+  76) and the GC workloads with the `fallback-roots` driver, 91 runs, 0
+  failed.
+* **Windows, an exhausted stack under GC stress.** `ns-gc-stress-main`
+  (native-stack-overflow.test, the acceptance tier's shard 2) fills a
+  1 MiB stack with an allocating recursion and ends in the guard's line.
+  ⟨GC-TIER⟩
+* **The cost of a collection.** Under GC stress it is what it was (section
+  8.2): the frames lost instructions, not shape.
+* **Linux x86-64, a controlled experiment.** Under
+  `BOTLISH_NATIVE_GC_STRESS=1`, in this session's container:
+  - the Rust tests: 296 library, 73 binary;
+  - `native/tests/native_stack.rs`: every check;
+  - native-stack-overflow.test: 20 of 20;
+  - native-executable.test: 19 of 19;
+  - native-root-storage.test: 10 of 10;
+  - native-stack-map.test: 11 of 11.
+
+  ⟨GC-ARM⟩
+
+The first GC-stress runs found a defect in this milestone's own tests, not
+in the guard. `ns-runtime-helper` and the nested-List case of
+`native-executable-stack-overflow` build a List nested a million deep in a
+loop. Under GC stress each of the loop's allocations traces every List
+built so far: 2.7 s for 10,000 levels, 22 s for 30,000, hours for a
+million (Linux, measured).
+
+The suite under GC stress therefore never finished. The arm64 workflow's
+GC-stress job ran past four hours in the test suite before it was
+cancelled, and the local run stood on `nest(1000000)` for 26 CPU minutes.
+Both tests now run that case without GC stress (d38feb0). They are about
+the guard ending an exhaustion inside the runtime; the guard under GC
+stress is `ns-gc-stress-main`'s subject. The Cranelift probe-loop test
+needs no such treatment: its 3,000 one-character Strings are immediate
+values, and it took 3.1 s with and without stress.
 
 ### 7.6 Mutation testing
 
