@@ -19,10 +19,10 @@
 # no observing parameter, so an operation that takes the Video must return
 # it, and a function that holds it may not fail (an error leaving it would
 # drop it: the caller could never close it). That is why drawing here is
-# data (NOTES.md beside this file, "Spellings"): render.bot builds the frame as a
-# List of Commands, an ordinary value it may compute -- and fail -- as it
-# likes, and `show` draws the whole List in one call that takes the Video
-# once per frame.
+# data (NOTES.md beside this file, "Spellings"): render.bot builds the
+# frame as a List of Commands, an ordinary value it may compute -- and
+# fail -- as it likes, and `show` draws the whole List in one call that
+# takes the Video once per frame.
 #
 # Memory. SDL takes its rectangles and strings by pointer, and Botlish
 # byte storage can only be lent to a C call whose contract allows it (a
