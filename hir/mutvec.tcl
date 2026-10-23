@@ -1591,12 +1591,13 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
         return 0
     }
     if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$id in $seen} {
+        # (An application's fields, its slots replaced by the arguments:
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        if {$type in $seen} {
             return 0
         }
-        foreach {name t} [hir::structs::fieldTypes $id] {
-            if {[MayHoldVector $t [concat $seen [list $id]]]} {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[MayHoldVector $t [concat $seen [list $type]]]} {
                 return 1
             }
         }

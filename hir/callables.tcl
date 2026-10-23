@@ -162,7 +162,7 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
         return 0
     }
     if {[hir::types::IsNamedStruct $type]} {
-        return [BearingNamed $hir [lindex $type 1] $mutable]
+        return [BearingNamed $hir $type $mutable]
     }
     return 0
 }
@@ -222,13 +222,12 @@ proc hir::callables::CarriedInto {hir type errorsVar} {
         return
     }
     if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {[info exists carriedVisiting] && $id in $carriedVisiting} {
+        if {[info exists carriedVisiting] && $type in $carriedVisiting} {
             return
         }
-        lappend carriedVisiting $id
+        lappend carriedVisiting $type
         try {
-            foreach {name t} [hir::structs::fieldTypes $id] {
+            foreach {name t} [hir::structs::AppliedFieldTypes $type] {
                 CarriedInto $hir $t errors
             }
         } finally {
@@ -237,18 +236,20 @@ proc hir::callables::CarriedInto {hir type errorsVar} {
     }
 }
 
-# Bearing of named struct ID: any declared field type bears. A struct may
-# name itself (directly or through others), so a declaration being examined
-# contributes nothing further (a cycle adds no obligation its first visit did
-# not already count).
-proc hir::callables::BearingNamed {hir id mutable} {
+# Bearing of the named struct type TYPE: any of its field types bears (an
+# application's, its slots replaced by the arguments: TRAIT-CONSTRAINED-
+# IMPRINTED-TYPES.md -- Box[Fn{...}] bears what its declaration's `value: T`
+# does not show). A struct may name itself (directly or through others), so
+# a type being examined contributes nothing further (a cycle adds no
+# obligation its first visit did not already count).
+proc hir::callables::BearingNamed {hir type mutable} {
     variable visiting
-    if {[info exists visiting] && $id in $visiting} {
+    if {[info exists visiting] && $type in $visiting} {
         return 0
     }
-    lappend visiting $id
+    lappend visiting $type
     try {
-        foreach {name t} [hir::structs::fieldTypes $id] {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
             if {[Bearing $hir $t $mutable]} {
                 return 1
             }
@@ -410,13 +411,12 @@ proc hir::callables::HasMutArray {type} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         variable hasVisiting
-        set id [lindex $type 1]
-        if {[info exists hasVisiting] && $id in $hasVisiting} {
+        if {[info exists hasVisiting] && $type in $hasVisiting} {
             return 0
         }
-        lappend hasVisiting $id
+        lappend hasVisiting $type
         try {
-            foreach {name t} [hir::structs::fieldTypes $id] {
+            foreach {name t} [hir::structs::AppliedFieldTypes $type] {
                 if {[HasMutArray $t]} { return 1 }
             }
             return 0
@@ -566,7 +566,7 @@ proc hir::callables::WalkExpr {hirVar e} {
             # (STRUCTS.md "Bearing").
             set structType [hir::typeOf $hir $e]
             foreach name [dict get $node names] field [dict get $node fields] {
-                if {![dict exists $node opaqueDenied]} {
+                if {![dict exists $node opaqueDenied] && ![hir::types::Poisoned $hir $e]} {
                     # (Not for a construction of an opaque struct that is
                     # already rejected as OPAQUE-CONSTRUCTION: the diagnostic
                     # would name a field of the hidden representation.)

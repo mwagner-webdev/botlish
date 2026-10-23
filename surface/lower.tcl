@@ -293,10 +293,16 @@ proc surface::lower::TraitDeclOf {node namespace} {
 # module identity, never read from the (cached, importer-neutral) AST. `opaque`
 # is the declaration's own modifier.
 proc surface::lower::StructDeclOf {node namespace} {
-    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
+    set decl [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
         namespace $namespace fields [dict get $node fields] span [dict get $node span] \
         opaque [dict getdef $node opaque 0] \
         context [dict getdef $node context 0]]
+    if {[dict exists $node slots]} {
+        # A parameterized struct's type slots (TRAIT-CONSTRAINED-IMPRINTED-
+        # TYPES.md), as written: hir/structs.tcl resolves their traits.
+        dict set decl slots [dict get $node slots]
+    }
+    return $decl
 }
 
 # The declaration dict of a `typedecl` node declared in module NAMESPACE (""
@@ -781,6 +787,16 @@ proc surface::lower::Node {node} {
                 # hir/resolve.tcl's ResolveStruct).
                 dict set type typeArg [dict get $node typeArg]
                 dict set type typeArgOrigin [Origin [dict get $node typeArgSpan] [dict get $node id]/typearg]
+            }
+            if {[dict exists $node typeArgs]} {
+                # NAME[A, B, ...] { ... }: a parameterized struct's
+                # construction (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), one
+                # argument per slot, as written.
+                dict set type typeArgs [dict get $node typeArgs]
+                set i 0
+                dict set type typeArgOrigins [lmap span [dict get $node typeArgSpans] {
+                    Origin $span [dict get $node id]/typearg[incr i]
+                }]
             }
             return [hir::syntax::structNode $origin $type [FieldInits $node]]
         }

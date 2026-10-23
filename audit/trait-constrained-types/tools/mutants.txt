@@ -1,0 +1,541 @@
+# Mutants of parameterized structs and trait-constrained type slots
+# (audit/trait-constrained-types/tools/mutate.tcl; TRAIT-CONSTRAINED-
+# IMPRINTED-TYPES.md, "Mutation testing"): the mutants the milestone brief
+# names, each a deliberate bug in the declaration of slots (hir/structs.tcl),
+# the validity of an application (hir/structs.tcl's ApplicationProblem), the
+# application's types (hir/types.tcl, hir/resolve.tcl), imprinting and the
+# derived constraints (hir/imprint.tcl), trait satisfaction and the plan
+# (hir/traits.tcl), specialization (hir/specialize.tcl), HIR text and
+# compilation isolation (hir/format.tcl, hir/read.tcl, hir/declarations.tcl),
+# the front-end cache (surface/cache.tcl) or the grammar
+# (surface/parser.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit are
+# comments.
+
+@@ constraint-ignored-concrete a constrained slot's concrete argument is never checked (only a variable's constraints count)
+## hir/structs.tcl
+<<<<
+            if {$arg eq "never"} {
+                continue
+            }
+            foreach trait [dict getdef $constraints $slot {}] {
+====
+            if {$arg eq "never" || ![hir::types::IsImprint $arg]} {
+                continue
+            }
+            foreach trait [dict getdef $constraints $slot {}] {
+>>>>
+
+@@ constraint-structural-hashable a slot constraint is checked as structural Hashable whatever trait it names, not by ordinary trait satisfaction
+## hir/structs.tcl
+<<<<
+                set s [hir::traits::satisfies $arg $trait]
+====
+                set s [hir::traits::satisfies $arg Hashable]
+>>>>
+
+@@ intrinsic-constraints-rejected an intrinsic trait (Hashable) cannot constrain a slot
+## hir/structs.tcl
+<<<<
+            if {[hir::traits::isContext $trait]} {
+====
+            if {[hir::traits::isContext $trait] || [hir::traits::isIntrinsic $trait]} {
+>>>>
+
+@@ ordinary-constraints-rejected a source-declared trait cannot constrain a slot
+## hir/structs.tcl
+<<<<
+            if {[hir::traits::isContext $trait]} {
+====
+            if {[hir::traits::isContext $trait] || ![hir::traits::isIntrinsic $trait]} {
+>>>>
+
+@@ callable-admitted-hashable-slot a callable satisfies a Hashable slot
+## hir/structs.tcl
+<<<<
+            if {$arg eq "never"} {
+                continue
+            }
+====
+            if {$arg eq "never" || [hir::types::IsFn $arg] || [hir::types::IsExactBlock $arg]} {
+                continue
+            }
+>>>>
+
+@@ any-admitted-hashable-slot any satisfies a constrained slot (some of its values might)
+## hir/structs.tcl
+<<<<
+            if {$arg eq "never"} {
+                continue
+            }
+====
+            if {$arg in {never any}} {
+                continue
+            }
+>>>>
+
+@@ constraint-turns-k-into-view a constrained variable is replaced by a view of its trait (K becomes Hashable)
+## hir/types.tcl
+<<<<
+    if {$traits eq {}} {
+        return [list imprint $name]
+    }
+    return [list imprint $name $traits]
+====
+    if {$traits eq {}} {
+        return [list imprint $name]
+    }
+    return [list trait [lindex $traits 0] [list imprint $name]]
+>>>>
+
+@@ constraint-erases-k a constrained variable is erased to any (the concrete K is lost)
+## hir/types.tcl
+<<<<
+    if {$traits eq {}} {
+        return [list imprint $name]
+    }
+    return [list imprint $name $traits]
+====
+    if {$traits eq {}} {
+        return [list imprint $name]
+    }
+    return any
+>>>>
+
+@@ projection-loses-substituted-k a projection of an application has the declaration's unsubstituted field type
+## hir/types.tcl
+<<<<
+        return [hir::structs::AppliedFieldType $type $name]
+====
+        return [hir::structs::fieldType [lindex $type 1] $name]
+>>>>
+
+@@ mutablearray-field-becomes-any a MutableArray[K] field of an application becomes MutableArray[any]
+## hir/structs.tcl
+<<<<
+    if {$t eq "" || $binding eq ""} {
+        return $t
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+====
+    if {$t eq "" || $binding eq ""} {
+        return $t
+    }
+    if {[hir::types::IsMutArray $t]} {
+        return mutarray
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+>>>>
+
+@@ result-application-no-obligation a constrained application in the result alone gives its variables no obligation
+## hir/imprint.tcl
+<<<<
+    set traits [dict create]
+    foreach type $all {
+====
+    set traits [dict create]
+    foreach type $params {
+>>>>
+
+@@ constraint-manufactures-k a constrained variable no argument establishes is bound to any instead of rejected
+## hir/imprint.tcl
+<<<<
+        foreach name $vars {
+            if {![dict exists $binding $name]} {
+                set where
+====
+        foreach name $vars {
+            if {![dict exists $binding $name] && [dict exists [ConstraintsOf $sig] $name]} {
+                dict set binding $name any
+            }
+            if {![dict exists $binding $name]} {
+                set where
+>>>>
+
+@@ conflicting-imprints-accepted two values establishing a slot differently are accepted (the first wins)
+## hir/imprint.tcl
+<<<<
+        } elseif {$arg ne "never" && [dict get $binding $name] ne $arg} {
+====
+        } elseif {0 && $arg ne "never" && [dict get $binding $name] ne $arg} {
+>>>>
+
+@@ nested-application-constraint-ignored an application nested in another type (a List element, a function type's argument) is not checked
+## hir/structs.tcl
+<<<<
+    foreach t [hir::imprint::Parts $type] {
+        set problem [ApplicationProblem $t]
+====
+    foreach t [lrange [hir::imprint::Parts $type] 0 -1] {
+        set problem [ApplicationProblem $t]
+>>>>
+
+@@ enclosing-declaration-hides-obligation a declaration need not state the obligation of an application its field holds (a field over a slot variable is not checked)
+## hir/structs.tcl
+<<<<
+        foreach {name t} [dict get $entry types] {
+            set problem [ApplicationProblem $t]
+            if {$problem eq ""} continue
+====
+        foreach {name t} [dict get $entry types] {
+            if {[string first imprint $t] >= 0} continue
+            set problem [ApplicationProblem $t]
+            if {$problem eq ""} continue
+>>>>
+
+@@ arity-ignored an application's arity is not checked (missing slots resolve to whatever comes, extra arguments are dropped)
+## hir/resolve.tcl
+<<<<
+    if {[llength $args] != [llength $slots]} {
+====
+    if {0 && [llength $args] != [llength $slots]} {
+>>>>
+## hir/resolve.tcl
+<<<<
+    set types {}
+    foreach slot $slots t $args {
+====
+    set types {}
+    while {[llength $args] < [llength $slots]} {
+        lappend args int
+    }
+    set args [lrange $args 0 [llength $slots]-1]
+    foreach slot $slots t $args {
+>>>>
+
+@@ missing-argument-becomes-any a missing type argument becomes any
+## hir/resolve.tcl
+<<<<
+    if {[llength $args] != [llength $slots]} {
+====
+    while {[llength $args] < [llength $slots]} {
+        lappend args any
+    }
+    if {[llength $args] != [llength $slots]} {
+>>>>
+
+@@ bare-constructor-accepted a parameterized struct's bare name is a type (its slots unapplied)
+## hir/types.tcl
+<<<<
+        if {[hir::structs::isParameterized $id]} {
+            # A parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+====
+        if {0 && [hir::structs::isParameterized $id]} {
+            # A parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+>>>>
+
+@@ witness-in-type-identity the traits a slot's argument satisfies become part of the application's identity
+## hir/types.tcl
+<<<<
+    set inner [expr {$nesting + 1}]
+    return [list nstruct $id [lmap a $args {
+        if {[IsAppliedStruct $a]} {
+            MakeApplied [lindex $a 1] [lindex $a 2] $depth $inner
+        } else {
+            Unviewed [Unshaped [Bound $a $depth]]
+        }
+    }]]
+====
+    set inner [expr {$nesting + 1}]
+    set args [lmap a $args {
+        if {[IsAppliedStruct $a]} {
+            MakeApplied [lindex $a 1] [lindex $a 2] $depth $inner
+        } else {
+            Unviewed [Unshaped [Bound $a $depth]]
+        }
+    }]
+    foreach slot [hir::structs::slots $id] a $args {
+        set traits [dict getdef [hir::structs::slotConstraints $id] $slot {}]
+        if {$traits ne {} && ![hir::types::IsImprint $a]} {
+            set args [lreplace $args [lsearch -exact $args $a] [lsearch -exact $args $a] [list srefined Witness $traits $a]]
+        }
+    }
+    return [list nstruct $id $args]
+>>>>
+
+@@ witness-in-specialization-key a slot's constraints become a dimension of native specialization (an instance per trait set)
+## hir/specialize.tcl
+<<<<
+    if {[hir::types::IsNamedStruct $type]} {
+        # A named struct's layout and field types are its declaration's.
+        return $type
+    }
+====
+    if {[hir::types::IsNamedStruct $type]} {
+        # A named struct's layout and field types are its declaration's.
+        if {[hir::types::IsAppliedStruct $type]} {
+            return [list nstruct [lindex $type 1] [concat [lindex $type 2] [list [hir::structs::slotConstraints [lindex $type 1]]]]]
+        }
+        return $type
+    }
+>>>>
+
+@@ specialization-adopts-rigid-k a bare `key: K` parameter of a concrete instance keeps the rigid variable (no String or Int comparison in the instance)
+## hir/specialize.tcl
+<<<<
+                    if {[hir::types::IsImprint $declaredType] && $type ne "any"} {
+====
+                    if {0 && [hir::types::IsImprint $declaredType] && $type ne "any"} {
+>>>>
+
+@@ hir-text-drops-constraint HIR text prints a slot without its trait
+## hir/format.tcl
+<<<<
+                if {$traits eq {}} {
+                    set slot
+                } else {
+                    string cat $slot " satisfies " [join $traits " "]
+                }
+====
+                set slot
+>>>>
+
+@@ hir-read-drops-constraint reading HIR text forgets a slot's trait
+## hir/read.tcl
+<<<<
+            if {[regexp {^([A-Z][0-9]*) satisfies (.+)$} $item -> slot traits]} {
+                lappend slots [list $slot [split $traits " "]]
+====
+            if {[regexp {^([A-Z][0-9]*) satisfies (.+)$} $item -> slot traits]} {
+                lappend slots [list $slot {}]
+>>>>
+
+@@ isolation-drops-constraint installing a HIR's declarations (interchange, isolation) forgets the slots' constraints
+## hir/declarations.tcl
+<<<<
+    set ::hir::structs::registry [dict get $state structs]
+====
+    set ::hir::structs::registry [dict map {id entry} [dict get $state structs] {
+        if {[dict exists $entry constraints]} {
+            dict for {slot traits} [dict get $entry constraints] {
+                dict set entry constraints $slot {}
+            }
+        }
+        set entry
+    }]
+>>>>
+
+@@ cache-confuses-constraints the front-end cache key forgets what a slot satisfies (a constrained and an unconstrained constructor share an entry)
+## surface/cache.tcl
+<<<<
+        path $path source $source library $::core::libraryDir \
+====
+        path $path source [regsub -all { satisfies [A-Za-z:]+} $source ""] library $::core::libraryDir \
+>>>>
+
+@@ generic-function-binder function declarations gain a generic binder, fn get[K, V](...)
+## surface/parser.tcl
+<<<<
+    set name [Expect p IDENT "a function name after \"fn\""]
+    set open [Expect p ( "\"(\" after the function name"]
+====
+    set name [Expect p IDENT "a function name after \"fn\""]
+    if {[Kind p] eq "\["} {
+        Imprints p [dict get $name value]
+    }
+    set open [Expect p ( "\"(\" after the function name"]
+>>>>
+
+@@ unconstrained-imprints-change every imprint variable of a signature with an application is constrained by Hashable, whether a slot requires it or not
+## hir/imprint.tcl
+<<<<
+            if {[hir::types::IsImprint $arg]} {
+                dict lappend traits [lindex $arg 1] {*}$required
+                continue
+            }
+====
+            if {[hir::types::IsImprint $arg]} {
+                dict lappend traits [lindex $arg 1] {*}$required
+                continue
+            }
+        }
+        foreach slot [hir::structs::slots [lindex $type 1]] arg [lindex $type 2] {
+            foreach name [VariablesIn $arg] {
+                dict lappend traits $name Hashable
+            }
+>>>>
+
+@@ hash-of-constrained-k-fallible hashing a constrained K stays the fallible dynamic hash (the constraint does not reach totality)
+## hir/types.tcl
+<<<<
+        foreach trait [ImprintConstraints $type] {
+            if {$operation in [hir::traits::intrinsicGuarantees $trait]} {
+====
+        foreach trait [ImprintConstraints $type] {
+            if {$operation ne "hash" && $operation in [hir::traits::intrinsicGuarantees $trait]} {
+>>>>
+
+@@ equality-of-constrained-k-fallible equality of a constrained K stays the fallible veq
+## hir/types.tcl
+<<<<
+        foreach trait [ImprintConstraints $type] {
+            if {$operation in [hir::traits::intrinsicGuarantees $trait]} {
+====
+        foreach trait [ImprintConstraints $type] {
+            if {$operation ne "equality" && $operation in [hir::traits::intrinsicGuarantees $trait]} {
+>>>>
+
+@@ table-hash-rejects-constrained-k the private table hash rejects a constrained K (its admission ignores the variable's constraints)
+## hir/range.tcl
+<<<<
+    lassign [hir::types::HashClass $type] class why
+    if {$class eq "total" || ($mode eq "checked" && $class eq "unknown")} {
+====
+    lassign [hir::types::HashClass $type] class why
+    if {$mode eq "required" && [string first imprint $type] >= 0} {
+        set class unknown
+    }
+    if {$class eq "total" || ($mode eq "checked" && $class eq "unknown")} {
+>>>>
+
+@@ constraint-leaks-from-body a body may construct an application its signature gives no obligation for (an implementation's assumption becomes a hidden requirement)
+## hir/traits.tcl
+<<<<
+        if {$id in [hir::types::ImprintConstraints $type]} {
+            dict set result ok 1
+====
+        if {$id in [hir::types::ImprintConstraints $type] || [hir::types::ImprintConstraints $type] eq {}} {
+            dict set result ok 1
+>>>>
+## hir/types.tcl
+<<<<
+        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+====
+        if {[ImprintConstraints $type] eq {} && $operation in {equality hash}} {
+            return {total ""}
+        }
+        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+>>>>
+
+@@ trait-operation-not-specialized a trait operation on a constrained variable is never specialized per binding (no clone: the build fails in the monomorphized program)
+## hir/traits.tcl
+<<<<
+    set imprintPolys [ImprintPolys $hir $roots]
+====
+    set imprintPolys [dict create]
+>>>>
+
+@@ trait-operation-wrong-witness a trait operation on a constrained variable is planned with the variable itself, not the binding's type
+## hir/traits.tcl
+<<<<
+                            set w [hir::types::canonical [hir::imprint::Substitute $receiverType $binding]]
+====
+                            set w $receiverType
+>>>>
+
+@@ clone-for-every-obligation every function with an ordinary-trait-constrained variable is specialized per binding, whether its code uses the trait or not
+## hir/traits.tcl
+<<<<
+        set vars [dict get $sig vars]
+        lappend blocks $block
+====
+        set vars [dict get $sig vars]
+        lappend blocks $block
+        if {[string first printable $sig] >= 0} {
+            dict set direct $block 1
+        }
+>>>>
+
+@@ ambiguous-operation-picks-first an operation two traits of a variable declare resolves to the first trait's
+## hir/traits.tcl
+<<<<
+    if {[llength $owners] > 1} {
+        dict set record ambiguous $owners
+    }
+====
+>>>>
+
+@@ applications-covariant an application is a subtype of another application of its constructor whose arguments are supertypes (declaration-site covariance)
+## hir/types.tcl
+<<<<
+    if {[IsNamedStruct $b]} {
+        # Nominal: only the same declaration. Identical spelling was
+====
+    if {[IsAppliedStruct $a] && [IsAppliedStruct $b] && [lindex $a 1] eq [lindex $b 1]} {
+        foreach x [lindex $a 2] y [lindex $b 2] {
+            if {![subtype $x $y]} { return 0 }
+        }
+        return 1
+    }
+    if {[IsNamedStruct $b]} {
+        # Nominal: only the same declaration. Identical spelling was
+>>>>
+
+@@ inferred-slot-keeps-exact-callable a construction's inferred slot keeps an exact function's identity (Box {value: f} is a Box of that one function)
+## hir/types.tcl
+<<<<
+    return [MakeApplied $id [lmap slot $slots {Presentable [dict get $binding $slot]}]]
+====
+    return [MakeApplied $id [lmap slot $slots {dict get $binding $slot}]]
+>>>>
+
+@@ invalid-construction-not-poison an invalid application's construction keeps its type (its consequences are restated by every use)
+## hir/types.tcl
+<<<<
+                if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
+                    dict set hir exprs $e structApplicationProblem $problem
+                }
+                return [Poison hir $e]
+====
+                if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
+                    dict set hir exprs $e structApplicationProblem $problem
+                }
+                return $type
+>>>>
+
+@@ construction-unchecked-against-application a parameterized struct's construction checks its values against the declaration's field types, not the application's
+## hir/range.tcl
+<<<<
+        set declared [hir::types::StructField $type $name]
+        if {$declared eq ""} {
+            continue
+        }
+        set valueType [hir::typeOf $hir $field]
+====
+        set declared [hir::structs::fieldType $id $name]
+        if {$declared eq "" || [hir::imprint::Mentions $declared]} {
+            continue
+        }
+        set valueType [hir::typeOf $hir $field]
+>>>>
+
+@@ nested-imprinted-unchecked a nested function that applies a trait's operation to its own constrained variable is accepted (its specialization is never made: an internal failure of the plan)
+## hir/traits.tcl
+<<<<
+    if {$nestedImprinted ne {}} {
+====
+    if {0} {
+>>>>
+
+@@ application-argument-cut-early an application's argument is bounded one aggregate level deeper than a value standing in its fields (a nested List's own construction is no longer admitted)
+## hir/types.tcl
+<<<<
+            Unviewed [Unshaped [Bound $a $depth]]
+====
+            Unviewed [Unshaped [Bound $a [expr {$depth + 1}]]]
+>>>>
+
+@@ nested-application-cut-early an application directly in an argument bounds its own arguments one aggregate level deeper (a Box of nested Lists inside a Pair is no longer admitted)
+## hir/types.tcl
+<<<<
+            MakeApplied [lindex $a 1] [lindex $a 2] $depth $inner
+====
+            MakeApplied [lindex $a 1] [lindex $a 2] [expr {$depth + 1}] $inner
+>>>>
+
+@@ specialization-keyed-by-every-variable a specialization per binding is keyed by every imprint variable, not only the ones a source trait constrains (recursion through an unconstrained variable makes a specialization per type)
+## hir/traits.tcl
+<<<<
+    return [dict filter $binding script {v t} {dict exists $selecting $v}]
+====
+    return $binding
+>>>>

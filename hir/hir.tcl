@@ -698,6 +698,10 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # generic function for an affine argument resolves its references by
         # (hir::traits::IdentOf, AFFINE-VALUES.md).
         hir::traits::index $hir
+        # A declaration's applications of parameterized structs
+        # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) are valid once every trait
+        # a slot names can be decided: a struct's or a payload's field.
+        hir::structs::VerifyDeclarations
     }
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
@@ -1350,6 +1354,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
         hir::signatures::infer hir $demote
     }
     hir::range::verifyDeclaredResults hir
+    hir::structs::verifyApplications hir
     hir::imprint::verify hir
     hir::cabi::verify hir
     hir::range::verifyDeclaredParams hir

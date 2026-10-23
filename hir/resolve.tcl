@@ -604,7 +604,17 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
         }
         return [hir::refinements::Resolve [lindex $typeExpr 1] [lindex $typeExpr 2]]
     }
+    if {[IsApplyTypeExpr $typeExpr]} {
+        # NAME[A, B, ...] (surface::parser::TypeExpr): an application of
+        # several arguments, a parameterized struct's.
+        return [ResolveApplied [lindex $typeExpr 1] [lindex $typeExpr 2] $ns $imprints]
+    }
     lassign $typeExpr name arg
+    if {$name ne "fn" && ![dict exists $::hir::types::constructors $name] && [hir::structs::lookup $name $ns] ne ""} {
+        # NAME[A]: a one-slot parameterized struct's application (a struct
+        # with no slot is resolveApplication's "not a type constructor").
+        return [ResolveApplied $name [list $arg] $ns $imprints]
+    }
     if {$name eq "fn"} {
         # A structural function type (surface::parser::FnType's
         # {fn FIELDS}; "fn" is a keyword, so never a constructor name):
@@ -689,6 +699,58 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
         return [hir::cabi::ResolveFnPtr $arg $ns $imprints]
     }
     return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg $ns $imprints]]]
+}
+
+# The application of the parameterized struct spelled NAME (in the code of
+# namespace NS) to the type expressions ARGS (TRAIT-CONSTRAINED-IMPRINTED-
+# TYPES.md): one per slot, each resolved as ResolveTypeExpr resolves any
+# type (IMPRINTS likewise), each a type a struct field may hold -- never a
+# trait, a context trait or an affine type. Its slots' trait constraints are
+# not checked here: a concrete argument's satisfaction is decided once the
+# program's declarations and implementations are all known
+# (hir::structs::verifyApplications), a symbolic one (an imprint variable)
+# gives its function the obligation (hir::imprint::Constrain).
+proc hir::resolve::ResolveApplied {name args ns imprints} {
+    set id [hir::structs::lookup $name $ns]
+    if {$id eq ""} {
+        if {[dict exists $::hir::types::constructors $name]} {
+            return -code error -errorcode {BOTLISH TYPE} \
+                "\"$name\" takes [dict get $::hir::types::constructors $name] type argument(s), got [llength $args]"
+        }
+        if {[core::type::valid [hir::types::CanonicalTypeName $name $ns]] || [hir::enums::lookup $name $ns] ne ""} {
+            error "\"$name\" is not a type constructor"
+        }
+        error "unknown type constructor \"$name\""
+    }
+    set slots [hir::structs::slots $id]
+    if {$slots eq {}} {
+        error "\"$name\" is not a type constructor: struct $name declares no type slots, so it takes no type arguments (write $name)"
+    }
+    if {[llength $args] != [llength $slots]} {
+        error "struct \"$name\" takes [llength $slots] type argument(s), [join $slots {, }], but $name\[[join [lmap t $args {ShowTypeExpr $t}] {, }]\] gives [llength $args]"
+    }
+    set types {}
+    foreach slot $slots t $args {
+        set type [ResolveTypeExpr $t $ns $imprints]
+        set what "the argument for slot $slot of $name"
+        set contextTrait [hir::types::MentionedContextTrait $type]
+        if {$contextTrait ne ""} {
+            return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
+                [hir::types::ContextTraitPositionMessage $contextTrait $what]
+        }
+        if {[hir::types::MentionsTrait $type]} {
+            # A struct stores one concrete representation per field (TRAITS.md,
+            # "Storage"): a slot is a field's type.
+            return -code error -errorcode {BOTLISH TRAIT-STORAGE-UNSUPPORTED} \
+                "$what cannot be the trait [hir::types::show $type]: a slot is the type of the values its fields hold, and there is no erased or heterogeneous trait representation (a constrained slot, $slot satisfies TRAIT, takes a concrete type that satisfies the trait)"
+        }
+        if {[hir::types::IsAffine $type]} {
+            return -code error -errorcode {BOTLISH TYPE} \
+                "$what is the affine type [hir::types::show $type]: a type slot takes an unrestricted type (its values may be copied wherever the slot's type is used)"
+        }
+        lappend types $type
+    }
+    return [hir::types::MakeApplied $id $types]
 }
 
 # The diagnostic kind of a failed ResolveTypeExpr whose catch OPTIONS are
@@ -818,6 +880,13 @@ proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ct
 # identical notation over the identical data shape; kept as its own tiny
 # proc rather than a cross-layer call, since hir/*.tcl has no dependency on
 # surface/*.tcl anywhere else.
+# 1 if TYPEEXPR (a surface::parser::TypeExpr result) is an application of
+# several type arguments, {apply NAME {ARG ...}} (TRAIT-CONSTRAINED-
+# IMPRINTED-TYPES.md).
+proc hir::resolve::IsApplyTypeExpr {typeExpr} {
+    return [expr {[llength $typeExpr] == 3 && [lindex $typeExpr 0] eq "apply"}]
+}
+
 proc hir::resolve::ShowTypeExpr {typeExpr} {
     if {[llength $typeExpr] == 1} {
         return $typeExpr
@@ -831,6 +900,9 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
             set head [ShowTypeExpr [lindex $typeExpr 3]]
         }
         return "$head{[join [lmap field [lindex $typeExpr 2] {join $field {: }}] {, }]}"
+    }
+    if {[hir::resolve::IsApplyTypeExpr $typeExpr]} {
+        return "[lindex $typeExpr 1]\[[join [lmap t [lindex $typeExpr 2] {ShowTypeExpr $t}] {, }]\]"
     }
     lassign $typeExpr name arg
     if {$name eq "fn"} {
@@ -1012,6 +1084,15 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lset declaredParamTypes $i $witness
                 }
                 SetField hir $e traitClone [dict get $head key]
+                if {[dict get $head imprints] ne {}} {
+                    # A specialization for one binding of the function's
+                    # constrained imprint variables (TRAIT-CONSTRAINED-
+                    # IMPRINTED-TYPES.md): its signature is imprinted with
+                    # it, so its body is checked for those types.
+                    set declaredParamTypes [lmap t $declaredParamTypes {
+                        if {$t eq {}} { set t } else { hir::types::canonical [hir::imprint::Substitute $t [dict get $head imprints]] }
+                    }]
+                }
                 if {[dict get $head selection] ne {}} {
                     # The installed contexts this clone's context-trait
                     # operations call (CONTEXT-TRAITS.md): {TRAIT WITNESS ...}.
@@ -1048,6 +1129,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 } else {
                     set declared $normalized
                 }
+            }
+            if {$head ne "" && [dict get $head imprints] ne {} && $declared ne {}} {
+                set declared [hir::types::canonical [hir::imprint::Substitute $declared [dict get $head imprints]]]
+            }
+            # Constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+            # the obligations the signature's applications of parameterized
+            # structs give its imprint variables, written on every
+            # occurrence -- derived from the contract, never declared.
+            lassign [hir::imprint::Constrain $declaredParamTypes $declared] constrainedParams declared
+            if {$constrainedParams ne $declaredParamTypes} {
+                set declaredParamTypes $constrainedParams
+                SetField hir $e declaredParamTypes $declaredParamTypes
             }
             set resultWitness [hir::traits::ResultOverride $ctx $node $head]
             if {$resultWitness ne ""} {
@@ -1096,7 +1189,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set inner [dict create scope $bodyScope callable $e loop "" errors $errorNames \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]] \
                 namespace [CtxNamespace $ctx]]
-            foreach field {traitContext clone} {
+            foreach field {traitContext clone cloneImprints} {
                 if {[dict exists $ctx $field]} {
                     dict set inner $field [dict get $ctx $field]
                 }
@@ -1242,13 +1335,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set imprint {}
                 set valid 1
                 set variables [hir::imprint::EnclosingVariables $hir $ctx]
+                lappend variables {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+                set constraints [hir::imprint::EnclosingConstraints $hir $ctx]
                 foreach t [dict get $node imprint] origin [dict get $node imprintOrigins] {
                     if {[catch {hir::cabi::ResolveImprint $t [CtxNamespace $ctx] $variables} type options]} {
                         hir::DiagnoseAt hir [TypeErrorKind $options TYPE] \
                             [format {unknown or invalid imprint %s: %s} [ShowTypeExpr $t] $type] $e $origin
                         set valid 0
                     }
-                    lappend imprint $type
+                    # (A forwarded variable is its function's: constrained
+                    # as its signature constrains it -- or, in a
+                    # specialization for a binding, the imprinted type.)
+                    lappend imprint [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type $constraints]]
                 }
                 if {$valid} {
                     SetField hir $e imprint $imprint
@@ -1669,6 +1767,8 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
     # the source wrote can be (a type reference carrying an `id` is core IR's,
     # past the source boundary).
     set denied 0
+    # A parameterized struct's explicit arguments, "" when none are written.
+    set structArgs ""
     if {$named} {
         if {[dict exists $typeRef id]} {
             set id [dict get $typeRef id]
@@ -1678,19 +1778,22 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
                     "unknown struct type \"$id\": no such struct declaration is visible" $e
                 set id ""
             }
+        } elseif {([dict exists $typeRef typeArg] || [dict exists $typeRef typeArgs])
+                && ([dict get $typeRef name] ne "LayoutStruct" || [dict getdef $typeRef namespace ""] ne ""
+                    || [dict exists $typeRef typeArgs])} {
+            # NAME[A, ...] { ... }: the construction of a parameterized
+            # struct's application, applied explicitly (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md): its fields are the declaration's with the
+            # slots replaced by the arguments (hir::range::VerifyStruct).
+            lassign [ResolveAppliedConstruction hir $e $typeRef $ctx] id spelling structArgs denied
         } elseif {[dict exists $typeRef typeArg]} {
             # NAME[TYPE] { ... } (BINARY-LAYOUT.md): the construction of an
             # applied type, the explicit type the imprinting design writes on
-            # an expression. Only LayoutStruct[L] has one: its fields are L's.
+            # an expression: LayoutStruct[L]'s, whose fields are L's.
             set ctor [dict get $typeRef name]
             set argText [ShowTypeExpr [dict get $typeRef typeArg]]
             set spelling "$ctor\[$argText\]"
-            if {$ctor ne "LayoutStruct"} {
-                set id ""
-                hir::DiagnoseAt hir UNKNOWN-STRUCT \
-                    "$spelling is not a struct type: of the applied types, only LayoutStruct\[L\] is constructed from field values" \
-                    $e [dict get $typeRef origin]
-            } elseif {[catch {hir::layouts::ResolveLayoutStruct [dict get $typeRef typeArg] $ns} type options]} {
+            if {[catch {hir::layouts::ResolveLayoutStruct [dict get $typeRef typeArg] $ns} type options]} {
                 set id ""
                 hir::DiagnoseAt hir [TypeErrorKind $options LAYOUT-STRUCT-PARAMETER] $type $e \
                     [dict get $typeRef typeArgOrigin]
@@ -1807,12 +1910,60 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         SetField hir $e opaqueDenied 1
     }
     SetField hir $e structId $id
+    if {$structArgs ne ""} {
+        SetField hir $e structArgs $structArgs
+    }
     SetField hir $e names $names
     SetField hir $e nameOrigins $nameOrigins
     SetField hir $e fieldOrigins $fieldOrigins
     SetField hir $e fields $values
     SetField hir $e layout $layout
     SetField hir $e slots [lmap name $names {lsearch -exact $layout $name}]
+}
+
+# {ID SPELLING ARGS DENIED}: the construction E of the explicit application
+# TYPEREF -- `Pair[int, str] {...}`, `geo::Pair[int, str] {...}` -- in
+# context CTX (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the parameterized
+# struct ID its constructor denotes, the construction's spelling, the
+# resolved arguments (an imprint variable of an enclosing function stands for
+# whatever that function's calls imprint, constrained as its signature
+# constrains it) and whether the code lacks authority over an opaque
+# struct's representation. ID "" after a diagnostic.
+proc hir::resolve::ResolveAppliedConstruction {hirVar e typeRef ctx} {
+    upvar 1 $hirVar hir
+    set ns [CtxNamespace $ctx]
+    set ctor [dict get $typeRef name]
+    if {[dict getdef $typeRef namespace ""] ne ""} {
+        set ctor "[dict get $typeRef namespace]::$ctor"
+    }
+    if {[dict exists $typeRef typeArgs]} {
+        set args [dict get $typeRef typeArgs]
+    } else {
+        set args [list [dict get $typeRef typeArg]]
+    }
+    set spelling "$ctor\[[join [lmap t $args {ShowTypeExpr $t}] {, }]\]"
+    set id [hir::structs::lookup $ctor $ns]
+    if {$id eq "" || ![hir::structs::isParameterized $id]} {
+        hir::DiagnoseAt hir UNKNOWN-STRUCT \
+            "$spelling is not a struct type: of the applied types, only LayoutStruct\[L\] and the applications of parameterized structs (struct NAME\[SLOT, ...\]:) are constructed from field values" \
+            $e [dict get $typeRef origin]
+        return [list "" $spelling "" 0]
+    }
+    set variables [hir::imprint::EnclosingVariables $hir $ctx]
+    lappend variables {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+    if {[catch {ResolveApplied $ctor $args $ns [if {$variables eq {}} {string cat 0} else {set variables}]} type options]} {
+        hir::DiagnoseAt hir [TypeErrorKind $options TYPE] \
+            [format {invalid applied type %s: %s} $spelling $type] $e [dict get $typeRef origin]
+        return [list "" $spelling "" 0]
+    }
+    set type [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type [hir::imprint::EnclosingConstraints $hir $ctx]]]
+    set denied 0
+    if {[hir::structs::representationDenied $id $ns]} {
+        set denied 1
+        hir::DiagnoseAt hir OPAQUE-CONSTRUCTION [hir::structs::ConstructionMessage $id] $e \
+            [dict get $typeRef origin]
+    }
+    return [list $id $spelling [hir::types::StructArgs $type] $denied]
 }
 
 # Resolves the syntax nodes NODES in order.
@@ -1864,7 +2015,8 @@ proc hir::resolve::ResolveClone {hirVar key ctx} {
     set inner [dict replace $ctx namespace [dict get $clone namespace] traitContext $key \
         clone [dict get $clone function] cloneHead [dict create key $key sid [dict get $node value sid] \
             params [dict get $clone params] result [dict get $clone result] \
-            selection [dict get $clone selection]]]
+            selection [dict get $clone selection] imprints [dict getdef $clone imprints {}]] \
+        cloneImprints [dict getdef $clone imprints {}]]
     SetField hir $e value [Expr hir [dict get $node value] $inner]
     return $e
 }

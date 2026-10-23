@@ -1482,6 +1482,11 @@ proc hir::range::ProvesType {range type {held {}}} {
 # `[[]]`, statically `List[List[never]]`) is checked the same way one level
 # down, without making the enclosing non-empty List/Set itself covariant.
 proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
+    if {$declared eq "never"} {
+        # (No value is admitted where none exists; no Range fact is one of
+        # `never`.)
+        return [expr {$argType eq "never"}]
+    }
     if {[hir::types::IsTraitConstraint $declared]} {
         # A trait-typed boundary (TRAITS.md): a view of the trait, or a
         # concrete type that satisfies it structurally (hir::traits).
@@ -2071,8 +2076,18 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         return
     }
     set id [dict get $node structId]
+    # A parameterized struct's construction is checked against its
+    # application's field types (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md); one
+    # whose application could not be established is diagnosed as that.
+    set type [list nstruct $id]
+    if {[hir::structs::isParameterized $id]} {
+        set type [hir::typeOf $hir $e]
+        if {![hir::types::IsAppliedStruct $type]} {
+            return
+        }
+    }
     foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
-        set declared [hir::structs::fieldType $id $name]
+        set declared [hir::types::StructField $type $name]
         if {$declared eq ""} {
             continue
         }
@@ -2086,7 +2101,7 @@ proc hir::range::VerifyStruct {hirVar ranges e node} {
         }
         hir::DiagnoseAt hir TYPE [format \
             {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s%s)%s} \
-            $name [hir::structs::display $id] [hir::types::show $declared] \
+            $name [hir::types::show $type] [hir::types::show $declared] \
             [hir::types::show [ShownArgType $valueType $declared]] [FactsClause $valueType $declared $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }
@@ -2160,6 +2175,19 @@ proc hir::range::MismatchClause {argType declared} {
         # DecimalRounded (DECIMAL-ROUNDED-MILESTONE-1.md): a guarantee not
         # strengthened, an upper bound not dropped, no implicit conversion.
         return $decimal
+    }
+    if {[hir::types::IsAppliedStruct $argType] && [hir::types::IsAppliedStruct $declared]
+            && [lindex $argType 1] eq [lindex $declared 1] && $argType ne $declared} {
+        # Two applications of one parameterized struct (TRAIT-CONSTRAINED-
+        # IMPRINTED-TYPES.md): invariant in every slot.
+        set slots {}
+        foreach slot [hir::structs::slots [lindex $declared 1]] a [lindex $argType 2] d [lindex $declared 2] {
+            if {$a ne $d} {
+                lappend slots "$slot is [hir::types::show $a], not [hir::types::show $d]"
+            }
+        }
+        return [format {; %s and %s are distinct applications of %s (%s): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed} \
+            [hir::types::show $argType] [hir::types::show $declared] [hir::structs::display [lindex $declared 1]] [::join $slots {, }]]
     }
     if {[hir::types::IsNamedStruct $argType] && [hir::types::IsNamedStruct $declared]
             && $argType ne $declared} {

@@ -674,6 +674,13 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
                 # Pair] {...}` names the layout geo::Pair.
                 TypeRefs [dict get $node typeArg] [dict get $node typeArgSpan] found
             }
+            if {[dict exists $node typeArgs]} {
+                # Pair[geo::Point, int] { ... } (TRAIT-CONSTRAINED-IMPRINTED-
+                # TYPES.md): every argument's references.
+                foreach t [dict get $node typeArgs] span [dict get $node typeArgSpans] {
+                    TypeRefs $t $span found
+                }
+            }
         }
         function {
             # Qualified struct types in parameter and result annotations,
@@ -704,6 +711,13 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
             # field's type.
             foreach field [dict get $node fields] {
                 TypeRefs [dict get $field type] [dict get $field typeSpan] found
+            }
+            # A type slot's trait (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) may
+            # be another module's: `K satisfies ui::Printable`.
+            foreach slot [dict getdef $node slots {}] {
+                if {[dict get $slot trait] ne ""} {
+                    TypeRefs [dict get $slot trait] [dict get $slot traitSpan] found
+                }
             }
         }
         externfn {
@@ -801,6 +815,13 @@ proc surface::modules::TypeRefs {type span foundVar} {
         } else {
             TypeRefs [lindex $type 1] $span found
         }
+        return
+    }
+    if {[llength $type] == 3 && [lindex $type 0] eq "apply"} {
+        # NAME[A, B, ...] (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+        # constructor's reference and every argument's.
+        TypeRefs [lindex $type 1] $span found
+        foreach t [lindex $type 2] { TypeRefs $t $span found }
         return
     }
     lassign $type head arg

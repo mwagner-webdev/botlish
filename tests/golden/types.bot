@@ -732,6 +732,16 @@ fn register_applied_type_resolution_tests():
             1
     std::test::rejects_containing("applied-type-bare-list-arity", std::compiler::DiagnosticCode::Type, "requires 1 type argument", b_bare_list)
 
+    # applied-type-malformed-comma-arity: List[Small, Small] is an
+    # application of two arguments (the grammar is n-ary since parameterized
+    # structs), and List takes one.
+    fn b_comma_arity() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x: List[Small, Small]):
+                x
+            1
+    std::test::rejects_containing("applied-type-malformed-comma-arity", std::compiler::DiagnosticCode::Type, "\"List\" takes 1 type argument(s), got 2", b_comma_arity)
+
     # applied-type-unknown-argument: List[Missing] (the suite declares no
     # Missing).
     fn b_unknown_argument() errors std::compiler::CompilerError:

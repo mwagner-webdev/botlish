@@ -82,6 +82,14 @@ proc hir::imprint::Occurrences {type {establishing 0} {position value}} {
         list - immutableSet - mutarray - mutvec {
             lappend result {*}[Occurrences [lindex $type 1] 1 value]
         }
+        nstruct {
+            # An application of a parameterized struct (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md): each argument is an applied type's, so a
+            # variable there is established by the argument's own.
+            foreach t [hir::types::StructArgs $type] {
+                lappend result {*}[Occurrences $t 1 value]
+            }
+        }
         cptr {
             lappend result {*}[Occurrences [lindex $type 1] 1 pointee]
         }
@@ -227,6 +235,39 @@ proc hir::imprint::EnclosingVariables {hir ctx} {
     return [lsort -unique $vars]
 }
 
+# {NAME {TRAIT ...} ...}: the constraints of the imprint variables of the
+# functions whose bodies resolution context CTX is in (EnclosingVariables'),
+# as their signatures carry them (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): a
+# type written in the body that names one of them is that function's
+# variable, constrained exactly so.
+proc hir::imprint::EnclosingConstraints {hir ctx} {
+    set result [dict create]
+    if {![dict exists $ctx blocks]} {
+        return $result
+    }
+    foreach pair [dict get $ctx blocks] {
+        set sig [BlockSignature $hir [lindex $pair 0]]
+        if {$sig ne ""} {
+            dict for {name traits} [ConstraintsOf $sig] {
+                dict set result $name $traits
+            }
+        }
+    }
+    return $result
+}
+
+# TYPE, written in a body resolved in context CTX, as that body has it: in a
+# specialization for one binding of its function's constrained variables
+# (hir::traits' imprint clones, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) each
+# of them is the type the binding imprints.
+proc hir::imprint::BodyType {ctx type} {
+    set binding [dict getdef $ctx cloneImprints {}]
+    if {$binding eq {} || ![Mentions $type]} {
+        return $type
+    }
+    return [hir::types::canonical [Substitute $type $binding]]
+}
+
 # The positions (value, pointee, cvalue) at which variable NAME occurs in
 # signature SIG.
 proc hir::imprint::Positions {sig name} {
@@ -276,9 +317,17 @@ proc hir::imprint::Bind {sig argTypes explicit callee} {
         foreach name $vars {
             if {![dict exists $binding $name]} {
                 set where [expr {[Establishable $sig $name] ? "the arguments do not establish it here" : "it occurs only in the result, and no type named $name is visible where $callee is declared"}]
-                return [dict create ok 0 message [format \
+                return [dict create ok 0 unestablished 1 message [format \
                     {%s: imprint variable %s is not established (%s): write %s[%s](...) with explicit imprints} \
                     $callee $name $where $callee [join $vars {, }]]]
+            }
+            if {[dict get $binding $name] eq "never" && [UsedBare $sig $name]} {
+                # Only an empty List's element said what the variable is,
+                # which says nothing; a parameter of the variable's own type
+                # would have to be held to `never`.
+                return [dict create ok 0 unestablished 1 message [format \
+                    {%s: imprint variable %s is not established (only an empty List holds it here, which says nothing about %s): write %s[%s](...) with explicit imprints} \
+                    $callee $name $name $callee [join $vars {, }]]]
             }
         }
     }
@@ -289,7 +338,34 @@ proc hir::imprint::Bind {sig argTypes explicit callee} {
             return [dict create ok 0 message "$callee: $problem"]
         }
     }
+    if {[ConstraintsOf $sig] ne {}} {
+        # The constructors' obligations (TRAIT-CONSTRAINED-IMPRINTED-
+        # TYPES.md): once the variables are established, every application
+        # of the imprinted signature must be a valid one -- the ordinary
+        # trait satisfaction of each constrained slot's argument. A failure
+        # is a trait failure, not an imprinting one.
+        foreach type [concat [dict get $sig params] [list [dict get $sig result]]] {
+            if {$type eq ""} continue
+            set problem [hir::structs::ApplicationProblem [Substitute $type $binding]]
+            if {$problem ne ""} {
+                return [dict create ok 0 trait 1 binding $binding message "$callee: $problem"]
+            }
+        }
+    }
     return [dict create ok 1 binding $binding]
+}
+
+# 1 if some parameter of SIG holds variable NAME bare (or in a Fn type):
+# where values of the variable's own type are arguments.
+proc hir::imprint::UsedBare {sig name} {
+    foreach param [dict get $sig params] {
+        foreach occurrence [Occurrences $param] {
+            if {[lindex $occurrence 0] eq $name && ![lindex $occurrence 1]} {
+                return 1
+            }
+        }
+    }
+    return 0
 }
 
 # 1 if some parameter of SIG can establish variable NAME.
@@ -375,6 +451,31 @@ proc hir::imprint::Match {param arg bindingVar index} {
             }
             return [MatchInner [lindex $param 1] $elem binding $index]
         }
+        nstruct {
+            if {![hir::types::IsAppliedStruct $param]} {
+                return ""
+            }
+            # An application (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+            # argument's application of the same constructor, slot by slot.
+            set id [lindex $param 1]
+            set n [llength [lindex $param 2]]
+            if {$arg eq "never"} {
+                set args [lrepeat $n never]
+            } elseif {[hir::types::IsAppliedStruct $arg] && [lindex $arg 1] eq $id} {
+                set args [lindex $arg 2]
+            } elseif {$arg in {any struct}} {
+                set args [lrepeat $n any]
+            } else {
+                return [FormMismatch $param $arg $index]
+            }
+            foreach p [lindex $param 2] a $args {
+                set problem [MatchInner $p $a binding $index]
+                if {$problem ne ""} {
+                    return $problem
+                }
+            }
+            return ""
+        }
         cptr {
             if {$arg eq "never"} {
                 return [MatchInner [lindex $param 1] never binding $index]
@@ -445,6 +546,184 @@ proc hir::imprint::FormMismatch {param arg index} {
     return "argument $index of type $actual does not have the form $expected, so it cannot imprint [join [lmap o [Occurrences $param] {lindex $o 0}] {, }]"
 }
 
+# ---------------------------------------------------------------------------
+# Constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+#
+# A parameterized struct may constrain a slot with a trait:
+#
+#   struct Map[K satisfies Hashable, V]: ...
+#   fn get(m: Map[K, V], key: K) -> V errors KeyNotFound
+#
+# Every valid application Map[X, Y] has X satisfies Hashable, so a function
+# whose contract mentions Map[K, V] knows K satisfies Hashable: matching the
+# application establishes K and V as always (Bind), and the constructor's
+# obligation on its first slot is K's. No function declares a constraint;
+# Constrain derives it from the signature's applications and writes it on
+# the variable, {imprint K {Hashable}}, at every occurrence, so the body sees
+# K itself (never Hashable, never a view) together with the fact -- which
+# the trait-reading checks consult as they consult a view's trait
+# (hir::types::Totality, hir::traits::satisfies, TypeCall). A constraint
+# only validates and enriches a variable an argument establishes (or a call
+# supplies explicitly): it never establishes one (Unestablished is
+# unchanged). At a call, every application of the imprinted signature must
+# be valid for the binding (Bind: the ordinary trait satisfaction of each
+# constrained slot's argument), reported as the trait failure it is.
+
+# The immediate component types of TYPE that may hold an application or a
+# variable: elements, a pointee, a signature's types, fields, arguments.
+proc hir::imprint::Parts {type} {
+    if {[llength $type] < 2 || [hir::types::IsImprint $type]} {
+        return {}
+    }
+    switch -- [lindex $type 0] {
+        srefined {
+            if {[hir::types::IsRefinedApplied $type]} {
+                return [list [hir::refinements::Base $type]]
+            }
+        }
+        list {
+            if {[llength $type] == 3} {
+                return [concat [list [lindex $type 1]] [lindex $type 2]]
+            }
+            return [list [lindex $type 1]]
+        }
+        immutableSet - mutarray - mutvec - cptr {
+            return [list [lindex $type 1]]
+        }
+        cfnptr {
+            return [Parts [lindex $type 1]]
+        }
+        fn - coroutine {
+            set fields [lindex $type 1]
+            return [concat [dict get $fields args] [list [dict get $fields return]]]
+        }
+        struct {
+            return [lmap {name t} [lindex $type 1] {set t}]
+        }
+        nstruct {
+            return [hir::types::StructArgs $type]
+        }
+    }
+    return {}
+}
+
+# The imprint variable names TYPE mentions, at any depth.
+proc hir::imprint::VariablesIn {type} {
+    if {[hir::types::IsImprint $type]} {
+        return [list [lindex $type 1]]
+    }
+    set names {}
+    foreach t [Parts $type] {
+        foreach name [VariablesIn $t] {
+            if {$name ni $names} {
+                lappend names $name
+            }
+        }
+    }
+    return $names
+}
+
+# Adds to the dict in TRAITSVAR (variable -> {TRAIT ...}) the obligations
+# the applications in TYPE give its variables: a constrained slot whose
+# argument is a variable gives it the slot's traits; one whose argument is
+# a composite of variables, an intrinsic trait (its witness predicate
+# recurses into components, HASHABLE-AND-KEYED-HASH.md: List[K] is Hashable
+# exactly when K is) gives every variable of the argument the trait -- an
+# over-approximation only for a slot the struct never stores, and sound. A
+# composite argument never satisfies an ordinary trait (an applied type is
+# no witness, TRAITS.md), which verification reports.
+proc hir::imprint::Obligations {type traitsVar} {
+    upvar 1 $traitsVar traits
+    if {[hir::types::IsAppliedStruct $type]} {
+        set constraints [hir::structs::slotConstraints [lindex $type 1]]
+        foreach slot [hir::structs::slots [lindex $type 1]] arg [lindex $type 2] {
+            set required [dict getdef $constraints $slot {}]
+            if {$required eq {}} {
+                continue
+            }
+            if {[hir::types::IsImprint $arg]} {
+                dict lappend traits [lindex $arg 1] {*}$required
+                continue
+            }
+            foreach trait $required {
+                if {![hir::traits::isIntrinsic $trait]} {
+                    continue
+                }
+                foreach name [VariablesIn $arg] {
+                    dict lappend traits $name $trait
+                }
+            }
+        }
+    }
+    foreach t [Parts $type] {
+        Obligations $t traits
+    }
+}
+
+# TYPE with every imprint variable named in CONSTRAINTS (variable -> {TRAIT
+# ...}) constrained by exactly those traits ({imprint NAME TRAITS}), every
+# other one as it is.
+proc hir::imprint::ConstrainVariables {type constraints} {
+    if {$constraints eq {} || [string first imprint $type] < 0} {
+        return $type
+    }
+    set binding [dict create]
+    dict for {name traits} $constraints {
+        dict set binding $name [hir::types::MakeImprint $name $traits]
+    }
+    return [Substitute $type $binding]
+}
+
+# {PARAMS RESULT}: a function's declared parameter types PARAMS ("" for an
+# untyped one) and result type RESULT ("" for none) with every imprint
+# variable constrained by the obligations their applications give it
+# (Obligations), at every occurrence; unchanged when there are none.
+proc hir::imprint::Constrain {params result} {
+    set all [concat $params [list $result]]
+    if {[string first imprint $all] < 0 || [string first nstruct $all] < 0} {
+        return [list $params $result]
+    }
+    set traits [dict create]
+    foreach type $all {
+        if {$type ne ""} {
+            Obligations $type traits
+        }
+    }
+    if {[dict size $traits] == 0} {
+        return [list $params $result]
+    }
+    set constrained [lmap t $params {
+        if {$t eq ""} { set t } else { ConstrainVariables $t $traits }
+    }]
+    if {$result ne ""} {
+        set result [ConstrainVariables $result $traits]
+    }
+    return [list $constrained $result]
+}
+
+# {NAME {TRAIT ...} ...}: the constraints of the variables of signature SIG,
+# as its types carry them.
+proc hir::imprint::ConstraintsOf {sig} {
+    set result [dict create]
+    foreach type [concat [dict get $sig params] [list [dict get $sig result]]] {
+        VariableConstraints $type result
+    }
+    return $result
+}
+
+proc hir::imprint::VariableConstraints {type resultVar} {
+    upvar 1 $resultVar result
+    if {[hir::types::IsImprint $type]} {
+        if {[hir::types::ImprintConstraints $type] ne {}} {
+            dict set result [lindex $type 1] [hir::types::ImprintConstraints $type]
+        }
+        return
+    }
+    foreach t [Parts $type] {
+        VariableConstraints $t result
+    }
+}
+
 # TYPE with every imprint variable replaced by its type in BINDING, in
 # canonical form.
 proc hir::imprint::Substitute {type binding} {
@@ -477,6 +756,18 @@ proc hir::imprint::Substitute {type binding} {
         }
         mutvec {
             return [hir::types::MakeMutVec [Substitute [lindex $type 1] $binding] 0]
+        }
+        nstruct {
+            if {[llength $type] == 3} {
+                return [hir::types::MakeApplied [lindex $type 1] [lmap t [lindex $type 2] {Substitute $t $binding}]]
+            }
+        }
+        struct {
+            set fields [dict create]
+            foreach {name t} [lindex $type 1] {
+                dict set fields $name [Substitute $t $binding]
+            }
+            return [hir::types::MakeStruct $fields 0]
         }
         cptr {
             return [list cptr [Substitute [lindex $type 1] $binding]]
@@ -519,15 +810,20 @@ proc hir::imprint::Call {hirVar e calleeType argTypes result fallback} {
     if {$sig eq "" && $explicit eq ""} {
         # (The common case: no imprint anywhere. The node is left alone
         # unless an earlier pass recorded something for it.)
-        if {[dict exists $node imprintBinding] || [dict exists $node imprintProblem]} {
+        if {[dict exists $node imprintBinding] || [dict exists $node imprintProblem]
+                || [dict exists $node imprintPoisoned]} {
             dict unset node imprintBinding
             dict unset node imprintProblem
+            dict unset node imprintTrait
+            dict unset node imprintPoisoned
             dict set hir exprs $e $node
         }
         return $result
     }
     dict unset node imprintBinding
     dict unset node imprintProblem
+    dict unset node imprintTrait
+    dict unset node imprintPoisoned
     if {$sig eq ""} {
         dict set node imprintProblem [format \
             {%s has no imprint variables, so it takes no imprint %s[...]: only a callable whose signature has an imprint variable (a statically known function or intrinsic) is imprinted at a call} \
@@ -535,9 +831,37 @@ proc hir::imprint::Call {hirVar e calleeType argTypes result fallback} {
         dict set hir exprs $e $node
         return $result
     }
+    set poisoned 0
+    set i 0
+    foreach arg [dict get $node args] {
+        if {$arg ne "" && [dict exists $hir poisoned $arg]} {
+            # A value an earlier diagnostic rejected (hir/types.tcl,
+            # "Poison") establishes nothing.
+            lset argTypes $i ""
+            set poisoned 1
+        }
+        incr i
+    }
     set bound [Bind $sig $argTypes $explicit [CalleeName $hir $node]]
+    if {![dict get $bound ok] && $poisoned && [dict exists $bound unestablished]} {
+        # What a poisoned argument would have established is not known:
+        # no problem of this call's own, and nothing to hold the other
+        # arguments to (Unbound).
+        dict set node imprintPoisoned 1
+        dict set hir exprs $e $node
+        if {[Mentions $result]} {
+            return $fallback
+        }
+        return $result
+    }
     if {![dict get $bound ok]} {
         dict set node imprintProblem [dict get $bound message]
+        if {[dict exists $bound trait]} {
+            # The variables are established, but an application of the
+            # signature is invalid for them: a trait failure (verify's
+            # TRAIT-NOT-SATISFIED), never an imprinting one.
+            dict set node imprintTrait 1
+        }
         dict set hir exprs $e $node
         if {[Mentions $result]} {
             return $fallback
@@ -573,7 +897,7 @@ proc hir::imprint::Parameters {hir e types} {
 # 1 if call E's imprints could not be bound (its problem is diagnosed by
 # verify; its arguments are not checked against unbound variables).
 proc hir::imprint::Unbound {hir e} {
-    return [dict exists $hir exprs $e imprintProblem]
+    return [expr {[dict exists $hir exprs $e imprintProblem] || [dict exists $hir exprs $e imprintPoisoned]}]
 }
 
 # Diagnoses HIR's imprint problems: each reachable call whose imprints did
@@ -586,6 +910,13 @@ proc hir::imprint::verify {hirVar} {
     upvar 1 $hirVar hir
     set callees [dict create]
     dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node structInferProblem]
+                && (![dict exists $node reachable] || [dict get $node reachable])} {
+            # A parameterized struct's construction that does not establish
+            # its slots (hir::types::InferApplication).
+            hir::Diagnose hir IMPRINT [dict get $node structInferProblem] $e
+            continue
+        }
         if {[dict get $node kind] ne "call"} {
             continue
         }
@@ -597,6 +928,10 @@ proc hir::imprint::verify {hirVar} {
             continue
         }
         if {[dict exists $node reachable] && ![dict get $node reachable]} {
+            continue
+        }
+        if {[dict exists $node imprintTrait]} {
+            hir::Diagnose hir TRAIT-NOT-SATISFIED [dict get $node imprintProblem] $e
             continue
         }
         hir::Diagnose hir IMPRINT [dict get $node imprintProblem] $e

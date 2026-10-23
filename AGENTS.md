@@ -783,6 +783,70 @@ audit/hashable/tools/oracle.py selftest` and `cargo test --release
 --manifest-path native/Cargo.toml --lib hash`. `audit/hashable/tools/census.tcl`
 regenerates the witness census; `bench/hashable.tcl` the performance report.
 
+## Parameterized structs and constrained slots
+
+A struct may declare type slots, `struct Pair[A, B]:`, each optionally
+constrained by one trait, `struct Map[K satisfies Hashable, V]:`
+(TRAIT-CONSTRAINED-IMPRINTED-TYPES.md). Its types are its applications
+`{nstruct ID ARGS}`; a constrained imprint variable is `{imprint K
+TRAITS}`. Functions stay imprinted: matching `Map[K, V]` establishes K and
+V as any applied type does, and gives the body the constructor's
+obligation, K itself known to satisfy Hashable -- never the trait view.
+Keep it so:
+
+* No function-side generics: never add `fn f[K, V]`, a `where` or
+  `requires` clause, a constraint on a function or on a bare imprint
+  variable, predicates, scalar constraints, higher-kinded or associated
+  types, parameterized traits, enums, errors, layouts or contexts. A
+  function's constraints are exactly what the applications of its own
+  signature give it (`hir::imprint::Constrain`); a body never adds one to
+  its contract.
+* A constraint validates an imprint, never establishes one: a variable no
+  argument or explicit imprint establishes is IMPRINT as before, and a
+  failed constraint is TRAIT-NOT-SATISFIED, checked after imprinting.
+* Satisfaction is the ordinary trait satisfaction (`hir::traits::satisfies`;
+  Hashable's witness predicate): never a second, structural check of a
+  slot, and `any` satisfies nothing. An application is checked wherever a
+  type is written and wherever a binding makes one
+  (`hir::structs::verifyApplications`, `VerifyDeclarations`,
+  `hir::imprint::Bind`); a field's nested application over a slot needs the
+  enclosing declaration to state the obligation.
+* An application's identity is its constructor and arguments: no witness,
+  trait set or constraint in it, and none in a specialization key (native
+  instances are keyed by the concrete application; the trait plan's
+  specializations per binding by the variables a source trait constrains,
+  `SelectingBinding`). Applications are invariant; no variance policy.
+* No runtime existence: every application shares its constructor's one
+  representation (one Tcl struct kind, one NIR shape), with no type
+  arguments, witness object or check at run time.
+* An argument is bounded at its application's own aggregate depth
+  (`hir::types::MakeApplied`; applications nest `appliedDepth` deep): cut a
+  level earlier than its fields' values, it would admit none of them.
+* The slots and constraints are part of the struct registry entry (a
+  declaration registry: isolation and interchange carry them); HIR text
+  prints them on the declaration and reading derives each variable's
+  constraints from it.
+
+If you change the slot grammar or n-ary applications (surface/parser.tcl's
+`TypeExpr`, `StructDecl`, `TypeSlots`), `hir/structs.tcl`'s slots,
+`AppliedFieldTypes` or `ApplicationProblem`, the application cases of
+`hir/types.tcl` (`MakeApplied`, `InferApplication`, `Totality` of a
+constrained variable), `hir/imprint.tcl`'s applications, `Obligations`,
+`Constrain` or `Bind`, `hir/resolve.tcl`'s `ResolveApplied`, the
+constrained-variable cases of `hir/traits.tcl` (`satisfies`,
+`TypeImprintCall`, `ImprintPolys`, `SelectingBinding`, the plan's imprint
+specializations) or the HIR text of slots, run
+`tests/trait-constrained-types.test`, its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/trait-constrained-types.bot`),
+`audit/trait-constrained-types/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/trait-constrained-types/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the trait, Hashable and C ABI type harnesses (above
+and below) for a change to code they share, and the static-decision
+harnesses for a change to the plan. `bench/trait-constrained-types.tcl`
+regenerates the performance report.
+
 ## Context traits
 
 Context traits (CONTEXT-TRAITS.md) are environment abstractions resolved
@@ -1777,8 +1841,10 @@ integer domain is exactly one fixed-width encoding's, nested layouts by value
 consumes. `hir/layouts.tcl`'s registry is the one representation of a
 resolved layout: `LayoutStruct[L]` is the named struct `{nstruct
 LayoutStruct[L]}`, whose schema `hir/structs.tcl` reads from it, never a
-second registration. Never add a generic struct declaration (`struct
-Foo[T]:`, `LayoutStruct Foo:`), a runtime layout object or value, a layout
+second registration. Never add a layout struct declaration (`LayoutStruct
+Foo:`, `layout struct Foo:`) or make a layout a parameterized struct (`struct
+Foo[T]:` is an ordinary type constructor, no layout's:
+TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), a runtime layout object or value, a layout
 read at run time by a compiled backend (the Tcl compiler and native lowering
 read the descriptor constant statically: one `binary scan`/`binary format`,
 one `binload`/`binstore` per scalar field), structural compatibility between
@@ -2074,7 +2140,12 @@ target is a front-end input, in `surface::cache::Key`. Imprinting
 functions (their declared types) and intrinsics (`-imprint`), variables
 established by applied types left to right, explicit imprints all or
 nothing in first-occurrence order. Never add declared type parameters
-(`fn f[T]`), constraints, or specialization keyed by a variable.
+(`fn f[T]`), a constraint written on a function or a variable (the only
+constraints are a struct slot's, which a signature's applications carry:
+Parameterized structs and constrained slots, above), or specialization
+keyed by a variable (the trait monomorphization's specializations per
+binding of a source-trait-constrained variable are a trait operation's
+witness selection, not imprinting's).
 
 If you change core/cabi.tcl, hir/cabi.tcl, hir/imprint.tcl, the `cptr`,
 `cfnptr` or `imprint` cases of hir/types.tcl, how the scalars are declared,

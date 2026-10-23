@@ -136,10 +136,12 @@
 @@ concrete-method-search resolve a trait method with the ordinary concrete method search
 ## hir/traits.tcl
 <<<<
-    set receiverType [hir::typeOf $hir [dict get $shape receiver]]
+        return [TypeImprintCall hir $e $node $shape $receiverType]
+    }
     if {![hir::types::IsTrait $receiverType]} {
 ====
-    set receiverType [hir::typeOf $hir [dict get $shape receiver]]
+        return [TypeImprintCall hir $e $node $shape $receiverType]
+    }
     if {1} {
 >>>>
 

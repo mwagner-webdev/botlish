@@ -236,12 +236,21 @@
 #                  body only. The body is a layout's otherwise: a union
 #                  layout is a `layoutdecl` node with `union 1`, whose
 #                  `fields` are its alternatives, each at offset 0
-#   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
+#   structDecl   = { structModifier } "struct" IDENT [ typeSlots ] ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
 #                  | "context"      -- CONTEXTS.md; contextual (below). The
 #                  modifiers are independent boolean properties, in any
 #                  order, each at most once; canonical spelling
 #                  `opaque context struct`
+#   typeSlots    = "[" typeSlot { "," typeSlot } [ "," ] "]"
+#   typeSlot     = IDENT [ "satisfies" typeName ]
+#                  -- TRAIT-CONSTRAINED-IMPRINTED-TYPES.md: the struct is a
+#                  type constructor, `struct Map[K satisfies Hashable, V]:`,
+#                  each slot a static imprinted type position its fields may
+#                  name; "satisfies" (contextual: a word of a slot list only)
+#                  constrains the slot by one trait, which every argument of
+#                  an application must satisfy. No predicate, no other
+#                  relation: a slot is a name, optionally one trait
 #   structField  = IDENT ":" typeExpr NEWLINE
 #
 # A structDecl (STRUCTS.md) declares a nominal struct type: like a typeDecl
@@ -335,13 +344,16 @@
 #                | IDENT { "::" IDENT } [ fieldInits ]
 #                  -- "a::b::c": member c of namespace a::b (every segment
 #                     but the last is the namespace path)
-#                | IDENT "[" typeExpr "]" fieldInits
+#                | IDENT { "::" IDENT } "[" typeExpr { "," typeExpr } "]" fieldInits
 #                  -- an applied type's construction (BINARY-LAYOUT.md):
 #                     `LayoutStruct[Pair] { ... }`, the explicit type the
 #                     imprinting design writes on an expression
-#                     (NATIVE-BOTLISH-LOWERING-IMPL.md, 6.3). The applied
+#                     (NATIVE-BOTLISH-LOWERING-IMPL.md, 6.3), or a
+#                     parameterized struct's, `Pair[int, str] { ... }`
+#                     (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md). The applied
 #                     type is the one TypeExpr grammar; which applied types
-#                     have a construction is HIR's (only LayoutStruct)
+#                     have a construction is HIR's (LayoutStruct and the
+#                     parameterized structs)
 #                | fieldInits
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #   fieldInits   = "{" [ fieldInit { "," fieldInit } [ "," ] ] "}"
@@ -2285,20 +2297,19 @@ proc surface::parser::Value {pVar} {
     return [Expression p]
 }
 
-# TypeName [ "[" TypeExpr "]" ] -- a possibly-applied type expression
-# (MINIMAL-APPLIED-LIST-TYPES.md). A bare name (no "[...]") is returned as
-# the plain name string, exactly as before this feature (so every existing
-# bare-type-name consumer -- surface::ast::showType, hir::resolve, and every
-# test that reads a param/result type as a plain string -- is unaffected);
-# an applied type is a {NAME ARG} pair, ARG itself a TypeExpr, recursively
-# representable ("List[List[Small]]" needs no separate grammar). The parser
-# is generic over the head name: it does not know "List" is special. Only
-# one type argument is ever parsed (no "A[X, Y]"): resolution (hir::resolve
-# ::ResolveTypeExpr) decides whether a name is a registered constructor and
-# checks its own arity against however many arguments this grammar can ever
-# produce (one), so "List[A, B]" is already a syntax error here, and a
-# constructor of higher arity would need no grammar change, only another
-# constructor-side arity number.
+# TypeName [ "[" TypeExpr { "," TypeExpr } "]" ] -- a possibly-applied type
+# expression (MINIMAL-APPLIED-LIST-TYPES.md). A bare name (no "[...]") is
+# returned as the plain name string, exactly as before this feature (so
+# every existing bare-type-name consumer -- surface::ast::showType,
+# hir::resolve, and every test that reads a param/result type as a plain
+# string -- is unaffected); an applied type of one argument is a {NAME ARG}
+# pair, ARG itself a TypeExpr, recursively representable ("List[List[Small]]"
+# needs no separate grammar), and one of several arguments ("Map[K, V]", a
+# parameterized struct's application, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+# is {apply NAME {ARG ...}}. The parser is generic over the head name: it
+# does not know "List" is special. Resolution (hir::resolve::ResolveTypeExpr)
+# decides whether a name is a registered constructor or a parameterized
+# struct and checks its arity, so "List[A, B]" is resolution's arity error.
 #
 # "Fn" is the one head name the parser does know: it introduces a
 # structural function type (STRUCTURAL-FUNCTION-TYPES.md), whose named
@@ -2375,15 +2386,30 @@ proc surface::parser::TypeExpr {pVar what} {
         return $name
     }
     Advance p
-    set arg [TypeExpr p "a type argument after \"\["]
+    set args [list [TypeExpr p "a type argument after \"\["]]
+    while {[Kind p] eq ","} {
+        # NAME[A, B, ...]: an application of a parameterized struct
+        # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), one argument per type slot.
+        Advance p
+        lappend args [TypeExpr p "a type argument after \",\""]
+    }
     Expect p \] "\"\]\" after the type argument"
+    if {[llength $args] == 1} {
+        set applied [list $name [lindex $args 0]]
+    } else {
+        # Three words whose first is "apply": like no applied type {NAME
+        # ARG}, no array {array N ELEMENT} and no refinement {refine NAME
+        # FIELDS} (a struct named `apply` applied to one argument is the
+        # two words {apply ARG}).
+        set applied [list apply $name $args]
+    }
     if {[Kind p] eq "\{"} {
         # NAME[ARG]{param: N ...}: a scalar refinement of an applied type
         # (LIST-CARDINALITY-REFINEMENTS.md), List[int]{length: 4} -- the
         # same refinement grammar, its base the applied type before it.
-        return [ScalarRefinement p $name [list $name $arg]]
+        return [ScalarRefinement p $name $applied]
     }
-    return [list $name $arg]
+    return $applied
 }
 
 # "{" [ field { separator field } [ "," ] ] "}" after the type name NAME:
@@ -3711,6 +3737,18 @@ proc surface::parser::CallArguments {pVar} {
 # std::abi::x86_64). A qualified name, a qualified construction
 # NAMESPACE::Struct { ... } or a call's callee with explicit imprints.
 # ROOTED is recorded on the node, for the loader (surface/modules.tcl).
+# The fields of a `namedstruct` node for the explicit type arguments TYPES
+# (TypeExpr results) at SPANS of an applied type's construction: `typeArg`
+# and `typeArgSpan` for one (LayoutStruct[L] {...}, BINARY-LAYOUT.md, or a
+# one-slot parameterized struct), `typeArgs` and `typeArgSpans` for several
+# (Pair[int, str] {...}, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+proc surface::parser::TypeArgFields {types spans} {
+    if {[llength $types] == 1} {
+        return [list typeArg [lindex $types 0] typeArgSpan [lindex $spans 0]]
+    }
+    return [list typeArgs $types typeArgSpans $spans]
+}
+
 proc surface::parser::QualifiedPrimary {pVar first span rooted} {
     upvar 1 $pVar p
     set segments [list [dict get $first value]]
@@ -3745,6 +3783,17 @@ proc surface::parser::QualifiedPrimary {pVar first span rooted} {
             set spelled ::$spelled
         }
         lassign [Imprints p $spelled] types spans
+        if {[Kind p] eq "\{"} {
+            # NAMESPACE::Struct[TYPE, ...] { ... }: the construction of a
+            # module's parameterized struct, applied explicitly
+            # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+            set nameSpan [SpanFrom p $span]
+            set init [FieldInits p]
+            return [surface::ast::node namedstruct [SpanFrom p $span] \
+                namespace $namespaceName \
+                name [dict get $member value] nameSpan $nameSpan init $init rooted $rooted \
+                {*}[TypeArgFields $types $spans]]
+        }
         if {[Kind p] ne "("} {
             Fail [Peek p] "explicit imprints $spelled\[...\] are written only before a call's argument list, found [Describe [Peek p]] after them"
         }
@@ -3832,13 +3881,10 @@ proc surface::parser::Primary {pVar} {
                 if {[Kind p] ne "\{"} {
                     Fail [Peek p] "an applied type [dict get $token value]\[...\] is not a value: in an expression it heads a construction, [dict get $token value]\[...\] \{field: value, ...\}, or [dict get $token value]\[TYPE, ...\](...) is a call with explicit imprints (found [Describe [Peek p]] after it)"
                 }
-                if {[llength $types] != 1} {
-                    Fail [Peek p] "an applied type's construction [dict get $token value]\[...\] \{...\} has one type argument, found [llength $types]"
-                }
                 set init [FieldInits p]
                 return [surface::ast::node namedstruct [SpanFrom p $span] \
                     namespace "" name [dict get $token value] nameSpan $nameSpan \
-                    typeArg [lindex $types 0] typeArgSpan [lindex $spans 0] init $init]
+                    {*}[TypeArgFields $types $spans] init $init]
             }
             return [surface::ast::node name $span name [dict get $token value]]
         }
@@ -4174,6 +4220,10 @@ proc surface::parser::StructDecl {pVar} {
     }
     Advance p
     set name [Expect p IDENT "a struct name after \"struct\""]
+    set slots {}
+    if {[Kind p] eq "\["} {
+        set slots [TypeSlots p [dict get $name value]]
+    }
     set token [Peek p]
     if {[dict get $token kind] ne ":"} {
         Fail $token "expected \":\" after the struct name \"[dict get $name value]\", found [Describe $token]"
@@ -4223,8 +4273,60 @@ proc surface::parser::StructDecl {pVar} {
     }
     set opaque [dict exists $modifiers opaque]
     set context [dict exists $modifiers context]
-    return [surface::ast::node structdecl [SpanFrom p $start] \
+    set node [surface::ast::node structdecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] fields $fields \
         opaque $opaque opaqueSpan [if {$opaque} {dict get $modifiers opaque} else {string cat ""}] \
         context $context contextSpan [if {$context} {dict get $modifiers context} else {string cat ""}]]
+    if {$slots ne {}} {
+        # A parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+        # field is present only then, so an ordinary declaration's node is
+        # unchanged.
+        dict set node slots $slots
+    }
+    return $node
+}
+
+# "[" typeSlot { "," typeSlot } [ "," ] "]" after the name of struct NAME
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): {name nameSpan trait traitSpan}
+# per slot in written order, TRAIT the spelled trait name ("" for an
+# unconstrained slot). Which names may be slots and what the trait names is
+# resolution's (hir/structs.tcl), never the parser's.
+proc surface::parser::TypeSlots {pVar name} {
+    upvar 1 $pVar p
+    Advance p
+    set slots {}
+    while 1 {
+        set slot [Expect p IDENT "a type slot name in struct $name\[...\]"]
+        set trait ""
+        set traitSpan ""
+        if {[Kind p] eq "IDENT" && [dict get [Peek p] value] eq "satisfies"} {
+            Advance p
+            set start [dict get [Peek p] span]
+            set token [Expect p IDENT "a trait name after \"satisfies\""]
+            set trait [dict get $token value]
+            while {[Kind p] eq "::"} {
+                Advance p
+                set member [Expect p IDENT "a trait name after \"::\""]
+                append trait "::[dict get $member value]"
+            }
+            set traitSpan [SpanFrom p $start]
+        } elseif {[Kind p] eq ":"} {
+            Fail [Peek p] "a type slot is constrained with \"satisfies\", not \":\" (struct $name\[[dict get $slot value] satisfies TRAIT\])"
+        }
+        lappend slots [dict create name [dict get $slot value] nameSpan [dict get $slot span] \
+            trait $trait traitSpan $traitSpan]
+        if {[Kind p] eq ","} {
+            Advance p
+            if {[Kind p] eq "\]"} {
+                break
+            }
+            continue
+        }
+        break
+    }
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] value] in {where requires implements extends}} {
+        Fail [Peek p] "a type slot's constraint is written \"satisfies TRAIT\" (one trait per slot): there is no \"[dict get [Peek p] value]\" clause"
+    }
+    Expect p \] "\",\" or \"\]\" after a type slot of struct $name"
+    return $slots
 }
