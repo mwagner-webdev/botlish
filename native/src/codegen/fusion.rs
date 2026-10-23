@@ -450,6 +450,7 @@ fn fuse_site(program: &Program, fi: usize, handle: Reg, yielding: &[bool]) -> Re
     b.caps = caps.clone();
     let entry = b.template_label();
     b.inline(thunk, &[], Return::Complete, entry, true)?;
+    b.clear_plans();
     let template_size = b.code.len();
     if template_size * segments > COPY_LIMIT {
         return Err(format!(
@@ -707,6 +708,12 @@ struct Builder<'p> {
     template_regs: Vec<Reg>,
     stack: Vec<FuncId>,
     inlined: Vec<String>,
+    /// Where the template suspends or completes: the index in CODE of each
+    /// jump to BACK, with the yield's number (None: the root's return).
+    suspends: Vec<(usize, Option<usize>)>,
+    /// The plan registers some continuation reads (`clear_plans`), cleared
+    /// again by each copy's failure pad.
+    plans: Vec<Reg>,
 }
 
 impl<'p> Builder<'p> {
@@ -731,6 +738,8 @@ impl<'p> Builder<'p> {
             template_regs: Vec::new(),
             stack: Vec::new(),
             inlined: Vec::new(),
+            suspends: Vec::new(),
+            plans: Vec::new(),
         };
         b.st = b.new_reg(RegKind::Raw, false);
         b.out = b.new_reg(RegKind::Tagged, false);
@@ -821,6 +830,7 @@ impl<'p> Builder<'p> {
                     Return::Complete => {
                         self.emit(Inst::Move { dst: self.out, src: reg(*r) }, origin);
                         self.emit(Inst::RawInt { dst: self.st, digits: DONE.to_string() }, origin);
+                        self.suspends.push((self.code.len(), None));
                         self.emit(Inst::Jump(BACK), origin);
                     }
                     Return::Value(dst, after) => {
@@ -850,6 +860,7 @@ impl<'p> Builder<'p> {
                     let k = self.resumes.len();
                     self.emit(Inst::Move { dst: self.out, src: reg(args[0]) }, origin);
                     self.emit(Inst::RawInt { dst: self.st, digits: k.to_string() }, origin);
+                    self.suspends.push((self.code.len(), Some(k)));
                     self.emit(Inst::Jump(BACK), origin);
                     self.emit(Inst::Label(resume), None);
                     self.emit(Inst::Move { dst: reg(*dst), src: self.msg }, origin);
@@ -869,6 +880,60 @@ impl<'p> Builder<'p> {
         }
         self.stack.pop();
         Ok(())
+    }
+
+    /// Clears the plan registers (a collecting loop's private plans) that a
+    /// continuation reads where the template suspends at a yield whose own
+    /// continuation does not read them, and where it completes; each copy's
+    /// failure pad clears them too. The state word sends every resume to the
+    /// continuation of the yield the coroutine is suspended at, but the
+    /// function's graph has an edge from each dispatch to every continuation,
+    /// and nir::validate's linearity dataflow follows them all: uncleared, a
+    /// plan the producer consumed before suspending or completing reaches,
+    /// along a path no run takes, a continuation that consumes it again. A
+    /// cleared register holds unit, an ordinary value a plan register may
+    /// hold (nir::validate_plans), where nothing reads it: a register the
+    /// continuation of the yield a run suspends at reads is never cleared,
+    /// and it is unconsumed there because the producer's own code validated.
+    fn clear_plans(&mut self) {
+        let plans: Vec<Reg> = self
+            .template_regs
+            .iter()
+            .copied()
+            .filter(|r| self.nf.plan_regs[*r as usize] && self.nf.kind_of(*r) == RegKind::Tagged)
+            .collect();
+        if plans.is_empty() || self.resumes.is_empty() {
+            return;
+        }
+        // Liveness in the template alone, where a yield goes on to its own
+        // continuation (as a run does, once resumed) and the root's return
+        // ends it: a register is live at a continuation when the code from
+        // there, through any later suspensions, reads it.
+        let mut t = self.nf.clone();
+        t.body = self.code.iter().map(|(i, _)| i.clone()).chain([Inst::Label(BACK), Inst::Unreachable]).collect();
+        for &(index, k) in &self.suspends {
+            if let Some(k) = k {
+                t.body[index] = Inst::Jump(self.resumes[k - 1]);
+            }
+        }
+        t.origins = vec![None; t.body.len()];
+        let at: Vec<usize> = self
+            .resumes
+            .iter()
+            .map(|l| t.body.iter().position(|i| matches!(i, Inst::Label(x) if x == l)).expect("a continuation label"))
+            .collect();
+        let live: Vec<Vec<bool>> = live_at_many(&t, &at).into_iter().map(|(live_in, _)| live_in).collect();
+        self.plans = plans.into_iter().filter(|r| live.iter().any(|l| l[*r as usize])).collect();
+        for &(index, k) in self.suspends.iter().rev() {
+            let origin = self.code[index].1;
+            let cleared: Vec<(Inst, Option<u32>)> = self
+                .plans
+                .iter()
+                .filter(|r| k.is_none_or(|k| !live[k - 1][**r as usize]))
+                .map(|r| (Inst::Unit { dst: *r }, origin))
+                .collect();
+            self.code.splice(index..index, cleared);
+        }
     }
 
     /// One copy of the template, for a start (START) or a resume: its code,
@@ -909,6 +974,9 @@ impl<'p> Builder<'p> {
         code.push((Inst::Label(fail), None));
         code.push((Inst::Op { dst: self.failbox, op: OpCode::CoFailed, args: Vec::new() }, origin));
         code.push((Inst::RawInt { dst: self.st, digits: FAILED.to_string() }, origin));
+        for r in &self.plans {
+            code.push((Inst::Unit { dst: *r }, origin));
+        }
         code.push((Inst::Jump(raise), origin));
         (code, dispatch, relabel(self.entry))
     }
@@ -1109,5 +1177,46 @@ mod tests {
         let mut program = nir::parse(&program("", "")).unwrap();
         let text = report(&fuse(&mut program));
         assert!(text.starts_with("fused consume {} {inlined {{#3} counter} yields 1 creates 1 starts 1 resumes 2"), "{text}");
+    }
+
+    /// collect(n) yields i twice per iteration of a collecting loop (its
+    /// List plan %3 lives across both yields), then returns the List;
+    /// consume(n) sums the yields until the coroutine is done and resumes it
+    /// once more (its cached result). The plan is consumed before the
+    /// coroutine completes, and a later resume's dispatch reaches the
+    /// continuation that consumes it again on a path only the graph has:
+    /// fused, it validates only because the plan is cleared there
+    /// (`clear_plans`), and runs only because it is not cleared at the
+    /// first yield, whose continuation reads it after the second.
+    #[test]
+    fn a_plan_across_yields_is_fused() {
+        let text = [
+            "nir 1 call-effects=1 statics=0\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+            "    %0 = int 3\n    %1 = call 2 %0\n    ret %1\nend\n",
+            "func 1 \"collect\" params=1 env=0 regs=13 pnames=\"n\" captures=0 planregs=\"3 9\"\n",
+            "    %1 = int 0\n    %2 = move %1\n    %4 = op listnew\n    %3 = move %4\n    jump L0\n  label L0\n",
+            "    %5 = op ilt %2 %0\n    br %5 L1 L2\n  label L1\n",
+            "    %6 = op coyield %2\n    %7 = op coyield %2\n",
+            "    %9 = construct list plan %3 elem %2\n    %3 = move %9\n",
+            "    %10 = int 1\n    %11 = op iadd %2 %10\n    %2 = move %11\n    jump L0\n",
+            "  label L2\n    %12 = construct list flat %3\n    ret %12\nend\n",
+            "func 2 \"consume\" params=1 env=0 regs=11 pnames=\"n\" captures=0\n",
+            "    %1 = closure 3 %0\n    %2 = op cocreate %1\n    %3 = op costart %2\n    %4 = move %3\n    jump L0\n",
+            "  label L0\n    %5 = op codone %2\n    br %5 L2 L1\n",
+            "  label L1\n    %6 = op coresume0 %2\n    %7 = op codone %2\n    br %7 L2 L3\n",
+            "  label L3\n    %8 = op iadd %4 %6\n    %4 = move %8\n    jump L0\n",
+            "  label L2\n    %9 = op coresume0 %2\n    %10 = op corelease %2\n    ret %4\nend\n",
+            "func 3 \"\" params=0 env=1 regs=2 pnames=\"\" captures=1\n",
+            "    %0 = capture 0\n    %1 = call 1 %0\n    ret %1\nend\n",
+        ]
+        .concat();
+        let mut program = nir::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        let reports = fuse(&mut program);
+        assert_eq!(reports.len(), 1);
+        let fused = reports[0].outcome.as_ref().unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!((fused.yields, fused.starts, fused.resumes), (2, 1, 2));
+        // 0 (the start's yield) + 0 + 1 + 1 + 2 + 2.
+        assert_eq!(run(&program), crate::runtime::value::make_small(6));
     }
 }

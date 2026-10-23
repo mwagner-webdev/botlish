@@ -77,12 +77,16 @@ inspection command compile the fused program):
   argument, a field, a List, a result), a recursive yielding function, a
   yielding closure (section 7).
 
-**Measured** (section 10): per item, fused code is 10 to 30 times faster
-than the general runtime, and within about 1.3x of hand-written procedural
-Botlish doing the same work -- faster than it where fusion also inlined what
-the procedural version calls (the deep-yield scan, the tokenizer, the
-validator). A fused run allocates no coroutine and maps no stack; with
-scalar transport it allocates exactly what the procedural baseline does.
+**Measured** (section 10): per item, fused code is 11.5 to 28 times faster
+than the general runtime on streaming workloads, and 470 to 1,000
+times where a coroutine is made per item (the general runtime maps a stack
+for each). It runs within 1.1 to 1.4 times of hand-written procedural
+Botlish doing the same work in one flat loop (the generator, the deep-yield
+scan) -- the remainder is a spill slot and the state test, no coroutine
+machinery (section 9) -- and faster than the procedural tokenizer (0.74 to
+0.87) and streaming validator (0.92 to 0.98). A fused run allocates no
+coroutine and maps no stack, and never allocates more than the procedural
+baseline.
 
 **Not achieved, and why** (sections 7, 12, 13):
 
@@ -92,8 +96,10 @@ scalar transport it allocates exactly what the procedural baseline does.
 * A recursive yielding function (a tree walk) is not fused: its suspended
   frames are unboundedly many, which no fixed set of registers holds.
 * Fused code is larger: every start and resume gets its own copy of the
-  coroutine's code (a precise control-flow graph, section 4.3); a consumer
-  grows by about 2-3 times its coroutine's size.
+  coroutine's code (a precise control-flow graph, section 4.3). The
+  generator's consumer grows from 640 to 2,279 bytes; whole programs by up
+  to 1.7 times, or not at all where the producer's own function is dropped
+  (section 10).
 * Scalar replacement of a passed struct is the fusion pass's own, limited to
   the values the coroutine passes; values the producer builds and keeps are
   scalar-replaced only where native lowering already does it (before
@@ -249,6 +255,16 @@ branch and tail-call.
   coroutine runs nothing after its yield, as releasing one does.
 * **Contexts** are static (CONTEXTS.md, CONTEXT-TRAITS.md): the inlined code
   is the code the construction selected.
+* **Stack depth is a resource, not a property.** A fused coroutine's code
+  runs on its consumer's stack (the thread's: 1 GiB by default), not on an
+  8 MiB stack of its own, so a recursion inside it deep enough to exhaust 8
+  MiB but not the thread's stack returns its value fused where the general
+  runtime stops with NATIVE LIMIT STACK. Recursion depth was already a
+  resource limit that differs between backends (Compilerpedia's NATIVE
+  LIMIT STACK topic), and an overflow of the thread's stack is still
+  NATIVE LIMIT STACK, never a crash, because the stack guard covers it
+  (native-stack-overflow.test's `ns-co-fused`). The tests of the coroutines'
+  own stacks and guards run on the general runtime.
 
 ### 3.3 The cached failure: one runtime operation
 
@@ -337,10 +353,20 @@ collecting loops (a private List plan extended once per iteration,
 validate_plans' linearity) were rejected as "plan register may be consumed
 twice", on a path entering the loop body through another resume's
 continuation. With a copy per operation a segment returns only to the
-operation that ran it, as in the source, and no analysis sees an infeasible
-path; the per-yield site dispatch disappears from the hot path too. The cost
-is code size (section 12); code of a copy reachable only from another
-operation's copy is dead and removed by Cranelift.
+operation that ran it, as in the source, and the per-yield site dispatch
+disappears from the hot path too. The cost is code size (section 12); code
+of a copy reachable only from another operation's copy is dead and removed
+by Cranelift.
+
+One infeasible edge per continuation remains, in the dispatch itself: the
+graph lets each copy's dispatch reach every continuation of the copy, while
+a run reaches only the continuation of the yield the coroutine is suspended
+at, and none after it has completed or failed. The census of the whole test
+suite (section 7) found the validator rejecting twelve sites for it, in four
+golden suites, all one shape: a producer that yields inside a collecting
+loop consumes the loop's plan and completes, and a later resume's dispatch
+-- on a path only the graph has -- enters a continuation that consumes the
+plan again. 4.5's plan clearing closes it.
 
 ### 4.4 Scalar transport
 
@@ -355,12 +381,30 @@ object. Native lowering's own scalar replacement (hir/escape.tcl) ran before
 fusion and could not see this: the yield and the projection were in
 different functions, with a stack switch between them.
 
-### 4.5 Resets and dead code
+### 4.5 Resets, plan clearing and dead code
 
 At each construction the template's tagged registers that are live into a
 dispatch are reset to unit, so a construction in a loop does not keep the
 previous coroutine's values alive as roots, and no register is read unset on
-a path the liveness considers. After a function's sites are fused, every
+a path the liveness considers.
+
+Plan registers (a collecting loop's List under construction, which
+validate_plans requires to be consumed at most once on every path) are
+cleared to unit where the template suspends at a yield whose continuation
+does not read them, and where it completes or fails (`clear_plans`). "Reads"
+is liveness over the template alone, where a yield goes on to its own
+continuation, as a run does once resumed: a plan read after a *later* yield
+is live at every earlier continuation and is never cleared there. So every
+dispatch is entered with each plan a continuation reads unconsumed: either
+the run's own continuation reads it, and the producer's code had it
+unconsumed there (it validated), or it was cleared. Unit is an ordinary
+value a plan register may always hold, and a cleared register is one no
+code a run reaches reads. The clearing costs nothing unless a plan lives
+across a yield; case-plan.bot is its test (fused, on every backend and
+under GC stress), and two mutants pin it (section 8): without the clearing
+the sites fall back; with liveness that stops at the next yield, a plan
+needed after the second of two yields is cleared at the first and the run
+fails. After a function's sites are fused, every
 function nothing refers to any more (a fused coroutine's thunk, and the
 producers only it called) keeps its number but loses its code
 (`unreachable`), so machine code size counts what runs.
@@ -594,9 +638,9 @@ test file's recursive helpers are its only fallbacks.
 | `cf-workloads-agree` | the nine workload programs have their stated values on interp, compile, cranelift-generic, cranelift (fused) and cranelift-unfused |
 | `cf-workloads-fused` | which sites are fused in each workload |
 | `cf-fallbacks` | the kept sites and their reasons (section 7) |
-| `cf-cases-agree`, `cf-cases-fused` | nine correctness cases, fused, on every backend: construction order and eager start (case-eager), completion during construction and cached results (case-early), terminal failure with a payload at construction and in a segment, raised again by every later resume (case-failure), moves, abandonment, early returns, breaks and continues (case-owners), loops, two live coroutines, nested and per-frame fusion (case-structure), collection pressure (case-gc), contexts (case-context), a self tail call (case-tail), and the closure that falls back (case-closure) |
+| `cf-cases-agree`, `cf-cases-fused` | ten correctness cases, fused, on every backend: construction order and eager start (case-eager), completion during construction and cached results (case-early), terminal failure with a payload at construction and in a segment, raised again by every later resume (case-failure), moves, abandonment, early returns, breaks and continues (case-owners), loops, two live coroutines, nested and per-frame fusion (case-structure), collection pressure (case-gc), contexts (case-context), a self tail call (case-tail), a collecting loop whose List plan lives across two yields, then completion and failure and later resumes (case-plan, 4.5), and the closure that falls back (case-closure) |
 | `cf-nested-fusion` | the nested site is one group, fused; no coroutine operation is left in the consumer |
-| `cf-gc-stress` | nine programs under `BOTLISH_NATIVE_GC_STRESS=1`, fused and unfused, equal and as stated |
+| `cf-gc-stress` | ten programs under `BOTLISH_NATIVE_GC_STRESS=1`, fused and unfused, equal and as stated |
 | `cf-nir-no-coroutine-operations` | the fused consumers' NIR keeps only `cofailed` and `coresume0` of the failure object |
 | `cf-clif-no-coroutine-helpers` | the fused programs' Cranelift IR refers to no coroutine helper but `rt_co_failed` and `rt_co_resume0` |
 | `cf-no-coroutine-at-run-time` | a fused run allocates no coroutine and maps no stack |
@@ -624,8 +668,9 @@ fused.
 
 **Rust**: the fusion pass's unit tests (`cargo test --release --bin
 botlish-native fusion`: a generator fused and run without the coroutine
-runtime, a handle reaching a call kept, a recursive yielding function kept,
-the report's text) and the NIR printer's round trip (`nirtext`).
+runtime, a collecting loop's plan across two yields fused and run, a handle
+reaching a call kept, a recursive yielding function kept, the report's
+text) and the NIR printer's round trip (`nirtext`).
 
 **Mutation testing** (audit/coroutine-fusion/tools/mutate.tcl, mutants.txt):
 13 deliberate bugs of the pass, each applied to a private copy of the
@@ -663,22 +708,205 @@ fusion report, and the machine code of the consumer function fused, unfused
 and in the procedural baseline (`NAME.{fused,general,procedural}.s`,
 objdump of `botlish-native object`); summary.md tabulates them:
 
-EVIDENCE-PLACEHOLDER
+| workload | consumer | bytes: fused / general / procedural | calls: fused / general / procedural | coroutine helpers the fused code calls | the general code calls |
+|---|---|---:|---:|---|---|
+| lcg | `sum` | 2,279 / 640 / 863 | 25 / 12 / 9 | `rt_co_failed` 1, `rt_co_resume0` 3 (failure paths) | create, start, `resume0` 2, release 2 |
+| lcg-struct | `sum` | 2,279 / 631 / 863 | 25 / 12 / 9 | the same | the same |
+| grid | `total` | 1,551 / 661 / 445 | 9 / 12 / 5 | `rt_co_resume0` 2 (failure paths) | create, start, `resume0` 2, release 2 |
+| tokens | `lex` | 5,581 / 2,965 / 1,817 | 56 / 61 / 24 | `rt_co_resume0` 5 (failure paths) | create 3, start 3, resume 2, `resume0` 3, release 14 |
+| utf8 | `validate` | 4,141 / 1,557 / 3,789 | 33 / 20 / 39 | `rt_co_resume0` 1 (failure path) | create, start, resume, release 2 |
+
+The calls the fused code makes besides those are the producer's own, now
+inlined: the arithmetic helpers on their overflow paths (`rt_int_mul`,
+`rt_int_add`, `rt_int_and`), the MutableArray's copy-on-write slow path
+(`rt_mutarray_set_proven`), the tokenizer's String and List operations.
+The general consumers' calls are the coroutine operations and little else,
+because the producer is a separate function there.
+
+lcg-struct's fused consumer is lcg's, instruction for instruction: the same
+2,279 bytes, with two stack slots assigned in another order. Its producer
+yields `Item {value: ...}` and the consumer reads `.value`; scalar transport
+(section 4.4) turned the Item into the register lcg yields directly, so the
+struct exists nowhere in the fused program -- where the general runtime
+allocates one per item (section 10's allocation table: 100,005 objects
+against 2).
 
 The coroutine helpers left in fused code are on failure paths only: each
 start's and resume's raise stub (`rt_co_resume0` of the failure object) and
 each copy's failure pad (`rt_co_failed`). Where nothing in a coroutine's code
-can fail, Cranelift removes the pads as unreachable (grid, utf8: no
-`rt_co_failed` at all). A successful run calls none of them
+can fail, Cranelift removes the pads as unreachable (grid, tokens and utf8
+call no `rt_co_failed` at all). A successful run calls none of them
 (`cf-no-coroutine-at-run-time`: no coroutine object allocated).
 
 The hot path of the fused LCG consumer (lcg.fused.s), one item:
 
-DISASM-PLACEHOLDER
+The loop body is the consumer's `acc.set(0, acc.at(0) + step())` with the
+resume's copy of the producer in place of `step()` (objdump of `botlish-native
+object`; comments added, the slow paths' bodies elided):
+
+```
+ 5c6:  mov    %rcx,%r15              ; consumer: acc
+ 5d2:  mov    0x10(%r15),%r11        ;   acc.at(0)
+ 5d6:  mov    (%r11),%rsi
+ 5e3:  cmp    $0x1,%r12              ; step(): the dispatch. st in %r12, a raw word
+ 5e7:  je     678                    ;   suspended at the yield: resume the producer
+ 5ed:  cmp    $0xffffffffffffffff,%r12   ;   completed (st = -1)?
+ 5f1:  jne    601                    ;   no: failed -> the raise stub
+ 5f7:  mov    0x48(%rsp),%rdx        ;   yes: the cached result
+ 5fc:  jmp    842
+ 601:  ...                           ; raise stub: rt_co_resume0 of the failure object, rt_raise
+ 678:  add    $0x1,%r13              ; producer: `loop i from 0 to count`, i a raw word in %r13
+ 67f:  cmp    %rbx,%r13
+ 682:  jl     6a7
+ 688:  mov    $0xffffffffffffffff,%rdx   ;   loop done: `return -1` (st = -1, out = -1)
+ 6a2:  jmp    842
+ 6a7:  mov    0x58(%rsp),%rsi        ; state.at(0)
+ 6ac:  mov    0x10(%rsi),%rax
+ 6b0:  mov    (%rax),%rsi
+ 6dd:  sar    $1,%rax                ; * 1103515245: inline on small Ints,
+ 6e0:  imulq  0x251(%rip)            ;   rt_int_mul only on overflow (6fe)
+ 72d:  add    $0x6072,%rsi           ; + 12345: inline, rt_int_add only on overflow (74a)
+ 787:  and    0x1b2(%rip),%rsi       ; mod 2^31 as a mask; rt_int_and only for a BigInt (773)
+ 79d:  mov    0x18(%rsi),%rax        ; state.set(0, next): copy-on-write check,
+ 7b8:  mov    %rdx,(%rcx)            ;   store (rt_mutarray_set_proven only if shared)
+ 7bb:  mov    $0x1,%r12d             ; yield: st = 1
+ 7c6:  sar    $1,%rdx                ; next.mod(1000) by reciprocal multiplication
+ 7d3:  imulq  0x16e(%rip)
+ ...
+ 834:  or     $0x1,%rdx              ;   retagged: the yielded value, out
+ 842:  ...                           ; the resume's continuation, back in the consumer
+ 857:  test   $0x1,%rdi              ; acc.at(0) + step(): both small Ints?
+ 870:  add    %r9,%rcx               ;   tagged add, rt_int_add only on overflow (88a)
+ 892:  mov    0x18(%r15),%rax        ; acc.set(0, ...): copy-on-write check, store
+ 8a3:  mov    %rcx,(%rax)
+ 8a6:  add    $0x1,%r14              ; consumer: `loop i from 1 to count`
+ 8b5:  jmp    327                    ;   back to the loop test
+```
+
+Per item: one compare and branch of the state word instead of
+`rt_co_resume0`, the stack switch into the producer and the switch back;
+the producer's counter and state are the consumer's registers and stack
+slots (%r13, 0x58(%rsp)); the yield is a store of an immediate into %r12.
+No helper is called on the path a successful item takes.
+
+What separates this loop from the procedural one (lcg.procedural.s, the same
+operations in one loop: `sum`'s body at 0x245-0x346) is register allocation
+and the dispatch: the procedural loop keeps `next` in %r15, while the fused
+one keeps the value register its copies share in a spill slot, 0x48(%rsp),
+stored and reloaded around nearly every step of `next.mod(1000)` (it is
+assigned on three paths that join at 0x842: the yield, the producer's
+`return -1` and a completed coroutine's cached result), and it tests `st`
+once per item. That is the 1.2-1.4x of section 10, not coroutine machinery: there is
+none left to remove here.
 
 ## 10. Performance
 
-PERFORMANCE-PLACEHOLDER
+`tclsh9.0 bench/coroutine-fusion.tcl` (defaults: best of 5 in-process runs,
+5 interleaved driver processes per variant, minimum and median over them;
+an Intel Xeon @ 2.10 GHz, 4 cores, in a shared container, so medians move by
+10-20% from run to run and the occasional outlier is the machine's). Every
+workload runs three ways, natively on cranelift: **general** (fusion off:
+its coroutines on the general runtime), **fused** (the default) and
+**procedural** (its hand-written baseline without coroutines, the same
+work). Times are ns per item: a generated value (lcg, lcg-struct), a grid
+cell (grid), an input character (tokens), an input byte (utf8), a recursion
+frame holding a suspended coroutine (held).
+
+| workload | items | general min | general med | fused min | fused med | procedural min | procedural med | fused / procedural (med) | general / fused (med) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lcg | 10,000 | 63.69 | 69.37 | 5.02 | 5.94 | 4.21 | 4.35 | 1.37 | 11.7 |
+| lcg | 100,000 | 62.16 | 67.21 | 5.12 | 5.83 | 3.85 | 4.35 | 1.34 | 11.5 |
+| lcg | 1,000,000 | 62.50 | 63.99 | 5.31 | 5.46 | 3.98 | 4.50 | 1.21 | 11.7 |
+| lcg-struct | 10,000 | 107.63 | 117.14 | 5.04 | 5.58 | 4.53 | 4.53 | 1.23 | 21.0 |
+| lcg-struct | 100,000 | 137.34 | 154.64 | 5.22 | 5.54 | 4.54 | 7.68 | 0.72 | 27.9 |
+| lcg-struct | 1,000,000 | 145.59 | 147.65 | 5.34 | 6.08 | 4.38 | 4.64 | 1.31 | 24.3 |
+| grid | 10,000 | 77.97 | 85.99 | 3.63 | 3.99 | 3.24 | 3.34 | 1.19 | 21.5 |
+| grid | 100,000 | 77.20 | 83.52 | 3.67 | 4.00 | 3.02 | 3.27 | 1.22 | 20.9 |
+| grid | 1,000,000 | 79.65 | 82.91 | 4.06 | 4.17 | 3.15 | 4.91 | 0.85 | 19.9 |
+| tokens | 2,000 | 272.63 | 292.68 | 10.85 | 12.15 | 14.70 | 15.11 | 0.80 | 24.1 |
+| tokens | 20,000 | 286.26 | 303.65 | 12.08 | 12.51 | 14.47 | 14.57 | 0.86 | 24.3 |
+| tokens | 200,000 | 274.84 | 287.20 | 12.15 | 12.37 | 13.89 | 15.11 | 0.82 | 23.2 |
+| utf8 | 2,000 | 115.95 | 117.79 | 8.77 | 9.44 | 9.11 | 9.66 | 0.98 | 12.5 |
+| utf8 | 20,000 | 121.98 | 132.98 | 8.27 | 9.08 | 9.02 | 9.52 | 0.95 | 14.6 |
+| utf8 | 200,000 | 152.32 | 165.63 | 9.44 | 10.08 | 10.17 | 10.65 | 0.95 | 16.4 |
+| held | 1,000 | 10,296.75 | 10,751.95 | 21.40 | 23.05 | 11.87 | 12.24 | 1.88 | 466.5 |
+| held | 5,000 | 19,335.33 | 20,057.17 | 21.54 | 23.64 | 12.71 | 13.93 | 1.70 | 848.5 |
+| held | 20,000 | 26,870.14 | 28,454.65 | 27.38 | 27.65 | 13.32 | 17.45 | 1.58 | 1,029.0 |
+
+Two ratios in the median column are the machine's, not the code's: the
+procedural medians of lcg-struct at 100,000 (7.68) and grid at 1,000,000
+(4.91) are outliers; by the minimums those rows are 1.15 and 1.29.
+
+Per workload, at its middle size: allocations of every kind (the
+allocation-counting build's summary), coroutine objects and stacks, the
+driver's peak resident memory, the program's machine code (every function,
+`botlish-native size`), native lowering's time and the driver's (fusion and
+Cranelift):
+
+| workload | variant | allocations | coroutine objects | stacks | peak RSS KiB | code bytes | lower ms | driver compile ms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| lcg | general | 4 | 1 | 1 | 11,184 | 1,530 | 19.1 | 3.7 |
+| lcg | fused | 2 | 0 | 0 | 11,164 | 2,572 | 18.0 | 3.7 |
+| lcg | procedural | 2 | 0 | 0 | 11,184 | 966 | 18.8 | 2.0 |
+| lcg-struct | general | 100,005 | 1 | 1 | 11,524 | 1,620 | 19.0 | 3.0 |
+| lcg-struct | fused | 2 | 0 | 0 | 11,168 | 2,572 | 20.3 | 4.0 |
+| lcg-struct | procedural | 2 | 0 | 0 | 11,128 | 966 | 17.5 | 2.2 |
+| grid | general | 3 | 1 | 1 | 11,168 | 1,425 | 28.6 | 3.2 |
+| grid | fused | 1 | 0 | 0 | 11,176 | 1,889 | 25.7 | 6.0 |
+| grid | procedural | 1,001 | 0 | 0 | 11,136 | 1,036 | 17.2 | 3.4 |
+| tokens | general | 31,505 | 3,501 | 3,501 | 11,128 | 6,763 | 107.1 | 11.3 |
+| tokens | fused | 3 | 0 | 0 | 11,164 | 6,672 | 117.8 | 11.8 |
+| tokens | procedural | 3 | 0 | 0 | 11,148 | 4,259 | 108.5 | 5.9 |
+| utf8 | general | 20,002 | 1 | 1 | 11,156 | 2,888 | 84.9 | 4.8 |
+| utf8 | fused | 1 | 0 | 0 | 11,152 | 3,783 | 102.0 | 7.8 |
+| utf8 | procedural | 1 | 0 | 0 | 11,208 | 2,072 | 86.6 | 4.0 |
+| held | general | 10,000 | 5,000 | 5,000 | 30,592 | 1,212 | 48.7 | 2.6 |
+| held | fused | 0 | 0 | 0 | 11,152 | 1,166 | 48.9 | 3.2 |
+| held | procedural | 0 | 0 | 0 | 11,140 | 474 | 27.2 | 1.6 |
+
+What the numbers say:
+
+* **Against the general runtime**, fused code is 11.5 to 28 times faster per
+  item on the streaming workloads, and 470 to 1,000 times faster where a
+  coroutine is made per item (held: the general runtime maps a stack per
+  coroutine, and its cost per frame grows with the number of stacks alive,
+  from 10 to 27 microseconds). The streaming speedups are the switch pair
+  and the helper calls of each resume (lcg, utf8: 11-16 times), plus the
+  allocations the boundary forced on the general runtime -- a boxed message
+  or result per resume (utf8: 20,002 objects), an Item per item
+  (lcg-struct: 100,005), three coroutines and their stacks per token
+  (tokens: 3,501 stacks) -- which the fused program does not make (lcg-struct,
+  tokens, grid: 21-28 times).
+* **Against hand-written procedural code**, fused code is within 1.1 to 1.4
+  times of it where the procedural version is the same loop written flat
+  (lcg, lcg-struct, grid); section 9 shows the remainder is a spill slot and
+  the state test. It is *faster* than the procedural tokenizer (0.74-0.87)
+  and validator (0.92-0.98), because their procedural versions, written as
+  a programmer would without coroutines, pay for what the coroutines' form
+  avoids: the procedural tokenizer scans with helper calls (`code`,
+  `number_end`, `digits_end`, `string_end`), some of which read a character
+  again, where the fused recognizers are inlined and see each character
+  once; the procedural validator keeps the decoder's state between bytes in
+  a four-slot MutableArray, read and written per byte, which the coroutine
+  keeps in locals that fusion makes registers. held's procedural baseline does
+  none of the counter's work, so its 1.6-2.1 is the cost of keeping a
+  suspended coroutine's registers live across a recursive call (a larger
+  frame and its root slots), not of resuming it.
+* **Allocation.** A fused run allocates no coroutine object and maps no
+  stack, and never more than the procedural baseline (grid's procedural
+  version allocates an accumulator per row, 1,001 objects; the coroutine
+  version yields its cells and needs none). held's general run needs 30.6 MB at its deepest point
+  against 11.2 MB fused, which is the procedural program's.
+* **Code size.** Whole programs grow by up to 1.7 times (lcg: 1,530 to 2,572
+  bytes; the consumer function alone 640 to 2,279, section 9), grid and
+  utf8 by 1.3 times, and shrink where the producer's own function is no
+  longer needed (tokens 6,763 to 6,672, held 1,212 to 1,166). The procedural
+  programs are smaller than either.
+* **Sizes.** Per-item times are flat across sizes for every fused and
+  procedural workload: fusion adds no per-run cost that a long run would
+  amortize, and none that grows with the input. The general runtime's
+  per-item time grows with held's depth (live stacks) and, mildly, with
+  utf8's input (its boxed messages).
 
 ## 11. GC and ownership
 
@@ -694,6 +922,15 @@ PERFORMANCE-PLACEHOLDER
 * **Resets.** A construction resets the template's tagged registers that are
   live into a dispatch: a coroutine made in a loop never keeps the previous
   one's values reachable, and liveness never sees one read unset.
+* **One imprecision.** The dispatch's edges to every continuation (4.3) make
+  a value that some *other* continuation reads live while the coroutine is
+  suspended at a yield after which nothing reads it: it stays a root until
+  the coroutine moves on, where the general runtime's stack map at that
+  yield would have dropped it. That retains memory longer; it never changes
+  a value (the collector only keeps more). Clearing such registers at each
+  yield, as 4.5 does for plans, would remove it at a store per register per
+  yield; this milestone clears only plans, whose double consumption is a
+  validity question, not a retention one.
 * **GC stress.** Every workload and case runs under
   `BOTLISH_NATIVE_GC_STRESS=1` (a collection attempt at every allocation
   site) fused and unfused with equal values (`cf-gc-stress`), including

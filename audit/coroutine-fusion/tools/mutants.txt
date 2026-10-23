@@ -113,6 +113,22 @@
                 self.emit(Inst::Move { dst: p, src: *a }, None);
 >>>>
 
+@@ plans-not-cleared a plan a continuation reads is not cleared where the coroutine suspends elsewhere, completes or fails: the fused function no longer validates and the site silently keeps the general runtime
+## native/src/codegen/fusion.rs
+<<<<
+                .filter(|r| k.is_none_or(|k| !live[k - 1][**r as usize]))
+====
+                .filter(|_| false)
+>>>>
+
+@@ plans-cleared-at-own-continuation a plan is cleared at every suspension, even where the continuation of the yield the run suspends at reads it (liveness that stops at the next yield)
+## native/src/codegen/fusion.rs
+<<<<
+                t.body[index] = Inst::Jump(self.resumes[k - 1]);
+====
+                let _ = (index, k);
+>>>>
+
 # ---------------------------------------------------------------------------
 # Scalar transport and what is left over
 

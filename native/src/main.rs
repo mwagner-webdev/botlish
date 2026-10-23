@@ -384,7 +384,8 @@ fn cli(args: &[String]) -> i32 {
     if let Ok(path) = std::env::var("BOTLISH_NATIVE_COROUTINE_FUSION_LOG") {
         if !fusion.is_empty() {
             if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-                let _ = writeln!(log, "{}", codegen::fusion::report(&fusion));
+                // One write: concurrent drivers append whole reports.
+                let _ = log.write_all(format!("{}\n", codegen::fusion::report(&fusion)).as_bytes());
             }
         }
     }

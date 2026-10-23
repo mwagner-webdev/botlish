@@ -649,10 +649,12 @@ test scc-affine-runs {and every backend releases the coroutine on the contract's
     sourceAgree $sccAffine
 } -result {value {[-2, 17, 17, -1, -2]}}
 
-test scc-affine-native {natively: every coroutine released, none swept} -constraints {
+test scc-affine-native {natively, on the general coroutine runtime (coroutine fusion off: a fused coroutine has no runtime object to count): every coroutine released, none swept} -constraints {
     nativeCoroutines
 } -body {
-    dict get [native::allocationReport [surface::compile $sccAffine -warnings off] summary] coroutines
+    withoutCoroutineFusion {
+        dict get [native::allocationReport [surface::compile $sccAffine -warnings off] summary] coroutines
+    }
 } -result {stacksMapped 1 stacksReused 3 released 4 releasedSuspended 2 sweptSuspended 0}
 
 # An affine-payload error through a structural contract: the error edge and

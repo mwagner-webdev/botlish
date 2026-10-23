@@ -1003,13 +1003,21 @@ compile the fused program. Keep it so:
 * The general runtime stays the oracle: `BOTLISH_NATIVE_COROUTINE_FUSION=0`
   turns the pass off, `cranelift-unfused` (tests/helpers.tcl) runs a
   program so, and tests/coroutines.test's `coAgree` and the coroutine
-  fuzzer compare fused code with it on every program. A test of the
-  runtime's own objects, stacks or releases runs inside
-  `withoutCoroutineFusion`; never make such a test pass by fusing.
+  fuzzer compare fused code with it on every program. A test or audit tool
+  that reads the general runtime's own objects, stacks or release counters
+  (`native::allocationReport`'s `coroutines`) reads them inside
+  `withoutCoroutineFusion`; never make such a test pass by fusing. One that
+  inspects a producer's machine code finds it in the fused consumer, where
+  fusion copied it (tests/c-ffi-error-capture.test's `ecHolders`).
 * A copy per operation keeps the control flow graph exact (a segment
   returns only to the operation that ran it): never share one copy between
   operations through a run-time return address without the validator's and
-  the root plan's precision argument (the report, 4.3).
+  the root plan's precision argument (the report, 4.3). The dispatch's
+  edges to every continuation are the one imprecision left: a plan register
+  is cleared where the template suspends at a yield whose continuation does
+  not read it, and where it completes or fails (`clear_plans`, 4.5, with
+  liveness that follows each yield into its own continuation); never drop
+  the clearing or stop its liveness at a yield.
 * The only runtime addition is `op cofailed` (`rt_co_failed`): a fused
   coroutine's cached failure, raised again by `coresume0`. Fusion adds no
   coroutine-specific code to the collector or codegen.
@@ -1025,9 +1033,13 @@ include cranelift-unfused), `cargo test --release --manifest-path
 native/Cargo.toml --bin botlish-native -- fusion nirtext` and
 `audit/coroutine-fusion/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
-you change the code it mutates, keeping it a mutant of the same rule).
-`audit/coroutine-fusion/tools/evidence.tcl` regenerates the native evidence
-(commit it); `bench/coroutine-fusion.tcl` is the performance report.
+you change the code it mutates, keeping it a mutant of the same rule), and
+take the census of a whole run (`audit/coroutine-fusion/tools/census.tcl
+-run tclsh9.0 tests/local.tcl -parts golden`): a site kept because its
+fused function "does not validate" is a fusion bug to fix, never a fallback
+to accept. `audit/coroutine-fusion/tools/evidence.tcl` regenerates the
+native evidence (commit it); `bench/coroutine-fusion.tcl` is the
+performance report.
 
 ## The native stack guard
 

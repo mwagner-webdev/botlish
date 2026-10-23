@@ -126,17 +126,17 @@ test cf-fallbacks {a handle passed to a function, stored in a struct, returned o
 # ---------------------------------------------------------------------------
 # Correctness
 
-test cf-cases-agree {construction order, early completion, terminal failure, ownership and exits, structure (loops, two live coroutines, nested and recursive fusion), collection pressure, contexts, a self tail call, a closure: the same values on every backend, fused and not} -constraints nativeCoroutines -body {
-    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-closure} {
+test cf-cases-agree {construction order, early completion, terminal failure, ownership and exits, structure (loops, two live coroutines, nested and recursive fusion), collection pressure, contexts, a self tail call, a collecting loop across yields, a closure: the same values on every backend, fused and not} -constraints nativeCoroutines -body {
+    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-plan case-closure} {
         expr {[cfAgree [cfText $name]] eq [list value [cfExpect $name]]}
     }
-} -result {1 1 1 1 1 1 1 1 1}
+} -result {1 1 1 1 1 1 1 1 1 1}
 
 test cf-cases-fused {each correctness case's coroutines are fused (the closure's excepted): the property under test is the fused code's} -body {
-    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-closure} {
+    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-plan case-closure} {
         lsort -unique [lmap entry [cfSites [cfText $name]] {lindex $entry 0}]
     }
-} -result {fused fused fused fused fused fused fused fused kept}
+} -result {fused fused fused fused fused fused fused fused fused kept}
 
 test cf-nested-fusion {a coroutine constructed by a fused producer is fused in the consumer too: the outer copies duplicate its construction, one site of several cocreates} -body {
     set hir [surface::compile [cfText case-structure] -warnings off]
@@ -148,14 +148,14 @@ test cf-nested-fusion {a coroutine constructed by a fused producer is fused in t
 
 test cf-gc-stress {under GC stress (a collection attempt at every allocation site) every workload and case has the same value, fused and on the general runtime} -constraints nativeCoroutines -body {
     cfGcStress {
-        lmap name {lcg-struct grid tokens utf8 case-failure case-owners case-structure case-gc case-tail} {
+        lmap name {lcg-struct grid tokens utf8 case-failure case-owners case-structure case-gc case-tail case-plan} {
             set hir [surface::compile [cfText $name] -warnings off]
             set fused [lrange [outcomeUnderHir cranelift $hir] 0 1]
             set general [lrange [outcomeUnderHir cranelift-unfused $hir] 0 1]
             expr {$fused eq $general && $fused eq [list value [cfExpect $name]]}
         }
     }
-} -result {1 1 1 1 1 1 1 1 1}
+} -result {1 1 1 1 1 1 1 1 1 1}
 
 # ---------------------------------------------------------------------------
 # Evidence
