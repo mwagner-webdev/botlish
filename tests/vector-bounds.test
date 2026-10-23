@@ -100,6 +100,10 @@ test vb-unproven-other-vector {a guard against one vector proves nothing about a
     vbDiagnostics "fn f(v: MutableVector\[int\], w: MutableVector\[int\], i: int) -> int:\n    if i >= 0 and i < v.length():\n        return w.at(i)\n    -1\n1\n"
 } -result {{UNHANDLED-ERROR 3}}
 
+test vb-unproven-other-copy {two copies of a vector taken around a push have their own lengths: a guard against the longer one proves nothing about the shorter (both are stable places whose source was resized, so each length is its own place's)} -body {
+    vbDiagnostics "fn f(a: MutableVector\[int\], i: int) -> int:\n    c = a\n    a.push(1)\n    b = a\n    if i >= 0 and i < b.length():\n        return c.at(i)\n    -1\n1\n"
+} -result {{UNHANDLED-ERROR 6}}
+
 test vb-unproven-mask-without-guard {a mask by the length minus one needs the length proven nonzero} -body {
     vbDiagnostics "fn f(v: MutableVector\[int\], h: int) -> int:\n    v.at(bit_and(h, v.length() - 1))\n1\n"
 } -result {{UNHANDLED-ERROR 2}}

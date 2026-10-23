@@ -599,6 +599,19 @@ fn register_vector_unproven_tests():
             1
     std::test::rejects("vb-unproven-other-vector", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_other_vector)
 
+    # two copies of a vector taken around a push have their own lengths: a guard against the longer one proves nothing about the shorter
+    fn b_vb_unproven_other_copy() errors std::compiler::CompilerError:
+        static compile:
+            fn f(a: MutableVector[int], i: int) -> int:
+                c = a
+                a.push(1)
+                b = a
+                if i >= 0 and i < b.length():
+                    return c.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-other-copy", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_other_copy)
+
     # a mask by the length minus one needs the length proven nonzero
     fn b_vb_unproven_mask_without_guard() errors std::compiler::CompilerError:
         static compile:

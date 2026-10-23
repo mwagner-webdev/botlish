@@ -107,22 +107,25 @@ test ci-snapshot-copies-only-when-needed {natively, a loop whose body does not t
         [expr {[dict get $busy mutableVector shares] > 0}] [expr {[dict get $busy mutableVector detaches] <= [dict get $busy mutableVector shares]}]
 } -cleanup {unset -nocomplain quiet busy} -result {0 0 1 1}
 
-test ci-no-materialization {natively, iterating a collection materializes nothing: a loop over a map's entries and a set's elements allocates the same at 1000 and at 2000 elements} -constraints nativeBuilt -body {
+test ci-no-materialization {natively, iterating a collection materializes nothing: a loop over a map's entries and a set's elements allocates the same objects and the same bytes at 1000 and at 2000 elements (a List of every key would be one object of twice the bytes)} -constraints nativeBuilt -body {
     set rows [lmap n {1000 2000} {
         set hir [surface::compile "${::ciDecls}fn build(place m: std::mutable_map::MutableMap\[int, int\], place s: std::mutable_set::MutableSet\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    m.set(i, i * 2)\n    s.add(i)\n    build(m, s, i + 1, n)\nm = std::mutable_map::create\[int, int\]()\ns = std::mutable_set::create\[int\]()\nbuild(m, s, 0, $n)\nacc = std::mutable_array::create(1, 0)\nloop e in m:\n    acc.set(0, e.value):\n        on IndexNotFound:\n            unit\nloop x in s:\n    acc.set(0, x):\n        on IndexNotFound:\n            unit\nacc.capacity()\n" -warnings off]
         set report [native::allocationReport $hir summary]
-        list [dict get $report total allocations] [dict get $report byKind Struct allocations] [dict get $report byKind List allocations]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes] \
+            [dict get $report byKind Struct allocations] [dict get $report byKind List allocations] \
+            [dict get $report byKind List allocatedBytes]
     }]
     expr {[lindex $rows 0] eq [lindex $rows 1]}
 } -cleanup {unset -nocomplain hir report n rows} -result 1
 
-test ci-no-materialization-set {the same for a set alone, beside a map that is never iterated} -constraints nativeBuilt -body {
+test ci-no-materialization-set {the same for a set alone, beside a map that is never iterated: the same objects and bytes} -constraints nativeBuilt -body {
     set rows [lmap n {1000 2000} {
         set hir [surface::compile "${::ciDecls}fn build(place s: std::mutable_set::MutableSet\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    s.add(i)\n    build(s, i + 1, n)\nm = letters()\ns = std::mutable_set::create\[int\]()\nbuild(s, 0, $n)\nacc = std::mutable_array::create(1, 0)\nloop x in s:\n    acc.set(0, x):\n        on IndexNotFound:\n            unit\nacc.capacity()\n" -warnings off]
-        dict get [native::allocationReport $hir summary] total allocations
+        set report [native::allocationReport $hir summary]
+        list [dict get $report total allocations] [dict get $report total allocatedBytes]
     }]
-    expr {[lindex $rows 0] == [lindex $rows 1]}
-} -cleanup {unset -nocomplain rows hir n} -result 1
+    expr {[lindex $rows 0] eq [lindex $rows 1]}
+} -cleanup {unset -nocomplain rows hir n report} -result 1
 
 # ---------------------------------------------------------------------------
 # What is written out, and what is refused

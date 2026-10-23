@@ -26,7 +26,13 @@ object, no Tcl helper of either collection.
   unique collection is never copied by its own operations.
 * **Cost.** Amortized O(1) contains, at, set, add and remove, O(n)
   iteration, no allocation per lookup, replacement or loop element, and dead
-  entries bounded by the live ones under any churn.
+  entries bounded by the live ones under any churn. Natively an Int hit
+  takes 55 ns at 1024 entries and 184 ns at 65536, a presized insertion 95
+  and 138 ns, iteration 17-19 ns per entry: 1.0-2.3 times the hash-table
+  experiment's tables on lookups and insertions, the difference being
+  mostly the keyed hash they did not pay, which in turn keeps a lookup at
+  47 ns on the public hash's collision corpus where theirs take 2-2.5 µs
+  (Performance).
 
 Three general language and compiler changes made it expressible, each with
 its own tests and mutants:
@@ -47,10 +53,13 @@ and one correction: `==` refused inside an opaque struct names the opaque
 values, never their representation (a map's index would otherwise show the
 hidden hash's placement in an error message).
 
-The evidence: six Tcl test files (105 tests) and four golden suites (89
-cases, every backend), an independent Python model, a stateful
-differential fuzzer, 57 mutants (every one killed), and a benchmark beside
-the hash-table experiment's tables and Rust's `HashMap`.
+The evidence: six Tcl test files (106 tests, also under GC stress) and
+four golden suites (89 cases, every backend), an independent Python model,
+a stateful differential fuzzer (0 disagreements in 56 programs and 121,848
+observations, under fixed hidden keys and GC stress too), <!-- MUTANTS-SUMMARY -->,
+and a benchmark beside the hash-table experiment's tables and the Rust
+reference, in time and in instructions, whose profile found and removed two
+costs of the first engine (Performance, "Where the instructions go").
 
 ## Public API
 
@@ -167,9 +176,16 @@ measured them all on this compiler):
   is `lp`'s backward shift, so probe lengths stay those of the live
   entries), and the entry vectors hold dead entries until a stable
   compaction drops them.
-* Everything is a MutableVector of a concrete element type: typed storage,
-  copy-on-write per vector, no allocation per entry, and every operation
-  expressible as ordinary Botlish over the vector operations.
+* Every per-entry field is a MutableVector of a concrete element type:
+  typed storage, copy-on-write per vector, no allocation per entry, and
+  every operation expressible as ordinary Botlish over the vector
+  operations.
+* The index is a MutableVector too, not the experiment's MutableArray: a
+  rebuild changes its size in place, through the table's place parameter,
+  and a place can change a vector's length but no Botlish operation
+  replaces a field. (That is why a rebuild refills the index one push per
+  slot: Performance.) The live count is a one-cell MutableArray for the
+  same reason: a place can update a cell, not rebind an Int field.
 
 ## Hashing
 
@@ -316,8 +332,8 @@ detach of any of its vectors (`mm-no-copies`; `pp-no-copies` for 10000
 updates through a recursive place function).
 
 Copies stay independent through every mutation, including the multi-vector
-ones -- growth (all three vectors and the index rebuilt), compaction (the
-entry vectors rewritten and truncated) and clear: `mm-copies-independent`
+ones -- growth (the index rebuilt, the entry vectors grown), compaction
+(the entry vectors rewritten and truncated) and clear: `mm-copies-independent`
 (a binding, an argument, a result, a struct field, a List element) and
 `mm-copies-adversarial` (a, b = a, c = b mutated in turn across growth,
 deletion, compaction and clear: each exactly its own history, the vectors of
@@ -850,7 +866,39 @@ proofs", "Opaque equality refusals").
 
 ## Regression and CI
 
-TBD.
+Run for this report, on the final tree (Linux x86-64, the 4-vCPU container):
+
+* **The new tests**: `tests/mutable-map.test` (28), `mutable-set.test` (12),
+  `collection-iteration.test` (15), `ordered-table.test` (10),
+  `place-parameters.test` (28) and `vector-bounds.test` (13): 106 tests,
+  every one passing, and every one again under
+  `BOTLISH_NATIVE_GC_STRESS=1`. Their golden suites, `mutable-map.bot` (27),
+  `mutable-set.bot` (10), `collection-iteration.bot` (10) and
+  `place-parameters.bot` (42), pass on interp, compile, cranelift-generic
+  and cranelift, and `audit/golden/tools/perturb.tcl` makes all 89 fail as
+  required under both perturbations (an inverted library and altered
+  expectations). The census and fragments classify the 106 Tcl tests
+  (67 MIGRATE, 24 KEEP-INTERNAL, 8 SPLIT, 3 KEEP-MULTI-PROGRAM, 2
+  KEEP-RUNTIME-ONLY, 2 KEEP-PARSER), and `audit/golden/migration/merge.tcl
+  -check 1` finds no problem in the regenerated manifest.
+* **The oracle and the fuzzer**: `oracle.py selftest`, and the fuzz runs
+  above (0 disagreements, GC stress included).
+* **Mutants**: this milestone's 57 (next section) and, for the code the
+  milestone changed under other harnesses, the 16 existing mutants
+  rewritten against it -- 9 of the bounds-proof harness, 4 of the
+  MutableVector one, 1 each of the MutableArray, static-decision and
+  Hashable ones -- all killed; and the whole Hashable harness (45 of 45
+  killed) and the whole trait-constrained-type harness (43 of 43), which
+  the brief asks to stay killed.
+* **The gates**: the warning gate (`audit/refactor/tools/gate.tcl`: the
+  three modules warning-clean; the manifest lists the two modules that
+  import the internal engine as unloadable alone), `tools/compilerpedia.tcl
+  check` (the generated reference regenerated; the new topics' examples
+  compile and run), the standard-library census regenerated.
+<!-- LOCAL -->
+
+CI (GitHub Actions, the branch's final commit):
+<!-- CI -->
 
 ## Limitations
 

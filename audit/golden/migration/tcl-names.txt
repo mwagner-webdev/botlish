@@ -9162,6 +9162,7 @@ tests/vector-bounds.test vb-unproven-resize-after pass
 tests/vector-bounds.test vb-unproven-place-call pass
 tests/vector-bounds.test vb-unproven-context-member pass
 tests/vector-bounds.test vb-unproven-other-vector pass
+tests/vector-bounds.test vb-unproven-other-copy pass
 tests/vector-bounds.test vb-unproven-mask-without-guard pass
 tests/vector-bounds.test vb-proven-reads-run pass
 tests/ordered-table.test ot-invariants-map-int pass
