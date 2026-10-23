@@ -901,7 +901,13 @@ environment, with `BOTLISH_NATIVE_LINKER=system`):
   `nativeCoroutines` is false, argument zero in the host's spelling,
   `kernel32` as the declared library on Windows, and the driver's
   absolute native path. On Linux x86-64 the changed file passes, 14 of
-  14 on both backends (executed). On Windows its run is PENDING-WINDOWS-RERUN.
+  14 on both backends (executed). On Windows (3cc2a2b1, run
+  40001867739) acceptance shard 4/4, whose tier runs system-linker.test
+  on the interp backend, **passed**: 2,024 tests, 1,963 passed, 61
+  skipped, 0 failed. The three tests pass, and system-linker.test skips
+  the same six as before (8 of its 14 run). The system-linker job, which
+  runs the file on both backends and under GC stress, was still queued
+  when this was written (PENDING-WINDOWS-SYSTEM-JOB).
 * The same three failures were acceptance shard 4/4's only ones (the
   tier runs system-linker.test too: 2,024 tests, 3 failed). Shards 1 to
   3, the smoke job and the root-plans job passed.
@@ -1133,9 +1139,8 @@ The jobs this milestone adds:
   skipped, 0 failed**. The same run's interp suite, golden shard 3,
   stub-linked executables, native Rust unit tests, warning gate,
   method-filter audit, golden shards 1, 2 and 4 and the cranelift and
-  cranelift-generic coverage passed too. Its compile suite was still
-  running when this was written (PENDING-TESTS-COMPILE). The GC-stress
-  job runs on pushes to main only.
+  cranelift-generic coverage and the compile suite passed too: every job
+  of the run passed (the GC-stress job runs on pushes to main only).
 * **tests-arm64.yml `system-linker`** (ubuntu-24.04-arm): the same on
   AArch64. **Passed** on 658737d8 (run 39971747629; section 25 has the
   numbers), and so did every other job of that run: interp, compile,
@@ -1184,7 +1189,8 @@ helper fix of section 30 included) every macOS job **passed** again, the
 system-linker job's GC-stress step included (run 39971727086). On
 3cc2a2b1, which changes system-linker.test for Windows (section 27), the
 system-linker job, smoke, acceptance shard 1/2 and the Linux control
-**passed** (run 40001867659); shard 2/2: PENDING-MACOS-RERUN.
+**passed** (run 40001867659), and so did shard 2/2: every macOS job
+passed on 3cc2a2b1.
 
 ## 34. Windows CI
 
@@ -1219,8 +1225,10 @@ They failed the system-linker job and acceptance shard 4/4, whose tier
 runs system-linker.test too. Everything else passed: the library check,
 hello-windows.bot, the Windows executable and C test files under the
 system linker (288 tests, 0 failed, on each backend), the smoke job, the
-root-plans job and acceptance shards 1 to 3. The run with the fixed tests
-is PENDING-WINDOWS-RERUN.
+root-plans job and acceptance shards 1 to 3. On 3cc2a2b1, with the fixed
+tests (run 40001867739), the smoke job, the root-plans job and all four
+acceptance shards **passed**, shard 4/4 with system-linker.test in it
+(section 27). The system-linker job: PENDING-WINDOWS-SYSTEM-JOB.
 
 ## 35. Remaining distribution work
 
