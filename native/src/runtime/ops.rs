@@ -32,6 +32,9 @@
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
 //! | rt_str_append_char     | Str, UnicodeChar    | Str (S followed by C)        | yes       |
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
+//! | rt_int_to_str          | Int                 | Str (canonical decimal text) | yes       |
+//! | rt_str_to_int          | Str                 | Int; declared                | big Ints  |
+//! |                        |                     | InvalidIntegerText           |           |
 //! | rt_str_char_at         | Str, Int            | UnicodeChar; declared        | no        |
 //! |                        |                     | IndexNotFound (str::char_at) |           |
 //! | rt_str_char_at_proven  | Str, Int            | UnicodeChar (index proven    | no        |
@@ -101,7 +104,8 @@ use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
 use super::value::*;
 use super::vm::{current_program, Vm, NativeInfo};
 use crate::nir::OpCode;
-use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64};
+use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64, rt_decimal_to_str};
+use super::inttext::{rt_int_to_str, rt_str_to_int};
 use num_bigint::BigInt;
 use num_traits::Signed;
 use std::cmp::Ordering;
@@ -127,10 +131,13 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         op,
         // A floating-point result is a heap object (KIND_FLOAT); truncation
         // may make a BigInt. The comparisons allocate nothing.
-        F64Add | F64Sub | F64Mul | F64Div | F64Neg | F64FromInt | F64Trunc |
+        F64Add | F64Sub | F64Mul | F64Div | F64Neg | F64FromInt | F64Trunc | F64Round |
         // A DecimalRounded result is one too (KIND_DECIMAL), its decay a
-        // Float64; its comparisons allocate nothing.
-        D64Add | D64Sub | D64Mul | D64Div | D64Neg | D64ToF64 | D64Round |
+        // Float64, its text a String; its comparisons allocate nothing.
+        D64Add | D64Sub | D64Mul | D64Div | D64Neg | D64ToF64 | D64Round | D64ToStr |
+        // An Int's text is a String, a text's Int may be a BigInt
+        // (runtime::inttext).
+        IntToStr | StrToInt |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
@@ -205,6 +212,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // DecimalRounded's arithmetic (NonFiniteFloat) and quantization
         // (UnrepresentableDecimal: DECIMAL-ROUNDED-MILESTONE-1.md).
         | D64Add | D64Sub | D64Mul | D64Div | D64Round | StrCat | StrAppendChar | StrUtf8Bytes | StrCharAt | Argv | StrIsTclAlpha | StrIsTclAlnum
+        // A text that is no Int's canonical decimal text: the declared
+        // InvalidIntegerText (runtime::inttext). Its inverse, IntToStr, and
+        // the other conversions to text and to Int never fail.
+        | StrToInt
         // The raw mod's zero divisor (ARITHMETIC, IMod's own error).
         // RIModTotal is not here: native/lower.tcl emits it only where the
         // divisor's Range excludes 0 (see OpCode::RIMod).
@@ -785,7 +796,7 @@ fn put_decimal_digits(buf: &mut [u8], mut end: usize, mut n: u64, min_digits: us
 /// bytes hold u128::MAX's 39 digits and a sign; a magnitude beyond 64 bits
 /// is cut into 19-digit chunks, so only those few rare values divide a u128.
 #[inline]
-fn decimal_text(neg: bool, mut mag: u128, buf: &mut [u8; 40]) -> &[u8] {
+pub(crate) fn decimal_text(neg: bool, mut mag: u128, buf: &mut [u8; 40]) -> &[u8] {
     const CHUNK: u128 = 10_000_000_000_000_000_000;
     let mut start = buf.len();
     while mag > u64::MAX as u128 {
@@ -799,6 +810,28 @@ fn decimal_text(neg: bool, mut mag: u128, buf: &mut [u8; 40]) -> &[u8] {
         buf[start] = b'-';
     }
     &buf[start..]
+}
+
+/// F of the canonical decimal text of the Int V (core::value::show's): the
+/// runtime's one Int rendering, which hashing's canonical walk, the
+/// program-result display and messages (show::int_text) and
+/// `std::int::to_string` (runtime::inttext) all read, so no two of them can
+/// disagree. Formatted on the stack (`decimal_text`) for every Int of at
+/// most 128 bits; a larger BigInt by num-bigint from the object's own value
+/// (no clone).
+pub(crate) fn with_int_text<R>(v: Value, f: impl FnOnce(&[u8]) -> R) -> R {
+    let mut buf = [0u8; 40];
+    match int_small(v) {
+        Some(n) => f(decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
+        None => {
+            use num_traits::ToPrimitive;
+            let n = big_of(v);
+            match n.magnitude().to_u128() {
+                Some(mag) => f(decimal_text(n.is_negative(), mag, &mut buf)),
+                None => f(n.to_str_radix(10).as_bytes()),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,23 +1040,9 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
     sink.bytes(&[tag]);
     match kind {
         // Canonical decimal text, matching how core::value::equal treats
-        // textual identity as numeric equality for every Int, small or big.
-        // Formatted on the stack (`decimal_text`); a BigInt of more than 128
-        // bits, by num-bigint from the object's own value (no clone).
-        Kind::Int => {
-            let mut buf = [0u8; 40];
-            match int_small(v) {
-                Some(n) => sink.text(decimal_text(n < 0, n.unsigned_abs() as u128, &mut buf)),
-                None => {
-                    use num_traits::ToPrimitive;
-                    let n = big_of(v);
-                    match n.magnitude().to_u128() {
-                        Some(mag) => sink.text(decimal_text(n.is_negative(), mag, &mut buf)),
-                        None => sink.text(n.to_str_radix(10).as_bytes()),
-                    }
-                }
-            }
-        }
+        // textual identity as numeric equality for every Int, small or big
+        // (with_int_text: on the stack, no allocation below 2^128).
+        Kind::Int => with_int_text(v, |text| sink.text(text)),
         // Evidence is metadata, not part of the value (equal ignores it too).
         Kind::Str => sink.text(str_of(v).as_bytes()),
         Kind::Bool => sink.bytes(&[(v == TRUE) as u8]),
@@ -2958,6 +2977,22 @@ pub extern "C" fn rt_f64_trunc(p: *mut Vm, v: Value) -> Value {
     vm(p).new_big(BigInt::from_f64(t).expect("a finite float is an integer once truncated"))
 }
 
+/// The Int nearest the Float64 V, ties to the even Int (std::float64::round,
+/// core::float::Nearest; NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): exact and
+/// never failing. Rounding a finite binary64 to an integral one is exact
+/// (below 2^52 the integer fits the significand; above it every binary64
+/// already is one), so the integral value is converted exactly, as
+/// rt_f64_trunc converts its own.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_f64_round(p: *mut Vm, v: Value) -> Value {
+    use num_traits::FromPrimitive;
+    let r = float64_of(v).round_ties_even();
+    if r.abs() < 4611686018427387904.0 {
+        return make_small(r as i64);
+    }
+    vm(p).new_big(BigInt::from_f64(r).expect("a finite float is an integer once rounded"))
+}
+
 /// The floating-point operation OP of type TY on A (and B): what a native
 /// called as a value performs, and the reference every generated sequence
 /// computes the same as (codegen::clif's float_op).
@@ -3214,6 +3249,10 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         }
         D64ToF64 => super::decimal::rt_decimal_to_f64(p, a[0], a[1]),
         D64Round => super::decimal::rt_decimal_round(p, a[0], a[1]),
+        D64ToStr => rt_decimal_to_str(p, a[0], a[1]),
+        F64Round => rt_f64_round(p, a[0]),
+        IntToStr => rt_int_to_str(p, a[0]),
+        StrToInt => rt_str_to_int(p, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash | HashTotal => rt_hash(p, a[0]),
@@ -3293,6 +3332,10 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_decimal_cmp, 4),
         h!(rt_decimal_to_f64, 3),
         h!(rt_decimal_round, 3),
+        h!(rt_decimal_to_str, 3),
+        h!(rt_int_to_str, 2),
+        h!(rt_str_to_int, 2),
+        h!(rt_f64_round, 2),
         h!(rt_float_nonfinite, 2),
         h!(rt_f64_from_int, 2),
         h!(rt_f64_trunc, 2),

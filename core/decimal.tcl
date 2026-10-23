@@ -60,6 +60,13 @@
 #                            UnrepresentableDecimal: the value whose true
 #                            value is round(x, N), or the error when no
 #                            binary64 holds that decimal to N places
+#   std::decimal_rounded::to_string (DR) -> str, elaborated into
+#   decimal_rounded#to_string       (DR, int P) -> str: the decimal text of
+#                            round(v, P) (`text`), P the precision v's static
+#                            type guarantees (NUMERIC-TEXT-BOUNDARY-
+#                            MILESTONE-1.md): exactly P fraction digits, no
+#                            point for P = 0, a "-" only before a nonzero
+#                            result. Total.
 
 namespace eval core::decimal {
     # The runtime kind (core/value.tcl) and the scalar-refinement family
@@ -553,7 +560,9 @@ proc core::decimal::trueValue {text} {
 
 # The decimal text of round(V, P): its digits with exactly P fraction digits
 # (none, and no point, for P = 0), and a "-" only for a nonzero result. The
-# display of a value whose static type guarantees P places.
+# display of a value whose static type guarantees P places: a program
+# result's (hir::decimal::Display) and std::decimal_rounded::to_string's,
+# one rounding at P (RoundAt), never a search over precisions.
 proc core::decimal::text {v p} {
     return [RoundedText [DoubleRat [of $v]] $p]
 }
@@ -715,6 +724,12 @@ proc core::decimal::ToFloat64Native {v p} {
     return [ToFloat64 $v [core::value::intOf $p]]
 }
 
+proc core::decimal::ToStringNative {v p} {
+    variable kind
+    core::value::expect $kind $v decimal_rounded#to_string
+    return [core::value::str [text $v [core::value::intOf $p]]]
+}
+
 proc core::decimal::RoundNative {x n} {
     core::value::expect Float64 $x decimal_rounded#round
     return [Complete decimal_rounded#round [Quantize $x [core::value::intOf $n]]]
@@ -803,4 +818,9 @@ apply {{} {
     core::native::register decimal_rounded#round -arity 2 -impl core::decimal::RoundNative \
         -param-types {Float64 int} -result-type $kind -runtime {bigint float-alloc} \
         -errors UnrepresentableDecimal -context-free 1
+    core::native::register std::decimal_rounded::to_string -arity 1 \
+        -impl [list core::decimal::Unelaborated std::decimal_rounded::to_string] \
+        -param-types [list $kind] -result-type str -context-free 1
+    core::native::register decimal_rounded#to_string -arity 2 -impl core::decimal::ToStringNative \
+        -param-types [list $kind int] -result-type str -runtime {bigint string-alloc} -context-free 1
 } core::decimal}

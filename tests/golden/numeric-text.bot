@@ -1,0 +1,277 @@
+# numeric-text.bot -- the numeric/text boundary (manifest: category
+# numeric-text; ported from tests/numeric-text.test,
+# NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): an Int's canonical decimal text
+# both ways (std::int::to_string, std::int::from_string and its declared
+# InvalidIntegerText), a Float64 rounded to the nearest Int, ties to even
+# (std::float64::round, beside std::float64::truncate), and a DecimalRounded
+# value's guaranteed decimal as text (std::decimal_rounded::to_string).
+#
+# The inputs reach the conversions through the parameters of the helpers
+# below and through loop elements, as in the Tcl programs, so a run computes
+# every one (no call is decided before it). The Tcl originals also pin the
+# folds' registrations, the literals' bit patterns, a representation's
+# binary64, the HIR of the elaborated call, the NIR ops, the builtin error's
+# index, a standalone executable, seeded random round trips and the
+# messages.
+import std::compiler
+import std::decimal_rounded
+import std::float64
+import std::int
+import std::list
+import std::test
+
+# nt-dr-to-string-field's struct (a struct is declared at the top level).
+struct Run:
+    best: DecimalRounded{minDecimalsPreserved: 1}
+    floor: int
+
+fn text(n: int) -> str:
+    n.to_string()
+
+fn texts(ns: List[int]) -> List[str]:
+    loop n in ns:
+        text(n)
+
+# The Int of S, or -1 for InvalidIntegerText.
+fn read(s: str) -> int:
+    std::int::from_string(s):
+        on InvalidIntegerText:
+            -1
+
+fn reads(ts: List[str]) -> List[int]:
+    loop t in ts:
+        read(t)
+
+fn rounded(xs: List[Float64]) -> List[int]:
+    loop x in xs:
+        x.round()
+
+fn whole(x: DecimalRounded{minDecimalsPreserved: 0}) -> str:
+    x.to_string()
+
+fn tenths(x: DecimalRounded{minDecimalsPreserved: 1}) -> str:
+    x.to_string()
+
+fn cents(x: DecimalRounded{minDecimalsPreserved: 2}) -> str:
+    x.to_string()
+
+fn mils(x: DecimalRounded{minDecimalsPreserved: 3}) -> str:
+    std::decimal_rounded::to_string(x)
+
+fn register_int_tests():
+    fn small() -> List[str]:
+        texts([0, 1, -1, 9, 10, 99, 100, -100, 7, -7, 123456])
+    std::test::value("nt-int-to-string-small", ["0", "1", "-1", "9", "10", "99", "100", "-100", "7", "-7", "123456"], small)
+
+    fn large() -> List[str]:
+        texts([4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905,
+            9223372036854775807, 9223372036854775808, -9223372036854775809, 18446744073709551616,
+            340282366920938463463374607431768211456, -340282366920938463463374607431768211457,
+            10000000000000000000000000000000000000000])
+    std::test::value("nt-int-to-string-large", ["4611686018427387903", "4611686018427387904", "-4611686018427387904",
+        "-4611686018427387905", "9223372036854775807", "9223372036854775808", "-9223372036854775809",
+        "18446744073709551616", "340282366920938463463374607431768211456", "-340282366920938463463374607431768211457",
+        "10000000000000000000000000000000000000000"], large)
+
+    fn folded() -> str:
+        std::int::to_string(-42)
+    std::test::value("nt-int-to-string-folds", "-42", folded)
+
+    fn valid() -> List[int]:
+        reads(["0", "1", "-1", "10", "7", "-7", "123456", "-999999999999999999999999999999999", "4611686018427387904"])
+    std::test::value("nt-int-from-string-valid", [0, 1, -1, 10, 7, -7, 123456, -999999999999999999999999999999999, 4611686018427387904], valid)
+
+    fn invalid() -> List[int]:
+        reads(["", "-", "+1", "01", "-01", "-0", "00", "1.0", " 1", "1 ", "1x", "x1", "--1", "1_000", "1e3", "0x10",
+            "1\n", "١٢", "１"])
+    std::test::value("nt-int-from-string-invalid", [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1], invalid)
+
+    fn propagates() errors std::compiler::CompilerError:
+        static compile:
+            fn parse(s: str) -> int errors InvalidIntegerText:
+                std::int::from_string(s)
+            fn sum(ts: List[str]) -> int errors InvalidIntegerText:
+                all = loop t in ts:
+                    parse(t)
+                std::list::length(all)
+            fn count(ts: List[str]) -> int:
+                sum(ts):
+                    on InvalidIntegerText:
+                        -1
+            [count(["1", "2"]), count(["1", "2x", "3"])]
+    std::test::value("nt-int-from-string-propagates", [2, -1], propagates)
+
+    fn unhandled() errors std::compiler::CompilerError:
+        static compile:
+            fn parse(s: str) -> int:
+                std::int::from_string(s)
+            parse("12")
+    std::test::rejects("nt-int-from-string-declared/unhandled", std::compiler::DiagnosticCode::UnhandledError, unhandled)
+
+    fn declared() errors std::compiler::CompilerError:
+        static compile:
+            fn parse(s: str) -> int errors InvalidIntegerText:
+                std::int::from_string(s)
+            parse("12"):
+                on InvalidIntegerText:
+                    0
+    std::test::value("nt-int-from-string-declared/declared", 12, declared)
+
+    fn constant() -> int:
+        std::int::from_string("1x"):
+            on InvalidIntegerText:
+                -1
+    std::test::value("nt-int-from-string-declared/constant-handled", -1, constant)
+
+    fn receiver() errors std::compiler::CompilerError:
+        static compile:
+            fn parse(s: str) -> int errors InvalidIntegerText:
+                s.from_string()
+            parse("12"):
+                on InvalidIntegerText:
+                    0
+    std::test::rejects("nt-int-from-string-nomethod/receiver", std::compiler::DiagnosticCode::NomethodCall, receiver)
+
+    fn method() -> str:
+        text(12)
+    std::test::value("nt-int-from-string-nomethod/to-string", "12", method)
+
+    fn round_trip() -> List[List[bool]]:
+        fn back(n: int) -> bool:
+            m = std::int::from_string(std::int::to_string(n)):
+                on InvalidIntegerText:
+                    return false
+            m == n
+        fn forth(t: str) -> bool:
+            n = std::int::from_string(t):
+                on InvalidIntegerText:
+                    return false
+            std::int::to_string(n) == t
+        ns = [0, 1, -1, 9, -10, 4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905,
+            9223372036854775807, 9223372036854775808, -9223372036854775809, 18446744073709551616,
+            -123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890]
+        ts = ["0", "-1", "4611686018427387904", "-9223372036854775809",
+            "98765432109876543210987654321098765432109876543210987654321098765432109876543210"]
+        backs = loop n in ns:
+            back(n)
+        forths = loop t in ts:
+            forth(t)
+        [backs, forths]
+    std::test::value("nt-int-round-trip", [[true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+        [true, true, true, true, true]], round_trip)
+
+fn register_round_tests():
+    fn halves() -> List[int]:
+        rounded([0.0, 0.49, 0.5, 1.5, 2.5, 3.5, -0.5, -1.5, -2.5, 1.4, -1.4, 0.51, -0.51])
+    std::test::value("nt-float-round-halves", [0, 0, 0, 2, 2, 4, 0, -2, -2, 1, -1, 1, -1], halves)
+
+    fn neighbors() -> List[int]:
+        rounded([0.49999999999999994, 0.5000000000000001, 2.4999999999999996, 2.5000000000000004, -2.5000000000000004,
+            4503599627370495.5, 4503599627370494.5])
+    std::test::value("nt-float-round-exact-binary", [0, 1, 2, 3, -3, 4503599627370496, 4503599627370494], neighbors)
+
+    fn large() -> List[int]:
+        rounded([1.0e20, -1.0e20, 9.223372036854776e18, 4.611686018427388e18, -4.611686018427388e18, 1.0e300, 1.7976931348623157e308, -1.7976931348623157e308])
+    std::test::value("nt-float-round-large", [100000000000000000000, -100000000000000000000, 9223372036854775808, 4611686018427387904, -4611686018427387904,
+        1000000000000000052504760255204420248704468581108159154915854115511802457988908195786371375080447864043704443832883878176942523235360430575644792184786706982848387200926575803737830233794788090059368953234970799945081119038967640880074652742780142494579258788820056842838115669472196386865459400540160,
+        179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368,
+        -179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368], large)
+
+    fn versus() -> List[List[int]]:
+        fn both(x: Float64) -> List[int]:
+            [std::float64::truncate(x), std::float64::round(x)]
+        loop x in [-2.7, 2.7, 2.5, -0.5, 0.49, -3.5, 1.0]:
+            both(x)
+    std::test::value("nt-float-round-versus-truncate", [[-2, -3], [2, 3], [2, 2], [0, 0], [0, 0], [-3, -4], [1, 1]], versus)
+
+    fn total() errors std::compiler::CompilerError:
+        static compile:
+            fn r(x: Float64) -> int:
+                x.round()
+            [r(1.5), std::float64::round(2.5)]
+    std::test::value("nt-float-round-total", [2, 2], total)
+
+fn register_decimal_tests():
+    fn precisions() -> List[List[str]]:
+        [
+            [whole(2.0), whole(2.5), whole(3.5), whole(-2.5), whole(7.0)],
+            [tenths(6.0), tenths(1.2), tenths(2.4), tenths(-0.3), tenths(12.35)],
+            [cents(0.19), cents(25.0), cents(1.24), cents(-7.5)],
+            [mils(1.0005), mils(1.0015), mils(123.4567), mils(-0.001)],
+        ]
+    std::test::value("nt-dr-to-string-precisions", [["2", "2", "4", "-2", "7"], ["6.0", "1.2", "2.4", "-0.3", "12.4"],
+        ["0.19", "25.00", "1.24", "-7.50"], ["1.000", "1.002", "123.457", "-0.001"]], precisions)
+
+    fn ties() -> List[str]:
+        [cents(1.245), cents(1.235), cents(1.255), cents(-1.245), cents(0.005), cents(0.015), cents(2.675)]
+    std::test::value("nt-dr-to-string-ties", ["1.24", "1.24", "1.26", "-1.24", "0.00", "0.02", "2.68"], ties)
+
+    fn hidden() -> List[str]:
+        fn keep(x: DecimalRounded{minDecimalsPreserved: 3}) -> DecimalRounded{minDecimalsPreserved: 3}:
+            x
+        fn quantized(x: Float64) -> str:
+            d = std::decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 2}](x):
+                on UnrepresentableDecimal:
+                    return "none"
+            cents(d)
+        first = [cents(0.295), tenths(keep(1.255)), tenths(keep(1.249)), tenths(keep(-0.051))]
+        later = loop x in [0.29500000000000004, 0.295, 1.005]:
+            quantized(x)
+        std::list::append(std::list::append(std::list::append(first, later.get(0, "")), later.get(1, "")), later.get(2, ""))
+    std::test::value("nt-dr-to-string-hidden-digits", ["0.30", "1.3", "1.2", "-0.1", "0.30", "0.29", "1.00"], hidden)
+
+    fn zeros() -> List[str]:
+        [tenths(-0.04), tenths(-0.05), tenths(-0.0), tenths(0.0), tenths(-0.06), cents(-0.004), cents(-0.005), whole(-0.4), whole(-0.5)]
+    std::test::value("nt-dr-to-string-no-negative-zero", ["0.0", "0.0", "0.0", "0.0", "-0.1", "0.00", "0.00", "0", "0"], zeros)
+
+    fn magnitudes() -> List[str]:
+        fn six(x: DecimalRounded{minDecimalsPreserved: 6}) -> str:
+            x.to_string()
+        fn many(x: DecimalRounded{minDecimalsPreserved: 25}) -> str:
+            x.to_string()
+        [cents(12345678901234.56), cents(1.0e20), cents(1.0e-30), cents(-1.0e20), whole(1.0e22), six(0.000001), six(1024.5),
+            many(0.5), many(-0.125)]
+    std::test::value("nt-dr-to-string-magnitudes", ["12345678901234.56", "100000000000000000000.00", "0.00", "-100000000000000000000.00",
+        "10000000000000000000000", "0.000001", "1024.500000", "0.5000000000000000000000000", "-0.1250000000000000000000000"], magnitudes)
+
+    fn bounded() -> List[str]:
+        fn t(x: DecimalRounded{minDecimalsPreserved: 2, maxDecimalsPreserved: 4}) -> str:
+            x.to_string()
+        [t(1.2345), t(19.995)]
+    std::test::value("nt-dr-to-string-upper-bound", ["1.23", "20.00"], bounded)
+
+    fn field() -> List[str]:
+        fn line(r: Run) -> str:
+            r.best.to_string()
+        fn floor(r: Run) -> str:
+            r.floor.to_string()
+        run = Run {best: 6.05, floor: 12}
+        [line(run), floor(run)]
+    std::test::value("nt-dr-to-string-field", ["6.0", "12"], field)
+
+    fn float_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn t(x: Float64) -> str:
+                std::decimal_rounded::to_string(x)
+            t(1.5)
+    std::test::rejects("nt-dr-to-string-float-refused/float64", std::compiler::DiagnosticCode::Type, float_argument)
+
+    fn int_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn t(x: int) -> str:
+                std::decimal_rounded::to_string(x)
+            t(1)
+    std::test::rejects("nt-dr-to-string-float-refused/int", std::compiler::DiagnosticCode::Type, int_argument)
+
+    fn decay() errors std::compiler::CompilerError:
+        static compile:
+            fn t(x: Float64) -> Float64:
+                std::float64::from_decimal_rounded(x)
+            t(1.5)
+    std::test::rejects("nt-dr-to-string-float-refused/decay", std::compiler::DiagnosticCode::Type, decay)
+
+with context std::test::suite()
+register_int_tests()
+register_round_tests()
+register_decimal_tests()
+std::test::report()

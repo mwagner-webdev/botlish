@@ -12,6 +12,7 @@
 # answers whether all of them did (main.bot stops on a failed frame).
 import std::float64
 import std::ffi::c
+import std::int
 import std::list
 import std::str
 import hud
@@ -73,7 +74,7 @@ fn platform(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::f
     edge = renderer.clone().fill(rect.clone(), p.x, top, p.width, 2.0)
     if not tower::milestone?(p.floor) or p.floor == 0:
         return colored and body and shine and edge
-    label = hud::int_text(p.floor)
+    label = p.floor.to_string()
     ink = renderer.clone().color(60, 40, 10)
     x = p.x + (p.width - 8.0 * std::float64::from_int(std::str::length(label))) / 2.0
     written = renderer.text(buffer, x, top + 4.0, label)

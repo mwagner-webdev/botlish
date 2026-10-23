@@ -1460,6 +1460,39 @@ must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule) and `cargo test
 --release --manifest-path native/Cargo.toml --lib decimal`.
 
+## Numbers and text
+
+`std::int::to_string`, `std::int::from_string`, `std::float64::round` and
+`std::decimal_rounded::to_string` (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md) are
+explicit conversions with one rule each. Keep it so:
+
+* An Int's text is its canonical decimal text, `core::value::isCanonicalInt`
+  (`0 | -?[1-9][0-9]*`, ASCII digits), both ways: from_string accepts
+  exactly what to_string writes, else the declared builtin error
+  InvalidIntegerText. Never accept a "+", a leading zero, "-0", whitespace,
+  a suffix, a base prefix or a non-ASCII digit, and never give from_string a
+  fold (a fold that fails is KNOWN-ERROR whatever handles it). One Int
+  formatter per runtime: `core::value::show`, natively `ops::with_int_text`
+  (hashing, display, messages and to_string).
+* round is round half to even of the exact binary value (core::decimal's
+  `RoundAt` at 0), total and exact at any magnitude: never half away from
+  zero, never through decimal text, never an overflow error.
+* A DecimalRounded value's text is `core::decimal::text` (natively
+  `decimal::text_at`) at the precision its static type guarantees, which
+  `hir::decimal::Elaborate` writes into the call
+  (`decimal_rounded#to_string(x, N)`): never a precision stored in a value,
+  never a digit of the representation, never a search over precisions, and
+  no operation shows more places than minDecimalsPreserved.
+* No implicit number-to-text conversion and no format strings.
+
+If you change any of that, run what NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md's
+"What to run when changing this" lists: `tests/numeric-text.test`, its
+golden suite, `audit/numeric-text/tools/fuzz.tcl` (several seeds), its
+oracle's selftest, `audit/numeric-text/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule)
+and the Rust tests it names.
+
 ## List length refinements
 
 `List[T]{length: N}` (LIST-CARDINALITY-REFINEMENTS.md) is the scalar-refinement

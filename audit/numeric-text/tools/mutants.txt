@@ -1,0 +1,277 @@
+# Mutants of the numeric/text boundary (audit/numeric-text/tools/mutate.tcl;
+# NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): deliberate bugs in an Int's text
+# both ways, Float64 rounding and a DecimalRounded value's text -- each in
+# the Tcl runtime (core/) and in the native runtime (native/), which must
+# be killed separately -- and in the front end's precision elaboration and
+# static check (hir/decimal.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# Int -> String (core/inttext.tcl)
+
+@@ int-drops-minus the Int formatter drops the minus sign
+## core/inttext.tcl
+<<<<
+    return [core::value::str [core::value::show $n]]
+====
+    return [core::value::str [string trimleft [core::value::show $n] -]]
+>>>>
+
+@@ int-leading-zero the Int formatter writes a one-digit Int with a leading zero
+## core/inttext.tcl
+<<<<
+    return [core::value::str [core::value::show $n]]
+====
+    set t [core::value::show $n]
+    if {[string length $t] == 1} {
+        set t 0$t
+    }
+    return [core::value::str $t]
+>>>>
+
+@@ int-fold-wrong a constant Int's decided text is not the text a run makes
+## core/inttext.tcl
+<<<<
+    return [list value [toString $n]]
+====
+    return [list value [core::value::str "[core::value::show $n]."]]
+>>>>
+
+# ---------------------------------------------------------------------------
+# String -> Int (core/inttext.tcl)
+
+@@ parse-trailing-junk the Int parser reads a canonical prefix and ignores what follows it
+## core/inttext.tcl
+<<<<
+    if {![core::value::isCanonicalInt $text]} {
+====
+    if {[regexp {^(?:0|-?[1-9][0-9]*)} $text prefix]} {
+        set text $prefix
+    }
+    if {![core::value::isCanonicalInt $text]} {
+>>>>
+
+@@ parse-leading-zero the Int parser accepts leading zeros, contrary to the integer literal's rule
+## core/inttext.tcl
+<<<<
+    if {![core::value::isCanonicalInt $text]} {
+====
+    if {[regexp {^-?[0-9]+$} $text]} {
+        set text [expr {$text + 0}]
+    }
+    if {![core::value::isCanonicalInt $text]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Float64 -> nearest Int (core/float.tcl)
+
+@@ round-half-away a Float64 half rounds away from zero (Tcl's round), not to even
+## core/float.tcl
+<<<<
+    return [list ok [core::value::intFromNumber [core::decimal::RoundAt $r 0]]]
+====
+    return [list ok [core::value::intFromNumber [expr {round([core::value::floatOf $v])}]]]
+>>>>
+
+@@ round-truncates round goes toward zero, like truncate
+## core/float.tcl
+<<<<
+    return [list ok [core::value::intFromNumber [core::decimal::RoundAt $r 0]]]
+====
+    return [list ok [core::value::intFromNumber [expr {entier([core::value::floatOf $v])}]]]
+>>>>
+
+# ---------------------------------------------------------------------------
+# DecimalRounded -> String (core/decimal.tcl, hir/decimal.tcl)
+
+@@ dr-float-text the DecimalRounded text is the representation's shortest Float64 text
+## core/decimal.tcl
+<<<<
+    return [core::value::str [text $v [core::value::intOf $p]]]
+====
+    return [core::value::str [core::float::Text [of $v]]]
+>>>>
+
+@@ dr-extra-digit the DecimalRounded text shows one digit more than the type guarantees
+## core/decimal.tcl
+<<<<
+    return [core::value::str [text $v [core::value::intOf $p]]]
+====
+    return [core::value::str [text $v [expr {[core::value::intOf $p] + 1}]]]
+>>>>
+
+@@ dr-trailing-zeros the DecimalRounded text drops trailing zeros (and a bare point)
+## core/decimal.tcl
+<<<<
+    return [core::value::str [text $v [core::value::intOf $p]]]
+====
+    set t [text $v [core::value::intOf $p]]
+    if {[string first . $t] >= 0} {
+        set t [string trimright [string trimright $t 0] .]
+    }
+    return [core::value::str $t]
+>>>>
+
+@@ dr-half-up the DecimalRounded text rounds a decimal half up, not to even
+## core/decimal.tcl
+<<<<
+    set k [RoundAt $r $p]
+    set sign [expr {$k < 0 ? "-" : ""}]
+====
+    lassign $r num den
+    set k [expr {(2 * $num * 10 ** $p + $den) / (2 * $den)}]
+    set sign [expr {$k < 0 ? "-" : ""}]
+>>>>
+
+@@ dr-negative-zero the DecimalRounded text keeps the representation's sign on a zero result
+## core/decimal.tcl
+<<<<
+    set sign [expr {$k < 0 ? "-" : ""}]
+====
+    set sign [expr {[lindex $r 0] < 0 ? "-" : ""}]
+>>>>
+
+@@ dr-precision-off-by-one the elaborated text reads one place more than the argument's static type guarantees
+## hir/decimal.tcl
+<<<<
+            set target decimal_rounded#to_string
+            set t [hir::typeOf $hir [lindex $args 0]]
+            if {[IsRefined $t]} {
+                set precision [Precision $t]
+====
+            set target decimal_rounded#to_string
+            set t [hir::typeOf $hir [lindex $args 0]]
+            if {[IsRefined $t]} {
+                set precision [expr {[Precision $t] + 1}]
+>>>>
+
+@@ dr-float-accepted a Float64 argument of to_string or the decay is not rejected statically
+## hir/decimal.tcl
+<<<<
+                } elseif {[hir::types::kindOf $t] ni {"" any} && ![hir::types::Poisoned $hir $a]} {
+====
+                } elseif {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The native runtime (native/src/runtime/inttext.rs, ops.rs, decimal.rs;
+# native/src/codegen/clif.rs)
+
+@@ native-int-drops-minus the native Int formatter drops the minus sign
+## native/src/runtime/inttext.rs
+<<<<
+        let text = std::str::from_utf8(text).expect("decimal digits are ASCII");
+====
+        let text = std::str::from_utf8(text).expect("decimal digits are ASCII").trim_start_matches('-');
+>>>>
+
+@@ native-int-leading-zero the native Int formatter writes a one-digit Int with a leading zero
+## native/src/runtime/inttext.rs
+<<<<
+        let text = std::str::from_utf8(text).expect("decimal digits are ASCII");
+====
+        let text = std::str::from_utf8(text).expect("decimal digits are ASCII");
+        let padded = format!("0{text}");
+        let text = if text.len() == 1 { padded.as_str() } else { text };
+>>>>
+
+@@ native-parse-trailing-junk the native Int parser reads a canonical prefix and ignores what follows it
+## native/src/runtime/inttext.rs
+<<<<
+    if !is_canonical_int(text) {
+        return None;
+    }
+====
+    let end = text.char_indices().skip(1).find(|(_, c)| !c.is_ascii_digit()).map_or(text.len(), |(i, _)| i);
+    let text = &text[..end];
+    if !is_canonical_int(text) {
+        return None;
+    }
+>>>>
+
+@@ native-parse-leading-zero the native Int parser accepts leading zeros
+## native/src/runtime/inttext.rs
+<<<<
+        [first, rest @ ..] => (b'1'..=b'9').contains(first) && rest.iter().all(u8::is_ascii_digit),
+====
+        [first, rest @ ..] => first.is_ascii_digit() && rest.iter().all(u8::is_ascii_digit),
+>>>>
+
+@@ native-strtoint-unchecked native code does not check the parse's result, so its declared error never propagates
+## native/src/codegen/clif.rs
+<<<<
+                let v = self.call_allocating("rt_str_to_int", &[self.vm, a[0]], "strtoint", KIND_BIGINT);
+                self.check(v);
+                v
+====
+                self.call_allocating("rt_str_to_int", &[self.vm, a[0]], "strtoint", KIND_BIGINT)
+>>>>
+
+@@ native-round-half-away the native rounding rounds a half away from zero (f64::round)
+## native/src/runtime/ops.rs
+<<<<
+    let r = float64_of(v).round_ties_even();
+====
+    let r = float64_of(v).round();
+>>>>
+
+@@ native-round-truncates the native rounding goes toward zero
+## native/src/runtime/ops.rs
+<<<<
+    let r = float64_of(v).round_ties_even();
+====
+    let r = float64_of(v).trunc();
+>>>>
+
+@@ native-dr-float-text the native DecimalRounded text is the representation's shortest Float64 text
+## native/src/runtime/decimal.rs
+<<<<
+    let text = text_at(float64_of(v), precision_of(precision));
+====
+    let _ = precision;
+    let text = super::show::float_text(float64_of(v));
+>>>>
+
+@@ native-dr-extra-digit the native DecimalRounded text shows one digit more than the type guarantees
+## native/src/runtime/decimal.rs
+<<<<
+    let text = text_at(float64_of(v), precision_of(precision));
+====
+    let text = text_at(float64_of(v), precision_of(precision) + 1);
+>>>>
+
+@@ native-dr-trailing-zeros the native DecimalRounded text drops trailing zeros (and a bare point)
+## native/src/runtime/decimal.rs
+<<<<
+    let text = text_at(float64_of(v), precision_of(precision));
+====
+    let text = text_at(float64_of(v), precision_of(precision));
+    let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.').to_string() } else { text };
+>>>>
+
+@@ native-dr-half-up the native DecimalRounded text rounds a decimal half up (its machine path), not to even
+## native/src/runtime/decimal.rs
+<<<<
+            if r > half || (r == half && q & 1 == 1) { q + 1 } else { q }
+====
+            if r >= half { q + 1 } else { q }
+>>>>
+
+@@ native-dr-negative-zero the native DecimalRounded text keeps the representation's sign on a zero result
+## native/src/runtime/decimal.rs
+<<<<
+    if k.sign() == Sign::Minus {
+====
+    if x < 0.0 {
+>>>>

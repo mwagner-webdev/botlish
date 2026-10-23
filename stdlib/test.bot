@@ -76,13 +76,13 @@
 # "FAIL name" line and its indented "expected:", "actual:" and "detail:"
 # lines per failing one, then "P passed, F failed".
 #
-# Text. Botlish has no Int-to-String conversion and no way to make a String
-# from a character (LANGUAGE-LIBRARY-DEFICIENCIES.md 3 and 11), so this
-# module writes its own (`int_text`, `describe`, slices of one table for its
-# punctuation), and an enum has no String form (ENUMS.md), so `code_name`
-# spells every std::compiler::DiagnosticCode case itself.
+# Text. An Int's text is std::int::to_string's (NUMERIC-TEXT-BOUNDARY-
+# MILESTONE-1.md); a value's is this module's own (`describe`, slices of one
+# table for its punctuation), and an enum has no String form (ENUMS.md), so
+# `code_name` spells every std::compiler::DiagnosticCode case itself.
 import std::compiler
 import std::coroutine
+import std::int
 import std::list
 import std::mutable_vector
 import std::str
@@ -155,40 +155,15 @@ fn count() -> int:
 # ---------------------------------------------------------------------------
 # Text
 
-# The one-character String at INDEX of the table "0123456789-\"[]": the
-# digits, then the minus sign, the quotation mark and the brackets.
+# The one-character String at INDEX of the table "\"[]": the quotation mark
+# and the brackets.
 fn glyph(index: int) -> str:
-    text = "0123456789-\"[]".substring(index, index + 1):
+    text = "\"[]".substring(index, index + 1):
         on LowerUnderrun:
             ""
         on UpperOverrun:
             ""
     text
-
-# The decimal digit N div P, for 0 <= N < 10 * P (by subtraction: Botlish
-# has no division).
-fn digit_value(n: int, p: int) -> int:
-    if n < p:
-        0
-    else:
-        1 + (n - p).digit_value(p)
-
-# The decimal digits of N div P, for N >= P, P a power of ten.
-fn digits_from(n: int, p: int) -> str:
-    next = p * 10
-    if n < next:
-        n.digit_value(p).glyph()
-    else:
-        n.digits_from(next).concat(n.mod(next).digit_value(p).glyph())
-
-# N in decimal, with a leading minus sign when it is negative.
-fn int_text(n: int) -> str:
-    if n < 0:
-        10.glyph().concat((0 - n).digits_from(1))
-    elif n == 0:
-        0.glyph()
-    else:
-        n.digits_from(1)
 
 fn no_texts() -> MutableVector[str]:
     std::mutable_vector::from_list([])
@@ -246,7 +221,7 @@ fn escaped(text: str) -> str:
 
 # TEXT as a Botlish String literal.
 fn quoted(text: str) -> str:
-    mark = 11.glyph()
+    mark = 0.glyph()
     mark.concat(text.escaped()).concat(mark)
 
 # The lines of TEXT: its pieces between newline characters (one piece, TEXT
@@ -307,7 +282,7 @@ struct Erased:
 fn describe(original) -> str:
     v = Erased {value: original}.value
     if integer?(v):
-        v.int_text()
+        std::int::to_string(v)
     elif string?(v):
         v.quoted()
     elif v == true:
@@ -317,7 +292,7 @@ fn describe(original) -> str:
     elif list?(v):
         parts = loop x in v:
             x.describe()
-        12.glyph().concat(parts.joined(", ")).concat(13.glyph())
+        1.glyph().concat(parts.joined(", ")).concat(2.glyph())
     else:
         "a value with no text form"
 
@@ -552,7 +527,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
 
 # A rejected block's diagnostic, for a report: its code and where it is.
 fn diagnostic_text(code: std::compiler::DiagnosticCode, primary: std::compiler::SourceLocation) -> str:
-    "compiler diagnostic ".concat(code.code_name()).concat(" at line ").concat(primary.line.int_text()).concat(", column ").concat(primary.column.int_text())
+    "compiler diagnostic ".concat(code.code_name()).concat(" at line ").concat(primary.line.to_string()).concat(", column ").concat(primary.column.to_string())
 
 # ---------------------------------------------------------------------------
 # Matchers
@@ -742,7 +717,7 @@ fn result_lines(result: TestResult) -> List[str]:
 
 # "P passed, F failed".
 fn summary_line(summary: Summary) -> str:
-    summary.passed.int_text().concat(" passed, ").concat(summary.failed.int_text()).concat(" failed")
+    summary.passed.to_string().concat(" passed, ").concat(summary.failed.to_string()).concat(" failed")
 
 # Runs the suite once and returns its report: every result's lines, in
 # registration order, then the summary line. A run that reports a different
@@ -762,8 +737,8 @@ fn report() -> List[str]:
         lines.push(summary.summary_line())
     else:
         lines.push("FAIL the run")
-        lines.push("  expected: ".concat(registered.int_text()).concat(" results, one per registered case"))
-        lines.push("  actual: ".concat(summary.total.int_text()).concat(" results"))
+        lines.push("  expected: ".concat(registered.to_string()).concat(" results, one per registered case"))
+        lines.push("  actual: ".concat(summary.total.to_string()).concat(" results"))
         lines.push(Summary {total: summary.total + 1, passed: summary.passed, failed: summary.failed + 1}.summary_line())
     loop line in lines:
         line

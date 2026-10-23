@@ -148,7 +148,7 @@ fn own_ends_with?(text: str, suffix: str) -> bool:
 
 # "LINE:COLUMN".
 fn own_place_text(line: int, column: int) -> str:
-    std::test::int_text(line).concat(":").concat(std::test::int_text(column))
+    std::test::describe(line).concat(":").concat(std::test::describe(column))
 
 # PARTS from INDEX on, joined by SEPARATOR.
 fn own_join_from(parts: List[str], separator: str, index: int) -> str:
