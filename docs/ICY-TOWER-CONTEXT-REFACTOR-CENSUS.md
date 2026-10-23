@@ -931,8 +931,9 @@ generated/c/sdl3   the generated binding: extern declarations, constants, layout
 * **Retain resources inside one root context; hide raw pointers entirely.**
   Design B removed every pointer, clone and cleanup site above the airlock
   (section 2); Design A could not remove main.bot's handle threading, and
-  its immediate-mode spellings cost 37-49 lines where B costs 26 (section
-  7). No public operation of the package should take or return a C
+  its immediate-mode spellings cost 37-49 lines where B costs 26, and its
+  display list (22) costs about 13 % more CPU a frame and a command type
+  (section 7). No public operation of the package should take or return a C
   pointer, a native view or edit, or a non-opaque struct holding one -- the
   warning of section 11 enforces exactly that boundary.
 * **One root context, not one context per subsystem or window.** A context
