@@ -131,7 +131,10 @@ pub fn abi_fingerprint() -> u64 {
         // never runs on a runtime of the other plan.
         u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
     ];
-    for (name, params, _) in super::ops::helpers() {
+    // The helpers' names, not their addresses: an address would keep the
+    // helper's code in every system-linked executable (ops.rs's
+    // HELPER_SIGNATURES).
+    for &(name, params) in super::ops::HELPER_SIGNATURES {
         words.extend(name.bytes().map(u64::from));
         words.push(params as u64);
     }

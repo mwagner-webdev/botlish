@@ -5,21 +5,27 @@
 #   tclsh9.0 bench/system-linker.tcl ?-runs N? ?-single PATH?
 #
 # 1. Link, ms (best of RUNS): the driver's `object` (the program object
-#    alone: Cranelift) and `executable` (object, startup and link) of a
-#    program that calls no C and of one that calls libc and a static
-#    library, with each linker that links it here; the system link's
-#    command line; the program objects' sizes.
+#    alone, from NIR: Cranelift) and `native::executable` from the HIR (NIR
+#    lowering in Tcl, the object, the startup and the link) of a program
+#    that calls no C and of one that calls libc and a static library, with
+#    each linker that links it here; the system link's command line; the
+#    program objects' sizes. The stub's column is nearly all lowering and
+#    object: the difference from it is a linker's own cost.
 # 2. Executables: the file each linker makes of the two programs, as linked
 #    and with `strip` (the stub's is never stripped: its image is appended),
 #    and their dynamic dependencies.
-# 3. Runs, ms (median of RUNS): the process's whole life for the program
-#    that calls no C (startup to exit), a computation that allocates
-#    (a 200000-element list of Strings, built and measured), the same under
-#    BOTLISH_NATIVE_GC_STRESS=1 (a smaller one), and 200000 C calls.
+# 3. Runs, ms (best and median of 3 x RUNS, the linkers' executables
+#    interleaved run by run, so that load drift on the machine falls on all
+#    of them alike; on a shared machine the best is the comparable figure):
+#    the process's whole life for the program that calls no C (startup to
+#    exit), a computation that allocates (a 200000-element list of Strings,
+#    built and measured), the same under BOTLISH_NATIVE_GC_STRESS=1 (a
+#    smaller one), and 200000 C calls.
 # 4. With -single PATH (single/build.sh's executable): its size, the zip
-#    entries' sizes, the first run that installs the native executables,
-#    the first that also installs the runtime archive, a warm run, and
-#    -version and -help.
+#    entries' sizes, and whole invocations (each compiles its program
+#    first, so they compare installations, not linkers): the first run that
+#    installs the native executables, the first that also installs the
+#    runtime archive, warm runs, and -version and -help.
 set root [file dirname [file dirname [file normalize [info script]]]]
 set args $argv
 set argv {}
@@ -190,7 +196,7 @@ foreach name {plain c} {
 }
 puts ""
 
-puts "## 3. Runs, ms (median)"
+puts "## 3. Runs, ms (best / median of [expr {3 * $runs}], interleaved)"
 puts ""
 puts "| run | [join $linkers { | }] |"
 puts "|---|[string repeat ---:| [llength $linkers]]"
@@ -200,11 +206,25 @@ foreach {label name vars} {
     "2000 Strings under GC stress" stress {BOTLISH_NATIVE_GC_STRESS 1}
     "200000 C calls (labs, bcf_add)" c {}
 } {
+    set present [lmap linker $linkers {
+        if {![dict exists $exes $name $linker]} continue
+        set linker
+    }]
+    set samples [dict create]
+    withEnvironment $vars {
+        for {set i 0} {$i < 3 * $runs} {incr i} {
+            foreach linker $present {
+                set t [clock microseconds]
+                exec [dict get $exes $name $linker]
+                dict lappend samples $linker [expr {([clock microseconds] - $t) / 1000.0}]
+            }
+        }
+    }
     set row [list $label]
     foreach linker $linkers {
-        if {![dict exists $exes $name $linker]} { lappend row -; continue }
-        set exe [dict get $exes $name $linker]
-        lappend row [withEnvironment $vars { timed {exec $exe} 1 }]
+        if {$linker ni $present} { lappend row -; continue }
+        set sorted [lsort -real [dict get $samples $linker]]
+        lappend row [format "%.1f / %.1f" [lindex $sorted 0] [lindex $sorted [expr {[llength $sorted] / 2}]]]
     }
     puts "| [join $row { | }] |"
 }
@@ -242,7 +262,7 @@ if {$single ne ""} {
     set ms [timed {exec env -i HOME=$home PATH=[file dirname [lindex [auto_execok cc] 0]] $single -warnings off -L $lib -emit-native-executable $cprog} 1]
     puts "  warm link of the C program: $ms ms"
     set ms [timed {exec env -i HOME=$home $single -warnings off -emit-native-executable [file join $app hello.bot]} 1]
-    puts "  warm stub link of the plain program: $ms ms"
+    puts "  warm stub link of the plain program (a larger front end: context traits, std::io): $ms ms"
     foreach option {-version -help} {
         set ms [timed {exec env -i HOME=[file join $work nohome] $single $option} 1]
         puts "  $option: $ms ms (installs nothing: [expr {![file exists [file join $work nohome]]}])"
