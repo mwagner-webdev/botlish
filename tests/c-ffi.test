@@ -70,7 +70,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
         set ::fixtureDir ""
     }
 }
-testConstraint cfFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+testConstraint cfFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 # libtcl9.0, as the Tcl acceptance links it: a probe link with the host's
 # linker driver.
 proc tclLinkable {} {
@@ -86,8 +86,8 @@ proc tclLinkable {} {
     file delete -force $dir
     return $ok
 }
-testConstraint tclLibrary [expr {[testConstraint nativeBuilt] && [testConstraint rustcLinker] && [tclLinkable]}]
-testConstraint boringssl [expr {[testConstraint nativeBuilt] && [testConstraint rustcLinker] && [cffi::boringsslDir] ne ""}]
+testConstraint tclLibrary [expr {[testConstraint nativeBuilt] && [testConstraint cLinker] && [tclLinkable]}]
+testConstraint boringssl [expr {[testConstraint nativeBuilt] && [testConstraint cLinker] && [cffi::boringsslDir] ne ""}]
 
 # The C calling convention a foreign call is compiled with on this host: the
 # driver's reading of the host target's triple (system_v on Linux,
@@ -517,7 +517,7 @@ proc bcfApp {main {extra {}}} {
     return [app [concat [list main.bot $main bcf.bot $::bcfModule] $extra]]
 }
 
-test cf-fixture-built {the C fixture builds with the host's C toolchain wherever C calls run -- a fixture that does not build would leave every test that needs it skipped, never failed -- as an object of the host's format and architecture, its library defining the fixture's functions under their C names in the object format's spelling (Mach-O's `_` user label prefix on macOS; on Windows the C object cl compiled and the Win64 assembly ml64 assembled, archived by lib)} -constraints {cCompiler nativeCCalls nativeBuilt rustcLinker} -body {
+test cf-fixture-built {the C fixture builds with the host's C toolchain wherever C calls run -- a fixture that does not build would leave every test that needs it skipped, never failed -- as an object of the host's format and architecture, its library defining the fixture's functions under their C names in the object format's spelling (Mach-O's `_` user label prefix on macOS; on Windows the C object cl compiled and the Win64 assembly ml64 assembled, archived by lib)} -constraints {cCompiler nativeCCalls nativeBuilt cLinker} -body {
     set prefix [expr {$::tcl_platform(os) eq "Darwin" ? "_" : ""}]
     if {$::windowsHost} {
         # The objects' own COFF symbol tables (tests/binary-header.tcl):
@@ -916,7 +916,7 @@ proc linkedName {name} {
     return [expr {$::windowsHost ? "$name.lib" : "-l$name"}]
 }
 
-test cf-missing-library {a library the linker cannot find compiles through the front end and fails at the native link, with the linker's own words, as NATIVE LINK -- never an UNKNOWN-NAMESPACE, a TYPE or a HIR error} -constraints {nativeBuilt rustcLinker nativeCCalls} -body {
+test cf-missing-library {a library the linker cannot find compiles through the front end and fails at the native link, with the linker's own words, as NATIVE LINK -- never an UNKNOWN-NAMESPACE, a TYPE or a HIR error} -constraints {nativeBuilt cLinker nativeCCalls} -body {
     set dir [app [list main.bot "extern c library \"definitely_missing_botlish_lib\"\n1 + 1\n"]]
     set hir [appHir $dir]
     lassign [native::withLinkDirs {} {outcomeUnderHir cranelift $hir}] tag code message
@@ -968,7 +968,7 @@ test cf-stub-linker {the stub linker links no native library: it refuses a progr
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_LINKER) } else { set ::env(BOTLISH_NATIVE_LINKER) $saved }
     }
-} -cleanup removeApps -result [list [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (symbols bcf_add; libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"] [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"]]
+} -cleanup removeApps -result [list [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (symbols bcf_add; libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library: link it with the system linker (BOTLISH_NATIVE_LINKER=system or auto, the single executable's: a C compiler driver and the runtime archive) or the rustc linker of a Botlish checkout (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"] [list {NATIVE LINK} "native link failed: this program calls C or declares a C library (libraries [linkedName botlish_cffi_fixture]), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library: link it with the system linker (BOTLISH_NATIVE_LINKER=system or auto, the single executable's: a C compiler driver and the runtime archive) or the rustc linker of a Botlish checkout (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)"]]
 
 test cf-main-tcl {main.tcl -backend cranelift -L DIR compiles, links with the declared libraries, runs and reports the value, the program's own output in its place (native program output is main.tcl's own)} -constraints cfFixture -body {
     set dir [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
@@ -1362,7 +1362,7 @@ test cf-error-sentinel {a C function's own error sentinel is a value: Botlish so
 # Windows (which has no separate math library: the C runtime holds it).
 set ::systemLibrary [expr {$::windowsHost ? "kernel32" : "m"}]
 
-test cf-system-library {functions of the system C library, declared by their C prototypes, through the platform linker -- libc's (glibc's, libSystem's on macOS, the C runtime every Windows executable links), with and without a system library declared (`extern c library "m"`; "kernel32" on Windows), one by another link symbol} -constraints {nativeBuilt rustcLinker nativeCCalls} -body {
+test cf-system-library {functions of the system C library, declared by their C prototypes, through the platform linker -- libc's (glibc's, libSystem's on macOS, the C runtime every Windows executable links), with and without a system library declared (`extern c library "m"`; "kernel32" on Windows), one by another link symbol} -constraints {nativeBuilt cLinker nativeCCalls} -body {
     set decls "extern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\nextern c fn abs(x: std::ffi::c::Int) -> std::ffi::c::Int\nextern c fn magnitude named \"llabs\"(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong\n"
     set call "\[labs(-42), abs(-7), magnitude(-9223372036854775807)\]\n"
     list [appValues [app [list main.bot "import std::ffi::c\n\n${decls}\n$call"]] {cranelift cranelift-generic}] \
@@ -1390,7 +1390,7 @@ proc importedFrom {exe symbol} {
 }
 testConstraint nm [expr {[auto_execok nm] ne ""}]
 
-test cf-system-symbol-resolved {the intended system function is what the executable calls: labs is imported from the system C library (libSystem on macOS, glibc on Linux) by the platform's dynamic linker, never defined inside the executable by another object of the link} -constraints {nativeBuilt rustcLinker nativeCCalls nm dynamicSystemCLibrary} -body {
+test cf-system-symbol-resolved {the intended system function is what the executable calls: labs is imported from the system C library (libSystem on macOS, glibc on Linux) by the platform's dynamic linker, never defined inside the executable by another object of the link} -constraints {nativeBuilt cLinker nativeCCalls nm dynamicSystemCLibrary} -body {
     set dir [app [list main.bot "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(-42)\n"]]
     set exe [native::executable [appHir $dir] [file join $dir program]]
     list [string trim [exec $exe]] [importedFrom $exe labs]
@@ -1407,7 +1407,7 @@ proc importedFromDll {exe symbol} {
     }
     return ""
 }
-test cf-system-symbol-resolved-windows {Windows: a kernel32 function a program declares is imported from KERNEL32.dll by the loader, and the C library's labs is the static C runtime's, linked into the executable, which imports it from no DLL and imports no C runtime DLL at all -- one C runtime, the executable's own (codegen/aot.rs's crt_args)} -constraints {nativeBuilt rustcLinker nativeCCalls windowsHost} -body {
+test cf-system-symbol-resolved-windows {Windows: a kernel32 function a program declares is imported from KERNEL32.dll by the loader, and the C library's labs is the static C runtime's, linked into the executable, which imports it from no DLL and imports no C runtime DLL at all -- one C runtime, the executable's own (codegen/aot.rs's crt_args)} -constraints {nativeBuilt cLinker nativeCCalls windowsHost} -body {
     set dir [app [list main.bot "import std::ffi::c\n\nextern c library \"kernel32\"\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\nextern c fn GetCurrentProcessId() -> std::ffi::c::ULong\n\n\[labs(-42), GetCurrentProcessId() > 0\]\n"]]
     set exe [native::executable [appHir $dir] [file join $dir program]]
     set imports [dict get [peFacts $exe] imports]

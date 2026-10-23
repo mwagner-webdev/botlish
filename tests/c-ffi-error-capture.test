@@ -83,7 +83,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstrai
         set ::fixtureDir ""
     }
 }
-testConstraint ecFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+testConstraint ecFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 
 # The allocator that changes errno (LD_PRELOAD on Linux, DYLD_INSERT_LIBRARIES
 # on macOS), built once: its path, or "".
@@ -723,7 +723,7 @@ proc ecTraced {dir options {untilLibrary 0} {function ec::fill} {foreign bcf_fil
     }
     set linked [lindex [dict filter $symbols value $fill] 0]
     set copy [window::machineMnemonics [window::machine $exe $fill] $fill]
-    if {$copy ne [window::machineMnemonics $functions $fill]} {
+    if {![window::sameLinkedCode $copy [window::machineMnemonics $functions $fill]]} {
         error "the executable's $fill is not the object's"
     }
     set start [format %x [expr {$linked + $offset}]]

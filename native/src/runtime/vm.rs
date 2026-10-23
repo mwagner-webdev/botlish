@@ -359,6 +359,49 @@ impl Vm {
         self.framemap = framemap;
     }
 
+    /// What the startup installed, for `BOTLISH_NATIVE_STARTUP_REPORT`
+    /// (runtime/aot.rs): the program information, every constant (its
+    /// kind, its text as `show` gives it, a function value's entry), the
+    /// module-static count and the stack-map table, every code address
+    /// relative to the lowest one the table holds (the program object's
+    /// first function). Free of absolute addresses, so the three linkers'
+    /// executables of one program -- whose machine code is one object's,
+    /// laid out alike -- report the same text exactly when their startups
+    /// built the same Vm (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+    pub fn startup_report(&self) -> String {
+        use std::fmt::Write;
+        let base = self.framemap.functions().iter().map(|f| f.code_start).min().unwrap_or(0);
+        let relative = |address: usize| address as i128 - base as i128;
+        let mut r = String::from("startup-report 1\n");
+        for (i, f) in self.info.functions.iter().enumerate() {
+            writeln!(r, "function {i} arity {} pnames {:?}", f.arity, f.pnames).unwrap();
+        }
+        for (i, n) in self.info.natives.iter().enumerate() {
+            writeln!(r, "native {i} {:?} arity {:?} params {:?} op {}", n.name, n.arity, n.params.iter().map(|k| k.map(|k| k.name())).collect::<Vec<_>>(), n.op.spelling()).unwrap();
+        }
+        for (i, sh) in self.info.shapes.iter().enumerate() {
+            writeln!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
+        }
+        for (i, e) in self.info.enums.iter().enumerate() {
+            writeln!(r, "enum {i} {:?} cases {:?}", e.name, e.cases).unwrap();
+        }
+        for (i, &value) in self.const_table.iter().enumerate() {
+            let header = value as *const Header;
+            let kind = unsafe { (*header).kind };
+            write!(r, "constant {i} kind {kind} {:?}", super::show::show(value)).unwrap();
+            if kind == KIND_CLOSURE {
+                let closure = unsafe { &*(value as *const ClosureObj) };
+                write!(r, " function {} arity {} code {:+}", closure.func, closure.arity, relative(closure.code)).unwrap();
+            }
+            r.push('\n');
+        }
+        writeln!(r, "statics {}", self.statics_table.len()).unwrap();
+        for f in self.framemap.functions() {
+            writeln!(r, "code {:+} {:+} safepoints {:?}", relative(f.code_start), relative(f.code_end), f.safepoints).unwrap();
+        }
+        r
+    }
+
     /// Sizes module-static storage to COUNT slots (nir::Program's own
     /// `statics`), called once per compiled program, before any generated
     /// code can run (mirrors `set_constants`). Every slot starts UNIT: a

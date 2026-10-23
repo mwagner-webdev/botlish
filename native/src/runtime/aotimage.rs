@@ -99,7 +99,8 @@ pub struct Image {
 /// calls. The driver records its own in the image; the stub refuses an image
 /// recorded by a driver whose runtime differs from its own (a stub and a
 /// driver from different builds), since that code would address fields that
-/// are not there.
+/// are not there; so does a system-linked executable's runtime archive
+/// (`read_linked`).
 pub fn abi_fingerprint() -> u64 {
     use super::{bytesobj, strobj, value, vm};
     let mut words: Vec<u64> = vec![
@@ -125,6 +126,10 @@ pub fn abi_fingerprint() -> u64 {
         bytesobj::BYTES_PAYLOAD_OFFSET as u64,
         bytesobj::BYTES_LEN_OFFSET as u64,
         value::FLOAT_BITS_OFFSET as u64,
+        // The GC root plan the code was generated for (stack maps and the
+        // frame walk, or the shadow stack): a `fallback-roots` build's code
+        // never runs on a runtime of the other plan.
+        u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
     ];
     for (name, params, _) in super::ops::helpers() {
         words.extend(name.bytes().map(u64::from));
@@ -476,6 +481,144 @@ pub fn trailer(payload_len: usize) -> [u8; 16] {
     t
 }
 
+// ------------------------------------------------- system-linked executables
+
+/// The first 8 bytes of a system-linked executable's program description
+/// (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): the data object
+/// `botlish_program_description` that `codegen::aot`'s startup object
+/// defines and the runtime archive's `main` reads. Its revision is the last
+/// byte, as the stub image's trailer's.
+pub const LINKED_MAGIC: &[u8; 8] = b"BOTLSYS1";
+
+/// The startup interface's symbol: the runtime archive defines it (one byte,
+/// its revision) and every startup object refers to it, so a startup object
+/// and an archive of different interface revisions fail to *link* (an
+/// undefined `botlish_runtime_startup_v1`), before anything runs. Its name
+/// changes with `LINKED_MAGIC`'s revision.
+pub const LINKED_INTERFACE_SYMBOL: &str = "botlish_runtime_startup_v1";
+
+/// The description's fixed header: the magic, the function count N, the
+/// metadata length, the interface symbol's address. Then 2N addresses (each
+/// function's direct entry `botlish_fn_I` and its generic entry
+/// `botlish_entry_I`, by NIR id: the linker's relocations), then the
+/// metadata: an [`Image`] with no machine code, no imports and no fixups
+/// (the code is the executable's own, already linked), whose functions'
+/// sizes and stack maps the addresses complete.
+pub const LINKED_HEADER: usize = 32;
+
+/// Bounds of a description's counts, far above any program: a description
+/// that claims more is damaged, and is never read.
+const LINKED_MAX_FUNCTIONS: u64 = 1 << 24;
+const LINKED_MAX_METADATA: u64 = 1 << 36;
+
+impl Image {
+    /// The image of a program the system linker links: its metadata alone.
+    /// FUNCTIONS carry sizes and stack maps; their offsets are unused (the
+    /// description's addresses replace them).
+    pub fn linked(info: ProgramInfo, constants: Vec<Const>, statics: u32, functions: Vec<FunctionCode>) -> Image {
+        Image { info, constants, statics, imports: Vec::new(), code: Vec::new(), size: 0, executable: 0, fixups: Vec::new(), functions }
+    }
+
+    /// The bytes of `botlish_program_description` before the linker fills
+    /// in its addresses (all zero here: each is a relocation's), and the
+    /// offsets of the slots to relocate: the interface symbol's, then every
+    /// function's direct and generic entry, by NIR id.
+    pub fn linked_description(&self) -> (Vec<u8>, usize, Vec<(usize, usize)>) {
+        let metadata = self.encode();
+        let n = self.functions.len();
+        let mut bytes = Vec::with_capacity(LINKED_HEADER + 16 * n + metadata.len());
+        bytes.extend_from_slice(LINKED_MAGIC);
+        bytes.extend_from_slice(&(n as u64).to_le_bytes());
+        bytes.extend_from_slice(&(metadata.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        let slots = (0..n).map(|i| (LINKED_HEADER + 16 * i, LINKED_HEADER + 16 * i + 8)).collect();
+        bytes.resize(LINKED_HEADER + 16 * n, 0);
+        bytes.extend_from_slice(&metadata);
+        (bytes, LINKED_HEADER - 8, slots)
+    }
+}
+
+/// Reads the program description at DESCRIPTION, linked into this
+/// executable, whose interface slot must hold INTERFACE (the archive's own
+/// `botlish_runtime_startup_v1`): the program, ready to instantiate. Every
+/// count is checked before it is used, the metadata is decoded with the
+/// stub image's checks (`Image::decode`: format, ABI fingerprint, bounds),
+/// and it must hold no machine code of its own.
+///
+/// # Safety
+/// DESCRIPTION is the address of a `botlish_program_description` the
+/// system linker linked (LINKED_HEADER bytes at least; the header's counts
+/// say how many more are there).
+pub unsafe fn read_linked(description: *const u8, interface: *const u8) -> Result<Loaded, String> {
+    let word = |at: usize| -> u64 { unsafe { std::ptr::read_unaligned(description.add(at).cast::<u64>()) } };
+    let magic = unsafe { std::slice::from_raw_parts(description, 8) };
+    if magic != LINKED_MAGIC {
+        return Err(if magic[..7] == LINKED_MAGIC[..7] {
+            format!("program description revision {:?}, this runtime reads revision {:?}", magic[7] as char, LINKED_MAGIC[7] as char)
+        } else {
+            "no program description (damaged executable)".to_string()
+        });
+    }
+    let (n, length) = (word(8), word(16));
+    if n == 0 || n > LINKED_MAX_FUNCTIONS || length > LINKED_MAX_METADATA {
+        return Err("malformed program description".to_string());
+    }
+    if word(24) != interface as u64 {
+        return Err("program description is linked against another runtime's startup interface".to_string());
+    }
+    let (n, length) = (n as usize, length as usize);
+    let addresses: Vec<u64> = (0..2 * n).map(|i| word(LINKED_HEADER + 8 * i)).collect();
+    let metadata = unsafe { std::slice::from_raw_parts(description.add(LINKED_HEADER + 16 * n), length) };
+    let image = Image::decode(metadata)?;
+    if !image.code.is_empty() || !image.imports.is_empty() || !image.fixups.is_empty() || image.size != 0 {
+        return Err("program description carries machine code: a stub image, not a linked program".to_string());
+    }
+    if image.functions.len() != n || image.info.functions.len() != n {
+        return Err("program description's function table does not match its program".to_string());
+    }
+    let mut functions = image.functions;
+    for (i, f) in functions.iter_mut().enumerate() {
+        (f.direct, f.entry) = (addresses[2 * i], addresses[2 * i + 1]);
+        if f.direct == 0 || f.entry == 0 {
+            return Err("program description has an unlinked function address".to_string());
+        }
+    }
+    Ok(Loaded { base: 0, info: image.info, constants: image.constants, statics: image.statics, functions })
+}
+
+/// The runtime archive's `main` (native/runtime-archive): what Rust's own
+/// startup does to the process (`aot::rust_process_setup`), then the
+/// program linked beside it, read from DESCRIPTION and run with the
+/// process's own arguments by `aot::run`, as the rustc linker's generated
+/// `main` and the stub's run theirs, and the process ends as theirs do
+/// (`std::process::exit`, which flushes Rust's standard output). A
+/// description it cannot read (`read_linked`) is reported as NATIVE STARTUP,
+/// status 1; a panic outside the program's own thread is status 101, as a
+/// Rust `main`'s.
+///
+/// # Safety
+/// As `read_linked`.
+pub unsafe fn linked_main(description: *const u8, interface: *const u8) -> i32 {
+    let status = std::panic::catch_unwind(|| -> i32 {
+        super::aot::rust_process_setup();
+        let argv = super::aot::process_argv();
+        match unsafe { read_linked(description, interface) } {
+            Ok(loaded) => super::aot::run(argv, move || loaded.instantiate()),
+            Err(error) => {
+                eprintln!("{error} (NATIVE STARTUP)");
+                1
+            }
+        }
+    });
+    match status {
+        Ok(status) => std::process::exit(status),
+        Err(_) => {
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            101
+        }
+    }
+}
+
 // ------------------------------------------------------------------ loading
 
 /// An image mapped and relocated in this process: plain addresses and data,
@@ -691,6 +834,79 @@ mod tests {
         let mut other_abi = bytes.clone();
         other_abi[4] ^= 1;
         assert!(matches!(Image::decode(&other_abi), Err(e) if e.contains("different native runtime build")));
+    }
+
+    /// A linked description (the system linker's startup object's data)
+    /// with the addresses the linker would have filled in.
+    fn linked_bytes(interface: *const u8) -> Vec<u8> {
+        let mut image = sample();
+        image.code.clear();
+        image.imports.clear();
+        image.fixups.clear();
+        let image = Image::linked(image.info, image.constants, image.statics, image.functions);
+        let (mut bytes, interface_slot, slots) = image.linked_description();
+        bytes[interface_slot..interface_slot + 8].copy_from_slice(&(interface as u64).to_le_bytes());
+        for (i, (direct, entry)) in slots.into_iter().enumerate() {
+            bytes[direct..direct + 8].copy_from_slice(&(0x1000 * (i as u64 + 1)).to_le_bytes());
+            bytes[entry..entry + 8].copy_from_slice(&(0x1000 * (i as u64 + 1) + 0x800).to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn linked_description_round_trips() {
+        static INTERFACE: u8 = 1;
+        let bytes = linked_bytes(&INTERFACE);
+        let loaded = unsafe { read_linked(bytes.as_ptr(), &INTERFACE) }.expect("read");
+        assert_eq!(loaded.base, 0);
+        assert_eq!(loaded.statics, 3);
+        assert_eq!(loaded.info.functions[1].pnames, "a b");
+        assert_eq!(loaded.constants, sample().constants);
+        let addresses: Vec<(u64, u32, u64, u32)> = loaded.functions.iter().map(|f| (f.direct, f.direct_size, f.entry, f.entry_size)).collect();
+        assert_eq!(addresses, [(0x1000, 16, 0x1800, 8), (0x2000, 4, 0x2800, 4)]);
+        assert_eq!(loaded.functions[0].safepoints, vec![(5, vec![0, 8])]);
+    }
+
+    /// Every damage a description can have is refused before anything of it
+    /// is used: another revision, no magic, counts out of bounds, another
+    /// runtime's interface, an unlinked address, another runtime build's
+    /// fingerprint, a stub image (with code) in its place, a function table
+    /// that does not match.
+    #[test]
+    fn linked_description_rejects_damage() {
+        static INTERFACE: u8 = 1;
+        static OTHER: u8 = 1;
+        let good = linked_bytes(&INTERFACE);
+        let refused = |bytes: &[u8]| unsafe { read_linked(bytes.as_ptr(), &INTERFACE) }.err().expect("refused");
+        let mut revision = good.clone();
+        revision[7] = b'2';
+        assert!(refused(&revision).contains("revision '2'"), "{}", refused(&revision));
+        let mut magic = good.clone();
+        magic[0] = b'X';
+        assert_eq!(refused(&magic), "no program description (damaged executable)");
+        let mut count = good.clone();
+        count[8..16].copy_from_slice(&0u64.to_le_bytes());
+        assert_eq!(refused(&count), "malformed program description");
+        assert!(unsafe { read_linked(good.as_ptr(), &OTHER) }.err().unwrap().contains("another runtime's startup interface"));
+        let mut unlinked = good.clone();
+        unlinked[LINKED_HEADER..LINKED_HEADER + 8].copy_from_slice(&0u64.to_le_bytes());
+        assert_eq!(refused(&unlinked), "program description has an unlinked function address");
+        let mut fingerprint = good.clone();
+        fingerprint[LINKED_HEADER + 32 + 4] ^= 1;
+        assert!(refused(&fingerprint).contains("different native runtime build"));
+        // A stub image's payload (machine code, fixups) in a description.
+        let payload = sample().encode();
+        let mut stub = good[..LINKED_HEADER + 32].to_vec();
+        stub[16..24].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+        stub.extend_from_slice(&payload);
+        assert!(refused(&stub).contains("carries machine code"));
+        // A header that claims a function the metadata does not have: the
+        // address table then overlaps the metadata, which no longer decodes
+        // or no longer matches.
+        let mut table = good.clone();
+        table[8..16].copy_from_slice(&3u64.to_le_bytes());
+        table.extend_from_slice(&[0; 16]);
+        assert!(unsafe { read_linked(table.as_ptr(), &INTERFACE) }.is_err());
     }
 
     #[test]

@@ -771,7 +771,7 @@ test ct-allocation-free {context-trait specialization allocates nothing: 100 ope
     }
 } -result {{0 0} {0 0}}
 
-test ct-machine-code-direct {machine code: the clone calls the implementation with a direct call (no indirect call), and is exactly as long as the hand-written concrete function} -constraints {nativeLinux objdump posixShell rustcLinker} -body {
+test ct-machine-code-direct {machine code: the clone calls the implementation with a direct call (no indirect call), and is exactly as long as the hand-written concrete function} -constraints {nativeLinux objdump posixShell symbolLinker} -body {
     set dir [makeDirectory ct-exe-[pid]]
     set exe [file join $dir evidence]
     set hir [surface::compile "$::evidence\n\[sum(50, 0), sum_a(50, 0)\]\n" -warnings off]

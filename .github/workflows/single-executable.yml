@@ -4,9 +4,11 @@ name: single executable
 # executable, needing only glibc, that takes main.tcl's options and runs every
 # backend, -emit-native-executable included. Built on every push to main
 # (merges included), smoke-tested in stock Ubuntu containers -- no Tcl, Rust,
-# C compiler or linker installed -- and uploaded as the workflow run's
-# `botlish-linux-x86_64` artifact. A build of main that passes every smoke
-# test is then published as the `single-latest` release's
+# C compiler or linker installed -- and, for programs that call C
+# (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md), in the same containers with gcc
+# installed and the checkout deleted, still no Rust; and uploaded as the
+# workflow run's `botlish-linux-x86_64` artifact. A build of main that passes
+# every smoke test is then published as the `single-latest` release's
 # `botlish-linux-x86_64` asset, which the README's download button links to.
 
 on:
@@ -55,6 +57,13 @@ jobs:
       - name: Smoke test on the build machine
         run: single/smoke-test.sh dist/botlish
 
+      # With strace here (a container may not trace): no Rust process starts
+      # while the packed compiler links a program that calls C.
+      - name: C FFI smoke test on the build machine
+        run: |
+          sudo apt-get install -y strace >/dev/null
+          single/ffi-smoke-test.sh dist/botlish
+
       - uses: actions/upload-artifact@v4
         with:
           name: botlish-linux-x86_64
@@ -86,13 +95,54 @@ jobs:
           chmod +x dist/botlish
           single/smoke-test.sh dist/botlish
 
+  # Programs that call C, linked by the packed compiler's system linker: in
+  # the same stock containers with only gcc (and its binutils) installed --
+  # no Rust anywhere -- and with the checkout deleted before the compiler
+  # runs (the script and the C fixture copied out first).
+  ffi-smoke:
+    name: C FFI smoke test (${{ matrix.image }} + gcc)
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "ubuntu:latest"]
+    container: ${{ matrix.image }}
+    steps:
+      # (No credentials kept: nothing is left for a post step to clean up in
+      # the checkout this job deletes.)
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-linux-x86_64
+          path: /opt/botlish
+
+      - name: Install a C toolchain (no Rust)
+        run: |
+          apt-get update >/dev/null
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc6-dev binutils >/dev/null
+          if command -v rustc || command -v cargo; then echo "::error::Rust is installed"; exit 1; fi
+
+      - name: C FFI smoke test, no checkout
+        run: |
+          mkdir -p /opt/smoke/single /opt/smoke/tests/cffi
+          cp single/ffi-smoke-test.sh /opt/smoke/single/
+          cp tests/cffi/fixture.c /opt/smoke/tests/cffi/
+          cd /
+          rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.[!.]*
+          chmod +x /opt/botlish/botlish
+          /opt/smoke/single/ffi-smoke-test.sh /opt/botlish/botlish /opt/smoke/tests/cffi/fixture.c
+
   # The README's download button: a rolling prerelease whose tag and asset
   # follow main. Run artifacts need a GitHub login to download and expire;
   # a release asset has a stable URL anyone can fetch:
   #   https://github.com/OWNER/REPO/releases/download/single-latest/botlish-linux-x86_64
   release:
     name: publish the latest build
-    needs: [build, smoke]
+    needs: [build, smoke, ffi-smoke]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -134,7 +184,7 @@ jobs:
           sha256sum "$ASSET" >"$ASSET.sha256"
           notes="The single-file Botlish compiler (docs/SINGLE-EXECUTABLE.md): one Linux x86-64 executable that needs nothing but glibc 2.39 or newer -- no Tcl, Rust, C compiler or linker. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose build passes the smoke tests.
 
-          Programs that call C (extern c fn) are refused at the native link for now: the single-file compiler links with the stub linker, which links no C library.
+          Programs that call C (extern c fn, extern c library) link too (docs/SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): they need the host's C compiler driver (cc, with its linker: apt install gcc) and the C libraries they declare, never Rust or a Botlish checkout -- the compiler carries its precompiled runtime. Every other program still links with no toolchain at all.
 
               curl -fLo botlish $GITHUB_SERVER_URL/$GH_REPO/releases/download/$TAG/$ASSET
               chmod +x botlish

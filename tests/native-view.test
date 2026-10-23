@@ -682,7 +682,7 @@ set ::nvFixtureDir ""
 # The oracle's record is LP64's (its static assertions pin a C long's
 # offsets): on an LLP64 target (Windows) it is not built, and the tests that
 # need it are skipped by lp64Target, never failed.
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker] && [testConstraint lp64Target]} {
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint cLinker] && [testConstraint lp64Target]} {
     set ::nvFixtureDir [makeDirectory nview-fixture-[pid]]
     if {[catch {
         ctool::staticLibrary $::nvFixtureDir botlish_nview_fixture [file join $::projectRoot tests cffi nview-fixture.c]

@@ -32,7 +32,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstrai
         set ::cflFixtureDir ""
     }
 }
-testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint rustcLinker]}]
+testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint cLinker]}]
 
 # The HIR of source TEXT (warnings off).
 proc cflHir {text args} {

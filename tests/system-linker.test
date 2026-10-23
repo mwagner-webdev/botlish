@@ -1,0 +1,675 @@
+# The `system` linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md,
+# native/src/codegen/aot.rs's link_system, native/src/runtime/aotimage.rs's
+# linked description, native/runtime-archive): standalone executables linked
+# by the host's own C compiler driver (link.exe on Windows) from the program
+# object, a startup object the driver makes (the program's description) and
+# the precompiled runtime archive built with the compiler -- no rustc, no
+# Rust library, no checkout.
+#
+#   * Its startup builds the same Vm as the rustc linker's and the stub's
+#     (BOTLISH_NATIVE_STARTUP_REPORT, Vm::startup_report): the same report,
+#     byte for byte, and the same output, error and status, plain and under
+#     GC stress.
+#   * It links C: a system library, static archives (in either order,
+#     incorporated: the executable runs with them gone), byte borrowing,
+#     variadics, errno read right after the call; and runs it as the rustc
+#     linker's executable does.
+#   * It is an ordinary executable of the platform (its Botlish functions are
+#     symbols), needs neither rustc nor the runtime archive to run, and links
+#     with nothing but the C driver (and its linker) on PATH.
+#   * auto picks it for a program that calls C and the stub for any other.
+#   * Every failure says what failed: no C driver, no linker, no runtime
+#     archive, one of another platform, a damaged description at startup,
+#     a missing library or symbol -- and leaves an earlier executable as it
+#     was.
+#
+# The whole executable test suite also runs with BOTLISH_NATIVE_LINKER=system
+# (.github/workflows/tests.yml's system-linker job).
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::windowsHost [expr {$::tcl_platform(platform) eq "windows"}]
+set ::hostTarget [core::cabi::hostTarget]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+# The driver's directory, where the runtime archive and the stub are.
+set ::release [expr {[testConstraint nativeBuilt] ? [file dirname [native::binary]] : [file join $native::home target release]}]
+set ::runtimeArchive [file join $::release [expr {$::windowsHost ? "botlish_runtime.lib" : "libbotlish_runtime.a"}]]
+# The system linker's driver: cc, or Microsoft's link.exe from a Developer
+# environment (ctool's, on Windows).
+proc systemLinkerTool {} {
+    if {$::windowsHost} {
+        return [auto_execok link.exe]
+    }
+    return [auto_execok cc]
+}
+testConstraint systemLinker [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]
+    && [file isfile $::runtimeArchive] && ($::windowsHost ? [ctool::available] : [systemLinkerTool] ne "")}]
+testConstraint stubLinker [expr {[testConstraint systemLinker] && $::hostTarget eq "linux-x86_64"
+    && [file executable [file join $::release botlish-aot-stub]]}]
+testConstraint rustcAvailable [expr {[testConstraint systemLinker] && [auto_execok rustc] ne ""
+    && [file isfile [file join $::release libbotlish_native.rlib]]}]
+testConstraint posixErrno [expr {[string match linux-* $::hostTarget] || [string match macos-* $::hostTarget]}]
+testConstraint linuxHost [string match linux-* $::hostTarget]
+testConstraint cFixture [expr {[testConstraint systemLinker] && [testConstraint nativeCCalls] && [testConstraint cToolchain]}]
+
+# Evaluates BODY with the environment variables NAME VALUE ... set (VALUE {}
+# unsets NAME) -- on Windows inside ctool's Developer environment, where
+# link.exe and its libraries are -- restored afterwards.
+proc withEnv {settings body} {
+    set saved {}
+    foreach {name value} $settings {
+        lappend saved $name [expr {[info exists ::env($name)] ? [list $::env($name)] : {}}]
+        if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) $value }
+    }
+    try {
+        if {$::windowsHost} {
+            return [uplevel 1 [list ctool::withMsvc $body]]
+        }
+        uplevel 1 $body
+    } finally {
+        foreach {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 0] }
+        }
+    }
+}
+
+# Links HIR with LINKER (rustc, stub, system or auto) to PATH, with the link
+# directories DIRS: the executable's file.
+proc linkWith {linker hir path {dirs {}}} {
+    withEnv [list BOTLISH_NATIVE_LINKER $linker] {
+        native::withLinkDirs $dirs {
+            native::executable $hir $path
+        }
+    }
+}
+
+# {EXIT-STATUS STDOUT STDERR} of running EXECUTABLE with STDIN, in an
+# environment holding only ENV (NAME=VALUE ...; Windows keeps its own and
+# adds them).
+proc runCaptured {executable stdin args} {
+    set output [makeFile {} captured-stdout]
+    set errors [makeFile {} captured-stderr]
+    set status 0
+    if {$::windowsHost} {
+        set command [list withEnvironment [concat {*}[lmap pair $args {split $pair =}]] [list exec $executable << $stdin > $output 2> $errors]]
+    } else {
+        set command [list exec env -i {*}$args $executable << $stdin > $output 2> $errors]
+    }
+    if {[catch {uplevel #0 $command} message options]} {
+        set code [dict get $options -errorcode]
+        if {[lindex $code 0] ne "CHILDSTATUS"} { return -options $options $message }
+        set status [lindex $code 2]
+    }
+    set result [list $status]
+    foreach file [list $output $errors] {
+        set channel [open $file rb]
+        lappend result [string map {\r\n \n} [string trimright [read $channel] \n]]
+        close $channel
+    }
+    removeFile captured-stdout
+    removeFile captured-stderr
+    return $result
+}
+
+# What EXECUTABLE's startup installed (Vm::startup_report).
+proc startupReport {executable} {
+    set report [makeFile {} startup-report]
+    runCaptured $executable "" BOTLISH_NATIVE_STARTUP_REPORT=$report
+    set channel [open $report rb]; set text [read $channel]; close $channel
+    removeFile startup-report
+    return $text
+}
+
+proc writeFile {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# Programs covering what a startup installs: constants of every kind (big
+# Int, String, character, Float64, native, function values), shapes, enums,
+# module statics, the context area, coroutines (suspended stacks holding
+# managed values across collections), a runtime error, the process
+# arguments and standard input.
+set ::programs {
+    values {import std::immutable_set
+import std::str
+big = 9223372036854775808
+[big * big, "aé🙂\n\t", '🙂', 2.5, true, unit, [1, [2, 3]],
+ std::immutable_set::from_list([3, 2, 3]), std::str::length, {a: 1, b: [2]}]}
+    closures {import std::str
+fn build():
+    std::str::concat("x", "y")
+fn other():
+    std::str::concat("z", "w")
+fn pick(flag: bool):
+    if flag:
+        build
+    else:
+        other
+fn apply(f):
+    prefix = std::str::concat("a", "b")
+    [prefix, f()]
+[apply(pick(true)), apply(pick(false))]}
+    enums {enum Color:
+    Red,
+    Green,
+fn flip(c: Color) -> Color:
+    if c == Color::Red:
+        Color::Green
+    else:
+        Color::Red
+[flip(Color::Red), flip(Color::Green)]}
+    coroutines {import std::list
+import std::str
+struct Item:
+    name: str
+    pair: list
+fn numbers(n: int) -> Item:
+    loop i from 0 to n:
+        yield Item {name: std::str::concat("n", "x"), pair: [i, i * i]}
+    Item {name: "done", pair: []}
+coroutine {step, first} = numbers(200)
+items = loop k from 0 to 200:
+    step()
+last = std::list::at(items, 199):
+    on IndexNotFound:
+        first
+[first.pair, std::list::length(items), std::list::at(items, 198).pair, last.name]}
+    error {import std::mutable_array
+std::mutable_array::allocate(0 - 1)}
+    argv {args = argv():
+    on InvalidArgumentEncoding:
+        ["fallback"]
+args}
+}
+
+# The programs the comparisons link: the examples' and the ones above.
+proc comparedPrograms {dir} {
+    set inputs {}
+    foreach name {io/hello linux/context-hello linux/read-stdin} {
+        if {[string match linux/* $name] && ![string match linux-* $::hostTarget]} continue
+        lappend inputs [file join $::projectRoot examples $name.bot]
+    }
+    foreach {name text} $::programs {
+        lappend inputs [writeFile [file join $dir $name.bot] $text]
+    }
+    return $inputs
+}
+
+# The linkers to compare with the system linker here.
+proc otherLinkers {} {
+    set linkers {}
+    if {[testConstraint rustcAvailable]} { lappend linkers rustc }
+    if {[testConstraint stubLinker]} { lappend linkers stub }
+    return $linkers
+}
+
+test system-linker-startup-parity {the system linker's executables install exactly what the rustc linker's and the stub's do -- the same startup report, program information, constants, function entries, module statics and stack maps -- and print, fail and exit as they do, plain and under GC stress} -constraints {systemLinker} -body {
+    set dir [makeDirectory system-linker-parity]
+    set differences {}
+    set compared 0
+    foreach input [comparedPrograms $dir] {
+        set name [file rootname [file tail $input]]
+        set hir [surface::readProgramFile $input -warnings off -cache ""]
+        set system [linkWith system $hir [file join $dir $name.system]]
+        set report [startupReport $system]
+        if {![string match "startup-report 1\n*code +0 *" $report]} { lappend differences [list $name report $report] }
+        foreach linker [otherLinkers] {
+            set other [linkWith $linker $hir [file join $dir $name.$linker]]
+            if {[startupReport $other] ne $report} { lappend differences [list $name $linker startup] }
+            # (argv() is each executable's own vector: argument zero, its
+            # path, differs; it is compared below, through one path.)
+            if {$name eq "argv"} continue
+            foreach extra {{} {BOTLISH_NATIVE_GC_STRESS=1}} {
+                set a [runCaptured $system "some input\n" {*}$extra]
+                set b [runCaptured $other "some input\n" {*}$extra]
+                if {$a ne $b} { lappend differences [list $name $linker $extra $a $b] }
+                incr compared
+            }
+        }
+    }
+    set results {}
+    foreach linker [concat system [otherLinkers]] {
+        set same [file join $dir same[file extension [native::executableFile x]]]
+        file copy -force [native::executableFile [file join $dir argv.$linker]] $same
+        lappend results [lindex [runCaptured $same ""] 1]
+        file delete $same
+    }
+    removeDirectory system-linker-parity
+    list $differences [llength [lsort -unique $results]] [expr {$compared == 0 || $compared == 2 * [llength [otherLinkers]] * ([llength [comparedPrograms [temporaryDirectory]]] - 1)}]
+} -cleanup {
+    foreach {name text} $::programs { file delete [file join [temporaryDirectory] $name.bot] }
+} -result {{} 1 1}
+
+test system-linker-outcomes {a system-linked executable prints its value, reports a runtime error with a failing status, reads its own arguments and standard input, and its coroutines and collections run as everywhere} -constraints {systemLinker} -body {
+    set dir [makeDirectory system-linker-outcomes]
+    set results {}
+    foreach {name text} $::programs {
+        if {$name ni {enums coroutines error argv}} continue
+        set exe [linkWith system [surface::compile $text $name.bot] [file join $dir $name]]
+        lassign [runCaptured $exe "" BOTLISH_NATIVE_GC_STRESS=1] status stdout stderr
+        lappend results $name $status [string map [list [file rootname $exe] EXE] $stdout] [string match {*(CORE SEMANTIC RANGE)*} $stderr]
+    }
+    if {[string match linux-* $::hostTarget]} {
+        set exe [linkWith system [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot] -warnings off -cache ""] [file join $dir read-stdin]]
+        lappend results stdin [lrange [runCaptured $exe "hello from stdin\n"] 0 1]
+    } else {
+        lappend results stdin {0 {hello from stdin
+17}}
+    }
+    removeDirectory system-linker-outcomes
+    set results
+} -result {enums 0 {[Color::Green, Color::Red]} 0 coroutines 0 {[[0, 0], 200, [199, 39601], "done"]} 0 error 1 {} 1 argv 0 {["EXE"]} 0 stdin {0 {hello from stdin
+17}}}
+
+# ---------------------------------------------------------------------------
+# C
+
+# The fixture (tests/cffi/fixture.c) as a static library in its own
+# directory, and a second library depending on it.
+proc fixtureLibraries {dir} {
+    set sources [list [file join $::projectRoot tests cffi fixture.c]]
+    if {$::windowsHost} {
+        lappend sources [file join $::projectRoot tests cffi fixture-win64.asm]
+    }
+    ctool::staticLibrary $dir botlish_cffi_fixture {*}$sources
+    writeFile [file join $dir dependent.c] "int bcf_add(int a, int b);\nint bcf_add_twice(int a, int b) { return 2 * bcf_add(a, b); }\n"
+    ctool::staticLibrary $dir botlish_cffi_dependent [file join $dir dependent.c]
+}
+
+# The binding module of the C acceptance programs (an application module
+# `acc`): the C library's labs, the fixture's scalars, byte borrowing (read
+# Bytes, write MutableBytes), a variadic sum, an errno sentinel read right
+# after the call, the (size_t)-1 sentinel, and a function of the dependent
+# library -- whose libraries are declared dependent first.
+proc accModule {} {
+    set errno [expr {[string match macos-* $::hostTarget] ? "__error" : "__errno_location"}]
+    return [string map [list ERRNO $errno] {direct module
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::ffi::c
+
+extern c library "botlish_cffi_dependent"
+extern c library "botlish_cffi_fixture"
+
+extern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long
+extern c fn add named "bcf_add"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn add_twice named "bcf_add_twice"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn sum named "bcf_sum"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong) -> std::ffi::c::ULong
+extern c fn fill named "bcf_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit
+extern c fn vsum named "bcf_vsum"(count: std::ffi::c::Int, variadic) -> std::ffi::c::LongLong
+extern c fn fill_errno named "bcf_fill_errno"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar, err: std::ffi::c::Int, stale: std::ffi::c::Int) -> std::ffi::c::Long
+extern c fn large_error named "bcf_large_error"(failing: std::ffi::c::Int) -> std::ffi::c::ULong
+extern c fn c_errno_location named "ERRNO"() -> std::ffi::c::Ptr[std::ffi::c::Int] independent
+
+layout ErrnoCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Int at 0
+
+fn errno() -> int:
+    location = c_errno_location()
+    cell = std::binary::native::view(ErrnoCell, location):
+        on NativeViewNull:
+            return 0
+    cell.value
+
+fn c_int(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    x
+
+fn c_longlong(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong:
+    x
+
+fn length(d: std::abi::bytes::Bytes) -> std::ffi::c::ULong:
+    std::abi::bytes::length(d).value
+
+fn mlength(d: std::abi::bytes::MutableBytes) -> std::ffi::c::ULong:
+    std::abi::bytes::mutable_length(d).value
+
+fn checksum(d: std::abi::bytes::MutableBytes) -> std::ffi::c::ULong:
+    frozen = std::abi::bytes::freeze(d)
+    sum(frozen, length(frozen))
+
+# bcf_fill_errno into a copy of DATA: its result, the errno a failure left
+# (read right after it) and the bytes C wrote.
+fn fill_or_errno(data: std::abi::bytes::MutableBytes, err: std::ffi::c::Int) -> list:
+    r = fill_errno(data, mlength(data), 7, err, 0)
+    if r.result < 0:
+        failure = errno()
+        return [r.result, failure, checksum(r.out)]
+    [r.result, 0, checksum(r.out)]
+
+fn large(failing: std::ffi::c::Int) -> list:
+    r = large_error(failing)
+    if r == 18446744073709551615:
+        failure = errno()
+        return [r, failure]
+    [r, 0]
+}]
+}
+
+set ::accMain {direct module
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::list
+import acc
+
+fn pattern(n: int):
+    loop i from 0 to n:
+        std::byte::from_int(mod(i * 7 + 3, 256))
+
+data = std::abi::bytes::from_list(pattern(300))
+out = std::abi::bytes::from_bytes(std::abi::bytes::from_list(pattern(16)))
+filled = acc::fill(out, acc::mlength(out), 9)
+[acc::labs(0 - 5), acc::add(40, 2), acc::add_twice(20, 1), acc::sum(data, acc::length(data)),
+ acc::checksum(filled.out), acc::checksum(out),
+ acc::vsum(3, acc::c_int(1), acc::c_longlong(20), acc::c_int(300)),
+ acc::fill_or_errno(out, 0), acc::fill_or_errno(out, 34), acc::large(5), acc::large(0)]
+}
+
+test system-linker-c-acceptance {a program that calls C -- the system C library, two static libraries declared in the order that needs the group, borrowed Bytes and MutableBytes, a variadic call, an errno sentinel and the (size_t)-1 one read right after the call -- links with the system linker, runs (also under GC stress) as the rustc linker's executable does, and runs with its libraries gone} -constraints {cFixture posixErrno nativeCVariadics} -body {
+    set dir [makeDirectory system-linker-c]
+    set libs [makeDirectory "system-linker c libs [pid]"]
+    fixtureLibraries $libs
+    writeFile [file join $dir acc.bot] [accModule]
+    set hir [surface::readProgramFile [writeFile [file join $dir main.bot] $::accMain] -warnings off -cache ""]
+    set exe [linkWith system $hir [file join $dir system] [list $libs]]
+    set plain [runCaptured $exe ""]
+    set stress [runCaptured $exe "" BOTLISH_NATIVE_GC_STRESS=1]
+    set same {}
+    foreach linker [otherLinkers] {
+        if {$linker eq "stub"} continue
+        set other [linkWith $linker $hir [file join $dir $linker] [list $libs]]
+        lappend same [expr {[runCaptured $other ""] eq $plain}] [expr {[startupReport $other] eq [startupReport $exe]}]
+    }
+    removeDirectory "system-linker c libs [pid]"
+    set gone [runCaptured $exe ""]
+    removeDirectory system-linker-c
+    list $plain [expr {$stress eq $plain}] [expr {$gone eq $plain}] [lsort -unique $same]
+} -result {{0 {[5, 42, 42, 37602, 1768, 888, 321, [16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]} {}} 1 1 1}
+
+# The dynamic dependencies of EXECUTABLE, by the platform's own tool: the
+# shared libraries (readelf's NEEDED, otool -L's lines after the first) or
+# DLLs (dumpbin /dependents) it names, lowercased file names.
+proc dependencies {executable} {
+    switch -glob -- $::hostTarget {
+        linux-* {
+            return [lmap line [split [exec readelf -d $executable] \n] {
+                expr {[regexp {\(NEEDED\).*\[(.*)\]} $line -> name] ? $name : [continue]}
+            }]
+        }
+        macos-* {
+            return [lmap line [lrange [split [exec otool -L $executable] \n] 1 end] {
+                file tail [lindex [string trim $line] 0]
+            }]
+        }
+        windows-* {
+            set text [ctool::msvc dumpbin /nologo /dependents [file nativename $executable]]
+            return [lmap line [split $text \n] {
+                expr {[regexp -nocase {^\s+(\S+\.dll)\s*$} $line -> name] ? [string tolower $name] : [continue]}
+            }]
+        }
+    }
+}
+
+test system-linker-static-incorporation {static libraries and the runtime archive are linked into the executable: it names no Botlish or fixture library among its dynamic dependencies, only the system's, and runs from anywhere with the runtime archive it was linked with gone} -constraints {cFixture} -body {
+    set dir [makeDirectory system-linker-static]
+    set libs [makeDirectory system-linker-static-libs]
+    fixtureLibraries $libs
+    set runtime [file join [makeDirectory "system linker runtime ä [pid]"] [file tail $::runtimeArchive]]
+    file copy $::runtimeArchive $runtime
+    set main [writeFile [file join $dir main.bot] "import std::ffi::c\nimport m\n\nm::add_twice(20, 1)\n"]
+    writeFile [file join $dir m.bot] "import std::ffi::c\n\nextern c library \"botlish_cffi_dependent\"\nextern c library \"botlish_cffi_fixture\"\n\nextern c fn add_twice named \"bcf_add_twice\"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int\n"
+    set exe [withEnv [list BOTLISH_NATIVE_RUNTIME $runtime] {
+        linkWith system [surface::readProgramFile $main -warnings off -cache ""] [file join $dir program] [list $libs]
+    }]
+    removeDirectory "system linker runtime ä [pid]"
+    removeDirectory system-linker-static-libs
+    set elsewhere [file join [makeDirectory system-linker-elsewhere] [file tail $exe]]
+    file copy $exe $elsewhere
+    set run [runCaptured $elsewhere ""]
+    set needed [dependencies $elsewhere]
+    removeDirectory system-linker-elsewhere
+    removeDirectory system-linker-static
+    set foreign [lsearch -all -inline -regexp $needed {botlish|cffi|fixture|dependent}]
+    set expected [switch -glob -- $::hostTarget {
+        linux-* { list libc.so.6 }
+        macos-* { list libSystem.B.dylib }
+        windows-* { list kernel32.dll }
+    }]
+    list $run $foreign [expr {[lindex $expected 0] in $needed}]
+} -result {{0 42 {}} {} 1}
+
+test system-linker-ordinary-executable {a system-linked executable is the platform's own kind of executable: its format and architecture, its Botlish functions and the program description as symbols, the runtime archive's main, nothing appended} -constraints {systemLinker linuxHost} -body {
+    set dir [makeDirectory system-linker-ordinary]
+    set exe [linkWith system [surface::compile "1 + 2" one.bot] [file join $dir program]]
+    set header [exec readelf -h $exe]
+    set symbols [exec nm $exe]
+    set channel [open $exe rb]; set bytes [read $channel]; close $channel
+    removeDirectory system-linker-ordinary
+    list [regexp {Type:\s+DYN} $header] \
+        [regexp [expr {$::hostTarget eq "linux-x86_64" ? {Machine:\s+Advanced Micro Devices X86-64} : {Machine:\s+AArch64}}] $header] \
+        [regexp -line {^[0-9a-f]+ T botlish_fn_0$} $symbols] [regexp -line {^[0-9a-f]+ T botlish_entry_0$} $symbols] \
+        [regexp -line {^[0-9a-f]+ [RDd] botlish_program_description$} $symbols] [regexp -line {^[0-9a-f]+ T main$} $symbols] \
+        [regexp -line {^[0-9a-f]+ R botlish_runtime_startup_v1$} $symbols] [expr {[string range $bytes end-7 end] ne "BOTLIMG1"}]
+} -result {1 1 1 1 1 1 1 1}
+
+test system-linker-no-rust-toolchain {the system linker links with nothing but the C compiler driver and its linker on PATH: no rustc, no cargo, no Rust library -- and runs neither (strace)} -constraints {systemLinker linuxHost} -body {
+    set dir [makeDirectory system-linker-no-rust]
+    set bin [makeDirectory system-linker-bin]
+    foreach tool {cc ld} {
+        file link -symbolic [file join $bin $tool] [lindex [auto_execok $tool] 0]
+    }
+    set hir [surface::compile "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 7)\n" labs.bot]
+    set exe [withEnv [list PATH $bin] {
+        linkWith system $hir [file join $dir program]
+    }]
+    set traced {}
+    if {[auto_execok strace] ne ""} {
+        set trace [file join $dir trace]
+        withEnv [list BOTLISH_NATIVE_LINKER system PATH $bin] {
+            set nir [native::nir $hir]
+            set nirFile [writeFile [file join $dir program.nir] $nir]
+            exec [lindex [auto_execok strace] 0] -f -qq -e trace=execve -o $trace [native::binary] executable [file join $dir traced] $nirFile
+        }
+        set channel [open $trace]; set traced [read $channel]; close $channel
+        set traced [lsort -unique [lmap line [split $traced \n] {
+            expr {[regexp {execve\("([^"]+)"} $line -> path] ? [file tail $path] : [continue]}
+        }]]
+    }
+    set run [runCaptured $exe ""]
+    removeDirectory system-linker-bin
+    removeDirectory system-linker-no-rust
+    list $run [lsearch -all -inline -regexp $traced {rustc|cargo}] [expr {$traced eq "" || "cc" in $traced}]
+} -result {{0 7 {}} {} 1}
+
+# The offset in BYTES (an executable's) of its program description
+# (aotimage::LINKED_HEADER): the magic followed by a header whose metadata,
+# after the address table, starts with the image format word (1) -- not the
+# runtime's own copy of the magic, which its code compares with. -1 if none.
+proc descriptionAt {bytes} {
+    set at -1
+    while {[set at [string first BOTLSYS1 $bytes [expr {$at + 1}]]] >= 0} {
+        if {[binary scan [string range $bytes $at+8 $at+23] ww n length] != 2 || $n <= 0 || $n > 1 << 24} continue
+        set metadata [expr {$at + 32 + 16 * $n}]
+        if {$length > 0 && $metadata + $length <= [string length $bytes]
+                && [binary scan [string range $bytes $metadata $metadata+3] i format] == 1 && $format == 1} {
+            return $at
+        }
+    }
+    return -1
+}
+
+# The offset of the description's metadata.
+proc descriptionMetadata {bytes} {
+    set at [descriptionAt $bytes]
+    binary scan [string range $bytes $at+8 $at+15] w n
+    return [expr {$at + 32 + 16 * $n}]
+}
+
+test system-linker-auto {auto, the single executable's choice, links a program that calls C or declares a library with the system linker and any other with the stub, where there is one: never with rustc} -constraints {systemLinker} -body {
+    set dir [makeDirectory system-linker-auto]
+    set results {}
+    foreach {name text} {
+        plain "1 + 2"
+        declares "extern c library \"m\"\n1 + 2"
+        calls "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 3)"
+    } {
+        set exe [linkWith auto [surface::compile $text $name.bot] [file join $dir $name]]
+        set channel [open $exe rb]; set bytes [read $channel]; close $channel
+        set stub [expr {[string range $bytes end-7 end] eq "BOTLIMG1"}]
+        set system [expr {[descriptionAt $bytes] >= 0}]
+        lappend results $name [lindex [runCaptured $exe ""] 1] [expr {$stub ? "stub" : $system ? "system" : "?"}]
+    }
+    removeDirectory system-linker-auto
+    set results
+} -result [list plain 3 [expr {[testConstraint stubLinker] ? "stub" : "system"}] declares 3 system calls 3 system]
+
+# ---------------------------------------------------------------------------
+# Failures
+
+test system-linker-runtime-failures {a missing runtime archive, a file that is no archive, an archive of another platform, one of another startup interface and a library that is no runtime archive are NATIVE ... RUNTIME errors that say so, before or at the link, and leave nothing behind} -constraints {systemLinker} -body {
+    set dir [makeDirectory system-linker-runtime]
+    set hir [surface::compile "1 + 2" one.bot]
+    set results {}
+    # A static library whose one object is an ELF file of another machine
+    # (s390, 22) -- every check of a member's header passes but its machine.
+    set elf [binary format a4ccc "\x7fELF" 2 1 1][string repeat \0 9][binary format ss 1 22][string repeat \0 44]
+    set member [format "%-16s%-12s%-6s%-6s%-8s%-10s`\n" x.o/ 0 0 0 644 [string length $elf]]$elf
+    writeFile [file join $dir foreign.a] "!<arch>\n"
+    set channel [open [file join $dir foreign.a] ab]; puts -nonewline $channel $member; close $channel
+    writeFile [file join $dir text.a] "not an archive\n"
+    foreach {case archive pattern} [list \
+            missing [file join $dir no-such-archive.a] {*the runtime archive is missing: *no-such-archive.a*built with the compiler*} \
+            text [file join $dir text.a] {*runtime archive *text.a is unusable: not a static library*} \
+            foreign [file join $dir foreign.a] "*runtime archive *foreign.a is for ELF (class 2, machine 22), not this driver's*"] {
+        withEnv [list BOTLISH_NATIVE_RUNTIME $archive] {
+            lappend results $case [catch {linkWith system $hir [file join $dir out]} message options] \
+                [dict get $options -errorcode] [string match $pattern $message]
+        }
+    }
+    # An archive of this platform whose main reads the description but that
+    # implements another startup interface (no botlish_runtime_startup_v1):
+    # the linker's undefined symbol, said as the archive's. And a static
+    # library of this platform with no main at all.
+    if {[testConstraint cToolchain]} {
+        writeFile [file join $dir main.c] "extern const char botlish_program_description;\nint main(void) { return botlish_program_description; }\n"
+        set old [ctool::staticLibrary $dir old [file join $dir main.c]]
+        writeFile [file join $dir other.c] "int other(void) { return 0; }\n"
+        set other [ctool::staticLibrary $dir other [file join $dir other.c]]
+        foreach {case archive pattern} [list \
+                interface $old {*does not implement this driver's startup interface (botlish_runtime_startup_v1)*} \
+                main $other {*defines no main: it is no Botlish runtime archive*}] {
+            withEnv [list BOTLISH_NATIVE_RUNTIME $archive] {
+                lappend results $case [catch {linkWith system $hir [file join $dir out]} message options] \
+                    [dict get $options -errorcode] [string match $pattern $message]
+            }
+        }
+    } else {
+        lappend results interface 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1
+    }
+    lappend results [glob -nocomplain -tails -directory $dir out*] [glob -nocomplain -tails -types hidden -directory $dir .botlish-aot-*]
+    removeDirectory system-linker-runtime
+    set results
+} -result {missing 1 {NATIVE AOT RUNTIME} 1 text 1 {NATIVE AOT RUNTIME} 1 foreign 1 {NATIVE AOT RUNTIME} 1 interface 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1 {} {}}
+
+test system-linker-toolchain-failures {no C compiler driver, and a driver that finds no linker, are NATIVE ... TOOLCHAIN errors naming what is missing and how to install it; a C program's is NATIVE LINK TOOLCHAIN} -constraints {systemLinker unixShell} -body {
+    set dir [makeDirectory system-linker-toolchain]
+    set plain [surface::compile "1 + 2" one.bot]
+    set calls [surface::compile "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 3)" calls.bot]
+    set results {}
+    withEnv [list PATH [makeDirectory system-linker-empty-path] BOTLISH_NATIVE_SYSTEM_LINKER {}] {
+        lappend results [catch {linkWith system $plain [file join $dir out]} message options] \
+            [dict get $options -errorcode] [string match {*needs a C compiler driver to link an executable for *, and there is none: no cc on PATH. To link: install *BOTLISH_NATIVE_SYSTEM_LINKER*} $message]
+    }
+    withEnv [list BOTLISH_NATIVE_SYSTEM_LINKER [file join $dir no-such-cc]] {
+        lappend results [catch {linkWith system $calls [file join $dir out]} message options] \
+            [dict get $options -errorcode] [string match {*no */no-such-cc (BOTLISH_NATIVE_SYSTEM_LINKER) file*} $message]
+    }
+    # A driver without its linker: gcc's collect2 words.
+    set fake [writeFile [file join $dir fake-cc] "#!/bin/sh\necho \"collect2: fatal error: cannot find 'ld'\" >&2\necho 'compilation terminated.' >&2\nexit 1\n"]
+    file attributes $fake -permissions 0755
+    withEnv [list BOTLISH_NATIVE_SYSTEM_LINKER $fake] {
+        lappend results [catch {linkWith system $plain [file join $dir out]} message options] \
+            [dict get $options -errorcode] [string match "*could not run a linker for *:\ncollect2: fatal error: cannot find 'ld'\nTo link: install*" $message]
+    }
+    lappend results [glob -nocomplain -tails -directory $dir out*] [glob -nocomplain -tails -types hidden -directory $dir .botlish-aot-*]
+    removeDirectory system-linker-empty-path
+    removeDirectory system-linker-toolchain
+    set results
+} -result {1 {NATIVE AOT TOOLCHAIN} 1 1 {NATIVE LINK TOOLCHAIN} 1 1 {NATIVE AOT TOOLCHAIN} 1 {} {}}
+
+test system-linker-link-failures {a library the linker cannot find and a symbol no library defines are the linker's own words, as NATIVE LINK -- a link directory that is none said beside them -- and a failed link keeps the executable an earlier one left} -constraints {cFixture} -body {
+    set dir [makeDirectory system-linker-link]
+    set libs [makeDirectory system-linker-link-libs]
+    fixtureLibraries $libs
+    set previous [native::executableFile [file join $dir program]]
+    writeFile $previous previous
+    set results {}
+    set missing [surface::compile "extern c library \"definitely_missing_botlish_lib\"\n1 + 1\n" missing.bot]
+    catch {linkWith system $missing [file join $dir program] [list [file join $dir nowhere]]} message options
+    lappend results [dict get $options -errorcode] \
+        [string match "native link failed: the system linker could not link this program with the C functions and libraries it declares (libraries *definitely_missing_botlish_lib*):*" $message] \
+        [regexp {(cannot|unable to) find[^\n]*definitely_missing_botlish_lib|library '?definitely_missing_botlish_lib'? not found|LNK1181} $message] \
+        [string match "*\nthe link directory [file join $dir nowhere] (-L) is not a directory" $message]
+    set undefined [surface::compile "import std::ffi::c\n\nextern c library \"botlish_cffi_fixture\"\nextern c fn nope named \"botlish_no_such_symbol\"(x: std::ffi::c::Int) -> std::ffi::c::Int\n\nnope(1)\n" undefined.bot]
+    catch {linkWith system $undefined [file join $dir program] [list $libs]} message options
+    lappend results [dict get $options -errorcode] [regexp -nocase {undefined (symbol|reference).*botlish_no_such_symbol|LNK20(19|01): unresolved external symbol botlish_no_such_symbol} $message]
+    set channel [open $previous]; lappend results [read $channel]; close $channel
+    lappend results [glob -nocomplain -tails -types hidden -directory $dir .botlish-aot-*]
+    removeDirectory system-linker-link-libs
+    removeDirectory system-linker-link
+    set results
+} -result {{NATIVE LINK} 1 1 1 {NATIVE LINK} 1 previous {}}
+
+test system-linker-damaged-description {an executable whose description was altered -- another startup revision, a runtime build's fingerprint that is not the archive's -- refuses to start (NATIVE STARTUP) before any program code runs} -constraints {systemLinker} -body {
+    set dir [makeDirectory system-linker-damaged]
+    set exe [linkWith system [surface::compile "1 + 2" one.bot] [file join $dir program]]
+    set channel [open $exe rb]; set bytes [read $channel]; close $channel
+    set magic [descriptionAt $bytes]
+    set fingerprint [expr {[descriptionMetadata $bytes] + 4}]
+    set flipped [binary format c [expr {([scan [string index $bytes $fingerprint] %c] ^ 1) & 0xff}]]
+    set results {}
+    foreach {case damaged pattern} [list \
+            revision [string replace $bytes $magic+7 $magic+7 9] {*program description revision '9', this runtime reads revision '1' (NATIVE STARTUP)*} \
+            fingerprint [string replace $bytes $fingerprint $fingerprint $flipped] {*compiled for a different native runtime build (NATIVE STARTUP)*}] {
+        set channel [open $exe wb]; puts -nonewline $channel $damaged; close $channel
+        lassign [runCaptured $exe ""] status stdout stderr
+        lappend results $case $status $stdout [string match $pattern $stderr]
+    }
+    removeDirectory system-linker-damaged
+    set results
+} -result {revision 1 {} 1 fingerprint 1 {} 1}
+
+test system-linker-linked-run {main.tcl's native backends run a program that calls C through the system linker: the program's output and error in place, its value, a runtime error, the run's arguments} -constraints {systemLinker nativeCCalls} -body {
+    set dir [makeDirectory system-linker-run]
+    set args "args = argv():\n    on InvalidArgumentEncoding:\n        \[\]\n"
+    set main [writeFile [file join $dir main.bot] "import std::ffi::c\nimport std::io\nimport std::linux::io\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nwith context std::linux::io::create()\n\nstd::io::print_line(\"hello\"):\n    on std::io::WriteFailed:\n        unit\n$args\[labs(0 - 9), args\]\n"]
+    if {![string match linux-* $::hostTarget]} {
+        set main [writeFile [file join $dir main.bot] "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\n$args\[labs(0 - 9), args\]\n"]
+    }
+    set results {}
+    foreach backend {cranelift cranelift-generic} {
+        withEnv [list BOTLISH_NATIVE_LINKER system] {
+            lappend results [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend $backend -warnings off -argv a -argv b $main]
+        }
+    }
+    removeDirectory system-linker-run
+    string map [list $main MAIN] $results
+} -result [expr {[string match linux-* [core::cabi::hostTarget]] ? {{== main.bot (cranelift)
+hello
+   value: [9, ["a", "b"]]} {== main.bot (cranelift-generic)
+hello
+   value: [9, ["a", "b"]]}} : {{== main.bot (cranelift)
+   value: [9, ["a", "b"]]} {== main.bot (cranelift-generic)
+   value: [9, ["a", "b"]]}}}]
+
+cleanupTests

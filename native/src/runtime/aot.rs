@@ -32,6 +32,11 @@
 //! reporting `times` and `timing` lines (`BOTLISH_NATIVE_COMPILE_US`, the
 //! driver's compile and link time, is the timing line's first field). An
 //! ordinary run of the executable, with neither variable, is unchanged.
+//!
+//! `BOTLISH_NATIVE_STARTUP_REPORT=PATH` makes the executable write what its
+//! startup installed to PATH (`Vm::startup_report`) before the program
+//! runs, which then runs as ever: how the tests compare the startups of the
+//! rustc, stub and system linkers (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 use super::error::RtError;
 use super::metrics::AllocMode;
 use super::show::{show, tcl_list, tcl_value};
@@ -129,6 +134,50 @@ pub fn utf16_from_wtf8(bytes: &[u8]) -> Option<Vec<u16>> {
     Some(units)
 }
 
+/// What Rust's own startup does to the process before a Rust `main` runs
+/// (`std::rt::lang_start`'s `init`), for the one executable whose `main` is
+/// not Rust's: a system-linked one (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md),
+/// whose C `main` is the runtime archive's (`aotimage::linked_main`). An
+/// executable the rustc or stub linker links, or the driver, gets this from
+/// Rust itself and never calls it. On Unix:
+///
+///   * a standard descriptor (0, 1, 2) the process was started without is
+///     opened on /dev/null, so no file the program opens later takes its
+///     place;
+///   * SIGPIPE is ignored, so a write to a closed pipe is the `EPIPE` error a
+///     program handles (NATIVE IO, a declared error), never a kill;
+///   * on macOS the main thread is named `main`.
+///
+/// What it does not do is install Rust's handler for an overflow of a Rust
+/// thread's own guard page (`stack_overflow::init`, not public): the runtime's
+/// own guard (runtime/platform/) reports a Botlish stack's overflow either
+/// way, and any other fault ends the process by the signal itself instead of
+/// by Rust's message and abort. Nothing on Windows: its other half of
+/// Rust's startup is that same handler.
+pub fn rust_process_setup() {
+    #[cfg(unix)]
+    unsafe {
+        let mut devnull = -1;
+        for fd in 0..3 {
+            if libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
+                // The lowest free descriptor: FD itself, as the earlier ones
+                // are open.
+                if devnull == -1 || libc::dup(devnull) == -1 {
+                    devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR, 0);
+                    if devnull == -1 {
+                        libc::abort();
+                    }
+                }
+            }
+        }
+        if libc::signal(libc::SIGPIPE, libc::SIG_IGN) == libc::SIG_ERR {
+            libc::abort();
+        }
+        #[cfg(target_vendor = "apple")]
+        libc::pthread_setname_np(c"main".as_ptr());
+    }
+}
+
 pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
     let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
         .ok()
@@ -136,8 +185,18 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
         .filter(|&size| size >= 1 << 20)
         .unwrap_or(1 << 30);
     let protocol = std::env::var_os("BOTLISH_NATIVE_RESULT").filter(|p| !p.is_empty());
+    let report = std::env::var_os("BOTLISH_NATIVE_STARTUP_REPORT").filter(|p| !p.is_empty());
     let worker = std::thread::Builder::new().stack_size(stack_size).spawn(move || {
         let (mut vm, entry) = init();
+        if let Some(path) = report {
+            // What the startup installed (Vm::startup_report), before any of
+            // the program runs: the evidence that every linker's startup
+            // builds the same Vm (tests/system-linker.test).
+            if let Err(error) = std::fs::write(&path, vm.startup_report()) {
+                eprintln!("{}: {error} (NATIVE IO)", std::path::Path::new(&path).display());
+                return 2;
+            }
+        }
         vm.set_argv(argv);
         debug_assert!(matches!(vm.metrics.mode, AllocMode::Off));
         if let Some(path) = protocol {

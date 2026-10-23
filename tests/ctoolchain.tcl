@@ -123,6 +123,31 @@ proc ctool::msvc {command args} {
     }
 }
 
+# Evaluates SCRIPT in the caller with the MSVC environment (Windows: the
+# vcvars64 environment MsvcEnvironment found, where link.exe and the
+# libraries are -- what a Developer Command Prompt has) set, restored
+# afterwards: for a command that runs Microsoft's tools through something
+# else, as the system linker runs link.exe (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+proc ctool::withMsvc {script} {
+    set environment [MsvcEnvironment]
+    if {$environment eq ""} {
+        error "no MSVC toolchain: vswhere found no Visual Studio with the x64 C tools"
+    }
+    set saved [dict create]
+    dict for {name value} $environment {
+        set name [EnvName $name]
+        dict set saved $name [array get ::env $name]
+        set ::env($name) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        dict for {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 1] }
+        }
+    }
+}
+
 proc ctool::available {} {
     variable windows
     if {$windows} {

@@ -497,6 +497,26 @@ proc window::machineMnemonics {functions function} {
     return [lmap instr [dict get $functions $function] {dict get $instr mnemonic}]
 }
 
+# Whether LINKED, the mnemonics of a function in a linked executable, are
+# OBJECT's, those of the same function in its object file, but for the
+# platform linker's relaxation of a GOT load of a symbol it resolved in the
+# executable into the symbol's address (x86-64 psABI's GOTPCRELX: `mov
+# sym@GOTPCREL(%rip)` to `lea sym(%rip)`; AArch64's ADRP+LDR to ADRP+ADD),
+# which GNU ld makes (the system linker's `cc`) and rust-lld (the rustc
+# linker's on x86-64) does not: an instruction of the same length at the same
+# offset, so every other instruction and offset is the object's.
+proc window::sameLinkedCode {linked object} {
+    if {[llength $linked] != [llength $object]} {
+        return 0
+    }
+    foreach a $linked b $object {
+        if {$a ne $b && !($a eq "lea" && $b eq "mov") && !($a eq "add" && $b eq "ldr")} {
+            return 0
+        }
+    }
+    return 1
+}
+
 # The calls of FUNCTION in text order (their target symbols).
 proc window::machineCalls {functions function} {
     set instrs [dict get $functions $function]

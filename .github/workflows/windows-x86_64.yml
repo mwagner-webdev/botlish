@@ -36,6 +36,11 @@ name: tests (windows x86-64)
 #   roots        every push: the fallback root plan (a `fallback-roots`
 #                driver: its Rust tests, the GC workloads) and native-frame
 #                roots against it on the same runner (bench/root-plans.tcl)
+#   system-linker every push: the system linker (SINGLE-EXECUTABLE-FFI-
+#                MILESTONE-1.md) -- link.exe from a Developer environment,
+#                the precompiled runtime archive, no rustc -- its tests and
+#                the executable and C test files linked by it, plainly and
+#                under GC stress
 #   acceptance   every push, four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
 #                golden suite (native backends excluded by the golden
@@ -505,6 +510,66 @@ jobs:
           name: windows-root-plans
           path: "*.log"
           if-no-files-found: ignore
+
+  # The system linker on Windows (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
+  # executables linked by Microsoft's link.exe directly -- no rustc -- from
+  # the program object, the startup object and the precompiled runtime
+  # archive (botlish_runtime.lib), with the static release C runtime and
+  # every other one excluded, as the rustc linker's. Unlike rustc, the system
+  # linker finds no Visual Studio itself: it runs the link.exe a Developer
+  # environment puts on PATH, which these steps enter (vcvars64.bat).
+  system-linker:
+    name: system linker (Windows x86-64, MSVC)
+    needs: smoke
+    if: >-
+      !cancelled()
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: The system linker's tests, in a Developer environment
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2]) }
+          }
+          $ErrorActionPreference = "Continue"
+          $failed = 0
+          native/target/release/botlish-native.exe system-linker
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          # A system-linked executable: the link command (BOTLISH_NATIVE_LINK_LOG),
+          # its run and what it imports.
+          $env:BOTLISH_NATIVE_LINKER = "system"
+          $env:BOTLISH_NATIVE_LINK_LOG = "$PWD\link.log"
+          New-Item -ItemType Directory -Force -Path sl | Out-Null
+          Copy-Item examples/io/hello-windows.bot sl/
+          tclsh9.0 main.tcl -warnings off -emit-native-executable sl/hello-windows.bot
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          Get-Content link.log
+          sl/hello-windows.exe
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          dumpbin /nologo /dependents sl/hello-windows.exe
+          Remove-Item env:BOTLISH_NATIVE_LINK_LOG
+          tclsh9.0 tests/system-linker.test
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test"
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          $env:BOTLISH_NATIVE_GC_STRESS = "1"
+          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test"
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          exit $failed
 
   acceptance:
     name: acceptance (Windows x86-64, shard ${{ matrix.shard }}/4)

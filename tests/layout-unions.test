@@ -1047,7 +1047,7 @@ test lu-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every alloc
 # images.
 
 set ::luFixtureDir ""
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint cLinker]} {
     set ::luFixtureDir [makeDirectory nunion-fixture-[pid]]
     if {[catch {
         ctool::staticLibrary $::luFixtureDir botlish_nunion_fixture [file join $::projectRoot tests cffi nunion-fixture.c]

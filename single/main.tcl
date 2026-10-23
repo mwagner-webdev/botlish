@@ -16,11 +16,17 @@
 #      -version or the language server (-lsp, -lsp-worker: they analyze and
 #      never reach a backend), installs the native executables, which the kernel cannot
 #      run from inside the archive, into a per-build cache directory (once
-#      per build: later runs find them there), and points the native backend
-#      at them:
-#      BOTLISH_NATIVE_BIN (native::binary) for the driver, and the `stub`
-#      linker with BOTLISH_NATIVE_AOT_STUB for -emit-native-executable, which
-#      therefore needs no rustc, linker or runtime library,
+#      per build: later runs find them there) -- and, for a run that may link
+#      a native executable (-emit-native-executable, a native backend), the
+#      runtime archive, which the host's linker cannot read from inside the
+#      archive either -- and points the native backend at them:
+#      BOTLISH_NATIVE_BIN (native::binary) for the driver, and the `auto`
+#      linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) unless
+#      BOTLISH_NATIVE_LINKER names one: the toolchain-free `stub`, with
+#      BOTLISH_NATIVE_AOT_STUB, for a program that calls no C -- no rustc,
+#      linker or runtime library -- and the `system` linker for one that
+#      calls C, which needs the host's C compiler driver and the program's
+#      libraries, never Rust: the runtime archive beside the driver,
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
 
@@ -32,6 +38,9 @@ foreach channel {stdin stdout stderr} {
 namespace eval ::single {
     variable app [file dirname [file normalize [info script]]]
     variable executables {botlish-native botlish-aot-stub}
+    # The runtime archive the system linker links (native/runtime-archive):
+    # installed beside the driver only for a run that may link.
+    variable runtime libbotlish_runtime.a
 }
 
 # The directories the native executables may be installed in, best first:
@@ -50,21 +59,27 @@ proc ::single::CacheRoots {} {
     return $roots
 }
 
-# Copies the archive's native executables into DIR, unless they are there
-# already. Each is written under a temporary name and renamed into place, so
-# concurrent first runs never see (or run) a partial file.
-proc ::single::Install {dir} {
+# Copies the archive's native executables into DIR, and with LINKING the
+# runtime archive too, unless they are there already. Each is written under a
+# temporary name and renamed into place, so concurrent first runs never see
+# (or run, or link) a partial file.
+proc ::single::Install {dir linking} {
     variable app
     variable executables
+    variable runtime
     file mkdir $dir
-    foreach name $executables {
+    set files $executables
+    if {$linking} {
+        lappend files $runtime
+    }
+    foreach name $files {
         set source [file join $app native-bin $name]
         set target [file join $dir $name]
         if {[file isfile $target] && [file size $target] == [file size $source]} continue
         set partial [file join $dir .$name.[pid].partial]
         try {
             file copy -force $source $partial
-            file attributes $partial -permissions 0755
+            file attributes $partial -permissions [expr {$name eq $runtime ? 0644 : 0755}]
             file rename -force $partial $target
         } on error {message options} {
             file delete -force $partial
@@ -73,22 +88,37 @@ proc ::single::Install {dir} {
     }
 }
 
-# The directory holding this build's native executables, installed on first
-# use. The build's id (//zipfs:/app/native-bin/ID: a digest of the
-# executables, written by single/package.tcl) names the directory, so builds
-# never share one. Without any usable cache directory, a private temporary one
-# serves this run and is removed when it exits.
-proc ::single::NativeDir {} {
+# Whether the invocation ARGV may link a native executable: it emits one, or
+# runs a native backend (which links a program that calls C to run it). The
+# runtime archive is installed for those only.
+proc ::single::MayLink {argv} {
+    set backend [expr {[info exists ::env(CORE_BACKEND)] ? $::env(CORE_BACKEND) : ""}]
+    for {set i 0} {$i < [llength $argv]} {incr i} {
+        switch -- [lindex $argv $i] {
+            -emit-native-executable { return 1 }
+            -backend { set backend [lindex $argv [incr i]] }
+        }
+    }
+    return [expr {$backend in {cranelift cranelift-generic}}]
+}
+
+# The directory holding this build's native executables (and with LINKING
+# its runtime archive), installed on first use. The build's id
+# (//zipfs:/app/native-bin/ID: a digest of the executables and the archive,
+# written by single/package.tcl) names the directory, so builds never share
+# one. Without any usable cache directory, a private temporary one serves
+# this run and is removed when it exits.
+proc ::single::NativeDir {linking} {
     variable app
     set id [string trim [readFile [file join $app native-bin ID]]]
     foreach root [CacheRoots] {
         set dir [file join $root native-$id]
-        if {![catch {Install $dir}]} {
+        if {![catch {Install $dir $linking}]} {
             return $dir
         }
     }
     set dir [file tempdir botlish-native]
-    Install $dir
+    Install $dir $linking
     rename ::exit ::single::Exit
     proc ::exit {{status 0}} [string map [list @DIR@ [list $dir]] {
         catch {file delete -force @DIR@}
@@ -103,13 +133,17 @@ proc ::single::NativeDir {} {
 # -lsp-worker, whenever it is replaced), which never reach a backend.
 if {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
-    if {[catch {::single::NativeDir} ::single::nativeDir]} {
+    if {[catch {::single::NativeDir [::single::MayLink $::argv]} ::single::nativeDir]} {
         puts stderr "botlish: cannot install the native backend: $::single::nativeDir"
         exit 2
     }
     set ::env(BOTLISH_NATIVE_BIN) [file join $::single::nativeDir botlish-native]
     set ::env(BOTLISH_NATIVE_AOT_STUB) [file join $::single::nativeDir botlish-aot-stub]
-    set ::env(BOTLISH_NATIVE_LINKER) stub
+    # An explicit choice (BOTLISH_NATIVE_LINKER=stub, system) is kept: for
+    # diagnostics and tests.
+    if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
+        set ::env(BOTLISH_NATIVE_LINKER) auto
+    }
 }
 
 set ::argv0 [info nameofexecutable]
