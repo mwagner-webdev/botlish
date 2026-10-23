@@ -701,7 +701,7 @@ for the message it expects, with a timeout.
 | `tclsh9.0 tools/compilerpedia.tcl check` | 0 problems (782 topics, 579 examples) |
 | `tclsh9.0 audit/golden/migration/merge.tcl ... -check` | the manifest is current (82 rows added, none changed; the new tests are KEEP-INTERNAL -- the layers -- or KEEP-MULTI-PROGRAM -- server sessions, processes and pipes: nothing a golden suite can express) |
 | `single/build.sh` and `single/smoke-test.sh` | the -lsp session passes (hover, diagnostics, definition into the extracted library, the worker started from the executable) |
-| CI | Linux (`tests.yml`, every job, at `be9b1ef3`): passed -- the whole Tcl suite on interp and compile, `lsp.test` and `lsp-neovim.test` (Neovim 0.11.4) included, 9113 tests on interp, 0 failed; Windows x86-64 smoke (main-cli.test among its files) passed at `fab5d4cb`; the macOS and Windows acceptance tiers (`lsp.test` and `compiler-service.test` among them) were still running when this was written |
+| CI | all green on the final code (`fab5d4cb`; the later commits change only Markdown): Linux `tests.yml` (dispatched on the branch: the whole Tcl suite on interp and compile with `lsp.test` and `lsp-neovim.test` -- Neovim 0.11.4 -- included, cranelift and cranelift-generic coverage, golden suites beside their Tcl originals, Rust unit tests, stub-linked executables, warning gate); macOS arm64 (Tier A smoke, both Tier B acceptance shards: `lsp.test` and `compiler-service.test` in shard 1/2, `main-cli.test` and `lsp-neovim.test` -- skipped there, no Neovim -- in 2/2); Windows x86-64 (smoke, root plans, all four acceptance shards: `lsp.test` and `compiler-service.test` in 1/4, the worker started and killed through `taskkill`) |
 
 ### 8.3 Mutation testing
 
