@@ -8,6 +8,7 @@ with the compiler, using the host's own C compiler driver (link.exe on
 Windows). Rust is not involved when an application is linked. The single
 executable carries the archive and chooses the system linker for a program
 that calls C, and the toolchain-free stub linker for every other program
+where the stub runs, Linux x86-64; elsewhere the system linker
 (`BOTLISH_NATIVE_LINKER=auto`).
 
 > The compiler may require the host's native linking toolchain to
@@ -905,9 +906,12 @@ environment, with `BOTLISH_NATIVE_LINKER=system`):
   40001867739) acceptance shard 4/4, whose tier runs system-linker.test
   on the interp backend, **passed**: 2,024 tests, 1,963 passed, 61
   skipped, 0 failed. The three tests pass, and system-linker.test skips
-  the same six as before (8 of its 14 run). The system-linker job, which
-  runs the file on both backends and under GC stress, was still queued
-  when this was written (PENDING-WINDOWS-SYSTEM-JOB).
+  the same six as before (8 of its 14 run). The system-linker job then
+  **passed** too: system-linker.test 14 tests, 8 passed, 6 skipped, 0
+  failed on each backend; the six C test files 288 tests, 243 passed, 45
+  skipped, 0 failed on each backend; and under GC stress
+  system-linker.test with c-ffi.test 132 tests, 103 passed, 29 skipped, 0
+  failed on each backend.
 * The same three failures were acceptance shard 4/4's only ones (the
   tier runs system-linker.test too: 2,024 tests, 3 failed). Shards 1 to
   3, the smoke job and the root-plans job passed.
@@ -1228,7 +1232,8 @@ system linker (288 tests, 0 failed, on each backend), the smoke job, the
 root-plans job and acceptance shards 1 to 3. On 3cc2a2b1, with the fixed
 tests (run 40001867739), the smoke job, the root-plans job and all four
 acceptance shards **passed**, shard 4/4 with system-linker.test in it
-(section 27). The system-linker job: PENDING-WINDOWS-SYSTEM-JOB.
+(section 27), and so did the system-linker job: every Windows job passed
+on 3cc2a2b1.
 
 ## 35. Remaining distribution work
 
