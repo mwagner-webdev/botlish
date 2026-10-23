@@ -687,19 +687,15 @@ fn first_dead(t: Table[K], p: int) -> int:
 @@ miss-returns-arbitrary a lookup of a missing key returns the last entry's value (when there is one)
 ## stdlib/mutable_map.bot
 <<<<
-    value = std::mutable_vector::at(m.vals, m.table.position(slot)):
-        on IndexNotFound:
-            fail KeyNotFound
-    value
-
-fn set(
+    p = m.table.position(slot)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
 ====
-    value = std::mutable_vector::at(m.vals, bit_and(m.table.position(slot), std::mutable_vector::length(m.vals) - 1)):
-        on IndexNotFound:
-            fail KeyNotFound
-    value
-
-fn set(
+    p = bit_and(m.table.position(slot), std::mutable_vector::length(m.vals) - 1)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
 >>>>
 
 # ---------------------------------------------------------------------------

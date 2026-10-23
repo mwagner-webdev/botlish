@@ -71,10 +71,10 @@ fn contains(m: MutableMap[K, V], key: K) -> bool:
 
 fn at(m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
     slot = m.table.slot_of(std::table_hash::of(key), key)
-    value = std::mutable_vector::at(m.vals, m.table.position(slot)):
-        on IndexNotFound:
-            fail KeyNotFound
-    value
+    p = m.table.position(slot)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
 
 fn set(place m: MutableMap[K, V], key: K, value: V) -> unit:
     h = std::table_hash::of(key)
