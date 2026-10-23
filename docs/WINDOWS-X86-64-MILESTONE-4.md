@@ -562,7 +562,105 @@ benchmark workloads.
 
 ### 7.6 Mutation testing
 
-⟨MUTANTS⟩
+`audit/native-stack/tools/mutate.tcl` holds 44 mutants. Each is a
+deliberate bug of one rule of sections 3 to 5, or of the guards it joins.
+On each host, every mutant whose code that host compiles is built into a
+private copy of the tree and run against the detectors, cheapest first,
+until one fails:
+
+1. the Rust tests (`rust`);
+2. `native/tests/native_stack.rs` (`native_stack`);
+3. native-stack-overflow.test;
+4. native-status;
+5. aot-facts;
+6. the `fallback-roots` build's Rust tests (`fallback`).
+
+A mutant of code the host never compiles is skipped: platform/linux.rs,
+macos.rs, windows.rs, guard.rs, and coroutine.rs off the coroutine hosts.
+The milestone's own mutants are the sixteen `win-*` (the Windows guard)
+and four of the host-independent rules: `effects-fallible-again`,
+`effects-infallible-on-fallback`, `depth-reserved-on-native-frames` and
+`stack-probes-disabled`.
+
+| Host | Where | Killed | Survived | Skipped |
+|---|---|---:|---:|---:|
+| Windows x86-64 | real Windows: run [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512), the full tier's shard 1 (62ba9cd), 889 s | 21 | 0 | 23 |
+| macOS AArch64 | real macOS: run [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468), Tier C shard 1 (eee16a5), 899 s | 25 | 0 | 19 |
+| Linux x86-64 | controlled experiment: this session's container, the tree of 1f69b66 | 21 | 0 | 23 |
+
+Each mutant and the first detector that killed it, per host (`--`:
+skipped there):
+
+| Mutant | The bug | Linux x86-64 | macOS AArch64 | Windows x86-64 |
+|---|---|---|---|---|
+| `linux-bounds-reversed` | the thread stack's top and bottom swapped (Linux) | rust | -- | -- |
+| `linux-size-halved` | the stack size read as half of what glibc reports (Linux) | rust | -- | -- |
+| `linux-constant-bound` | the stack's low bound a constant 8 MiB below its top (Linux) | native_stack | -- | -- |
+| `macos-bounds-reversed` | the thread stack's top and bottom swapped (macOS) | -- | rust | -- |
+| `macos-address-is-the-bottom` | pthread_get_stackaddr_np taken for the stack's lowest address (macOS) | -- | rust | -- |
+| `macos-size-halved` | the stack size read as half of what libpthread reports (macOS) | -- | rust | -- |
+| `macos-constant-bound` | the stack's low bound a constant 8 MiB below its top (macOS) | -- | rust | -- |
+| `macos-reported-bottom-trusted` | the reported bottom taken as usable without looking (the main thread's is inaccessible) (macOS) | -- | native_stack | -- |
+| `macos-guard-assumed` | one 16 KiB page below the stack taken for its guard, unconfirmed (macOS) | -- | rust | -- |
+| `page-size-4096` | the guard taken as one 4 KiB page below the stack, a page size Apple Silicon does not have (macOS) | -- | native_stack | -- |
+| `publish-before-switch` | the stack about to run published before the switch, not on arrival | native_stack | native_stack | -- |
+| `start-publishes-thread-stack` | a coroutine's first segment publishes the thread's stack, not its own | native_stack | native_stack | -- |
+| `resume-not-published` | a resumed coroutine does not publish its stack | native_stack | native_stack | -- |
+| `yield-not-restored` | the resumer does not publish its stack when a segment returns to it | native_stack | native_stack | -- |
+| `guard-range-swapped` | the published guard and low bound swapped: no address is in the guard | native_stack | native_stack | -- |
+| `guard-includes-stack` | the guard range runs up into the usable stack: a fault there is an overflow too | native_stack | native_stack | -- |
+| `every-fault-overflows` | every fault on the guarded thread is reported as an overflow | native_stack | native_stack | -- |
+| `any-thread-overflows` | the faulting thread is not checked: another thread's fault in the guard is an overflow | native_stack | native_stack | -- |
+| `no-alternate-stack` | the handler is installed without SA_ONSTACK: it runs on the stack that overflowed | native_stack | native_stack | -- |
+| `report-without-line` | the overflow ends the process without its result line | native_stack | native_stack | -- |
+| `report-ignores-result-fd` | the overflow line goes to standard output, not the --result descriptor | native_stack | native_stack | -- |
+| `defer-exits-quietly` | an unrelated fault ends the process with exit status 0, not under the disposition it had before | native_stack | native_stack | -- |
+| `drop-leaves-guard-busy` | a dropped guard never returns to UNGUARDED: no second guard installs | native_stack | native_stack | -- |
+| `gc-walk-half-stack` | the frame walk of the thread's stack bounded at its middle | rust | rust | rust |
+| `win-handler-not-registered` | the vectored handler is never added: the guard installs and nothing claims an overflow (Windows) | -- | -- | native_stack |
+| `win-any-exception-code` | any exception at an address of the guarded stack is an overflow, whatever its code (Windows) | -- | -- | rust |
+| `win-access-violation-is-overflow` | an access violation at an address of the guarded stack is reported as an overflow (Windows) | -- | -- | rust |
+| `win-software-raised-claimed` | a STATUS_STACK_OVERFLOW raised by software (RaiseException) naming the guarded stack is claimed (Windows) | -- | -- | rust |
+| `win-any-thread` | the raising thread is not checked: another thread's exception naming the guarded stack is claimed (Windows) | -- | -- | rust |
+| `win-no-address-check` | STATUS_STACK_OVERFLOW is claimed whatever address its record names, or none (Windows) | -- | -- | rust |
+| `win-no-guarantee` | the guard asks for no stack guarantee and checks none: the thread keeps whatever it had (Windows) | -- | -- | rust |
+| `win-guard-page-assumed` | the system's guard page taken for granted, unconfirmed (Windows) | -- | -- | rust |
+| `win-no-destination` | the report's destination never stored: the line goes nowhere (Windows) | -- | -- | native_stack |
+| `win-result-file-ignored` | the driver's line goes to standard output, not the --result file (Windows) | -- | -- | native_stack |
+| `win-report-without-line` | the overflow ends the process without its result line (Windows) | -- | -- | native_stack |
+| `win-statuses-swapped` | the driver exits 1 and an executable 0 after an overflow (Windows) | -- | -- | native_stack |
+| `win-handler-returns` | the handler writes the line and returns instead of ending the process (Windows) | -- | -- | native_stack |
+| `win-drop-leaves-guard-busy` | a dropped guard never returns to UNGUARDED: no second guard installs (Windows) | -- | -- | rust |
+| `win-driver-unguarded` | the driver runs Botlish code without the guard (Windows) | -- | -- | native-stack-overflow.test |
+| `win-executable-unguarded` | a standalone executable runs its program without the guard (Windows) | -- | -- | aot-facts |
+| `effects-fallible-again` | a Botlish call is fallible again where native frames hold the roots: callers check for an error the guard makes impossible | rust | rust | rust |
+| `effects-infallible-on-fallback` | a Botlish call proven infallible on the fallback plan, whose shadow stack's depth check can fail it: callers do not check | fallback | fallback | fallback |
+| `depth-reserved-on-native-frames` | a function with a Botlish call reserves depth where native frames hold the roots, as the stack-limit check did | rust | rust | rust |
+| `stack-probes-disabled` | generated code does not probe a frame larger than a page: a large frame steps over the system's guard | rust | rust | rust |
+
+Each Windows mutant is killed by the check that states its rule:
+
+* **The classification** (`win-any-exception-code`,
+  `win-access-violation-is-overflow`, `win-software-raised-claimed`,
+  `win-any-thread`, `win-no-address-check`): the classifier's unit test,
+  section 3.3's table.
+* **The guard page and the guarantee** (`win-guard-page-assumed`,
+  `win-no-guarantee`, `win-drop-leaves-guard-busy`): the unit tests that
+  lay out a reservation with `VirtualAlloc` and install a guard.
+* **Reporting** (`win-handler-not-registered`, `win-no-destination`,
+  `win-report-without-line`, `win-statuses-swapped`,
+  `win-handler-returns`): real exhaustion in a child process.
+* **The drivers** (`win-driver-unguarded`, `win-executable-unguarded`):
+  native-stack-overflow.test, eight of whose tests fail, and aot-facts'
+  three standalone overflows. Nothing in the Rust tests exhausts a stack
+  through the driver.
+
+`audit/windows-unwind/tools/mutate.tcl` lost the three mutants of the
+stack-limit check (`stack-limit-unchecked`,
+`stack-limit-at-the-stacks-end`, `effects-infallible`): their code is
+gone, and the rules that replace them are the four host-independent
+mutants above. Its seventeen other mutants were all killed on Windows in
+the same run (338 s), every one by the Rust tests, as in milestone 3.
 
 ### 7.7 Linux and macOS
 
