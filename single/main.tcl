@@ -12,8 +12,9 @@
 #   1. makes UTF-8 the system and standard-channel encoding (a checkout's
 #      canonical setup is LANG=C.utf8, AGENTS.md; a single executable does not
 #      ask its user for a locale),
-#   2. unless the invocation is only the usage summary (no arguments), -help
-#      or -version, installs the native executables, which the kernel cannot
+#   2. unless the invocation is only the usage summary (no arguments), -help,
+#      -version or the language server (-lsp, -lsp-worker: they analyze and
+#      never reach a backend), installs the native executables, which the kernel cannot
 #      run from inside the archive, into a per-build cache directory (once
 #      per build: later runs find them there), and points the native backend
 #      at them:
@@ -97,8 +98,11 @@ proc ::single::NativeDir {} {
 }
 
 # The usage summary, -help and -version run no program: they install
-# nothing (main.tcl answers them before it loads the compiler).
-if {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}} {
+# nothing (main.tcl answers them before it loads the compiler). Nor does
+# the language server or its worker (which starts as this executable, with
+# -lsp-worker, whenever it is replaced), which never reach a backend.
+if {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
+        && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
     if {[catch {::single::NativeDir} ::single::nativeDir]} {
         puts stderr "botlish: cannot install the native backend: $::single::nativeDir"
         exit 2

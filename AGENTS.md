@@ -249,7 +249,7 @@ a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
 the test suite, still install the `.deb`s.
 
 * `single/package.tcl` packs exactly main.tcl, LICENSE, `core/`,
-  `compiler/`, `hir/`, `surface/`, `service/`, `native/*.tcl`, `stdlib/`,
+  `compiler/`, `hir/`, `surface/`, `service/`, `lsp/`, `native/*.tcl`, `stdlib/`,
   `compilerpedia/compilerpedia.tcl`, `compilerpedia/topics/` and
   `compilerpedia/generated/`, plus a `BUILD` file naming the source
   revision. If the compiler starts reading another file at run time, add
@@ -1523,6 +1523,39 @@ when changing this", lists the files), run `tests/decimal-rounded.test`,
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule) and `cargo test
 --release --manifest-path native/Cargo.toml --lib decimal`.
+
+## Numbers and text
+
+`std::int::to_string`, `std::int::from_string`, `std::float64::round` and
+`std::decimal_rounded::to_string` (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md) are
+explicit conversions with one rule each. Keep it so:
+
+* An Int's text is its canonical decimal text, `core::value::isCanonicalInt`
+  (`0 | -?[1-9][0-9]*`, ASCII digits), both ways: from_string accepts
+  exactly what to_string writes, else the declared builtin error
+  InvalidIntegerText. Never accept a "+", a leading zero, "-0", whitespace,
+  a suffix, a base prefix or a non-ASCII digit, and never give from_string a
+  fold (a fold that fails is KNOWN-ERROR whatever handles it). One Int
+  formatter per runtime: `core::value::show`, natively `ops::with_int_text`
+  (hashing, display, messages and to_string).
+* round is round half to even of the exact binary value (core::decimal's
+  `RoundAt` at 0), total and exact at any magnitude: never half away from
+  zero, never through decimal text, never an overflow error.
+* A DecimalRounded value's text is `core::decimal::text` (natively
+  `decimal::text_at`) at the precision its static type guarantees, which
+  `hir::decimal::Elaborate` writes into the call
+  (`decimal_rounded#to_string(x, N)`): never a precision stored in a value,
+  never a digit of the representation, never a search over precisions, and
+  no operation shows more places than minDecimalsPreserved.
+* No implicit number-to-text conversion and no format strings.
+
+If you change any of that, run what NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md's
+"What to run when changing this" lists: `tests/numeric-text.test`, its
+golden suite, `audit/numeric-text/tools/fuzz.tcl` (several seeds), its
+oracle's selftest, `audit/numeric-text/tools/mutate.tcl` (every mutant in
+its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule)
+and the Rust tests it names.
 
 ## List length refinements
 
@@ -2949,6 +2982,60 @@ service, run `tests/compiler-service.test`, `tests/main-cli.test`,
 `audit/hir-interchange/tools/roundtrip.tcl -via cache` (each mutant must
 still apply and be killed); `bench/compiler-service.tcl` regenerates the
 performance report.
+
+## The language server
+
+`lsp/` (LSP-MILESTONE-1.md) is `main.tcl -lsp`: a Language Server Protocol
+server on stdin and stdout, a consumer of the compiler service that adds
+transport, scheduling and presentation, never semantics. Keep it so:
+
+* Every semantic answer is the service's: diagnostics are
+  `service::diagnostics` re-encoded, hover, definition and references are
+  `service::at`'s facts, Compilerpedia topics `service::explain`'s and the
+  facts' own (by identity). Never match names, parse formatted CLI output,
+  run a second analysis or resolver, or compute a type in `lsp/`.
+* Layers: `transport.tcl` (bytes, Content-Length framing, nothing else),
+  `json.tcl` (typed values: a category is never guessed from a Tcl
+  string), `jsonrpc.tcl` (messages, no LSP method knowledge), then
+  `server.tcl`. JSON and JSON-RPC stay replaceable by a native
+  implementation: never let a handler reach below `lsp::rpc`/`lsp::json`'s
+  interface.
+* stdout carries protocol messages only (the worker's stdout its private
+  protocol's); logs go to stderr. The server never writes a source file:
+  open documents are the workspace's overlay.
+* Positions are converted only in `positions.tcl`, against one exact
+  normalized text: the one a revision analyzed, or the one the request was
+  made in. A revision answers a position of other text only through
+  `Mapping` (identical text, or the unchanged prefix and suffix of one
+  edit), and returns a location only where it maps into the text that file
+  has now. Never shift offsets by line numbers or guess.
+* Only a fresh revision publishes (`Fresh`: every source it read is still
+  what the editor and the disk hold); a result older than the one applied
+  for its program is obsolete. A stale hover says so; a stale definition or
+  references waits while an analysis that will answer fresh is pending.
+* Programs and ownership are `UpdateRoots` and `Owner`'s one rule (the
+  standard library is no program; a document another open program reads is
+  its module; the earlier opened owns): no second rule elsewhere.
+* Both schedulers run `service::analyze`; the worker's revisions return as
+  `service::export` text (HIR interchange inside) through
+  `service::import`, never another serialization of compiler semantics. A
+  worker never outlives the server or its own replacement (killed and
+  reaped), a crash is reported and recovered from, and the worker is no
+  daemon. Test hooks (`BOTLISH_LSP_FAULT`) are environment-only, never
+  reachable from the protocol.
+* Advertise only implemented capabilities; a new one comes with its tests
+  over real pipes.
+
+If you change `lsp/`, `service::export`/`import`, `-lsp`'s options or the
+Neovim configuration, run `tests/lsp.test`, `tests/lsp-neovim.test` (it
+needs Neovim: `BOTLISH_NVIM=PATH`; CI installs a pinned release),
+`tests/compiler-service.test`, `tests/main-cli.test` and
+`audit/lsp/tools/mutate.tcl` (every mutant in its `mutants.txt` must still
+apply and be killed: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule); for a scheduling change
+also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
+packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
+session).
 
 ## Compilerpedia (the built-in reference)
 

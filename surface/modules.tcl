@@ -192,9 +192,10 @@ namespace eval surface::modules {
     # (main.tcl, the compiler service) -- is not lexed and parsed again by
     # the next compilation in the same process (a test file, a batch
     # driver). Keyed by the text itself, never by a timestamp, so it cannot
-    # go stale; a file that does not parse is never stored. Cleared whole
-    # past 64 entries.
+    # go stale; a file that does not parse is never stored. One entry per
+    # file (`parsedKeys`: PATH -> its key), cleared whole past 64 entries.
     variable parsed [dict create]
+    variable parsedKeys [dict create]
     # The module files read since the last compileProgramFile began: PATH ->
     # the text read. The front-end cache keeps these as the entry's
     # dependencies (surface/cache.tcl): the texts the HIR was built from,
@@ -227,10 +228,20 @@ proc surface::modules::Parse {path source} {
     }
     set ast [surface::parse $source $path -recover 1]
     if {[dict get $ast diagnostics] eq ""} {
+        # One AST per file: a file's newer text replaces its older one,
+        # which a long-running caller that analyzes after every edit (the
+        # language server) would otherwise keep, an AST per edit, up to
+        # the bound.
+        variable parsedKeys
+        if {[dict exists $parsedKeys $path]} {
+            dict unset parsed [dict get $parsedKeys $path]
+        }
         if {[dict size $parsed] >= 64} {
             set parsed [dict create]
+            set parsedKeys [dict create]
         }
         dict set parsed $key $ast
+        dict set parsedKeys $path $key
     }
     return $ast
 }

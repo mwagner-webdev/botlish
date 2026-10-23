@@ -2,13 +2,14 @@
 # (ICY-TOWER-VERTICAL-SLICE-1.md): the lines the renderer draws over the
 # game and the one-line summary a run ends with. Pure, like tower.bot.
 #
-# Botlish has no Int-to-String and no integer division, and a
-# DecimalRounded value has no text either: numbers are spelled out here, a
-# digit at a time, by subtraction (as the 2048 workload does), and a height
-# is shown by decaying it to the Float64 nearest its guaranteed decimal and
-# counting its tenths.
+# Numbers are shown with the standard library's conversions
+# (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): a count as its decimal text
+# (std::int::to_string), a position as its nearest Int (std::float64::round,
+# ties to even) and a height or a time at the one decimal place its
+# DecimalRounded type guarantees (std::decimal_rounded::to_string).
 import std::decimal_rounded
 import std::float64
+import std::int
 import std::list
 import std::str
 import tower
@@ -16,75 +17,13 @@ import tower
 # ---------------------------------------------------------------------------
 # Numbers
 
-# TEXT followed by the digit D, 0 <= D <= 9.
-fn digit(text: str, d: int) -> str:
-    c = "0123456789".char_at(d):
-        on IndexNotFound:
-            return text
-    text.append_char(c)
-
-# How many times P fits into N, for 0 <= N < 10 * P.
-fn fits(n: int, p: int) -> int:
-    if n < p:
-        0
-    else:
-        1 + (n - p).fits(p)
-
-# TEXT followed by the decimal digits of N >= 0 from the digit worth P (a
-# power of ten, P <= N or P = 1) down.
-fn digits(text: str, n: int, p: int) -> str:
-    next = p * 10
-    if n < next:
-        text.digit(n.fits(p))
-    else:
-        text.digits(n, next).digit(n.mod(next).fits(p))
-
-# N in decimal.
-fn int_text(n: int) -> str:
-    if n < 0:
-        "".append_char('-').digits(-n, 1)
-    else:
-        "".digits(n, 1)
-
-# The Int nearest X.
-fn nearest(x: Float64) -> int errors NonFiniteFloat:
-    if x < 0.0:
-        std::float64::truncate(x - 0.5)
-    else:
-        std::float64::truncate(x + 0.5)
-
-# The text of a count of tenths: 123 is "12.3", 5 is "0.5", -5 is "-0.5".
-fn tenths_text(tenths: int) -> str:
-    if tenths < 0:
-        return "".append_char('-').concat(tenths_text(-tenths))
-    text = int_text(tenths)
-    padded = if std::str::length(text) < 2:
-        "".append_char('0').concat(text)
-    else:
-        text
-    n = std::str::length(padded)
-    whole = padded.substring(0, n - 1):
-        on LowerUnderrun:
-            ""
-        on UpperOverrun:
-            ""
-    tenth = padded.char_at(n - 1):
-        on IndexNotFound:
-            return whole
-    whole.append_char('.').append_char(tenth)
-
-# M with its one guaranteed decimal place, "12.3": the Float64 nearest the
-# guaranteed decimal, times ten, to the nearest Int.
-fn metres_text(m: DecimalRounded{minDecimalsPreserved: 1}) -> str errors NonFiniteFloat:
-    tenths_text(nearest(std::float64::from_decimal_rounded(m) * 10.0))
-
 # SECONDS as a timer shows them, at one place: quantized to a DecimalRounded
 # value first, so the display reads the decimal the timer states.
-fn timer_text(seconds: Float64) -> str errors NonFiniteFloat:
+fn timer_text(seconds: Float64) -> str:
     shown = std::decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 1}](seconds):
         on UnrepresentableDecimal:
             return "unrepresentable"
-    metres_text(shown)
+    shown.to_string()
 
 fn yes_no(b: bool) -> str:
     if b:
@@ -109,11 +48,11 @@ fn spaced(parts: List[str]) -> str:
 
 # The lines in the top left corner: the score, the floor, the best height
 # and the time.
-fn status_lines(world: tower::World) -> List[str] errors NonFiniteFloat:
+fn status_lines(world: tower::World) -> List[str]:
     [
-        "SCORE ".concat(int_text(tower::score(world))),
-        "FLOOR ".concat(int_text(world.floor)),
-        "BEST ".concat(metres_text(world.best)).concat(" M"),
+        "SCORE ".concat(tower::score(world).to_string()),
+        "FLOOR ".concat(world.floor.to_string()),
+        "BEST ".concat(world.best.to_string()).concat(" M"),
         "TIME ".concat(timer_text(world.time)),
     ]
 
@@ -128,19 +67,19 @@ fn banner_lines(world: tower::World) -> List[str]:
 
 # The one-line state of a run after FRAMES frames: what a smoke run prints
 # and what its tests compare.
-fn summary(world: tower::World, frames: int) -> str errors NonFiniteFloat:
+fn summary(world: tower::World, frames: int) -> str:
     p = world.player
     spaced([
-        "frames=".concat(int_text(frames)),
-        "round=".concat(int_text(world.round)),
-        "floor=".concat(int_text(world.floor)),
-        "score=".concat(int_text(tower::score(world))),
-        "best=".concat(metres_text(world.best)),
+        "frames=".concat(frames.to_string()),
+        "round=".concat(world.round.to_string()),
+        "floor=".concat(world.floor.to_string()),
+        "score=".concat(tower::score(world).to_string()),
+        "best=".concat(world.best.to_string()),
         "time=".concat(timer_text(world.time)),
         "over=".concat(yes_no(world.over)),
-        "x=".concat(int_text(nearest(p.x))),
-        "y=".concat(int_text(nearest(p.y))),
-        "camera=".concat(int_text(nearest(world.camera.bottom))),
-        "platforms=".concat(int_text(std::list::length(world.platforms))),
-        "rng=".concat(int_text(world.rng)),
+        "x=".concat(p.x.round().to_string()),
+        "y=".concat(p.y.round().to_string()),
+        "camera=".concat(world.camera.bottom.round().to_string()),
+        "platforms=".concat(std::list::length(world.platforms).to_string()),
+        "rng=".concat(world.rng.to_string()),
     ])

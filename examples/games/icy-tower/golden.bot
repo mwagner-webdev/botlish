@@ -21,6 +21,7 @@ import std::compiler
 import std::decimal_rounded
 import std::float64
 import hud
+import std::int
 import std::list
 import options
 import std::test
@@ -129,14 +130,11 @@ fn simulated(world: tower::World, frames: int) -> tower::World:
     later
 
 fn summary_after(world: tower::World, frames: int) -> str:
-    text = world.simulated(frames).summary(frames):
-        on NonFiniteFloat:
-            return "non-finite"
-    text
+    world.simulated(frames).summary(frames)
 
 fn shown(y: Float64) -> str:
     fn text() -> str errors NonFiniteFloat, UnrepresentableDecimal:
-        tower::metres(y).metres_text()
+        tower::metres(y).to_string()
     shown = text():
         on NonFiniteFloat:
             "non-finite"
@@ -145,10 +143,7 @@ fn shown(y: Float64) -> str:
     shown
 
 fn timer(seconds: Float64) -> str:
-    text = hud::timer_text(seconds):
-        on NonFiniteFloat:
-            return "non-finite"
-    text
+    hud::timer_text(seconds)
 
 fn parsed(args: List[str]) -> list:
     o = options::parse(args):
@@ -357,7 +352,7 @@ fn register_camera_tests():
             b3 = b2.best_after(player(0.0, 1290.0, 0.0, 0.0))
             b4 = b3.best_after(player(0.0, 400.0, 0.0, 0.0))
             loop b in [b1, b2, b3, b4]:
-                b.metres_text()
+                b.to_string()
         shown = texts():
             on NonFiniteFloat:
                 return ["non-finite"]
@@ -512,10 +507,7 @@ fn register_game_tests():
     fn restarted() -> list:
         dying = w.world_with(player(300.0, 2900.0, 420.0, -900.0), tower::Camera {bottom: 3000.0, rising: true}, 30).over()
         fresh = dying.stepped(restart(), 0.25)
-        best = fresh.best.metres_text():
-            on NonFiniteFloat:
-                "non-finite"
-        [fresh.facts(), best, std::list::length(fresh.platforms)]
+        [fresh.facts(), fresh.best.to_string(), std::list::length(fresh.platforms)]
     std::test::value("icy-restart-resets-everything-but-the-round", [[[227.0, 40.0, 0.0, 0.0], 0.0, false, 0, 0.0, false, 2], "0.0", 11], restarted)
 
     fn next_tower() -> bool:
@@ -539,19 +531,25 @@ fn register_game_tests():
         new_world(7).summary_after(240)
     std::test::value("icy-seed-7-after-240-frames", "frames=240 round=1 floor=8 score=80 best=9.9 time=4.0 over=no x=266 y=1030 camera=634 platforms=12 rng=2686829111", short_run)
 
+    fn rounded() -> str:
+        w.world_with(player(-2.5, 1030.7, 0.0, 0.0), tower::Camera {bottom: 633.5, rising: false}, 3).summary(60)
+    std::test::value("icy-summary-shows-positions-at-the-nearest-int", "frames=60 round=1 floor=3 score=30 best=0.0 time=0.0 over=no x=-2 y=1031 camera=634 platforms=10 rng=768150900", rounded)
+
 # ---------------------------------------------------------------------------
 # Text
 
 fn register_text_tests():
     fn ints() -> str:
         texts = loop n in [0, 7, 10, 305, 1234567, -42]:
-            hud::int_text(n)
+            n.to_string()
         hud::spaced(texts)
     std::test::value("icy-int-text", "0 7 10 305 1234567 -42", ints)
 
     fn tenths() -> List[str]:
-        loop n in [0, 5, 10, 123, -5, -123]:
-            hud::tenths_text(n)
+        fn heights() -> List[DecimalRounded{minDecimalsPreserved: 1}]:
+            [0.0, 0.5, 1.0, 12.3, -0.5, -12.3]
+        loop m in heights():
+            m.to_string()
     std::test::value("icy-tenths-text", ["0.0", "0.5", "1.0", "12.3", "-0.5", "-12.3"], tenths)
 
     fn heights() -> List[str]:
@@ -597,6 +595,10 @@ fn register_option_tests():
         parsed(["--autopilot", "--fixed-step", "--frames", "30"])
     std::test::value("icy-options-smoke", [7, false, 30, false, true, true, false], smoke)
 
+    fn long_seed() -> list:
+        parsed(["--seed", "123456789012345678901234567890", "--frames", "12"])
+    std::test::value("icy-options-numbers-of-any-length", [123456789012345678901234567890, true, 12, false, false, false, false], long_seed)
+
     fn mistakes() -> list:
         [
             parsed(["--fly"]),
@@ -604,6 +606,9 @@ fn register_option_tests():
             parsed(["--seed", "12x"]),
             parsed(["--frames", ""]),
             parsed(["--headless"]),
+            parsed(["--seed", "-5"]),
+            parsed(["--frames", "007"]),
+            parsed(["--seed", "+5"]),
         ]
     std::test::value("icy-options-errors", [
         ["usage error", "unknown option: --fly"],
@@ -611,6 +616,9 @@ fn register_option_tests():
         ["usage error", "not a number: 12x"],
         ["usage error", "not a number: "],
         ["usage error", "--headless needs --frames N (N > 0)"],
+        ["usage error", "not a number: -5"],
+        ["usage error", "not a number: 007"],
+        ["usage error", "not a number: +5"],
     ], mistakes)
 
 with context std::test::suite()

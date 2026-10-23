@@ -950,10 +950,10 @@ fn register_enum_resolution_tests():
         static compile:
             Measured::Car
     std::test::rejects_at("enum-qualifier-not-an-enum/trait", std::compiler::DiagnosticCode::NotAnEnum, 951, 13, b_trait_qualifier)
-    fn b_int_qualifier() errors std::compiler::CompilerError:
+    fn b_bool_qualifier() errors std::compiler::CompilerError:
         static compile:
-            int::Car
-    std::test::rejects_at("enum-qualifier-not-an-enum/int", std::compiler::DiagnosticCode::NotAnEnum, 955, 13, b_int_qualifier)
+            bool::Car
+    std::test::rejects_at("enum-qualifier-not-an-enum/bool", std::compiler::DiagnosticCode::NotAnEnum, 955, 13, b_bool_qualifier)
     fn b_fn_qualifier() errors std::compiler::CompilerError:
         static compile:
             Fn::Car

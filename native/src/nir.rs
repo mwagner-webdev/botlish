@@ -142,6 +142,13 @@ pub enum OpCode {
     IsError,
     ResultValue,
     ResultError,
+    /// An Int's canonical decimal text (`inttostr`: std::int::to_string,
+    /// never fails) and the Int of one (`strtoint`: std::int::from_string,
+    /// the declared InvalidIntegerText for any other text; a BigInt beyond
+    /// the small-Int range): runtime::inttext, NUMERIC-TEXT-BOUNDARY-
+    /// MILESTONE-1.md.
+    IntToStr,
+    StrToInt,
     /// The Unicode scalar value of a UnicodeChar operand, as an Int
     /// (char::scalar_value, core/unicodechar.tcl): total, never
     /// fails. A scalar value always fits the small-Int range, so the result
@@ -171,6 +178,11 @@ pub enum OpCode {
     F64Eq,
     F64FromInt,
     F64Trunc,
+    /// `f64round`: the Int nearest a Float64, ties to the even Int (std::
+    /// float64::round, NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): exact, never
+    /// fails; a BigInt beyond the small-Int range. A runtime helper, like
+    /// `f64trunc`, not a FloatOp: no float_op computes it.
+    F64Round,
     /// DecimalRounded (DECIMAL-ROUNDED-MILESTONE-1.md; core/decimal.tcl):
     /// `d64add` .. `d64div` and `d64neg`, the binary64 operations on the
     /// representations (FloatType::DecimalRounded; native/lower.tcl emits
@@ -193,6 +205,10 @@ pub enum OpCode {
     D64Eq,
     D64ToF64,
     D64Round,
+    /// `d64tostr`: the decimal text of round(a, P), P the second operand,
+    /// exactly P fraction digits (std::decimal_rounded::to_string,
+    /// runtime::decimal's rt_decimal_to_str; never fails).
+    D64ToStr,
     MkOk,
     MkError,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
@@ -826,6 +842,8 @@ op_spellings! {
     "resultvalue" => ResultValue,
     "resulterror" => ResultError,
     "charcodepoint" => CharCodepoint,
+    "inttostr" => IntToStr,
+    "strtoint" => StrToInt,
     "f64add" => F64Add,
     "f64sub" => F64Sub,
     "f64mul" => F64Mul,
@@ -838,6 +856,7 @@ op_spellings! {
     "f64eq" => F64Eq,
     "f64fromint" => F64FromInt,
     "f64trunc" => F64Trunc,
+    "f64round" => F64Round,
     "d64add" => D64Add,
     "d64sub" => D64Sub,
     "d64mul" => D64Mul,
@@ -850,6 +869,7 @@ op_spellings! {
     "d64eq" => D64Eq,
     "d64tof64" => D64ToF64,
     "d64round" => D64Round,
+    "d64tostr" => D64ToStr,
     "mkok" => MkOk,
     "mkerror" => MkError,
     "hash" => Hash,
@@ -1027,7 +1047,7 @@ impl OpCode {
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
-            | F64Neg | F64FromInt | F64Trunc | D64Neg
+            | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone

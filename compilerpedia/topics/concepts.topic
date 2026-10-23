@@ -314,11 +314,11 @@ docs/README.md sections 13 and 14; STRICT-TYPED-PARAMETERS.md.
 
 @topic concept.integers
 title: Integers: arbitrary precision, no integer division
-summary: Int is an arbitrary-precision integer with + - *, comparisons, mod (Euclidean) and bit operations; there is no integer division and no Int-to-String conversion in the standard namespaces.
+summary: Int is an arbitrary-precision integer with + - *, comparisons, mod (Euclidean) and bit operations; there is no integer division; std::int converts it to and from decimal text.
 index: concepts
 alias: integers; arbitrary precision integers; bigint; bit operations; Int type
 keywords: int, integer, arithmetic, overflow, mod, remainder, bit_and, bit_or, bit_xor, shift_left, shift_right, ARITHMETIC, decimal
-related: concept.integer-domains concept.floats concept.types capability.integer-division capability.int-to-string stdlib.mod stdlib.bit_and stdlib.shift_right stdlib.std::test::int_text proof.ranges error.arithmetic
+related: concept.integer-domains concept.floats concept.types capability.integer-division task.number-text stdlib.mod stdlib.bit_and stdlib.shift_right stdlib.std::int::to_string stdlib.std::int::from_string proof.ranges error.arithmetic
 docs: README.md BYTE-NIBBLE-BIT-ARITHMETIC.md LANGUAGE-LIBRARY-DEFICIENCIES.md
 
 == WHAT IT IS
@@ -339,10 +339,12 @@ value leaves the machine word). Literals are decimal.
     (capability.integer-division). `mod` gives the remainder, shift_right
     divides by a power of two.
   * An Int never mixes with a Float64 (concept.floats):
-    std::float64::from_int and std::float64::truncate convert explicitly.
-  * There is no Int-to-String conversion in the standard namespaces;
-    stdlib/test.bot's std::test::int_text(n) is the available one
-    (capability.int-to-string).
+    std::float64::from_int, std::float64::truncate (toward zero) and
+    std::float64::round (to nearest, ties to even) convert explicitly.
+  * An Int's text is std::int::to_string(n) (import std::int): its decimal
+    digits, a "-" when negative; std::int::from_string(s) reads exactly
+    such a text back, else the declared error InvalidIntegerText
+    (task.number-text).
   * bit_and, bit_or and bit_xor are `nomethod`: their operands are
     symmetric, so `a.bit_and(b)` is rejected.
 
@@ -375,8 +377,8 @@ title: Float64: finite binary64 floating-point numbers
 summary: Float64 is a finite IEEE 754 binary64 number: literals such as 1.5, + - * / and comparisons; a result that is not finite (NaN or an infinity) fails with the declared error NonFiniteFloat.
 index: concepts
 alias: float; floats; double; floating point; decimal number; real number; Float64; NonFiniteFloat; NaN; infinity; float division by zero
-keywords: float, double, decimal, fraction, real, divide, NaN, infinity, finite, NonFiniteFloat, from_int, truncate
-related: concept.integers stdlib./ stdlib.std::float64::from_int stdlib.std::float64::truncate stdlib.module.std::float64 capability.integer-division error.known-error error.unhandled-error concept.errors concept.decimal-rounded
+keywords: float, double, decimal, fraction, real, divide, NaN, infinity, finite, NonFiniteFloat, from_int, truncate, round
+related: concept.integers stdlib./ stdlib.std::float64::from_int stdlib.std::float64::truncate stdlib.std::float64::round stdlib.module.std::float64 capability.integer-division error.known-error error.unhandled-error concept.errors concept.decimal-rounded
 docs: FLOAT64-MILESTONE-1.md README.md
 
 == WHAT IT IS
@@ -392,6 +394,7 @@ with the declared error NonFiniteFloat. There is no negative zero either:
     < <= > >= == !=     comparisons
     std::float64::from_int(n)    Int -> nearest Float64 (import std::float64)
     std::float64::truncate(x)    Float64 -> Int, toward zero
+    std::float64::round(x)       Float64 -> nearest Int, a half to the even one
     std::float64::min(a, b)  std::float64::max(a, b)  x.abs()  x.clamp(low, high)
                         bounds (stdlib/float64.bot); they never fail
 
@@ -403,7 +406,9 @@ with the declared error NonFiniteFloat. There is no negative zero either:
   * An operator's operands are both Float64 or both Int: the compiler
     chooses the Float64 operation by the operands' static types, and an Int
     and a Float64 together are rejected (TYPE). Nothing converts implicitly;
-    convert with std::float64::from_int or std::float64::truncate.
+    convert with std::float64::from_int, std::float64::truncate or
+    std::float64::round. round and truncate read the exact binary value and
+    never fail: every Float64 has an Int nearest it and an integer part.
   * `/` divides Float64 values only (capability.integer-division).
   * A result that is not finite -- an overflow, any division by zero --
     fails with NonFiniteFloat, an ordinary declared error: a function
@@ -483,8 +488,8 @@ title: DecimalRounded: a decimal-rounding guarantee, not a representation
 summary: DecimalRounded{minDecimalsPreserved: N}: a number whose type guarantees that rounding it to N places (half to even) gives the intended decimal, proven by the compiler, observed at N places.
 index: concepts
 alias: decimal rounded; DecimalRounded; minDecimalsPreserved; maxDecimalsPreserved; decimal places; money; currency; cents; precision guarantee; rounding guarantee; banker's rounding; round half to even; UnrepresentableDecimal
-keywords: decimal, rounding, round, half even, precision, places, guarantee, refinement, money, Float64, from_decimal_rounded, quantize, exact, ExactDecimal, observation, ceiling
-related: concept.scalar-refinements concept.floats stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round stdlib.module.std::decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
+keywords: decimal, rounding, round, half even, precision, places, guarantee, refinement, money, Float64, from_decimal_rounded, quantize, exact, ExactDecimal, observation, ceiling, to_string, text, display
+related: concept.scalar-refinements concept.floats stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::round stdlib.std::decimal_rounded::to_string task.number-text stdlib.module.std::decimal_rounded error.decimal-precision error.decimal-guarantee-lost error.refinement-parameter error.equality error.known-error concept.static-compile
 docs: DECIMAL-ROUNDED-MILESTONE-1.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC EQUALITY | *of a DecimalRounded value needs the precision of its type*
 match: CORE SEMANTIC TYPE | *DecimalRounded*
@@ -565,12 +570,21 @@ DecimalRounded is not.
     round(x, N). std::decimal_rounded::round[T](f) mints T from a Float64 by
     rounding f's exact value to T's places; it fails with
     UnrepresentableDecimal when no representation holds that decimal.
-  * A program's printed result shows a DecimalRounded value as round(v, N)
-    with exactly N places, N its static type's guarantee (main.tcl, every
-    backend). Where the static type does not say N (a List mixing kinds),
-    and in a standalone executable's printed result, it shows
-    `<DecimalRounded>`: a print that does not know the precision shows no
-    digits.
+  * std::decimal_rounded::to_string(x) (import std::decimal_rounded; also
+    x.to_string()) is the guaranteed decimal as text, which ordinary code
+    shows directly: round(x, N) half to even with exactly N fraction
+    digits (trailing zeros kept, no point at N = 0), "-" only before a
+    nonzero result (no negative zero), never a digit of the representation
+    -- 0.295 at two places is "0.30". N is the argument's static type's,
+    written into the call by the compiler (a value carries none); an
+    argument of another type is TYPE, and one whose type is erased is
+    refused when the call runs.
+  * A program's printed result shows a DecimalRounded value the same way,
+    as round(v, N) with exactly N places, N its static type's guarantee
+    (main.tcl, every backend). Where the static type does not say N (a
+    List mixing kinds), and in a standalone executable's printed result,
+    it shows `<DecimalRounded>`: a print that does not know the precision
+    shows no digits (make the text with to_string instead).
 
 == WHY
 A decimal guarantee lets a program state what it needs -- cents, a rate
@@ -613,6 +627,18 @@ price().with_tax():
         0.00
 @caption Computing with a parameter: decay to Float64, round back to a guarantee
 @value 23.79
+@end
+
+@example accept
+import std::decimal_rounded
+import std::str
+
+fn line(amount: DecimalRounded{minDecimalsPreserved: 2}) -> str:
+    "amount ".concat(amount.to_string())
+
+[line(0.295), line(25.0), line(-0.004)]
+@caption The guaranteed decimal as text: exactly two places, the half to even, no negative zero
+@value ["amount 0.30", "amount 25.00", "amount 0.00"]
 @end
 
 @example reject
@@ -753,11 +779,11 @@ compiler derives.
 
 @topic concept.strings
 title: Strings and characters
-summary: str is an immutable sequence of Unicode scalar values; 'a' is a UnicodeChar, a distinct type; str:: operations need `import std::str`, and there is no string formatting or Int-to-String conversion.
+summary: str is an immutable sequence of Unicode scalar values; 'a' is a UnicodeChar, a distinct type; str:: operations need `import std::str`; no formatting, and numbers become text explicitly.
 index: concepts
 alias: str type; UnicodeChar; character literal; char literal; text values
 keywords: string, str, char, character, unicode, scalar, concat, append_char, char_at, substring, length, encode_utf8, escape
-related: concept.integers concept.types principle.characters-not-strings warning.one-char-string-literal capability.string-formatting capability.int-to-string stdlib.module.std::str stdlib.std::str::concat stdlib.std::str::char_at stdlib.std::str::substring
+related: concept.integers concept.types principle.characters-not-strings warning.one-char-string-literal capability.string-formatting task.number-text stdlib.module.std::str stdlib.std::str::concat stdlib.std::str::char_at stdlib.std::str::substring
 docs: README.md UNICODE-CHAR-LITERALS.md STDLIB-NAMESPACES.md
 
 == WHAT IT IS
@@ -791,8 +817,9 @@ lowercase, encode_utf8 (to a List of bytes). `std::char::scalar_value(c)`
     the index or slice valid.
   * A one-character String literal draws ONE-CHAR-STRING-LITERAL: a single
     character is written as a character literal.
-  * No formatting, interpolation or Int-to-String conversion
-    (capability.string-formatting, capability.int-to-string).
+  * No formatting or interpolation (capability.string-formatting), and no
+    implicit number-to-text conversion: std::int::to_string,
+    std::decimal_rounded::to_string (task.number-text).
 
 == WHY
 Counting scalar values gives the same answers on every backend and never
@@ -3597,7 +3624,7 @@ summary: stdlib/test.bot (std::test) is ordinary Botlish: install `std::test::su
 index: concepts stdlib
 alias: testing; unit test; test framework; golden test; test suite; assert; assertion
 keywords: test, suite, case, value, holds, rejects, rejects_at, report, PASS, FAIL, golden, assertion, expect, Match, run
-related: concept.negative-tests concept.static-compile concept.contexts concept.coroutines capability.test-timeout capability.process-exit-status stdlib.module.std::test stdlib.std::test::value stdlib.std::test::holds stdlib.std::test::rejects stdlib.std::test::case stdlib.std::test::report stdlib.std::test::int_text
+related: concept.negative-tests concept.static-compile concept.contexts concept.coroutines capability.test-timeout capability.process-exit-status stdlib.module.std::test stdlib.std::test::value stdlib.std::test::holds stdlib.std::test::rejects stdlib.std::test::case stdlib.std::test::report stdlib.std::int::to_string
 docs: GOLDEN-TEST-FRAMEWORK.md STATIC-COMPILE.md
 
 == WHAT IT IS
@@ -3638,7 +3665,8 @@ expected/actual/detail lines, then "P passed, F failed".
   * The report is a value: make it the program's value (as below) or
     print its lines. A FAIL line does not make the program itself fail
     (capability.process-exit-status).
-  * std::test::int_text(n) is the available Int-to-String conversion.
+  * A report shows an Int with std::int::to_string's text
+    (task.number-text); a test's own texts convert numbers the same way.
 
 == WHY
 Tests written in the language they test exercise the real compiler and

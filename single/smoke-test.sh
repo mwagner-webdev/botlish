@@ -16,8 +16,11 @@
 # -emit-native-executable produces executables that run without anything
 # else; an application of two files (a module beside its entry file) with a
 # recursion deeper than tclsh's default limit allows on the interpreter; a
-# native run shows what the program prints; and the native backend still
-# works with no cache directory at all (no HOME).
+# native run shows what the program prints; the native backend still
+# works with no cache directory at all (no HOME); and the language server
+# (-lsp) answers a scripted editor session, its analysis worker started
+# from the executable itself and the standard library's source given to the
+# editor as files (LSP-MILESTONE-1.md).
 set -euo pipefail
 
 botlish=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -122,5 +125,33 @@ env -i "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || 
 [[ $(env -i ./hello) == $'Hello, world!\nunit' ]] || fail "executable built without HOME"
 env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
 grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"
+
+# The language server: an editor's session, framed by hand. The hover and
+# the definition are asked before the analysis is done and answered when it
+# is; the definition of std::list::get is a file the editor can open (the
+# standard library copied out of the archive).
+mkdir -p "$work/lspapp"
+printf 'fn area(w: int, h: int) -> int:\n    w * h\n' >"$work/lspapp/shapes.bot"
+uri="file://$work/lspapp/main.bot"
+text='import shapes\nimport std::list\n\na = shapes::area(3, 4)\nb = std::list::get([1, 2], 5, 0)\na + b + nosuch\n'
+frame() { printf 'Content-Length: %d\r\n\r\n%s' "$(printf %s "$1" | LC_ALL=C wc -c)" "$1"; }
+at() { printf '{"jsonrpc":"2.0","id":%s,"method":"textDocument/%s","params":{"textDocument":{"uri":"%s"},"position":{"line":%s,"character":%s}}}' "$1" "$2" "$uri" "$3" "$4"; }
+{
+  frame '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}'
+  frame '{"jsonrpc":"2.0","method":"initialized","params":{}}'
+  frame "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"$uri\",\"languageId\":\"botlish\",\"version\":1,\"text\":\"$text\"}}}"
+  frame "$(at 2 hover 3 6)"
+  frame "$(at 3 definition 4 17)"
+  sleep 20
+  frame '{"jsonrpc":"2.0","id":4,"method":"shutdown"}'
+  frame '{"jsonrpc":"2.0","method":"exit"}'
+} | run -lsp >"$work/lsp.out" 2>"$work/lsp.err" || { cat "$work/lsp.err" >&2; fail "-lsp did not exit in order"; }
+grep -qF '"id":2,"result":{"contents":{"kind":"plaintext","value":"fn shapes::area(w: int, h: int) -> int"}' "$work/lsp.out" ||
+  fail "-lsp hover"
+grep -qF 'unbound name \"nosuch\"' "$work/lsp.out" || fail "-lsp published no diagnostic"
+definition=$(grep -oE '"id":3,"result":\{"uri":"file://[^"]*/list.bot"' "$work/lsp.out" | sed -E 's|.*"file://||; s|"$||')
+[[ -n $definition && -f $definition && $definition != *zipfs* ]] || fail "-lsp definition into std:: ($definition)"
+grep -q 'analysis worker started' "$work/lsp.err" || fail "-lsp started no worker"
+echo "   -lsp: hover, diagnostics, definition into $definition"
 
 echo "== smoke test passed"

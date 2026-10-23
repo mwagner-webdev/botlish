@@ -1329,7 +1329,9 @@ proc core::native::invoke {nativeValue argValues} {
 # (core/decimal.tcl, which core/core.tcl loads after binary.tcl so that the
 # ids existing programs and documents show stay what they were), then
 # LengthMismatch (core/listlength.tcl, loaded after decimal.tcl: builtin
-# error 10, LIST-CARDINALITY-REFINEMENTS.md).
+# error 10, LIST-CARDINALITY-REFINEMENTS.md), then InvalidIntegerText
+# (core/inttext.tcl, loaded after listlength.tcl: builtin error 11,
+# NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md).
 core::native::declareError InvalidArgumentEncoding
 core::native::declareError IndexNotFound
 core::native::declareError LowerUnderrun

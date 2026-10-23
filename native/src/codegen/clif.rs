@@ -2312,6 +2312,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 v
             }
             F64Trunc => self.call_allocating("rt_f64_trunc", &[self.vm, a[0]], "f64trunc", KIND_BIGINT),
+            F64Round => self.call_allocating("rt_f64_round", &[self.vm, a[0]], "f64round", KIND_BIGINT),
+            // DecimalRounded's text at the precision operand, and an Int's
+            // text both ways (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): runtime
+            // helpers; only strtoint fails (the declared InvalidIntegerText,
+            // routed by `check` like a `fail`).
+            D64ToStr => self.call_allocating("rt_decimal_to_str", &[self.vm, a[0], a[1]], "d64tostr", KIND_STR),
+            IntToStr => self.call_allocating("rt_int_to_str", &[self.vm, a[0]], "inttostr", KIND_STR),
+            StrToInt => {
+                let v = self.call_allocating("rt_str_to_int", &[self.vm, a[0]], "strtoint", KIND_BIGINT);
+                self.check(v);
+                v
+            }
             // C addresses (C-ABI-TYPES.md): the null pointer is a constant
             // word, the null test one comparison with it, and clone, erase
             // and retype are the word itself -- no machine operation, no

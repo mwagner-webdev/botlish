@@ -1,0 +1,2 @@
+old_file	old_test	subsystem	status	confidence	observes	source_theorem	outcome	tcl_retained	tags	notes
+tests/lsp-neovim.test	lsp-neovim-session	harness	KEEP-MULTI-PROGRAM	high	Neovim's built-in LSP client, with editors/neovim/botlish.lua, uses main.tcl -lsp on a two-module program: diagnostics, hover, definitions, references, unsaved edits, a syntax error and recovery	-	none	main.tcl -lsp under a real editor (needs Neovim)	MAIN-TCL,STDOUT,STDERR	LSP-MILESTONE-1.md; skipped without Neovim

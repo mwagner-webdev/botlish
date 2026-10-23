@@ -23,11 +23,14 @@
 #   service::hir REV                    its HIR ("" without one)
 #   service::release REV
 #   service::revisions ?WS?             the live revisions
+#   service::export REV ?-derived 0|1?  the revision as text, for another process
+#   service::import WS TEXT ?-version V?    => REV: an exported revision
 #
 # Queries
 #
 #   service::at REV PATH LINE COLUMN ?-version V?   the facts at a position
-#   service::prepare REV                 build its query indexes now
+#   service::prepare REV ?-paths PATHS? ?-compilerpedia 0|1?
+#                                        build its query indexes now
 #   service::explain DIAGNOSTIC          its Compilerpedia topic
 #   service::state                       what the service holds (counts)
 #
@@ -64,6 +67,8 @@ namespace eval service {
     # The facts a position query answers; each is either in its result or in
     # its `unavailable` dict, with the reason (at).
     variable facts {syntax construct binding type hover definition references diagnostics topics}
+    # The format of an exported revision (export, import).
+    variable exportVersion 1
 }
 
 # Raises the service error {SERVICE KIND} with MESSAGE: a misuse of the
@@ -500,6 +505,90 @@ proc service::stale {rev} {
     return $changed
 }
 
+# Revision REV as text another process with the same front end can import
+# (import): everything the revision is -- the entry, its outcome, its
+# diagnostics, the failure, the configuration, the snapshot (every source's
+# observation and text) -- with its HIR in the HIR interchange format
+# (HIR-INTERCHANGE.md), the checked source build of a trait program
+# included (its queries read it: QueryHir). Not the caller's version or its
+# workspace. With -derived 1 also the query indexes computed so far
+# (prepare): pure functions of the revision, so the importer answers the
+# same with them, without computing them again (re-parsing sources, for
+# one).
+proc service::export {rev args} {
+    variable exportVersion
+    set options [Options service::export {-derived 0} $args]
+    set revision [Get $rev]
+    set hir [dict get $revision hir]
+    if {$hir ne ""} {
+        set hir [hir::interchange::encode $hir -trait-source 1]
+    }
+    set body [dict create]
+    foreach key {entry outcome errors warnings failure config sources} {
+        dict set body $key [dict get $revision $key]
+    }
+    dict set body hir $hir
+    if {[dict get $options -derived]} {
+        dict set body derived [dict get $revision derived]
+    }
+    return "botlish-service-revision $exportVersion\n$body"
+}
+
+# A new revision of workspace WS holding what the text TEXT (export) holds,
+# with the caller's -version V: queries of it answer exactly as queries of
+# the exported revision did. Its HIR is decoded from interchange text (which
+# refuses another front end's text, {HIR INTERCHANGE COMPILER}) and is
+# activated whenever a query reads it (Use), as any revision's is. TEXT
+# made by a service with another configuration than this process's front
+# end is refused ({SERVICE IMPORT}): a revision is a function of its
+# configuration. Its sources are compared with WS's documents and the disk
+# by `stale`, like those of a revision analyzed in WS.
+proc service::import {ws text args} {
+    variable exportVersion
+    variable workspaces
+    variable revisions
+    variable nextRevision
+    set options [Options service::import {-version ""} $args]
+    set workspace [Workspace $ws]
+    set newline [string first \n $text]
+    set header [string range $text 0 [expr {$newline - 1}]]
+    if {$newline < 0 || $header ne "botlish-service-revision $exportVersion"} {
+        Fail IMPORT "not an exported revision of this service (it starts \"[string range $header 0 40]\")"
+    }
+    set body [string range $text [expr {$newline + 1}] end]
+    set keys {entry outcome errors warnings failure config sources hir}
+    if {[catch {dict size $body}] || [lmap key $keys {dict exists $body $key}] ne [lrepeat [llength $keys] 1]} {
+        Fail IMPORT "an exported revision without its [join $keys {, }]"
+    }
+    set config [dict get $body config]
+    foreach {key mine} [list frontEnd [hir::interchange::fingerprint] library $::core::libraryDir] {
+        if {[dict getdef $config $key ""] ne $mine} {
+            Fail IMPORT "an exported revision of another configuration ($key [dict getdef $config $key ""], here $mine)"
+        }
+    }
+    set revision [dict create]
+    foreach key {entry outcome errors warnings failure config sources} {
+        dict set revision $key [dict get $body $key]
+    }
+    set hir [dict get $body hir]
+    if {$hir ne ""} {
+        set hir [hir::interchange::decode $hir]
+    }
+    dict set revision hir $hir
+    set rev rev[incr nextRevision]
+    dict set revision id $rev
+    dict set revision workspace $ws
+    dict set revision version [dict get $options -version]
+    set derived [dict getdef $body derived [dict create]]
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations}]] ne {declarations lines semantic syntax}} {
+        Fail IMPORT "an exported revision whose derived data are not its query indexes"
+    }
+    dict set revision derived $derived
+    dict set revisions $rev $revision
+    dict set workspaces $ws revisions [concat [dict get $workspace revisions] [list $rev]]
+    return $rev
+}
+
 # Releases revision REV: the service keeps nothing of it (its HIR, ASTs,
 # indexes and texts go with it).
 proc service::release {rev} {
@@ -566,23 +655,42 @@ proc service::Derived {rev kind key command} {
 # Compilerpedia's catalogue (a process's first topic lookup reads it): what
 # a query would compute on first use, done before the first query (a
 # transport calls it after an analysis, off the request path). Queries
-# answer the same with or without it.
-proc service::prepare {rev} {
+# answer the same with or without it. -paths PATHS limits the per-source
+# indexes to those of PATHS (the documents an editor has open: a path the
+# revision did not read is skipped); -compilerpedia 0 leaves the catalogue
+# unloaded.
+proc service::prepare {rev args} {
+    set options [Options service::prepare {-paths "" -compilerpedia 1} $args]
     set revision [Use $rev]
+    set paths {}
     dict for {path observation} [dict get $revision sources] {
         if {[dict exists $observation text]} {
-            Derived $rev lines $path [list service::Lines $path]
-            Derived $rev syntax $path [list service::SyntaxIndex $path]
+            lappend paths $path
         }
+    }
+    if {[dict exists $args -paths]} {
+        set paths [lsort -unique [lmap path [dict get $options -paths] {
+            set source [SourcePath $revision $path]
+            if {$source eq ""} continue
+            set source
+        }]]
+    }
+    foreach path $paths {
+        Derived $rev lines $path [list service::Lines $path]
+        Derived $rev syntax $path [list service::SyntaxIndex $path]
     }
     if {[QueryHir $revision] ne ""} {
         set index [Derived $rev semantic all [list service::SemanticIndex]]
         dict for {f path} [dict get $index files] {
-            Derived $rev declarations $f [list service::DeclarationIndex $f]
+            if {$path in $paths} {
+                Derived $rev declarations $f [list service::DeclarationIndex $f]
+            }
         }
     }
-    Compilerpedia
-    compilerpedia::symbolTopics ""
+    if {[dict get $options -compilerpedia]} {
+        Compilerpedia
+        compilerpedia::symbolTopics ""
+    }
     return
 }
 

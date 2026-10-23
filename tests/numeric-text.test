@@ -1,0 +1,372 @@
+# numeric-text.test -- the numeric/text boundary
+# (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md): an Int's canonical decimal text
+# both ways (std::int::to_string, std::int::from_string and its declared
+# InvalidIntegerText), a Float64 rounded to the nearest Int, ties to even
+# (std::float64::round, beside std::float64::truncate), and a DecimalRounded
+# value's guaranteed decimal as text (std::decimal_rounded::to_string, at the
+# precision its static type states, written into the call by
+# hir::decimal::Elaborate).
+#
+# Every value test runs on all four backends, which must agree; the inputs
+# reach the conversions through parameters and loop elements, so no call is
+# decided before a run and every backend's own implementation computes it.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set dr0 "DecimalRounded{minDecimalsPreserved: 0}"
+set dr1 "DecimalRounded{minDecimalsPreserved: 1}"
+set dr2 "DecimalRounded{minDecimalsPreserved: 2}"
+set dr3 "DecimalRounded{minDecimalsPreserved: 3}"
+
+# The HIR of source TEXT (warnings off).
+proc ntHir {text} {
+    return [surface::compile $text t.bot -warnings off]
+}
+
+# The raw outcome of HIR under BACKEND: {value V} or {error CODE MESSAGE}.
+proc ntRun {backend hir} {
+    set saved [core::useBackend]
+    resetEffects
+    try {
+        if {[catch {
+            switch -- $backend {
+                interp {
+                    core::useBackend interp
+                    core::evalProgram [hir::lower $hir]
+                }
+                compile { core::compiler::evalHir $hir }
+                cranelift-generic { native::evalHir $hir -specialize 0 }
+                cranelift { native::evalHir $hir }
+            }
+        } result options]} {
+            return [list error [dict get $options -errorcode] $result]
+        }
+        return [list value $result]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# The backends a value test runs on: all four when the native backend is
+# built, else the two Tcl ones.
+proc ntBackends {} {
+    if {[testConstraint nativeBuilt]} {
+        return {interp compile cranelift-generic cranelift}
+    }
+    return {interp compile}
+}
+
+# The outcome of HIR on every backend, which must agree: {value SHOWN} (the
+# result as core::value::show renders it) or {error KIND} (the last word of
+# the error code: a run-time error's kind, or a declared error's
+# UNCAUGHT-ERROR).
+proc ntOutcome {hir} {
+    set outcomes {}
+    foreach b [ntBackends] {
+        set outcome [ntRun $b $hir]
+        if {[lindex $outcome 0] eq "value"} {
+            lappend outcomes [list value [core::value::show [lindex $outcome 1]]]
+        } else {
+            lappend outcomes [list error [lindex [lindex $outcome 1] end]]
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "mismatch across [ntBackends]: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The shown result of source TEXT, agreed by every backend.
+proc ntValue {text} {
+    set outcome [ntOutcome [ntHir $text]]
+    if {[lindex $outcome 0] ne "value"} {
+        error "not a value: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# "KIND: MESSAGE" of the first diagnostic of source TEXT's compilation (its
+# location dropped), or accepted.
+proc ntRejection {text} {
+    if {[catch {surface::compile $text t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        regsub {^t\.bot:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return "[lindex $code end]: $message"
+    }
+    return accepted
+}
+
+# Botlish source of a List literal of the Tcl strings TEXTS, as String
+# literals.
+proc ntStrings {texts} {
+    return "\[[join [lmap t $texts {string cat \" [string map {\\ \\\\ \" \\\" \n \\n} $t] \"}] {, }]\]"
+}
+
+# ---------------------------------------------------------------------------
+# Int -> String
+
+test nt-int-to-string-small {std::int::to_string is an Int's canonical decimal text: no leading zero but the one digit of 0, a "-" before a negative number, nothing before any other} -body {
+    ntValue "import std::int\nfn text(n: int) -> str:\n    std::int::to_string(n)\nloop n in \[0, 1, -1, 9, 10, 99, 100, -100, 7, -7, 123456\]:\n    text(n)\n"
+} -result {["0", "1", "-1", "9", "10", "99", "100", "-100", "7", "-7", "123456"]}
+
+test nt-int-to-string-large {to_string is exact for Ints of every size: the small-Int, i64, u64 and u128 boundaries and far beyond them, both signs} -body {
+    set ints {}
+    foreach k {62 63 64 127 128 200 1000} {
+        set two [expr {2 ** $k}]
+        lappend ints [expr {$two - 1}] $two [expr {-$two}] [expr {-$two - 1}]
+    }
+    lappend ints [expr {10 ** 40}] [expr {-(10 ** 40) + 1}]
+    set shown [ntValue "import std::int\nfn text(n: int) -> str:\n    n.to_string()\nloop n in \[[join $ints {, }]\]:\n    text(n)\n"]
+    expr {$shown eq "\[[join [lmap n $ints {string cat \" $n \"}] {, }]\]"}
+} -result 1
+
+test nt-int-to-string-folds {to_string of an exactly known Int is decided like its run (its fold is the implementation): the constant text, and the same text a run computes} -body {
+    set fold [dict get [core::native::metadata std::int::to_string] fold]
+    list [{*}$fold [core::value::int -42]] [{*}$fold [core::value::str x]] \
+        [ntValue "import std::int\nstd::int::to_string(-42)\n"]
+} -result {{value {str -42}} {} {"-42"}}
+
+# ---------------------------------------------------------------------------
+# String -> Int
+
+test nt-int-from-string-valid {std::int::from_string reads an Int's canonical decimal text, of any size} -body {
+    ntValue "import std::int\nfn read(s: str) -> int:\n    std::int::from_string(s):\n        on InvalidIntegerText:\n            0\nloop s in [ntStrings {0 1 -1 10 7 -7 123456 -999999999999999999999999999999999 4611686018427387904}]:\n    read(s)\n"
+} -result {[0, 1, -1, 10, 7, -7, 123456, -999999999999999999999999999999999, 4611686018427387904]}
+
+test nt-int-from-string-invalid {from_string accepts exactly the canonical texts: no empty text, no lone or doubled sign, no "+", no leading zero, no "-0", no space, fraction, exponent, digit separator, base prefix or non-ASCII digit: each is the declared InvalidIntegerText} -body {
+    set texts [list "" - +1 01 -01 -0 00 1.0 " 1" "1 " 1x x1 --1 1_000 1e3 0x10 "1\n" "١٢" "１"]
+    ntValue "import std::int\nfn read(s: str) -> int:\n    std::int::from_string(s):\n        on InvalidIntegerText:\n            -1\nloop s in [ntStrings $texts]:\n    read(s)\n"
+} -result {[-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]}
+
+test nt-int-from-string-propagates {InvalidIntegerText propagates like any declared error: through a function that declares it, to the handler of its caller, the text before it read} -body {
+    ntValue [string cat "import std::int\nimport std::list\n" \
+        "fn read(s: str) -> int errors InvalidIntegerText:\n    std::int::from_string(s)\n" \
+        "fn sum(texts: List\[str\]) -> int errors InvalidIntegerText:\n    total = loop t in texts:\n        read(t)\n    std::list::length(total)\n" \
+        "fn count(texts: List\[str\]) -> int:\n    sum(texts):\n        on InvalidIntegerText:\n            -1\n" \
+        "\[count(\[\"1\", \"2\"\]), count(\[\"1\", \"2x\", \"3\"\])\]\n"]
+} -result {[2, -1]}
+
+test nt-int-from-string-declared {InvalidIntegerText is a declared error of every call: a function that neither handles nor declares it is rejected; a constant invalid text is no compile-time error (from_string has no fold), so a handler of it is ordinary} -body {
+    list [ntRejection "import std::int\nfn read(s: str) -> int:\n    std::int::from_string(s)\nread(\"1\")\n"] \
+        [ntRejection "import std::int\nfn read(s: str) -> int errors InvalidIntegerText:\n    std::int::from_string(s)\nread(\"1\"):\n    on InvalidIntegerText:\n        0\n"] \
+        [ntValue "import std::int\nfn read() -> int:\n    std::int::from_string(\"1x\"):\n        on InvalidIntegerText:\n            -1\nread()\n"] \
+        [dict get [core::native::metadata std::int::from_string] fold] \
+        [core::native::builtinErrorIndex InvalidIntegerText]
+} -match glob -result {{UNHANDLED-ERROR: *InvalidIntegerText*} accepted -1 {} 11}
+
+test nt-int-from-string-nomethod {from_string is nomethod: a String is no receiver of an Int's parse, so "12".from_string() is a resolution error; to_string reads as a method} -body {
+    list [ntRejection "import std::int\nfn read(s: str) -> int errors InvalidIntegerText:\n    s.from_string()\nread(\"1\")\n"] \
+        [ntValue "import std::int\nfn text(n: int) -> str:\n    n.to_string()\ntext(12)\n"]
+} -match glob -result {{NOMETHOD-CALL: *} {"12"}}
+
+test nt-int-round-trip {from_string(to_string(x)) == x for every Int, and to_string(from_string(t)) == t for every canonical text: boundaries and seeded random Ints of up to 300 digits, both signs} -body {
+    expr {srand(20261023)}
+    set ints {0 1 -1 9 -10 4611686018427387903 4611686018427387904 -4611686018427387904 -4611686018427387905
+        9223372036854775807 9223372036854775808 -9223372036854775809 18446744073709551616}
+    for {set i 0} {$i < 120} {incr i} {
+        set digits [expr {1 + int(rand() * 300)}]
+        set n [expr {1 + int(rand() * 9)}]
+        for {set d 1} {$d < $digits} {incr d} {
+            append n [expr {int(rand() * 10)}]
+        }
+        if {rand() < 0.5} {
+            set n -$n
+        }
+        lappend ints $n
+    }
+    set program [string cat "import std::int\n" \
+        "fn back(n: int) -> bool:\n    m = std::int::from_string(std::int::to_string(n)):\n        on InvalidIntegerText:\n            return false\n    m == n\n" \
+        "fn forth(t: str) -> bool:\n    n = std::int::from_string(t):\n        on InvalidIntegerText:\n            return false\n    std::int::to_string(n) == t\n" \
+        "fn backs(ns: List\[int\]) -> List\[bool\]:\n    loop n in ns:\n        back(n)\n" \
+        "fn forths(ts: List\[str\]) -> List\[bool\]:\n    loop t in ts:\n        forth(t)\n" \
+        "\[backs(\[[join $ints {, }]\]), forths([ntStrings $ints])\]\n"]
+    set shown [ntValue $program]
+    list [llength [regexp -all -inline true $shown]] [llength [regexp -all -inline false $shown]] [expr {2 * [llength $ints]}]
+} -result {266 0 266}
+
+# ---------------------------------------------------------------------------
+# Float64 -> nearest Int
+
+# The Tcl double whose IEEE 754 bit pattern is BITS.
+proc ntDouble {bits} {
+    binary scan [binary format wu $bits] q x
+    return $x
+}
+
+# The bit pattern of the Tcl double X.
+proc ntBits {x} {
+    binary scan [binary format q $x] wu bits
+    return $bits
+}
+
+test nt-float-round-halves {std::float64::round rounds to the nearest Int, a half to the even Int: 0.5 and -0.5 to 0, 1.5 and 2.5 to 2, 3.5 to 4, -1.5 and -2.5 to -2} -body {
+    ntValue "import std::float64\nfn r(x: Float64) -> int:\n    std::float64::round(x)\nloop x in \[0.0, 0.49, 0.5, 1.5, 2.5, 3.5, -0.5, -1.5, -2.5, 1.4, -1.4, 0.51, -0.51\]:\n    r(x)\n"
+} -result {[0, 0, 0, 2, 2, 4, 0, -2, -2, 1, -1, 1, -1]}
+
+test nt-float-round-exact-binary {round reads a Float64's exact binary value, not its shortest decimal text: the binary64s adjacent to a half round away from it, each literal checked to be that binary64} -body {
+    # The literals and the binary64 each denotes: one ulp below and above
+    # 0.5, 2.5 and -2.5, and the tie at 2^52 - 1/2 (rounds to the even 2^52).
+    set cases [list \
+        0.49999999999999994 [expr {[ntBits 0.5] - 1}] \
+        0.5000000000000001 [expr {[ntBits 0.5] + 1}] \
+        2.4999999999999996 [expr {[ntBits 2.5] - 1}] \
+        2.5000000000000004 [expr {[ntBits 2.5] + 1}] \
+        -2.5000000000000004 [expr {[ntBits -2.5] + 1}] \
+        4503599627370495.5 [ntBits [expr {2.0 ** 52 - 0.5}]] \
+        4503599627370494.5 [ntBits [expr {2.0 ** 52 - 1.5}]]]
+    set exact [lmap {literal bits} $cases {expr {[ntBits $literal] == $bits}}]
+    set literals [join [dict keys $cases] {, }]
+    list $exact [ntValue "import std::float64\nfn r(x: Float64) -> int:\n    x.round()\nloop x in \[$literals\]:\n    r(x)\n"]
+} -result {{1 1 1 1 1 1 1} {[0, 1, 2, 3, -3, 4503599627370496, 4503599627370494]}}
+
+test nt-float-round-large {round is exact beyond every machine integer width: the Int of a large Float64 is its exact integer value, never an overflow error} -body {
+    set xs {1.0e20 -1.0e20 9.223372036854776e18 4.611686018427388e18 -4.611686018427388e18 1.0e300 1.7976931348623157e308 -1.7976931348623157e308}
+    set shown [ntValue "import std::float64\nfn r(x: Float64) -> int:\n    x.round()\nloop x in \[[join $xs {, }]\]:\n    r(x)\n"]
+    expr {$shown eq "\[[join [lmap x $xs {expr {entier($x)}}] {, }]\]"}
+} -result 1
+
+test nt-float-round-versus-truncate {truncate goes toward zero, round to the nearest Int (ties to even): the two differ exactly where the fraction is a half or more} -body {
+    ntValue "import std::float64\nfn both(x: Float64) -> List\[int\]:\n    \[std::float64::truncate(x), std::float64::round(x)\]\nloop x in \[-2.7, 2.7, 2.5, -0.5, 0.49, -3.5, 1.0\]:\n    both(x)\n"
+} -result {[[-2, -3], [2, 3], [2, 2], [0, 0], [0, 0], [-3, -4], [1, 1]]}
+
+test nt-float-round-total {round never fails (no errors clause, no handler) and folds like truncate: a constant argument is decided by the run's own computation} -body {
+    set fold [dict get [core::native::metadata std::float64::round] fold]
+    list [dict get [core::native::metadata std::float64::round] errors] \
+        [{*}$fold [core::value::float Float64 2.5]] [{*}$fold [core::value::float Float64 -3.5]] \
+        [ntRejection "import std::float64\nfn r(x: Float64) -> int:\n    x.round()\nr(1.5)\n"] \
+        [ntValue "import std::float64\nstd::float64::round(2.5)\n"]
+} -result {{} {value {int 2}} {value {int -4}} accepted 2}
+
+# ---------------------------------------------------------------------------
+# DecimalRounded -> String
+
+test nt-dr-to-string-precisions {std::decimal_rounded::to_string is round(x, N) with exactly N fraction digits, N the value's static guarantee; no point at N = 0} -body {
+    list [ntValue "import std::decimal_rounded\nfn t(x: $dr0) -> str:\n    x.to_string()\n\[t(2.0), t(2.5), t(3.5), t(-2.5), t(7.0)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr1) -> str:\n    x.to_string()\n\[t(6.0), t(1.2), t(2.4), t(-0.3), t(12.35)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\n\[t(0.19), t(25.0), t(1.24), t(-7.5)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr3) -> str:\n    std::decimal_rounded::to_string(x)\n\[t(1.0005), t(1.0015), t(123.4567), t(-0.001)\]\n"]
+} -result {{["2", "2", "4", "-2", "7"]} {["6.0", "1.2", "2.4", "-0.3", "12.4"]} {["0.19", "25.00", "1.24", "-7.50"]} {["1.000", "1.002", "123.457", "-0.001"]}}
+
+test nt-dr-to-string-ties {a decimal half rounds to the even digit, whichever side of it the binary64 representation lies: 1.245 and 1.235 to 1.24, 1.255 to 1.26, -1.245 to -1.24, 0.005 to 0.00} -body {
+    ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\n\[t(1.245), t(1.235), t(1.255), t(-1.245), t(0.005), t(0.015), t(2.675)\]\n"
+} -result {["1.24", "1.24", "1.26", "-1.24", "0.00", "0.02", "2.68"]}
+
+test nt-dr-to-string-hidden-digits {the text never shows the representation's digits: 0.295 at two places is "0.30" though its binary64 lies above 0.295 and is not 0.3's; a value weakened to fewer places shows only those, and a quantized Float64 its quantization} -body {
+    set x [core::decimal::of [core::decimal::constant 0.295]]
+    list [expr {$x == 0.3}] [expr {$x > 0.295}] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\nt(0.295)\n"] \
+        [ntValue "import std::decimal_rounded\nfn tenths(x: $dr1) -> str:\n    x.to_string()\nfn keep(x: $dr3) -> $dr3:\n    x\n\[tenths(keep(1.255)), tenths(keep(1.249)), tenths(keep(-0.051))\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\nfn q(x: Float64) -> str:\n    d = std::decimal_rounded::round\[$dr2\](x):\n        on UnrepresentableDecimal:\n            return \"none\"\n    t(d)\nloop x in \[0.29500000000000004, 0.295, 1.005\]:\n    q(x)\n"]
+} -result {0 1 {"0.30"} {["1.3", "1.2", "-0.1"]} {["0.30", "0.29", "1.00"]}}
+
+test nt-dr-to-string-no-negative-zero {a DecimalRounded value whose guaranteed decimal is zero shows positive zero text, never -0.0} -body {
+    list [ntValue "import std::decimal_rounded\nfn t(x: $dr1) -> str:\n    x.to_string()\n\[t(-0.04), t(-0.05), t(-0.0), t(0.0), t(-0.06)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\n\[t(-0.004), t(-0.005)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: $dr0) -> str:\n    x.to_string()\n\[t(-0.4), t(-0.5)\]\n"]
+} -result {{["0.0", "0.0", "0.0", "0.0", "-0.1"]} {["0.00", "0.00"]} {["0", "0"]}}
+
+test nt-dr-to-string-magnitudes {large and small magnitudes, at small and large precisions: the machine-integer path and the big-integer path give one rule} -body {
+    list [ntValue "import std::decimal_rounded\nfn t(x: $dr2) -> str:\n    x.to_string()\n\[t(12345678901234.56), t(1.0e20), t(1.0e-30), t(-1.0e20)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: DecimalRounded{minDecimalsPreserved: 0}) -> str:\n    x.to_string()\nt(1.0e22)\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: DecimalRounded{minDecimalsPreserved: 6}) -> str:\n    x.to_string()\n\[t(0.000001), t(1024.5)\]\n"] \
+        [ntValue "import std::decimal_rounded\nfn t(x: DecimalRounded{minDecimalsPreserved: 25}) -> str:\n    x.to_string()\n\[t(0.5), t(-0.125)\]\n"]
+} -result {{["12345678901234.56", "100000000000000000000.00", "0.00", "-100000000000000000000.00"]} {"10000000000000000000000"} {["0.000001", "1024.500000"]} {["0.5000000000000000000000000", "-0.1250000000000000000000000"]}}
+
+test nt-dr-to-string-upper-bound {an upper precision bound changes nothing: the text is at minDecimalsPreserved, always within the bound} -body {
+    ntValue "import std::decimal_rounded\nfn t(x: DecimalRounded{minDecimalsPreserved: 2, maxDecimalsPreserved: 4}) -> str:\n    x.to_string()\n\[t(1.2345), t(19.995)\]\n"
+} -result {["1.23", "20.00"]}
+
+test nt-dr-to-string-field {a struct field's DecimalRounded value is shown at the field's declared precision, method syntax on the projection; std::int::to_string beside it resolves by the receiver's kind} -body {
+    ntValue [string cat "import std::decimal_rounded\nimport std::int\n" \
+        "struct Run:\n    best: $dr1\n    floor: int\n" \
+        "fn line(r: Run) -> str:\n    r.best.to_string()\n" \
+        "fn floor(r: Run) -> str:\n    r.floor.to_string()\n" \
+        "fn both(r: Run) -> List\[str\]:\n    \[line(r), floor(r)\]\n" \
+        "both(Run {best: 6.05, floor: 12})\n"]
+} -result {["6.0", "12"]}
+
+test nt-dr-to-string-erased {a DecimalRounded value whose static type is erased is no text: the call keeps its check form, which no backend runs -- the Tcl backends refuse it when it runs (TYPE), native lowering has no implementation of it (NATIVE UNSUPPORTED) -- rather than show digits no type guarantees} -body {
+    set hir [ntHir "import std::decimal_rounded\nfn g(x) -> str:\n    std::decimal_rounded::to_string(x)\nfn h(x: $dr2) -> str:\n    g(x)\nh(1.25)\n"]
+    set outcomes [lmap b [ntBackends] {lindex [ntRun $b $hir] 1}]
+    lsort -unique [lmap code $outcomes {
+        if {[lrange $code 0 2] eq {CORE SEMANTIC TYPE} || [lrange $code 0 1] eq {NATIVE UNSUPPORTED}} {
+            string cat refused
+        } else {
+            set code
+        }
+    }]
+} -result refused
+
+test nt-dr-to-string-float-refused {a value statically of another kind is no DecimalRounded value: to_string (or the decay) of a Float64 or an Int is a type error, never an implicit conversion} -body {
+    list [ntRejection "import std::decimal_rounded\nfn t(x: Float64) -> str:\n    std::decimal_rounded::to_string(x)\nt(1.5)\n"] \
+        [ntRejection "import std::decimal_rounded\nfn t(x: int) -> str:\n    std::decimal_rounded::to_string(x)\nt(1)\n"] \
+        [ntRejection "import std::float64\nfn t(x: Float64) -> Float64:\n    std::float64::from_decimal_rounded(x)\nt(1.5)\n"]
+} -result {{TYPE: the argument of std::decimal_rounded::to_string is Float64, not a DecimalRounded value: only a DecimalRounded value is made a String at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)} {TYPE: the argument of std::decimal_rounded::to_string is int, not a DecimalRounded value: only a DecimalRounded value is made a String at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)} {TYPE: the argument of std::float64::from_decimal_rounded is Float64, not a DecimalRounded value: only a DecimalRounded value is decayed to a Float64 at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)}}
+
+test nt-dr-to-string-elaborated {the precision reaches the run as an argument the compiler writes (decimal_rounded#to_string(x, N), N the argument's static guarantee): the value carries no precision of its own} -body {
+    set hir [ntHir "import std::decimal_rounded\nfn t(x: $dr3) -> str:\n    x.to_string()\nfn u(x: $dr1) -> str:\n    x.to_string()\n\[t(1.5), u(1.5)\]\n"]
+    set found {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [hir::decimal::CalledNative $hir $e] in {decimal_rounded#to_string std::decimal_rounded::to_string}} {
+            set last [lindex [dict get $node args] end]
+            lappend found [list [hir::decimal::CalledNative $hir $e] [llength [dict get $node args]] \
+                [core::value::show [dict get $hir exprs $last value]]]
+        }
+    }
+    list [lsort $found] [llength [core::decimal::constant 1.5]]
+} -result {{{decimal_rounded#to_string 2 1} {decimal_rounded#to_string 2 3}} 2}
+
+# ---------------------------------------------------------------------------
+# The native backend
+
+test nt-native-ops {natively each conversion is one runtime helper call: NIR's inttostr, strtoint, f64round and d64tostr (with its precision operand)} -constraints nativeBuilt -body {
+    set hir [ntHir [string cat "import std::int\nimport std::float64\nimport std::decimal_rounded\n" \
+        "fn a(n: int) -> str:\n    n.to_string()\n" \
+        "fn b(s: str) -> int errors InvalidIntegerText:\n    std::int::from_string(s)\n" \
+        "fn c(x: Float64) -> int:\n    x.round()\n" \
+        "fn d(x: $dr2) -> str:\n    x.to_string()\n" \
+        "fn e(s: str) -> int:\n    b(s):\n        on InvalidIntegerText:\n            0\n" \
+        "\[a(1), e(\"2\"), c(2.5), d(0.5)\]\n"]]
+    set nir [native::lowered $hir]
+    list [regexp {= op inttostr %[0-9]+ @} $nir] [regexp {= op strtoint %[0-9]+ @} $nir] [regexp {= op f64round %[0-9]+ @} $nir] \
+        [regexp {= op d64tostr %[0-9]+ %[0-9]+ @} $nir]
+} -result {1 1 1 1}
+
+test nt-native-error-id {InvalidIntegerText's builtin index is the native runtime's: error.rs's ERR_INVALID_INTEGER_TEXT is BUILTIN_ERROR_ID_BASE + 11, the index core/inttext.tcl's declaration order gives it} -body {
+    set f [open [file join $::projectRoot native src runtime error.rs]]
+    set text [read $f]
+    close $f
+    list [core::native::builtinErrorIndex InvalidIntegerText] \
+        [regexp {ERR_INVALID_INTEGER_TEXT: u32 = BUILTIN_ERROR_ID_BASE \+ 11;} $text] \
+        [core::native::builtinErrorIndex LengthMismatch]
+} -result {11 1 10}
+
+test nt-native-executable {a standalone executable converts like the JIT: Int text both ways, rounding and DecimalRounded text} -constraints {nativeBuilt executableAot} -body {
+    set dir [makeDirectory nt-exe-[pid]]
+    set path [file join $dir prog.bot]
+    set channel [open $path w]
+    puts -nonewline $channel [string cat "import std::int\nimport std::float64\nimport std::decimal_rounded\n" \
+        "fn text(n: int) -> str:\n    n.to_string()\n" \
+        "fn read(s: str) -> int:\n    std::int::from_string(s):\n        on InvalidIntegerText:\n            -1\n" \
+        "fn cents(x: $dr2) -> str:\n    x.to_string()\n" \
+        "fn r(x: Float64) -> int:\n    x.round()\n" \
+        "\[text(-1234567890123456789012345), read(\"98765432109876543210\"), read(\"01\"), cents(0.295), cents(-0.004), r(2.5), r(-1.0e20)\]\n"]
+    close $channel
+    set hir [surface::readProgramFile $path -warnings off -cache ""]
+    set exe [native::executable $hir [file join $dir prog]]
+    set output [exec $exe]
+    file delete -force $dir
+    list [expr {$output eq [core::value::show [lindex [ntRun compile $hir] 1] 1]}] $output
+} -result {1 {["-1234567890123456789012345", 98765432109876543210, -1, "0.30", "0.00", 2, -100000000000000000000]}}
+
+cleanupTests

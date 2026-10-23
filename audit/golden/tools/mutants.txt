@@ -153,9 +153,14 @@
 @@ int-text-drops-sign a negative Int is shown without its sign
 ## stdlib/test.bot
 <<<<
-        10.glyph().concat((0 - n).digits_from(1))
+    if integer?(v):
+        std::int::to_string(v)
 ====
-        (0 - n).digits_from(1)
+    if integer?(v):
+        if v < 0:
+            std::int::to_string(0 - v)
+        else:
+            std::int::to_string(v)
 >>>>
 
 @@ escape-drops-quote a quotation mark inside a described String is not escaped
