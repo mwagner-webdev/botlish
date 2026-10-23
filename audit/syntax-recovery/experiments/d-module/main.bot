@@ -1,0 +1,5 @@
+import geom
+
+a = geom::area(2, 3)
+p = geom::perimeter(1, 1)
+s = geom::square(3)

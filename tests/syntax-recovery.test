@@ -1,0 +1,567 @@
+# syntax-recovery.test -- syntax-error-tolerant analysis
+# (SYNTAX-RECOVERY-MILESTONE-1.md): what of a program with syntax errors the
+# compiler still knows, what it must not claim, and that such a program is
+# never compiled or run.
+#
+# The oracles are the compiler's own: the strict compilation of a valid
+# program (recovery changes nothing there), the analysis of the same program
+# repaired two ways (a fact the repairs disagree on is never known; a fact
+# independent of the broken text is the valid program's), and the parser's
+# syntax diagnostics (reported unchanged).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+interp recursionlimit {} 100000
+
+namespace eval sr {}
+
+# A fresh directory under the tcltest temporary directory.
+proc sr::Dir {name} {
+    set dir [file join [temporaryDirectory] sr-$name-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    return [file normalize $dir]
+}
+
+proc sr::Put {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# The revision of the program file PATH (a workspace of its own, no cache,
+# warnings off): {WS REV}.
+proc sr::Analyze {path} {
+    set ws [service::workspace -warnings off -cache ""]
+    return [list $ws [service::analyze $ws $path]]
+}
+
+# The binding and type at a position, briefly: "NAME: TYPE", "NAME: -" (a
+# binding, no type), "-" (neither).
+proc sr::Fact {rev path line column} {
+    set facts [service::at $rev $path $line $column]
+    set name [expr {[dict exists $facts binding] ? [dict get $facts binding name] : "-"}]
+    set type [expr {[dict exists $facts type] ? [dict get $facts type text] : "-"}]
+    return "$name: $type"
+}
+
+# The diagnostics of REV as {CODE FILE:LINE:COLUMN MESSAGE}.
+proc sr::Brief {rev} {
+    return [lmap d [service::diagnostics $rev] {
+        list [dict get $d code] [file tail [dict get $d file]]:[dict get $d line]:[dict get $d column] [dict get $d message]
+    }]
+}
+
+# The holes of the recovered AST of SOURCE, top level and in function bodies:
+# {ID NAME BINDS TYPES} each, then the file's `recovered` facts.
+proc sr::Holes {source} {
+    set ast [surface::recover::apply [surface::parse $source t.bot -recover 1] $source]
+    set holes {}
+    sr::CollectHoles [dict get $ast body] holes
+    return [list $holes [dict getdef $ast recovered {}]]
+}
+
+proc sr::CollectHoles {statements holesVar} {
+    upvar 1 $holesVar holes
+    foreach statement $statements {
+        if {[dict get $statement kind] eq "hole"} {
+            lappend holes [list [dict get $statement id] [dict get $statement name] [dict get $statement binds] \
+                [dict get $statement types]]
+        } elseif {[dict get $statement kind] eq "function"} {
+            sr::CollectHoles [dict get $statement body body] holes
+        }
+    }
+}
+
+# Every fact at every position of every source REV read that lies before
+# offset LIMIT of the file PATH (all of every other file).
+proc sr::FactsBefore {rev path limit} {
+    set facts {}
+    dict for {source observation} [dict get [service::revision $rev] sources] {
+        if {![dict get $observation read]} continue
+        set text [service::sourceText $rev $source]
+        set lines [split $text \n]
+        set offset 0
+        for {set l 1} {$l <= [llength $lines]} {incr l} {
+            set length [string length [lindex $lines $l-1]]
+            for {set c 1} {$c <= $length + 1} {incr c} {
+                if {$source ne $path || $offset + $c - 1 < $limit} {
+                    set at [dict remove [service::at $rev $source $l $c] revision]
+                    if {[dict exists $at syntax] && [dict get $at syntax kind] eq "program"} {
+                        # (The whole file's node: its range is the file's.)
+                        dict unset at syntax range
+                    }
+                    lappend facts [file tail $source]:$l:$c $at
+                }
+            }
+            incr offset [expr {$length + 1}]
+        }
+    }
+    return $facts
+}
+
+# ===========================================================================
+# What the source establishes (surface/recover.tcl)
+
+test sr-holes-statement-forms {a malformed statement keeps what its valid prefix decides: the name it binds, or that it binds nothing visible after it; a prefix too short to decide, a destructuring and a region that swallowed the next line may bind anything} -body {
+    set out {}
+    foreach source [list "x = foo(\ny = 2\n" "fn f(a, b: -> int:\n    a\n" "fn g():\n    return a +\n" \
+            "fn g():\n    f(1, \n" "{a, b} = (\n" "x \$ 1\n" "fn f():\nx = 1\n" "if x\n    y = 1\nz = 2\n" \
+            "fn g():\n    a = 1\n    \$\n    a\n"] {
+        lappend out [lindex [sr::Holes $source] 0]
+    }
+    set out
+} -cleanup {unset -nocomplain out source} -result {{{x= x 0 0}} {{error f 0 0}} {{g()/error {} 0 0}} {{g()/call {} 0 0}} {{error {} 1 0}} {{error {} 1 1}} {{error f 1 1}} {{error {} 0 0}} {{g()/hole@22 {} 1 0}}}
+
+test sr-holes-lexical {lexical damage makes the statement it is in a hole even when it parsed -- a string ended at the line's end, a bracket the lexer closed, a skipped character -- and the statements around it stay} -body {
+    lmap source [list "x = \"abc\nz = 1\n" "n = std::list::length(xs\nm = 1\n" "a = 1\nb = 2 \$ 3\nc = 3\n"] {
+        lassign [sr::Holes $source] holes
+        list $holes [lmap s [dict get [surface::parse $source t.bot -recover 1] body] {dict get $s kind}]
+    }
+} -cleanup {unset -nocomplain source holes} -result {{{{x= x 0 0}} {bind bind}} {{{n= n 0 0}} {bind bind}} {{{error b 0 0}} {bind error bind}}}
+
+test sr-holes-layout {a layout diagnostic makes the top-level statements around it holes -- from the last one written at column 1 before it to the next one at column 1 after it -- each keeping the name its prefix states} -body {
+    sr::Holes "fn f():\n    1\nfn g():\n    1\n  y = 3\nw = 4\n"
+} -cleanup {} -result {{{g() g 0 0} {y= {} 1 1}} {header 0 values 1 types 1 externs 1 installs 1 holes 2}}
+
+test sr-holes-header {a malformed import is header damage: the file's header is not known, and the well-formed imports stay} -body {
+    set source "import std::\nimport std::list\nx = 1\n"
+    set ast [surface::recover::apply [surface::parse $source t.bot -recover 1] $source]
+    list [dict get $ast recovered header] [lmap i [dict get $ast imports] {dict get $i namespace}] [lmap s [dict get $ast body] {dict get $s kind}]
+} -cleanup {unset -nocomplain source ast} -result {1 std::list bind}
+
+test sr-holes-declarations {a malformed top-level declaration may declare a type-level name; a malformed `with context` may install a context; a malformed extern may declare a function its whole file sees} -body {
+    lmap source [list "struct P:\n    x int\ny = 1\n" "with context foo(\n" "extern c fn puts(\n"] {
+        lindex [sr::Holes $source] 1
+    }
+} -cleanup {unset -nocomplain source} -result {{header 0 values 0 types 1 externs 0 installs 0 holes 1} {header 0 values 0 types 0 externs 0 installs 1 holes 1} {header 0 values 1 types 1 externs 1 installs 0 holes 1}}
+
+test sr-holes-damage-past-statement {a statement the parser failed on whose diagnostic points past its own text -- blanks after it at the end of its line, or the end of the file -- is a hole all the same, and the program around it is analyzed (an editor's usual state while typing)} -body {
+    set dir [sr::Dir trailing]
+    set out {}
+    foreach source [list "a = 1\na + \n" "a = 1\na + " "fn f(n: int) -> int:\n    k = n + \n    k\n\nx = f(1)\n" "x = \[1, 2\]\ny = (x \n"] {
+        set hir [surface::readProgramFile [sr::Put $dir/main.bot $source] -strict 0 -recover-syntax 1 -cache "" -warnings off]
+        lappend out [llength [lmap e [hir::walk $hir] {if {[dict exists $hir exprs $e hole]} {set e} else continue}]] \
+            [lmap d [hir::recovery::reported $hir] {dict get $d kind}]
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir out source hir} -result {1 {} 1 {} 1 {} 1 {}}
+
+test sr-no-damage-no-recovery {a program without syntax errors has no damage record and recovery returns its AST unchanged} -body {
+    set source "fn f(a: int) -> int:\n    a + 1\nx = f(2)\n"
+    set ast [surface::parse $source t.bot -recover 1]
+    list [dict exists $ast damage] [expr {[surface::recover::apply $ast $source] eq $ast}]
+} -cleanup {unset -nocomplain source ast} -result {0 1}
+
+# ===========================================================================
+# Facts: known where the source establishes them, unavailable where it does not
+
+# The experiments (audit/syntax-recovery/experiments): each malformed program,
+# repaired two ways. A probe the experiment expects `known` must be known in
+# the malformed program and be what both repairs know; one expected `binding`
+# must have the binding both repairs have, and no type; one expected
+# `unavailable` must have no type (the repairs give it two different ones,
+# or one).
+test sr-experiments-oracle {every experiment's malformed program: a syntax outcome with a partial HIR; each fact expected known is known and is what both repairs know; each binding expected known without its value is the repairs' binding with no type; each fact expected unavailable has no type} -body {
+    set experiments [file join $::projectRoot audit syntax-recovery experiments]
+    set problems {}
+    foreach case [lsort [glob -directory $experiments -types d *]] {
+        set name [file tail $case]
+        set facts [dict create]
+        foreach variant {malformed repair-1 repair-2} {
+            set dir [sr::Dir $name-$variant]
+            foreach path [glob -directory $case -types f *.bot] {
+                file copy $path $dir
+            }
+            if {$variant ne "malformed"} {
+                foreach path [glob -directory [file join $case $variant] -types f *.bot] {
+                    file copy -force $path $dir
+                }
+            }
+            lassign [sr::Analyze $dir/main.bot] ws rev
+            if {$variant eq "malformed"} {
+                set summary [service::revision $rev]
+                if {[dict get $summary outcome] ne "syntax" || [dict get $summary semantics] ne "partial"} {
+                    lappend problems "$name: [dict get $summary outcome] [dict get $summary semantics]"
+                }
+            }
+            set f [open [file join $case probes]]
+            foreach line [split [read $f] \n] {
+                if {[string trim $line] eq ""} continue
+                lassign [split $line " "] file l c expect
+                dict set facts "$file:$l:$c" $variant [sr::Fact $rev $dir/$file $l $c]
+                dict set facts "$file:$l:$c" expect $expect
+            }
+            close $f
+            service::closeWorkspace $ws
+            file delete -force $dir
+        }
+        dict for {where record} $facts {
+            set malformed [dict get $record malformed]
+            switch -- [dict get $record expect] {
+                binding {
+                    # The binding is known, its value is not: the repairs
+                    # agree on the name only.
+                    set name [lindex [split $malformed :] 0]
+                    if {![string match "*: -" $malformed] || $name eq "-"
+                            || $name ne [lindex [split [dict get $record repair-1] :] 0]
+                            || $name ne [lindex [split [dict get $record repair-2] :] 0]} {
+                        lappend problems "$name $where binding: $malformed / [dict get $record repair-1] / [dict get $record repair-2]"
+                    }
+                }
+                known {
+                    if {[string match "*: -" $malformed] || $malformed ne [dict get $record repair-1]
+                            || $malformed ne [dict get $record repair-2]} {
+                        lappend problems "$name $where known: $malformed / [dict get $record repair-1] / [dict get $record repair-2]"
+                    }
+                }
+                unavailable {
+                    if {![string match "*: -" $malformed]} {
+                        lappend problems "$name $where unavailable: $malformed"
+                    }
+                }
+            }
+        }
+    }
+    set problems
+} -cleanup {unset -nocomplain experiments problems case name facts variant dir path ws rev summary f line file l c expect where record malformed} -result {}
+
+# The independent-source oracle: a malformed statement appended to a valid
+# program changes no fact before it.
+test sr-appended-hole-changes-nothing-before {a malformed statement appended to a valid program leaves every fact at every position before it -- and in every module -- what the valid program's analysis says} -body {
+    set dir [sr::Dir appended]
+    set program "import util\n\nfn total(xs, n: int) -> int:\n    s = util::scale(n)\n    s + 1\n\ny = total(\[1, 2\], 3)\nz = util::scale(y)\n"
+    sr::Put $dir/util.bot "fn scale(n: int) -> int:\n    n * 2\n"
+    sr::Put $dir/main.bot $program
+    lassign [sr::Analyze $dir/main.bot] ws valid
+    set before [sr::FactsBefore $valid $dir/main.bot [string length $program]]
+    set out {}
+    foreach broken [list "w = total(" "fn more(a: int) -> \n    a\n" "{p, q} = (\n" "\$\$\n"] {
+        sr::Put $dir/main.bot "$program$broken"
+        set rev [service::analyze $ws $dir/main.bot]
+        lappend out [dict get [service::revision $rev] semantics] \
+            [expr {[sr::FactsBefore $rev $dir/main.bot [string length $program]] eq $before}]
+    }
+    set out
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir program ws valid before out broken rev} -result {partial 1 partial 1 partial 1 partial 1}
+
+test sr-function-body-facts {in a function whose body holds a malformed line: what comes before it is known; after an expression's malformed value, everything is; after a statement that may bind any name, the function's own locals are known and every outer name is not; other functions are untouched} -body {
+    set dir [sr::Dir body]
+    sr::Put $dir/main.bot "fn helper(n: int) -> int:\n    n + 1\n\nfn f(a: int) -> int:\n    b = a\n    c = b +\n    d = helper(b)\n    d\n\nfn g(a: int) -> int:\n    b = a\n    {p, q} = (\n    d = helper(b)\n    e = nosuch\n    d\n\nx = helper(2)\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    set path $dir/main.bot
+    list [sr::Fact $rev $path 5 5] [sr::Fact $rev $path 6 5] [sr::Fact $rev $path 7 9] [sr::Fact $rev $path 7 16] \
+        [sr::Fact $rev $path 13 16] [sr::Fact $rev $path 13 9] [sr::Fact $rev $path 13 5] \
+        [dict get [service::at $rev $path 13 9] unavailable binding] [sr::Fact $rev $path 17 1] [sr::Brief $rev]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path} -result {{b: int} {c: -} {helper: Fn{args: [int], return: int, errors: []}} {b: int} {b: int} {-: -} {d: -} {a malformed statement before it, in a scope it sees, may bind this name: which binding it denotes is not known} {x: int} {{{SURFACE SYNTAX} main.bot:6:12 {expected an expression, found end of line}} {{SURFACE SYNTAX} main.bot:12:14 {"(" is never closed}}}}
+
+test sr-declared-contract {a function whose body holds a malformed line keeps its declared contract and nothing its body would infer: a declared result types its calls, even one a body could narrow (no semantic instance); an undeclared one, or a contract its body would require of a parameter, is not known} -body {
+    set dir [sr::Dir contract]
+    sr::Put $dir/main.bot "fn declared(n: int) -> str:\n    m = n +\n    \"ab\"\n\nfn inferred(n):\n    k = n + 1\n    k *\n\na = declared(1)\nb = inferred(2)\n\nfn loose(n: int) -> any:\n    m = n +\n    \"ab\"\n\nl = loose(1)\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    set path $dir/main.bot
+    list [dict get [service::at $rev $path 9 5] hover] [sr::Fact $rev $path 9 1] \
+        [dict get [service::at $rev $path 10 5] unavailable hover] [sr::Fact $rev $path 10 1] \
+        [dict get [service::at $rev $path 5 13] unavailable hover] [dict get [service::at $rev $path 5 4] unavailable hover] \
+        [sr::Fact $rev $path 16 1]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path} -result {{fn declared(n: int) -> str} {a: str} {its signature is not known: its body holds malformed source and the signature does not declare every type} {b: -} {its contract is not known: it declares no type, and its function's body, which would require one, holds malformed source} {its signature is not known: its body holds malformed source and the signature does not declare every type} {l: any}}
+
+test sr-module-recovery {a module with a malformed function: its well-formed members keep their bindings, types and definitions in the importer; the malformed one's name is known, its value is not; a member a malformed top-level line may declare is not reported missing} -body {
+    set dir [sr::Dir module]
+    sr::Put $dir/geom.bot "fn area(w: int, h: int) -> int:\n    w * h\n\n\$\$\n\nfn perimeter(w: int, h: int) -> int:\n    2 * (w +\n\nfn square(s: int) -> int:\n    area(s, s)\n"
+    sr::Put $dir/main.bot "import geom\n\na = geom::area(2, 3)\np = geom::perimeter(1, 1)\ns = geom::square(3)\nq = geom::cube(2)\nr = nosuch\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    set path $dir/main.bot
+    set definition [dict get [service::at $rev $path 3 11] definition]
+    list [sr::Fact $rev $path 3 1] [file tail [dict get $definition file]]:[dict get $definition line]:[dict get $definition column] \
+        [sr::Fact $rev $path 4 1] [sr::Fact $rev $path 5 1] [sr::Fact $rev $path 6 1] [sr::Fact $rev $path 6 5] [sr::Brief $rev]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path definition} -result {{a: int} geom.bot:1:4 {p: int} {s: int} {q: -} {-: -} {{{SURFACE SYNTAX} geom.bot:4:1 {unexpected character "$"}} {{SURFACE SYNTAX} geom.bot:4:2 {unexpected character "$"}} {{SURFACE SYNTAX} geom.bot:7:9 {"(" is never closed}} {{CORE SEMANTIC UNBOUND} main.bot:7:5 {unbound name "nosuch"}}}}
+
+test sr-transitive-module {a malformed module two imports away: what does not depend on its malformed function is known in the entry, and what does is not} -body {
+    set dir [sr::Dir transitive]
+    sr::Put $dir/low.bot "fn base() -> int:\n    7\n\nfn bad(\n"
+    sr::Put $dir/mid.bot "import low\n\nfn twice() -> int:\n    low::base() * 2\n\nfn usebad():\n    low::bad(1)\n"
+    sr::Put $dir/main.bot "import mid\n\nv = mid::twice()\nw = mid::usebad()\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    list [sr::Fact $rev $dir/main.bot 3 1] [sr::Fact $rev $dir/main.bot 4 1] [sr::Fact $rev $dir/mid.bot 4 10] \
+        [sr::Fact $rev $dir/mid.bot 7 10] [lmap d [sr::Brief $rev] {lindex $d 0}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{v: int} {w: -} {low::base: Fn{args: [], return: int, errors: []}} {low::bad: -} {{SURFACE SYNTAX}}}
+
+# ===========================================================================
+# Soundness: no proof from what nobody wrote
+
+test sr-no-proof-from-incomplete-body {an incomplete body proves nothing to its callers: no exact result (no KNOWN-ERROR at an index the body's visible part would put out of bounds), no certain failure (no KNOWN-ERROR from a `fail` a malformed line may skip), no rejected static block, and the repaired programs disagree} -body {
+    set dir [sr::Dir proofs]
+    set out {}
+    foreach {pick main} [list \
+            "fn index() -> int:\n    k = 1\n    k +\n" "import std::list\nimport pick\n\nx = std::list::at(\[10, 20, 30\], pick::index())\n" \
+            "fn index() -> int:\n    k = 1\n    k + 6\n" "import std::list\nimport pick\n\nx = std::list::at(\[10, 20, 30\], pick::index())\n" \
+            "" "error Boom\n\nfn always(n: int) -> int errors Boom:\n    if n > 2\n        return n\n    fail Boom\n\nv = always(3):\n    on Boom:\n        0\n" \
+            "" "error Boom\n\nfn always(n: int) -> int errors Boom:\n    if n > 5:\n        return n\n    fail Boom\n\nv = always(3):\n    on Boom:\n        0\n" \
+            "" "import std::compiler\n\nfn helper(n: int):\n    n +\n\nfn need(v: int) -> int:\n    v\n\nfn probe() -> int errors std::compiler::CompilerError:\n    static compile:\n        need(helper(1))\n\nr = probe():\n    on std::compiler::CompilerError:\n        0\n"] {
+        if {$pick ne ""} {
+            sr::Put $dir/pick.bot $pick
+        }
+        sr::Put $dir/main.bot $main
+        lassign [sr::Analyze $dir/main.bot] ws rev
+        lappend out [lmap d [sr::Brief $rev] {lindex $d 0}] [expr {[dict exists [service::hir $rev] staticSites]}]
+        service::closeWorkspace $ws
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir out pick main ws rev} -result {{{SURFACE SYNTAX}} 0 {{CORE SEMANTIC KNOWN-ERROR}} 0 {{SURFACE SYNTAX}} 0 {{CORE SEMANTIC KNOWN-ERROR}} 0 {{SURFACE SYNTAX}} 0}
+
+test sr-hole-is-poison-not-divergence {a hole is no value and no divergence: what follows it stays reachable and is checked (an independent error after it is reported), its value is poison, and nothing consuming it is typed} -body {
+    set hir [surface::readProgramFile [sr::Put [sr::Dir poison]/main.bot "x = foo(\ny = x + 1\nz = 1 + nosuch\n"] \
+        -strict 0 -recover-syntax 1 -cache "" -warnings off]
+    set holes [lmap e [hir::walk $hir] {if {[dict exists $hir exprs $e hole]} {set e} else continue}]
+    list [llength $holes] [hir::types::Poisoned $hir [lindex $holes 0]] [hir::types::Halts $hir [lindex $holes 0] never] \
+        [lmap d [hir::recovery::reported $hir] {dict get $d kind}] [dict get $hir syntaxRecovery taintedFiles]
+} -cleanup {unset -nocomplain hir holes} -result {1 1 0 UNBOUND {}}
+
+test sr-analysis-claims-nothing {the analysis itself, not only what is reported, claims no outcome of a hole: a function whose body holds one is not proven to fail or never to complete (no KNOWN-ERROR among all the HIR's diagnostics)} -body {
+    set hir [surface::readProgramFile [sr::Put [sr::Dir claims]/main.bot "error Boom\n\nfn f() -> int errors Boom:\n    k = 1 +\n    k\n\nfn g() -> int errors Boom:\n    if true\n        fail Boom\n    1\n\nv = f():\n    on Boom:\n        0\nw = g():\n    on Boom:\n        0\n"] \
+        -strict 0 -recover-syntax 1 -cache "" -warnings off]
+    lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]
+} -cleanup {unset -nocomplain hir} -result SYNTAX-HOLE
+
+test sr-method-candidates {a method-style call in a file importing a module whose malformed top-level line may define its function is not reported unresolved; in a file that imports no such module it is} -body {
+    set dir [sr::Dir methods]
+    sr::Put $dir/text.bot "fn one() -> int:\n    1\n\$\$\n"
+    sr::Put $dir/main.bot "import text\n\nxs = \"ab\"\ny = xs.shout()\n"
+    sr::Put $dir/plain.bot "# imports nothing\n\nxs = \"ab\"\ny = xs.shout()\n"
+    set out {}
+    foreach file {main plain} {
+        lassign [sr::Analyze $dir/$file.bot] ws rev
+        lappend out [lmap d [sr::Brief $rev] {lindex $d 0}] [sr::Fact $rev $dir/$file.bot 4 1]
+        service::closeWorkspace $ws
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev} -result {{{SURFACE SYNTAX} {SURFACE SYNTAX}} {y: -} {{CORE SEMANTIC NOT-A-STRUCT}} {y: -}}
+
+test sr-context-installation {a malformed `with context` may have installed the context a later call needs: that call's MISSING-CONTEXT is not reported, while the program without the line reports it} -body {
+    set dir [sr::Dir context]
+    set program "context struct Clock:\n    ticks: int\n\nfn now(context clock: Clock) -> int:\n    clock.ticks\n\n"
+    sr::Put $dir/broken.bot "${program}with context Clock \{ticks: \nx = now()\n"
+    sr::Put $dir/valid.bot "${program}x = now()\n"
+    set out {}
+    foreach file {broken valid} {
+        lassign [sr::Analyze $dir/$file.bot] ws rev
+        lappend out [lmap d [sr::Brief $rev] {lindex $d 0}]
+        service::closeWorkspace $ws
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir program out file ws rev} -result {{{SURFACE SYNTAX}} {{CORE SEMANTIC MISSING-CONTEXT}}}
+
+test sr-trait-conformance {a module whose malformed top-level line may be the implementation a trait needs: TRAIT-NOT-SATISFIED is not reported for its type, while the module without the line reports it} -body {
+    set dir [sr::Dir trait]
+    set main "import people\n\ntrait Named:\n    fn name(value: Named) -> str\n\nfn describe(value: Named) -> str:\n    value.name()\n\nd = describe(people::Person {value: \"ab\"})\n"
+    sr::Put $dir/main.bot $main
+    set out {}
+    foreach people [list "struct Person:\n    value: str\n\nfn name(value: Person -> str:\n    value.value\n" "struct Person:\n    value: str\n"] {
+        sr::Put $dir/people.bot $people
+        lassign [sr::Analyze $dir/main.bot] ws rev
+        lappend out [lmap d [sr::Brief $rev] {lindex $d 0}]
+        service::closeWorkspace $ws
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir main out people ws rev} -result {{{SURFACE SYNTAX}} {{CORE SEMANTIC TRAIT-NOT-SATISFIED}}}
+
+test sr-header-damage {a malformed import: what the file may name is not known, so a reference to a namespace it does not import is not reported, while references through its well-formed imports are known} -body {
+    set dir [sr::Dir header]
+    sr::Put $dir/main.bot "import std::list\nimport std::\n\nxs = \[1, 2\]\nn = std::list::length(xs)\ns = std::str::length(\"x\")\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    list [sr::Fact $rev $dir/main.bot 5 1] [sr::Fact $rev $dir/main.bot 6 1] [lmap d [sr::Brief $rev] {lindex $d 0}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{n: int} {s: -} {{SURFACE SYNTAX}}}
+
+test sr-type-declaration-damage {a malformed struct declaration: a use of the type it may declare -- an annotation, a construction, in its module or an importer -- is not reported unknown, while an unrelated unbound name is} -body {
+    set dir [sr::Dir types]
+    sr::Put $dir/geo.bot "struct Point:\n    x: int\n    y int\n\nfn origin() -> int:\n    0\n"
+    sr::Put $dir/main.bot "import geo\n\nfn mk(p: geo::Point) -> int:\n    p.x\n\nq = geo::Point {x: 1, y: 2}\no = geo::origin()\nz = nosuch\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    list [sr::Fact $rev $dir/main.bot 6 1] [sr::Fact $rev $dir/main.bot 7 1] [lmap d [sr::Brief $rev] {lindex $d 0}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{q: -} {o: int} {{SURFACE SYNTAX} {CORE SEMANTIC UNBOUND}}}
+
+# ===========================================================================
+# Diagnostics
+
+test sr-diagnostics-syntax-unchanged {every syntax diagnostic is the parser's, unchanged and first -- the entry's, then each module's in load order -- and the first is the one a compilation without recovery raises} -body {
+    set dir [sr::Dir syntaxdiag]
+    sr::Put $dir/a.bot "fn f(n: int) -> int:\n    n +\n"
+    sr::Put $dir/b.bot "fn g() -> int:\n    (1\n"
+    sr::Put $dir/main.bot "import a\nimport b\n\nx = a::f(\ny = nosuch\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    catch {surface::readProgramFile $dir/main.bot -warnings off -cache ""} message options
+    set strict [lindex [dict get $options -diagnostics] 0]
+    set first [lindex [service::diagnostics $rev] 0]
+    list [sr::Brief $rev] [expr {[dict get $first text] eq [dict get $strict message] && [dict get $first record] eq [dict get $strict record]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev message options strict first} -result {{{{SURFACE SYNTAX} main.bot:4:9 {"(" is never closed}} {{SURFACE SYNTAX} a.bot:2:8 {expected an expression, found end of line}} {{SURFACE SYNTAX} b.bot:2:5 {"(" is never closed}} {{CORE SEMANTIC UNBOUND} main.bot:5:5 {unbound name "nosuch"}}} 1}
+
+test sr-diagnostics-independent-and-dependent {independent diagnostics are reported, each as a valid program reports it; a diagnostic whose premise is malformed source is not: an unbound name a malformed statement may bind, a check of code that depends on a malformed function, a reference error into a module a malformed line may extend} -body {
+    set dir [sr::Dir independent]
+    sr::Put $dir/util.bot "fn one() -> int:\n    1\n\$\$\n"
+    sr::Put $dir/main.bot "import util\n\nfn f(a: int) -> int:\n    {p, q} = (\n    later + a\n\nfn broken():\n    1 +\n\nx = broken() + \"s\"\ny = util::two()\nz = 1 + \"t\"\nw = nosuch\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    lmap d [sr::Brief $rev] {lrange $d 0 1}
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{{SURFACE SYNTAX} main.bot:4:14} {{SURFACE SYNTAX} main.bot:8:8} {{SURFACE SYNTAX} util.bot:3:1} {{SURFACE SYNTAX} util.bot:3:2} {{CORE SEMANTIC UNBOUND} main.bot:13:5}}
+
+test sr-diagnostics-deterministic {the same sources give the same diagnostics, in the same order, whatever was analyzed before} -body {
+    set dir [sr::Dir deterministic]
+    sr::Put $dir/util.bot "fn one() -> int:\n    1 +\n"
+    sr::Put $dir/main.bot "import util\nx = util::one(\ny = nosuch\nz = also\n"
+    sr::Put $dir/other.bot "struct T:\n    a: int\nt = T {a: 1}\n"
+    lassign [sr::Analyze $dir/main.bot] ws first
+    service::analyze $ws $dir/other.bot
+    set second [service::analyze $ws $dir/main.bot]
+    expr {[service::diagnostics $first] eq [service::diagnostics $second]}
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws first second} -result 1
+
+# The strict-compiler oracle: without syntax errors, recovery is not there.
+test sr-valid-programs-unchanged {a program without syntax errors compiles to the same HIR, with the same diagnostics and warnings, with recovery requested and without: the examples, a multi-module application and golden suites} -body {
+    set programs [concat [lsort [glob [file join $::projectRoot examples surface *.bot]]] \
+        [list [file join $::projectRoot examples games 2048 demo.bot] [file join $::projectRoot tests golden types.bot] \
+            [file join $::projectRoot tests golden static-compile.bot]]]
+    set differ {}
+    foreach path $programs {
+        set results {}
+        foreach recover {0 1} {
+            if {[catch {surface::readProgramFile $path -strict 0 -recover-syntax $recover -warnings default -warning-channel "" -cache ""} hir]} {
+                lappend results [list error $hir]
+                continue
+            }
+            lappend results [list [hir::format $hir] [hir::recovery::reported $hir] [dict getdef $hir warnings {}] \
+                [dict exists $hir syntaxRecovery]]
+        }
+        if {[lindex $results 0] ne [lindex $results 1]} {
+            lappend differ [file tail $path]
+        }
+    }
+    list [llength $programs] $differ
+} -cleanup {unset -nocomplain programs differ path results recover hir} -result {18 {}}
+
+# ===========================================================================
+# Strict compilation: a program with syntax errors never runs
+
+test sr-strict-unchanged {a compilation still rejects a program with syntax errors with exactly its syntax errors, on every entry point; requested with recovery, a strict compilation raises the syntax errors first, then the independent semantic ones} -body {
+    set dir [sr::Dir strict]
+    set path [sr::Put $dir/main.bot "x = foo(\ny = 1 + \"s\"\nz = nosuch\n"]
+    set out {}
+    foreach command [list [list surface::readProgramFile $path -cache ""] [list surface::readProgramFile $path -strict 0 -cache ""] \
+            [list surface::compile [core::ReadFile $path] $path -strict 0]] {
+        catch $command message options
+        lappend out [lrange [dict get $options -errorcode] 0 1] [llength [dict get $options -diagnostics]]
+    }
+    catch {surface::readProgramFile $path -cache "" -recover-syntax 1} message options
+    lappend out [lmap entry [dict get $options -diagnostics] {list [dict get $entry location line]:[dict get $entry location column] [core::ShownCode $entry]}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path out command message options entry} -result {{SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {{1:8 {SURFACE SYNTAX}} {3:5 {CORE SEMANTIC UNBOUND}}}}
+
+test sr-backends-refuse {every backend entry point refuses a recovered HIR (HIR SYNTAX-RECOVERED), read back from interchange text too: it analyzes a program with syntax errors and is never compiled or run} -body {
+    set dir [sr::Dir backends]
+    set hir [surface::readProgramFile [sr::Put $dir/main.bot "fn f(a: int) -> int:\n    a +\nx = f(1)\n"] \
+        -strict 0 -recover-syntax 1 -cache "" -warnings off]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    set out {}
+    foreach h [list $hir $decoded] {
+        foreach command {{hir::lower $h} {core::compiler::compileHir $h} {native::prepareHir $h}} {
+            lappend out [catch $command message options] [dict get $options -errorcode]
+        }
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir hir decoded out h command message options} -result {1 {HIR SYNTAX-RECOVERED} 1 {HIR SYNTAX-RECOVERED} 1 {HIR SYNTAX-RECOVERED} 1 {HIR SYNTAX-RECOVERED} 1 {HIR SYNTAX-RECOVERED} 1 {HIR SYNTAX-RECOVERED}}
+
+test sr-main-never-runs {main.tcl rejects a program with syntax errors on every backend with its syntax errors alone, runs nothing, and -check reports the independent semantic errors too, the syntax errors first} -body {
+    set dir [sr::Dir main]
+    set path [sr::Put $dir/main.bot "fn f(a: int) -> int:\n    a +\n\nprint = 1\nx = nosuch\n"]
+    set out {}
+    foreach backend {interp compile cranelift} {
+        set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend $backend -warnings off $path 2>@1} output]
+        lappend out $status [regexp -all {error: } $output] [string match "*value:*" $output]
+    }
+    catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -check -warnings off $path 2>@1} output
+    lappend out [regexp -all -inline {\((?:SURFACE|CORE) [A-Z ]+\)} $output]
+} -cleanup {file delete -force $dir; unset -nocomplain dir path out backend status output} -result {1 1 0 1 1 0 1 1 0 {{(SURFACE SYNTAX)} {(CORE SEMANTIC UNBOUND)}}}
+
+test sr-cache-never-stores {a compilation with syntax errors is never kept in the front-end cache; fixed, the program is compiled and kept as ever} -body {
+    set dir [sr::Dir cache]
+    set cache [file join $dir cache]
+    set path [sr::Put $dir/main.bot "x = foo(\n"]
+    surface::readProgramFile $path -strict 0 -recover-syntax 1 -cache $cache -warnings off
+    set broken [llength [glob -nocomplain -directory $cache -types f *]]
+    sr::Put $path "x = 1\n"
+    surface::readProgramFile $path -strict 0 -recover-syntax 1 -cache $cache -warnings off
+    list $broken [expr {[llength [glob -nocomplain -directory $cache -types f *]] > 0}]
+} -cleanup {file delete -force $dir; unset -nocomplain dir cache path broken} -result {0 1}
+
+# ===========================================================================
+# The compiler service
+
+test sr-service-outcomes {a revision with syntax errors is a syntax outcome, never ok, with a partial HIR; with a module that also fails to load, it has no HIR and both kinds of error, the syntax errors first} -body {
+    set dir [sr::Dir outcomes]
+    sr::Put $dir/a.bot "x = 1 +\n"
+    sr::Put $dir/b.bot "import nosuch\nx = 1 +\n"
+    set out {}
+    foreach file {a b} {
+        lassign [sr::Analyze $dir/$file.bot] ws rev
+        set summary [service::revision $rev]
+        lappend out [dict get $summary outcome] [dict get $summary semantics] [dict get $summary hir] \
+            [lmap d [sr::Brief $rev] {lindex $d 0}]
+        service::closeWorkspace $ws
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev summary} -result {syntax partial 1 {{SURFACE SYNTAX}} syntax none 0 {{SURFACE SYNTAX} {SURFACE MODULE UNKNOWN-NAMESPACE}}}
+
+test sr-service-hole-facts {in malformed source a query names why it has no fact; a name whose binding a malformed statement may change has no binding, no definition and is in no binding's references; a recovered binding's definition is its name} -body {
+    set dir [sr::Dir holefacts]
+    sr::Put $dir/main.bot "fn helper(n: int) -> int:\n    n\n\nfn f(a: int) -> int:\n    {p, q} = (\n    helper(a)\n\nt = helper(1) +\nu = helper(2)\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    set path $dir/main.bot
+    set hole [service::at $rev $path 8 15]
+    set dependent [service::at $rev $path 6 5]
+    set t [service::at $rev $path 8 1]
+    set references [lmap r [dict get [service::at $rev $path 1 4] references] {dict get $r line}]
+    list [dict get $hole unavailable binding] [lsort [dict keys [dict get $dependent unavailable]]] $references \
+        [dict get $t binding name] [dict get $t definition line]:[dict get $t definition column]-[dict get $t definition endColumn] \
+        [dict get $t unavailable type]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path hole dependent t references} -result {{malformed source: no meaning is known for it (its syntax error says why)} {binding definition hover references type} 9 t 8:1-2 {its value is not known: it depends on malformed source or on a construct a diagnostic rejects}}
+
+test sr-service-export-import {a partial revision exported and imported (the language server's worker) answers every query, and reports every diagnostic, exactly as the original} -body {
+    set dir [sr::Dir export]
+    sr::Put $dir/util.bot "fn one() -> int:\n    1 +\n\nfn two() -> int:\n    2\n"
+    sr::Put $dir/main.bot "import util\n\nfn f(n: int) -> int:\n    {p, q} = (\n    util::two() + later\n\na = util::one()\nb = util::two()\nc = b +\nd = nosuch\n"
+    lassign [sr::Analyze $dir/main.bot] ws rev
+    set ws2 [service::workspace -warnings off -cache ""]
+    set imported [service::import $ws2 [service::export $rev -derived 1]]
+    set all {}
+    foreach r [list $rev $imported] {
+        set facts {}
+        dict for {path observation} [dict get [service::revision $r] sources] {
+            if {![dict get $observation read] || [string match *stdlib* $path]} continue
+            set lines [split [service::sourceText $r $path] \n]
+            for {set l 1} {$l <= [llength $lines]} {incr l} {
+                for {set c 1} {$c <= [string length [lindex $lines $l-1]] + 1} {incr c} {
+                    lappend facts [dict remove [service::at $r $path $l $c] revision]
+                }
+            }
+        }
+        lappend all [list [dict remove [service::revision $r] id workspace] [service::diagnostics $r] $facts]
+    }
+    list [dict get [service::revision $imported] semantics] [expr {[lindex $all 0] eq [lindex $all 1]}]
+} -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain dir ws rev ws2 imported all r facts path observation lines l c} -result {partial 1}
+
+test sr-service-isolation {partial and full revisions of programs with conflicting declarations, analyzed in any order, each answer from their own declarations} -body {
+    set dir [sr::Dir isolation]
+    sr::Put $dir/a/main.bot "struct Point:\n    x: int\n\np = Point {x: 1}\nq = p.x\nr = q +\n"
+    sr::Put $dir/b/main.bot "struct Point:\n    x: str\n\np = Point {x: \"s\"}\nq = p.x\n"
+    set ws [service::workspace -warnings off -cache ""]
+    set a [service::analyze $ws $dir/a/main.bot]
+    set b [service::analyze $ws $dir/b/main.bot]
+    set out {}
+    foreach rev [list $a $b $a $b] path [list $dir/a/main.bot $dir/b/main.bot $dir/a/main.bot $dir/b/main.bot] {
+        lappend out [dict get [service::at $rev $path 5 7] type text] [dict get [service::revision $rev] semantics]
+    }
+    set out
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws a b out rev path} -result {int partial str full int partial str full}
+
+cleanupTests

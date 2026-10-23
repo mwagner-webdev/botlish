@@ -589,7 +589,10 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
 # kind the compiler's front end (hir/*.tcl, surface/modules.tcl) can name, by
 # class. `recoverable` is exactly the code table; the others are never a
-# static block's rejection, each for its reason. Any other upper-case kind
+# static block's rejection, each for its reason (`syntax-recovery`: a
+# program with a syntax error has no static decision -- its blocks are holes
+# -- and SYNTAX-HOLE is never reported; SYNTAX-RECOVERED is a backend's
+# refusal of such a HIR, SYNTAX-RECOVERY-MILESTONE-1.md). Any other upper-case kind
 # token in that code is a new, unclassified kind: classify it (and give it a
 # case if a block can produce it).
 set scCensus {
@@ -609,6 +612,7 @@ set scCensus {
         ANONYMOUS-ENUM TRAIT-EMPTY TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT TRAIT-REQUIREMENT-BODY
         TRAIT-NESTED MALFORMED-VARIADIC-SECTION}
     runtime {NOT-CALLABLE NOT-BOOLEAN}
+    syntax-recovery {SYNTAX-HOLE SYNTAX-RECOVERED}
     other {MODULE-BINDINGS C-ABI-TYPES DIRECT-MODULES A-Z A-Z0-9}
 }
 

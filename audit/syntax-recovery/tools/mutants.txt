@@ -1,0 +1,434 @@
+# mutants.txt -- the syntax-recovery mutants (tools/mutate.tcl;
+# SYNTAX-RECOVERY-MILESTONE-1.md, "Mutation testing").
+#
+# Format: "@@ NAME DESCRIPTION" starts a mutant; "%% FILE ?PATTERN...?"
+# names the test file that states its rule (tests/syntax-recovery.test when
+# absent) and the tests of it that state it (tcltest -match patterns; every
+# test when absent); "## FILE" names the file its next edits change; each
+# edit is "<<<<", the exact text to replace (occurring once), "====", its
+# replacement, ">>>>". Update a mutant's text when the code it mutates
+# changes, keeping it a mutant of the same rule.
+
+
+@@ no-recovery the service analyzes without recovery: any syntax error leaves the revision no HIR (the behavior before the milestone)
+## service/service.tcl
+<<<<
+        set hir [surface::readProgramFile $path -strict 0 -warnings $collect -recover-syntax 1 \
+====
+        set hir [surface::readProgramFile $path -strict 0 -warnings $collect -recover-syntax 0 \
+>>>>
+
+@@ module-error-erases a syntax error in an imported module ends the analysis: every importer loses its semantics
+## surface/modules.tcl
+<<<<
+    if {[dict get $state recover]} {
+        set ast [ParseModule $path state]
+    } else {
+====
+    if {0} {
+        set ast [ParseModule $path state]
+    } else {
+>>>>
+
+@@ hole-is-unit a malformed statement or value is `unit`: a value nobody wrote, with a type
+## hir/syntax.tcl
+<<<<
+    return [Node ref $origin name syntax#hole root 0 hole [dict create binds $binds installs $installs]]
+====
+    return [Node ref $origin name unit root 1]
+>>>>
+
+@@ hole-is-never a hole is `never` and diverges: what follows it is unreachable, and its function is proven never to complete
+## hir/types.tcl
+<<<<
+            if {[dict exists $node hole] && ![dict exists $ctx spec]} {
+                # Source the front end could not read
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): an unknown value --
+                # poison, never a divergence.
+                return [SetType hir $e [Poison hir $e]]
+            }
+====
+            if {[dict exists $node hole] && ![dict exists $ctx spec]} {
+                return [SetType hir $e never]
+            }
+>>>>
+## hir/completions.tcl
+<<<<
+            if {[dict exists $node hole] || [dict exists $hir syntaxDependent $e]} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): it may complete with any
+                # value; nothing proves it fails or what it raises.
+                set r [hir::range::unknown]
+====
+            if {[dict exists $hir syntaxDependent $e]} {
+                set r [hir::range::unknown]
+>>>>
+
+@@ missing-result-inferred a function whose body holds a hole and declares no result is typed by the rest of its body: what the malformed line returns is taken to be nothing
+## hir/types.tcl
+<<<<
+            || ($declared eq {} && [dict exists $hir holeBlocks $e] && ![dict exists $outer spec])} {
+====
+            || 0} {
+>>>>
+
+@@ instance-of-incomplete-body a call of a function whose body holds a hole is typed by a semantic instance of that body, narrower than its declared result
+## hir/types.tcl
+<<<<
+                if {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])
+                        && ![dict exists $hir holeBlocks $block]} {
+====
+                if {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])} {
+>>>>
+
+@@ static-decided a static block is decided in a program with syntax errors: the decision reads an analysis of what nobody wrote
+## surface/modules.tcl
+<<<<
+        lassign [Recovery $state $nodes $sections] nodes sections recovery
+====
+        lassign [Recovery $state $nodes $sections] - - recovery
+>>>>
+
+@@ no-binding-holes a malformed statement binds nothing: a later unbound name it may bind is reported, a name it may shadow keeps its outer binding
+## hir/resolve.tcl
+<<<<
+    if {![dict exists $hir bindingHoles]} {
+        return 0
+    }
+    set own
+====
+    if {1} {
+        return 0
+    }
+    set own
+>>>>
+
+@@ own-scope-shadowable a binding of the hole's own scope is taken to be shadowable: the function's own locals after a malformed statement lose their binding
+## hir/resolve.tcl
+<<<<
+    for {} {$s ne "" && $s ne $own} {set s [dict get $hir scopes $s parent]} {
+====
+    for {} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
+>>>>
+
+@@ dependent-binding-guessed a name whose binding a malformed statement may change keeps the binding resolution found: hover, definition and references guess
+## service/service.tcl
+<<<<
+    if {$e ne "" && [dict exists $hir syntaxDependent $e] && [dict get $hir exprs $e kind] eq "ref"} {
+        # Which binding the name denotes depends on malformed source
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): never a guess.
+        set binding ""
+    }
+====
+    if {0} {
+        set binding ""
+    }
+>>>>
+
+@@ references-include-dependent a name whose binding is not known is listed among a binding's references
+## service/service.tcl
+<<<<
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""
+                && ![dict exists $hir syntaxDependent $e]} {
+====
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""} {
+>>>>
+
+@@ hole-diagnostic-reported a hole reports a semantic diagnostic of its own besides its syntax error
+## hir/recovery.tcl
+<<<<
+        if {[dict get $d kind] eq "SYNTAX-HOLE"} {
+            # A hole's error is its syntax diagnostic, reported by the parser
+            # (SYNTAX-RECOVERY-MILESTONE-1.md).
+            continue
+        }
+====
+        if {0} {
+            continue
+        }
+>>>>
+
+@@ dependent-units-reported a unit that refers to a binding a hole's unit declares is not tainted: its checks' diagnostics, which depend on the incomplete body, are reported
+## hir/recovery.tcl
+<<<<
+        if {$d ni $resolution} {
+            set e [dict getdef $d expr ""]
+====
+        if {$d ni $resolution && [dict get $d kind] in {}} {
+            set e [dict getdef $d expr ""]
+>>>>
+
+@@ independent-suppressed a program with syntax errors reports no semantic diagnostic: an independent error is hidden with the dependent ones
+## service/service.tcl
+<<<<
+        set errors [concat [dict get $hir syntaxRecovery diagnostics] $errors]
+====
+        set errors [dict get $hir syntaxRecovery diagnostics]
+>>>>
+
+@@ installs-ignored a malformed `with context` is taken to install nothing: a later call is reported missing the context it may have installed
+## hir/recovery.tcl
+<<<<
+        } elseif {[dict exists $hir exprs $root hole] && [dict get $hir exprs $root hole installs]} {
+====
+        } elseif {0} {
+>>>>
+
+@@ conformance-ignored a module's malformed top-level line is taken not to be the implementation a trait needs: TRAIT-NOT-SATISFIED is reported
+## hir/recovery.tcl
+<<<<
+    variable conformanceKinds {TRAIT-NOT-SATISFIED MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+====
+    variable conformanceKinds {}
+>>>>
+
+@@ types-known a malformed declaration is taken to declare no type: a use of the type it may declare is reported unknown
+## hir/recovery.tcl
+<<<<
+    set typeFiles [dict get $hir syntaxRecovery typeFiles]
+    set tainted
+====
+    set typeFiles {}
+    set tainted
+>>>>
+
+@@ members-known a module's members are taken to be its well-formed declarations: a member its malformed line may declare is reported missing
+## surface/modules.tcl
+<<<<
+    if {$kind eq "UNKNOWN-SYMBOL" && [dict exists $state open $ns]} {
+====
+    if {0} {
+>>>>
+
+@@ header-known a malformed import is taken to import nothing: a reference to a namespace it may import is reported
+## surface/recover.tcl
+<<<<
+        if {[dict get $region header]} {
+            set header 1
+            continue
+        }
+====
+        if {[dict get $region header]} {
+            continue
+        }
+>>>>
+
+@@ methods-known a module's malformed top-level line is taken to define no function: a method-style call it may serve is reported unresolved
+## surface/modules.tcl
+<<<<
+                if {[dict exists $open $ns] && [dict get $open $ns values]} {
+                    # (Its functions are method candidates here: IMPORTS.md.)
+                    set methods 1
+                }
+====
+                if {0} {
+                    set methods 1
+                }
+>>>>
+
+@@ lexical-damage-ignored only a statement the parser failed on is malformed: a statement it read from text the lexer altered (a closed bracket, a cut string) is analyzed as written
+## surface/recover.tcl
+<<<<
+    lappend points {*}[dict get $damage lexical]
+    foreach at
+====
+    foreach at
+>>>>
+
+@@ prefix-past-damage a malformed statement's form is read from all its tokens, the ones after the damage included
+## surface/recover.tcl
+<<<<
+        if {$e <= $at} {
+            lappend prefix $token
+====
+        if {1} {
+            lappend prefix $token
+>>>>
+
+@@ swallowed-lines-ignored a malformed region that swallowed the next statement is taken to bind only what its prefix states
+## surface/recover.tcl
+<<<<
+            if {[dict get $token span column] <= $column && [dict get $token kind] ni {elif else}} {
+                return 1
+            }
+====
+            if {0} {
+                return 1
+            }
+>>>>
+
+@@ name-is-statement a recovered binding's declaration is its whole malformed statement, not its name
+## surface/lower.tcl
+<<<<
+        lappend result [hir::syntax::bindNode [Origin [dict get $node nameSpan] [dict get $node id]] [dict get $node name] \
+====
+        lappend result [hir::syntax::bindNode [OriginOf $node] [dict get $node name] \
+>>>>
+
+@@ syntax-revision-ok the service reports a revision with syntax errors by its HIR: ok or semantic, never syntax
+## service/service.tcl
+<<<<
+    if {[dict exists $hir syntaxRecovery]} {
+        dict set revision outcome syntax
+    } elseif {$errors ne {}} {
+====
+    if {0} {
+        dict set revision outcome syntax
+    } elseif {$errors ne {}} {
+>>>>
+
+@@ backend-accepts a backend compiles a recovered HIR: a program with syntax errors runs
+## hir/recovery.tcl
+<<<<
+    if {[dict exists $hir syntaxRecovery]} {
+        # A program with syntax errors analyzed past them
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): an analysis, never a program.
+        throw
+====
+    if {0} {
+        throw
+>>>>
+
+@@ strict-recovered-accepted a strict compilation asked to recover returns the recovered HIR: it raises only the semantic errors, not the syntax ones
+## surface/lower.tcl
+<<<<
+    if {$strict && [dict exists $hir syntaxRecovery]} {
+====
+    if {0} {
+>>>>
+
+@@ cache-keeps-recovered the front-end cache keeps a compilation with syntax errors
+## surface/modules.tcl
+<<<<
+    if {![dict exists $hir syntaxRecovery]} {
+        # (A program with syntax errors is never kept: it is no compilation.)
+====
+    if {1} {
+>>>>
+
+@@ export-omits-syntax an exported revision leaves out its syntax diagnostics: the worker's revision reports only the semantic ones
+## service/service.tcl
+<<<<
+    foreach key {entry outcome semantics errors warnings failure config sources} {
+        dict set body $key [dict get $revision $key]
+    }
+====
+    foreach key {entry outcome semantics errors warnings failure config sources} {
+        dict set body $key [dict get $revision $key]
+    }
+    dict set body errors [lmap e [dict get $body errors] {if {[dict get $e code] eq {SURFACE SYNTAX}} continue; set e}]
+>>>>
+
+@@ import-loses-markers an imported revision loses its recovery markers: names whose binding is not known, and the incomplete functions
+## service/service.tcl
+<<<<
+    if {$hir ne ""} {
+        set hir [hir::interchange::decode $hir]
+    }
+    dict set revision hir $hir
+====
+    if {$hir ne ""} {
+        set hir [hir::interchange::decode $hir]
+        dict unset hir syntaxDependent
+        dict unset hir holeBlocks
+    }
+    dict set revision hir $hir
+>>>>
+
+@@ partial-not-activated a partial revision's queries read whatever declarations the last compilation left
+## service/service.tcl
+<<<<
+    set hir [QueryHir $revision]
+    if {$hir ne ""} {
+        hir::activate $hir
+    }
+====
+    set hir [QueryHir $revision]
+    if {$hir ne "" && ![dict exists $hir syntaxRecovery]} {
+        hir::activate $hir
+    }
+>>>>
+
+@@ signature-unmarked a function whose body holds a hole shows a signature it does not fully declare: an unannotated parameter reads as unconstrained, an undeclared result as what the rest of the body returns
+## service/service.tcl
+<<<<
+        if {[dict exists $hir holeBlocks $block]
+                && ([dict get $hir exprs $block declaredResult] eq {} || {} in [dict get $hir exprs $block declaredParamTypes])} {
+====
+        if {0} {
+>>>>
+
+@@ lsp-prefers-stale the language server answers from the last revision of the program as written before the current partial one: fresh answers come marked stale
+%% tests/lsp.test lsp-lang-recovery-session lsp-lang-session
+## lsp/server.tcl
+<<<<
+    foreach rev [list [dict get $record latest] [dict get $record good]] {
+        if {$rev ne "" && $rev ni $candidates && [dict get [RevInfo $rev] hir]} {
+====
+    foreach rev [list [dict get $record good] [dict get $record latest]] {
+        if {$rev ne "" && $rev ni $candidates && [dict get [RevInfo $rev] hir]} {
+>>>>
+
+@@ lsp-partial-is-good the language server's fallback is its latest revision with any HIR, a partial one included: where the current analysis knows nothing, nothing answers
+%% tests/lsp.test lsp-lang-recovery-session
+## lsp/server.tcl
+<<<<
+            if {[dict get [RevInfo $payload] semantics] eq "full"} {
+====
+            if {[dict get [RevInfo $payload] hir]} {
+>>>>
+
+@@ range-hole-never the range analysis takes a hole for no value at all: a function whose body holds one is proven never to complete, and what that proves about its result is believed
+## hir/range.tcl
+<<<<
+            if {[dict exists $node hole] || [dict exists $hir syntaxDependent $e]} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): a value, but none known.
+====
+            if {0} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): a value, but none known.
+>>>>
+
+@@ completion-hole-never the completion analysis takes a hole for no completion at all: a function whose body holds one is proven never to complete normally, or never to raise
+## hir/completions.tcl
+<<<<
+            if {[dict exists $node hole] || [dict exists $hir syntaxDependent $e]} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): it may complete with any
+====
+            if {0} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): it may complete with any
+>>>>
+
+@@ declaration-is-valid a malformed declaration's name is bound to a valid value (unit): importers and later code see a binding with a type nobody wrote
+## surface/lower.tcl
+<<<<
+            [hir::syntax::holeNode [Origin [dict get $node valueSpan] [dict get $node id]/value] 0]]
+====
+            [hir::syntax::rootRef [Origin [dict get $node valueSpan] [dict get $node id]/value] unit]]
+>>>>
+
+@@ identity-of-keyword a malformed function header's name is located at its `fn` keyword: the recovered declaration takes another token's source identity
+## surface/recover.tcl
+<<<<
+            set nameSpan [dict get [lindex $prefix $i+1] span]
+====
+            set nameSpan [dict get [lindex $prefix $i] span]
+>>>>
+
+@@ definition-by-spelling a name whose binding a malformed statement may change is navigated by its spelling: the last binding of that name in the program answers
+## service/service.tcl
+<<<<
+        # Which binding the name denotes depends on malformed source
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): never a guess.
+        set binding ""
+====
+        # Which binding the name denotes depends on malformed source
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): never a guess.
+        set binding ""
+        dict for {b -} [dict get $hir bindings] {
+            if {[dict get $hir bindings $b name] eq [dict get $hir exprs $e name]} { set binding $b }
+        }
+>>>>

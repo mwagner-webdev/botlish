@@ -75,8 +75,13 @@
 # malformed construct inside it makes), `skipped` those of the diagnostics
 # whose recovery removed source text from the token stream (an unexpected
 # character, the rest of an unterminated string's line: a bracket left open
-# around one is not reported at all), and `synthetic` the
-# start offsets of the zero-width closers it inserted.
+# around one is not reported at all), `synthetic` the
+# start offsets of the zero-width closers it inserted, and `indentation` the
+# indices of the layout diagnostics (a tab, an inconsistent dedent): guesses
+# about which block a line belongs to, and `unclosed` those of the brackets
+# never closed (the opener is what was written; what follows it is the
+# guess), which syntax recovery weighs (surface/recover.tcl,
+# SYNTAX-RECOVERY-MILESTONE-1.md).
 
 namespace eval surface::lexer {
     variable keywords {fn if elif else loop return break continue true false unit and or not type \
@@ -115,6 +120,8 @@ proc surface::lexer::tokenize {source file} {
     set structural {}
     set skipped {}
     set synthetic {}
+    set indentation {}
+    set unclosed {}
     # Where an unterminated literal started: its line's rest, closers
     # included, is in it.
     set absorbing {}
@@ -163,6 +170,7 @@ proc surface::lexer::tokenize {source file} {
                 continue
             }
             if {$tab >= 0} {
+                lappend indentation [llength $diagnostics]
                 Report diagnostics $file $tab $line $lineStart 1 "tab used for indentation"
             }
             set width [expr {$j - $i}]
@@ -176,6 +184,7 @@ proc surface::lexer::tokenize {source file} {
                     lappend tokens [Token DEDENT "" "" $here]
                 }
                 if {$width != [lindex $indents end]} {
+                    lappend indentation [llength $diagnostics]
                     Report diagnostics $file $j $line $lineStart 0 \
                         "inconsistent dedent: indentation does not match any enclosing level"
                 }
@@ -206,6 +215,7 @@ proc surface::lexer::tokenize {source file} {
                         lassign $bracket opener span
                         if {![Absorbed $absorbing $span]} {
                             lappend structural [llength $diagnostics]
+                            lappend unclosed [llength $diagnostics]
                             lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
                         }
                         lappend tokens [Token [Closer $opener] "" "" $here]
@@ -393,6 +403,7 @@ proc surface::lexer::tokenize {source file} {
         lassign $bracket opener span
         if {![Absorbed $absorbing $span]} {
             lappend structural [llength $diagnostics]
+            lappend unclosed [llength $diagnostics]
             lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
         }
         lappend tokens [Token [Closer $opener] "" "" $here]
@@ -406,7 +417,7 @@ proc surface::lexer::tokenize {source file} {
     }
     lappend tokens [Token EOF "" "" $here]
     return [dict create tokens $tokens diagnostics $diagnostics structural $structural \
-        skipped $skipped synthetic $synthetic]
+        skipped $skipped synthetic $synthetic indentation $indentation unclosed $unclosed]
 }
 
 # True if the physical line starting at offset START cannot continue an
