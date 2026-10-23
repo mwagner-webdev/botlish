@@ -86,11 +86,12 @@
         set normal $text
 >>>>
 
-@@ overlay-ignored an open document's text never reaches the compiler: analyses read the disk instead of the editor's buffer
-%% tests/lsp.test lsp-lang-overlay lsp-lang-loader-error
+@@ overlay-ignored an open document's text never reaches the compiler, in the server's workspace or the worker's: analyses read the disk instead of the editor's buffer
+%% tests/lsp.test lsp-lang-overlay lsp-lang-loader-error lsp-lang-schedulers-agree
 ## lsp/server.tcl
 <<<<
     service::setDocument $workspace $path $text -version $gen/$version
+    lsp::scheduler::document $scheduler $path [dict create text $text version $gen/$version]
 ====
 >>>>
 
@@ -270,7 +271,7 @@
 >>>>
 
 @@ worker-not-killed a superseded worker is not killed: its process lives on beside its replacement
-%% tests/lsp.test lsp-sched-superseded lsp-sched-shutdown-outstanding
+%% tests/lsp.test lsp-sched-superseded lsp-sched-supersede-responsive lsp-sched-shutdown-outstanding
 ## lsp/scheduler.tcl
 <<<<
             catch {exec kill -KILL {*}$pids}

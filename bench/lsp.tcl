@@ -43,7 +43,7 @@ foreach {option value} $argv {
 expr {srand([dict get $options -seed])}
 
 set workloads [dict create \
-    csv [dict create dir examples/stdlib entry csv.bot module csv.bot old {return ""} new {return "" + ""}] \
+    csv [dict create dir examples/stdlib entry csv.bot module csv.bot old {return ""} new {return "" + ""} at {98 10}] \
     2048 [dict create dir examples/games/2048 entry demo.bot module game2048.bot \
         old {scores.get(i, 0) + from(i + 1)} new {scores.get(i, 0) + from(i + 1) + 0}] \
     icy [dict create dir examples/games/icy-tower entry headless.bot module tower.bot \
@@ -147,7 +147,11 @@ proc session {name scheduler} {
     if {[string first [dict get $w old] $moduleText] < 0} {
         error "$name: the edit's text is not in [dict get $w module]"
     }
-    set entryAt [position $entryText]
+    if {[dict exists $w at]} {
+        set entryAt [dict get $w at]
+    } else {
+        set entryAt [position $entryText]
+    }
     set moduleAt [position $moduleText 1]
     set stats [file join [file tempdir lspbench] stats.txt]
     array set samples {server {} worker {}}
@@ -218,6 +222,9 @@ proc session {name scheduler} {
     set final [list [brief [lspc::published $c $entry]] [brief [lspc::published $c $module]]]
     set end [lspc::stop $c]
     set report [readFile $stats]
+    if {[info exists ::env(BOTLISH_LSP_BENCH_DEBUG)]} {
+        puts stderr "$name $scheduler: [dict get $report longest]"
+    }
     file delete -force [file dirname $stats]
     set counters [dict get $report counters]
     set totals [dict get $report totals]
@@ -296,7 +303,7 @@ foreach r $results {
     lappend lines "| [dict get $r workload] | [dict get $r scheduler] | [fmt [median $e]] | [fmt [percentile $e 95]] | [fmt [percentile $e 99]] | [fmt [percentile $e 100]] | [fmt [median $i]] | [fmt [percentile $i 95]] | [fmt [percentile $i 100]] |"
 }
 lappend lines "" "## Diagnostics, event loop and analysis work" "" \
-    "| workload | scheduler | first diagnostics (ms) | last edit to its diagnostics (ms) | longest callback (ms) | analyses run | killed (ms of their work) | superseded versions published |" \
+    "| workload | scheduler | first diagnostics (ms) | last edit to its diagnostics (ms) | longest callback (ms) | analyses run | killed (ms of their work) | intermediate versions published |" \
     "|---|---|---:|---:|---:|---:|---:|---:|"
 foreach r $results {
     set longest [lindex [dict get $r longest] 0]
@@ -310,7 +317,8 @@ lappend lines "" "## Worker, transfer and memory" "" \
     "| workload | scheduler | server start (ms) | worker starts | worker start to hello (ms, mean) | analysis in the worker (ms, mean) | import (ms, mean) | transferred (KiB, mean) | server RSS max (MiB) | worker RSS max (MiB) | processes |" \
     "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 foreach r $results {
-    set imports [expr {[dict get $r scheduler] eq "worker" ? max(1, [dict get $r analyses] - [dict get $r killed]) : 0}]
+    # (A killed analysis never returns: every analysis counted was imported.)
+    set imports [expr {[dict get $r scheduler] eq "worker" ? max(1, [dict get $r analyses]) : 0}]
     set starts [dict get $r workerStarts]
     lappend lines "| [dict get $r workload] | [dict get $r scheduler] | [dict get $r startup] | $starts | [expr {$starts ? [fmt [expr {[dict get $r workerStartMs] / $starts}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r workerAnalysisMs] / double($imports)}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importMs] / $imports}] 1] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importBytes] / 1024.0 / $imports}]] : "-"}] | [fmt [tcl::mathfunc::max 0 {*}[dict get $r serverRss]]] | [expr {[dict get $r workerRss] eq {} ? "-" : [fmt [tcl::mathfunc::max {*}[dict get $r workerRss]]]}] | [expr {[dict get $r scheduler] eq "worker" ? 2 : 1}] |"
 }

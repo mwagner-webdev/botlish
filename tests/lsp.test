@@ -900,7 +900,7 @@ proc lt::Timed {script} {
 }
 
 foreach scheduler {worker sync} {
-    test lsp-sched-rapid-versions-$scheduler "rapid successive versions ($scheduler scheduler): intermediate versions are skipped, not analyzed; versions are published in order; the last version's diagnostics are the ones that stay" -body {
+    test lsp-sched-rapid-versions-$scheduler "rapid successive versions ($scheduler scheduler): intermediate versions are skipped, not analyzed; versions are published in order; the last version's diagnostics are the ones that stay; and the server keeps no more than a program's two revisions" -body {
         set dir [lt::Project rapid-$scheduler]
         set stats [file join $dir stats.txt]
         set c [lt::Start -scheduler $scheduler -env [list BOTLISH_LSP_STATS $stats]]
@@ -911,13 +911,19 @@ foreach scheduler {worker sync} {
             lspc::didChange $c $main $v [expr {$v % 2 ? $::ltMain : "$::ltMain\nnosuch$v\n"}]
         }
         set last [lt::Diagnostics $c $main 13]
+        # Then versions analyzed one by one: each newer revision releases
+        # what it replaces.
+        for {set v 14} {$v <= 17} {incr v} {
+            lspc::didChange $c $main $v "$::ltMain\n# $v\n"
+            lt::Diagnostics $c $main $v
+        }
         set versions [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {
             if {[lsp::json::get $p uri] ne [list str $main]} continue
             lsp::json::integer [lsp::json::get $p version]
         }]
         set status [lt::Stop $c]
         set counters [dict get [lt::Stats $stats] counters]
-        list $last [expr {$versions eq [lsort -integer -unique $versions]}] [expr {[dict get $counters submitted] < 13}] \
+        list $last [expr {$versions eq [lsort -integer -unique $versions]}] [expr {[dict get $counters submitted] < 17}] \
             [expr {[dict get $counters liveRevisions] <= 2}] $status
     } -cleanup {file delete -force $dir; unset -nocomplain dir stats c main v last versions status counters} -result {{} 1 1 1 0}
 }
@@ -1066,19 +1072,25 @@ test lsp-sched-close-pending {closing a document while its analysis is pending: 
 } -cleanup {file delete -force $dir; unset -nocomplain dir c main} -result {{} -32601 0}
 
 
-test lsp-sched-stale-result {a result whose sources changed while it ran publishes nothing -- here a module the program has imported only since the edit that started it -- and the program is analyzed again, so what is published is right} -body {
+test lsp-sched-stale-result {a result whose sources changed while it ran publishes nothing -- here a module the program has imported only since the edit that started it, owned by another open program -- and the program is analyzed again, so what is published is right} -body {
     set dir [lt::Dir stale-result]
     lt::Put $dir/util.bot "fn g(x: int) -> int:\n    x\n"
+    lt::Put $dir/other.bot "import util\nutil::g(2)\n"
     lt::Put $dir/main.bot "y = 1\ny\n"
     set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=1500}]
     set main [lspc::uri $dir/main.bot]
     set util [lspc::uri $dir/util.bot]
+    set other [lspc::uri $dir/other.bot]
+    # other.bot is the program util.bot belongs to.
+    lspc::didOpen $c $other [lt::Read $dir/other.bot]
+    lt::Diagnostics $c $other 1
+    lspc::didOpen $c $util [lt::Read $dir/util.bot]
     lspc::didOpen $c $main "y = 1\ny\n"
     lt::Diagnostics $c $main 1
-    lspc::didOpen $c $util "fn g(x: int) -> int:\n    x\n"
     lspc::didChange $c $main 2 "import util\nutil::g(1)\n"
     lt::Pump $c 600
-    # While that analysis runs, util changes: g now takes a str.
+    # While main's analysis runs, util changes: g now takes a str. As main's
+    # earlier revisions knew it, the change does not concern it.
     lspc::didChange $c $util 2 "fn g(x: str) -> int:\n    1\n"
     lspc::until $c {[lt::Brief [lspc::published $c $main]] ne {}}
     set versions [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {
@@ -1086,7 +1098,7 @@ test lsp-sched-stale-result {a result whose sources changed while it ran publish
         list [lsp::json::integer [lsp::json::get $p version]] [llength [lsp::json::elements [lsp::json::get $p diagnostics]]]
     }]
     list $versions [lindex [lt::Brief [lspc::published $c $main]] 0 2] [lt::Stop $c]
-} -cleanup {file delete -force $dir; unset -nocomplain dir c main util versions} -result {{{1 0} {2 1}} {CORE SEMANTIC TYPE} 0}
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main util other versions} -result {{{1 0} {2 1}} {CORE SEMANTIC TYPE} 0}
 
 test lsp-lang-stale-locations {while a syntax error keeps the last analysis in use, its locations are given in the text the documents have now -- moved with the lines above them -- and a location in text that changed is dropped, never given at its old place} -body {
     set dir [lt::Project stale-locations]
@@ -1118,5 +1130,21 @@ test lsp-lang-topics {Compilerpedia is associated by identity: a diagnostic carr
     list [lsp::json::get [lsp::json::get $diagnostic data] topic] $own [llength [split $std \n]] \
         [string match "*-help stdlib.std::list::get)*" $std] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir program c main diagnostic own std} -result {{str error.unbound} {fn get(xs, index, default) -> any} 2 1 0}
+
+
+test lsp-sched-supersede-responsive {stopping a superseded analysis never blocks the server: the worker is killed at once, not waited for, and a request sent right after is answered while the dead worker's analysis would still be running} -body {
+    set dir [lt::Project supersede-responsive]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=4000}]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didChange $c $main 2 "$::ltMain\n# 2\n"
+    lt::Pump $c 600
+    lspc::didChange $c $main 3 "$::ltMain\n# 3\n"
+    lt::Pump $c 100
+    lassign [lt::Timed {lspc::request $c nosuch [lsp::json::obj]}] ms response
+    set end [lspc::stop $c]
+    list [lt::ErrorCode $response] [expr {$ms < 2000}] [lt::Reaped [lt::WorkerPids [dict get $end stderr]]] [dict get $end status]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main ms response end} -result {-32601 1 {} 0}
 
 cleanupTests

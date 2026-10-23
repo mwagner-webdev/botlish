@@ -23,13 +23,14 @@
 #   service::hir REV                    its HIR ("" without one)
 #   service::release REV
 #   service::revisions ?WS?             the live revisions
-#   service::export REV                 the revision as text, for another process
+#   service::export REV ?-derived 0|1?  the revision as text, for another process
 #   service::import WS TEXT ?-version V?    => REV: an exported revision
 #
 # Queries
 #
 #   service::at REV PATH LINE COLUMN ?-version V?   the facts at a position
-#   service::prepare REV                 build its query indexes now
+#   service::prepare REV ?-paths PATHS? ?-compilerpedia 0|1?
+#                                        build its query indexes now
 #   service::explain DIAGNOSTIC          its Compilerpedia topic
 #   service::state                       what the service holds (counts)
 #
@@ -509,10 +510,14 @@ proc service::stale {rev} {
 # diagnostics, the failure, the configuration, the snapshot (every source's
 # observation and text) -- with its HIR in the HIR interchange format
 # (HIR-INTERCHANGE.md), the checked source build of a trait program
-# included (its queries read it: QueryHir). Not the caller's version, its
-# workspace or anything derived from it.
-proc service::export {rev} {
+# included (its queries read it: QueryHir). Not the caller's version or its
+# workspace. With -derived 1 also the query indexes computed so far
+# (prepare): pure functions of the revision, so the importer answers the
+# same with them, without computing them again (re-parsing sources, for
+# one).
+proc service::export {rev args} {
     variable exportVersion
+    set options [Options service::export {-derived 0} $args]
     set revision [Get $rev]
     set hir [dict get $revision hir]
     if {$hir ne ""} {
@@ -523,6 +528,9 @@ proc service::export {rev} {
         dict set body $key [dict get $revision $key]
     }
     dict set body hir $hir
+    if {[dict get $options -derived]} {
+        dict set body derived [dict get $revision derived]
+    }
     return "botlish-service-revision $exportVersion\n$body"
 }
 
@@ -571,7 +579,11 @@ proc service::import {ws text args} {
     dict set revision id $rev
     dict set revision workspace $ws
     dict set revision version [dict get $options -version]
-    dict set revision derived [dict create]
+    set derived [dict getdef $body derived [dict create]]
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations}]] ne {declarations lines semantic syntax}} {
+        Fail IMPORT "an exported revision whose derived data are not its query indexes"
+    }
+    dict set revision derived $derived
     dict set revisions $rev $revision
     dict set workspaces $ws revisions [concat [dict get $workspace revisions] [list $rev]]
     return $rev
@@ -643,23 +655,42 @@ proc service::Derived {rev kind key command} {
 # Compilerpedia's catalogue (a process's first topic lookup reads it): what
 # a query would compute on first use, done before the first query (a
 # transport calls it after an analysis, off the request path). Queries
-# answer the same with or without it.
-proc service::prepare {rev} {
+# answer the same with or without it. -paths PATHS limits the per-source
+# indexes to those of PATHS (the documents an editor has open: a path the
+# revision did not read is skipped); -compilerpedia 0 leaves the catalogue
+# unloaded.
+proc service::prepare {rev args} {
+    set options [Options service::prepare {-paths "" -compilerpedia 1} $args]
     set revision [Use $rev]
+    set paths {}
     dict for {path observation} [dict get $revision sources] {
         if {[dict exists $observation text]} {
-            Derived $rev lines $path [list service::Lines $path]
-            Derived $rev syntax $path [list service::SyntaxIndex $path]
+            lappend paths $path
         }
+    }
+    if {[dict exists $args -paths]} {
+        set paths [lsort -unique [lmap path [dict get $options -paths] {
+            set source [SourcePath $revision $path]
+            if {$source eq ""} continue
+            set source
+        }]]
+    }
+    foreach path $paths {
+        Derived $rev lines $path [list service::Lines $path]
+        Derived $rev syntax $path [list service::SyntaxIndex $path]
     }
     if {[QueryHir $revision] ne ""} {
         set index [Derived $rev semantic all [list service::SemanticIndex]]
         dict for {f path} [dict get $index files] {
-            Derived $rev declarations $f [list service::DeclarationIndex $f]
+            if {$path in $paths} {
+                Derived $rev declarations $f [list service::DeclarationIndex $f]
+            }
         }
     }
-    Compilerpedia
-    compilerpedia::symbolTopics ""
+    if {[dict get $options -compilerpedia]} {
+        Compilerpedia
+        compilerpedia::symbolTopics ""
+    }
     return
 }
 

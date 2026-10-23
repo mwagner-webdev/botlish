@@ -972,4 +972,23 @@ test cs-import-refuses {import refuses text that is no exported revision, an exp
     lappend out [llength [service::revisions $ws]]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir text out message options body hir hirBody} -result {{1SERVICE IMPORT} {1SERVICE IMPORT} {1HIR INTERCHANGE COMPILER} 1}
 
+
+test cs-export-import-derived {a revision exported with the query indexes prepare computed (-derived 1, for the documents given by -paths) is imported with them: its queries answer exactly as the original's and parse nothing; text with derived data that are not query indexes is refused} -body {
+    lassign [cs::Program derived] rev path ws dir
+    set direct [cs::AllFacts $rev]
+    service::prepare $rev -paths [list $path] -compilerpedia 0
+    set text [service::export $rev -derived 1]
+    set ws2 [cs::Workspace]
+    set ::surface::modules::parsed [dict create]
+    set imported [service::import $ws2 $text]
+    set first [dict remove [service::at $imported $path 5 5] revision]
+    set parsedAfterQuery [dict size $::surface::modules::parsed]
+    set body [string range $text [expr {[string first \n $text] + 1}] end]
+    dict set body derived nonsense 1
+    set refused [catch {service::import $ws2 "botlish-service-revision 1\n$body"} message options]
+    list $parsedAfterQuery [expr {$first eq [dict remove [service::at $rev $path 5 5] revision]}] \
+        [expr {[cs::AllFacts $imported] eq $direct}] $refused [dict get $options -errorcode] \
+        [lsort [dict keys [dict get [service::state] derived]]]
+} -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain rev path ws dir direct text ws2 imported first parsedAfterQuery body refused message options} -result {0 1 1 1 {SERVICE IMPORT} {declarations lines semantic syntax}}
+
 cleanupTests

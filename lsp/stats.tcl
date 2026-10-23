@@ -20,11 +20,16 @@ namespace eval lsp::stats {
     # The longest callbacks, longest first: {MS WHAT} each (at most 8).
     variable longest {}
     variable depth 0
+    variable label ""
 }
 
 proc lsp::stats::timed {what script} {
     variable longest
     variable depth
+    variable label
+    if {$depth == 0} {
+        set label $what
+    }
     incr depth
     set start [clock microseconds]
     try {
@@ -36,12 +41,22 @@ proc lsp::stats::timed {what script} {
         if {$depth == 0} {
             set ms [expr {([clock microseconds] - $start) / 1000.0}]
             if {[llength $longest] < 8 || $ms > [lindex $longest end 0]} {
-                lappend longest [list $ms $what]
+                lappend longest [list $ms $label]
                 set longest [lrange [lsort -real -decreasing -index 0 $longest] 0 7]
             }
             add callbacks $ms
             count callbacks
         }
+    }
+}
+
+# Names the outermost callback running now WHAT (a message, once it is
+# known which).
+proc lsp::stats::label {what} {
+    variable depth
+    variable label
+    if {$depth > 0} {
+        set label $what
     }
 }
 

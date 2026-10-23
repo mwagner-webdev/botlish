@@ -8,7 +8,8 @@
 # scheduler.tcl describes. It keeps one compiler-service workspace whose
 # overlay mirrors the server's documents, analyzes the entry programs it is
 # asked to (service::analyze: the one analysis), and answers with each
-# revision as text (service::export), releasing it at once: it holds no
+# revision as text (service::export, with the query indexes of the open
+# documents), releasing it at once: it holds no
 # revision between jobs, only what the compiler keeps warm (its bytecode,
 # the loader's bounded parse cache). It exits when its input ends or it is
 # told to; it writes nothing to stdout but protocol messages, and logs on
@@ -98,7 +99,12 @@ proc lsp::worker::Handle {bytes} {
                 return
             }
             try {
-                set text [service::export $rev]
+                # The query indexes of the documents the editor has open (and
+                # the entry), computed here, where the sources are parsed
+                # already, and sent with the revision (service::export
+                # -derived): the server answers its first query at once.
+                service::prepare $rev -paths [concat [list [dict get $body entry]] [dict keys [service::documents $workspace]]] -compilerpedia 0
+                set text [service::export $rev -derived 1]
             } finally {
                 service::release $rev
             }

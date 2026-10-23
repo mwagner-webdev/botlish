@@ -8964,3 +8964,8 @@ tests/main-cli.test cli-malformed-lsp-worker-scheduler pass
 tests/main-cli.test cli-malformed-lsp-and-worker pass
 tests/main-cli.test cli-malformed-lsp-target pass
 tests/lsp-neovim.test lsp-neovim-session pass
+tests/compiler-service.test cs-export-import-derived pass
+tests/lsp.test lsp-sched-supersede-responsive pass
+tests/lsp.test lsp-sched-stale-result pass
+tests/lsp.test lsp-lang-stale-locations pass
+tests/lsp.test lsp-lang-topics pass

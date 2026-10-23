@@ -206,10 +206,12 @@ proc lsp::server::Message {bytes} {
                 # The server sends no requests.
             }
             notification {
+                lsp::stats::label [dict get $message method]
                 Notification [dict get $message method] [dict get $message params]
             }
             request {
                 lsp::stats::count "request [dict get $message method]"
+                lsp::stats::label [dict get $message method]
                 Request [dict get $message id] [dict get $message method] [dict get $message params]
             }
         }
@@ -359,6 +361,10 @@ proc lsp::server::Initialize {id params} {
         -deliver lsp::server::Deliver -command $command -supersede [dict get $options -supersede] \
         -faults $faults -log lsp::server::Log]
     set state initialized
+    # Compilerpedia's catalogue (topics of diagnostics and of library
+    # symbols) is loaded now, while the editor is still opening documents,
+    # not at the first publication or hover.
+    after idle {lsp::stats::timed warm {catch {service::explain [dict create code "" text ""]}}}
     set sync [lsp::json::obj openClose {bool 1} change [lsp::json::int 1] \
         save [lsp::json::obj includeText {bool 0}]]
     set result [lsp::json::obj \
@@ -830,6 +836,11 @@ proc lsp::server::Apply {root job outcome payload} {
                     Release $rev
                 }
             }
+            # The query indexes of the open documents it owns, before the
+            # first query asks (a worker's revision brings them; the
+            # synchronous scheduler's are computed here, in a callback of
+            # their own).
+            after idle [list lsp::server::Prepare $root $payload]
             if {[Fresh $payload]} {
                 lsp::stats::count freshResults
             } else {
@@ -856,6 +867,23 @@ proc lsp::server::Apply {root job outcome payload} {
     }
     Reconcile
     Retry $root
+}
+
+proc lsp::server::Prepare {root rev} {
+    variable roots
+    variable documents
+    if {![dict exists $roots $root] || $rev ni [list [dict get $roots $root latest] [dict get $roots $root good]]} {
+        return
+    }
+    lsp::stats::timed prepare {
+        set paths {}
+        foreach path [dict keys $documents] {
+            if {[Owner $path] eq $root && [dict exists [RevInfo $rev] sources $path path]} {
+                lappend paths [dict get [RevInfo $rev] sources $path path]
+            }
+        }
+        catch {service::prepare $rev -paths $paths -compilerpedia 0}
+    }
 }
 
 # ---------------------------------------------------------------------------
