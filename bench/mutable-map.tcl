@@ -3,7 +3,7 @@
 #
 #   tclsh9.0 bench/mutable-map.tcl ?-keys LIST? ?-sizes LIST? ?-modes LIST?
 #       ?-ops M? ?-runs R? ?-passes P? ?-build-passes B? ?-out FILE?
-#       ?-allocations 0|1? ?-stdlib DIR?
+#       ?-allocations 0|1? ?-stdlib DIR? ?-instructions 0|1?
 #
 # For every key kind, one Botlish program (the driver below, typed for the
 # kind), compiled and lowered once; then one native run per size and mode,
@@ -25,7 +25,7 @@
 #                     - T[build, B REPS] + T[build, REPS]) / ((B - 1) REPS N),
 #                    per removal in insertion order
 #   iterate          (T[1 + P passes] - T[1 pass]) / (P N) per entry visited,
-#                    P = max(PASSES, OPS / N)
+#                    P = max(PASSES, 20 OPS / N): 4 million visits
 #   mixed            per operation: 80% lookups, 10% insertions of fresh
 #                    keys, 10% removals of the key inserted before
 #   churn            per insertion-and-removal pair: a fresh key set, the key
@@ -49,6 +49,10 @@
 #
 #   keys n mode m reps best-us per-op-ns checksum
 #
+# -instructions 1 counts instructions (valgrind's callgrind, one run each)
+# instead of timing: the per-op column is then instructions per operation
+# (use a smaller -ops, as audit/hash-table/tools/instructions.tcl does).
+#
 # -stdlib DIR compiles against another copy of the standard library (a policy
 # variant: ORDERED-MUTABLE-MAP-SET.md, "Growth").
 
@@ -61,7 +65,7 @@ source [file join $root native native.tcl]
 set options [dict create -keys {int-dense int-sparse str-short str-medium point nested int-collide} \
     -sizes {16 256 4096 65536 262144} \
     -modes {build presized hit miss has-hit has-miss replace remove iterate mixed churn copy set-build set-hit set-miss} \
-    -ops 200000 -runs 5 -out "" -allocations 0 -stdlib "" -passes 10 -build-passes 4]
+    -ops 200000 -runs 5 -out "" -allocations 0 -stdlib "" -passes 10 -build-passes 4 -instructions 0]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "bench/mutable-map.tcl: unknown option $option" }
     dict set options $option $value
@@ -446,6 +450,9 @@ proc argvOf {args} {
 
 # The best time (microseconds) and checksum of a native run with ARGS.
 proc timed {text args} {
+    if {[dict get $::options -instructions]} {
+        return [counted $text {*}$args]
+    }
     core::process::withArgv [argvOf {*}$args] {
         set lines [native::Driver bench $text [dict get $::options -runs]]
     }
@@ -458,6 +465,37 @@ proc timed {text args} {
         error "bench/mutable-map.tcl: a run ended with [core::formatValue $value]"
     }
     return [list [expr {$best / 1000.0}] [lindex $value 1]]
+}
+
+# With -instructions 1: the instructions callgrind counts for one native run
+# with ARGS (deterministic: no machine noise), as `timed` returns times --
+# {COUNT CHECKSUM} -- so every formula above applies to them unchanged
+# (audit/hash-table/tools/instructions.tcl's method; callgrind sees no cache
+# misses or branch costs).
+proc counted {text args} {
+    set dir [file tempdir botlish-mm-instructions]
+    try {
+        set nirPath [file join $dir run.nir]
+        set f [open $nirPath w]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts -nonewline $f $text
+        close $f
+        set argvPath [file join $dir run.argv]
+        core::process::withArgv [argvOf {*}$args] {
+            set f [open $argvPath w]
+            puts $f [core::process::driverArgv]
+            close $f
+        }
+        set out [exec valgrind --tool=callgrind --smc-check=all-non-file --callgrind-out-file=/dev/null \
+            [native::binary] bench 1 --argv-file $argvPath $nirPath 2>@1]
+    } finally {
+        file delete -force $dir
+    }
+    if {![regexp {Collected : (\d+)} $out -> n]} {
+        error "bench/mutable-map.tcl: no instruction count: $out"
+    }
+    # (in thousands, so that the formulas' * 1000.0 gives instructions)
+    return [list [expr {$n / 1000.0}] -]
 }
 
 proc allocations {hir args} {
@@ -516,7 +554,7 @@ foreach kind [dict get $options -keys] {
                     set per [expr {(($t2 - $t1) - ($b2 - $b1)) * 1000.0 / (($buildPasses - 1) * $reps * $n)}]
                 }
                 iterate {
-                    set p8 [expr {max($passes, $ops / $n)}]
+                    set p8 [expr {max($passes, (20 * $ops) / $n)}]
                     lassign [timed $text 8 $n $m 1 {*}$p] t1 sum
                     lassign [timed $text 8 $n $m [expr {1 + $p8}] {*}$p] t3
                     set per [expr {($t3 - $t1) * 1000.0 / ($p8 * $n)}]

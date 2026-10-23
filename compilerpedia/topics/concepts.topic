@@ -3448,7 +3448,7 @@ MUTABLE-VECTOR.md.
 
 @topic concept.place-parameters
 title: Place parameters: `place m: T` updates the caller's collection
-summary: A parameter declared `place m: T` is the caller's place itself: the function mutates the caller's collection (or struct of collections) in place, as a collection's own operations do; nothing else about the value changes.
+summary: A parameter declared `place m: T` is the caller's place itself, so the function mutates the caller's collection (or struct of collections) in place, as the collection's own operations do.
 index: concepts
 alias: place parameter; place; in-out parameter; inout; mutable parameter; pass by reference; by-reference parameter; out parameter
 keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, overlap
@@ -3536,9 +3536,9 @@ PLACE-PARAMETERS.md.
 
 @topic concept.mutable-map
 title: MutableMap[K, V]: an insertion-ordered mutable map
-summary: std::mutable_map::MutableMap[K satisfies Hashable, V] maps keys to values; it iterates in insertion order (a replaced value keeps its key's place, a removed and re-set key goes last), and is a value that copies are independent of.
+summary: std::mutable_map::MutableMap[K, V] maps Hashable keys to values and iterates in insertion order: a replaced value keeps its key's place, a removed and re-set key goes last.
 index: concepts
-alias: MutableMap; map; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
+alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
 keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value
 related: concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
 docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
@@ -3614,9 +3614,9 @@ ORDERED-MUTABLE-MAP-SET.md.
 
 @topic concept.mutable-set
 title: MutableSet[T]: an insertion-ordered mutable set
-summary: std::mutable_set::MutableSet[T satisfies Hashable] holds distinct values; it iterates in insertion order (adding a present element changes nothing, removing and re-adding one moves it last), and copies are independent.
+summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
 index: concepts
-alias: MutableSet; set; hash set; ordered set; hashset; mutable set
+alias: MutableSet; ordered set; mutable set
 keywords: mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
 related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
 docs: ORDERED-MUTABLE-MAP-SET.md
