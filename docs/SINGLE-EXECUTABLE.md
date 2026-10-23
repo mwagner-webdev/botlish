@@ -75,7 +75,7 @@ zipfs-enabled tclsh) and a directory.
    native-bin/      botlish-native, botlish-aot-stub, libbotlish_runtime.a, ID
    ```
 
-The result is about 13.6 MB: a 3.5 MB static tclsh, plus the compressed
+The result is about 13.7 MB: a 3.5 MB static tclsh, plus the compressed
 archive, 5 MB of which is the runtime archive (16 MB stripped, uncompressed;
 SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "Sizes"). `single/build.sh` also checks
 that the system libraries the driver passes the linker after the runtime

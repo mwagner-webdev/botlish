@@ -308,6 +308,11 @@ the test suite, still install the `.deb`s.
   - Failures carry a kind (`LinkError`: `NATIVE LINK|AOT TOOLCHAIN`,
     `... RUNTIME`) when they are no error of the program's plan; the
     plan's own stay the linker's words, as the rustc linker's.
+  - Nothing on the linked startup's path takes a runtime helper's address:
+    the ABI fingerprint reads `ops::HELPER_SIGNATURES` (names and counts),
+    never `helpers()`, whose addresses would keep every helper in every
+    system-linked executable (`system-linker-keeps-only-reached-helpers`;
+    the helper list is one macro, so the two cannot disagree).
 * The three startups must build the Vm identically: the generated startup
   crate (`codegen/aot.rs`'s `startup`), `aotimage::Loaded::instantiate`
   (the stub's) and `aotimage::linked_main` (the system linker's, through

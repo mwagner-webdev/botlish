@@ -530,6 +530,23 @@ test system-linker-ordinary-executable {a system-linked executable is the platfo
         [regexp -line {^[0-9a-f]+ R botlish_runtime_startup_v1$} $symbols] [expr {[string range $bytes end-7 end] ne "BOTLIMG1"}]
 } -result {1 1 1 1 1 1 1 1}
 
+# The runtime helpers (rt_*) an executable defines, by its symbol table.
+proc runtimeHelpers {executable} {
+    lsort [lmap line [split [exec nm --defined-only $executable] \n] {
+        if {![regexp {^[0-9a-f]+ [Tt] (rt_\w+)$} $line -> name]} continue
+        set name
+    }]
+}
+
+test system-linker-keeps-only-reached-helpers {a system-linked executable keeps the runtime helpers its program reaches and no others: exactly the rustc-linked executable's, never the whole table the stub must hold (the startup's ABI fingerprint reads the helpers' names, never their addresses: ops.rs's HELPER_SIGNATURES)} -constraints {systemLinker linuxHost rustcAvailable} -body {
+    set dir [makeDirectory system-linker-helpers]
+    set hir [surface::compile "import std::list\nimport std::str\n\nfn names(n: int):\n    loop i from 0 to n:\n        std::str::concat(\"item\", \"x\")\nnames(20).length()" helpers.bot]
+    set system [runtimeHelpers [linkWith system $hir [file join $dir program.system]]]
+    set rustc [runtimeHelpers [linkWith rustc $hir [file join $dir program.rustc]]]
+    removeDirectory system-linker-helpers
+    list [expr {$system eq $rustc}] [expr {[llength $system] < 20}]
+} -result {1 1}
+
 test system-linker-no-rust-toolchain {the system linker links with nothing but the C compiler driver and its linker on PATH: no rustc, no cargo, no Rust library -- and runs neither (strace)} -constraints {systemLinker linuxHost} -body {
     set dir [makeDirectory system-linker-no-rust]
     set bin [makeDirectory system-linker-bin]

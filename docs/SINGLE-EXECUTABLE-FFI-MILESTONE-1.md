@@ -215,9 +215,9 @@ source is 40 lines: `main` and the interface symbol.
 |---|---|
 | file | `native/target/release/libbotlish_runtime.a` (`botlish_runtime.lib` with MSVC) |
 | build cost | 14 s added to a build with a changed runtime (the archive's own crate and bundling) |
-| as built (`debug = 1`: line tables) | 36,089,476 bytes |
-| `strip --strip-debug` | 16,014,088 bytes |
-| `gzip -9` of the stripped archive | 4,976,917 bytes |
+| as built (`debug = 1`: line tables) | 36,115,600 bytes |
+| `strip --strip-debug` | 16,097,728 bytes |
+| `gzip -9` of the stripped archive | 4,988,905 bytes |
 | members | Botlish's runtime (16 codegen units), num-bigint, num-traits, num-integer, unicode-general-category, libc; Rust's std, core, alloc, compiler_builtins (273 members), panic_unwind, unwind, and std's backtrace symbolization (addr2line, gimli, object, miniz_oxide, adler2, memchr, hashbrown, rustc_demangle) |
 | compiler-only code | none: no cranelift-*, target-lexicon or log member (botlish-native's library never had a code generator) |
 | system libraries (rustc's `--print native-static-libs`) | `-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc` |
@@ -228,7 +228,9 @@ its line tables and 16 MB without them. Splitting the runtime from the
 compiler would gain nothing: the archive already holds no compiler code.
 Almost all of what remains is the runtime and Rust's standard library, and
 the linker's `--gc-sections` (`-dead_strip`, `/OPT:REF`) keeps only what an
-executable reaches (section 30).
+executable reaches: a system-linked executable is 6% larger stripped than
+the rustc linker's (section 30), once the startup takes no helper's
+address.
 
 ## 8. The runtime's startup boundary
 
@@ -391,7 +393,7 @@ digests: section 13). A deliberately mixed pair, through
   its CRC and size into `native-bin/ID`.
 * Nothing else is added: no target directory, no rlib, no Cargo file.
 
-The single executable grows from about 8.6 MB to 13.6 MB (section 30). The
+The single executable grows from about 8.7 MB to 13.7 MB (section 30). The
 runtime archive in the zip is 5.0 MB compressed and 16.1 MB unpacked.
 
 ## 13. Installation
@@ -703,7 +705,7 @@ are the front end's and unchanged.
 
 ## 24. Linux x86-64: the single-file compiler
 
-`single/build.sh` → `single/out/botlish`, 13,632,495 bytes. **Executed**
+`single/build.sh` → `single/out/botlish`, 13,662,703 bytes. **Executed**
 on this milestone's machine (Ubuntu 24.04, gcc 13.3) and in CI (section
 32):
 
@@ -723,11 +725,11 @@ on this milestone's machine (Ubuntu 24.04, gcc 13.3) and in CI (section
   process starts. It covers applications A to E of the brief:
 
 ```
-   built a (1232672 bytes)
-   built b (1251072 bytes)
-   built c (1255824 bytes)
-   built d (1256064 bytes)
-   built e (1255968 bytes, stub-linked, no C compiler on PATH)
+   built a (879800 bytes)
+   built b (898416 bytes)
+   built c (927216 bytes)
+   built d (945568 bytes)
+   built e (1266000 bytes, stub-linked, no C compiler on PATH)
    ran a: 42  (needs: libgcc_s.so.1 libm.so.6 libc.so.6 ld-linux-x86-64.so.2 )
    ran b: [42, 42, 321]  (needs: ...)
    ran c: [37602, 1768, 888]  (needs: ...)
@@ -756,7 +758,9 @@ ICY-TOWER-VERTICAL-SLICE-1.md) from its sources and the staged generated
 SDL3 binding, against the package-owned headless libSDL3
 (`tests/cffi/sdl3.tcl`): `botlish -warnings error -emit-native-executable
 -L SDL3-DIR app/main.bot` takes 39 s and runs `botlish`, `botlish-native`,
-`cc`, `collect2` and `ld`. The 1,360,864-byte executable needs
+`cc`, `collect2` and `ld`. The 1,360,864-byte executable (built before
+section 30's fix, when every system-linked executable kept all the runtime
+helpers) needs
 `libSDL3.so.0`, `libgcc_s.so.1`, `libm.so.6` and `libc.so.6`. Its headless
 runs agree with the game's independent oracle (`python3 -I
 audit/icy-tower/oracle.py compare EXECUTABLE`: "0 differences" over every
@@ -848,7 +852,7 @@ private copy of the tree and run against its detectors:
 * `audit/native-aot/tools/mutate.tcl`, whose detectors are the driver's
   `aot` unit tests, the library's `aotimage` tests and now
   `tests/system-linker.test` beside the executable tests it ran before. It
-  gains 23 `sys-*` mutants of the system linker, the description and the
+  gains 25 `sys-*` mutants of the system linker, the description and the
   linked startup.
 * `audit/single-executable/tools/mutate.tcl` (new): 9 mutants of
   `single/package.tcl` and `single/main.tcl`. For each one it packs a
@@ -856,7 +860,7 @@ private copy of the tree and run against its detectors:
   static tclsh `single/build.sh` cached and this checkout's native build)
   and runs `single/smoke-test.sh` and `single/ffi-smoke-test.sh` on it.
 
-**The `sys-*` mutants: 24, 24 killed.**
+**The `sys-*` mutants: 25, 25 killed.**
 
 | mutant | what it breaks | killed by |
 |---|---|---|
@@ -884,6 +888,7 @@ private copy of the tree and run against its detectors:
 | sys-interface-unchecked | another startup interface accepted | `linked_description_rejects_damage` |
 | sys-sigpipe-default | SIGPIPE left at its default | system-linker-process-setup |
 | sys-fds-not-sanitized | a missing standard descriptor left closed | system-linker-process-setup |
+| sys-fingerprint-keeps-helpers | the fingerprint over `helpers()` again (section 30) | system-linker-keeps-only-reached-helpers |
 
 The first full run killed 21 of 23 and found two survivors, both real
 gaps in the tests:
@@ -952,11 +957,102 @@ inputs that would expose a wrong link.
 
 ## 30. Sizes
 
-PENDING-SIZES
+**Executed** (Linux x86-64; `bench/system-linker.tcl -runs 7 -single
+single/out/botlish`):
+
+| what | bytes |
+|---|---:|
+| the single executable | 13,662,703 |
+| its runtime archive, unpacked (`strip --strip-debug`) / compressed in the zip | 16,097,728 / 5,002,339 |
+| its driver, unpacked / compressed | 10,231,448 / 2,847,463 |
+| its stub, unpacked / compressed | 1,258,456 / 489,151 |
+| the same zipkit without the runtime archive (estimated: the archive's compressed entry removed) | about 8,660,000 |
+
+| program | linker | as linked | stripped | dynamic dependencies |
+|---|---|---:|---:|---|
+| prints a line, calls no C | system | 9,495,960 | 725,856 | libgcc_s, libm, libc, ld-linux |
+| | rustc | 9,536,760 | 685,792 | the same |
+| | stub | 9,921,323 | (not strippable: the image is appended) | the same |
+| calls libc and a static library | system | 9,490,936 | 717,664 | the same |
+| | rustc | 9,527,768 | 675,704 | the same |
+
+* As linked, almost all of an executable is the runtime's line tables
+  (`debug = 1`). The single executable's archive is `--strip-debug`'d, so
+  the executables it makes are 0.88 to 0.95 MB (section 24).
+* Stripped, a system-linked executable is 40 to 42 KB (6%) larger than the
+  rustc linker's: the description's decoder, its checks and their messages
+  (`aotimage::read_linked`), which the rustc linker's generated startup
+  does not need.
+
+**A size defect this measurement found.** The first measurement had the
+system-linked executables at 996,216 bytes stripped against rustc's
+659,184 (one program, `compute.bot`): `.text` 213 KB and `.rodata` 78 KB
+larger. They kept all 163 runtime helpers (`nm`: 163 `rt_*` symbols,
+against the rustc-linked executable's 5), as the stub does, which must.
+The cause was `aotimage::abi_fingerprint`, which every system-linked
+startup computes to check its description. It hashed the helpers' names
+and parameter counts by iterating `ops::helpers()`, whose entries also
+hold every helper's address, and taking an address keeps the code. The
+helper list is now one macro expanding to `HELPER_SIGNATURES` (names and
+counts) and `helpers()` (with addresses), and the fingerprint reads the
+former. Its value is unchanged (the same words, in the same order). The
+same program is now 705,376 bytes and keeps 5 helpers, and its startup
+report is the rustc-linked executable's, byte for byte.
 
 ## 31. Link and startup benchmarks
 
-PENDING-BENCH
+**Executed** (Linux x86-64, a shared 4-core container; `bench/system-linker.tcl
+-runs 7`).
+
+Link, ms, best of 7. `native::executable` from the HIR is the NIR
+lowering in Tcl, the object, the startup and the link. The stub's column is
+nearly all lowering and object, so the difference from it is a linker's own
+cost:
+
+| program | object (driver) | system | rustc | stub |
+|---|---:|---:|---:|---:|
+| prints a line | 9.6 | 351.1 | 613.3 | 148.9 |
+| calls libc and a static library | 5.6 | 225.0 | 465.4 | refused |
+
+The system linker adds about 200 ms to the stub's time here: `cc` and
+GNU ld over the program object, the startup object and the 16 MB archive.
+The rustc linker adds about 460 ms, compiling the startup crate with rustc
+and then linking.
+
+Runs, ms, best / median of 21, the linkers' executables interleaved run by
+run:
+
+| run | system | rustc | stub |
+|---|---:|---:|---:|
+| process life (prints a line) | 2.2 / 2.4 | 2.1 / 2.7 | 2.3 / 2.5 |
+| 200,000 Strings built | 30.4 / 37.2 | 30.0 / 34.2 | 32.3 / 38.4 |
+| 2,000 Strings under GC stress | 15.1 / 20.8 | 16.1 / 19.4 | 16.5 / 21.5 |
+| 200,000 C calls (labs, bcf_add) | 12.0 / 13.3 | 12.1 / 12.9 | - |
+
+The executables run the same code: Cranelift's, and the same runtime
+built once. Within this machine's noise they take the same time, and the
+startup (description read, checked and installed) is not measurable
+beside a process's life. An earlier version of the benchmark ran each
+linker's executables back to back and showed the system linker's 20%
+slower on the String run; interleaved, the difference disappears (a
+separate 31-run check: medians 34.3, 33.7 and 33.9 ms). The medians here
+still differ by up to 4 ms between runs of the benchmark: this machine's
+times are bimodal (p90s near 52 ms), and the best is the comparable figure.
+
+The single executable (whole invocations, which compile their program
+first, so they compare installations, not linkers):
+
+| invocation | ms |
+|---|---:|
+| first run, installing the driver and the stub (a compile-backend run) | 1,344 |
+| the same, warm | 1,224 |
+| first link of a C program, installing the runtime archive | 446 |
+| the same, warm | 423 |
+| a warm stub link of the plain program (its front end: context traits, `std::io`) | 974 |
+| `-version` / `-help` (install nothing) | 125 / 178 |
+
+Installing the runtime archive, 16 MB extracted from the zip and renamed
+into place, costs about 20 ms, once per build of the compiler.
 
 ## 32. Linux CI
 
@@ -1064,9 +1160,9 @@ before the merge, its one failure was `cf-renamed-binding-native-name`
   compile-time fingerprint. Today a mismatched archive is caught when the
   executable first starts.
 * **The archive's size.** 16 MB stripped, 5 MB compressed in the zipkit.
-  The executables it makes are 1.0 MB stripped, against rustc's 0.7 MB
-  (section 30). Most of the difference is that the startup's checks keep
-  every runtime helper linked. No runtime split is warranted (section 7).
+  The executables it makes are 6% larger stripped than the rustc linker's
+  (section 30): the description's decoder and its checks. No runtime split
+  is warranted (section 7).
 * **Publishing the AArch64 build.** single-executable.yml builds and
   smoke-tests it (section 25) but publishes only x86-64's.
 * **An empty link directory.** c-ffi.test passes its fixture directory
@@ -1119,7 +1215,8 @@ What a macOS single-file compiler needs from this one, and what it must add:
   `startup_object`, `system_link_args`, `link_system`, `runtime_archive`,
   `archive_machine`), the linked description (`aotimage.rs`'s
   `Image::linked`, `linked_description`, `read_linked`, `linked_main`),
-  `aot::rust_process_setup`, `Vm::startup_report` or native/runtime-archive:
+  `aot::rust_process_setup`, `Vm::startup_report`, the ABI fingerprint or
+  ops.rs's helper list (`runtime_helpers!`) or native/runtime-archive:
   * `cargo test --release --manifest-path native/Cargo.toml --lib
     aotimage` and `--bin botlish-native aot::`;
   * `tests/system-linker.test`;

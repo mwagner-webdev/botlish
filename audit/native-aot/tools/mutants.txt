@@ -442,6 +442,14 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
                 || line.contains("xcrun: error: invalid active developer path:")
 >>>>
 
+@@ sys-fingerprint-keeps-helpers the ABI fingerprint reads ops::helpers(), every helper's address with its name, so every system-linked executable keeps all the runtime helpers
+## native/src/runtime/aotimage.rs
+<<<<
+    for &(name, params) in super::ops::HELPER_SIGNATURES {
+====
+    for (name, params, _) in super::ops::helpers() {
+>>>>
+
 @@ sys-revision-unchecked the runtime reads a description of another startup revision
 ## native/src/runtime/aotimage.rs
 <<<<

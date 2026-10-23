@@ -7696,6 +7696,7 @@ tests/symbolic-type-identity.test symbolic-type-identity-wide-superset-byte pass
 tests/system-linker.test system-linker-auto pass
 tests/system-linker.test system-linker-c-acceptance pass
 tests/system-linker.test system-linker-damaged-description pass
+tests/system-linker.test system-linker-keeps-only-reached-helpers pass
 tests/system-linker.test system-linker-link-failures pass
 tests/system-linker.test system-linker-linked-run pass
 tests/system-linker.test system-linker-no-rust-toolchain pass
