@@ -3,10 +3,22 @@ name: react-native probe
 # The React Native census's mobile probes (REACT-NATIVE-TARGET-CENSUS.md,
 # "Empirical results"): the probe's Botlish functions (audit/react-native/
 # probe/rnprobe.bot) as a library (audit/react-native/tools/libmode.tcl, a
-# stand-in for a library mode the compiler does not have), packaged as a
+# stand-in for a library mode the compiler did not have), packaged as a
 # Pure C++ TurboModule (audit/react-native/tools/rnpackage.tcl), installed
 # from its npm tarball into an ordinary React Native 0.88 app and called from
 # JavaScript on an Android emulator and an iOS simulator.
+#
+# History, pinned: every job checks out the census's revision, the last one
+# before NATIVE-LIBRARY-MILESTONE-1.md. That milestone gave the compiler its
+# library mode (exported c fn, -emit-native-library) and replaced what
+# libmode.tcl read (the executable link's startup crate) with the program
+# descriptor, so the stand-in no longer runs against later revisions.
+# Building a native library for a mobile target is not part of that
+# milestone (the library mode builds for Linux glibc hosts; the native
+# backend emits machine code for its own host only): until a milestone does
+# it, this workflow reproduces the census's evidence as it was gathered, by
+# hand only. The host-side probe (audit/react-native/tools/host-spike.tcl)
+# runs on the compiler's library mode.
 #
 #   android-arm64-library  ubuntu-24.04-arm: the AArch64 Android library (the
 #                          native backend emits machine code for its own
@@ -23,15 +35,10 @@ name: react-native probe
 #                          same app with the C stand-in as a control when
 #                          the Botlish one shows nothing
 #
-# Exploratory: it runs only when the probe or this file changes, or by hand.
 # A probe step that is expected to fail is a census result and does not
 # fail its job; the jobs fail only when no variant runs.
 
 on:
-  push:
-    paths:
-      - "audit/react-native/**"
-      - ".github/workflows/react-native-probe.yml"
   workflow_dispatch:
 
 permissions:
@@ -58,6 +65,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The census's revision (see the top of this file).
+          ref: cc7e6e3badee088cf4073636bd5bae475323b2b4
 
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
@@ -92,6 +102,9 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The census's revision (see the top of this file).
+          ref: cc7e6e3badee088cf4073636bd5bae475323b2b4
 
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
@@ -180,6 +193,9 @@ jobs:
       LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The census's revision (see the top of this file).
+          ref: cc7e6e3badee088cf4073636bd5bae475323b2b4
 
       - name: Install prerequisites (Tcl 9.0.1, stable Rust)
         uses: ./.github/actions/setup-macos

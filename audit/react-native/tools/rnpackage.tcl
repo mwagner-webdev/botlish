@@ -1,16 +1,18 @@
 # rnpackage.tcl -- a prototype of the React Native plugin's generator
 # (REACT-NATIVE-TARGET-CENSUS.md, "Package-generation model"): an
-# installable React Native library around a Botlish C ABI library, a Pure
+# installable React Native library around a Botlish native library, a Pure
 # C++ TurboModule with no Java, Kotlin or Swift.
 #
 #   tclsh9.0 audit/react-native/tools/rnpackage.tcl -o DIR \
-#       -exports P_botlish.exports -header P_botlish.h -name NPM-NAME \
+#       -manifest NAME.json -header NAME.h -name NPM-NAME \
 #       ?-version V? ?-module NAME? ?-java-package P? ?-react-native V? \
 #       ?-android-lib ABI LIB.a ...? ?-ios-lib LIB.a? ?-codegen-project DIR?
 #
-# Everything it reads is the library mode's output (libmode.tcl): the export
-# manifest (NAME C-SYMBOL {PARAM TYPE ...} RESULT {ERRORS} per line) and the
-# C header. It never reads Botlish source or HIR: the C ABI is the boundary.
+# Everything it reads is the compiler's native library output (`main.tcl
+# -emit-native-library NAME`, NATIVE-LIBRARY-MILESTONE-1.md): the JSON
+# export manifest and the C header. It never reads Botlish source or HIR:
+# the C ABI is the boundary. (Until that milestone it read the export list
+# of the census's stand-in, libmode.tcl, which is kept as history.)
 #
 # What it writes, all of it React Native's own conventions (the
 # create-react-native-library 0.63.1 `turbo-module`/`cpp` template, and the
@@ -21,21 +23,25 @@
 #   src/NativeMODULE.ts     the Codegen spec (TypeScript)
 #   src/index.ts            the typed JS entry point
 #   cpp/MODULEModule.{h,cpp}  the adapter: NativeMODULECxxSpec<T> over the C ABI
-#   botlish/P_botlish.h     the C ABI
+#   botlish/NAME.h          the C ABI
+#   botlish/NAME_unavailable.c  the C ABI where no library was built
 #   android/CMakeLists.txt  the adapter and the imported Botlish library
-#   android/libs/ABI/libP_botlish.a
+#   android/libs/ABI/libNAME.a
 #   ios/MODULEModuleProvider.mm   RCTModuleProvider
-#   ios/lib/libP_botlish.a
+#   ios/lib/libNAME.a
 #   MODULE.podspec
 #   android/generated, ios/generated   Codegen's output, when -codegen-project
 #                           names a React Native project to run it from
 #                           (includesGeneratedCode); otherwise the app runs
 #                           Codegen.
 #
-# Output is deterministic: no time, host path or directory order.
+# The adapter owns one library instance per module object, created on its
+# first call: on the JS thread, which every later call comes from (the
+# library's thread rule). Output is deterministic: no time, host path or
+# directory order.
 
 proc usage {} {
-    puts stderr "usage: tclsh9.0 rnpackage.tcl -o DIR -exports FILE -header FILE -name NPM-NAME ?options?"
+    puts stderr "usage: tclsh9.0 rnpackage.tcl -o DIR -manifest NAME.json -header NAME.h -name NPM-NAME ?options?"
     exit 2
 }
 
@@ -48,14 +54,14 @@ while {[llength $argv]} {
             set argv [lassign $argv abi lib]
             dict lappend opts -android-lib $abi [file normalize $lib]
         }
-        -o - -exports - -header - -name - -version - -module - -java-package - -react-native - -ios-lib - -codegen-project {
+        -o - -manifest - -header - -name - -version - -module - -java-package - -react-native - -ios-lib - -codegen-project {
             set argv [lassign $argv value]
             dict set opts $option $value
         }
         default { usage }
     }
 }
-foreach required {-o -exports -header -name} {
+foreach required {-o -manifest -header -name} {
     if {![dict exists $opts $required]} { usage }
 }
 set out [file normalize [dict get $opts -o]]
@@ -102,18 +108,32 @@ if {$javaPackage eq ""} {
 }
 
 # ---------------------------------------------------------------------------
-# The exports.
+# The exports, from the manifest: {NAME C-SYMBOL {PARAM TYPE ...} RESULT
+# {ERRORS}} each.
 
-set f [open [dict get $opts -exports]]
-set exports {}
-foreach line [split [read $f] \n] {
-    if {[string trim $line] ne ""} {
-        lappend exports $line
-    }
-}
+source [file join [file dirname [file normalize [info script]]] .. .. .. lsp json.tcl]
+set f [open [dict get $opts -manifest] rb]
+set manifest [lsp::json::decode [read $f]]
 close $f
+if {[lsp::json::text [lsp::json::get $manifest format]] ne "botlish-native-library"
+        || [lsp::json::integer [lsp::json::get $manifest version]] != 1} {
+    error "[dict get $opts -manifest]: not a version 1 Botlish native library manifest"
+}
+set prefix [lsp::json::text [lsp::json::get $manifest library]]
+set api [lmap {k v} [lsp::json::members [lsp::json::get $manifest api]] { list $k [lsp::json::text $v] }]
+set api [concat {*}$api]
+set exports {}
+foreach export [lsp::json::elements [lsp::json::get $manifest exports]] {
+    set params {}
+    foreach param [lsp::json::elements [lsp::json::get $export params]] {
+        lappend params [lsp::json::text [lsp::json::get $param name]] [lsp::json::text [lsp::json::get $param type]]
+    }
+    lappend exports [list [lsp::json::text [lsp::json::get $export name]] \
+        [lsp::json::text [lsp::json::get $export symbol]] $params \
+        [lsp::json::text [lsp::json::get [lsp::json::get $export result] type]] \
+        [lmap e [lsp::json::elements [lsp::json::get $export errors]] { lsp::json::text $e }]]
+}
 set headerName [file tail [dict get $opts -header]]
-set prefix [regsub {_botlish\.h$} $headerName ""]
 
 set jsNames {}
 foreach export $exports {
@@ -131,11 +151,11 @@ foreach export $exports {
 }
 
 proc tsType {t} {
-    return [dict get {int number str string bool boolean unit void} $t]
+    return [dict get {int number Float64 number str string bool boolean unit void} $t]
 }
 
 proc cxxType {t} {
-    return [dict get {int double str std::string bool bool unit void} $t]
+    return [dict get {int double Float64 double str std::string bool bool unit void} $t]
 }
 
 # ---------------------------------------------------------------------------
@@ -250,14 +270,14 @@ foreach export $exports {
     lassign $export name symbol params result errors
     set js [camel $name]
     set cxxParams [list "jsi::Runtime &rt"]
-    set call {}
+    set call [list "instance(rt)"]
     set position 0
     foreach {p t} $params {
         set v [camel $p]
         lappend cxxParams "[cxxType $t] $v"
         switch -- $t {
             int { lappend call "intArgument(rt, \"$js\", $position, $v)" }
-            bool { lappend call $v }
+            bool - Float64 { lappend call $v }
             str { lappend call "reinterpret_cast<const uint8_t *>($v.data())" "$v.size()" }
         }
         incr position
@@ -267,24 +287,29 @@ foreach export $exports {
     switch -- $result {
         int { append body "  int64_t out = 0;\n"; lappend call "&out" }
         bool { append body "  bool out = false;\n"; lappend call "&out" }
-        str { append body "  BotlishStr out;\n"; lappend call "&out" }
+        Float64 { append body "  double out = 0;\n"; lappend call "&out" }
+        str { append body "  ${prefix}_bytes out = {nullptr, 0};\n"; lappend call "&out" }
     }
-    append body "  check(rt, \"$js\", $symbol\([join $call {, }]\));\n"
+    append body "  ${prefix}_error *error = nullptr;\n"
+    lappend call "&error"
+    append body "  check(rt, \"$js\", $symbol\([join $call {, }]\), error);\n"
     switch -- $result {
         int { append body "  return intResult(rt, \"$js\", out);\n" }
-        bool { append body "  return out;\n" }
-        str { append body "  return std::string(reinterpret_cast<const char *>(out.ptr), out.len);\n" }
+        bool - Float64 { append body "  return out;\n" }
+        str { append body "  return text(out);\n" }
     }
     lappend defs "[cxxType $result] ${class}::${js}\([join $cxxParams {, }]\) \{\n$body\}"
 }
 
-write [file join $out cpp $class.h] [string map [list @CLASS@ $class @SPEC@ $spec @MODULE@ $module @DECLS@ [join $decls \n]] {// Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md):
+write [file join $out cpp $class.h] [string map [list @CLASS@ $class @SPEC@ $spec @MODULE@ $module @HEADER@ $headerName @PREFIX@ $prefix @DECLS@ [join $decls \n]] {// Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md):
 // the Pure C++ TurboModule @MODULE@, Codegen's NativeModuleCxxSpec over the
 // Botlish C ABI. The class name is also this header's name, which Android
 // autolinking includes and constructs (cxxModuleHeaderName).
 #pragma once
 
 #include <@SPEC@JSI.h>
+
+#include "@HEADER@"
 
 #include <memory>
 #include <string>
@@ -294,22 +319,28 @@ namespace facebook::react {
 class @CLASS@ : public Native@MODULE@CxxSpec<@CLASS@> {
  public:
   explicit @CLASS@(std::shared_ptr<CallInvoker> jsInvoker);
+  ~@CLASS@() override;
 
 @DECLS@
+
+ private:
+  // The module's own library instance, created by its first call, on the
+  // JS thread every call comes from.
+  @PREFIX@_instance *instance(jsi::Runtime &rt);
+  @PREFIX@_instance *instance_ = nullptr;
 };
 
 } // namespace facebook::react
 }]
 
-write [file join $out cpp $class.cpp] [string map [list @CLASS@ $class @MODULE@ $module @HEADER@ $headerName @PREFIX@ $prefix @DEFS@ [join $defs \n\n]] {// Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md).
+write [file join $out cpp $class.cpp] [string map [list @CLASS@ $class @MODULE@ $module @PREFIX@ $prefix @DEFS@ [join $defs \n\n]] {// Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md).
 // Every conversion is checked: a JS number reaches a Botlish Int only if it
 // is an integer of at most Number.MAX_SAFE_INTEGER in magnitude, and an Int
 // result returns only if JS holds it exactly. A Botlish error becomes a JS
-// Error whose `code` is its identity (a declared error's canonical name, or
-// the runtime error's code).
+// Error whose `code` is its identity (a declared error's canonical name, a
+// runtime error's code, "BOUNDARY ..." for a value the C boundary refused)
+// and whose `fields` are a declared error's payload.
 #include "@CLASS@.h"
-
-#include "@HEADER@"
 
 #include <cmath>
 
@@ -319,9 +350,24 @@ namespace {
 
 constexpr double kMaxSafe = 9007199254740991.0;
 
-[[noreturn]] void throwError(jsi::Runtime &rt, const char *ctor, const std::string &code, const std::string &message) {
+std::string text(const @PREFIX@_text &t) {
+  return std::string(reinterpret_cast<const char *>(t.data), t.len);
+}
+
+// An owned str result as a std::string; the buffer goes back to the library.
+std::string text(@PREFIX@_bytes &bytes) {
+  std::string s(reinterpret_cast<const char *>(bytes.data), bytes.len);
+  @PREFIX@_bytes_release(&bytes);
+  return s;
+}
+
+[[noreturn]] void throwError(jsi::Runtime &rt, const char *ctor, const std::string &code, const std::string &message,
+    const jsi::Value &fields = jsi::Value::undefined()) {
   auto error = rt.global().getPropertyAsFunction(rt, ctor).callAsConstructor(rt, message).asObject(rt);
   error.setProperty(rt, "code", jsi::String::createFromUtf8(rt, code));
+  if (!fields.isUndefined()) {
+    error.setProperty(rt, "fields", fields);
+  }
   throw jsi::JSError(rt, jsi::Value(rt, error));
 }
 
@@ -340,27 +386,103 @@ double intResult(jsi::Runtime &rt, const char *method, int64_t n) {
   return static_cast<double>(n);
 }
 
-void check(jsi::Runtime &rt, const char *method, int32_t status) {
-  switch (status) {
-    case @PREFIX@_OK:
-      return;
-    case @PREFIX@_INT_RANGE:
-      throwError(rt, "RangeError", "BOTLISH_INT_RANGE", std::string(method) + ": the result does not fit in 64 bits");
-    case @PREFIX@_BAD_UTF8:
-      throwError(rt, "TypeError", "BOTLISH_ARGUMENT", std::string(method) + ": a String argument is not valid UTF-8");
-    default: {
-      BotlishStr identity, message;
-      @PREFIX@_last_error(&identity, &message);
-      throwError(rt, "Error", std::string(reinterpret_cast<const char *>(identity.ptr), identity.len),
-          std::string(method) + ": " + std::string(reinterpret_cast<const char *>(message.ptr), message.len));
+// A declared error's payload as a JS object: an int field a number when JS
+// holds it exactly (else its decimal text), the others as they are.
+jsi::Value fields(jsi::Runtime &rt, const @PREFIX@_error *error) {
+  size_t n = @PREFIX@_error_field_count(error);
+  if (n == 0) {
+    return jsi::Value::undefined();
+  }
+  jsi::Object out(rt);
+  for (size_t i = 0; i < n; i++) {
+    @PREFIX@_text name, t;
+    if (@PREFIX@_error_field_name(error, i, &name) != @PREFIX@_OK) {
+      continue;
+    }
+    std::string key = text(name);
+    int64_t k = 0;
+    bool b = false;
+    double d = 0;
+    switch (@PREFIX@_error_field_kind(error, i)) {
+      case @PREFIX@_FIELD_INT:
+        if (@PREFIX@_error_field_int(error, i, &k) == @PREFIX@_OK && k <= 9007199254740991LL && k >= -9007199254740991LL) {
+          out.setProperty(rt, key.c_str(), static_cast<double>(k));
+          continue;
+        }
+        break;
+      case @PREFIX@_FIELD_BOOL:
+        if (@PREFIX@_error_field_bool(error, i, &b) == @PREFIX@_OK) {
+          out.setProperty(rt, key.c_str(), b);
+          continue;
+        }
+        break;
+      case @PREFIX@_FIELD_FLOAT64:
+        if (@PREFIX@_error_field_float64(error, i, &d) == @PREFIX@_OK) {
+          out.setProperty(rt, key.c_str(), d);
+          continue;
+        }
+        break;
+      case @PREFIX@_FIELD_STR:
+        if (@PREFIX@_error_field_str(error, i, &t) == @PREFIX@_OK) {
+          out.setProperty(rt, key.c_str(), jsi::String::createFromUtf8(rt, t.data, t.len));
+          continue;
+        }
+        break;
+    }
+    if (@PREFIX@_error_field_text(error, i, &t) == @PREFIX@_OK) {
+      out.setProperty(rt, key.c_str(), jsi::String::createFromUtf8(rt, t.data, t.len));
     }
   }
+  return jsi::Value(rt, out);
+}
+
+void check(jsi::Runtime &rt, const char *method, int32_t status, @PREFIX@_error *error) {
+  if (status == @PREFIX@_OK) {
+    return;
+  }
+  std::string code = "BOTLISH_UNKNOWN", message = std::string(method) + ": failed";
+  jsi::Value payload = jsi::Value::undefined();
+  if (error != nullptr) {
+    @PREFIX@_text t;
+    if (@PREFIX@_error_identity(error, &t) == @PREFIX@_OK) {
+      code = text(t);
+    }
+    if (@PREFIX@_error_message(error, &t) == @PREFIX@_OK) {
+      message = std::string(method) + ": " + text(t);
+    }
+    if (status == @PREFIX@_DECLARED_ERROR) {
+      payload = fields(rt, error);
+    }
+    @PREFIX@_error_release(error);
+  }
+  const char *ctor = "Error";
+  if (status == @PREFIX@_BOUNDARY_ERROR) {
+    ctor = code == "BOUNDARY INT-RANGE" ? "RangeError" : "TypeError";
+  }
+  throwError(rt, ctor, code, message, payload);
 }
 
 } // namespace
 
 @CLASS@::@CLASS@(std::shared_ptr<CallInvoker> jsInvoker)
     : Native@MODULE@CxxSpec(std::move(jsInvoker)) {}
+
+// The module is torn down with its runtime, on the JS thread; were it not,
+// the library would refuse the destruction (INVOCATION_ERROR) and keep the
+// instance rather than touch it from another thread.
+@CLASS@::~@CLASS@() {
+  if (instance_ != nullptr) {
+    @PREFIX@_destroy(instance_);
+  }
+}
+
+@PREFIX@_instance *@CLASS@::instance(jsi::Runtime &rt) {
+  if (instance_ == nullptr) {
+    @PREFIX@_error *error = nullptr;
+    check(rt, "create", @PREFIX@_create(&instance_, &error), error);
+  }
+  return instance_;
+}
 
 @DEFS@
 
@@ -372,40 +494,72 @@ file copy -force [dict get $opts -header] [file join $out botlish $headerName]
 
 # The C ABI on a CPU the Botlish library was not built for (Cranelift has no
 # 32-bit ARM or x86 backend, and React Native's app template builds both):
-# every call fails with BOTLISH_UNAVAILABLE, so the app still builds for
-# every ABI it targets, unmodified.
+# creating an instance fails with BOTLISH_UNAVAILABLE, so the app still
+# builds for every ABI it targets, unmodified.
 set stubs {}
 foreach export $exports {
     lassign $export name symbol params result errors
-    set cparams {}
+    set cparams [list "${prefix}_instance *instance"]
     foreach {p t} $params {
         switch -- $t {
             int { lappend cparams "int64_t $p" }
             bool { lappend cparams "bool $p" }
-            str { lappend cparams "const uint8_t *${p}_ptr" "size_t ${p}_len" }
+            Float64 { lappend cparams "double $p" }
+            str { lappend cparams "const uint8_t *$p" "size_t ${p}_len" }
         }
     }
     switch -- $result {
-        int { lappend cparams "int64_t *out" }
-        bool { lappend cparams "bool *out" }
-        str { lappend cparams "BotlishStr *out" }
+        int { lappend cparams "int64_t *result" }
+        bool { lappend cparams "bool *result" }
+        Float64 { lappend cparams "double *result" }
+        str { lappend cparams "${prefix}_bytes *result" }
     }
+    lappend cparams "${prefix}_error **error"
     set unused [lmap c $cparams { string cat "(void)" [lindex [regexp -inline {\w+$} $c] 0] ";" }]
-    lappend stubs "int32_t $symbol\([join $cparams {, }]\) \{\n  [join $unused { }]\n  return ${prefix}_ERROR;\n\}"
+    lappend stubs "int32_t $symbol\([join $cparams {, }]\) \{\n  [join $unused { }]\n  return unavailable(error);\n\}"
 }
-write [file join $out botlish ${prefix}_unavailable.c] [string map [list @HEADER@ $headerName @PREFIX@ $prefix @STUBS@ [join $stubs \n\n]] {/* Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md):
+write [file join $out botlish ${prefix}_unavailable.c] [string map [list @HEADER@ $headerName @PREFIX_UPPER@ [string toupper $prefix] @PREFIX@ $prefix @STUBS@ [join $stubs \n\n]] {/* Generated by audit/react-native/tools/rnpackage.tcl (REACT-NATIVE-TARGET-CENSUS.md):
    the C ABI where no Botlish library exists for the CPU being built. */
 #include "@HEADER@"
 
+struct @PREFIX@_error {
+  int unused;
+};
+
+static struct @PREFIX@_error the_error;
 static const char identity[] = "BOTLISH_UNAVAILABLE";
 static const char message[] = "this Botlish library was not built for this CPU architecture";
 
-void @PREFIX@_last_error(BotlishStr *i, BotlishStr *m) {
-  i->ptr = (const uint8_t *)identity;
-  i->len = sizeof identity - 1;
-  m->ptr = (const uint8_t *)message;
-  m->len = sizeof message - 1;
+static int32_t unavailable(@PREFIX@_error **error) {
+  if (error) *error = &the_error;
+  return @PREFIX@_INVOCATION_ERROR;
 }
+
+int32_t @PREFIX@_abi_version(void) { return @PREFIX_UPPER@_ABI_VERSION; }
+int32_t @PREFIX@_create(@PREFIX@_instance **instance, @PREFIX@_error **error) {
+  if (instance) *instance = NULL;
+  return unavailable(error);
+}
+int32_t @PREFIX@_destroy(@PREFIX@_instance *instance) { (void)instance; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_release(@PREFIX@_error *error) { (void)error; return @PREFIX@_OK; }
+int32_t @PREFIX@_error_status(const @PREFIX@_error *error) { return error == &the_error ? @PREFIX@_INVOCATION_ERROR : -1; }
+static int32_t view(const @PREFIX@_error *error, @PREFIX@_text *t, const char *s, size_t n) {
+  if (error != &the_error || !t) return @PREFIX@_INVOCATION_ERROR;
+  t->data = (const uint8_t *)s;
+  t->len = n;
+  return @PREFIX@_OK;
+}
+int32_t @PREFIX@_error_identity(const @PREFIX@_error *error, @PREFIX@_text *t) { return view(error, t, identity, sizeof identity - 1); }
+int32_t @PREFIX@_error_message(const @PREFIX@_error *error, @PREFIX@_text *t) { return view(error, t, message, sizeof message - 1); }
+size_t @PREFIX@_error_field_count(const @PREFIX@_error *error) { (void)error; return 0; }
+int32_t @PREFIX@_error_field_name(const @PREFIX@_error *e, size_t i, @PREFIX@_text *t) { (void)e; (void)i; (void)t; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_field_kind(const @PREFIX@_error *e, size_t i) { (void)e; (void)i; return -1; }
+int32_t @PREFIX@_error_field_int(const @PREFIX@_error *e, size_t i, int64_t *v) { (void)e; (void)i; (void)v; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_field_bool(const @PREFIX@_error *e, size_t i, bool *v) { (void)e; (void)i; (void)v; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_field_float64(const @PREFIX@_error *e, size_t i, double *v) { (void)e; (void)i; (void)v; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_field_str(const @PREFIX@_error *e, size_t i, @PREFIX@_text *t) { (void)e; (void)i; (void)t; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_error_field_text(const @PREFIX@_error *e, size_t i, @PREFIX@_text *t) { (void)e; (void)i; (void)t; return @PREFIX@_INVOCATION_ERROR; }
+int32_t @PREFIX@_bytes_release(@PREFIX@_bytes *bytes) { (void)bytes; return @PREFIX@_INVOCATION_ERROR; }
 
 @STUBS@
 }]
@@ -418,7 +572,7 @@ write [file join $out android CMakeLists.txt] [string map [list @TARGET@ $target
 cmake_minimum_required(VERSION 3.13)
 project(@TARGET@)
 
-set(BOTLISH_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/lib@PREFIX@_botlish.a")
+set(BOTLISH_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI}/lib@PREFIX@.a")
 if(EXISTS "${BOTLISH_LIBRARY}")
   add_library(botlish_@PREFIX@ STATIC IMPORTED)
   set_target_properties(botlish_@PREFIX@ PROPERTIES IMPORTED_LOCATION "${BOTLISH_LIBRARY}")
@@ -434,14 +588,15 @@ set_target_properties(@TARGET@ PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
 target_include_directories(@TARGET@ PUBLIC ../cpp ../botlish)
-# The Botlish library is a Rust static library: its runtime's and std's
-# symbols stay inside libappmodules.so, and std needs these system libraries.
-target_link_options(@TARGET@ INTERFACE "-Wl,--exclude-libs,lib@PREFIX@_botlish.a")
+# The Botlish library's only global symbols are its C interface's
+# (@PREFIX@_*); they stay inside libappmodules.so, and the runtime needs
+# these system libraries.
+target_link_options(@TARGET@ INTERFACE "-Wl,--exclude-libs,lib@PREFIX@.a")
 target_link_libraries(@TARGET@ jsi reactnative react_codegen_@SPEC@ botlish_@PREFIX@ log dl m)
 }]
 foreach {abi lib} [dict get $opts -android-lib] {
     file mkdir [file join $out android libs $abi]
-    file copy -force $lib [file join $out android libs $abi lib${prefix}_botlish.a]
+    file copy -force $lib [file join $out android libs $abi lib${prefix}.a]
 }
 
 # ---------------------------------------------------------------------------
@@ -471,8 +626,8 @@ write [file join $out ios $provider.mm] [string map [list @PROVIDER@ $provider @
 set vendored ""
 if {[dict get $opts -ios-lib] ne ""} {
     file mkdir [file join $out ios lib]
-    file copy -force [dict get $opts -ios-lib] [file join $out ios lib lib${prefix}_botlish.a]
-    set vendored "\n  s.vendored_libraries = \"ios/lib/lib${prefix}_botlish.a\""
+    file copy -force [dict get $opts -ios-lib] [file join $out ios lib lib${prefix}.a]
+    set vendored "\n  s.vendored_libraries = \"ios/lib/lib${prefix}.a\""
 }
 set sources {"ios/**/*.{h,mm}", "cpp/**/*.{h,cpp}", "botlish/*.h"}
 if {$vendored eq ""} {

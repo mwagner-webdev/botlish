@@ -2453,6 +2453,74 @@ AArch64 ones apply on an AArch64 host), `cargo test --release
 AArch64 host: CI's arm64 workflow and the macOS smoke job), and the
 binding generator's checks for a change to what it emits (next sections).
 
+## Native libraries (exported c fn, -emit-native-library)
+
+`exported c fn NAME [named "SYMBOL"](PARAMS) -> TYPE` gives an ordinary
+function a C entry point, and `main.tcl -emit-native-library NAME`
+(`native::library`, native/library.tcl) builds the program into
+`libNAME.a`, `libNAME.so`, `NAME.h` and the manifest `NAME.json`
+(NATIVE-LIBRARY-MILESTONE-1.md). Keep it so:
+
+* An export is a root: the generic instance of its block under its
+  declared types only (`hir::specialize`'s `-roots`, `ExportRoots`), open to
+  the range analysis and to refinement facts (`RefinementFacts` skips
+  roots). Never specialize an export for its Botlish callers' arguments,
+  never let a caller's constant, range or branch fact reach it, and never
+  disable an optimization to keep it sound: internal calls keep every
+  optimization, and an executable of the same program lowers exactly as
+  before (`nl-root-*`). Exports are found by resolved block identity
+  (`hir/exports.tcl`), never by a NIR name or text.
+* One program descriptor serves every start: `botlish_program`
+  (codegen/library.rs, runtime/program.rs) holds the encoded ProgramData
+  and the function table, `runtime::program::build_vm` builds every Vm (the
+  rustc startup through `program::start`, the stub image, a library
+  instance). Program functions are object-local symbols: never call one by
+  name from outside, never export one, and never reintroduce a startup
+  crate that spells out program data.
+* The C ABI is exactly int (int64_t, range-checked out), bool, finite
+  Float64, str (pointer and length in, validated UTF-8; an owned
+  NAME_bytes out) and unit, a status per call and an owned error object
+  whose identity, message and payload are data (runtime/library.rs). Nothing
+  returned points into a Botlish heap, nothing unwinds into C, no Botlish
+  value crosses as a pointer. A new type is a row of
+  `hir::exports::Representation`, a trampoline case (codegen/library.rs), a
+  conversion (`botlish_library_call`), the header and the manifest
+  together; no collection, struct, callback or handle without a milestone.
+* Isolation: a library's archive is one relocatable object whose only
+  global symbols are NAME_* (`ld -r`, `objcopy --keep-global-symbols`): no
+  runtime or Rust symbol is ever global, so two libraries carry two
+  runtimes and their registries never meet. An instance is created,
+  called and destroyed on one thread (a serial number, never a thread id),
+  reentrance is refused, and the registries' locks guard handle
+  bookkeeping only: never hold a lock around Botlish code, never serialize
+  instances behind a global one, never move a Vm between threads, and add
+  no worker thread or scheduler (the actor model's).
+* A library's code checks the stack limit in every function with a call
+  (NIR's `library=` header, `Program::stack_limit_checked`), the GC walks
+  only the frames below the call's boundary (`Vm::set_stack_boundary`), and
+  no signal handler is installed: never install one, `_exit`, or let
+  NATIVE LIMIT STACK end the host.
+* The library's root file runs nothing (NATIVE LIBRARY TOP-LEVEL): creating
+  an instance initializes the modules it imports.
+* Hosts are the `libraries` capability (native/native.tcl): Linux glibc on
+  x86-64 and AArch64; a test that builds one carries `nativeLibrary`.
+
+If you change export roots or `hir/exports.tcl`, the syntax, the
+descriptor or `build_vm`, codegen/library.rs, runtime/library.rs,
+native/library.tcl or the stack-limit rule, run `tests/native-library.test`
+(its C conformance suite runs statically linked, under
+`BOTLISH_NATIVE_GC_STRESS=1` and as shared libraries),
+`tests/native-executable.test`, `tests/aot-stub-linker.test`,
+`tests/platform/aot-facts.tcl`, `cargo test --release --manifest-path
+native/Cargo.toml --lib -- runtime::program runtime::library`,
+`audit/native-aot/tools/mutate.tcl`
+(every mutant in its `mutants.txt` that applies to the host must still apply
+and be killed) and the JSON probe as a Tcl extension
+(`audit/compiler-service/probes/export/run.sh`); for a change to the C
+interface also the React Native host probe
+(`audit/react-native/tools/host-spike.tcl`, REACT-NATIVE-TARGET-CENSUS.md
+section 16).
+
 ## C header archaeology (a research instrument)
 
 `audit/c-header/` (C-HEADER-ARCHAEOLOGY.md) preprocesses BoringSSL's and

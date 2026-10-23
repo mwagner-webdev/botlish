@@ -1220,6 +1220,14 @@ Foo.podspec
 
 ## 16. Reproducing the probes
 
+> Since NATIVE-LIBRARY-MILESTONE-1.md the host spike builds the probe with
+> the compiler's own library mode (`exported c fn`, `main.tcl
+> -emit-native-library`) and `rnpackage.tcl` reads its JSON manifest; that
+> report's section 11 has the run. `libmode.tcl` no longer runs against the
+> compiler, and the mobile probes run, by hand, at this census's revision
+> (cc7e6e3b; `audit/react-native/README.md`). The list below is the
+> material as this census used it.
+
 The probe material:
 
 * `audit/react-native/probe/rnprobe.bot`: the Botlish functions.

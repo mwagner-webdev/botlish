@@ -22,8 +22,10 @@
 #   -stack-kib N           runs them with an N KiB main-thread stack (the JS
 #                          thread's: 512 is an iOS release build's)
 #
-# Steps: libmode.tcl builds the probe's Botlish library for the host;
-# rnpackage.tcl generates the package (running Codegen); the generated
+# Steps: the compiler builds the probe's Botlish native library for the host
+# (main.tcl -emit-native-library, NATIVE-LIBRARY-MILESTONE-1.md; until that
+# milestone the census's stand-in libmode.tcl did); rnpackage.tcl generates
+# the package from its manifest and header (running Codegen); the generated
 # adapter, ReactCommon's TurboModule sources and host/host_main.cpp are
 # compiled and linked with Hermes and the library; host/probe.js runs. Then
 # the asynchronous probe: host/NativeBotlishAsync.ts joins the package's
@@ -70,12 +72,20 @@ proc run {args} {
 
 set lib [file join $work botlish]
 set pkg [file join $work "generated package"]
-run $tclsh [file join $here libmode.tcl] -o $lib -prefix rnprobe \
-    [file join $root audit react-native probe rnprobe.bot] add reverse require_positive depth same pick
+file delete -force $lib
+run $tclsh [file join $root main.tcl] -emit-native-library rnprobe -library-dir $lib \
+    [file join $root audit react-native probe rnprobe.bot]
 file delete -force $pkg
 run $tclsh [file join $here rnpackage.tcl] -o $pkg \
-    -exports [file join $lib rnprobe_botlish.exports] -header [file join $lib rnprobe_botlish.h] \
+    -manifest [file join $lib rnprobe.json] -header [file join $lib rnprobe.h] \
     -name react-native-botlish-probe -codegen-project $project
+# The system libraries the library's runtime needs, as its manifest lists them.
+source [file join $root lsp json.tcl]
+set f [open [file join $lib rnprobe.json] rb]
+set systemLibraries [lmap l [lsp::json::elements [lsp::json::get [lsp::json::decode [read $f]] link]] {
+    string cat -l [lsp::json::text $l]
+}]
+close $f
 
 set generated [file join $pkg android generated jni]
 set includes [list -I[file join $pkg cpp] -I[file join $pkg botlish] -I$generated \
@@ -95,10 +105,10 @@ proc compile {includes source object} {
     return $object
 }
 proc link {out objects} {
-    global lib hermesBuild
-    run clang++ -o $out {*}$objects [file join $lib librnprobe_botlish.a] \
+    global lib hermesBuild systemLibraries
+    run clang++ -o $out {*}$objects [file join $lib librnprobe.a] \
         -L[file join $hermesBuild lib] -lhermesvm [file join $hermesBuild jsi libjsi.a] \
-        -Wl,-rpath,[file join $hermesBuild lib] -lglog -lpthread -ldl -lm
+        -Wl,-rpath,[file join $hermesBuild lib] -lglog {*}$systemLibraries
 }
 set objects {}
 set n 0

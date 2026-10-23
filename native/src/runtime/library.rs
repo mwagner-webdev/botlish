@@ -759,3 +759,60 @@ pub unsafe extern "C" fn botlish_library_error_field_str(error: *const LibError,
 pub unsafe extern "C" fn botlish_library_error_field_text(error: *const LibError, index: usize, out: *mut Text) -> i32 {
     field(error, index).map_or(INVOCATION_ERROR, |f| text(out, &f.2))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A registered instance record at a fresh address, owned by this
+    /// thread (enter reads only the registry, never the instance).
+    fn registered(descriptor: usize) -> usize {
+        let instance = Box::into_raw(Box::new(0u64)) as usize;
+        lock(&INSTANCES).insert(instance, Record { descriptor, owner: this_thread(), state: State::Idle });
+        instance
+    }
+
+    fn refusal(descriptor: usize, instance: usize) -> String {
+        match enter(descriptor as *const Descriptor, instance as *mut Instance) {
+            Ok(()) => "entered".to_string(),
+            Err(e) => e.identity,
+        }
+    }
+
+    #[test]
+    fn an_instance_admits_one_call_at_a_time_from_its_own_thread() {
+        let descriptor = 0x10;
+        let instance = registered(descriptor);
+        assert_eq!(refusal(descriptor, instance), "entered");
+        // Reentrance: a call while one is running on the owner thread.
+        assert_eq!(refusal(descriptor, instance), "INVOCATION REENTRANT");
+        // Another thread, during the call and after it.
+        let during = std::thread::spawn(move || refusal(descriptor, instance)).join().unwrap();
+        assert_eq!(during, "INVOCATION WRONG-THREAD");
+        leave(instance as *mut Instance, State::Idle);
+        let after = std::thread::spawn(move || refusal(descriptor, instance)).join().unwrap();
+        assert_eq!(after, "INVOCATION WRONG-THREAD");
+        assert_eq!(refusal(descriptor, instance), "entered");
+        leave(instance as *mut Instance, State::Idle);
+        // Another library's descriptor, an unregistered pointer, NULL.
+        assert_eq!(refusal(0x20, instance), "INVOCATION OTHER-LIBRARY");
+        assert_eq!(refusal(descriptor, instance + 8), "INVOCATION UNKNOWN-INSTANCE");
+        assert_eq!(refusal(descriptor, 0), "INVOCATION NULL-INSTANCE");
+        // A poisoned instance, then a destroyed one.
+        leave(instance as *mut Instance, State::Poisoned);
+        assert_eq!(refusal(descriptor, instance), "INVOCATION POISONED");
+        leave(instance as *mut Instance, State::Destroyed);
+        assert_eq!(refusal(descriptor, instance), "INVOCATION DESTROYED");
+        lock(&INSTANCES).remove(&instance);
+        drop(unsafe { Box::from_raw(instance as *mut u64) });
+    }
+
+    #[test]
+    fn every_thread_has_its_own_serial_number() {
+        let main = this_thread();
+        let first = std::thread::spawn(this_thread).join().unwrap();
+        let second = std::thread::spawn(this_thread).join().unwrap();
+        assert_eq!(this_thread(), main);
+        assert!(first != main && second != main && first != second);
+    }
+}

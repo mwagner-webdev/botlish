@@ -21,6 +21,12 @@ attempt('reverse("")', () => BotlishProbe.reverse(''));
 attempt('requirePositive(5)', () => BotlishProbe.requirePositive(5));
 attempt('requirePositive(-1)', () => BotlishProbe.requirePositive(-1));
 attempt('depth(1000)', () => BotlishProbe.depth(1000));
+// Deeper than the JS thread's stack: the library's runtime error NATIVE LIMIT
+// STACK (a JS Error), never the end of the process, and the instance goes on.
+for (const n of [5000, 10000, 20000, 50000, 100000, 10000000]) {
+  attempt(`depth(${n})`, () => BotlishProbe.depth(n));
+}
+attempt('depth(10)', () => BotlishProbe.depth(10));
 attempt('same("añb", "añb")', () => BotlishProbe.same('añb', 'añb'));
 attempt('same("a", "b")', () => BotlishProbe.same('a', 'b'));
 attempt('pick(true, "left", "right")', () => BotlishProbe.pick(true, 'left', 'right'));

@@ -1837,6 +1837,16 @@ add10(32)          # 42 (add captures x)
   call whose name is both a visible function and a possibly-callable field of
   the receiver's struct type is rejected as ambiguous
   (`AMBIGUOUS-METHOD-CALL`). See METHOD-SUGAR.md.
+* **`exported c fn`.** `exported c fn checked(n: int) -> int:` (optionally
+  `exported c fn checked named "calc_check"(...)`) gives a top-level function
+  a C entry point when the program is built as a native library
+  (`-emit-native-library NAME`, below). To Botlish callers and every backend
+  it is an ordinary function; in a library it is also an independent
+  compilation root, compiled for every value its declared types admit. Its
+  parameters and result are declared, each int, bool, Float64 or str (unit
+  for the result): EXPORT-SIGNATURE, EXPORT-CAPTURE, EXPORT-SYMBOL and
+  EXPORT-SYNTAX report the rest. `exported`, `c` and `named` stay ordinary
+  names elsewhere. See NATIVE-LIBRARY-MILESTONE-1.md.
 * **`nomethod fn`.** `nomethod fn atan2(y, x):` declares a function that is
   *never the callee of method syntax*. It is a modifier on the one
   declaration, accepted wherever `fn` is (top level, modules, nested
@@ -2542,8 +2552,10 @@ an executable (SINGLE-EXECUTABLE.md):
 * `rustc` (the default) needs the built native backend, its adjacent
   `libbotlish_native.rlib` and `deps/`, the matching `rustc` (or the `RUSTC`
   executable), and the system C linker (on macOS the Xcode command line
-  tools' `cc` and `ld`). rustc compiles only the generated startup metadata
-  and statically links the shared Botlish runtime; on macOS the linker signs
+  tools' `cc` and `ld`). rustc compiles only a generated four-line startup,
+  which starts the program from the descriptor the program object holds
+  (`botlish_program`, runtime/program.rs), and statically links the shared
+  Botlish runtime; on macOS the linker signs
   the executable ad hoc, as it signs every arm64 executable.
 * `stub` needs only `botlish-aot-stub` beside the driver (or
   `BOTLISH_NATIVE_AOT_STUB`): the prebuilt runtime with the program's image
@@ -2566,6 +2578,28 @@ The Tcl API is `native::executable $hir $outputPath ?OPTIONS?`. It also
 accepts the native lowering options; specialization is enabled by default
 regardless of `BOTLISH_NATIVE_SPECIALIZE`. The CLI also accepts `.hir` and
 `.ir` inputs and multiple input paths.
+
+### Native libraries (Linux glibc)
+
+```sh
+tclsh9.0 main.tcl -emit-native-library calc -library-dir out calc.bot
+cc -o app app.c out/libcalc.a -lgcc_s -lutil -lrt -lpthread -lm -ldl
+```
+
+A program whose root file declares functions (and runs nothing) and marks
+some `exported c fn` (or names them with `-export F`) builds into
+`libcalc.a`, `libcalc.so`, the C header `calc.h` and the manifest
+`calc.json` (NATIVE-LIBRARY-MILESTONE-1.md). The C interface: instances
+(`calc_create`, `calc_destroy`), each export as `int32_t calc_F(instance,
+args..., result, error)` with a status (OK, DECLARED_ERROR, RUNTIME_ERROR,
+BOUNDARY_ERROR, INVOCATION_ERROR), owned str results (`calc_bytes`,
+released with `calc_bytes_release`) and owned error objects (identity,
+message, payload fields as data). An instance belongs to the thread that
+created it. Each library's only global symbols are its own `calc_*`: two
+libraries, each with its own copy of the runtime, coexist in one process.
+Botlish code runs on the caller's stack, which generated code checks
+(NATIVE LIMIT STACK, a runtime error). The Tcl API is `native::library $hir
+-name NAME -out DIR ?-exports {F ...}? ?-shared 0|1?`.
 
 ### Values
 
