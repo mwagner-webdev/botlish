@@ -1087,27 +1087,44 @@ Run for this report, on the final tree (Linux x86-64, the 4-vCPU container):
   duplicates skipped as the local run does, and all 108 golden suites on
   the four backends (interp 5,180, compile 5,180, cranelift-generic 5,088,
   cranelift 5,190 tests passed, 0 failed); 53 minutes with 4 jobs. The
-  native crate's unit tests: 296 passed.
+  native crate's unit tests: 296 passed. Again after the method-filter
+  follow-up (429718c9): interp 7,005 passed, compile 7,000 (the 5 new
+  tests), all 108 golden suites on the four backends, 0 failed; 40
+  minutes.
 
 CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
 
 * `static-decisions.yml` (every golden suite's static decisions under the
   batched and the sequential scheduler, the four new suites included):
   **passed** on a812dade, the state before the engine's last two changes
-  and the merge of main; dispatched again on the final commit, pending.
+  and the merge of main. The run on ff9c0c11 was superseded before its
+  shards finished; dispatched on 429718c9 (the method-filter follow-up,
+  Compiler changes, item 6): pending.
 * `tests-arm64.yml` (Linux AArch64: the Tcl suite on interp and compile,
   its native coverage, the golden suites, the Rust tests, GC stress):
-  **passed** on a812dade; dispatched again on the final commit, pending.
+  **passed** on a812dade. On ff9c0c11 the four golden shards, the Rust tests
+  (also under GC stress) and the cranelift-generic coverage **passed**; the
+  Tcl suite on interp and compile, the cranelift coverage and the GC-stress
+  run were still running at this writing. Dispatched on 429718c9: pending.
 * `tests.yml` (Linux x86-64, the whole suite with the golden duplicates,
-  native coverage, the warning gate, stub-linked executables) and the
-  macOS arm64 and Windows x86-64 workflows (which every push starts and
-  the next push cancels): pending on the final commit. The macOS acceptance
-  tier of an earlier commit (6c55215a) failed on three checks this
-  milestone's own changes broke -- `compilerpedia.test` (new topics'
-  summaries over the length limit and aliases another topic already
-  claimed), `mutable-array-type.test` (the typed
-  MutableArray fence did not admit the engine) and `warning-gate.test`
-  (the new modules not yet in the gate's manifest) -- fixed in a812dade.
+  native coverage, the warning gate, stub-linked executables): on ff9c0c11
+  the stub-linked executables, the method-call kind filter's audit, the
+  cranelift and cranelift-generic coverage, the Rust tests, the warning
+  gate and three of the four golden shards **passed**; golden shard 2
+  failed before any test ran (the runner's download of the Tcl package
+  from archive.ubuntu.com was reset: `curl: (56) Recv failure: Connection
+  reset by peer`), to be re-run; the Tcl suite on interp and compile was
+  still running at this writing. Dispatched on 429718c9: pending.
+* macOS arm64 (every push starts it, the next push cancels it):
+  **passed** on ff9c0c11 (smoke, the acceptance tier). On 429718c9:
+  pending. The acceptance tier of an earlier commit (6c55215a) failed on
+  three checks this milestone's own changes broke -- `compilerpedia.test`
+  (new topics' summaries over the length limit and aliases another topic
+  already claimed), `mutable-array-type.test` (the typed MutableArray fence
+  did not admit the engine) and `warning-gate.test` (the new modules not
+  yet in the gate's manifest) -- fixed in a812dade.
+* Windows x86-64: cancelled on ff9c0c11 by the next push; on 429718c9:
+  pending.
 
 ## Limitations
 
