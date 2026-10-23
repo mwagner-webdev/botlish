@@ -498,20 +498,21 @@ test sr-cache-never-stores {a compilation with syntax errors is never kept in th
 # ===========================================================================
 # The compiler service
 
-test sr-service-outcomes {a revision with syntax errors is a syntax outcome, never ok, with a partial HIR; with a module that also fails to load, it has no HIR and both kinds of error, the syntax errors first} -body {
+test sr-service-outcomes {a revision with syntax errors is a syntax outcome, never ok, with a partial HIR; with a module that also fails to load, it has no HIR and both kinds of error, the syntax errors first; an error a declaration raises (which stops any compilation) leaves it no HIR and its syntax errors, which may be its cause, and is no compiler failure} -body {
     set dir [sr::Dir outcomes]
     sr::Put $dir/a.bot "x = 1 +\n"
     sr::Put $dir/b.bot "import nosuch\nx = 1 +\n"
+    sr::Put $dir/c.bot "struct Flag:\n    v: Turn\n\nx = (1\n"
     set out {}
-    foreach file {a b} {
+    foreach file {a b c} {
         lassign [sr::Analyze $dir/$file.bot] ws rev
         set summary [service::revision $rev]
         lappend out [dict get $summary outcome] [dict get $summary semantics] [dict get $summary hir] \
-            [lmap d [sr::Brief $rev] {lindex $d 0}]
+            [lmap d [sr::Brief $rev] {lindex $d 0}] [dict get $summary failure]
         service::closeWorkspace $ws
     }
     set out
-} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev summary} -result {syntax partial 1 {{SURFACE SYNTAX}} syntax none 0 {{SURFACE SYNTAX} {SURFACE MODULE UNKNOWN-NAMESPACE}}}
+} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev summary} -result {syntax partial 1 {{SURFACE SYNTAX}} {} syntax none 0 {{SURFACE SYNTAX} {SURFACE MODULE UNKNOWN-NAMESPACE}} {} syntax none 0 {{SURFACE SYNTAX}} {}}
 
 test sr-service-hole-facts {in malformed source a query names why it has no fact; a name whose binding a malformed statement may change has no binding, no definition and is in no binding's references; a recovered binding's definition is its name -- a malformed function header's too, not its keyword} -body {
     set dir [sr::Dir holefacts]

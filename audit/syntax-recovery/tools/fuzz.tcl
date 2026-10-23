@@ -17,9 +17,11 @@
 #   syntax     its outcome is `syntax`, its errors start with its syntax
 #              errors, and the damaged file's are exactly the ones a strict
 #              parse of its text reports (message, line, column, in order)
-#   recovered  its semantics are partial -- a HIR was built past the syntax
-#              errors -- unless a loader error stopped the build (a module
-#              that does not exist: there is no HIR to recover then)
+#   recovered  the revision records no compiler failure; its semantics are
+#              partial -- a HIR was built past the syntax errors -- unless a
+#              loader error (a module that does not exist) or an error a
+#              declaration raises (an unknown type in a struct's field, which
+#              stops any compilation) stopped the build: those are counted
 #   located    no semantic diagnostic it reports lies in malformed text (a
 #              hole): what nobody could read is never checked
 #   refused    no backend accepts its HIR (hir::recovery::runnable)
@@ -120,7 +122,7 @@ proc strict {text path} {
 
 
 set failures 0
-set counts [dict create skipped 0 partial 0 loader 0 cases 0]
+set counts [dict create skipped 0 partial 0 loader 0 declaration 0 cases 0]
 proc fail {case property detail} {
     global failures
     incr failures
@@ -171,12 +173,14 @@ for {set i 0} {$i < [dict get $options -cases]} {incr i} {
     }
     # recovered
     set loaderError [expr {[lsearch -glob [lmap e $errors {dict get $e code}] {SURFACE MODULE *}] >= 0}]
-    if {[dict get $info semantics] eq "partial"} {
+    if {[dict get $info failure] ne ""} {
+        fail $case recovered "the compiler failed: [dict get $info failure errorinfo]"
+    } elseif {[dict get $info semantics] eq "partial"} {
         dict incr counts partial
     } elseif {$loaderError} {
         dict incr counts loader
     } else {
-        fail $case recovered "semantics [dict get $info semantics] with only syntax errors: [lmap e $errors {dict get $e message}]"
+        dict incr counts declaration
     }
     set hir [service::hir $rev]
     if {$hir ne ""} {
@@ -230,5 +234,5 @@ for {set i 0} {$i < [dict get $options -cases]} {incr i} {
     service::closeWorkspace $ws
 }
 
-puts "seed [dict get $options -seed]: [dict get $counts cases] damaged programs analyzed ([dict get $counts partial] partial, [dict get $counts loader] stopped by a loader error), [dict get $counts skipped] still parsing (skipped); $failures failures"
+puts "seed [dict get $options -seed]: [dict get $counts cases] damaged programs analyzed ([dict get $counts partial] partial, [dict get $counts loader] stopped by a loader error, [dict get $counts declaration] by a declaration's error), [dict get $counts skipped] still parsing (skipped); $failures failures"
 exit [expr {$failures > 0}]

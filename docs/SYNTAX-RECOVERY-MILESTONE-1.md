@@ -314,9 +314,11 @@ program with syntax errors: it becomes a hole (`static-decided`).
 
 **Context installation, conformance, authority.** A top-level hole that may
 install a context taints every top-level unit after it (MISSING-CONTEXT is
-not reported: `installs-ignored`); a module whose malformed top-level line
-may be a missing implementation reports no TRAIT-NOT-SATISFIED,
-MISSING-CONTEXT or AMBIGUOUS-CONTEXT-IMPLEMENTATION (`conformance-ignored`).
+not reported: `installs-ignored`); while a module's malformed top-level
+line may declare a function -- perhaps the missing implementation -- no
+TRAIT-NOT-SATISFIED, MISSING-CONTEXT or AMBIGUOUS-CONTEXT-IMPLEMENTATION is
+reported (`conformance-ignored`), and a malformed value binding, which
+cannot be one, withholds nothing (`sr-trait-conformance`).
 Recovery grants nothing: a recovered HIR never runs, so no authority it
 might be thought to establish is ever exercised, and the direct-module
 analysis's module-level findings, like every check diagnostic without an
@@ -339,7 +341,7 @@ per file (`surface::modules::Recovered`) and decides what is dependent:
 | bind any value name (`values`) | a qualified reference to a member the module does not visibly declare is not UNKNOWN-SYMBOL (`DependentReference`): it is lowered as a hole (`members-known`) |
 | declare a type-level name (`types`) | an unknown type, struct, error or layout name in that module or an importer is dependent (`Recovered`'s `typeFiles`), and an `import type` of it is not reported (`types-known`) |
 | bind any value name, so define a function | a method-style call in a file importing it may apply that function: dependent (`methodFiles`, `methods-known`) |
-| be anything at the top level (any top-level hole) | it may be the implementation a trait or context trait needs: conformance diagnostics are not reported (section 4, `openFiles`) |
+| declare a function (it may bind any name, or it is a malformed `fn NAME` header) | it may be the implementation a trait or context trait needs: conformance diagnostics are not reported (section 4, `openFiles`); a malformed value binding (`x = (1`) cannot be one, and they are |
 | (a malformed header) | every unit of the file is tainted, and every reference error in it dependent: what it imports is not known (`header-known`) |
 
 A module whose malformed top-level line may bind any value name is *open*:
@@ -600,7 +602,7 @@ mutants, and the rule each is:
 | an invalid expression becomes `unit` | `hole-is-unit` |
 | an invalid expression becomes `never` | `hole-is-never` |
 | a missing return expression becomes a successful return | `missing-result-inferred` |
-| a malformed body proves its declared result range | `range-hole-never`, `instance-of-incomplete-body` |
+| a malformed body proves its declared result range | `missing-result-inferred`, `completion-hole-never` (and two equivalent mutants, below) |
 | a failed expression proves a function cannot throw | `completion-hole-never` |
 | unknown static input selects one branch | `static-decided` |
 | a dependent error is reported | `dependent-units-reported`, `hole-diagnostic-reported`, `installs-ignored`, `conformance-ignored`, `types-known`, `members-known`, `header-known`, `methods-known`, `no-binding-holes` |
@@ -660,13 +662,21 @@ The existing harnesses were rerun against the changed code:
   declare is dependent, so a misspelled member of such a module is not reported until
   its syntax error is fixed. A malformed declaration that may declare a type
   makes every unknown type name in its file and its importers dependent.
-* **Conformance.** While any module has a hole at the top level,
-  TRAIT-NOT-SATISFIED, MISSING-CONTEXT and AMBIGUOUS-CONTEXT-IMPLEMENTATION
-  are not reported anywhere in the program.
+* **Conformance.** While any file has a malformed top-level statement that
+  may declare a function, TRAIT-NOT-SATISFIED, MISSING-CONTEXT and
+  AMBIGUOUS-CONTEXT-IMPLEMENTATION are not reported anywhere in the program
+  (the diagnostic is not traced to the owner module and requirement it is
+  about).
 * **Static blocks** of a program with syntax errors are not decided, so
   their CompilerError values and the code under them are unknown.
-* **Loader errors** still end the analysis: a missing module leaves no HIR
-  to recover.
+* **Loader errors and declaration errors** still end the analysis, as they
+  end any compilation: a missing module, or an error a declaration raises
+  while it is registered (an unknown type in a struct's field), leaves no HIR
+  to recover. With syntax errors the revision then reports only those (the
+  declaration error may be theirs: a type a malformed declaration would have
+  declared) and has `semantics none`; the fuzzer counts these cases
+  (section 9.3). A compiler failure there is recorded as the revision's
+  `failure`, never hidden behind the syntax errors.
 
 None of these establishes a fact: each withholds one.
 

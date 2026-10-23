@@ -217,6 +217,15 @@ proc service::Provider {workspace} {
 #             module file that cannot be read)
 #   failure   no HIR: the compiler failed (not a diagnostic of the program)
 #
+# A compiler failure (not an error of the program) in a program whose entry
+# has syntax errors is reported as those (outcome syntax, semantics none),
+# and kept in the revision's `failure` all the same: that the analysis past
+# them failed is the compiler's problem, never hidden. An error a
+# declaration raises (an unknown type in a struct's field) stops an analysis
+# past syntax errors as it stops any compilation: the revision reports the
+# syntax errors, which may be its cause (a type a malformed declaration
+# would have declared), and has no semantics.
+#
 # and, separately, what is known of its meaning (`semantics`): `full` (a HIR
 # of the program as written: outcomes ok and semantic), `partial` (a HIR of
 # a program with syntax errors, its malformed source holes and whatever
@@ -265,6 +274,9 @@ proc service::Analyze {workspace path} {
             -warning-channel "" -target [dict get $workspace target] -cache [dict get $workspace cache]]
     } on error {message options} {
         set code [dict get $options -errorcode]
+        if {[lindex $code 0] ni {SURFACE POSIX CORE}} {
+            set failure [dict create message $message errorcode $code errorinfo [dict get $options -errorinfo]]
+        }
         if {[lrange $code 0 1] ne {SURFACE SYNTAX}} {
             # The command line parses the entry before it compiles, so
             # every syntax error of the entry is what it reports, even when
@@ -285,8 +297,9 @@ proc service::Analyze {workspace path} {
             dict set revision outcome loader
         } else {
             dict set revision outcome failure
-            dict set revision failure [dict create message $message errorcode $code \
-                errorinfo [dict get $options -errorinfo]]
+        }
+        if {[info exists failure]} {
+            dict set revision failure $failure
         }
         set entries [dict getdef $options -diagnostics [list [dict create errorcode $code message $message]]]
         dict set revision errors [lmap entry $entries {Record error $entry}]
