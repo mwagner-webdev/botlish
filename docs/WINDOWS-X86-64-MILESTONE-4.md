@@ -772,7 +772,8 @@ were run in full:
   section 7.5's defect held past four hours until it was cancelled.
   Run
   [39986848710](https://github.com/mwagner-webdev/botlish/actions/runs/39986848710)
-  (d38feb0, with section 7.5's correction): ⟨ARM-FINAL⟩.
+  (d38feb0, with section 7.5's correction): every job green, the GC-stress
+  job included.
 * **macOS AArch64.** Run
   [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468)
   (eee16a5, dispatched with the mutants): every job green. That is the
@@ -803,8 +804,8 @@ Every run of this milestone on the branch, in order:
 | [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512) | 62ba9cd | windows-x86_64 (manual, the two mutant items) | smoke, `roots`, acceptance, the mutants | green |
 | 39985866957 | caaabfc | windows-x86_64 (manual, `full`) | the GC-stress tier | cancelled before it started: section 7.5's defect would have held it |
 | ⟨RUN-W⟩ |
-| ⟨RUN-M⟩ |
-| ⟨RUN-A⟩ |
+| [39986842454](https://github.com/mwagner-webdev/botlish/actions/runs/39986842454) | d38feb0 | macos-arm64 (push, `[ci-full]`) | smoke, acceptance, Tier C under GC stress | green |
+| [39986848710](https://github.com/mwagner-webdev/botlish/actions/runs/39986848710) | d38feb0 | tests (linux arm64) (manual) | Linux AArch64, GC stress included | green |
 
 Commits after 62ba9cd change only this report, except d38feb0, which
 the last three runs ran.
