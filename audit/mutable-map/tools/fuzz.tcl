@@ -10,9 +10,14 @@
 # collections -- MutableMap[K, int] and MutableSet[K] variables, some of them
 # logical copies of others (`b = a`) -- of one key kind K:
 #
-#   int        an Int (ids from a small range, or the collision corpus:
-#              audit/hashable/data/int-collide-1024.txt, all on one home slot
-#              under the public hash)
+#   int        an Int (ids from a small range)
+#   collide    an Int of the public hash's collision corpus
+#              (audit/hashable/data/int-collide-1024.txt: all on one home
+#              slot under the public hash, so ordinary keys to the table)
+#   kcollide   an Int of audit/mutable-map/data/keyed-collide.txt, all on
+#              one home slot (of every index up to 1024 slots) under the
+#              table hash's hidden key {1 2}, which every run of such a
+#              program installs: genuine collisions of the table's own hash
 #   str        its decimal text
 #   enum       a case of an 8-case enum
 #   struct     P {id: ID, name: "nID"}
@@ -52,7 +57,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -n 20 -seed 1 -ops 120 -backends {interp compile cranelift-generic cranelift} \
-    -gc-stress 0 -keys {int str enum struct nested list collide} -dump 0 -keyed 1 -profile small \
+    -gc-stress 0 -keys {int str enum struct nested list collide kcollide} -dump 0 -keyed 1 -profile small \
     -sugar 4 -interp-every 3]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
@@ -66,6 +71,7 @@ source [file join $root surface surface.tcl]
 
 set ::oracle [file join $root audit mutable-map tools oracle.py]
 set ::corpus [string trim [core::ReadFile [file join $root audit hashable data int-collide-1024.txt]]]
+set ::kcorpus [string trim [core::ReadFile [file join $root audit mutable-map data keyed-collide.txt]]]
 
 # ---------------------------------------------------------------------------
 # Deterministic choices
@@ -86,7 +92,7 @@ proc Pick {items} {
 
 proc KeyType {kind} {
     switch -- $kind {
-        int - collide { return int }
+        int - collide - kcollide { return int }
         str { return str }
         enum { return Color }
         struct { return P }
@@ -97,7 +103,7 @@ proc KeyType {kind} {
 
 proc KeyLiteral {kind id} {
     switch -- $kind {
-        int - collide { return $id }
+        int - collide - kcollide { return $id }
         str { return "\"$id\"" }
         enum { return "Color::C$id" }
         struct { return "P {id: $id, name: \"n$id\"}" }
@@ -118,7 +124,7 @@ proc Declarations {kind} {
     append text "    Color::C7\n\n"
     append text "fn tag(x: $t) -> int:\n"
     switch -- $kind {
-        int - collide { append text "    x\n" }
+        int - collide - kcollide { append text "    x\n" }
         str { append text "    n = std::int::from_string(x):\n        on InvalidIntegerText:\n            -1\n    n\n" }
         enum {
             foreach i {0 1 2 3 4 5 6 7} {
@@ -132,7 +138,7 @@ proc Declarations {kind} {
     }
     append text "\nfn key(i: int) -> $t:\n"
     switch -- $kind {
-        int - collide { append text "    i\n" }
+        int - collide - kcollide { append text "    i\n" }
         str { append text "    std::int::to_string(i)\n" }
         enum { append text "    color(i)\n" }
         struct { append text "    P {id: i, name: std::str::concat(\"n\", std::int::to_string(i))}\n" }
@@ -177,6 +183,7 @@ proc Program {kind count opsN profile} {
     switch -- $kind {
         enum { set pool {0 1 2 3 4 5 6 7} }
         collide { set pool [lrange $::corpus 0 [expr {$count - 1}]] }
+        kcollide { set pool [lrange $::kcorpus 0 [expr {$count - 1}]] }
         default {
             set pool {}
             for {set i 0} {$i < $count} {incr i} {
@@ -273,7 +280,7 @@ proc Program {kind count opsN profile} {
             set b [expr {$a + 10000}]
             append src "drain_$what\($v, $a, $b, 1)\n"
             lappend ops [list drain $v $a $b 1]
-        } elseif {$kind ne "enum" && $kind ne "collide"} {
+        } elseif {$kind ni {enum collide kcollide}} {
             # A loop that mutates its collection: the snapshot.
             set offset [expr {1000000 + 1000000 * [Rand 3]}]
             append src "bump_$what\(out, $v, $offset)\n"
@@ -360,7 +367,18 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
         incr failures
         continue
     }
-    set runs [list drawn [RunBackends $hir $runOn]]
+    if {$kind eq "kcollide"} {
+        # The colliding key in force for the first run too, so that the
+        # collisions are exercised whatever -keyed says.
+        core::hashing::useTableHashKey {1 2}
+        try {
+            set runs [list {1 2} [RunBackends $hir $runOn]]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    } else {
+        set runs [list drawn [RunBackends $hir $runOn]]
+    }
     if {[dict get $options -keyed]} {
         foreach key {{1 2} {0x9e3779b97f4a7c15 0xbf58476d1ce4e5b9}} {
             core::hashing::useTableHashKey $key

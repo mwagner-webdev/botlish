@@ -9170,3 +9170,4 @@ tests/ordered-table.test ot-churn-bounded pass
 tests/ordered-table.test ot-shrink-after-removal pass
 tests/ordered-table.test ot-clear-is-minimal pass
 tests/ordered-table.test ot-keys-compared-on-hash-match-only pass
+tests/ordered-table.test ot-keyed-collisions pass

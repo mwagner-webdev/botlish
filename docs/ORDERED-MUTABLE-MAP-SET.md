@@ -47,7 +47,7 @@ and one correction: `==` refused inside an opaque struct names the opaque
 values, never their representation (a map's index would otherwise show the
 hidden hash's placement in an error message).
 
-The evidence: six Tcl test files (114 tests) and four golden suites (89
+The evidence: six Tcl test files (105 tests) and four golden suites (89
 cases, every backend), an independent Python model, a stateful
 differential fuzzer, 57 mutants (every one killed), and a benchmark beside
 the hash-table experiment's tables and Rust's `HashMap`.
@@ -191,7 +191,8 @@ processes' own drawn ones (`mm-secret-independent`,
 `ot-invariants-hidden-keys`), the fuzzer runs every program under two fixed
 keys on every compiled backend, and the collision corpus of the public hash
 (`audit/hashable/data/int-collide-1024.txt`) is a set of ordinary keys to
-the table.
+the table. Collisions of the table's own hash need the secret: under a
+fixed test key they are made deliberately (Collision corpus, below).
 
 ## Typed storage
 
@@ -422,7 +423,34 @@ TBD.
 
 ## Collision corpus
 
-TBD.
+Two corpora, of two different hashes:
+
+* **The public hash's** (`audit/hashable/data/int-collide-1024.txt`, the
+  hash-table experiment's): 1024 Ints on one home slot under `hash`. To the
+  table they are ordinary keys, because the table never uses the public
+  hash: their keyed hashes are as spread as any others'. `mm-collision-corpus`
+  (256 of them: every lookup, every third removed, the order after),
+  `ms-collision-corpus` (512, a set) and the fuzzer's `collide` kind use
+  them; the benchmark's `int-collide` rows measure them, and cost what
+  `int-sparse` keys cost (Performance).
+* **The keyed hash's** (`audit/mutable-map/data/keyed-collide.txt`, written
+  by `audit/mutable-map/tools/keyed-collide.tcl`): 512 Ints whose table hash
+  under the hidden key {1 2} has its low 10 bits zero, so they share one
+  home slot in every index of up to 1024 slots. These are genuine
+  collisions of the table's hash, possible only because the tests install
+  the key (`core::hashing::useTableHashKey`, the driver's
+  `--table-hash-key`); under a process's own drawn key they are ordinary
+  keys again. `ot-keyed-collisions` builds 64 of them into one probe cluster
+  of 64 occupied slots (every live entry's home the same slot), removes a
+  third from inside the cluster (backward shift), replaces a third and
+  reinserts some, and checks every invariant after every operation; the
+  fuzzer's `kcollide` kind runs its programs under that key on every
+  backend.
+* **Collisions of the full stored hash** (two different keys with the same
+  61-bit keyed hash) cannot be found under SipHash: `mm-full-hash-collisions`
+  injects them with a private library whose map keeps two bits of the hash,
+  and every lookup, removal and replacement is still decided by key
+  equality.
 
 ## Performance
 

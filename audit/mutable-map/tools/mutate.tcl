@@ -37,7 +37,7 @@ set root [file dirname [file dirname [file dirname [file dirname $script]]]]
 
 set options [dict create -only "" -jobs 1 -shard "" \
     -tests {tests/ordered-table.test tests/mutable-map.test tests/mutable-set.test tests/collection-iteration.test} \
-    -fuzz-count 7 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 600]
+    -fuzz-count 8 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 600]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value

@@ -387,4 +387,43 @@ misses = loop i from 0 to 200:
     list $value $::otEqualCalls
 } -cleanup {unset -nocomplain hir trace value ::otEqualDepth ::otEqualCalls} -result {{[200, 200, 200]} 200}
 
+test ot-keyed-collisions {genuine collisions of the table's own hash: under the hidden key {1 2}, the first 64 keys of audit/mutable-map/data/keyed-collide.txt share one home slot in every index of up to 1024 slots; built into one probe cluster, removed from it (backward shift), replaced and reinserted, every invariant holds after every operation} -body {
+    set keys [lrange [string trim [core::ReadFile [file join $::projectRoot audit mutable-map data keyed-collide.txt]]] 0 63]
+    set ops {}
+    foreach k $keys {
+        lappend ops [list set $k 1]
+    }
+    foreach k $keys j [lsearch -all $keys *] {
+        switch -- [expr {$j % 3}] {
+            0 { lappend ops [list remove $k] }
+            1 { lappend ops [list set $k 2] }
+        }
+    }
+    foreach k $keys j [lsearch -all $keys *] {
+        if {$j % 3 == 0 && $j < 40} {
+            lappend ops [list set $k 3]
+        }
+    }
+    core::hashing::useTableHashKey {1 2}
+    try {
+        set homes [lsort -unique [lmap k $keys {
+            expr {[core::value::intOf [core::hashing::tableHash [core::value::intFromNumber $k]]] & 1023}
+        }]]
+        set check [otCheck map int $ops]
+        set snap [lindex [core::compiler::evalHir [surface::compile [otProgram map int $ops] -warnings off]] 1 64]
+        set table [core::value::structGet $snap table]
+        set index [otInts [core::value::structGet $table index]]
+        set hashes [otInts [core::value::structGet $table hashes]]
+        set mask [expr {[llength $index] - 1}]
+        set clustered [lsort -unique [lmap h $hashes {expr {$h & $mask}}]]
+        set run 0
+        while {[lindex $index [expr {([lindex $clustered 0] + $run) & $mask}]] != -1} {
+            incr run
+        }
+    } finally {
+        core::hashing::useTableHashKey ""
+    }
+    list $homes $check [llength $clustered] $run
+} -cleanup {unset -nocomplain keys ops k j homes check snap table index hashes mask clustered run} -result {0 {ok 122} 1 64}
+
 cleanupTests
