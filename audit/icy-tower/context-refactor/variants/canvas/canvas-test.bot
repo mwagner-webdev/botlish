@@ -1,0 +1,116 @@
+# canvas-test.bot -- render.bot's frames drawn on a recording canvas
+# (variant "canvas" of ICY-TOWER-CONTEXT-REFACTOR-CENSUS).
+#
+# Run beside the game's pure modules and the variant's render.bot (tower.bot,
+# hud.bot, render.bot: no SDL module, no SDL binding staged):
+#
+#   tclsh9.0 main.tcl -backend B canvas-test.bot      (B: interp, compile,
+#                                                      cranelift-generic,
+#                                                      cranelift)
+#
+# The program installs its own context, Recorder, which implements
+# render::Canvas structurally through the seven functions below (the owner of
+# a context implements a context trait with its own top-level functions:
+# CONTEXT-TRAITS.md, section 2). Each operation appends one line to the
+# Recorder's log, a MutableVector[str] -- a context member mutated in place
+# (MUTABLE-VECTOR.md) -- and succeeds. The program draws two worlds through
+# render::frame: tower::new_world(7, 1), and the same world after
+# tower::simulate's 600 frames (the state of the reference smoke run). Its
+# value is, for each world: whether the frame succeeded, how many commands
+# it recorded, its first eight commands, and every text command; then the
+# full log of the later world's frame.
+import std::ffi::c
+import std::list
+import std::mutable_vector
+import std::str
+import hud
+import render
+import tower
+
+# The canvas that records: one line per operation, in order.
+context struct Recorder:
+    log: MutableVector[str]
+
+fn recorder() -> Recorder:
+    Recorder {log: std::mutable_vector::from_list([])}
+
+# X to one decimal place, "263.4".
+fn number(x: Float64) -> str errors NonFiniteFloat:
+    hud::tenths_text(hud::nearest(x * 10.0))
+
+# Appends ENTRY to the log; succeeds.
+fn record(entry: str, context rec: Recorder) -> bool:
+    rec.log.push(entry)
+    true
+
+# ---------------------------------------------------------------------------
+# render::Canvas, implemented by Recorder
+
+nomethod fn color(r: std::ffi::c::UChar, g: std::ffi::c::UChar, b: std::ffi::c::UChar, context rec: Recorder) -> bool:
+    hud::spaced(["color", hud::int_text(r), hud::int_text(g), hud::int_text(b)]).record()
+
+fn clear(context rec: Recorder) -> bool:
+    "clear".record()
+
+fn present(context rec: Recorder) -> bool:
+    "present".record()
+
+nomethod fn fill(x: Float64, y: Float64, w: Float64, h: Float64, context rec: Recorder) -> bool errors NonFiniteFloat:
+    hud::spaced(["fill", number(x), number(y), number(w), number(h)]).record()
+
+nomethod fn line(x1: Float64, y1: Float64, x2: Float64, y2: Float64, context rec: Recorder) -> bool errors NonFiniteFloat:
+    hud::spaced(["line", number(x1), number(y1), number(x2), number(y2)]).record()
+
+nomethod fn text(x: Float64, y: Float64, text: str, context rec: Recorder) -> bool errors NonFiniteFloat:
+    hud::spaced(["text", number(x), number(y), text]).record()
+
+fn scale(factor: Float64, context rec: Recorder) -> bool errors NonFiniteFloat:
+    hud::spaced(["scale", number(factor)]).record()
+
+# ---------------------------------------------------------------------------
+# Reading the log
+
+fn recorded(context rec: Recorder) -> List[str]:
+    loop entry in rec.log:
+        entry
+
+fn forget(context rec: Recorder):
+    rec.log.clear()
+
+# The first N of ENTRIES.
+fn first(entries: List[str], n: int) -> List[str]:
+    loop entry in entries and i from 0 to std::list::length(entries):
+        if i >= n:
+            continue
+        entry
+
+# The text commands of ENTRIES.
+fn texts(entries: List[str]) -> List[str]:
+    loop entry in entries:
+        head = entry.substring(0, 4):
+            on LowerUnderrun:
+                ""
+            on UpperOverrun:
+                ""
+        if head != "text":
+            continue
+        entry
+
+# WORLD drawn on a fresh log: [succeeded, commands, first eight, texts].
+fn drawn(world: tower::World) -> list errors NonFiniteFloat:
+    forget()
+    ok = render::frame(world)
+    entries = recorded()
+    [ok, std::list::length(entries), entries.first(8), entries.texts()]
+
+fn run() -> list errors NonFiniteFloat:
+    start = tower::new_world(7, 1)
+    later = start.simulate(600)
+    [start.drawn(), later.drawn(), recorded()]
+
+with context recorder()
+
+result = run():
+    on NonFiniteFloat:
+        ["non-finite"]
+result

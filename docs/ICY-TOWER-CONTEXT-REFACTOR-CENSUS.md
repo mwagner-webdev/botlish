@@ -437,7 +437,94 @@ plus two that are not context rules -- no private module members (section
 
 ## 7. Design A against Design B (and the ID variant)
 
-TODO(after agents)
+Three designs were built to the same reference behavior -- the same
+summaries for seeds 7 and 11 (also under GC stress), the same SDL_Init and
+SDL_CreateRenderer failure messages and exit statuses, memcheck clean --
+so their costs compare directly. Each has its directory and NOTES.md under
+`audit/icy-tower/context-refactor/variants/`.
+
+* **Design B, retained context state** (the committed game): the context
+  owns the session; pointers in a native record behind a view.
+* **Design B', retained context state through SDL's IDs** (`variants/ids/`):
+  the same public operations -- render.bot and main.bot compile unchanged
+  against it -- but the session is `{window: SDL_WindowID, synced}`: every
+  operation recovers the window (`SDL_GetWindowFromID`) and its renderer
+  (`SDL_GetRenderer`), and allocates and frees its own scratch memory. No
+  native memory is retained and nothing in the context is a view.
+* **Design A, opaque resource values** (`variants/opaque-values/`): no
+  state in a context (an authority-only `Sdl {tag: unit}` mediates); an
+  `opaque struct Video` holds the pointers; `open` returns it, `close`
+  consumes it, every operation takes it -- and, with no observing
+  parameter, must hand it back.
+
+| | baseline | B (committed) | B' (IDs) | A (opaque values) |
+|---|---:|---:|---:|---:|
+| pointer clones (all / outside sdl.bot) | 56 / 48 | 6 / 0 | 3 / 0 | 11 / 0 |
+| calls carrying a pointer across modules | 38 | 0 | 0 | 7 (the opaque Video) |
+| raw pointer representation crossing (R2) | 37 | 0 | 0 | 0 |
+| pointer-holding struct types | 4 | 0 | 0 | 5 |
+| main.bot: `Ended` exits carrying the handle / handle destructurings | 8 / 3 | 0 / 0 | 0 / 0 | 8 / 3 |
+| code lines sdl / render / main | 179 / 120 / 128 | 269 / 107 / 127 | 250 / 107 / 127 | 239 / 109 / 133 |
+| SDL C calls a frame (callgrind) | 89 | 89 | 319 | 89 + the list's |
+| instructions a frame vs B | -0.7 % | -- | +3.6 % | +13 % CPU time (the display list) |
+| use after close / double close | static error | run-time no-op / `false` | the same as B | **static error** (USE-AFTER-MOVE) |
+| forgotten close | silent | silent | silent | silent (both leak; valgrind finds it) |
+| native memory retained to hold handles | -- | 56 B record | none | -- |
+| retains textures, streams, any pointer | yes | yes | **no** (IDs exist for windows, joysticks, gamepads, haptics, sensors only) | per value, but not inside a display list |
+
+**Design A's honest spelling.** A's agent wrote three spellings of the
+same 26-line sample (`walls`, `player`) and kept the cheapest:
+
+* *S1, a result struct per operation* (`{video: v1, ok: shade} =
+  v0.color1(...)`): 49 lines, handles numbered `v0`..`v5` (a scope cannot
+  rebind a name);
+* *S2, a failure flag inside the value* (calls chained,
+  `video.color(...).fill(...)`): 37 lines;
+* *S3, a display list*: render.bot's functions return
+  `List[sdl::Command]`, and one `sdl::show(video, commands)` per frame
+  makes the calls: 22 lines. The variant uses it.
+
+S1 and S2 ran into three language facts, each with its diagnostic:
+a function holding the handle may not fail (the handle dies with the
+callee: USE-AFTER-MOVE in the caller's handler), a handler covers one call
+and not its arguments (`row(std::float64::from_int(k) * brick, camera): on
+NonFiniteFloat:` leaves `from_int` UNHANDLED-ERROR), so every fallible
+computation is lifted into a helper; and a loop cannot thread an affine
+value (AFFINE-NOT-DEFINITELY-LIVE), so each of render's 4 drawing loops
+becomes a recursive helper. S3 avoids all three by changing the rendering
+style from immediate to retained -- the affine handle forces it -- at
+about 13 % more CPU a frame (81 Command values allocated a frame). And a
+display list must be unrestricted data: an affine texture cannot ride in
+it (AFFINE-LIST-OPERATION-UNSUPPORTED, USE-AFTER-MOVE when one texture is
+drawn twice), so textures would again be named by unrestricted ids into a
+table -- the retained design.
+
+**Which current semantics make cleaner, safer code.** For Icy Tower,
+Design B. It removes everything above the airlock (A keeps main.bot's
+handle threading: 8 exits, 3 destructurings, 3 close sites), it is the only
+design in which immediate-mode drawing costs nothing, and it centralizes
+cleanup. Design A is the safer one in one respect: use after close and
+double close are compile-time errors, where B makes them defined run-time
+outcomes (`false`, a no-op). Neither catches a forgotten close.
+
+**The ID variant** shows that the retained design does not depend on
+native memory where the library offers non-affine handles -- and that this
+is rarely enough. Every draw paid `SDL_GetRenderer`, a locked, string-keyed
+property lookup costing more than the draw call it precedes (915 against
+244 instructions for `SDL_SetRenderDrawColor`), and per-call scratch moved
+correctness from structure to hand-written free-on-every-path code that no
+diagnostic checks (a dropped pointer is silent). Of SDL3's object types,
+only windows, joysticks, gamepads, haptics and sensors round-trip through
+an ID; textures, audio streams, surfaces, cameras, I/O streams and every
+GPU resource do not. SDL's property sets could hold any pointer under a
+name, but the binding gives the name parameters no contract (Botlish bytes
+cannot be lent to them) and binds none of SDL's `SDL_PROP_*` names.
+
+**A hybrid is the package shape** (section 12): B's ownership and
+lifetime (one root context, one close), and, where several resources of a
+kind exist, unrestricted typed handles -- indices into the context's table
+-- which is what both A (textures in a display list) and B' (IDs) end up
+needing.
 
 ## 8. Application code quality
 
