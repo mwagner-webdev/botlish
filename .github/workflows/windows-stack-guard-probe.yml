@@ -1,0 +1,68 @@
+name: windows stack guard probe
+
+# The Windows stack guard's feasibility probe (WINDOWS-X86-64-MILESTONE-4.md,
+# "Experiments"): audit/windows-stack-guard/probe, a program independent of
+# botlish-native, run on a real Windows Server 2025 runner with MSVC's
+# toolchain -- what exception arrives when a thread's stack is exhausted in
+# Rust, in MSVC-compiled C and in an inline probe loop like Cranelift's;
+# how much stack a vectored exception handler has then, under which stack
+# guarantee; what the reporting path itself uses; and what arrives for the
+# faults that are not an overflow. Evidence, not a test tier: nothing here
+# gates anything, and the step records what happens rather than require it.
+#
+# It runs on pushes that change it or audit/windows-stack-guard/, and, once
+# it is on the default branch, on demand (workflow_dispatch) for any branch.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/windows-stack-guard-probe.yml"
+      - "audit/windows-stack-guard/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-stack-guard-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Stable Rust for x86_64-pc-windows-msvc
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -vV
+
+      - name: The probe
+        run: cargo run --release --manifest-path audit/windows-stack-guard/probe/Cargo.toml 2>&1 | tee probe.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Windows stack guard probe"
+            echo '```'
+            cat probe.log 2>/dev/null | grep -av '^   Compiling\|^    Finished\|^     Running' | head -n 1500
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-stack-guard-probe
+          path: probe.log
+          if-no-files-found: ignore
