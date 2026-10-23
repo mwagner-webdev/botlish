@@ -790,7 +790,120 @@ disagreements), `audit/affine/tools/mutate.tcl` (29 of 29 mutants killed) and
 
 ## 11. Warning proposal
 
-TODO(after agents)
+**Could a warning have pushed the vertical slice to this architecture
+earlier? Yes -- a narrow one, and the census measured it.**
+
+### The rule
+
+`CONTEXT-RESOURCE-ESCAPE` (the `CONTEXT-*` family of CONTEXTS.md's
+diagnostics). For every call, in a unit V, of a function F of another
+module U, where U is **contextualized** (DIRECT-MODULES.md: U has direct
+edges and its own contexts mediate every one -- by the compiler's own
+proof, the airlock of some raw authority), warn when an argument or the
+result exposes raw foreign representation to V:
+
+* **R2** a C address (`Ptr`, `FnPtr`) itself, or a struct, anonymous
+  struct, List, vector or array holding one *without an opaque struct in
+  between* (V cannot read through an opaque struct);
+* **R3** a native view or edit, with the same opaque stop;
+* **R4** code in V constructs, destructures or projects a *non-opaque*
+  struct of U that holds a C address (U's resource record taken apart
+  outside U).
+
+Reported once per exposing declaration of U (the function, or the struct
+for R4) -- the fix is there -- located at the declaration, with the first
+crossing site and the number of sites as evidence. Never reported: a
+crossing whose type is sealed by an opaque struct (affine ownership
+transferred on purpose: Design A); a call into a **designated** direct
+module (a raw layer by declaration); a module that is ordinary (it
+mediates nothing: a thin binding, std::windows); calls inside U.
+
+Message, for the vertical slice's first one:
+
+```
+warning: sdl::color hands a raw C pointer (parameter `renderer`,
+std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]) across the boundary of module
+sdl, which mediates its raw authority through its context sdl::Sdl:
+module render passes one in (16 calls; first at render.bot:39:13). Keep the
+resource behind the context and give sdl an operation that takes values,
+or seal it in an opaque struct (CONTEXT-RESOURCE-ESCAPE)
+```
+
+### The measurement
+
+`tools/escape-candidates.tcl` computes the rule's facts (the three rules
+above, and R1 -- any C address crossing at all, sealed or not -- for
+comparison) from the HIR of a program, and the repository census ran it
+over everything that compiles (`warning-census/`):
+
+| | partition A: libraries, examples, benches, golden suites, bindings, audit programs | partition B: the Tcl tests' programs, six fuzzers |
+|---|---:|---:|
+| programs | 765 units, 704 compiled | 1,494 distinct, 901 compiled |
+| sites, all rules and buckets | 59 | 9 |
+| -- hit (a contextualized module's boundary) | 49 | 0 |
+| -- no-context (an ordinary module's boundary) | 10 | 7 |
+| -- designated-direct | 0 | 2 |
+| SUSPICIOUS / LEGITIMATE / UNDECIDABLE | 41 / 18 / 0 | 0 / 9 / 0 |
+
+64 distinct sites in all (four std::windows::io sites are in both). Every
+SUSPICIOUS site is in code written to show the problem: 40 in the baseline
+Icy Tower (6df89a8e), 1 in reproducer g1. **Nothing the repository ships
+has a hit**: the standard library, every example (the refactored game
+included), the benchmarks, 102 golden suites, 383 generated binding
+modules, the test suite's programs and 180 fuzzer programs.
+
+**False positives, by rule.** In the hit bucket every site carrying R2 or
+R3 is SUSPICIOUS (38 of 38). R4 is SUSPICIOUS on a non-opaque struct of
+pointers (3) and LEGITIMATE on a carrier whose pointer-holding field is an
+opaque struct (2: Design A's `Polled` and `Shown`) -- hence the opaque
+stop above (the instrument's R4 follows addresses through opaque structs;
+the rule must not). R1 alone has legitimate hits: 6, all Design A's sealed
+affine `sdl::Video`, an intended ownership transfer (and the design that
+makes use after close a compile error). So the proposed rule has **41
+sites, all SUSPICIOUS, and no false positive in the repository**; counted
+as declarations, **13 warnings** -- the baseline's `color`, `fill`,
+`line`, `text`, `scale`, `clear`, `present`, `open`, `poll` and `close`,
+its structs `Video` and `Polled`, and g1's `record`. On the refactored
+game: none.
+
+**Examples it should and should not warn on.** Should: the baseline (raw
+renderer pointers in seven drawing functions' signatures; a non-opaque
+Video destructured and rebuilt in render.bot); g1 (a view of the record
+returned by the airlock). Should not: Design A (the opaque Video crosses;
+nothing raw does); std::windows::io calling std::windows (an ordinary
+layer, no airlock); the native-view and native-edit tests' raw layers
+(designated direct); an ordinary module reading a pointer-free view
+someone else made; the airlock's own helpers called inside it.
+
+**What the instrument cannot see, and what a sharper rule would need.**
+A function of an airlock taken as a value and called elsewhere (0 such
+references in the repository; a function requiring the context cannot
+become a value at all, CONTEXT-FUNCTION-VALUE, so only an airlock's
+context-free helpers could). The one judgment the compiler cannot make
+from types is *provenance*: whether a pointer V passes into the airlock is
+the airlock's own resource handed back (suspicious) or V's own, which the
+airlock merely uses (legitimate -- V then has raw authority of its own,
+being direct or another airlock). No such case arose; if one does,
+excluding callers that are themselves contextualized or designated direct
+is the natural refinement.
+
+### Severity
+
+An **ordinary warning**, on by default, in the one policy Botlish has (no
+opt-in lints exist, by design: AGENTS.md, "Compiler warnings"). It is
+backed by compiler facts, not by taste: the module's contextualized status
+is a proof the direct-module analysis already makes, the crossing types are
+the checker's, opacity is a declaration; on this repository it has no false
+positive. The architectural judgment it encodes -- an airlock should not
+hand out what it exists to keep -- is DIRECT-MODULES.md's own premise. The
+response (an operation, an opaque struct, a redesign) stays the author's:
+no fixit, no suppression. A Compilerpedia architecture note -- the three
+designs of section 7 and when each fits -- should accompany it.
+
+Not implemented here, deliberately: a warning needs its WARNINGS-*.md, a
+Compilerpedia topic with a warning and a non-warning example, a fuzzer
+against an independent model and mutants (AGENTS.md); this census's
+instrument and corpus are its starting point.
 
 ## 12. SDL3 wrapper package implications
 
@@ -947,7 +1060,50 @@ no C-string-to-String (so SDL's error text can only be logged by SDL).
 
 ## 14. Recommendation
 
-TODO
+**A: no language change first. Add the warning (section 11) and its
+Compilerpedia architecture note, and build the SDL3 wrapper package on the
+retained-context pattern (section 12).**
+
+Why A, on the evidence:
+
+* **The architecture works today, completely, where it matters.** Every
+  piece of ceremony the vertical slice blamed on the language disappeared
+  from the application with no language change (section 2); behavior is
+  identical call for call (section 9). A package author pays the
+  workaround once, inside the airlock; application authors never see it.
+* **The remaining deficiency does not block the package and does not leak
+  into its API.** Context-owned affine members (6.A) would retire the
+  native records inside the wrapper, but the ID variant showed the public
+  operations do not change with the retention mechanism (render.bot and
+  main.bot compiled unchanged against both): the package can be built now
+  and its insides simplified later.
+* **The warning is ready to specify.** It is backed by facts the compiler
+  already proves, has no false positive in 2,198 compiled programs, and
+  would have flagged exactly the 13 declarations the vertical slice got
+  wrong (and the one g1 plants).
+* **Not C.** Observing affine access has no remaining use above the
+  airlock (0 pointers) and saves 6 clones inside it. The census found no
+  case in which proper encapsulation needed it.
+* **Not B first.** Extending contexts to own affine members is the right
+  *second* step -- a new capability with real semantics to design (member
+  access as places, release at program end or by the closing operation,
+  native slots holding pointer words) -- and a package built on today's
+  pattern is the workload to measure that design against, the way this
+  census measured the context system against Icy Tower. It is recorded as
+  the first follow-up below, with its reproducers (a1, a1b, a2) and
+  proposed semantics (6.A).
+
+Follow-ups, in order:
+
+1. `CONTEXT-RESOURCE-ESCAPE` as specified in section 11 (its report, topic,
+   fuzzer and mutants), and a Compilerpedia note on the three designs.
+2. The SDL3 package (section 12), starting from Icy Tower's sdl.bot.
+3. Context-owned affine members (6.A), measured against the package.
+4. Module privacy (IMPORTS.md's not-done list), which every airlock needs
+   to hide its helpers (section 5).
+5. Small: the context-installation case of `AFFINE-ERASURE-UNSUPPORTED`
+   names a hygienic temporary and offers inapplicable remedies (6.A); the
+   native context slot omits views (6.B, b2b).
 
 ## 15. Artifacts and what to run
 
