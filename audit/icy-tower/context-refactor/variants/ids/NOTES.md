@@ -73,10 +73,11 @@ window, SDL_Quit.
 5. Built the unmodified working tree (4be79514, byte-identical files) the
    same way, for the comparison runs.
 
-I also wrote an error-path probe, `errpaths.bot` (scratch only, not
-committed). It imports `sdl` and calls `fill`, `text`, `line` and `poll` on
-a closed Sdl, after `open`, with `1.0e300` arguments that overflow binary32,
-with a 130-character text, and again after a double `close`. I built it
+I also wrote an error-path probe, `errpaths.bot` (its source is at the end
+of this file). It imports `sdl` and calls `fill`, `text`, `line` and `poll` on
+a closed Sdl and after `open` (opened twice: the second is a no-op), with
+`1.0e300` arguments that overflow binary32, with a 130-character text, and
+again after a double `close`. I built it
 against both versions. Every number below is from the final `sdl.bot` in
 this directory.
 
@@ -393,3 +394,66 @@ LD_LIBRARY_PATH=$SDL SDL_VIDEO_DRIVER=dummy valgrind --tool=callgrind --dump-ins
 The per-function call counts come from walking `calls=` lines whose caller
 object is the executable and whose callee object is libSDL3. Take the
 difference of the 240- and 60-frame runs and divide by 180.
+
+The error-path probe, `errpaths.bot`, goes beside `main.bot` in the stage
+and is built the same way (`-warnings off`):
+
+```
+# The error and closed-session paths of sdl.bot's operations, for the
+# variant and the working tree alike (same public API).
+import std::ffi::c
+import std::list
+import std::str
+import sdl
+
+fn try_fill(x: Float64) -> str:
+    ok = sdl::fill(x, 0.0, 10.0, 10.0):
+        on NonFiniteFloat:
+            return "fill:NonFiniteFloat"
+    if ok:
+        return "fill:true"
+    "fill:false"
+
+fn try_text(x: Float64, s: str) -> str:
+    ok = sdl::text(x, 0.0, s):
+        on NonFiniteFloat:
+            return "text:NonFiniteFloat"
+    if ok:
+        return "text:true"
+    "text:false"
+
+fn try_line(x: Float64) -> str:
+    ok = sdl::line(x, 0.0, 1.0, 1.0):
+        on NonFiniteFloat:
+            return "line:NonFiniteFloat"
+    if ok:
+        return "line:true"
+    "line:false"
+
+fn polled() -> str:
+    p = sdl::poll([])
+    "poll:".concat(p.failure)
+
+fn run() -> List[str]:
+    closed_fill = try_fill(1.0)
+    closed_text = try_text(1.0, "a")
+    closed_poll = polled()
+    sdl::close("")
+    sdl::open("t", 64, 64, false):
+        on sdl::SdlFailed {call}:
+            return ["open failed ".concat(call)]
+    sdl::open("again", 64, 64, false):
+        on sdl::SdlFailed {call}:
+            return ["second open failed ".concat(call)]
+    big = 1.0e300
+    long = "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+    r = [try_fill(1.0), try_fill(big), try_text(1.0, "hi"), try_text(big, "hi"), try_text(1.0, long), try_line(big), polled()]
+    present = sdl::present()
+    sdl::close("")
+    sdl::close("")
+    [closed_fill, closed_text, closed_poll, r.get(0, ""), r.get(1, ""), r.get(2, ""), r.get(3, ""), r.get(4, ""), r.get(5, ""), r.get(6, ""), try_fill(1.0), polled()]
+
+with context sdl::create()
+
+run()
+```
