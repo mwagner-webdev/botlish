@@ -501,23 +501,75 @@ job; the paths shortened):
   unwrapped.
 * ld warns `ignoring duplicate libraries: '-lSystem'`, because clang adds
   `-lSystem` itself. The warning goes to the link log only.
-  rustc's own link of the same list gets the same warning.
 * The executable (hello-darwin.bot) is `Mach-O 64-bit executable arm64`.
-  `otool -L` lists `/usr/lib/libSystem.B.dylib` only. Apple's ld signs it
-  ad hoc, so it runs as linked and prints `Hello, world!`.
+  `otool -L` lists `/usr/lib/libiconv.2.dylib` and
+  `/usr/lib/libSystem.B.dylib`, both part of macOS. Apple's ld signs an
+  arm64 executable ad hoc, so it runs as linked and prints `Hello, world!`.
 
 **The archive's system libraries.** rustc's `--print native-static-libs`
 for the archive on macOS names `-liconv -lSystem -lc -lm`. The first CI
 run linked with `-lSystem -lc -lm`, a list written without that account.
 Every test still linked, because no archive member a Botlish executable
-pulls in refers to libiconv. The list now matches rustc's.
-`native/runtime-archive/libraries.tcl`, which every host's system-linker
-job runs, fails the job when the two differ. Before, only
-`single/build.sh` compared them, and only on Linux.
+pulls in refers to libiconv, and the executable then depended on
+libSystem alone. The list now matches rustc's (the check printed
+`runtime archive libraries: -liconv -lSystem -lc -lm (as rustc accounts
+for them)`), and ld records libiconv as a dependency even though nothing
+uses it, since no `-dead_strip_dylibs` is passed. rustc's own macOS
+command, recorded in MACOS-AARCH64-MILESTONE-6.md, passes the same
+libraries and flags (`-liconv -lSystem -lc -lm -arch arm64
+-mmacosx-version-min=11.0.0 ... -Wl,-dead_strip`) and no
+`-dead_strip_dylibs` either. So the omission was avoidable: the record was
+already there. `native/runtime-archive/libraries.tcl`, which every host's
+system-linker job runs, fails the job when the two lists differ. Before,
+only `single/build.sh` compared them, and only on Linux.
 
 ## 17. Microsoft's link.exe
 
-PENDING-WINDOWS
+**Executed** (windows-2025, Visual Studio 18 Enterprise, MSVC 14.51:
+windows-x86_64.yml's `system-linker` job, which imports vcvars64.bat's
+environment so that link.exe is on PATH; the paths shortened):
+
+```
+link.exe /NOLOGO /SUBSYSTEM:CONSOLE /INCREMENTAL:NO /OPT:REF /OPT:ICF /NXCOMPAT /DYNAMICBASE
+    /OUT:WORK\sl\.botlish-aot-PID-NONCE\executable.exe
+    WORK\sl\.botlish-aot-PID-NONCE\program.obj WORK\sl\.botlish-aot-PID-NONCE\startup.obj
+    kernel32.lib
+    RELEASE\botlish_runtime.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib
+    libcmt.lib libvcruntime.lib libucrt.lib
+    /NODEFAULTLIB:msvcrt.lib /NODEFAULTLIB:msvcrtd.lib /NODEFAULTLIB:vcruntime.lib
+    /NODEFAULTLIB:vcruntimed.lib /NODEFAULTLIB:ucrt.lib /NODEFAULTLIB:ucrtd.lib
+    /NODEFAULTLIB:libcmtd.lib /NODEFAULTLIB:libvcruntimed.lib /NODEFAULTLIB:libucrtd.lib
+    /NODEFAULTLIB:msvcprt.lib /NODEFAULTLIB:msvcprtd.lib /NODEFAULTLIB:libcpmtd.lib
+```
+
+* The first `kernel32.lib` is the program's own plan: hello-windows.bot
+  declares `extern c library "kernel32"`. The second is one of the
+  runtime archive's system libraries. `botlish-native system-linker`
+  reported `libraries kernel32.lib ntdll.lib userenv.lib ws2_32.lib
+  dbghelp.lib`, and the library check agreed: `(as rustc accounts for
+  them)`, rustc's `/defaultlib:` entry for the C runtime left out.
+* The C runtime is the rustc linker's policy (`crt_args`,
+  WINDOWS-X86-64-MILESTONE-2.md): the static release runtime, with every
+  other Microsoft runtime excluded.
+* `/INCREMENTAL:NO`: an incremental link's thunks would put a function's
+  address somewhere other than its code, and the description's addresses
+  must be the code's.
+* The executable ran and printed `Hello, world!`. `dumpbin /dependents`
+  lists `KERNEL32.dll`, `kernel32.dll`, `api-ms-win-core-synch-l1-2-0.dll`,
+  `ntdll.dll` and `bcryptprimitives.dll`. All are system DLLs, and there
+  is no `VCRUNTIME140.dll` and no UCRT `api-ms-win-crt-*`. kernel32
+  appears twice, in two spellings: two import entries that the loader
+  resolves to the same module (DLL names are case-insensitive).
+* The tool is link.exe found on PATH. Botlish has no Visual Studio
+  discovery of its own; rustc, by contrast, finds link.exe itself.
+  **Inspected, not executed** (system-linker-toolchain-failures needs a
+  Unix shell): without a Developer environment the link is `NATIVE AOT
+  TOOLCHAIN` (`NATIVE LINK TOOLCHAIN` for a program that calls C), "the
+  system linker needs Microsoft's linker to link an executable for
+  windows-x86_64, and there is none: no link.exe on PATH. To link: run
+  from a Visual Studio Developer Command Prompt (or after vcvars64.bat),
+  ...". A `link` that is not Microsoft's (Git's or MSYS2's coreutils) is
+  refused by its missing banner, `toolchain_error` as well.
 
 ## 18. Static libraries
 
@@ -710,11 +762,75 @@ build.sh links it.)
 
 ## 25. Linux AArch64
 
-PENDING-ARM64
+**The single executable: executed** (ubuntu-24.04-arm, single-executable.yml's
+`build-arm64` job). `single/build.sh` builds it there unchanged: an
+`ELF 64-bit LSB pie executable, ARM aarch64`. The library check passes, and
+`single/ffi-smoke-test.sh` passes with only gcc on PATH:
+
+```
+   built a (1340912 bytes)
+   built b (1347184 bytes)
+   built c (1347832 bytes)
+   built d (1348064 bytes)
+   built e (1342000 bytes, system-linked: no stub on aarch64)
+   ran a: 42  (needs: libgcc_s.so.1 libm.so.6 libc.so.6 )
+   ran b: [42, 42, 321]  (needs: libgcc_s.so.1 libm.so.6 libc.so.6 ld-linux-aarch64.so.1 )
+   ran c: [37602, 1768, 888]  (needs: ...)
+   ran d: [[16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]  (needs: ...)
+   ran e: Hello from the stub linker | unit  (needs: libgcc_s.so.1 libm.so.6 libc.so.6 )
+   refused no C compiler: NATIVE LINK TOOLCHAIN
+   refused a missing library: definitely_missing_botlish_lib
+   refused an undefined symbol: botlish_no_such_symbol
+   ran b on -backend cranelift
+   refused the stub linker, chosen: the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library
+ok
+```
+
+E is the program that calls no C (its text still says "stub linker"). On
+AArch64 `auto` links it with the system linker, because there is no stub
+(section 35). The arithmetic is x86-64's, byte for byte. The artifact is
+uploaded (`botlish-linux-aarch64`) but not published.
+
+**The test files: PENDING-ARM64-TESTS**
 
 ## 26. macOS AArch64
 
-PENDING-MACOS
+**Executed** (macos-15-arm64, macOS 15.7.9, Apple clang 17, rustc 1.99.1:
+macos-arm64.yml's `system-linker` job on this milestone's head, with
+`BOTLISH_NATIVE_LINKER=system` for the whole job):
+
+* `botlish-native system-linker`: `flavor apple macos-aarch64`, `tool
+  /usr/bin/cc`, `runtime .../libbotlish_runtime.a {Mach-O arm64}`,
+  `libraries -liconv -lSystem -lc -lm`. The library check agrees.
+* hello-darwin.bot linked and run (section 16).
+* `tests/system-linker.test` on both Tcl backends: 10 passed, 3 skipped
+  (`linuxHost`: the closed-pipe and closed-descriptor run, the ELF
+  checks, the strace of the link). Startup parity is checked against the
+  rustc linker: the startup reports of the two executables are identical
+  and they print, fail and exit alike, plainly and under GC stress. The C
+  acceptance program (libc, two static libraries, borrowed Bytes and
+  MutableBytes, a variadic call, `__error()`'s errno and the `(size_t)-1`
+  sentinel) prints exactly what it prints on Linux, `[5, 42, 42, 37602,
+  1768, 888, 321, [16, 0, 1736], [-1, 34, 1736], [18446744073709551615,
+  5], [42, 0]]`. Its executable runs after the
+  libraries and the archive copy are deleted, and `otool -L` names no
+  Botlish or fixture library.
+* `tests/all.tcl` over the 61 test files that build an executable or link
+  C: **3,265 tests, 3,076 passed, 189 skipped, 0 failed**. The skipped
+  ones are other hosts' tests (`linuxX86_64` 40, `nativeLinux` 70,
+  Windows 24), BoringSSL, SDL3 and Tcl acceptance without their packages,
+  MinGW, and rustc's own invocation (`rustcLinker` 2).
+* Under `BOTLISH_NATIVE_GC_STRESS=1`, system-linker.test, c-ffi.test,
+  darwin-io.test, c-byte-borrowing.test, c-ffi-error-capture.test and
+  coroutines.test on both backends: **287 tests, 274 passed, 13 skipped,
+  0 failed** on each backend. darwin-io.test is Darwin IO through
+  libSystem's C functions; coroutines.test's executables switch native
+  stacks.
+
+The first run, before the fixes, had 2 failures out of 3,264. Startup
+parity compiled the Linux Hello World on macOS; the test now compiles the
+host's own. c-ffi.test's `cf-renamed-binding-native-name` failed on main
+too and was fixed there; the fix is merged.
 
 ## 27. Windows x86-64
 
@@ -736,7 +852,77 @@ private copy of the tree and run against its detectors:
   static tclsh `single/build.sh` cached and this checkout's native build)
   and runs `single/smoke-test.sh` and `single/ffi-smoke-test.sh` on it.
 
-PENDING-MUTANT-TABLE
+**The `sys-*` mutants: 24, 24 killed.**
+
+| mutant | what it breaks | killed by |
+|---|---|---|
+| sys-auto-stub-for-c | auto links C with the stub | `linker_selection_auto_follows_the_link_plan`, system-linker-auto |
+| sys-auto-system-for-plain | auto system-links a program that calls no C | the same |
+| sys-runtime-omitted | no runtime archive in the link | the three `system_link_args_*` tests, 12 system-linker tests |
+| sys-runtime-path-split | the archive's path split at spaces | system-linker-static-incorporation |
+| sys-runtime-variable-ignored | `BOTLISH_NATIVE_RUNTIME` not read | system-linker-runtime-failures |
+| sys-runtime-machine-unchecked | an archive of another machine linked | system-linker-runtime-failures |
+| sys-description-local | the description a local symbol | 12 system-linker tests |
+| sys-interface-not-referenced | the interface slot unrelocated | `startup_object_relocates_every_address`, 10 tests |
+| sys-entries-swapped | direct and generic entries exchanged | `startup_object_relocates_every_address`, 4 tests |
+| sys-constant-dropped | the last constant lost | startup parity, outcomes, C acceptance, process setup |
+| sys-stack-maps-dropped | no stack maps | the same four |
+| sys-root-dropped | one live root dropped per safepoint | startup parity, outcomes, C acceptance |
+| sys-group-dropped | GNU ld without the archive group | `system_link_args_gnu` |
+| sys-link-dirs-lost | `-L` directories dropped | the three `system_link_args_*` tests, 3 tests |
+| sys-plan-lost | the libraries dropped | the same |
+| sys-not-pie | a position-dependent executable | `system_link_args_gnu`, system-linker-ordinary-executable |
+| sys-failed-link-replaces | the old executable removed first | system-linker-link-failures |
+| sys-missing-linker-unclassified | collect2's missing ld a link failure | `missing_linker_is_a_toolchain_failure`, system-linker-toolchain-failures |
+| sys-no-command-line-tools-unclassified | xcrun's missing tools a link failure | `missing_linker_is_a_toolchain_failure` |
+| sys-revision-unchecked | another startup revision read | `linked_description_rejects_damage`, system-linker-damaged-description |
+| sys-fingerprint-unchecked | another runtime build's description run | the same |
+| sys-interface-unchecked | another startup interface accepted | `linked_description_rejects_damage` |
+| sys-sigpipe-default | SIGPIPE left at its default | system-linker-process-setup |
+| sys-fds-not-sanitized | a missing standard descriptor left closed | system-linker-process-setup |
+
+The first full run killed 21 of 23 and found two survivors, both real
+gaps in the tests:
+
+* **sys-missing-linker-unclassified** was equivalent. gcc's `collect2:
+  fatal error: cannot find 'ld'` matched two of `missing_linker_lines`'
+  patterns, so weakening one changed nothing. The redundant pattern is
+  gone. The mutant now weakens the remaining one, and the unit test pins
+  every pattern by a real tool's words: collect2, clang's `unable to
+  execute command` and `invalid linker name`, xcrun's `invalid active
+  developer path` and `unable to find utility`, and xcode-select's `No
+  developer tools were found`. A new mutant,
+  sys-no-command-line-tools-unclassified, pins macOS without the
+  Command Line Tools.
+* **sys-fds-not-sanitized** survived because system-linker-process-setup
+  could not tell `/dev/null` from a closed descriptor. Its program handled
+  WriteFailed, and Rust's standard output takes EBADF for success when it
+  prints the result line, so a process left without descriptor 1 also
+  exited 0. The test now runs a program whose failed write ends in a
+  runtime error.
+
+**The single-executable mutants: 9, 9 killed.**
+
+| mutant | what it breaks | killed by |
+|---|---|---|
+| runtime-not-packed | no runtime archive in the zip | smoke-test.sh (emit), ffi-smoke-test.sh (build a) |
+| runtime-never-installed | the archive never installed | smoke-test.sh (install check), ffi-smoke-test.sh |
+| runtime-always-installed | installed by a run that links nothing | smoke-test.sh (install check) |
+| backend-run-not-linking | `-backend cranelift` not taken for a run that may link | ffi-smoke-test.sh (`-backend cranelift` of b) |
+| id-without-runtime | the build id ignores the archive | smoke-test.sh (cache directory name) |
+| linker-stub | everything stub-linked, as before | smoke-test.sh (no NATIVE LINK TOOLCHAIN), ffi-smoke-test.sh |
+| linker-system | everything system-linked | smoke-test.sh (emit hello needs cc), ffi-smoke-test.sh (e without cc) |
+| linker-choice-overridden | an explicit `BOTLISH_NATIVE_LINKER` replaced by auto | ffi-smoke-test.sh (stub chosen) |
+| installed-modes-decimal | modes from `expr`, which reads 0755 as decimal | smoke-test.sh (modes 1363 1363 1204, want 755 755 644) |
+
+The last mutant is the bug CI found in this milestone's first
+single-executable build. A run that started the stub failed with
+"botlish-aot-stub: Permission denied": the installed files had modes
+`--wxrw--wt`. The local smoke tests ran as root, which can read and run
+a file whatever its mode, and so they passed. They now check the exact
+modes, and they pass as `nobody` too.
+`runtime-never-installed` was killed only by ffi-smoke-test.sh until
+smoke-test.sh gained its install check.
 
 ## 29. Fuzzing
 
@@ -770,15 +956,80 @@ PENDING-BENCH
 
 ## 32. Linux CI
 
-PENDING-CI
+The jobs this milestone adds:
+
+* **tests.yml `system-linker`** (ubuntu-latest, every push and pull
+  request). It builds the native backend, prints `botlish-native
+  system-linker` and runs the library check. Then every test file that
+  builds an executable or links C runs with `BOTLISH_NATIVE_LINKER=system`
+  (`tests/all.tcl -file`, the compile backend). Finally system-linker.test,
+  c-ffi.test, c-byte-borrowing.test, c-ffi-error-capture.test and
+  coroutines.test run again under `BOTLISH_NATIVE_GC_STRESS=1`.
+  PENDING-TESTS-YML
+* **tests-arm64.yml `system-linker`** (ubuntu-24.04-arm): the same on
+  AArch64. PENDING-ARM64-YML
+* **single-executable.yml**:
+  * `build` (ubuntu-24.04): `single/build.sh`, which runs the library
+    check, then smoke-test.sh and ffi-smoke-test.sh on the build machine.
+    **Passed.**
+  * `build-arm64` (ubuntu-24.04-arm): the same build, with
+    ffi-smoke-test.sh. **Passed** (section 25). Not published.
+  * `smoke` (stock `ubuntu:24.04` and `ubuntu:latest` containers):
+    smoke-test.sh with no toolchain at all, as before. It now also checks
+    the install, the modes and the C refusal.
+  * `ffi-smoke` (new; the same images): `apt-get install gcc libc6-dev
+    binutils`, and the job fails if `rustc` or `cargo` exists. It deletes
+    the checkout, keeping only ffi-smoke-test.sh and the C fixture, and
+    runs the downloaded executable. `ubuntu:latest` (gcc 15.2): **passed**,
+    applications A to E as on the build machine.
+  * `release` now needs `ffi-smoke` as well, and its notes say what a
+    program that calls C needs.
+
+  PENDING-SINGLE-YML
+
+The Linux results quoted elsewhere in this report come from this
+milestone's machine (Ubuntu 24.04 x86-64, gcc 13.3). There:
+`tests/local.tcl` on the 26 files this milestone touched passed (52 runs,
+0 failed), and so did the executable and C test files under the system
+linker (section 21).
 
 ## 33. macOS CI
 
-PENDING-MACOS-CI
+macos-arm64.yml gains a `system-linker` job (macos-15, every branch push).
+It runs with `BOTLISH_NATIVE_LINKER=system` throughout: the discovery
+facts and the library check, hello-darwin.bot linked, `file`'d,
+`otool -L`'d and run, system-linker.test on both Tcl backends, every
+executable and C test file, and the GC-stress set with darwin-io.test
+added. On this milestone's merged head it **passed**: section 26 has the
+numbers. Every other macOS job (smoke, both acceptance shards, the Linux
+control) passed on the same head: the rustc-linked tiers are unaffected
+by the runtime archive in the build. PENDING-MACOS-LAST
 
 ## 34. Windows CI
 
-PENDING-WINDOWS-CI
+windows-x86_64.yml gains a `system-linker` job (windows-2025). It imports
+vcvars64.bat's environment into the step, then: the discovery facts, the
+library check, hello-windows.bot linked and run with the link command
+logged, `dumpbin /dependents`, system-linker.test, the Windows-relevant
+executable and C test files, and system-linker.test and c-ffi.test under
+GC stress.
+
+Its first run found two problems, neither in the system linker:
+
+* **Every system-linker test and C fixture was skipped.**
+  tests/ctoolchain.tcl took an existing Developer environment for no
+  MSVC: an empty dict, meaning "nothing to add", is `""` in Tcl. Fixed:
+  `ctool::HaveMsvc`. The rustc-linked jobs never ran inside a Developer
+  environment, so they never saw it.
+* **c-ffi.test's `cf-system-library` failed** with `LNK1146: no argument
+  specified with option '/LIBPATH:'`. With the fixture unbuilt (the
+  first problem), the test passes an empty fixture directory as a link
+  directory. This is latent under every linker; with the fixture built it
+  cannot occur. It is recorded for a separate fix (section 35).
+
+The smoke job (rustc-linked, unchanged) **passed** on the merged head;
+before the merge, its one failure was `cf-renamed-binding-native-name`
+(fixed on main). PENDING-WINDOWS-LAST
 
 ## 35. Remaining distribution work
 
@@ -814,6 +1065,13 @@ PENDING-WINDOWS-CI
   every runtime helper linked. No runtime split is warranted (section 7).
 * **Publishing the AArch64 build.** single-executable.yml builds and
   smoke-tests it (section 25) but publishes only x86-64's.
+* **An empty link directory.** c-ffi.test passes its fixture directory
+  as a link directory even when the fixture did not build and the
+  directory is `""`. link.exe then gets `/LIBPATH:` alone (LNK1146). gcc
+  gets `-L` alone, which takes the next argument as the directory. The
+  test should pass no directory then. Whether `--link-dir ""` should be
+  refused by the driver is a separate question. It predates this
+  milestone and affects every linker.
 
 ## 36. For the next macOS milestone
 
