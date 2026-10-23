@@ -74,7 +74,8 @@ code:
 
 No AArch64 machine, cross toolchain or qemu was available in this
 container. `tests/native-library.test` runs there in CI's arm64 workflow
-(`tests-arm64.yml`), which this milestone did not get to run.
+(`tests-arm64.yml`), dispatched on this milestone's branch; its result is
+the AArch64 evidence.
 
 **Not supported: macOS, Windows and mobile targets.**
 
@@ -352,7 +353,7 @@ exported c fn checked(n: int) -> int errors Rejected:
 Each kind has a `std::compiler::DiagnosticCode` case (`ExportEnvironment`,
 `ExportName`, `ExportPlacement`, `ExportSignature`; `stdlib/compiler.bot`,
 `hir::static::codes`) and a Compilerpedia topic (`error.export-*`).
-`nl-front-end-diagnostics` checks all four, nine findings in one program.
+`nl-front-end-diagnostics` checks all four, ten findings in one program.
 
 ### The explicit list
 
@@ -1039,7 +1040,7 @@ All pass.
 
 ### Mutation results
 
-`audit/native-library/tools/mutate.tcl` holds 21 mutants (`mutants.txt`),
+`audit/native-library/tools/mutate.tcl` holds 20 mutants (`mutants.txt`),
 each a deliberate bug of one rule. Each runs in a private tree with its
 own native build. The detectors are:
 
@@ -1047,7 +1048,54 @@ own native build. The detectors are:
 * `tests/native-library.test`;
 * `tests/aot-stub-linker.test`.
 
-MUTATION-RESULTS
+| Mutant | The bug | Killed by |
+|---|---|---|
+| export-root-specialized | an export is the instance its call sites specialized (`checked(-5) = -10`) | 16 tests, `nl-export-root-checked` among them |
+| export-context-accepted | an export requiring a context is accepted | `nl-front-end-diagnostics` |
+| library-top-level-accepted | an entry file may hold statements | `nl-library-checks` |
+| symbols-global | runtime and program symbols stay global | `nl-symbols`, `nl-two-libraries`, `nl-nested-libraries` |
+| error-table-unwritten | no NIR error table: identities become numbers | 6 tests |
+| float-argument-converted | a `double` argument converted to an integer | `nl-abi-types` |
+| utf8-unchecked | a `str` argument is not validated | `nl-abi-types` |
+| nonfinite-admitted | NaN and infinities enter | `nl-abi-types` |
+| int-result-wrapped | an out-of-range Int result becomes -1 | `nl-abi-types`, `nl-export-root-no-caller` |
+| arguments-unrooted | a converted argument is no root while the next allocates | `nl-abi-types` (three `str` arguments, GC stress) |
+| declared-identity-numeric | a declared error's identity is its number | 6 tests |
+| payload-dropped | a declared error carries no fields | 6 tests |
+| released-buffer-kept | release leaves the struct pointing at freed memory | `nl-abi-types` |
+| foreign-buffer-freed | a buffer the library never made is freed | `nl-abi-types`, `nl-two-libraries` |
+| wrong-thread-accepted | another thread's call runs | `nl-threads` |
+| reentrant-accepted | a call from inside a call runs | `nl-reentrant` |
+| destroyed-handle-live | a destroyed instance stays registered | `nl-lifecycle` |
+| stack-ceiling-unset | the walk climbs into the host's frames | `nl-walk-boundary` |
+| descriptor-errors-dropped | the descriptor's error table read as empty | `program_descriptor_round_trips`, 6 tests |
+| fingerprint-unchecked | a record of another runtime build accepted | `linked_program_refuses_a_foreign_record` |
+
+The first run, against the test file as it then was, left four
+survivors.
+
+* **`export-context-accepted`.** The diagnostics test had no export that
+  requires a context. It gained one.
+* **`arguments-unrooted`.** No export took two `str` arguments, so no
+  conversion allocated while an earlier argument was unrooted.
+  `nl-abi-types` gained `joined(a, b, c)`.
+* **`stack-ceiling-unset`.**
+  * No test had a collection while another instance's Botlish frames sat
+    above the call. `nl-walk-boundary` (section 8) was written for it.
+  * With frame pointers in the callback (the test compiles it so), the
+    walk reaches the outer instance's frame, marks its objects, and the
+    mutant's `outer` returns the wrong value.
+  * Analysis, not measured: a callback without frame pointers hides the
+    outer frame's return address from the walk, so the defect would stay
+    latent.
+* **`program-scope-not-restored`** (ProgramScope's drop not restoring the
+  previous program) is equivalent.
+  * A library's runtime is a private copy with its own thread-local, so no
+    other program ever shares it.
+  * It was removed from `mutants.txt`, whose header records why.
+
+The three new detectors kill their mutants (a rerun of those three with
+`-only`). Every other mutant was killed in the first run.
 
 The existing harnesses' mutants were checked against the changed files.
 Two no longer applied and were updated to the code they mutate, keeping
