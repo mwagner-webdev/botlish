@@ -104,11 +104,14 @@ location), except the two spelling measures (marked *); before is commit
 | code lines (non-blank, non-comment) sdl / render / main | 179 / 120 / 128 | 269 / 107 / 127 |
 
 The last row is the honest cost: the airlock grew by 90 lines while the
-application shrank by 14. Of the 90: 40 are the per-operation session
-lookup (`session = sdl.open.at(0): on IndexNotFound: return false`, the
-view, the pointer bound to a local), 15 the Handles record and its
-writer, the rest open's longer failure paths and the context's
-lifecycle. Section 8 shows where.
+application shrank by 14. In sdl.bot, 36 lines are the per-operation
+session lookup (9 operations x `session = sdl.open.at(0):`, its
+`on IndexNotFound: return false`, and the view), 10 bind a pointer read
+from the view before its C call, 21 are the Handles layout, the Session
+struct and `remember` (where the Video struct's 8 were), and `open` grew
+by 17 (the record, its edit and view, two impossible-failure handlers);
+the rest is `synced?`, `create` and close's split into close and
+`release`. Section 8 shows where.
 
 ## 3. Final architecture
 
@@ -210,7 +213,7 @@ of the shape `text.clone().log_failure(...)` / `buffer.clone().write_text
 is needed after the call. One more kind of ceremony is new: an extern call
 may not observe a pointer temporary (`AFFINE-TEMPORARY-UNSUPPORTED`), so
 each operation binds the pointer it reads from the view before calling SDL
-(`renderer = h.renderer` then `renderer.SDL_RenderClear()`): 13 such
+(`renderer = h.renderer` then `renderer.SDL_RenderClear()`): 10 such
 bindings. Neither would justify a parameter mode.
 
 ### 4.5 Does cleanup become simpler?
@@ -261,8 +264,9 @@ SDL's own).
 
 Before, the statuses were the same -- DIRECT-MODULES.md's accounting was
 already satisfied -- but raw *resources* (not raw calls) leaked upward:
-render.bot named `std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer]` in all 8 of
-its signatures and main.bot called `SDL_GetPerformanceCounter` directly.
+7 of render.bot's 10 functions took `std::ffi::c::Ptr[sdl3::ctypes::
+SDL_Renderer]` (and an 8th the whole `sdl::Video`), and main.bot called
+`SDL_GetPerformanceCounter` directly.
 Directness tracks who makes raw calls; it says nothing about who holds raw
 handles. That gap is what the warning of section 11 would cover.
 
@@ -1078,7 +1082,7 @@ Why A, on the evidence:
   main.bot compiled unchanged against both): the package can be built now
   and its insides simplified later.
 * **The warning is ready to specify.** It is backed by facts the compiler
-  already proves, has no false positive in 2,198 compiled programs, and
+  already proves, has no false positive in 1,605 compiled programs, and
   would have flagged exactly the 13 declarations the vertical slice got
   wrong (and the one g1 plants).
 * **Not C.** Observing affine access has no remaining use above the
