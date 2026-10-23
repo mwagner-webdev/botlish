@@ -623,7 +623,10 @@ What section 6 claims, checked:
   - native-root-storage.test: 10 of 10;
   - native-stack-map.test: 11 of 11.
 
-  ⟨GC-ARM⟩
+* **Linux AArch64.** The arm64 workflow's GC-stress job on d38feb0 (run
+  [39986848710](https://github.com/mwagner-webdev/botlish/actions/runs/39986848710))
+  ran the whole Tcl suite and the Rust tests under GC stress: green, in
+  1 h 52 min, the time it takes on main.
 
 The first GC-stress runs found a defect in this milestone's own tests, not
 in the guard. `ns-runtime-helper` and the nested-List case of
@@ -767,7 +770,9 @@ were run in full:
   [39944781420](https://github.com/mwagner-webdev/botlish/actions/runs/39944781420)
   (eee16a5, dispatched): every job green but the GC-stress job, which
   section 7.5's defect held past four hours until it was cancelled.
-  ⟨ARM-RERUN⟩
+  Run
+  [39986848710](https://github.com/mwagner-webdev/botlish/actions/runs/39986848710)
+  (d38feb0, with section 7.5's correction): ⟨ARM-FINAL⟩.
 * **macOS AArch64.** Run
   [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468)
   (eee16a5, dispatched with the mutants): every job green. That is the
@@ -776,7 +781,12 @@ were run in full:
   checks), both acceptance shards, the ubuntu control and Tier C's
   mutants. On macOS, `c-access-violation` ends in the signal it always
   did, as native-status records.
-  ⟨MAC-FULL⟩
+  Run
+  [39986842454](https://github.com/mwagner-webdev/botlish/actions/runs/39986842454)
+  (d38feb0, `[ci-full]`): every job green. That includes Tier C, the
+  acceptance tier under GC stress in three shards (58, 36 and 28
+  minutes), with this milestone's tests of the thread's stack and of
+  coroutine stacks.
 
 ### 7.8 The CI runs
 
