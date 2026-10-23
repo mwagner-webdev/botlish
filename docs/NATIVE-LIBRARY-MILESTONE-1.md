@@ -48,9 +48,10 @@ manifest: out/calc.json       the machine-readable interface
 Tested on: Linux 6.18 x86_64 (a 4-core container), Ubuntu 24.04's glibc
 2.39, GNU binutils 2.42 (`ld`, `objcopy`, `ar`), gcc 13.3.0 (`cc`), clang
 18.1.3 (the React Native host probe), rustc 1.97.0, cranelift-codegen
-0.135.2, Tcl 9.0.1. Linux AArch64 is in the `libraries` capability and its
-code paths are the same, but nothing in this report was run on it: that is
-CI's arm64 workflow's to show (section 13).
+0.135.2, Tcl 9.0.1. Linux AArch64 (the `libraries` capability's other
+host) ran in CI only, on GitHub's ubuntu-24.04-arm runners: the whole Tcl
+suite, `tests/native-library.test`'s C suites included, on interp, on
+compile and under GC stress (section 15).
 
 ## 1. Executive result
 
@@ -657,8 +658,9 @@ Not claimed: anything about LTO, a size budget, or mobile code size.
 
 ## 13. Limitations
 
-* **Hosts.** Linux glibc only (`libraries`: linux-x86_64, linux-aarch64);
-  AArch64 was not run here. macOS needs Apple's `ld -r` and a symbol
+* **Hosts.** Linux glibc only (`libraries`: linux-x86_64, linux-aarch64;
+  AArch64 in CI only, not by the probes of sections 10 and 11). macOS
+  needs Apple's `ld -r` and a symbol
   localization (`-exported_symbols_list`, `nmedit`), Windows a DLL and an
   import library: both are another milestone's. Mobile targets need the
   runtime built for them and the native backend's machine code for them
@@ -760,26 +762,32 @@ program.rs, runtime/library.rs, runtime/aotimage.rs, runtime/vm.rs
   Native host probe, `host-spike.tcl -stack-kib 512` with and without
   `-gc-stress 1` (section 11).
 
-CI on the branch, as of 15:20 UTC:
+CI on the branch, as of 17:25 UTC:
 
-* Linux x86-64 (`tests.yml`, dispatched on 9da4e4f8): passed -- the Tcl
-  suite on interp and on compile, the cranelift and cranelift-generic
-  coverage, golden shards 2-4 beside their Tcl originals, the stub-linked
-  executables, the warning gate and the method-call filter audit; the Rust
-  unit tests and golden shard 1 were still queued.
+* Linux x86-64 (`tests.yml`, dispatched on 9da4e4f8): passed, every job
+  -- the Tcl suite on interp and on compile, the cranelift and
+  cranelift-generic coverage, the four golden shards beside their Tcl
+  originals, the Rust unit tests, the stub-linked executables, the warning
+  gate and the method-call filter audit (its GC-stress job runs on main
+  only).
 * Linux arm64 (`tests-arm64.yml`, dispatched on 9da4e4f8): the Rust unit
-  tests (also under GC stress) and all four golden shards passed. The
-  cranelift-generic coverage failed in one test, this milestone's:
-  `nl-build-manifest` expected the manifest's target to be
-  `linux-x86_64`; it now compares it with the host's own target. The
-  interp, compile, cranelift coverage and GC-stress jobs were still running.
-* macOS arm64 (on 9da4e4f8): Tier A passed; Tier B failed in two test
-  files. One was this milestone's: `nl-signature-diagnostics` compiled a
-  program importing `std::linux::io` for the host's target,
+  tests (also under GC stress) and the four golden shards passed. The Tcl
+  suite on interp (9,092 passed), on compile (9,087) and under GC stress
+  (9,085), and the cranelift and cranelift-generic coverage, each failed in
+  exactly one test, this milestone's: `nl-build-manifest` expected the
+  manifest's target to be `linux-x86_64`. It now compares it with the
+  host's own target (bfdfc66b). Every other test of
+  `tests/native-library.test` passed on Linux AArch64, the C conformance
+  suite statically linked, under GC stress and shared, and the JSON
+  library from C. The workflow dispatched again on bfdfc66b was still
+  queued: pending.
+* macOS arm64: passed on bfdfc66b. On 9da4e4f8 its Tier B had failed in
+  two test files. One was this milestone's: `nl-signature-diagnostics`
+  compiled a program importing `std::linux::io` for the host's target,
   UNSUPPORTED-PLATFORM on macOS; it now compiles it for `linuxTarget`, as
   AGENTS.md asks. The other, `cf-renamed-binding-native-name` in
   `tests/c-ffi.test`, failed the same way on main before this branch
   (main's run 39938910401); main's fix (4361226c) is merged into the
-  branch. The run on 69246fc6, which carries both, was in progress.
-* Windows x86-64: the run on 9da4e4f8 was superseded before a runner took
-  it; the one on 69246fc6 was still queued.
+  branch.
+* Windows x86-64: the run on bfdfc66b was still queued (the earlier ones
+  were superseded before a runner took them): pending.
