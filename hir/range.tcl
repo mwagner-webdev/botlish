@@ -977,6 +977,13 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return $r
         }
         ref {
+            if {[dict exists $node hole] || [dict exists $hir syntaxDependent $e]} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): a value, but none known.
+                set r [unknown]
+                dict set ctx exprs $e $r
+                return $r
+            }
             if {[dict get $node binding] eq ""} {
                 return never
             }

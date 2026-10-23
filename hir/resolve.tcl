@@ -946,7 +946,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
         ref {
             set ident [hir::traits::ExternalIdent $ctx $node]
-            if {$ident ne ""} {
+            if {[dict exists $node hole]} {
+                # Source the front end could not read (SYNTAX-RECOVERY-
+                # MILESTONE-1.md).
+                ResolveHole hir $e $node $ctx
+            } elseif {$ident ne ""} {
                 # A reference of a trait clone's body to a binding outside
                 # its function, resolved to the binding the source function's
                 # own resolution found (TRAITS.md, "Monomorphization").
@@ -1226,6 +1230,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {[dict exists $node method] && $planned ne "field"} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
                     [expr {[llength [dict get $node args]] + 1}] hidden]
+                if {[AfterBindingHole hir $scope ""]} {
+                    # A malformed statement before it may bind the method's
+                    # name: which function it applies is not known (Holes,
+                    # below).
+                    dict set hir syntaxDependent $e 1
+                }
             }
             if {[dict exists $node written]} {
                 # How the call was spelled, and the namespace of the code it
@@ -2169,6 +2179,12 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
             # yet: the ordinary forward-reference rule (nothing is hoisted).
             SetField hir $e binding ""
             SetField hir $e init yes
+            if {[AfterBindingHole hir [dict get $ctx scope] ""]} {
+                # (Unless a malformed statement before it may have: Holes,
+                # below.)
+                dict set hir syntaxDependent $e 1
+                return
+            }
             hir::Diagnose hir UNBOUND \
                 "unbound name \"$qualified\": \"$name\" is not established before this point in its own namespace; forward references are not allowed (a binding is visible only after it is established)" $e
             return
@@ -2460,6 +2476,15 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         set b [Lookup hir $scope $name]
     }
     SetField hir $e binding $b
+    if {$b eq "" && !$root && [AfterBindingHole hir $scope ""]} {
+        # A name nothing established: but a malformed statement before it,
+        # in a scope it sees, may have bound it. That it is unbound is not
+        # known (SYNTAX-RECOVERY-MILESTONE-1.md): no diagnostic, and the
+        # reference stands for an unknown value.
+        SetField hir $e init yes
+        dict set hir syntaxDependent $e 1
+        return
+    }
     if {$b eq ""} {
         SetField hir $e init yes
         set message "unbound name \"$name\""
@@ -2476,6 +2501,12 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         return
     }
     set binding [dict get $hir bindings $b]
+    if {!$root && [AfterBindingHole hir $scope $b]} {
+        # A malformed statement between the binding and the reference may
+        # have bound the same name in a scope closer to it: which binding
+        # the name denotes is not known (SYNTAX-RECOVERY-MILESTONE-1.md).
+        dict set hir syntaxDependent $e 1
+    }
     # Every binding a reference can resolve to is already established
     # (sequential resolution), except an ambient one: whatever the host
     # environment holds when a closure eventually runs.
@@ -2485,6 +2516,65 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     if {[dict get $binding kind] ne "root"} {
         Capture hir $ctx [dict get $binding scope] $b
     }
+}
+
+# ---------------------------------------------------------------------------
+# Holes (SYNTAX-RECOVERY-MILESTONE-1.md)
+#
+# A hole (hir/syntax.tcl's holeNode) is source the front end could not read: a
+# malformed statement, or a malformed statement's value. It resolves to
+# nothing and is diagnosed SYNTAX-HOLE -- a resolution diagnostic, so the unit
+# holding it is tainted and its checks' diagnostics are not reported
+# (hir/recovery.tcl), and never shown itself (the syntax error is). Two facts
+# are recorded for what follows it:
+#
+#   * a hole that may bind names (`binds 1`: the malformed statement's form
+#     is not known) is counted in its scope's `holes`. A later reference whose
+#     lookup passes such a scope before it reaches the scope of the binding it
+#     finds may denote a binding the hole made instead: a binding in a scope
+#     inside the found one shadows it. (Not one in the found binding's own
+#     scope: there, binding the same name again is DUPLICATE, whichever comes
+#     first.) Such a reference is `syntaxDependent`: its binding is not
+#     known, and inference makes it poison. An unresolved name after such a
+#     hole is not reported (AfterBindingHole);
+#   * its block (the innermost enclosing function) is a `holeBlocks` entry:
+#     the function's body is incomplete, so nothing inferred from it -- an
+#     undeclared result, an inferred parameter contract -- is known
+#     (hir/types.tcl, hir/signatures.tcl). Its declared contract is.
+proc hir::resolve::ResolveHole {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    SetField hir $e name syntax#hole
+    SetField hir $e binding ""
+    SetField hir $e init yes
+    set binds [dict get $node hole binds]
+    SetField hir $e hole [dict create binds $binds installs [dict getdef $node hole installs 0]]
+    if {$binds} {
+        set scope [dict get $ctx scope]
+        dict set hir scopes $scope holes [expr {[dict getdef $hir scopes $scope holes 0] + 1}]
+        dict set hir bindingHoles 1
+    }
+    set callable [dict get $ctx callable]
+    if {$callable ne ""} {
+        dict set hir holeBlocks $callable 1
+    }
+    hir::Diagnose hir SYNTAX-HOLE "malformed source: no meaning is known for it (its syntax error says why)" $e
+}
+
+# 1 if a reference in scope S to binding B ("" for a name nothing binds) may
+# denote a binding a hole made (ResolveHole): a binding hole in a scope from S
+# out to B's own scope, exclusive (every scope, for an unresolved name).
+proc hir::resolve::AfterBindingHole {hirVar s b} {
+    upvar 1 $hirVar hir
+    if {![dict exists $hir bindingHoles]} {
+        return 0
+    }
+    set own [if {$b eq ""} {list} else {dict get $hir bindings $b scope}]
+    for {} {$s ne "" && $s ne $own} {set s [dict get $hir scopes $s parent]} {
+        if {[dict getdef $hir scopes $s holes 0]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # Establishes the binding of bind expression E (name NAME, in scope SCOPE):

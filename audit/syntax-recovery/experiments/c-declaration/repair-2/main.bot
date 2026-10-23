@@ -1,0 +1,11 @@
+fn first(x: int) -> int:
+    x
+
+fn broken(a: int, b: str) -> str:
+    b
+
+fn last(y: int) -> int:
+    y + first(y)
+
+r = broken(1, 2)
+q = last(4)

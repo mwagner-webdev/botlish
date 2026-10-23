@@ -1,0 +1,5 @@
+main.bot 3 1 known a: a module function before the malformed one
+main.bot 3 11 known geom::area: navigable into the module
+main.bot 4 1 known p: the declared result of the malformed module function
+main.bot 5 1 known s: a module function after the malformed one
+geom.bot 8 5 known area: a reference inside the module after the error

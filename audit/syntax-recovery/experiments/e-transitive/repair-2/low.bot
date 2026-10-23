@@ -1,0 +1,5 @@
+fn base() -> int:
+    7
+
+fn bad(n: int) -> str:
+    "text"

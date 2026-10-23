@@ -64,7 +64,7 @@ proc surface::readProgramFile {path args} {
 }
 
 apply {{dir} {
-    foreach name {ast lexer parser lower source modules cache} {
+    foreach name {ast lexer parser recover lower source modules cache} {
         uplevel #0 [list source [file join $dir $name.tcl]]
     }
 }} $surface::home

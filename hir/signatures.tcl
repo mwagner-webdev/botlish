@@ -396,8 +396,12 @@ proc hir::signatures::Collect {hir} {
             block {
                 set entry [entryTypes $hir $e]
                 set i 0
+                # (A function whose body holds a hole: what its body requires
+                # is not known, only what it declares --
+                # SYNTAX-RECOVERY-MILESTONE-1.md.)
+                set incomplete [dict exists $hir holeBlocks $e]
                 foreach b [dict get $node params] d [dict get $node declaredParamTypes] {
-                    if {$d eq {}} {
+                    if {$d eq {} && !$incomplete} {
                         dict set A params $b [dict create block $e index $i]
                         dict set A slots [list $e $i] $b
                         set t [lindex $entry $i]

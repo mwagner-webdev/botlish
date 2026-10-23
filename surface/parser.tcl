@@ -434,12 +434,55 @@ proc surface::parse {source args} {
     # malformed construct and independent lexical problem, in source order).
     set program [surface::parseTokens [dict get $lexed tokens] -recover 1]
     set diagnostics [surface::parser::Independent $lexed $program]
-    dict unset program failed
     if {!$recover && $diagnostics ne ""} {
         surface::raiseSyntax $diagnostics
     }
+    if {$diagnostics ne ""} {
+        # Where the text is damaged -- every place recovery skipped, guessed
+        # or invented text, reported or not -- for syntax-error-tolerant
+        # analysis (surface/recover.tcl, SYNTAX-RECOVERY-MILESTONE-1.md).
+        # Never part of a program without syntax errors.
+        dict set program damage [surface::parser::Damage $lexed $program]
+    }
+    dict unset program failed
     dict set program diagnostics $diagnostics
     return [surface::ast::assignIds $program]
+}
+
+# The damage record of a recovering parse (LEXED the lexer's result, PROGRAM
+# the parser's): {lexical {OFFSET ...} indentation {OFFSET ...} failed {{start
+# S end E at A header H} ...} tokens T synthetic S} -- the start of every lexical diagnostic but
+# the layout ones (the end of a bracket never closed: its opener was written)
+# and of every closer the lexer inserted, the start of every
+# layout diagnostic (a tab, an inconsistent dedent), and every construct the
+# parser skipped: its region, the start of its diagnostic, and whether it was
+# part of the file header. Dependent diagnostics included: each says where
+# the text stopped being what the parser could read. It also keeps the
+# lexer's `tokens` and `synthetic` (the closers it inserted), which recovery
+# reads a malformed statement's prefix from, so the text is not lexed twice.
+proc surface::parser::Damage {lexed program} {
+    set lexical {}
+    set indentation {}
+    set index 0
+    foreach diagnostic [dict get $lexed diagnostics] {
+        if {$index in [dict get $lexed indentation]} {
+            lappend indentation [dict get $diagnostic start]
+        } elseif {$index in [dict get $lexed unclosed]} {
+            # The opener was written; where its bracket ends is the guess.
+            lappend lexical [dict get $diagnostic end]
+        } else {
+            lappend lexical [dict get $diagnostic start]
+        }
+        incr index
+    }
+    lappend lexical {*}[dict get $lexed synthetic]
+    set failed [lmap region [dict getdef $program failed {}] {
+        dict create start [dict get $region start] end [dict get $region end] \
+            at [dict get $region diagnostic start] header [dict get $region header]
+    }]
+    return [dict create lexical [lsort -integer -unique $lexical] \
+        indentation [lsort -integer -unique $indentation] failed $failed \
+        tokens [dict get $lexed tokens] synthetic [dict get $lexed synthetic]]
 }
 
 # The syntax DIAGNOSTICS (a parse's, in its order) as core::raiseDiagnostics
@@ -679,7 +722,7 @@ proc surface::parser::Program {pVar} {
         }
         set direct [dict getdef $p directSpan ""]
         Synchronize p
-        Failed p $first [lindex [dict get $options -errorcode] 2]
+        Failed p $first [lindex [dict get $options -errorcode] 2] 1
     }
     set imports [Imports p]
     set body [Statements p {EOF}]
@@ -790,7 +833,7 @@ proc surface::parser::Imports {pVar} {
         if {[dict get $p pos] == $before} {
             Advance p
         }
-        Failed p $token [lindex [dict get $options -errorcode] 2]
+        Failed p $token [lindex [dict get $options -errorcode] 2] 1
     }
 }
 
@@ -1773,11 +1816,13 @@ proc surface::parser::Statements {pVar stop} {
 # and that recovery has just skipped: the diagnostic, and the construct's
 # region -- from TOKEN to the token the parser resumes at -- in which no other
 # diagnostic is independent of it (surface::parse, DIAGNOSTIC-RECOVERY.md).
-proc surface::parser::Failed {pVar token diagnostic} {
+# HEADER is 1 for a construct of the file header (an import, `direct
+# module`), which no statement node stands for (surface/recover.tcl).
+proc surface::parser::Failed {pVar token diagnostic {header 0}} {
     upvar 1 $pVar p
     dict lappend p diagnostics $diagnostic
     dict lappend p failed [dict create start [dict get $token span start] \
-        end [dict get [Peek p] span start] diagnostic $diagnostic]
+        end [dict get [Peek p] span start] diagnostic $diagnostic header $header]
 }
 
 # Skips to the start of the next statement: past the end of the current line

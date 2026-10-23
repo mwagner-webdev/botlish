@@ -59,8 +59,8 @@
 //! one synthetic argument `botlish-runner` (runtime/vm.rs's DEFAULT_ARGV),
 //! never this driver's own arguments.
 //!
-//! `--link-dir DIR` (anywhere on the line, repeatable; main.tcl's `-L DIR`)
-//! adds DIR to the system linker's library search path (-LDIR) when a
+//! `--link-dir DIR` (anywhere on the line, repeatable, never empty; main.tcl's
+//! `-L DIR`) adds DIR to the system linker's library search path (-LDIR) when a
 //! program that calls C (C-FFI.md) is linked. Such a program -- one with
 //! `foreign` functions or `link` libraries -- is never JIT-run: `run` and
 //! `bench` link it as an executable (codegen/aot.rs, the same link
@@ -300,21 +300,28 @@ fn extract_table_hash_key(args: &[String]) -> Option<Vec<String>> {
 }
 
 /// Pulls every "--link-dir DIR" out of ARGS (anywhere): the remaining
-/// arguments in order, and the directories. None if one has no value.
-fn extract_link_dirs(args: &[String]) -> Option<(Vec<String>, Vec<String>)> {
+/// arguments in order, and the directories. Err if one has no value or an
+/// empty one: an empty DIR would be a bare `-L`, which GNU's and Apple's
+/// linker drivers read as taking their next argument for the directory, or
+/// a bare `/LIBPATH:`, which link.exe refuses (LNK1146).
+fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let mut dirs = Vec::new();
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--link-dir" {
-            dirs.push(args.get(i + 1)?.clone());
+            let dir = args.get(i + 1).ok_or("--link-dir needs a directory")?;
+            if dir.is_empty() {
+                return Err("--link-dir needs a directory (found an empty one)".to_string());
+            }
+            dirs.push(dir.clone());
             i += 2;
             continue;
         }
         out.push(args[i].clone());
         i += 1;
     }
-    Some((out, dirs))
+    Ok((out, dirs))
 }
 
 fn cli(args: &[String]) -> i32 {
@@ -323,7 +330,13 @@ fn cli(args: &[String]) -> i32 {
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
-    let Some((args, link_dirs)) = extract_link_dirs(&args) else { return usage() };
+    let (args, link_dirs) = match extract_link_dirs(&args) {
+        Ok(split) => split,
+        Err(message) => {
+            eprintln!("botlish-native: {message}");
+            return usage();
+        }
+    };
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];

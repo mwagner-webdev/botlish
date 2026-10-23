@@ -495,7 +495,7 @@ proc hir::BuildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
             -type-decls {} -error-decls {} -struct-decls {} -trait-decls {} -imports {} -module-decls {} \
-            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0} $args]
+            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0 -syntax-recovery {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -714,6 +714,13 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # -halt-on-resolution-errors and raises the diagnostics itself.
         hir::declarations::stamp hir
         return $hir
+    }
+    if {[dict get $options -syntax-recovery] ne {}} {
+        # A program with syntax errors, its malformed source holes
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): what resolution found that may
+        # depend on them is not known (hir::recovery::Recovered).
+        dict set hir syntaxRecovery [dict get $options -syntax-recovery]
+        hir::recovery::Recovered hir
     }
     if {[dict get $hir diagnostics] ne ""} {
         # The program is checked although it did not resolve: what the

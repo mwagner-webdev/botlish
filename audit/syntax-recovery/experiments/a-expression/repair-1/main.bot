@@ -1,0 +1,10 @@
+fn total(a: int, b: int) -> int:
+    s = a + b
+    t = s * 2
+    s + a
+
+fn other(x: int) -> int:
+    x * 2
+
+y = other(3)
+z = total(1, 2)

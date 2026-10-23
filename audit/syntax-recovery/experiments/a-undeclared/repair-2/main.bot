@@ -1,0 +1,11 @@
+fn helper(n: int):
+    k = n + 1
+    if k > 2:
+        return "big"
+    "small"
+
+fn fine(n: int) -> int:
+    n + 1
+
+h = helper(1)
+f = fine(2)
