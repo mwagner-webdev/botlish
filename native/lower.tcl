@@ -10156,7 +10156,7 @@ proc native::lower::DfaTransition {fnVar e node want} {
         } else {
             set segs {}
             for {set i 0} {$i < $nrows} {incr i} {
-                lappend segs [list [expr {$i == 0 ? "" : $i}] $i $i]
+                lappend segs [list [if {$i == 0} {string cat ""} else {set i}] $i $i]
             }
             set rowOf [dict create]
             for {set i 0} {$i < $nrows} {incr i} {

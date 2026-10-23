@@ -1370,6 +1370,7 @@ tests/dfa.test dfa-protocol-delegation pass
 tests/dfa.test dfa-protocol-errors-declared pass
 tests/dfa.test dfa-protocol-first-symbol-completes pass
 tests/dfa.test dfa-protocol-lookahead pass
+tests/dfa.test dfa-protocol-names-read-as-numbers pass
 tests/dfa.test dfa-protocol-never-suspends pass
 tests/dfa.test dfa-protocol-rejections pass
 tests/dfa.test dfa-protocol-sequences-trie pass

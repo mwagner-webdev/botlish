@@ -963,7 +963,7 @@ proc surface::dfa::Analyze {d} {
                 continue
             }
             set segs [dict getdef $resolved $q/$k {}]
-            if {[llength $segs] && [llength [lmap s $segs {expr {[lindex $s 1 0] eq "reject" ? [continue] : $s}}]] == 0} {
+            if {[llength $segs] && [llength [lmap s $segs {if {[lindex $s 1 0] eq "reject"} continue; set s}]] == 0} {
                 dict lappend dead $q $k
             }
         }
@@ -1003,7 +1003,7 @@ proc surface::dfa::Analyze {d} {
     # them. So one diagnostic per bottom strongly connected component of
     # those states (none of its successors outside it never accepts), at its
     # first state.
-    set never [lmap q [dict get $d stateOrder] {expr {$q in $reached && ![dict exists $canAccept $q] ? $q : [continue]}}]
+    set never [lmap q [dict get $d stateOrder] {if {$q ni $reached || [dict exists $canAccept $q]} continue; set q}]
     set successors [dict create]
     foreach q $never {
         set out {}
@@ -1023,11 +1023,11 @@ proc surface::dfa::Analyze {d} {
     foreach q $never {
         # Q's component: the states it reaches that reach it back.
         set forward [Closure $successors $q]
-        set component [lmap r $forward {expr {$q in [Closure $successors $r] ? $r : [continue]}}]
+        set component [lmap r $forward {if {$q ni [Closure $successors $r]} continue; set r}]
         if {[lindex [lsort -command [list surface::dfa::OrderOf [dict get $d stateOrder]] $component] 0] ne $q} {
             continue
         }
-        if {[llength [lmap r $forward {expr {$r in $component ? [continue] : $r}}]]} {
+        if {[llength [lmap r $forward {if {$r in $component} continue; set r}]]} {
             continue
         }
         if {$q eq $start} {
