@@ -1119,7 +1119,9 @@ their rule:
   mutants on linux-x86_64, 16 killed, 0 survived, 4 skipped (other hosts'
   code), `startup-no-stack-maps` among the killed.
 * `audit/target-model/tools/mutants.txt`'s `driver-runs-any-target`
-  includes `library` among the commands that check the target.
+  includes `library` among the commands that check the target; run with
+  `-only`: killed (`tm-main-native-target`, `tm-native-driver-boundary`,
+  `tm-native-refuses-another-target`).
 
 `audit/native-stack/tools/mutants.txt`'s `gc-walk-half-stack` follows the
 walk's new `main_stack` bound and was rerun: killed.
