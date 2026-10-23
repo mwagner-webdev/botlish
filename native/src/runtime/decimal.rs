@@ -207,6 +207,75 @@ pub fn to_f64_at(x: f64, p: u32) -> f64 {
     nearest_double(&Rational { num: k, den: BigInt::from(10u32).pow(p) }).expect("a rounded finite binary64 is finite")
 }
 
+/// round(X, P) as the integer K with round(X, P) = K x 10^-P, computed with
+/// machine integers when that is exact: P <= 19 (10^P fits 64 bits) and X's
+/// scaled significand within 127 bits -- every X below 2^10 in magnitude,
+/// at every such P, and every X too small to reach a unit of 10^-P. The
+/// same rounding as round_at (ties to the even K), on the same exact value
+/// m x 2^e of X; None when the operands would not fit, and round_at decides.
+pub fn round_at_small(x: f64, p: u32) -> Option<i128> {
+    if p > 19 {
+        return None;
+    }
+    let bits = x.to_bits();
+    let negative = bits >> 63 == 1;
+    let biased = ((bits >> 52) & 0x7FF) as i64;
+    let fraction = bits & FRACTION_MASK;
+    let (m, e) = if biased == 0 { (fraction, MIN_EXPONENT) } else { (fraction | (1 << 52), biased - 1075) };
+    // m < 2^53 and 10^19 < 2^64, so m x 10^p < 2^117.
+    let scaled = m as u128 * 10u128.pow(p);
+    let k = if e >= 0 {
+        // An integer: m x 2^e x 10^p, exact while it stays below 2^127.
+        if e > 9 {
+            return None;
+        }
+        scaled << e
+    } else {
+        let s = (-e) as u32;
+        if s >= 120 {
+            // scaled < 2^117 is below half of 2^s: it rounds to 0.
+            0
+        } else {
+            let q = scaled >> s;
+            let r = scaled & ((1u128 << s) - 1);
+            let half = 1u128 << (s - 1);
+            if r > half || (r == half && q & 1 == 1) { q + 1 } else { q }
+        }
+    };
+    let k = k as i128;
+    Some(if negative { -k } else { k })
+}
+
+/// The decimal text of round(X, P) (core::decimal::RoundedText): its digits
+/// with exactly P fraction digits (none, and no point, for P = 0), a "-"
+/// only before a nonzero result -- DecimalRounded has no negative zero. One
+/// rounding at P (round_at_small, else round_at), never a search over
+/// precisions, and never X's own digits beyond P.
+pub fn text_at(x: f64, p: u32) -> String {
+    let k = match round_at_small(x, p) {
+        Some(k) => num_bigint::BigInt::from(k),
+        None => round_at(&exact(x), p),
+    };
+    let mut digits = k.magnitude().to_string();
+    let p = p as usize;
+    let mut out = String::with_capacity(digits.len() + p + 3);
+    if k.sign() == Sign::Minus {
+        out.push('-');
+    }
+    if p == 0 {
+        out.push_str(&digits);
+        return out;
+    }
+    if digits.len() <= p {
+        digits.insert_str(0, &"0".repeat(p + 1 - digits.len()));
+    }
+    let point = digits.len() - p;
+    out.push_str(&digits[..point]);
+    out.push('.');
+    out.push_str(&digits[point..]);
+    out
+}
+
 /// The quantization of X at N places (core::decimal::Quantize): the
 /// binary64 representing the true value round(X, N), or None when none
 /// satisfies that true value's guarantee at N places.
@@ -237,6 +306,20 @@ pub extern "C" fn rt_decimal_cmp(_p: *mut Vm, a: Value, b: Value, p: Value) -> i
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_decimal_to_f64(p: *mut Vm, v: Value, precision: Value) -> Value {
     float_value(p, FloatType::Float64, to_f64_at(float64_of(v), precision_of(precision)))
+}
+
+/// `decimal_rounded#to_string`: the decimal text of round(V, P), V a
+/// DecimalRounded value and P the precision its static type guarantees
+/// (an elaborated constant: hir::decimal::Elaborate). Never fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_decimal_to_str(p: *mut Vm, v: Value, precision: Value) -> Value {
+    let text = text_at(float64_of(v), precision_of(precision));
+    let n = text.len();
+    vm_of(p).new_str_known(&text, n, true)
+}
+
+fn vm_of<'a>(p: *mut Vm) -> &'a mut Vm {
+    unsafe { &mut *p }
 }
 
 /// `decimal_rounded#round`: the DecimalRounded value whose true value is
@@ -303,6 +386,77 @@ mod tests {
         assert_eq!(proven(y, &t), Some(15));
         assert_eq!(proven(0.1, &decimal("0.1")), Some(16));
         assert_eq!(proven(0.5, &decimal("0.5")), None);
+    }
+
+    #[test]
+    fn decimal_text_at_rounds_once_half_to_even() {
+        let cases = [
+            ("1.245", 2, "1.24"),
+            ("1.235", 2, "1.24"),
+            ("1.255", 2, "1.26"),
+            ("-1.245", 2, "-1.24"),
+            ("0.005", 2, "0.00"),
+            ("0.295", 2, "0.30"),
+            ("2.0", 1, "2.0"),
+            ("2.0", 2, "2.00"),
+            ("25.0", 2, "25.00"),
+            ("-0.04", 1, "0.0"),
+            ("-0.05", 1, "0.0"),
+            ("-0.15", 1, "-0.2"),
+            ("2.5", 0, "2"),
+            ("3.5", 0, "4"),
+            ("-2.5", 0, "-2"),
+            ("0.0", 3, "0.000"),
+            ("123456.789", 3, "123456.789"),
+        ];
+        for (text, p, want) in cases {
+            let x = represent(&decimal(text)).unwrap();
+            assert_eq!(text_at(x, p), want, "{text} at {p}");
+        }
+        // The largest finite magnitude, beyond the machine path.
+        assert!(text_at(f64::MAX, 2).ends_with(".00"));
+        assert!(text_at(-f64::MIN_POSITIVE, 20).starts_with("0.000"));
+    }
+
+    #[test]
+    fn decimal_round_at_small_matches_round_at() {
+        // A deterministic sweep: every precision the fast path takes, over
+        // magnitudes from subnormal to 2^70, ties and their neighbors.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut xs: Vec<f64> = vec![0.0, 0.5, 1.5, 2.5, -0.5, -2.5, 1.245, 0.295, 1e-300, f64::MIN_POSITIVE, 1023.999, 1024.0];
+        for _ in 0..20000 {
+            let r = next();
+            let exponent = (r % 140) as i32 - 70;
+            let mantissa = (next() >> 11) as f64 / (1u64 << 53) as f64 + 0.5;
+            let mut x = mantissa * 2f64.powi(exponent);
+            if r & (1 << 40) != 0 {
+                x = -x;
+            }
+            xs.push(x);
+            xs.push(f64::from_bits(next()) % 1e6);
+        }
+        for p in 0..=19u32 {
+            for &x in &xs {
+                if !x.is_finite() {
+                    continue;
+                }
+                let t = (x * 10f64.powi(p as i32)).round() / 10f64.powi(p as i32);
+                for y in [x, t, next_double(t, true).unwrap_or(t), next_double(t, false).unwrap_or(t)] {
+                    if let Some(k) = round_at_small(y, p) {
+                        assert_eq!(BigInt::from(k), round_at(&exact(y), p), "{y:e} at {p}");
+                    }
+                }
+            }
+        }
+        // The fast path takes every value below 2^10 at every P <= 19.
+        assert!(round_at_small(1023.9999, 19).is_some());
+        assert!(round_at_small(1.0e300, 0).is_none());
     }
 
     #[test]

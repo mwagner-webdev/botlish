@@ -19,6 +19,9 @@
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
 #   -check                 analyze each .bot input, report its diagnostics,
 #                          run and build nothing (the compiler service)
+#   -lsp ?-lsp-scheduler worker|sync?    the language server, on stdin and
+#                          stdout (no input file); -lsp-worker is its
+#                          analysis worker, started by -lsp itself
 #   -help [QUERY...]       Compilerpedia, the built-in reference
 #                          (compilerpedia/, COMPILERPEDIA.md); everything
 #                          after -help is the query
@@ -117,6 +120,18 @@
 # rest run, build or inspect, and -check does none of that, so naming one
 # beside it is a usage error, as is an input that is not Botlish source.
 #
+# -lsp runs Botlish's language server (lsp/server.tcl, LSP-MILESTONE-1.md):
+# the Language Server Protocol on stdin and stdout, for an editor, with
+# nothing else on stdout (its log goes to stderr). It takes no input file
+# (the editor sends the documents) and analyzes what the editor opens with
+# the compiler service, as -check does -- never running, building or
+# writing anything -- so only -warnings and -target combine with it, and
+# -lsp-scheduler NAME, which says where its analyses run: worker (the
+# default; a persistent analysis worker process the server starts itself as
+# `-lsp-worker`, so it keeps answering while an analysis runs) or sync (in
+# its own process, the reference design). It exits 0 when the editor ends
+# the session in order (shutdown, then exit) and 1 otherwise.
+#
 # -L DIR adds DIR to the system linker's library search path (-LDIR) for a
 # program that calls C (C-FFI.md: `extern c library` and `extern c fn`), which
 # the native backends and -emit-native-executable link with the libraries it
@@ -170,6 +185,9 @@ set cliOptions {
     -emit-native-executable {} build {build a standalone executable beside each input}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -check {} check {report each .bot input's diagnostics; run nothing}
+    -lsp {} lsp {run the language server on stdin and stdout}
+    -lsp-scheduler NAME lsp {where -lsp analyzes: worker (default) or sync}
+    -lsp-worker {} lsp {(internal) the language server's analysis worker}
     -code {} inspect {the compile backend's generated Tcl code}
     -hir {} inspect {the program's semantic HIR}
     -ast {} inspect {a .bot file's surface syntax tree}
@@ -211,7 +229,7 @@ proc usage {} {
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." ""]
-    foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} inspect {Inspecting (printed before the program runs)} help Reference} {
+    foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
         foreach {name argument optionGroup description} $cliOptions {
             if {$optionGroup ne $group} continue
@@ -226,6 +244,7 @@ proc usage {} {
     }
     lappend lines "Examples:" \
         "  $me -backend cranelift game.bot" \
+        "  $me -lsp                      the language server, for an editor" \
         "  $me -help                     the indices of Compilerpedia" \
         "  $me -help cli.options         every option in detail" \
         "  $me -help KNOWN-ERROR         a diagnostic or warning code" \
@@ -289,10 +308,21 @@ proc parseCommandLine {argv} {
         }
         dict lappend result files $arg
     }
-    if {[dict get $result files] eq ""} {
+    if {[dict get $result files] eq "" && [lspMode $result] eq ""} {
         usageError "no input file"
     }
     return $result
+}
+
+# -lsp or -lsp-worker when COMMANDLINE (parseCommandLine's) names one, else "".
+proc lspMode {commandLine} {
+    set mode ""
+    foreach option [dict get $commandLine options] {
+        if {[lindex $option 0] in {-lsp -lsp-worker}} {
+            set mode [lindex $option 0]
+        }
+    }
+    return $mode
 }
 
 # The -version text: what this build is, from the information that exists
@@ -353,6 +383,50 @@ switch -- [dict get $commandLine action] {
     help {
         source [file join $root compilerpedia compilerpedia.tcl]
         printing {compilerpedia::main [dict get $commandLine query]}
+    }
+}
+
+# -lsp: the language server, and -lsp-worker, its analysis worker
+# (lsp/server.tcl, lsp/worker.tcl, LSP-MILESTONE-1.md). Both speak a
+# protocol on stdin and stdout and analyze with the compiler service: they
+# load the front end and no backend, take no input file, and of the other
+# options only -warnings and -target, which decide the analysis (and
+# -lsp-scheduler, which says where -lsp analyzes). Anything else is refused,
+# never ignored.
+if {[set lspMode [lspMode $commandLine]] ne "" && [dict get $commandLine action] eq "run"} {
+    set lspOptions [dict create]
+    foreach option [dict get $commandLine options] {
+        lassign $option arg value
+        if {$arg ni {-lsp -lsp-worker -lsp-scheduler -warnings -target}} {
+            usageError "$lspMode cannot be combined with $arg: the language server analyzes the programs an editor opens, without running, building or inspecting them (it takes -warnings, -target and -lsp-scheduler)"
+        }
+        if {$arg in {-lsp -lsp-worker} && $arg ne $lspMode} {
+            usageError "-lsp and -lsp-worker cannot be combined"
+        }
+        if {$arg eq "-lsp-scheduler" && $lspMode ne "-lsp"} {
+            usageError "-lsp-scheduler is an option of -lsp"
+        }
+        dict set lspOptions $arg $value
+    }
+    if {[dict get $commandLine files] ne ""} {
+        usageError "$lspMode takes no input file: the editor sends the documents (found \"[lindex [dict get $commandLine files] 0]\")"
+    }
+    if {[dict exists $lspOptions -lsp-scheduler] && [dict get $lspOptions -lsp-scheduler] ni {worker sync}} {
+        usageError "unknown language server scheduler \"[dict get $lspOptions -lsp-scheduler]\" (known: worker sync)"
+    }
+    if {[dict exists $lspOptions -warnings] && [dict get $lspOptions -warnings] ni {default off error}} {
+        usageError "unknown warnings mode \"[dict get $lspOptions -warnings]\" (known: default off error)"
+    }
+    source [file join $root lsp lsp.tcl]
+    if {[dict exists $lspOptions -target] && ![core::cabi::isTarget [dict get $lspOptions -target]]} {
+        usageError "unknown C ABI target \"[dict get $lspOptions -target]\" (known: [join [core::cabi::targetNames] {, }])"
+    }
+    set analysis [dict create -warnings [dict getdef $lspOptions -warnings [hir::warnings::defaultMode]] \
+        -target [dict getdef $lspOptions -target ""]]
+    if {$lspMode eq "-lsp"} {
+        lsp::server::main {*}$analysis -scheduler [dict getdef $lspOptions -lsp-scheduler worker]
+    } else {
+        lsp::worker::main {*}$analysis
     }
 }
 
@@ -759,6 +833,9 @@ foreach option [dict get $commandLine options] {
         -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
         -L {
             lappend native::linkDirs [file normalize $value]
+        }
+        -lsp-scheduler {
+            usageError "-lsp-scheduler is an option of -lsp"
         }
     }
 }

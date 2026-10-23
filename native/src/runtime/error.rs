@@ -72,6 +72,10 @@ pub const ERR_UNREPRESENTABLE_DECIMAL: u32 = BUILTIN_ERROR_ID_BASE + 9;
 /// have the length its imprint states (runtime::ops's rt_list_with_length,
 /// LIST-CARDINALITY-REFINEMENTS.md).
 pub const ERR_LENGTH_MISMATCH: u32 = BUILTIN_ERROR_ID_BASE + 10;
+/// `InvalidIntegerText` (builtin error 11): `std::int::from_string`'s text is
+/// not the canonical decimal text of an Int (runtime::inttext's
+/// rt_str_to_int, NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md).
+pub const ERR_INVALID_INTEGER_TEXT: u32 = BUILTIN_ERROR_ID_BASE + 11;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

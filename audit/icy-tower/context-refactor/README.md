@@ -21,3 +21,12 @@ them.
 
 Every tool keeps its scratch files in a private temporary directory and
 removes it.
+
+The variants were written against the game at commit 4be79514, before
+NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md replaced `hud::int_text`,
+`tenths_text`, `nearest` and `metres_text` with the standard library's
+conversions; `variants/opaque-values/render.bot` and `variants/canvas/`
+still call them. Build a variant beside that revision's pure modules
+(`git show 4be79514:examples/games/icy-tower/hud.bot`, and `tower.bot`,
+`options.bot` and `golden.bot` likewise), as their NOTES.md describe:
+they are evidence measured there, not code to keep current.

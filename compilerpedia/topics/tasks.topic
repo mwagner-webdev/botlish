@@ -8,7 +8,7 @@ summary: std::io::print_line(text) prints a line on the native backends and in e
 index: stdlib backends
 alias: print output; print; println; print a line; write to stdout; hello world; console output
 keywords: print, output, stdout, stderr, io, hello, print_line, write
-related: backend.io stdlib.std::io::print_line stdlib.module.std::io concept.context-traits concept.program-value backend.native-only capability.int-to-string
+related: backend.io stdlib.std::io::print_line stdlib.module.std::io concept.context-traits concept.program-value backend.native-only task.number-text
 docs: CONTEXT-TRAITS.md
 
 == THE PROGRAM
@@ -57,9 +57,9 @@ backend, make the text the program's value: the compiler prints it after
 "value:", and an executable prints it last.
 
 == NUMBERS
-There is no Int-to-String conversion in the standard namespaces;
-std::test::int_text (import std::test) is the available one
-(capability.int-to-string).
+Convert a number to text first: std::int::to_string(n) (import std::int),
+std::decimal_rounded::to_string(x) for a DecimalRounded value
+(task.number-text).
 
 @topic task.handle-several-errors
 title: Handling several declared errors
@@ -129,7 +129,7 @@ summary: std::str::concat(a, b) (written a.concat(b) after `import std::str`) jo
 index: stdlib
 alias: string concatenation; concatenate strings; join strings; append string; string plus
 keywords: concat, join, append, String, text, plus
-related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting capability.int-to-string stdlib.std::test::joined
+related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings capability.string-formatting task.number-text stdlib.std::test::joined
 
 == HOW
     import std::str
@@ -137,8 +137,7 @@ related: stdlib.std::str::concat stdlib.std::str::append_char concept.strings ca
     line = greeting.append_char('!')
 `+` adds Ints; applied to Strings it fails (a TYPE error). For many parts,
 chain concat calls or use stdlib/test.bot's std::test::joined(parts,
-separator). Numbers need std::test::int_text first
-(capability.int-to-string).
+separator). Numbers need std::int::to_string first (task.number-text).
 
 @example accept
 import std::str
@@ -263,3 +262,55 @@ fn last_or(xs: List[int], fallback: int) -> int:
 [[4, 5, 6].last_or(0), [].last_or(0)]
 @value [6, 0]
 @end
+
+@topic task.number-text
+title: Numbers to and from text
+summary: std::int::to_string(n) and std::int::from_string(s) convert an Int's decimal text; std::float64::round rounds a Float64; std::decimal_rounded::to_string(x) shows a DecimalRounded value.
+index: concepts stdlib
+alias: integer to string; int to string; number to text; to_string; format number; itoa; tostring; string of a number; string to int; parse int; parse number; atoi; text to number; round a float; nearest integer; decimal to string; format money
+keywords: convert, string, text, decimal, format, parse, round, to_string, from_string
+related: stdlib.module.std::int stdlib.std::int::to_string stdlib.std::int::from_string stdlib.std::float64::round stdlib.std::float64::truncate stdlib.std::decimal_rounded::to_string concept.decimal-rounded concept.integers capability.string-formatting
+docs: NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md
+
+== HOW
+    import std::int
+    import std::float64
+    import std::decimal_rounded
+
+    n.to_string()                       Int -> its decimal text
+    std::int::from_string(s)            text -> Int, errors InvalidIntegerText
+    x.round()                           Float64 -> nearest Int, ties to even
+    x.truncate()                        Float64 -> Int toward zero
+    d.to_string()                       DecimalRounded{minDecimalsPreserved: N}
+                                        -> its decimal, exactly N places
+
+Every conversion is explicit: nothing turns a number into text by itself,
+`+` never concatenates, and there is no format string
+(capability.string-formatting). An Int's text is the canonical one --
+digits, no leading zero, "-" when negative -- and from_string accepts
+exactly that, so the two are inverses. round and DecimalRounded share one
+rule, round half to even, on a value's exact binary value. A DecimalRounded
+value shows the decimal its type guarantees, never its representation's
+digits. There is no Float64 to String conversion beyond a program's printed
+result, no other base, and no parsing of a Float64 or a DecimalRounded
+value.
+
+@example accept
+import std::decimal_rounded
+import std::float64
+import std::int
+import std::str
+
+fn label(n: int, x: Float64, best: DecimalRounded{minDecimalsPreserved: 1}) -> str:
+    "floor ".concat(n.to_string()).concat(" at ").concat(x.round().to_string()).concat(" best ").concat(best.to_string())
+
+fn seed(s: str) -> int:
+    std::int::from_string(s):
+        on InvalidIntegerText:
+            0
+
+[label(12, 266.5, 9.95), label(-3, 2.5, 6.0), seed("42"), seed("4x")]
+@value ["floor 12 at 266 best 10.0", "floor -3 at 2 best 6.0", 42, 0]
+@caption Every number converted explicitly; the halves round to even
+@end
+

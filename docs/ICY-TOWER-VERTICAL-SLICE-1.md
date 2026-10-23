@@ -8,6 +8,23 @@ executable, and used as a hostile test of the language, its library, its
 FFI and its compiler. The game is `examples/games/icy-tower/`; the
 executable is `audit/icy-tower/artifacts/icy-tower`.
 
+**Since NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md**, the four conversions this
+report lists as missing are the standard library's, and the game uses them:
+`hud::int_text` is `std::int::to_string`, `options::number` is
+`std::int::from_string` (a number on the command line is now the canonical
+text of a nonnegative Int: "007" and "-5" are usage errors, length is
+unbounded), `hud::nearest` is `std::float64::round` and
+`hud::metres_text`/`tenths_text` are `std::decimal_rounded::to_string`.
+hud.bot is 85 lines (146 before), `timer_text` and `summary` no longer
+declare NonFiniteFloat, and the golden suite has 67 tests (two added:
+`icy-options-numbers-of-any-length`, `icy-summary-shows-positions-at-the-
+nearest-int`). One rule changed with the rounding: a position is shown at
+its nearest Int with a half to the even one (it was away from zero); of 50
+seed and frame-count summaries compared with the earlier executable, one
+differs (seed 3 after 60 frames, x=286.5: 287 before, 286 now), and
+oracle.py's `nearest` is Python's `round` to match. The text below
+describes the slice as it was built.
+
 ![Three frames of the X11 window under Xvfb: the start, floor 26, a restarted game](../audit/icy-tower/screenshots/xvfb-x11.png)
 
 *Three frames of the executable in a real X11 window (Xvfb, SDL's x11

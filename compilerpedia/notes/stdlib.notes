@@ -918,7 +918,7 @@ title: -
 summary: String operations: length, slices, concatenation, appending a character, character access, UTF-8 bytes and lowercase.
 index: stdlib
 keywords: string functions; text functions; text operations
-related: concept.strings task.string-concatenation capability.string-formatting capability.int-to-string
+related: concept.strings task.string-concatenation capability.string-formatting task.number-text
 
 == NOTES
 Every member is an intrinsic; there is no stdlib/str.bot. `import std::str`
@@ -928,9 +928,9 @@ and every length and index counts those -- never bytes, never grapheme
 clusters.
 
 What is not here: no uppercase, trim, split, join of a List, search,
-replace, comparison or ordering, number parsing and no Int-to-String
-conversion or formatting (capability.int-to-string,
-capability.string-formatting). Equality is == (stdlib.==).
+replace, comparison or ordering, and no formatting
+(capability.string-formatting); a number's text and its parsing are
+std::int's (task.number-text). Equality is == (stdlib.==).
 
 @topic stdlib.std::str::length
 title: -
@@ -1040,8 +1040,8 @@ related: task.string-concatenation concept.strings stdlib.std::str::append_char 
 == NOTES
 The way to join text: + is for Ints only ("a" + "b" is the TYPE error).
 Both arguments must be Strings; to add a single character use
-std::str::append_char, and to put a number into text there is no standard
-conversion (capability.int-to-string). The length of the result is the
+std::str::append_char, and to put a number into text convert it first
+(std::int::to_string, task.number-text). The length of the result is the
 sum of the lengths, which the slice proof knows (proof.slices). For many
 pieces, chain the calls: a.concat(b).concat(c).
 
@@ -1234,18 +1234,19 @@ import std::char
 
 @topic stdlib.module.std::decimal_rounded
 title: -
-summary: The explicit quantization from Float64 to DecimalRounded: std::decimal_rounded::round[T](x).
+summary: The explicit quantization from Float64 to DecimalRounded, std::decimal_rounded::round[T](x), and a value's guaranteed decimal as text, std::decimal_rounded::to_string(x).
 index: stdlib
-keywords: decimal functions; decimal conversion; float to decimal; quantize; round to places
-related: concept.decimal-rounded stdlib.std::float64::from_decimal_rounded
+keywords: decimal functions; decimal conversion; float to decimal; quantize; round to places; decimal to string; format decimal
+related: concept.decimal-rounded stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::to_string
 
 == NOTES
-`decimal_rounded` has no module file: its member is an intrinsic, reached
-with `import std::decimal_rounded`. With std::float64::from_decimal_rounded
-it is one of the two conversions between DecimalRounded and Float64: nothing
-converts implicitly, a Float64 never becomes a DecimalRounded value by being
-relabeled, and the operators on DecimalRounded values are the language's own
-(concept.decimal-rounded).
+`decimal_rounded` has no module file: its members are intrinsics, reached
+with `import std::decimal_rounded`. With
+std::float64::from_decimal_rounded, round is one of the two conversions
+between DecimalRounded and Float64: nothing converts implicitly, a Float64
+never becomes a DecimalRounded value by being relabeled, and the operators
+on DecimalRounded values are the language's own (concept.decimal-rounded).
+to_string is the value's text at the precision its type guarantees.
 
 @topic stdlib.std::decimal_rounded::round
 title: -
@@ -1282,12 +1283,62 @@ fn safe(x: Float64) -> DecimalRounded{minDecimalsPreserved: 2}:
 @value [0.30, 1.00, -0.12]
 @end
 
+@topic stdlib.std::decimal_rounded::to_string
+title: -
+summary: The guaranteed decimal of the DecimalRounded value x as a String: round(x, N) with exactly N fraction digits, N its type's minDecimalsPreserved, after `import std::decimal_rounded`.
+index: stdlib
+keywords: decimal to string; format decimal; show decimal; decimal text; print money; to_string
+related: concept.decimal-rounded stdlib.module.std::decimal_rounded stdlib.std::int::to_string stdlib.std::float64::from_decimal_rounded
+
+== NOTES
+The text a DecimalRounded value guarantees, never the digits of the
+binary64 behind it: x rounded half to even to the N places of its static
+type (DecimalRounded{minDecimalsPreserved: N}), written with exactly N
+digits after the point -- trailing zeros kept, no point at N = 0 -- and a
+"-" only before a nonzero result (DecimalRounded has no negative zero:
+-0.04 at one place is "0.0"). It is the same text a program's printed
+result shows. The precision is the argument's static type's: the compiler
+writes it into the call, so a value carries none, and a value weakened to
+fewer places shows those (a DecimalRounded{minDecimalsPreserved: 3} value
+passed as one with 1 shows one place). maxDecimalsPreserved changes
+nothing. An argument of another type (a Float64, an Int) is a TYPE error;
+one whose type is erased (an untyped parameter) has no precision to show
+and is refused when the call runs. Never fails; runs on every backend;
+also written x.to_string().
+
+== EXAMPLES
+@example accept
+import std::decimal_rounded
+
+fn cents(x: DecimalRounded{minDecimalsPreserved: 2}) -> str:
+    x.to_string()
+
+fn tenths(x: DecimalRounded{minDecimalsPreserved: 1}) -> str:
+    std::decimal_rounded::to_string(x)
+
+[cents(0.295), cents(1.245), cents(25.0), cents(-0.004), tenths(6.0)]
+@value ["0.30", "1.24", "25.00", "0.00", "6.0"]
+@caption Exactly the guaranteed places: 0.295 shows 0.30 (not its binary64's digits), a half rounds to even, zeros stay
+@end
+
+@example reject
+import std::decimal_rounded
+
+fn t(x: Float64) -> str:
+    std::decimal_rounded::to_string(x)
+
+t(1.5)
+@caption A Float64 is no DecimalRounded value: quantize it first with std::decimal_rounded::round[T]
+@error CORE SEMANTIC TYPE
+@at 4:5
+@end
+
 @topic stdlib.module.std::float64
 title: -
-summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
+summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::round, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
 index: stdlib
-keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
-related: concept.floats stdlib./ concept.decimal-rounded
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp; round
+related: concept.floats stdlib./ concept.decimal-rounded stdlib.std::float64::round
 
 == NOTES The conversions are intrinsics and the bounds (min, max, abs,
 clamp) the ordinary Botlish of stdlib/float64.bot, all reached with `import
@@ -1368,6 +1419,108 @@ import std::float64
 big = 1.0e20
 [std::float64::truncate(2.75), std::float64::truncate(-2.75), big.truncate()]
 @value [2, -2, 100000000000000000000]
+@end
+
+@topic stdlib.std::float64::round
+title: -
+summary: The Int nearest the Float64 X, a half to the even Int, after `import std::float64`: exact at any magnitude, and it never fails.
+index: stdlib
+keywords: float to int; convert float; round; nearest integer; round half to even; banker's rounding
+related: concept.floats stdlib.std::float64::truncate stdlib.module.std::float64 concept.decimal-rounded
+
+== NOTES
+Rounds to the nearest Int; a value exactly halfway between two Ints goes
+to the even one (0.5 and -0.5 to 0, 1.5 and 2.5 to 2, -2.5 to -2) -- the
+rule Float64 arithmetic and DecimalRounded already round by, so there is
+one rounding rule in the language. It reads the Float64's exact binary
+value, not its shortest decimal text: 0.49999999999999994 (one ulp below
+0.5) rounds to 0 and 2.5000000000000004 to 3. Every Float64 is finite, so
+every one rounds to some Int, held exactly however large (1.0e20 becomes
+100000000000000000000); no overflow error. std::float64::truncate goes
+toward zero instead (2.7 to 2, where round gives 3). There is no floor or
+ceiling. Also written x.round().
+
+== EXAMPLES
+@example accept
+import std::float64
+
+halves = [0.5, 1.5, 2.5, -2.5, 2.7, -2.7]
+loop x in halves:
+    [x.round(), x.truncate()]
+@value [[0, 0], [2, 1], [2, 2], [-2, -2], [3, 2], [-3, -2]]
+@caption round to nearest, ties to even, beside truncate toward zero
+@end
+
+@topic stdlib.module.std::int
+title: -
+summary: An Int's canonical decimal text, both ways: std::int::to_string(n) and std::int::from_string(s), whose malformed text is the declared error InvalidIntegerText.
+index: stdlib
+keywords: int functions; int to string; string to int; parse int; format int; number to text; text to number; integer text
+related: concept.integers stdlib.std::int::to_string stdlib.std::int::from_string task.number-text
+
+== NOTES
+`int` has no module file: its members are intrinsics, reached with `import
+std::int`. The Int operators themselves (+, mod, bit_and, ...) are root
+natives that need no import. The text is the one canonical decimal text of
+an Int -- the integer literal's digits, no leading zero, a "-" before a
+negative number -- and the two conversions are inverses: from_string
+accepts exactly what to_string writes. Base ten only; no locale, no digit
+grouping, no "+".
+
+@topic stdlib.std::int::to_string
+title: -
+summary: std::int::to_string(n): the canonical decimal text of the Int n, exact at any size, after `import std::int`.
+index: stdlib
+keywords: int to string; format int; number to text; show int; integer text; to_string; itoa
+related: stdlib.module.std::int stdlib.std::int::from_string concept.integers stdlib.std::decimal_rounded::to_string
+
+== NOTES
+The decimal digits of n, with no leading zero (0 is "0") and a "-" before
+a negative number: the text a program's printed result shows for an Int,
+for an Int of any size. Never fails; also written n.to_string(). Nothing
+turns an Int into text implicitly: "x = ".concat(n) fails with TYPE
+(concat takes two Strings), and is written "x = ".concat(n.to_string()).
+
+== EXAMPLES
+@example accept
+import std::int
+
+loop n in [0, 7, -7, 123456, -123456789012345678901234567890]:
+    n.to_string()
+@value ["0", "7", "-7", "123456", "-123456789012345678901234567890"]
+@end
+
+@topic stdlib.std::int::from_string
+title: -
+summary: std::int::from_string(s): the Int whose canonical decimal text is s, else the declared error InvalidIntegerText, after `import std::int`.
+index: stdlib
+keywords: string to int; parse int; text to number; read int; atoi; parse number; InvalidIntegerText
+related: stdlib.module.std::int stdlib.std::int::to_string rule.unhandled-errors
+
+== NOTES
+Accepts exactly the texts std::int::to_string writes -- an optional "-"
+and decimal digits, no leading zero -- so from_string(to_string(n)) is n
+for every Int, of any size. Everything else completes with the builtin
+declared error InvalidIntegerText, which the caller handles or declares:
+the empty text, "-", "+1", "01", "-01", "-0" (zero has one text), any
+space ("1 ", " 1"), a fraction or exponent ("1.0", "1e3"), "1_000", a
+digit other than ASCII 0-9, and trailing text ("12x"). It never clamps,
+never stops early and never reads zero for a malformed text. It is
+`nomethod` (a String is not the receiver of an Int's parse): write
+std::int::from_string(s), not s.from_string().
+
+== EXAMPLES
+@example accept
+import std::int
+
+fn read(s: str) -> int:
+    std::int::from_string(s):
+        on InvalidIntegerText:
+            -1
+
+loop s in ["42", "-7", "98765432109876543210", "01", "+1", "1 ", "12x", ""]:
+    read(s)
+@value [42, -7, 98765432109876543210, -1, -1, -1, -1, -1]
 @end
 
 @topic stdlib.module.std::mutable_array

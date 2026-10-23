@@ -54,7 +54,7 @@ set gameDir [file join $::projectRoot examples games icy-tower]
 # summary 7 600).
 set seed7 {frames=600 round=1 floor=26 score=260 best=29.1 time=10.0 over=no x=263 y=2947 camera=2551 platforms=11 rng=3699965314}
 
-test workload-icy-tower-golden-suite "golden.bot: compiles once, all 65 tests pass on [join $suiteBackends {, }], the same report on each" -constraints suiteBackends -body {
+test workload-icy-tower-golden-suite "golden.bot: compiles once, all 67 tests pass on [join $suiteBackends {, }], the same report on each" -constraints suiteBackends -body {
     set result [golden::suite [file join $gameDir golden.bot] $suiteBackends]
     set status [dict get $result status]
     if {$status eq "compile-error"} {
@@ -71,10 +71,10 @@ test workload-icy-tower-golden-suite "golden.bot: compiles once, all 65 tests pa
             if {[string match "FAIL *" $line]} { lappend problems "$backend: $line" }
         }
         set names [lmap line [golden::verdicts $lines] {string range $line 5 end}]
-        if {[llength $names] != 65 || [llength [lsort -unique $names]] != 65} {
-            lappend problems "$backend: [llength $names] verdicts, [llength [lsort -unique $names]] distinct, expected 65"
+        if {[llength $names] != 67 || [llength [lsort -unique $names]] != 67} {
+            lappend problems "$backend: [llength $names] verdicts, [llength [lsort -unique $names]] distinct, expected 67"
         }
-        if {[lindex $lines end] ne "65 passed, 0 failed"} {
+        if {[lindex $lines end] ne "67 passed, 0 failed"} {
             lappend problems "$backend: [lindex $lines end]"
         }
     }

@@ -268,10 +268,7 @@ pub fn float_text(x: f64) -> String {
 }
 
 pub fn int_text(v: Value) -> String {
-    match int_small(v) {
-        Some(n) => n.to_string(),
-        None => int_to_big(v).to_string(),
-    }
+    super::ops::with_int_text(v, |text| String::from_utf8(text.to_vec()).expect("decimal digits are ASCII"))
 }
 
 /// V as the host runtime value (a Tcl list such as `int 5` or `str {a b}`).

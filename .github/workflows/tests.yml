@@ -58,6 +58,15 @@ jobs:
           fi
           tclsh9.0 tests/cffi/boringssl.tcl
 
+      # The language server under a real editor (tests/lsp-neovim.test,
+      # LSP-MILESTONE-1.md, "Editors"): Neovim's built-in LSP client, a
+      # pinned release, never a dependency of the compiler.
+      - name: Install Neovim (for the language server's editor test)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/nvim.tar.gz" https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-x86_64.tar.gz
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/nvim.tar.gz"
+          echo "BOTLISH_NVIM=$RUNNER_TEMP/nvim-linux-x86_64/bin/nvim" >> "$GITHUB_ENV"
+
       - name: Run test suite
         env:
           CORE_BACKEND: ${{ matrix.backend }}

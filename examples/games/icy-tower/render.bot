@@ -13,6 +13,7 @@
 # Every SDL operation returns whether it succeeded; a frame is drawn whole
 # and answers whether all of them did (main.bot stops on a failed frame).
 import std::float64
+import std::int
 import std::list
 import std::str
 import hud
@@ -73,7 +74,7 @@ fn platform(p: tower::Platform, camera: tower::Camera) -> bool errors NonFiniteF
     edge = sdl::fill(p.x, top, p.width, 2.0)
     if not tower::milestone?(p.floor) or p.floor == 0:
         return colored and body and shine and edge
-    label = hud::int_text(p.floor)
+    label = p.floor.to_string()
     ink = sdl::color(60, 40, 10)
     x = p.x + (p.width - 8.0 * std::float64::from_int(std::str::length(label))) / 2.0
     written = sdl::text(x, top + 4.0, label)

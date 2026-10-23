@@ -786,7 +786,10 @@ also checks an unrepresentable quantization.
   except as a function's result.
 * Display shows exactly the guaranteed places; there is no formatting
   operation (no DecimalRounded-to-String), and a standalone executable's
-  type-blind result printing shows `<DecimalRounded>`.
+  type-blind result printing shows `<DecimalRounded>`. (Since
+  NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md, `std::decimal_rounded::to_string(x)`
+  is that display as an ordinary String, at the precision of x's static
+  type; caller-chosen precisions and formatting remain absent.)
 * Equality is the precision-aware comparison only; aggregates of
   DecimalRounded values cannot be compared, hashed or put in a set.
 * The representation strategy is binary64 for every value; acceptance is

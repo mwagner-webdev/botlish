@@ -138,7 +138,7 @@ are reachable too, but are not part of it):
 | `std::test::report()` | runs the suite once: its deterministic report, a `List[str]` |
 | `std::test::result_lines(result)`, `std::test::summary_line(summary)` | the report's formatting, for a driver of its own |
 | `std::test::registered()`, `std::test::count()` | the registered cases (a snapshot List), how many |
-| `std::test::describe(v)`, `std::test::int_text(n)`, `std::test::code_name(code)`, `std::test::diagnostic_text(code, primary)` | the texts a report shows |
+| `std::test::describe(v)`, `std::test::code_name(code)`, `std::test::diagnostic_text(code, primary)` | the texts a report shows (an Int's is `std::int::to_string`'s since NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md, which removed the framework's own `std::test::int_text`) |
 
 The registration helpers and `case`/`mismatch` are `nomethod`: their first
 argument is a name, not a receiver (`"adds".value(42, adds)` would read

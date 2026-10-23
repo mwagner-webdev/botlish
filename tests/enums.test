@@ -306,9 +306,9 @@ test enum-qualifier-not-an-enum {a case qualified by a type that is not an enum 
         [enumError "struct P:\n    a: int\nP::Car\n"] \
         [enumError "type Small = Int in 0..3\nSmall::Car\n"] \
         [enumError "trait T:\n    fn f(x: T) -> int\nT::Car\n"] \
-        [enumError "int::Car\n"] \
+        [enumError "bool::Car\n"] \
         [enumError "Fn::Car\n"]
-} -result {{NOT-AN-ENUM: enum.bot:3:1: "P" is a struct, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "P::Car" names nothing} {NOT-AN-ENUM: enum.bot:2:1: "Small" is a type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Small::Car" names nothing} {NOT-AN-ENUM: enum.bot:3:1: "T" is a trait, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "T::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "int" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "int::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "Fn" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Fn::Car" names nothing}}
+} -result {{NOT-AN-ENUM: enum.bot:3:1: "P" is a struct, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "P::Car" names nothing} {NOT-AN-ENUM: enum.bot:2:1: "Small" is a type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Small::Car" names nothing} {NOT-AN-ENUM: enum.bot:3:1: "T" is a trait, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "T::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "bool" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "bool::Car" names nothing} {NOT-AN-ENUM: enum.bot:1:1: "Fn" is a built-in type, not an enum: only an enum type qualifies a case ("Enum::Case"), and a type is not a namespace, so "Fn::Car" names nothing}}
 
 test enum-qualifier-unknown {a qualifier that names nothing is an unknown namespace, and says no enum of that name is visible} -body {
     enumError "Vehicle::Car\n"

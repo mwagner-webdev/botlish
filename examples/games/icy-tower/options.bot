@@ -10,7 +10,11 @@
 #   --autopilot    the deterministic player instead of the keyboard
 #   --fixed-step   every frame lasts 1/60 s, whatever the clock says
 #   --help         print the usage and exit
-import std::char
+#
+# A number N is the decimal text of a nonnegative Int, as
+# std::int::to_string writes it (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md):
+# digits, no leading zero, of any length.
+import std::int
 import std::list
 import std::str
 
@@ -34,22 +38,14 @@ fn usage() -> List[str]:
         "  --headless --frames N: no window; the autopilot plays N fixed frames and the run prints its summary",
     ]
 
-# The value of TEXT, a decimal number of at most 18 digits.
+# The value of TEXT, the decimal text of a nonnegative Int.
 fn number(text: str) -> int errors UsageError:
-    n = std::str::length(text)
-    if n == 0 or n > 18:
-        fail UsageError {message: "not a number: ".concat(text)}
-    nomethod fn from(i: int, value: int) -> int errors UsageError:
-        if i >= n:
-            return value
-        c = text.char_at(i):
-            on IndexNotFound:
-                fail UsageError {message: "not a number: ".concat(text)}
-        d = std::char::scalar_value(c) - 48
-        if d < 0 or d > 9:
+    n = std::int::from_string(text):
+        on InvalidIntegerText:
             fail UsageError {message: "not a number: ".concat(text)}
-        from(i + 1, value * 10 + d)
-    from(0, 0)
+    if n < 0:
+        fail UsageError {message: "not a number: ".concat(text)}
+    n
 
 fn flag?(name: str) -> bool:
     name == "--headless" or name == "--autopilot" or name == "--fixed-step" or name == "--help"
