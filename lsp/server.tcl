@@ -391,6 +391,9 @@ proc lsp::server::Initialized {params} {
 proc lsp::server::Shutdown {id params} {
     variable state
     variable deferred
+    # What the server still holds as the session ends: the revisions its
+    # programs keep (at most two each), for the measurements.
+    lsp::stats::count liveRevisions [dict get [service::state] revisions]
     # Every waiting request is answered first, with what the server knows.
     foreach key [dict keys $deferred] {
         Resolve $key 1
@@ -972,9 +975,13 @@ proc lsp::server::CurrentText {path} {
     return [list 1 $text]
 }
 
-# The line starts of TEXT, cached under KEY.
+# The line starts of TEXT, cached under KEY ("": not cached -- a text that
+# can change under the same name, the disk's, is never cached).
 proc lsp::server::Starts {key text} {
     variable cache
+    if {$key eq ""} {
+        return [lsp::positions::lineStarts $text]
+    }
     if {![dict exists $cache $key]} {
         dict set cache $key [lsp::positions::lineStarts $text]
     }
@@ -989,7 +996,7 @@ proc lsp::server::Starts {key text} {
 # never saw. Identical texts are one prefix.
 proc lsp::server::Mapping {key old new} {
     variable cache
-    if {[dict exists $cache $key]} {
+    if {$key ne "" && [dict exists $cache $key]} {
         return [dict get $cache $key]
     }
     set oldLength [string length $old]
@@ -1005,11 +1012,15 @@ proc lsp::server::Mapping {key old new} {
         }
         set mapping [list $prefix $suffix [expr {$newLength - $oldLength}]]
     }
+    set result [list $mapping $oldLength $newLength]
+    if {$key eq ""} {
+        return $result
+    }
     if {[dict size $cache] > 256} {
         set cache [dict create]
     }
-    dict set cache $key [list $mapping $oldLength $newLength]
-    return [dict get $cache $key]
+    dict set cache $key $result
+    return $result
 }
 
 proc lsp::server::CommonPrefix {a b} {
@@ -1084,13 +1095,14 @@ proc lsp::server::Location {rev range} {
         if {!$exists} {
             return ""
         }
-        set key "$rev,$path,disk"
+        # (The disk's text: never cached, it may change under its name.)
+        set key ""
     }
     set mapped [ToNew [Mapping $key $old $new] [dict get $range start] [dict get $range end]]
     if {$mapped eq ""} {
         return ""
     }
-    return [lsp::json::obj uri [lsp::json::str [UriOf $path]] range [LspRange $key,lines $new {*}$mapped]]
+    return [lsp::json::obj uri [lsp::json::str [UriOf $path]] range [LspRange [if {$key eq ""} {string cat ""} else {string cat $key,lines}] $new {*}$mapped]]
 }
 
 # ---------------------------------------------------------------------------
@@ -1217,7 +1229,7 @@ proc lsp::server::Topic {d} {
     set key "topic,[dict get $d code],[dict get $d text]"
     if {![dict exists $cache $key]} {
         set topic [service::explain $d]
-        dict set cache $key [expr {$topic eq {} ? "" : [dict get $topic id]}]
+        dict set cache $key [if {$topic eq {}} {string cat ""} else {dict get $topic id}]
     }
     return [dict get $cache $key]
 }
@@ -1266,7 +1278,8 @@ proc lsp::server::Ask {id kind where params} {
     } else {
         lassign [CurrentText $path] exists text
         dict set where text $text
-        dict set where version disk
+        # (Unique: the disk's text is never cached under a version.)
+        dict set where version disk[incr ::lsp::server::nextDeferred]
     }
     set result [Answer $kind $where 0]
     if {[lindex $result 0] eq "answer"} {
@@ -1341,7 +1354,7 @@ proc lsp::server::Answer {kind where final} {
     variable encoding
     set path [dict get $where path]
     set text [dict get $where text]
-    set empty [expr {$kind eq "references" ? [lsp::json::arr] : [lsp::json::null]}]
+    set empty [if {$kind eq "references"} {lsp::json::arr} else {lsp::json::null}]
     set owner [Owner $path]
     if {$owner eq ""} {
         return [list answer $empty]

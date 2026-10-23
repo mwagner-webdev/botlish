@@ -8963,3 +8963,4 @@ tests/main-cli.test cli-malformed-lsp-scheduler-alone pass
 tests/main-cli.test cli-malformed-lsp-worker-scheduler pass
 tests/main-cli.test cli-malformed-lsp-and-worker pass
 tests/main-cli.test cli-malformed-lsp-target pass
+tests/lsp-neovim.test lsp-neovim-session pass

@@ -1,0 +1,316 @@
+# mutants.txt -- the language server's mutants (tools/mutate.tcl;
+# LSP-MILESTONE-1.md, "Mutation testing").
+#
+# Format: "@@ NAME DESCRIPTION" starts a mutant; "%% FILE ?PATTERN...?"
+# names the test file that states its rule (tests/lsp.test when absent) and
+# the tests of it that state it (tcltest -match patterns; every test when
+# absent): each mutant must be killed by a focused test; "## FILE" names the
+# file its next edits change; each edit is "<<<<", the exact text to replace
+# (occurring once), "====", its replacement, ">>>>". Update a mutant's text
+# when the code it mutates changes, keeping it a mutant of the same rule.
+
+@@ length-in-characters a frame's Content-Length counts characters, not bytes: a non-ASCII message is framed too short
+%% tests/lsp.test lsp-frame-split-anywhere lsp-proto-non-ascii
+## lsp/transport.tcl
+<<<<
+    return "Content-Length: [string length $bytes]\r\n\r\n$bytes"
+====
+    return "Content-Length: [string length [encoding convertfrom utf-8 $bytes]]\r\n\r\n$bytes"
+>>>>
+
+@@ fragment-is-message a fragment of a body is taken for the whole message: the framing reader does not wait for Content-Length bytes
+%% tests/lsp.test lsp-frame-* lsp-proto-fragmented
+## lsp/transport.tcl
+<<<<
+                if {[string length $buffer] < $length} {
+                    break
+                }
+====
+                if {[string length $buffer] == 0} {
+                    break
+                }
+                set length [expr {min($length, [string length $buffer])}]
+>>>>
+
+@@ string-is-boolean a JSON string that reads "true" or "false" is taken for a boolean: JSON categories guessed from a Tcl string's contents
+%% tests/lsp.test lsp-json-*
+## lsp/json.tcl
+<<<<
+            return [::list str [String $text i]]
+====
+            set string [String $text i]
+            if {$string in {true false}} {
+                return [::list bool [expr {$string eq "true"}]]
+            }
+            return [::list str $string]
+>>>>
+
+@@ notification-answered a notification gets a response (with id null), as if it were a request
+%% tests/lsp.test lsp-proto-notifications
+## lsp/server.tcl
+<<<<
+                Notification [dict get $message method] [dict get $message params]
+====
+                Notification [dict get $message method] [dict get $message params]
+                Send [lsp::rpc::success [lsp::json::null] [lsp::json::null]]
+>>>>
+
+@@ missing-id-is-request a message with a method and no id is classified as a request with id null, not as a notification
+%% tests/lsp.test lsp-rpc-classify lsp-proto-notifications
+## lsp/jsonrpc.tcl
+<<<<
+        return [dict create kind notification method [lsp::json::text $method] params $params]
+====
+        return [dict create kind request id [lsp::json::null] method [lsp::json::text $method] params $params]
+>>>>
+
+@@ positions-in-bytes positions count UTF-8 bytes, not UTF-16 code units: everything after a non-ASCII character is misplaced
+%% tests/lsp.test lsp-positions-* lsp-lang-unicode-positions
+## lsp/positions.tcl
+<<<<
+    set n [string length $text]
+    if {$encoding eq "utf-16"} {
+        incr n [regexp -all {[\U00010000-\U0010FFFF]} $text]
+    }
+    return $n
+====
+    return [string length [encoding convertto utf-8 $text]]
+>>>>
+
+@@ no-normalization a document's text is used for positions as the editor sent it: CRLF and lone CR are not the compiler's normalized text
+%% tests/lsp.test lsp-lang-line-endings
+## lsp/server.tcl
+<<<<
+        set normal [surface::source::normalize $text]
+====
+        set normal $text
+>>>>
+
+@@ overlay-ignored an open document's text never reaches the compiler: analyses read the disk instead of the editor's buffer
+%% tests/lsp.test lsp-lang-overlay lsp-lang-loader-error
+## lsp/server.tcl
+<<<<
+    service::setDocument $workspace $path $text -version $gen/$version
+====
+>>>>
+
+@@ importer-not-reanalyzed a change to a module concerns only the program it is, never a program that imports it: the importer keeps its old diagnostics
+%% tests/lsp.test lsp-lang-module-edit lsp-lang-close-module
+## lsp/server.tcl
+<<<<
+            if {$path eq $root || [Observes $root $path]} {
+====
+            if {$path eq $root} {
+>>>>
+
+@@ stale-publishes a revision whose sources changed while it ran publishes its diagnostics for the documents' newer versions
+%% tests/lsp.test lsp-sched-stale-result
+## lsp/server.tcl
+<<<<
+        if {$latest eq "" || ![Fresh $latest]} continue
+====
+        if {$latest eq ""} continue
+>>>>
+
+@@ stale-not-reanalyzed a revision that came back stale is kept without analyzing the program again: the newer sources are never published
+%% tests/lsp.test lsp-sched-stale-result
+## lsp/server.tcl
+<<<<
+                if {![Pending $root]} {
+                    Schedule $root
+                }
+====
+>>>>
+
+@@ obsolete-applied a result older than the one already applied becomes the program's revision: an older job overwrites a newer one
+%% tests/lsp.test lsp-sched-obsolete-result
+## lsp/server.tcl
+<<<<
+    if {![dict exists $roots $root] || $job <= [dict get $roots $root applied]} {
+====
+    if {![dict exists $roots $root]} {
+>>>>
+
+@@ location-not-mapped a stale revision's locations are given at their old offsets in the text the document has now, without proving that text unchanged there
+%% tests/lsp.test lsp-lang-stale-locations
+## lsp/server.tcl
+<<<<
+    set mapped [ToNew [Mapping $key $old $new] [dict get $range start] [dict get $range end]]
+====
+    set mapped [list [dict get $range start] [dict get $range end]]
+>>>>
+
+@@ stale-hover-unmarked a hover from a stale revision is not marked stale
+%% tests/lsp.test lsp-lang-session lsp-sched-hover-during-analysis-worker
+## lsp/server.tcl
+<<<<
+                lappend notes "stale: analyzed before the latest changes to [join [lsort -unique $changed] {, }]"
+====
+>>>>
+
+@@ stale-definition-at-once a definition from a stale revision is answered at once although the analysis that would answer it fresh is pending
+%% tests/lsp.test lsp-sched-advanced-beyond
+## lsp/server.tcl
+<<<<
+        if {!$fresh && $kind ne "hover" && $pending} {
+====
+        if {0} {
+>>>>
+
+@@ references-by-spelling references are the occurrences of the name's spelling in the document, not the references resolved to the binding
+%% tests/lsp.test lsp-lang-references-identity
+## lsp/server.tcl
+<<<<
+            foreach range [dict getdef $facts references {}] {
+                if {$range eq ""} continue
+                set location [Location $rev $range]
+                if {$location ne ""} {
+                    lappend locations $location
+                }
+            }
+====
+            set text [dict get $where text]
+            set name [namespace tail [dict get $facts binding name]]
+            foreach match [regexp -all -inline -indices "\\m[string map {: \\:} $name]\\M" $text] {
+                lassign $match start end
+                lappend locations [lsp::json::obj uri [lsp::json::str [UriOf $path]] \
+                    range [LspRange "request,$path,[dict get $where version]" $text $start [expr {$end + 1}]]]
+            }
+>>>>
+
+@@ topics-by-name a hover's Compilerpedia topic is looked up by the binding's spelling, not by what it resolves to: a program's own function named like a library one gets the library's topic
+%% tests/lsp.test lsp-lang-topics
+## lsp/server.tcl
+<<<<
+            foreach topic [dict get $facts topics] {
+                if {[lindex [dict get $topic for] 0] eq "symbol"} {
+                    lappend notes "[dict get $topic title] ($::cliInvocation -help [dict get $topic id])"
+                }
+            }
+====
+            if {[dict exists $facts binding]} {
+                service::Compilerpedia
+                foreach id [compilerpedia::symbolTopics std::list::[namespace tail [dict get $facts binding name]]] {
+                    lappend notes "[dict get [compilerpedia::topic $id] title] ($::cliInvocation -help $id)"
+                }
+            }
+>>>>
+
+@@ log-to-stdout the server's log is written to stdout, among the protocol's frames
+%% tests/lsp.test lsp-proto-stdout-frames-* lsp-lang-out-of-order
+## lsp/server.tcl
+<<<<
+    catch {puts stderr "botlish lsp: $message"}
+====
+    catch {puts stdout "botlish lsp: $message"; flush stdout}
+>>>>
+
+@@ cancel-unanswered a cancelled request is forgotten without the response the protocol requires
+%% tests/lsp.test lsp-sched-cancel
+## lsp/server.tcl
+<<<<
+            Send [lsp::rpc::failure $id RequestCancelled "cancelled"]
+====
+>>>>
+
+@@ out-of-order-accepted a change that does not advance a document's version replaces its text
+%% tests/lsp.test lsp-lang-out-of-order
+## lsp/server.tcl
+<<<<
+    if {$version <= [dict get $current version]} {
+====
+    if {0} {
+>>>>
+
+@@ default-encoding-utf32 the server announces UTF-32 positions to a client that offered none (every client implements UTF-16, the default)
+%% tests/lsp.test lsp-proto-initialize lsp-proto-position-encoding
+## lsp/server.tcl
+<<<<
+    set encoding utf-16
+    foreach offered
+====
+    set encoding utf-32
+    foreach offered
+>>>>
+
+@@ every-document-a-program a module an open program imports is analyzed as a program of its own and answers from that analysis, not from the program's
+%% tests/lsp.test lsp-lang-shared-module
+## lsp/server.tcl
+<<<<
+                if {$other ne $candidate && $candidate in [Reads $other]} {
+====
+                if {0} {
+>>>>
+
+@@ closed-not-withdrawn closing a program leaves its diagnostics published: an owner's last publication is kept although it owns nothing any more
+%% tests/lsp.test lsp-lang-overlay lsp-lang-two-programs
+## lsp/server.tcl
+<<<<
+        } elseif {$owner ne "" && [dict get $before owner] eq $owner} {
+====
+        } elseif {$owner eq "" || [dict get $before owner] eq $owner} {
+>>>>
+
+@@ sync-despite-worker the worker scheduler is asked for and the analysis runs on the server's event loop anyway: a slow analysis blocks every request
+%% tests/lsp.test lsp-sched-hover-during-analysis-worker
+## lsp/server.tcl
+<<<<
+    set scheduler [lsp::scheduler::create [dict get $options -scheduler] -workspace $workspace \
+====
+    set scheduler [lsp::scheduler::create sync -workspace $workspace \
+>>>>
+
+@@ crash-ends-server a worker that dies takes the language server down with it
+%% tests/lsp.test lsp-sched-worker-crash
+## lsp/scheduler.tcl
+<<<<
+        Deliver $s [dict get $running root] [dict get $running job] crashed $message
+====
+        exit 1
+>>>>
+
+@@ worker-not-killed a superseded worker is not killed: its process lives on beside its replacement
+%% tests/lsp.test lsp-sched-superseded lsp-sched-shutdown-outstanding
+## lsp/scheduler.tcl
+<<<<
+            catch {exec kill -KILL {*}$pids}
+====
+            catch {}
+>>>>
+
+@@ revisions-not-released revisions a program no longer keeps are never released: the server holds every revision it was given
+%% tests/lsp.test lsp-sched-rapid-versions-*
+## lsp/server.tcl
+<<<<
+                if {$rev ne "" && $rev ni $keep} {
+                    Release $rev
+                }
+====
+>>>>
+
+@@ uri-drive-letter a Windows file URI's drive letter keeps the URI path's leading slash: /C:/x is no path of the drive
+%% tests/lsp.test lsp-uri-windows
+## lsp/uri.tcl
+<<<<
+        if {[regexp {^/[A-Za-z]:(/|$)} $path]} {
+====
+        if {0} {
+>>>>
+
+@@ export-without-trait-source an exported revision's HIR leaves out the checked source build its queries read: an imported trait program answers differently
+%% tests/compiler-service.test cs-export-* cs-import-*
+## service/service.tcl
+<<<<
+        set hir [hir::interchange::encode $hir -trait-source 1]
+====
+        set hir [hir::interchange::encode $hir]
+>>>>
+
+@@ import-any-configuration an exported revision of another configuration (another front end) is imported as if it were this one's
+%% tests/compiler-service.test cs-export-* cs-import-*
+## service/service.tcl
+<<<<
+        if {[dict getdef $config $key ""] ne $mine} {
+====
+        if {0} {
+>>>>

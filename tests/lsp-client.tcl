@@ -14,6 +14,9 @@
 #   lspc::published C URI             the last publishDiagnostics params for
 #                                     URI, or ""
 #   lspc::Get C order                 the ids of the responses, in arrival order
+#   lspc::Get C answered              ID -> when its response arrived (ms)
+#   lspc::Get C arrivals              when each notification arrived (ms), in
+#                                     the order of `notifications`
 #   lspc::stderr C                    what the server wrote on stderr so far
 #   lspc::stop C                      shutdown, exit; => {status S stderr T}
 #   lspc::finish C                    wait for the process to end, without
@@ -36,6 +39,13 @@ if {[info commands ::lsp::json::parse] eq ""} {
 
 namespace eval lspc {
     variable root [file dirname [file dirname [file normalize [info script]]]]
+    # How long a wait may last, in milliseconds, unless a call says otherwise
+    # (BOTLISH_LSPC_TIMEOUT: the mutation harness shortens it, so a mutant
+    # that breaks the protocol fails fast).
+    variable timeout 60000
+    if {[info exists ::env(BOTLISH_LSPC_TIMEOUT)] && [string is integer -strict $::env(BOTLISH_LSPC_TIMEOUT)]} {
+        set timeout $::env(BOTLISH_LSPC_TIMEOUT)
+    }
     variable clients [dict create]
     variable next 0
     variable tick 0
@@ -80,7 +90,7 @@ proc lspc::start {args} {
         }
     }
     dict set clients $c [dict create chan $chan stderr $stderr next 0 responses [dict create] \
-        notifications {} order {} frames 0 problems {} ended 0 pid [pid $chan] scratch $scratch]
+        notifications {} arrivals {} answered {} order {} frames 0 problems {} ended 0 pid [pid $chan] scratch $scratch]
     dict set clients $c endpoint [lsp::transport::connect $chan $chan \
         -message [list lspc::Received $c] -problem [list lspc::Problem $c] -eof [list lspc::Ended $c]]
     if {[dict get $options -initialize]} {
@@ -112,12 +122,15 @@ proc lspc::Received {c bytes} {
     variable tick
     dict set clients $c frames [expr {[dict get $clients $c frames] + 1}]
     set message [lsp::json::decode $bytes]
+    set now [clock milliseconds]
     if {[lsp::json::has $message method]} {
         dict set clients $c notifications [linsert [dict get $clients $c notifications] end $message]
+        dict set clients $c arrivals [linsert [dict get $clients $c arrivals] end $now]
     } else {
         set id [lsp::json::get $message id]
         dict set clients $c responses $id $message
         dict set clients $c order [linsert [dict get $clients $c order] end $id]
+        dict set clients $c answered $id $now
     }
     incr tick
 }
@@ -160,7 +173,7 @@ proc lspc::notify {c method params} {
 
 proc lspc::response {c id args} {
     variable clients
-    set timeout [dict getdef $args -timeout 60000]
+    set timeout [dict getdef $args -timeout $::lspc::timeout]
     until $c {[dict exists $::lspc::clients $c responses $id] || [dict get $::lspc::clients $c ended]} -timeout $timeout
     if {![dict exists $clients $c responses $id]} {
         error "lspc: no response to request [lsp::json::write $id]"
@@ -178,7 +191,7 @@ proc lspc::request {c method params args} {
 # true; an error after -timeout milliseconds (default 60 s).
 proc lspc::until {c script args} {
     variable tick
-    set timeout [dict getdef $args -timeout 60000]
+    set timeout [dict getdef $args -timeout $::lspc::timeout]
     set deadline [expr {[clock milliseconds] + $timeout}]
     while {![uplevel 1 [list expr $script]]} {
         set left [expr {$deadline - [clock milliseconds]}]
@@ -222,7 +235,7 @@ proc lspc::stop {c} {
 
 proc lspc::finish {c args} {
     variable clients
-    set timeout [dict getdef $args -timeout 60000]
+    set timeout [dict getdef $args -timeout $::lspc::timeout]
     catch {until $c {[dict get $::lspc::clients $c ended]} -timeout $timeout}
     set chan [Get $c chan]
     lsp::transport::disconnect [Get $c endpoint]

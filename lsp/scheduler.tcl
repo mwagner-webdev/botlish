@@ -361,6 +361,7 @@ proc lsp::scheduler::FromWorker {s bytes} {
                 } elseif {$type eq "failed"} {
                     Deliver $s [dict get $running root] [dict get $running job] failed [dict get $body message]
                 } else {
+                    lsp::stats::add workerAnalysisMs [dict getdef $body ms 0]
                     set start [clock microseconds]
                     if {[catch {service::import [Option $s -workspace] [dict get $body text] -version [dict get $running job]} rev]} {
                         Deliver $s [dict get $running root] [dict get $running job] failed "the worker's revision could not be imported: $rev"

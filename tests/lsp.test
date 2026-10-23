@@ -916,9 +916,10 @@ foreach scheduler {worker sync} {
             lsp::json::integer [lsp::json::get $p version]
         }]
         set status [lt::Stop $c]
-        set submitted [dict get [lt::Stats $stats] counters submitted]
-        list $last [expr {$versions eq [lsort -integer -unique $versions]}] [expr {$submitted < 13}] $status
-    } -cleanup {file delete -force $dir; unset -nocomplain dir stats c main v last versions status submitted} -result {{} 1 1 0}
+        set counters [dict get [lt::Stats $stats] counters]
+        list $last [expr {$versions eq [lsort -integer -unique $versions]}] [expr {[dict get $counters submitted] < 13}] \
+            [expr {[dict get $counters liveRevisions] <= 2}] $status
+    } -cleanup {file delete -force $dir; unset -nocomplain dir stats c main v last versions status counters} -result {{} 1 1 1 0}
 }
 
 test lsp-sched-hover-during-analysis-worker {with the worker, a hover while an analysis runs is answered at once from the last revision (marked stale: a module it read changed), not after the analysis} -body {
@@ -1063,5 +1064,59 @@ test lsp-sched-close-pending {closing a document while its analysis is pending: 
     lt::Pump $c 2500
     list [lspc::published $c $main] [lt::ErrorCode [lspc::request $c nosuch [lsp::json::obj]]] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir c main} -result {{} -32601 0}
+
+
+test lsp-sched-stale-result {a result whose sources changed while it ran publishes nothing -- here a module the program has imported only since the edit that started it -- and the program is analyzed again, so what is published is right} -body {
+    set dir [lt::Dir stale-result]
+    lt::Put $dir/util.bot "fn g(x: int) -> int:\n    x\n"
+    lt::Put $dir/main.bot "y = 1\ny\n"
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=1500}]
+    set main [lspc::uri $dir/main.bot]
+    set util [lspc::uri $dir/util.bot]
+    lspc::didOpen $c $main "y = 1\ny\n"
+    lt::Diagnostics $c $main 1
+    lspc::didOpen $c $util "fn g(x: int) -> int:\n    x\n"
+    lspc::didChange $c $main 2 "import util\nutil::g(1)\n"
+    lt::Pump $c 600
+    # While that analysis runs, util changes: g now takes a str.
+    lspc::didChange $c $util 2 "fn g(x: str) -> int:\n    1\n"
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] ne {}}
+    set versions [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {
+        if {[lsp::json::get $p uri] ne [list str $main]} continue
+        list [lsp::json::integer [lsp::json::get $p version]] [llength [lsp::json::elements [lsp::json::get $p diagnostics]]]
+    }]
+    list $versions [lindex [lt::Brief [lspc::published $c $main]] 0 2] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main util versions} -result {{{1 0} {2 1}} {CORE SEMANTIC TYPE} 0}
+
+test lsp-lang-stale-locations {while a syntax error keeps the last analysis in use, its locations are given in the text the documents have now -- moved with the lines above them -- and a location in text that changed is dropped, never given at its old place} -body {
+    set dir [lt::Project stale-locations]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    # A broken line above everything: every location moves down a line.
+    lspc::didChange $c $main 2 "y = )\n$::ltMain"
+    lt::Diagnostics $c $main 2
+    set moved [list [lt::Locations [lspc::references $c $main 4 4 1]] [lt::Location [lt::Result [lspc::definition $c $main 9 7]]]]
+    # The reference to b broken: its location is in changed text, and goes.
+    lspc::didChange $c $main 3 [string map {"double(a + b)" "double(a + )"} $::ltMain]
+    lt::Diagnostics $c $main 3
+    list {*}$moved [lt::Locations [lspc::references $c $main 7 0 1]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main moved} -result {{main.bot:4:3-4:9 main.bot:9:0-9:6} main.bot:7:0-7:1 main.bot:7:0-7:1 0}
+
+test lsp-lang-topics {Compilerpedia is associated by identity: a diagnostic carries its code's topic (data.topic, the topic main.tcl's help line names), a standard-library function's hover names its topic, and a program's own function of the same name gets none} -body {
+    set dir [lt::Dir topics]
+    set program "import std::list\n\nfn get(xs, index, default):\n    default\n\na = get(\[1\], 0, 0)\nb = std::list::get(\[1\], 0, 0)\nnosuch\n"
+    lt::Put $dir/main.bot $program
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $program
+    lt::Diagnostics $c $main 1
+    set diagnostic [lindex [lsp::json::elements [lsp::json::get [lspc::published $c $main] diagnostics]] 0]
+    set own [lt::Hover [lspc::hover $c $main 5 4]]
+    set std [lt::Hover [lspc::hover $c $main 6 15]]
+    list [lsp::json::get [lsp::json::get $diagnostic data] topic] $own [llength [split $std \n]] \
+        [string match "*-help stdlib.std::list::get)*" $std] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir program c main diagnostic own std} -result {{str error.unbound} {fn get(xs, index, default) -> any} 2 1 0}
 
 cleanupTests
