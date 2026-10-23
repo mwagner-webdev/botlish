@@ -13,6 +13,8 @@
 #   lspc::until C SCRIPT ?-timeout MS?   wait until SCRIPT (caller's) is true
 #   lspc::published C URI             the last publishDiagnostics params for
 #                                     URI, or ""
+#   lspc::Get C order                 the ids of the responses, in arrival order
+#   lspc::stderr C                    what the server wrote on stderr so far
 #   lspc::stop C                      shutdown, exit; => {status S stderr T}
 #   lspc::finish C                    wait for the process to end, without
 #                                     shutting it down; => {status S stderr T}
@@ -78,7 +80,7 @@ proc lspc::start {args} {
         }
     }
     dict set clients $c [dict create chan $chan stderr $stderr next 0 responses [dict create] \
-        notifications {} frames 0 problems {} ended 0 pid [pid $chan] scratch $scratch]
+        notifications {} order {} frames 0 problems {} ended 0 pid [pid $chan] scratch $scratch]
     dict set clients $c endpoint [lsp::transport::connect $chan $chan \
         -message [list lspc::Received $c] -problem [list lspc::Problem $c] -eof [list lspc::Ended $c]]
     if {[dict get $options -initialize]} {
@@ -115,6 +117,7 @@ proc lspc::Received {c bytes} {
     } else {
         set id [lsp::json::get $message id]
         dict set clients $c responses $id $message
+        dict set clients $c order [linsert [dict get $clients $c order] end $id]
     }
     incr tick
 }
@@ -249,8 +252,20 @@ proc lspc::finish {c args} {
     if {[Get $c scratch] ne ""} {
         catch {file delete -force [Get $c scratch]}
     }
-    dict unset clients $c
+    # (The record stays: what the server sent can still be read.)
     return $result
+}
+
+# What the server has written to its stderr so far.
+proc lspc::stderr {c} {
+    set text ""
+    catch {
+        set f [open [Get $c stderr]]
+        fconfigure $f -encoding utf-8
+        set text [read $f]
+        close $f
+    }
+    return $text
 }
 
 proc lspc::kill {c} {

@@ -109,6 +109,10 @@ proc lsp::server::main {args} {
     set library [file normalize $::core::libraryDir]
     set workspace [service::workspace -warnings [dict get $options -warnings] -target [dict get $options -target]]
     fconfigure stderr -encoding utf-8
+    # An error escaping an event-loop callback is the server's own failure:
+    # it is logged (stderr only: stdout is the protocol's) and the server
+    # goes on.
+    interp bgerror {} lsp::server::BackgroundError
     set endpoint [lsp::transport::connect stdin stdout -message lsp::server::Message \
         -problem lsp::server::Problem -eof lsp::server::Ended]
     vwait lsp::server::status
@@ -134,6 +138,10 @@ proc lsp::server::Faults {} {
         }
     }
     return $faults
+}
+
+proc lsp::server::BackgroundError {message options} {
+    Log "internal error: [dict get $options -errorinfo]"
 }
 
 proc lsp::server::Log {message} {
@@ -781,6 +789,7 @@ proc lsp::server::Deliver {root job outcome payload} {
         if {[dict getdef $faults hold-result 0] && $outcome eq "revision" && $held eq "" && $job == 1} {
             # (Test hook: the first result arrives after the next one.)
             set held [list $root $job $outcome $payload]
+            Log "holding the result of job $job (BOTLISH_LSP_FAULT hold-result)"
             return
         }
         Apply $root $job $outcome $payload

@@ -1,0 +1,1067 @@
+# lsp.test -- Botlish's language server (LSP-MILESTONE-1.md): its JSON,
+# framing, JSON-RPC, coordinate and URI layers on their own, then the real
+# server, `tclsh9.0 main.tcl -lsp`, as a child process spoken to through
+# real pipes (tests/lsp-client.tcl): the protocol, the language features,
+# and scheduling under slow, crashing and superseded analyses (the
+# BOTLISH_LSP_FAULT test hooks of lsp/server.tcl and lsp/worker.tcl).
+#
+# The oracle of every semantic answer is the compiler service in this
+# process (service::diagnostics, service::at) and `main.tcl -check`: the
+# server must agree with them, never compute anything of its own.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot lsp lsp.tcl]
+source [file join $::projectRoot tests lsp-client.tcl]
+
+namespace eval lt {}
+
+# A fresh directory NAME under the tcltest temporary directory.
+proc lt::Dir {name} {
+    set dir [file join [temporaryDirectory] lsp-$name-[pid]]
+    file delete -force $dir
+    file mkdir $dir
+    return [file normalize $dir]
+}
+
+# Writes TEXT to PATH exactly.
+proc lt::Put {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+proc lt::Read {path} {
+    set channel [open $path r]
+    fconfigure $channel -encoding utf-8 -translation lf
+    set text [read $channel]
+    close $channel
+    return $text
+}
+
+# A server with a short debounce (20 ms) and the client capabilities
+# CAPABILITIES (none by default).
+proc lt::Start {args} {
+    set options [dict create -scheduler worker -options [lsp::json::obj debounce [lsp::json::int 20]]]
+    foreach {option value} $args {
+        dict set options $option $value
+    }
+    return [lspc::start {*}$options]
+}
+
+# Shuts the server C down; its exit status (0 for an orderly exit).
+proc lt::Stop {c} {
+    return [dict get [lspc::stop $c] status]
+}
+
+# The diagnostics published for URI once its version is VERSION ("" for a
+# closed file: any publication), as {LINE:CHAR-LINE:CHAR SEVERITY CODE
+# MESSAGE} lists.
+proc lt::Diagnostics {c uri {version ""} args} {
+    if {$version eq ""} {
+        lspc::until $c {[lspc::published $c $uri] ne ""} {*}$args
+    } else {
+        lspc::until $c {[lsp::json::get [lspc::published $c $uri] version {null {}}] eq [list num $version]} {*}$args
+    }
+    return [lt::Brief [lspc::published $c $uri]]
+}
+
+proc lt::Brief {params} {
+    return [lmap d [lsp::json::elements [lsp::json::get $params diagnostics]] {
+        list [lt::Range [lsp::json::get $d range]] [lsp::json::integer [lsp::json::get $d severity]] \
+            [lsp::json::text [lsp::json::get $d code]] [lsp::json::text [lsp::json::get $d message]]
+    }]
+}
+
+proc lt::Range {range} {
+    set s [lsp::json::get $range start]
+    set e [lsp::json::get $range end]
+    return "[lsp::json::integer [lsp::json::get $s line]]:[lsp::json::integer [lsp::json::get $s character]]-[lsp::json::integer [lsp::json::get $e line]]:[lsp::json::integer [lsp::json::get $e character]]"
+}
+
+# The result of RESPONSE (an error if it is an error).
+proc lt::Result {response} {
+    if {[lsp::json::has $response error]} {
+        error "error response: [lsp::json::write $response]"
+    }
+    return [lsp::json::get $response result]
+}
+
+# A hover response's text ("null" without one).
+proc lt::Hover {response} {
+    set result [lt::Result $response]
+    if {$result eq {null {}}} {
+        return null
+    }
+    return [lsp::json::text [lsp::json::get [lsp::json::get $result contents] value]]
+}
+
+# A location as FILE:RANGE, FILE the path's tail.
+proc lt::Location {location} {
+    if {$location eq {null {}}} {
+        return null
+    }
+    return "[file tail [lsp::uri::toPath [lsp::json::text [lsp::json::get $location uri]]]]:[lt::Range [lsp::json::get $location range]]"
+}
+
+proc lt::Locations {response} {
+    return [lmap l [lsp::json::elements [lt::Result $response]] {lt::Location $l}]
+}
+
+# The error code of an error RESPONSE, "" for a success.
+proc lt::ErrorCode {response} {
+    if {![lsp::json::has $response error]} {
+        return ""
+    }
+    return [lsp::json::integer [lsp::json::get [lsp::json::get $response error] code]]
+}
+
+# The process ids of the analysis workers a server's stderr says it started.
+proc lt::WorkerPids {stderr} {
+    set pids {}
+    foreach {- list} [regexp -all -inline {analysis worker started \(pid ([0-9,]+)\)} $stderr] {
+        lappend pids {*}[split $list ,]
+    }
+    return $pids
+}
+
+# 1 while process PID exists.
+proc lt::Alive {pid} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        catch {exec tasklist /FI "PID eq $pid" /NH} out
+        return [regexp "\\m$pid\\M" $out]
+    }
+    if {[file isdirectory /proc/self]} {
+        if {![file exists /proc/$pid]} {
+            return 0
+        }
+        # A zombie has exited.
+        catch {
+            set f [open /proc/$pid/stat]
+            set stat [read $f]
+            close $f
+            if {[lindex [regexp -inline {\) (\S)} $stat] 1] eq "Z"} {
+                return 0
+            }
+        }
+        return 1
+    }
+    return [expr {![catch {exec kill -0 $pid}]}]
+}
+
+# Waits up to 10 s until none of PIDS is alive; the live ones.
+proc lt::Reaped {pids} {
+    set deadline [expr {[clock milliseconds] + 10000}]
+    while 1 {
+        set alive [lmap p $pids {if {![lt::Alive $p]} continue; set p}]
+        if {$alive eq {} || [clock milliseconds] > $deadline} {
+            return $alive
+        }
+        after 100
+    }
+}
+
+# The program of most language tests: an entry importing a module and the
+# standard library.
+set ::ltShapes "fn area(w: int, h: int) -> int:\n    w * h\n"
+set ::ltMain "import shapes\nimport std::list\n\nfn double(n: int) -> int:\n    n * 2\n\na = shapes::area(3, 4)\nb = std::list::get(\[1, 2\], 5, 0)\ndouble(a + b)\n"
+
+proc lt::Project {name} {
+    set dir [lt::Dir $name]
+    lt::Put $dir/shapes.bot $::ltShapes
+    lt::Put $dir/main.bot $::ltMain
+    return $dir
+}
+
+# ===========================================================================
+# JSON (lsp/json.tcl)
+
+test lsp-json-roundtrip {every JSON category keeps its type and value through reading and writing: the strings "true", "1" and "null" stay strings, numbers keep their exact text (0, a huge integer, an exponent), empty containers stay empty} -body {
+    set text {{"o":{},"a":[],"s":"true","n":"1","z":"null","t":true,"f":false,"nil":null,"zero":0,"big":12345678901234567890,"e":-1.5E+300,"nested":[[{"x":[1,{"y":[]}]}]]}}
+    set value [lsp::json::parse $text]
+    set types [lmap key {o a s n z t f nil zero big e} {lsp::json::type [lsp::json::get $value $key]}]
+    list [expr {[lsp::json::write $value] eq $text}] $types [lsp::json::get $value big] [lsp::json::get $value e]
+} -cleanup {unset -nocomplain text value types} -result {1 {obj arr str str str bool bool null num num num} {num 12345678901234567890} {num -1.5E+300}}
+
+test lsp-json-escapes {every JSON escape decodes, a surrogate pair is one astral character, and writing escapes exactly what JSON requires} -body {
+    set value [lsp::json::parse {"q\"b\\s\/b\bf\fn\nr\rt\tu\u00e9\ud83d\ude00"}]
+    set text [lsp::json::text $value]
+    list [string length $text] [expr {$text eq "q\"b\\s/b\bf\fn\nr\rt\tu\u00e9\U1F600"}] \
+        [lsp::json::write [lsp::json::str "a\x01\x1f\"\\\n\u00e9"]]
+} -cleanup {unset -nocomplain value text} -result [list 19 1 "\"a\\u0001\\u001f\\\"\\\\\\n\u00e9\""]
+
+test lsp-json-malformed {malformed JSON is refused with its offset, never half read: a trailing comma, a missing value, a lone surrogate either half, a raw control character, a bad escape, leading zeros, an unterminated string, trailing text; and bytes that are not UTF-8} -body {
+    set out {}
+    foreach text [list {{"a":1,}} {[1,]} {"\ud800"} {"\udc00"} {"\ud800\u0041"} "\"a\x01\"" {"\x"} {01} {"abc} {[1]x} {} { } {-} {1.} {.5} {nul} {{"a" 1}} {{1:2}}] {
+        catch {lsp::json::parse $text} message options
+        lappend out [lrange [dict get $options -errorcode] 0 2]
+    }
+    catch {lsp::json::decode "\"\xc3\x28\""} message options
+    lappend out [dict get $options -errorcode]
+    lsort -unique $out
+} -cleanup {unset -nocomplain out text message options} -result {{LSP JSON ENCODING} {LSP JSON MALFORMED}}
+
+test lsp-json-deep {nesting deeper than the bound is malformed, not a Tcl stack overflow} -body {
+    catch {lsp::json::parse "[string repeat {[} 100000][string repeat {]} 100000]"} message options
+    lrange [dict get $options -errorcode] 0 2
+} -cleanup {unset -nocomplain message options} -result {LSP JSON MALFORMED}
+
+test lsp-json-types {accessors check the type: an integer is a number written as one, a string is never a number or a boolean} -body {
+    set v [lsp::json::parse {{"i":7,"f":7.0,"s":"7","b":true}}]
+    list [lsp::json::integer [lsp::json::get $v i]] \
+        [catch {lsp::json::integer [lsp::json::get $v f]}] [catch {lsp::json::integer [lsp::json::get $v s]}] \
+        [catch {lsp::json::boolean [lsp::json::get $v s]}] [lsp::json::boolean [lsp::json::get $v b]] \
+        [catch {lsp::json::text [lsp::json::get $v b]}]
+} -cleanup {unset -nocomplain v} -result {7 1 1 1 1 1}
+
+test lsp-json-large {a large document's text (a megabyte, with escapes and non-ASCII) round-trips exactly through encoding and decoding} -body {
+    set text [string repeat "fn f(x: int) -> int:\n    x + 1 # \"é\" \\ 😀\t\n" 25000]
+    set bytes [lsp::json::encode [lsp::json::obj text [lsp::json::str $text]]]
+    set back [lsp::json::text [lsp::json::get [lsp::json::decode $bytes] text]]
+    list [expr {[string length $bytes] > 1000000}] [expr {$back eq $text}]
+} -cleanup {unset -nocomplain text bytes back} -result {1 1}
+
+test lsp-json-write-valid-utf8 {written JSON is always valid UTF-8: a lone surrogate a Tcl string may hold is written as its escape} -body {
+    set bytes [lsp::json::encode [lsp::json::str "a\uD800b"]]
+    list [encoding convertfrom -profile strict utf-8 $bytes]
+} -cleanup {unset -nocomplain bytes} -result {{"a\ud800b"}}
+
+# ===========================================================================
+# Framing (lsp/transport.tcl)
+
+proc lt::Feed {chunks args} {
+    set reader [lsp::transport::reader {*}$args]
+    set events {}
+    foreach chunk $chunks {
+        lappend events {*}[lsp::transport::feed reader $chunk]
+    }
+    lappend events {*}[lsp::transport::finish reader]
+    return $events
+}
+
+test lsp-frame-split-anywhere {two messages, one non-ASCII (its length counted in bytes), split at every byte boundary, and fed one byte at a time, frame to exactly the two messages} -body {
+    set a [encoding convertto utf-8 {{"x":"é😀"}}]
+    set b {{"y":[]}}
+    set stream "[lsp::transport::frame $a][lsp::transport::frame $b]"
+    set wanted [list [list message $a] [list message $b]]
+    set bad {}
+    for {set i 0} {$i <= [string length $stream]} {incr i} {
+        if {[lt::Feed [list [string range $stream 0 [expr {$i - 1}]] [string range $stream $i end]]] ne $wanted} {
+            lappend bad $i
+        }
+    }
+    list $bad [expr {[lt::Feed [split $stream ""]] eq $wanted}] [string range [lsp::transport::frame $a] 0 18]
+} -cleanup {unset -nocomplain a b stream wanted bad i} -result [list {} 1 "Content-Length: 14\r"]
+
+test lsp-frame-several-in-one {several messages in one piece, then a partial one completed later} -body {
+    set m1 [lsp::transport::frame 1]
+    set m2 [lsp::transport::frame 22]
+    set m3 [lsp::transport::frame 333]
+    lt::Feed [list "$m1$m2[string range $m3 0 10]" [string range $m3 11 end]]
+} -cleanup {unset -nocomplain m1 m2 m3} -result {{message 1} {message 22} {message 333}}
+
+test lsp-frame-headers {header names are case-insensitive, a UTF-8 Content-Type is accepted, another charset refused, unknown fields ignored} -body {
+    list [lt::Feed [list "content-length: 2\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\nX-Other: y\r\n\r\n{}"]] \
+        [lt::Feed [list "Content-Length: 2\r\nContent-Type: application/vscode-jsonrpc; charset=latin1\r\n\r\n{}"]]
+} -result {{{message {{}}}} {{error charset {the content is latin1, not UTF-8}}}}
+
+test lsp-frame-errors {a header with no length, a negative, non-numeric or contradictory length, or too long a header ends the stream; so does the end of input inside a header or a body; nothing is read after} -body {
+    set out {}
+    foreach chunks [list [list "X: 1\r\n\r\n{}"] [list "Content-Length: -2\r\n\r\n"] [list "Content-Length: 2x\r\n\r\n"] \
+            [list "Content-Length: 2\r\nContent-Length: 3\r\n\r\n"] [list "Content-Length: 2\r\n[string repeat x 9000]"] \
+            [list "Content-Le"] [list "Content-Length: 5\r\n\r\nab"] [list "garbage\r\n\r\n" [lsp::transport::frame {{}}]]] {
+        lappend out [lmap e [lt::Feed $chunks] {lrange $e 0 1}]
+    }
+    set out
+} -cleanup {unset -nocomplain out chunks e} -result {{{error no-length}} {{error bad-length}} {{error bad-length}} {{error contradictory-length}} {{error header-too-large}} {{error truncated}} {{error truncated}} {{error header-syntax}}}
+
+test lsp-frame-oversize {a well-framed message over the limit is skipped as it arrives (never held), and the next message is read} -body {
+    set reader [lsp::transport::reader -max-body 10]
+    set events [lsp::transport::feed reader "Content-Length: 100\r\n\r\n[string repeat a 60]"]
+    set held [string length [dict get $reader buffer]]
+    lappend events {*}[lsp::transport::feed reader "[string repeat a 40][lsp::transport::frame ok]"]
+    list $events $held
+} -cleanup {unset -nocomplain reader events held} -result {{{oversize 100} {message ok}} 0}
+
+# ===========================================================================
+# JSON-RPC (lsp/jsonrpc.tcl)
+
+proc lt::Classify {text} {
+    set m [lsp::rpc::classify [encoding convertto utf-8 $text]]
+    return [dict remove $m problem params result error]
+}
+
+test lsp-rpc-classify {requests (an integer id, the id 0, a string id, an id no 64-bit integer holds), notifications, responses; a null params is none; invalid messages keep a usable id; batches are invalid; text that is not JSON is a parse error} -body {
+    lmap text [list {{"jsonrpc":"2.0","id":0,"method":"m"}} {{"jsonrpc":"2.0","id":"0","method":"m","params":{}}} \
+        {{"jsonrpc":"2.0","id":123456789012345678901234567890,"method":"m","params":[]}} \
+        {{"jsonrpc":"2.0","method":"n","params":null}} {{"jsonrpc":"2.0","id":4,"result":null}} \
+        {{"jsonrpc":"1.0","id":5,"method":"m"}} {{"jsonrpc":"2.0","id":{},"method":"m"}} \
+        {{"jsonrpc":"2.0","id":6,"method":7}} {{"jsonrpc":"2.0","id":8,"method":"m","params":"x"}} \
+        {[{"jsonrpc":"2.0","id":9,"method":"m"}]} {{"jsonrpc":"2.0","id":10}} {nope}] {lt::Classify $text}
+} -cleanup {unset -nocomplain text} -result {{kind request id {num 0} method m} {kind request id {str 0} method m} {kind request id {num 123456789012345678901234567890} method m} {kind notification method n} {kind response id {num 4}} {kind invalid id {num 5}} {kind invalid id {null {}}} {kind invalid id {num 6}} {kind invalid id {num 8}} {kind invalid id {null {}}} {kind invalid id {num 10}} {kind parse-error}}
+
+test lsp-rpc-messages {responses carry the id exactly as received and a null result as null; errors carry their JSON-RPC code} -body {
+    list [encoding convertfrom utf-8 [lsp::rpc::success {num 12345678901234567890} {null {}}]] \
+        [encoding convertfrom utf-8 [lsp::rpc::failure {str 7} RequestCancelled cancelled]] \
+        [encoding convertfrom utf-8 [lsp::rpc::failure {null {}} ParseError x]]
+} -result {{{"jsonrpc":"2.0","id":12345678901234567890,"result":null}} {{"jsonrpc":"2.0","id":"7","error":{"code":-32800,"message":"cancelled"}}} {{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"x"}}}}
+
+# ===========================================================================
+# Coordinates (lsp/positions.tcl)
+
+test lsp-positions-encodings {UTF-16 counts an astral character twice and everything else once; UTF-32 counts scalar values, as the compiler does; a combining mark is a character of its own in both} -body {
+    # x 😀 é(e + U+0301) y, on the second line.
+    set text "first\nx\U1F600e\u0301y\n"
+    set starts [lsp::positions::lineStarts $text]
+    set out {}
+    foreach offset {6 7 8 9 10 11} {
+        lappend out [list $offset [lsp::positions::toLsp $text $starts $offset utf-16] [lsp::positions::toLsp $text $starts $offset utf-32]]
+    }
+    set out
+} -cleanup {unset -nocomplain text starts out offset} -result {{6 {1 0} {1 0}} {7 {1 1} {1 1}} {8 {1 3} {1 2}} {9 {1 4} {1 3}} {10 {1 5} {1 4}} {11 {1 6} {1 5}}}
+
+test lsp-positions-round-trip {every offset of a text of ASCII, BMP, astral and combining characters on several lines converts to a protocol position and back to itself, in both encodings} -body {
+    set text "a\u00e9\U1F600\U10FFFFb\n\ne\u0301\U1F600\nlast\U1F600"
+    set starts [lsp::positions::lineStarts $text]
+    set bad {}
+    foreach encoding {utf-16 utf-32} {
+        for {set offset 0} {$offset <= [string length $text]} {incr offset} {
+            lassign [lsp::positions::toLsp $text $starts $offset $encoding] line character
+            if {[lsp::positions::fromLsp $text $starts $line $character $encoding] != $offset} {
+                lappend bad $encoding:$offset
+            }
+        }
+    }
+    set bad
+} -cleanup {unset -nocomplain text starts bad encoding offset line character} -result {}
+
+test lsp-positions-edges {a character past the line's end is its end (the protocol's rule), a character inside a surrogate pair is the pair's character, a line past the text is no position, the end of the text is one} -body {
+    set text "ab\U1F600\nx"
+    set starts [lsp::positions::lineStarts $text]
+    list [lsp::positions::fromLsp $text $starts 0 99 utf-16] [lsp::positions::fromLsp $text $starts 0 3 utf-16] \
+        [lsp::positions::fromLsp $text $starts 2 0 utf-16] [lsp::positions::fromLsp $text $starts 1 1 utf-16] \
+        [lsp::positions::toLsp $text $starts 5 utf-16]
+} -cleanup {unset -nocomplain text starts} -result {3 2 {} 5 {1 1}}
+
+# ===========================================================================
+# URIs (lsp/uri.tcl)
+
+test lsp-uri-unix {file URIs decode their percent-escapes as UTF-8 (spaces, #, %, non-ASCII); a path round-trips; localhost is this machine; other schemes, other hosts, bad escapes and NULs are refused} -body {
+    set path "/tmp/a b/ünï#c%d 😀.bot"
+    set uri [lsp::uri::fromPath $path unix]
+    set out [list $uri [expr {[lsp::uri::toPath $uri unix] eq $path}] [lsp::uri::toPath file://localhost/x/y.bot unix] \
+        [lsp::uri::toPath FILE:///x unix]]
+    foreach bad {untitled:Untitled-1 http://x/y.bot file://host/x.bot file:///a%2 file:///a%C3 file:///a%00b} {
+        lappend out [catch {lsp::uri::toPath $bad unix} message options][lindex [dict get $options -errorcode] end]
+    }
+    set out
+} -cleanup {unset -nocomplain path uri out bad message options} -result {file:///tmp/a%20b/%C3%BCn%C3%AF%23c%25d%20%F0%9F%98%80.bot 1 /x/y.bot /x 1UNSUPPORTED 1UNSUPPORTED 1UNSUPPORTED 1UNSUPPORTED 1UNSUPPORTED 1UNSUPPORTED}
+
+test lsp-uri-windows {Windows: a drive letter, written or escaped, upper or lower case; a UNC path from a URI with a host; backslashes; each round-trips} -body {
+    list [lsp::uri::toPath file:///C:/Users/x/a.bot windows] [lsp::uri::toPath file:///c%3A/Users/x/a.bot windows] \
+        [lsp::uri::toPath file://server/share/d/a.bot windows] [lsp::uri::fromPath {C:\Users\a b\é.bot} windows] \
+        [lsp::uri::fromPath //server/share/a.bot windows] \
+        [lsp::uri::toPath [lsp::uri::fromPath {D:/x y/ü.bot} windows] windows]
+} -result {C:/Users/x/a.bot c:/Users/x/a.bot //server/share/d/a.bot file:///C:/Users/a%20b/%C3%A9.bot file://server/share/a.bot {D:/x y/ü.bot}}
+
+# ===========================================================================
+# The protocol, over real pipes
+
+test lsp-proto-initialize {initialize answers with exactly the implemented capabilities -- full document synchronization with open, close and save, hover, definition, references -- and UTF-16 positions by default} -body {
+    set c [lt::Start]
+    set result [lt::Result [lspc::Get $c initialize]]
+    list [lsp::json::write [lsp::json::get $result capabilities]] [lsp::json::get [lsp::json::get $result serverInfo] name] [lt::Stop $c]
+} -cleanup {unset -nocomplain c result} -result {{{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true}} {str botlish} 0}
+
+test lsp-proto-position-encoding {the position encoding is the first of the client's that the server implements (UTF-16, UTF-32), UTF-16 when it names none of them} -body {
+    set out {}
+    foreach offered {{utf-32 utf-16} {utf-8 utf-16 utf-32} {utf-8}} {
+        set c [lt::Start -capabilities [lsp::json::obj general [lsp::json::obj positionEncodings [lsp::json::arrayOf [lmap e $offered {lsp::json::str $e}]]]]]
+        lappend out [lsp::json::get [lsp::json::get [lt::Result [lspc::Get $c initialize]] capabilities] positionEncoding]
+        lt::Stop $c
+    }
+    set out
+} -cleanup {unset -nocomplain out offered c} -result {{str utf-32} {str utf-16} {str utf-16}}
+
+test lsp-proto-lifecycle {a request before initialize is ServerNotInitialized and a notification is dropped; initialize then works once; after shutdown a request is InvalidRequest; exit after shutdown is status 0} -body {
+    set dir [lt::Project lifecycle]
+    set c [lspc::start -initialize 0]
+    set early [lt::ErrorCode [lspc::hover $c [lspc::uri $dir/main.bot] 0 0]]
+    lspc::didOpen $c [lspc::uri $dir/main.bot] $::ltMain
+    set init [lt::ErrorCode [lspc::request $c initialize [lsp::json::obj capabilities [lsp::json::obj]]]]
+    lspc::notify $c initialized [lsp::json::obj]
+    set again [lt::ErrorCode [lspc::request $c initialize [lsp::json::obj capabilities [lsp::json::obj]]]]
+    # The dropped didOpen left nothing open: nothing was published.
+    set hover [lt::Hover [lspc::hover $c [lspc::uri $dir/main.bot] 6 5]]
+    set shutdown [lt::Result [lspc::request $c shutdown {null {}}]]
+    set after [lt::ErrorCode [lspc::hover $c [lspc::uri $dir/main.bot] 0 0]]
+    set published [lspc::published $c [lspc::uri $dir/main.bot]]
+    lspc::notify $c exit {null {}}
+    set end [lspc::finish $c]
+    list $early $init $again $hover $shutdown $after [dict get $end status] $published
+} -cleanup {file delete -force $dir; unset -nocomplain dir c early init again hover shutdown after end published} -result {-32002 {} -32600 null {null {}} -32600 0 {}}
+
+test lsp-proto-exit-without-shutdown {exit without shutdown ends the server with status 1, as the protocol says} -body {
+    set c [lt::Start]
+    lspc::notify $c exit {null {}}
+    dict get [lspc::finish $c] status
+} -cleanup {unset -nocomplain c} -result 1
+
+test lsp-proto-fragmented {a request whose header and body arrive in pieces, with pauses between them, is answered once it is complete} -body {
+    set c [lt::Start]
+    set body [lsp::json::encode [lsp::json::obj jsonrpc {str 2.0} id {num 41} method {str shutdown}]]
+    set frame [lsp::transport::frame $body]
+    foreach piece [list [string range $frame 0 3] [string range $frame 4 17] [string range $frame 18 21] \
+            [string range $frame 22 30] [string range $frame 31 end]] {
+        lspc::raw $c $piece
+        after 50
+    }
+    set response [lspc::response $c {num 41}]
+    lspc::notify $c exit {null {}}
+    list [lsp::json::write $response] [dict get [lspc::finish $c] status]
+} -cleanup {unset -nocomplain c body frame piece response} -result {{{"jsonrpc":"2.0","id":41,"result":null}} 0}
+
+test lsp-proto-two-in-one-write {two requests in one write get their two responses, in order} -body {
+    set c [lt::Start]
+    set one [lsp::transport::frame [lsp::json::encode [lsp::json::obj jsonrpc {str 2.0} id {num 51} method {str nosuch/one}]]]
+    set two [lsp::transport::frame [lsp::json::encode [lsp::json::obj jsonrpc {str 2.0} id {num 52} method {str nosuch/two}]]]
+    lspc::raw $c $one$two
+    list [lt::ErrorCode [lspc::response $c {num 51}]] [lt::ErrorCode [lspc::response $c {num 52}]] [lt::Stop $c]
+} -cleanup {unset -nocomplain c one two} -result {-32601 -32601 0}
+
+test lsp-proto-request-ids {request ids come back exactly as sent: 0, a negative number, a string that looks like a number, an integer no 64-bit word holds} -body {
+    set c [lt::Start]
+    set out {}
+    foreach id {{num 0} {num -3} {str 7} {num 123456789012345678901234567890}} {
+        lspc::raw $c [lsp::transport::frame [lsp::json::encode [lsp::json::obj jsonrpc {str 2.0} id $id method {str nosuch}]]]
+        lappend out [lsp::json::get [lspc::response $c $id] id]
+    }
+    lappend out [lt::Stop $c]
+} -cleanup {unset -nocomplain c out id} -result {{num 0} {num -3} {str 7} {num 123456789012345678901234567890} 0}
+
+test lsp-proto-non-ascii {a non-ASCII request (its body's length counted in bytes) is read, the non-ASCII answer is framed by its byte count, and the next request still frames correctly} -body {
+    set c [lt::Start]
+    set response [lspc::request $c "méthode/😀" [lsp::json::obj]]
+    set message [lsp::json::text [lsp::json::get [lsp::json::get $response error] message]]
+    set next [lt::ErrorCode [lspc::request $c nosuch [lsp::json::obj]]]
+    list $message $next [dict get [lspc::stop $c] problems]
+} -cleanup {unset -nocomplain c response message next} -result {{unsupported method "méthode/😀"} -32601 {}}
+
+test lsp-proto-malformed {a body that is not JSON is a ParseError (id null), one that is no JSON-RPC message an InvalidRequest with its id when it has one, and the server goes on} -body {
+    set c [lt::Start]
+    lspc::raw $c [lsp::transport::frame "\{nope"]
+    lspc::raw $c [lsp::transport::frame {{"id":61,"method":"x"}}]
+    lspc::raw $c [lsp::transport::frame {{"jsonrpc":"2.0","id":62,"method":"x","params":3}}]
+    lspc::raw $c [lsp::transport::frame "\xff\xfe"]
+    lspc::until $c {[dict size [dict get $::lspc::clients $c responses]] >= 3}
+    set responses [dict get $::lspc::clients $c responses]
+    set out [list [dict keys $responses]]
+    dict for {id response} $responses {
+        lappend out [lt::ErrorCode $response]
+    }
+    lappend out [lt::ErrorCode [lspc::request $c nosuch [lsp::json::obj]]] [lt::Stop $c]
+} -cleanup {unset -nocomplain c responses out id response} -result {{{null {}} {num 61} {num 62}} -32700 -32600 -32600 -32601 0}
+
+test lsp-proto-invalid-params {a request with missing or mistyped params, or a document URI the server cannot read, is InvalidParams} -body {
+    set c [lt::Start]
+    set out {}
+    foreach params [list [lsp::json::obj] [lsp::json::obj textDocument [lsp::json::obj uri {str file:///x.bot}]] \
+            [lspc::at file:///x.bot -1 0] [lspc::at untitled:Untitled-1 0 0] \
+            [lsp::json::obj textDocument [lsp::json::obj uri {str file:///x.bot}] position [lsp::json::obj line {str 0} character {num 0}]]] {
+        lappend out [lt::ErrorCode [lspc::request $c textDocument/hover $params]]
+    }
+    lappend out [lt::ErrorCode [lspc::request $c textDocument/hover [lsp::json::arr]]] [lt::Stop $c]
+} -cleanup {unset -nocomplain c out params} -result {-32602 -32602 -32602 -32602 -32602 -32602 0}
+
+test lsp-proto-notifications {notifications get no response -- known ones, unknown ones, $/ ones, malformed ones -- and the server goes on: the only responses are to the requests} -body {
+    set dir [lt::Project notifications]
+    set c [lt::Start]
+    lspc::notify $c nosuch/notification [lsp::json::obj]
+    lspc::notify $c \$/setTrace [lsp::json::obj value {str off}]
+    lspc::notify $c textDocument/didOpen [lsp::json::obj]
+    lspc::didOpen $c [lspc::uri $dir/main.bot] $::ltMain
+    lt::Diagnostics $c [lspc::uri $dir/main.bot] 1
+    set ids [list [lspc::send $c nosuch [lsp::json::obj]]]
+    lspc::response $c [lindex $ids 0]
+    set end [lspc::stop $c]
+    # initialize, nosuch, shutdown: three responses; the other frames are
+    # publications.
+    list [expr {[dict get $end frames] - [llength [lspc::notifications $c textDocument/publishDiagnostics]]}] [dict get $end status]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c ids end} -result {3 0}
+
+test lsp-proto-eof {the end of input inside a message, or without exit, ends the server -- status 1 -- without hanging} -body {
+    set out {}
+    foreach bytes [list "Content-Length: 50\r\n\r\n\{\"jsonrpc\"" "Content-Len" ""] {
+        set c [lt::Start]
+        lspc::raw $c $bytes
+        close [lspc::Get $c chan] write
+        lappend out [dict get [lspc::finish $c -timeout 20000] status]
+    }
+    set out
+} -cleanup {unset -nocomplain out bytes c} -result {1 1 1}
+
+test lsp-proto-oversize {a message larger than the limit is refused (an error with id null) and skipped as it arrives} -body {
+    set c [lt::Start]
+    lspc::raw $c "Content-Length: 1000000000\r\n\r\n\{\"jsonrpc\":\"2.0\"\}"
+    lspc::until $c {[dict exists $::lspc::clients $c responses {null {}}]}
+    set response [dict get $::lspc::clients $c responses {null {}}]
+    close [lspc::Get $c chan] write
+    set end [lspc::finish $c -timeout 20000]
+    list [lt::ErrorCode $response] [string match "*1000000000 bytes*" [lsp::json::text [lsp::json::get [lsp::json::get $response error] message]]] [dict get $end status]
+} -cleanup {unset -nocomplain c response end} -result {-32600 1 1}
+
+test lsp-proto-bad-header {a header that cannot be framed ends the server (status 1), saying why on stderr} -body {
+    set c [lt::Start]
+    lspc::raw $c "Content-Length: nope\r\n\r\n"
+    set end [lspc::finish $c -timeout 20000]
+    list [dict get $end status] [string match "*bad-length*" [dict get $end stderr]]
+} -cleanup {unset -nocomplain c end} -result {1 1}
+
+foreach scheduler {worker sync} {
+    test lsp-proto-stdout-frames-$scheduler "stdout holds protocol messages and nothing else ($scheduler scheduler): every frame of a session that analyzes, publishes, answers and shuts down is a JSON-RPC message" -body {
+        set dir [lt::Project frames-$scheduler]
+        set c [lt::Start -scheduler $scheduler]
+        set main [lspc::uri $dir/main.bot]
+        lspc::didOpen $c $main $::ltMain
+        lt::Diagnostics $c $main 1
+        lspc::didChange $c $main 2 "$::ltMain\nnosuch\n"
+        lt::Diagnostics $c $main 2
+        lspc::hover $c $main 6 5
+        lspc::definition $c $main 6 5
+        lspc::references $c $main 3 4
+        set end [lspc::stop $c]
+        # initialize, two publications, three answers, shutdown.
+        list [dict get $end status] [dict get $end problems] [dict get $end frames]
+    } -cleanup {file delete -force $dir; unset -nocomplain dir c main end} -result {0 {} 7}
+}
+
+# ===========================================================================
+# Language features
+
+# A brief record of a session through scheduler SCHEDULER: what an editor
+# sees while opening, querying, breaking and fixing a program.
+proc lt::Session {scheduler} {
+    set dir [lt::Project session-$scheduler]
+    set c [lt::Start -scheduler $scheduler -args {-warnings default}]
+    set main [lspc::uri $dir/main.bot]
+    set out {}
+    lspc::didOpen $c $main $::ltMain
+    lappend out open [lt::Diagnostics $c $main 1]
+    lappend out hover [lt::Hover [lspc::hover $c $main 6 5]] [lt::Hover [lspc::hover $c $main 3 4]] \
+        [lt::Hover [lspc::hover $c $main 8 7]] [lt::Hover [lspc::hover $c $main 2 0]]
+    lappend out definition [lt::Location [lt::Result [lspc::definition $c $main 6 5]]] \
+        [lt::Location [lt::Result [lspc::definition $c $main 7 17]]] \
+        [lt::Location [lt::Result [lspc::definition $c $main 8 1]]] \
+        [lt::Location [lt::Result [lspc::definition $c $main 8 7]]]
+    lappend out references [lt::Locations [lspc::references $c $main 3 4 1]] [lt::Locations [lspc::references $c $main 3 4 0]]
+    # A semantic error, then its fix.
+    lspc::didChange $c $main 2 [string map {"double(a + b)" "double(a + nosuch)"} $::ltMain]
+    lappend out semantic [lt::Diagnostics $c $main 2]
+    lspc::didChange $c $main 3 $::ltMain
+    lappend out fixed [lt::Diagnostics $c $main 3]
+    # A syntax error: hover in its unchanged text answers from the last
+    # analysis, marked stale; then the fix, and fresh answers again.
+    lspc::didChange $c $main 4 [string map {"double(a + b)" "double(a + )"} $::ltMain]
+    lappend out syntax [lt::Diagnostics $c $main 4]
+    lappend out stale [lt::Hover [lspc::hover $c $main 6 5]] [lt::Location [lt::Result [lspc::definition $c $main 6 5]]] \
+        [lt::Hover [lspc::hover $c $main 8 11]]
+    lspc::didChange $c $main 5 $::ltMain
+    lappend out recovered [lt::Diagnostics $c $main 5] [lt::Hover [lspc::hover $c $main 6 5]]
+    lappend out status [lt::Stop $c]
+    file delete -force $dir
+    return $out
+}
+
+test lsp-lang-session {an editing session: diagnostics of each version, hover (a function, a parameter, a module's function, nothing), definition (a module's function, a std:: module's function, a function, a binding), references with and without the declaration, a semantic error and its fix, a syntax error during which unchanged text still answers (stale), and recovery} -body {
+    lt::Session worker
+} -result [list open {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} \
+    hover {fn shapes::area(w: int, h: int) -> int} {fn double(n: int) -> int} {a: int} null \
+    definition shapes.bot:0:3-0:7 list.bot:75:3-75:6 main.bot:3:3-3:9 main.bot:6:0-6:1 \
+    references {main.bot:3:3-3:9 main.bot:8:0-8:6} main.bot:8:0-8:6 \
+    semantic {{8:11-8:17 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} \
+    fixed {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} \
+    syntax {{8:11-8:12 1 {SURFACE SYNTAX} {expected an expression, found ")"}}} \
+    stale "fn shapes::area(w: int, h: int) -> int\n(stale: analyzed before the latest changes to main.bot)" shapes.bot:0:3-0:7 null \
+    recovered {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} {fn shapes::area(w: int, h: int) -> int} \
+    status 0]
+
+test lsp-lang-schedulers-agree {the synchronous scheduler and the worker answer the same session identically: the same diagnostics for every version, the same hovers, definitions and references} -body {
+    expr {[lt::Session sync] eq [lt::Session worker]}
+} -result 1
+
+
+# The diagnostics of a -check of PATH, per file: FILE -> {LINE:COL MESSAGE
+# CODE ...} in -check's order, as `main.tcl -check` prints them.
+proc lt::Check {path args} {
+    catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -check {*}$args $path 2>@1} output
+    set out [dict create]
+    foreach line [split $output \n] {
+        if {[regexp {^   error: (.+?):(\d+):(\d+): (.*) \(([^()]+)\)$} $line -> file l col message code]} {
+            dict lappend out [file tail $file] [list $l:$col $message $code]
+        } elseif {[regexp {^(.+?):(\d+):(\d+): warning: (.*) \(([^()]+)\)$} $line -> file l col message code]} {
+            dict lappend out [file tail $file] [list $l:$col $message $code]
+        }
+    }
+    return $out
+}
+
+# Published diagnostics as -check prints them: {LINE:COL MESSAGE CODE ...},
+# 1-based (ASCII sources: a UTF-16 character is a column).
+proc lt::AsCheck {brief} {
+    return [lmap d $brief {
+        lassign $d range severity code message
+        regexp {^(\d+):(\d+)-} $range -> l col
+        list [expr {$l + 1}]:[expr {$col + 1}] $message $code
+    }]
+}
+
+test lsp-lang-agrees-with-check {the published diagnostics are what main.tcl -check reports for the same files -- errors of the entry and of a closed module, in the same words, codes and order, each in its own file; warnings likewise -- and their ranges are the service's exactly} -body {
+    set dir [lt::Dir check]
+    lt::Put $dir/shapes.bot "fn area(w: int, h: int) -> int:\n    w * nosuch\n"
+    lt::Put $dir/main.bot "import shapes\n\nx = shapes::area(1, \"two\")\ny = missing + 1\n"
+    lt::Put $dir/warn.bot "import std::list\n\nstd::list::get(\[1\], 0, 0)\n"
+    set c [lt::Start -args {-warnings default}]
+    lspc::didOpen $c [lspc::uri $dir/main.bot] [lt::Read $dir/main.bot]
+    lspc::didOpen $c [lspc::uri $dir/warn.bot] [lt::Read $dir/warn.bot]
+    set main [lt::Diagnostics $c [lspc::uri $dir/main.bot] 1]
+    set shapes [lt::Diagnostics $c [lspc::uri $dir/shapes.bot]]
+    set warn [lt::Diagnostics $c [lspc::uri $dir/warn.bot] 1]
+    set check [lt::Check $dir/main.bot -warnings default]
+    set checkWarn [lt::Check $dir/warn.bot -warnings default]
+    # The service, in this process, for the ranges.
+    set ws [service::workspace -warnings default -cache ""]
+    set rev [service::analyze $ws $dir/main.bot]
+    set ranges [lmap d [service::diagnostics $rev] {
+        string cat [file tail [dict get $d file]] " " [expr {[dict get $d line] - 1}]:[expr {[dict get $d column] - 1}]-[expr {[dict get $d endLine] - 1}]:[expr {[dict get $d endColumn] - 1}]
+    }]
+    service::closeWorkspace $ws
+    set published [concat [lmap d $main {string cat "main.bot [lindex $d 0]"}] [lmap d $shapes {string cat "shapes.bot [lindex $d 0]"}]]
+    list [expr {[lt::AsCheck $main] eq [dict get $check main.bot]}] [expr {[lt::AsCheck $shapes] eq [dict get $check shapes.bot]}] \
+        [expr {[lt::AsCheck $warn] eq [dict get $checkWarn warn.bot]}] [expr {[lsort $published] eq [lsort $ranges]}] \
+        [llength $main] [llength $shapes] [lindex $warn 0 1] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main shapes warn check checkWarn ws rev ranges published} -result {1 1 1 1 1 1 2 0}
+
+test lsp-lang-agrees-with-service {at every position of a program -- functions, parameters, locals, destructured fields, loop variables, function values, a module's and the standard library's functions -- hover and definition are the service's own answers (service::at), converted} -body {
+    set dir [lt::Dir agree]
+    lt::Put $dir/util.bot "fn f(n: int) -> int:\n    n * 10\n"
+    set program "import util\nimport std::list\n\nfn add(a: int, b) -> int:\n    t = a + b\n    t\n\nfn twice(f: Fn{args: \[int\], return: int}, n: int) -> int:\n    f(f(n))\n\nfn inc(n: int) -> int:\n    n + 1\n\n{left: l, right: r} = {left: 1, right: 2}\nxs = \[1, 2, 3\]\ntotal = loop x in xs:\n    add(x, l)\nq = util::f(2)\nfns = \[inc, inc\]\nw = twice(inc, r)\nstd::list::at(xs, 0)\n"
+    lt::Put $dir/main.bot $program
+    set c [lt::Start]
+    set uri [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $uri $program
+    lt::Diagnostics $c $uri 1
+    set ws [service::workspace -warnings off -cache ""]
+    set rev [service::analyze $ws $dir/main.bot]
+    set lines [split $program \n]
+    set n 0
+    set wrong {}
+    for {set l 0} {$l < [llength $lines]} {incr l} {
+        for {set col 0} {$col <= [string length [lindex $lines $l]]} {incr col 2} {
+            set facts [service::at $rev $dir/main.bot [expr {$l + 1}] [expr {$col + 1}]]
+            set hover [expr {[dict exists $facts hover] && [dict exists $facts construct] ? [dict get $facts hover] : "null"}]
+            set definition null
+            if {[dict exists $facts definition]} {
+                set d [dict get $facts definition]
+                set definition "[file tail [dict get $d file]]:[expr {[dict get $d line] - 1}]:[expr {[dict get $d column] - 1}]-[expr {[dict get $d endLine] - 1}]:[expr {[dict get $d endColumn] - 1}]"
+            }
+            # (The first line: a standard-library symbol's hover adds its
+            # Compilerpedia topic.)
+            set gotHover [lindex [split [lt::Hover [lspc::hover $c $uri $l $col]] \n] 0]
+            set gotDefinition [lt::Location [lt::Result [lspc::definition $c $uri $l $col]]]
+            incr n
+            if {$gotHover ne $hover || $gotDefinition ne $definition} {
+                lappend wrong [list $l:$col $hover $gotHover $definition $gotDefinition]
+            }
+        }
+    }
+    service::closeWorkspace $ws
+    list [expr {$n > 150}] [lrange $wrong 0 3] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir program c uri ws rev lines n wrong l col facts hover definition d gotHover gotDefinition} -result {1 {} 0}
+
+test lsp-lang-references-identity {references are by resolved identity: two parameters both named n, in two functions, each have their own; includeDeclaration adds the declaration} -body {
+    set dir [lt::Dir references]
+    set program "fn inc(n: int) -> int:\n    n + 1\n\nfn twice(n: int) -> int:\n    inc(inc(n))\n\ntwice(inc(1))\n"
+    lt::Put $dir/main.bot $program
+    set c [lt::Start]
+    set uri [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $uri $program
+    lt::Diagnostics $c $uri 1
+    list [lt::Locations [lspc::references $c $uri 0 7 0]] [lt::Locations [lspc::references $c $uri 3 9 0]] \
+        [lt::Locations [lspc::references $c $uri 3 9 1]] [lt::Locations [lspc::references $c $uri 0 4 1]] \
+        [lt::Locations [lspc::references $c $uri 2 0 1]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir program c uri} -result {main.bot:1:4-1:5 main.bot:4:12-4:13 {main.bot:3:9-3:10 main.bot:4:12-4:13} {main.bot:0:3-0:6 main.bot:4:4-4:7 main.bot:4:8-4:11 main.bot:6:6-6:9} {} 0}
+
+test lsp-lang-module-edit {an unsaved edit of an imported module re-analyzes the program that imports it: the importer's diagnostics change although its text did not, and are published for its unchanged version} -body {
+    set dir [lt::Project module-edit]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    set shapes [lspc::uri $dir/shapes.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didOpen $c $shapes $::ltShapes
+    lspc::didChange $c $shapes 2 "fn area(w: str, h: int) -> int:\n    h\n"
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] ne {}}
+    set broken [lt::Brief [lspc::published $c $main]]
+    set version [lsp::json::get [lspc::published $c $main] version]
+    lspc::didChange $c $shapes 3 $::ltShapes
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] eq {}}
+    list [lindex $broken 0 2] $version [lt::Brief [lspc::published $c $main]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main shapes broken version} -result {{CORE SEMANTIC TYPE} {num 1} {} 0}
+
+test lsp-lang-overlay {an open document's text is the editor's, never the disk's: an unsaved error is reported, the file is never written, and closing the document withdraws what was published for it} -body {
+    set dir [lt::Project overlay]
+    set before [file mtime $dir/main.bot]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main "$::ltMain\nnosuch\n"
+    set open [lt::Diagnostics $c $main 1]
+    lspc::didClose $c $main
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] eq {}}
+    list [lindex $open 0 2] [expr {[lt::Read $dir/main.bot] eq $::ltMain && [file mtime $dir/main.bot] == $before}] \
+        [lsp::json::has [lspc::published $c $main] version] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir before c main open} -result {{CORE SEMANTIC UNBOUND} 1 0 0}
+
+test lsp-lang-close-module {closing a module with unsaved changes makes its importer read the disk again: the error the unsaved text caused is gone} -body {
+    set dir [lt::Project close-module]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    set shapes [lspc::uri $dir/shapes.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didOpen $c $shapes "fn area(w: str, h: int) -> int:\n    h\n"
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] ne {}}
+    lspc::didClose $c $shapes
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] eq {}}
+    list [lt::Hover [lspc::hover $c $main 6 5]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main shapes} -result {{fn shapes::area(w: int, h: int) -> int} 0}
+
+test lsp-lang-two-programs {two independent programs open at once: each its own analysis, diagnostics and answers; closing one leaves the other as it was} -body {
+    set dir [lt::Dir two]
+    lt::Put $dir/a.bot "fn fa(x: int) -> int:\n    x\n\nfa(nosuch_a)\n"
+    lt::Put $dir/b.bot "fn fb(y: str) -> str:\n    y\n\nfb(nosuch_b)\n"
+    set c [lt::Start]
+    set a [lspc::uri $dir/a.bot]
+    set b [lspc::uri $dir/b.bot]
+    lspc::didOpen $c $a [lt::Read $dir/a.bot]
+    lspc::didOpen $c $b [lt::Read $dir/b.bot]
+    set da [lt::Diagnostics $c $a 1]
+    set db [lt::Diagnostics $c $b 1]
+    set ha [lt::Hover [lspc::hover $c $a 0 4]]
+    set hb [lt::Hover [lspc::hover $c $b 0 4]]
+    lspc::didClose $c $a
+    set hb2 [lt::Hover [lspc::hover $c $b 3 0]]
+    list [list [lmap d $da {lindex $d 3}] [lmap d $db {lindex $d 3}]] $ha $hb $hb2 [lt::Brief [lspc::published $c $b]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c a b da db ha hb hb2} -result {{{{unbound name "nosuch_a"}} {{unbound name "nosuch_b"}}} {fn fa(x: int) -> int} {fn fb(y: str) -> str} {fn fb(y: str) -> str} {{3:3-3:11 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch_b"}}} 0}
+
+
+test lsp-lang-shared-module {a module two open programs import belongs to the one opened first: opened before both it is a program of its own until they read it; its diagnostics are never withdrawn while a program owns it, and pass to the other program when the first closes} -body {
+    set dir [lt::Dir shared]
+    lt::Put $dir/util.bot "fn f(n: int) -> int:\n    n + nosuch\n"
+    lt::Put $dir/a.bot "import util\nutil::f(1)\n"
+    lt::Put $dir/b.bot "import util\nutil::f(2)\n"
+    set c [lt::Start]
+    set util [lspc::uri $dir/util.bot]
+    set a [lspc::uri $dir/a.bot]
+    set b [lspc::uri $dir/b.bot]
+    lspc::didOpen $c $util [lt::Read $dir/util.bot]
+    set alone [lt::Diagnostics $c $util 1]
+    lspc::didOpen $c $a [lt::Read $dir/a.bot]
+    lt::Diagnostics $c $a 1
+    lspc::didOpen $c $b [lt::Read $dir/b.bot]
+    lt::Diagnostics $c $b 1
+    lspc::didClose $c $a
+    set hover [lt::Hover [lspc::hover $c $util 0 4]]
+    set publications [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {
+        if {[lsp::json::get $p uri] ne [list str $util]} continue
+        llength [lsp::json::elements [lsp::json::get $p diagnostics]]
+    }]
+    list $alone [lsort -unique $publications] $hover [lt::Brief [lspc::published $c $util]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c util a b alone hover publications} -result {{{1:8-1:14 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} 1 {fn util::f(n: int) -> int} {{1:8-1:14 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} 0}
+
+test lsp-lang-line-endings {a document with CRLF, lone CR and mixed line endings is the same program as its LF twin: the same diagnostics at the same protocol positions, the same answers} -body {
+    set dir [lt::Project line-endings]
+    set lf "$::ltMain\nnosuch\n"
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    set out {}
+    set version 0
+    foreach text [list $lf [string map [list \n \r\n] $lf] [string map [list \n \r] $lf] [regsub -all {\n(?=[a-d])} $lf "\r"]] {
+        if {$version == 0} {
+            lspc::didOpen $c $main $text [incr version]
+        } else {
+            lspc::didChange $c $main [incr version] $text
+        }
+        lappend out [list [lt::Diagnostics $c $main $version] [lt::Hover [lspc::hover $c $main 6 5]] [lt::Location [lt::Result [lspc::definition $c $main 8 1]]]]
+    }
+    list [llength [lsort -unique $out]] [lindex $out 0] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir lf c main out version text} -result {1 {{{10:0-10:6 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} {fn shapes::area(w: int, h: int) -> int} main.bot:3:3-3:9} 0}
+
+test lsp-lang-unicode-positions {positions after astral characters count two UTF-16 units each (one in UTF-32), a combining mark one: diagnostics land and hovers answer at the client's own positions in either encoding} -body {
+    set dir [lt::Dir unicode]
+    set program "word = \"w\"\npair = \[\"\U1F600\U1F600\", word\]\nmark = \[\"é\", word\]\nbad = \[\"\U1F600\", nosuch\]\n"
+    lt::Put $dir/main.bot $program
+    set out {}
+    foreach encoding {utf-16 utf-32} {
+        set c [lt::Start -capabilities [lsp::json::obj general [lsp::json::obj positionEncodings [lsp::json::arr [lsp::json::str $encoding]]]]]
+        set uri [lspc::uri $dir/main.bot]
+        lspc::didOpen $c $uri $program
+        set wordAt [expr {$encoding eq "utf-16" ? 16 : 14}]
+        lappend out $encoding [lt::Diagnostics $c $uri 1] [lt::Hover [lspc::hover $c $uri 1 $wordAt]] \
+            [lt::Hover [lspc::hover $c $uri 2 14]] [lt::Locations [lspc::references $c $uri 0 0]]
+        lt::Stop $c
+    }
+    set out
+} -cleanup {file delete -force $dir; unset -nocomplain dir program out encoding c uri wordAt} -result {utf-16 {{3:13-3:19 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} {word: str} {word: str} {main.bot:1:16-1:20 main.bot:2:14-2:18} utf-32 {{3:12-3:18 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} {word: str} {word: str} {main.bot:1:14-1:18 main.bot:2:14-2:18}}
+
+test lsp-lang-unicode-paths {a project in a directory whose name has spaces, non-ASCII and astral characters: its documents' URIs are decoded, its modules found, and locations in them returned as URIs naming them} -body {
+    set dir [lt::Dir "é dir 😀"]
+    lt::Put $dir/shapes.bot $::ltShapes
+    lt::Put $dir/main.bot $::ltMain
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    set location [lt::Result [lspc::definition $c $main 6 5]]
+    set uri [lsp::json::text [lsp::json::get $location uri]]
+    list [string match *%* $uri] [expr {[lsp::uri::toPath $uri] eq [file normalize $dir/shapes.bot]}] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main location uri} -result {1 1 0}
+
+test lsp-lang-library-document {a standard-library module open on its own is no program -- nothing is analyzed or published for it, and it answers nothing -- while one a program imports answers from that program's analysis} -body {
+    set dir [lt::Project library]
+    set list [lspc::uri [file join $::core::libraryDir list.bot]]
+    set text [lt::Read [file join $::core::libraryDir list.bot]]
+    set c [lt::Start]
+    lspc::didOpen $c $list $text
+    set alone [lt::Hover [lspc::hover $c $list 75 4]]
+    set publishedAlone [lspc::published $c $list]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    set owned [lindex [split [lt::Hover [lspc::hover $c $list 75 4]] \n] 0]
+    list $alone $publishedAlone $owned [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir list text c alone publishedAlone main owned} -result {null {} {fn std::list::get(xs: list, index: int, default) -> any} 0}
+
+test lsp-lang-loader-error {an import that resolves to no module is the loader's diagnostic, at the import; creating the module as an unsaved document resolves it} -body {
+    set dir [lt::Dir loader]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main "import helper\nhelper::g(1)\n"
+    set missing [lt::Diagnostics $c $main 1]
+    lspc::didOpen $c [lspc::uri $dir/helper.bot] "fn g(x: int) -> int:\n    x\n"
+    lspc::until $c {[lt::Brief [lspc::published $c $main]] eq {}}
+    list [lindex $missing 0 0] [lindex $missing 0 2] [lt::Hover [lspc::hover $c $main 1 8]] [file exists $dir/helper.bot] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main missing} -result {0:7-0:13 {SURFACE MODULE UNKNOWN-NAMESPACE} {fn helper::g(x: int) -> int} 0 0}
+
+test lsp-lang-closed-module-diagnostics {an error in a module no editor has open is published for that module's file, with no version} -body {
+    set dir [lt::Dir closed-module]
+    lt::Put $dir/shapes.bot "fn area(w: int, h: int) -> int:\n    w * nosuch\n"
+    lt::Put $dir/main.bot $::ltMain
+    set c [lt::Start]
+    lspc::didOpen $c [lspc::uri $dir/main.bot] $::ltMain
+    set diagnostics [lt::Diagnostics $c [lspc::uri $dir/shapes.bot]]
+    list $diagnostics [lsp::json::has [lspc::published $c [lspc::uri $dir/shapes.bot]] version] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c diagnostics} -result {{{1:8-1:14 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} 0 0}
+
+test lsp-lang-out-of-order {a change that does not advance the document's version is ignored (and logged): the document stays at its version} -body {
+    set dir [lt::Project out-of-order]
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain 5
+    lt::Diagnostics $c $main 5
+    lspc::didChange $c $main 4 "$::ltMain\nnosuch\n"
+    lspc::didChange $c $main 5 "$::ltMain\nnosuch\n"
+    set hover [lt::Hover [lspc::hover $c $main 6 5]]
+    set end [lspc::stop $c]
+    list $hover [lt::Brief [lspc::published $c $main]] [regexp {version 4, not after version 5: ignored} [dict get $end stderr]] [dict get $end status]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main hover end} -result {{fn shapes::area(w: int, h: int) -> int} {} 1 0}
+
+
+# ===========================================================================
+# Scheduling
+
+# The measurements a server wrote at its exit (BOTLISH_LSP_STATS=PATH).
+proc lt::Stats {path} {
+    return [lt::Read $path]
+}
+
+# Runs the event loop for MS milliseconds.
+proc lt::Pump {c ms} {
+    catch {lspc::until $c 0 -timeout $ms}
+}
+
+# The time a request takes, in milliseconds, and its response.
+proc lt::Timed {script} {
+    set start [clock milliseconds]
+    set response [uplevel 1 $script]
+    return [list [expr {[clock milliseconds] - $start}] $response]
+}
+
+foreach scheduler {worker sync} {
+    test lsp-sched-rapid-versions-$scheduler "rapid successive versions ($scheduler scheduler): intermediate versions are skipped, not analyzed; versions are published in order; the last version's diagnostics are the ones that stay" -body {
+        set dir [lt::Project rapid-$scheduler]
+        set stats [file join $dir stats.txt]
+        set c [lt::Start -scheduler $scheduler -env [list BOTLISH_LSP_STATS $stats]]
+        set main [lspc::uri $dir/main.bot]
+        lspc::didOpen $c $main $::ltMain
+        lt::Diagnostics $c $main 1
+        for {set v 2} {$v <= 13} {incr v} {
+            lspc::didChange $c $main $v [expr {$v % 2 ? $::ltMain : "$::ltMain\nnosuch$v\n"}]
+        }
+        set last [lt::Diagnostics $c $main 13]
+        set versions [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {
+            if {[lsp::json::get $p uri] ne [list str $main]} continue
+            lsp::json::integer [lsp::json::get $p version]
+        }]
+        set status [lt::Stop $c]
+        set submitted [dict get [lt::Stats $stats] counters submitted]
+        list $last [expr {$versions eq [lsort -integer -unique $versions]}] [expr {$submitted < 13}] $status
+    } -cleanup {file delete -force $dir; unset -nocomplain dir stats c main v last versions status submitted} -result {{} 1 1 0}
+}
+
+test lsp-sched-hover-during-analysis-worker {with the worker, a hover while an analysis runs is answered at once from the last revision (marked stale: a module it read changed), not after the analysis} -body {
+    set dir [lt::Project during-worker]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=2500}]
+    set main [lspc::uri $dir/main.bot]
+    set shapes [lspc::uri $dir/shapes.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didOpen $c $shapes $::ltShapes
+    lspc::didChange $c $shapes 2 "fn area(w: int, h: int) -> int:\n    w * h + 0\n"
+    lt::Pump $c 400
+    lassign [lt::Timed {lspc::hover $c $main 6 5}] ms response
+    list [expr {$ms < 1500}] [lt::Hover $response] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main shapes ms response} -result [list 1 "fn shapes::area(w: int, h: int) -> int\n(stale: analyzed before the latest changes to shapes.bot)" 0]
+
+test lsp-sched-hover-during-analysis-sync {the synchronous scheduler, for contrast: a hover sent while an analysis runs waits for it (the event loop is blocked) and is then answered fresh} -body {
+    set dir [lt::Project during-sync]
+    set c [lt::Start -scheduler sync -env {BOTLISH_LSP_FAULT analysis-delay=2500}]
+    set main [lspc::uri $dir/main.bot]
+    set shapes [lspc::uri $dir/shapes.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didOpen $c $shapes $::ltShapes
+    lspc::didChange $c $shapes 2 "fn area(w: int, h: int) -> int:\n    w * h + 0\n"
+    lt::Pump $c 400
+    lassign [lt::Timed {lspc::hover $c $main 6 5}] ms response
+    list [expr {$ms >= 1500}] [lt::Hover $response] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main shapes ms response} -result {1 {fn shapes::area(w: int, h: int) -> int} 0}
+
+test lsp-sched-cancel {a request waiting for an analysis -- queued behind another program's, or running -- is answered RequestCancelled when cancelled, and never again; one not cancelled is answered when its analysis completes} -body {
+    set dir [lt::Dir cancel]
+    lt::Put $dir/a.bot "fn fa(x: int) -> int:\n    x\n\nfa(1)\n"
+    lt::Put $dir/b.bot "fn fb(x: int) -> int:\n    x\n\nfb(2)\n"
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=2000}]
+    set a [lspc::uri $dir/a.bot]
+    set b [lspc::uri $dir/b.bot]
+    lspc::didOpen $c $a [lt::Read $dir/a.bot]
+    lspc::didOpen $c $b [lt::Read $dir/b.bot]
+    lt::Pump $c 300
+    # b's analysis is queued behind a's, a's runs.
+    set queued [lspc::send $c textDocument/hover [lspc::at $b 0 4]]
+    set running [lspc::send $c textDocument/hover [lspc::at $a 0 4]]
+    set kept [lspc::send $c textDocument/hover [lspc::at $a 0 4]]
+    lt::Pump $c 200
+    lspc::notify $c \$/cancelRequest [lsp::json::obj id $queued]
+    lspc::notify $c \$/cancelRequest [lsp::json::obj id $running]
+    lassign [lt::Timed {lspc::response $c $queued}] msQueued rQueued
+    set rRunning [lspc::response $c $running]
+    set rKept [lspc::response $c $kept]
+    lt::Diagnostics $c $b 1
+    set ids [lspc::Get $c order]
+    list [lt::ErrorCode $rQueued] [lt::ErrorCode $rRunning] [expr {$msQueued < 1500}] [lt::Hover $rKept] \
+        [llength [lsearch -all -exact $ids $queued]] [llength [lsearch -all -exact $ids $running]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c a b queued running kept msQueued rQueued rRunning rKept ids} -result {-32800 -32800 1 {fn fa(x: int) -> int} 1 1 0}
+
+test lsp-sched-advanced-beyond {after the editor moves past the last analysis, hover answers at once from it where the text is unchanged (stale), while definition waits for the new analysis and answers fresh, at the moved position} -body {
+    set dir [lt::Project beyond]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=1500}]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didChange $c $main 2 "# a new first line\n$::ltMain"
+    lassign [lt::Timed {lspc::hover $c $main 9 1}] msHover hover
+    lassign [lt::Timed {lspc::definition $c $main 9 1}] msDefinition definition
+    list [expr {$msHover < 700}] [lt::Hover $hover] [expr {$msDefinition >= 700}] [lt::Location [lt::Result $definition]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main msHover hover msDefinition definition} -result [list 1 "fn double(n: int) -> int\n(stale: analyzed before the latest changes to main.bot)" 1 main.bot:4:3-4:9 0]
+
+test lsp-sched-worker-crash {a worker that dies mid-answer (half a message) is reported, never taken for a result; the server keeps its last revision and answers from it, and the next analysis runs in a new worker; no worker outlives the server} -body {
+    set dir [lt::Project crash]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT crash-marker=CRASH_WORKER}]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    lspc::didChange $c $main 2 "$::ltMain# CRASH_WORKER\n"
+    lspc::until $c {[lspc::notifications $c window/logMessage] ne {}}
+    set message [lsp::json::text [lsp::json::get [lindex [lspc::notifications $c window/logMessage] 0] message]]
+    set hover [lt::Hover [lspc::hover $c $main 6 5]]
+    lspc::didChange $c $main 3 "$::ltMain\nnosuch\n"
+    set after [lt::Diagnostics $c $main 3]
+    set end [lspc::stop $c]
+    set pids [lt::WorkerPids [dict get $end stderr]]
+    list [string match "*did not complete*" $message] $hover [lindex $after 0 3] [llength $pids] [lt::Reaped $pids] [dict get $end problems] [dict get $end status]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main message hover after end pids} -result [list 1 "fn shapes::area(w: int, h: int) -> int\n(stale: analyzed before the latest changes to main.bot)" {unbound name "nosuch"} 2 {} {} 0]
+
+test lsp-sched-obsolete-result {a result that arrives after a newer one for the same program is obsolete: it never becomes the program's revision and never publishes} -body {
+    set dir [lt::Project obsolete]
+    set stats [file join $dir stats.txt]
+    set c [lt::Start -env [list BOTLISH_LSP_FAULT hold-result=1 BOTLISH_LSP_STATS $stats]]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main "$::ltMain\nnosuch\n"
+    lspc::until $c {[string match "*holding the result of job 1*" [lspc::stderr $c]]}
+    lspc::didChange $c $main 2 $::ltMain
+    set fixed [lt::Diagnostics $c $main 2]
+    set hover [lt::Hover [lspc::hover $c $main 9 0]]
+    set versions [lmap p [lspc::notifications $c textDocument/publishDiagnostics] {lsp::json::get $p version}]
+    set status [lt::Stop $c]
+    list $fixed $hover $versions [dict get [lt::Stats $stats] counters obsoleteResults] $status
+} -cleanup {file delete -force $dir; unset -nocomplain dir stats c main fixed hover versions status} -result {{} null {{num 2}} 1 0}
+
+test lsp-sched-shutdown-outstanding {shutdown while a request waits for a running analysis answers the request first (with what the server knows), then shutdown; the worker is reclaimed and the exit is orderly} -body {
+    set dir [lt::Project shutdown]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=3000}]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    set waiting [lspc::send $c textDocument/hover [lspc::at $main 6 5]]
+    lt::Pump $c 300
+    set end [lspc::stop $c]
+    set order [lspc::Get $c order]
+    set pids [lt::WorkerPids [dict get $end stderr]]
+    list [lt::Result [lspc::response $c $waiting]] [expr {[lsearch -exact $order $waiting] < [llength $order] - 1}] \
+        [dict get $end status] [llength $pids] [lt::Reaped $pids]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main waiting end order pids} -result {{null {}} 1 0 1 {}}
+
+test lsp-sched-superseded {edits that supersede a running analysis restart the worker instead of waiting for it: the last version is analyzed, at most one worker is alive at a time, and none is left} -body {
+    set dir [lt::Project superseded]
+    set stats [file join $dir stats.txt]
+    set c [lt::Start -env [list BOTLISH_LSP_FAULT analysis-delay=700 BOTLISH_LSP_STATS $stats]]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $::ltMain
+    lt::Diagnostics $c $main 1
+    set alive {}
+    for {set v 2} {$v <= 6} {incr v} {
+        lspc::didChange $c $main $v "$::ltMain\nnosuch$v\n"
+        lt::Pump $c 300
+        lappend alive [llength [lmap p [lt::WorkerPids [lspc::stderr $c]] {if {![lt::Alive $p]} continue; set p}]]
+    }
+    set last [lt::Diagnostics $c $main 6]
+    set end [lspc::stop $c]
+    set counters [dict get [lt::Stats $stats] counters]
+    list [lindex $last 0 3] [expr {[tcl::mathfunc::max {*}$alive] <= 1}] [expr {[dict get $counters supersededKilled] >= 2}] \
+        [lt::Reaped [lt::WorkerPids [dict get $end stderr]]] [dict get $end status]
+} -cleanup {file delete -force $dir; unset -nocomplain dir stats c main alive v p last end counters} -result {{unbound name "nosuch6"} 1 1 {} 0}
+
+test lsp-sched-close-pending {closing a document while its analysis is pending: nothing is published for it afterwards, and the server goes on} -body {
+    set dir [lt::Project close-pending]
+    set c [lt::Start -env {BOTLISH_LSP_FAULT analysis-delay=1500}]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main "$::ltMain\nnosuch\n"
+    lt::Pump $c 200
+    lspc::didClose $c $main
+    lt::Pump $c 2500
+    list [lspc::published $c $main] [lt::ErrorCode [lspc::request $c nosuch [lsp::json::obj]]] [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir c main} -result {{} -32601 0}
+
+cleanupTests

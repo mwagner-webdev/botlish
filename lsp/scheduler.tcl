@@ -265,6 +265,7 @@ proc lsp::scheduler::Start {s} {
     lsp::stats::count workerStarts
     Set $s chan $chan
     Set $s pids [pid $chan]
+    Log $s "analysis worker started (pid [join [pid $chan] ,])"
     Set $s phase starting
     Set $s started $now
     Set $s sent [dict create]

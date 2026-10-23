@@ -36,6 +36,7 @@ proc lsp::worker::main {args} {
     }
     set faults [lsp::server::Faults]
     set workspace [service::workspace -warnings [dict get $options -warnings] -target [dict get $options -target]]
+    interp bgerror {} lsp::worker::BackgroundError
     set endpoint [lsp::transport::connect stdin stdout -message lsp::worker::Message \
         -problem lsp::worker::Problem -eof lsp::worker::Ended]
     Send hello [dict create protocol $::lsp::scheduler::protocol frontEnd [hir::interchange::fingerprint] pid [pid]]
@@ -47,7 +48,18 @@ proc lsp::worker::Send {type body} {
     lsp::transport::send $endpoint [encoding convertto utf-8 [list $type $body]]
 }
 
+# Answers one message. A failure of its own (never a diagnostic of a
+# program, which an analysis reports as data) ends the worker: the server
+# sees it die and replaces it, rather than waiting for an answer that
+# would never come.
 proc lsp::worker::Message {bytes} {
+    if {[catch {Handle $bytes} message options]} {
+        puts stderr "botlish lsp worker: internal error: [dict get $options -errorinfo]"
+        Leave 2
+    }
+}
+
+proc lsp::worker::Handle {bytes} {
     variable workspace
     variable faults
     set message [encoding convertfrom utf-8 $bytes]
@@ -74,7 +86,7 @@ proc lsp::worker::Message {bytes} {
                     if {[string first $marker [dict getdef $entry text ""]] >= 0} {
                         # Half a message, then death: the server must never take
                         # it for a result.
-                        puts -nonewline stdout "Content-Length: 4096\r\n\r\n[list revision [dict create job $job text]]"
+                        puts -nonewline stdout "Content-Length: 4096\r\n\r\n[list revision [dict create job $job text partial]]"
                         flush stdout
                         exit 3
                     }
@@ -100,6 +112,11 @@ proc lsp::worker::Message {bytes} {
             Leave 2
         }
     }
+}
+
+proc lsp::worker::BackgroundError {message options} {
+    puts stderr "botlish lsp worker: internal error: [dict get $options -errorinfo]"
+    Leave 2
 }
 
 proc lsp::worker::Problem {kind detail} {
