@@ -568,7 +568,7 @@ proc hir::traits::index {hir} {
                         params [lrange [dict get $node declaredParamTypes] 0 [expr {$arity - 1}]] \
                         result [dict get $node declaredResult] errors [dict get $node declaredErrors] \
                         flags $flags contexts [dict getdef $node contextParams {}] \
-                        variadic [dict exists $node variadic]]
+                        variadic [dict exists $node variadic] places [dict getdef $node places {}]]
                 }
             }
             dict set impls $unit $name $info
@@ -733,6 +733,9 @@ proc hir::traits::Implementation {req witness owner kind} {
             }
             if {[dict getdef $info variadic 0]} {
                 return [dict create ok 0 reason "$qualified is variadic: a trait requirement is a fixed signature, and a variadic function is no implementation of one" found $found]
+            }
+            if {[dict getdef $info places {}] ne {}} {
+                return [dict create ok 0 reason "$qualified has a place parameter: a trait requirement takes values, and a function that mutates its caller's place is no implementation of one" found $found]
             }
             if {[dict get $info contexts] ne {}} {
                 return [dict create ok 0 reason "$qualified requires a context ([join [lmap c [dict get $info contexts] {dict get $c context}] {, }]): context-dependent implementations are not supported yet" found $found]

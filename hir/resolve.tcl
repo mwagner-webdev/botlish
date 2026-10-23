@@ -1058,6 +1058,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {$variadic >= 0} {
                 SetField hir $e variadic $variadic
             }
+            if {[dict exists $node places]} {
+                # Place parameters (PLACE-PARAMETERS.md): the indices of the
+                # parameters a call passes the caller's place itself for
+                # (hir/mutvec.tcl checks and elaborates them).
+                SetField hir $e places [lsort -integer [dict keys [dict get $node places]]]
+            }
             # Imprint variables (hir/imprint.tcl): each one a parameter uses
             # must be established by an earlier one.
             set declaredParamTypes [hir::imprint::CheckSignature hir $e $declaredParamTypes \

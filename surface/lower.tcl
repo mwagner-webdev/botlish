@@ -850,6 +850,19 @@ proc surface::lower::Node {node} {
                 set block [hir::syntax::withVariadic $block \
                     [Origin [dict get $variadic span] "[dict get $node id]/variadic"]]
             }
+            # Place parameters (PLACE-PARAMETERS.md): each one's index and its
+            # marker's origin.
+            set places {}
+            set index -1
+            foreach param [dict get $node params] {
+                incr index
+                if {[llength $param] > 4} {
+                    lappend places $index [Origin [lindex $param 4] "[dict get $node id]/place([lindex $param 0])"]
+                }
+            }
+            if {$places ne {}} {
+                set block [hir::syntax::withPlaces $block $places]
+            }
             if {[dict exists $node proves] && [dict get $node proves] ne {}} {
                 set block [hir::syntax::withProofs $block [lmap clause [dict get $node proves] {
                     set param [dict get $clause param]

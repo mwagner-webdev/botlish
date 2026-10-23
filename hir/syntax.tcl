@@ -305,6 +305,21 @@ proc hir::syntax::withVariadic {block origin} {
     return $block
 }
 
+# BLOCK (a `block` node) whose parameters at the indices of PLACES (a flat
+# list INDEX ORIGIN ...: each place parameter's index and its marker's
+# origin) are place parameters (PLACE-PARAMETERS.md): a call passes the
+# caller's place itself, which the function mutates in place.
+proc hir::syntax::withPlaces {block places} {
+    set n [llength [dict get $block params]]
+    foreach {index origin} $places {
+        if {![string is digit -strict $index] || $index >= $n} {
+            core::malformed "a place parameter is one of the block's parameters" [list block]
+        }
+    }
+    dict set block places $places
+    return $block
+}
+
 # BLOCK (a `block` node) with the proof clauses PROOFS (REFINEMENT-VALUES.md):
 # a list of {outcome true|normal param NAME paramOrigin ORIGIN type TYPEEXPR
 # typeOrigin ORIGIN} dicts, TYPEEXPR the as-written refinement type. A proof

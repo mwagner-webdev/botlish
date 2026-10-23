@@ -1,0 +1,306 @@
+# ordered_table.bot -- the "std::ordered_table" namespace: the table engine
+# std::mutable_map and std::mutable_set share (ORDERED-MUTABLE-MAP-SET.md).
+# It is internal to the standard library (core::native's internal
+# namespaces): no program imports it or names a member of it, so nothing
+# below is a semantic commitment of either collection.
+#
+# Representation: a compact ordered table. The *entries* are dense, in
+# insertion order, in two MutableVectors -- `hashes` (each entry's keyed
+# hash, std::table_hash::of, or -1 for a removed one) and `keys` -- and the
+# table proper is `index`, a MutableVector[int] of a power-of-two number of
+# slots, each -1 (empty) or the position of a live entry. A lookup probes the
+# index linearly from the key's home slot (its keyed hash masked by the slot
+# count) and stops at an empty slot (absent) or at a slot whose entry's
+# stored hash equals the key's and, only then, whose key equals it
+# (present). The keyed hash decides where an entry lives in the index, never
+# where it is in the entries: iteration (std::mutable_map's and
+# std::mutable_set's loop protocol) walks the entries in position order,
+# which is insertion order, whatever the hidden key.
+#
+#   insertion of an absent key   appends an entry (its position is the
+#                                entry count) and stores the position at
+#                                the first empty slot of its probe sequence
+#   replacement                  touches no entry (std::mutable_map replaces
+#                                the value at the entry's position)
+#   removal                      takes the entry's slot out of the index by
+#                                backward shift (no tombstone in the index:
+#                                every probe sequence stays the live
+#                                entries') and marks the entry dead (hash
+#                                -1); its key -- and std::mutable_map's
+#                                value -- stay in the dead entry until the
+#                                next compaction, unreachable
+#   compaction                   moves the live entries down over the dead
+#                                ones, in order, and rebuilds the index
+#
+# The policy (measured: ORDERED-MUTABLE-MAP-SET.md, "Growth"):
+#
+#   slots        a power of two, at least 8
+#   load         at most 7/10 of the slots hold an entry: an insertion that
+#                would exceed it rebuilds the table first
+#   rebuild      compacts the entries (when any is dead) and sizes the index
+#                to the smallest power of two at least 8 that is at most
+#                half full with the live entries (plus the one being added)
+#   garbage      a removal that leaves at least max(8, live) dead entries
+#                rebuilds the table too, so dead entries never outnumber
+#                live ones by more than 8: churn (insert, remove, insert ...)
+#                keeps the entries vectors bounded, and the index shrinks
+#                back after mass removal
+#
+# Every operation that changes the table takes it as a place parameter
+# (PLACE-PARAMETERS.md): the collection's caller's own place, updated in
+# place; the readers take it as a value (read where the caller waits). The
+# value semantics are the vectors': a copy of a table is a copy of its
+# headers, and a write to one copy detaches only what it writes.
+import std::mutable_vector
+import std::mutable_array
+
+opaque struct Table[K satisfies Hashable]:
+    index: MutableVector[int]
+    hashes: MutableVector[int]
+    keys: MutableVector[K]
+    live: MutableArray[int]
+
+# ---------------------------------------------------------------------------
+# Policy
+
+fn min_slots() -> int:
+    8
+
+# The smallest power of two of at least min_slots() slots holding COUNT
+# entries at most half full.
+fn slots_for(count: int) -> int:
+    fn from(cap: int) -> int:
+        if count * 2 <= cap:
+            return cap
+        from(cap * 2)
+    from(min_slots())
+
+# ---------------------------------------------------------------------------
+# Construction and observation
+
+# An empty table whose index holds COUNT entries without a rebuild.
+fn fresh(count: int) -> Table[K]:
+    cap = slots_for(count)
+    blank = loop i from 0 to cap:
+        -1
+    Table[K] {index: std::mutable_vector::from_list(blank), hashes: std::mutable_vector::from_list([]), keys: std::mutable_vector::from_list([]), live: std::mutable_array::create(1, 0)}
+
+# The live entry count.
+fn length(t: Table[K]) -> int:
+    n = t.live.at(0):
+        on IndexNotFound:
+            0
+    n
+
+# The number of entry positions, live or dead: one past the last.
+fn positions(t: Table[K]) -> int:
+    t.hashes.length()
+
+# Whether position I holds a live entry.
+fn live_at?(t: Table[K], i: int) -> bool:
+    h = t.hashes.at(i):
+        on IndexNotFound:
+            return false
+    h >= 0
+
+# The key at position I, which loop protocols ask of a live position only.
+# Total: the index is reduced into the entries' own count, which a live
+# position makes nonzero.
+fn key_at(t: Table[K], i: int) -> K:
+    t.keys.at(i.mod(t.keys.length()))
+
+# ---------------------------------------------------------------------------
+# Lookup
+
+fn probe(t: Table[K], h: int, key: K, slot: int) -> int:
+    if t.index.length() == 0:
+        return -1
+    s = bit_and(slot, t.index.length() - 1)
+    e = t.index.at(s)
+    if e < 0:
+        return -1
+    stored = t.hashes.at(e):
+        on IndexNotFound:
+            return -1
+    if stored == h:
+        k = t.keys.at(e):
+            on IndexNotFound:
+                return -1
+        if k == key:
+            return s
+    probe(t, h, key, s + 1)
+
+# The index slot holding the position of KEY (keyed hash H), or -1 when KEY
+# is absent: the probe sequence from H's home slot, up to the first empty
+# slot.
+fn slot_of(t: Table[K], h: int, key: K) -> int:
+    if t.index.length() == 0:
+        return -1
+    probe(t, h, key, bit_and(h, t.index.length() - 1))
+
+# The entry position index slot SLOT holds (SLOT a slot slot_of returned).
+fn position(t: Table[K], slot: int) -> int:
+    if slot < 0 or slot >= t.index.length():
+        return -1
+    t.index.at(slot)
+
+# ---------------------------------------------------------------------------
+# Insertion
+
+# Whether one more entry would exceed the maximum load.
+fn full?(t: Table[K]) -> bool:
+    (length(t) + 1) * 10 > t.index.length() * 7
+
+# Whether the dead entries are enough to rebuild for (the garbage rule).
+fn garbage?(t: Table[K]) -> bool:
+    dead = positions(t) - length(t)
+    dead >= min_slots() and dead >= length(t)
+
+# Adds DELTA to the live count.
+fn counted(place t: Table[K], delta: int) -> unit:
+    n = length(t)
+    t.live.set(0, n + delta):
+        on IndexNotFound:
+            unit
+
+# The first empty slot from SLOT on (the index is never full), or -1.
+fn empty_slot(t: Table[K], slot: int) -> int:
+    if t.index.length() == 0:
+        return -1
+    s = bit_and(slot, t.index.length() - 1)
+    if t.index.at(s) < 0:
+        return s
+    empty_slot(t, s + 1)
+
+# Stores entry position P (keyed hash H) at the first empty index slot of
+# H's probe sequence.
+fn place_entry(place t: Table[K], p: int, h: int) -> unit:
+    s = empty_slot(t, bit_and(h, t.index.length() - 1))
+    if s >= 0:
+        t.index.swap(s, p):
+            on IndexNotFound:
+                -1
+    unit
+
+# Appends the entry (H, KEY) -- KEY absent, the table not full -- and stores
+# its position at the first empty slot of H's probe sequence. Returns the
+# position.
+fn append(place t: Table[K], h: int, key: K) -> int:
+    p = t.hashes.length()
+    place_entry(t, p, h)
+    t.hashes.push(h)
+    t.keys.push(key)
+    counted(t, 1)
+    p
+
+# ---------------------------------------------------------------------------
+# Removal: backward shift
+
+# Whether slot K is cyclically in the interval (I, J].
+fn between?(k: int, i: int, j: int) -> bool:
+    if i <= j:
+        i < k and k <= j
+    else:
+        i < k or k <= j
+
+# The index after the slot HOLE was emptied, the entries after it shifted
+# back: J is the last slot looked at.
+fn shift(place t: Table[K], hole: int, j: int) -> unit:
+    if t.index.length() == 0:
+        return unit
+    mask = t.index.length() - 1
+    n = bit_and(j + 1, mask)
+    e = t.index.at(n):
+        on IndexNotFound:
+            return unit
+    if e < 0:
+        t.index.swap(hole, -1):
+            on IndexNotFound:
+                -1
+        return unit
+    h = t.hashes.at(e):
+        on IndexNotFound:
+            -1
+    if between?(bit_and(h, mask), hole, n):
+        return shift(t, hole, n)
+    t.index.swap(hole, e):
+        on IndexNotFound:
+            -1
+    shift(t, n, n)
+
+# Removes the entry whose position index slot SLOT holds (a slot slot_of
+# returned): its slot leaves the index by backward shift, and the entry is
+# marked dead.
+fn remove_slot(place t: Table[K], slot: int) -> unit:
+    p = position(t, slot)
+    if p < 0:
+        return unit
+    shift(t, slot, slot)
+    t.hashes.swap(p, -1):
+        on IndexNotFound:
+            -1
+    counted(t, -1)
+
+# ---------------------------------------------------------------------------
+# Rebuilding: compaction and resizing
+
+# VALUES (a collection's per-entry payload, aligned with T's positions) with
+# the dead entries' slots dropped, the live ones moved down in order: what
+# rebuild will do to T's own entries. Called before rebuild.
+fn compact_values(t: Table[K], place values: MutableVector[V]) -> unit:
+    if positions(t) == length(t):
+        return unit
+    kept = loop p from 0 to values.length():
+        if not live_at?(t, p):
+            continue
+        values.at(p):
+            on IndexNotFound:
+                continue
+    values.clear()
+    loop v in kept:
+        values.push(v)
+    unit
+
+# T with its dead entries dropped (the live ones in order) and its index
+# rebuilt at slots_for(NEEDED) slots, NEEDED at least its live entry count.
+fn rebuild(place t: Table[K], needed: int) -> unit:
+    if positions(t) != length(t):
+        hs = loop p from 0 to t.hashes.length():
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            h
+        ks = loop p from 0 to t.keys.length():
+            if not live_at?(t, p):
+                continue
+            t.keys.at(p):
+                on IndexNotFound:
+                    continue
+        t.hashes.clear()
+        loop h in hs:
+            t.hashes.push(h)
+        t.keys.clear()
+        loop k in ks:
+            t.keys.push(k)
+    t.index.clear()
+    loop s from 0 to slots_for(needed):
+        t.index.push(-1)
+    loop p from 0 to t.hashes.length():
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        place_entry(t, p, h)
+    unit
+
+# Empties T: no entry, the smallest index.
+fn clear(place t: Table[K]) -> unit:
+    t.hashes.clear()
+    t.keys.clear()
+    t.index.clear()
+    loop s from 0 to min_slots():
+        t.index.push(-1)
+    t.live.set(0, 0):
+        on IndexNotFound:
+            unit

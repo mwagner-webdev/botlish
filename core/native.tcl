@@ -474,6 +474,21 @@ proc core::native::declareInternalNamespace {ns} {
     dict set internalNamespaces $ns 1
 }
 
+# Declares the standard library module of namespace NS (a stdlib/ Botlish
+# module, no intrinsic namespace) internal to the standard library, as
+# declareInternalNamespace an intrinsic one: only a standard library module
+# may import it or name its members (surface/modules.tcl's CheckInternal,
+# INTERNAL-NAMESPACE). Its functions are ordinary Botlish, which the
+# standard library's own modules share: std::ordered_table, the engine of
+# std::mutable_map and std::mutable_set (ORDERED-MUTABLE-MAP-SET.md).
+proc core::native::declareInternalModule {ns} {
+    variable internalNamespaces
+    if {[qualifiedMembers $ns] ne {}} {
+        error "core::native::declareInternalModule: \"$ns\" is an intrinsic namespace (declareInternalNamespace)"
+    }
+    dict set internalNamespaces $ns 1
+}
+
 # 1 if the intrinsic namespace NS is internal (declareInternalNamespace).
 proc core::native::isInternalNamespace {ns} {
     variable internalNamespaces
@@ -852,7 +867,7 @@ proc core::native::ValidBounds {bounds arity errors} {
                 return 0
             }
             lassign $bounds _ family c i
-            return [expr {$family in {list mutarray str narray} && [apply $arg $c] && [apply $arg $i]}]
+            return [expr {$family in {list mutarray str narray mutvec} && [apply $arg $c] && [apply $arg $i]}]
         }
         extents {
             # {extents V}: LayoutExtentMismatch unless every fixed array the
@@ -1337,3 +1352,6 @@ core::native::declareError IndexNotFound
 core::native::declareError LowerUnderrun
 core::native::declareError UpperOverrun
 core::native::declareError NonFiniteFloat
+
+# The standard library's internal Botlish modules (declareInternalModule).
+core::native::declareInternalModule std::ordered_table
