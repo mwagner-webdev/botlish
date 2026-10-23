@@ -74,8 +74,11 @@ linux-x86_64, observed:
   of one library keep their state apart.
 * The JSON/Tcl probe builds with the new facility and runs as a Tcl 9
   extension, also under GC stress (section 10).
-* The React Native host probe consumes the new artifact: section 11 has its
-  result.
+* The React Native host probe consumes the new artifact: React Native's
+  own TurboModule layer on Hermes calls the generated adapter over the new
+  library, reproducing every line of the census's output, also under GC
+  stress, and recursion that killed the process now fails as a JS Error
+  (section 11).
 * Executables are unchanged in behavior: the native, executable, stub-linker
   and platform-fact tests pass, and the full local suite (section 15).
 * No worker thread, scheduler or implicit concurrency was added: an
@@ -485,7 +488,41 @@ interpreter (destroyed with it; `bj::destroy`/`bj::create` for the
 lifecycle checks), errors as Tcl errors with errorcode `{BOTLISH STATUS
 IDENTITY FIELDS}`.
 
-TBD: run.sh output
+Observed (`sh audit/compiler-service/probes/export/run.sh INC STUB`, the
+census's `results/export-probe.txt` checks, then the new ones):
+
+```
+token_count([1, 2]): 5
+token_count([1, 2, 3]): 7                       (the stand-in: 6)
+token_count([1, 2, 3, 4, 5, 6]): 13
+token_count("abcdefghij"): 1                    (the stand-in: "malformed at 8")
+token_count({"é": "ü", "😀": [1.5e3, -0, true]}): 15
+token_count(a 500-element array, 1500 bytes): 1001
+token_count(malformed at 6): -7
+tokens(malformed at 6): {BOTLISH DECLARED json_tokens::Malformed {at 6}} {uncaught propagated error: <error json_tokens::Malformed {at: 6}>}
+token_count(invalid UTF-8): {BOTLISH BOUNDARY {BOUNDARY UTF-8} {}} {bj_token_count: argument 1 is not UTF-8}
+shout(café): café!
+shout(a NUL inside): 4 bytes
+checked(21): 42
+checked(-5): {BOTLISH DECLARED Rejected {code -5}} {...}   (the stand-in: -10)
+retained result after a collecting call: kept!
+error after later calls: BOTLISH DECLARED Rejected {code -7}
+after destroy: {BOTLISH INVOCATION {INVOCATION DESTROYED} {}} {the instance was destroyed}
+after create: checked(2) = 4
+20000 x token_count(193 bytes): 36.8 us per call; rss 14 -> 14 MiB
+200 x churn(10000): rss 14 -> 14 MiB
+2000 x destroy + create + call: rss 14 -> 14 MiB
+```
+
+Under `BOTLISH_NATIVE_GC_STRESS=1` (`-quick`: shorter loops, no timing)
+every line is the same but `churn`'s count. Compared with the census's
+run: the counts the stand-in got wrong are right with no `argv()` in the
+program; the payload is data (`{code -5}` in the errorcode, read through
+`bj_error_field_*`), not text to parse; the invalid-UTF-8 refusal says
+which argument; RSS stayed at 14 MiB over the 20,000 calls (the census
+recorded 14 -> 19 MiB with the stand-in; why it grew was not
+investigated); and the lifecycle (destroy, refused calls, re-create, 2,000
+cycles with flat RSS) did not exist.
 
 `nl-c-json` runs the same library from C (tests/native-library/json.c),
 also in the full suite: short and 20,000-element inputs, UTF-8 keys,
@@ -496,11 +533,118 @@ refusing calls, and 500 create-use-destroy cycles.
 
 ## 11. React Native compatibility
 
-TBD
+**Reused unchanged**: the package boundary (`rnpackage.tcl` reads only the
+library's artifacts, never Botlish source), React Native's Codegen, its
+TurboModule sources, `host/host_main.cpp`, the census's checks in
+`host/probe.js`, Hermes at React Native 0.88's pinned tag.
+
+**Mechanical updates** (this milestone's commit):
+
+* `probe/rnprobe.bot`: `exported c fn` on the six functions; its top level
+  (which existed only to give the stand-in its instances) is gone.
+* `tools/host-spike.tcl`: `main.tcl -emit-native-library rnprobe` instead of
+  libmode.tcl; the link takes `librnprobe.a` and the manifest's `link`
+  libraries.
+* `tools/rnpackage.tcl`: `-manifest NAME.json` instead of the stand-in's
+  export list (read with lsp/json.tcl's JSON reader); the adapter keeps one
+  library instance per module, created by its first call (on the JS thread,
+  which every later call comes from) and destroyed with the module; it
+  turns the status and error object into a JS `Error` whose `code` is the
+  identity and whose `fields` are a declared error's payload (a
+  `RangeError` for BOUNDARY INT-RANGE, a `TypeError` for other boundary
+  errors); owned results are copied and released; Float64 parameters and
+  results are now accepted; the stubs for CPUs without a library implement
+  the new interface (creation fails with BOTLISH_UNAVAILABLE).
+* `host/host_async.cpp`: the worker thread creates its own instance when it
+  starts and destroys it when it stops; jobs receive it. That is the
+  thread rule doing what the census's worker did by convention.
+* `host/probe.js`: a depth sweep on the JS thread's own stack.
+
+**Observed** (`host-spike.tcl ... -stack-kib 512`, React Native 0.88.0,
+Hermes `hermes-v260318099.0.4`, clang 18.1.3, x86-64 Linux; Codegen from a
+`create-react-native-library@0.63.1` project): every line of the census's
+output (REACT-NATIVE-TARGET-CENSUS.md, "The host spike") is reproduced
+exactly, and the new ones:
+
+```
+requirePositive(-1) threw Error NotPositive "requirePositive: uncaught propagated error: <error NotPositive>"
+depth(1000) => 1000
+depth(5000) => 5000
+depth(10000) threw Error NATIVE LIMIT STACK "depth: native stack exhausted: too many nested calls"
+depth(20000) threw Error NATIVE LIMIT STACK "depth: native stack exhausted: too many nested calls"
+depth(50000) threw Error NATIVE LIMIT STACK "depth: native stack exhausted: too many nested calls"
+depth(100000) threw Error NATIVE LIMIT STACK "depth: native stack exhausted: too many nested calls"
+depth(10000000) threw Error NATIVE LIMIT STACK "depth: native stack exhausted: too many nested calls"
+depth(10) => 10
+...
+100000 reverse calls, last => "y99999x" in 88 ms
+depth(1000000) => 1000000 after 72 ms                   (host_async: the worker)
+1000 queued reverse calls, last => "é999x"
+tearing down with 1 JS task(s) unrun
+runtime, module and Botlish worker torn down
+```
+
+The same run under `-gc-stress 1`: identical lines (100,000 `reverse`
+calls in 222 ms).
+
+**Stack depth on the JS thread**, `depth(n)` without a tail call (largest
+`n` that returned, by bisection):
+
+| Stack | the census (stand-in) | now |
+|---|---|---|
+| 512 KiB | 10,000; 20,000 killed the process (SIGSEGV) | about 9,200; deeper is NATIVE LIMIT STACK, a JS Error |
+| 1 MiB | 20,000; 50,000 SIGSEGV | about 18,700; deeper is the Error |
+| 8 MiB | 100,000; 200,000 SIGSEGV | about 152,500; deeper is the Error |
+
+The reserve the check keeps for the host's frames (an eighth of the stack,
+64 KiB to 1 MiB) costs some depth on small stacks; a bigger stack gains it
+back (the census's 8 MiB figure was its coarse bracket, not a bisection).
+The process survives every one, and the instance answers the next call.
+
+**Pending**:
+
+* The mobile probes (`react-native-probe.yml`): the library mode builds for
+  Linux glibc hosts, and this milestone builds nothing for Android or iOS.
+  The workflow now runs, by hand, at the census's revision, where its
+  stand-in still works (audit/react-native/README.md). Its successor needs
+  the steps of section 14.
+* A lone surrogate in a JS string never reaches the boundary's UTF-8
+  check: JSI's UTF-8 conversion makes it U+FFFD first (`reverse("\ud800")
+  => "�"`, as in the census). Refusing it instead is an adapter policy
+  (reading the string as UTF-16), not a library one.
+* The adapter's destructor destroys the instance on the thread the module is
+  destroyed on. In React Native that is the JS thread (the runtime's
+  teardown); were it another, the library would refuse the destruction and
+  the instance would leak rather than be touched from the wrong thread.
 
 ## 12. Performance and size
 
-TBD
+Observed, on one 4-core container (single runs: timings move between runs
+by tens of percent, so only orders of magnitude are claimed):
+
+* **Calls.** 100,000 `reverse` calls from Hermes through the TurboModule:
+  88 ms (the census: 77 to 125 ms across runs with the stand-in), so the
+  instance lookup, the thread check and the owned-result copy add nothing
+  visible at a microsecond a call. `token_count` from Tcl on a 193-byte
+  message: 36.8 µs a call, measured while the full test suite loaded all four
+  cores (the census: 36 µs); the tokenizer dominates.
+* **Build.** `main.tcl -emit-native-library rnprobe`: to be measured on an idle machine (front end,
+  native lowering, the driver, `ld -r`, `objcopy`, `ar`, `cc -shared`).
+* **Size** (rnprobe, six exports): `librnprobe.a` 13.4 MB on disk, one
+  relocatable object holding 1.83 MB of code and data -- the rest is its
+  relocations and symbol tables (`ld -r` keeps them; debug information is
+  stripped unless `-debug 1`); `librnprobe.so` 2.7 MB (2.0 MB of code and
+  data). The census's stand-in archive was 34.9 MB with the runtime's debug
+  information, 15.6 MB stripped: a rustc staticlib holds all of the
+  runtime and the standard library, where `ld -r` pulls only the members
+  the program reaches. The Hermes host probe executable, linking
+  `librnprobe.a` statically, is 4.1 MB.
+* **Stack checks.** A library's functions that make a Botlish call compare
+  the stack pointer with the limit in their prologue: one load, compare and
+  branch per call. Not measured in isolation; the call figures above
+  include it.
+
+Not claimed: anything about LTO, a size budget, or mobile code size.
 
 ## 13. Limitations
 
