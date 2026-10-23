@@ -192,8 +192,8 @@ set cliOptions {
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
-    -emit-native-library NAME build {build the native library NAME (libNAME.a/.so, NAME.h, NAME.json)}
-    -library-dir DIR build {where -emit-native-library writes (default: beside the input)}
+    -emit-native-library NAME build {build libNAME.a, libNAME.so, NAME.h and NAME.json}
+    -library-dir DIR build {the native library's directory (default: the input's)}
     -export FUNCTION build {with -emit-native-library: also export FUNCTION to C}
     -check {} check {report each .bot input's diagnostics; run nothing}
     -lsp {} lsp {run the language server on stdin and stdout}

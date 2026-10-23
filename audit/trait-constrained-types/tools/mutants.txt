@@ -336,13 +336,13 @@
 ## surface/parser.tcl
 <<<<
     set name [Expect p IDENT "a function name after \"fn\""]
-    set open [Expect p ( "\"(\" after the function name"]
+    set symbol ""
 ====
     set name [Expect p IDENT "a function name after \"fn\""]
     if {[Kind p] eq "\["} {
         Imprints p [dict get $name value]
     }
-    set open [Expect p ( "\"(\" after the function name"]
+    set symbol ""
 >>>>
 
 @@ unconstrained-imprints-change every imprint variable of a signature with an application is constrained by Hashable, whether a slot requires it or not

@@ -453,22 +453,24 @@ proc checks {} {
     foreach line [split $symbols \n] {
         lassign $line name type
         if {$name eq ""} continue
-        if {$type eq "U"} { lappend undefined $name } elseif {$type in {T D B S}} { lappend defined $name } else { lappend local $name }
+        if {$type eq "U"} { lappend undefined $name } elseif {$type in {T D B S R}} { lappend defined $name } else { lappend local $name }
     }
-    set functions [regexp -all {botlish_fn_[0-9]+} $symbols]
-    set wanted {}
-    set missing {}
-    foreach name [lsearch -all -inline -regexp $defined "^${prefix}botlish_(fn|entry)_\[0-9\]+\$"] {
-        lappend wanted $name
-    }
+    # A program's functions are local to its object: what starts the program
+    # finds them through its global descriptor, botlish_program
+    # (runtime/program.rs, codegen/library.rs; NATIVE-LIBRARY-MILESTONE-1.md),
+    # never by name, so two program objects in one link share no symbol.
+    set wanted [lsearch -all -inline -regexp $local "^${prefix}botlish_(fn|entry)_\[0-9\]+\$"]
+    set global [lsearch -all -inline -regexp $defined "^${prefix}botlish_(fn|entry)_"]
+    set descriptor [lsearch -all -inline -exact $defined ${prefix}botlish_program]
     set decorated [lsearch -all -inline -regexp [concat $defined $undefined $local] {botlish_|rt_}]
     set misdecorated [lsearch -all -inline -not -regexp $decorated "^${prefix}(botlish_|rt_)"]
     set helpers [lsearch -all -inline -regexp $undefined "^${prefix}rt_"]
     set context [lsearch -all -inline -exact $local ${prefix}botlish_context_area]
     check object-symbols [expr {$::toolError eq "" && [llength $wanted] >= 8 && [llength $wanted] % 2 == 0
+            && $global eq "" && [llength $descriptor] == 1
             && [llength $helpers] > 0 && [llength $context] == 1 && $misdecorated eq ""
-            && [lsearch -regexp $defined "^${prefix}botlish_fn_0\$"] >= 0}] \
-        "[expr {[llength $wanted] / 2}] functions defined (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area local: [expr {$context ne {}}], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+            && [lsearch -regexp $local "^${prefix}botlish_fn_0\$"] >= 0}] \
+        "[expr {[llength $wanted] / 2}] functions defined local (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), descriptor ${prefix}botlish_program global: [llength $descriptor], [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area local: [expr {$context ne {}}], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         "$::toolError$symbols"
 
     set relocations [tool objdump -r $object]
@@ -555,8 +557,10 @@ proc checks {} {
     check executable-libraries [expr {$::toolError eq "" && $paths ne "" && $system eq "" && $ours eq ""}] \
         "[llength $paths] dynamic libraries: [join [lmap p $paths {file tail $p}] {, }]" "$::toolError$libraries"
     set exeSymbols [tool nm -P $executable]
-    check executable-symbols [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols]}] \
-        "${prefix}botlish_fn_0 [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols] ? "defined" : "missing"}] in the executable" $::toolError
+    set exeFunction [regexp -line "^${prefix}botlish_fn_0 t " $exeSymbols]
+    set exeDescriptor [regexp -line "^${prefix}botlish_program \[DRS\] " $exeSymbols]
+    check executable-symbols [expr {$exeFunction && $exeDescriptor}] \
+        "${prefix}botlish_fn_0 [expr {$exeFunction ? "local" : "missing"}], ${prefix}botlish_program [expr {$exeDescriptor ? "global" : "missing"}] in the executable" $::toolError
 
     # The platform linker's command line, as rustc runs it for this link
     # (`--print link-args`, through a wrapper given as RUSTC: the link
@@ -659,18 +663,25 @@ proc windowsChecks {} {
     set coff [coffFacts $object]
     set defined {}
     set undefined {}
+    set static {}
     foreach symbol [dict get $coff symbols] {
         lassign $symbol name section class
+        # IMAGE_SYM_CLASS_EXTERNAL (2) and IMAGE_SYM_CLASS_STATIC (3): a
+        # program's functions are static, found through the external
+        # descriptor botlish_program (NATIVE-LIBRARY-MILESTONE-1.md).
+        if {$class == 3 && $section > 0} { lappend static $name }
         if {$class != 2} continue
         if {$section == 0} { lappend undefined $name } elseif {$section > 0} { lappend defined $name }
     }
-    set functions [lsearch -all -inline -regexp $defined {^botlish_(fn|entry)_[0-9]+$}]
+    set functions [lsearch -all -inline -regexp $static {^botlish_(fn|entry)_[0-9]+$}]
+    set global [lsearch -all -inline -regexp $defined {^botlish_(fn|entry)_}]
     set helpers [lsearch -all -inline -regexp $undefined {^rt_}]
-    set misdecorated [lsearch -all -inline -regexp [concat $defined $undefined] {^_+(botlish|rt)_}]
+    set misdecorated [lsearch -all -inline -regexp [concat $defined $undefined $static] {^_+(botlish|rt)_}]
     set context [lsearch -all -inline -exact [lmap s [dict get $coff symbols] {lindex $s 0}] botlish_context_area]
     check object-symbols [expr {[llength $functions] >= 8 && [llength $functions] % 2 == 0 && [llength $helpers] > 0
-            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 1}] \
-        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+            && "botlish_fn_0" in $static && $global eq "" && "botlish_program" in $defined
+            && $misdecorated eq "" && [llength $context] == 1}] \
+        "[expr {[llength $functions] / 2}] functions defined static (botlish_fn_N, botlish_entry_N), descriptor botlish_program external: [expr {"botlish_program" in $defined}], [llength $helpers] runtime helpers undefined (rt_*), context area: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         [join [dict get $coff symbols] \n]
     set types [lsort -unique [lmap r [dict get $coff relocations] {lindex $r 1}]]
     set foreign [lmap t $types {expr {$t in [dict get $facts relocTypes] ? [continue] : $t}}]

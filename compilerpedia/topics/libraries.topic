@@ -1,0 +1,242 @@
+# libraries.topic -- native libraries with C exports: `exported c fn`,
+# -emit-native-library, and their diagnostics (NATIVE-LIBRARY-MILESTONE-1.md).
+
+@topic concept.native-library
+title: Native libraries: `exported c fn` and -emit-native-library
+summary: `exported c fn` gives an ordinary Botlish function a C entry point; -emit-native-library NAME builds a static and a shared library, a C header and a JSON manifest that any C host can call.
+index: concepts backends
+alias: library mode; C export; export to C; exported c fn; native library; emit-native-library; call Botlish from C
+keywords: exported, c, named, export, library, static library, shared library, .a, .so, header, manifest, C ABI, embedding, Tcl extension, React Native, instance, thread
+related: concept.c-ffi backend.native-executable error.export-signature error.export-capture error.export-symbol error.export-syntax error.native-library cli.options
+docs: NATIVE-LIBRARY-MILESTONE-1.md C-ABI-TYPES.md
+
+== WHAT IT IS
+    exported c fn checked(n: int) -> int errors Rejected:
+        if n < 0:
+            fail Rejected {code: n}
+        n * 2
+
+An exported function is an ordinary function: its Botlish callers, every
+analysis and every backend see an ordinary block. Building the program as
+a native library gives it a C entry point too:
+
+    botlish -emit-native-library calc -library-dir out calc.bot
+
+writes out/libcalc.a, out/libcalc.so, out/calc.h and out/calc.json. The C
+function is calc_checked (LIBRARY_NAME), or the symbol the declaration
+states: `exported c fn checked named "calc_check"(n: int) -> int`.
+-export FUNCTION exports a top-level function that is not declared so.
+
+== THE C INTERFACE
+    calc_instance *in;
+    calc_error *err;
+    calc_create(&in, &err);                 /* one instance per caller */
+    int64_t out;
+    int32_t status = calc_checked(in, -5, &out, &err);
+    /* status == calc_DECLARED_ERROR; calc_error_identity(err) is
+       "Rejected", field 0 is code = -5 */
+    calc_error_release(err);
+    calc_destroy(in);
+
+Parameter and result types, each declared: `int` is int64_t (an Int
+result outside it is a BOUNDARY error, never truncated), `bool` is C's
+bool, `Float64` a finite double, `str` UTF-8 bytes (a pointer and a length
+in, validated; an owned NAME_bytes out, released with NAME_bytes_release),
+`unit` a result with no result parameter. Every call returns a status: OK,
+DECLARED_ERROR, RUNTIME_ERROR, BOUNDARY_ERROR or INVOCATION_ERROR, and an
+error object the caller owns, with its identity, message and payload as
+data.
+
+== RULES
+  * An exported function declares every parameter's type and its result
+    type, each with a C representation (error.export-signature); it is
+    environment-free (error.export-capture); its symbol is unique
+    (error.export-symbol).
+  * Each export is compiled as an independent root: for every value its
+    declared types admit, never for what its Botlish callers happen to
+    pass.
+  * The library's root file declares and runs nothing: creating an
+    instance initializes the modules it imports, and a top-level statement
+    is refused (error.native-library).
+  * An instance belongs to the thread that created it; every call comes
+    from that thread. Instances, and libraries, share no state. Botlish
+    code runs on the caller's stack: recursion that would exhaust it is the
+    runtime error NATIVE LIMIT STACK, never a crash.
+  * Linux glibc (x86_64, aarch64) only; no callbacks, collections, structs
+    or asynchronous calls cross the boundary yet.
+
+@example accept
+exported c fn twice(n: int) -> int:
+    n * 2
+
+twice(21)
+@caption An exported function is an ordinary function to every backend
+@value 42
+@end
+
+@topic error.export-signature
+title: EXPORT-SIGNATURE: an exported function without a C signature
+summary: An `exported c fn` declares every parameter and its result with a type that has a C representation (int, bool, Float64, str; unit for the result) and no flag, context, variadic or resume section.
+index: errors
+alias: exported function signature; no C representation; export needs declared types
+keywords: exported, c, export, parameter, result, declared, int, bool, Float64, str, unit, context, flags, variadic, yield, native library
+related: concept.native-library error.export-capture error.export-symbol
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-SIGNATURE
+
+== MEANING
+A C caller passes C values: the function's C signature is its declared
+Botlish signature at the boundary, never one inferred from its Botlish
+callers. So every parameter and the result are declared, each with one of
+the types that have a C representation:
+
+    int      int64_t           bool     bool
+    Float64  double (finite)   str      const uint8_t *, size_t (UTF-8)
+    unit     (a result only: no result parameter)
+
+Also refused: a flag section, a context parameter or a required context
+(no native library installs one), a variadic parameter, a resume clause,
+and a function that may yield.
+
+== WHAT TO DO
+Declare the types (`fn f(n: int) -> int`). A value of another type crosses
+as one of these: a List as a str the C side parses, a refined Int as an
+int the function checks.
+
+@example reject
+exported c fn f(x) -> int:
+    1
+
+0
+@caption A parameter without a declared type
+@error CORE SEMANTIC EXPORT-SIGNATURE
+@at 1:16
+@end
+
+@topic error.export-capture
+title: EXPORT-CAPTURE: an exported function that captures a binding
+summary: An `exported c fn` is environment-free: it may call other functions and read module bindings, never a binding of its file's top level, which a native library never runs.
+index: errors
+alias: exported function captures; export is not environment-free
+keywords: exported, capture, closure, top level, module binding, environment, native library
+related: concept.native-library error.export-signature concept.modules
+docs: NATIVE-LIBRARY-MILESTONE-1.md MODULE-STATIC-RETAINED-VALUES.md
+code: CORE SEMANTIC EXPORT-CAPTURE
+
+== MEANING
+A native library never runs its root file's statements, so a binding made
+there would have no value when a C caller calls the export. Functions and
+module bindings (a module's top-level bindings, initialized when an
+instance is created) are fine.
+
+== WHAT TO DO
+Make the value a function, or move it into a module the file imports.
+
+@example reject
+limit = 3
+
+exported c fn f(x: int) -> int:
+    x + limit
+
+0
+@caption The export reads a top-level binding of its own file
+@error CORE SEMANTIC EXPORT-CAPTURE
+@at 3:16
+@end
+
+@topic error.export-symbol
+title: EXPORT-SYMBOL: two exported functions with one C symbol
+summary: Two `exported c fn` declarations state the same C symbol (`named "SYMBOL"`); a library's C symbols are unique.
+index: errors
+alias: duplicate export symbol; C symbol exported twice
+keywords: exported, named, symbol, duplicate, C, native library
+related: concept.native-library error.export-signature error.native-library
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-SYMBOL
+
+== MEANING
+A stated C symbol names one function of the library. (A symbol the
+library derives, LIBRARY_NAME, is checked when the library is built:
+NATIVE LIBRARY SYMBOL.)
+
+== WHAT TO DO
+State another symbol for one of them.
+
+@example reject
+exported c fn f named "same"(x: int) -> int:
+    x
+
+exported c fn g named "same"(x: int) -> int:
+    x
+
+0
+@caption One C symbol, two functions
+@error CORE SEMANTIC EXPORT-SYMBOL
+@at 4:29
+@end
+
+@topic error.export-syntax
+title: EXPORT-SYNTAX: a malformed exported c fn declaration
+summary: `exported c fn NAME [named "SYMBOL"](PARAMS) -> TYPE:` at the top level of a module is the one export form; anything else is a located syntax error.
+index: errors
+alias: exported function syntax; exported fn without c; malformed exported c fn
+keywords: exported, c, fn, named, symbol, syntax, nested
+related: concept.native-library error.extern-syntax error.surface-syntax
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: EXPORT-SYNTAX
+match: SURFACE SYNTAX | EXPORT-SYNTAX: *
+
+== MEANING
+The parser reports, at the offender: an export without its ABI
+(`exported fn`), another ABI than c, `named` on a function that is not
+exported, a symbol that is not a C identifier, and an export nested in a
+function, loop or branch.
+
+== WHAT TO DO
+Write `exported c fn NAME(...) -> T:` at the top level of a file, with
+`named "SYMBOL"` after the name when the C symbol should differ from the
+library's default.
+
+@example reject
+exported fn f(n: int) -> int:
+    n
+
+0
+@caption The ABI is missing
+@error SURFACE SYNTAX
+@at 1:10
+@end
+
+@topic error.native-library
+title: NATIVE LIBRARY: building a native library failed
+summary: NATIVE LIBRARY errors refuse a native library build: no exports, a name that is no C identifier, a root file with statements, a C symbol taken twice, an unsupported host, a missing tool.
+index: errors backends
+alias: native library build failed; library mode error
+keywords: -emit-native-library, -export, -library-dir, native::library, ld, objcopy, ar, cc, symbol, top level, host
+related: concept.native-library error.export-signature error.native-aot-not-ready error.native-not-built
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: NATIVE LIBRARY
+
+== MEANING
+At build time (-emit-native-library, native::library); nothing is written.
+The codes:
+
+    NATIVE LIBRARY EXPORT     no exported function, or -export names no
+                              top-level function of the input
+    NATIVE LIBRARY NAME       the library's name is no C identifier
+    NATIVE LIBRARY TOP-LEVEL  the root file has a statement, which would
+                              never run (instance creation initializes only
+                              the modules it imports)
+    NATIVE LIBRARY SYMBOL     two exports, or an export and the library's
+                              own API (NAME_create, ...), share a C symbol
+    NATIVE LIBRARY HOST       not Linux glibc on x86_64 or aarch64
+    NATIVE LIBRARY TOOL       ld, objcopy, ar or cc is missing or failed
+    NATIVE LIBRARY OUTPUT     no output directory was given
+    NATIVE LIBRARY ROOT       the input is not a program
+    NATIVE LIBRARY INPUT      the input is core IR text
+
+== WHAT TO DO
+Move top-level statements into functions, or data into a module; state a
+`named` symbol for a clash; install GNU binutils and a C compiler driver.
+A program whose code needs run-time kind checks is NATIVE AOT NOT-READY,
+as for an executable.

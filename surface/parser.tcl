@@ -2662,9 +2662,8 @@ proc surface::parser::Function {pVar} {
             FailCode [dict get $token span] EXPORT-SYNTAX \
                 "expected the C symbol as a string after \"named\", found [Describe $token]: \"exported c fn NAME named \\\"SYMBOL\\\"(...)\""
         }
-        Advance p
+        set symbolSpan [dict get [Advance p] span]
         set symbol [dict get $token value]
-        set symbolSpan [dict get $token span]
         if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $symbol]} {
             FailCode $symbolSpan EXPORT-SYNTAX \
                 "\"$symbol\" is not a C symbol an exported c fn can have: a C identifier is letters, digits and _, not starting with a digit"

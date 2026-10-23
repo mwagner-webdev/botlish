@@ -451,8 +451,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -emit-native-library, -library-dir, -export, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable concept.native-library concept.argv
 docs: README.md
 
 == RUNNING
@@ -485,6 +485,15 @@ own process arguments.
                               (backend.native-executable)
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
+    -emit-native-library NAME the native library NAME from the one input:
+                              libNAME.a, libNAME.so, the C header NAME.h
+                              and the manifest NAME.json, exporting its
+                              `exported c fn` declarations; Linux glibc
+                              only (concept.native-library)
+    -library-dir DIR          where -emit-native-library writes (default:
+                              the input's directory)
+    -export FUNCTION          with -emit-native-library: also export the
+                              input's top-level function FUNCTION
 
 == CHECKING (nothing runs, nothing is built or written)
     -check            analyze each .bot input and report what compiling it
