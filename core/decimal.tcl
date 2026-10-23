@@ -460,6 +460,12 @@ proc core::decimal::Represent {t} {
         return ""
     }
     set x [lindex $nearest 1]
+    # T is itself a binary64 (0.0, 6.0, 0.25): no neighbor can do better,
+    # and ruling out a neighbor of zero, a subnormal, would take Proven some
+    # 320 precisions of 1074-bit rationals.
+    if {[Proven $x $t] eq "exact"} {
+        return $x
+    }
     set candidates [list $x]
     foreach direction {-1 1} {
         set y [NextDouble $x $direction]

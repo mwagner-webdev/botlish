@@ -2,7 +2,8 @@
 # comparison (LSP-MILESTONE-1.md, "Scheduling decision" and "Performance").
 #
 #   tclsh9.0 bench/lsp.tcl ?-workloads NAMES? ?-schedulers LIST? ?-edits N?
-#                          ?-idle N? ?-seed S? ?-recovery 0|1? ?-out FILE?
+#                          ?-idle N? ?-seed S? ?-recovery 0|1? ?-sessions 0|1?
+#                          ?-memory ROUNDS? ?-out FILE?
 #
 # Replays one scripted editing session per workload through each scheduler
 # (worker, sync), the real server (`main.tcl -lsp`) in a child process over
@@ -24,7 +25,11 @@
 # answer the idle hovers identically. With -recovery 1 (the default) it also
 # measures, for the worker, the recovery from a worker that dies mid-answer
 # (BOTLISH_LSP_FAULT crash-marker): the time from the next edit to its
-# diagnostics, a new worker started.
+# diagnostics, a new worker started. -memory ROUNDS adds a long session per
+# workload and scheduler (ROUNDS edits, each analyzed and queried before the
+# next) sampling the resident memory of the server and its worker after
+# each round (steady state against the peaks of the editing sessions);
+# -sessions 0 runs only that.
 #
 # The workloads are the compiler-service census's (COMPILER-SERVICE-CENSUS.md,
 # section 7): csv (a single file: the entry is the edited module), the 2048
@@ -35,7 +40,7 @@ set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root tests lsp-client.tcl]
 
 set options [dict create -workloads {csv 2048 icy 2048-golden} -schedulers {worker sync} -edits 20 \
-    -idle 20 -seed 7 -recovery 1 -out ""]
+    -idle 20 -seed 7 -recovery 1 -sessions 1 -memory 0 -out ""]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -270,6 +275,37 @@ proc recovery {name} {
     return [dict create detected $detected recovered $recovered workers [regexp -all {analysis worker started} [dict get $end stderr]] status [dict get $end status]]
 }
 
+# Memory over a long session of scheduler SCHEDULER on workload NAME: ROUNDS
+# edits of its module, each waited for (its diagnostics published), the
+# resident set of the server and of its worker sampled after each.
+proc memory {name scheduler rounds} {
+    global root workloads
+    set w [dict get $workloads $name]
+    set dir [file join $root [dict get $w dir]]
+    set entry [lspc::uri [file join $dir [dict get $w entry]]]
+    set module [lspc::uri [file join $dir [dict get $w module]]]
+    set moduleText [readFile [file join $dir [dict get $w module]]]
+    set c [lspc::start -scheduler $scheduler -args {-warnings off}]
+    lspc::didOpen $c $entry [readFile [file join $dir [dict get $w entry]]]
+    if {$module ne $entry} {
+        lspc::didOpen $c $module $moduleText
+    }
+    lspc::until $c {[published $c $entry] >= 1} -timeout 600000
+    array set samples {server {} worker {}}
+    set rows {}
+    for {set k 1} {$k <= $rounds} {incr k} {
+        lspc::didChange $c $module [expr {$k + 1}] [string map [list [dict get $w old] "[dict get $w new] # round $k"] $moduleText]
+        lspc::until $c {[published $c $module] >= $k + 1} -timeout 600000
+        lspc::hover $c $entry {*}[position [readFile [file join $dir [dict get $w entry]]]]
+        set samples(server) {}
+        set samples(worker) {}
+        sample $c samples
+        lappend rows [list $k [lindex $samples(server) end] [lindex $samples(worker) end]]
+    }
+    lspc::stop $c
+    return $rows
+}
+
 proc fmt {value {digits 0}} {
     if {$value eq "" || $value eq "-"} {
         return -
@@ -278,10 +314,21 @@ proc fmt {value {digits 0}} {
 }
 
 set results {}
-foreach name [dict get $options -workloads] {
-    foreach scheduler [dict get $options -schedulers] {
-        puts stderr "== $name ($scheduler)"
-        lappend results [session $name $scheduler]
+if {[dict get $options -sessions]} {
+    foreach name [dict get $options -workloads] {
+        foreach scheduler [dict get $options -schedulers] {
+            puts stderr "== $name ($scheduler)"
+            lappend results [session $name $scheduler]
+        }
+    }
+}
+set memories {}
+if {[dict get $options -memory] > 0} {
+    foreach name [dict get $options -workloads] {
+        foreach scheduler [dict get $options -schedulers] {
+            puts stderr "== $name ($scheduler, memory)"
+            dict set memories "$name $scheduler" [memory $name $scheduler [dict get $options -memory]]
+        }
     }
 }
 set recoveries {}
@@ -328,6 +375,32 @@ if {$recoveries ne {}} {
     dict for {name r} $recoveries {
         lappend lines "| $name | [dict get $r detected] | [dict get $r recovered] | [dict get $r workers] | [dict get $r status] |"
     }
+}
+if {$memories ne {}} {
+    set rounds [dict get $options -memory]
+    set shown [lsort -integer -unique [list 1 [expr {max(1, $rounds / 4)}] [expr {max(1, $rounds / 2)}] [expr {max(1, 3 * $rounds / 4)}] $rounds]]
+    lappend lines "" "## Memory over a long session (MiB resident after each round: server / worker)" "" \
+        "| workload | scheduler | [join [lmap k $shown {string cat "round $k"}] { | }] | max |" \
+        "|---|---|[string repeat ---:| [expr {[llength $shown] + 1}]]"
+    dict for {key rows} $memories {
+        set cells [lmap k $shown {
+            lassign [lindex $rows [expr {$k - 1}]] - server worker
+            string cat [fmt $server] / [fmt $worker]
+        }]
+        set maxServer [tcl::mathfunc::max {*}[lmap r $rows {expr {[lindex $r 1] eq "" ? 0 : [lindex $r 1]}}]]
+        set maxWorker [tcl::mathfunc::max {*}[lmap r $rows {expr {[lindex $r 2] eq "" ? 0 : [lindex $r 2]}}]]
+        lappend lines "| [lindex $key 0] | [lindex $key 1] | [join $cells { | }] | [fmt $maxServer] / [fmt $maxWorker] |"
+    }
+}
+if {$results eq {}} {
+    set text [join $lines \n]
+    puts $text
+    if {[dict get $options -out] ne ""} {
+        set f [open [dict get $options -out] w]
+        puts $f $text
+        close $f
+    }
+    exit 0
 }
 lappend lines "" "## Equivalence" ""
 foreach name [dict get $options -workloads] {
