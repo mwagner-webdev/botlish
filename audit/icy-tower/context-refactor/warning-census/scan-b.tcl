@@ -219,6 +219,11 @@ foreach dir $dirs {
             foreach rel $files {
                 if {[file extension $rel] ne ".bot" || [string match lib/* $rel]} continue
                 set t [surface::modules::PlatformTarget [scan::Read [file join $progDir $rel]]]
+                if {[string match macos-* $t]} {
+                    # The macOS platform's native host (MACOS-AARCH64-*.md),
+                    # where the test compiles it with no -target.
+                    set t macos-aarch64
+                }
                 if {$t ne ""} {
                     set target $t
                     break
