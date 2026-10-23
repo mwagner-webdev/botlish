@@ -998,6 +998,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {[dict exists $node nomethod]} {
                 SetField hir $e nomethod 1
             }
+            if {[dict exists $node exported]} {
+                SetField hir $e exported [dict get $node exported]
+            }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
             set declaredParamTypes {}

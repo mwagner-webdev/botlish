@@ -28,14 +28,11 @@
 //! the machine code is the same Cranelift output either linker links.
 
 use super::aot::ProgramEntry;
-use super::constants::{self, Const};
-use super::framemap::{FunctionMap, ProgramMap};
+use super::constants::Const;
 use super::metrics::AllocMode;
-use super::value::{FloatType, Kind};
-use super::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
-use crate::nir::OpCode;
+use super::program::{self, FunctionMeta, Reader, Writer};
+use super::vm::{ProgramInfo, Vm};
 use std::io::{Read, Seek, SeekFrom};
-use std::rc::Rc;
 
 /// The last 8 bytes of a stub-linked executable.
 pub const MAGIC: &[u8; 8] = b"BOTLIMG1";
@@ -139,101 +136,29 @@ pub fn abi_fingerprint() -> u64 {
 }
 
 // ---------------------------------------------------------------- encoding
+//
+// The metadata (program info, constants, safepoints) is encoded by the
+// functions every program descriptor uses (runtime::program); the image adds
+// its code, imports and fixups.
 
-struct Writer(Vec<u8>);
-
-impl Writer {
-    fn u32(&mut self, v: u32) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn u64(&mut self, v: u64) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn i64(&mut self, v: i64) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn len(&mut self, n: usize) {
-        self.u64(n as u64);
-    }
-    fn bytes(&mut self, b: &[u8]) {
-        self.len(b.len());
-        self.0.extend_from_slice(b);
-    }
-    fn str(&mut self, s: &str) {
-        self.bytes(s.as_bytes());
-    }
-    fn opt_str(&mut self, s: Option<&str>) {
-        match s {
-            Some(s) => {
-                self.u32(1);
-                self.str(s);
-            }
-            None => self.u32(0),
+fn write_target(w: &mut Writer, t: Target) {
+    match t {
+        Target::Local(offset) => {
+            w.u32(0);
+            w.u64(offset);
         }
-    }
-    fn target(&mut self, t: Target) {
-        match t {
-            Target::Local(offset) => {
-                self.u32(0);
-                self.u64(offset);
-            }
-            Target::Import(index) => {
-                self.u32(1);
-                self.u64(u64::from(index));
-            }
+        Target::Import(index) => {
+            w.u32(1);
+            w.u64(u64::from(index));
         }
     }
 }
 
-struct Reader<'a> {
-    data: &'a [u8],
-    at: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
-        let end = self.at.checked_add(n).filter(|&end| end <= self.data.len()).ok_or("truncated program image")?;
-        let slice = &self.data[self.at..end];
-        self.at = end;
-        Ok(slice)
-    }
-    fn u32(&mut self) -> Result<u32, String> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
-    }
-    fn u64(&mut self) -> Result<u64, String> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-    fn i64(&mut self) -> Result<i64, String> {
-        Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-    fn len(&mut self) -> Result<usize, String> {
-        usize::try_from(self.u64()?).map_err(|e| e.to_string())
-    }
-    fn bytes(&mut self) -> Result<Vec<u8>, String> {
-        let n = self.len()?;
-        Ok(self.take(n)?.to_vec())
-    }
-    fn str(&mut self) -> Result<String, String> {
-        String::from_utf8(self.bytes()?).map_err(|e| e.to_string())
-    }
-    fn opt_str(&mut self) -> Result<Option<String>, String> {
-        Ok(match self.u32()? {
-            0 => None,
-            _ => Some(self.str()?),
-        })
-    }
-    fn kind(&mut self) -> Result<Option<Kind>, String> {
-        match self.opt_str()? {
-            None => Ok(None),
-            Some(name) => Kind::parse(&name).map(Some).ok_or_else(|| format!("unknown kind {name:?}")),
-        }
-    }
-    fn target(&mut self) -> Result<Target, String> {
-        Ok(match self.u32()? {
-            0 => Target::Local(self.u64()?),
-            _ => Target::Import(u32::try_from(self.u64()?).map_err(|e| e.to_string())?),
-        })
-    }
+fn read_target(r: &mut Reader) -> Result<Target, String> {
+    Ok(match r.u32()? {
+        0 => Target::Local(r.u64()?),
+        _ => Target::Import(u32::try_from(r.u64()?).map_err(|e| e.to_string())?),
+    })
 }
 
 impl Image {
@@ -242,75 +167,8 @@ impl Image {
         let mut w = Writer(Vec::new());
         w.u32(FORMAT);
         w.u64(abi_fingerprint());
-        let info = &self.info;
-        w.len(info.functions.len());
-        for f in &info.functions {
-            w.len(f.arity);
-            w.str(&f.pnames);
-        }
-        w.len(info.natives.len());
-        for n in &info.natives {
-            w.str(&n.name);
-            match n.arity {
-                Some(arity) => {
-                    w.u32(1);
-                    w.len(arity);
-                }
-                None => w.u32(0),
-            }
-            w.len(n.params.len());
-            for kind in &n.params {
-                w.opt_str(kind.map(Kind::name));
-            }
-            w.str(n.op.spelling());
-        }
-        w.len(info.shapes.len());
-        for s in &info.shapes {
-            w.opt_str(s.name.as_deref());
-            w.len(s.fields.len());
-            for field in &s.fields {
-                w.str(field);
-            }
-            w.u32(u32::from(s.opaque));
-        }
-        w.len(info.enums.len());
-        for e in &info.enums {
-            w.str(&e.name);
-            w.len(e.cases.len());
-            for case in &e.cases {
-                w.str(case);
-            }
-        }
-        w.len(self.constants.len());
-        for c in &self.constants {
-            match c {
-                Const::Str(text) => {
-                    w.u32(0);
-                    w.str(text);
-                }
-                Const::Bytes(bytes) => {
-                    w.u32(1);
-                    w.bytes(bytes);
-                }
-                Const::BigInt(digits) => {
-                    w.u32(2);
-                    w.str(digits);
-                }
-                Const::Native(index) => {
-                    w.u32(3);
-                    w.u32(*index);
-                }
-                Const::FnValue(func) => {
-                    w.u32(4);
-                    w.u32(*func);
-                }
-                Const::Float(ty, bits) => {
-                    w.u32(5);
-                    w.str(ty.prefix());
-                    w.u64(*bits);
-                }
-            }
-        }
+        program::encode_info(&mut w, &self.info);
+        program::encode_constants(&mut w, &self.constants);
         w.u32(self.statics);
         w.len(self.imports.len());
         for name in &self.imports {
@@ -325,7 +183,7 @@ impl Image {
                 Fixup::Abs64 { at, target, addend } => {
                     w.u32(0);
                     w.u64(at);
-                    w.target(target);
+                    write_target(&mut w, target);
                     w.i64(addend);
                 }
                 Fixup::Call32 { at, import, addend, trampoline } => {
@@ -343,14 +201,7 @@ impl Image {
             w.u32(f.direct_size);
             w.u64(f.entry);
             w.u32(f.entry_size);
-            w.len(f.safepoints.len());
-            for (pc, roots) in &f.safepoints {
-                w.u32(*pc);
-                w.len(roots.len());
-                for root in roots {
-                    w.u32(*root);
-                }
-            }
+            program::encode_safepoints(&mut w, &f.safepoints);
         }
         w.0
     }
@@ -364,49 +215,8 @@ impl Image {
         if r.u64()? != abi_fingerprint() {
             return Err("program image was compiled for a different native runtime build".to_string());
         }
-        let mut info = ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() };
-        for _ in 0..r.len()? {
-            let arity = r.len()?;
-            info.functions.push(FunctionInfo { arity, pnames: r.str()? });
-        }
-        for _ in 0..r.len()? {
-            let name = r.str()?;
-            let arity = match r.u32()? {
-                0 => None,
-                _ => Some(r.len()?),
-            };
-            let params = (0..r.len()?).map(|_| r.kind()).collect::<Result<Vec<_>, _>>()?;
-            let spelling = r.str()?;
-            let op = OpCode::parse(&spelling).ok_or_else(|| format!("unknown native operation {spelling:?}"))?;
-            info.natives.push(NativeInfo { name, arity, params, op });
-        }
-        for _ in 0..r.len()? {
-            let name = r.opt_str()?;
-            let fields = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
-            let opaque = r.u32()? != 0;
-            info.shapes.push(ShapeInfo { name, fields, opaque });
-        }
-        for _ in 0..r.len()? {
-            let name = r.str()?;
-            let cases = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
-            info.enums.push(EnumInfo { name, cases });
-        }
-        let mut constants = Vec::new();
-        for _ in 0..r.len()? {
-            constants.push(match r.u32()? {
-                0 => Const::Str(r.str()?),
-                1 => Const::Bytes(r.bytes()?),
-                2 => Const::BigInt(r.str()?),
-                3 => Const::Native(r.u32()?),
-                4 => Const::FnValue(r.u32()?),
-                5 => {
-                    let prefix = r.str()?;
-                    let ty = FloatType::of_prefix(&prefix).ok_or_else(|| format!("unknown float type {prefix}"))?;
-                    Const::Float(ty, r.u64()?)
-                }
-                tag => return Err(format!("unknown constant tag {tag}")),
-            });
-        }
+        let info = program::decode_info(&mut r)?;
+        let constants = program::decode_constants(&mut r)?;
         let statics = r.u32()?;
         let imports = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
         let code = r.bytes()?;
@@ -415,7 +225,7 @@ impl Image {
         let mut fixups = Vec::new();
         for _ in 0..r.len()? {
             fixups.push(match r.u32()? {
-                0 => Fixup::Abs64 { at: r.u64()?, target: r.target()?, addend: r.i64()? },
+                0 => Fixup::Abs64 { at: r.u64()?, target: read_target(&mut r)?, addend: r.i64()? },
                 1 => Fixup::Call32 { at: r.u64()?, import: r.u32()?, addend: r.i64()?, trampoline: r.u64()? },
                 tag => return Err(format!("unknown fixup tag {tag}")),
             });
@@ -426,12 +236,7 @@ impl Image {
             let direct_size = r.u32()?;
             let entry = r.u64()?;
             let entry_size = r.u32()?;
-            let mut safepoints = Vec::new();
-            for _ in 0..r.len()? {
-                let pc = r.u32()?;
-                let roots = (0..r.len()?).map(|_| r.u32()).collect::<Result<Vec<_>, _>>()?;
-                safepoints.push((pc, roots));
-            }
+            let safepoints = program::decode_safepoints(&mut r)?;
             functions.push(FunctionCode { direct, direct_size, entry, entry_size, safepoints });
         }
         if r.at != data.len() {
@@ -583,28 +388,21 @@ fn map_near(anchor: usize, size: usize) -> Result<usize, String> {
 }
 
 impl Loaded {
-    /// The program's Vm and entry, built as the `rustc` linker's generated
-    /// startup builds them (codegen/aot.rs's `startup`). Runs on the thread
-    /// that runs the program.
+    /// The program's Vm and entry, built by the construction every startup
+    /// shares (runtime::program's `build_vm`) from the image's code where
+    /// the stub mapped it. Runs on the thread that runs the program.
     pub fn instantiate(self) -> (Box<Vm>, ProgramEntry) {
         let base = self.base;
-        let mut vm = Vm::new(Rc::new(self.info), AllocMode::Off);
-        let entries: Vec<usize> = self.functions.iter().map(|f| base + f.entry as usize).collect();
-        constants::install(&mut vm, &self.constants, &entries, self.statics);
-        let mut map = ProgramMap::new();
-        for f in &self.functions {
-            let start = base + f.direct as usize;
-            map.push(FunctionMap {
-                code_start: start,
-                code_end: start + f.direct_size as usize,
-                safepoints: f.safepoints.clone(),
-            });
-            let start = base + f.entry as usize;
-            map.push(FunctionMap { code_start: start, code_end: start + f.entry_size as usize, safepoints: vec![] });
-        }
-        map.finish();
-        vm.set_framemap(Rc::new(map));
-        let entry: ProgramEntry = unsafe { std::mem::transmute(base + self.functions[0].direct as usize) };
+        let code: Vec<[usize; 2]> =
+            self.functions.iter().map(|f| [base + f.direct as usize, base + f.entry as usize]).collect();
+        let meta: Vec<FunctionMeta> = self
+            .functions
+            .iter()
+            .map(|f| FunctionMeta { direct_size: f.direct_size, entry_size: f.entry_size, safepoints: f.safepoints.clone() })
+            .collect();
+        let vm = program::build_vm(self.info, &self.constants, self.statics, &code, &meta, AllocMode::Off);
+        // SAFETY: function 0 is the program (codegen::clif's ProgramEntry).
+        let entry: ProgramEntry = unsafe { std::mem::transmute(code[0][0]) };
         (vm, entry)
     }
 }
@@ -627,6 +425,9 @@ pub fn main() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::value::{FloatType, Kind};
+    use super::super::vm::{EnumInfo, FunctionInfo, NativeInfo, ShapeInfo};
+    use crate::nir::OpCode;
 
     fn sample() -> Image {
         Image {

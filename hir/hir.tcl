@@ -124,7 +124,12 @@
 #             that it is never the callee of method syntax; printed by
 #             hir::format as `nomethod` and read back by hir::parse; the
 #             binding of the function carries `nomethod 1` too, which method
-#             resolution reads -- WARNINGS-METHOD-ELIGIBLE.md)
+#             resolution reads -- WARNINGS-METHOD-ELIGIBLE.md), exported
+#             ({c SYMBOL}, only on an `exported c fn`: a native library
+#             exports it to C, SYMBOL its stated C symbol or ""; printed by
+#             hir::format as `exported c ?named SYMBOL?` and read back by
+#             hir::parse; read by hir/exports.tcl alone --
+#             NATIVE-LIBRARY-MILESTONE-1.md)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically).
 #             A call written `receiver.name(args)` with a function `name`
@@ -1360,6 +1365,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::contexts::verify hir
     hir::direct::verify hir
     hir::coroutines::verify hir
+    hir::exports::verify hir
     hir::affine::verify hir
     hir::mutvec::verify hir
     hir::syscall::verify hir
@@ -1705,7 +1711,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign exports errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

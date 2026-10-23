@@ -149,6 +149,14 @@ fn current_fp() -> usize {
     rbp
 }
 
+/// The frame record of the function this is inlined into: its frame
+/// pointer (runtime::library's stack boundary).
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(windows)))]
+#[inline(always)]
+pub fn frame_address() -> usize {
+    current_fp()
+}
+
 /// Reads the current frame pointer (`x29`); `#[inline(always)]` as on x86-64.
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]

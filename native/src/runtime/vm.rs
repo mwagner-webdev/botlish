@@ -98,6 +98,15 @@ thread_local! {
     static PROGRAM: RefCell<Option<Rc<ProgramInfo>>> = const { RefCell::new(None) };
 }
 
+/// Makes PROGRAM the program executing on this thread and returns the one
+/// that was (runtime::library: a native library's instance is the running
+/// program for exactly the duration of a call into it, and whatever ran
+/// before -- another library's instance on this thread, or none -- is
+/// restored when the call returns).
+pub fn swap_current_program(program: Option<Rc<ProgramInfo>>) -> Option<Rc<ProgramInfo>> {
+    PROGRAM.with(|p| std::mem::replace(&mut *p.borrow_mut(), program))
+}
+
 /// Runs F with the program currently executing on this thread.
 pub fn current_program<R>(f: impl FnOnce(&ProgramInfo) -> R) -> R {
     PROGRAM.with(|p| f(p.borrow().as_ref().expect("no native program is running")))
@@ -253,11 +262,6 @@ pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
-        // The shadow stack holds the fallback plan's roots and bounds its
-        // recursion (codegen::roots's `depth_reservation`): not needed where
-        // native frames hold the roots (where no guard reports an exhausted
-        // stack, the stack pointer is checked instead: `stack_limit`).
-        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
         // Typed: on a host outside the list the block is a bare `None`.
         let native_stack: Option<NativeStack> = {
             #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64")))]
@@ -265,6 +269,18 @@ impl Vm {
             #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))))]
             { None }
         };
+        Vm::with_stack(info, alloc_mode, native_stack)
+    }
+
+    /// `new`, on the native stack NATIVE_STACK (the calling thread's, which
+    /// the caller found itself: runtime::library reports a stack it cannot
+    /// find as a failed instance creation instead of a panic).
+    pub fn with_stack(info: Rc<ProgramInfo>, alloc_mode: AllocMode, native_stack: Option<NativeStack>) -> Box<Vm> {
+        // The shadow stack holds the fallback plan's roots and bounds its
+        // recursion (codegen::roots's `depth_reservation`): not needed where
+        // native frames hold the roots (where no guard reports an exhausted
+        // stack, the stack pointer is checked instead: `stack_limit`).
+        let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
         let stack_limit = match native_stack {
             Some(stack) if super::native_stack::stack_limit_checked(super::framewalk::NATIVE_FRAME_ROOTS) => stack.stack_limit(),
             _ => 0,
@@ -304,6 +320,25 @@ impl Vm {
             native_stack,
             co_current: std::ptr::null_mut(),
         })
+    }
+
+    /// The native stack this Vm's code runs on (None where the host gives
+    /// none): the thread's, bounded by `set_stack_boundary`.
+    pub fn native_stack(&self) -> Option<NativeStack> {
+        self.native_stack
+    }
+
+    /// Makes BOUNDARY the top of the stack this Vm's code runs on: a native
+    /// library's call into it (runtime::library) runs below its own entry
+    /// frame, whose frame record is BOUNDARY, on a stack whose frames above
+    /// that belong to its host. The collector's walk of this stack
+    /// (runtime::framewalk, bounded by the stack) then ends at the entry
+    /// frame and never reads a host frame as a Botlish one
+    /// (NATIVE-LIBRARY-MILESTONE-1.md, "The stack-walking boundary").
+    pub fn set_stack_boundary(&mut self, boundary: usize) {
+        if let Some(stack) = self.native_stack.as_mut() {
+            stack.high_bound = boundary;
+        }
     }
 
     /// Publishes STACK (None: the thread's own stack) as the one native stack

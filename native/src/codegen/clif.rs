@@ -149,6 +149,10 @@ pub struct Symbols {
     /// (`va_stub`): (foreign index, vector register count) -> the stub's
     /// local function.
     pub va_stubs: HashMap<(u32, u32), ModuleFuncId>,
+    /// The program is a native library (nir::Program's `library`): every
+    /// function that makes a Botlish call checks its stack pointer
+    /// (`prologue_stack_limit`, roots::plan_checked).
+    pub library: bool,
 }
 
 /// How many machine words F's direct function returns. Ordinarily
@@ -400,6 +404,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
         context_pc_relative: export,
         foreigns: vec![],
         va_stubs: HashMap::new(),
+        library: program.library.is_some(),
     };
     if program.context_bytes > 0 {
         // The context area (CONTEXTS.md): every context slot, at the offsets
@@ -456,7 +461,11 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
             }
         }
     }
-    let linkage = if export { Linkage::Export } else { Linkage::Local };
+    // Every function is local to the program object: what starts a program
+    // or calls into it from outside finds its functions through the
+    // program's descriptor (codegen::library, runtime::program), never by
+    // a symbol name, so two program objects in one link never share one.
+    let linkage = Linkage::Local;
     for f in &program.functions {
         let params = 1 + f.env as usize + f.params as usize;
         let name = format!("botlish_fn_{}", f.id);
@@ -846,7 +855,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             !stack_maps || matches!(module.isa().name(), "x64" | "aarch64"),
             "native-frame roots on an ISA the frame walk does not know"
         );
-        let plan = roots::plan(f, stack_maps);
+        let plan = roots::plan_checked(f, stack_maps, symbols.library);
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         let mutarray_inline = std::env::var("BOTLISH_NATIVE_MUTARRAY_INLINE_OPT").ok().as_deref() != Some("0");
         let root_init_opt = std::env::var("BOTLISH_NATIVE_ROOT_INIT_OPT").ok().as_deref() != Some("0");

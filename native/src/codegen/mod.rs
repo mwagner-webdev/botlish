@@ -13,6 +13,7 @@
 
 pub mod aot;
 pub mod clif;
+pub mod library;
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod jitunwind;
 pub mod roots;
@@ -423,6 +424,8 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa) -> Result<ObjectProg
     for f in &program.functions {
         functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, false)?);
     }
+    let descriptor = library::define_descriptor(&mut module, &symbols, program, &pool, &functions)?;
+    library::define_api(&mut module, program, descriptor)?;
     let mut product = module.finish();
     add_windows_unwind(&mut product, &symbols, &functions)?;
     let mut bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;

@@ -109,6 +109,13 @@
 #   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
+#                | "exported" "c"  -- NATIVE-LIBRARY-MILESTONE-1.md: the
+#                  function is exported to C from a native library built from
+#                  the program: an ordinary Botlish function with a C entry
+#                  point. Only at the top level of a module. After its name
+#                  it may state its C symbol, `named STRING` (as extern c fn
+#                  does); otherwise a library names it LIBRARY_NAME. Both
+#                  words are contextual like every modifier
 #   paramList    = [ param { "," param } ] [ "," flagSection ]
 #                  [ "," contextSection ] [ "," variadicSection ]
 #                  [ "," resumeClause ] [ "," ]
@@ -403,7 +410,7 @@ namespace eval surface::parser {
     # The contextual words that may precede `fn` in a function declaration
     # (see the grammar above). Each names one boolean property of the
     # `function` node (`nomethod` -> `nomethod 0|1`, `nomethodSpan`).
-    variable functionModifiers {nomethod}
+    variable functionModifiers {nomethod exported}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
@@ -1371,6 +1378,10 @@ proc surface::parser::AtFunctionDecl {pVar} {
     upvar 1 $pVar p
     set i 0
     while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $functionModifiers} {
+        if {[dict get [Peek p $i] text] eq "exported" && [Kind p [expr {$i + 1}]] eq "IDENT"} {
+            # `exported c`: the modifier names its foreign ABI.
+            incr i
+        }
         incr i
     }
     return [expr {$i > 0 && [Kind p $i] eq "fn"}]
@@ -2616,20 +2627,62 @@ proc surface::parser::Function {pVar} {
         if {[dict exists $modifiers $text]} {
             Fail $word "duplicate modifier \"$text\" in this function declaration"
         }
+        if {$text eq "exported"} {
+            # `exported c` (NATIVE-LIBRARY-MILESTONE-1.md): the one foreign
+            # ABI a function is exported to.
+            set abi [Peek p]
+            if {[dict get $abi kind] ne "IDENT" || [dict get $abi text] in $functionModifiers} {
+                FailCode [dict get $abi span] EXPORT-SYNTAX \
+                    "an exported function names its foreign ABI: write \"exported c fn NAME(...) -> T:\" (the only foreign ABI is c)"
+            }
+            if {[dict get $abi text] ne "c"} {
+                FailCode [dict get $abi span] EXPORT-SYNTAX \
+                    "unknown foreign ABI \"[dict get $abi text]\": a function is exported as \"exported c fn\""
+            }
+            Advance p
+            if {![dict get $p topLevel]} {
+                FailCode [dict get $word span] EXPORT-SYNTAX \
+                    "an exported c fn is only allowed at the top level of a module, not nested in a function/if/loop"
+            }
+        }
         dict set modifiers $text [dict get $word span]
     }
     Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
+    set symbol ""
+    set symbolSpan ""
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "named"} {
+        set named [Advance p]
+        if {![dict exists $modifiers exported]} {
+            FailCode [dict get $named span] EXPORT-SYNTAX \
+                "\"named\" states the C symbol of an exported c fn: \"[dict get $name value]\" is not exported (write \"exported c fn [dict get $name value] named \\\"SYMBOL\\\"(...)\")"
+        }
+        set token [Peek p]
+        if {[dict get $token kind] ne "STRING"} {
+            FailCode [dict get $token span] EXPORT-SYNTAX \
+                "expected the C symbol as a string after \"named\", found [Describe $token]: \"exported c fn NAME named \\\"SYMBOL\\\"(...)\""
+        }
+        Advance p
+        set symbol [dict get $token value]
+        set symbolSpan [dict get $token span]
+        if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $symbol]} {
+            FailCode $symbolSpan EXPORT-SYNTAX \
+                "\"$symbol\" is not a C symbol an exported c fn can have: a C identifier is letters, digits and _, not starting with a digit"
+        }
+    }
     set open [Expect p ( "\"(\" after the function name"]
     lassign [ParamSections p] params flags contexts resume variadic
     set body [Suite p "the parameter list"]
     set nomethod [dict exists $modifiers nomethod]
+    set exported [dict exists $modifiers exported]
     return [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
         errors [dict get $body errors] proves [dict get $body proves] body $body \
         nomethod $nomethod nomethodSpan [if {$nomethod} {dict get $modifiers nomethod} else {string cat ""}] \
+        exported $exported exportedSpan [if {$exported} {dict get $modifiers exported} else {string cat ""}] \
+        symbol $symbol symbolSpan $symbolSpan \
         resume $resume variadic $variadic]
 }
 

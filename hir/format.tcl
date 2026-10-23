@@ -21,6 +21,7 @@
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
 #                                        omitted when empty; then ?nomethod?,
+#                                        ?exported c ?named SYMBOL??,
 #                                        ?declares TYPE?, ?proves BINDING
 #                                        NAME: TYPE? (a proof contract,
 #                                        REFINEMENT-VALUES.md), ?errors ...?
@@ -519,6 +520,14 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
             if {[dict exists $node nomethod]} {
                 append text " nomethod"
+            }
+            if {[dict exists $node exported]} {
+                # An exported c fn (NATIVE-LIBRARY-MILESTONE-1.md), with its
+                # stated C symbol, if any.
+                append text " exported c"
+                if {[lindex [dict get $node exported] 1] ne ""} {
+                    append text " named [lindex [dict get $node exported] 1]"
+                }
             }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its

@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# The runtime library: an rlib for the driver, the AOT stub and the
+# executables the rustc linker links, and a static library -- the runtime
+# with Rust's standard library, for C toolchains -- that a native library's
+# final link pulls the runtime from (native/library.tcl,
+# NATIVE-LIBRARY-MILESTONE-1.md).
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 cranelift-codegen = { version = "0.135", features = ["trace-log"] }
 cranelift-frontend = "0.135"

@@ -1444,6 +1444,7 @@ proc native::lower::Program {hirProgram args} {
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
             -virtual-construction-opt $constructionDefault \
+            -library "" -exports {} \
             -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1519,7 +1520,19 @@ proc native::lower::Program {hirProgram args} {
         throw {NATIVE BUG} "native lowering: unknown fault \"$fault\" (the one fault injection is eager-foreign-result)"
     }
     set leafEligible [dict create]
-    set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
+    # A native library (NATIVE-LIBRARY-MILESTONE-1.md): its exports
+    # (native::library's records) are the analysis's export roots, each an
+    # independent compilation root whose instance assumes only its declared
+    # contract (hir::specialize's "Export roots").
+    variable library
+    variable exports
+    set library [dict get $options -library]
+    set exports [dict get $options -exports]
+    if {$library eq "" && [llength $exports]} {
+        throw {NATIVE BUG} "native lowering: exports need a library (-library NAME)"
+    }
+    set roots [lmap export $exports {dict get $export block}]
+    set spec [hir::specialize::analyze $hirProgram -roots $roots -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt] \
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
@@ -1602,6 +1615,15 @@ proc native::lower::Program {hirProgram args} {
 
     set functions [dict create]
     set pending [list [list [dict get $spec keys program] canonical]]
+    set exportInstances {}
+    foreach export $exports {
+        set id [hir::specialize::genericInstance $hirProgram $spec [dict get $export block]]
+        if {$id eq ""} {
+            throw {NATIVE BUG} "native lowering: export [dict get $export symbol] has no root instance"
+        }
+        lappend exportInstances $id
+        lappend pending [list $id canonical]
+    }
     while {$pending ne ""} {
         set pending [lassign $pending item]
         lassign $item id mode
@@ -1653,8 +1675,25 @@ proc native::lower::Program {hirProgram args} {
     }
 
     variable contextBytes
-    set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
+    set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}][if {$library ne ""} {string cat " library=$library"}]"]
     lappend header {*}[ContextHeader]
+    # A library's exports (each its root instance's canonical function) and
+    # the canonical identity of every declared error id: what its boundary
+    # reports as data (runtime::library).
+    set k 0
+    foreach export $exports id $exportInstances {
+        set func [lsearch -exact $order [Key $id canonical]]
+        lappend header "export $k [Quote [dict get $export symbol]] func=$func params=[Quote [join [dict get $export params] { }]] result=[dict get $export result] name=[Quote [dict get $export name]]"
+        incr k
+    }
+    if {$library ne ""} {
+        dict for {name id} $errorIds {
+            lappend header "error $id [Quote $name]"
+        }
+        foreach name [core::native::builtinErrorNames] {
+            lappend header "error [ErrorId $name] [Quote $name]"
+        }
+    }
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {

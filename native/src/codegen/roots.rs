@@ -764,13 +764,23 @@ fn entry_zero_slots(f: &Function, cfg: &Cfg, slot_of: &[Option<u32>], num_slots:
 /// both). This is a pure storage/discovery decision: it never changes
 /// `slot_of`/`entry_zero`/liveness/coloring above, and on the fallback path
 /// it reproduces the pre-stack-map behavior exactly, byte for byte.
+#[cfg(test)]
 pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
+    plan_checked(f, native_frame_supported, false)
+}
+
+/// `plan`, for a program whose calling functions all check their stack
+/// pointer (STACK_LIMIT: nir::Program's `stack_limit_checked`, a native
+/// library's on every host): the depth reservation is the stack limit's
+/// wherever native frames hold the roots.
+pub fn plan_checked(f: &Function, native_frame_supported: bool, stack_limit: bool) -> RootPlan {
     let cfg = Cfg::build(f);
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots, &liveness.def_edges);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
     let has_call = f.has_botlish_call();
-    let depth_reservation = has_call && crate::runtime::native_stack::depth_checked(native_frame_supported);
+    let depth_reservation = has_call
+        && (crate::runtime::native_stack::depth_checked(native_frame_supported) || (stack_limit && native_frame_supported));
     // On the native-stack-map path every function qualifies for NativeFrame
     // (called or not: the frame-walker discovers roots across any number of
     // nested native frames, so a Botlish call no longer disqualifies it --
@@ -829,7 +839,7 @@ pub fn report(program: &Program) -> String {
     let native_frame_supported = crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
     let mut out = String::new();
     for f in &program.functions {
-        let plan = plan(f, native_frame_supported);
+        let plan = plan_checked(f, native_frame_supported, program.library.is_some());
         let (regs, raw) = RootPlan::counts(f);
         writeln!(out, "function {} \"{}\"", f.id, f.name).unwrap();
         writeln!(out, "  NIR regs: {regs}").unwrap();

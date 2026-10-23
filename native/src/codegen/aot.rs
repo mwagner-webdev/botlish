@@ -48,11 +48,11 @@
 //! Windows SDK's import libraries -- by itself, without a Developer Command
 //! Prompt, and the C runtime's startup (`mainCRTStartup`) is rustc's. An
 //! executable's file name ends in `.exe` (`executable_path`).
-use super::{Const, ObjectProgram, emit_object};
+use super::{ObjectProgram, emit_object};
 use crate::nir::Program;
 use botlish_native::runtime::aotimage::{self, Fixup, FunctionCode, Image, Target};
 use std::collections::HashMap;
-use std::fmt::Write;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -81,122 +81,19 @@ impl Drop for WorkDir {
     }
 }
 
-fn startup(program: &Program, object: &ObjectProgram) -> String {
-    let mut s = String::from(
-        "#![allow(unused_imports)]\n\
-         use botlish_native::{nir::OpCode, runtime::{aot, constants::{self, Const},\n\
-         framemap::{FunctionMap, ProgramMap}, metrics::AllocMode, value::{FloatType, Kind, Value},\n\
-         vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm}}};\n\
-         use std::rc::Rc;\n\
-         unsafe extern \"C\" {\n",
-    );
-    for f in &program.functions {
-        writeln!(s, "fn botlish_fn_{}(); fn botlish_entry_{}();", f.id, f.id).unwrap();
-    }
-    s.push_str(
-        "}\nextern \"C\" fn entry(vm: *mut Vm) -> Value {\n\
-        let f: aot::ProgramEntry = unsafe { std::mem::transmute(botlish_fn_0 as *const ()) };\n\
-        f(vm)\n}\nfn main() {\n\
-        std::process::exit(aot::run(aot::process_argv(), || {\n\
-        let info = ProgramInfo { functions: vec![\n",
-    );
-    for f in &program.functions {
-        writeln!(
-            s,
-            "FunctionInfo {{ arity: {}, pnames: {:?}.into() }},",
-            f.params, f.pnames
-        )
-        .unwrap();
-    }
-    s.push_str("], natives: vec![\n");
-    for n in &program.natives {
-        let params: Vec<String> = n
-            .params
-            .iter()
-            .map(|kind| match kind {
-                Some(k) => format!("Some(Kind::{k:?})"),
-                None => "None".to_string(),
-            })
-            .collect();
-        writeln!(
-            s,
-            "NativeInfo {{ name: {:?}.into(), arity: {:?}, params: vec![{}], op: OpCode::{:?} }},",
-            n.name,
-            n.arity,
-            params.join(","),
-            n.op
-        )
-        .unwrap();
-    }
-    s.push_str("], shapes: vec![\n");
-    for shape in &program.shapes {
-        let name = match &shape.name {
-            Some(n) => format!("Some({n:?}.to_string())"),
-            None => "None".to_string(),
-        };
-        writeln!(
-            s,
-            "ShapeInfo {{ name: {name}, fields: <Vec<&str>>::into_iter(vec!{:?}).map(String::from).collect(), opaque: {} }},",
-            shape.fields, shape.opaque
-        )
-        .unwrap();
-    }
-    s.push_str("], enums: vec![\n");
-    for e in &program.enums {
-        writeln!(
-            s,
-            "EnumInfo {{ name: {:?}.to_string(), cases: vec!{:?}.into_iter().map(String::from).collect() }},",
-            e.name, e.cases
-        )
-        .unwrap();
-    }
-    s.push_str("] };\nlet mut vm = Vm::new(Rc::new(info), AllocMode::Off);\nlet entries = vec![\n");
-    for f in &program.functions {
-        writeln!(s, "botlish_entry_{} as *const () as usize,", f.id).unwrap();
-    }
-    s.push_str("];\nconstants::install(&mut vm, &[\n");
-    for c in &object.pool.entries {
-        match c {
-            Const::Str(text) => writeln!(s, "Const::Str({text:?}.into()),"),
-            Const::Bytes(bytes) => {
-                // A byte-string literal of \xNN escapes: compact however large
-                // the static storage is, and exact for every byte (NUL, 0xff).
-                let literal: String = bytes.iter().map(|b| format!("\\x{b:02x}")).collect();
-                writeln!(s, "Const::Bytes(b\"{literal}\".to_vec()),")
-            }
-            Const::BigInt(text) => writeln!(s, "Const::BigInt({text:?}.into()),"),
-            Const::Native(id) => writeln!(s, "Const::Native({id}),"),
-            Const::FnValue(id) => writeln!(s, "Const::FnValue({id}),"),
-            Const::Float(ty, bits) => writeln!(s, "Const::Float(FloatType::{ty:?}, {bits:#x}),"),
-        }
-        .unwrap();
-    }
-    writeln!(
-        s,
-        "], &entries, {});\nlet mut map = ProgramMap::new();",
-        program.statics
-    )
-    .unwrap();
-    for (id, f) in object.functions.iter().enumerate() {
-        let points: Vec<String> = f
-            .safepoints
-            .iter()
-            .map(|(pc, roots)| format!("({pc}, vec!{roots:?})"))
-            .collect();
-        writeln!(
-            s,
-            "let start = botlish_fn_{id} as *const () as usize;\n\
-            map.push(FunctionMap {{ code_start: start, code_end: start + {}, safepoints: vec![{}] }});\n\
-            let start = entries[{id}];\n\
-            map.push(FunctionMap {{ code_start: start, code_end: start + {}, safepoints: vec![] }});",
-            f.direct_size,
-            points.join(","),
-            f.entry_size
-        )
-        .unwrap();
-    }
-    s.push_str("map.finish();\nvm.set_framemap(Rc::new(map));\n(vm, entry as aot::ProgramEntry)\n})); }\n");
-    s
+/// The `rustc` linker's startup crate: a `main` that builds the program's
+/// Vm from the program descriptor in the program object (runtime::program,
+/// codegen::library's `botlish_program`) and runs it. The same for every
+/// program: nothing of the program is generated in Rust.
+fn startup() -> &'static str {
+    "use botlish_native::runtime::{aot, program};\n\
+     unsafe extern \"C\" {\n    static botlish_program: program::Descriptor;\n}\n\
+     fn main() {\n\
+     \x20   let descriptor = &raw const botlish_program as usize;\n\
+     \x20   std::process::exit(aot::run(aot::process_argv(), move || {\n\
+     \x20       program::start(unsafe { &*(descriptor as *const program::Descriptor) })\n\
+     \x20   }));\n\
+     }\n"
 }
 
 /// Whether PROGRAM calls C or names a native library (C-FFI.md): it is then
@@ -377,7 +274,7 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
     // to a name without one (link.exe keeps a name as given).
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
-    std::fs::write(&source_path, startup(program, &object)).map_err(|e| e.to_string())?;
+    std::fs::write(&source_path, startup()).map_err(|e| e.to_string())?;
     // rustc compiles the startup crate for the driver's own target, the one
     // the runtime library was built for, whatever rustc's own host is: a
     // Windows machine commonly has both Rust Windows host toolchains, and a
@@ -918,7 +815,7 @@ fn image(program: &Program, object: &ObjectProgram) -> Result<Image, String> {
         });
     }
     Ok(Image {
-        info: crate::program_info(program),
+        info: botlish_native::runtime::program::program_info(program),
         constants: object.pool.entries.clone(),
         statics: program.statics,
         imports,

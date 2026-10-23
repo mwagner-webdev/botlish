@@ -221,17 +221,18 @@ proc hir::specialize::analyze {hir args} {
     variable state
     set options [hir::Options hir::specialize::analyze \
         {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1 -exact-callable-opt 1
-         -exact-callable-limit {}} $args]
+         -exact-callable-limit {} -roots {}} $args]
     variable exactLimit
     set context [hir::aot::context $hir]
-    set state [dict create hir $hir context $context \
+    set roots [ExportRoots $hir $context [dict get $options -roots]]
+    set state [dict create hir $hir context $context roots $roots \
         specialize [dict get $options -specialize] callFactsOpt [dict get $options -call-facts-opt] \
         exactCallableOpt [dict get $options -exact-callable-opt] \
         exactLimit [if {[dict get $options -exact-callable-limit] ne ""} {dict get $options -exact-callable-limit} else {set exactLimit}] \
         instances [dict create] keys [dict create] byBlock [dict create] \
         seeds [dict create] deps [dict create] refs [dict create] \
         queue {} next 0 current "" building {} analyses 0 \
-        refinementFacts [if {[dict get $options -specialize]} {RefinementFacts $hir} else {string cat {}}]]
+        refinementFacts [if {[dict get $options -specialize]} {RefinementFacts $hir $roots} else {string cat {}}]]
     try {
         Instance program {}
         if {[dict get $state specialize]} {
@@ -251,7 +252,8 @@ proc hir::specialize::analyze {hir args} {
         set analysis [dict create specialize [dict get $state specialize] \
             instances [dict get $state instances] keys [dict get $state keys] \
             used [Used] context $context \
-            exactCallable [expr {[dict get $state specialize] && [dict get $state exactCallableOpt]}]]
+            exactCallable [expr {[dict get $state specialize] && [dict get $state exactCallableOpt]}] \
+            roots $roots]
         # The one authoritative closedness result (see InstanceClosed): every
         # later consumer reads it from here rather than re-deriving it.
         # CloseCallers already ran blockescape over the identical frozen graph
@@ -264,6 +266,50 @@ proc hir::specialize::analyze {hir args} {
     } finally {
         set state {}
     }
+}
+
+# ---------------------------------------------------------------------------
+# Export roots (NATIVE-LIBRARY-MILESTONE-1.md, "Export roots")
+#
+# A function exported to C is called by code this analysis cannot see, with
+# any value its declared parameter contracts admit. analyze's -roots names
+# such functions (block ExprIds; native::lower::program passes the
+# library's exports, hir/exports.tcl). Each is an independent compilation
+# root: the program instance's code hands its Block value to an unknown
+# caller, exactly as if it materialized it (Analyze adds it to the program's
+# `values`). Everything follows from that one fact, by the rules the
+# analyses already have for a materialized Block:
+#
+#   * its generic instance is used and lowered, whatever its Botlish callers
+#     do (none at all included), and tiny-leaf inlining into them never
+#     removes it: a materialized Block retains a generic entry;
+#   * that instance is open (InstanceClosed: a materialized static block),
+#     so no closed-caller theorem refines it (CloseCallers, ClosedSet) and
+#     the range analysis folds no caller's argument into its entry
+#     (hir::range::OpenInstances): its parameters assume exactly their
+#     declared types (Analyze's declared-type seed) and their full ranges;
+#   * named-refinement facts (RefinementFacts) of its block are not derived
+#     from its Botlish calls, which are not all of its calls.
+#
+# Its Botlish callers are unchanged: a call with keyed arguments still
+# selects (and optimizes) its own specialized instance, which nothing
+# foreign ever calls. A root must be an environment-free (static) block: a
+# closure's captures come from a run of the program, which a library never
+# starts for its exports (native::library diagnoses it before lowering).
+proc hir::specialize::ExportRoots {hir context roots} {
+    set result {}
+    foreach block $roots {
+        if {![dict exists $hir exprs $block] || [dict get $hir exprs $block kind] ne "block"} {
+            error "hir::specialize::analyze: export root \"$block\" is not a block"
+        }
+        if {$block ni [dict get $context envless]} {
+            error "hir::specialize::analyze: export root \"$block\" is not environment-free"
+        }
+        if {$block ni $result} {
+            lappend result $block
+        }
+    }
+    return $result
 }
 
 # ---------------------------------------------------------------------------
@@ -682,7 +728,7 @@ proc hir::specialize::Intersect {a b} {
 # evidence in its own semantic type unless the operation is itself known to
 # preserve it, so it correctly contributes {} -- dropping the fact for that
 # parameter unless some other call proves it independently.
-proc hir::specialize::RefinementFacts {hir} {
+proc hir::specialize::RefinementFacts {hir {roots {}}} {
     set callsByBlock [dict create]
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "call"} {
@@ -693,6 +739,11 @@ proc hir::specialize::RefinementFacts {hir} {
             continue
         }
         set block [lindex $target 1]
+        if {$block in $roots} {
+            # An export root's foreign callers prove nothing: its exact
+            # calls are not all of its calls.
+            continue
+        }
         set params [dict get $hir exprs $block params]
         set args [dict get $node args]
         if {[llength $params] != [llength $args]} {
@@ -871,8 +922,14 @@ proc hir::specialize::Analyze {id} {
         dict set instance overlay $overlay
         dict set instance reachable [dict keys $reachable]
         dict set instance seeds $seeds
-        dict set instance values [hir::aot::materializedBlocks $semantic [dict get $state context] \
+        set values [hir::aot::materializedBlocks $semantic [dict get $state context] \
             $block [dict keys $reachable]]
+        if {$block eq "program"} {
+            # Export roots (NATIVE-LIBRARY-MILESTONE-1.md): the program hands
+            # every exported function's value to a caller it cannot see.
+            set values [lsort -unique [concat $values [dict get $state roots]]]
+        }
+        dict set instance values $values
         dict set state instances $id $instance
 
         # Edges from reachable code only.
@@ -1868,6 +1925,9 @@ proc hir::specialize::SemanticInstances {} {
             }
         }
         set values [hir::aot::materializedBlocks $hir $context $region $reachable]
+        if {$region eq "program"} {
+            set values [lsort -unique [concat $values [dict get $state roots]]]
+        }
         dict set state instances $id values $values
         dict set state instances $id reachable $reachable
         foreach block $values {

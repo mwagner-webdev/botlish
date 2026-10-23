@@ -65,6 +65,10 @@
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
+#   exported c fn f(a: int) -> int:   the same block marked `exported {c
+#                         SYMBOL}` (SYMBOL the `named` one, else ""): a native
+#                         library exports it to C (hir/exports.tcl,
+#                         NATIVE-LIBRARY-MILESTONE-1.md)
 #   fn p(x: T) -> bool proves x: R:   the same block carrying `proofs`
 #                         ({outcome true param x paramOrigin .. type R
 #                         typeOrigin ..}): a proof contract, resolved and
@@ -845,6 +849,9 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {[dict exists $node exported] && [dict get $node exported]} {
+                set block [hir::syntax::withExport $block [dict get $node symbol]]
             }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \

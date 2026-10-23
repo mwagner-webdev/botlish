@@ -108,7 +108,7 @@ use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
-use runtime::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
+use runtime::vm::{ProgramInfo, Vm};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
@@ -606,28 +606,7 @@ fn call_effect_report(program: &nir::Program) -> String {
 }
 
 fn program_info(program: &nir::Program) -> ProgramInfo {
-    ProgramInfo {
-        functions: program
-            .functions
-            .iter()
-            .map(|f| FunctionInfo { arity: f.params as usize, pnames: f.pnames.clone() })
-            .collect(),
-        natives: program
-            .natives
-            .iter()
-            .map(|n| NativeInfo { name: n.name.clone(), arity: n.arity, params: n.params.clone(), op: n.op })
-            .collect(),
-        shapes: program
-            .shapes
-            .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
-            .collect(),
-        enums: program
-            .enums
-            .iter()
-            .map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() })
-            .collect(),
-    }
+    runtime::program::program_info(program)
 }
 
 /// The "sites" entry of Metrics::to_tcl: SITES (codegen::clif's compile-time

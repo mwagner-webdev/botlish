@@ -1804,6 +1804,96 @@ pub struct Program {
     /// bounds its Capture indices. Zero for a program with no module-static
     /// bindings.
     pub statics: u32,
+    /// The native library this program is compiled as (the header's
+    /// `library="NAME"`, NATIVE-LIBRARY-MILESTONE-1.md): its C name, the
+    /// prefix of its public API, and None for an ordinary program. A library
+    /// is called on its host's threads and stacks, so every function that
+    /// makes a Botlish call checks its stack pointer against the instance's
+    /// stack limit (`stack_limit_checked`) and fails with NATIVE LIMIT STACK
+    /// instead of faulting.
+    pub library: Option<String>,
+    /// The library's C exports (`export K ...`, dense, in order).
+    pub exports: Vec<ExportDecl>,
+    /// The canonical identity of every declared error id the program can
+    /// raise (`error ID "NAME"`): what a library reports as data for the
+    /// pending error id at its boundary. Empty for an ordinary program.
+    pub errors: Vec<(u32, String)>,
+}
+
+/// The C representation of an exported function's parameter or result
+/// (NATIVE-LIBRARY-MILESTONE-1.md, "The C ABI contract"): `int` as int64_t
+/// (an Int result outside it is a boundary error, never truncated), `bool`
+/// as C's bool, `Float64` as a finite double, `str` as UTF-8 bytes (a
+/// pointer and a length in, an owned buffer out), `unit` (a result only)
+/// as nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Boundary {
+    Int,
+    Bool,
+    Float64,
+    Str,
+    Unit,
+}
+
+impl Boundary {
+    pub fn parse(word: &str) -> Option<Boundary> {
+        Some(match word {
+            "int" => Boundary::Int,
+            "bool" => Boundary::Bool,
+            "Float64" => Boundary::Float64,
+            "str" => Boundary::Str,
+            "unit" => Boundary::Unit,
+            _ => return None,
+        })
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Boundary::Int => "int",
+            Boundary::Bool => "bool",
+            Boundary::Float64 => "Float64",
+            Boundary::Str => "str",
+            Boundary::Unit => "unit",
+        }
+    }
+
+    /// The machine words a C argument of this representation occupies in a
+    /// call's argument words (runtime::library's `call`): a pointer and a
+    /// length for `str`, one word otherwise.
+    pub fn words(self) -> usize {
+        match self {
+            Boundary::Str => 2,
+            Boundary::Unit => 0,
+            _ => 1,
+        }
+    }
+}
+
+/// `export K "SYMBOL" func=F params="KIND ..." result=KIND name="NAME"`: the
+/// C function SYMBOL calls NIR function F (the exported Botlish function's
+/// export root, through its generic entry) with arguments of the given
+/// representations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExportDecl {
+    pub symbol: String,
+    pub name: String,
+    pub func: FuncId,
+    pub params: Vec<Boundary>,
+    pub result: Boundary,
+}
+
+impl Program {
+    /// Whether a function that makes a Botlish call checks its stack
+    /// pointer against the Vm's stack limit (codegen::clif's
+    /// `prologue_stack_limit`; runtime::native_stack's
+    /// `stack_limit_checked`): where the host has no stack guard, and in
+    /// every native library (`library`), whose code runs on a host thread
+    /// with no guard of Botlish's (NATIVE-LIBRARY-MILESTONE-1.md, "Stack
+    /// safety").
+    pub fn stack_limit_checked(&self) -> bool {
+        self.library.is_some()
+            || crate::runtime::native_stack::stack_limit_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS)
+    }
 }
 
 #[derive(Debug)]
@@ -1956,6 +2046,9 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         statics: 0,
         context_bytes: 0,
         contexts: Vec::new(),
+        library: None,
+        exports: Vec::new(),
+        errors: Vec::new(),
     };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
@@ -1982,6 +2075,12 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
             };
             if program.context_bytes % 8 != 0 {
                 return p.err("the context area size must be a multiple of 8 bytes");
+            }
+            if let Some(name) = kv.get("library") {
+                if !is_c_identifier(name) {
+                    return p.err(format!("library name {name:?} is not a C identifier"));
+                }
+                program.library = Some(name.clone());
             }
             seen_header = true;
             continue;
@@ -2041,6 +2140,28 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                     }
                     program.foreigns.push(decl.1);
                 }
+                "export" => {
+                    let decl = parse_export(&p, &tokens)?;
+                    if decl.0 as usize != program.exports.len() {
+                        return p.err(format!("export numbers must be dense and in order, got {}", decl.0));
+                    }
+                    if program.library.is_none() {
+                        return p.err("an export needs a library (the header's library=NAME)");
+                    }
+                    program.exports.push(decl.1);
+                }
+                "error" => {
+                    let id = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok());
+                    match (id, tokens.get(2)) {
+                        (Some(id), Some(Token::Quoted(name))) if id > 0 && !name.is_empty() && tokens.len() == 3 => {
+                            if program.errors.iter().any(|(known, _)| *known == id) {
+                                return p.err(format!("error {id} is declared twice"));
+                            }
+                            program.errors.push((id, name.clone()));
+                        }
+                        _ => return p.err("error needs a nonzero id and a quoted canonical identity"),
+                    }
+                }
                 "func" => current = Some(parse_func_header(&p, &tokens)?),
                 _ => return p.err(format!("expected native or func, got {raw:?}")),
             }
@@ -2070,7 +2191,8 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
     // function making a Botlish call fails with NATIVE LIMIT STACK from its
     // own prologue (codegen::roots's `depth_reservation`), so its callers
     // must check: elsewhere the stack guard ends an exhausted run instead.
-    let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+    let depth_checked = program.stack_limit_checked()
+        || crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
     for (i, f) in program.functions.iter().enumerate() {
         local[i].0 = depth_checked && f.has_botlish_call();
         for inst in &f.body {
@@ -2234,6 +2356,42 @@ fn parse_foreign(p: &Parser, tokens: &[Token]) -> Result<(u32, ForeignDecl), Nir
         Some(_) => return p.err("foreign variadic=1 needs at least one fixed parameter"),
     };
     Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic }))
+}
+
+/// Whether NAME is a C identifier: a letter or `_`, then letters, digits
+/// and `_` (ASCII).
+pub fn is_c_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+/// `export K "SYMBOL" func=F params="KIND ..." result=KIND name="NAME"`.
+fn parse_export(p: &Parser, tokens: &[Token]) -> Result<(u32, ExportDecl), NirError> {
+    let Some(index) = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok()) else {
+        return p.err("export needs a number");
+    };
+    let symbol = match tokens.get(2) {
+        Some(Token::Quoted(symbol)) if is_c_identifier(symbol) => symbol.clone(),
+        _ => return p.err("export needs a quoted C symbol"),
+    };
+    let kv = pairs(tokens);
+    let Some(func) = kv.get("func").and_then(|w| w.parse::<FuncId>().ok()) else {
+        return p.err("export needs func=F");
+    };
+    let params = match kv.get("params") {
+        Some(text) => text
+            .split_whitespace()
+            .map(|w| Boundary::parse(w).filter(|b| *b != Boundary::Unit))
+            .collect::<Option<Vec<Boundary>>>(),
+        None => None,
+    };
+    let Some(params) = params else { return p.err("export needs params= of int, bool, Float64 or str") };
+    let Some(result) = kv.get("result").and_then(|w| Boundary::parse(w)) else {
+        return p.err("export needs result= (int, bool, Float64, str or unit)");
+    };
+    let name = kv.get("name").cloned().unwrap_or_else(|| symbol.clone());
+    Ok((index, ExportDecl { symbol, name, func, params, result }))
 }
 
 fn parse_enum(p: &Parser, tokens: &[Token]) -> Result<(u32, EnumDecl), NirError> {
@@ -2787,6 +2945,20 @@ fn validate(program: &Program) -> Result<(), NirError> {
     for (i, f) in program.functions.iter().enumerate() {
         if f.id as usize != i {
             return fail(format!("function ids must be 0..n in order, got {} at {i}", f.id));
+        }
+    }
+    let mut symbols = HashSet::new();
+    for (k, export) in program.exports.iter().enumerate() {
+        // An export calls its function's generic entry with one tagged
+        // argument per parameter and no closure: an environment-free
+        // function of exactly that arity, never the program.
+        match program.functions.get(export.func as usize) {
+            Some(f) if f.id != 0 && !f.env && f.params as usize == export.params.len() && f.results == 1 => {}
+            _ => return fail(format!("export {k} ({}): func={} is not an environment-free function of {} parameters",
+                export.symbol, export.func, export.params.len())),
+        }
+        if !symbols.insert(export.symbol.as_str()) {
+            return fail(format!("export {k}: the C symbol {} is exported twice", export.symbol));
         }
     }
     let func = |id: FuncId| program.functions.get(id as usize);

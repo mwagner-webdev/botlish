@@ -24,6 +24,8 @@
 #             flags), nomethod (optional, 1: `nomethod fn`, the function's author
 #             declares that it is never the callee of method syntax --
 #             WARNINGS-METHOD-ELIGIBLE.md; absent for every other block),
+#             exported (optional, {c SYMBOL}: an `exported c fn`, SYMBOL its
+#             stated C symbol or "" -- NATIVE-LIBRARY-MILESTONE-1.md),
 #             contextParams (optional: {NAME ORIGIN TYPE TYPEORIGIN} tuples,
 #             the function's context parameter section -- CONTEXTS.md;
 #             absent for a function without one), resume (optional: {TYPE
@@ -290,6 +292,15 @@ proc hir::syntax::withOperator {call op} {
 # BLOCK (a `block` node) declared `nomethod` by its author.
 proc hir::syntax::withNoMethod {block} {
     dict set block nomethod 1
+    return $block
+}
+
+# BLOCK (a `block` node) exported to C (NATIVE-LIBRARY-MILESTONE-1.md, an
+# `exported c fn`): `exported {c SYMBOL}`, SYMBOL its stated C symbol or ""
+# (a library names it LIBRARY_NAME). Its meaning is a native library's
+# (hir/exports.tcl); to every analysis and backend it is an ordinary block.
+proc hir::syntax::withExport {block symbol} {
+    dict set block exported [list c $symbol]
     return $block
 }
 
