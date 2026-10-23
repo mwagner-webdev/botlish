@@ -964,7 +964,9 @@ a header word already loaded.
 * **Consequence.** Measured as `lpa` against `lpint` and `lpstr`
   (HASH-TABLE-EXPERIMENT.md, "Typed against generic").
 * **Generality.** Every generic container written in Botlish.
-* **Candidate fix.** This is not a proof. One option is generic struct
+* **Candidate fix.** (Taken: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md's
+  parameterized structs; its typed-storage probe compares String and Int
+  keys with `streq` and `ieq`.) This is not a proof. One option is generic struct
   declarations, a language feature outside this milestone. The other is
   specialization of a struct-typed parameter's field element types from its
   construction sites, which is whole-program, like the instance entry facts.

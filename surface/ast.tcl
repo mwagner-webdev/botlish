@@ -55,7 +55,9 @@
 #              typeArg (a surface::parser::TypeExpr result) and typeArgSpan,
 #              the construction of an applied type: NAME[TYPE] { ... }
 #              (BINARY-LAYOUT.md, `LayoutStruct[Pair] {...}`; NAME is then
-#              the bare constructor name)
+#              the bare constructor name); with typeArgs and typeArgSpans
+#              (lists) instead, one of several type arguments,
+#              Pair[int, str] { ... } (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
 #   fieldinits fields ({name nameSpan value} dicts in written order) -- the
 #              one shared field-initializer payload of anonstruct and
 #              namedstruct
@@ -157,7 +159,10 @@
 #              declared order; TYPE as surface::parser::TypeExpr returns it),
 #              opaque (1 for `opaque struct NAME:`, else 0), opaqueSpan (the
 #              modifier word's span, or ""), context (1 for `context struct
-#              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md)
+#              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md), and
+#              for a parameterized struct only, slots ({name nameSpan trait
+#              traitSpan} dicts in written order, TRAIT the spelled trait of
+#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
@@ -751,6 +756,9 @@ proc surface::ast::Expr {node show} {
             if {[dict exists $node typeArg]} {
                 append name "\[[showType [dict get $node typeArg]]\]"
             }
+            if {[dict exists $node typeArgs]} {
+                append name "\[[::join [lmap t [dict get $node typeArgs] {showType $t}] {, }]\]"
+            }
             return "([::join [concat struct $name [FieldsText $node $show]] { }])$at"
         }
         project {
@@ -873,6 +881,11 @@ proc surface::ast::showType {type} {
         }
         return "$head{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
     }
+    if {[llength $type] == 3 && [lindex $type 0] eq "apply"} {
+        # An application of several type arguments (surface::parser::
+        # TypeExpr, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+        return "[lindex $type 1]\[[join [lmap t [lindex $type 2] {showType $t}] {, }]\]"
+    }
     lassign $type name arg
     if {$name eq "fn"} {
         # A structural function type (surface::parser::FnType): its
@@ -986,7 +999,17 @@ proc surface::ast::Statement {node indent show linesVar} {
             if {[dict exists $node context] && [dict get $node context]} {
                 append modifier "context "
             }
-            lappend lines "${pad}${modifier}struct [dict get $node name]$at"
+            set slots ""
+            if {[dict exists $node slots]} {
+                set slots "\[[join [lmap slot [dict get $node slots] {
+                    if {[dict get $slot trait] eq ""} {
+                        dict get $slot name
+                    } else {
+                        string cat [dict get $slot name] " satisfies " [dict get $slot trait]
+                    }
+                }] {, }]\]"
+            }
+            lappend lines "${pad}${modifier}struct [dict get $node name]$slots$at"
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
             }

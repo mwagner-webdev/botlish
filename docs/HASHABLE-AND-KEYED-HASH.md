@@ -813,7 +813,11 @@ Run on Linux x86-64 (4 cores) on the final tree.
 
 ## Limitations
 
-* **Imprint variables cannot be constrained.**
+* **Imprint variables cannot be constrained.** (Since
+  TRAIT-CONSTRAINED-IMPRINTED-TYPES.md they can, through a constrained
+  struct slot: in `fn get(m: Map[K, V], key: K)` over `struct Map[K
+  satisfies Hashable, V]`, K is known Hashable, so `hash(key)` is
+  `hashtotal`, `==` is `veqtotal` and the table hash admits K.)
   * Imprinting has no constraints by design (C-ABI-TYPES.md, "Imprinting").
     `List[Hashable]` is TRAIT-STORAGE-UNSUPPORTED, so "K is imprinted from
     the argument and must satisfy Hashable" cannot be written.
@@ -852,7 +856,10 @@ Constraints the collection milestone inherits:
 * **Do not expose the keyed numbers.** Bucket placement must never become
   observable: no API may expose slot order or a table hash. Map/Set
   iteration can then stay insertion-ordered while placement is randomized.
-* **Stored keys come back as `any`.** Botlish has no generic structs (CO-3),
+* **Stored keys come back as `any`.** (Superseded by
+  TRAIT-CONSTRAINED-IMPRINTED-TYPES.md: a `struct Map[K satisfies Hashable,
+  V]` storing `keys: MutableArray[K]` gets its keys back as K, still
+  Hashable; the text below is the state before it.) Botlish has no generic structs (CO-3),
   so a table's stored keys lose their static type. `std::table_hash::of` admits
   only Hashable, so a table must hash a key at its Hashable-typed boundary
   (the `put`/`get` parameter) and store the keyed hash beside the key, never

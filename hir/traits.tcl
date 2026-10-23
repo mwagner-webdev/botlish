@@ -832,6 +832,20 @@ proc hir::traits::satisfies {type id} {
         } else {
             dict set result reason $why
         }
+    } elseif {[hir::types::IsImprint $type]} {
+        # An imprint variable (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): it
+        # satisfies exactly the traits its function's contract entails (the
+        # applications of parameterized structs its signature holds it in),
+        # whatever type a call imprints -- every call's binding is held to
+        # them (hir::imprint::Bind). Its implementations are the imprinted
+        # type's, known only per binding (the plan's imprint clones).
+        dict set result ownerKind imprint
+        if {$id in [hir::types::ImprintConstraints $type]} {
+            dict set result ok 1
+        } else {
+            set name [lindex $type 1]
+            dict set result reason "its type is the imprint variable $name, and its function's contract does not say $name satisfies $id: $name satisfies exactly the traits the constrained slots of its signature's applications require"
+        }
     } else {
         lassign [WitnessOwner $type] owner kind why
         dict set result owner $owner
@@ -1015,6 +1029,9 @@ proc hir::traits::TypeCall {hirVar e node} {
         return ""
     }
     set receiverType [hir::typeOf $hir [dict get $shape receiver]]
+    if {[hir::types::IsImprint $receiverType]} {
+        return [TypeImprintCall hir $e $node $shape $receiverType]
+    }
     if {![hir::types::IsTrait $receiverType]} {
         if {[dict exists $hir exprs $e traitCall]} {
             dict unset hir exprs $e traitCall
@@ -1055,6 +1072,72 @@ proc hir::traits::TypeCall {hirVar e node} {
     }
     if {[dict get $shape shape] eq "candidate"} {
         set args [linsert $args 0 [list trait $id]]
+    }
+    set contract [hir::types::MakeFn $args $type [dict get $req errors]]
+    dict set hir exprs [dict get $node callee] type [hir::types::intern hir $contract]
+    if {[dict get $shape shape] eq "field"} {
+        dict set hir exprs [dict get $node callee] traitCallee 1
+    }
+    dict set hir exprs $e traitCall $record
+    return [list $type [dict get $req errors]]
+}
+
+# TypeCall's case of a method-syntax call E (NODE, its MethodShape SHAPE)
+# whose receiver has the constrained imprint type RECEIVERTYPE
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): `value.describe()` where value: T
+# and T satisfies Printable because a constrained slot of the signature
+# holds it. When the method name is a requirement of exactly one of T's
+# traits it is that trait's operation -- the trait declaration is
+# authoritative, as for a view -- typed by the requirement's contract with
+# the trait's own type replaced by T itself (never by a view: the receiver
+# and a self result stay T), and recorded `imprint 1`: its implementation is
+# the imprinted type's, a direct call in each specialization the plan makes
+# per binding (Plan's imprint clones; an intrinsic trait's is one native for
+# every witness). Otherwise it is no trait call (T is a type, whose values
+# have whatever other operations the code calls); two traits of T with that
+# requirement make it ambiguous (TRAIT-AMBIGUOUS-OPERATION, verify).
+proc hir::traits::TypeImprintCall {hirVar e node shape receiverType} {
+    upvar 1 $hirVar hir
+    if {[dict exists $node traitImpl]} {
+        # The monomorphized program's direct call of the implementation the
+        # plan chose (an intrinsic trait's native, in a function no binding
+        # specializes): an ordinary call now.
+        if {[dict exists $hir exprs $e traitCall]} {
+            dict unset hir exprs $e traitCall
+        }
+        return ""
+    }
+    set name [dict get $shape name]
+    set owners {}
+    foreach id [hir::types::ImprintConstraints $receiverType] {
+        if {[declared $id] && ![isContext $id] && [requirement $id $name] ne ""} {
+            lappend owners $id
+        }
+    }
+    if {$owners eq {}} {
+        if {[dict exists $hir exprs $e traitCall]} {
+            dict unset hir exprs $e traitCall
+        }
+        return ""
+    }
+    set id [lindex $owners 0]
+    set record [dict create trait $id requirement $name receiver [dict get $shape receiver] \
+        args [dict get $shape args] shape [dict get $shape shape] imprint 1]
+    if {[llength $owners] > 1} {
+        dict set record ambiguous $owners
+    }
+    set req [requirement $id $name]
+    set result [dict get $req result]
+    if {$result eq ""} {
+        set type any
+    } elseif {[dict get $result self]} {
+        set type $receiverType
+    } else {
+        set type [dict get $result type]
+    }
+    set args [lmap p [lrange [dict get $req params] 1 end] {dict get $p type}]
+    if {[dict get $shape shape] eq "candidate"} {
+        set args [linsert $args 0 $receiverType]
     }
     set contract [hir::types::MakeFn $args $type [dict get $req errors]]
     dict set hir exprs [dict get $node callee] type [hir::types::intern hir $contract]
@@ -1205,13 +1288,35 @@ proc hir::traits::verify {hirVar} {
     }
     VerifyFunctionValues hir $parents
     set roots [dict get $hir roots]
+    set imprinted {}
+    set nestedImprinted {}
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] ne "block" || ![IsPolymorphic $hir $e]} {
+        if {[dict get $node kind] ne "block"} {
             continue
         }
         set parent [dict getdef $parents $e ""]
-        if {$parent eq "" || [dict get $hir exprs $parent kind] ne "bind" || $parent ni $roots} {
+        set nested [expr {$parent eq "" || [dict get $hir exprs $parent kind] ne "bind" || $parent ni $roots}]
+        if {$nested && [IsPolymorphic $hir $e]} {
             hir::Diagnose hir TRAIT-NESTED-POLYMORPHIC "a function with a trait-typed parameter must be declared at the top level of a module or the entry program: a nested trait-polymorphic function is not supported yet (its specializations would have to be made per activation of the enclosing function)" $e
+        } elseif {[dict get $node reachable] && [hir::imprint::BlockSignature $hir $e] ne ""} {
+            lappend imprinted $e
+            if {$nested} {
+                lappend nestedImprinted $e
+            }
+        }
+    }
+    # A nested imprinted function whose code needs a specialization per
+    # binding of its constrained variables (an ordinary trait's operation on
+    # one, or a call passing one to a function that does: ImprintPolys) has
+    # the same limitation (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, "Trait
+    # operations").
+    if {$nestedImprinted ne {}} {
+        set specialized [ImprintPolyBlocks $hir $imprinted]
+        foreach e $nestedImprinted {
+            if {![dict exists $specialized $e]} {
+                continue
+            }
+            hir::Diagnose hir TRAIT-NESTED-POLYMORPHIC "a function that applies a trait's operation to a value of one of its own constrained imprint variables must be declared at the top level of a module or the entry program: a nested one is not supported yet (its specializations, one per binding of the variables, would have to be made per activation of the enclosing function)" $e
         }
     }
     Promote hir
@@ -1266,6 +1371,17 @@ proc hir::traits::VerifyCallUse {hirVar e node} {
     upvar 1 $hirVar hir
     if {[dict exists $node traitCall]} {
         set record [dict get $node traitCall]
+        if {[dict exists $record ambiguous]} {
+            # An operation of a constrained imprint variable that two of its
+            # traits declare (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): no trait
+            # is ranked above another, so the call names no one operation.
+            set origin [if {[dict exists $node method]} {dict get $node method nameOrigin} else {dict get $hir exprs [dict get $node callee] nameOrigin}]
+            set receiverType [hir::typeOf $hir [dict get $record receiver]]
+            hir::DiagnoseAt hir AMBIGUOUS-METHOD-CALL [format {the operation "%s" of a value of type %s is ambiguous: %s satisfies %s, and each of them declares "%s" (no trait is preferred to another)} \
+                [dict get $record requirement] [hir::types::show $receiverType] [hir::types::show $receiverType] \
+                [join [dict get $record ambiguous] { and }] [dict get $record requirement]] $e $origin
+            return
+        }
         if {[dict exists $record unknown]} {
             set id [dict get $record trait]
             set origin [if {[dict exists $node method]} {dict get $node method nameOrigin} else {dict get $hir exprs [dict get $node callee] nameOrigin}]
@@ -1855,6 +1971,11 @@ proc hir::traits::ImplIdent {impl} {
 
 # A short, symbol-safe spelling of witness type W for clone names.
 proc hir::traits::WitnessName {w} {
+    if {[hir::types::IsAppliedStruct $w]} {
+        # An application (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): its
+        # arguments are part of its identity, so of a clone's name.
+        return [string map {" " ""} [hir::types::show $w]]
+    }
     if {[hir::types::IsNamedStruct $w] || [hir::types::IsEnum $w]} {
         return [lindex $w 1]
     }
@@ -1896,6 +2017,11 @@ proc hir::traits::Plan {hir syntax} {
     # untyped parameter, AFFINE-VALUES.md: specialized per affine type, the
     # source function kept for every other call.)
     set affinePolys [AffinePolys $hir]
+    # (The imprinted functions whose code performs an ordinary trait's
+    # operation on a constrained imprint variable of their own, directly or
+    # through another such function: specialized per binding,
+    # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+    set imprintPolys [ImprintPolys $hir $roots]
     foreach r $roots {
         set node [dict get $hir exprs $r]
         if {[dict get $node kind] ne "bind" || [dict get $hir exprs [dict get $node value] kind] ne "block"} {
@@ -1905,7 +2031,8 @@ proc hir::traits::Plan {hir syntax} {
         set trait [IsPolymorphic $hir $block]
         set contextTraits [ContextTraitsOf $hir $block]
         set affine [dict exists $affinePolys $block]
-        if {(!$trait && $contextTraits eq {} && !$affine) || ![dict exists $node sid]} {
+        set imprint [dict exists $imprintPolys $block]
+        if {(!$trait && $contextTraits eq {} && !$affine && !$imprint) || ![dict exists $node sid]} {
             continue
         }
         set b [dict get $node binding]
@@ -1918,7 +2045,7 @@ proc hir::traits::Plan {hir syntax} {
         }
         dict set polys $block [dict create bind $r binding $b sid [dict get $node sid] \
             namespace $ns name $name index [dict get $rootIndex $r] trait $trait affine $affine \
-            contextTraits $contextTraits selection [ContextSelection $hir $contextTraits]]
+            imprint $imprint contextTraits $contextTraits selection [ContextSelection $hir $contextTraits]]
     }
     # Each expression's home: the replaced function whose body it is in (a
     # clone context), or "" (live code).
@@ -1952,6 +2079,7 @@ proc hir::traits::Plan {hir syntax} {
     }
     set actions [dict create]
     set clones [dict create]
+    set cloneCounts [dict create]
     set livePos [dict create]
     set edges [dict create]
     set implUses {}
@@ -1960,6 +2088,7 @@ proc hir::traits::Plan {hir syntax} {
     while {$queue ne {}} {
         set context [lindex $queue 0]
         set queue [lrange $queue 1 end]
+        set binding {}
         if {$context eq "live"} {
             set view $hir
             set h ""
@@ -1978,6 +2107,16 @@ proc hir::traits::Plan {hir syntax} {
                 } else {
                     set rt [hir::type $hir [dict get $hir exprs $h resultType]]
                 }
+            } elseif {[lindex $context 0] eq "imprintfn"} {
+                # An imprinted function specialized for one binding of its
+                # constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+                # its generic analysis, every type of it imprinted with the
+                # binding.
+                lassign $context - h binding
+                set view $hir
+                set caller generic
+                set params {}
+                set rt [hir::imprint::Substitute [dict get $hir exprs $h declaredResult] $binding]
             } else {
                 set inst [dict get $instances $context]
                 set view [hir::semantic::View $hir $context]
@@ -1985,9 +2124,14 @@ proc hir::traits::Plan {hir syntax} {
                 set caller $context
                 set params [CloneWitnesses $hir $h [dict get $inst args]]
                 set rt [dict get $inst result]
+                set binding [InstanceBinding $hir $h [dict get $inst args]]
             }
             set fn [dict get $polys $h]
             set ckey [list $h $params [dict get $fn selection]]
+            if {[lindex $context 0] ne "contextfn" && [dict get $fn imprint] && $binding ne {}} {
+                # (A specialization for a binding is keyed by it too.)
+                lappend ckey $binding
+            }
             if {![dict exists $clones $ckey]} {
                 set node [dict get $syntax [dict get $fn sid]]
                 set result ""
@@ -2006,10 +2150,19 @@ proc hir::traits::Plan {hir syntax} {
                 foreach {c w} [dict get $fn selection] {
                     lappend parts "$c=$w"
                 }
+                set imprints [lindex $ckey 3]
+                dict for {v w} $imprints {
+                    lappend parts "$v=[WitnessName $w]"
+                }
                 dict set clones $ckey [dict create key $ckey node $node namespace [dict get $fn namespace] \
                     function [dict get $fn sid] params $params result $result source $qualified \
-                    selection [dict get $fn selection] \
+                    selection [dict get $fn selection] imprints $imprints \
                     name "$qualified<[join $parts ,]>" block $h]
+                dict incr cloneCounts $h
+                if {[dict get $cloneCounts $h] > [ImprintCloneLimit]} {
+                    return [dict create diagnostics [list [list TRAIT-POLYMORPHIC-RECURSION [format {%s is specialized for more than %d bindings of its imprint variables: its calls imprint it with ever new types (polymorphic recursion), which static specialization cannot do} \
+                        $qualified [ImprintCloneLimit]] $h]]]
+                }
             }
         }
         # The context traits this context's code has a provider for: the
@@ -2074,12 +2227,24 @@ proc hir::traits::Plan {hir syntax} {
                             continue
                         }
                         set receiverType [hir::typeOf $view [dict get $record receiver]]
-                        if {![hir::types::IsView $receiverType] || ![IsConcreteWitness [hir::types::ViewWitness $receiverType]]} {
+                        set id [dict get $record trait]
+                        if {[dict exists $record imprint]} {
+                            # An operation of a constrained imprint variable
+                            # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+                            # witness is the type this specialization's
+                            # binding imprints (an intrinsic trait's
+                            # implementation is the same native for all).
+                            set w [hir::types::canonical [hir::imprint::Substitute $receiverType $binding]]
+                            if {[hir::imprint::Mentions $w] && ![isIntrinsic $id]} {
+                                lappend diagnostics [list TRAIT-INTERNAL "trait operation [dict get $record requirement] of [hir::types::show $receiverType] has no imprinted witness here" $e]
+                                continue
+                            }
+                        } elseif {![hir::types::IsView $receiverType] || ![IsConcreteWitness [hir::types::ViewWitness $receiverType]]} {
                             lappend diagnostics [list TRAIT-INTERNAL "trait operation [dict get $record requirement] has no concrete witness here" $e]
                             continue
+                        } else {
+                            set w [SubstituteWitness [hir::types::ViewWitness $receiverType] $binding]
                         }
-                        set w [hir::types::ViewWitness $receiverType]
-                        set id [dict get $record trait]
                         set s [satisfies $w $id]
                         if {![dict get $s ok]} {
                             lappend diagnostics [list TRAIT-NOT-SATISFIED [explain $w $id $hir] $e]
@@ -2135,6 +2300,40 @@ proc hir::traits::Plan {hir syntax} {
                                 continue
                             }
                         }
+                        if {[dict get $fn imprint] && ![dict get $fn trait] && [dict get $fn contextTraits] eq {}} {
+                            # A function specialized per binding of its
+                            # constrained variables: this call's binding,
+                            # imprinted with this specialization's own.
+                            if {[DeadCall $view $e]} {
+                                SetAction actions diagnostics $ckey $sid [list dead] $e
+                                continue
+                            }
+                            set callBinding [dict create]
+                            dict for {v t} [SelectingBinding $hir $tb [hir::imprint::BindingOf $view $e]] {
+                                dict set callBinding $v [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+                            }
+                            if {[BindingMentions $callBinding]} {
+                                lappend diagnostics [list TRAIT-INTERNAL "a call of [dict get $fn name] has no imprinted binding here" $e]
+                                continue
+                            }
+                            set j [list imprintfn $tb $callBinding]
+                            set witnesses {}
+                            set k [list $tb {} [dict get $fn selection] $callBinding]
+                            SetAction actions diagnostics $ckey $sid [list redirect $k] $e
+                            if {$ckey eq "live"} {
+                                set top [TopIndex $parents $rootIndex $e]
+                                if {![dict exists $livePos $k] || $top < [dict get $livePos $k]} {
+                                    dict set livePos $k $top
+                                }
+                            } else {
+                                dict set edges $ckey $k 1
+                            }
+                            if {![dict exists $seen $j]} {
+                                dict set seen $j 1
+                                lappend queue $j
+                            }
+                            continue
+                        }
                         if {[dict get $fn trait]} {
                             if {![dict exists $calls [list $caller $e]] && [DeadCall $view $e]} {
                                 # A dead call (an argument of type `never`,
@@ -2158,6 +2357,16 @@ proc hir::traits::Plan {hir syntax} {
                             if {$witnesses eq ""} {
                                 lappend diagnostics [list TRAIT-INTERNAL "a call of [dict get $polys $tb name] has no concrete witness" $e]
                                 continue
+                            }
+                            if {$binding ne {}} {
+                                # (In a specialization for a binding, a view
+                                # whose witness is one of its constrained
+                                # variables has the imprinted witness.)
+                                set witnesses [concat {*}[lmap {i w} $witnesses {list $i [SubstituteWitness $w $binding]}]]
+                                if {[BindingMentions $witnesses]} {
+                                    lappend diagnostics [list TRAIT-INTERNAL "a call of [dict get $polys $tb name] has no imprinted witness here" $e]
+                                    continue
+                                }
                             }
                         } elseif {[dict get $fn contextTraits] ne {}} {
                             if {[dict exists $calls [list $caller $e]]
@@ -2186,6 +2395,18 @@ proc hir::traits::Plan {hir syntax} {
                             }
                         }
                         set k [list $tb $witnesses [dict get $fn selection]]
+                        if {[dict get $fn imprint]} {
+                            # (A trait-polymorphic function also specialized
+                            # per binding: TRAIT-CONSTRAINED-IMPRINTED-
+                            # TYPES.md.)
+                            set calleeBinding [dict create]
+                            dict for {v t} [SelectingBinding $hir $tb [hir::imprint::BindingOf $view $e]] {
+                                dict set calleeBinding $v [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+                            }
+                            if {$calleeBinding ne {}} {
+                                lappend k $calleeBinding
+                            }
+                        }
                         SetAction actions diagnostics $ckey $sid [list redirect $k] $e
                         if {$ckey eq "live"} {
                             set top [TopIndex $parents $rootIndex $e]
@@ -2298,7 +2519,7 @@ proc hir::traits::Plan {hir syntax} {
     # it).
     set drop [dict create]
     dict for {block fn} $polys {
-        if {[dict get $fn trait] || [dict get $fn contextTraits] ne {}} {
+        if {[dict get $fn trait] || [dict get $fn contextTraits] ne {} || [dict get $fn imprint]} {
             dict set drop [dict get $fn sid] 1
         }
     }
@@ -2311,7 +2532,7 @@ proc hir::traits::Plan {hir syntax} {
                 set fn [hir::contexts::Denotes $hir [dict get $node binding]]
             }
             if {$fn ne "" && [dict exists $polys $fn]
-                    && ([dict get $polys $fn trait] || [dict get $polys $fn contextTraits] ne {})} {
+                    && ([dict get $polys $fn trait] || [dict get $polys $fn contextTraits] ne {} || [dict get $polys $fn imprint])} {
                 dict set drop [dict get $node sid] 1
             }
         }
@@ -2372,6 +2593,181 @@ proc hir::traits::Plan {hir syntax} {
     }
     return [dict create clones $clones actions $actions place $place drop $drop \
         externals $externals methods $methods polys $polys]
+}
+
+# The most specializations one imprinted function gets for the bindings of
+# its constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): a bound
+# on polymorphic recursion, which would otherwise make ever new ones.
+proc hir::traits::ImprintCloneLimit {} {
+    return 64
+}
+
+# The blocks of the top-level functions ROOTS of HIR that are specialized
+# per binding of their constrained imprint variables
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, "Trait operations"): those whose
+# code (nested functions included) performs an ordinary trait's operation
+# on a value whose type mentions a variable of their own, passes such a
+# value to a trait-typed parameter, or calls another such function with a
+# binding that mentions one -- the operations whose implementation is the
+# imprinted type's. A function whose variables carry only intrinsic traits
+# (Hashable) or are never operated on through a trait is never cloned for
+# its constraints: an obligation alone selects nothing.
+proc hir::traits::ImprintPolys {hir roots} {
+    set blocks {}
+    foreach r $roots {
+        set node [dict get $hir exprs $r]
+        if {[dict get $node kind] eq "bind" && [dict get $hir exprs [dict get $node value] kind] eq "block"} {
+            lappend blocks [dict get $node value]
+        }
+    }
+    return [ImprintPolyBlocks $hir $blocks]
+}
+
+# ImprintPolys' rule over the function blocks BLOCKS of HIR, wherever they
+# are declared: the ones of BLOCKS whose code needs a specialization per
+# binding of their own constrained variables.
+proc hir::traits::ImprintPolyBlocks {hir candidates} {
+    set direct [dict create]
+    set callees [dict create]
+    set blocks {}
+    foreach block $candidates {
+        set sig [hir::imprint::BlockSignature $hir $block]
+        if {$sig eq ""} {
+            continue
+        }
+        set vars [dict get $sig vars]
+        lappend blocks $block
+        set stack [hir::children $hir $block]
+        while {$stack ne {}} {
+            set e [lindex $stack end]
+            set stack [lrange $stack 0 end-1]
+            lappend stack {*}[hir::children $hir $e]
+            set n [dict get $hir exprs $e]
+            if {[dict get $n kind] ne "call"} {
+                continue
+            }
+            if {[dict exists $n traitCall imprint] && ![dict exists $n traitCall ambiguous]
+                    && ![isIntrinsic [dict get $n traitCall trait]]
+                    && [MentionsAny [hir::typeOf $hir [dict get $n traitCall receiver]] $vars]} {
+                dict set direct $block 1
+                continue
+            }
+            lassign [dict getdef $n target ""] tk tb
+            if {$tk ne "block"} {
+                continue
+            }
+            if {[IsPolymorphic $hir $tb]} {
+                foreach arg [dict get $n args] d [dict get $hir exprs $tb declaredParamTypes] {
+                    if {$d ne {} && [hir::types::IsTraitConstraint $d] && $arg ne ""
+                            && [MentionsAny [hir::typeOf $hir $arg] $vars]} {
+                        dict set direct $block 1
+                    }
+                }
+            }
+            if {[BindingMentionsAny [SelectingBinding $hir $tb [hir::imprint::BindingOf $hir $e]] $vars]} {
+                dict lappend callees $block $tb
+            }
+        }
+    }
+    set result $direct
+    set changed 1
+    while {$changed} {
+        set changed 0
+        foreach block $blocks {
+            if {[dict exists $result $block]} {
+                continue
+            }
+            foreach tb [dict getdef $callees $block {}] {
+                if {[dict exists $result $tb]} {
+                    dict set result $block 1
+                    set changed 1
+                    break
+                }
+            }
+        }
+    }
+    return $result
+}
+
+# 1 if TYPE mentions one of the imprint variables VARS.
+proc hir::traits::MentionsAny {type vars} {
+    foreach name [hir::imprint::VariablesIn $type] {
+        if {$name in $vars} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if a type of BINDING (variable -> type) mentions one of VARS.
+proc hir::traits::BindingMentionsAny {binding vars} {
+    dict for {v t} $binding {
+        if {[MentionsAny $t $vars]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if a type of BINDING (variable -> type) mentions any imprint variable.
+proc hir::traits::BindingMentions {binding} {
+    dict for {v t} $binding {
+        if {[hir::imprint::Mentions $t]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# WITNESS (a view's hidden witness) imprinted with BINDING: in a
+# specialization for a binding, a view whose witness is a constrained
+# variable has the imprinted type as its witness.
+proc hir::traits::SubstituteWitness {witness binding} {
+    if {$binding eq {} || ![hir::imprint::Mentions $witness]} {
+        return $witness
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $witness $binding]]
+}
+
+# The binding of the imprint variables of block BLOCK that the entry types
+# ENTRY of one of its semantic instances imprint ("" when it has none, or
+# when they do not bind): what an instance of a function that is also
+# specialized per binding is specialized for.
+proc hir::traits::InstanceBinding {hir block entry} {
+    set sig [hir::imprint::BlockSignature $hir $block]
+    if {$sig eq ""} {
+        return {}
+    }
+    set bound [hir::imprint::Bind $sig $entry "" ""]
+    if {![dict get $bound ok] && ![dict exists $bound binding]} {
+        return {}
+    }
+    return [SelectingBinding $hir $block [dict get $bound binding]]
+}
+
+# The part of BINDING (variable -> type) for the variables of block BLOCK's
+# signature a source trait constrains: the ones whose binding selects an
+# implementation, the one dimension of a specialization per binding
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, "Trait integration"). An
+# unconstrained variable, or one only an intrinsic trait constrains, stays
+# a variable of the specialization, imprinted at each of its calls.
+proc hir::traits::SelectingBinding {hir block binding} {
+    if {$binding eq {}} {
+        return {}
+    }
+    set sig [hir::imprint::BlockSignature $hir $block]
+    if {$sig eq ""} {
+        return {}
+    }
+    set selecting [dict create]
+    dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
+        foreach trait $traits {
+            if {![isIntrinsic $trait]} {
+                dict set selecting $name 1
+            }
+        }
+    }
+    return [dict filter $binding script {v t} {dict exists $selecting $v}]
 }
 
 # The context traits block E's requirement includes (CONTEXT-TRAITS.md),

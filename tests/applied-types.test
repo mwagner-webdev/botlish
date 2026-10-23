@@ -82,12 +82,12 @@ foreach {name source pattern} {
     } -result {{SURFACE SYNTAX} 1}
 }
 
-test applied-type-malformed-comma-arity {"List[A, B]" is a syntax error: the grammar is unary-only (a comma is not part of a single TypeExpr)} -body {
-    catch {surface::parse {type A = Int in 0..3
+test applied-type-malformed-comma-arity {"List[A, B]" parses as an application of two arguments (the grammar is n-ary since parameterized structs, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) and is resolution's arity error: List takes one} -body {
+    catch {surface::compile {type A = Int in 0..3
 fn f(x: List[A, A]):
     x} comma.bot} message options
-    lrange [dict get $options -errorcode] 0 1
-} -result {SURFACE SYNTAX}
+    list [dict get $options -errorcode] [string match {*"List" takes 1 type argument(s), got 2*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # Resolution: unknown constructor, wrong kind, wrong arity, unknown argument

@@ -83,11 +83,11 @@
 @@ recursive-struct-not-hashable a struct met again through its own fields is taken as not known, so a recursive Hashable struct is lost
 ## hir/types.tcl
 <<<<
-                if {$id in $seen} {
+                if {$type in $seen} {
                     return {total ""}
                 }
 ====
-                if {$id in $seen} {
+                if {$type in $seen} {
                     return [list unknown "recursive"]
                 }
 >>>>
