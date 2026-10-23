@@ -40,7 +40,7 @@
 # {TYPE BODY}:
 #
 #   worker -> server  hello {protocol 1 frontEnd FINGERPRINT pid PID}
-#                     revision {job J text EXPORT ms ELAPSED}
+#                     revision {job J text EXPORT ms ANALYSIS exportMs EXPORT}
 #                     failed {job J message M}
 #   server -> worker  documents {PATH ENTRY ...}   ENTRY {text T version V},
 #                                                  or "" for the disk
@@ -362,6 +362,7 @@ proc lsp::scheduler::FromWorker {s bytes} {
                     Deliver $s [dict get $running root] [dict get $running job] failed [dict get $body message]
                 } else {
                     lsp::stats::add workerAnalysisMs [dict getdef $body ms 0]
+                    lsp::stats::add workerExportMs [dict getdef $body exportMs 0]
                     set start [clock microseconds]
                     if {[catch {service::import [Option $s -workspace] [dict get $body text] -version [dict get $running job]} rev]} {
                         Deliver $s [dict get $running root] [dict get $running job] failed "the worker's revision could not be imported: $rev"

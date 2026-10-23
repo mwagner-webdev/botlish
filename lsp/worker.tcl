@@ -98,6 +98,7 @@ proc lsp::worker::Handle {bytes} {
                 Send failed [dict create job $job message $rev]
                 return
             }
+            set analyzed [clock milliseconds]
             try {
                 # The query indexes of the documents the editor has open (and
                 # the entry), computed here, where the sources are parsed
@@ -108,7 +109,8 @@ proc lsp::worker::Handle {bytes} {
             } finally {
                 service::release $rev
             }
-            Send revision [dict create job $job text $text ms [expr {[clock milliseconds] - $start}]]
+            set now [clock milliseconds]
+            Send revision [dict create job $job text $text ms [expr {$analyzed - $start}] exportMs [expr {$now - $analyzed}]]
         }
         exit {
             Leave 0

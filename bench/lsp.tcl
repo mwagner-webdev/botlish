@@ -235,6 +235,7 @@ proc session {name scheduler} {
         analyses [dict getdef $counters analyses 0] submitted [dict getdef $counters submitted 0] \
         killed [dict getdef $counters supersededKilled 0] killedMs [dict getdef $totals supersededMs 0] \
         analysisMs [dict getdef $totals analysisMs 0] workerAnalysisMs [dict getdef $totals workerAnalysisMs 0] \
+        workerExportMs [dict getdef $totals workerExportMs 0] \
         workerStarts [dict getdef $counters workerStarts 0] workerStartMs [dict getdef $totals workerStartMs 0] \
         importMs [dict getdef $totals importMs 0] importBytes [dict getdef $counters importBytes 0] \
         staleResults [dict getdef $counters staleResults 0] freshResults [dict getdef $counters freshResults 0] \
@@ -314,13 +315,13 @@ foreach r $results {
     lappend lines "| [dict get $r workload] | [dict get $r scheduler] | [dict get $r first] | [dict get $r diagnostics] | [fmt [lindex $longest 0]] ([lindex $longest 1]) | [dict get $r analyses] of [dict get $r submitted] submitted | [dict get $r killed] ([fmt [dict get $r killedMs]]) | $superseded |"
 }
 lappend lines "" "## Worker, transfer and memory" "" \
-    "| workload | scheduler | server start (ms) | worker starts | worker start to hello (ms, mean) | analysis in the worker (ms, mean) | import (ms, mean) | transferred (KiB, mean) | server RSS max (MiB) | worker RSS max (MiB) | processes |" \
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+    "| workload | scheduler | server start (ms) | worker starts | worker start to hello (ms, mean) | analysis in the worker (ms, mean) | indexes and export in the worker (ms, mean) | import (ms, mean) | transferred (KiB, mean) | server RSS max (MiB) | worker RSS max (MiB) | processes |" \
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 foreach r $results {
     # (A killed analysis never returns: every analysis counted was imported.)
     set imports [expr {[dict get $r scheduler] eq "worker" ? max(1, [dict get $r analyses]) : 0}]
     set starts [dict get $r workerStarts]
-    lappend lines "| [dict get $r workload] | [dict get $r scheduler] | [dict get $r startup] | $starts | [expr {$starts ? [fmt [expr {[dict get $r workerStartMs] / $starts}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r workerAnalysisMs] / double($imports)}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importMs] / $imports}] 1] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importBytes] / 1024.0 / $imports}]] : "-"}] | [fmt [tcl::mathfunc::max 0 {*}[dict get $r serverRss]]] | [expr {[dict get $r workerRss] eq {} ? "-" : [fmt [tcl::mathfunc::max {*}[dict get $r workerRss]]]}] | [expr {[dict get $r scheduler] eq "worker" ? 2 : 1}] |"
+    lappend lines "| [dict get $r workload] | [dict get $r scheduler] | [dict get $r startup] | $starts | [expr {$starts ? [fmt [expr {[dict get $r workerStartMs] / $starts}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r workerAnalysisMs] / double($imports)}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r workerExportMs] / double($imports)}]] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importMs] / $imports}] 1] : "-"}] | [expr {$imports ? [fmt [expr {[dict get $r importBytes] / 1024.0 / $imports}]] : "-"}] | [fmt [tcl::mathfunc::max 0 {*}[dict get $r serverRss]]] | [expr {[dict get $r workerRss] eq {} ? "-" : [fmt [tcl::mathfunc::max {*}[dict get $r workerRss]]]}] | [expr {[dict get $r scheduler] eq "worker" ? 2 : 1}] |"
 }
 if {$recoveries ne {}} {
     lappend lines "" "## Worker crash recovery" "" "| workload | crash reported after (ms) | next edit to its diagnostics (ms) | workers started | exit |" "|---|---:|---:|---:|---:|"

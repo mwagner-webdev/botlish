@@ -609,7 +609,7 @@ stderr). The program cannot choose its own exit status
 
 @topic cli.lsp
 title: The language server (editor integration)
-summary: botlish -lsp speaks the Language Server Protocol on stdin and stdout: an editor gets the compiler's own diagnostics, hover, go-to-definition and find-references for unsaved Botlish source, without running anything.
+summary: botlish -lsp is a language server on stdin and stdout: the compiler's own diagnostics, hover, definitions and references for an editor's unsaved Botlish source.
 index: backends
 alias: lsp; language server; editor; neovim; vscode; ide; editor support
 keywords: -lsp, LSP, hover, definition, references, diagnostics, editor, neovim
