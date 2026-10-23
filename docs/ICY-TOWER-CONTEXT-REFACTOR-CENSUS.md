@@ -723,8 +723,8 @@ f1. Checked as AGENTS.md asks for a change to hir/affine.tcl: the
 affine, coroutine, mutable-vector, mutable-array, list-length and c-ffi
 test files and their golden suites on all backends (all passed),
 `audit/affine/tools/fuzz.tcl` on seeds 3, 17 and 41 (120 programs, 0
-disagreements), `audit/affine/tools/mutate.tcl` and
-`audit/coroutines/tools/mutate.tcl` (TODO results).
+disagreements), `audit/affine/tools/mutate.tcl` (29 of 29 mutants killed) and
+`audit/coroutines/tools/mutate.tcl` (52 of 52 killed).
 
 ## 11. Warning proposal
 
