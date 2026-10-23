@@ -302,10 +302,30 @@ done = spam():
         unit
 "finished"}
     set hir [surface::compile $text spam.bot]
+    # One write whose failure ends the run in a runtime error (a negative
+    # allocation): with descriptor 1 closed it fails (EBADF), with /dev/null
+    # in its place it succeeds. (The spam program cannot tell them apart:
+    # it handles the failure, and Rust's standard output takes EBADF for
+    # success when the result line is printed.)
+    set once [surface::compile {import std::io
+import std::linux::io
+import std::mutable_array
+
+fn hello() errors std::io::WriteFailed:
+    std::io::print_line("hello")
+
+with context std::linux::io::create()
+
+written = hello():
+    on std::io::WriteFailed:
+        std::mutable_array::allocate(0 - 1)
+        unit
+"written"} once.bot]
     set results {}
     foreach linker [concat system [otherLinkers]] {
         set exe [linkWith $linker $hir [file join $dir spam.$linker]]
-        set closed [catch {exec sh -c "exec '$exe' >&-"} message options]
+        set onceExe [linkWith $linker $once [file join $dir once.$linker]]
+        set closed [catch {exec sh -c "exec '$onceExe' >&-"} message options]
         lappend results $linker [closedPipe $exe] $closed
     }
     removeDirectory system-linker-process
