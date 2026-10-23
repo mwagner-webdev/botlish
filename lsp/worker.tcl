@@ -1,0 +1,118 @@
+# worker.tcl -- the language server's analysis worker (LSP-MILESTONE-1.md,
+# "Scheduling"): main.tcl -lsp-worker.
+#
+#   lsp::worker::main ?-warnings MODE? ?-target T?
+#
+# A persistent process the server starts (scheduler.tcl's worker strategy)
+# and talks to over its stdin and stdout with the private protocol
+# scheduler.tcl describes. It keeps one compiler-service workspace whose
+# overlay mirrors the server's documents, analyzes the entry programs it is
+# asked to (service::analyze: the one analysis), and answers with each
+# revision as text (service::export), releasing it at once: it holds no
+# revision between jobs, only what the compiler keeps warm (its bytecode,
+# the loader's bounded parse cache). It exits when its input ends or it is
+# told to; it writes nothing to stdout but protocol messages, and logs on
+# stderr.
+#
+# Test hooks (BOTLISH_LSP_FAULT in its environment, comma-separated; never
+# reachable from the protocol): analysis-delay=MS sleeps before each
+# analysis (a slow analysis); crash-marker=TEXT makes an analysis of a
+# program while any document holds TEXT write half a message and exit (a
+# worker dying mid-answer).
+
+namespace eval lsp::worker {
+    variable workspace ""
+    variable endpoint ""
+    variable faults [dict create]
+}
+
+proc lsp::worker::main {args} {
+    variable workspace
+    variable endpoint
+    variable faults
+    set options [dict create -warnings [hir::warnings::defaultMode] -target ""]
+    foreach {option value} $args {
+        dict set options $option $value
+    }
+    set faults [lsp::server::Faults]
+    set workspace [service::workspace -warnings [dict get $options -warnings] -target [dict get $options -target]]
+    set endpoint [lsp::transport::connect stdin stdout -message lsp::worker::Message \
+        -problem lsp::worker::Problem -eof lsp::worker::Ended]
+    Send hello [dict create protocol $::lsp::scheduler::protocol frontEnd [hir::interchange::fingerprint] pid [pid]]
+    vwait forever
+}
+
+proc lsp::worker::Send {type body} {
+    variable endpoint
+    lsp::transport::send $endpoint [encoding convertto utf-8 [list $type $body]]
+}
+
+proc lsp::worker::Message {bytes} {
+    variable workspace
+    variable faults
+    set message [encoding convertfrom utf-8 $bytes]
+    lassign $message type body
+    switch -- $type {
+        documents {
+            dict for {path entry} $body {
+                if {$entry eq ""} {
+                    service::clearDocument $workspace $path
+                } else {
+                    service::setDocument $workspace $path [dict get $entry text] -version [dict get $entry version]
+                }
+            }
+        }
+        analyze {
+            set job [dict get $body job]
+            set delay [dict getdef $faults analysis-delay 0]
+            if {$delay > 0} {
+                after $delay
+            }
+            set marker [dict getdef $faults crash-marker ""]
+            if {$marker ne ""} {
+                dict for {path entry} [service::documents $workspace] {
+                    if {[string first $marker [dict getdef $entry text ""]] >= 0} {
+                        # Half a message, then death: the server must never take
+                        # it for a result.
+                        puts -nonewline stdout "Content-Length: 4096\r\n\r\n[list revision [dict create job $job text]]"
+                        flush stdout
+                        exit 3
+                    }
+                }
+            }
+            set start [clock milliseconds]
+            if {[catch {service::analyze $workspace [dict get $body entry] -version $job} rev]} {
+                Send failed [dict create job $job message $rev]
+                return
+            }
+            try {
+                set text [service::export $rev]
+            } finally {
+                service::release $rev
+            }
+            Send revision [dict create job $job text $text ms [expr {[clock milliseconds] - $start}]]
+        }
+        exit {
+            Leave 0
+        }
+        default {
+            puts stderr "botlish lsp worker: unknown message \"$type\""
+            Leave 2
+        }
+    }
+}
+
+proc lsp::worker::Problem {kind detail} {
+    puts stderr "botlish lsp worker: unreadable input ($kind: $detail)"
+    Leave 2
+}
+
+proc lsp::worker::Ended {} {
+    Leave 0
+}
+
+proc lsp::worker::Leave {status} {
+    variable endpoint
+    lsp::transport::drain $endpoint
+    exit $status
+}

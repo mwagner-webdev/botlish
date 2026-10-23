@@ -23,6 +23,8 @@
 #   service::hir REV                    its HIR ("" without one)
 #   service::release REV
 #   service::revisions ?WS?             the live revisions
+#   service::export REV                 the revision as text, for another process
+#   service::import WS TEXT ?-version V?    => REV: an exported revision
 #
 # Queries
 #
@@ -64,6 +66,8 @@ namespace eval service {
     # The facts a position query answers; each is either in its result or in
     # its `unavailable` dict, with the reason (at).
     variable facts {syntax construct binding type hover definition references diagnostics topics}
+    # The format of an exported revision (export, import).
+    variable exportVersion 1
 }
 
 # Raises the service error {SERVICE KIND} with MESSAGE: a misuse of the
@@ -498,6 +502,79 @@ proc service::stale {rev} {
         }
     }
     return $changed
+}
+
+# Revision REV as text another process with the same front end can import
+# (import): everything the revision is -- the entry, its outcome, its
+# diagnostics, the failure, the configuration, the snapshot (every source's
+# observation and text) -- with its HIR in the HIR interchange format
+# (HIR-INTERCHANGE.md), the checked source build of a trait program
+# included (its queries read it: QueryHir). Not the caller's version, its
+# workspace or anything derived from it.
+proc service::export {rev} {
+    variable exportVersion
+    set revision [Get $rev]
+    set hir [dict get $revision hir]
+    if {$hir ne ""} {
+        set hir [hir::interchange::encode $hir -trait-source 1]
+    }
+    set body [dict create]
+    foreach key {entry outcome errors warnings failure config sources} {
+        dict set body $key [dict get $revision $key]
+    }
+    dict set body hir $hir
+    return "botlish-service-revision $exportVersion\n$body"
+}
+
+# A new revision of workspace WS holding what the text TEXT (export) holds,
+# with the caller's -version V: queries of it answer exactly as queries of
+# the exported revision did. Its HIR is decoded from interchange text (which
+# refuses another front end's text, {HIR INTERCHANGE COMPILER}) and is
+# activated whenever a query reads it (Use), as any revision's is. TEXT
+# made by a service with another configuration than this process's front
+# end is refused ({SERVICE IMPORT}): a revision is a function of its
+# configuration. Its sources are compared with WS's documents and the disk
+# by `stale`, like those of a revision analyzed in WS.
+proc service::import {ws text args} {
+    variable exportVersion
+    variable workspaces
+    variable revisions
+    variable nextRevision
+    set options [Options service::import {-version ""} $args]
+    set workspace [Workspace $ws]
+    set newline [string first \n $text]
+    set header [string range $text 0 [expr {$newline - 1}]]
+    if {$newline < 0 || $header ne "botlish-service-revision $exportVersion"} {
+        Fail IMPORT "not an exported revision of this service (it starts \"[string range $header 0 40]\")"
+    }
+    set body [string range $text [expr {$newline + 1}] end]
+    set keys {entry outcome errors warnings failure config sources hir}
+    if {[catch {dict size $body}] || [lmap key $keys {dict exists $body $key}] ne [lrepeat [llength $keys] 1]} {
+        Fail IMPORT "an exported revision without its [join $keys {, }]"
+    }
+    set config [dict get $body config]
+    foreach {key mine} [list frontEnd [hir::interchange::fingerprint] library $::core::libraryDir] {
+        if {[dict getdef $config $key ""] ne $mine} {
+            Fail IMPORT "an exported revision of another configuration ($key [dict getdef $config $key ""], here $mine)"
+        }
+    }
+    set revision [dict create]
+    foreach key {entry outcome errors warnings failure config sources} {
+        dict set revision $key [dict get $body $key]
+    }
+    set hir [dict get $body hir]
+    if {$hir ne ""} {
+        set hir [hir::interchange::decode $hir]
+    }
+    dict set revision hir $hir
+    set rev rev[incr nextRevision]
+    dict set revision id $rev
+    dict set revision workspace $ws
+    dict set revision version [dict get $options -version]
+    dict set revision derived [dict create]
+    dict set revisions $rev $revision
+    dict set workspaces $ws revisions [concat [dict get $workspace revisions] [list $rev]]
+    return $rev
 }
 
 # Releases revision REV: the service keeps nothing of it (its HIR, ASTs,
