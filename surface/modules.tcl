@@ -1505,7 +1505,7 @@ proc surface::modules::ExpandDfas {stateVar ast own imported} {
     dict set state dfaRegistry [dict get $result registry]
     if {[dict get $result missingImport] ne ""} {
         set span [dict get $result missingImport]
-        set message "namespace \"$surface::dfa::protocolNamespace\" is not imported; add `import $surface::dfa::protocolNamespace` to declare a recognizer (it is resumed with std::dfa::Symbol and fails with std::dfa's errors)"
+        set message "namespace \"$::surface::dfa::protocolNamespace\" is not imported; add `import $::surface::dfa::protocolNamespace` to declare a recognizer (it is resumed with std::dfa::Symbol and fails with std::dfa's errors)"
         dict lappend state referenceErrors [dict create errorcode [list SURFACE MODULE MISSING-IMPORT] \
             message "[surface::ast::location $span]: $message" summary $message location $span related {}]
     }

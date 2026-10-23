@@ -407,6 +407,16 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
         set word [lindex $texts 0]
         if {[llength $prefix] == 1} {
             set any 1
+        } elseif {$word eq "dfa" && [lindex $kinds 1] eq "IDENT" && $topLevel} {
+            # A recognizer (DFA-COROUTINE-MILESTONE-2.md) is the function of
+            # its name.
+            set name [dict get [lindex $prefix 1] value]
+            set nameSpan [dict get [lindex $prefix 1] span]
+            set valueFrom 2
+            set function 1
+        } elseif {$word eq "class" && [lindex $kinds 1] eq "IDENT"} {
+            # A symbol class: a name only recognizers read.
+            set types $topLevel
         } elseif {$word in $declarationWords && [lindex $kinds 1] in {IDENT type struct}} {
             set types $topLevel
             if {$word eq "extern"} {

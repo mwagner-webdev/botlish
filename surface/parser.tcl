@@ -1313,15 +1313,20 @@ proc surface::parser::DfaSymbol {pVar} {
 #
 # Items may be separated by commas.
 proc surface::parser::DfaItems {pVar stopWords where} {
+    variable dfaReserved
     upvar 1 $pVar p
     set items {}
     while 1 {
         set token [Peek p]
         set kind [dict get $token kind]
-        if {$kind in {NEWLINE EOF -> DEDENT}} {
+        if {$kind in {NEWLINE EOF -> DEDENT =}} {
             break
         }
-        if {$kind eq "IDENT" && [dict get $token text] in $stopWords} {
+        # (A word of the declaration syntax names no class -- ClassDecl
+        # refuses one -- so the items end before it and the caller reports
+        # what it expected there: "'a' accept" lacks its "->".)
+        if {$kind eq "IDENT" && ([dict get $token text] in $stopWords
+                || ([dict get $token text] in $dfaReserved && [dict get $token text] ni {any end}))} {
             break
         }
         if {$kind eq ","} {
@@ -1556,7 +1561,8 @@ proc surface::parser::DfaTransition {pVar} {
             set unreadSpan ""
             if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "before"} {
                 set unread 1
-                set unreadSpan [dict get [Advance p] span]
+                # (From the word "accept": the phrase says how many.)
+                set unreadSpan [surface::ast::cover [dict get $token span] [dict get [Advance p] span]]
                 if {[Kind p] eq "INT"} {
                     set count [Advance p]
                     set unread [dict get $count value]

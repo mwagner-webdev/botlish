@@ -420,17 +420,28 @@ proc surface::dfa::ResolveClass {ctx node local} {
 # class item is).
 proc surface::dfa::UseSet {d value span what {related {}}} {
     set alphabet [dict get $d alphabet]
+    # A symbol or a range is named by its text, a class or a sequence by
+    # WHAT ("class c", "the sequence ..."): "is" for the one, "holds" for
+    # the other.
+    set item [expr {![string match "class *" $what] && ![string match "the sequence *" $what]}]
     if {$alphabet eq "bytes"} {
         set bad [Inter [dict get $value chars] {{128 1114111}}]
         if {[llength $bad]} {
-            Diag DFA-BYTE-CHARACTER $span "$what holds [SetText $bad unicode], written as characters, not bytes: a bytes recognizer reads UTF-8 code units, so only ASCII characters name one byte (write the bytes as numbers, or recognize over unicode)" $related
+            set head [if {$item} {string cat "$what is a character, not a byte"} else {string cat "$what holds [SetText $bad unicode], written as characters, not bytes"}]
+            Diag DFA-BYTE-CHARACTER $span "$head: a bytes recognizer reads the bytes of encoded text, so only an ASCII character names one byte (write the bytes as numbers, or recognize over unicode)" $related
             return ""
         }
     }
     lassign [AlphabetHull $alphabet] hlo hhi
     set outside [Minus [dict get $value set] [list [list $hlo $hhi]]]
     if {[llength $outside]} {
-        Diag DFA-ALPHABET $span "$what holds [SetText $outside unicode], outside the alphabet of [dict get $d name] ($alphabet: [Sym $hlo $alphabet]..[Sym $hhi $alphabet])" $related
+        set whole [expr {![llength [Inter [dict get $value set] [list [list $hlo $hhi]]]]}]
+        if {$item && $whole} {
+            set head "$what is outside the alphabet of [dict get $d name]"
+        } else {
+            set head "$what holds [SetText $outside unicode], outside the alphabet of [dict get $d name]"
+        }
+        Diag DFA-ALPHABET $span "$head ($alphabet: [Sym $hlo $alphabet]..[Sym $hhi $alphabet])" $related
         return ""
     }
     set result [Inter [dict get $value set] [AlphabetSet $alphabet]]
@@ -559,7 +570,7 @@ proc surface::dfa::ResolveDfa {ctx node} {
                         set next "$sname\"$read\""
                         dict set step action goto
                         dict set step target $next
-                        dict set step actionText "-> (\"$read\")"
+                        dict set step actionText "(the rest of [dict get $seq text])"
                         foreach field {unread unreadSpan callee calleeSpan then thenSpan targetSpan} {
                             dict unset step $field
                         }
@@ -637,14 +648,19 @@ proc surface::dfa::ResolveDfa {ctx node} {
                 }
                 set set [Union $set $concrete]
             }
+            if {$hasEnd && [dict get $t action] in {goto call}} {
+                Diag DFA-END-CONSUMED $itemsSpan "the end of the input cannot be consumed: `end` may only accept or reject (\"end -> accept\", \"end -> accept before N\", \"end -> reject\")"
+                continue
+            }
             if {!$ok} {
+                # Its symbols are not known (their diagnostic, or a class's
+                # own, says why), so it claims none; its names are resolved
+                # all the same, each written reference its own diagnostic.
+                # (The recognizer is failed or dependent: never analyzed.)
+                lappend ts [dict merge $base [dict create set {} anon 0]]
                 continue
             }
             if {$hasEnd} {
-                if {[dict get $t action] in {goto call}} {
-                    Diag DFA-END-CONSUMED $itemsSpan "the end of the input cannot be consumed: `end` may only accept or reject (\"end -> accept\", \"end -> accept before N\", \"end -> reject\")"
-                    continue
-                }
                 set set [Union $set [list [list $END $END]]]
             }
             lappend ts [dict merge $base [dict create set $set anon 0]]
@@ -754,7 +770,7 @@ proc surface::dfa::CheckDeterminism {d} {
                 if {[llength $both]} {
                     set where [StateText $d $name]
                     Diag DFA-AMBIGUOUS-TRANSITION [TransitionSpan $b] \
-                        "two transitions of $where claim [SetText $both $alphabet]: a recognizer takes at most one transition per symbol" \
+                        "two transitions of $where claim [SetText $both $alphabet] (\"[dict get $a text] -> [ActionWords $a]\" and \"[dict get $b text] -> [ActionWords $b]\"): a recognizer takes at most one transition per symbol" \
                         [list [list "[dict get $a text] -> [ActionWords $a]" [TransitionSpan $a]] \
                             [list "[dict get $b text] -> [ActionWords $b]" [TransitionSpan $b]]]
                 }
@@ -890,8 +906,26 @@ proc surface::dfa::Analyze {d} {
                 "state $q of [dict get $d name] is never reached: no transition from the start state leads to it"
         }
     }
+    # Calls that can only reject (reported below): a state whose way to a
+    # completion is such a call is not also reported as never accepting.
+    set dead [dict create]
+    foreach q [dict get $d stateOrder] {
+        set ts [dict get $d states $q transitions]
+        for {set k 0} {$k < [llength $ts]} {incr k} {
+            if {[dict get [lindex $ts $k] action] ne "call"} {
+                continue
+            }
+            set segs [dict getdef $resolved $q/$k {}]
+            if {[llength $segs] && [llength [lmap s $segs {expr {[lindex $s 1 0] eq "reject" ? [continue] : $s}}]] == 0} {
+                dict lappend dead $q $k
+            }
+        }
+    }
     # Acceptance: which states can still lead to a completion.
     set canAccept [dict create]
+    dict for {q -} $dead {
+        dict set canAccept $q 1
+    }
     set changed 1
     while {$changed} {
         set changed 0
@@ -917,31 +951,52 @@ proc surface::dfa::Analyze {d} {
             }
         }
     }
-    foreach q [dict get $d stateOrder] {
-        if {$q in $reached && ![dict exists $canAccept $q]} {
-            if {$q eq $start} {
-                set what "[dict get $d name] accepts no input at all"
-            } else {
-                set what "from [StateText $d $q] no input is ever accepted"
+    # The reached states that never accept, reported where the cause is: a
+    # state that only leads to others that never accept is explained by
+    # them. So one diagnostic per bottom strongly connected component of
+    # those states (none of its successors outside it never accepts), at its
+    # first state.
+    set never [lmap q [dict get $d stateOrder] {expr {$q in $reached && ![dict exists $canAccept $q] ? $q : [continue]}}]
+    set successors [dict create]
+    foreach q $never {
+        set out {}
+        foreach seg [dict get $effective $q] {
+            set a [lindex $seg 1]
+            set next [switch -- [lindex $a 0] {
+                goto { lindex $a 1 }
+                call { lindex $a 3 }
+                default { string cat }
+            }]
+            if {$next in $never && $next ni $out} {
+                lappend out $next
             }
-            Diag DFA-NO-ACCEPT [dict get $d states $q nameSpan] \
-                "$what: every path from it ends in a rejection (add the transition that accepts, or remove the state)"
         }
+        dict set successors $q $out
     }
-    # Calls that can only reject.
-    foreach q [dict get $d stateOrder] {
-        set ts [dict get $d states $q transitions]
-        for {set k 0} {$k < [llength $ts]} {incr k} {
-            set t [lindex $ts $k]
-            if {[dict get $t action] ne "call"} {
-                continue
-            }
-            set segs [dict getdef $resolved $q/$k {}]
-            if {[llength $segs] && [llength [lmap s $segs {expr {[lindex $s 1 0] eq "reject" ? [continue] : $s}}]] == 0} {
-                Diag DFA-DEAD-TRANSITION [TransitionSpan $t] \
-                    "this transition of [StateText $d $q] can never succeed: [KeyText [dict get $t key]] rejects every symbol it hands over ([SetText [dict get $t set] $alphabet])" \
-                    [list [list "dfa [KeyText [dict get $t key]]" [dict get $t info nameSpan]]]
-            }
+    foreach q $never {
+        # Q's component: the states it reaches that reach it back.
+        set forward [Closure $successors $q]
+        set component [lmap r $forward {expr {$q in [Closure $successors $r] ? $r : [continue]}}]
+        if {[lindex [lsort -command [list surface::dfa::OrderOf [dict get $d stateOrder]] $component] 0] ne $q} {
+            continue
+        }
+        if {[llength [lmap r $forward {expr {$r in $component ? [continue] : $r}}]]} {
+            continue
+        }
+        if {$q eq $start} {
+            set what "[dict get $d name] accepts no input at all"
+        } else {
+            set what "from [StateText $d $q] no input is ever accepted"
+        }
+        Diag DFA-NO-ACCEPT [dict get $d states $q nameSpan] \
+            "$what: every path from it ends in a rejection (add the transition that accepts, or remove the state)"
+    }
+    dict for {q ks} $dead {
+        foreach k $ks {
+            set t [lindex [dict get $d states $q transitions] $k]
+            Diag DFA-DEAD-TRANSITION [TransitionSpan $t] \
+                "this transition of [StateText $d $q] can never succeed: [KeyText [dict get $t key]] rejects every symbol it hands over ([SetText [dict get $t set] $alphabet])" \
+                [list [list "dfa [KeyText [dict get $t key]]" [dict get $t info nameSpan]]]
         }
     }
     # A state that completes before a symbol says what the end means.
@@ -1002,6 +1057,28 @@ proc surface::dfa::Analyze {d} {
     return [Facts $d]
 }
 
+# The states reachable from Q (itself included) in the graph SUCCESSORS
+# (state -> successors).
+proc surface::dfa::Closure {successors q} {
+    set seen [list $q]
+    set work [list $q]
+    while {[llength $work]} {
+        set work [lassign $work r]
+        foreach next [dict getdef $successors $r {}] {
+            if {$next ni $seen} {
+                lappend seen $next
+                lappend work $next
+            }
+        }
+    }
+    return $seen
+}
+
+# lsort -command: declaration order (ORDER) of states A and B.
+proc surface::dfa::OrderOf {order a b} {
+    return [expr {[lsearch -exact $order $a] - [lsearch -exact $order $b]}]
+}
+
 # Bounded lookahead: every `accept before N` of an entered state Q has been
 # supplied enough symbols (the header's rule). DISTANCE(Q) is the fewest
 # symbols any path to Q consumes: on a symbol, N <= DISTANCE(Q) keeps the
@@ -1019,15 +1096,24 @@ proc surface::dfa::Bounds {d} {
             set onSymbol [llength [Minus [dict get $t set] [list [list $END $END]]]]
             set atEnd [llength [Inter [dict get $t set] [list [list $END $END]]]]
             set span [if {[dict get $t unreadSpan] ne ""} {dict get $t unreadSpan} else {dict get $t span}]
+            set leaves [Count $n symbol]
             if {$onSymbol && $n > $k} {
                 Diag DFA-UNREAD-BEYOND-INPUT $span \
-                    "\"accept before $n\" leaves $n symbols unread, but [StateText $d $q] is reached after consuming as few as $k: a recognizer gives back only symbols of its own input, and its token keeps at least one, so on a symbol it leaves at most $k unread here"
+                    "\"accept before $n\" leaves $leaves unread, but [StateText $d $q] is reached after consuming as few as [Count $k symbol]: a recognizer gives back only symbols of its own input, and its token keeps at least one, so on a symbol it leaves at most $k unread here"
             } elseif {$atEnd && $n >= $k} {
                 Diag DFA-UNREAD-BEYOND-INPUT $span \
-                    "\"end -> accept before $n\" leaves $n symbols unread, but [StateText $d $q] is reached after consuming as few as $k: the end of the input is no symbol, and a token keeps at least one, so at the end it leaves at most [expr {max(0, $k - 1)}] unread here"
+                    "\"end -> accept before $n\" leaves $leaves unread, but [StateText $d $q] is reached after consuming as few as [Count $k symbol]: the end of the input is no symbol, and a token keeps at least one, so at the end it leaves at most [expr {max(0, $k - 1)}] unread here"
             }
         }
     }
+}
+
+# "N WORD" or "N WORDs".
+proc surface::dfa::Count {n word} {
+    if {$n == 1} {
+        return "1 $word"
+    }
+    return "$n ${word}s"
 }
 
 # A call that continues in a state reconsiders what its callee left unread
@@ -1065,7 +1151,8 @@ proc surface::dfa::Facts {d} {
     set endFails 0
     set returns {}
     set maxUnread 0
-    set leaves {}
+    set maxSymbol 0
+    set maxEnd 0
     set start [lindex [dict get $d entered] 0]
     set minTake ""
     foreach q [dict get $d entered] {
@@ -1085,9 +1172,7 @@ proc surface::dfa::Facts {d} {
                     set maxUnread [expr {max($maxUnread, $n)}]
                     if {$onSymbol} {
                         lappend returns [lindex {taken unread1 more} [expr {min($n, 2)}]]
-                        if {$n > 1} {
-                            lappend leaves "$n symbols"
-                        }
+                        set maxSymbol [expr {max($maxSymbol, $n)}]
                         set take [expr {$k + 1 - $n}]
                         if {$minTake eq "" || $take < $minTake} {
                             set minTake $take
@@ -1095,9 +1180,7 @@ proc surface::dfa::Facts {d} {
                     }
                     if {$isEnd} {
                         lappend returns [lindex {endc more} [expr {$n > 0}]]
-                        if {$n > 0} {
-                            lappend leaves "$n at the end of the input"
-                        }
+                        set maxEnd [expr {max($maxEnd, $n)}]
                         # (A callee never sees the end in its start state's
                         # first segment: it is handed a symbol first.)
                         if {$q ne $start || $k > 0} {
@@ -1116,9 +1199,8 @@ proc surface::dfa::Facts {d} {
                     if {[lindex $a 3] eq "accept"} {
                         lappend returns {*}[dict get $info returns]
                         set maxUnread [expr {max($maxUnread, [dict get $info maxUnread])}]
-                        if {![dict get $info reconsider]} {
-                            lappend leaves [dict get $info leavesText]
-                        }
+                        set maxSymbol [expr {max($maxSymbol, [dict get $info maxSymbol])}]
+                        set maxEnd [expr {max($maxEnd, [dict get $info maxEnd])}]
                         set take [expr {$k + [dict get $info minTake]}]
                         if {$minTake eq "" || $take < $minTake} {
                             set minTake $take
@@ -1152,7 +1234,14 @@ proc surface::dfa::Facts {d} {
     dict set d maxUnread $maxUnread
     dict set d minTake $minTake
     dict set d reconsider [expr {"more" ni $returns}]
-    dict set d leavesText [join [lsort -unique $leaves] ", or "]
+    dict set d maxSymbol $maxSymbol
+    dict set d maxEnd $maxEnd
+    # What it can leave unread, said as a caller's diagnostic says it.
+    set text "up to [Count $maxSymbol symbol]"
+    if {$maxEnd > 0} {
+        append text " ([Count $maxEnd symbol] at the end of the input)"
+    }
+    dict set d leavesText $text
     dict set d startPart $startPart
     return $d
 }
@@ -1165,6 +1254,7 @@ proc surface::dfa::Export {d} {
     return [dict create failed 0 qualified [dict get $d qualified] own [dict get $d own] name [dict get $d name] \
         alphabet [dict get $d alphabet] nameSpan [dict get $d nameSpan] \
         errors [dict get $d errors] returns [dict get $d returns] maxUnread [dict get $d maxUnread] \
+        maxSymbol [dict get $d maxSymbol] maxEnd [dict get $d maxEnd] \
         minTake [dict get $d minTake] reconsider [dict get $d reconsider] leavesText [dict get $d leavesText] \
         startPart [dict get $d startPart]]
 }

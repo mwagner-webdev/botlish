@@ -30,6 +30,13 @@ proc core::dfa::Lookup {table row key} {
         error "dfa#transition: state $row is no row of the table ([llength $table] rows)"
     }
     lassign [lindex $table $row] default lows highs codes
+    # Every bound a table holds is a symbol or the end (-1..0x10FFFF): a key
+    # beyond them, a bignum included, is one no interval holds.
+    if {$key < -2} {
+        set key -2
+    } elseif {$key > 0x110000} {
+        set key 0x110000
+    }
     set i [lsearch -sorted -integer -bisect $lows $key]
     if {$i >= 0 && $key <= [lindex $highs $i]} {
         return [lindex $codes $i]

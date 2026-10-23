@@ -1,0 +1,631 @@
+# dfa.topic -- declared finite-state recognizers (`class`, `dfa`), their
+# protocol (std::dfa) and the diagnostics of their declarations.
+
+@topic concept.recognizers
+title: Declared recognizers: `dfa` and `class`
+summary: `dfa NAME over ALPHABET:` declares a finite-state recognizer of one token, checked by the compiler and run as an ordinary coroutine that returns how many symbols it leaves unread.
+index: concepts
+alias: dfa; recognizer; finite automaton; lexer; tokenizer; class declaration; accept before; lookahead
+keywords: dfa, class, recognizer, automaton, DFA, lexer, tokenizer, token, accept, accept before, lookahead, unread, end, call, then, over, bytes, ascii, unicode, sequence, std::dfa, UnrecognizedInput, UnexpectedEnd
+related: concept.coroutines stdlib.module.std::dfa error.dfa-ambiguous-transition error.dfa-unread-beyond-input error.dfa-call-lookahead
+docs: DFA-COROUTINE-MILESTONE-2.md DFA-COROUTINE-EXPLORATION.md COROUTINES.md COROUTINE-FUSION-MILESTONE-1.md
+
+== WHAT IT IS
+A recognizer is a table: states, and for each state the symbols it takes
+and what it does with them. The compiler checks the table and lowers it to
+an ordinary coroutine function of the protocol of std::dfa:
+
+    fn NAME(first: int, resume std::dfa::Symbol) -> int
+            errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd
+
+`coroutine {step, first} = NAME(c)` starts it on the token's first
+symbol; `step(std::dfa::Symbol {code: c})` hands it the next. While it runs,
+each yield answers 0 ("taken, send the next"); its completion
+(`std::coroutine::done?(step)`) returns how many of the symbols it was
+handed are not part of its token. The end of the input is the code -1,
+never a symbol, and never counted.
+
+    class digit = '0'..'9'
+
+    dfa number over ascii:
+        start:
+            '-' -> minus
+            digit -> integer
+        minus:
+            digit -> integer
+        integer:
+            digit -> integer
+            ' ' ',' -> accept before
+            end -> accept
+
+== THE DECLARATION
+  * `class NAME = SYMBOLS [except SYMBOLS]`: a named symbol set, at the top
+    level (a module's classes are named `ns::NAME` after `import ns`) or
+    first in a dfa. A symbol is a character literal, a decimal or `0x`
+    hexadecimal integer, a range `'a'..'z'`, a class, or `any` (the
+    alphabet of the recognizer that reads it).
+  * `dfa NAME over bytes|ascii|unicode:`: bytes are 0..255, ascii 0..127
+    (the same symbols in every alphabet), unicode the Unicode scalar
+    values. The first state starts.
+  * A transition is `SYMBOLS -> ACTION`: a state (take the symbol and
+    continue there), `accept` (complete, the symbol part of the token),
+    `accept before N` (complete, the last N symbols handed over not part of
+    it; `accept before` is N = 1), `call DFA then STATE` or `call DFA then
+    accept` (hand the symbol to an earlier recognizer and continue when it
+    completes), or, for the end of the input only, `end -> reject`.
+  * A string `"true" -> word_end` is a sequence: one symbol at a time.
+  * Every symbol a state names no transition for is rejected: there is no
+    other kind of rejection, no regular expression, no priority, no
+    longest match and no action.
+
+== WHAT THE COMPILER PROVES
+  * Determinism: the transitions of a state claim disjoint symbols
+    (error.dfa-ambiguous-transition).
+  * Defined rejection: every value -- outside the alphabet too -- is taken
+    by exactly one transition or rejected, with std::dfa::UnrecognizedInput
+    {recognizer, state, symbol} (the end: UnexpectedEnd {recognizer,
+    state}).
+  * Explicit acceptance and progress: a recognizer completes only through
+    an `accept`; every transition takes its symbol, completes, or calls a
+    recognizer that takes it.
+  * Finite control: only earlier recognizers are called
+    (error.dfa-recursive-call), so a recognizer's state is a state number
+    and a bounded call chain.
+  * Bounded lookahead: `accept before N` never hands back more symbols
+    than the recognizer was given, and a token keeps at least one symbol
+    unless no symbol was given at all (error.dfa-unread-beyond-input); every
+    recognizer has a static largest unread count, the buffer a driver
+    needs.
+  * Integrity: no unreachable state, no state that never accepts, no call
+    that can only reject, no state that completes before a symbol without
+    saying what the end means.
+
+== WHAT IT DOES NOT PROVE
+A well-formed recognizer can recognize the wrong language: the checks are
+about the declaration, not about agreement with a grammar someone else
+wrote. That is what conformance corpora and differential tests are for.
+Nothing about the code that drives a recognizer (its buffer, its limits)
+is proved either.
+
+== EXECUTION
+A recognizer is an ordinary coroutine: eager start, typed resumes, a
+stable final result or failure, affine handle, deep yields through calls.
+Nothing new runs: the transition table is one internal call the native
+backend compiles to a jump table, an interval search or a table load, and
+coroutine fusion (COROUTINE-FUSION-MILESTONE-1.md) compiles a driver that
+keeps its recognizers' handles into one loop without coroutine objects.
+
+@example accept
+import std::dfa
+import std::coroutine
+
+class digit = '0'..'9'
+
+dfa number over ascii:
+    start:
+        digit -> integer
+    integer:
+        digit -> integer
+        ',' -> accept before
+        end -> accept
+
+fn unread(first: int, next: int) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step} = number(first)
+    step(std::dfa::Symbol {code: next})
+    step(std::dfa::Symbol {code: 44})
+
+unread(49, 50):
+    on std::dfa::UnrecognizedInput:
+        -1
+    on std::dfa::UnexpectedEnd:
+        -2
+@caption "12," is the number 12 and one symbol after it
+@value 1
+@end
+
+@topic error.dfa-ambiguous-transition
+title: DFA-AMBIGUOUS-TRANSITION: two transitions of one state take a symbol
+summary: A recognizer takes at most one transition per symbol: two transitions of a state whose symbol sets overlap are rejected at the later one, with the symbols they share.
+index: errors
+alias: transitions overlap; nondeterministic transition
+keywords: dfa, determinism, overlap, ambiguous, class, range
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-AMBIGUOUS-TRANSITION
+
+== MEANING
+The order of a state's transitions means nothing: the compiler is free to
+test them in any order because it proves no symbol is claimed twice. An
+overlap -- often a class that already holds a symbol written separately
+-- would leave the choice to the order.
+
+== WHAT TO DO
+Remove the shared symbols from one side (`'1'..'9'` instead of a class of
+every digit), or write `class nonzero = digit except '0'`.
+
+@example reject
+import std::dfa
+
+dfa number over ascii:
+    start:
+        '0' -> zero
+        '0'..'9' -> digits
+    zero:
+        end -> accept
+    digits:
+        end -> accept
+
+0
+@caption '0' is claimed twice
+@error CORE SEMANTIC DFA-AMBIGUOUS-TRANSITION
+@at 6:9
+@end
+
+@topic error.dfa-unknown-state
+title: DFA-UNKNOWN-STATE: a transition names no state of the recognizer
+summary: A transition's target, or a call's `then` state, names no state the recognizer declares.
+index: errors
+alias: unknown state
+keywords: dfa, state, typo, target
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-UNKNOWN-STATE
+
+== MEANING
+States are a recognizer's own names, declared by `NAME:` lines in its
+body; a transition may name a state declared after it.
+
+== WHAT TO DO
+Fix the spelling, or declare the state.
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> nowhere
+
+0
+@caption nowhere is no state of d
+@error CORE SEMANTIC DFA-UNKNOWN-STATE
+@at 5:16
+@end
+
+@topic error.dfa-unknown-class
+title: DFA-UNKNOWN-CLASS: a symbol item names no class
+summary: A name in a transition or a class declaration names no class of the recognizer, of its file or of the imported namespace it qualifies, or a class of the file declared after it.
+index: errors
+alias: unknown class
+keywords: dfa, class, typo, declared later, qualified class
+related: concept.recognizers error.missing-import
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-UNKNOWN-CLASS
+
+== MEANING
+A class is used after it is declared, as every binding is. A bare name is
+a class of the recognizer (declared first in its body) or of the file; a
+qualified one, `ns::digit`, a class of module ns (after `import ns`).
+
+== WHAT TO DO
+Declare the class above its first use, or qualify it with the namespace
+that declares it.
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        digit -> start
+        end -> accept
+
+0
+@caption No class digit is declared
+@error CORE SEMANTIC DFA-UNKNOWN-CLASS
+@at 5:9
+@end
+
+@topic error.dfa-unknown-dfa
+title: DFA-UNKNOWN-DFA: a call names no earlier recognizer
+summary: `call DFA then ...` names a recognizer that is not declared, or one declared after the caller: a recognizer calls only recognizers declared before it (or in an imported module), so no call can recur.
+index: errors
+alias: unknown recognizer; call to a later recognizer
+keywords: dfa, call, delegation, forward reference, order
+related: concept.recognizers error.dfa-recursive-call
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-UNKNOWN-DFA
+
+== WHAT TO DO
+Declare the callee first, or qualify it with the module that declares it
+(`call json_lex::json_escape then body`, after `import json_lex`).
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> call e then accept
+
+dfa e over ascii:
+    start:
+        'a' -> accept
+
+0
+@caption e is declared after d
+@error CORE SEMANTIC DFA-UNKNOWN-DFA
+@at 5:21
+@end
+
+@topic error.dfa-recursive-call
+title: DFA-RECURSIVE-CALL: a recognizer calls itself
+summary: A recognizer that calls itself would need a stack of unbounded depth, which no finite-state recognizer has.
+index: errors
+alias: recursive recognizer
+keywords: dfa, recursion, nesting, stack, call
+related: concept.recognizers error.dfa-unknown-dfa
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-RECURSIVE-CALL
+
+== WHAT TO DO
+Nesting (brackets, indentation) is not finite-state: write it in ordinary
+code above the recognizers, with an explicit, bounded stack.
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> call d then accept
+
+0
+@caption d calls itself
+@error CORE SEMANTIC DFA-RECURSIVE-CALL
+@at 5:21
+@end
+
+@topic error.dfa-call-alphabet
+title: DFA-CALL-ALPHABET: a call between recognizers of different alphabets
+summary: A call hands the callee the caller's symbols, so the callee reads the caller's alphabet or ascii, whose symbols mean the same in every alphabet.
+index: errors
+alias: alphabet mismatch
+keywords: dfa, call, alphabet, bytes, unicode, ascii
+related: concept.recognizers error.dfa-alphabet
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-CALL-ALPHABET
+
+@example reject
+import std::dfa
+
+dfa letters over unicode:
+    start:
+        'a' -> accept
+
+dfa d over bytes:
+    start:
+        'a' -> call letters then accept
+
+0
+@caption A bytes recognizer hands bytes, not scalar values
+@error CORE SEMANTIC DFA-CALL-ALPHABET
+@at 9:21
+@end
+
+@topic error.dfa-alphabet
+title: DFA-ALPHABET: a symbol outside the recognizer's alphabet
+summary: A symbol, a range or a class names a value outside the alphabet the recognizer reads (or the alphabet is unknown).
+index: errors
+alias: outside the alphabet; unknown alphabet
+keywords: dfa, alphabet, bytes, ascii, unicode, surrogate, range
+related: concept.recognizers error.dfa-byte-character
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-ALPHABET
+
+== MEANING
+bytes are 0..255, ascii 0..127, unicode the Unicode scalar values (a range
+that spans the surrogates U+D800..U+DFFF means its scalar values; one wholly
+inside them names none). A value outside the alphabet is rejected at run
+time by every recognizer: writing one is a mistake.
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        200 -> accept
+
+0
+@caption 200 is no ASCII code
+@error CORE SEMANTIC DFA-ALPHABET
+@at 5:9
+@end
+
+@topic error.dfa-byte-character
+title: DFA-BYTE-CHARACTER: a non-ASCII character in a bytes recognizer
+summary: A bytes recognizer reads UTF-8 code units, so a character literal outside ASCII ('é') names no single byte.
+index: errors
+alias: character is not a byte
+keywords: dfa, bytes, UTF-8, character, code unit
+related: concept.recognizers error.dfa-alphabet
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-BYTE-CHARACTER
+
+== WHAT TO DO
+Write the bytes as numbers (0xC3 0xA9), or recognize over unicode.
+
+@example reject
+import std::dfa
+
+dfa d over bytes:
+    start:
+        'é' -> accept
+
+0
+@caption 'é' is two bytes in UTF-8
+@error CORE SEMANTIC DFA-BYTE-CHARACTER
+@at 5:9
+@end
+
+@topic error.dfa-empty-range
+title: DFA-EMPTY-RANGE: a range or a class that holds no symbol
+summary: A range whose end is below its start, or a class (or a use of it) whose every symbol is excepted, holds nothing.
+index: errors
+alias: empty range; empty class
+keywords: dfa, range, class, except, empty
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-EMPTY-RANGE
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'z'..'a' -> accept
+
+0
+@caption The range is written backwards
+@error CORE SEMANTIC DFA-EMPTY-RANGE
+@at 5:9
+@end
+
+@topic error.dfa-end-consumed
+title: DFA-END-CONSUMED: the end of the input taken like a symbol
+summary: `end` is the end of the input, not a symbol: it can accept or reject, never be consumed by `-> STATE` or handed to a call.
+index: errors
+alias: end consumed
+keywords: dfa, end, end of input, EOF
+related: concept.recognizers error.dfa-missing-end
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-END-CONSUMED
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> start
+        end -> start
+
+0
+@caption Nothing follows the end of the input
+@error CORE SEMANTIC DFA-END-CONSUMED
+@at 6:9
+@end
+
+@topic error.dfa-unreachable-state
+title: DFA-UNREACHABLE-STATE: a state no transition leads to
+summary: No transition from the start state leads to the state: in a declaration whose every state is a node of one graph it specifies nothing, and it is usually a forgotten transition.
+index: errors
+alias: unreachable state; unused state
+keywords: dfa, state, unreachable, unused
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-UNREACHABLE-STATE
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> accept
+    lost:
+        'b' -> accept
+
+0
+@caption Nothing goes to lost
+@error CORE SEMANTIC DFA-UNREACHABLE-STATE
+@at 6:5
+@end
+
+@topic error.dfa-no-accept
+title: DFA-NO-ACCEPT: a state from which nothing is ever accepted
+summary: Every path from a reachable state ends in a rejection (from the start: the recognizer accepts no input at all); it is reported where the paths end, not at every state that leads there.
+index: errors
+alias: never accepts
+keywords: dfa, accept, state, closing quote
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-NO-ACCEPT
+
+== MEANING
+A forgotten `accept` -- the closing quote of a string, the last digit of a
+fixed-length escape -- leaves a state from which the recognizer can only
+reject: it is equivalent to omitting the state.
+
+@example reject
+import std::dfa
+
+dfa quoted over ascii:
+    start:
+        '"' -> body
+    body:
+        'a'..'z' -> body
+
+0
+@caption The closing quote is missing
+@error CORE SEMANTIC DFA-NO-ACCEPT
+@at 6:5
+@end
+
+@topic error.dfa-dead-transition
+title: DFA-DEAD-TRANSITION: a call that can only reject
+summary: A call hands its callee only symbols the callee's first state rejects, so it can never succeed.
+index: errors
+alias: dead call
+keywords: dfa, call, delegation, reject
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-DEAD-TRANSITION
+
+@example reject
+import std::dfa
+
+dfa escape over ascii:
+    start:
+        '\\' -> accept
+
+dfa d over ascii:
+    start:
+        'x' -> call escape then accept
+
+0
+@caption escape starts only with a backslash
+@error CORE SEMANTIC DFA-DEAD-TRANSITION
+@at 9:9
+@end
+
+@topic error.dfa-missing-end
+title: DFA-MISSING-END: a state that accepts before a symbol ignores the end
+summary: A state with an `accept before` on symbols could also be where the input ends: it says what the end means there (`end -> accept`, `end -> accept before N` or `end -> reject`).
+index: errors
+alias: missing end
+keywords: dfa, end, end of input, accept before, EOF
+related: concept.recognizers error.dfa-end-consumed
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-MISSING-END
+
+@example reject
+import std::dfa
+
+dfa word over ascii:
+    start:
+        'a'..'z' -> body
+    body:
+        'a'..'z' -> body
+        ' ' -> accept before
+
+0
+@caption Does "ab" at the end of the input end a word?
+@error CORE SEMANTIC DFA-MISSING-END
+@at 6:5
+@end
+
+@topic error.dfa-duplicate
+title: DFA-DUPLICATE: a recognizer, class or state declared twice
+summary: A file declares two recognizers or two classes of one name, or a recognizer two states or two classes of one name.
+index: errors
+alias: duplicate state; duplicate class; duplicate dfa
+keywords: dfa, class, state, duplicate, declared twice
+related: concept.recognizers
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-DUPLICATE
+
+@example reject
+import std::dfa
+
+dfa d over ascii:
+    start:
+        'a' -> accept
+    start:
+        'b' -> accept
+
+0
+@caption Two states named start
+@error CORE SEMANTIC DFA-DUPLICATE
+@at 6:5
+@end
+
+@topic error.dfa-unread-beyond-input
+title: DFA-UNREAD-BEYOND-INPUT: `accept before N` hands back too many symbols
+summary: A recognizer never hands back a symbol it was not given, and a token keeps at least one symbol, so in a state reached after K symbols `accept before N` needs N at most K (at the end, below K).
+index: errors
+alias: unread count too large; accept before too many; lookahead beyond the token
+keywords: dfa, accept before, lookahead, unread, bound, empty token, buffer
+related: concept.recognizers error.dfa-call-lookahead
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-UNREAD-BEYOND-INPUT
+
+== MEANING
+`accept before N` completes leaving the last N symbols the recognizer was
+handed unread: the driver hands them to the next token. They must be the
+recognizer's own: the compiler counts the fewest symbols any path to the
+state consumes (a call: its callee's shortest token) and checks N against
+it. The end of the input is never counted. This is what makes every
+recognizer's largest unread count a static bound, and what keeps a driver
+that hands the unread symbols to the next token from looping on an empty
+one.
+
+== WHAT TO DO
+Leave fewer symbols unread, or move the transition to a state that is
+reached only after the symbols it hands back.
+
+@example reject
+import std::dfa
+
+dfa word over ascii:
+    start:
+        'a'..'z' -> body
+    body:
+        'a'..'z' -> body
+        ':' -> accept before 2
+        end -> accept
+
+0
+@caption body may be reached after one symbol: there is only one to hand back with the ':'
+@error CORE SEMANTIC DFA-UNREAD-BEYOND-INPUT
+@at 8:16
+@end
+
+@topic error.dfa-call-lookahead
+title: DFA-CALL-LOOKAHEAD: a call continues after a callee that leaves too much
+summary: `call DFA then STATE` can reconsider only the symbol the callee completed on, so a callee that leaves more unread is called with `then accept`, which passes its unread symbols on.
+index: errors
+alias: call lookahead
+keywords: dfa, call, delegation, lookahead, accept before, unread
+related: concept.recognizers error.dfa-unread-beyond-input
+docs: DFA-COROUTINE-MILESTONE-2.md
+code: CORE SEMANTIC DFA-CALL-LOOKAHEAD
+
+== MEANING
+A recognizer keeps no input: what it reads is handed to it one symbol at
+a time and taken. When a callee completes leaving the symbol it completes
+on unread, the caller still has that symbol and reconsiders it in STATE;
+an earlier one it no longer has. So a callee with `accept before 2` (or
+`end -> accept before 1`) can only end its caller's token too: `then
+accept` completes the caller with the callee's unread count.
+
+@example reject
+import std::dfa
+
+dfa key over ascii:
+    start:
+        'a'..'z' -> body
+    body:
+        'a'..'z' -> body
+        ':' -> colon
+    colon:
+        'a'..'z' -> body
+        ' ' -> accept before 2
+        end -> accept before 1
+
+dfa entry over ascii:
+    start:
+        'a'..'z' -> call key then rest
+    rest:
+        ' ' -> accept
+        end -> accept
+
+0
+@caption key can leave ": " unread, but entry holds only the space
+@error CORE SEMANTIC DFA-CALL-LOOKAHEAD
+@at 16:26
+@end

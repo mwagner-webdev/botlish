@@ -1476,7 +1476,12 @@ proc hir::warnings::ConventionalName {kind name} {
 # "h")`, `#clear_drop`, `#swap_drop`; MUTABLE-VECTOR.md). They are recognized
 # by the compiler's own predicates for those constructs (hir::contexts::isLoad,
 # hir::mutvec::DescriptorArgs); no source can spell `context#load` or
-# `mutable_vector#...`, so no written literal is ever such a key.
+# `mutable_vector#...`, so no written literal is ever such a key. A declared
+# recognizer's functions (surface/dfa.tcl, DFA-COROUTINE-MILESTONE-2.md)
+# carry their table and the names of their states and recognizers as String
+# consts the front end writes from the declaration: each is marked
+# `synthesized` where it is made (surface/dfa.tcl's Str) and is no literal
+# either.
 #
 # Literals only. Nothing else is looked at: not a binding read at a use site
 # (`sep = ","` is reported at its initializer, once, never where `sep` is
@@ -1494,7 +1499,7 @@ proc hir::warnings::OneCharStringLiteral {hir} {
     set keys [ContextLoadKeys $hir]
     set warnings {}
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] ne "const" || [dict exists $keys $e]} {
+        if {[dict get $node kind] ne "const" || [dict exists $keys $e] || [dict exists $node synthesized]} {
             continue
         }
         set fact [hir::exact::Of $hir $e]

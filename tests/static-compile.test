@@ -587,7 +587,9 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
 } -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 107}
 
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
-# kind the compiler's front end (hir/*.tcl, surface/modules.tcl) can name, by
+# kind the compiler's front end (hir/*.tcl, surface/modules.tcl, and the
+# declared recognizers' surface/dfa.tcl -- top-level declarations, which no
+# static block holds) can name, by
 # class. `recoverable` is exactly the code table; the others are never a
 # static block's rejection, each for its reason (`syntax-recovery`: a
 # program with a syntax error has no static decision -- its blocks are holes
@@ -599,7 +601,11 @@ set scCensus {
     internal {CONTEXT-TRAIT-INTERNAL TRAIT-INTERNAL}
     declaration {CYCLIC-REFINEMENT REFINEMENT-CARRIER TRAIT-DUPLICATE-REQUIREMENT TRAIT-NAME-COLLISION
         TRAIT-OTHER-TRAIT TRAIT-REQUIREMENT-RECEIVER TRAIT-SELF-POSITION ENUM-EMPTY
-        LAYOUT-SIZE LAYOUT-ALIGNMENT LAYOUT-FIELD-TYPE LAYOUT-FIELD-BOUNDS LAYOUT-FIELD-OVERLAP LAYOUT-CYCLE}
+        LAYOUT-SIZE LAYOUT-ALIGNMENT LAYOUT-FIELD-TYPE LAYOUT-FIELD-BOUNDS LAYOUT-FIELD-OVERLAP LAYOUT-CYCLE
+        DFA-ALPHABET DFA-AMBIGUOUS-TRANSITION DFA-BYTE-CHARACTER DFA-CALL-ALPHABET DFA-CALL-LOOKAHEAD
+        DFA-DEAD-TRANSITION DFA-DUPLICATE DFA-EMPTY-RANGE DFA-END-CONSUMED DFA-MISSING-END DFA-NO-ACCEPT
+        DFA-RECURSIVE-CALL DFA-UNKNOWN-CLASS DFA-UNKNOWN-DFA DFA-UNKNOWN-STATE DFA-UNREACHABLE-STATE
+        DFA-UNREAD-BEYOND-INPUT}
     top-level-install {CONTEXT-TYPE-NOT-EXACT DUPLICATE-CONTEXT}
     not-from-source {LISTLOOP-BREAK-VALUE}
     header {CYCLE DUPLICATE-IMPORT DUPLICATE-NATIVE INVALID-TOPLEVEL MODULE-COLLISION NOT-A-TYPE SELF-IMPORT RESERVED-NAMESPACE
@@ -627,7 +633,8 @@ test sc-census-exhaustive {item 22: every diagnostic kind the front end names is
         }
     }
     set seen [dict create]
-    foreach path [concat [glob [file join $::projectRoot hir *.tcl]] [list [file join $::projectRoot surface modules.tcl]]] {
+    foreach path [concat [glob [file join $::projectRoot hir *.tcl]] [list [file join $::projectRoot surface modules.tcl] \
+            [file join $::projectRoot surface dfa.tcl]]] {
         foreach line [split [core::ReadFile $path] \n] {
             if {[regexp {^\s*#} $line]} continue
             foreach token [regexp -all -inline {\m[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\M} $line] {

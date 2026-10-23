@@ -593,7 +593,7 @@ proc cpt::Generate {} {
 # its leading words), ORIGIN where it was found. Read from the source by
 # the patterns each reporting mechanism uses, never from a list kept by hand:
 #   * diagnostic kinds: the token scan of tests/static-compile.test's census
-#     (hir/*.tcl and surface/modules.tcl), less the warning codes, the
+#     (hir/*.tcl, surface/modules.tcl and surface/dfa.tcl), less the warning codes, the
 #     tokens that name a design document, and the regular-expression
 #     fragments; and every hir::static::codes kind
 #   * the module loader's kinds: `Error KIND` in surface/modules.tcl
@@ -606,7 +606,8 @@ proc cpt::Inventory {} {
     set inventory {}
     set warnings [dict keys $::hir::warnings::passes]
     set seen [dict create]
-    foreach path [concat [glob [file join $root hir *.tcl]] [list [file join $root surface modules.tcl]]] {
+    foreach path [concat [glob [file join $root hir *.tcl]] [list [file join $root surface modules.tcl] \
+            [file join $root surface dfa.tcl]]] {
         foreach line [split [ReadFile $path] \n] {
             if {[regexp {^\s*#} $line]} continue
             foreach token [regexp -all -inline {\m[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\M} $line] {

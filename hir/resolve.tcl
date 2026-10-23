@@ -943,6 +943,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # A decimal literal's exact decimal (hir/decimal.tcl).
                 SetField hir $e decimal [dict get $node decimal]
             }
+            if {[dict exists $node synthesized]} {
+                # A constant the front end wrote for a declaration, not a
+                # literal of the program (surface/dfa.tcl's Str): no
+                # warning about literals reads it.
+                SetField hir $e synthesized [dict get $node synthesized]
+            }
         }
         ref {
             set ident [hir::traits::ExternalIdent $ctx $node]
