@@ -58,6 +58,9 @@ proc core::dfa::Fold {row key table} {
     return [list value $value]
 }
 
+# Every code is a state number or an outcome's number, both nonnegative
+# (-result-range: the range analysis proves a state from it, and native
+# lowering then checks none).
 core::native::register dfa#transition -arity 3 -impl core::dfa::transition \
-    -param-types {int int str} -result-type int -context-free 1 \
+    -param-types {int int str} -result-type int -result-range nonneg -context-free 1 \
     -ownership {observe observe observe} -fold core::dfa::Fold

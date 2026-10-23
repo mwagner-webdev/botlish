@@ -1,0 +1,155 @@
+# yaml_lex.bot -- a scoped subset of YAML 1.2.2's lexical grammar as
+# declared recognizers (DFA-COROUTINE-MILESTONE-2.md, "The workloads"): a
+# grammar JSON's does not resemble, and the one whose plain scalars need two
+# symbols of lookahead.
+#
+# In the subset: double-quoted scalars with every escape of 5.7, single-
+# quoted scalars ('' is a quote), comments, flow indicators, and plain
+# scalars of one word in flow context. Not in it, by the subset's design:
+# block structure, indentation, block scalars (| and >), plain scalars of
+# several words or lines, tags, anchors, directives, documents -- each needs
+# a count, a stack or unbounded lookahead (a plain scalar's inner blanks:
+# "a  b" is one scalar, "a  :" is not, and no fixed number of symbols tells
+# them apart) that no finite recognizer with bounded lookahead holds.
+
+import std::dfa
+
+# c-printable without the line breaks and the byte order mark: nb-char (5.2,
+# 5.4); its non-blank part, ns-char (5.5).
+class nb_char = 0x09 0x20..0x7E 0x85 0xA0..0xD7FF 0xE000..0xFEFE 0xFF00..0xFFFD 0x10000..0x10FFFF
+class ns_char = 0x21..0x7E 0x85 0xA0..0xD7FF 0xE000..0xFEFE 0xFF00..0xFFFD 0x10000..0x10FFFF
+class line_break = '\n' '\r'
+class white = ' ' '\t'
+class hex = '0'..'9' 'a'..'f' 'A'..'F'
+# c-indicator (5.3) and c-flow-indicator.
+class indicator = '-' '?' ':' ',' '[' ']' '{' '}' '#' '&' '*' '!' '|' '>' '\'' '"' '%' '@' '`'
+class flow_indicator = ',' '[' ']' '{' '}'
+# ns-plain-safe(flow-in) = ns-char - c-flow-indicator (7.3.3); a plain
+# scalar's symbols but ':' and '#', which belong to it only where they
+# cannot start an indicator or a comment (below).
+class safe = ns_char except flow_indicator
+class plain = safe except ':' '#'
+
+# c-double-quoted (7.3.1): nb-json characters but " and \, line breaks (the
+# scalar may span lines; folding is the value's, not the token's), and the
+# escapes of 5.7 -- an escaped line break included.
+dfa yaml_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '0' 'a' 'b' 't' '\t' 'n' 'v' 'f' 'r' 'e' ' ' '"' '/' '\\' 'N' '_' 'L' 'P' '\n' '\r' -> accept
+        'x' -> x2
+        'u' -> u4
+        'U' -> U8
+    x2:
+        hex -> x1
+    x1:
+        hex -> accept
+    u4:
+        hex -> u3
+    u3:
+        hex -> u2
+    u2:
+        hex -> u1
+    u1:
+        hex -> accept
+    U8:
+        hex -> U7
+    U7:
+        hex -> U6
+    U6:
+        hex -> U5
+    U5:
+        hex -> u4
+
+dfa yaml_double_quoted over unicode:
+    class content = 0x09 0x20..0x21 0x23..0x5B 0x5D..0x10FFFF
+    open:
+        '"' -> body
+    body:
+        '"' -> accept
+        '\\' -> call yaml_escape then body
+        content line_break -> body
+
+# c-single-quoted (7.3.2): '' is one quote, so the closing quote is known
+# only at the symbol after it: one symbol of lookahead.
+dfa yaml_single_quoted over unicode:
+    class content = 0x09 0x20..0x26 0x28..0x10FFFF
+    class not_quote = any except '\''
+    open:
+        '\'' -> body
+    body:
+        '\'' -> quote
+        content line_break -> body
+    quote:
+        '\'' -> body
+        not_quote -> accept before
+        end -> accept
+
+# c-nb-comment-text (6.6): # and the rest of the line, without the break.
+dfa yaml_comment over unicode:
+    start:
+        '#' -> text
+    text:
+        nb_char -> text
+        line_break -> accept before
+        end -> accept
+
+# ns-plain-one-line in flow context (7.3.3), one word of it. Its first
+# symbol is no indicator, or one of - ? : followed by a safe one
+# (ns-plain-first). Inside it, '#' follows a non-blank symbol, so it is the
+# scalar's; ':' is the scalar's only when a safe symbol follows it
+# (ns-plain-char): a ':' followed by a blank, a line break, a flow indicator
+# or the end is the mapping indicator, and the scalar ended *before* it --
+# two symbols back from the one that says so (one at the end of the input,
+# which is no symbol). So "a:b" is one scalar and "a: b" the scalar "a",
+# then ':'.
+dfa yaml_plain_flow over unicode:
+    class first = ns_char except indicator
+    start:
+        first -> body
+        '-' '?' ':' -> lead
+    lead:
+        plain '#' -> body
+        ':' -> colon
+    body:
+        plain '#' -> body
+        ':' -> colon
+        white line_break flow_indicator -> accept before
+        end -> accept
+    colon:
+        plain '#' -> body
+        ':' -> colon
+        white line_break flow_indicator -> accept before 2
+        end -> accept before 1
+
+# One token of a flow-style text whose first symbol is not blank: a
+# dispatcher. A ':' is the mapping indicator when no safe symbol follows it
+# and a plain scalar's first symbol when one does; deciding takes the symbol
+# after it, so this recognizer reads the scalar on itself (a call hands the
+# callee its current symbol, and the ':' is behind it by then), in the
+# states that follow yaml_plain_flow's.
+dfa yaml_token over unicode:
+    class first = ns_char except indicator
+    start:
+        '[' ']' '{' '}' ',' -> accept
+        '"' -> call yaml_double_quoted then accept
+        '\'' -> call yaml_single_quoted then accept
+        '#' -> call yaml_comment then accept
+        first '-' '?' -> call yaml_plain_flow then accept
+        ':' -> colon_first
+    colon_first:
+        white line_break flow_indicator -> accept before
+        end -> accept
+        plain '#' -> body
+        ':' -> colon
+    body:
+        plain '#' -> body
+        ':' -> colon
+        white line_break flow_indicator -> accept before
+        end -> accept
+    colon:
+        plain '#' -> body
+        ':' -> colon
+        white line_break flow_indicator -> accept before 2
+        end -> accept before 1

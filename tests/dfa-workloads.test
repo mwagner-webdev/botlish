@@ -1,0 +1,678 @@
+# dfa-workloads.test -- the JSON and YAML workloads of declared recognizers
+# (examples/dfa/json, examples/dfa/yaml; DFA-COROUTINE-MILESTONE-2.md, "The
+# workloads"), on every backend (the interpreter, the Tcl compiler,
+# cranelift-generic, cranelift with coroutine fusion and without):
+#
+# * the recognizers against the reference interpreter of
+#   tests/dfa-support.tcl;
+# * token boundaries, the lookahead included: a number ends before the
+#   symbol after it, a YAML plain scalar two symbols before ": ";
+# * JSON documents, over text and over UTF-8 bytes, each verdict also
+#   CPython's strict json's (audit/dfa/tools/oracle.py; needs python3);
+# * chunking: a chunk boundary is not the end of the input -- every split of
+#   a text, and random ones, give its verdict, the driver giving back what a
+#   token left unread across chunk boundaries;
+# * the caller's limits, long inputs, decoding a string token;
+# * the YAML tokenizer's tokens, "a:b" against "a: b".
+#
+# audit/dfa/tools/differential.tcl runs the JSON workload against
+# JSONTestSuite and generated cases (the report's "Correctness").
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot tests dfa-support.tcl]
+
+interp recursionlimit {} 100000
+core::useProgramRecursionLimit
+
+set jsonDir [file join $::projectRoot examples dfa json]
+set yamlDir [file join $::projectRoot examples dfa yaml]
+
+proc readText {path} {
+    set f [open $path]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+
+testConstraint python3 [expr {![catch {exec python3 -c "import json"}]}]
+# conformance.bot reads its arguments and prints through std::linux::io.
+testConstraint linuxHost [expr {$::tcl_platform(os) eq "Linux"}]
+
+# A Botlish string literal of TEXT (whose characters the literal can spell).
+proc literal {text} {
+    return "\"[string map {\\ \\\\ \" \\\" \n \\n \r \\r \t \\t} $text]\""
+}
+
+# The scalar values of TEXT.
+proc scalars {text} {
+    return [lmap c [split $text ""] {scan $c %c}]
+}
+
+# The UTF-8 bytes of TEXT.
+proc utf8 {text} {
+    binary scan [encoding convertto utf-8 $text] cu* bytes
+    return $bytes
+}
+
+# The verdict functions the document cases run (module cases.bot).
+set casesModule {import json
+import yaml
+import std::str
+import std::int
+import std::list
+
+fn verdict(chunks: List[str], max_depth: int, max_token: int) -> str errors IndexNotFound:
+    s = json::validate_text(chunks, max_depth, max_token):
+        on json::Lexical {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("lexical ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on json::Truncated {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("truncated ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on json::Structure {at, expected}:
+            return std::str::concat(std::str::concat(std::str::concat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return std::str::concat("too long ", std::int::to_string(at))
+    std::str::concat(std::str::concat(std::str::concat("ok ", std::int::to_string(s.tokens)), " "), std::int::to_string(s.symbols))
+
+fn verdict_bytes(chunks: List[List[int]], max_depth: int, max_token: int) -> str:
+    s = json::validate_bytes(chunks, max_depth, max_token):
+        on json::Lexical {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("lexical ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on json::Truncated {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("truncated ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on json::Structure {at, expected}:
+            return std::str::concat(std::str::concat(std::str::concat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return std::str::concat("too long ", std::int::to_string(at))
+    std::str::concat(std::str::concat(std::str::concat("ok ", std::int::to_string(s.tokens)), " "), std::int::to_string(s.symbols))
+
+fn join(parts: List[str], i: int, sep: str) -> str errors IndexNotFound:
+    if i >= std::list::length(parts):
+        return ""
+    if i == 0:
+        return std::str::concat(std::list::at(parts, 0), join(parts, 1, sep))
+    std::str::concat(std::str::concat(sep, std::list::at(parts, i)), join(parts, i + 1, sep))
+
+fn tokens(chunks: List[str]) -> str errors IndexNotFound:
+    ts = yaml::tokens(chunks, 4096):
+        on yaml::Lexical {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("lexical ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on yaml::Truncated {at, recognizer, state}:
+            return std::str::concat(std::str::concat(std::str::concat(std::str::concat(std::str::concat("truncated ", std::int::to_string(at)), " "), recognizer), " "), state)
+        on yaml::TokenTooLong {at}:
+            return std::str::concat("too long ", std::int::to_string(at))
+    join(ts, 0, "; ")
+
+fn counted(chunks: List[str]) -> str errors IndexNotFound:
+    n = yaml::count_tokens(chunks, 4096):
+        on yaml::Lexical:
+            return "lexical"
+        on yaml::Truncated:
+            return "truncated"
+        on yaml::TokenTooLong:
+            return "too long"
+    std::int::to_string(n)
+
+fn listed(chunks: List[str]) -> str errors IndexNotFound:
+    ts = yaml::tokens(chunks, 4096):
+        on yaml::Lexical:
+            return "lexical"
+        on yaml::Truncated:
+            return "truncated"
+        on yaml::TokenTooLong:
+            return "too long"
+    std::int::to_string(std::list::length(ts))
+
+fn show(xs: List[int]) -> str errors IndexNotFound:
+    out = loop x in xs:
+        std::int::to_string(x)
+    std::str::concat(std::str::concat("[", join(out, 0, " ")), "]")
+
+fn decoded_text(text: str) -> str errors IndexNotFound:
+    xs = json::decode_text(text, 0, std::str::length(text)):
+        on json::UnpairedSurrogate {at}:
+            return std::str::concat("unpaired at ", std::int::to_string(at))
+    show(xs)
+
+fn decoded_bytes(bytes: List[int]) -> str errors IndexNotFound:
+    xs = json::decode_bytes(bytes):
+        on json::UnpairedSurrogate {at}:
+            return std::str::concat("unpaired at ", std::int::to_string(at))
+    show(xs)
+}
+
+# A private application directory: the workloads' modules, cases.bot and
+# FILES (NAME TEXT ...).
+proc workloads {args} {
+    set files [list cases.bot $::casesModule]
+    foreach dir [list $::jsonDir $::yamlDir] {
+        foreach path [glob -directory $dir *.bot] {
+            if {[file tail $path] ne "conformance.bot"} {
+                lappend files [file tail $path] [readText $path]
+            }
+        }
+    }
+    return [dfatest::workspace {*}$files {*}$args]
+}
+
+# The outcomes of running CALLS (Botlish expressions of str, using the
+# functions of cases.bot) on BACKENDS: the List of str every backend agrees
+# on.
+proc runCalls {calls {backends ""}} {
+    set program "import cases\nimport json\n\nfn all() -> List\[str\] errors IndexNotFound:\n    \[\n"
+    foreach c $calls {
+        append program "        $c,\n"
+    }
+    append program "    \]\n\nall():\n    on IndexNotFound:\n        \[\"index\"\]\n"
+    set dir [workloads main.bot $program]
+    return [dfatest::strings [dfatest::agreed [dfatest::outcomes [file join $dir main.bot] $backends]]]
+}
+
+# The cases ({R QUALIFIED SYMBOLS}) of the recognizers RS of module NS
+# (json_lex or yaml_lex) run on BACKENDS, compared with the reference: the
+# number of cases and the disagreements.
+proc modelRun {ns rs seed frontier {backends ""}} {
+    set dir [workloads]
+    set model [dfaref::load [list $ns [file join $dir $ns.bot]]]
+    set cases {}
+    foreach r $rs {
+        foreach w [dfatest::cases $model $ns $r 10 $seed $frontier] {
+            lappend cases [list $r ${ns}::$r $w]
+        }
+    }
+    if {$backends ne ""} {
+        set saved $::dfatest::backends
+        set ::dfatest::backends $backends
+    }
+    try {
+        set bad [dfatest::compare $dir $ns $cases]
+    } finally {
+        if {$backends ne ""} {
+            set ::dfatest::backends $saved
+        }
+    }
+    return [list [llength $cases] [lrange $bad 0 4]]
+}
+
+# The outcome text (dfatest::Driver's) of each case {R SYMBOLS} of module NS,
+# every backend agreeing.
+proc boundaries {ns cases} {
+    set dir [workloads]
+    set full [lmap c $cases {list [lindex $c 0] ${ns}::[lindex $c 0] [lindex $c 1]}]
+    set path [file join $dir main.bot]
+    set f [open $path w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f [dfatest::program $ns $full]
+    close $f
+    return [dfatest::strings [dfatest::agreed [dfatest::outcomes $path]]]
+}
+
+# A case's symbols as text: the end <end>, control characters and a
+# backslash by number.
+proc shown {symbols} {
+    join [lmap s $symbols {
+        if {$s == -1} {
+            string cat <end>
+        } elseif {$s < 32 || $s == 92} {
+            string cat <$s>
+        } else {
+            format %c $s
+        }
+    }] ""
+}
+
+test dfa-workloads-warning-clean {the workloads' modules and the conformance program compile under -warnings error (the warning gate's corpus does not include examples/dfa: this is its check)} -constraints linuxHost -body {
+    set dir [workloads main.bot "import json\nimport yaml\nimport composition\nimport by_hand\n\n0\n"]
+    file copy [file join $::jsonDir conformance.bot] [file join $dir conformance.bot]
+    surface::readProgramFile [file join $dir main.bot] -warnings error
+    surface::readProgramFile [file join $dir conformance.bot] -warnings error
+    string cat ok
+} -result ok
+
+# ---------------------------------------------------------------------------
+# JSON
+
+test dfa-json-model {json_lex's recognizers do what their declarations say: the reference interpreter's outcome for every state's every transition (and random runs), on every backend} -body {
+    lassign [modelRun json_lex {json_number json_literal json_escape json_string utf8_char json_string_bytes utf8_text json_token json_token_bytes json_escape_strict json_string_strict} 7 80] n bad
+    list [expr {$n > 1000}] $bad
+} -result {1 {}}
+
+test dfa-json-boundaries {number and literal tokens end before the symbol after them, which is left unread; strings at their closing quote; nowhere else} -body {
+    set cases {}
+    foreach {r text end} {
+        json_number "123," 0
+        json_number "-0.25e+3]" 0
+        json_number "01" 0
+        json_number "1e+" 1
+        json_number "1." 1
+        json_number "1.2.3" 0
+        json_number "7" 1
+        json_number "-" 1
+        json_number "0]" 0
+        json_number "123abc" 0
+        json_string {"a\u0041"} 0
+        json_string {"a\q"} 0
+        json_string "\"abc" 1
+        json_string "\"tab\there\"" 0
+        json_string {"\u12G4"} 0
+        json_literal "true," 0
+        json_literal "truex" 0
+        json_literal "nul" 1
+        json_literal "false" 1
+        json_token "\[" 0
+        json_token "12 " 0
+        json_token "null\]" 0
+    } {
+        set w [scalars $text]
+        if {$end} {
+            lappend w -1
+        }
+        lappend cases [list $r $w]
+    }
+    set out {}
+    foreach c $cases g [boundaries json_lex $cases] {
+        lappend out "[lindex $c 0] [shown [lindex $c 1]] => $g"
+    }
+    join $out \n
+} -result {json_number 123, => accept 3 1
+json_number -0.25e+3] => accept 8 1
+json_number 01 => unrecognized json_lex::json_number zero 1
+json_number 1e+<end> => end json_lex::json_number exponent_sign 3
+json_number 1.<end> => end json_lex::json_number point 2
+json_number 1.2.3 => unrecognized json_lex::json_number fraction 3
+json_number 7<end> => accept 1 0
+json_number -<end> => end json_lex::json_number minus 1
+json_number 0] => accept 1 1
+json_number 123abc => unrecognized json_lex::json_number integer 3
+json_string "a<92>u0041" => accept 9 0
+json_string "a<92>q" => unrecognized json_lex::json_escape kind 3
+json_string "abc<end> => end json_lex::json_string body 4
+json_string "tab<9>here" => unrecognized json_lex::json_string body 4
+json_string "<92>u12G4" => unrecognized json_lex::json_escape u3 5
+json_literal true, => accept 4 1
+json_literal truex => unrecognized json_lex::json_literal word_end 4
+json_literal nul<end> => end json_lex::json_literal start"nul" 3
+json_literal false<end> => accept 5 0
+json_token [ => accept 1 0
+json_token 12  => accept 2 1
+json_token null] => accept 4 1}
+
+# Documents: the structural layer over the tokens.
+set documents {
+    {{"a": [1, -2.5e3, true, null], "b": {}}} {ok 18 39}
+    {[]} {ok 2 2}
+    {{}} {ok 2 2}
+    {"x"} {ok 1 3}
+    { 0 } {ok 1 3}
+    {[[[]]]} {ok 6 6}
+    {[1,]} {structure 3 a value}
+    {[,1]} {structure 1 a value or ]}
+    {{"a":1,}} {structure 7 a string}
+    {{"a" 1}} {structure 5 a name separator}
+    {{,}} "structure 1 a string or \}"
+    {{1:2}} {lexical 2 json_lex::json_number integer}
+    {[1 2]} {structure 3 , or ]}
+    {1 2} {structure 2 the end of the input}
+    "{\"a\":1}\}" {structure 7 the end of the input}
+    {{"a":1}x} {lexical 7 json_lex::json_token start}
+    {} {structure 0 a value}
+    {   } {structure 3 a value}
+    {[} {structure 1 a value or ]}
+    {{"a":[1}} {structure 7 , or ]}
+    {tru} {truncated 3 json_lex::json_literal start"tru"}
+    {true1} {lexical 4 json_lex::json_literal word_end}
+    {-} {truncated 1 json_lex::json_number minus}
+    {0.0e} {truncated 4 json_lex::json_number exponent}
+    {"\ud800"} {ok 1 8}
+    {NaN} {lexical 0 json_lex::json_token start}
+    {'a'} {lexical 0 json_lex::json_token start}
+    {[1.]} {lexical 3 json_lex::json_number point}
+    {1} {ok 1 1}
+    {[1]} {ok 3 3}
+    {[true]} {ok 3 6}
+}
+
+test dfa-json-documents {documents: nesting, token order, trailing commas, several values, trailing content; a number or literal as the last token of the input, and right before a bracket} -body {
+    set calls {}
+    foreach {text want} $::documents {
+        lappend calls "cases::verdict(\[[literal $text]\], 32, 4096)"
+    }
+    set out {}
+    foreach {text want} $::documents g [runCalls $calls] {
+        if {$g ne $want} {
+            lappend out [list $text $want $g]
+        }
+    }
+    set out
+} -result {}
+
+test dfa-json-documents-oracle {every document's verdict is CPython's strict json's} -constraints python3 -body {
+    set input ""
+    foreach {text want} $::documents {
+        binary scan [encoding convertto utf-8 $text] H* hex
+        append input $hex\n
+    }
+    set verdicts [split [string trim [exec python3 -I [file join $::projectRoot audit dfa tools oracle.py] << $input]] \n]
+    set out {}
+    foreach {text want} $::documents v $verdicts {
+        set ours [if {[string match "ok *" $want]} {string cat accept} else {string cat reject}]
+        if {$ours ne $v} {
+            lappend out [list $text $ours $v]
+        }
+    }
+    set out
+} -result {}
+
+# Over bytes: UTF-8 is validated inside strings, and nothing else may be
+# non-ASCII.
+set byteDocuments [list \
+    [list 34 195 169 34] {ok 1 4} \
+    [list 34 240 159 152 128 34] {ok 1 6} \
+    [list 34 192 128 34] {lexical 1 json_lex::json_string_bytes body} \
+    [list 34 226 130 34] {lexical 3 json_lex::utf8_char tail1} \
+    [list 34 237 160 128 34] {lexical 2 json_lex::utf8_char ed} \
+    [list 34 244 144 128 128 34] {lexical 2 json_lex::utf8_char f4} \
+    [list 195 169] {lexical 0 json_lex::json_token_bytes start} \
+    [list 239 187 191 49] {lexical 0 json_lex::json_token_bytes start} \
+    [list 34 0 34] {lexical 1 json_lex::json_string_bytes body} \
+    [list 34 226 130] {truncated 3 json_lex::utf8_char tail1} \
+    [list 91 49 44 34 92 117 48 48 101 57 34 93] {ok 5 12} \
+]
+
+test dfa-json-bytes {UTF-8 over bytes: overlong forms, surrogates, truncation, a byte order mark} -body {
+    set calls {}
+    foreach {bytes want} $::byteDocuments {
+        lappend calls "cases::verdict_bytes(\[\[[join $bytes {, }]\]\], 32, 4096)"
+    }
+    set out {}
+    foreach {bytes want} $::byteDocuments g [runCalls $calls] {
+        if {$g ne $want} {
+            lappend out [list $bytes $want $g]
+        }
+    }
+    set out
+} -result {}
+
+test dfa-json-bytes-oracle {every byte document's verdict is CPython's strict json's} -constraints python3 -body {
+    set input ""
+    foreach {bytes want} $::byteDocuments {
+        append input [join [lmap b $bytes {format %02x $b}] ""]\n
+    }
+    set verdicts [split [string trim [exec python3 -I [file join $::projectRoot audit dfa tools oracle.py] << $input]] \n]
+    set out {}
+    foreach {bytes want} $::byteDocuments v $verdicts {
+        set ours [if {[string match "ok *" $want]} {string cat accept} else {string cat reject}]
+        if {$ours ne $v} {
+            lappend out [list $bytes $ours $v]
+        }
+    }
+    set out
+} -result {}
+
+# ITEMS split at every possible place, and at random places into many
+# chunks (COUNT of them, seed SEED; empty chunks among them): a list of
+# chunk lists.
+proc splits {items count seed} {
+    expr {srand($seed)}
+    set n [llength $items]
+    set out {}
+    for {set cut 0} {$cut <= $n} {incr cut} {
+        lappend out [list [lrange $items 0 [expr {$cut - 1}]] [lrange $items $cut end]]
+    }
+    for {set k 0} {$k < $count} {incr k} {
+        set chunks {}
+        set chunk {}
+        foreach item $items {
+            lappend chunk $item
+            if {rand() < 0.3} {
+                lappend chunks $chunk
+                set chunk {}
+                if {rand() < 0.2} {
+                    lappend chunks {}
+                }
+            }
+        }
+        lappend chunks $chunk
+        lappend out $chunks
+    }
+    return $out
+}
+
+test dfa-json-chunks {a chunk boundary is not the end of the input: every split, and random ones with empty chunks, give the text's verdict -- a number's lookahead symbol in the next chunk, a split inside an escape, a UTF-8 character or a literal} -body {
+    set texts [list "{\"key\": \[1.5e-3, -0, \"\\u00e9\\n\", true, null, false\]}" "\[\"abc" "\[12" "{\"a\":1}x" "  \[\[\]\]  " "\[12,345\]" "123"]
+    set calls {}
+    set expected {}
+    foreach text $texts {
+        foreach chunks [splits [split $text ""] 6 3] {
+            lappend calls "cases::verdict(\[[join [lmap c $chunks {literal [join $c ""]}] {, }]\], 32, 4096)"
+            lappend expected "cases::verdict(\[[literal $text]\], 32, 4096)"
+        }
+    }
+    foreach bytes [list [utf8 "\[\"é€😀\", 12.5\]"] [utf8 "\"é"]] {
+        foreach chunks [splits $bytes 6 5] {
+            lappend calls "cases::verdict_bytes(\[[join [lmap c $chunks {string cat \[ [join $c {, }] \]}] {, }]\], 32, 4096)"
+            lappend expected "cases::verdict_bytes(\[\[[join $bytes {, }]\]\], 32, 4096)"
+        }
+    }
+    set got [runCalls [concat $calls $expected] {interp cranelift cranelift-unfused}]
+    set n [llength $calls]
+    set bad {}
+    for {set k 0} {$k < $n} {incr k} {
+        if {[lindex $got $k] ne [lindex $got [expr {$n + $k}]]} {
+            lappend bad [list [lindex $calls $k] [lindex $got $k] [lindex $got [expr {$n + $k}]]]
+        }
+    }
+    list [expr {$n > 100}] [lsort -unique [lrange $got $n end]] [lrange $bad 0 3]
+} -result {1 {{lexical 7 json_lex::json_token start} {ok 1 3} {ok 17 52} {ok 4 8} {ok 5 19} {ok 5 8} {structure 3 , or ]} {truncated 3 json_lex::json_string_bytes body} {truncated 5 json_lex::json_string body}} {}}
+
+test dfa-json-limits {nesting and token length are bounded by the caller's limits} -body {
+    set deep [string repeat "\[" 33][string repeat "\]" 33]
+    set ok [string repeat "\[" 32][string repeat "\]" 32]
+    set long "\[\"[string repeat x 1500]\"\]"
+    runCalls [list "cases::verdict(\[[literal $deep]\], 32, 4096)" "cases::verdict(\[[literal $ok]\], 32, 4096)" \
+        "cases::verdict(\[[literal $long]\], 32, 1000)" "cases::verdict(\[[literal $long]\], 32, 2000)"]
+} -result {{too deep} {ok 64 64} {too long 1} {ok 3 1504}}
+
+test dfa-json-long {a long valid input: 20,000 tokens, 10,000 of them numbers each ended by the symbol after it, and a 20,000-symbol string token} -body {
+    set many "\[[string repeat {1, } 9999]1\]"
+    set long "\[\"[string repeat a 20000]\"\]"
+    runCalls [list "cases::verdict(\[[literal $many]\], 32, 100000)" "cases::verdict(\[[literal $long]\], 32, 100000)"] \
+        {compile cranelift-generic cranelift cranelift-unfused}
+} -result {{ok 20001 30000} {ok 3 20004}}
+
+test dfa-json-long-interp {the interpreter has no tail calls (DFA-COROUTINE-MILESTONE-2.md, "Reference interpreter census"): a recognizer's self call per symbol nests, so its evaluation depth bounds a token -- 2,000 symbols fit} -body {
+    set long "\[\"[string repeat a 2000]\"\]"
+    runCalls [list "cases::verdict(\[[literal $long]\], 32, 100000)"] {interp}
+} -result {{ok 3 2004}}
+
+test dfa-json-decode {decoding a recognized string token: escapes, surrogate pairs, and no lossy surrogate} -body {
+    set calls {}
+    foreach text {{"a\u0041"} {"\ud83d\ude00"} {"\b\f\n\r\t\/\\\""} {"é\u00e9"}} {
+        lappend calls "cases::decoded_text([literal $text])"
+    }
+    foreach text {{"\u00e9"} {"é"} {"\ud83d\ude00x"}} {
+        lappend calls "cases::decoded_bytes(\[[join [utf8 $text] {, }]\])"
+    }
+    foreach text {{"\ud800"} {"\udc00\ud800"} {"\ud800\u0041"}} {
+        lappend calls "cases::decoded_text([literal $text])"
+    }
+    runCalls $calls
+} -result {{[97 65]} {[128512]} {[8 12 10 13 9 47 92 34]} {[233 233]} {[195 169]} {[195 169]} {[240 159 152 128 120]} {unpaired at 1} {unpaired at 1} {unpaired at 1}}
+
+test dfa-json-strict {I-JSON's no-lone-surrogate rule, as finite state} -body {
+    set cases {}
+    foreach text {{"\ud83d\ude00"} {"\ud800"} {"\udc00"} {"\ud800\u0041"} {"\uD83D\uDE00"} {"\ue000"} {"\u0041"}} {
+        lappend cases [list json_string_strict [concat [scalars $text] -1]]
+    }
+    boundaries json_lex $cases
+} -result {{accept 14 0} {unrecognized json_lex::json_escape_strict pair_backslash 7} {unrecognized json_lex::json_escape_strict d2 4} {unrecognized json_lex::json_escape_strict low1 9} {accept 14 0} {accept 8 0} {accept 8 0}}
+
+test dfa-json-by-hand {the same number recognizer written by hand as an ordinary coroutine (by_hand.bot) agrees with json_number's declaration on its model cases: the same outcome at the same symbol, the same count left unread (the state names are each one's own)} -body {
+    set dir [workloads]
+    set model [dfaref::load [list json_lex [file join $dir json_lex.bot]]]
+    set cases [lmap w [dfatest::cases $model json_lex json_number 60 5 150] {list number_by_hand by_hand::number_by_hand $w}]
+    set path [file join $dir main.bot]
+    set f [open $path w]
+    puts -nonewline $f [dfatest::program by_hand $cases]
+    close $f
+    set bad {}
+    foreach {backend outcome} [dfatest::outcomes $path {interp compile cranelift cranelift-unfused}] {
+        foreach c $cases got [dfatest::strings $outcome] {
+            set want [dfaref::text [dfaref::run $model json_lex json_number [lindex $c 2] 0]]
+            regsub {^(unrecognized|end) \S+ \S+ } $want {\1 * * } want
+            regsub {^(unrecognized|end) \S+ \S+ } $got {\1 * * } got
+            if {$want ne $got} {
+                lappend bad [list $backend [lindex $c 2] $want $got]
+            }
+        }
+    }
+    list [expr {[llength $cases] > 150}] [lrange $bad 0 3]
+} -result {1 {}}
+
+test dfa-json-composition {one driver for any recognizer, through a factory that starts it and returns its handle (composition.bot): the same tokens as lex_text, and its recognizers kept on the general runtime by fusion -- the optimizer's interprocedural limit, the probe's point} -body {
+    set dir [workloads main.bot {import composition
+import json
+
+fn run(chunks: List[str]) -> List[int] errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong:
+    a = composition::lex_with(composition::token, chunks, 1000)
+    b = composition::lex_with(composition::token_strict, chunks, 1000)
+    c = json::lex_text(chunks, 1000)
+    [a.tokens, a.symbols, b.tokens, c.tokens, c.symbols]
+
+run(["{\"a\": [1, 2", "3, true], \"b\": null}"]):
+    on IndexNotFound:
+        []
+    on json::Lexical:
+        [-1]
+    on json::Truncated:
+        [-2]
+    on json::TokenTooLong:
+        [-3]
+}]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+    # (The sites that construct a recognizer are the factories'.)
+    set fusion [lsort -unique [lmap entry [native::fusion $hir] {
+        if {![string match *token* [lindex $entry 1]]} continue
+        lindex $entry 0
+    }]]
+    list [dfatest::agreed [dfatest::outcomes [file join $dir main.bot]]] $fusion
+} -result {{value {[15, 31, 15, 15, 31]}} kept}
+
+# ---------------------------------------------------------------------------
+# YAML
+
+test dfa-yaml-model {yaml_lex's recognizers do what their declarations say, on every backend} -body {
+    lassign [modelRun yaml_lex {yaml_escape yaml_double_quoted yaml_single_quoted yaml_comment yaml_plain_flow yaml_token} 3 80] n bad
+    list [expr {$n > 500}] $bad
+} -result {1 {}}
+
+test dfa-yaml-boundaries {quoted scalars, comments, plain scalars: where each token ends, and how much it leaves unread} -body {
+    set cases {}
+    foreach {r text end} {
+        yaml_double_quoted {"a|x41|u00e9|U0001F600|"b"} 0
+        yaml_double_quoted "\"tab\there\"" 0
+        yaml_double_quoted {"a|q"} 0
+        yaml_double_quoted {"|x4"} 0
+        yaml_double_quoted "\"two\nlines\"" 0
+        yaml_single_quoted {'it''s'} 1
+        yaml_single_quoted {'it''s' x} 0
+        yaml_single_quoted {'abc} 1
+        yaml_comment "# note\n" 0
+        yaml_comment "# note" 1
+        yaml_plain_flow "abc," 0
+        yaml_plain_flow "a:b " 0
+        yaml_plain_flow "a: " 0
+        yaml_plain_flow "a:," 0
+        yaml_plain_flow "a:" 1
+        yaml_plain_flow "a::b " 0
+        yaml_plain_flow "a:: " 0
+        yaml_plain_flow "a#b " 0
+        yaml_plain_flow "-1\]" 0
+        yaml_plain_flow "-: " 0
+        yaml_plain_flow "- a" 0
+        yaml_plain_flow ":x " 0
+        yaml_token ": " 0
+        yaml_token ":x," 0
+        yaml_token ":" 1
+        yaml_token "::\]" 0
+    } {
+        # A | in a case is a backslash (shown <92>), so that no escape of
+        # this file's own syntax is in the way.
+        set w [scalars [string map {| \\} $text]]
+        if {$end} {
+            lappend w -1
+        }
+        lappend cases [list $r $w]
+    }
+    set out {}
+    foreach c $cases g [boundaries yaml_lex $cases] {
+        lappend out "[lindex $c 0] [shown [lindex $c 1]] => $g"
+    }
+    join $out \n
+} -result {yaml_double_quoted "a<92>x41<92>u00e9<92>U0001F600<92>"b" => accept 26 0
+yaml_double_quoted "tab<9>here" => accept 10 0
+yaml_double_quoted "a<92>q" => unrecognized yaml_lex::yaml_escape kind 3
+yaml_double_quoted "<92>x4" => unrecognized yaml_lex::yaml_escape x1 4
+yaml_double_quoted "two<10>lines" => accept 11 0
+yaml_single_quoted 'it''s'<end> => accept 7 0
+yaml_single_quoted 'it''s' x => accept 7 1
+yaml_single_quoted 'abc<end> => end yaml_lex::yaml_single_quoted body 4
+yaml_comment # note<10> => accept 6 1
+yaml_comment # note<end> => accept 6 0
+yaml_plain_flow abc, => accept 3 1
+yaml_plain_flow a:b  => accept 3 1
+yaml_plain_flow a:  => accept 1 2
+yaml_plain_flow a:, => accept 1 2
+yaml_plain_flow a:<end> => accept 1 1
+yaml_plain_flow a::b  => accept 4 1
+yaml_plain_flow a::  => accept 2 2
+yaml_plain_flow a#b  => accept 3 1
+yaml_plain_flow -1] => accept 2 1
+yaml_plain_flow -:  => accept 1 2
+yaml_plain_flow - a => unrecognized yaml_lex::yaml_plain_flow lead 1
+yaml_plain_flow :x  => accept 2 1
+yaml_token :  => accept 1 1
+yaml_token :x, => accept 2 1
+yaml_token :<end> => accept 1 0
+yaml_token ::] => accept 1 2}
+
+test dfa-yaml-plain-lookahead {in flow context "a:b" is one plain scalar and "a: b" the scalar "a", the mapping indicator and "b" (YAML 1.2.2, 7.3.3): the scalar ends two symbols before the symbol that says so} -body {
+    runCalls [list {cases::tokens(["{a:b, c: d}"])} {cases::tokens(["[a:, x::y, :z, \"k\":1]"])} {cases::tokens(["a:"])} {cases::tokens(["a:b:c"])}]
+} -result {{begin-mapping 0 1; plain 1 4; entry-separator 4 5; plain 6 7; value-indicator 7 8; plain 9 10; end-mapping 10 11} {begin-sequence 0 1; plain 1 2; value-indicator 2 3; entry-separator 3 4; plain 5 9; entry-separator 9 10; plain 11 13; entry-separator 13 14; double-quoted 15 18; value-indicator 18 19; plain 19 20; end-sequence 20 21} {plain 0 1; value-indicator 1 2} {plain 0 5}}
+
+test dfa-yaml-tokens {quoted scalars, comments and line breaks between flow tokens; an error names the recognizer and the state} -body {
+    runCalls [list "cases::tokens(\[[literal "\['it''s', \"a\\tb\" # note\n, x\]"]\])" {cases::tokens(["- a"])} {cases::tokens(["\"abc"])} "cases::tokens(\[[literal "\{a: 'x"]\])"]
+} -result {{begin-sequence 0 1; single-quoted 1 8; entry-separator 8 9; double-quoted 10 16; comment 17 23; entry-separator 24 25; plain 26 27; end-sequence 27 28} {lexical 1 yaml_lex::yaml_plain_flow lead} {truncated 4 yaml_lex::yaml_double_quoted body} {truncated 6 yaml_lex::yaml_single_quoted body}}
+
+test dfa-yaml-count {count_tokens counts the tokens tokens finds} -body {
+    runCalls [list {cases::counted(["{a:b, c: d}", " [x::y, 'it''s', \"k\":1]"])} {cases::listed(["{a:b, c: d}", " [x::y, 'it''s', \"k\":1]"])} \
+        {cases::counted(["- a"])} {cases::listed(["- a"])}]
+} -result {16 16 lexical lexical}
+
+test dfa-yaml-chunks {the tokens are the same whatever the chunks: every split, and random ones -- the two symbols a plain scalar leaves unread across a chunk boundary given back} -body {
+    set texts [list "{a:b, c: d}" "\[a:, x::y, :z\]" "a: b" "k::v: w" "'it''s' # c\n"]
+    set calls {}
+    set expected {}
+    foreach text $texts {
+        foreach chunks [splits [split $text ""] 6 7] {
+            lappend calls "cases::tokens(\[[join [lmap c $chunks {literal [join $c ""]}] {, }]\])"
+            lappend expected "cases::tokens(\[[literal $text]\])"
+        }
+    }
+    set got [runCalls [concat $calls $expected] {interp cranelift cranelift-unfused}]
+    set n [llength $calls]
+    set bad {}
+    for {set k 0} {$k < $n} {incr k} {
+        if {[lindex $got $k] ne [lindex $got [expr {$n + $k}]]} {
+            lappend bad [list [lindex $calls $k] [lindex $got $k] [lindex $got [expr {$n + $k}]]]
+        }
+    }
+    list [expr {$n > 80}] [lrange $bad 0 3]
+} -result {1 {}}
+
+cleanupTests

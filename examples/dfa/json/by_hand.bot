@@ -1,0 +1,92 @@
+# by_hand.bot -- json_lex.bot's json_number written by hand as an ordinary
+# coroutine (DFA-COROUTINE-MILESTONE-2.md, "Performance"; the exploration's
+# "the code the declaration replaces"), in the fusion milestone's style: its
+# state is where it is suspended, a digit run is a helper that yields
+# itself. The same protocol as the declared recognizer -- constructed with
+# the first symbol, one std::dfa::Symbol per resume, 0 for every symbol it
+# needs more after, completing with the number of symbols left unread -- so
+# tests/dfa-workloads.test compares the two on the declaration's cases.
+#
+# Every fact the declaration states once is a branch here: which symbols end
+# a number, that the end of the input may, what each state rejects. Nothing
+# checks that the branches are disjoint, that every path ends, or that a
+# missing `else` rejects rather than falls through.
+
+import std::dfa
+
+fn digit?(c: int) -> bool:
+    c >= 48 and c <= 57
+
+# What may follow a number: whitespace, a value separator, the end of an
+# array or object.
+fn after_value?(c: int) -> bool:
+    c == 32 or c == 9 or c == 10 or c == 13 or c == 44 or c == 93 or c == 125
+
+# The next symbol (the current one was consumed).
+fn next(resume std::dfa::Symbol) -> int:
+    m = yield 0
+    m.code
+
+# Consumes the current digit and every digit after it; the first symbol
+# that is not a digit, received but not consumed.
+fn digits(resume std::dfa::Symbol) -> int:
+    loop:
+        n = next()
+        if not digit?(n):
+            return n
+
+# The end of a number at C: the count left unread -- 1 before a symbol that
+# may follow a number, 0 at the end of the input (which is no symbol).
+# (A rejection is written out where it happens: a function that always
+# fails cannot be called, KNOWN-ERROR. nomethod: STATE, a state's name, is
+# no receiver -- "integer".ends(c) would read as a String operation.)
+nomethod fn ends(state: str, c: int) -> int errors std::dfa::UnrecognizedInput:
+    if c == -1:
+        return 0
+    if after_value?(c):
+        return 1
+    fail std::dfa::UnrecognizedInput {recognizer: "by_hand", state: state, symbol: c}
+
+# An exponent from its e or E (consumed).
+fn exponent(resume std::dfa::Symbol) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    s = next()
+    first = if s == 43 or s == 45:
+        next()
+    else:
+        s
+    if first == -1:
+        fail std::dfa::UnexpectedEnd {recognizer: "by_hand", state: "exponent"}
+    if not digit?(first):
+        fail std::dfa::UnrecognizedInput {recognizer: "by_hand", state: "exponent", symbol: first}
+    ends("exponent_digits", digits())
+
+# A fraction from its point (consumed), then perhaps an exponent.
+fn fraction(resume std::dfa::Symbol) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    first = next()
+    if first == -1:
+        fail std::dfa::UnexpectedEnd {recognizer: "by_hand", state: "point"}
+    if not digit?(first):
+        fail std::dfa::UnrecognizedInput {recognizer: "by_hand", state: "point", symbol: first}
+    after = digits()
+    if after == 101 or after == 69:
+        return exponent()
+    ends("fraction", after)
+
+fn number_by_hand(first: int, resume std::dfa::Symbol) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    lead = if first == 45:
+        next()
+    else:
+        first
+    if lead == -1:
+        fail std::dfa::UnexpectedEnd {recognizer: "by_hand", state: "start"}
+    if not digit?(lead):
+        fail std::dfa::UnrecognizedInput {recognizer: "by_hand", state: "start", symbol: lead}
+    after = if lead == 48:
+        next()
+    else:
+        digits()
+    if after == 46:
+        return fraction()
+    if after == 101 or after == 69:
+        return exponent()
+    ends("integer", after)

@@ -1,5 +1,13 @@
 # DFA-COROUTINE-EXPLORATION.md
 
+> **Historical.** This exploration's prototype is retired:
+> DFA-COROUTINE-MILESTONE-2.md made `class` and `dfa` declarations part of
+> the language, checked and lowered by the compiler. The prototype's
+> preprocessor, its `.dfa` sources, generated modules and tests are in the
+> repository's history (commit e5286ad5); its results and native evidence
+> stay in `audit/dfa/results/` and `audit/dfa/evidence/`, and its JSON and
+> YAML workloads live on in `examples/dfa/`.
+
 Exploratory milestone 1 of declarative finite-state recognition in Botlish:
 a deterministic finite automaton declared as such, statically checked, and
 executed as an ordinary Botlish coroutine. JSON (RFC 8259) is the primary

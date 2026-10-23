@@ -1,34 +1,33 @@
-# json.bot -- JSON documents over the declarative recognizers of
-# json_lex.dfa (DFA-COROUTINE-EXPLORATION.md, "JSON implementation" and
-# "Composition"). Ordinary Botlish: nothing here is generated.
+# json.bot -- JSON documents over the declared recognizers of json_lex.bot
+# (DFA-COROUTINE-MILESTONE-2.md, "The workloads"). Ordinary Botlish.
 #
 # Three layers, three kinds of state:
 #
 #   symbols      a coroutine yielding the input's symbols one by one across
 #                its chunks (a chunk boundary is invisible above it), then
 #                -1, the end of the input, forever (its stable final result)
-#   recognizers  json_lex's generated coroutines, one per token, fed one
-#                symbol per resume: finite control state only
+#   recognizers  json_lex's coroutines, one per token, fed one symbol per
+#                resume: finite control state only
 #   structure    a coroutine fed one token per resume: RFC 8259's value
 #                grammar, which nests, so it keeps an explicit stack of what
 #                it expects next (a MutableVector), bounded by MAX_DEPTH
 #
-# validate_text/validate_bytes drive the three from one function, so every
-# coroutine stays inside it (and fuses: COROUTINE-FUSION-MILESTONE-1.md).
-# A recognizer's answer is whether it took the symbol it was handed (a yield:
-# always; its completion: true when the token ends with that symbol, false
-# when the symbol is the first one after it, which the driver keeps for the
-# next token). A token's kind is what its first symbol says (json_token
-# dispatches on that same symbol); its extent is counted by the driver, which also bounds
-# its length (MAX_TOKEN symbols): a recognizer keeps no input, so a long
-# token costs it nothing, but the caller's limit is the caller's.
+# validate_text/validate_scalars/validate_bytes drive the three from one
+# function, so every coroutine stays inside it (and fuses:
+# COROUTINE-FUSION-MILESTONE-1.md). A recognizer completes with the number
+# of the symbols it was handed that are not part of its token; the driver
+# gives them back: it keeps the last symbols it read in a buffer of a fixed
+# size -- the most any recognizer it runs leaves unread, here 1, so the
+# current symbol -- and hands them over again, first, to the next token. A token's kind is what its first
+# symbol says (json_token dispatches on that same symbol); its extent is
+# counted by the driver, which also bounds its length (MAX_TOKEN symbols): a
+# recognizer keeps no input, so a long token costs it nothing, but the
+# caller's limit is the caller's.
 #
 # decode_text/decode_bytes turn one recognized string token into its value,
-# as a List of Unicode scalar values or as UTF-8 bytes: the language has no
-# Int -> UnicodeChar conversion, so neither can make a str (the report's
-# "Unicode findings").
+# as a List of Unicode scalar values or as UTF-8 bytes.
 
-import dfa
+import std::dfa
 import json_lex
 import std::coroutine
 import std::mutable_array
@@ -58,14 +57,18 @@ struct Summary:
     tokens: int
     symbols: int
 
-# A symbol no token takes, or that continues a token wrongly, at offset AT
-# (the recognizer's state names where).
+# A symbol no token takes, or that continues a token wrongly, at offset AT:
+# the recognizer that rejected it, its state and the symbol.
 error Lexical:
     at: int
+    recognizer: str
     state: str
+    symbol: int
 
-# The end of the input inside a token.
+# The end of the input, at offset AT, inside a token.
 error Truncated:
+    at: int
+    recognizer: str
     state: str
 
 # A token the structure does not allow there: EXPECTED says what it allows.
@@ -151,7 +154,7 @@ fn expected_text(e: int) -> str:
         return ", or }"
     if e == 6:
         return "a string"
-    ":"
+    "a name separator"
 
 # RFC 8259's JSON-text = ws value ws, over tokens (whitespace never reaches
 # it). Each resume hands it the next token; it completes, true, when the
@@ -182,13 +185,13 @@ fn structure(max_depth: int, resume Lexeme) -> bool errors Structure, TooDeep:
             if t.kind != Kind::ValueSeparator:
                 fail Structure {at: t.start, expected: expected_text(e)}
             if e == 3:
-                std::mutable_vector::push(stack, expect_array_next())
-                std::mutable_vector::push(stack, expect_value())
+                stack.push(expect_array_next())
+                stack.push(expect_value())
             else:
-                std::mutable_vector::push(stack, expect_object_next())
-                std::mutable_vector::push(stack, expect_value())
-                std::mutable_vector::push(stack, expect_colon())
-                std::mutable_vector::push(stack, expect_key())
+                stack.push(expect_object_next())
+                stack.push(expect_value())
+                stack.push(expect_colon())
+                stack.push(expect_key())
             continue
         if e == 7:
             if t.kind != Kind::NameSeparator:
@@ -198,19 +201,19 @@ fn structure(max_depth: int, resume Lexeme) -> bool errors Structure, TooDeep:
             if t.kind != Kind::String:
                 fail Structure {at: t.start, expected: expected_text(e)}
             if e == 4:
-                std::mutable_vector::push(stack, expect_object_next())
-                std::mutable_vector::push(stack, expect_value())
-                std::mutable_vector::push(stack, expect_colon())
+                stack.push(expect_object_next())
+                stack.push(expect_value())
+                stack.push(expect_colon())
             continue
         # e is 1 (a value) or 2 (the first value of an array).
         if not value_start?(t.kind):
             fail Structure {at: t.start, expected: expected_text(e)}
         if e == 2:
-            std::mutable_vector::push(stack, expect_array_next())
+            stack.push(expect_array_next())
         if t.kind == Kind::BeginArray:
-            std::mutable_vector::push(stack, expect_array_first())
+            stack.push(expect_array_first())
         if t.kind == Kind::BeginObject:
-            std::mutable_vector::push(stack, expect_object_first())
+            stack.push(expect_object_first())
         # Below the document's end, one entry per open container.
         if std::mutable_vector::length(stack) > max_depth + 1:
             fail TooDeep {limit: max_depth}
@@ -219,7 +222,7 @@ fn structure(max_depth: int, resume Lexeme) -> bool errors Structure, TooDeep:
 fn scalars(chunks: List[str]) -> int errors IndexNotFound:
     loop chunk in chunks:
         loop i from 0 to std::str::length(chunk):
-            yield std::char::scalar_value(std::str::char_at(chunk, i))
+            yield std::char::scalar_value(chunk.char_at(i))
         # (A collecting loop's last value is collected: without this, the
         # inner loop's List of yields would be built, one element a symbol.)
         continue
@@ -230,8 +233,6 @@ fn bytes(chunks: List[List[int]]) -> int:
     loop chunk in chunks:
         loop b in chunk:
             yield b
-        # (A collecting loop's last value is collected: without this, the
-        # inner loop's List of yields would be built, one element a symbol.)
         continue
     -1
 
@@ -240,182 +241,222 @@ fn codes(chunks: List[List[int]]) -> int:
     loop chunk in chunks:
         loop c in chunk:
             yield c
-        # (A collecting loop's last value is collected: without this, the
-        # inner loop's List of yields would be built, one element a symbol.)
         continue
     -1
+
+# The driver's input buffer, the four drivers below spell out (a function
+# that may yield is never a value, COROUTINES.md 37, so a driver cannot be
+# given its source or its recognizer, and a helper cannot resume the
+# driver's source for it). Its size is the most any recognizer it runs
+# leaves unread: json_lex's lookahead is 1 (a number or literal ends before
+# the symbol after it; at the end of the input nothing is left unread), so
+# the buffer is the current symbol, the last one read from the source:
+#
+#   cursor[0]   the offset of the current symbol
+#   cursor[1]   the current symbol (-1: the end of the input, no symbol)
+#   cursor[2]   tokens so far
+#   cursor[3]   the current token's count: 0 while it runs (every symbol it
+#               is handed it takes), then what it left unread
+#
+# A recognizer is handed the current symbol; when it answers 0 (taken) the
+# driver reads the next. When it completes leaving the current symbol
+# unread, that symbol stays current -- it is the next token's first -- and
+# nothing is read again: the source advances monotonically, and no symbol is
+# lost, read twice or part of two tokens. yaml.bot's buffer holds two (its
+# plain scalars' lookahead), in a ring.
 
 # Validates the JSON text that CHUNKS hold, split anywhere: the number of
 # tokens and of symbols, or the first error.
 fn validate_text(chunks: List[str], max_depth: int, max_token: int) -> Summary errors IndexNotFound, Lexical, Truncated, Structure, TooDeep, TokenTooLong:
     coroutine {step: next_symbol, first: c0} = scalars(chunks)
     coroutine {step: parse} = structure(max_depth)
-    current = std::mutable_array::create(1, c0)
-    offset = std::mutable_array::create(1, 0)
-    tokens = std::mutable_array::create(1, 0)
-    took = std::mutable_array::create(1, false)
+    cursor = std::mutable_array::create(4, 0)
+    cursor.set(1, c0)
     loop:
-        c = std::mutable_array::at(current, 0)
-        if whitespace?(c):
-            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-            std::mutable_array::set(current, 0, next_symbol())
-            continue
-        start = std::mutable_array::at(offset, 0)
+        start = cursor.at(0)
+        c = cursor.at(1)
         if c == -1:
             parse(Lexeme {kind: Kind::End, start: start, end: start})
             break
-        coroutine {step: feed, first} = json_lex::json_token(c):
-            on dfa::UnrecognizedInput {state}:
-                fail Lexical {at: start, state: state}
-            on dfa::UnexpectedEnd {state}:
-                fail Truncated {state: state}
-        std::mutable_array::set(took, 0, first)
+        if whitespace?(c):
+            cursor.set(0, start + 1)
+            cursor.set(1, next_symbol())
+            continue
+        coroutine {step: feed, first: u0} = json_lex::json_token(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
         loop:
-            if std::mutable_array::at(took, 0):
-                std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-                std::mutable_array::set(current, 0, next_symbol())
             if std::coroutine::done?(feed):
                 break
-            if std::mutable_array::at(offset, 0) - start >= max_token:
+            # It answered 0: it took the current symbol; hand it the next.
+            p = cursor.at(0) + 1
+            cursor.set(0, p)
+            x = next_symbol()
+            cursor.set(1, x)
+            if p - start >= max_token:
                 fail TokenTooLong {at: start, limit: max_token}
-            answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
-                on dfa::UnrecognizedInput {state}:
-                    fail Lexical {at: std::mutable_array::at(offset, 0), state: state}
-                on dfa::UnexpectedEnd {state}:
-                    fail Truncated {state: state}
-            std::mutable_array::set(took, 0, answer)
-        parse(Lexeme {kind: kind_of(c), start: start, end: std::mutable_array::at(offset, 0)})
-        std::mutable_array::set(tokens, 0, std::mutable_array::at(tokens, 0) + 1)
-    Summary {tokens: std::mutable_array::at(tokens, 0), symbols: std::mutable_array::at(offset, 0)}
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        # Completed: with nothing unread, it took the current symbol too
+        # (unless that was the end); with one, the current symbol is the
+        # next token's first.
+        if cursor.at(3) == 0 and cursor.at(1) != -1:
+            cursor.set(0, cursor.at(0) + 1)
+            cursor.set(1, next_symbol())
+        parse(Lexeme {kind: kind_of(c), start: start, end: cursor.at(0)})
+        cursor.set(2, cursor.at(2) + 1)
+    Summary {tokens: cursor.at(2), symbols: cursor.at(0)}
 
 # The same over the text's scalar values as Ints (a text a caller has
-# already decoded): the same recognizers, another source. A driver cannot be
-# given its source or its recognizer -- a function that may yield is never
-# a value (COROUTINES.md 37) -- so each pairing is written out.
+# already decoded): the same recognizers, another source.
 fn validate_scalars(chunks: List[List[int]], max_depth: int, max_token: int) -> Summary errors Lexical, Truncated, Structure, TooDeep, TokenTooLong:
     coroutine {step: next_symbol, first: c0} = codes(chunks)
     coroutine {step: parse} = structure(max_depth)
-    current = std::mutable_array::create(1, c0)
-    offset = std::mutable_array::create(1, 0)
-    tokens = std::mutable_array::create(1, 0)
-    took = std::mutable_array::create(1, false)
+    cursor = std::mutable_array::create(4, 0)
+    cursor.set(1, c0)
     loop:
-        c = std::mutable_array::at(current, 0)
-        if whitespace?(c):
-            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-            std::mutable_array::set(current, 0, next_symbol())
-            continue
-        start = std::mutable_array::at(offset, 0)
+        start = cursor.at(0)
+        c = cursor.at(1)
         if c == -1:
             parse(Lexeme {kind: Kind::End, start: start, end: start})
             break
-        coroutine {step: feed, first} = json_lex::json_token(c):
-            on dfa::UnrecognizedInput {state}:
-                fail Lexical {at: start, state: state}
-            on dfa::UnexpectedEnd {state}:
-                fail Truncated {state: state}
-        std::mutable_array::set(took, 0, first)
+        if whitespace?(c):
+            cursor.set(0, start + 1)
+            cursor.set(1, next_symbol())
+            continue
+        coroutine {step: feed, first: u0} = json_lex::json_token(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
         loop:
-            if std::mutable_array::at(took, 0):
-                std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-                std::mutable_array::set(current, 0, next_symbol())
             if std::coroutine::done?(feed):
                 break
-            if std::mutable_array::at(offset, 0) - start >= max_token:
+            # It answered 0: it took the current symbol; hand it the next.
+            p = cursor.at(0) + 1
+            cursor.set(0, p)
+            x = next_symbol()
+            cursor.set(1, x)
+            if p - start >= max_token:
                 fail TokenTooLong {at: start, limit: max_token}
-            answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
-                on dfa::UnrecognizedInput {state}:
-                    fail Lexical {at: std::mutable_array::at(offset, 0), state: state}
-                on dfa::UnexpectedEnd {state}:
-                    fail Truncated {state: state}
-            std::mutable_array::set(took, 0, answer)
-        parse(Lexeme {kind: kind_of(c), start: start, end: std::mutable_array::at(offset, 0)})
-        std::mutable_array::set(tokens, 0, std::mutable_array::at(tokens, 0) + 1)
-    Summary {tokens: std::mutable_array::at(tokens, 0), symbols: std::mutable_array::at(offset, 0)}
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        # Completed: with nothing unread, it took the current symbol too
+        # (unless that was the end); with one, the current symbol is the
+        # next token's first.
+        if cursor.at(3) == 0 and cursor.at(1) != -1:
+            cursor.set(0, cursor.at(0) + 1)
+            cursor.set(1, next_symbol())
+        parse(Lexeme {kind: kind_of(c), start: start, end: cursor.at(0)})
+        cursor.set(2, cursor.at(2) + 1)
+    Summary {tokens: cursor.at(2), symbols: cursor.at(0)}
 
 # Only the tokens of CHUNKS, without the structure: the tokenizer the
-# report's performance section compares with the imperative probe and the
-# coroutine tokenizer of the fusion milestone.
+# performance report compares.
 fn lex_text(chunks: List[str], max_token: int) -> Summary errors IndexNotFound, Lexical, Truncated, TokenTooLong:
     coroutine {step: next_symbol, first: c0} = scalars(chunks)
-    current = std::mutable_array::create(1, c0)
-    offset = std::mutable_array::create(1, 0)
-    tokens = std::mutable_array::create(1, 0)
-    took = std::mutable_array::create(1, false)
+    cursor = std::mutable_array::create(4, 0)
+    cursor.set(1, c0)
     loop:
-        c = std::mutable_array::at(current, 0)
-        if whitespace?(c):
-            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-            std::mutable_array::set(current, 0, next_symbol())
-            continue
+        start = cursor.at(0)
+        c = cursor.at(1)
         if c == -1:
             break
-        start = std::mutable_array::at(offset, 0)
-        coroutine {step: feed, first} = json_lex::json_token(c):
-            on dfa::UnrecognizedInput {state}:
-                fail Lexical {at: start, state: state}
-            on dfa::UnexpectedEnd {state}:
-                fail Truncated {state: state}
-        std::mutable_array::set(took, 0, first)
+        if whitespace?(c):
+            cursor.set(0, start + 1)
+            cursor.set(1, next_symbol())
+            continue
+        coroutine {step: feed, first: u0} = json_lex::json_token(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
         loop:
-            if std::mutable_array::at(took, 0):
-                std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-                std::mutable_array::set(current, 0, next_symbol())
             if std::coroutine::done?(feed):
                 break
-            if std::mutable_array::at(offset, 0) - start >= max_token:
+            # It answered 0: it took the current symbol; hand it the next.
+            p = cursor.at(0) + 1
+            cursor.set(0, p)
+            x = next_symbol()
+            cursor.set(1, x)
+            if p - start >= max_token:
                 fail TokenTooLong {at: start, limit: max_token}
-            answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
-                on dfa::UnrecognizedInput {state}:
-                    fail Lexical {at: std::mutable_array::at(offset, 0), state: state}
-                on dfa::UnexpectedEnd {state}:
-                    fail Truncated {state: state}
-            std::mutable_array::set(took, 0, answer)
-        std::mutable_array::set(tokens, 0, std::mutable_array::at(tokens, 0) + 1)
-    Summary {tokens: std::mutable_array::at(tokens, 0), symbols: std::mutable_array::at(offset, 0)}
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        # Completed: with nothing unread, it took the current symbol too
+        # (unless that was the end); with one, the current symbol is the
+        # next token's first.
+        if cursor.at(3) == 0 and cursor.at(1) != -1:
+            cursor.set(0, cursor.at(0) + 1)
+            cursor.set(1, next_symbol())
+        cursor.set(2, cursor.at(2) + 1)
+    Summary {tokens: cursor.at(2), symbols: cursor.at(0)}
 
 # The same over UTF-8 bytes (RFC 8259 8.1): every string's characters are
 # validated as UTF-8 as they arrive.
 fn validate_bytes(chunks: List[List[int]], max_depth: int, max_token: int) -> Summary errors Lexical, Truncated, Structure, TooDeep, TokenTooLong:
     coroutine {step: next_symbol, first: c0} = bytes(chunks)
     coroutine {step: parse} = structure(max_depth)
-    current = std::mutable_array::create(1, c0)
-    offset = std::mutable_array::create(1, 0)
-    tokens = std::mutable_array::create(1, 0)
-    took = std::mutable_array::create(1, false)
+    cursor = std::mutable_array::create(4, 0)
+    cursor.set(1, c0)
     loop:
-        c = std::mutable_array::at(current, 0)
-        if whitespace?(c):
-            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-            std::mutable_array::set(current, 0, next_symbol())
-            continue
-        start = std::mutable_array::at(offset, 0)
+        start = cursor.at(0)
+        c = cursor.at(1)
         if c == -1:
             parse(Lexeme {kind: Kind::End, start: start, end: start})
             break
-        coroutine {step: feed, first} = json_lex::json_token_bytes(c):
-            on dfa::UnrecognizedInput {state}:
-                fail Lexical {at: start, state: state}
-            on dfa::UnexpectedEnd {state}:
-                fail Truncated {state: state}
-        std::mutable_array::set(took, 0, first)
+        if whitespace?(c):
+            cursor.set(0, start + 1)
+            cursor.set(1, next_symbol())
+            continue
+        coroutine {step: feed, first: u0} = json_lex::json_token_bytes(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
         loop:
-            if std::mutable_array::at(took, 0):
-                std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
-                std::mutable_array::set(current, 0, next_symbol())
             if std::coroutine::done?(feed):
                 break
-            if std::mutable_array::at(offset, 0) - start >= max_token:
+            # It answered 0: it took the current symbol; hand it the next.
+            p = cursor.at(0) + 1
+            cursor.set(0, p)
+            x = next_symbol()
+            cursor.set(1, x)
+            if p - start >= max_token:
                 fail TokenTooLong {at: start, limit: max_token}
-            answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
-                on dfa::UnrecognizedInput {state}:
-                    fail Lexical {at: std::mutable_array::at(offset, 0), state: state}
-                on dfa::UnexpectedEnd {state}:
-                    fail Truncated {state: state}
-            std::mutable_array::set(took, 0, answer)
-        parse(Lexeme {kind: kind_of(c), start: start, end: std::mutable_array::at(offset, 0)})
-        std::mutable_array::set(tokens, 0, std::mutable_array::at(tokens, 0) + 1)
-    Summary {tokens: std::mutable_array::at(tokens, 0), symbols: std::mutable_array::at(offset, 0)}
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        # Completed: with nothing unread, it took the current symbol too
+        # (unless that was the end); with one, the current symbol is the
+        # next token's first.
+        if cursor.at(3) == 0 and cursor.at(1) != -1:
+            cursor.set(0, cursor.at(0) + 1)
+            cursor.set(1, next_symbol())
+        parse(Lexeme {kind: kind_of(c), start: start, end: cursor.at(0)})
+        cursor.set(2, cursor.at(2) + 1)
+    Summary {tokens: cursor.at(2), symbols: cursor.at(0)}
 
 fn hex_value(c: int) -> int:
     if c >= 48 and c <= 57:
@@ -433,10 +474,10 @@ fn utf8_of(v: int) -> List[int]:
     if v < 128:
         return [v]
     if v < 2048:
-        return [192 + shift_right(v, 6), 128 + mod(v, 64)]
+        return [192 + v.shift_right(6), 128 + v.mod(64)]
     if v < 65536:
-        return [224 + shift_right(v, 12), 128 + mod(shift_right(v, 6), 64), 128 + mod(v, 64)]
-    [240 + shift_right(v, 18), 128 + mod(shift_right(v, 12), 64), 128 + mod(shift_right(v, 6), 64), 128 + mod(v, 64)]
+        return [224 + v.shift_right(12), 128 + v.shift_right(6).mod(64), 128 + v.mod(64)]
+    [240 + v.shift_right(18), 128 + v.shift_right(12).mod(64), 128 + v.shift_right(6).mod(64), 128 + v.mod(64)]
 
 # The value of the string token SYMBOLS (its symbols, quotes included, as
 # json_string or json_string_bytes accepted them: escapes well formed): its
@@ -455,28 +496,28 @@ fn decode_symbols(symbols: List[int], flags :utf8) -> List[int] errors IndexNotF
             break
         c = std::list::at(symbols, k)
         if c != 92:
-            std::mutable_vector::push(out, c)
-            std::mutable_array::set(i, 0, k + 1)
+            out.push(c)
+            i.set(0, k + 1)
             continue
         e = std::list::at(symbols, k + 1)
         scalar = if e == 117:
-            u = hex4(symbols, k + 2)
+            u = symbols.hex4(k + 2)
             if u >= 55296 and u <= 56319:
                 # A high surrogate: a low one must follow at once.
                 if k + 11 > last or std::list::at(symbols, k + 6) != 92 or std::list::at(symbols, k + 7) != 117:
                     fail UnpairedSurrogate {at: k}
-                low = hex4(symbols, k + 8)
+                low = symbols.hex4(k + 8)
                 if low < 56320 or low > 57343:
                     fail UnpairedSurrogate {at: k}
-                std::mutable_array::set(i, 0, k + 12)
+                i.set(0, k + 12)
                 65536 + (u - 55296) * 1024 + (low - 56320)
             else:
                 if u >= 56320 and u <= 57343:
                     fail UnpairedSurrogate {at: k}
-                std::mutable_array::set(i, 0, k + 6)
+                i.set(0, k + 6)
                 u
         else:
-            std::mutable_array::set(i, 0, k + 2)
+            i.set(0, k + 2)
             if e == 98:
                 8
             elif e == 102:
@@ -491,16 +532,16 @@ fn decode_symbols(symbols: List[int], flags :utf8) -> List[int] errors IndexNotF
                 e
         if utf8:
             loop b in utf8_of(scalar):
-                std::mutable_vector::push(out, b)
+                out.push(b)
         else:
-            std::mutable_vector::push(out, scalar)
+            out.push(scalar)
     loop v in out:
         v
 
 # The string token TEXT[START, END) of a validated text, decoded.
 fn decode_text(text: str, start: int, end: int) -> List[int] errors IndexNotFound, UnpairedSurrogate:
     symbols = loop k from start to end:
-        std::char::scalar_value(std::str::char_at(text, k))
+        std::char::scalar_value(text.char_at(k))
     decode_symbols(symbols)
 
 # The string token of bytes SYMBOLS decoded to the UTF-8 bytes of its value.

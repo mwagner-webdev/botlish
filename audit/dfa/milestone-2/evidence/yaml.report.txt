@@ -1,0 +1,2 @@
+fused yaml::tokens e776 {inlined {{#19} yaml::scalars} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 31 template 69 copied 242 unboxed 0}
+fused yaml::tokens e935 {inlined {{#20} yaml_lex::yaml_token yaml_lex::yaml_token#run yaml_lex::yaml_double_quoted#run yaml_lex::yaml_escape#run yaml_lex::yaml_comment#run yaml_lex::yaml_plain_flow#run yaml_lex::yaml_single_quoted#run} yields 6 creates 1 starts 1 resumes 1 queries 1 releases 15 template 807 copied 1655 unboxed 1}

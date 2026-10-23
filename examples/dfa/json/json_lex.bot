@@ -1,16 +1,17 @@
-# json_lex.dfa -- RFC 8259's lexical grammar as declarative recognizers
-# (DFA-COROUTINE-EXPLORATION.md, "JSON implementation"). The DFA front end
-# (audit/dfa/tools/dfa.tcl) checks every declaration below and lowers it to
-# json_lex.bot, an ordinary module of coroutine functions; everything that is
-# not a `class` or a `dfa` passes through unchanged.
+# json_lex.bot -- RFC 8259's lexical grammar as declared recognizers
+# (DFA-COROUTINE-MILESTONE-2.md). An ordinary module: the compiler checks
+# every `class` and `dfa` declaration below where it is written and lowers
+# each recognizer to a coroutine function of its first symbol.
 #
 # Each recognizer recognizes exactly one token: constructed with the token's
-# first symbol and resumed with one dfa::Symbol per further symbol, it
-# answers every symbol with a Bool -- whether the symbol was part of the
-# token -- returns (std::coroutine::done?) when the token is complete, and
-# fails dfa::UnrecognizedInput / dfa::UnexpectedEnd on anything else.
-# Nothing here knows JSON's structure: json.bot composes the tokens and
-# checks the document.
+# first symbol and resumed with one std::dfa::Symbol per further symbol, it
+# answers 0 to every symbol it needs more after, and completes
+# (std::coroutine::done?) with the number of the symbols it was handed that
+# are not part of the token -- 0, or 1 where a token ends only at the symbol
+# after it (`accept before`); it fails std::dfa::UnrecognizedInput or
+# std::dfa::UnexpectedEnd on anything else. Nothing here knows JSON's
+# structure: json.bot composes the tokens, gives back what a token left
+# unread, and checks the document.
 #
 # Token boundaries. A string, and punctuation, end at a symbol of their own
 # (the closing quote); a number and the literals true, false and null end at
@@ -21,7 +22,7 @@
 # there: `01`, `1.2.3`, `123abc`, `truex` fail at the symbol that continues
 # them, never as a token followed by another.
 
-import dfa
+import std::dfa
 
 class digit = '0'..'9'
 class nonzero = '1'..'9'

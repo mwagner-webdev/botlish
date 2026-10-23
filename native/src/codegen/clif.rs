@@ -4100,3 +4100,135 @@ mod aarch64_float_tests {
     }
 }
 
+
+#[cfg(test)]
+mod switch_tests {
+    //! NIR's general multiway branch (`switch`) and the byte-table loads
+    //! (`rtabload8`, `rtabload16`) that declared recognizers' transitions
+    //! lower to (native/lower.tcl's DfaTransition), run through the JIT.
+    use crate::codegen::{Backend, CompileOptions, CraneliftJit};
+    use crate::nir;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::value::{make_small, Value};
+    use crate::runtime::vm::{ProgramInfo, Vm};
+    use std::rc::Rc;
+
+    fn run(text: &str) -> Value {
+        let program = nir::parse(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            AllocMode::Off,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        (compiled.entry)(&mut *vm)
+    }
+
+    /// A program whose value is pick(K): the switch CASES ({LO, HI}) over
+    /// K's raw value, case i answering i, the default 99.
+    fn pick(cases: &[(i64, i64)], k: i64) -> Value {
+        let mut text = String::from("nir 1 call-effects=1 statics=0\n\n");
+        text.push_str("func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n");
+        text.push_str(&format!("    %0 = int {k}\n    %1 = call 1 %0\n    ret %1\nend\n"));
+        text.push_str("func 1 \"pick\" params=1 env=0 regs=4 pnames=\"k\" captures=0 rawregs=\"1 2\"\n");
+        text.push_str("    %1 = op runbox %0\n    switch %1 L99");
+        for (i, (lo, hi)) in cases.iter().enumerate() {
+            text.push_str(&format!(" {lo}:{hi}:L{i}"));
+        }
+        text.push('\n');
+        for i in 0..cases.len() {
+            text.push_str(&format!("  label L{i}\n    %2 = rawint {i}\n    jump L100\n"));
+        }
+        text.push_str("  label L99\n    %2 = rawint 99\n    jump L100\n");
+        text.push_str("  label L100\n    %3 = op rbox %2\n    ret %3\nend\n");
+        run(&text)
+    }
+
+    /// The answer `pick` gives for K by a direct search of CASES.
+    fn expected(cases: &[(i64, i64)], k: i64) -> Value {
+        let i = cases.iter().position(|(lo, hi)| *lo <= k && k <= *hi).map_or(99, |i| i as i64);
+        make_small(i)
+    }
+
+    fn check(cases: &[(i64, i64)], probes: &[i64]) {
+        for &k in probes {
+            assert_eq!(pick(cases, k), expected(cases, k), "pick({k}) over {cases:?}");
+        }
+    }
+
+    /// Every interesting probe of CASES: each bound, one past each, between.
+    fn probes(cases: &[(i64, i64)]) -> Vec<i64> {
+        let mut out = vec![-1_000_000, 1_000_000];
+        for (lo, hi) in cases {
+            out.extend([lo - 1, *lo, (lo + hi) / 2, *hi, hi + 1]);
+        }
+        out
+    }
+
+    #[test]
+    fn a_dense_switch_takes_every_case_and_the_default() {
+        // Seven intervals over a span of 40: a jump table.
+        let cases = [(0, 0), (1, 1), (2, 2), (3, 5), (10, 10), (11, 20), (30, 40)];
+        check(&cases, &probes(&cases));
+    }
+
+    #[test]
+    fn a_sparse_switch_takes_every_case_and_the_default() {
+        // Wide gaps: a balanced search over the intervals.
+        let cases = [(-1, -1), (32, 32), (48, 57), (1000, 1000), (65536, 1114111)];
+        check(&cases, &probes(&cases));
+    }
+
+    #[test]
+    fn a_switch_of_one_case_and_of_none() {
+        check(&[(48, 57)], &[47, 48, 52, 57, 58]);
+        check(&[], &[0, 1]);
+    }
+
+    /// A program whose value is the byte (OP rtabload8) or the 16-bit
+    /// element (rtabload16) at raw index K of the bytes constant HEX.
+    fn load(op: &str, hex: &str, k: i64) -> Value {
+        let text = format!(
+            "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"1 2\"\n    %0 = bytes \"{hex}\"\n    %1 = rawint {k}\n    %2 = op {op} %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
+        );
+        run(&text)
+    }
+
+    #[test]
+    fn byte_table_loads_read_unsigned_elements() {
+        assert_eq!(load("rtabload8", "0a0bff0c", 0), make_small(10));
+        assert_eq!(load("rtabload8", "0a0bff0c", 2), make_small(255));
+        assert_eq!(load("rtabload8", "0a0bff0c", 3), make_small(12));
+        // Little-endian 16-bit elements, the index counting elements.
+        assert_eq!(load("rtabload16", "3412ffff0100", 0), make_small(0x1234));
+        assert_eq!(load("rtabload16", "3412ffff0100", 1), make_small(0xffff));
+        assert_eq!(load("rtabload16", "3412ffff0100", 2), make_small(1));
+    }
+
+    #[test]
+    fn a_switch_over_a_tagged_register_does_not_validate() {
+        let text = "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n    %0 = int 1\n    switch %0 L1 0:0:L0\n  label L0\n    ret %0\n  label L1\n    ret %0\nend\n";
+        // (Parsing validates: the raw operand is checked there.)
+        let rejected = match nir::parse(text) {
+            Err(e) => e.to_string().contains("raw"),
+            Ok(program) => nir::validate_function(&program, 0).is_err(),
+        };
+        assert!(rejected);
+    }
+
+    #[test]
+    fn overlapping_or_unsorted_cases_do_not_parse_or_validate() {
+        for cases in ["0:5:L0 3:7:L1", "5:7:L0 0:1:L1", "3:2:L0"] {
+            let text = format!(
+                "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"1\"\n    %0 = int 1\n    %1 = op runbox %0\n    switch %1 L2 {cases}\n  label L0\n    ret %0\n  label L1\n    ret %0\n  label L2\n    ret %0\nend\n"
+            );
+            let rejected = match nir::parse(&text) {
+                Err(_) => true,
+                Ok(program) => nir::validate_function(&program, 0).is_err(),
+            };
+            assert!(rejected, "{cases}");
+        }
+    }
+}

@@ -1503,6 +1503,7 @@ proc surface::modules::ExpandDfas {stateVar ast own imported} {
     set result [surface::dfa::expand [dict get $ast body] -own $own -imports $imported \
         -registry [dict get $state dfaRegistry] -open $open]
     dict set state dfaRegistry [dict get $result registry]
+    dict lappend state dfaNames {*}[dict get $result facts]
     if {[dict get $result missingImport] ne ""} {
         set span [dict get $result missingImport]
         set message "namespace \"$::surface::dfa::protocolNamespace\" is not imported; add `import $::surface::dfa::protocolNamespace` to declare a recognizer (it is resumed with std::dfa::Symbol and fails with std::dfa's errors)"
@@ -1868,7 +1869,7 @@ proc surface::modules::NewState {files nextFile} {
         staticDeferred [dict create] \
         target "" targetRead 0 root "" entry "" application [dict create] moduleDecls [dict create] \
         referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
-        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create]]
+        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {}]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -1987,6 +1988,11 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     # The target the HIR was built for, when the build read it (header,
     # "Target dependence"); "" when the HIR is every target's.
     dict set hir target [if {[dict get $state targetRead]} {dict get $state target} else {string cat ""}]
+    # What the recognizer declarations' names denote, for the compiler
+    # service (surface/dfa.tcl's Fact): read by no backend or analysis.
+    if {[dict get $state dfaNames] ne {}} {
+        dict set hir dfaNames [dict get $state dfaNames]
+    }
     return $hir
 }
 

@@ -5,10 +5,12 @@
 #   surface::dfa::expand STATEMENTS ?-own NS? ?-imports NSS? ?-registry REG?
 #                        ?-open 0|1?
 #       => {statements STATEMENTS registry REG referenceErrors ENTRIES
-#           missingImport SPAN}
+#           missingImport SPAN facts FACTS}
 #   surface::dfa::Nodes NODE        => the syntax nodes of an expanded
 #                                      `dfadecl` or `classdecl` (surface/lower.tcl)
-#   surface::dfa::describe MODEL    => a recognizer's effective table, as text
+#
+# FACTS are what the declarations' names denote (Fact), for the compiler
+# service.
 #
 # The parser reads the declarations (surface/parser.tcl's ClassDecl and
 # DfaDecl); this file decides what they mean. The loader calls `expand` on
@@ -45,17 +47,17 @@
 # symbols supplied unread; the end of the input is never counted. N is
 # bounded by what the recognizer has consumed (Bounds): in a state every path
 # to which consumes at least K symbols, a transition on a symbol may leave
-# N <= K unread (the token keeps at least that symbol's predecessor... at
-# least one symbol), at the end N < K or N = 0 (a token is empty only when no
-# symbol was supplied at all). So a recognizer never hands back a symbol it
+# N <= K unread (of the K + 1 symbols supplied with this one, the token
+# keeps at least one), at the end N < K or N = 0 (a token is empty only when
+# no symbol was supplied at all). So a recognizer never hands back a symbol it
 # was not given, a token is never empty unless its input is, and every
 # recognizer has a static maximum unread count -- the bound a driver's buffer
 # needs. A call passes its callee's unread symbols on only through `then
 # accept`: continuing in a state, the caller can reconsider the current
 # symbol (or the end) but holds no earlier one (CallLookahead).
 #
-# The lowering (section 8). Each recognizer becomes three ordinary functions
-# whose names no source can spell (a `#`), all `nomethod`:
+# The lowering (section 8). Each recognizer becomes ordinary functions whose
+# names no source can spell (a `#`), all `nomethod`:
 #
 #   NAME#run(state, c, resume std::dfa::Symbol) -> int   one step and the rest
 #       next = dfa#transition(state, c, TABLE)    -- the whole table, one call
@@ -92,6 +94,29 @@ namespace eval surface::dfa {
     variable unrecognized std::dfa::UnrecognizedInput
     variable unexpectedEnd std::dfa::UnexpectedEnd
     variable protocolNamespace std::dfa
+    # The name facts of the file being expanded (Fact).
+    variable facts {}
+}
+
+# Records that the name written at USE (a span) denotes the declaration at
+# DECL (a span; USE itself for a declaration), a state, class or recognizer
+# (KIND), with HOVER its description: the compiler service's view of a
+# declaration's names (`dfaNames`, which surface/modules.tcl attaches to the
+# HIR), what this checker resolved -- never a resolution of the service's
+# own.
+proc surface::dfa::Fact {kind use decl hover} {
+    variable facts
+    lappend facts [dict create kind $kind use $use decl $decl hover $hover]
+}
+
+# The hover text of state NODE (the AST's) of recognizer NAME over ALPHABET:
+# its declaration as written.
+proc surface::dfa::StateHover {name alphabet node} {
+    set lines [list "state [dict get $node name] of dfa $name over $alphabet:"]
+    foreach t [dict get $node transitions] {
+        lappend lines "    [surface::ast::DfaItemsText [dict get $t items]] -> [surface::ast::DfaActionText $t]"
+    }
+    return [join $lines \n]
 }
 
 # ---------------------------------------------------------------------------
@@ -382,6 +407,7 @@ proc surface::dfa::ClassInfo {ctx item local} {
         }
         set info [dict get $registry $ns classes $name]
     }
+    Fact class $span [dict get $info span] [dict get $info text]
     if {[dict get $info failed]} {
         return "dependent"
     }
@@ -391,7 +417,9 @@ proc surface::dfa::ClassInfo {ctx item local} {
 # The class declaration NODE resolved in CTX, LOCAL as ItemsSet's: its info
 # (ClassInfo), `failed 1` when it does not resolve.
 proc surface::dfa::ResolveClass {ctx node local} {
-    set info [dict create span [dict get $node nameSpan] failed 1 set {} any 0 anyExcept {} chars {}]
+    set text [surface::ast::DfaClassText $node]
+    set info [dict create span [dict get $node nameSpan] text $text failed 1 set {} any 0 anyExcept {} chars {}]
+    Fact class [dict get $node nameSpan] [dict get $node nameSpan] $text
     set items [ItemsSet $ctx [dict get $node items] $local]
     set except [ItemsSet $ctx [dict get $node except] $local]
     if {$items eq "" || $except eq ""} {
@@ -519,8 +547,10 @@ proc surface::dfa::ResolveDfa {ctx node} {
                 [list [list "first declared" [dict get $states $sname nameSpan]]]
             continue
         }
+        set hover [StateHover $name [dict get $node alphabet] $st]
+        Fact state [dict get $st nameSpan] [dict get $st nameSpan] $hover
         dict set states $sname [dict create nameSpan [dict get $st nameSpan] span [dict get $st span] \
-            anon 0 transitions {} written [dict get $st transitions]]
+            anon 0 transitions {} written [dict get $st transitions] hover $hover]
         lappend order $sname
     }
     set out [dict create]
@@ -665,7 +695,8 @@ proc surface::dfa::ResolveDfa {ctx node} {
             }
             lappend ts [dict merge $base [dict create set $set anon 0]]
         }
-        dict set out $sname [dict create nameSpan [dict get $st nameSpan] span [dict get $st span] anon 0 transitions $ts]
+        dict set out $sname [dict create nameSpan [dict get $st nameSpan] span [dict get $st span] anon 0 transitions $ts \
+            hover [dict get $st hover]]
         lappend outOrder $sname
         foreach anonName [dict keys $extra] {
             set steps [dict get $extra $anonName]
@@ -699,6 +730,10 @@ proc surface::dfa::ResolveNames {ctx d} {
                     if {![dict exists $d states [dict get $t target]]} {
                         Diag DFA-UNKNOWN-STATE [dict get $t targetSpan] "unknown state [dict get $t target] in [dict get $d name]"
                         set good 0
+                    } elseif {![dict exists $t prefix]} {
+                        # (A sequence's own steps are no written name.)
+                        Fact state [dict get $t targetSpan] [dict get $d states [dict get $t target] nameSpan] \
+                            [dict get $d states [dict get $t target] hover]
                     }
                 }
                 call {
@@ -739,11 +774,23 @@ proc surface::dfa::ResolveNames {ctx d} {
                             dict set t key $key
                             dict set t info $info
                             dict set d callees $key $info
+                            set leaves [if {[dict get $info maxSymbol] == 0 && [dict get $info maxEnd] == 0} {
+                                string cat "leaves nothing unread"
+                            } else {
+                                string cat "can leave [dict get $info leavesText] unread"
+                            }]
+                            Fact recognizer $span [dict get $info nameSpan] \
+                                "dfa [KeyText $key] over [dict get $info alphabet]: $leaves (errors [join [dict get $info errors] {, }])"
                         }
                     }
-                    if {$good && [dict get $t then] ne "accept" && ![dict exists $d states [dict get $t then]]} {
-                        Diag DFA-UNKNOWN-STATE [dict get $t thenSpan] "unknown state [dict get $t then] in [dict get $d name]"
-                        set good 0
+                    if {$good && [dict get $t then] ne "accept"} {
+                        if {![dict exists $d states [dict get $t then]]} {
+                            Diag DFA-UNKNOWN-STATE [dict get $t thenSpan] "unknown state [dict get $t then] in [dict get $d name]"
+                            set good 0
+                        } else {
+                            Fact state [dict get $t thenSpan] [dict get $d states [dict get $t then] nameSpan] \
+                                [dict get $d states [dict get $t then] hover]
+                        }
                     }
                 }
             }
@@ -1284,6 +1331,7 @@ proc surface::dfa::expand {statements args} {
     variable diagnostics
     variable references
     variable protocolNamespace
+    variable facts
     set options [dict merge {-own "" -imports {} -registry {} -open 0} $args]
     set own [dict get $options -own]
     set registry [dict get $options -registry]
@@ -1307,11 +1355,12 @@ proc surface::dfa::expand {statements args} {
             }
         }
     }
-    set result [dict create statements $statements registry $registry referenceErrors {} missingImport ""]
+    set result [dict create statements $statements registry $registry referenceErrors {} missingImport "" facts {}]
     if {!$any && ![dict size $later]} {
         return $result
     }
     set references {}
+    set facts {}
     set out {}
     set seenClass [dict create]
     set seenDfa [dict create]
@@ -1380,6 +1429,7 @@ proc surface::dfa::expand {statements args} {
     dict set result statements $out
     dict set result registry $registry
     dict set result referenceErrors $errors
+    dict set result facts [lsort -unique $facts]
     if {$any && $own ne $protocolNamespace && $protocolNamespace ni [dict get $options -imports]} {
         foreach s $statements {
             if {[dict get $s kind] eq "dfadecl"} {

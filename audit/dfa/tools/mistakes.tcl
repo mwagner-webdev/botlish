@@ -1,17 +1,19 @@
-# mistakes.tcl -- the mistake census of DFA-COROUTINE-EXPLORATION.md
-# ("Static guarantees: what they catch"): realistic mistakes in json_lex.dfa,
-# each applied alone, and what catches it.
+# mistakes.tcl -- the mistake census of the declared recognizers
+# (DFA-COROUTINE-MILESTONE-2.md, "Static guarantees"; first written for the
+# exploration's prototype, DFA-COROUTINE-EXPLORATION.md): realistic mistakes
+# in examples/dfa/json/json_lex.bot, each applied alone, and what catches it.
 #
 #   tclsh9.0 audit/dfa/tools/mistakes.tcl ?-suite DIR? ?-fuzz N? ?-only NAME?
 #       ?-out FILE?
 #
-# For every mistake below: if the DFA front end reports a diagnostic, the
-# mistake is caught statically (its codes are listed); otherwise the mutated
-# json_lex.bot is generated into a private application directory and the
+# For every mistake below: if the compiler reports a diagnostic for the
+# mutated module (compiled as the one import of an entry program), the
+# mistake is caught statically (its codes are listed); otherwise the
+# mutated json_lex.bot goes into a private application directory and the
 # differential run (differential.tcl: JSONTestSuite's test_parsing in DIR,
 # N generated cases, the strict oracle) decides whether the tests catch it.
 # A mistake neither catches survives. Each mistake's text must occur exactly
-# once in json_lex.dfa (the census fails otherwise: update the mistake).
+# once in json_lex.bot (the census fails otherwise: update the mistake).
 # The mistakes are mistakes.txt.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
@@ -20,15 +22,40 @@ foreach {option value} $argv {
     dict set options $option $value
 }
 set argv {}
-source [file join $root core core.tcl]
-source [file join $root audit dfa tools dfa.tcl]
+source [file join $root tests helpers.tcl]
+source [file join $root surface surface.tcl]
+
+proc readText {path} {
+    set f [open $path]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+
+proc writeText {path text} {
+    set f [open $path w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f $text
+    close $f
+}
+
+# The diagnostic codes (their last words) of the program whose entry is
+# main.bot in DIR: {} when it compiles.
+proc codesOf {dir} {
+    if {![catch {surface::readProgramFile [file join $dir main.bot] -warnings off} message options]} {
+        return {}
+    }
+    set entries [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode]]]]
+    return [lsort -unique [lmap e $entries {lindex [dict getdef $e shown [dict get $e errorcode]] end}]]
+}
 
 # {NAME KIND DESCRIPTION OLD NEW} of mistakes.txt (the format of the
 # repository's mutants.txt files).
 proc readMistakes {path} {
     set out {}
     set mode ""
-    foreach line [split [dfa::ReadText $path] \n] {
+    foreach line [split [readText $path] \n] {
         switch -- $mode {
             "" {
                 if {[regexp {^@@ (\S+) (\S+) (.*)$} $line -> name kind description]} {
@@ -59,7 +86,7 @@ proc readMistakes {path} {
 }
 set mistakes [concat {*}[readMistakes [file join $root audit dfa tools mistakes.txt]]]
 
-set source [dfa::ReadText [file join $root audit dfa json json_lex.dfa]]
+set source [readText [file join $root examples dfa json json_lex.bot]]
 set rows {}
 set counts [dict create]
 foreach {name kind description old new} $mistakes {
@@ -71,26 +98,25 @@ foreach {name kind description old new} $mistakes {
         incr n
     }
     if {$n != 1} {
-        puts stderr "mistake $name: its text occurs $n times in json_lex.dfa"
+        puts stderr "mistake $name: its text occurs $n times in json_lex.bot"
         exit 1
     }
     set mutated [string map [list $old $new] $source]
     set dir [file tempdir dfa-mistake]
     try {
-        dfa::WriteText [file join $dir json_lex.dfa] $mutated
-        set result [dfa::compileFile [file join $dir json_lex.dfa]]
-        set codes [lsort -unique [lmap e [dict get $result diagnostics] {lindex [dict get $e errorcode] 2}]]
+        writeText [file join $dir json_lex.bot] $mutated
+        writeText [file join $dir main.bot] "import json_lex\n\n0\n"
+        set codes [codesOf $dir]
         if {[llength $codes]} {
             set verdict "static"
             set detail [join $codes ", "]
         } else {
-            dfa::WriteText [file join $dir json_lex.bot] [dict get $result bot]
             set command [list tclsh9.0 [file join $root audit dfa tools differential.tcl] -app $dir -fuzz [dict get $options -fuzz] -seed 1 -out [file join $dir report.md]]
             if {[dict get $options -suite] ne ""} {
                 lappend command -suite [dict get $options -suite]
             }
             set status [catch {exec {*}$command 2>@1} output]
-            set report [dfa::ReadText [file join $dir report.md]]
+            set report [readText [file join $dir report.md]]
             regexp {Disagreements with the oracle or the suite: (\d+)} $report -> disagree
             regexp {Whole and chunked runs that disagree: (\d+)} $report -> split
             if {$disagree || $split} {
@@ -111,7 +137,7 @@ foreach {name kind description old new} $mistakes {
     puts "$name: $verdict $detail"
 }
 
-set report "# DFA mistake census\n\nGenerated by audit/dfa/tools/mistakes.tcl[expr {[dict get $options -suite] eq "" ? "" : " -suite JSONTestSuite/test_parsing"}] -fuzz [dict get $options -fuzz]: each mistake applied alone to json_lex.dfa.\n\n"
+set report "# DFA mistake census (declared recognizers)\n\nGenerated by audit/dfa/tools/mistakes.tcl[expr {[dict get $options -suite] eq "" ? "" : " -suite JSONTestSuite/test_parsing"}] -fuzz [dict get $options -fuzz]: each mistake applied alone to examples/dfa/json/json_lex.bot.\n\n"
 append report "| mistake | kind | caught by | what | detail |\n|---|---|---|---|---|\n"
 foreach row $rows {
     lassign $row name kind verdict description detail
@@ -124,5 +150,5 @@ foreach key [lsort [dict keys $counts]] {
 if {[dict get $options -out] eq ""} {
     puts -nonewline $report
 } else {
-    dfa::WriteText [dict get $options -out] $report
+    writeText [dict get $options -out] $report
 }

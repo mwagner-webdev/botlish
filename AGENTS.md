@@ -2801,6 +2801,68 @@ calls (`bench/method-filter.tcl -suites -audit 1`) and the suites above under
 `BOTLISH_METHOD_FILTER_AUDIT=1`. A new test file's tests get census rows
 (`audit/golden/migration/census/method-filter.tsv`).
 
+## Declared recognizers (dfa and class)
+
+`class NAME = ITEMS` and `dfa NAME over bytes|ascii|unicode:`
+(DFA-COROUTINE-MILESTONE-2.md) declare finite-state recognizers in an
+ordinary module that imports `std::dfa`. surface/dfa.tcl checks each
+declaration where it is written (the loader calls `expand` once a file's
+imports are loaded) and lowers a recognizer before HIR to ordinary
+coroutine functions -- `NAME`, constructed with the token's first symbol,
+resumed with `std::dfa::Symbol`, yielding 0 and completing with how many
+symbols it left unread, and `NAME#run` -- whose transitions are one call of
+the internal root native `dfa#transition(state, c, TABLE)` over a constant
+table (core/dfa.tcl; natively a byte table, a NIR `switch` or nested
+comparisons: native/lower.tcl's `DfaTransition`). Keep it so:
+
+* No DFA runtime, scheduler, ownership model, coroutine operation or HIR
+  or Core IR node: a recognizer is its generated functions, failing
+  `std::dfa::UnrecognizedInput {recognizer, state, symbol}` and
+  `std::dfa::UnexpectedEnd {recognizer, state}`. Never add `=>`
+  (non-consuming moves), actions, priorities, longest match, backtracking,
+  regex syntax or an explicit rejection of an ordinary symbol.
+* `accept before N` is bounded statically (`Bounds`, `CallLookahead`): on a
+  symbol N is at most the fewest symbols any path to the state consumed,
+  at the end less than that (or 0); `call D then STATE` takes only a callee
+  that leaves at most the current symbol. A recognizer keeps no input: the
+  driver gives back what a token left unread from a buffer of the
+  recognizers' static lookahead (examples/dfa). Never let a recognizer hand
+  back a symbol before its first, or store symbols.
+* A declaration's diagnostics are reported at the declaration (a HIR hole
+  carrying its report, hir/resolve.tcl's `ResolveHole`) and taint its unit:
+  never a diagnostic from generated code, never a cascade. Every kind is
+  classified in tests/static-compile.test's census and has a Compilerpedia
+  topic (compilerpedia/topics/dfa.topic) with a rejected example.
+* Generated names hold a `#` (no source spells them) and are `nomethod`;
+  String constants the lowering writes are `synthesized` (no
+  ONE-CHAR-STRING-LITERAL). The compiler service's facts of a
+  declaration's names are the checker's (surface/dfa.tcl's `Fact`, the
+  HIR's `dfaNames`), never a resolution of the service's own.
+* The table is the transitions' one representation after checking: the
+  Tcl backends look it up (`core::dfa::Lookup`), native lowering expands it
+  at compile time; `switch` and `rtabload8/16` are general NIR, never a
+  DFA-only opcode. `dfa#transition`'s `-result-range nonneg` is what lets
+  the range analysis prove a state and native lowering drop its check.
+* `surface::dfa::lowering` (compact | tree) is a front-end input
+  (`surface::cache::Key`); `-dfa-dispatch` / BOTLISH_NATIVE_DFA_DISPATCH a
+  backend option. The exploration's preprocessor is retired: never add a
+  second DFA compiler (audit/dfa keeps its results as history).
+
+If you change the grammar (surface/parser.tcl's `ClassDecl`, `DfaDecl`,
+`DfaItems`, `DfaTransition`), surface/dfa.tcl, core/dfa.tcl, stdlib/dfa.bot,
+native/lower.tcl's `DfaTransition`/`DfaTable`/`DfaSearch`/`DfaRawIn`, NIR
+`switch` or `rtabload` (native/src/nir.rs, codegen/clif.rs), the service's
+`DfaNameIndex`, or examples/dfa, run `tests/dfa.test`,
+`tests/dfa-workloads.test`, `tests/static-compile.test`,
+`tests/compilerpedia.test`, `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native switch_tests`,
+`audit/dfa/tools/differential.tcl -suite DIR -fuzz 2000 -seeds 1-12`
+(JSONTestSuite's test_parsing in DIR; 0 disagreements) and
+`audit/dfa/tools/mistakes.tcl` (every structural and lookahead mistake
+static, the grammar ones caught or recorded as surviving), plus the warning
+gate for a change to examples/dfa. `bench/dfa.tcl` regenerates the
+performance report and `audit/dfa/tools/evidence.tcl` the native evidence.
+
 ## Workloads (examples/games/2048)
 
 `examples/games/2048/` is the first workload of the post-golden stress-test

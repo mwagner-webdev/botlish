@@ -1,17 +1,19 @@
-# Mistakes in json_lex.dfa (audit/dfa/tools/mistakes.tcl;
-# DFA-COROUTINE-EXPLORATION.md, "Static guarantees"): realistic errors of a
-# recognizer's author, each applied alone. KIND is what the mistake breaks:
+# Mistakes in examples/dfa/json/json_lex.bot (audit/dfa/tools/mistakes.tcl;
+# DFA-COROUTINE-MILESTONE-2.md, "Static guarantees"; the exploration's census
+# adapted): realistic errors of a recognizer's author, each applied alone.
+# KIND is what the mistake breaks:
 #
 #   structure  the declaration as an automaton (determinism, reachability,
-#              acceptance, names): what the front end can rule out
+#              acceptance, names): what the compiler can rule out
 #   boundary   where a token ends, or what the end of the input means
+#   lookahead  how many symbols a token leaves unread
 #   progress   a move that consumes nothing
 #   alphabet   bytes, characters and Unicode scalar values confused
 #   grammar    a well-formed automaton for the wrong language
 #
 #   @@ NAME KIND DESCRIPTION
 #   <<<<
-#   text to replace (must occur exactly once in json_lex.dfa)
+#   text to replace (must occur exactly once in json_lex.bot)
 #   ====
 #   replacement
 #   >>>>
@@ -148,7 +150,7 @@ dfa json_string over unicode:
         end -> word_end
 >>>>
 
-@@ reconsider-loop progress a state that hands a symbol back to one that hands it back
+@@ reconsider progress the exploration's reconsidering move (=>), which consumes nothing: no longer syntax
 <<<<
     minus:
         '0' -> zero
@@ -158,20 +160,20 @@ dfa json_string over unicode:
         '0' -> zero
         nonzero -> integer
         '+' => start
-    start2:
-        '+' => minus
 >>>>
 
-@@ reconsider-dead structure a reconsidering transition its target always rejects
+@@ call-dead structure a call whose callee rejects every symbol it is handed (json_number never starts with '+')
 <<<<
-    minus:
-        '0' -> zero
-        nonzero -> integer
+        '-' digit -> call json_number then accept
+        't' 'f' 'n' -> call json_literal then accept
+
+dfa json_token_bytes over bytes:
 ====
-    minus:
-        '0' -> zero
-        nonzero -> integer
-        '+' => point
+        '-' digit -> call json_number then accept
+        '+' -> call json_number then accept
+        't' 'f' 'n' -> call json_literal then accept
+
+dfa json_token_bytes over bytes:
 >>>>
 
 @@ recursive-call structure a string escape that calls the string itself
@@ -357,4 +359,73 @@ class hex = '0'..'9' 'a'..'f'
 class ws = ' ' '\t' '\n' '\r'
 ====
 class ws = ' ' '\n' '\r'
+>>>>
+
+@@ unread-beyond lookahead a token that gives back more symbols than it can have read ("0," leaving two unread)
+<<<<
+    zero:
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+====
+    zero:
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before 2
+>>>>
+
+@@ call-lookahead lookahead a callee that leaves two symbols unread (its end said), called by a state that reconsiders only one
+<<<<
+    u4:
+        hex -> accept
+
+# string = quotation-mark
+====
+    u4:
+        hex -> accept before 2
+        end -> reject
+
+# string = quotation-mark
+>>>>
+
+@@ lookahead-too-long lookahead a number that gives back its last digit with the delimiter (accept before 2 where 1 is meant)
+<<<<
+    fraction:
+        digit -> fraction
+        'e' 'E' -> exponent
+        after_value -> accept before
+====
+    fraction:
+        digit -> fraction
+        'e' 'E' -> exponent
+        after_value -> accept before 2
+>>>>
+
+@@ end-unread lookahead a literal that gives back a symbol at the end of the input ("true" lexes as "tru")
+<<<<
+    word_end:
+        after_value -> accept before
+        end -> accept
+====
+    word_end:
+        after_value -> accept before
+        end -> accept before 1
+>>>>
+
+@@ quote-unread lookahead a string that gives back its closing quote (its end said)
+<<<<
+    body:
+        '"' -> accept
+        '\\' -> call json_escape then body
+        unescaped -> body
+
+# One UTF-8
+====
+    body:
+        '"' -> accept before
+        '\\' -> call json_escape then body
+        unescaped -> body
+        end -> reject
+
+# One UTF-8
 >>>>

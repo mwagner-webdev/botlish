@@ -936,6 +936,21 @@ proc service::DeclarationIndex {f revision} {
     return [dict create index [IntervalIndex $items] sites $sites]
 }
 
+# The names of recognizer declarations in source PATH of a revision:
+# {index INTERVALS all FACTS}, the intervals of the facts written in PATH,
+# FACTS every fact of the program (surface/dfa.tcl's Fact: {kind use decl
+# hover}).
+proc service::DfaNameIndex {path revision} {
+    set all [dict getdef [dict get $revision hir] dfaNames {}]
+    set items {}
+    foreach fact $all {
+        if {[dict get $fact use file] eq $path} {
+            lappend items [dict get $fact use start] [dict get $fact use end] $fact
+        }
+    }
+    return [dict create index [IntervalIndex $items] all $all]
+}
+
 # The span in TEXT where binding B of HIR is declared by name (above), or "".
 proc service::NameSite {hir b text nodes} {
     set origin [dict get $hir bindings $b origin]
@@ -1062,6 +1077,39 @@ proc service::at {rev path line column args} {
         set reason "no semantic analysis: the revision's outcome is [dict get $revision outcome] (no HIR)"
         foreach fact {construct binding type hover definition references} {
             dict set unavailable $fact $reason
+        }
+        dict set result topics $topics
+        dict set result unavailable $unavailable
+        return $result
+    }
+    # A name in a recognizer declaration -- a state, a class, a called
+    # recognizer -- is no binding of the program: its facts are the ones the
+    # declaration's checker recorded (the HIR's `dfaNames`, surface/dfa.tcl's
+    # Fact; DFA-COROUTINE-MILESTONE-2.md).
+    set names [Derived $rev dfaNames $source [list service::DfaNameIndex $source]]
+    set chain [Innermost [dict get $names index] $offset]
+    if {$chain ne {}} {
+        set fact [lindex [dict get $names index values] [lindex $chain 0]]
+        set kind [dict get $fact kind]
+        dict set result construct [dict create kind dfa-$kind range [Range [dict get $fact use]]]
+        dict set result hover [dict get $fact hover]
+        dict set result definition [Range [dict get $fact decl]]
+        dict set result references [lmap other [dict get $names all] {
+            if {[dict get $other decl] ne [dict get $fact decl] || [dict get $other use] eq [dict get $other decl]} continue
+            Range [dict get $other use]
+        }]
+        set why [dict get {
+            state "a state of a recognizer is no binding or value of the program"
+            class "a class names symbols of recognizer declarations: it is no binding or value of the program"
+            recognizer "a recognizer a declaration calls is named as a callee here: its declaration's name is the binding of its coroutine function"
+        } $kind]
+        foreach missing {binding type} {
+            dict set unavailable $missing $why
+        }
+        Compilerpedia
+        if {"concept.recognizers" ni [lmap t $topics {dict get $t id}]} {
+            lappend topics [dict create id concept.recognizers \
+                title [dict get [compilerpedia::topic concept.recognizers] title] for [list syntax dfa-$kind]]
         }
         dict set result topics $topics
         dict set result unavailable $unavailable

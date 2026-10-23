@@ -348,6 +348,15 @@ test dfa-protocol-lookahead {accept before N leaves the last N symbols handed ov
     dfaAgree "import std::dfa\n\nclass safe = 0x21..0x7E except ',' '\[' '\]' '\{' '\}'\nclass plain = safe except ':'\n\ndfa scalar over ascii:\n    start:\n        plain -> body\n    body:\n        plain -> body\n        ':' -> colon\n        ' ' ',' -> accept before\n        end -> accept\n    colon:\n        plain -> body\n        ':' -> colon\n        ' ' ',' -> accept before 2\n        end -> accept before 1\n[dfaRunner scalar]\n\[run(97, \[58, 98, -1\]), run(97, \[58, 32\]), run(97, \[58, -1\]), run(97, \[58, 58, 32\]), run(97, \[32\]), run(97, \[58, 58, -1\])\]"
 } -result {value {["accept 0", "accept 2", "accept 1", "accept 2", "accept 1", "accept 1"]}}
 
+test dfa-protocol-accept-before-zero {accept before 0 is accept: the same table, the same answers (a count of zero symbols left unread)} -body {
+    set a [surface::compile "import std::dfa\n\ndfa d over ascii:\n    start:\n        'a' -> more\n    more:\n        'b' -> accept before 0\n        end -> accept before 0\n0" t.bot -warnings off]
+    set b [surface::compile "import std::dfa\n\ndfa d over ascii:\n    start:\n        'a' -> more\n    more:\n        'b' -> accept\n        end -> accept\n0" t.bot -warnings off]
+    set tables [lmap hir [list $a $b] {
+        lmap e [hirFind $hir const] {if {[dict exists [hir::node $hir $e] synthesized] && [string first "\{" [hir::get $hir $e value]] >= 0} {hir::get $hir $e value} else continue}
+    }]
+    list [expr {[lindex $tables 0] eq [lindex $tables 1]}] [dfaAgree "import std::dfa\n\ndfa d over ascii:\n    start:\n        'a' -> more\n    more:\n        'b' -> accept before 0\n        end -> accept before 0\n[dfaRunner d]\n\[run(97, \[98\]), run(97, \[-1\])\]"]
+} -result {1 {value {["accept 0", "accept 0"]}}}
+
 test dfa-protocol-delegation {a call hands the symbol to the callee; then accept completes with the callee's unread count, then STATE reconsiders the symbol the callee left (or the end) in STATE at once} -body {
     dfaAgree "import std::dfa\n\nclass digit = '0'..'9'\nclass nondigit = any except digit\n\ndfa digits over ascii:\n    start:\n        digit -> more\n    more:\n        digit -> more\n        nondigit -> accept before\n        end -> accept\n\ndfa pair over ascii:\n    start:\n        digit -> call digits then sep\n    sep:\n        '.' -> frac\n        end -> accept\n        ' ' -> accept before\n    frac:\n        digit -> call digits then accept\n[dfaRunner pair]\n\[run(49, \[50, 46, 51, 32\]), run(49, \[46, 51, -1\]), run(49, \[50, -1\]), run(49, \[32\]), run(49, \[46, 120\]), run(49, \[120\])\]"
 } -result {value {["accept 1", "accept 0", "accept 0", "accept 1", "unrecognized pair frac 120", "unrecognized pair sep 120"]}}
@@ -658,3 +667,181 @@ test dfa-modules-interchange {a program with recognizers read back from HIR inte
     set read [hir::interchange::decode [hir::interchange::encode $hir]]
     list [lrange [outcomeUnderHir interp $hir] 0 end-1] [lrange [outcomeUnderHir interp $read] 0 end-1] [lrange [outcomeUnderHir cranelift $read] 0 end-1]
 } -result {{value {["accept 1", "unrecognized tokens::number more 120"]}} {value {["accept 1", "unrecognized tokens::number more 120"]}} {value {["accept 1", "unrecognized tokens::number more 120"]}}}
+
+# ---------------------------------------------------------------------------
+# Lowering: one transition call per recognizer, the native dispatch forms,
+# fusion, no allocation per symbol, warning-clean generated code
+
+# The number of dfa#transition calls in HIR.
+proc dfaTransitionCalls {hir} {
+    set n 0
+    foreach e [hirFind $hir call] {
+        set callee [hir::get $hir $e callee]
+        if {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] eq "dfa#transition"} {
+            incr n
+        }
+    }
+    return $n
+}
+
+test dfa-lowering-one-transition-call {a recognizer's transitions are one dfa#transition call over its constant table, whatever its number of states: the model's ten recognizers, ten calls} -body {
+    set hir [surface::compile "$::dfaModelLex\n0" t.bot -warnings off]
+    dfaTransitionCalls $hir
+} -result 10
+
+# A driver feeding recognizer number N symbols, all in one function (so its
+# coroutine is fused).
+proc dfaDriverProgram {n} {
+    return "import std::dfa
+import std::coroutine
+import std::mutable_array
+
+class digit = '0'..'9'
+
+dfa number over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        ' ' -> accept before
+        end -> accept
+
+dfa wide over unicode:
+    start:
+        0x10000..0x10FFFF 'x' -> more
+    more:
+        0x10000..0x10FFFF 'x' -> more
+        ' ' -> accept before
+        end -> accept
+
+fn count(n: int) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step} = number(49)
+    i = std::mutable_array::create(1, 0)
+    loop:
+        if std::mutable_array::at(i, 0) >= n:
+            break
+        std::mutable_array::set(i, 0, std::mutable_array::at(i, 0) + 1)
+        step(std::dfa::Symbol {code: 53})
+    step(std::dfa::Symbol {code: 32})
+
+fn w() -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step} = wide(120)
+    step(std::dfa::Symbol {code: 128512})
+    step(std::dfa::Symbol {code: -1})
+
+r = count($n):
+    on std::dfa::UnrecognizedInput:
+        -1
+    on std::dfa::UnexpectedEnd:
+        -2
+s = w():
+    on std::dfa::UnrecognizedInput:
+        -1
+    on std::dfa::UnexpectedEnd:
+        -2
+\[r, s\]
+"
+}
+
+test dfa-lowering-native-dispatch {natively a transition call is control flow over its constant table: a byte-table load per state and symbol (table, for a bytes or ascii recognizer; a unicode one as switch), multiway branches on the state and on the symbol (switch: Cranelift lowers each to a jump table or a balanced search), or nested ifs (tree); auto takes table for bytes and ascii, switch otherwise -- the same answers every way} -body {
+    set hir [surface::compile [dfaDriverProgram 3] t.bot -warnings off]
+    set out {}
+    foreach mode {auto tree switch table} {
+        set text [native::nir $hir -dfa-dispatch $mode]
+        lappend out $mode [regexp -all {\n\s*switch %} $text] [regexp -all {rtabload8|rtabload16} $text] \
+            [native::evalHir $hir -dfa-dispatch $mode]
+    }
+    set out
+} -result {auto 3 2 {list {{int 1} {int 0}}} tree 0 0 {list {{int 1} {int 0}}} switch 6 0 {list {{int 1} {int 0}}} table 3 2 {list {{int 1} {int 0}}}}
+
+test dfa-lowering-fused-no-allocation {a recognizer resumed only in the function that constructs it is fused into it -- no coroutine object, stack or switch -- and feeding it a symbol allocates nothing: the same allocations for ten symbols and a thousand (the driver's counter and the program's result List)} -body {
+    set hir [surface::compile [dfaDriverProgram 10] t.bot -warnings off]
+    set fused [lmap entry [native::fusion $hir] {lrange $entry 0 1}]
+    set counts {}
+    foreach n {10 1000} {
+        set report [native::allocationReport [surface::compile [dfaDriverProgram $n] t.bot -warnings off] summary]
+        lappend counts [dict get $report total allocations]
+    }
+    list $fused $counts
+} -result {{{fused count} {fused w}} {2 2}}
+
+test dfa-lowering-warning-clean {the code a declaration lowers to is warning-clean: one-letter recognizers and states give no ONE-CHAR-STRING-LITERAL (their names are no literals of the program), the generated functions no METHOD-ELIGIBLE (they are nomethod)} -body {
+    surface::compile "$::dfaModelLex\ndfa a over ascii:\n    start:\n        'x' -> s\n    s:\n        end -> accept\n0" t.bot -warnings error
+    string cat ok
+} -result ok
+
+# ---------------------------------------------------------------------------
+# The compiler service: a declaration's diagnostics with their ranges and
+# related locations; hover, definition and references of its names
+
+source [file join $::projectRoot service service.tcl]
+
+# A revision of the unsaved document SOURCE (and module documents FILES,
+# NAME TEXT ...) at /virtual.
+proc dfaRevision {source args} {
+    set ws [service::workspace -warnings default -cache ""]
+    foreach {name text} $args {
+        service::setDocument $ws /virtual/$name $text
+    }
+    service::setDocument $ws /virtual/main.bot $source
+    return [service::analyze $ws /virtual/main.bot]
+}
+
+# LINE:COLUMN-ENDLINE:ENDCOLUMN of RANGE (FILE: before it when not main.bot).
+proc dfaRange {range} {
+    set text [dict get $range line]:[dict get $range column]-[dict get $range endLine]:[dict get $range endColumn]
+    if {[file tail [dict get $range file]] ne "main.bot"} {
+        set text [file tail [dict get $range file]]:$text
+    }
+    return $text
+}
+
+test dfa-service-diagnostics {the service reports a declaration's diagnostics as the compiler does, each with its range and its related locations} -body {
+    set rev [dfaRevision "import std::dfa\n\ndfa d over ascii:\n    start:\n        '0'..'9' -> a\n        '5' -> a\n    a:\n        end -> accept\n0\n"]
+    lmap d [service::diagnostics $rev] {
+        list [lindex [dict get $d code] end] [dfaRange $d] [lmap r [dict get $d related] {dfaRange $r}]
+    }
+} -result {{DFA-AMBIGUOUS-TRANSITION 6:9-6:12 {5:9-5:17 6:9-6:12}}}
+
+set dfaServiceMain {import std::dfa
+import tokens
+
+class odd = '1' '3' '5'
+
+dfa signed over ascii:
+    start:
+        '+' -> after
+        odd -> call tokens::number then accept
+    after:
+        tokens::digit -> call tokens::number then done
+    done:
+        end -> accept
+0
+}
+
+test dfa-service-names {a state, a class and a called recognizer have a hover, a definition (another module's included) and references, from the facts the declaration's checker recorded; a declaration's own name answers for itself} -body {
+    set rev [dfaRevision $::dfaServiceMain tokens.bot $::dfaTokens]
+    set out {}
+    foreach {line column} {8 16 10 5 11 9 11 51 4 7 9 9 9 27} {
+        set at [service::at $rev /virtual/main.bot $line $column]
+        lappend out [list $line:$column [dict get $at construct kind] [dict get $at hover] \
+            [dfaRange [dict get $at definition]] [lmap r [dict get $at references] {dfaRange $r}]]
+    }
+    join $out \n
+} -result {8:16 dfa-state {state after of dfa signed over ascii:
+    tokens::digit -> call tokens::number then done} 10:5-10:10 8:16-8:21
+10:5 dfa-state {state after of dfa signed over ascii:
+    tokens::digit -> call tokens::number then done} 10:5-10:10 8:16-8:21
+11:9 dfa-class {class digit = '0'..'9'} tokens.bot:3:7-3:12 {tokens.bot:8:9-8:14 tokens.bot:10:9-10:14 11:9-11:22}
+11:51 dfa-state {state done of dfa signed over ascii:
+    end -> accept} 12:5-12:9 11:51-11:55
+4:7 dfa-class {class odd = '1' '3' '5'} 4:7-4:10 9:9-9:12
+9:9 dfa-class {class odd = '1' '3' '5'} 4:7-4:10 9:9-9:12
+9:27 dfa-recognizer {dfa tokens::number over ascii: can leave up to 1 symbol unread (errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd)} tokens.bot:6:5-6:11 {9:21-9:35 11:31-11:45}}
+
+test dfa-service-recognizer-binding {a recognizer's name is the binding of the coroutine function it declares: its hover is that function's signature} -body {
+    set rev [dfaRevision $::dfaServiceMain tokens.bot $::dfaTokens]
+    dict get [service::at $rev /virtual/main.bot 6 5] hover
+} -result {fn signed(first: int) -> int errors std::dfa::UnexpectedEnd, std::dfa::UnrecognizedInput}
+
+cleanupTests

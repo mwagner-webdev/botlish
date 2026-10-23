@@ -10056,19 +10056,31 @@ proc native::lower::DfaTable {fnVar e stateExpr keyExpr s c rows result bad join
     }
     set op [expr {$wide ? "rtabload16" : "rtabload8"}]
     set table [Assign fn "bytes [Quote $hex]" $e]
-    set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
+    # A recognizer of one state has one row: the state is not read at all
+    # (every state a generated recognizer computes is a row of its table).
+    if {$nrows > 1} {
+        set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
+    }
     set outside [NewLabel fn]
     set rc [DfaRawIn fn $c $keyExpr -1 255 $outside $e]
-    set width [AssignRaw fn "rawint 257" $e]
-    set rowAt [AssignRaw fn "op rimul $rs $width" $e]
     set one [AssignRaw fn "rawint 1" $e]
     set column [AssignRaw fn "op riadd $rc $one" $e]
-    set index [AssignRaw fn "op riadd $rowAt $column" $e]
+    if {$nrows > 1} {
+        set width [AssignRaw fn "rawint 257" $e]
+        set rowAt [AssignRaw fn "op rimul $rs $width" $e]
+        set index [AssignRaw fn "op riadd $rowAt $column" $e]
+    } else {
+        set index $column
+    }
     Emit fn "$result = op $op $table $index" $e
     Emit fn "jump $join" $e
     EmitLabel fn $outside
     set base [AssignRaw fn "rawint [expr {$nrows * 257}]" $e]
-    set at [AssignRaw fn "op riadd $rs $base" $e]
+    if {$nrows > 1} {
+        set at [AssignRaw fn "op riadd $rs $base" $e]
+    } else {
+        set at $base
+    }
     Emit fn "$result = op $op $table $at" $e
     Emit fn "jump $join" $e
 }
@@ -10124,11 +10136,13 @@ proc native::lower::DfaTransition {fnVar e node want} {
         DfaTable fn $e $stateExpr $keyExpr $s $c $rows $result $bad $join
         set codes {}
     } else {
-        # The state, then its row.
-        set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
+        # The state, then its row (one row: the state is not read).
         set rowLabels {}
         foreach row $rows {
             lappend rowLabels [NewLabel fn]
+        }
+        if {$nrows > 1} {
+            set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
         }
         if {$nrows == 1} {
             Emit fn "jump [lindex $rowLabels 0]" $e
