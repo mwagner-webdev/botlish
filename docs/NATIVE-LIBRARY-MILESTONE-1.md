@@ -745,7 +745,9 @@ program.rs, runtime/library.rs, runtime/aotimage.rs, runtime/vm.rs
   under GC stress and shared; the JSON library from C),
   `tests/native-executable.test` (18), `tests/aot-stub-linker.test` (6),
   `tests/main-cli.test` (61), `tests/compilerpedia.test` (39),
-  `tests/platform/aot-facts.tcl`.
+  `tests/platform/aot-facts.tcl`; the first three again under
+  `BOTLISH_NATIVE_GC_STRESS=1` (executables now build their Vm through
+  `build_vm`): all pass.
 * `cargo test --release --manifest-path native/Cargo.toml --lib` (301
   passed, the five of runtime::program and runtime::library included) and
   `--bin botlish-native` (73 passed).
