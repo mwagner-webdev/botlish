@@ -15,6 +15,7 @@ pub mod ffifixture;
 pub mod framemap;
 pub mod framewalk;
 pub mod heap;
+pub mod inttext;
 pub mod metrics;
 pub mod mutvec;
 pub mod native_stack;

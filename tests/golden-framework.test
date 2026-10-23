@@ -800,9 +800,9 @@ struct Point:
 }
 } -result {["0", "-305", "123456789012345678901234567890", "\"a\\\"b\\\\c\\nd\\te\"", "true", "false", "[[1, -2], [], [\"s\"]]", "a value with no text form", "a value with no text form"]}
 
-test gf-int-text {int_text at the boundaries the representations change at (small Int, i64), both signs} -body {
+test gf-int-text {a report's Int text (std::test::describe, through std::int::to_string) at the boundaries the representations change at (small Int, i64), both signs} -body {
     gfValue {import std::test
-[std::test::int_text(9), std::test::int_text(10), std::test::int_text(4611686018427387903), std::test::int_text(4611686018427387904), std::test::int_text(9223372036854775807), std::test::int_text(9223372036854775808), std::test::int_text(-9223372036854775808), std::test::int_text(-9223372036854775809)]
+[std::test::describe(9), std::test::describe(10), std::test::describe(4611686018427387903), std::test::describe(4611686018427387904), std::test::describe(9223372036854775807), std::test::describe(9223372036854775808), std::test::describe(-9223372036854775808), std::test::describe(-9223372036854775809)]
 }
 } -result {["9", "10", "4611686018427387903", "4611686018427387904", "9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809"]}
 
@@ -860,7 +860,7 @@ fn register_many(k: int, label: str):
 fn register_all(k: int):
     if k == 0:
         return
-    register_many(k, "case ".concat(std::test::int_text(k)))
+    register_many(k, "case ".concat(std::test::describe(k)))
     register_all(k - 1)
 
 with context std::test::suite()

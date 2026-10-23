@@ -112,7 +112,7 @@ test cp-search-symbols {a standard-library symbol shows its generated page} -bod
 test cp-search-aliases {an alias shows its topic: phrases from other languages map to the Botlish concept that answers them} -body {
     list [found "bounds proof"] [found "try catch"] [found throw] [found lambda] [found switch] \
         [found "exit status"] [found "integer to string"] [found division]
-} -result {{page proof.list-bounds} {page capability.exceptions} {page capability.exceptions} {page capability.lambdas} {page capability.match} {page capability.process-exit-status} {page capability.int-to-string} {page capability.integer-division}}
+} -result {{page proof.list-bounds} {page capability.exceptions} {page capability.exceptions} {page capability.lambdas} {page capability.match} {page capability.process-exit-status} {page task.number-text} {page capability.integer-division}}
 
 test cp-search-case-and-spelling {lookups ignore case, and hyphens, underscores and spaces alike} -body {
     list [found method-eligible] [found Method_Eligible] [found "method eligible"] [found "BOUNDS PROOF"] [found STD::LIST::AT]

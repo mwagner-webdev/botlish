@@ -144,7 +144,10 @@ class World:
 
 
 def nearest(v):
-    return math.trunc(v - 0.5) if v < 0.0 else math.trunc(v + 0.5)
+    # The Int nearest V, a half to the even Int (hud.bot's
+    # std::float64::round): Python's round of a float is exactly that, on
+    # its exact binary value.
+    return round(v)
 
 
 def summary(seed, frames):

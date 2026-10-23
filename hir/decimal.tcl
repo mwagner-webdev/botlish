@@ -71,9 +71,12 @@
 # precision); `!=` is the negation of `==`. `<` and `>` therefore hold only
 # when the true values are provably ordered, and `==` means "the same
 # decimal at P". std::float64::from_decimal_rounded(x) is the Float64 nearest
-# round(x, N), N x's guaranteed precision. Elaborate writes each such P into
-# the call (the run-time operation's last argument), after every check, so
-# no backend chooses a precision. Equality of a List, struct or set holding
+# round(x, N), N x's guaranteed precision, and
+# std::decimal_rounded::to_string(x) the decimal text of round(x, N), with
+# exactly N fraction digits (the program result's display,
+# core::decimal::text). Elaborate writes each such P into the call (the
+# run-time operation's last argument), after every check, so no backend
+# chooses a precision. Equality of a List, struct or set holding
 # DecimalRounded values does not know their precision: it is rejected where
 # the program says so (verify) and raises EQUALITY where it does not
 # (core::value::equal).
@@ -649,10 +652,24 @@ proc hir::decimal::verify {hirVar} {
         }
         set name [CalledNative $hir $e]
         switch -- $name {
-            std::float64::from_decimal_rounded {
-                set t [hir::typeOf $hir [lindex [dict get $node args] 0]]
-                if {[IsDecimal $t] && ![IsRefined $t]} {
-                    PrecisionUnknown hir $e $t "decayed to a Float64"
+            std::float64::from_decimal_rounded - std::decimal_rounded::to_string {
+                # An observation at the argument's guaranteed precision: of a
+                # DecimalRounded value whose type states one.
+                set a [lindex [dict get $node args] 0]
+                set t [hir::typeOf $hir $a]
+                set what [if {$name eq "std::decimal_rounded::to_string"} {string cat "made a String"} else {string cat "decayed to a Float64"}]
+                if {[IsDecimal $t]} {
+                    if {![IsRefined $t]} {
+                        PrecisionUnknown hir $e $t $what
+                    }
+                } elseif {[hir::types::kindOf $t] ni {"" any} && ![hir::types::Poisoned $hir $a]} {
+                    # A value statically of another kind: nothing converts
+                    # one implicitly, and no precision is known to read it
+                    # at (an erased value -- any -- is refused by the check
+                    # form when it runs).
+                    hir::Diagnose hir TYPE [format \
+                        {the argument of %s is %s, not a DecimalRounded value: only a DecimalRounded value is %s at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)} \
+                        $name [hir::types::show $t] $what] $e
                 }
             }
             std::decimal_rounded::round {
@@ -866,8 +883,12 @@ proc hir::decimal::ExactText {t} {
 # comparison with P, the smaller guaranteed precision of its operands; a
 # decay std::float64::from_decimal_rounded(x) becomes decimal_rounded#to_float64
 # with x's guaranteed precision; a quantization std::decimal_rounded::round[T](x)
-# becomes decimal_rounded#round with T's. A call whose precision is not
-# known (verify reported it) keeps its check form, which refuses to run.
+# becomes decimal_rounded#round with T's; a text
+# std::decimal_rounded::to_string(x) becomes decimal_rounded#to_string with
+# x's (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md: the precision is the static
+# type's, never a value's). A call whose precision is not known (verify
+# reported it, or x's static type is erased) keeps its check form, which
+# refuses to run.
 proc hir::decimal::Elaborate {hirVar} {
     upvar 1 $hirVar hir
     dict for {e node} [dict get $hir exprs] {
@@ -893,6 +914,12 @@ proc hir::decimal::Elaborate {hirVar} {
             }
         } elseif {$name eq "std::float64::from_decimal_rounded"} {
             set target decimal_rounded#to_float64
+            set t [hir::typeOf $hir [lindex $args 0]]
+            if {[IsRefined $t]} {
+                set precision [Precision $t]
+            }
+        } elseif {$name eq "std::decimal_rounded::to_string"} {
+            set target decimal_rounded#to_string
             set t [hir::typeOf $hir [lindex $args 0]]
             if {[IsRefined $t]} {
                 set precision [Precision $t]

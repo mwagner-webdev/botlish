@@ -5912,30 +5912,94 @@ fn safe(x: Float64) -> DecimalRounded{minDecimalsPreserved: 2}:
 @value [0.30, 1.00, -0.12]
 @end
 
+@topic stdlib.std::decimal_rounded::to_string
+title: std::decimal_rounded::to_string -- intrinsic of namespace std::decimal_rounded
+summary: The guaranteed decimal of the DecimalRounded value x as a String: round(x, N) with exactly N fraction digits, N its type's minDecimalsPreserved, after `import std::decimal_rounded`.
+index: stdlib
+symbol: std::decimal_rounded::to_string
+keywords: decimal to string; format decimal; show decimal; decimal text; print money; to_string
+related: stdlib.module.std::decimal_rounded concept.decimal-rounded stdlib.std::int::to_string stdlib.std::float64::from_decimal_rounded
+
+== SIGNATURE
+    std::decimal_rounded::to_string(DecimalRounded) -> str
+
+== USE
+An intrinsic of namespace std::decimal_rounded: import
+std::decimal_rounded, then write std::decimal_rounded::to_string. Method
+syntax: receiver.to_string(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The text a DecimalRounded value guarantees, never the digits of the
+binary64 behind it: x rounded half to even to the N places of its static
+type (DecimalRounded{minDecimalsPreserved: N}), written with exactly N
+digits after the point -- trailing zeros kept, no point at N = 0 -- and a
+"-" only before a nonzero result (DecimalRounded has no negative zero:
+-0.04 at one place is "0.0"). It is the same text a program's printed
+result shows. The precision is the argument's static type's: the compiler
+writes it into the call, so a value carries none, and a value weakened to
+fewer places shows those (a DecimalRounded{minDecimalsPreserved: 3} value
+passed as one with 1 shows one place). maxDecimalsPreserved changes
+nothing. An argument of another type (a Float64, an Int) is a TYPE error;
+one whose type is erased (an untyped parameter) has no precision to show
+and is refused when the call runs. Never fails; runs on every backend;
+also written x.to_string().
+
+== EXAMPLES
+@example accept
+import std::decimal_rounded
+
+fn cents(x: DecimalRounded{minDecimalsPreserved: 2}) -> str:
+    x.to_string()
+
+fn tenths(x: DecimalRounded{minDecimalsPreserved: 1}) -> str:
+    std::decimal_rounded::to_string(x)
+
+[cents(0.295), cents(1.245), cents(25.0), cents(-0.004), tenths(6.0)]
+@caption Exactly the guaranteed places: 0.295 shows 0.30 (not its binary64's digits), a half rounds to even, zeros stay
+@value ["0.30", "1.24", "25.00", "0.00", "6.0"]
+@end
+
+@example reject
+import std::decimal_rounded
+
+fn t(x: Float64) -> str:
+    std::decimal_rounded::to_string(x)
+
+t(1.5)
+@caption A Float64 is no DecimalRounded value: quantize it first with std::decimal_rounded::round[T]
+@error CORE SEMANTIC TYPE
+@at 4:5
+@end
+
 @topic stdlib.module.std::decimal_rounded
 title: std::decimal_rounded -- standard namespace
-summary: The explicit quantization from Float64 to DecimalRounded: std::decimal_rounded::round[T](x).
+summary: The explicit quantization from Float64 to DecimalRounded, std::decimal_rounded::round[T](x), and a value's guaranteed decimal as text, std::decimal_rounded::to_string(x).
 index: stdlib
 symbol: std::decimal_rounded
-keywords: decimal functions; decimal conversion; float to decimal; quantize; round to places
-related: concept.decimal-rounded stdlib.std::float64::from_decimal_rounded
+keywords: decimal functions; decimal conversion; float to decimal; quantize; round to places; decimal to string; format decimal
+related: concept.decimal-rounded stdlib.std::float64::from_decimal_rounded stdlib.std::decimal_rounded::to_string
 
 == SOURCE
 Compiler intrinsics only, no module file (import std::decimal_rounded).
 
 == MEMBERS
     std::decimal_rounded::round    intrinsic -- std::decimal_rounded::round...
+    std::decimal_rounded::to_string intrinsic -- The guaranteed decimal of ...
 
 Each member is a topic: -help NAME (e.g. -help
 std::decimal_rounded::round).
 
 == NOTES
-`decimal_rounded` has no module file: its member is an intrinsic, reached
-with `import std::decimal_rounded`. With std::float64::from_decimal_rounded
-it is one of the two conversions between DecimalRounded and Float64: nothing
-converts implicitly, a Float64 never becomes a DecimalRounded value by being
-relabeled, and the operators on DecimalRounded values are the language's own
-(concept.decimal-rounded).
+`decimal_rounded` has no module file: its members are intrinsics, reached
+with `import std::decimal_rounded`. With
+std::float64::from_decimal_rounded, round is one of the two conversions
+between DecimalRounded and Float64: nothing converts implicitly, a Float64
+never becomes a DecimalRounded value by being relabeled, and the operators
+on DecimalRounded values are the language's own (concept.decimal-rounded).
+to_string is the value's text at the precision its type guarantees.
 
 @topic stdlib.std::ffi::c::clone
 title: std::ffi::c::clone -- intrinsic of namespace std::ffi::c
@@ -6366,6 +6430,47 @@ import std::float64
 @value [3.0, -12.0, 9007199254740992.0]
 @end
 
+@topic stdlib.std::float64::round
+title: std::float64::round -- intrinsic of namespace std::float64
+summary: The Int nearest the Float64 X, a half to the even Int, after `import std::float64`: exact at any magnitude, and it never fails.
+index: stdlib
+symbol: std::float64::round
+keywords: float to int; convert float; round; nearest integer; round half to even; banker's rounding
+related: stdlib.module.std::float64 concept.floats stdlib.std::float64::truncate concept.decimal-rounded
+
+== SIGNATURE
+    std::float64::round(Float64) -> int
+
+== USE
+An intrinsic of namespace std::float64: import std::float64, then write
+std::float64::round. Method syntax: receiver.round(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+Rounds to the nearest Int; a value exactly halfway between two Ints goes
+to the even one (0.5 and -0.5 to 0, 1.5 and 2.5 to 2, -2.5 to -2) -- the
+rule Float64 arithmetic and DecimalRounded already round by, so there is
+one rounding rule in the language. It reads the Float64's exact binary
+value, not its shortest decimal text: 0.49999999999999994 (one ulp below
+0.5) rounds to 0 and 2.5000000000000004 to 3. Every Float64 is finite, so
+every one rounds to some Int, held exactly however large (1.0e20 becomes
+100000000000000000000); no overflow error. std::float64::truncate goes
+toward zero instead (2.7 to 2, where round gives 3). There is no floor or
+ceiling. Also written x.round().
+
+== EXAMPLES
+@example accept
+import std::float64
+
+halves = [0.5, 1.5, 2.5, -2.5, 2.7, -2.7]
+loop x in halves:
+    [x.round(), x.truncate()]
+@caption round to nearest, ties to even, beside truncate toward zero
+@value [[0, 0], [2, 1], [2, 2], [-2, -2], [3, 2], [-3, -2]]
+@end
+
 @topic stdlib.std::float64::truncate
 title: std::float64::truncate -- intrinsic of namespace std::float64
 summary: The Int part of the Float64 X, rounding toward zero, after `import std::float64`: exact at any magnitude, and it never fails.
@@ -6401,11 +6506,11 @@ big = 1.0e20
 
 @topic stdlib.module.std::float64
 title: std::float64 -- standard namespace
-summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
+summary: Float64's explicit conversions (std::float64::from_int, std::float64::truncate, std::float64::round, std::float64::from_decimal_rounded) and its bounds (std::float64::min, max, abs, clamp).
 index: stdlib
 symbol: std::float64
-keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp
-related: concept.floats stdlib./ concept.decimal-rounded
+keywords: float functions; float conversion; int to float; float to int; decimal to float; float min; float max; float abs; clamp; round
+related: concept.floats stdlib./ concept.decimal-rounded stdlib.std::float64::round
 
 == DESCRIPTION
 The namespace's intrinsics are root natives registered under their qualified
@@ -6441,6 +6546,7 @@ stdlib/float64.bot (import std::float64).
     std::float64::from_int         intrinsic -- The Float64 nearest the Int...
     std::float64::max              function (nomethod)
     std::float64::min              function (nomethod)
+    std::float64::round            intrinsic -- The Int nearest the Float64...
     std::float64::truncate         intrinsic -- The Int part of the Float64...
 
 Each member is a topic: -help NAME (e.g. -help std::float64::abs).
@@ -6548,6 +6654,118 @@ order, no size, no iteration (`loop x in s:` is the TYPE error when it
 runs), no union or other set algebra and no way to add or remove a
 member. Sets compare with == as sets and hash consistently. Membership
 uses ==, so lookup is linear in the set's size today.
+
+@topic stdlib.std::int::from_string
+title: std::int::from_string -- intrinsic of namespace std::int
+summary: std::int::from_string(s): the Int whose canonical decimal text is s, else the declared error InvalidIntegerText, after `import std::int`.
+index: stdlib
+symbol: std::int::from_string
+keywords: string to int; parse int; text to number; read int; atoi; parse number; InvalidIntegerText
+related: stdlib.module.std::int stdlib.std::int::to_string rule.unhandled-errors
+
+== SIGNATURE
+    std::int::from_string(str) -> int
+
+== ERRORS
+    InvalidIntegerText
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::int: import std::int, then write
+std::int::from_string. Declared nomethod: method syntax does not apply
+(NOMETHOD-CALL); call it as std::int::from_string(...).
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+Accepts exactly the texts std::int::to_string writes -- an optional "-"
+and decimal digits, no leading zero -- so from_string(to_string(n)) is n
+for every Int, of any size. Everything else completes with the builtin
+declared error InvalidIntegerText, which the caller handles or declares:
+the empty text, "-", "+1", "01", "-01", "-0" (zero has one text), any
+space ("1 ", " 1"), a fraction or exponent ("1.0", "1e3"), "1_000", a
+digit other than ASCII 0-9, and trailing text ("12x"). It never clamps,
+never stops early and never reads zero for a malformed text. It is
+`nomethod` (a String is not the receiver of an Int's parse): write
+std::int::from_string(s), not s.from_string().
+
+== EXAMPLES
+@example accept
+import std::int
+
+fn read(s: str) -> int:
+    std::int::from_string(s):
+        on InvalidIntegerText:
+            -1
+
+loop s in ["42", "-7", "98765432109876543210", "01", "+1", "1 ", "12x", ""]:
+    read(s)
+@value [42, -7, 98765432109876543210, -1, -1, -1, -1, -1]
+@end
+
+@topic stdlib.std::int::to_string
+title: std::int::to_string -- intrinsic of namespace std::int
+summary: std::int::to_string(n): the canonical decimal text of the Int n, exact at any size, after `import std::int`.
+index: stdlib
+symbol: std::int::to_string
+keywords: int to string; format int; number to text; show int; integer text; to_string; itoa
+related: stdlib.module.std::int stdlib.std::int::from_string concept.integers stdlib.std::decimal_rounded::to_string
+
+== SIGNATURE
+    std::int::to_string(int) -> str
+
+== USE
+An intrinsic of namespace std::int: import std::int, then write
+std::int::to_string. Method syntax: receiver.to_string(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The decimal digits of n, with no leading zero (0 is "0") and a "-" before
+a negative number: the text a program's printed result shows for an Int,
+for an Int of any size. Never fails; also written n.to_string(). Nothing
+turns an Int into text implicitly: "x = ".concat(n) fails with TYPE
+(concat takes two Strings), and is written "x = ".concat(n.to_string()).
+
+== EXAMPLES
+@example accept
+import std::int
+
+loop n in [0, 7, -7, 123456, -123456789012345678901234567890]:
+    n.to_string()
+@value ["0", "7", "-7", "123456", "-123456789012345678901234567890"]
+@end
+
+@topic stdlib.module.std::int
+title: std::int -- standard namespace
+summary: An Int's canonical decimal text, both ways: std::int::to_string(n) and std::int::from_string(s), whose malformed text is the declared error InvalidIntegerText.
+index: stdlib
+symbol: std::int
+keywords: int functions; int to string; string to int; parse int; format int; number to text; text to number; integer text
+related: concept.integers stdlib.std::int::to_string stdlib.std::int::from_string task.number-text
+
+== SOURCE
+Compiler intrinsics only, no module file (import std::int).
+
+== MEMBERS
+    std::int::from_string          intrinsic -- std::int::from_string(s): t...
+    std::int::to_string            intrinsic -- std::int::to_string(n): the...
+
+Each member is a topic: -help NAME (e.g. -help std::int::from_string).
+
+== NOTES
+`int` has no module file: its members are intrinsics, reached with `import
+std::int`. The Int operators themselves (+, mod, bit_and, ...) are root
+natives that need no import. The text is the one canonical decimal text of
+an Int -- the integer literal's digits, no leading zero, a "-" before a
+negative number -- and the two conversions are inverses: from_string
+accepts exactly what to_string writes. Base ten only; no locale, no digit
+grouping, no "+".
 
 @topic stdlib.std::io::WriteFailed
 title: std::io::WriteFailed -- Error of module std::io
@@ -9523,8 +9741,8 @@ every backend (interp, compile, cranelift-generic, cranelift)
 == NOTES
 The way to join text: + is for Ints only ("a" + "b" is the TYPE error).
 Both arguments must be Strings; to add a single character use
-std::str::append_char, and to put a number into text there is no standard
-conversion (capability.int-to-string). The length of the result is the
+std::str::append_char, and to put a number into text convert it first
+(std::int::to_string, task.number-text). The length of the result is the
 sum of the lengths, which the slice proof knows (proof.slices). For many
 pieces, chain the calls: a.concat(b).concat(c).
 
@@ -9798,7 +10016,7 @@ summary: String operations: length, slices, concatenation, appending a character
 index: stdlib
 symbol: std::str
 keywords: string functions; text functions; text operations
-related: concept.strings task.string-concatenation capability.string-formatting capability.int-to-string
+related: concept.strings task.string-concatenation capability.string-formatting task.number-text
 
 == SOURCE
 Compiler intrinsics only, no module file (import std::str).
@@ -9824,9 +10042,9 @@ and every length and index counts those -- never bytes, never grapheme
 clusters.
 
 What is not here: no uppercase, trim, split, join of a List, search,
-replace, comparison or ordering, number parsing and no Int-to-String
-conversion or formatting (capability.int-to-string,
-capability.string-formatting). Equality is == (stdlib.==).
+replace, comparison or ordering, and no formatting
+(capability.string-formatting); a number's text and its parsing are
+std::int's (task.number-text). Equality is == (stdlib.==).
 
 @topic stdlib.std::test::Match
 title: std::test::Match -- Struct of module std::test
@@ -10011,7 +10229,7 @@ How many cases are registered.
 
 @topic stdlib.std::test::glyph
 title: std::test::glyph -- Function of module std::test
-summary: The one-character String at INDEX of the table "0123456789-\"[]"
+summary: The one-character String at INDEX of the table "\"[]"
 index: stdlib
 symbol: std::test::glyph
 related: stdlib.module.std::test
@@ -10024,60 +10242,8 @@ stdlib/test.bot: import std::test, then write std::test::glyph or, as a
 method, receiver.glyph(...).
 
 == DESCRIPTION
-The one-character String at INDEX of the table "0123456789-\"[]": the
-digits, then the minus sign, the quotation mark and the brackets.
-
-@topic stdlib.std::test::digit_value
-title: std::test::digit_value -- Function of module std::test
-summary: The decimal digit N div P, for 0 <= N < 10 * P (by subtraction
-index: stdlib
-symbol: std::test::digit_value
-related: stdlib.module.std::test
-
-== DECLARATION
-    fn digit_value(n: int, p: int) -> int:
-
-== MODULE
-stdlib/test.bot: import std::test, then write std::test::digit_value or,
-as a method, receiver.digit_value(...).
-
-== DESCRIPTION
-The decimal digit N div P, for 0 <= N < 10 * P (by subtraction: Botlish has
-no division).
-
-@topic stdlib.std::test::digits_from
-title: std::test::digits_from -- Function of module std::test
-summary: The decimal digits of N div P, for N >= P, P a power of ten.
-index: stdlib
-symbol: std::test::digits_from
-related: stdlib.module.std::test
-
-== DECLARATION
-    fn digits_from(n: int, p: int) -> str:
-
-== MODULE
-stdlib/test.bot: import std::test, then write std::test::digits_from or,
-as a method, receiver.digits_from(...).
-
-== DESCRIPTION
-The decimal digits of N div P, for N >= P, P a power of ten.
-
-@topic stdlib.std::test::int_text
-title: std::test::int_text -- Function of module std::test
-summary: N in decimal, with a leading minus sign when it is negative.
-index: stdlib
-symbol: std::test::int_text
-related: stdlib.module.std::test
-
-== DECLARATION
-    fn int_text(n: int) -> str:
-
-== MODULE
-stdlib/test.bot: import std::test, then write std::test::int_text or, as a
-method, receiver.int_text(...).
-
-== DESCRIPTION
-N in decimal, with a leading minus sign when it is negative.
+The one-character String at INDEX of the table "\"[]": the quotation mark
+and the brackets.
 
 @topic stdlib.std::test::no_texts
 title: std::test::no_texts -- Function of module std::test
@@ -10699,11 +10865,10 @@ check exactly once. `std::test::results()` drains a run,
 "FAIL name" line and its indented "expected:", "actual:" and "detail:" lines
 per failing one, then "P passed, F failed".
 
-Text. Botlish has no Int-to-String conversion and no way to make a String
-from a character (LANGUAGE-LIBRARY-DEFICIENCIES.md 3 and 11), so this module
-writes its own (`int_text`, `describe`, slices of one table for its
-punctuation), and an enum has no String form (ENUMS.md), so `code_name`
-spells every std::compiler::DiagnosticCode case itself.
+Text. An Int's text is std::int::to_string's (NUMERIC-TEXT-BOUNDARY-
+MILESTONE-1.md); a value's is this module's own (`describe`, slices of one
+table for its punctuation), and an enum has no String form (ENUMS.md), so
+`code_name` spells every std::compiler::DiagnosticCode case itself.
 
 == SOURCE
 stdlib/test.bot (import std::test).
@@ -10722,14 +10887,11 @@ stdlib/test.bot (import std::test).
     std::test::describe            function -- The text of a value for a re...
     std::test::diagnostic          function -- An observed rejection -- COD...
     std::test::diagnostic_text     function -- A rejected block's diagnosti...
-    std::test::digit_value         function -- The decimal digit N div P, f...
-    std::test::digits_from         function -- The decimal digits of N div ...
     std::test::equal               function -- ACTUAL against the golden va...
     std::test::escape_of           function -- The Botlish escape of the ch...
     std::test::escaped             function -- TEXT with every quotation ma...
     std::test::glyph               function -- The one-character String at ...
     std::test::holds               function (nomethod) -- BODY's value must...
-    std::test::int_text            function -- N in decimal, with a leading...
     std::test::joined              function -- PARTS joined by SEPARATOR.
     std::test::mismatch            function (nomethod) -- The verdict of a ...
     std::test::no_results          function

@@ -106,6 +106,7 @@ proc native::lower::FloatNatives {} {
         set ns [dict get [core::type::floatInfo $type] namespace]
         dict set result ${ns}::from_int ${prefix}fromint
         dict set result ${ns}::truncate ${prefix}trunc
+        dict set result ${ns}::round ${prefix}round
     }
     return $result
 }
@@ -173,6 +174,8 @@ namespace eval native::lower {
         hash         {hashing hash hashtotal} \
         std::table_hash::of {hashing tablehash tablehashtotal} \
         std::char::scalar_value {op charcodepoint} \
+        std::int::to_string     {op inttostr} \
+        std::int::from_string   {op strtoint} \
         std::byte_store::from_list {op bytesfromlist} \
         std::byte_store::byte_count    {op byteslen} \
         std::mutable_byte_store::zeroed   {op mbytesnew} \
@@ -231,6 +234,7 @@ namespace eval native::lower {
         decimal_rounded#less d64lt decimal_rounded#less_equal d64le decimal_rounded#greater d64gt
         decimal_rounded#greater_equal d64ge decimal_rounded#equal d64eq
         decimal_rounded#to_float64 d64tof64 decimal_rounded#round d64round
+        decimal_rounded#to_string d64tostr
     } {
         dict set natives $name [list op $op]
     }

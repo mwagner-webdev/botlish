@@ -32,7 +32,7 @@
 #   fit a helper (TYPE at the registration, naming the error); the same
 #   error escaping a block is that block's UnhandledError; handled it is a
 #   value.
-# * The report's texts: std::test::describe, std::test::int_text, std::test::code_name.
+# * The report's texts: std::test::describe (an Int's through std::int::to_string), std::test::code_name.
 # * The framework keeps the compiler's precision: a range proof, a known
 #   error, error narrowing by an exact value, the affine analysis and method
 #   resolution decide a body's code exactly as they decide plain code.
@@ -321,11 +321,11 @@ fn register_text_tests():
             [std::test::describe(0), std::test::describe(-305), std::test::describe(123456789012345678901234567890), std::test::describe("a\"b\\c\nd\te"), std::test::describe(true), std::test::describe(false), std::test::describe([[1, -2], [], ["s"]]), std::test::describe(Point {x: 1}), std::test::describe(std::compiler::DiagnosticCode::Type)]
     std::test::value("gf-describe", ["0", "-305", "123456789012345678901234567890", "\"a\\\"b\\\\c\\nd\\te\"", "true", "false", "[[1, -2], [], [\"s\"]]", "a value with no text form", "a value with no text form"], describes)
 
-    # gf-int-text: int_text at the boundaries the representations change at
+    # gf-int-text: an Int's report text at the boundaries the representations change at
     # (small Int, i64), both signs.
     fn int_texts() errors std::compiler::CompilerError:
         static compile:
-            [std::test::int_text(9), std::test::int_text(10), std::test::int_text(4611686018427387903), std::test::int_text(4611686018427387904), std::test::int_text(9223372036854775807), std::test::int_text(9223372036854775808), std::test::int_text(-9223372036854775808), std::test::int_text(-9223372036854775809)]
+            [std::test::describe(9), std::test::describe(10), std::test::describe(4611686018427387903), std::test::describe(4611686018427387904), std::test::describe(9223372036854775807), std::test::describe(9223372036854775808), std::test::describe(-9223372036854775808), std::test::describe(-9223372036854775809)]
     std::test::value("gf-int-text", ["9", "10", "4611686018427387903", "4611686018427387904", "9223372036854775807", "9223372036854775808", "-9223372036854775808", "-9223372036854775809"], int_texts)
 
     # gf-code-name-complete: std::test::code_name spells every

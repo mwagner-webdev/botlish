@@ -30,6 +30,8 @@
 #   TYPE#< TYPE#<= TYPE#> TYPE#>= (TYPE, TYPE) -> bool
 #   NS::from_int                  (int) -> TYPE, errors NonFiniteFloat
 #   NS::truncate                  (TYPE) -> int (toward zero; exact, total)
+#   NS::round                     (TYPE) -> int (to the nearest Int, ties to
+#                                 the even one; exact, total)
 #
 # (NS is the type's `namespace`: float64.) A `#` name is no source spelling:
 # the operators reach them through operator resolution (hir/operators.tcl,
@@ -325,6 +327,24 @@ proc core::float::TruncateNative {type name v} {
     return [lindex [Truncate $type $v] 1]
 }
 
+# {ok INT}: the Int nearest the float value V, ties to the even Int
+# (NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md) -- the rule every rounding of the
+# numeric model uses: IEEE 754's round-to-nearest of the arithmetic, and
+# DecimalRounded's round(x, P), of which this is round(x, 0)
+# (core::decimal::RoundAt, the same procedure). Computed exactly from V's
+# binary value (core::decimal::DoubleRat), never from its decimal text, so a
+# value just below or above a half rounds by where it really is. Exact and
+# total: every finite float is within half of some Int, of any size.
+proc core::float::Nearest {type v} {
+    set r [core::decimal::DoubleRat [core::value::floatOf $v]]
+    return [list ok [core::value::intFromNumber [core::decimal::RoundAt $r 0]]]
+}
+
+proc core::float::NearestNative {type name v} {
+    core::value::expect $type $v $name
+    return [lindex [Nearest $type $v] 1]
+}
+
 # The fold of a float native (-fold, core/native.tcl): the call of the
 # operation on the exactly known ARGS, decided -- {value V} or {error
 # NonFiniteFloat} -- or "" when an argument is not of the operation's kind
@@ -384,5 +404,8 @@ apply {{} {
         core::native::register ${ns}::truncate -arity 1 -impl [list core::float::TruncateNative $type ${ns}::truncate] \
             -param-types [list $type] -result-type int -runtime bigint -context-free 1 \
             -fold [list core::float::Fold $type [list $type] [list core::float::Truncate $type]]
+        core::native::register ${ns}::round -arity 1 -impl [list core::float::NearestNative $type ${ns}::round] \
+            -param-types [list $type] -result-type int -runtime bigint -context-free 1 \
+            -fold [list core::float::Fold $type [list $type] [list core::float::Nearest $type]]
     }
 } core::float}

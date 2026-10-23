@@ -9,7 +9,7 @@ summary: Every facility other languages offer that Botlish lacks or offers only 
 index: concepts
 alias: capabilities; missing features; absent features; unsupported features; does it exist; what is missing; limitations of the language
 keywords: capability, absent, missing, unsupported, limitation, feature, exist, alternative
-related: capability.integer-division capability.int-to-string capability.string-formatting capability.input capability.files capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.visibility capability.struct-type-import
+related: capability.integer-division capability.string-formatting capability.input capability.files capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.visibility capability.struct-type-import
 
 == HOW TO FIND OUT WHETHER SOMETHING EXISTS
 Ask for it as you would name it elsewhere: `-help division`, `-help "exit
@@ -26,7 +26,7 @@ summary: Botlish has no integer division: `/` divides Float64 values only, and t
 index: concepts stdlib
 alias: division; divide; integer division; quotient; div; / operator; % operator; remainder; modulo operator
 keywords: divide, quotient, remainder, mod, shift_right, slash, percent
-related: concept.integers concept.floats stdlib./ stdlib.mod stdlib.shift_right capability.int-to-string
+related: concept.integers concept.floats stdlib./ stdlib.mod stdlib.shift_right task.number-text
 docs: LANGUAGE-LIBRARY-DEFICIENCIES.md BYTE-NIBBLE-BIT-ARITHMETIC.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC TYPE | *Botlish has no integer division*
 match: SURFACE SYNTAX | unexpected character "%"*
@@ -44,9 +44,9 @@ and the comparisons.
   * shift_right(n, k): n divided by 2^k, rounded down; bit_and(n, 2^k - 1)
     is the remainder (row and column of a cell of a 4x4 board, for
     example).
-  * Division by any other divisor: repeated subtraction, as
-    stdlib/test.bot's digit_value does for decimal digits (a recursive
-    helper).
+  * Division by any other divisor: repeated subtraction (a recursive
+    helper). A number's decimal digits need none: std::int::to_string
+    writes them (task.number-text).
   * An approximate quotient through Float64: std::float64::truncate of
     std::float64::from_int(a) / std::float64::from_int(b) is exact only
     while both Ints and the quotient fit in 53 bits.
@@ -63,35 +63,6 @@ x
 @caption There is no integer division
 @error CORE SEMANTIC TYPE
 @at 1:5
-@end
-
-@topic capability.int-to-string
-title: Int-to-String conversion: absent from the standard namespaces
-summary: There is no general Int-to-String conversion (no std::str::of, no formatting); the test framework's std::test::int_text(n) converts by repeated subtraction and is the one available route.
-index: concepts stdlib
-alias: integer to string; int to string; number to text; to_string; format number; itoa; tostring; string of a number
-keywords: convert, string, text, decimal, format, int_text
-related: stdlib.std::test::int_text concept.strings capability.string-formatting capability.integer-division
-docs: LANGUAGE-LIBRARY-DEFICIENCIES.md GOLDEN-TEST-FRAMEWORK.md
-
-== STATUS
-No standard namespace converts an Int to its decimal text, and there is no
-string formatting or interpolation (capability.string-formatting). A
-program's value is shown by the compiler (the compiler's "value:" line, an
-executable's last line), which is how most programs report numbers.
-
-== NEAREST ALTERNATIVE
-std::test::int_text(n), in stdlib/test.bot (import std::test), returns n in
-decimal with a leading minus sign when negative. It needs no installed
-suite. It is written in Botlish by repeated subtraction (there is no
-division), so it is slow for huge numbers but exact.
-
-@example accept
-import std::test
-import std::str
-
-"moves: ".concat(std::test::int_text(20))
-@value "moves: 20"
 @end
 
 @topic capability.process-exit-status
@@ -235,17 +206,18 @@ write system calls are the only route, and no open exists.
 
 @topic capability.string-formatting
 title: String formatting and interpolation: absent
-summary: There is no format function, template string or interpolation; text is built with std::str::concat and std::str::append_char, numbers with std::test::int_text.
+summary: There is no format function, template string or interpolation; text is built with std::str::concat and std::str::append_char, numbers with std::int::to_string and std::decimal_rounded::to_string.
 index: concepts stdlib
 alias: string formatting; format string; interpolation; sprintf; string interpolation; f-string
 keywords: format, interpolation, template, concat, text
-related: task.string-concatenation capability.int-to-string concept.strings stdlib.std::str::concat
+related: task.string-concatenation task.number-text concept.strings stdlib.std::str::concat
 
 == STATUS
 No format, printf-style operation or interpolation syntax exists.
 
 == NEAREST ALTERNATIVE
-Concatenate: `"moves: ".concat(std::test::int_text(n)).concat(" steps")`;
+Concatenate, converting each number explicitly (task.number-text):
+`"moves: ".concat(n.to_string()).concat(" steps")` (import std::int);
 build long texts with a helper or stdlib/test.bot's std::test::joined(parts,
 separator).
 

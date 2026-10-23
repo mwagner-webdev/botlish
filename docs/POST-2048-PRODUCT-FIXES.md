@@ -290,7 +290,7 @@ Nothing here was touched; each remains evidence for the 15-puzzle run.
 
 | finding | status |
 |---|---|
-| S1 Int to String | open: no stdlib operation added |
+| S1 Int to String | open here; closed in the standard library by NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md (`std::int::to_string`), whose run left the 2048 engine's workaround in place as this evidence |
 | S2 integer division | open |
 | S5 descending-loop index proofs | open: `hir/range.tcl` unchanged |
 | S6 typed empty MutableVector | open |

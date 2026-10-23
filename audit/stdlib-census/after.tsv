@@ -2,7 +2,7 @@ name	kind	namespace	role	origin	location	platform	arch	direct
 *	intrinsic		primitive	intrinsic				
 +	intrinsic		primitive	intrinsic				
 -	intrinsic		primitive	intrinsic				
-/	intrinsic		primitive	intrinsic	core/float.tcl:358			
+/	intrinsic		primitive	intrinsic	core/float.tcl:378			
 <	intrinsic		primitive	intrinsic				
 <=	intrinsic		primitive	intrinsic				
 ==	intrinsic		primitive	intrinsic	core/primitives.tcl:99			
@@ -29,6 +29,7 @@ Float64#>=	intrinsic		internal	intrinsic
 Float64#neg	intrinsic		internal	intrinsic				
 IndexNotFound	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidArgumentEncoding	builtin-error		builtin	intrinsic	core/native.tcl			
+InvalidIntegerText	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutExtentMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutLengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
@@ -64,8 +65,9 @@ decimal_rounded#greater	intrinsic		internal	intrinsic
 decimal_rounded#greater_equal	intrinsic		internal	intrinsic				
 decimal_rounded#less	intrinsic		internal	intrinsic				
 decimal_rounded#less_equal	intrinsic		internal	intrinsic				
-decimal_rounded#round	intrinsic		internal	intrinsic	core/decimal.tcl:803			
-decimal_rounded#to_float64	intrinsic		internal	intrinsic	core/decimal.tcl:797			
+decimal_rounded#round	intrinsic		internal	intrinsic	core/decimal.tcl:818			
+decimal_rounded#to_float64	intrinsic		internal	intrinsic	core/decimal.tcl:812			
+decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:824			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
 hash	intrinsic		primitive	intrinsic	core/hashing.tcl:444			
@@ -391,7 +393,8 @@ std::darwin::read	function	std::darwin	api	source	stdlib/darwin.bot:182	macos
 std::darwin::terminator	function	std::darwin	api	source	stdlib/darwin.bot:190	macos		
 std::darwin::write	function	std::darwin	api	source	stdlib/darwin.bot:171	macos		
 std::decimal_rounded	namespace		api	intrinsic				
-std::decimal_rounded::round	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:799			
+std::decimal_rounded::round	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:814			
+std::decimal_rounded::to_string	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:821			
 std::ffi::c	namespace		api	source+intrinsic	stdlib/ffi/c.bot			
 std::ffi::c::Bool	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
 std::ffi::c::Char	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
@@ -418,14 +421,18 @@ std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:593
 std::float64	namespace		api	source+intrinsic	stdlib/float64.bot			
 std::float64::abs	function	std::float64	api	source	stdlib/float64.bot:38			
 std::float64::clamp	function	std::float64	api	source	stdlib/float64.bot:44			
-std::float64::from_decimal_rounded	intrinsic	std::float64	api	intrinsic	core/decimal.tcl:794			
+std::float64::from_decimal_rounded	intrinsic	std::float64	api	intrinsic	core/decimal.tcl:809			
 std::float64::from_int	intrinsic	std::float64	api	intrinsic				
 std::float64::max	function	std::float64	api	source	stdlib/float64.bot:32			
 std::float64::min	function	std::float64	api	source	stdlib/float64.bot:26			
+std::float64::round	intrinsic	std::float64	api	intrinsic				
 std::float64::truncate	intrinsic	std::float64	api	intrinsic				
 std::immutable_set	namespace		api	intrinsic				
 std::immutable_set::contains	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:78			
 std::immutable_set::from_list	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:75			
+std::int	namespace		api	intrinsic				
+std::int::from_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:80			
+std::int::to_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:77			
 std::io	namespace		api	source	stdlib/io.bot			
 std::io::IO	context-trait	std::io	api	source	stdlib/io.bot:48			
 std::io::WriteFailed	error	std::io	api	source	stdlib/io.bot:44			
@@ -522,49 +529,46 @@ std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116
 std::table_hash	namespace		std-internal	intrinsic				
 std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:452			
 std::test	namespace		api	source	stdlib/test.bot			
-std::test::Erased	struct	std::test	api	source	stdlib/test.bot:295			
+std::test::Erased	struct	std::test	api	source	stdlib/test.bot:270			
 std::test::Match	struct	std::test	api	source	stdlib/test.bot:95			
 std::test::Suite	context-struct	std::test	api	source	stdlib/test.bot:123			
 std::test::Summary	struct	std::test	api	source	stdlib/test.bot:127			
 std::test::TestCase	struct	std::test	api	source	stdlib/test.bot:111			
 std::test::TestResult	struct	std::test	api	source	stdlib/test.bot:102			
 std::test::case	function	std::test	api	source	stdlib/test.bot:142			
-std::test::code_name	function	std::test	api	source	stdlib/test.bot:325			
-std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:281			
+std::test::code_name	function	std::test	api	source	stdlib/test.bot:300			
+std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
-std::test::describe	function	std::test	api	source	stdlib/test.bot:307			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:587			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:554			
-std::test::digit_value	function	std::test	api	source	stdlib/test.bot:170			
-std::test::digits_from	function	std::test	api	source	stdlib/test.bot:177			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:571			
-std::test::escape_of	function	std::test	api	source	stdlib/test.bot:214			
-std::test::escaped	function	std::test	api	source	stdlib/test.bot:230			
+std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:562			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:529			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:546			
+std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
+std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:611			
-std::test::int_text	function	std::test	api	source	stdlib/test.bot:185			
-std::test::joined	function	std::test	api	source	stdlib/test.bot:198			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:567			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:692			
-std::test::no_texts	function	std::test	api	source	stdlib/test.bot:193			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:561			
-std::test::quoted	function	std::test	api	source	stdlib/test.bot:248			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:586			
+std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:542			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:667			
+std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:536			
+std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:620			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:642			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:630			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:668			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:655			
-std::test::report	function	std::test	api	source	stdlib/test.bot:753			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:721			
-std::test::results	function	std::test	api	source	stdlib/test.bot:696			
-std::test::run	function	std::test	api	source	stdlib/test.bot:686			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:579			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:595			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:617			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:605			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:643			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:630			
+std::test::report	function	std::test	api	source	stdlib/test.bot:728			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:696			
+std::test::results	function	std::test	api	source	stdlib/test.bot:671			
+std::test::run	function	std::test	api	source	stdlib/test.bot:661			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:554			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:711			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:744			
-std::test::text_lines	function	std::test	api	source	stdlib/test.bot:254			
-std::test::value	function	std::test	api	source	stdlib/test.bot:602			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:686			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:719			
+std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
+std::test::value	function	std::test	api	source	stdlib/test.bot:577			
 std::web	namespace		api	source	stdlib/web.bot			
 std::web::Emailish	refined-type	std::web	api	source	stdlib/web.bot:71			
 std::web::UriQueryValue	refined-type	std::web	api	source	stdlib/web.bot:226			
