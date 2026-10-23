@@ -170,6 +170,10 @@ pub fn inst(program: &Program, inst: &Inst) -> String {
         Inst::Tail { args } => format!("    tail{}", regs(args)),
         Inst::TailEnv { closure, args } => format!("    tailenv %{closure}{}", regs(args)),
         Inst::Br { cond, then, otherwise } => format!("    br %{cond} L{then} L{otherwise}"),
+        Inst::Switch { value, default, cases } => {
+            let cases: Vec<String> = cases.iter().map(|(lo, hi, l)| format!("{lo}:{hi}:L{l}")).collect();
+            format!("    switch %{value} L{default} {}", cases.join(" "))
+        }
         Inst::Jump(l) => format!("    jump L{l}"),
         Inst::Ret(r) => format!("    ret %{r}"),
         Inst::RetMulti(rs) => format!("    retmulti{}", regs(rs)),

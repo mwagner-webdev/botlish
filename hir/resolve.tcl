@@ -2557,6 +2557,14 @@ proc hir::resolve::ResolveHole {hirVar e node ctx} {
     if {$callable ne ""} {
         dict set hir holeBlocks $callable 1
     }
+    if {[dict exists $node hole report]} {
+        # A declaration the front end rejected (hir/syntax.tcl's holeNode):
+        # its diagnostic, located where the hole is.
+        lassign [dict get $node hole report] kind message related
+        SetField hir $e hole [dict create binds $binds installs [dict getdef $node hole installs 0] report $kind]
+        hir::Diagnose hir $kind $message $e $related
+        return
+    }
     hir::Diagnose hir SYNTAX-HOLE "malformed source: no meaning is known for it (its syntax error says why)" $e
 }
 

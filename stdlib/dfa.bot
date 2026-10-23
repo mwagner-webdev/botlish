@@ -1,0 +1,46 @@
+# dfa.bot -- the "std::dfa" namespace: the protocol every declared
+# recognizer speaks (DFA-COROUTINE-MILESTONE-2.md).
+#
+#   std::dfa::Symbol              the message a recognizer is resumed with
+#   std::dfa::UnrecognizedInput   a symbol no transition of its state takes
+#   std::dfa::UnexpectedEnd       the end of the input where nothing accepts
+#
+# A `dfa NAME over ALPHABET:` declaration is lowered to an ordinary coroutine
+# function of this protocol:
+#
+#   fn NAME(first: int, resume std::dfa::Symbol) -> int
+#           errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd
+#
+# constructed with the token's first symbol (`coroutine {step, first} =
+# NAME(c)`) and resumed with one Symbol per further symbol; code -1 is the end
+# of the input, never a symbol. While it runs, each yield answers 0 ("taken,
+# send the next"). Its completion (std::coroutine::done? true) returns how
+# many of the symbols it was supplied are not part of its token: 0 for
+# `accept`, N for `accept before N`, counting actual symbols only (the end of
+# the input is never counted). A recognizer fails with one of the two errors
+# below; nothing about recognition is a value of its own. A file declaring a
+# recognizer imports this namespace, like any other it names.
+#
+# Nothing here is built in: the declarations below are ordinary namespaced
+# declarations. The compiler's one privilege is writing the functions a
+# declaration lowers to (surface/dfa.tcl).
+
+# One input symbol: a byte (0..255), an ASCII code (0..127) or a Unicode
+# scalar value, as the recognizer's alphabet says; -1 is the end of the
+# input.
+struct Symbol:
+    code: int
+
+# A symbol the current state of RECOGNIZER takes no transition on (and every
+# value outside its alphabet). RECOGNIZER is the qualified name of the
+# recognizer whose state rejected it (a callee's, inside a call), STATE that
+# state's name.
+error UnrecognizedInput:
+    recognizer: str
+    state: str
+    symbol: int
+
+# The end of the input in a state of RECOGNIZER that does not accept there.
+error UnexpectedEnd:
+    recognizer: str
+    state: str

@@ -373,6 +373,8 @@ proc surface::ast::Statements {statements parent} {
     foreach statement $statements {
         switch -- [dict get $statement kind] {
             function { set key "[dict get $statement name]()" }
+            classdecl { set key "class([dict get $statement name])" }
+            dfadecl  { set key "dfa([dict get $statement name])" }
             bind     { set key "[dict get $statement name]=" }
             coroutinebind { set key coroutine }
             default  { set key [dict get $statement kind] }
@@ -922,6 +924,23 @@ proc surface::ast::Statement {node indent show linesVar} {
             lappend lines "${pad}error [dict get $node name]$at"
             return
         }
+        classdecl {
+            lappend lines "${pad}[DfaClassText $node]$at"
+            return
+        }
+        dfadecl {
+            lappend lines "${pad}dfa [dict get $node name] over [dict get $node alphabet]$at"
+            foreach c [dict get $node classes] {
+                lappend lines "${pad}    [DfaClassText $c]"
+            }
+            foreach state [dict get $node states] {
+                lappend lines "${pad}    [dict get $state name]:"
+                foreach t [dict get $state transitions] {
+                    lappend lines "${pad}        [DfaItemsText [dict get $t items]] -> [DfaActionText $t]"
+                }
+            }
+            return
+        }
         enumdecl {
             lappend lines "${pad}enum [dict get $node name]$at"
             foreach case [dict get $node cases] {
@@ -1116,6 +1135,51 @@ proc surface::ast::Statement {node indent show linesVar} {
 
 # Lines of the static intrinsic NODE ("static OPERATION" and its captured
 # block, STATIC-COMPILE.md), its first line starting with PREFIX.
+# The source text of a dfa or class declaration's items (surface/parser.tcl's
+# DfaItems), a class declaration, and a transition's action, as written.
+proc surface::ast::DfaItemsText {items} {
+    return [join [lmap item $items {
+        switch -- [dict get $item kind] {
+            sym - seq { dict get $item text }
+            any - end { dict get $item kind }
+            class {
+                set name [dict get $item name]
+                if {[dict get $item namespace] ne ""} {
+                    set name [dict get $item namespace]::$name
+                }
+                string cat [expr {[dict get $item rooted] ? "::" : ""}] $name
+            }
+        }
+    }] " "]
+}
+
+proc surface::ast::DfaClassText {node} {
+    set text "class [dict get $node name] = [DfaItemsText [dict get $node items]]"
+    if {[dict get $node except] ne {}} {
+        append text " except [DfaItemsText [dict get $node except]]"
+    }
+    return $text
+}
+
+proc surface::ast::DfaActionText {t} {
+    switch -- [dict get $t action] {
+        goto { return [dict get $t target] }
+        reject { return reject }
+        accept {
+            switch -- [dict get $t unread] {
+                0 { return accept }
+                1 { return "accept before" }
+                default { return "accept before [dict get $t unread]" }
+            }
+        }
+        call {
+            lassign [dict get $t callee] ns name rooted
+            set callee [if {$ns eq ""} {set name} else {string cat $ns :: $name}]
+            return "call [expr {$rooted ? "::" : ""}]$callee then [dict get $t then]"
+        }
+    }
+}
+
 proc surface::ast::StaticIntrinsic {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]

@@ -171,6 +171,13 @@ proc hir::syntax::rootRef {origin name} {
 # SYNTAX-HOLE (never shown: the syntax diagnostic is the error), inference
 # makes it poison, and no backend compiles a HIR that has one
 # (hir::recovery::runnable).
+#
+# A declaration the front end rejected before HIR (a `dfa` or `class`
+# declaration, surface/dfa.tcl: DFA-COROUTINE-MILESTONE-2.md) lowers to
+# holes too, one per diagnostic, whose `hole` carries `report {KIND MESSAGE
+# RELATED}`: resolution reports that diagnostic instead of SYNTAX-HOLE -- a
+# resolution diagnostic of the declaration's own unit, so a unit that uses
+# what it declares is dependent and says nothing more (hir/recovery.tcl).
 proc hir::syntax::holeNode {origin binds {installs 0}} {
     return [Node ref $origin name syntax#hole root 0 hole [dict create binds $binds installs $installs]]
 }

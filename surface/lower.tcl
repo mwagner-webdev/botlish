@@ -433,6 +433,11 @@ proc surface::lower::Sequence {nodes} {
             lappend result {*}[CoroutineBind $node]
         } elseif {[dict get $node kind] eq "hole"} {
             lappend result {*}[Hole $node]
+        } elseif {[dict get $node kind] in {dfadecl classdecl}} {
+            # A declared recognizer or symbol class (DFA-COROUTINE-
+            # MILESTONE-2.md): the functions it lowers to, or its
+            # diagnostics (surface/dfa.tcl; the loader analyzed it).
+            lappend result {*}[surface::dfa::Nodes $node]
         } elseif {[dict get $node kind] eq "with"} {
             # `with context EXPR` (CONTEXTS.md): the value bound to a hygienic
             # temporary, then the explicit installation of it (placement,

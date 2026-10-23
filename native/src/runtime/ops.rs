@@ -3286,7 +3286,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // A C word exists only between a C call and its uses, in one
         // function (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): never a value.
         | CWBox | CWLt | CWLe | CWGt | CWGe | CWEq
-        | RIShr | RIShl | RIAnd | RIOr | RIXor | RIMod | RIModTotal | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
+        | RIShr | RIShl | RIAnd | RIOr | RIXor | RIMod | RIModTotal | RTabLoad8 | RTabLoad16 | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
         | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // The syscall transports and the raw address bridges are never

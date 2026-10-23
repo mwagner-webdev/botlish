@@ -259,6 +259,7 @@ pub(crate) fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
             ((0..params).collect(), use_)
         }
         Inst::Br { cond, .. } => (vec![], vec![*cond]),
+        Inst::Switch { value, .. } => (vec![], vec![*value]),
         Inst::Jump(_) => (vec![], vec![]),
         Inst::Ret(r) => (vec![], vec![*r]),
         Inst::RetMulti(rs) => (vec![], rs.clone()),
@@ -316,6 +317,12 @@ impl Cfg {
                 Inst::Br { then, otherwise, .. } => {
                     succs[bidx].push(block_of[label_index[then]]);
                     succs[bidx].push(block_of[label_index[otherwise]]);
+                }
+                Inst::Switch { default, cases, .. } => {
+                    succs[bidx].push(block_of[label_index[default]]);
+                    for (_, _, l) in cases {
+                        succs[bidx].push(block_of[label_index[l]]);
+                    }
                 }
                 // A self tail call jumps back to the body's first block,
                 // exactly like codegen::clif's own translation (see this

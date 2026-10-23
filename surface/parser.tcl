@@ -29,7 +29,25 @@
 #                     followed by a name or by "type", which no other
 #                     construct allows, so `import` stays an ordinary name.
 #   topStatement = typeDecl | structDecl | enumDecl | layoutDecl | errorDecl
-#                | traitDecl | externDecl | statement
+#                | traitDecl | externDecl | classDecl | dfaDecl | statement
+#   classDecl    = "class" IDENT "=" dfaItems [ "except" dfaItems ] NEWLINE
+#   dfaDecl      = "dfa" IDENT "over" IDENT ":" NEWLINE INDENT
+#                  { classDecl } dfaState { dfaState } DEDENT
+#   dfaState     = IDENT ":" NEWLINE INDENT dfaTransition { dfaTransition } DEDENT
+#   dfaTransition = dfaItems "->" ( IDENT | "accept" [ "before" [ INT ] ]
+#                  | "reject" | "call" path "then" IDENT ) NEWLINE
+#   dfaItems     = dfaItem { [ "," ] dfaItem }
+#   dfaItem      = symbol [ ".." symbol ] | path | STRING
+#   symbol       = CHAR | INT | HEX
+#                  -- DFA-COROUTINE-MILESTONE-2.md: a named symbol set and a
+#                  declared finite-state recognizer, lowered to ordinary
+#                  coroutine functions by surface/dfa.tcl. "class", "dfa" and
+#                  every word of their bodies (over, accept, before, reject,
+#                  call, then, end, any, except) are contextual: a
+#                  declaration only as the first word of a top-level
+#                  statement directly followed by a name, so each stays an
+#                  ordinary name everywhere else. HEX (`0xC2`) is a symbol
+#                  only here
 #   externDecl   = "extern" "c" "library" STRING NEWLINE
 #                | "extern" "c" "fn" IDENT [ "named" STRING ]
 #                  "(" [ externParam { "," externParam } [ "," ] ] ")"
@@ -636,6 +654,7 @@ proc surface::parser::Describe {token} {
         EOF     { return "end of file" }
         IDENT   { return "name \"[dict get $token text]\"" }
         INT     { return "integer [dict get $token text]" }
+        HEX     { return "hexadecimal integer [dict get $token text] (written only in a dfa or class declaration)" }
         DECIMAL { return "decimal number [dict get $token text]" }
         STRING  { return "string [dict get $token text]" }
         CHAR    { return "character [dict get $token text]" }
@@ -1187,6 +1206,429 @@ proc surface::parser::LayoutDecl {pVar} {
         dict set node union 1
     }
     return $node
+}
+
+# ---------------------------------------------------------------------------
+# Declared recognizers (DFA-COROUTINE-MILESTONE-2.md): `class` and `dfa`.
+# The grammar of both is the parser's; what a declaration means -- its
+# symbol sets, its checks, its lowering to coroutine functions -- is
+# surface/dfa.tcl's.
+
+namespace eval surface::parser {
+    # The words of a dfa body that are never a state's or a class's name.
+    variable dfaReserved {accept before reject call then end any except class over}
+}
+
+# 1 if the next tokens start a symbol-class declaration: the contextual word
+# "class" directly followed by a name and "=". Two names in a row are never
+# a valid statement, so an ordinary variable called `class` (`class = 3`,
+# `class(x)`, `x.class`) is unaffected.
+proc surface::parser::AtClassDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "class"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# 1 if the next tokens start a recognizer declaration: the contextual word
+# "dfa" directly followed by a name (DfaDecl reports a missing `over`).
+proc surface::parser::AtDfaDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "dfa"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# "class" IDENT "=" items [ "except" items ] NEWLINE -- a named symbol set:
+# a `classdecl` node {name nameSpan items except}. ITEMS and EXCEPT are
+# DfaItems lists; a class holds symbols, so neither may hold `end` or a
+# sequence.
+proc surface::parser::ClassDecl {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set start [dict get [Advance p] span]
+    set name [Peek p]
+    if {[dict get $name kind] ne "IDENT" || [dict get $name text] in $dfaReserved} {
+        Fail $name "expected a class name after \"class\", found [Describe $name] (a class is declared as \"class NAME = SYMBOLS\")"
+    }
+    Advance p
+    if {[Kind p] ne "="} {
+        Fail [Peek p] "expected \"=\" after the class name \"[dict get $name value]\", found [Describe [Peek p]] (a class is declared as \"class NAME = SYMBOLS\")"
+    }
+    Advance p
+    set items [DfaItems p {except} class]
+    set except {}
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "except"} {
+        Advance p
+        set except [DfaItems p {} class]
+        if {$except eq {}} {
+            Fail [Peek p] "expected the symbols \"except\" removes, found [Describe [Peek p]]"
+        }
+    }
+    if {$items eq {}} {
+        Fail [Peek p] "class \"[dict get $name value]\" holds no symbol: expected a symbol, a range or a class after \"=\", found [Describe [Peek p]]"
+    }
+    if {[Kind p] ni {NEWLINE EOF}} {
+        Fail [Peek p] "expected the end of the line after the class's symbols, found [Describe [Peek p]]"
+    }
+    set span [SpanFrom p $start]
+    if {[Kind p] eq "NEWLINE"} {
+        Advance p
+    }
+    return [surface::ast::node classdecl $span name [dict get $name value] nameSpan [dict get $name span] \
+        items $items except $except]
+}
+
+# One bound of a symbol range: a CHAR, INT or HEX token's {VALUE KIND TEXT},
+# KIND char, int or hex, TEXT as written; "" for anything else (nothing
+# consumed).
+proc surface::parser::DfaSymbol {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    switch -- [dict get $token kind] {
+        CHAR { set kind char }
+        INT { set kind int }
+        HEX { set kind hex }
+        default { return "" }
+    }
+    Advance p
+    return [list [dict get $token value] $kind [dict get $token text]]
+}
+
+# The items of a class or a transition, up to (not including) the end of the
+# line, "->", or one of the contextual words STOPWORDS. WHERE is class or
+# transition (a sequence is only a transition's). Each item is a dict:
+#
+#   {kind sym lo LO hi HI loKind K hiKind K text TEXT span SPAN}
+#        a symbol or a range LO..HI (decimal text; KIND char, int or hex: a
+#        character literal names a Unicode scalar value, which a bytes
+#        recognizer must not take for a byte)
+#   {kind class namespace NS name NAME rooted R span SPAN}
+#        a class, NS "" for the file's own (`digit`) or a namespace path
+#        (`ascii::digit`, `::lexing::digit`)
+#   {kind any span SPAN} / {kind end span SPAN}
+#        the alphabet; the end of the input (never a symbol)
+#   {kind seq symbols {CODE...} text TEXT span SPAN}
+#        a string: the sequence of its scalar values
+#
+# Items may be separated by commas.
+proc surface::parser::DfaItems {pVar stopWords where} {
+    upvar 1 $pVar p
+    set items {}
+    while 1 {
+        set token [Peek p]
+        set kind [dict get $token kind]
+        if {$kind in {NEWLINE EOF -> DEDENT}} {
+            break
+        }
+        if {$kind eq "IDENT" && [dict get $token text] in $stopWords} {
+            break
+        }
+        if {$kind eq ","} {
+            if {$items eq {}} {
+                Fail $token "expected a symbol before \",\""
+            }
+            Advance p
+            if {[Kind p] in {NEWLINE EOF -> , DEDENT}} {
+                Fail [Peek p] "expected a symbol after \",\", found [Describe [Peek p]]"
+            }
+            continue
+        }
+        set start [dict get $token span]
+        set lo [DfaSymbol p]
+        if {$lo ne ""} {
+            set hi $lo
+            if {[Kind p] eq ".."} {
+                Advance p
+                set hi [DfaSymbol p]
+                if {$hi eq ""} {
+                    Fail [Peek p] "expected the symbol that ends the range after \"..\", found [Describe [Peek p]] (a range is written 'a'..'z' or 0x80..0xBF)"
+                }
+            }
+            set span [SpanFrom p $start]
+            lappend items [dict create kind sym lo [lindex $lo 0] hi [lindex $hi 0] \
+                loKind [lindex $lo 1] hiKind [lindex $hi 1] \
+                text [if {$hi eq $lo} {lindex $lo 2} else {string cat [lindex $lo 2] .. [lindex $hi 2]}] \
+                span $span]
+            continue
+        }
+        if {$kind eq "STRING"} {
+            if {$where ne "transition"} {
+                Fail $token "a class holds symbols, not a sequence: [Describe $token] is a transition's (\"\\\"...\\\" -> ACTION\")"
+            }
+            Advance p
+            set value [dict get $token value]
+            if {$value eq ""} {
+                Fail $token "an empty sequence: a sequence names the symbols it consumes, one at least"
+            }
+            lappend items [dict create kind seq symbols [lmap c [split $value ""] {scan $c %c}] \
+                text [dict get $token text] span [dict get $token span]]
+            continue
+        }
+        if {$kind eq "IDENT" || $kind eq "::"} {
+            set rooted 0
+            if {$kind eq "::"} {
+                Advance p
+                set rooted 1
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a namespace after \"::\", found [Describe [Peek p]]"
+                }
+            }
+            set segments [list [dict get [Advance p] value]]
+            while {[Kind p] eq "::"} {
+                Advance p
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a name after \"::\", found [Describe [Peek p]]"
+                }
+                lappend segments [dict get [Advance p] value]
+            }
+            set span [SpanFrom p $start]
+            if {[llength $segments] == 1 && !$rooted && [lindex $segments 0] in {any end}} {
+                if {[lindex $segments 0] eq "end" && $where ne "transition"} {
+                    Fail $token "`end` is the end of the input, not a symbol: a class cannot hold it"
+                }
+                lappend items [dict create kind [lindex $segments 0] span $span]
+                continue
+            }
+            if {$rooted && [llength $segments] < 2} {
+                Fail $token "a class written from the root names a namespace and a class (\"::NAMESPACE::NAME\")"
+            }
+            lappend items [dict create kind class \
+                namespace [join [lrange $segments 0 end-1] ::] name [lindex $segments end] \
+                rooted $rooted span $span]
+            continue
+        }
+        Fail $token "expected a symbol, a range, a class, `any`[expr {$where eq "transition" ? ", `end` or a sequence" : ""}], found [Describe $token]"
+    }
+    return $items
+}
+
+# "dfa" IDENT "over" IDENT ":" NEWLINE INDENT { classDecl } state { state } DEDENT
+# -- a declared recognizer: a `dfadecl` node {name nameSpan alphabet
+# alphabetSpan classes states}. CLASSES are its own classdecl nodes (written
+# before its states); STATES a list of {name nameSpan span transitions}, the
+# first the start state; a transition is
+#
+#   {items ITEMS action ACTION span SPAN arrowSpan SPAN actionSpan SPAN ...}
+#
+# with ITEMS as DfaItems's and ACTION one of
+#
+#   goto     target, targetSpan              "-> STATE": consume, continue
+#   accept   unread N, unreadSpan            "-> accept" (N 0), "-> accept
+#            before" (N 1), "-> accept before N": complete, the last N
+#            symbols supplied not part of the token
+#   reject                                   "end -> reject" (the end only:
+#            a symbol no transition takes is rejected already)
+#   call     callee {NS NAME ROOTED}, calleeSpan, then (a state or
+#            "accept"), thenSpan             "-> call DFA then STATE|accept"
+#
+# The alphabet is a contextual word (bytes, ascii, unicode), checked with
+# everything else by surface/dfa.tcl.
+proc surface::parser::DfaDecl {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set start [dict get [Advance p] span]
+    set name [Advance p]
+    if {[dict get $name value] in $dfaReserved} {
+        Fail $name "\"[dict get $name value]\" is a word of the dfa syntax and cannot name a recognizer"
+    }
+    set over [Peek p]
+    if {[dict get $over kind] ne "IDENT" || [dict get $over text] ne "over"} {
+        Fail $over "expected \"over\" and an alphabet after \"dfa [dict get $name value]\", found [Describe $over] (a recognizer is declared as \"dfa NAME over ALPHABET:\", the alphabet bytes, ascii or unicode)"
+    }
+    Advance p
+    set alphabet [Peek p]
+    if {[dict get $alphabet kind] ne "IDENT"} {
+        Fail $alphabet "expected an alphabet after \"over\" (bytes, ascii or unicode), found [Describe $alphabet]"
+    }
+    Advance p
+    if {[Kind p] ne ":"} {
+        Fail [Peek p] "expected \":\" after \"dfa [dict get $name value] over [dict get $alphabet text]\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "NEWLINE"} {
+        Fail [Peek p] "expected a new line and the recognizer's indented states after \":\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        Fail [Peek p] "dfa \"[dict get $name value]\" declares no state: its states are written on the indented lines after \"dfa [dict get $name value] over [dict get $alphabet text]:\""
+    }
+    Advance p
+    set classes {}
+    set states {}
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {[Kind p] in {DEDENT EOF}} {
+            break
+        }
+        set token [Peek p]
+        if {[AtClassDecl p]} {
+            if {$states ne {}} {
+                Fail $token "a recognizer's classes come before its states"
+            }
+            lappend classes [ClassDecl p]
+            continue
+        }
+        lappend states [DfaState p]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    if {$states eq {}} {
+        Fail $name "dfa \"[dict get $name value]\" declares no state"
+    }
+    return [surface::ast::node dfadecl [SpanFrom p $start] name [dict get $name value] \
+        nameSpan [dict get $name span] alphabet [dict get $alphabet text] \
+        alphabetSpan [dict get $alphabet span] classes $classes states $states]
+}
+
+# IDENT ":" NEWLINE INDENT transition { transition } DEDENT -- one state of a
+# dfa body (DfaDecl).
+proc surface::parser::DfaState {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set name [Peek p]
+    if {[dict get $name kind] ne "IDENT" || [Kind p 1] ne ":"} {
+        Fail $name "expected a state (\"NAME:\" and its indented transitions) or a class, found [Describe $name]"
+    }
+    if {[dict get $name value] in $dfaReserved} {
+        Fail $name "\"[dict get $name value]\" is a word of the dfa syntax and cannot name a state"
+    }
+    Advance p
+    Advance p
+    if {[Kind p] ne "NEWLINE"} {
+        Fail [Peek p] "expected a new line and the state's indented transitions after \"[dict get $name value]:\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        Fail $name "state \"[dict get $name value]\" has no transition: its transitions are written on the indented lines after \"[dict get $name value]:\""
+    }
+    Advance p
+    set transitions {}
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {[Kind p] in {DEDENT EOF}} {
+            break
+        }
+        lappend transitions [DfaTransition p]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    return [dict create name [dict get $name value] nameSpan [dict get $name span] \
+        span [SpanFrom p [dict get $name span]] transitions $transitions]
+}
+
+# items "->" action NEWLINE -- one transition of a state (DfaDecl).
+proc surface::parser::DfaTransition {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set first [Peek p]
+    set start [dict get $first span]
+    if {[Kind p] eq "=" && [Kind p 1] eq ">"} {
+        Fail $first "\"=>\" (reconsider the symbol in another state) is not part of the dfa syntax: a transition consumes its symbol, completes, or calls a recognizer that consumes it"
+    }
+    set items [DfaItems p {} transition]
+    if {$items eq {}} {
+        Fail [Peek p] "expected a transition (\"SYMBOLS -> ACTION\"), found [Describe [Peek p]]"
+    }
+    if {[Kind p] eq "=" && [Kind p 1] eq ">"} {
+        Fail [Peek p] "\"=>\" (reconsider the symbol in another state) is not part of the dfa syntax: a transition consumes its symbol, completes, or calls a recognizer that consumes it"
+    }
+    if {[Kind p] ne "->"} {
+        Fail [Peek p] "expected \"->\" and an action after the transition's symbols, found [Describe [Peek p]]"
+    }
+    set arrowSpan [dict get [Advance p] span]
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        Fail $token "expected an action after \"->\" (a state, `accept`, `accept before N`, `call DFA then ...`, or `reject` for `end`), found [Describe $token]"
+    }
+    Advance p
+    set word [dict get $token value]
+    set t [dict create items $items arrowSpan $arrowSpan actionSpan [dict get $token span]]
+    switch -- $word {
+        accept {
+            set unread 0
+            set unreadSpan ""
+            if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "before"} {
+                set unread 1
+                set unreadSpan [dict get [Advance p] span]
+                if {[Kind p] eq "INT"} {
+                    set count [Advance p]
+                    set unread [dict get $count value]
+                    set unreadSpan [surface::ast::cover $unreadSpan [dict get $count span]]
+                } elseif {[Kind p] ni {NEWLINE EOF DEDENT}} {
+                    Fail [Peek p] "expected the number of symbols left unread after \"accept before\", found [Describe [Peek p]] (\"accept before\" leaves one; \"accept before N\" leaves N, a nonnegative integer)"
+                }
+            }
+            dict set t action accept
+            dict set t unread $unread
+            dict set t unreadSpan $unreadSpan
+        }
+        reject {
+            if {[llength $items] != 1 || [dict get [lindex $items 0] kind] ne "end"} {
+                Fail $token "only the end of the input is rejected explicitly (\"end -> reject\"): a symbol no transition of a state takes is rejected already, so write no transition for it"
+            }
+            dict set t action reject
+        }
+        call {
+            set callee [Peek p]
+            set rooted 0
+            if {[Kind p] eq "::"} {
+                Advance p
+                set rooted 1
+            }
+            if {[Kind p] ne "IDENT"} {
+                Fail [Peek p] "expected the recognizer to call after \"call\", found [Describe [Peek p]] (\"-> call DFA then STATE\" or \"-> call DFA then accept\")"
+            }
+            set calleeStart [dict get [Peek p] span]
+            set segments [list [dict get [Advance p] value]]
+            while {[Kind p] eq "::"} {
+                Advance p
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a name after \"::\", found [Describe [Peek p]]"
+                }
+                lappend segments [dict get [Advance p] value]
+            }
+            set calleeSpan [SpanFrom p [dict get $callee span]]
+            if {[Kind p] ne "IDENT" || [dict get [Peek p] text] ne "then"} {
+                Fail [Peek p] "expected \"then\" after \"call [join $segments ::]\", found [Describe [Peek p]] (\"-> call DFA then STATE\" continues in STATE once it completes, \"-> call DFA then accept\" completes with it)"
+            }
+            Advance p
+            if {[Kind p] ne "IDENT"} {
+                Fail [Peek p] "expected a state or `accept` after \"then\", found [Describe [Peek p]]"
+            }
+            set then [Advance p]
+            if {[dict get $then value] ne "accept" && [dict get $then value] in $dfaReserved} {
+                Fail $then "expected a state or `accept` after \"then\", found [Describe $then]"
+            }
+            dict set t action call
+            dict set t callee [list [join [lrange $segments 0 end-1] ::] [lindex $segments end] $rooted]
+            dict set t calleeSpan $calleeSpan
+            dict set t then [dict get $then value]
+            dict set t thenSpan [dict get $then span]
+        }
+        default {
+            if {$word in $dfaReserved} {
+                Fail $token "\"$word\" is not an action: a transition goes to a state, `accept`s (`accept before N`), calls a recognizer (`call DFA then ...`) or, for `end`, `reject`s"
+            }
+            dict set t action goto
+            dict set t target $word
+            dict set t targetSpan [dict get $token span]
+        }
+    }
+    if {[Kind p] ni {NEWLINE EOF DEDENT}} {
+        Fail [Peek p] "expected the end of the line after the transition's action, found [Describe [Peek p]]"
+    }
+    dict set t span [SpanFrom p $start]
+    if {[Kind p] eq "NEWLINE"} {
+        Advance p
+    }
+    return $t
 }
 
 # 1 if the next tokens start a trait declaration (TRAITS.md): the contextual
@@ -1914,6 +2356,18 @@ proc surface::parser::Statement {pVar} {
             Fail $token "a [expr {[dict get $token text] eq "union" ? "union layout" : "layout"}] declaration is only allowed at the top level of a module, not nested in a function/if/loop"
         }
         return [LayoutDecl p]
+    }
+    if {[AtClassDecl p] || [AtDfaDecl p]} {
+        # `class NAME = SYMBOLS`, `dfa NAME over ALPHABET:`
+        # (DFA-COROUTINE-MILESTONE-2.md): contextual top-level declarations.
+        set word [dict get $token text]
+        if {![dict get $p topLevel]} {
+            Fail $token "a $word declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        if {$word eq "class"} {
+            return [ClassDecl p]
+        }
+        return [DfaDecl p]
     }
     if {[AtTraitDecl p]} {
         # `trait NAME:` (TRAITS.md): a contextual top-level declaration.
@@ -3812,6 +4266,9 @@ proc surface::parser::Primary {pVar} {
         INT {
             Advance p
             return [surface::ast::node int $span text [dict get $token value]]
+        }
+        HEX {
+            Fail $token "a hexadecimal integer ([dict get $token text]) is written only as a symbol of a dfa or class declaration (DFA-COROUTINE-MILESTONE-2.md); an Int is written in decimal ([dict get $token value])"
         }
         DECIMAL {
             # A decimal literal (FLOAT64-MILESTONE-1.md): the decimal

@@ -1623,6 +1623,88 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().iconst(I64, n as i64)
     }
 
+    /// A NIR `switch` on the raw i64 V: to the block of the case whose
+    /// interval holds V, else DEFAULT. CASES are sorted and disjoint
+    /// (nir::validate). A dense switch -- one whose span is small and not
+    /// much larger than the number of intervals it is cut into, gaps and
+    /// the outside included -- is a bounds check and a jump table
+    /// (br_table); any other a balanced search of the intervals, one
+    /// comparison per level (no comparison decides less than half of what
+    /// is left).
+    fn switch(&mut self, v: ir::Value, default: ir::Block, cases: &[(i64, i64, ir::Block)]) {
+        if cases.is_empty() {
+            self.b.ins().jump(default, &[]);
+            return;
+        }
+        // The partition of the whole i64 line: (start, block), the first
+        // start i64::MIN, gaps DEFAULT, adjacent pieces of one block one.
+        let mut pieces: Vec<(i64, ir::Block)> = Vec::new();
+        let push = |pieces: &mut Vec<(i64, ir::Block)>, start: i64, block: ir::Block| {
+            if pieces.last().is_none_or(|(_, b)| *b != block) {
+                pieces.push((start, block));
+            }
+        };
+        let mut at = Some(i64::MIN);
+        for &(lo, hi, block) in cases {
+            if let Some(a) = at {
+                if lo > a {
+                    push(&mut pieces, a, default);
+                }
+            }
+            push(&mut pieces, lo, block);
+            at = hi.checked_add(1);
+        }
+        if let Some(a) = at {
+            push(&mut pieces, a, default);
+        }
+        let lo = cases[0].0;
+        let hi = cases[cases.len() - 1].1;
+        let span = (hi as i128) - (lo as i128) + 1;
+        let intervals = pieces.len() as i128;
+        if intervals >= 5 && span <= 4096 && span <= 8 * intervals {
+            // Dense: V - LO indexes a table of SPAN blocks.
+            let mut table: Vec<ir::Block> = Vec::with_capacity(span as usize);
+            let mut k = 0;
+            for x in lo..=hi {
+                while k + 1 < cases.len() && cases[k].1 < x {
+                    k += 1;
+                }
+                let (clo, chi, block) = cases[k];
+                table.push(if clo <= x && x <= chi { block } else { default });
+            }
+            let index = self.b.ins().iadd_imm_s(v, lo.wrapping_neg());
+            let inside = self.b.ins().icmp_imm_u(IntCC::UnsignedLessThan, index, span as i64);
+            let dispatch = self.b.create_block();
+            self.b.ins().brif(inside, dispatch, &[], default, &[]);
+            self.b.switch_to_block(dispatch);
+            let index = self.b.ins().ireduce(types::I32, index);
+            let default_call = self.b.func.dfg.block_call(default, &[]);
+            let calls: Vec<ir::BlockCall> = table.iter().map(|b| self.b.func.dfg.block_call(*b, &[])).collect();
+            let jt = self.b.create_jump_table(ir::JumpTableData::new(default_call, &calls));
+            self.b.ins().br_table(index, jt);
+            return;
+        }
+        self.search(v, &pieces);
+    }
+
+    /// A balanced search of the partition PIECES (Translator::switch) on V,
+    /// in the current block.
+    fn search(&mut self, v: ir::Value, pieces: &[(i64, ir::Block)]) {
+        if pieces.len() == 1 {
+            self.b.ins().jump(pieces[0].1, &[]);
+            return;
+        }
+        let mid = pieces.len() / 2;
+        let below = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, v, pieces[mid].0);
+        let left = self.b.create_block();
+        let right = self.b.create_block();
+        self.b.ins().brif(below, left, &[], right, &[]);
+        self.b.switch_to_block(left);
+        self.search(v, &pieces[..mid]);
+        self.b.switch_to_block(right);
+        self.search(v, &pieces[mid..]);
+    }
+
     fn label(&mut self, l: nir::Label) -> ir::Block {
         if let Some(block) = self.labels.get(&l) {
             return *block;
@@ -2117,6 +2199,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().brif(flag, t, &[], e, &[]);
                 self.terminated = true;
             }
+            Inst::Switch { value, default, cases } => {
+                let v = self.get(*value);
+                let default = self.label(*default);
+                let cases: Vec<(i64, i64, ir::Block)> = cases.iter().map(|(lo, hi, l)| (*lo, *hi, self.label(*l))).collect();
+                self.switch(v, default, &cases);
+                self.terminated = true;
+            }
             Inst::Jump(l) => {
                 let block = self.label(*l);
                 self.b.ins().jump(block, &[]);
@@ -2483,6 +2572,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             StrToAscii => self.call_helper("rt_str_to_ascii", &[self.vm, a[0]]),
             AsciiToStr => self.call_allocating("rt_ascii_to_str", &[self.vm, a[0]], "asciitostr", KIND_STR),
             RIAdd => self.b.ins().iadd(a[0], a[1]),
+            // A static byte storage's payload starts BYTES_PAYLOAD_OFFSET
+            // past its address (runtime/bytesobj.rs); the index is native
+            // lowering's, bounded by the table's shape (DfaTable).
+            RTabLoad8 => {
+                let at = self.b.ins().iadd(a[0], a[1]);
+                self.b.ins().uload8(I64, MemFlagsData::trusted().with_readonly(), at, BYTES_PAYLOAD_OFFSET as i32)
+            }
+            RTabLoad16 => {
+                let scaled = self.b.ins().ishl_imm_u(a[1], 1);
+                let at = self.b.ins().iadd(a[0], scaled);
+                self.b.ins().uload16(I64, MemFlagsData::trusted().with_readonly(), at, BYTES_PAYLOAD_OFFSET as i32)
+            }
             RISub => self.b.ins().isub(a[0], a[1]),
             RIMul => self.b.ins().imul(a[0], a[1]),
             // native/lower.tcl's RawEligibleShift already proved a[0]

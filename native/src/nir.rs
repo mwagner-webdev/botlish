@@ -651,6 +651,15 @@ pub enum OpCode {
     /// per-opcode split as SetContainsTotal's.
     RIMod,
     RIModTotal,
+    /// `rtabload8 %t %i` / `rtabload16 %t %i`: the unsigned byte (the
+    /// little-endian 16-bit word) at index %i (raw) of the static byte
+    /// storage %t (a `bytes` constant), as a raw Int. Unchecked: native
+    /// lowering emits it only for an index it has bounded by the table's own
+    /// shape -- a declared recognizer's state and symbol (native/lower.tcl's
+    /// DfaTable, DFA-COROUTINE-MILESTONE-2.md) -- so it has no error exit,
+    /// allocates nothing and is one load.
+    RTabLoad8,
+    RTabLoad16,
     /// C words (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): a 64-bit C integer
     /// result held as the machine word the C ABI returned, in a register of
     /// the `i64` or `u64` kind (`i64regs=`/`u64regs=`: the word read as
@@ -968,6 +977,8 @@ op_spellings! {
     "rbox" => RBox,
     "runbox" => RUnbox,
     "riadd" => RIAdd,
+    "rtabload8" => RTabLoad8,
+    "rtabload16" => RTabLoad16,
     "risub" => RISub,
     "rimul" => RIMul,
     "cwbox" => CWBox,
@@ -1080,7 +1091,7 @@ impl OpCode {
     pub fn raw_result(self) -> bool {
         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
             | OpCode::RIShr | OpCode::RIShl | OpCode::RIAnd | OpCode::RIOr | OpCode::RIXor
-            | OpCode::RIMod | OpCode::RIModTotal
+            | OpCode::RIMod | OpCode::RIModTotal | OpCode::RTabLoad8 | OpCode::RTabLoad16
             | OpCode::ShortLen | OpCode::AsciiLen)
     }
 
@@ -1105,6 +1116,8 @@ impl OpCode {
         use OpCode::*;
         if self.word_op() {
             if i == 0 { RegKind::I64 } else { RegKind::Tagged }
+        } else if matches!(self, RTabLoad8 | RTabLoad16) {
+            if i == 0 { RegKind::Tagged } else { RegKind::Raw }
         } else if self.raw_operands() {
             RegKind::Raw
         } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
@@ -1252,6 +1265,15 @@ pub enum Inst {
     Tail { args: Vec<Reg> },
     TailEnv { closure: Reg, args: Vec<Reg> },
     Br { cond: Reg, then: Label, otherwise: Label },
+    /// `switch %v LDEFAULT LO:HI:L ...`: a multiway branch on the raw
+    /// (untagged) Int %v -- to the label L of the case whose closed interval
+    /// LO..HI holds it, else to LDEFAULT. The cases are sorted and disjoint
+    /// (validate). It is general control flow, not any construct's: native
+    /// lowering emits it for a declared recognizer's state and symbol
+    /// dispatch (native/lower.tcl's DfaTransition, DFA-COROUTINE-
+    /// MILESTONE-2.md), and codegen::clif chooses per switch between a jump
+    /// table and a balanced search of its intervals (Translator::switch).
+    Switch { value: Reg, default: Label, cases: Vec<(i64, i64, Label)> },
     Jump(Label),
     Ret(Reg),
     /// Returns several tagged Values at once: the terminator of a
@@ -1368,6 +1390,7 @@ impl Inst {
             Inst::Tail { .. }
                 | Inst::TailEnv { .. }
                 | Inst::Br { .. }
+                | Inst::Switch { .. }
                 | Inst::Jump(_)
                 | Inst::Ret(_)
                 | Inst::RetMulti(_)
@@ -2774,6 +2797,24 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
         "tail" => Inst::Tail { args: regs_from(1)? },
         "tailenv" => Inst::TailEnv { closure: reg(1)?, args: regs_from(2)? },
         "br" => Inst::Br { cond: reg(1)?, then: label(2)?, otherwise: label(3)? },
+        "switch" => {
+            let mut cases = Vec::new();
+            for t in tokens.iter().skip(3) {
+                let parts: Vec<&str> = word(t).map(|w| w.split(':').collect()).unwrap_or_default();
+                let case = match parts.as_slice() {
+                    [lo, hi, l] => match (lo.parse::<i64>(), hi.parse::<i64>(), l.strip_prefix('L').and_then(|n| n.parse::<Label>().ok())) {
+                        (Ok(lo), Ok(hi), Some(l)) => Some((lo, hi, l)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                match case {
+                    Some(case) => cases.push(case),
+                    None => return p.err(format!("bad switch case {t:?}: expected LO:HI:LABEL")),
+                }
+            }
+            Inst::Switch { value: reg(1)?, default: label(2)?, cases }
+        }
         "jump" => Inst::Jump(label(1)?),
         "ret" => Inst::Ret(reg(1)?),
         "retmulti" => Inst::RetMulti(regs_from(1)?),
@@ -3081,6 +3122,22 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
                     used.push(*cond);
                     targets.extend([*then, *otherwise]);
                 }
+                Inst::Switch { value, default, cases } => {
+                    if f.kind_of(*value) != RegKind::Raw {
+                        return fail(ctx(format!("switch on %{value}, which is not a raw register")));
+                    }
+                    for (k, (lo, hi, l)) in cases.iter().enumerate() {
+                        if lo > hi {
+                            return fail(ctx(format!("switch case {lo}:{hi} is empty")));
+                        }
+                        if k > 0 && cases[k - 1].1 >= *lo {
+                            return fail(ctx(format!("switch cases are not sorted and disjoint at {lo}:{hi}")));
+                        }
+                        targets.push(*l);
+                    }
+                    used.push(*value);
+                    targets.push(*default);
+                }
                 Inst::Jump(l) => targets.push(*l),
                 Inst::Ret(r) => {
                     if f.results != 1 {
@@ -3244,6 +3301,8 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
                 // argument must already have it too. Every other rebound
                 // register (env=1's closure) stays ordinary tagged, like
                 // any operand in the catch-all below.
+                // A switch dispatches on a raw Int (checked above).
+                Inst::Switch { .. } => {}
                 Inst::Tail { args } | Inst::TailEnv { args, .. } => {
                     if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != kind(*i as Reg)) {
                         return fail(ctx(format!(
@@ -3445,6 +3504,7 @@ fn validate_plans(program: &Program, only: Option<usize>) -> Result<(), NirError
                     }
                 }
                 Inst::Br { cond, .. } => used.push(*cond),
+                Inst::Switch { value, .. } => used.push(*value),
                 Inst::RetMulti(rs) => used.extend(rs),
             }
             if let Some(r) = used.iter().find(|r| plan[**r as usize]) {
@@ -3554,6 +3614,12 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
             match inst {
                 Inst::Br { then, otherwise, .. } => {
                     for l in [then, otherwise] {
+                        succs.push(block_of(label_index[l]));
+                    }
+                }
+                Inst::Switch { default, cases, .. } => {
+                    succs.push(block_of(label_index[default]));
+                    for (_, _, l) in cases {
                         succs.push(block_of(label_index[l]));
                     }
                 }

@@ -1052,6 +1052,11 @@ fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label)
         Inst::Tail { args } => Inst::Tail { args: regs(args) },
         Inst::TailEnv { closure, args } => Inst::TailEnv { closure: reg(*closure), args: regs(args) },
         Inst::Br { cond, then, otherwise } => Inst::Br { cond: reg(*cond), then: label(*then), otherwise: label(*otherwise) },
+        Inst::Switch { value, default, cases } => Inst::Switch {
+            value: reg(*value),
+            default: label(*default),
+            cases: cases.iter().map(|(lo, hi, l)| (*lo, *hi, label(*l))).collect(),
+        },
         Inst::Jump(l) => Inst::Jump(label(*l)),
         Inst::Ret(r) => Inst::Ret(reg(*r)),
         Inst::RetMulti(rs) => Inst::RetMulti(regs(rs)),

@@ -1064,9 +1064,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
             Error CONTEXT-INSTALLATION-UNSUPPORTED [dict get $statement span] \
                 "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: \"$name\", $path)"
         }
-        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn externlib}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn externlib classdecl dfadecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, enum declarations, layout declarations, trait declarations, error declarations and extern declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, enum declarations, layout declarations, trait declarations, error declarations, extern declarations and class and dfa declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     CheckNativeMembers $ast $name "module \"$name\" ($path)"
@@ -1075,9 +1075,10 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     dict set state files $fileId $path
     dict incr state nextFile
     Recovered state $ast $name $fileId
-    CollectAndLoad state $ast $name
+    set ast [CollectAndLoad state $ast $name]
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl errordecl structdecl enumdecl traitdecl layoutdecl externlib}} continue
+        if {[dict get $statement kind] in {typedecl errordecl structdecl enumdecl traitdecl layoutdecl externlib classdecl}} continue
+        if {[dict get $statement kind] eq "dfadecl" && [dict exists $statement dfaDuplicate]} continue
         if {[dict get $statement kind] eq "hole" && [dict get $statement name] eq ""} continue
         dict get $statement name
     }]
@@ -1422,6 +1423,10 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     set env [CheckImports state $ast $own]
     dict set state imports $key $env
     set imported [dict get $env namespaces]
+    # Declared recognizers and symbol classes (DFA-COROUTINE-MILESTONE-2.md):
+    # checked once the modules the file imports are loaded, against what
+    # they declare, and annotated for lowering (surface/dfa.tcl).
+    set ast [ExpandDfas state $ast $own $imported]
     # STATIC-COMPILE.md: a file using a static intrinsic names the error its
     # rejected blocks complete with, std::compiler::CompilerError -- an ordinary
     # namespaced declaration, so the file imports its namespace like any
@@ -1478,6 +1483,37 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             dict set state {*}$path $deferred
         }
     }
+    return $ast
+}
+
+# The file AST of module KEY (OWN its namespace, IMPORTED the namespaces it
+# imports) with its `class` and `dfa` declarations analyzed
+# (surface::dfa::expand), against the classes and recognizers of the modules
+# loaded before it (STATE's dfaRegistry, which gains the file's own). A
+# qualified class or recognizer of a namespace the file does not import is
+# MISSING-IMPORT, and so is a recognizer declared in a file that does not
+# import std::dfa, its protocol: reported with the file's other references.
+proc surface::modules::ExpandDfas {stateVar ast own imported} {
+    upvar 1 $stateVar state
+    set open 0
+    if {[dict get $state recover] && [dict exists $state open $own]} {
+        set facts [dict get $state open $own]
+        set open [expr {[dict getdef $facts values 0] || [dict getdef $facts types 0] || [dict getdef $facts functions 0]}]
+    }
+    set result [surface::dfa::expand [dict get $ast body] -own $own -imports $imported \
+        -registry [dict get $state dfaRegistry] -open $open]
+    dict set state dfaRegistry [dict get $result registry]
+    if {[dict get $result missingImport] ne ""} {
+        set span [dict get $result missingImport]
+        set message "namespace \"$surface::dfa::protocolNamespace\" is not imported; add `import $surface::dfa::protocolNamespace` to declare a recognizer (it is resumed with std::dfa::Symbol and fails with std::dfa's errors)"
+        dict lappend state referenceErrors [dict create errorcode [list SURFACE MODULE MISSING-IMPORT] \
+            message "[surface::ast::location $span]: $message" summary $message location $span related {}]
+    }
+    if {[dict get $result referenceErrors] ne {}} {
+        dict lappend state referenceErrors {*}[dict get $result referenceErrors]
+    }
+    dict set ast body [dict get $result statements]
+    return $ast
 }
 
 # Checks the qualified reference REF ({NAMESPACE NAME SPAN KIND}, QualifiedRefs)
@@ -1832,7 +1868,7 @@ proc surface::modules::NewState {files nextFile} {
         staticDeferred [dict create] \
         target "" targetRead 0 root "" entry "" application [dict create] moduleDecls [dict create] \
         referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
-        dependentRefs [dict create] typeKeys [dict create]]
+        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create]]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -1910,7 +1946,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     }
     Recovered state $ast "" f1
     try {
-        CollectAndLoad state $ast ""
+        set ast [CollectAndLoad state $ast ""]
         RaiseReferenceErrors $state
     } on error {message options} {
         if {[dict get $state syntaxEntries] eq {}
