@@ -711,7 +711,9 @@ test cf-renamed-binding-native-name {an extern c fn called both from a function 
         ""
         "report()"
         ""} \n]]]
-    set hir [appHir $dir]
+    # A Linux program (std::linux::io): compiled for the Linux target on any
+    # host; only its HIR is read.
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target [linuxTarget]]
     set names {}
     set natives {}
     dict for {e node} [dict get $hir exprs] {
