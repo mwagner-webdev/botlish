@@ -25,7 +25,8 @@
 #                     - T[build, B REPS] + T[build, REPS]) / ((B - 1) REPS N),
 #                    per removal in insertion order
 #   iterate          (T[1 + P passes] - T[1 pass]) / (P N) per entry visited,
-#                    P = max(PASSES, 20 OPS / N): 4 million visits
+#                    P = max(PASSES, 200 OPS / N): 40 million visits (fewer
+#                    leave a large build's own variance as large as them)
 #   mixed            per operation: 80% lookups, 10% insertions of fresh
 #                    keys, 10% removals of the key inserted before
 #   churn            per insertion-and-removal pair: a fresh key set, the key
@@ -554,7 +555,7 @@ foreach kind [dict get $options -keys] {
                     set per [expr {(($t2 - $t1) - ($b2 - $b1)) * 1000.0 / (($buildPasses - 1) * $reps * $n)}]
                 }
                 iterate {
-                    set p8 [expr {max($passes, (20 * $ops) / $n)}]
+                    set p8 [expr {max($passes, (200 * $ops) / $n)}]
                     lassign [timed $text 8 $n $m 1 {*}$p] t1 sum
                     lassign [timed $text 8 $n $m [expr {1 + $p8}] {*}$p] t3
                     set per [expr {($t3 - $t1) * 1000.0 / ($p8 * $n)}]
