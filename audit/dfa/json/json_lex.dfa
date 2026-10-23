@@ -5,11 +5,12 @@
 # not a `class` or a `dfa` passes through unchanged.
 #
 # Each recognizer recognizes exactly one token: constructed with the token's
-# first symbol, resumed with one dfa::Symbol per further symbol, it returns
-# when the token is complete (dfa::Answer's took: whether the last symbol was
-# part of it) and fails dfa::UnrecognizedInput / dfa::UnexpectedEnd on
-# anything else. Nothing here knows JSON's structure: json.bot composes the
-# tokens and checks the document.
+# first symbol and resumed with one dfa::Symbol per further symbol, it
+# answers every symbol with a Bool -- whether the symbol was part of the
+# token -- returns (std::coroutine::done?) when the token is complete, and
+# fails dfa::UnrecognizedInput / dfa::UnexpectedEnd on anything else.
+# Nothing here knows JSON's structure: json.bot composes the tokens and
+# checks the document.
 #
 # Token boundaries. A string, and punctuation, end at a symbol of their own
 # (the closing quote); a number and the literals true, false and null end at

@@ -422,4 +422,33 @@ test json-strict "I-JSON's no-lone-surrogate rule, as finite state" -body {
     }
 } -result {{accept 14 took} {unrecognized json_escape_strict.pair_backslash 7} {unrecognized json_escape_strict.d2 4} {unrecognized json_escape_strict.low1 9} {accept 14 took} {accept 8 took} {accept 8 took}}
 
+# The same recognizer written by hand as an ordinary coroutine
+# (audit/dfa/json/by_hand.bot) against the declaration's model cases: the
+# same outcome at the same symbol (the state names are each one's own).
+test json-by-hand "a hand-written coroutine number recognizer agrees with json_number's declaration" -body {
+    set cases {}
+    foreach w [dfatest::cases $model json_number 200 5] {
+        lappend cases [list number_by_hand $w]
+    }
+    set dir [dfatest::workspace by_hand.bot [dfa::ReadText [file join $dfatest::json by_hand.bot]] \
+        main.bot [dfatest::program by_hand $cases]]
+    try {
+        set outcomes [dfatest::outcomes [file join $dir main.bot]]
+    } finally {
+        file delete -force $dir
+    }
+    set bad {}
+    foreach {backend outcome} $outcomes {
+        foreach c $cases got [dfatest::strings $outcome] {
+            set want [dfatest::OutcomeText [dfatest::simulate $model json_number [lindex $c 1]]]
+            regsub {^(unrecognized|end) \S+ } $want {\1 * } want
+            regsub {^(unrecognized|end) \S+ } $got {\1 * } got
+            if {$want ne $got} {
+                lappend bad [list $backend $c $want $got]
+            }
+        }
+    }
+    list [expr {[llength $cases] > 300}] [lrange $bad 0 3]
+} -result {1 {}}
+
 cleanupTests

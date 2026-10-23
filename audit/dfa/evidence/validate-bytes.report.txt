@@ -1,3 +1,3 @@
-fused json::validate_bytes e4927 {inlined {{#20} json::bytes} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 28 template 72 copied 254 unboxed 0}
-fused json::validate_bytes e4941 {inlined {{#21} json::structure} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 28 template 335 copied 1040 unboxed 2}
-fused json::validate_bytes e5024 {inlined {{#22} json_lex::json_token_bytes json_lex::dfa_json_token_bytes json_lex::dfa_json_string_bytes json_lex::dfa_json_escape json_lex::dfa_utf8_char json_lex::dfa_json_number json_lex::dfa_json_literal} yields 5 creates 1 starts 1 resumes 1 queries 1 releases 14 template 3944 copied 7925 unboxed 1}
+fused json::validate_bytes e4930 {inlined {{#20} json::bytes} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 28 template 67 copied 236 unboxed 0}
+fused json::validate_bytes e4944 {inlined {{#21} json::structure} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 28 template 335 copied 1040 unboxed 2}
+fused json::validate_bytes e5027 {inlined {{#22} json_lex::json_token_bytes json_lex::dfa_json_token_bytes json_lex::dfa_json_string_bytes json_lex::dfa_json_escape json_lex::dfa_utf8_char json_lex::dfa_json_number json_lex::dfa_json_literal} yields 5 creates 1 starts 1 resumes 1 queries 1 releases 14 template 3944 copied 7925 unboxed 1}

@@ -332,12 +332,26 @@ proc dfatest::ordered {cases} {
 }
 
 # A private copy of the JSON application directory (json_lex.bot, dfa.bot,
-# json.bot), with the extra files FILES ({NAME TEXT}...): its path.
+# json.bot, composition.bot, recursive.bot, variants.bot), with the extra
+# files FILES ({NAME TEXT}...): its path.
 proc dfatest::workspace {args} {
     variable json
     set dir [file tempdir dfa-test]
-    foreach name {dfa.bot json_lex.bot json.bot} {
+    foreach name {dfa.bot json_lex.bot json.bot composition.bot recursive.bot variants.bot} {
         file copy [file join $json $name] [file join $dir $name]
+    }
+    foreach {name text} $args {
+        dfa::WriteText [file join $dir $name] $text
+    }
+    return $dir
+}
+
+# A private copy of the files NAMES of directory FROM, with the extra files
+# ({NAME TEXT}...): its path.
+proc dfatest::workspaceOf {from names args} {
+    set dir [file tempdir dfa-test]
+    foreach name $names {
+        file copy [file join $from $name] [file join $dir $name]
     }
     foreach {name text} $args {
         dfa::WriteText [file join $dir $name] $text

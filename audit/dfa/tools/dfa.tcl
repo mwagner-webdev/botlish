@@ -397,7 +397,7 @@ proc dfa::Items {tokens i stop lineNo} {
                     incr i 2
                 }
                 lappend items [list kind sym lo $lo hi $hi ascii $ascii col $col width $width \
-                    text [expr {$lo == $hi ? $text : "$text..[lindex $tokens $i 1]"}] chars [expr {$kind eq "CHAR"}]]
+                    text [if {$lo == $hi} {set text} else {string cat $text .. [lindex $tokens $i 1]}] chars [expr {$kind eq "CHAR"}]]
             }
             IDENT {
                 if {$text eq "end"} {
@@ -872,7 +872,7 @@ proc dfa::Resolve {model d} {
                     } else {
                         dict lappend extra $from $step
                     }
-                    set from [expr {$k < $n - 1 ? $next : ""}]
+                    set from [if {$k < $n - 1} {set next} else {string cat}]
                 }
                 continue
             }
@@ -1296,7 +1296,7 @@ proc dfa::Leaf {d a n numbers isEnd codesVar} {
         before { return "$p[expr {$states + 1}]\n" }
         reject {
             set state [lindex $a 1]
-            set qualified [expr {[string first . $state] >= 0 ? $state : "$name.$state"}]
+            set qualified [if {[string first . $state] >= 0} {set state} else {string cat $name . $state}]
             dict lappend codes rejects
             set k [lsearch -exact [dict get $codes rejects] $qualified]
             if {$k < 0} {

@@ -307,6 +307,28 @@ test frontend-errors-precise "a recognizer that cannot fail at the end does not 
     dict get $d errors
 } -result {dfa::UnrecognizedInput}
 
+test frontend-numeric-looking-names "a state named inf or nan, and a symbol written 0x80, stay as written (AGENTS.md: no expr ?: over a string)" -body {
+    set dir [file tempdir dfa-frontend]
+    dfa::WriteText $dir/t.dfa {dfa d over ascii:
+    start:
+        'n' -> nan
+        'i' -> inf
+    nan:
+        'x' -> accept
+    inf:
+        "ty" -> accept
+}
+    set bot [dict get [dfa::compileFile $dir/t.dfa] bot]
+    dfa::WriteText $dir/u.dfa {dfa e over ascii:
+    start:
+        0x80 -> accept
+}
+    set message [dict get [firstEntry [dfa::ReadText $dir/u.dfa]] message]
+    file delete -force $dir
+    list [regexp -all {"d\.nan"} $bot] [regexp -all {"d\.inf"} $bot] [regexp -all {"d\.inf\\"t\\""} $bot] \
+        [regexp -all {Inf|NaN} $bot] [string match {*: 0x80 is outside the alphabet of e *} $message]
+} -result {1 1 1 0 1}
+
 test frontend-lowering-shape "one suspension point, a self tail call, one call per callee" -body {
     set text [dfa::ReadText [file join $dfatest::json json_lex.bot]]
     set body [string range $text [string first "fn dfa_json_string_bytes(" $text] [string first "fn json_string_bytes(" $text]]

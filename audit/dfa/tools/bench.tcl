@@ -16,8 +16,17 @@
 #                literal, no escape validation), counting
 #   dfa-lex      json::lex_text: the declared recognizers of json_lex.dfa
 #                (RFC 8259's whole lexical grammar), counting
+#   dfa-lex-sites    variants::lex_text_sites: the same recognizers, the
+#                kind decided by the driver (punctuation inline, a
+#                construction site per kind: tokens.bot's shape)
+#   dfa-lex-factory  composition::lex_with: the same, its recognizer a
+#                parameter (a factory value returning the started handle:
+#                the general runtime even "fused")
 #   dfa-validate json::validate_text: the same with the structural layer
-#                (the text made one valid document)
+#                (the text made one valid document): an explicit stack
+#   dfa-validate-recursive  recursive::validate_text_recursive: the
+#                structural layer as recursive descent (the general runtime
+#                for it: a recursive yielding function)
 #
 # and validating UTF-8, per byte, the fusion milestone's pattern input:
 #
@@ -32,9 +41,18 @@
 # allocations, coroutine objects, machine code bytes (botlish-native size),
 # the front end's compile time, native lowering's and the driver's. With
 # -instructions 1 (valgrind installed), the instructions per item: the
-# driver's whole run under callgrind at the middle size minus at the
-# smallest, over the items between (compilation and startup cancel out).
-# Unlike the times, which a shared machine scatters, the counts repeat.
+# driver's run under callgrind at the middle size minus at the smallest,
+# over the items between. Where the variant makes no coroutine object, only
+# the program's execution is counted ("run": callgrind collects inside the
+# driver's `execute` but not inside the compile it calls or the compiled
+# program's release at its end), because those two vary from process to
+# process with the heap's state, by up to a few hundred thousand
+# instructions (measured: 320,000 and 86,000 for the same program), many
+# per item over 18,000 items, while the run alone varies by a few
+# thousand. A coroutine object runs on a stack of its own, and callgrind
+# loses track of `execute` at the first switch, so a variant that makes
+# one is counted whole ("process"), compile included: there the variation
+# is about 1% of its thousands of instructions per item.
 # -parts selects among times, resources (and instructions).
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
@@ -48,7 +66,7 @@ interp recursionlimit {} 200000
 set runs 5
 set rounds 5
 set scale 1.0
-set workloads {imperative coroutine dfa-lex dfa-validate utf8-coroutine utf8-procedural utf8-dfa}
+set workloads {imperative coroutine dfa-lex dfa-lex-sites dfa-lex-factory dfa-validate dfa-validate-recursive utf8-coroutine utf8-procedural utf8-dfa}
 set out ""
 set instructions 0
 set parts {times resources}
@@ -140,10 +158,19 @@ run("} [jsonText $n] {"):
             set at [lsearch -glob $lines {lex(*}]
             return [list main.bot [join [lreplace $lines $at $at "lex(\"[jsonText $n]\"):"] \n]\n]
         }
-        dfa-lex - dfa-validate {
-            set call [expr {$name eq "dfa-lex" ? "json::lex_text(\[\"[jsonText $n]\"\], 100000000)" : "json::validate_text(\[\"[jsonText $n 1]\"\], 64, 100000000)"}]
+        dfa-lex-sites {
+            return [list main.bot "import json\nimport variants\n\nfn run() -> int errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong:\n    variants::lex_text_sites(\[\"[jsonText $n]\"\], 100000000).tokens\n\nrun():\n    on IndexNotFound:\n        -1\n    on json::Lexical:\n        -2\n    on json::Truncated:\n        -3\n    on json::TokenTooLong:\n        -6\n"]
+        }
+        dfa-lex-factory {
+            return [list main.bot "import json\nimport composition\n\nfn run() -> int errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong:\n    composition::lex_with(composition::token, \[\"[jsonText $n]\"\], 100000000).tokens\n\nrun():\n    on IndexNotFound:\n        -1\n    on json::Lexical:\n        -2\n    on json::Truncated:\n        -3\n    on json::TokenTooLong:\n        -6\n"]
+        }
+        dfa-lex - dfa-validate - dfa-validate-recursive {
+            set call [dict get [list dfa-lex "json::lex_text(\[\"[jsonText $n]\"\], 100000000)" \
+                dfa-validate "json::validate_text(\[\"[jsonText $n 1]\"\], 64, 100000000)" \
+                dfa-validate-recursive "recursive::validate_text_recursive(\[\"[jsonText $n 1]\"\], 64, 100000000)"] $name]
             set errors [expr {$name eq "dfa-lex" ? "" : "\n    on json::Structure:\n        -4\n    on json::TooDeep:\n        -5"}]
-            return [list main.bot "import json\n\nfn run() -> int errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong[expr {$name eq "dfa-lex" ? "" : ", json::Structure, json::TooDeep"}]:\n    $call.tokens\n\nrun():\n    on IndexNotFound:\n        -1\n    on json::Lexical:\n        -2\n    on json::Truncated:\n        -3\n    on json::TokenTooLong:\n        -6$errors\n"]
+            set imports [expr {$name eq "dfa-validate-recursive" ? "import json\nimport recursive\n" : "import json\n"}]
+            return [list main.bot "$imports\nfn run() -> int errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong[expr {$name eq "dfa-lex" ? "" : ", json::Structure, json::TooDeep"}]:\n    $call.tokens\n\nrun():\n    on IndexNotFound:\n        -1\n    on json::Lexical:\n        -2\n    on json::Truncated:\n        -3\n    on json::TokenTooLong:\n        -6$errors\n"]
         }
         utf8-coroutine - utf8-procedural {
             set file [expr {$name eq "utf8-coroutine" ? "utf8.bot" : "utf8-procedural.bot"}]
@@ -222,13 +249,21 @@ proc allocations {hir fused} {
     return [list $all $coroutines]
 }
 
-# callgrind's instruction count of the driver running HIR, fusion on or off.
-proc instructionCount {hir fused} {
+# callgrind's instruction count of the driver running HIR, fusion on or
+# off: of the run alone if RUN, else of the whole process.
+proc instructionCount {hir fused run} {
     lassign [file tempfile path botlish-dfa-bench.nir] channel
     puts -nonewline $channel [native::nir $hir]
     close $channel
     try {
-        set command [list exec valgrind --tool=callgrind --callgrind-out-file=/dev/null [native::binary] run $path 2>@1]
+        set only {}
+        if {$run} {
+            set only [list --collect-atstart=no --toggle-collect=botlish_native::execute \
+                "--toggle-collect=<botlish_native::codegen::CraneliftJit as botlish_native::codegen::Backend>::compile" \
+                "--toggle-collect=core::ptr::drop_glue::<botlish_native::codegen::CompiledProgram>"]
+        }
+        set command [list exec valgrind --tool=callgrind --callgrind-out-file=/dev/null {*}$only \
+            [native::binary] run $path 2>@1]
         if {$fused} {
             catch $command output
         } else {
@@ -309,7 +344,7 @@ foreach name [expr {"resources" in $parts ? $workloads : {}}] {
     }
 }
 if {$instructions} {
-    set section "\n## Instructions per item (callgrind)\n\n| workload | variant | instructions per item |\n|---|---|---:|\n"
+    set section "\n## Instructions per item (callgrind)\n\nCounted: the run alone (no coroutine object), or the whole process.\n\n| workload | variant | counted | instructions per item |\n|---|---|---|---:|\n"
     append report $section
     puts -nonewline $section
     foreach name $workloads {
@@ -318,8 +353,10 @@ if {$instructions} {
         lassign [compileWorkload $name $middle] hirMiddle
         set variants [expr {[coroutines? $name] ? {general 0 fused 1} : {fused 1}}]
         foreach {variant fused} $variants {
-            set per [expr {double([instructionCount $hirMiddle $fused] - [instructionCount $hirSmall $fused]) / ($middle - $small)}]
-            set row "| $name | [expr {[coroutines? $name] ? $variant : "--"}] | [format %.1f $per] |"
+            set run [expr {[lindex [allocations $hirSmall $fused] 1] == 0}]
+            set per [expr {double([instructionCount $hirMiddle $fused $run] - [instructionCount $hirSmall $fused $run]) / ($middle - $small)}]
+            set counted [if {$run} {string cat run} else {string cat process}]
+            set row "| $name | [expr {[coroutines? $name] ? $variant : "--"}] | $counted | [format %.1f $per] |"
             append report $row\n
             puts $row
         }

@@ -85,6 +85,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [COROUTINES.md](COROUTINES.md) -- eagerly started, affine, resumable computations with deep `yield`
 - [COROUTINE-PREREQUISITES.md](COROUTINE-PREREQUISITES.md) -- the research coroutines were built on
 - [COROUTINE-FUSION-MILESTONE-1.md](COROUTINE-FUSION-MILESTONE-1.md) -- coroutine fusion: a coroutine closed inside one function compiled natively into that function's control flow (one stack, no coroutine object or switch), deep yields, several coroutines per frame, scalar transport, the general runtime as fallback and oracle (completion report)
+- [DFA-COROUTINE-EXPLORATION.md](DFA-COROUTINE-EXPLORATION.md) -- declarative finite-state recognizers as ordinary coroutines: an isolated prototype (`audit/dfa/`) that checks determinism, rejection, acceptance, progress and boundaries and lowers to fused coroutine code; RFC 8259's lexical grammar, a YAML subset, a mistake census, differential tests, native evidence and a recommendation (exploratory report)
 - [MUTABLE-VECTOR.md](MUTABLE-VECTOR.md) -- `MutableVector[T]`: a growable mutable value
 - [MUTABLE-ARRAY.md](MUTABLE-ARRAY.md) -- `MutableArray[T]` as a copy-on-write value
 - [PARAMETERIZED-MUTABLEARRAY.md](PARAMETERIZED-MUTABLEARRAY.md) -- parameterized `MutableArray[T]`
