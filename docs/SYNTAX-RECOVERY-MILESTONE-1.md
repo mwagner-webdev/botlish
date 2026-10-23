@@ -81,7 +81,8 @@ $ tclsh9.0 main.tcl main.bot
 ```
 
 `-check` reports the same syntax errors, first and unchanged, then the
-module's, then the one semantic error the malformed lines cannot affect:
+module's, then the one semantic error the malformed lines cannot affect
+(paths shortened):
 
 ```text
 $ tclsh9.0 main.tcl -check main.bot
@@ -118,7 +119,7 @@ What the compiler service (`service::at`) knows, position by position:
 | `fn f() -> int errors Boom:` / `    k = 1 +` / `    k` | no proof that `f` fails or never completes | the hole is neither divergence nor a value |
 | `with context Clock {ticks: ` / `x = now()` | no MISSING-CONTEXT | the malformed line may have installed it |
 | `x = foo(` / `y = x + 1` / `z = 1 + nosuch` | UNBOUND for `nosuch`; nothing for `y` | `x` is bound, its value poison; `z` is independent |
-| a module whose malformed top-level line may be the implementation a trait needs | no TRAIT-NOT-SATISFIED | conformance reads the module's own declarations |
+| a module whose malformed top-level line may declare a function (`fn name(value: Person -> str:`) | no TRAIT-NOT-SATISFIED | it may be the implementation the trait needs: conformance reads the module's own functions |
 | `static compile:` in a program with syntax errors | no decision: the block is a hole | a decision reads the whole program's analysis |
 
 Each row is a test (section 9).
@@ -137,7 +138,7 @@ server and worker over real pipes. On the LSP milestone's two-module program
 | hover on `b` (line 5) | `b: int`, fresh |
 | hover on `a` inside the malformed line 6 | `a: int` *stale: analyzed before the latest changes to main.bot* -- the current analysis knows nothing there, the last complete one answers in text it saw |
 | line 6 fixed | no error; hover fresh |
-| `shapes.bot` opened (second buffer); line 2 becomes `    w *` | `1:7: expected an expression, found end of line` in `shapes.bot`; no error in `main.bot` |
+| `shapes.bot` opened (second buffer); line 2 becomes `    w *` | `expected an expression, found end of line` at line 2, column 8 of `shapes.bot`; no error in `main.bot` |
 | hover on `shapes::area` and on `b` in `main.bot` | the signature and `b: int`, fresh |
 | `shapes.bot` repaired | its diagnostic goes; hover fresh |
 | the files on disk | never written |
@@ -289,16 +290,18 @@ unknown syntax satisfies a constraint. A function whose body holds a hole
 (`holeBlocks`) keeps its declared contract and nothing its body would
 infer: an undeclared result is poison, not the type of the rest of the body
 (`missing-result-inferred`); a call of it is typed by its declaration, never
-by a semantic instance of the incomplete body (`instance-of-incomplete-body`);
-its untyped parameters get no inferred contract (`hir/signatures.tcl`), and
+by a semantic instance of the incomplete body (a guard whose mutant is
+equivalent, section 9.4); its untyped parameters get no inferred contract (`hir/signatures.tcl`), and
 the service shows its signature only when it declares every type
 (`signature-unmarked`). A hole is not `unit` (`hole-is-unit`), and a
 malformed declaration's name is not bound to a value (`declaration-is-valid`).
 
 **Range and exact values.** A hole's range is unknown (`hir/range.tcl`): a
-missing expression proves no value and no bound -- in the table of section
-1, no KNOWN-ERROR at an index the visible part of a body would put out of
-bounds (`range-hole-never`).
+missing expression proves no value and no bound. Every range check skips a
+poisoned value, which a hole is, so this guard's mutant is equivalent
+(section 9.4); the proofs a caller could draw from an incomplete body are
+the completion analysis's, next -- in the table of section 1, no
+KNOWN-ERROR at an index the visible part of a body would put out of bounds.
 
 **Known errors and error effects.** The completion analysis gives a hole an
 unknown completion: it may complete normally with any value, so no call of
@@ -347,8 +350,10 @@ per file (`surface::modules::Recovered`) and decides what is dependent:
 A module whose malformed top-level line may bind any value name is *open*:
 what it declares cannot be listed. One whose malformed lines bind only the
 names their prefixes state is not: a reference to a member it does not
-declare is still UNKNOWN-SYMBOL (section 6). A syntax error two imports away (`main -> mid -> low`) taints what
-depends on its malformed function and nothing else: `mid::twice` keeps its
+declare is still UNKNOWN-SYMBOL (section 6).
+
+A syntax error two imports away (`main -> mid -> low`) taints what depends
+on its malformed function and nothing else: `mid::twice` keeps its
 type in `main`, `mid::usebad` (which calls `low::bad`) does not
 (`sr-transitive-module`, the experiments' case E). Loader errors (a module
 that does not exist) still end the build, with the syntax errors found so
@@ -573,8 +578,8 @@ does (cut off, a line cut short, characters deleted, a bracket, operator,
 keyword, quote, tab or line break inserted, two or three lines cut short),
 analyzes each damaged text as an unsaved buffer, and checks that the
 analysis never fails internally, that its syntax diagnostics are exactly a
-strict parse's, that it built a partial HIR unless a loader error stopped
-it, that no reported semantic diagnostic lies in malformed text, that no
+strict parse's, that it recorded no compiler failure and built a partial
+HIR unless a loader or declaration error stopped it, that no reported semantic diagnostic lies in malformed text, that no
 backend accepts the HIR, that queries at random positions answer, and that
 export and import keep it. Four seeds of 150 cases each (1, 5, 17, 41):
 
@@ -597,7 +602,11 @@ was located by no statement and stayed an `error` node, which lowering
 cannot lower; the service caught the error and fell back to a revision with
 no HIR. It is fixed (a failed construct is located by its region's start),
 an `error` node can no longer reach lowering (it becomes a hole that may
-bind anything), and `sr-holes-damage-past-statement` pins it.
+bind anything), and `sr-holes-damage-past-statement` pins it. The same
+episode showed that the service hid a compiler failure behind the entry's
+syntax errors (it reported those, with no HIR, and nothing else): such a
+failure is now kept as the revision's `failure`, and the fuzzer fails on
+it.
 
 ### 9.4 Mutation testing
 
@@ -678,7 +687,26 @@ disagreement.
 
 ### 9.5 Regressions and CI
 
-@@REGRESSIONS@@
+| Run | Result |
+|---|---|
+| `tclsh9.0 tests/local.tcl` (the merged tree: this branch and `main` at `4361226c`, with Neovim 0.11.4) | every Tcl test file on interp and compile and the 104 golden suites on all four backends (interp 5,090/5,090, compile 5,090/5,090, cranelift-generic 4,998/4,998, cranelift 5,100/5,100): all ok but one run of `lsp-neovim.test` (compile), see below |
+| `tclsh9.0 tests/syntax-recovery.test` | 33 passed |
+| `tclsh9.0 tests/lsp-neovim.test` alone | passed, three runs out of three |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 0 problems (787 topics, 588 examples) |
+| `tclsh9.0 audit/golden/migration/merge.tcl ...` | the manifest is current: the new tests are KEEP-INTERNAL, KEEP-NOT-EXPRESSIBLE (a golden suite cannot hold a syntax error) or KEEP-MULTI-PROGRAM |
+| the mutation harnesses, round trips, efficiency corpus and fuzzers | sections 9.3 and 9.4 |
+| CI | @@CI@@ |
+
+**A flaky test that predates this milestone.** `lsp-neovim.test` failed
+once in the local run: Neovim recorded its jump to `std::list::get` as
+landing at `list.bot:1:0` instead of `list.bot:76:3`. It fails the same way
+on the baseline `85753d95` when four copies run at once (three of four),
+and passes alone. The server's answer is right every time -- instrumented,
+the definition response was line 75, character 3 in every run, failing ones
+included -- and waiting in the driver for the cursor to move does not help
+(it stays at the first character), so the race is between Neovim's jump
+into a buffer it has to load and the library document's attachment, not in
+the server. It is left as found, recorded here for a follow-up.
 
 ## 10. Performance
 
