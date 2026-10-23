@@ -5,6 +5,7 @@
 #   tclsh9.0 audit/mutable-map/tools/fuzz.tcl ?-n N? ?-seed S? ?-ops N?
 #       ?-backends LIST? ?-gc-stress 0|1? ?-keys KINDS? ?-dump 1?
 #       ?-keyed 0|1? ?-profile PROFILE? ?-sugar N? ?-interp-every N?
+#       ?-values KINDS?
 #
 # Each program is one long, stateful operation sequence over several
 # collections -- MutableMap[K, int] and MutableSet[K] variables, some of them
@@ -27,7 +28,11 @@
 # Every key is built where it is used, from its integer id (so equal keys are
 # built independently), and the construction is injective in the id: two keys
 # are equal exactly when their ids are, which is all the model needs to know
-# of Botlish equality. The operations: set a new or an existing key, at
+# of Botlish equality. A map's values are of one value kind V per program
+# (-values): an Int, its decimal text, a struct W {n, label}, a List [x,
+# x + 1] or a MutableVector holding x (collections inside the map: a value
+# read out or moved between entries is a logical copy). `val(x)` builds a
+# V from the Int x and `vtag(v)` reads x back, so the model sees Ints. The operations: set a new or an existing key, at
 # (hit, miss), contains, remove (hit, miss), length, clear, iterate, copy,
 # fill (a loop inserting a run of fresh keys: growth), drain (a loop removing
 # most keys: compaction and the index shrinking), and bump (a loop over a
@@ -58,7 +63,7 @@
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -n 20 -seed 1 -ops 120 -backends {interp compile cranelift-generic cranelift} \
     -gc-stress 0 -keys {int str enum struct nested list collide kcollide} -dump 0 -keyed 1 -profile small \
-    -sugar 4 -interp-every 3]
+    -sugar 4 -interp-every 3 -values {int str rec list vec}]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "fuzz.tcl: unknown option $option"
@@ -72,6 +77,7 @@ source [file join $root surface surface.tcl]
 set ::oracle [file join $root audit mutable-map tools oracle.py]
 set ::corpus [string trim [core::ReadFile [file join $root audit hashable data int-collide-1024.txt]]]
 set ::kcorpus [string trim [core::ReadFile [file join $root audit mutable-map data keyed-collide.txt]]]
+set ::valueKinds [dict get $options -values]
 
 # ---------------------------------------------------------------------------
 # Deterministic choices
@@ -112,10 +118,45 @@ proc KeyLiteral {kind id} {
     }
 }
 
-proc Declarations {kind} {
+# Value kinds: the Botlish type, `val(x)` (a V from the Int x) and `vtag(v)`
+# (x again): vtag(val(x)) == x for every Int.
+proc ValueType {vkind} {
+    switch -- $vkind {
+        int { return int }
+        str { return str }
+        rec { return W }
+        list { return List\[int\] }
+        vec { return MutableVector\[int\] }
+    }
+}
+
+proc ValueDeclarations {vkind} {
+    set vt [ValueType $vkind]
+    set text "fn val(x: int) -> $vt:\n"
+    switch -- $vkind {
+        int { append text "    x\n" }
+        str { append text "    std::int::to_string(x)\n" }
+        rec { append text "    W {n: x, label: std::int::to_string(x)}\n" }
+        list { append text "    \[x, x + 1\]\n" }
+        vec { append text "    std::mutable_vector::from_list(\[x\])\n" }
+    }
+    append text "\nfn vtag(v: $vt) -> int:\n"
+    switch -- $vkind {
+        int { append text "    v\n" }
+        str { append text "    n = std::int::from_string(v):\n        on InvalidIntegerText:\n            -2\n    n\n" }
+        rec { append text "    v.n\n" }
+        list { append text "    n = std::list::at(v, 0):\n        on IndexNotFound:\n            -2\n    n\n" }
+        vec { append text "    n = std::mutable_vector::at(v, 0):\n        on IndexNotFound:\n            -2\n    n\n" }
+    }
+    return "$text\n"
+}
+
+proc Declarations {kind vkind} {
     set t [KeyType $kind]
+    set vt [ValueType $vkind]
     set text "import std::list\nimport std::str\nimport std::int\nimport std::mutable_map\nimport std::mutable_set\nimport std::mutable_vector\n\n"
-    append text "struct P:\n    id: int\n    name: str\n\nstruct Q:\n    inner: P\n    tags: List\[int\]\n\n"
+    append text "struct P:\n    id: int\n    name: str\n\nstruct Q:\n    inner: P\n    tags: List\[int\]\n\nstruct W:\n    n: int\n    label: str\n\n"
+    append text [ValueDeclarations $vkind]
     append text "enum Color:\n    [join [lmap i {0 1 2 3 4 5 6 7} {string cat C$i}] {, }]\n\n"
     append text "fn color(i: int) -> Color:\n"
     foreach i {0 1 2 3 4 5 6} {
@@ -146,13 +187,13 @@ proc Declarations {kind} {
         list { append text "    \[i, 3\]\n" }
     }
     append text "\nfn bit(b: bool) -> int:\n    if b:\n        return 1\n    0\n\n"
-    append text "fn obs_map(place out: MutableVector\[int\], m: std::mutable_map::MutableMap\[$t, int\]) -> unit:\n    out.push(-9)\n    loop e in m:\n        out.push(tag(e.key))\n        out.push(e.value)\n    unit\n\n"
+    append text "fn obs_map(place out: MutableVector\[int\], m: std::mutable_map::MutableMap\[$t, $vt\]) -> unit:\n    out.push(-9)\n    loop e in m:\n        out.push(tag(e.key))\n        out.push(vtag(e.value))\n    unit\n\n"
     append text "fn obs_set(place out: MutableVector\[int\], s: std::mutable_set::MutableSet\[$t\]) -> unit:\n    out.push(-9)\n    loop x in s:\n        out.push(tag(x))\n    unit\n\n"
-    append text "fn fill_map(place m: std::mutable_map::MutableMap\[$t, int\], a: int, b: int, step: int, x: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        m.set(key(k), x + k)\n    unit\n\n"
+    append text "fn fill_map(place m: std::mutable_map::MutableMap\[$t, $vt\], a: int, b: int, step: int, x: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        m.set(key(k), val(x + k))\n    unit\n\n"
     append text "fn fill_set(place s: std::mutable_set::MutableSet\[$t\], a: int, b: int, step: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        s.add(key(k))\n    unit\n\n"
-    append text "fn drain_map(place m: std::mutable_map::MutableMap\[$t, int\], a: int, b: int, step: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        r = [Call map remove m "key(k)"]:\n            on std::mutable_map::KeyNotFound:\n                -1\n    unit\n\n"
+    append text "fn drain_map(place m: std::mutable_map::MutableMap\[$t, $vt\], a: int, b: int, step: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        r = [Call map remove m "key(k)"]:\n            on std::mutable_map::KeyNotFound:\n                val(-1)\n    unit\n\n"
     append text "fn drain_set(place s: std::mutable_set::MutableSet\[$t\], a: int, b: int, step: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        [Call set remove s "key(k)"]\n    unit\n\n"
-    append text "fn bump_map(place out: MutableVector\[int\], place m: std::mutable_map::MutableMap\[$t, int\], offset: int) -> unit:\n    loop e in m:\n        out.push(tag(e.key))\n        m.set(e.key, e.value + 1)\n        m.set(key(tag(e.key) + offset), e.value)\n    unit\n\n"
+    append text "fn bump_map(place out: MutableVector\[int\], place m: std::mutable_map::MutableMap\[$t, $vt\], offset: int) -> unit:\n    loop e in m:\n        out.push(tag(e.key))\n        m.set(e.key, val(vtag(e.value) + 1))\n        m.set(key(tag(e.key) + offset), e.value)\n    unit\n\n"
     append text "fn bump_set(place out: MutableVector\[int\], place s: std::mutable_set::MutableSet\[$t\], offset: int) -> unit:\n    loop x in s:\n        out.push(tag(x))\n        [Call set remove s x]\n        s.add(key(tag(x) + offset))\n    unit\n\n"
     return $text
 }
@@ -192,7 +233,9 @@ proc Program {kind count opsN profile} {
         }
     }
     set t [KeyType $kind]
-    set src [Declarations $kind]
+    set vkind [Pick $::valueKinds]
+    set vt [ValueType $vkind]
+    set src [Declarations $kind $vkind]
     append src "out = std::mutable_vector::from_list(\[0\])\n"
     set ops {}
     set vars {}
@@ -200,7 +243,7 @@ proc Program {kind count opsN profile} {
     # Two collections to start: a map and a set.
     foreach {v what} {m0 map s0 set} {
         if {$what eq "map"} {
-            append src "$v = std::mutable_map::create\[$t, int\]()\n"
+            append src "$v = std::mutable_map::create\[$t, $vt\]()\n"
         } else {
             append src "$v = std::mutable_set::create\[$t\]()\n"
         }
@@ -218,7 +261,7 @@ proc Program {kind count opsN profile} {
         if {$r < 30} {
             if {$what eq "map"} {
                 set x [expr {$step * 10 + [Rand 10]}]
-                append src "[Call map set $v "$k, $x"]\n"
+                append src "[Call map set $v "$k, val($x)"]\n"
                 lappend ops [list set $v $id $x]
             } else {
                 append src "out.push(bit([Call set add $v $k]))\n"
@@ -226,7 +269,7 @@ proc Program {kind count opsN profile} {
             }
         } elseif {$r < 45} {
             if {$what eq "map"} {
-                append src "r$n = [Call map at $v $k]:\n    on std::mutable_map::KeyNotFound:\n        -1\nout.push(r$n)\n"
+                append src "r$n = [Call map at $v $k]:\n    on std::mutable_map::KeyNotFound:\n        val(-1)\nout.push(vtag(r$n))\n"
                 lappend ops [list at $v $id]
             } else {
                 append src "out.push(bit([Call set contains $v $k]))\n"
@@ -237,7 +280,7 @@ proc Program {kind count opsN profile} {
             lappend ops [list contains $v $id]
         } elseif {$r < 67} {
             if {$what eq "map"} {
-                append src "r$n = [Call map remove $v $k]:\n    on std::mutable_map::KeyNotFound:\n        -1\nout.push(r$n)\n"
+                append src "r$n = [Call map remove $v $k]:\n    on std::mutable_map::KeyNotFound:\n        val(-1)\nout.push(vtag(r$n))\n"
             } else {
                 append src "out.push(bit([Call set remove $v $k]))\n"
             }
@@ -296,7 +339,7 @@ proc Program {kind count opsN profile} {
         lappend ops [list length $v] [list iterate $v]
     }
     append src "result = loop x in out:\n    x\nresult\n"
-    return [list $src $ops]
+    return [list $src $ops $vkind]
 }
 
 # The model's observations of OPS (with the leading 0 the program pushes
@@ -349,13 +392,13 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
         set b
     }]
     set count [expr {[dict get $options -profile] eq "large" ? 50 + [Rand 300] : 8 + [Rand 23]}]
-    lassign [Program $kind $count [dict get $options -ops] [dict get $options -profile]] src ops
+    lassign [Program $kind $count [dict get $options -ops] [dict get $options -profile]] src ops vkind
     incr programs
     incr operationCount [llength $ops]
     set keyedOn [lmap b $runOn {if {$b eq "interp"} continue; set b}]
     incr runCount [expr {[llength $runOn] + ([dict get $options -keyed] ? 2 * [llength $keyedOn] : 0) + [dict get $options -gc-stress]}]
     if {[dict get $options -dump]} {
-        puts "---- program $p ($kind)\n$src"
+        puts "---- program $p ($kind keys, $vkind values)\n$src"
     }
     set expected [Expected $ops]
     incr observations [llength [split $expected ,]]
@@ -363,7 +406,7 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
     set compiled [catch {surface::compile $src -warnings off} hir options2]
     dict incr ::timeOf front-end [expr {[clock milliseconds] - $t0}]
     if {$compiled} {
-        puts "program $p ($kind, sugared $::sugared): does not compile: $hir"
+        puts "program $p ($kind keys, $vkind values, sugared $::sugared): does not compile: $hir"
         incr failures
         continue
     }
@@ -407,7 +450,7 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
     }
     if {$bad ne {}} {
         incr failures
-        puts "program $p ($kind, sugared $::sugared, seed [dict get $options -seed]): DISAGREES with the model"
+        puts "program $p ($kind keys, $vkind values, sugared $::sugared, seed [dict get $options -seed]): DISAGREES with the model"
         puts "  expected $expected"
         foreach b $bad {
             puts "  $b"
