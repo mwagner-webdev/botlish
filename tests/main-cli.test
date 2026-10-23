@@ -155,6 +155,7 @@ foreach {name arguments message} {
     missing-target        {-target}                          {option -target needs an argument (NAME)}
     missing-argv          {-argv}                            {option -argv needs an argument (TEXT)}
     missing-L             {-L}                               {option -L needs an argument (DIR)}
+    empty-L               {-L {} x.bot}                      {-L needs a directory (found an empty one)}
     unknown-backend       {-backend fast x.bot}              {unknown backend "fast"*}
     unknown-mode          {-warnings loud x.bot}             {unknown warnings mode "loud"*}
     unknown-target        {-target vax x.bot}                {unknown C ABI target "vax"*}

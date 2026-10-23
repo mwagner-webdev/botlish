@@ -71,6 +71,16 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
     }
 }
 testConstraint cfFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+# The link directories of a test's links, for native::withLinkDirs: the
+# fixture's, or none when it did not build. A test that needs no fixture
+# (cf-system-library) still links then, and an empty directory is no
+# directory (cf-link-directory-empty).
+proc fixtureDirs {} {
+    if {$::fixtureDir eq ""} {
+        return {}
+    }
+    return [list $::fixtureDir]
+}
 # libtcl9.0, as the Tcl acceptance links it: a probe link with the host's
 # linker driver.
 proc tclLinkable {} {
@@ -303,12 +313,12 @@ proc appRejection {dir {main main.bot}} {
     return accepted
 }
 
-# The value of DIR/MAIN on each of BACKENDS (with the fixture's directory on
-# the linker's search path), or the backend's error: {CODE MESSAGE} with DIR
-# spelled away.
+# The value of DIR/MAIN on each of BACKENDS (with the fixture's directory, if
+# it built, on the linker's search path), or the backend's error: {CODE
+# MESSAGE} with DIR spelled away.
 proc appValues {dir backends {main main.bot}} {
     set hir [appHir $dir $main]
-    native::withLinkDirs [list $::fixtureDir] {
+    native::withLinkDirs [fixtureDirs] {
         lmap backend $backends {
             lassign [outcomeUnderHir $backend $hir] tag value message
             expr {$tag eq "value" ? $value : [list [lrange $value end-1 end] [string map [list $dir/ ""] $message]]}
@@ -319,7 +329,7 @@ proc appValues {dir backends {main main.bot}} {
 # The error code's last words of DIR/MAIN on BACKEND, or its value.
 proc appCode {dir backend {main main.bot}} {
     set hir [appHir $dir $main]
-    native::withLinkDirs [list $::fixtureDir] {
+    native::withLinkDirs [fixtureDirs] {
         lassign [outcomeUnderHir $backend $hir] tag value
     }
     return [expr {$tag eq "value" ? $value : [lrange $value end-1 end]}]
@@ -904,7 +914,7 @@ test cf-tcl-backends {the Tcl backends have no machine to call C on: a C call is
 test cf-strict0-replay {an unchecked (-strict 0) program's refused exposure replays the refusal on every backend, the C call never made} -constraints cfFixture -body {
     set dir [app [list main.bot "direct module\n\nimport std::abi\nimport std::abi::bytes\nimport std::ffi::c\nimport std::str\nimport r\n\nr::keep(std::abi::bytes::from_list(std::str::encode_utf8(\"x\")))\n" r.bot "import std::ffi::c\n\nextern c library \"botlish_cffi_fixture\"\nextern c fn keep named \"bcf_keep\"(p: std::ffi::c::Ptr\[std::ffi::c::UChar\] read captures) -> unit\n"]]
     set hir [appHir $dir main.bot 0]
-    native::withLinkDirs [list $::fixtureDir] {
+    native::withLinkDirs [fixtureDirs] {
         lmap backend {interp compile cranelift} {lindex [lindex [outcomeUnderHir $backend $hir] 1] end}
     }
 } -cleanup removeApps -result {TYPE TYPE TYPE}
@@ -949,7 +959,7 @@ test cf-link-order {the declared libraries link as one group, so their order nev
 
 test cf-executable {a program that calls C links as a standalone executable with the libraries it declares and runs with no Tcl, no rustc and no source: moved out of its build directory, its application deleted, with an empty environment} -constraints cfFixture -body {
     set dir [bcfApp "${::bytesPrelude}src = text(\"hello\")\nr = bcf::reverse(src, len(src), std::abi::bytes::zeroed(std::abi::usize(5)))\n\[bcf::add(40, 2), std::abi::bytes::freeze(r.out) == text(\"olleh\"), bcf::pick(15, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $::cfPickLong, 128, -2, 2147483649, -1)\]\n"]
-    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+    set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
     set elsewhere [makeDirectory cf-moved-[pid]]
     set moved [file join $elsewhere [file tail $exe]]
     file rename $exe $moved
@@ -964,7 +974,7 @@ test cf-stub-linker {the stub linker links no native library: it refuses a progr
     set ::env(BOTLISH_NATIVE_LINKER) stub
     try {
         lmap dir [list $calls $declares] {
-            catch {native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}} message options
+            catch {native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}} message options
             list [dict get $options -errorcode] $message
         }
     } finally {
@@ -1060,7 +1070,7 @@ test cf-interchange {HIR interchange text carries everything a C call needs past
     puts $channel "source [list [file join $::projectRoot native native.tcl]]\nset h \[hir::interchange::readFile [list $path]\]\nputs -nonewline \[native::nir \$h\]"
     close $channel
     set read [exec [info nameofexecutable] $script]
-    list [expr {$read eq [string trimright $direct \n]}] [native::withLinkDirs [list $::fixtureDir] {
+    list [expr {$read eq [string trimright $direct \n]}] [native::withLinkDirs [fixtureDirs] {
         lindex [outcomeUnderHir cranelift [hir::interchange::readFile $path]] 1
     }]
 } -cleanup removeApps -result {1 {[42, true]}}
@@ -1085,7 +1095,7 @@ test cf-cache {the front-end cache keeps a program that calls C as its build (a 
         lappend misses [expr {[dict get $changed foreign] ne [dict get $first foreign] || [dict get $changed links] ne [dict get $first links]}]
     }
     list [expr {[native::nir $hit] eq [native::nir $first]}] $misses \
-        [native::withLinkDirs [list $::fixtureDir] {lindex [outcomeUnderHir cranelift $hit] 1}]
+        [native::withLinkDirs [fixtureDirs] {lindex [outcomeUnderHir cranelift $hit] 1}]
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-cache-[pid]]} -result {1 {1 1 1 1} 42}
 
 test cf-isolation {extern declarations, link plans and their natives are compilation-local: compiling another program (with other externs of the same names, or none) never changes an earlier HIR's lowering, and no later compilation links an earlier one's library} -constraints cfFixture -body {
@@ -1101,7 +1111,7 @@ test cf-isolation {extern declarations, link plans and their natives are compila
     list [expr {[native::nir $hirA] eq $nirA}] [regexp {link|foreign} $nirC] \
         [lsearch -all -inline -regexp [split [native::nir $hirB] \n] {^(link|foreign) }] \
         $registered \
-        [native::withLinkDirs [list $::fixtureDir] {lindex [outcomeUnderHir cranelift $hirA] 1}]
+        [native::withLinkDirs [fixtureDirs] {lindex [outcomeUnderHir cranelift $hirA] 1}]
 } -cleanup removeApps -result {1 0 {{link "other"} {foreign 0 "other_add" params="i32" result=i32 name="bcf::add"}} {} 42}
 
 # ---------------------------------------------------------------------------
@@ -1484,6 +1494,23 @@ test cf-link-directories {-L directories: one whose path has spaces, two at once
     set results
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] "cf dir with spaces [pid]"] [file join [temporaryDirectory] cf-second-[pid]]} -result [list 42 42 42 "== main.bot (cranelift)\n   value: 42"]
 
+test cf-link-directory-empty {an empty string is no link directory: native::withLinkDirs refuses one, alone or beside a real directory, before its script runs, and leaves the directories as they were -- an empty one would reach the linker as a bare -L, which takes the linker's next argument for its directory, or a bare /LIBPATH:, which link.exe refuses; a caller with none passes none (fixtureDirs)} -body {
+    set ::cfRan 0
+    set before $native::linkDirs
+    set refused [lmap dirs [list [list ""] [list [temporaryDirectory] ""]] {
+        list [catch {native::withLinkDirs $dirs {set ::cfRan 1}} message] $message
+    }]
+    list $refused $::cfRan [expr {$native::linkDirs eq $before}] [native::withLinkDirs {} {set native::linkDirs}]
+} -cleanup {unset -nocomplain ::cfRan} -result {{{1 {native::withLinkDirs: an empty string is no link directory (pass no directory instead)}} {1 {native::withLinkDirs: an empty string is no link directory (pass no directory instead)}}} 0 1 {}}
+
+test cf-link-directory-empty-driver {the driver refuses a --link-dir with an empty or no directory as a usage error (exit status 2) with a line naming it, before it reads its program: never a link with a bare -L} -constraints nativeBuilt -body {
+    set nir [file join [temporaryDirectory] cf-no-such-[pid].nir]
+    lmap arguments [list [list --link-dir "" $nir] [list $nir --link-dir]] {
+        set failed [catch {exec [native::binary] run {*}$arguments 2>@1} output options]
+        list $failed [lindex [dict get $options -errorcode] 0] [lindex [dict get $options -errorcode] end] [lindex [split $output \n] 0]
+    }
+} -result {{1 CHILDSTATUS 2 {botlish-native: --link-dir needs a directory (found an empty one)}} {1 CHILDSTATUS 2 {botlish-native: --link-dir needs a directory}}}
+
 # A static archive of a function compiled for another architecture than the
 # host's: Apple clang's -arch x86_64 on macOS, clang's other Linux target on
 # Linux (no header needed), on Windows clang's ARM64 Windows target, archived
@@ -1533,8 +1560,8 @@ test cf-link-failure-keeps-executable {a failed link of a program that calls C p
     set good [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::add(40, 2)\n"]
     set bad [app [list main.bot "import std::ffi::c\n\nextern c library \"definitely_missing_botlish_lib\"\n\nextern c fn add named \"bcf_add\"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int\n\nadd(1, 2)\n"]]
     set out [makeDirectory cf-keep-[pid]]
-    set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $good] [file join $out program]}]
-    set failed [catch {native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $bad] [file join $out program]}} message options]
+    set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $good] [file join $out program]}]
+    set failed [catch {native::withLinkDirs [fixtureDirs] {native::executable [appHir $bad] [file join $out program]}} message options]
     list $failed [lrange [dict get $options -errorcode] 0 1] [string trim [exec $exe]] [glob -nocomplain -tails -directory $out .botlish-aot-*]
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] cf-keep-[pid]]} -result {1 {NATIVE LINK} 42 {}}
 
@@ -1551,7 +1578,7 @@ test cf-gc-calls {C calls inside allocation-heavy loops, under GC stress, on bot
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+        set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
@@ -1565,7 +1592,7 @@ test cf-coroutine-calls {C calls inside a coroutine, before its first yield and 
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+        set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
@@ -1582,7 +1609,7 @@ test cf-c-stack-overflow {C recursion that exhausts the native stack it runs on 
     try {
         set results [list [lindex [appValues $deep {cranelift}] 0] [appValues $finite {cranelift}] [lindex [appValues $inCoroutine {cranelift}] 0]]
         foreach dir [list $deep $inCoroutine] {
-            set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+            set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
             set code [catch {exec $exe 2>@1} message options]
             lappend results [list $code [lrange [dict get $options -errorcode] 0 0] [lindex [dict get $options -errorcode] end] $message]
         }
@@ -1667,7 +1694,7 @@ test cf-va-ambiguous-type {a value proven of two C integer types at once has no 
 test cf-va-strict0-replay {an unchecked (-strict 0) program's trailing argument with no C type replays its refusal on the native backends, the C call never made} -constraints cfFixture -body {
     set dir [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::vsum(1, \"five\")\n"]
     set hir [appHir $dir main.bot 0]
-    native::withLinkDirs [list $::fixtureDir] {
+    native::withLinkDirs [fixtureDirs] {
         lmap backend {interp compile cranelift cranelift-generic} {
             lassign [outcomeUnderHir $backend $hir] tag code message
             list [lindex $code end] [string match "*a trailing argument of a variadic C function*" $message]
@@ -1801,7 +1828,7 @@ test cf-va-win64-refused {Windows x86-64: no variadic C call is lowered for the 
     catch {native::clif $hir} clif options
     set clifCode [lrange [dict get $options -errorcode] 0 1]
     set linked [lindex [appValues $dir {cranelift cranelift-generic}] 0]
-    set failed [catch {native::withLinkDirs [list $::fixtureDir] {native::executable $hir [file join $dir program]}} message options]
+    set failed [catch {native::withLinkDirs [fixtureDirs] {native::executable $hir [file join $dir program]}} message options]
     list $clifCode [string match "*$why*" $clif] [lindex $linked 0] [string match "*$why*" [lindex $linked 1]] \
         $failed [lrange [dict get $options -errorcode] 0 1] [string match "*$why*" $message] \
         [glob -nocomplain -directory $dir program*] [lindex [appCode $dir interp] end]
@@ -1976,7 +2003,7 @@ test cf-va-interchange {HIR interchange carries a variadic declaration and each 
     puts $channel "source [list [file join $::projectRoot native native.tcl]]\nset h \[hir::interchange::readFile [list $path]\]\nputs -nonewline \[native::nir \$h\]"
     close $channel
     set read [exec [info nameofexecutable] $script]
-    list [expr {$read eq [string trimright $direct \n]}] [regexp {varargs=i32:i32,u8:i32} $read] [native::withLinkDirs [list $::fixtureDir] {
+    list [expr {$read eq [string trimright $direct \n]}] [regexp {varargs=i32:i32,u8:i32} $read] [native::withLinkDirs [fixtureDirs] {
         lindex [outcomeUnderHir cranelift [hir::interchange::readFile $path]] 1
     }]
 } -cleanup removeApps -result {1 1 {[42, 12.0]}}
@@ -1999,7 +2026,7 @@ test cf-va-cache {the front-end cache keeps a variadic program as its build (a h
     puts -nonewline $channel [string map [list {vsum named "bcf_vsum"(count: std::ffi::c::Int, variadic)} {vsum named "bcf_vsum"(count: std::ffi::c::Int, extra: std::ffi::c::Int, variadic)}] $::bcfModule]
     close $channel
     set changed [surface::readProgramFile $path -warnings off -cache $cache]
-    list [expr {$hit eq $first}] [native::withLinkDirs [list $::fixtureDir] {lindex [outcomeUnderHir cranelift $hit] 1}] \
+    list [expr {$hit eq $first}] [native::withLinkDirs [fixtureDirs] {lindex [outcomeUnderHir cranelift $hit] 1}] \
         [expr {[dict get [dict get $changed foreign] bcf::vsum contract params] ne [dict get [dict get $first foreign] bcf::vsum contract params]}]
 } -cleanup {removeApps; removeDirectory cf-va-cache-[pid]} -result {1 42 1}
 
@@ -2009,7 +2036,7 @@ test cf-va-executable-gc-coroutine {variadic C calls with managed values held ac
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     try {
         set results [appValues $dir {cranelift cranelift-generic}]
-        set exe [native::withLinkDirs [list $::fixtureDir] {native::executable [appHir $dir] [file join $dir program]}]
+        set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
         lappend results [string trim [exec $exe]]
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }

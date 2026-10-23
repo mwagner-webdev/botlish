@@ -176,9 +176,15 @@ proc native::hostSupports {capability} {
 }
 
 # Evaluates SCRIPT in the caller's scope with DIRS the linker search
-# directories (native::linkDirs), restored afterwards.
+# directories (native::linkDirs), restored afterwards. An empty string in
+# DIRS is an error, never a directory: it would reach the linker as a bare
+# -L, which takes the linker's next argument for its directory (link.exe
+# refuses a bare /LIBPATH:). A caller with no directory passes none.
 proc native::withLinkDirs {dirs script} {
     variable linkDirs
+    if {"" in $dirs} {
+        error "native::withLinkDirs: an empty string is no link directory (pass no directory instead)"
+    }
     set saved $linkDirs
     set linkDirs [lmap dir $dirs {file normalize $dir}]
     try {

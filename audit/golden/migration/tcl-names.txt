@@ -3474,6 +3474,7 @@ tests/main-cli.test cli-malformed-check-emit pass
 tests/main-cli.test cli-malformed-check-inspect pass
 tests/main-cli.test cli-malformed-check-not-source pass
 tests/main-cli.test cli-malformed-missing-L pass
+tests/main-cli.test cli-malformed-empty-L pass
 tests/main-cli.test cli-malformed-missing-argv pass
 tests/main-cli.test cli-malformed-missing-backend pass
 tests/main-cli.test cli-malformed-missing-target pass
@@ -8537,6 +8538,8 @@ tests/c-ffi.test cf-system-library pass
 tests/c-ffi.test cf-system-symbol-resolved pass
 tests/c-ffi.test cf-shared-library pass
 tests/c-ffi.test cf-link-directories pass
+tests/c-ffi.test cf-link-directory-empty pass
+tests/c-ffi.test cf-link-directory-empty-driver pass
 tests/c-ffi.test cf-wrong-architecture pass
 tests/c-ffi.test cf-link-failure-keeps-executable pass
 tests/c-ffi.test cf-gc-calls pass
