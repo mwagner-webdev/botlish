@@ -698,7 +698,7 @@ disagreement.
 | `tclsh9.0 tools/compilerpedia.tcl check` | 0 problems (787 topics, 588 examples) |
 | `tclsh9.0 audit/golden/migration/merge.tcl ...` | the manifest is current: the new tests are KEEP-INTERNAL, KEEP-NOT-EXPRESSIBLE (a golden suite cannot hold a syntax error) or KEEP-MULTI-PROGRAM |
 | the mutation harnesses, round trips, efficiency corpus and fuzzers | sections 9.3 and 9.4 |
-| CI | @@CI@@ |
+| CI on `41e83666` (the merged tree; every later commit changes only this report, which starts no workflow) | all passed: `tests` (run 39958615366: interp, compile, cranelift and cranelift-generic coverage, the four golden shards, the warning gate, the method-filter audit, the native Rust unit tests, the stub-linked executables; its GC-stress job runs on pushes to `main` only), `tests (macos arm64)` (39958607702), `tests (windows x86-64)` (39958607716: smoke, root plans, the four acceptance shards) and `static-decisions` (39958626794: mutable-array.bot and the four shards, the batched and the sequential scheduler agreeing on every suite) |
 
 **A flaky test that predates this milestone.** `lsp-neovim.test` failed
 once in the local run: Neovim recorded its jump to `std::list::get` as
