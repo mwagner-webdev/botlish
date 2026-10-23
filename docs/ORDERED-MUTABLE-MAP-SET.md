@@ -53,10 +53,10 @@ and one correction: `==` refused inside an opaque struct names the opaque
 values, never their representation (a map's index would otherwise show the
 hidden hash's placement in an error message).
 
-The evidence: six Tcl test files (106 tests, also under GC stress) and
-four golden suites (89 cases, every backend), an independent Python model,
+The evidence: six Tcl test files (107 tests, also under GC stress) and
+four golden suites (90 cases, every backend), an independent Python model,
 a stateful differential fuzzer (0 disagreements in 56 programs and 121,848
-observations, under fixed hidden keys and GC stress too), <!-- MUTANTS-SUMMARY -->,
+observations, under fixed hidden keys and GC stress too), 57 mutants of the collections and their seams (every one killed), the whole Hashable (45) and trait-constrained-type (43) harnesses and 15 rewritten mutants of four others (every one still killed),
 and a benchmark beside the hash-table experiment's tables and the Rust
 reference, in time and in instructions, whose profile found and removed two
 costs of the first engine (Performance, "Where the instructions go").
@@ -535,7 +535,157 @@ disagreement either.
 
 ## Mutation testing
 
-TBD.
+`audit/mutable-map/tools/mutate.tcl` applies each mutant of
+`audit/mutable-map/tools/mutants.txt` to a private copy of the tree
+(rebuilding the native backend for a native mutant) and runs, until one
+kills it: the mutant's own test files, then `tests/ordered-table.test`,
+`mutable-map.test`, `mutable-set.test` and `collection-iteration.test`,
+then the fuzzer (8 programs, every key kind). **57 mutants, 57 killed**,
+the brief's (item 51) and one or more for each general seam this milestone
+added. The table names the first test that failed, in the first file that
+failed:
+**Hashing**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `public-hash` | placement uses the public hash instead of the keyed table hash | `ot-churn-bounded` (ordered-table) |
+| `post-mix-public-hash` | placement post-mixes the public hash with the secret | `ot-churn-bounded` (ordered-table) |
+| `no-stored-hash-check` | a probe compares the key at every occupied slot, never its stored hash first | `ot-keys-compared-on-hash-match-only` (ordered-table) |
+| `trust-hash` | a probe trusts an equal stored hash without comparing the keys | `ot-keys-compared-on-hash-match-only` (ordered-table) |
+| `identity-equality` | total structural equality (struct and List keys) compares identities natively | `mm-equal-keys` (mutable-map) |
+| `erased-key-storage` | the keys are stored erased (MutableVector[any]) | `ot-churn-bounded` (ordered-table) |
+| `untyped-key-equality` | the probe compares keys through an untyped helper (fallible veq unspecialized) | `mm-typed-probe` (mutable-map) |
+| `untyped-string-equality` | native lowering stops choosing streq for two Strings | `mm-typed-probe` (mutable-map) |
+| `unconstrained-key` | the map's key slot drops `satisfies Hashable` | `ot-churn-bounded` (ordered-table) |
+
+**Probing**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `no-backward-shift` | removal empties its slot without shifting the entries after it back | `ot-churn-bounded` (ordered-table) |
+| `probe-no-wraparound` | a probe stops at the index's end instead of wrapping to slot 0 | `ot-invariants-map-int` (ordered-table) |
+| `wrong-home-slot` | a lookup starts one slot past the key's home slot | `ot-churn-bounded` (ordered-table) |
+| `wrong-probe-mask` | a probe reduces slots modulo the slot count minus one | `ot-churn-bounded` (ordered-table) |
+| `load-off-by-one` | an insertion rebuilds one entry past the 7/10 load | `ot-invariants-hidden-keys` (ordered-table) |
+| `shift-before-home` | backward shift moves an entry into the hole even when that is before its home slot | `ot-churn-bounded` (ordered-table) |
+
+**Growth and compaction**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `resize-drops-entry` | rebuilding the index leaves the last entry out | `ot-churn-bounded` (ordered-table) |
+| `resize-reverses-order` | every rebuild (growth included) moves the entries into reverse order, keys, hashes and values alike | `ot-churn-bounded` (ordered-table) |
+| `resize-bucket-order` | every rebuild orders the entries by index slot (the hash's placement), keys, hashes and values alike | `ot-churn-bounded` (ordered-table) |
+| `compaction-fills-holes-from-end` | compaction fills each dead position with the last live entry (swap-remove: no copying, the order lost), keys, hashes and values alike | `ot-churn-bounded` (ordered-table) |
+| `compaction-loses-value` | compacting a map's values truncates one value too many | `ot-churn-bounded` (ordered-table) |
+| `compaction-stale-index` | a rebuild that keeps the slot count keeps the old index (stale entry positions after compaction) | `ot-churn-bounded` (ordered-table) |
+| `hash-not-moved-with-key` | compaction moves the keys down but leaves the stored hashes where they were | `ot-churn-bounded` (ordered-table) |
+| `map-values-misaligned` | a map's rebuild compacts the keys but not the values | `ot-churn-bounded` (ordered-table) |
+| `tombstones-never-compact` | the garbage rule never fires: dead entries are only dropped by growth | `ot-churn-bounded` (ordered-table) |
+
+**Replacement, removal, reinsertion**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `replace-appends-duplicate` | setting a present key appends a second entry | `ot-invariants-hidden-keys` (ordered-table) |
+| `replace-moves-to-end` | setting a present key removes its entry and appends a new one | `ot-invariants-hidden-keys` (ordered-table) |
+| `set-duplicate-moves` | adding a present element moves it to the end (and still answers false) | `ot-invariants-set-int` (ordered-table) |
+| `remove-leaves-visible` | removal decrements the count but leaves the entry and its slot | `ot-invariants-map-str` (ordered-table) |
+| `remove-decrements-twice` | removal decrements the live count by two | `ot-invariants-map-str` (ordered-table) |
+| `reinsert-revives-entry` | inserting a key revives its own dead entry (keeping its old position) instead of appending | `ot-invariants-hidden-keys` (ordered-table) |
+| `reinsert-reuses-dead-slot` | inserting a new key reuses the first dead position instead of appending | `ot-churn-bounded` (ordered-table) |
+| `miss-returns-arbitrary` | a lookup of a missing key returns the last entry's value (when there is one) | `mm-copies-independent` (mutable-map) |
+
+**Clear**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `clear-leaves-membership` | clear only resets the count: index and entries stay | `ot-invariants-set-str` (ordered-table) |
+| `clear-leaves-entries` | clear empties the index but leaves the entries | `ot-clear-is-minimal` (ordered-table) |
+
+**Set representation**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `set-value-storage` | a set stores a value per element too | `ms-no-value-storage` (mutable-set) |
+
+**Iteration**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `iteration-exposes-dead` | the map's loop protocol calls every position live | `mm-churn` (mutable-map) |
+| `iteration-bucket-order` | the map's loop protocol walks the index slots (hash order) | `mm-churn` (mutable-map) |
+| `set-iteration-bucket-order` | the set's loop protocol walks the index slots: its order depends on the hidden key | `ms-collision-corpus` (mutable-set) |
+| `iteration-materializes` | each loop over a map first collects every key into a List | `ci-no-materialization` (collection-iteration) |
+
+**Allocation**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `lookup-allocates-list` | a probe step builds two one-element Lists to compare the stored hash | `ot-keys-compared-on-hash-match-only` (ordered-table) |
+
+**Copies**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `local-copy-shares-header` | `b = a` of a collection-bearing local gives b a's own headers (no entry copy) | `mm-content-comparison` (mutable-map) |
+| `push-after-sharing-aliases` | natively, push onto a shared vector backing appends in place (growth after a copy changes the copy) | `mm-copies-adversarial` (mutable-map) |
+| `clear-after-sharing-aliases` | natively, clear of a shared vector backing empties it in place (compaction or clear after a copy changes the copy) | `mm-copies-adversarial` (mutable-map) |
+
+**Place parameters**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `place-param-entry-copy` | a place parameter gets an entry copy like a value parameter: the caller never sees the update | `pp-callee-copy-and-result` (place-parameters) |
+| `place-overlap-unchecked` | one call may give overlapping places to two place parameters | `pp-diag-overlapping-places` (place-parameters) |
+| `place-module-binding` | a module binding is accepted as a place argument | `pp-diag-module-binding` (place-parameters) |
+| `place-observer-uncopied` | an argument overlapping a place argument of the same call is read out uncopied (it observes the update) | `pp-observer-overlap-copied` (place-parameters) |
+| `places-not-printed` | HIR text drops a block's place parameters | `pp-hir-text` (place-parameters) |
+
+**The loop protocol**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `protocol-live-check-dropped` | the elaborated loop visits every position, live or not | `ci-empty` (collection-iteration) |
+| `protocol-not-internal` | application code may name a loop protocol operation | `ci-protocol-internal` (collection-iteration) |
+| `protocol-lockstep-accepted` | a lockstep loop over a collection is accepted (its element count is no proven count) | `ci-lockstep-refused` (collection-iteration) |
+
+**MutableVector index proofs**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `vector-length-ignores-resizes` | a vector's length is taken as stable whatever resizes it | `vb-unproven-place-call` (vector-bounds) |
+| `vector-length-ignores-place-calls` | a call giving the vector to a place parameter does not count as resizing it | `vb-unproven-place-call` (vector-bounds) |
+| `vector-length-one-atom` | every vector place's length is the same form (one vector's guard proves another's read) | `vb-unproven-other-copy` (vector-bounds) |
+| `vector-length-context-member` | a context member's vector length is taken as stable | `vb-unproven-context-member` (vector-bounds) |
+
+**Opaque equality refusals**
+
+| mutant | the bug | killed by |
+|---|---|---|
+| `opaque-refusal-leaks-tcl` | the Tcl runtimes' refusal of == inside an opaque struct names the representation | `mm-no-equality` (mutable-map) |
+| `opaque-refusal-leaks-native` | the native refusal of == inside an opaque struct names the representation | `mm-no-equality` (mutable-map) |
+
+Two mutants survived the first full run, and both exposed a weak detector,
+fixed by strengthening the test rather than the mutant:
+
+* `iteration-materializes` survived `ci-no-materialization`, which compared
+  object counts at 1000 and 2000 entries: a List of every key is one object
+  at any length. The test now compares allocated bytes too (a correct loop
+  allocates the same at both sizes; the List doubles).
+* `vector-length-one-atom` survived because the place form it collapses is
+  the fallback of `VectorLength`, reached only for a vector whose value's
+  source was resized but whose own place was not -- which no test built.
+  `vb-unproven-other-copy` (two copies of a vector taken around a push: a
+  guard on the longer proves nothing about the shorter) reaches it, in the
+  Tcl suite and in `place-parameters.bot`.
+
+The brief's mutants with no non-equivalent counterpart here are documented
+in `mutants.txt`'s header: replacing the stored key with an equal one
+(equal Hashable values are indistinguishable), stopping a probe at a
+tombstone (the index has none: `no-backward-shift` is the bug of that
+family) and the load threshold off by one (no program observes it, so the
+representation's invariant test is its detector: `load-off-by-one`).
 
 ## Collision corpus
 
@@ -817,7 +967,7 @@ proofs", "Opaque equality refusals").
    (hir/cardinality.tcl's `ResizedPlaces`, `Mutated`).
    Why: a Botlish function could not change its caller's collection; the
    collections' mutating operations are such functions. Evidence: 28 Tcl
-   tests, 42 golden cases (with the index proofs'), 5 mutants; the map's and
+   tests, 43 golden cases (with the index proofs'), 5 mutants; the map's and
    set's own tests and fuzzer use place calls throughout; a unique map is
    never copied (`mm-no-copies`: 0 shares, 0 detaches over 3000 entries).
 2. **The loop protocol** (hir/iteration.tcl). A table of iterable
@@ -850,7 +1000,7 @@ proofs", "Opaque equality refusals").
    natively a proven vector read is still the checked runtime call
    (`mvat`, `rt_mv_at`), because native lowering's check-free siblings
    (`provenOps`) cover List and MutableArray reads but not MutableVector's
-   (Performance, "Where the instructions go"). Evidence: 13 Tcl tests (6 proven, 6 unproven, and a sweep
+   (Performance, "Where the instructions go"). Evidence: 14 Tcl tests (6 proven, 7 unproven, and a sweep
    running every proven read in range on every backend), their golden
    ports, and 4 wrong-fact mutants (a length that ignores resizes, ignores
    place calls, is one form for every vector, or trusts a context member),
@@ -870,15 +1020,15 @@ Run for this report, on the final tree (Linux x86-64, the 4-vCPU container):
 
 * **The new tests**: `tests/mutable-map.test` (28), `mutable-set.test` (12),
   `collection-iteration.test` (15), `ordered-table.test` (10),
-  `place-parameters.test` (28) and `vector-bounds.test` (13): 106 tests,
+  `place-parameters.test` (28) and `vector-bounds.test` (14): 107 tests,
   every one passing, and every one again under
   `BOTLISH_NATIVE_GC_STRESS=1`. Their golden suites, `mutable-map.bot` (27),
   `mutable-set.bot` (10), `collection-iteration.bot` (10) and
-  `place-parameters.bot` (42), pass on interp, compile, cranelift-generic
-  and cranelift, and `audit/golden/tools/perturb.tcl` makes all 89 fail as
+  `place-parameters.bot` (43), pass on interp, compile, cranelift-generic
+  and cranelift, and `audit/golden/tools/perturb.tcl` makes all 90 fail as
   required under both perturbations (an inverted library and altered
-  expectations). The census and fragments classify the 106 Tcl tests
-  (67 MIGRATE, 24 KEEP-INTERNAL, 8 SPLIT, 3 KEEP-MULTI-PROGRAM, 2
+  expectations). The census and fragments classify the 107 Tcl tests
+  (68 MIGRATE, 24 KEEP-INTERNAL, 8 SPLIT, 3 KEEP-MULTI-PROGRAM, 2
   KEEP-RUNTIME-ONLY, 2 KEEP-PARSER), and `audit/golden/migration/merge.tcl
   -check 1` finds no problem in the regenerated manifest.
 * **The oracle and the fuzzer**: `oracle.py selftest`, and the fuzz runs
