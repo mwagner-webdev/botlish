@@ -27,11 +27,11 @@ object, no Tcl helper of either collection.
 * **Cost.** Amortized O(1) contains, at, set, add and remove, O(n)
   iteration, no allocation per lookup, replacement or loop element, and dead
   entries bounded by the live ones under any churn. Natively an Int hit
-  takes 55 ns at 1024 entries and 184 ns at 65536, a presized insertion 95
-  and 138 ns, iteration 17-19 ns per entry: 1.0-2.3 times the hash-table
+  takes 64 ns at 1024 entries and 157 ns at 65536, a presized insertion 95
+  and 138 ns, iteration 17-19 ns per entry: 0.9-2.3 times the hash-table
   experiment's tables on lookups and insertions, the difference being
   mostly the keyed hash they did not pay, which in turn keeps a lookup at
-  47 ns on the public hash's collision corpus where theirs take 2-2.5 µs
+  71 ns on the public hash's collision corpus where theirs take 2-2.5 µs
   (Performance).
 
 Three general language and compiler changes made it expressible, each with
@@ -750,14 +750,14 @@ Int keys (`int-dense`), ns per operation:
 |---|---:|---:|---:|---:|
 | `set`, growing | 277 | 178 | 191 | 361 |
 | `set`, presized (`with_capacity`) | 203 | 95 | 138 | 264 |
-| `at`, hit | 67 | 55 | 184 | 220 |
-| `at`, miss (KeyNotFound handled) | 187 | 177 | 227 | 263 |
+| `at`, hit | 53 | 64 | 157 | 216 |
+| `at`, miss (KeyNotFound handled) | 112 | 143 | 141 | 184 |
 | `contains`, hit | 53 | 64 | 118 | 210 |
 | `contains`, miss | 83 | 78 | 98 | 143 |
 | `set`, replacing | 65 | 78 | 159 | 241 |
 | `remove` (in insertion order, compaction included) | 183 | 272 | 315 | 313 |
 | iteration, per entry | 26 | 17 | 18 | 19 |
-| mixed: 80 % `at`, 10 % `set`, 10 % `remove` | 95 | 95 | 162 | 231 |
+| mixed: 80 % `at`, 10 % `set`, 10 % `remove` | 99 | 103 | 176 | 229 |
 | churn: a fresh `set` and an earlier key's `remove` | 360 | 314 | 332 | 468 |
 | copy, then one `set` (the copy's first write) | 1.3 µs | 7.3 µs | 1.5 ms | 5.8 ms |
 | MutableSet `add`, growing | 226 | 195 | 192 | 252 |
@@ -770,8 +770,8 @@ canonical walk are structural), `nested` six times. Iteration is 17-26 ns
 per entry for every kind and size: it reads positions in order, so it
 never misses the cache the way a probe does.
 
-* **Amortized O(1).** From 1024 to 262144 entries an Int `at` grows from 55
-  to 220 ns and `contains` miss from 78 to 143: the cost of cache misses
+* **Amortized O(1).** From 1024 to 262144 entries an Int `at` grows from 64
+  to 216 ns and `contains` miss from 78 to 143: the cost of cache misses
   (the index, then the entry's hash, key and value, each in its own
   vector), not of longer probes. The index stays at most 7/10 full and is
   rebuilt to half full, so probe sequences stay short at every size
@@ -782,9 +782,10 @@ never misses the cache the way a probe does.
   at 1024 entries, 1.5 ms at 65536. That is MutableVector's value model
   applied to each vector, and what the brief's copy-then-mutate case
   measures. A unique map is never copied (`mm-no-copies`).
-* **A miss through `at` costs about 100 ns more than `contains`.** The
+* **A miss through `at` costs 30-65 ns more than a `contains` miss.** The
   difference is the declared error: KeyNotFound raised in `at` and handled
-  by the caller. The brief's minimal API has no get-with-default; a
+  by the caller (it cost 100-130 ns more before `at` was changed to fail
+  once: Performance, "Where the instructions go"). The brief's minimal API has no get-with-default; a
   program that expects misses calls `contains` first or pays the error
   path (Limitations).
 
@@ -803,23 +804,23 @@ ns per operation:
 | Int | insert, growing | 65536 | 191 | 183 | 140 | 85 | 38 |
 | Int | insert, presized | 1024 | 95 | 45 | 65 | 13 | 12 |
 | Int | insert, presized | 65536 | 138 | 129 | 91 | 51 | 14 |
-| Int | hit | 1024 | 55 | 35 | 40 | 8.9 | 8.1 |
-| Int | hit | 65536 | 184 | 81 | 98 | 40 | 19 |
+| Int | hit | 1024 | 64 | 35 | 40 | 8.9 | 8.1 |
+| Int | hit | 65536 | 157 | 81 | 98 | 40 | 19 |
 | Int | miss | 1024 | 78 | 42 | 58 | 50 | 8.8 |
 | Int | miss | 65536 | 98 | 76 | 94 | 44 | 11 |
 | Int | replace | 1024 | 78 | 34 | 46 | 19 | 9.8 |
 | Int | remove | 1024 | 272 | 56 | -- | 35 | 46 |
 | String | insert, growing | 1024 | 200 | 128 | 102 | 67 | 90 |
-| String | hit | 1024 | 63 | 49 | 61 | 8.9 | 13 |
-| String | hit | 65536 | 192 | 102 | 197 | 50 | 57 |
+| String | hit | 1024 | 58 | 49 | 61 | 8.9 | 13 |
+| String | hit | 65536 | 177 | 102 | 197 | 50 | 57 |
 | String | miss | 1024 | 71 | 44 | 47 | 21 | 11 |
 | struct | insert, growing | 1024 | 279 | 184 | 145 | 36 | 46 |
-| struct | hit | 1024 | 166 | 83 | 115 | 26 | 11 |
-| struct | hit | 65536 | 400 | 191 | 288 | 72 | 26 |
+| struct | hit | 1024 | 156 | 83 | 115 | 26 | 11 |
+| struct | hit | 65536 | 318 | 191 | 288 | 72 | 26 |
 
 (`compare.py` prints every kind, size and operation.)
 
-* **Production costs 1.0-2.3 times the experiment's tables on lookups
+* **Production costs 0.9-2.3 times the experiment's tables on lookups
   and insertions,** and 4.9 times `lpa` on removal; 1.6-9 times Rust's
   `lp` where the experiment's `lpa` is 0.8-5 times in this run. The
   difference has three causes, measured below: the keyed hash, which the
@@ -835,7 +836,7 @@ ns per operation:
   | 1024 colliding keys | MutableMap | `lpa` | `cd` | Rust `lp` | Rust `std` |
   |---|---:|---:|---:|---:|---:|
   | insert, growing | 206 | 5,829 | 4,697 | 1,387 | 53 |
-  | hit | 47 | 2,546 | 2,157 | 231 | 8.1 |
+  | hit | 71 | 2,546 | 2,157 | 231 | 8.1 |
   | replace | 74 | 2,511 | 2,347 | 200 | 9.7 |
   | remove | 239 | 4,215 | -- | 2,162 | 45 |
 
@@ -898,7 +899,7 @@ fails once.
 **Viability (the brief's criterion).** The hash-table experiment found
 ordinary Botlish tables viable at 2-6 times Rust's run time, with `lpa`
 at 4.2-4.4 times Rust's `lp` on hits and 1.7-2.4 on misses. The
-production table runs at 1.0-2.3 times the experiment's own tables on
+production table runs at 0.9-2.3 times the experiment's own tables on
 lookups and insertions on this machine -- the same regime, an order of
 magnitude from neither -- and at 1.6-9 times Rust's `lp`, the upper end
 on small tables where the keyed hash is most of a lookup. What separates it
@@ -944,7 +945,14 @@ Managed-heap objects allocated natively (`native::allocationReport`,
   compaction counters (a one-cell MutableArray per compaction pass), one
   rebuild per several thousand operations.
 
-<!-- BACKENDS -->
+### The Tcl backends
+
+The same operations on the reference interpreter and the Tcl compiler, an
+insertion or a hit (`T(2N) - T(N)` over whole runs, a few hundred Int
+keys): about 5.3 ms per operation on interp and 0.33 ms on compile, where
+the native backends take 50-300 ns. Every engine helper is an interpreted
+or compiled Tcl call there; the collections are correct on them (every
+test and golden case runs on both), not fast.
 
 ## Compiler changes
 
@@ -1045,7 +1053,14 @@ Run for this report, on the final tree (Linux x86-64, the 4-vCPU container):
   import the internal engine as unloadable alone), `tools/compilerpedia.tcl
   check` (the generated reference regenerated; the new topics' examples
   compile and run), the standard-library census regenerated.
-<!-- LOCAL -->
+* **The whole suite** (`tclsh9.0 tests/local.tcl`, after merging main's
+  coroutine fusion into the branch, the native backend rebuilt): every Tcl
+  test file on interp (7,000 passed, 0 failed, 90 skipped by constraint)
+  and compile (6,995 passed, 0 failed, 95 skipped), the 2,250 golden
+  duplicates skipped as the local run does, and all 108 golden suites on
+  the four backends (interp 5,180, compile 5,180, cranelift-generic 5,088,
+  cranelift 5,190 tests passed, 0 failed); 53 minutes with 4 jobs. The
+  native crate's unit tests: 296 passed.
 
 CI (GitHub Actions, the branch's final commit):
 <!-- CI -->
@@ -1106,10 +1121,11 @@ Deliberate omissions, and costs measured but not fixed:
   failure raised and handled costs about 780 instructions natively. None is
   table logic, and none was changed here: each is a change to MutableVector,
   native lowering or the keyed hash's runtime, with its own harnesses.
-* **The reference interpreter is slow on these collections**: about 4 ms
-  per operation (every engine helper is interpreted), against about 0.1 ms
-  on the Tcl compiler and 60-300 ns natively. The fuzzer runs the
-  interpreter on a third of its programs.
+* **The reference interpreter is slow on these collections**: about 5 ms
+  per operation (an insertion or a hit, every engine helper interpreted),
+  against 0.33 ms on the Tcl compiler and 50-300 ns natively (measured on
+  maps of a few hundred Int keys). The fuzzer runs the interpreter on a
+  third of its programs.
 * **ImmutableSet was not rewritten** (below).
 
 ## Future immutable Map
