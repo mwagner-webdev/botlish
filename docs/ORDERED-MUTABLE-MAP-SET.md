@@ -1062,8 +1062,25 @@ Run for this report, on the final tree (Linux x86-64, the 4-vCPU container):
   cranelift 5,190 tests passed, 0 failed); 53 minutes with 4 jobs. The
   native crate's unit tests: 296 passed.
 
-CI (GitHub Actions, the branch's final commit):
-<!-- CI -->
+CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
+
+* `static-decisions.yml` (every golden suite's static decisions under the
+  batched and the sequential scheduler, the four new suites included):
+  **passed** on a812dade, the state before the engine's last two changes
+  and the merge of main; dispatched again on the final commit, pending.
+* `tests-arm64.yml` (Linux AArch64: the Tcl suite on interp and compile,
+  its native coverage, the golden suites, the Rust tests, GC stress):
+  **passed** on a812dade; dispatched again on the final commit, pending.
+* `tests.yml` (Linux x86-64, the whole suite with the golden duplicates,
+  native coverage, the warning gate, stub-linked executables) and the
+  macOS arm64 and Windows x86-64 workflows (which every push starts and
+  the next push cancels): pending on the final commit. The macOS acceptance
+  tier of an earlier commit (6c55215a) failed on three checks this
+  milestone's own changes broke -- `compilerpedia.test` (new topics'
+  summaries over the length limit and aliases another topic already
+  claimed), `mutable-array-type.test` (the typed
+  MutableArray fence did not admit the engine) and `warning-gate.test`
+  (the new modules not yet in the gate's manifest) -- fixed in a812dade.
 
 ## Limitations
 
