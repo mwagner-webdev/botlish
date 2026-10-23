@@ -1,0 +1,407 @@
+# sdl.bot, variant B-prime ("ids") -- the SDL airlock of the Icy Tower
+# vertical slice (ICY-TOWER-VERTICAL-SLICE-1.md, ICY-TOWER-CONTEXT-REFACTOR-
+# CENSUS.md), with the working tree's public operations (create, open,
+# close, synced?, poll, seconds, sleep, counter, color, clear, present,
+# fill, line, text, scale; Sdl, SdlFailed, Polled) but retaining SDL only
+# through a non-affine value: the window's SDL_WindowID. Everything below
+# this module is the GENERATED SDL3 binding (generated/c/sdl3/TARGET/sdl3/,
+# staged beside the program by build.sh).
+#
+# Authority (DIRECT-MODULES.md). A call that hands SDL a pointer its
+# contract says nothing about (the renderer, the window: unknown escape) is
+# raw, ambient authority, and so is making a native edit or view
+# (std::binary::native). Every function here that does either requires Sdl,
+# the context this module declares, so the authority reaches the game only
+# as that capability -- `with context sdl::create()` in the entry program
+# -- and nothing above this module is direct for using it.
+#
+# State. Sdl's one member is a MutableVector, empty while SDL is closed and
+# holding the session while it is open (MUTABLE-VECTOR.md, "Context-field
+# receiver mutation"): `open` pushes it, `close` takes it out; an operation
+# of a closed Sdl does nothing and reports failure, and closing twice
+# closes once.
+#
+# Why the session is an ID. C pointers are affine (C-ABI-TYPES.md) and a
+# context may hold no affine value, so the session holds none: it holds
+# the window's SDL_WindowID, a C unsigned int, and nothing else of SDL's.
+# Every operation recovers the pointers it needs from SDL itself, when it
+# runs: the window by SDL_GetWindowFromID, its renderer by SDL_GetRenderer
+# (the window's renderer property), the keyboard state by
+# SDL_GetKeyboardState. The pointers are fresh locals of the operation,
+# which SDL only observes; none is stored, and no native memory holds one.
+# A window ID is never reused by SDL, so a stale ID finds no window (NULL,
+# which every SDL call used here answers with failure) rather than a freed
+# one.
+#
+# Memory. SDL takes its rectangles and strings by pointer, and Botlish byte
+# storage can only be lent to a C call whose contract allows it (a
+# byte-sized pointee: C-POINTER-BORROWING.md), which an SDL_FRect is not.
+# So the scratch memory a call needs is native, from SDL_malloc, written and
+# read through layouts (std::binary::native::edit/view) -- and, since the
+# session holds no pointer, it is the call's own: `fill` allocates its
+# SDL_FRect, `text` its 128-byte text buffer, `poll` its 128-byte SDL_Event,
+# `log_failure` its format string, and each frees it before it returns, on
+# every way out (an error raised after the allocation frees it and raises
+# the error again). SDL copies what it is given into its command queue
+# before the call returns, so nothing outlives the call. SDL_Event's
+# generated layout is blocked (its alternatives hold C bools, which no
+# layout field represents), so the event's type is read through EventType,
+# the one field this program needs, at offset 0 of every alternative; the
+# keyboard state, a C array of bool, is read as bytes through KeyState.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::char
+import std::ffi::c
+import std::float64
+import std::list
+import std::mutable_vector
+import std::str
+import sdl3::ctypes
+import sdl3::events
+import sdl3::error_h
+import sdl3::init
+import sdl3::keyboard
+import sdl3::layouts
+import sdl3::log
+import sdl3::render
+import sdl3::stdinc
+import sdl3::timer
+import sdl3::video
+
+# An open session: its window's SDL_WindowID, and whether presenting a
+# frame waits for the display (vertical sync). No pointer: nothing affine.
+struct Session:
+    window: std::ffi::c::UInt
+    synced: bool
+
+# The capability to call SDL, and SDL's state: the open session, if any.
+# Opaque: only this module makes one or looks inside.
+opaque context struct Sdl:
+    open: MutableVector[Session]
+
+# SDL, closed. Makes no SDL call, so it needs no authority: the entry
+# program installs it, `with context sdl::create()`, and `open` starts SDL.
+fn create() -> Sdl:
+    Sdl {open: std::mutable_vector::from_list([])}
+
+# An SDL call failed; SDL_GetError's text has been logged already.
+error SdlFailed:
+    call: str
+
+# The first field of every SDL_Event alternative: its type.
+layout EventType:
+    size 128
+    align 8
+    field type_: std::ffi::c::UInt at 0
+
+# SDL_GetKeyboardState's array, one C bool (a byte, 0 or 1) per scancode.
+layout KeyState:
+    size 512
+    align 1
+    field down: array 512 of std::ffi::c::UChar at 0
+
+# The text buffer: a NUL-terminated C string of at most 127 characters.
+layout TextBuffer:
+    size 128
+    align 1
+    field chars: array 128 of std::ffi::c::Char at 0
+
+fn nul() -> std::byte::Byte:
+    0
+
+# TEXT's UTF-8 bytes and the NUL the C API needs.
+fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# Writes TEXT, at most 127 characters, into the edit E of a text buffer:
+# printable ASCII as itself, any other character as '?', then the NUL.
+fn write_text_unchecked(text: str, e: NativeEdit[TextBuffer]) errors IndexNotFound:
+    n = std::str::length(text)
+    loop i from 0 to n:
+        c = std::char::scalar_value(text.char_at(i))
+        code = if c >= 32 and c < 127:
+            c
+        else:
+            63
+        std::binary::store_element(e.chars, i, code)
+    std::binary::store_element(e.chars, n, 0)
+
+# Writes TEXT into BUFFER as a C string (its first 127 characters).
+fn write_text(buffer: std::ffi::c::Ptr[std::ffi::c::Char], text: str, context sdl: Sdl) errors NativeEditNull, IndexNotFound:
+    e = std::binary::native::edit(TextBuffer, buffer)
+    n = std::str::length(text)
+    if n > 127:
+        return text.substring(0, 127).write_text_unchecked(e):
+            on LowerUnderrun:
+                unit
+            on UpperOverrun:
+                unit
+    text.write_text_unchecked(e)
+
+# The scratch memory's release, one per pointee (SDL_free of a null
+# pointer does nothing).
+fn free_text(text: std::ffi::c::Ptr[std::ffi::c::Char], context sdl: Sdl):
+    memory = std::ffi::c::erase(text)
+    sdl3::stdinc::SDL_free(memory)
+
+fn free_rect(rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], context sdl: Sdl):
+    memory = std::ffi::c::erase(rect)
+    sdl3::stdinc::SDL_free(memory)
+
+fn free_event(event: std::ffi::c::Ptr[sdl3::ctypes::SDL_Event], context sdl: Sdl):
+    memory = std::ffi::c::erase(event)
+    sdl3::stdinc::SDL_free(memory)
+
+# Logs "Icy Tower: CALL failed: " and SDL_GetError's text through SDL_Log
+# (a variadic C call: the error string is its one trailing argument). The
+# format string is written into a buffer of its own, freed again; nothing
+# is logged when that buffer cannot be had. (nomethod: a call's name is not
+# a receiver.)
+nomethod fn log_failure(call: str, context sdl: Sdl):
+    buffer = std::ffi::c::retype[std::ffi::c::Char](sdl3::stdinc::SDL_malloc(128))
+    written = buffer.clone().write_text("Icy Tower: ".concat(call).concat(" failed: %s")):
+        on NativeEditNull:
+            return unit
+        on IndexNotFound:
+            buffer.free_text()
+            return unit
+    message = sdl3::error_h::SDL_GetError()
+    buffer.SDL_Log(message)
+    buffer.free_text()
+
+# ---------------------------------------------------------------------------
+# Opening and closing
+
+# Logs FAILURE, unless it is "", then destroys RENDERER (unless it is null)
+# and WINDOW; the caller then ends SDL. (It does not call SDL_Quit itself:
+# like every function here it is public -- a module has no private members
+# -- and it must do nothing an importer could use to end SDL under an open
+# session.) (nomethod: neither pointer is a receiver.)
+nomethod fn release(window: std::ffi::c::Ptr[sdl3::ctypes::SDL_Window], renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], failure: str, context sdl: Sdl):
+    if failure != "":
+        log_failure(failure)
+    if not renderer.null?():
+        renderer.SDL_DestroyRenderer()
+    window.SDL_DestroyWindow()
+
+# Starts SDL with video, a resizable window of WIDTH x HEIGHT titled TITLE,
+# its renderer showing a WIDTH x HEIGHT logical view letterboxed into the
+# window (one policy for every display density: SDL scales the logical view
+# to the window's pixels), and vertical sync when SYNC asks for it: the
+# session of this Sdl from now on, remembered by the window's ID. On a
+# failure everything made before it is released again (SDL_Quit included)
+# and the failure is logged. Opening an open Sdl changes nothing.
+# (nomethod: a title is not a receiver.)
+nomethod fn open(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int, sync: bool, context sdl: Sdl) errors SdlFailed:
+    if not sdl.open.empty?():
+        return unit
+    if not sdl3::init::SDL_Init(sdl3::init::SDL_INIT_VIDEO):
+        log_failure("SDL_Init")
+        fail SdlFailed {call: "SDL_Init"}
+    window = cstring(title).SDL_CreateWindow(width, height, sdl3::video::SDL_WINDOW_RESIZABLE)
+    if window.null?():
+        log_failure("SDL_CreateWindow")
+        sdl3::init::SDL_Quit()
+        fail SdlFailed {call: "SDL_CreateWindow"}
+    no_name = std::ffi::c::null[std::ffi::c::Char]()
+    renderer = window.SDL_CreateRenderer(no_name)
+    if renderer.null?():
+        log_failure("SDL_CreateRenderer")
+        window.SDL_DestroyWindow()
+        sdl3::init::SDL_Quit()
+        fail SdlFailed {call: "SDL_CreateRenderer"}
+    id = window.SDL_GetWindowID()
+    presented = renderer.SDL_SetRenderLogicalPresentation(width, height, sdl3::render::SDL_LOGICAL_PRESENTATION_LETTERBOX)
+    if id == 0 or not presented:
+        release(window, renderer, "SDL_GetWindowID or SDL_SetRenderLogicalPresentation")
+        sdl3::init::SDL_Quit()
+        fail SdlFailed {call: "setup"}
+    synced = sync and renderer.SDL_SetRenderVSync(1)
+    sdl.open.push(Session {window: id, synced: synced})
+
+# Logs FAILURE, unless it is "", and releases the open session -- the
+# renderer and the window, found again by the window's ID -- and SDL.
+# Closing a closed Sdl does nothing. (The failure is logged before the
+# lookups: SDL_GetError's text is the failure's, which a failed lookup
+# would replace.)
+fn close(failure: str, context sdl: Sdl):
+    session = sdl.open.pop():
+        on IndexNotFound:
+            return unit
+    if failure != "":
+        log_failure(failure)
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    release(window, renderer, "")
+    sdl3::init::SDL_Quit()
+
+# Whether presenting a frame waits for the display (false when closed).
+fn synced?(context sdl: Sdl) -> bool:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    session.synced
+
+# ---------------------------------------------------------------------------
+# Input and time
+
+# Whether a quit was asked for (the window closed) among the events waiting
+# in SDL's queue, every one of which this takes, through EVENT.
+fn quit_requested?(event: std::ffi::c::Ptr[sdl3::ctypes::SDL_Event], context sdl: Sdl) -> bool errors NativeViewNull:
+    if not sdl3::events::SDL_PollEvent(event):
+        return false
+    if std::binary::native::view(EventType, event).type_ == sdl3::events::SDL_EVENT_QUIT:
+        return true
+    event.quit_requested?()
+
+# What a poll found: whether a quit was asked for, which of the keys asked
+# about are held, and what failed ("" when nothing did).
+struct Polled:
+    quit: bool
+    held: List[bool]
+    failure: str
+
+# Takes the waiting events (through an SDL_Event of its own, freed again)
+# and reads, for each of SCANCODES, whether its key is held, in the
+# keyboard state SDL_GetKeyboardState gives now.
+fn poll(scancodes: List[std::ffi::c::UInt], context sdl: Sdl) -> Polled:
+    if sdl.open.empty?():
+        return Polled {quit: true, held: [], failure: "polling a closed SDL"}
+    event = std::ffi::c::retype[sdl3::ctypes::SDL_Event](sdl3::stdinc::SDL_malloc(128))
+    if event.null?():
+        return Polled {quit: true, held: [], failure: "reading an event"}
+    quit = event.clone().quit_requested?():
+        on NativeViewNull:
+            event.free_event()
+            return Polled {quit: true, held: [], failure: "reading an event"}
+    event.free_event()
+    no_count = std::ffi::c::null[std::ffi::c::Int]()
+    keys = sdl3::keyboard::SDL_GetKeyboardState(no_count)
+    state = std::binary::native::view(KeyState, keys):
+        on NativeViewNull:
+            return Polled {quit: true, held: [], failure: "reading the keyboard"}
+    held = loop code in scancodes:
+        down = std::binary::element(state.down, code):
+            on IndexNotFound:
+                0
+        down != 0
+    Polled {quit: quit, held: held, failure: ""}
+
+# Seconds since SDL started.
+fn seconds(context sdl: Sdl) -> Float64 errors NonFiniteFloat:
+    std::float64::from_int(sdl3::timer::SDL_GetTicksNS()) / 1000000000.0
+
+# Sleeps SECONDS (nothing when it is not positive).
+fn sleep(seconds: Float64, context sdl: Sdl) errors NonFiniteFloat:
+    ns = std::float64::truncate(seconds * 1000000000.0)
+    if ns > 0 and ns < 1000000000:
+        sdl3::timer::SDL_DelayNS(ns)
+
+# SDL's high-resolution counter: a different value every run.
+fn counter(context sdl: Sdl) -> int:
+    sdl3::timer::SDL_GetPerformanceCounter()
+
+# ---------------------------------------------------------------------------
+# Drawing. Each returns whether SDL drew (false when SDL is closed). Each
+# finds the renderer itself, from the session's window ID: a function
+# returning the renderer would hand any importer the pointer (a module has
+# no private members).
+
+# The current color: R, G, B, opaque.
+nomethod fn color(r: std::ffi::c::UChar, g: std::ffi::c::UChar, b: std::ffi::c::UChar, context sdl: Sdl) -> bool:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    renderer.SDL_SetRenderDrawColor(r, g, b, 255)
+
+fn clear(context sdl: Sdl) -> bool:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    renderer.SDL_RenderClear()
+
+fn present(context sdl: Sdl) -> bool:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    renderer.SDL_RenderPresent()
+
+# Writes the rectangle X, Y, W, H into the edit E of an SDL_FRect: each
+# Float64 rounded to binary32, an overflow NonFiniteFloat before its bytes
+# are written. (Storing through an edit someone made is no authority.)
+fn store_rect(e: NativeEdit[sdl3::layouts::SDL_FRect], x: Float64, y: Float64, w: Float64, h: Float64) errors NonFiniteFloat:
+    std::binary::store(e, sdl3::layouts::SDL_FRect.x, x)
+    std::binary::store(e, sdl3::layouts::SDL_FRect.y, y)
+    std::binary::store(e, sdl3::layouts::SDL_FRect.w, w)
+    std::binary::store(e, sdl3::layouts::SDL_FRect.h, h)
+
+# Fills the rectangle at X, Y (its top left corner, in view coordinates) of
+# W x H in the current color. The four Float64s cross into C as the
+# SDL_FRect's floats: rounded to binary32, an overflow NonFiniteFloat. The
+# SDL_FRect is this call's own.
+nomethod fn fill(x: Float64, y: Float64, w: Float64, h: Float64, context sdl: Sdl) -> bool errors NonFiniteFloat:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    rect = std::ffi::c::retype[sdl3::ctypes::SDL_FRect](sdl3::stdinc::SDL_malloc(16))
+    e = std::binary::native::edit(sdl3::layouts::SDL_FRect, rect):
+        on NativeEditNull:
+            return false
+    stored = e.store_rect(x, y, w, h):
+        on NonFiniteFloat {result}:
+            rect.free_rect()
+            fail NonFiniteFloat {result: result}
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    filled = renderer.SDL_RenderFillRect(rect)
+    rect.free_rect()
+    filled
+
+# A line from X1, Y1 to X2, Y2 in the current color (C float arguments).
+nomethod fn line(x1: Float64, y1: Float64, x2: Float64, y2: Float64, context sdl: Sdl) -> bool errors NonFiniteFloat:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    renderer.SDL_RenderLine(x1, y1, x2, y2)
+
+# TEXT in SDL's built-in 8 x 8 debug font, its top left corner at X, Y. The
+# text buffer is this call's own.
+nomethod fn text(x: Float64, y: Float64, text: str, context sdl: Sdl) -> bool errors NonFiniteFloat:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    buffer = std::ffi::c::retype[std::ffi::c::Char](sdl3::stdinc::SDL_malloc(128))
+    written = buffer.clone().write_text(text):
+        on NativeEditNull:
+            return false
+        on IndexNotFound:
+            buffer.free_text()
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    drawn = renderer.SDL_RenderDebugText(x, y, buffer):
+        on NonFiniteFloat {result}:
+            buffer.free_text()
+            fail NonFiniteFloat {result: result}
+    buffer.free_text()
+    drawn
+
+# Scales everything drawn after it by FACTOR (C float arguments).
+nomethod fn scale(factor: Float64, context sdl: Sdl) -> bool errors NonFiniteFloat:
+    session = sdl.open.at(0):
+        on IndexNotFound:
+            return false
+    window = sdl3::video::SDL_GetWindowFromID(session.window)
+    renderer = window.SDL_GetRenderer()
+    renderer.SDL_SetRenderScale(factor, factor)
