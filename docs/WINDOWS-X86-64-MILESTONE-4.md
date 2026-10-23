@@ -472,9 +472,11 @@ exception handler: the vectored handler is called before Windows looks
 for frame-based handlers, and ends the process before it would.
 
 The fallback plan is untouched too (section 5): it never depended on the
-check, and the guard now also covers it -- a `fallback-roots` driver on a
-small stack whose native frames run out before its shadow stack does
-(2^22 slots) ends in the guard's report, where until now the process died.
+check, and the guard now also covers it. A `fallback-roots` driver on a
+16 MiB stack, whose native frames run out before its shadow stack does
+(2^22 slots), ends in the guard's report (real Windows, section 8.1).
+Until now nothing caught that exhaustion: the shadow stack's check never
+fired, and Windows ended the process (code inspection).
 
 ## 7. Tests
 
@@ -638,8 +640,8 @@ The first GC-stress runs found a defect in this milestone's own tests, not
 in the guard. `ns-runtime-helper` and the nested-List case of
 `native-executable-stack-overflow` build a List nested a million deep in a
 loop. Under GC stress each of the loop's allocations traces every List
-built so far: 2.7 s for 10,000 levels, 22 s for 30,000, hours for a
-million (Linux, measured).
+built so far: 2.7 s for 10,000 levels and 22 s for 30,000 (measured on
+Linux), so some seven hours for a million (extrapolated).
 
 The suite under GC stress therefore never finished. The arm64 workflow's
 GC-stress job ran past four hours in the test suite before it was
@@ -809,7 +811,7 @@ Every run of this milestone on the branch, in order:
 | [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468) | eee16a5 | macos-arm64 (manual, `native-stack-mutants`) | smoke, acceptance, Tier C's mutants | green |
 | [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512) | 62ba9cd | windows-x86_64 (manual, the two mutant items) | smoke, `roots`, acceptance, the mutants | green |
 | 39985866957 | caaabfc | windows-x86_64 (manual, `full`) | the GC-stress tier | cancelled before it started: section 7.5's defect would have held it |
-| ⟨RUN-W⟩ |
+| [39986842398](https://github.com/mwagner-webdev/botlish/actions/runs/39986842398) | d38feb0 | windows-x86_64 (push, `[ci-full]`) | smoke, `roots`, acceptance, the GC-stress tier | green |
 | [39986842454](https://github.com/mwagner-webdev/botlish/actions/runs/39986842454) | d38feb0 | macos-arm64 (push, `[ci-full]`) | smoke, acceptance, Tier C under GC stress | green |
 | [39986848710](https://github.com/mwagner-webdev/botlish/actions/runs/39986848710) | d38feb0 | tests (linux arm64) (manual) | Linux AArch64, GC stress included | green |
 
