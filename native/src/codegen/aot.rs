@@ -1096,8 +1096,7 @@ fn missing_linker_lines(output: &str) -> Option<String> {
         .lines()
         .map(str::trim)
         .filter(|line| {
-            line.contains("cannot find 'ld'")
-                || line.contains("collect2: fatal error: cannot find")
+            line.contains("collect2: fatal error: cannot find")
                 || (line.contains("unable to execute command") && line.contains("ld"))
                 || line.contains("invalid linker name")
                 || line.contains("xcrun: error: invalid active developer path")
@@ -1979,6 +1978,9 @@ mod tests {
             "collect2: fatal error: cannot find 'ld'",
             "clang: error: unable to execute command: Executable \"ld\" doesn't exist!",
             "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun at: /Library/Developer/CommandLineTools/usr/bin/xcrun",
+            "xcode-select: note: No developer tools were found, requesting install.",
+            "xcrun: error: unable to find utility \"ld\", not a developer tool or in PATH",
+            "clang: error: invalid linker name in argument '-fuse-ld=lld'",
         ] {
             assert_eq!(missing_linker_lines(&format!("noise\n  {line}\n")), Some(line.to_string()));
         }

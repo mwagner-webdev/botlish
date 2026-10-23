@@ -429,9 +429,17 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-missing-linker-unclassified gcc's "cannot find 'ld'" is taken for a failed link, not a missing linker
 ## native/src/codegen/aot.rs
 <<<<
-            line.contains("cannot find 'ld'")
+            line.contains("collect2: fatal error: cannot find")
 ====
-            line.contains("cannot find 'ld' at all")
+            line.contains("collect2: fatal error: cannot find the linker")
+>>>>
+
+@@ sys-no-command-line-tools-unclassified macOS without the Command Line Tools (xcrun's "invalid active developer path") is taken for a failed link, not a missing toolchain
+## native/src/codegen/aot.rs
+<<<<
+                || line.contains("xcrun: error: invalid active developer path")
+====
+                || line.contains("xcrun: error: invalid active developer path:")
 >>>>
 
 @@ sys-revision-unchecked the runtime reads a description of another startup revision
