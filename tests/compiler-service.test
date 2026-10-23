@@ -453,7 +453,7 @@ test cs-revision-release {release drops everything the service holds of a revisi
     list $held $one $failed [dict get $options -errorcode] [expr {[service::state] eq $base}]
 } -cleanup {file delete -force $dir; unset -nocomplain dir base ws a b held one failed message options} -result {2 rev* 1 {SERVICE UNKNOWN-REVISION} 1} -match glob
 
-test cs-revision-bounded {analyzing, querying and releasing again and again leaves the service holding one revision, and the loader's parse cache within its bound} -body {
+test cs-revision-bounded {analyzing, querying and releasing again and again leaves the service holding one revision, and the loader's parse cache within its bound, with one AST of the edited file (its newer text replaces its older one)} -body {
     set dir [cs::Dir bounded]
     set ws [cs::Workspace]
     set counts {}
@@ -464,8 +464,9 @@ test cs-revision-bounded {analyzing, querying and releasing again and again leav
         lappend counts [dict get [service::state] revisions]
         service::release $rev
     }
-    list [lsort -unique $counts] [dict get [service::state] revisions] [expr {[dict size $::surface::modules::parsed] <= 64}]
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws counts i rev} -result {1 0 1}
+    set mine [lsearch -all -index 0 -exact [dict keys $::surface::modules::parsed] [file normalize $dir/main.bot]]
+    list [lsort -unique $counts] [dict get [service::state] revisions] [expr {[dict size $::surface::modules::parsed] <= 64}] [llength $mine]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws counts i rev mine} -result {1 0 1 1}
 
 # ---------------------------------------------------------------------------
 # Activation: a retained revision answers about its own declarations
