@@ -7725,6 +7725,7 @@ tests/syntax-recovery.test sr-trait-conformance pass
 tests/syntax-recovery.test sr-transitive-module pass
 tests/syntax-recovery.test sr-type-declaration-damage pass
 tests/syntax-recovery.test sr-valid-programs-unchanged pass
+tests/syntax-recovery.test sr-holes-damage-past-statement pass
 tests/traits.test trait-alias-direct-call pass
 tests/traits.test trait-allocation-free pass
 tests/traits.test trait-any-erasure pass
@@ -9022,6 +9023,7 @@ tests/main-cli.test cli-malformed-lsp-scheduler-alone pass
 tests/main-cli.test cli-malformed-lsp-worker-scheduler pass
 tests/main-cli.test cli-malformed-lsp-and-worker pass
 tests/main-cli.test cli-malformed-lsp-target pass
+tests/main-cli.test cli-check-recovers-past-syntax pass
 tests/lsp-neovim.test lsp-neovim-session pass
 tests/compiler-service.test cs-export-import-derived pass
 tests/lsp.test lsp-sched-supersede-responsive pass

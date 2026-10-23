@@ -70,7 +70,7 @@ proc surface::recover::apply {ast source} {
     set containers {}
     Collect $ast 0 statements containers
     set body [dict get $ast body]
-    set firstStart [expr {$body eq "" ? [string length $source] : [dict get [lindex $body 0] span start]}]
+    set firstStart [if {$body eq ""} {string length $source} else {dict get [lindex $body 0] span start}]
     set header 0
     # Damaged positions: id -> the first damaged offset of a malformed
     # statement; inserted holes for damage between statements.
@@ -266,7 +266,7 @@ proc surface::recover::LayoutRegion {body at} {
         if {$start > $at && [dict get $statement span column] == 1} {
             break
         }
-        lappend result $statement [expr {$start <= $at ? $at : $start}]
+        lappend result $statement [expr {max($start, $at)}]
     }
     return $result
 }
@@ -279,7 +279,7 @@ proc surface::recover::Rebuild {node stateVar topLevel} {
     }
     switch -- [dict get $node kind] {
         program - suite {
-            set inserted [dict getdef [dict get $state inserted] [expr {[dict get $node kind] eq "program" ? "" : [dict get $node id]}] {}]
+            set inserted [dict getdef [dict get $state inserted] [if {[dict get $node kind] eq "program"} {list} else {dict get $node id}] {}]
             set body {}
             set index 0
             foreach statement [dict get $node body] {
@@ -432,7 +432,7 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     if {$name ne ""} {
         # The value: everything after the name (and `=`), from its first
         # token, or from the damage when nothing was written there.
-        set from [expr {$valueFrom < [llength $prefix] ? [dict get [lindex $prefix $valueFrom] span start] : $at}]
+        set from [if {$valueFrom < [llength $prefix]} {dict get [lindex $prefix $valueFrom] span start} else {set at}]
         set to [expr {max([dict get $span end], $from)}]
         set valueSpan [Span [dict get $state source] [dict get $state file] $from $to]
     }

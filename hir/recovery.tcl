@@ -210,12 +210,13 @@ proc hir::recovery::Tainted {hir resolution} {
     return [dict create unitOf $unitOf units $units]
 }
 
-# Resolution diagnostics that hold whatever a type-level name denotes: a
-# misplaced statement, a name bound twice in one scope.
 namespace eval hir::recovery {
     # What a module's top-level declarations decide for code elsewhere
     # (TRAITS.md, CONTEXT-TRAITS.md): conformance and implementations.
     variable conformanceKinds {TRAIT-NOT-SATISFIED MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+    # Resolution diagnostics that hold whatever a type-level name denotes: a
+    # misplaced statement, a name bound twice in one scope, an unbound name
+    # (a value, never a type-level name).
     variable structuralKinds {DUPLICATE BREAK-OUTSIDE-LOOP CONTINUE-OUTSIDE-LOOP RETURN-OUTSIDE-CALLABLE
         LISTLOOP-BREAK-VALUE DUPLICATE-LOOP-VARIABLE DUPLICATE-FIELD UNBOUND}
 }
@@ -224,7 +225,7 @@ namespace eval hir::recovery {
 # whose `syntaxRecovery` the front end recorded (surface/modules.tcl's
 # Recovery). Holes are SYNTAX-HOLE diagnostics, and references whose binding
 # a hole may change are `syntaxDependent` already (hir/resolve.tcl's Holes).
-# Two things depend on what nobody wrote beyond that:
+# Three things depend on what nobody wrote beyond that:
 #
 #   * in a file whose type-level names are not all known (`typeFiles`: a
 #     malformed declaration may have declared one, of the file or of a module

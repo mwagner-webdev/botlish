@@ -2416,7 +2416,7 @@ proc hir::resolve::AfterBindingHole {hirVar s b} {
     if {![dict exists $hir bindingHoles]} {
         return 0
     }
-    set own [expr {$b eq "" ? "" : [dict get $hir bindings $b scope]}]
+    set own [if {$b eq ""} {list} else {dict get $hir bindings $b scope}]
     for {} {$s ne "" && $s ne $own} {set s [dict get $hir scopes $s parent]} {
         if {[dict getdef $hir scopes $s holes 0]} {
             return 1

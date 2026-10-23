@@ -319,13 +319,13 @@ test sr-hole-is-poison-not-divergence {a hole is no value and no divergence: wha
     set holes [lmap e [hir::walk $hir] {if {[dict exists $hir exprs $e hole]} {set e} else continue}]
     list [llength $holes] [hir::types::Poisoned $hir [lindex $holes 0]] [hir::types::Halts $hir [lindex $holes 0] never] \
         [lmap d [hir::recovery::reported $hir] {dict get $d kind}] [dict get $hir syntaxRecovery taintedFiles]
-} -cleanup {unset -nocomplain hir holes} -result {1 1 0 UNBOUND {}}
+} -cleanup {file delete -force [file join [temporaryDirectory] sr-poison-[pid]]; unset -nocomplain hir holes} -result {1 1 0 UNBOUND {}}
 
 test sr-analysis-claims-nothing {the analysis itself, not only what is reported, claims no outcome of a hole: a function whose body holds one is not proven to fail or never to complete (no KNOWN-ERROR among all the HIR's diagnostics)} -body {
     set hir [surface::readProgramFile [sr::Put [sr::Dir claims]/main.bot "error Boom\n\nfn f() -> int errors Boom:\n    k = 1 +\n    k\n\nfn g() -> int errors Boom:\n    if true\n        fail Boom\n    1\n\nv = f():\n    on Boom:\n        0\nw = g():\n    on Boom:\n        0\n"] \
         -strict 0 -recover-syntax 1 -cache "" -warnings off]
     lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]
-} -cleanup {unset -nocomplain hir} -result SYNTAX-HOLE
+} -cleanup {file delete -force [file join [temporaryDirectory] sr-claims-[pid]]; unset -nocomplain hir} -result SYNTAX-HOLE
 
 test sr-method-candidates {a method-style call in a file importing a module whose malformed top-level line may define its function is not reported unresolved; in a file that imports no such module it is} -body {
     set dir [sr::Dir methods]

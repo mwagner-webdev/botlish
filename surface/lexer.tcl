@@ -75,13 +75,12 @@
 # malformed construct inside it makes), `skipped` those of the diagnostics
 # whose recovery removed source text from the token stream (an unexpected
 # character, the rest of an unterminated string's line: a bracket left open
-# around one is not reported at all), `synthetic` the
-# start offsets of the zero-width closers it inserted, and `indentation` the
-# indices of the layout diagnostics (a tab, an inconsistent dedent): guesses
-# about which block a line belongs to, and `unclosed` those of the brackets
-# never closed (the opener is what was written; what follows it is the
-# guess), which syntax recovery weighs (surface/recover.tcl,
-# SYNTAX-RECOVERY-MILESTONE-1.md).
+# around one is not reported at all), and `synthetic` the start offsets of
+# the zero-width closers it inserted. For syntax recovery (surface/recover.tcl,
+# SYNTAX-RECOVERY-MILESTONE-1.md), `indentation` holds the indices of the
+# layout diagnostics (a tab, an inconsistent dedent: guesses about which
+# block a line belongs to) and `unclosed` those of the brackets never closed
+# (the opener was written; where the bracket ends is the guess).
 
 namespace eval surface::lexer {
     variable keywords {fn if elif else loop return break continue true false unit and or not type \
