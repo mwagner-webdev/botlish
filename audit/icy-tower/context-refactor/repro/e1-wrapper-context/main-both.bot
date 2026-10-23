@@ -1,0 +1,14 @@
+# E1b. The same program with both layers installed by the entry program, in
+# dependency order (see main.bot): it runs.
+#
+# expect interp: value: 2
+# expect compile: value: 2
+# expect cranelift-generic: value: 2
+# expect cranelift: value: 2
+import lowlevel
+import wrapper
+
+with context lowlevel::create()
+with context wrapper::create()
+
+wrapper::sprite(3)

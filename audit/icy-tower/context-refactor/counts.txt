@@ -1,0 +1,94 @@
+# census.tcl -rev 6df89a8e (the baseline: the vertical slice as committed before this census)
+measure                             hud    main options  render     sdl   tower
+functions                           14      11       9      10      21      25   total 90
+pointer-functions                    0       1       0       8      15       0   total 24
+pointer-struct-types                 0       1       0       1       2       0   total 4
+pointer-clones                       0       0       0      48       8       0   total 56
+pointer-clones-hir                   0       0       0      48       8       0   total 56
+pointer-destructurings               0       3       0       1       2       0   total 6
+pointer-struct-constructions         0       8       0       2       6       0   total 16
+cross-module-calls                   2      17       0      39       0       0   total 58
+pointer-crossing-calls               0       4       0      34       0       0   total 38
+sdl-c-calls                          0       1       0       0      30       0   total 31
+other-c-calls                        0       4       0       0       0       0   total 4
+native-view-edit                     0       0       0       0       4       0   total 4
+names-c-pointer-types                0       0       0       1       1       0   total 2
+raw-binding-imports                  0       2       0       1      11       0   total 14
+sdl-context-parameters               0       0       0       0      17       0   total 17
+sdl-requiring-functions              0       5       0       8      17       0   total 30
+
+direct status: tower ordinary hud ordinary options ordinary sdl contextualized render ordinary main ordinary
+pointer-struct-types:
+    Ended
+    render::Drawn
+    sdl::Polled
+    sdl::Video
+crossing:
+    main -> render::draw
+    main -> sdl::close
+    main -> sdl::open
+    main -> sdl::poll
+    render -> sdl::clear
+    render -> sdl::color
+    render -> sdl::fill
+    render -> sdl::line
+    render -> sdl::present
+    render -> sdl::scale
+    render -> sdl::text
+pointer-functions:
+    run  (main:89:7)
+    render::walls  (render:38:9)
+    render::platform_color  (render:53:18)
+    render::platform  (render:66:12)
+    render::player  (render:82:10)
+    render::lines  (render:99:9)
+    render::banner  (render:106:10)
+    render::frame  (render:121:9)
+    render::draw  (render:145:8)
+    sdl::write_text  (sdl:123:14)
+    sdl::log_failure  (sdl:136:15)
+    sdl::free_text  (sdl:148:13)
+    sdl::close  (sdl:155:9)
+    sdl::open  (sdl:176:17)
+    sdl::quit_requested?  (sdl:214:19)
+    sdl::down?  (sdl:222:9)
+    sdl::poll  (sdl:235:8)
+    sdl::color  (sdl:262:9)
+    sdl::clear  (sdl:265:9)
+    sdl::present  (sdl:268:11)
+    sdl::fill  (sdl:274:8)
+    sdl::line  (sdl:283:8)
+    sdl::text  (sdl:287:8)
+    sdl::scale  (sdl:292:9)
+SDL functions called from sdl: sdl3::error_h::SDL_GetError sdl3::events::SDL_PollEvent sdl3::init::SDL_Init sdl3::init::SDL_Quit sdl3::keyboard::SDL_GetKeyboardState sdl3::log::SDL_Log sdl3::render::SDL_CreateRenderer sdl3::render::SDL_DestroyRenderer sdl3::render::SDL_RenderClear sdl3::render::SDL_RenderDebugText sdl3::render::SDL_RenderFillRect sdl3::render::SDL_RenderLine sdl3::render::SDL_RenderPresent sdl3::render::SDL_SetRenderDrawColor sdl3::render::SDL_SetRenderLogicalPresentation sdl3::render::SDL_SetRenderScale sdl3::render::SDL_SetRenderVSync sdl3::stdinc::SDL_free sdl3::stdinc::SDL_malloc sdl3::timer::SDL_DelayNS sdl3::timer::SDL_GetTicksNS sdl3::video::SDL_CreateWindow sdl3::video::SDL_DestroyWindow
+SDL functions called from main: sdl3::timer::SDL_GetPerformanceCounter
+
+# census.tcl examples/games/icy-tower (the refactor)
+measure                             hud    main options  render     sdl   tower
+functions                           14      11       9      10      25      25   total 94
+pointer-functions                    0       0       0       0       7       0   total 7
+pointer-struct-types                 0       0       0       0       0       0   total 0
+pointer-clones                       0       0       0       0       6       0   total 6
+pointer-clones-hir                   0       0       0       0       6       0   total 6
+pointer-destructurings               0       0       0       0       0       0   total 0
+pointer-struct-constructions         0       0       0       0       0       0   total 0
+cross-module-calls                   2      20       0      39       0       0   total 61
+pointer-crossing-calls               0       0       0       0       0       0   total 0
+sdl-c-calls                          0       0       0       0      38       0   total 38
+other-c-calls                        0       4       0       0       0       0   total 4
+native-view-edit                     0       0       0       0       6       0   total 6
+names-c-pointer-types                0       0       0       0       1       0   total 1
+raw-binding-imports                  0       1       0       0      11       0   total 12
+sdl-context-parameters               0       0       0       0      20       0   total 20
+sdl-requiring-functions              0       5       0       8      20       0   total 33
+
+direct status: tower ordinary hud ordinary options ordinary sdl contextualized render ordinary main ordinary
+pointer-functions:
+    sdl::write_text  (sdl:150:14)
+    sdl::log_failure  (sdl:163:15)
+    sdl::free_text  (sdl:175:13)
+    sdl::release  (sdl:186:20)
+    sdl::remember  (sdl:199:12)
+    sdl::quit_requested?  (sdl:292:19)
+    sdl::down?  (sdl:300:9)
+SDL functions called from sdl: sdl3::error_h::SDL_GetError sdl3::events::SDL_PollEvent sdl3::init::SDL_Init sdl3::init::SDL_Quit sdl3::keyboard::SDL_GetKeyboardState sdl3::log::SDL_Log sdl3::render::SDL_CreateRenderer sdl3::render::SDL_DestroyRenderer sdl3::render::SDL_RenderClear sdl3::render::SDL_RenderDebugText sdl3::render::SDL_RenderFillRect sdl3::render::SDL_RenderLine sdl3::render::SDL_RenderPresent sdl3::render::SDL_SetRenderDrawColor sdl3::render::SDL_SetRenderLogicalPresentation sdl3::render::SDL_SetRenderScale sdl3::render::SDL_SetRenderVSync sdl3::stdinc::SDL_free sdl3::stdinc::SDL_malloc sdl3::timer::SDL_DelayNS sdl3::timer::SDL_GetPerformanceCounter sdl3::timer::SDL_GetTicksNS sdl3::video::SDL_CreateWindow sdl3::video::SDL_DestroyWindow

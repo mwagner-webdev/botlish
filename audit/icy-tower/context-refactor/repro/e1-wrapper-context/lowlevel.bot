@@ -1,0 +1,14 @@
+# lowlevel.bot -- the lower layer of e1 (e1-wrapper-context/main.bot): a
+# module whose operations require its own context, as sdl.bot's require Sdl.
+import std::mutable_vector
+
+opaque context struct Native:
+    allocations: MutableVector[int]
+
+fn create() -> Native:
+    Native {allocations: std::mutable_vector::from_list([])}
+
+# Records an allocation of SIZE; the number made so far.
+fn allocate(size: int, context n: Native) -> int:
+    n.allocations.push(size)
+    std::mutable_vector::length(n.allocations)

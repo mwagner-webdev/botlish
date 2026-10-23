@@ -19,8 +19,9 @@
 #
 # The frame loop is one self-tail-recursive function, `run`, which the
 # native backend compiles to a loop: the world is an immutable value
-# replaced each frame, and the SDL objects (affine C pointers) travel with
-# it, so that every way out of the loop hands them back to sdl::close.
+# replaced each frame. SDL -- the window, the renderer, the keyboard, the
+# clock -- is the installed sdl::Sdl context, which `play` opens before the
+# loop and closes after it: nothing here holds an SDL object.
 import std::ffi::c
 import std::float64
 import std::io
@@ -32,7 +33,6 @@ import std::str
 import render
 import sdl
 import sdl3::scancode
-import sdl3::timer
 import tower
 
 # C's exit(3): the process's exit status, which Botlish cannot set.
@@ -60,10 +60,9 @@ fn input(held: List[bool]) -> tower::Input:
 fn escape?(held: List[bool]) -> bool:
     held.get(5, false)
 
-# How a run ended: the SDL objects to release, the last world, the frames
-# played, and what failed ("" when nothing did).
+# How a run ended: the last world, the frames played, and what failed (""
+# when nothing did).
 struct Ended:
-    video: sdl::Video
     world: tower::World
     frames: int
     failure: str
@@ -78,60 +77,60 @@ fn frame_length(now: Float64, last: Float64, o: options::Options) -> Float64 err
 # Sleeps out the rest of a 60 Hz frame that started at NOW, unless the
 # display paces the loop (vertical sync) or the steps are fixed (a smoke
 # run goes as fast as it can).
-fn pace(now: Float64, synced: bool, o: options::Options) errors NonFiniteFloat:
-    if synced or o.fixed_step:
+fn pace(now: Float64, o: options::Options) errors NonFiniteFloat:
+    if sdl::synced?() or o.fixed_step:
         return unit
     sdl::sleep(tower::frame_time - (sdl::seconds() - now))
 
-# The frame loop: plays WORLD on VIDEO until a quit (the window closed,
-# Escape), the frame limit of OPTIONS or a failure. FRAMES have been
-# played, the last one started at LAST seconds.
-fn run(video: sdl::Video, world: tower::World, frames: int, last: Float64, o: options::Options) -> Ended:
+# The frame loop: plays WORLD until a quit (the window closed, Escape), the
+# frame limit of OPTIONS or a failure. FRAMES have been played, the last
+# one started at LAST seconds.
+fn run(world: tower::World, frames: int, last: Float64, o: options::Options) -> Ended:
     if o.frames > 0 and frames >= o.frames:
-        return Ended {video: video, world: world, frames: frames, failure: ""}
-    {video: polled, quit, held, failure: unread} = video.poll(scancodes())
+        return Ended {world: world, frames: frames, failure: ""}
+    {quit, held, failure: unread} = sdl::poll(scancodes())
     if unread != "":
-        return Ended {video: polled, world: world, frames: frames, failure: unread}
+        return Ended {world: world, frames: frames, failure: unread}
     if quit or held.escape?():
-        return Ended {video: polled, world: world, frames: frames, failure: ""}
+        return Ended {world: world, frames: frames, failure: ""}
     wanted = if o.autopilot:
         tower::autopilot(world):
             on NonFiniteFloat:
-                return Ended {video: polled, world: world, frames: frames, failure: "the autopilot"}
+                return Ended {world: world, frames: frames, failure: "the autopilot"}
     else:
         held.input()
     now = sdl::seconds():
         on NonFiniteFloat:
-            return Ended {video: polled, world: world, frames: frames, failure: "reading the clock"}
+            return Ended {world: world, frames: frames, failure: "reading the clock"}
     dt = now.frame_length(last, o):
         on NonFiniteFloat:
-            return Ended {video: polled, world: world, frames: frames, failure: "reading the clock"}
+            return Ended {world: world, frames: frames, failure: "reading the clock"}
     next = world.step(wanted, dt):
         on NonFiniteFloat:
-            return Ended {video: polled, world: world, frames: frames, failure: "a step of the game"}
-    {video: drawn, synced, failure: undrawn} = polled.draw(next)
+            return Ended {world: world, frames: frames, failure: "a step of the game"}
+    undrawn = render::draw(next)
     if undrawn != "":
-        return Ended {video: drawn, world: next, frames: frames + 1, failure: undrawn}
-    paced = now.pace(synced, o):
+        return Ended {world: next, frames: frames + 1, failure: undrawn}
+    paced = now.pace(o):
         on NonFiniteFloat:
             unit
-    drawn.run(next, frames + 1, now, o)
+    next.run(frames + 1, now, o)
 
 # Plays with SDL: opens the window, runs the loop, closes everything; the
 # summary, or, after a failure (logged), exit status 1.
 fn play(o: options::Options) -> str errors NonFiniteFloat:
-    video = sdl::open("Icy Tower - Botlish", 480, 720, not o.fixed_step):
+    sdl::open("Icy Tower - Botlish", 480, 720, not o.fixed_step):
         on sdl::SdlFailed {call}:
             exit(1)
             return "failed: ".concat(call)
     seed = if o.seeded:
         o.seed
     else:
-        sdl3::timer::SDL_GetPerformanceCounter()
+        sdl::counter()
     world = tower::new_world(seed, 1)
     start = sdl::seconds()
-    {video: done, world: last, frames, failure} = video.run(world, 0, start, o)
-    done.close(failure)
+    {world: last, frames, failure} = world.run(0, start, o)
+    sdl::close(failure)
     if failure != "":
         exit(1)
         return "failed: ".concat(failure)
@@ -161,12 +160,16 @@ fn main(arguments: List[str]) -> str errors std::io::WriteFailed:
         return "help"
     ran = o.session():
         on NonFiniteFloat:
+            # SDL may be open (play opens it before its first Float64): close
+            # it, as every other way out does. (Closing a closed Sdl does
+            # nothing.)
+            sdl::close("")
             exit(1)
             "failed: a number left the finite Float64s"
     ran
 
 with context std::linux::io::create()
-with context sdl::authority()
+with context sdl::create()
 
 fn arguments() -> List[str]:
     everything = argv():

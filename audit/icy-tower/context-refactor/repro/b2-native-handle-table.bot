@@ -1,0 +1,107 @@
+# B2. Retaining foreign pointers across contextual calls today: a handle
+# table in native memory, held by the context through a native view
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Can a context retain affine
+# foreign resources?"). The mechanism of the refactored sdl.bot, with libc
+# in SDL's place.
+#
+# `open` mallocs a record and a string, writes the string's pointer and the
+# record's own into the record through a native edit, and pushes the record's
+# native view -- an unrestricted value -- into the context's MutableVector.
+# Every later contextual call reads the pointers it needs back through the
+# view (a pointer field read through a view is the pointer memory holds:
+# NATIVE-LAYOUT-VIEWS.md) and hands them to C, which observes them. No
+# pointer is a field of the context, no pointer crosses a function boundary
+# above the context's own module, and no `.clone()` is written: the affine
+# discipline is stepped around through raw memory, which is why making a
+# view or an edit is direct authority (mediated here by the program's own
+# context, Store).
+#
+# C calls run natively only (the Tcl backends refuse them: NATIVE-ONLY).
+#
+# expect interp: NATIVE-ONLY
+# expect compile: NATIVE-ONLY
+# expect cranelift-generic: value: [-1, 5, -1, -1]
+# expect cranelift: value: [-1, 5, -1, -1]
+import std::binary
+import std::binary::native
+import std::ffi::c
+import std::mutable_vector
+
+extern c fn malloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
+extern c fn strlen(s: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::ULong
+
+# The session's pointers, in native memory: the record's own address (a
+# view never becomes a pointer again) and the string's.
+layout Handles:
+    size 16
+    align 8
+    field record: std::ffi::c::Ptr[std::ffi::c::Void] at 0
+    field name: std::ffi::c::Ptr[std::ffi::c::Char] at 8
+
+layout Text:
+    size 8
+    align 1
+    field chars: array 8 of std::ffi::c::Char at 0
+
+struct Session:
+    handles: NativeView[Handles]
+
+opaque context struct Store:
+    open: MutableVector[Session]
+
+fn create() -> Store:
+    Store {open: std::mutable_vector::from_list([])}
+
+fn write_hello(e: NativeEdit[Text]) errors IndexNotFound:
+    std::binary::store_element(e.chars, 0, 104)
+    std::binary::store_element(e.chars, 1, 101)
+    std::binary::store_element(e.chars, 2, 108)
+    std::binary::store_element(e.chars, 3, 108)
+    std::binary::store_element(e.chars, 4, 111)
+    std::binary::store_element(e.chars, 5, 0)
+
+fn open(context s: Store) errors NativeEditNull, NativeViewNull, IndexNotFound:
+    record = malloc(16)
+    name = std::ffi::c::retype[std::ffi::c::Char](malloc(8))
+    hello = std::binary::native::edit(Text, name)
+    hello.write_hello()
+    e = std::binary::native::edit(Handles, record)
+    std::binary::store(e, Handles.record, record)
+    std::binary::store(e, Handles.name, name)
+    s.open.push(Session {handles: std::binary::native::view(Handles, record)})
+
+fn length(context s: Store) -> int:
+    session = s.open.at(0):
+        on IndexNotFound:
+            return -1
+    name = session.handles.name
+    strlen(name)
+
+fn close(context s: Store):
+    session = s.open.pop():
+        on IndexNotFound:
+            return unit
+    h = session.handles
+    record = h.record
+    name = h.name
+    memory = std::ffi::c::erase(name)
+    free(memory)
+    free(record)
+
+with context create()
+
+before = length()
+opened = open():
+    on NativeEditNull:
+        unit
+    on NativeViewNull:
+        unit
+    on IndexNotFound:
+        unit
+during = length()
+close()
+after = length()
+close()
+again = length()
+[before, during, after, again]

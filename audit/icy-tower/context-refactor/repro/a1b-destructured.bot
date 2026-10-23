@@ -1,0 +1,28 @@
+# A1b. Destructuring the context local is accepted -- the installation is
+# still rejected (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context
+# deficiencies", A).
+#
+# Every function that requires Holder loads the installed value as a fresh
+# immutable local, so a destructuring moves the pointer out of *that local*
+# only: if installation were allowed, every load would mint another owner of
+# the one pointer. The wall is the installation, not the read.
+#
+# expect interp: AFFINE-ERASURE-UNSUPPORTED
+# expect compile: AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift-generic: AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift: AFFINE-ERASURE-UNSUPPORTED
+import std::ffi::c
+
+opaque context struct Holder:
+    p: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn make() -> Holder:
+    Holder {p: std::ffi::c::null[std::ffi::c::Void]()}
+
+fn empty?(context h: Holder) -> bool:
+    {p} = h
+    p.null?()
+
+with context make()
+
+empty?()

@@ -101,24 +101,71 @@ test workload-icy-tower-warning-clean {the pure modules and their programs have 
     join $found \n
 } -result {}
 
-test workload-icy-tower-sdl-modules-warning-clean {main.bot, sdl.bot and render.bot, staged with the committed generated SDL3 binding (tools/c-bindgen.tcl stage), compile under -warnings error for linux-x86_64: no warning of the game's own, none of the binding's -- and no module of the game is direct: sdl.bot's raw calls (retaining C calls, native views and edits) are all mediated by its own Sdl context (DIRECT-MODULES.md), so render.bot and the entry program stay ordinary} -body {
+# The HIR of main.bot, staged with the committed generated SDL3 binding
+# (tools/c-bindgen.tcl stage) and compiled under -warnings error for
+# linux-x86_64; compiled once, for the tests that read it.
+proc icyStagedHir {} {
+    if {[info exists ::icyStagedHir]} {
+        return $::icyStagedHir
+    }
     set stage [file join [tcltest::temporaryDirectory] icy-tower-stage]
     file delete -force $stage
-    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $gameDir -into $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $::gameDir -into $stage
     try {
-        set hir [surface::readProgramFile [file join $stage main.bot] -warnings error -warning-channel "" -target linux-x86_64]
-        set statuses {}
-        foreach line [split [hir::direct::summary $hir] \n] {
-            if {[regexp {^module (tower|hud|options|sdl|render): (\S+)} $line -> module status]
-                    || [regexp {^(entry program): (\S+)} $line -> module status]} {
-                lappend statuses $module $status
-            }
-        }
-        list ok [lsort -stride 2 $statuses]
+        set ::icyStagedHir [surface::readProgramFile [file join $stage main.bot] -warnings error -warning-channel "" -target linux-x86_64]
     } finally {
         file delete -force $stage
     }
+    return $::icyStagedHir
+}
+
+test workload-icy-tower-sdl-modules-warning-clean {main.bot, sdl.bot and render.bot, staged with the committed generated SDL3 binding (tools/c-bindgen.tcl stage), compile under -warnings error for linux-x86_64: no warning of the game's own, none of the binding's -- and no module of the game is direct: sdl.bot's raw calls (retaining C calls, native views and edits) are all mediated by its own Sdl context (DIRECT-MODULES.md), so render.bot and the entry program stay ordinary} -body {
+    set hir [icyStagedHir]
+    set statuses {}
+    foreach line [split [hir::direct::summary $hir] \n] {
+        if {[regexp {^module (tower|hud|options|sdl|render): (\S+)} $line -> module status]
+                || [regexp {^(entry program): (\S+)} $line -> module status]} {
+            lappend statuses $module $status
+        }
+    }
+    list ok [lsort -stride 2 $statuses]
 } -result {ok {{entry program} ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
+
+# The game module of expression E (its file's name), "" outside the game.
+proc icyModuleOf {hir e} {
+    set origin [dict get $hir exprs $e origin]
+    if {[lindex $origin 0] ne "file"} { return "" }
+    set file [file rootname [file tail [lindex [split [hir::originLocation $hir $origin] :] 0]]]
+    return [expr {$file in {main sdl render tower hud options} ? $file : ""}]
+}
+
+test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md): outside sdl.bot no function's parameter or result holds a C pointer, no call passes or returns one, no SDL function is called, and no native view or edit is made -- every SDL object lives in the installed context's session, and render.bot and main.bot use operations only} -body {
+    set hir [icyStagedHir]
+    set found {}
+    dict for {e node} [dict get $hir exprs] {
+        set module [icyModuleOf $hir $e]
+        if {$module in {"" sdl}} continue
+        set where "$module.bot:[lindex [split [hir::originLocation $hir [dict get $node origin]] :] end-1]"
+        switch -- [dict get $node kind] {
+            block {
+                set signature [hir::signatures::of $hir $e]
+                foreach type [concat [lmap p [dict get $signature params] {dict get $p trusted}] [list [dict get $signature result]]] {
+                    if {$type ne "" && [hir::types::IsAffine $type]} { lappend found "$where: a function holding a pointer" }
+                }
+            }
+            call {
+                set native [hir::affine::NativeName $hir $e]
+                if {[string match extern#sdl3::* $native]} { lappend found "$where: calls [string range $native 7 end]" }
+                if {$native in {std::binary::native::view std::binary::native::edit}} { lappend found "$where: makes a native view or edit" }
+                foreach value [concat [list $e] [dict get $node args]] {
+                    set type [hir::typeOf $hir $value]
+                    if {$type ne "" && [hir::types::IsAffine $type]} { lappend found "$where: a call passing or returning a pointer" }
+                }
+            }
+        }
+    }
+    lsort -unique $found
+} -result {}
 
 test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
     set text [core::ReadFile [file join $gameDir golden.bot]]

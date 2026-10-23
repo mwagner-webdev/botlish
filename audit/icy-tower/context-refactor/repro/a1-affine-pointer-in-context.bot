@@ -1,0 +1,38 @@
+# A1. A context cannot hold an affine C pointer
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies", A).
+#
+# The intended airlock -- a context that privately retains the pointer a
+# foreign library returned and hands it to C on every contextual call --
+# spelled the natural way. Two diagnostics:
+#
+# * the field read `h.p` through the context parameter is
+#   AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE: a context parameter is an
+#   ordinary immutable local, so reading an affine field would make a
+#   second owner (even though the use, null?, only observes it);
+# * the installation is AFFINE-ERASURE-UNSUPPORTED: `with context EXPR`
+#   becomes a call of the internal native context#install, which takes any
+#   value, and an affine value may not be erased into `any` (C-ABI-TYPES.md:
+#   "a context struct may not hold one"). The message names the hygienic
+#   temporary (`context#N`) rather than the installed expression.
+#
+# Destructuring the context local instead (`{p} = h`) passes the first
+# check and still fails the second: a1b-destructured.bot.
+#
+# expect interp: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
+# expect compile: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift-generic: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
+import std::ffi::c
+
+opaque context struct Holder:
+    p: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn make() -> Holder:
+    Holder {p: std::ffi::c::null[std::ffi::c::Void]()}
+
+fn empty?(context h: Holder) -> bool:
+    h.p.null?()
+
+with context make()
+
+empty?()

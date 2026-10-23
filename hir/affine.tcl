@@ -216,6 +216,14 @@ proc hir::affine::NativeName {hir e} {
     if {[dict get $binding kind] ne "root"} {
         return ""
     }
+    # The name the native is registered by: its symbol's. A binding's own
+    # name can differ -- hygiene renames an extern c fn's binding
+    # (extern#KEY#N) when another binding of its name would shadow it
+    # (ProtectEarlierRefs), as a planned clone's reference does.
+    set y [dict get $binding symbol]
+    if {$y ne "" && [dict exists $hir symbols $y] && [dict get $hir symbols $y kind] eq "native"} {
+        return [dict get $hir symbols $y name]
+    }
     return [dict get $binding name]
 }
 

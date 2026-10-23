@@ -2683,6 +2683,16 @@ generated SDL3 binding. Keep its layering:
   `Sdl` context, so `render.bot` and `main.bot` stay ordinary modules
   (`workload-icy-tower-sdl-modules-warning-clean` checks
   `hir::direct::summary`). Do not mark a game module `direct module`.
+* SDL's objects stay behind that context (ICY-TOWER-CONTEXT-REFACTOR-
+  CENSUS.md): the installed `Sdl` holds the open session (the window, the
+  renderer and the scratch memory, in a native-memory record its view
+  reads), and `render.bot` and `main.bot` call operations that take and
+  return values only. Never give a function outside `sdl.bot` a C pointer,
+  a native view or edit, or a struct holding one, never call SDL from
+  another module, and never add a public `sdl.bot` function that returns
+  the session's view or a pointer (a module has no private members:
+  anything it returns, every importer gets). `workload-icy-tower-sdl-
+  airlock` checks it.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
   beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
   into the example directory or hand-write a parallel SDL declaration.
@@ -2700,6 +2710,10 @@ without it), `audit/icy-tower/mutate.tcl` (every mutant in
 `audit/icy-tower/mutants.txt` must still apply and be killed: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule) and `python3 audit/icy-tower/oracle.py compare EXECUTABLE`;
+for a change to `sdl.bot`, `render.bot` or `main.bot`, also compare the SDL
+call trace of the old and new executables
+(`audit/icy-tower/context-refactor/tools/trace-compare.sh OLD NEW`: every
+draw, poll and release with its arguments must be the same);
 `audit/icy-tower/tools/xvfb-session.py` plays the executable in a real X11
 window (an SDL3 built with the x11 driver: build.sh says how) and
 `audit/icy-tower/tools/perf.tcl` is the performance report. CI's

@@ -1,0 +1,25 @@
+# C1b. `with context EXPR` takes no handler block (see c1).
+#
+# expect interp: SYNTAX
+# expect compile: SYNTAX
+# expect cranelift-generic: SYNTAX
+# expect cranelift: SYNTAX
+context struct Session:
+    id: int
+
+error OpenFailed:
+    reason: str
+
+fn open(ok: bool) -> Session errors OpenFailed:
+    if not ok:
+        fail OpenFailed {reason: "no display"}
+    Session {id: 1}
+
+fn id(context s: Session) -> int:
+    s.id
+
+with context open(false):
+    on OpenFailed:
+        Session {id: 0}
+
+id()

@@ -1,0 +1,41 @@
+# F1. A front-end crash this census hit and fixed
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Compiler bug found and fixed").
+#
+# Not a context rule: a compiler bug the context-shaped sdl.bot exposed. An
+# extern c fn called both from a function the trait plan clones (`report`,
+# which requires std::io::IO through print_line) and from one it does not
+# (`count`) has its binding renamed by hygiene (extern#exit#1); with any
+# MutableVector operation in the program, the vector check asked the native
+# registry for "extern#exit#1" and the front end died with "core::native: no
+# native named "extern#exit#1"" (Tcl error NONE). The refactored game is that
+# shape: main.bot declares `exit`, and Sdl's member is a MutableVector.
+# Fixed in hir::affine::NativeName (the native's symbol, not the binding's
+# name); tests/c-ffi.test's cf-renamed-binding-native-name pins it.
+#
+# expect check: ok
+# expect cranelift-generic: value: 2
+# expect cranelift: value: 2
+import std::ffi::c
+import std::io
+import std::linux::io
+import std::mutable_vector
+
+extern c fn exit(status: std::ffi::c::Int) -> unit
+
+fn count() -> int:
+    v = std::mutable_vector::from_list([1])
+    v.push(2)
+    n = std::mutable_vector::length(v)
+    if n != 2:
+        exit(1)
+    n
+
+fn report() -> int:
+    printed = std::io::print_line("hello"):
+        on std::io::WriteFailed:
+            exit(1)
+    count()
+
+with context std::linux::io::create()
+
+report()

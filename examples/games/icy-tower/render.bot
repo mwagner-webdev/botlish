@@ -1,22 +1,22 @@
 # render.bot -- draws a frame of the Icy Tower vertical slice
-# (ICY-TOWER-VERTICAL-SLICE-1.md) with sdl.bot's few calls: the walls with
-# their mortar lines, the platforms, the player and the text. Rectangles
-# and lines only; the text is SDL's built-in debug font.
+# (ICY-TOWER-VERTICAL-SLICE-1.md) with sdl.bot's few operations: the walls
+# with their mortar lines, the platforms, the player and the text.
+# Rectangles and lines only; the text is SDL's built-in debug font. The
+# operations draw on the session the installed sdl::Sdl holds, so nothing
+# here holds or passes an SDL object.
 #
 # The view is 480 x 720 logical units, y DOWN; the world's y is altitude,
 # UP (tower.bot). The one conversion is `row`: the view row of an altitude
 # is the view's height less the altitude's height above the camera's
 # bottom edge. Nothing in the world moves for the camera.
 #
-# Every SDL call returns whether it succeeded; a frame is drawn whole and
-# answers whether all of them did (main.bot stops on a failed frame).
+# Every SDL operation returns whether it succeeded; a frame is drawn whole
+# and answers whether all of them did (main.bot stops on a failed frame).
 import std::float64
-import std::ffi::c
 import std::list
 import std::str
 import hud
 import sdl
-import sdl3::ctypes
 import tower
 
 # A platform's drawn thickness, below its top.
@@ -35,55 +35,55 @@ fn succeeded?(results: List[bool]) -> bool:
             return false
     true
 
-fn walls(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], camera: tower::Camera) -> bool errors NonFiniteFloat, NativeEditNull:
-    shade = renderer.clone().color(54, 64, 96)
-    left = renderer.clone().fill(rect.clone(), 0.0, 0.0, tower::wall, tower::view_height)
-    right = renderer.clone().fill(rect.clone(), tower::view_width - tower::wall, 0.0, tower::wall, tower::view_height)
-    mortar = renderer.clone().color(32, 38, 60)
+fn walls(camera: tower::Camera) -> bool errors NonFiniteFloat:
+    shade = sdl::color(54, 64, 96)
+    left = sdl::fill(0.0, 0.0, tower::wall, tower::view_height)
+    right = sdl::fill(tower::view_width - tower::wall, 0.0, tower::wall, tower::view_height)
+    mortar = sdl::color(32, 38, 60)
     first = std::float64::truncate(camera.bottom / brick)
     lines = loop k from first to first + 17:
         y = row(std::float64::from_int(k) * brick, camera)
-        a = renderer.clone().line(0.0, y, tower::wall, y)
-        b = renderer.clone().line(tower::view_width - tower::wall, y, tower::view_width, y)
+        a = sdl::line(0.0, y, tower::wall, y)
+        b = sdl::line(tower::view_width - tower::wall, y, tower::view_width, y)
         a and b
     shade and left and right and mortar and lines.succeeded?()
 
 # The platform color of FLOOR: the spanning floors gold, the others in
 # bands of ten floors.
-fn platform_color(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], floor: int) -> bool:
+fn platform_color(floor: int) -> bool:
     band = floor.mod(40)
     if tower::milestone?(floor):
-        renderer.color(236, 196, 84)
+        sdl::color(236, 196, 84)
     elif band < 10:
-        renderer.color(128, 206, 236)
+        sdl::color(128, 206, 236)
     elif band < 20:
-        renderer.color(120, 220, 170)
+        sdl::color(120, 220, 170)
     elif band < 30:
-        renderer.color(186, 160, 240)
+        sdl::color(186, 160, 240)
     else:
-        renderer.color(240, 150, 140)
+        sdl::color(240, 150, 140)
 
-fn platform(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], buffer: std::ffi::c::Ptr[std::ffi::c::Char], p: tower::Platform, camera: tower::Camera) -> bool errors NonFiniteFloat, NativeEditNull, IndexNotFound:
+fn platform(p: tower::Platform, camera: tower::Camera) -> bool errors NonFiniteFloat:
     top = p.y.row(camera)
     if top < -thickness or top > tower::view_height:
         return true
-    colored = renderer.clone().platform_color(p.floor)
-    body = renderer.clone().fill(rect.clone(), p.x, top, p.width, thickness)
-    shine = renderer.clone().color(255, 255, 255)
-    edge = renderer.clone().fill(rect.clone(), p.x, top, p.width, 2.0)
+    colored = platform_color(p.floor)
+    body = sdl::fill(p.x, top, p.width, thickness)
+    shine = sdl::color(255, 255, 255)
+    edge = sdl::fill(p.x, top, p.width, 2.0)
     if not tower::milestone?(p.floor) or p.floor == 0:
         return colored and body and shine and edge
     label = hud::int_text(p.floor)
-    ink = renderer.clone().color(60, 40, 10)
+    ink = sdl::color(60, 40, 10)
     x = p.x + (p.width - 8.0 * std::float64::from_int(std::str::length(label))) / 2.0
-    written = renderer.text(buffer, x, top + 4.0, label)
+    written = sdl::text(x, top + 4.0, label)
     colored and body and shine and edge and ink and written
 
-fn player(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], p: tower::Player, camera: tower::Camera) -> bool errors NonFiniteFloat, NativeEditNull:
+fn player(p: tower::Player, camera: tower::Camera) -> bool errors NonFiniteFloat:
     top = row(p.y + tower::player_height, camera)
-    body_color = renderer.clone().color(250, 112, 72)
-    body = renderer.clone().fill(rect.clone(), p.x, top, tower::player_width, tower::player_height)
-    eye_color = renderer.clone().color(28, 28, 40)
+    body_color = sdl::color(250, 112, 72)
+    body = sdl::fill(p.x, top, tower::player_width, tower::player_height)
+    eye_color = sdl::color(28, 28, 40)
     # The eyes look the way it runs.
     look = if p.vx < -20.0:
         -4.0
@@ -91,68 +91,54 @@ fn player(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi
         4.0
     else:
         0.0
-    left_eye = renderer.clone().fill(rect.clone(), p.x + 6.0 + look, top + 8.0, 4.0, 7.0)
-    right_eye = renderer.fill(rect, p.x + 16.0 + look, top + 8.0, 4.0, 7.0)
+    left_eye = sdl::fill(p.x + 6.0 + look, top + 8.0, 4.0, 7.0)
+    right_eye = sdl::fill(p.x + 16.0 + look, top + 8.0, 4.0, 7.0)
     body_color and body and eye_color and left_eye and right_eye
 
 # LINES of text, one under another from X, Y.
-fn lines(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], buffer: std::ffi::c::Ptr[std::ffi::c::Char], lines: List[str], x: Float64, y: Float64) -> bool errors NonFiniteFloat, NativeEditNull, IndexNotFound:
+fn lines(lines: List[str], x: Float64, y: Float64) -> bool errors NonFiniteFloat:
     written = loop line in lines and i from 0 to std::list::length(lines):
-        renderer.clone().text(buffer.clone(), x, y + 12.0 * std::float64::from_int(i), line)
+        sdl::text(x, y + 12.0 * std::float64::from_int(i), line)
     written.succeeded?()
 
 # LINES twice the size, each centered across the view, from row Y, on a
 # dark band.
-fn banner(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], buffer: std::ffi::c::Ptr[std::ffi::c::Char], lines: List[str], y: Float64) -> bool errors NonFiniteFloat, NativeEditNull, IndexNotFound:
+fn banner(lines: List[str], y: Float64) -> bool errors NonFiniteFloat:
     n = std::list::length(lines)
     if n == 0:
         return true
-    shade = renderer.clone().color(10, 12, 24)
-    band = renderer.clone().fill(rect, tower::wall, y - 16.0, tower::inner_width, 24.0 * std::float64::from_int(n) + 24.0)
-    ink = renderer.clone().color(255, 236, 160)
-    bigger = renderer.clone().scale(2.0)
+    shade = sdl::color(10, 12, 24)
+    band = sdl::fill(tower::wall, y - 16.0, tower::inner_width, 24.0 * std::float64::from_int(n) + 24.0)
+    ink = sdl::color(255, 236, 160)
+    bigger = sdl::scale(2.0)
     written = loop line in lines and i from 0 to n:
         x = (tower::view_width / 2.0 - 8.0 * std::float64::from_int(std::str::length(line))) / 2.0
-        renderer.clone().text(buffer.clone(), x, (y + 24.0 * std::float64::from_int(i)) / 2.0, line)
-    normal = renderer.scale(1.0)
+        sdl::text(x, (y + 24.0 * std::float64::from_int(i)) / 2.0, line)
+    normal = sdl::scale(1.0)
     shade and band and ink and bigger and written.succeeded?() and normal
 
 # One frame of WORLD, presented: whether every SDL call succeeded.
-fn frame(renderer: std::ffi::c::Ptr[sdl3::ctypes::SDL_Renderer], rect: std::ffi::c::Ptr[sdl3::ctypes::SDL_FRect], buffer: std::ffi::c::Ptr[std::ffi::c::Char], world: tower::World) -> bool errors NonFiniteFloat, NativeEditNull, IndexNotFound:
+fn frame(world: tower::World) -> bool errors NonFiniteFloat:
     camera = world.camera
-    sky = renderer.clone().color(18, 22, 38)
-    cleared = renderer.clone().clear()
-    walled = renderer.clone().walls(rect.clone(), camera)
+    sky = sdl::color(18, 22, 38)
+    cleared = sdl::clear()
+    walled = walls(camera)
     drawn = loop p in world.platforms:
-        renderer.clone().platform(rect.clone(), buffer.clone(), p, camera)
-    figure = renderer.clone().player(rect.clone(), world.player, camera)
-    shade = renderer.clone().color(10, 12, 24)
-    panel = renderer.clone().fill(rect.clone(), tower::wall, 0.0, 132.0, 56.0)
-    ink = renderer.clone().color(236, 240, 255)
-    status = renderer.clone().lines(buffer.clone(), hud::status_lines(world), tower::wall + 8.0, 8.0)
-    message = renderer.clone().banner(rect, buffer, hud::banner_lines(world), 300.0)
-    shown = renderer.present()
+        p.platform(camera)
+    figure = world.player.player(camera)
+    shade = sdl::color(10, 12, 24)
+    panel = sdl::fill(tower::wall, 0.0, 132.0, 56.0)
+    ink = sdl::color(236, 240, 255)
+    status = hud::status_lines(world).lines(tower::wall + 8.0, 8.0)
+    message = hud::banner_lines(world).banner(300.0)
+    shown = sdl::present()
     sky and cleared and walled and drawn.succeeded?() and figure and shade and panel and ink and status and message and shown
 
-# What drawing a frame did: the Video back, whether presenting waits for
-# the display, and what failed ("" when nothing did).
-struct Drawn:
-    video: sdl::Video
-    synced: bool
-    failure: str
-
-# Draws WORLD on VIDEO and presents it.
-fn draw(video: sdl::Video, world: tower::World) -> Drawn:
-    {window, renderer, keys, rect, text, event, synced} = video
-    drawn = renderer.clone().frame(rect.clone(), text.clone(), world):
+# Draws WORLD and presents it: what failed, "" when nothing did.
+fn draw(world: tower::World) -> str:
+    drawn = frame(world):
         on NonFiniteFloat:
             false
-        on NativeEditNull:
-            false
-        on IndexNotFound:
-            false
-    failure = if drawn:
-        ""
-    else:
-        "drawing a frame"
-    Drawn {video: sdl::Video {window: window, renderer: renderer, keys: keys, rect: rect, text: text, event: event, synced: synced}, synced: synced, failure: failure}
+    if drawn:
+        return ""
+    "drawing a frame"

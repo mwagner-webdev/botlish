@@ -1,0 +1,50 @@
+# C3. An affine resource value may be dropped without its release
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Does cleanup become simpler?").
+#
+# The vertical slice credited the affine Video with making cleanup total
+# ("the types forced every exit path to carry the Video back"). Affinity is
+# at-most-once, not exactly-once (AFFINE-VALUES.md: an affine value "may be
+# dropped unused"): here `play` drops its opaque handle on the error path
+# -- as the baseline's play did when `sdl::seconds()` failed after
+# `sdl::open` -- and nothing is reported; `close` runs on one path only. The
+# retained-context design has the same property (nothing forces `close`),
+# but its close needs no value, so a single handler can close on every way
+# out (the refactored main.bot does, in `main`'s NonFiniteFloat handler).
+#
+# expect interp: value: [1, 0]
+# expect compile: value: [1, 0]
+# expect cranelift-generic: value: [1, 0]
+# expect cranelift: value: [1, 0]
+import std::ffi::c
+
+opaque struct Video:
+    window: std::ffi::c::Ptr[std::ffi::c::Void]
+
+error Clock:
+    reason: str
+
+fn open() -> Video:
+    Video {window: std::ffi::c::null[std::ffi::c::Void]()}
+
+# 1: closed.
+fn close(video: Video) -> int:
+    {window} = video
+    1
+
+fn tick(fails: bool) -> int errors Clock:
+    if fails:
+        fail Clock {reason: "the clock"}
+    0
+
+fn play(fails: bool) -> int errors Clock:
+    video = open()
+    t = tick(fails)
+    video.close() + t
+
+fn run(fails: bool) -> int:
+    closed = play(fails):
+        on Clock:
+            0
+    closed
+
+[run(false), run(true)]

@@ -684,6 +684,48 @@ test cf-entry-program-declares {the entry program declares and calls its own ext
     list [appValues $dir {cranelift}] [appRejection $hidden]
 } -cleanup removeApps -result {42 {UNBOUND: m.bot:2:5: unbound name "plus"}}
 
+test cf-renamed-binding-native-name {an extern c fn called both from a function the trait plan clones (one requiring std::io::IO) and from one it does not has its binding renamed by hygiene (extern#exit#1: the clone's reference names extern#exit); every analysis that asks which native a call is reads the native's symbol, not that name -- the MutableVector check of a program with any vector operation once asked the registry for "extern#exit#1" and crashed the front end (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md)} -body {
+    set dir [app [list main.bot [join {
+        "import std::ffi::c"
+        "import std::io"
+        "import std::linux::io"
+        "import std::mutable_vector"
+        ""
+        "extern c fn exit(status: std::ffi::c::Int) -> unit"
+        ""
+        "fn count() -> int:"
+        "    v = std::mutable_vector::from_list(\[1\])"
+        "    v.push(2)"
+        "    n = std::mutable_vector::length(v)"
+        "    if n != 2:"
+        "        exit(1)"
+        "    n"
+        ""
+        "fn report() -> int:"
+        "    printed = std::io::print_line(\"hello\"):"
+        "        on std::io::WriteFailed:"
+        "            exit(1)"
+        "    count()"
+        ""
+        "with context std::linux::io::create()"
+        ""
+        "report()"
+        ""} \n]]]
+    set hir [appHir $dir]
+    set names {}
+    set natives {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call"} {
+            set name [hir::affine::NativeName $hir $e]
+            if {[string match extern#* $name]} { lappend natives $name }
+        }
+    }
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict exists $binding extern]} { lappend names [dict get $binding name] }
+    }
+    list $names [lsort -unique $natives]
+} -cleanup removeApps -result {extern#exit#1 extern#exit}
+
 # ---------------------------------------------------------------------------
 # Byte borrowing through real C
 

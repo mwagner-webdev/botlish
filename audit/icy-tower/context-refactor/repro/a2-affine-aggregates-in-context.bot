@@ -1,0 +1,35 @@
+# A2. Affinity is compositional, so no container smuggles a pointer into a
+# context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies", A).
+#
+# A struct holding a pointer, and a MutableVector of pointers (the one kind
+# of member a context mutates in place), are affine like the pointer itself
+# (hir::types::IsAffine): installing a context that holds either is the same
+# AFFINE-ERASURE-UNSUPPORTED as a1's. One diagnostic per installation.
+#
+# expect interp: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
+# expect compile: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift-generic: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
+# expect cranelift: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
+import std::ffi::c
+import std::mutable_vector
+
+struct Pair:
+    window: std::ffi::c::Ptr[std::ffi::c::Void]
+    renderer: std::ffi::c::Ptr[std::ffi::c::Void]
+
+opaque context struct Video:
+    pair: Pair
+
+opaque context struct Pool:
+    pointers: MutableVector[std::ffi::c::Ptr[std::ffi::c::Void]]
+
+fn video() -> Video:
+    Video {pair: Pair {window: std::ffi::c::null[std::ffi::c::Void](), renderer: std::ffi::c::null[std::ffi::c::Void]()}}
+
+fn pool() -> Pool:
+    Pool {pointers: std::mutable_vector::from_list([])}
+
+with context video()
+with context pool()
+
+1

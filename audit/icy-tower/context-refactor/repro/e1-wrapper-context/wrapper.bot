@@ -1,0 +1,24 @@
+# wrapper.bot -- the upper layer of e1 (e1-wrapper-context/main.bot): a
+# platform context meant to own the lower layer. It holds a lowlevel::Native
+# VALUE, which is not an installation: functions requiring lowlevel::Native
+# are satisfied only by the environment, never by a value someone holds.
+# Its own context does mediate raw.bot's direct authority.
+import lowlevel
+import raw
+
+# (A small domain: a native context slot holds no unbounded Int.)
+type Scale = Int in 1..16
+
+opaque context struct Platform:
+    inner: lowlevel::Native
+    scale: Scale
+
+fn create() -> Platform:
+    Platform {inner: lowlevel::create(), scale: 2}
+
+# Draws a sprite of SIZE: allocates through the lower layer (which requires
+# lowlevel::Native from the environment) and pokes raw memory (a direct edge
+# of this module, mediated by Platform).
+fn sprite(size: int, context p: Platform) -> int:
+    made = lowlevel::allocate(size * p.scale)
+    raw::poke(made)
