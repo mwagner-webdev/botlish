@@ -40,10 +40,11 @@
 # import is dropped (`recovered header 1` on the program: what the file may
 # name is not known).
 #
-# The program node gets `recovered {header H values V types T externs X
-# installs I holes N}`: the header is damaged; a top-level hole may bind value
-# names nobody can list, declare a type-level name, declare an extern,
-# install a context; N top-level statements are holes. The loader reads them
+# The program node gets `recovered {header H values V functions F types T
+# externs X installs I holes N}`: the header is damaged; a top-level hole may
+# bind value names nobody can list, declare a function (one of those names,
+# or the one its `fn NAME` prefix states), declare a type-level name, declare
+# an extern, install a context; N top-level statements are holes. The loader reads them
 # (a reference into
 # a module whose members are not known is not reported as unknown:
 # surface/modules.tcl), and lowering turns each hole into HIR syntax holes
@@ -134,7 +135,7 @@ proc surface::recover::apply {ast source} {
         }
     }
     set state [dict create source $source tokens $tokens synthetic $synthetic malformed $malformed \
-        inserted $inserted values 0 types 0 externs 0 installs 0 file $file]
+        inserted $inserted values 0 functions 0 types 0 externs 0 installs 0 file $file]
     set ast [Rebuild $ast state 1]
     if {$header} {
         # An import the damage reached is not one the file makes.
@@ -147,7 +148,8 @@ proc surface::recover::apply {ast source} {
         if {[dict get $statement kind] ne "hole"} continue
         set statement
     }]]
-    dict set ast recovered [dict create header $header values [dict get $state values] types [dict get $state types] \
+    dict set ast recovered [dict create header $header values [dict get $state values] \
+        functions [dict get $state functions] types [dict get $state types] \
         externs [dict get $state externs] installs [dict get $state installs] holes $holes]
     # The tokens were for the prefixes; the recovered tree does not carry them.
     dict unset ast damage tokens
@@ -332,7 +334,7 @@ proc surface::recover::Rebuild {node stateVar topLevel} {
 proc surface::recover::InsertedHole {container at index stateVar topLevel} {
     upvar 1 $stateVar state
     set span [Span [dict get $state source] [dict get $state file] $at $at]
-    foreach flag {values types externs installs} {
+    foreach flag {values functions types externs installs} {
         dict set state $flag [expr {[dict get $state $flag] || $topLevel}]
     }
     set id [expr {[dict get $container id] eq "" ? "hole@$at" : "[dict get $container id]/hole@$at"}]
@@ -367,6 +369,7 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     set name ""
     set nameSpan ""
     set valueFrom ""
+    set function 0
     set binds 0
     set types 0
     set externs 0
@@ -386,6 +389,7 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
             set name [dict get [lindex $prefix $i+1] value]
             set nameSpan [dict get [lindex $prefix $i+1] span]
             set valueFrom [expr {$i + 2}]
+            set function 1
         } else {
             set binds 1
         }
@@ -438,6 +442,7 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     }
     if {$topLevel} {
         dict set state values [expr {[dict get $state values] || $binds}]
+        dict set state functions [expr {[dict get $state functions] || $binds || $function}]
         dict set state types [expr {[dict get $state types] || $types}]
         dict set state externs [expr {[dict get $state externs] || $externs}]
         dict set state installs [expr {[dict get $state installs] || $installs}]

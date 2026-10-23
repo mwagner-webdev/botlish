@@ -873,6 +873,7 @@ result until `std::web::uri_query_value?` proves it one.
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
 | `surface/parser.tcl` | tokens → surface AST (recursive descent) |
 | `surface/ast.tcl` | spans, syntax errors, AST formatting |
+| `surface/recover.tcl` | malformed statements → holes (syntax recovery) |
 | `surface/lower.tcl` | surface AST → HIR |
 | `surface/surface.tcl` | loader and `surface::compile` / `readProgramFile` |
 | `bench/` | benchmark programs and runners (`bench.tcl` for the canonical `*.bot` corpus, `corpus.tcl` for §18) |
@@ -2143,7 +2144,14 @@ of the first, with `FILE:LINE:COLUMN: message`, then a line per further one
   (DIAGNOSTIC-RECOVERY.md). `main.tcl` uses this to report all syntax errors
   of a `.bot` file.
 
-`surface::lowerToHir` refuses an AST with diagnostics.
+`surface::lowerToHir` refuses an AST with diagnostics. Syntax recovery
+(SYNTAX-RECOVERY-MILESTONE-1.md) lowers one: `surface::recover::apply`
+replaces each malformed statement with a *hole* that keeps only what the
+statement's tokens before the damage establish (`x = ...` binds `x`, `fn f`
+binds `f`), the program is analyzed around the holes, and only `-check`,
+the compiler service and the language server ask for it
+(`surface::readProgramFile -recover-syntax 1`); the HIR is never run, built
+or cached.
 
 HIR's semantic diagnostics (`DUPLICATE`, including duplicate parameters,
 `UNBOUND`, control placement, and every check's) are raised statically as one
@@ -2212,8 +2220,11 @@ references and hygiene.
     (`struct NAME`, `error NAME`, `import`, ...) and isn't indented deeper
     than the line that opened it. Expression lines in between are read as
     part of the bracket.
-* An AST with syntax errors can't be lowered, so there's no partial HIR for
-  the valid parts of a broken file.
+* The valid parts of a broken file are analyzed only by `-check`, the
+  compiler service and the language server, around holes: what a malformed
+  statement may mean is unknown, and nothing that depends on it is reported
+  or proven (SYNTAX-RECOVERY-MILESTONE-1.md). Everything else -- a run, a
+  build, every inspecting option -- stops at the syntax errors.
 
 **Node ids**
 

@@ -105,7 +105,7 @@ proc writeFile {path text} {
 # A private copy of the compiler sources, the service, the language server,
 # Compilerpedia, the tests and what they read (the examples, the
 # diagnostic-recovery corpus and the syntax-recovery experiments).
-set tree [file tempdir botlish-recovery-mutants]
+set tree [file tempdir botlish-syntax-mutants]
 foreach dir {compiler core hir surface service lsp stdlib compilerpedia tests examples audit/diagnostic-recovery audit/syntax-recovery} {
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -162,7 +162,7 @@ try {
             continue
         }
         lassign $testSpec testFile patterns
-        set tmp [file tempdir botlish-recovery-mutant-run]
+        set tmp [file tempdir botlish-syntax-mutant-run]
         set match {}
         if {$patterns ne ""} {
             set match [list -match $patterns]

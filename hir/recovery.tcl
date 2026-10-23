@@ -78,8 +78,9 @@ proc hir::recovery::reported {hir} {
         }
         if {[dict get $d kind] in $conformanceKinds && [dict getdef $hir syntaxRecovery openFiles {}] ne {}} {
             # Whether a type satisfies a trait, or a context implements a
-            # context trait, reads its owner module's top-level
-            # declarations: a malformed one may be the missing
+            # context trait, reads its owner module's top-level functions: a
+            # malformed statement that may declare one (`openFiles`,
+            # surface/modules.tcl's Recovery) may be the missing
             # implementation.
             continue
         }

@@ -1945,8 +1945,9 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
 # may (`methodFiles`: a malformed header, or an imported module whose
 # malformed statements may define functions), whose unbound names may
 # (`externFiles`: an extern c fn a malformed statement may declare), and the
-# files with a malformed top-level statement, which may be any declaration
-# (`openFiles`: hir/recovery.tcl).
+# files with a malformed top-level statement that may declare a function
+# (`openFiles`: the implementation a trait or context trait needs,
+# hir/recovery.tcl).
 proc surface::modules::Recovery {state nodes sections} {
     if {[hir::static::present $nodes $sections]} {
         set decisions [dict create]
@@ -1962,14 +1963,14 @@ proc surface::modules::Recovery {state nodes sections} {
     set externFiles {}
     set openFiles {}
     dict for {key fileId} [dict get $state fileOf] {
-        set facts [dict getdef $open $key {header 0 values 0 types 0 externs 0 installs 0 holes 0}]
+        set facts [dict getdef $open $key {header 0 values 0 functions 0 types 0 externs 0 installs 0 holes 0}]
         set header [dict get $facts header]
         if {$header} {
             lappend tainted $fileId
         }
-        if {[dict get $facts holes]} {
-            # (A malformed top-level statement: any declaration of the file
-            # may be one conformance reads, hir/recovery.tcl.)
+        if {[dict get $facts functions]} {
+            # (A malformed top-level statement that may declare a function:
+            # the implementation conformance reads, hir/recovery.tcl.)
             lappend openFiles $fileId
         }
         if {[dict get $facts externs]} {

@@ -125,7 +125,7 @@ test sr-holes-lexical {lexical damage makes the statement it is in a hole even w
 
 test sr-holes-layout {a layout diagnostic makes the top-level statements around it holes -- from the last one written at column 1 before it to the next one at column 1 after it -- each keeping the name its prefix states} -body {
     sr::Holes "fn f():\n    1\nfn g():\n    1\n  y = 3\nw = 4\n"
-} -cleanup {} -result {{{g() g 0 0} {y= {} 1 1}} {header 0 values 1 types 1 externs 1 installs 1 holes 2}}
+} -cleanup {} -result {{{g() g 0 0} {y= {} 1 1}} {header 0 values 1 functions 1 types 1 externs 1 installs 1 holes 2}}
 
 test sr-holes-header {a malformed import is header damage: the file's header is not known, and the well-formed imports stay} -body {
     set source "import std::\nimport std::list\nx = 1\n"
@@ -133,11 +133,11 @@ test sr-holes-header {a malformed import is header damage: the file's header is 
     list [dict get $ast recovered header] [lmap i [dict get $ast imports] {dict get $i namespace}] [lmap s [dict get $ast body] {dict get $s kind}]
 } -cleanup {unset -nocomplain source ast} -result {1 std::list bind}
 
-test sr-holes-declarations {a malformed top-level declaration may declare a type-level name; a malformed `with context` may install a context; a malformed extern may declare a function its whole file sees} -body {
-    lmap source [list "struct P:\n    x int\ny = 1\n" "with context foo(\n" "extern c fn puts(\n"] {
+test sr-holes-declarations {a malformed top-level declaration may declare a type-level name; a malformed `with context` may install a context; a malformed extern may declare a function its whole file sees; a malformed function header declares a function, a malformed binding none} -body {
+    lmap source [list "struct P:\n    x int\ny = 1\n" "with context foo(\n" "extern c fn puts(\n" "fn area(w: int\n" "x = (1\n"] {
         lindex [sr::Holes $source] 1
     }
-} -cleanup {unset -nocomplain source} -result {{header 0 values 0 types 1 externs 0 installs 0 holes 1} {header 0 values 0 types 0 externs 0 installs 1 holes 1} {header 0 values 1 types 1 externs 1 installs 0 holes 1}}
+} -cleanup {unset -nocomplain source} -result {{header 0 values 0 functions 0 types 1 externs 0 installs 0 holes 1} {header 0 values 0 functions 0 types 0 externs 0 installs 1 holes 1} {header 0 values 1 functions 1 types 1 externs 1 installs 0 holes 1} {header 0 values 0 functions 1 types 0 externs 0 installs 0 holes 1} {header 0 values 0 functions 0 types 0 externs 0 installs 0 holes 1}}
 
 test sr-holes-damage-past-statement {a statement the parser failed on whose diagnostic points past its own text -- blanks after it at the end of its line, or the end of the file -- is a hole all the same, and the program around it is analyzed (an editor's usual state while typing)} -body {
     set dir [sr::Dir trailing]
@@ -258,9 +258,9 @@ test sr-function-body-facts {in a function whose body holds a malformed line: wh
         [dict get [service::at $rev $path 13 9] unavailable binding] [sr::Fact $rev $path 17 1] [sr::Brief $rev]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path} -result {{b: int} {c: -} {helper: Fn{args: [int], return: int, errors: []}} {b: int} {b: int} {-: -} {d: -} {a malformed statement before it, in a scope it sees, may bind this name: which binding it denotes is not known} {x: int} {{{SURFACE SYNTAX} main.bot:6:12 {expected an expression, found end of line}} {{SURFACE SYNTAX} main.bot:12:14 {"(" is never closed}}}}
 
-test sr-declared-contract {a function whose body holds a malformed line keeps its declared contract and nothing its body would infer: a declared result types its calls, even one a body could narrow (no semantic instance); an undeclared one, or a contract its body would require of a parameter, is not known} -body {
+test sr-declared-contract {a function whose body holds a malformed line keeps its declared contract and nothing its body would infer: a declared result types its calls; an undeclared one is not known, even when the rest of the body has a type (what the malformed line would have been is not known), nor is a contract its body would require of a parameter} -body {
     set dir [sr::Dir contract]
-    sr::Put $dir/main.bot "fn declared(n: int) -> str:\n    m = n +\n    \"ab\"\n\nfn inferred(n):\n    k = n + 1\n    k *\n\na = declared(1)\nb = inferred(2)\n\nfn loose(n: int) -> any:\n    m = n +\n    \"ab\"\n\nl = loose(1)\n"
+    sr::Put $dir/main.bot "fn declared(n: int) -> str:\n    m = n +\n    \"ab\"\n\nfn inferred(n):\n    k = n *\n    n + 1\n\na = declared(1)\nb = inferred(2)\n\nfn loose(n: int) -> any:\n    m = n +\n    \"ab\"\n\nl = loose(1)\n"
     lassign [sr::Analyze $dir/main.bot] ws rev
     set path $dir/main.bot
     list [dict get [service::at $rev $path 9 5] hover] [sr::Fact $rev $path 9 1] \
@@ -329,7 +329,7 @@ test sr-analysis-claims-nothing {the analysis itself, not only what is reported,
 
 test sr-method-candidates {a method-style call in a file importing a module whose malformed top-level line may define its function is not reported unresolved; in a file that imports no such module it is} -body {
     set dir [sr::Dir methods]
-    sr::Put $dir/text.bot "fn one() -> int:\n    1\n\$\$\n"
+    sr::Put $dir/text.bot "fn one() -> int:\n    1\n\n\{a, b\} =\n"
     sr::Put $dir/main.bot "import text\n\nxs = \"ab\"\ny = xs.shout()\n"
     sr::Put $dir/plain.bot "# imports nothing\n\nxs = \"ab\"\ny = xs.shout()\n"
     set out {}
@@ -339,7 +339,7 @@ test sr-method-candidates {a method-style call in a file importing a module whos
         service::closeWorkspace $ws
     }
     set out
-} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev} -result {{{SURFACE SYNTAX} {SURFACE SYNTAX}} {y: -} {{CORE SEMANTIC NOT-A-STRUCT}} {y: -}}
+} -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev} -result {{{SURFACE SYNTAX}} {y: -} {{CORE SEMANTIC NOT-A-STRUCT}} {y: -}}
 
 test sr-context-installation {a malformed `with context` may have installed the context a later call needs: that call's MISSING-CONTEXT is not reported, while the program without the line reports it} -body {
     set dir [sr::Dir context]
@@ -355,19 +355,20 @@ test sr-context-installation {a malformed `with context` may have installed the 
     set out
 } -cleanup {file delete -force $dir; unset -nocomplain dir program out file ws rev} -result {{{SURFACE SYNTAX}} {{CORE SEMANTIC MISSING-CONTEXT}}}
 
-test sr-trait-conformance {a module whose malformed top-level line may be the implementation a trait needs: TRAIT-NOT-SATISFIED is not reported for its type, while the module without the line reports it} -body {
+test sr-trait-conformance {a module whose malformed top-level line may declare a function may be declaring the implementation a trait needs: TRAIT-NOT-SATISFIED is not reported for its type; one whose malformed line binds a value can not be, and the module without the line reports it} -body {
     set dir [sr::Dir trait]
-    set main "import people\n\ntrait Named:\n    fn name(value: Named) -> str\n\nfn describe(value: Named) -> str:\n    value.name()\n\nd = describe(people::Person {value: \"ab\"})\n"
-    sr::Put $dir/main.bot $main
+    sr::Put $dir/lib.bot "trait Named:\n    fn name(value: Named) -> str\n\nfn describe(value: Named) -> str:\n    value.name()\n"
+    sr::Put $dir/main.bot "import lib\nimport people\n\nd = lib::describe(people::Person \{value: \"ab\"\})\n"
     set out {}
-    foreach people [list "struct Person:\n    value: str\n\nfn name(value: Person -> str:\n    value.value\n" "struct Person:\n    value: str\n"] {
+    foreach people [list "struct Person:\n    value: str\n\nfn name(value: Person -> str:\n    value.value\n" \
+            "struct Person:\n    value: str\n\nx = (1\n" "struct Person:\n    value: str\n"] {
         sr::Put $dir/people.bot $people
         lassign [sr::Analyze $dir/main.bot] ws rev
         lappend out [lmap d [sr::Brief $rev] {lindex $d 0}]
         service::closeWorkspace $ws
     }
     set out
-} -cleanup {file delete -force $dir; unset -nocomplain dir main out people ws rev} -result {{{SURFACE SYNTAX}} {{CORE SEMANTIC TRAIT-NOT-SATISFIED}}}
+} -cleanup {file delete -force $dir; unset -nocomplain dir out people ws rev} -result {{{SURFACE SYNTAX}} {{SURFACE SYNTAX} {CORE SEMANTIC TRAIT-NOT-SATISFIED}} {{CORE SEMANTIC TRAIT-NOT-SATISFIED}}}
 
 test sr-header-damage {a malformed import: what the file may name is not known, so a reference to a namespace it does not import is not reported, while references through its well-formed imports are known} -body {
     set dir [sr::Dir header]
@@ -512,24 +513,26 @@ test sr-service-outcomes {a revision with syntax errors is a syntax outcome, nev
     set out
 } -cleanup {file delete -force $dir; unset -nocomplain dir out file ws rev summary} -result {syntax partial 1 {{SURFACE SYNTAX}} syntax none 0 {{SURFACE SYNTAX} {SURFACE MODULE UNKNOWN-NAMESPACE}}}
 
-test sr-service-hole-facts {in malformed source a query names why it has no fact; a name whose binding a malformed statement may change has no binding, no definition and is in no binding's references; a recovered binding's definition is its name} -body {
+test sr-service-hole-facts {in malformed source a query names why it has no fact; a name whose binding a malformed statement may change has no binding, no definition and is in no binding's references; a recovered binding's definition is its name -- a malformed function header's too, not its keyword} -body {
     set dir [sr::Dir holefacts]
-    sr::Put $dir/main.bot "fn helper(n: int) -> int:\n    n\n\nfn f(a: int) -> int:\n    {p, q} = (\n    helper(a)\n\nt = helper(1) +\nu = helper(2)\n"
+    sr::Put $dir/main.bot "fn helper(n: int) -> int:\n    n\n\nfn f(a: int) -> int:\n    {p, q} =\n    helper(a)\n\nt = helper(1) +\nu = helper(2)\n\nfn broken(w: int, h:\n    w\n\nr = broken\n"
     lassign [sr::Analyze $dir/main.bot] ws rev
     set path $dir/main.bot
     set hole [service::at $rev $path 8 15]
     set dependent [service::at $rev $path 6 5]
     set t [service::at $rev $path 8 1]
     set references [lmap r [dict get [service::at $rev $path 1 4] references] {dict get $r line}]
+    set broken [service::at $rev $path 14 5]
     list [dict get $hole unavailable binding] [lsort [dict keys [dict get $dependent unavailable]]] $references \
         [dict get $t binding name] [dict get $t definition line]:[dict get $t definition column]-[dict get $t definition endColumn] \
-        [dict get $t unavailable type]
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path hole dependent t references} -result {{malformed source: no meaning is known for it (its syntax error says why)} {binding definition hover references type} 9 t 8:1-2 {its value is not known: it depends on malformed source or on a construct a diagnostic rejects}}
+        [dict get $t unavailable type] \
+        [dict get $broken binding name] [dict get $broken definition line]:[dict get $broken definition column]-[dict get $broken definition endColumn]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev path hole dependent t references broken} -result {{malformed source: no meaning is known for it (its syntax error says why)} {binding definition hover references type} 9 t 8:1-2 {its value is not known: it depends on malformed source or on a construct a diagnostic rejects} broken 11:4-10}
 
 test sr-service-export-import {a partial revision exported and imported (the language server's worker) answers every query, and reports every diagnostic, exactly as the original} -body {
     set dir [sr::Dir export]
     sr::Put $dir/util.bot "fn one() -> int:\n    1 +\n\nfn two() -> int:\n    2\n"
-    sr::Put $dir/main.bot "import util\n\nfn f(n: int) -> int:\n    {p, q} = (\n    util::two() + later\n\na = util::one()\nb = util::two()\nc = b +\nd = nosuch\n"
+    sr::Put $dir/main.bot "import util\n\nfn f(n: int) -> int:\n    {p, q} =\n    util::two() + later\n\nfn g(m):\n    k = m *\n    m + 1\n\na = util::one()\nb = util::two()\nc = b +\nd = nosuch\ne = g(1)\n"
     lassign [sr::Analyze $dir/main.bot] ws rev
     set ws2 [service::workspace -warnings off -cache ""]
     set imported [service::import $ws2 [service::export $rev -derived 1]]
@@ -550,18 +553,28 @@ test sr-service-export-import {a partial revision exported and imported (the lan
     list [dict get [service::revision $imported] semantics] [expr {[lindex $all 0] eq [lindex $all 1]}]
 } -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain dir ws rev ws2 imported all r facts path observation lines l c} -result {partial 1}
 
-test sr-service-isolation {partial and full revisions of programs with conflicting declarations, analyzed in any order, each answer from their own declarations} -body {
+test sr-service-isolation {partial and full revisions of programs with conflicting declarations -- a type of the same name, a domain of different bounds -- queried in alternation with other analyses, each answer exactly as right after their own analysis, from their own declarations} -body {
     set dir [sr::Dir isolation]
-    sr::Put $dir/a/main.bot "struct Point:\n    x: int\n\np = Point {x: 1}\nq = p.x\nr = q +\n"
-    sr::Put $dir/b/main.bot "struct Point:\n    x: str\n\np = Point {x: \"s\"}\nq = p.x\n"
+    sr::Put $dir/a/geo.bot "struct Point:\n    x: int\n    y: int\n\ntype Small = Int in 0..10\n\nfn make(n: Small) -> Point:\n    Point \{x: n, y: n + 1\}\n"
+    sr::Put $dir/a/main.bot "import geo\n\np = geo::make(3)\nq = p.x\nr = q +\n"
+    sr::Put $dir/b/geo.bot "struct Point:\n    x: str\n\ntype Small = Int in 100..200\n\nfn make(n: Small) -> Point:\n    Point \{x: \"b\"\}\n"
+    sr::Put $dir/b/main.bot "import geo\n\np = geo::make(150)\nq = p.x\n"
+    sr::Put $dir/c/main.bot "z = 1\nz\n"
     set ws [service::workspace -warnings off -cache ""]
+    set positions {{3 1} {3 5} {3 10} {4 1} {4 7}}
     set a [service::analyze $ws $dir/a/main.bot]
+    set answersA [lmap p $positions {service::at $a $dir/a/main.bot {*}$p}]
     set b [service::analyze $ws $dir/b/main.bot]
-    set out {}
-    foreach rev [list $a $b $a $b] path [list $dir/a/main.bot $dir/b/main.bot $dir/a/main.bot $dir/b/main.bot] {
-        lappend out [dict get [service::at $rev $path 5 7] type text] [dict get [service::revision $rev] semantics]
+    set answersB [lmap p $positions {service::at $b $dir/b/main.bot {*}$p}]
+    service::analyze $ws $dir/c/main.bot
+    set again {}
+    foreach round {1 2} {
+        lappend again [expr {[lmap p $positions {service::at $a $dir/a/main.bot {*}$p}] eq $answersA}]
+        lappend again [expr {[lmap p $positions {service::at $b $dir/b/main.bot {*}$p}] eq $answersB}]
+        service::analyze $ws $dir/c/main.bot
     }
-    set out
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws a b out rev path} -result {int partial str full int partial str full}
+    list $again [dict get [service::revision $a] semantics] [dict get [service::revision $b] semantics] \
+        [dict get [lindex $answersA 4] type text] [dict get [lindex $answersB 4] type text]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws positions a b answersA answersB again round p} -result {{1 1 1 1} partial full int str}
 
 cleanupTests
