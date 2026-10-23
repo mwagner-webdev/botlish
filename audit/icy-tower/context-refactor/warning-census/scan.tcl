@@ -32,8 +32,25 @@
 # view search included), as NAME(r) for a result, NAME(p) for a parameter.
 # PTR-STRUCTS: its struct types holding a C address, NAME[opaque] for an
 # opaque one; VIEW-STRUCTS: those with a field holding a native view or
-# edit (a nested opaque struct stopping the search). EXTERNS / PTR-EXTERNS: its `extern c fn` declarations, and
-# those with a pointer parameter or result.
+# edit (a nested opaque struct stopping the search). EXTERNS / PTR-EXTERNS:
+# its `extern c fn` declarations, and those with a pointer parameter or
+# result.
+#
+#   XCALL ID  STATUS-OF-U  LOCATION  FROM  TO  KINDS  CALLEE
+#
+# A supplementary measurement outside the instrument's rules: a call from
+# unit V of an `extern c fn` that another unit U declares (the instrument's
+# R1-R3 see calls of Botlish functions only, escape::CalleeBlock), with
+# KINDS the ptr/view kinds of its argument and result types (the same
+# escape::Holds searches) -- a C call made across a module boundary on a
+# pointer. Only calls whose KINDS are not empty are listed.
+#
+#   VREF  ID  LOCATION  FROM  TO  KINDS  FUNCTION
+#
+# A second supplementary measurement: a reference from unit V to a function
+# of a contextualized module U that is not the callee of a call -- the
+# function taken as a value, which escape::CalleeBlock never follows (KINDS
+# as above, of the function's own parameter and result types).
 
 set censusHere [file dirname [file normalize [info script]]]
 set censusRoot [file normalize [file join $censusHere .. .. .. ..]]
@@ -206,6 +223,78 @@ proc census::Modules {hir id map entryFile} {
     return $lines
 }
 
+# XCALL lines of HIR (see the header).
+proc census::ExternCalls {hir id map} {
+    hir::activate $hir
+    set sections [dict create]
+    dict for {ns scope} [dict getdef $hir modules {}] { dict set sections $scope $ns }
+    set status [dict create]
+    if {[dict exists $hir direct units]} {
+        dict for {ns u} [dict get $hir direct units] { dict set status $ns [dict get $u status] }
+    }
+    set owners [dict create]
+    dict for {key record} [hir::foreign::declarations $hir] {
+        dict set owners [dict get $record native] [dict get $record namespace]
+    }
+    set memo [dict create]
+    set lines {}
+    set seen [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call"} continue
+        set callee [dict get $hir exprs [dict get $node callee]]
+        if {[dict get $callee kind] ne "ref" || [dict get $callee binding] eq ""} continue
+        set value [dict get $hir bindings [dict get $callee binding] value]
+        if {[lindex $value 0] ne "native" || ![dict exists $owners [lindex $value 1]]} continue
+        set u [dict get $owners [lindex $value 1]]
+        set v [hir::direct::UnitOfScope $hir [dict get $node scope] memo $sections]
+        if {$u eq $v} continue
+        set types [list [hir::typeOf $hir $e]]
+        foreach a [dict get $node args] { lappend types [hir::typeOf $hir $a] }
+        set kinds [Kinds $types]
+        if {$kinds eq {}} continue
+        set where [escape::Location $hir $e]
+        if {$where eq "" || [dict exists $seen $where]} continue
+        dict set seen $where 1
+        lappend lines [join [list XCALL $id [dict getdef $status $u ""] [MapLocation $map $where] \
+            [expr {$v eq "" ? "entry" : $v}] $u [join $kinds ,] [core::native::displayName [lindex $value 1]]] \t]
+    }
+    return $lines
+}
+
+# VREF lines of HIR (see the header).
+proc census::ValueRefs {hir id map} {
+    set sections [dict create]
+    dict for {ns scope} [dict getdef $hir modules {}] { dict set sections $scope $ns }
+    set status [dict create]
+    if {[dict exists $hir direct units]} {
+        dict for {ns u} [dict get $hir direct units] { dict set status $ns [dict get $u status] }
+    }
+    set callees [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call"} { dict set callees [dict get $node callee] 1 }
+    }
+    set memo [dict create]
+    set lines {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || [dict exists $callees $e] || [dict get $node binding] eq ""} continue
+        set binding [dict get $hir bindings [dict get $node binding]]
+        set by [dict get $binding declaredBy]
+        if {$by eq "" || ![dict exists $hir exprs $by value]} continue
+        set block [dict get $hir exprs $by value]
+        if {$block eq "" || [dict get $hir exprs $block kind] ne "block"} continue
+        set u [hir::direct::UnitOfScope $hir [dict get $hir exprs $block scope] memo $sections]
+        if {$u eq "" || [dict getdef $status $u ""] ne "contextualized"} continue
+        set v [hir::direct::UnitOfScope $hir [dict get $node scope] memo $sections]
+        if {$u eq $v} continue
+        set type [hir::typeOf $hir $block]
+        set kinds [Kinds [concat [list [lindex $type 3]] [dict getdef [lindex $type 4] args {}]]]
+        set where [escape::Location $hir $e]
+        lappend lines [join [list VREF $id [MapLocation $map $where] [expr {$v eq "" ? "entry" : $v}] $u \
+            [join $kinds ,] [hir::semantic::CallableName $hir $block]] \t]
+    }
+    return $lines
+}
+
 set unitsFile [lindex $censusArgs 0]
 set shard 1/1
 foreach {option value} [lrange $censusArgs 1 end] {
@@ -245,6 +334,16 @@ foreach line $unitLines {
     if {$census::hir ne ""} {
         if {[catch {census::Modules $census::hir $id $map $entry} lines]} {
             puts [join [list MODERROR $id [lindex [split $lines \n] 0]] \t]
+        } else {
+            foreach l $lines { puts $l }
+        }
+        if {[catch {census::ValueRefs $census::hir $id $map} lines]} {
+            puts [join [list VERROR $id [lindex [split $lines \n] 0]] \t]
+        } else {
+            foreach l $lines { puts $l }
+        }
+        if {[catch {census::ExternCalls $census::hir $id $map} lines]} {
+            puts [join [list XERROR $id [lindex [split $lines \n] 0]] \t]
         } else {
             foreach l $lines { puts $l }
         }

@@ -13,7 +13,11 @@
 # message, seconds, modules compiled, sites per bucket) and prints the
 # summaries (totals per bucket, rule and classification; the
 # contextualized modules and what they expose; the compile failures; the
-# sites with the units that observed them).
+# sites with the units that observed them; scan.tcl's supplementary XCALL
+# lines, the C calls across a module boundary on a pointer, grouped; the
+# per-directory unit listing partition-a.md quotes). VREF lines (scan.tcl's
+# other supplementary measurement) are not read: partition-a.md, section 7,
+# reports them.
 #
 # The classification is the census author's judgment, written below as
 # rules: a site matches the first rule whose location pattern (a glob over
@@ -41,6 +45,16 @@ set classification {
      "not an airlock boundary: render::Drawn is ordinary render.bot's result struct handing sdl's Video back to the loop; a consequence of sdl's leak, which is reported at sdl's boundary"}
     {stdlib/windows/io.bot:* {call std::windows::*} * LEGITIMATE
      "std::windows is the thin Win32 layer, ordinary and context-free (GetStdHandle and WriteFile's handle are non-retaining): no airlock. The handle is a borrowed standard handle that std::windows::io fetches and passes back within one call (write_some) and never stores (AGENTS.md, Windows I/O: a C pointer cannot live in a context); std::windows::io, the context's owner, is itself ordinary because nothing it calls is direct"}
+    {audit/icy-tower/context-refactor/repro/g1-view-leak/main.bot:* {call airlock::record} R3 SUSPICIOUS
+     "the targeted shape, written on purpose (reproducer g1): contextualized airlock returns the unrestricted view of its native record, and the ordinary entry program reads the C string pointer out of it and hands it to strlen with no diagnostic and no directness; the airlock could read the record inline behind its context, as the working tree's sdl.bot does"}
+    {audit/icy-tower/context-refactor/variants/opaque-values/*:* {call sdl::*} R1 LEGITIMATE
+     "intended ownership transfer (Design A, variants/opaque-values/NOTES.md): sdl::Video is an opaque affine resource value that open returns, poll/show take and hand back and close consumes; R2 and R3 do not fire (the representation is sealed: OPAQUE-REPRESENTATION outside sdl.bot), and the transfer is what buys Design A its static use-after-close and double-close errors (USE-AFTER-MOVE), which the context-retained design gives up (census section 7)"}
+    {audit/icy-tower/context-refactor/variants/opaque-values/*:* {destructure sdl::*} R4 LEGITIMATE
+     "the hand-back carrier Design A's affine value forces (no observing parameter: an operation that takes the Video must return it): the struct is sdl's, but its one pointer-holding field is the opaque Video, so no pointer representation is taken apart outside sdl.bot; R4 follows C addresses through opaque structs (its carry search), unlike R2"}
+    {audit/icy-tower/context-refactor/variants/opaque-values/main.bot:* {call render::draw} R1 LEGITIMATE
+     "not an airlock boundary: render declares no context and makes no direct call; it forwards Design A's opaque sdl::Video, an intended ownership transfer (see the sdl sites)"}
+    {audit/icy-tower/context-refactor/variants/opaque-values/main.bot:* {destructure render::Drawn} R4 LEGITIMATE
+     "not an airlock boundary: render::Drawn is ordinary render.bot's carrier handing Design A's opaque Video back to the loop; no representation exposed"}
     {examples/ffi/tcl/demo.bot:* {call tcl::eval} * LEGITIMATE
      "tcl.bot is a hand-written thin binding with no context and no direct edge (Tcl_EvalEx's interp is noescape): no airlock; the program owns the interpreter pointer by design (it creates and deletes it) and lends a clone to the wrapper"}
 }
@@ -75,6 +89,7 @@ foreach line [ReadLines $unitsFile] {
     lappend order $id
 }
 set sites [dict create]
+set xcalls [dict create]
 set siteOrder {}
 set mods {}
 foreach raw $rawFiles {
@@ -102,6 +117,12 @@ foreach raw $rawFiles {
                 lassign $fields - id ns status file contexts functions ptrFns viewFns ptrStructs viewStructs externs ptrExterns
                 dict set units $id modules [linsert [dict get $units $id modules] end $ns]
                 lappend mods [list $id $ns $status $file $contexts $functions $ptrFns $viewFns $ptrStructs $viewStructs $externs $ptrExterns]
+            }
+            XCALL {
+                lassign $fields - id ustatus location from to kinds callee
+                if {![dict exists $xcalls $location]} {
+                    dict set xcalls $location [list $ustatus $from $to $kinds $callee]
+                }
             }
         }
     }
@@ -158,7 +179,7 @@ if {$outDir ne ""} {
         # The module count leaves out the entry program.
         set modules [expr {[llength [dict get $u modules]] ? [llength [dict get $u modules]] - 1 : 0}]
         puts $f [join [list $id [dict get $u set] [dict get $u label] [dict get $u target] [dict get $u expect] \
-            [dict get $u outcome] [dict get $u code] [dict get $u message] [dict get $u seconds] $modules \
+            [dict get $u outcome] [regsub { \{.*$} [dict get $u code] ""] [string map [list $root/ ""] [dict get $u message]] [dict get $u seconds] $modules \
             {*}[dict values $counts]] \t]
     }
     close $f
@@ -192,7 +213,7 @@ puts "== modules by status (distinct files; units observing)"
 set byFile [dict create]
 foreach m $mods {
     lassign $m id ns status file contexts functions ptrFns viewFns ptrStructs viewStructs externs ptrExterns
-    if {$ns eq "entry"} continue
+    if {$ns eq "entry" && $status eq "ordinary"} continue
     set key [list $status $ns $file]
     if {![dict exists $byFile $key]} {
         dict set byFile $key [dict create facts [lrange $m 4 end] units {}]
@@ -216,6 +237,21 @@ foreach key [lsort [dict keys $byFile]] {
     puts "  $ns $file contexts={$contexts} functions=$functions ptrFns={$ptrFns} viewFns={$viewFns} ptrStructs={$ptrStructs} viewStructs={$viewStructs} externs=$externs ptrExterns=$ptrExterns"
 }
 puts "== distinct module files compiled: [llength [lsort -unique [lmap k [dict keys $byFile] {lindex $k 2}]]]"
+puts "== cross-module C calls on a pointer (scan.tcl's XCALL; outside the instrument's rules): [dict size $xcalls] distinct locations"
+set pairs [dict create]
+set contextual [dict create]
+foreach {status ns file} [concat {*}[dict keys $byFile]] {
+    set info [dict get $byFile [list $status $ns $file]]
+    if {$status ne "ordinary" || [lindex [dict get $info facts] 0] ne ""} { dict set contextual $ns $status }
+}
+dict for {location x} $xcalls {
+    lassign $x ustatus from to kinds callee
+    set file [lindex [split $location :] 0]
+    if {[string match 6df89a8e:* $location]} { set file [join [lrange [split $location :] 0 1] :] }
+    dict incr pairs "$ustatus $from -> [expr {[string match sdl3::* $to] ? "sdl3::*" : $to}] ($file) $kinds"
+    if {[dict exists $contextual $to]} { puts "  INTO A CONTEXT-DECLARING OR NON-ORDINARY MODULE: $location $from -> $to $callee" }
+}
+dict for {k n} $pairs { puts "  $n  $k" }
 puts "== units per directory (markdown)"
 set byDir [dict create]
 foreach id $order {

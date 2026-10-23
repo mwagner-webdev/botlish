@@ -52,10 +52,17 @@
 #              root), the compiler-service export probe (exports.bot beside
 #              json/json_tokens.bot) and the Icy Tower context variants
 #              (each staged over the working tree with the SDL3 binding).
-#              The diagnostic-recovery corpus and the reproducers whose
-#              header expects a front-end rejection are deliberately
-#              invalid. audit/machine-code-proof-loss/out/profiles/*.bot
-#              are directories, not files.
+#              Every hash-table implementation is compiled with bench.bot,
+#              every driver with lp (its own key module), and the point and
+#              str key modules with bench.bot and lp; lpp needs the
+#              experiment's compiler patch and is expected to fail here.
+#              The diagnostic-recovery corpus, the reproducers whose
+#              header expects a front-end rejection, the canvas variant's
+#              golden-check-draws.bot and four probes whose rejection
+#              their header or report documents ($documentedRejections)
+#              are deliberately invalid.
+#              audit/machine-code-proof-loss/out/profiles/*.bot are
+#              directories, not files.
 
 set here [file dirname [file normalize [info script]]]
 set root [file normalize [file join $here .. .. .. ..]]
@@ -259,6 +266,17 @@ foreach profileDir [lsort [glob -type d -directory [file join $root generated c]
 # ---------------------------------------------------------------------------
 # audit corpora
 
+# Audit programs whose rejection their own header or report documents.
+set documentedRejections {
+    audit/comprehensive-generated-code/probes/from-int-invalid.bot
+        {its header: statically KNOWN-ERROR, never reaches codegen}
+    audit/proof-census/probes/g-induction-declared-param.bot
+        {the rejection PROOF-FACT-CENSUS.md documents (H: count_eq)}
+    audit/proof-census/probes/p-param-inference-narrowing.bot
+        {its header: a caller passing 5 is rejected (PROOF-FACT-CENSUS.md's reproducer)}
+    audit/strict-reference-determinism/experiment/csv_records-B-caller-first.bot
+        {the rejection STRICT-REFERENCE-DETERMINISM.md documents (B, the caller-first order)}
+}
 set assembled {
     audit/hash-table/ audit/traits/principal/ audit/icy-tower/context-refactor/variants/
     audit/compiler-service/probes/export/
@@ -271,7 +289,9 @@ foreach f [EntryPrograms [file join $root audit]] {
     }
     if {$skip} continue
     set expect ok
-    if {[string match audit/diagnostic-recovery/corpus/* $rel]} {
+    if {[dict exists $documentedRejections $rel]} {
+        set expect "invalid:[dict get $documentedRejections $rel]"
+    } elseif {[string match audit/diagnostic-recovery/corpus/* $rel]} {
         set expect "invalid:diagnostic-recovery corpus (deliberately invalid programs)"
     } elseif {[string match audit/icy-tower/context-refactor/repro/* $rel]} {
         # The reproducer's own expectation: rejected by the front end when
@@ -305,7 +325,7 @@ proc HtTypedDriver {text type} {
     }
     return [join $out \n]
 }
-proc HtApp {driver impl keys} {
+proc HtApp {driver impl keys {expect ok}} {
     set ht [file join $::root audit hash-table]
     set dir [file join $::work ht [file rootname $driver]-$impl-$keys]
     file mkdir $dir
@@ -322,14 +342,22 @@ proc HtApp {driver impl keys} {
     set map [list [file join $dir main.bot] audit/hash-table/drivers/$driver \
         [file join $dir table.bot] audit/hash-table/impl/$impl.bot \
         [file join $dir keys.bot] audit/hash-table/drivers/keys_$keys.bot]
-    Unit audit $label [file join $dir main.bot] $::hostTarget ok $map
+    Unit audit $label [file join $dir main.bot] $::hostTarget $expect $map
 }
 foreach implPath [lsort [glob -directory [file join $root audit hash-table impl] *.bot]] {
     set impl [file rootname [file tail $implPath]]
-    HtApp bench.bot $impl [expr {$impl eq "lpstr" ? "str" : "int"}]
+    set expect ok
+    if {$impl eq "lpp"} {
+        # lpp calls std::mutable_array::probe_linear, which only the
+        # experiment's compiler patch defines (audit/hash-table/patches/).
+        set expect "invalid:needs audit/hash-table/patches/probe-primitive.patch (an experiment, not for main)"
+    }
+    HtApp bench.bot $impl [expr {$impl eq "lpstr" ? "str" : "int"}] $expect
 }
-foreach driver {bfs.bot freq.bot memo.bot memo2.bot trace.bot} {
-    HtApp $driver lp int
+# Each mixed workload with its own key module (tools/mixed.tcl: bfs.bot's
+# keys are points, freq.bot's strings).
+foreach {driver keys} {bfs.bot point freq.bot str memo.bot int memo2.bot int trace.bot int} {
+    HtApp $driver lp $keys
 }
 HtApp hashes.bot listmap int
 HtApp bench.bot lp point
@@ -355,23 +383,35 @@ lappend map [file join $into json_tokens.bot] audit/compiler-service/probes/json
 Unit audit "audit/compiler-service/probes/export/exports.bot (beside json/json_tokens.bot)" \
     [file join $into exports.bot] $hostTarget ok $map
 
-# The Icy Tower context variants, each over the working tree.
+# The Icy Tower context variants, each over the working tree: every .bot
+# of the variant's directory replaces or joins the game's files, and the
+# units are the game's main.bot and every variant file no other file
+# imports (canvas: canvas-test.bot, its golden.bot, and
+# golden-check-draws.bot, which its NOTES.md shows rejected).
 set variants [file join $root audit icy-tower context-refactor variants]
-foreach {name files entries} {
-    ids {sdl.bot} {main.bot}
-    opaque-values {main.bot render.bot sdl.bot} {main.bot}
-    canvas {render.bot canvas-test.bot} {main.bot canvas-test.bot}
-} {
+foreach name {ids opaque-values canvas} {
     set into [file join $work variant-$name]
+    file delete -force $into
     set map [CopyApp $icy $into]
+    set files [lsort [glob -directory [file join $variants $name] *.bot]]
     foreach f $files {
-        file copy -force [file join $variants $name $f] [file join $into $f]
-        dict set map [file join $into $f] audit/icy-tower/context-refactor/variants/$name/$f
+        file copy -force $f [file join $into [file tail $f]]
+        dict set map [file join $into [file tail $f]] audit/icy-tower/context-refactor/variants/$name/[file tail $f]
     }
     lappend map {*}[StageBinding sdl3 $hostTarget $into]
+    set entries [list main.bot]
+    foreach f [EntryPrograms $into] {
+        if {[file tail $f] ne "main.bot" && [file join $variants $name [file tail $f]] in $files} {
+            lappend entries [file tail $f]
+        }
+    }
     foreach e $entries {
+        set expect ok
+        if {$name eq "canvas" && $e eq "golden-check-draws.bot"} {
+            set expect "invalid:the variant's rejected test (CONTEXT-FUNCTION-VALUE, variants/canvas/NOTES.md)"
+        }
         Unit audit "audit/icy-tower/context-refactor/variants/$name: $e (over the working tree, staged with sdl3)" \
-            [file join $into $e] $hostTarget ok $map
+            [file join $into $e] $hostTarget $expect $map
     }
 }
 
