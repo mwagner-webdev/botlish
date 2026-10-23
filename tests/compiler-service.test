@@ -993,6 +993,6 @@ test cs-export-import-derived {a revision exported with the query indexes prepar
     list $parsedAfterQuery [expr {$first eq [dict remove [service::at $rev $path 5 5] revision]}] \
         [expr {[cs::AllFacts $imported] eq $direct}] $refused [dict get $options -errorcode] \
         [lsort [dict keys [dict get [service::state] derived]]]
-} -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain rev path ws dir direct text ws2 imported first parsedAfterQuery body refused message options} -result {0 1 1 1 {SERVICE IMPORT} {declarations lines semantic syntax}}
+} -cleanup {service::closeWorkspace $ws; service::closeWorkspace $ws2; file delete -force $dir; unset -nocomplain rev path ws dir direct text ws2 imported first parsedAfterQuery body refused message options} -result {0 1 1 1 {SERVICE IMPORT} {declarations dfaNames lines semantic syntax}}
 
 cleanupTests

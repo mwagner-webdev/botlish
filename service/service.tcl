@@ -614,7 +614,7 @@ proc service::import {ws text args} {
     dict set revision workspace $ws
     dict set revision version [dict get $options -version]
     set derived [dict getdef $body derived [dict create]]
-    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations}]] ne {declarations lines semantic syntax}} {
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames}]] ne {declarations dfaNames lines semantic syntax}} {
         Fail IMPORT "an exported revision whose derived data are not its query indexes"
     }
     dict set revision derived $derived
@@ -719,6 +719,9 @@ proc service::prepare {rev args} {
             if {$path in $paths} {
                 Derived $rev declarations $f [list service::DeclarationIndex $f]
             }
+        }
+        foreach path $paths {
+            Derived $rev dfaNames $path [list service::DfaNameIndex $path]
         }
     }
     if {[dict get $options -compilerpedia]} {
