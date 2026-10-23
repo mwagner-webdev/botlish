@@ -54,11 +54,6 @@ struct MutableMapEntry[K, V]:
 # A key with no entry in the map.
 error KeyNotFound
 
-# M with its dead entries dropped and its index sized for COUNT entries.
-fn rebuild(place m: MutableMap[K, V], count: int) -> unit:
-    m.table.compact_values(m.vals)
-    std::ordered_table::rebuild(m.table, count)
-
 fn create() -> MutableMap[K, V]:
     MutableMap[K, V] {table: std::ordered_table::fresh[K](0), vals: std::mutable_vector::from_list([])}
 
@@ -90,7 +85,7 @@ fn set(place m: MutableMap[K, V], key: K, value: V) -> unit:
                 value
         return unit
     if std::ordered_table::full?(m.table):
-        rebuild(m, std::ordered_table::length(m.table) + 1)
+        m.table.rebuild_with(m.vals, std::ordered_table::length(m.table) + 1)
     m.table.append(h, key)
     m.vals.push(value)
 
@@ -101,7 +96,7 @@ fn remove(place m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
             fail KeyNotFound
     m.table.remove_slot(slot)
     if std::ordered_table::garbage?(m.table):
-        rebuild(m, std::ordered_table::length(m.table))
+        m.table.rebuild_with(m.vals, std::ordered_table::length(m.table))
     value
 
 fn clear(place m: MutableMap[K, V]) -> unit:

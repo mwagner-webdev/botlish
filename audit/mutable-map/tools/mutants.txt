@@ -225,91 +225,277 @@ opaque struct MutableMap[K, V]:
 ## stdlib/ordered_table.bot
 <<<<
     if t.positions() != t.length():
-        hs = loop p from 0 to std::mutable_vector::length(t.hashes):
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
             h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
 ====
     if true:
         hs = loop q from 0 to std::mutable_vector::length(t.hashes):
             p = std::mutable_vector::length(t.hashes) - 1 - q
             h = t.hashes.at(p):
->>>>
-<<<<
-        ks = loop p from 0 to std::mutable_vector::length(t.keys):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            h
+        ks = loop q from 0 to std::mutable_vector::length(t.hashes):
+            p = std::mutable_vector::length(t.hashes) - 1 - q
             if not t.live_at?(p):
-====
-        ks = loop q from 0 to std::mutable_vector::length(t.keys):
-            p = std::mutable_vector::length(t.keys) - 1 - q
-            if not t.live_at?(p):
+                continue
+            t.key_at(p)
+        std::mutable_vector::clear(t.hashes)
+        loop h in hs:
+            t.hashes.push(h)
+        std::mutable_vector::clear(t.keys)
+        loop k in ks:
+            t.keys.push(k)
 >>>>
 <<<<
     if t.positions() == t.length():
         return unit
-    kept = loop p from 0 to std::mutable_vector::length(values):
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
 ====
-    kept = loop q from 0 to std::mutable_vector::length(values):
+    vs = loop q from 0 to std::mutable_vector::length(values):
         p = std::mutable_vector::length(values) - 1 - q
+        if not t.live_at?(p):
+            continue
+        values.at(p):
+            on IndexNotFound:
+                continue
+    std::mutable_vector::clear(values)
+    loop v in vs:
+        values.push(v)
 >>>>
 
 @@ resize-bucket-order every rebuild orders the entries by index slot (the hash's placement), keys, hashes and values alike
 ## stdlib/ordered_table.bot
 <<<<
     if t.positions() != t.length():
-        hs = loop p from 0 to std::mutable_vector::length(t.hashes):
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
             h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
 ====
     if true:
-        hs = loop s from 0 to std::mutable_vector::length(t.index):
-            p = t.position(s)
+        hs = loop q from 0 to std::mutable_vector::length(t.index):
+            p = t.position(q)
             h = t.hashes.at(p):
->>>>
-<<<<
-        ks = loop p from 0 to std::mutable_vector::length(t.keys):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            h
+        ks = loop q from 0 to std::mutable_vector::length(t.index):
+            p = t.position(q)
             if not t.live_at?(p):
-====
-        ks = loop s from 0 to std::mutable_vector::length(t.index):
-            p = t.position(s)
-            if not t.live_at?(p):
+                continue
+            t.key_at(p)
+        std::mutable_vector::clear(t.hashes)
+        loop h in hs:
+            t.hashes.push(h)
+        std::mutable_vector::clear(t.keys)
+        loop k in ks:
+            t.keys.push(k)
 >>>>
 <<<<
     if t.positions() == t.length():
         return unit
-    kept = loop p from 0 to std::mutable_vector::length(values):
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
 ====
-    kept = loop s from 0 to std::mutable_vector::length(t.index):
-        p = t.position(s)
+    vs = loop q from 0 to std::mutable_vector::length(t.index):
+        p = t.position(q)
+        if not t.live_at?(p):
+            continue
+        values.at(p):
+            on IndexNotFound:
+                continue
+    std::mutable_vector::clear(values)
+    loop v in vs:
+        values.push(v)
 >>>>
 
-@@ compaction-reverses-order compaction (a rebuild with dead entries) moves the live entries into reverse order
+@@ compaction-fills-holes-from-end compaction fills each dead position with the last live entry (swap-remove: no copying, the order lost), keys, hashes and values alike
 ## stdlib/ordered_table.bot
 <<<<
-        hs = loop p from 0 to std::mutable_vector::length(t.hashes):
-            h = t.hashes.at(p):
+# VALUES (a collection's per-entry payload, aligned with T's positions) with
 ====
-        hs = loop q from 0 to std::mutable_vector::length(t.hashes):
-            p = std::mutable_vector::length(t.hashes) - 1 - q
-            h = t.hashes.at(p):
+fn fill_holes(place t: Table[K], hole: int, last: int) -> unit:
+    if hole < 0 or hole >= last:
+        return unit
+    if t.live_at?(hole):
+        return t.fill_holes(hole + 1, last)
+    if not t.live_at?(last):
+        return t.fill_holes(hole, last - 1)
+    h = t.hashes.at(last):
+        on IndexNotFound:
+            -1
+    k = t.key_at(last)
+    r = t.hashes.swap(hole, h):
+        on IndexNotFound:
+            -1
+    o = t.keys.swap(hole, k):
+        on IndexNotFound:
+            k
+    d = t.hashes.swap(last, -1):
+        on IndexNotFound:
+            -1
+    t.fill_holes(hole + 1, last - 1)
+
+fn fill_value_holes(t: Table[K], place values: MutableVector[V], hole: int, last: int) -> unit:
+    if hole < 0 or hole >= last:
+        return unit
+    if t.live_at?(hole):
+        return t.fill_value_holes(values, hole + 1, last)
+    if not t.live_at?(last):
+        return t.fill_value_holes(values, hole, last - 1)
+    v = values.at(last):
+        on IndexNotFound:
+            return unit
+    o = values.swap(hole, v):
+        on IndexNotFound:
+            v
+    t.fill_value_holes(values, hole + 1, last - 1)
+
+# VALUES (a collection's per-entry payload, aligned with T's positions) with
 >>>>
 <<<<
-        ks = loop p from 0 to std::mutable_vector::length(t.keys):
-            if not t.live_at?(p):
+    if t.positions() != t.length():
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
 ====
-        ks = loop q from 0 to std::mutable_vector::length(t.keys):
-            p = std::mutable_vector::length(t.keys) - 1 - q
-            if not t.live_at?(p):
+    if t.positions() != t.length():
+        t.fill_holes(0, std::mutable_vector::length(t.hashes) - 1)
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
 >>>>
 <<<<
-    kept = loop p from 0 to std::mutable_vector::length(values):
+    if t.positions() == t.length():
+        return unit
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
 ====
-    kept = loop q from 0 to std::mutable_vector::length(values):
-        p = std::mutable_vector::length(values) - 1 - q
+    if t.positions() == t.length():
+        return unit
+    t.fill_value_holes(values, 0, std::mutable_vector::length(values) - 1)
+    values.truncate(t.length())
 >>>>
 
-@@ compaction-loses-value compacting a map's values drops the value at position 0
+@@ compaction-loses-value compacting a map's values truncates one value too many
 ## stdlib/ordered_table.bot
 <<<<
-    kept = loop p from 0 to std::mutable_vector::length(values):
+    values.truncate(t.length())
 ====
-    kept = loop p from 1 to std::mutable_vector::length(values):
+    values.truncate(t.length() - 1)
 >>>>
 
 @@ compaction-stale-index a rebuild that keeps the slot count keeps the old index (stale entry positions after compaction)
@@ -324,30 +510,24 @@ opaque struct MutableMap[K, V]:
     loop s from 0 to slots_for(needed):
 >>>>
 
-@@ hash-not-moved-with-key compaction moves the keys but leaves the stored hashes where they were
+@@ hash-not-moved-with-key compaction moves the keys down but leaves the stored hashes where they were
 ## stdlib/ordered_table.bot
 <<<<
-        std::mutable_vector::clear(t.hashes)
-        loop h in hs:
-            t.hashes.push(h)
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
 ====
-        n = std::list::length(hs)
->>>>
-<<<<
-import std::mutable_vector
-import std::mutable_array
-====
-import std::list
-import std::mutable_vector
-import std::mutable_array
+                k = t.key_at(p)
 >>>>
 
 @@ map-values-misaligned a map's rebuild compacts the keys but not the values
-## stdlib/mutable_map.bot
+## stdlib/ordered_table.bot
 <<<<
-    m.table.compact_values(m.vals)
+    t.compact_values(values)
+    t.rebuild(needed)
 ====
-    n = std::mutable_vector::length(m.vals)
+    t.rebuild(needed)
 >>>>
 
 @@ tombstones-never-compact the garbage rule never fires: dead entries are only dropped by growth

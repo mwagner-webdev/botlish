@@ -1831,6 +1831,84 @@ any change they name. A change to native tracing or drops also needs a
 `BOTLISH_NATIVE_GC_STRESS=1` run of `tests/mutable-array.test`.
 `bench/mutable-array.tcl` regenerates the performance report.
 
+## MutableMap, MutableSet and place parameters
+
+`std::mutable_map::MutableMap[K satisfies Hashable, V]` and
+`std::mutable_set::MutableSet[T satisfies Hashable]`
+(ORDERED-MUTABLE-MAP-SET.md) are ordinary Botlish: opaque parameterized
+structs over MutableVectors, sharing the internal engine `std::ordered_table`
+(stdlib/ordered_table.bot, `core::native::declareInternalModule`: no program
+imports it). Iteration is insertion order; the private keyed hash
+(`std::table_hash::of`) decides where an entry lives in the index, never
+where it appears. Keep it so:
+
+* No runtime map or set: no native, NIR instruction, runtime object or Tcl
+  helper of either collection, and no compiler knowledge of them beyond the
+  loop protocol's table (`hir::iteration`'s `iterables`). A new collection
+  that needs a language seam gets a general one, with its own tests and
+  mutants, never a collection-specific rule.
+* Placement uses the keyed table hash only, computed once per operation and
+  stored per entry: never the public `hash`, a post-mix of it, an unkeyed
+  fast path or a recomputation in a helper. A probe compares a key only at
+  an entry whose stored hash is equal; equality decides identity. Nothing
+  observable may depend on the hidden key: no API exposes a slot, a stored
+  hash, a capacity, the load or the probe order.
+* Keys keep their type (MutableVector[K]): a probe of Int or String keys
+  lowers to `ieq`/`streq`, a structural key to `veqtotal`, never the
+  fallible `veq`. Neither collection is Hashable, and `==` of two refuses
+  them at run time naming the opaque values, never their representation
+  (core/value.tcl's and ops.rs's opaque-struct cases).
+* Replacement keeps a key's position and its stored key; removal leaves a
+  dead entry (hash -1) that compaction drops, in order, in place; removal
+  then insertion appends. The policy (7/10 load, power-of-two slots of at
+  least 8, the garbage rule) is the engine's and may change: never let a
+  test of a program's behavior depend on it -- tests/ordered-table.test is
+  the one white-box test of the representation.
+* The engine's own method calls are written so the kind filter decides them
+  (a qualified call where a lexical name would be a second candidate):
+  every program importing the collections compiles their modules.
+* A loop over a collection is the loop protocol (hir/iteration.tcl): the
+  owner module's `iteration_end`, `iteration_live?` and `iteration_at`,
+  `nomethod` and internal to the standard library (INTERNAL-NAMESPACE for a
+  program naming one), elaborated after the checks into a counted loop over
+  a logical copy (MutableVector's snapshot rule). Never materialize the
+  collection for a loop, and never let a lockstep loop iterate one.
+* A place parameter (`place m: T`, PLACE-PARAMETERS.md) is the caller's
+  place: no entry copy, never moved, read out by copy; its argument is a
+  place of the caller, never a temporary, a module binding, an enclosing
+  function's binding or a place another argument of the call overlaps.
+  Never give it a runtime existence, a reference type, a function-value
+  form or an affine type, and never let it implement a trait requirement.
+  A call giving a place to a place parameter resizes every vector under it
+  for `hir::cardinality`'s MutableVector length proofs (`VectorLength`,
+  `ResizedPlaces`, `Mutated`).
+
+If you change the collections or the engine (stdlib/mutable_map.bot,
+stdlib/mutable_set.bot, stdlib/ordered_table.bot), the loop protocol
+(hir/iteration.tcl, its uses in hir/types.tcl, hir/affine.tcl,
+hir/lockstep.tcl, surface/modules.tcl's `CheckInternal`), place parameters
+(surface/parser.tcl's `PlaceMarker`, hir/syntax.tcl's `withPlaces`, the
+places of hir/resolve.tcl, hir/format.tcl and hir/read.tcl, hir/mutvec.tcl's
+place section and its uses in `Elaborate`), the MutableVector index proofs
+(hir/cardinality.tcl's `VectorLength`, `ResizedPlaces`, `Mutated`; the
+`mutvec` bounds family) or the opaque equality refusals, run
+`tests/mutable-map.test`, `tests/mutable-set.test`,
+`tests/collection-iteration.test`, `tests/ordered-table.test`,
+`tests/place-parameters.test`, `tests/vector-bounds.test`, their golden
+suites (`tclsh9.0 tests/local.tcl tests/golden/mutable-map.bot
+tests/golden/mutable-set.bot tests/golden/collection-iteration.bot
+tests/golden/place-parameters.bot`), `python3 -I
+audit/mutable-map/tools/oracle.py selftest`,
+`audit/mutable-map/tools/fuzz.tcl` (several seeds; once with `-gc-stress 1`,
+once with `-profile large -backends "compile cranelift-generic cranelift"`)
+and `audit/mutable-map/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the vector and
+array harnesses (above) for a change to hir/mutvec.tcl or hir/cardinality.tcl,
+the Hashable and trait-constrained-type harnesses for a change to how keys
+are constrained or hashed, and the warning gate (the three modules are
+warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
+
 ## Fixed binary layouts
 
 A `layout` (BINARY-LAYOUT.md) is a compile-time schema of a fixed number of

@@ -246,46 +246,67 @@ fn remove_slot(place t: Table[K], slot: int) -> unit:
 # ---------------------------------------------------------------------------
 # Rebuilding: compaction and resizing
 
+# V with only its first N elements (V holding at least N).
+fn truncate(place v: MutableVector[E], n: int) -> unit:
+    loop s from n to std::mutable_vector::length(v):
+        x = v.pop():
+            on IndexNotFound:
+                continue
+    unit
+
 # VALUES (a collection's per-entry payload, aligned with T's positions) with
-# the dead entries' slots dropped, the live ones moved down in order: what
-# rebuild will do to T's own entries. Called before rebuild.
+# the dead entries' slots dropped, the live ones moved down in order, in
+# place: what rebuild will do to T's own entries. Called before rebuild.
 fn compact_values(t: Table[K], place values: MutableVector[V]) -> unit:
     if t.positions() == t.length():
         return unit
-    kept = loop p from 0 to std::mutable_vector::length(values):
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
         if not t.live_at?(p):
             continue
-        values.at(p):
+        i = w.at(0):
             on IndexNotFound:
-                continue
-    std::mutable_vector::clear(values)
-    loop v in kept:
-        values.push(v)
-    unit
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
 
-# T with its dead entries dropped (the live ones in order) and its index
-# rebuilt at slots_for(NEEDED) slots, NEEDED at least its live entry count.
+# T with its dead entries dropped -- the live ones moved down in order, in
+# place -- and its index rebuilt at slots_for(NEEDED) slots, NEEDED at least
+# its live entry count.
 fn rebuild(place t: Table[K], needed: int) -> unit:
     if t.positions() != t.length():
-        hs = loop p from 0 to std::mutable_vector::length(t.hashes):
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
             h = t.hashes.at(p):
                 on IndexNotFound:
                     continue
             if h < 0:
                 continue
-            h
-        ks = loop p from 0 to std::mutable_vector::length(t.keys):
-            if not t.live_at?(p):
-                continue
-            t.keys.at(p):
+            i = w.at(0):
                 on IndexNotFound:
-                    continue
-        std::mutable_vector::clear(t.hashes)
-        loop h in hs:
-            t.hashes.push(h)
-        std::mutable_vector::clear(t.keys)
-        loop k in ks:
-            t.keys.push(k)
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
     std::mutable_vector::clear(t.index)
     loop s from 0 to slots_for(needed):
         t.index.push(-1)
@@ -295,6 +316,15 @@ fn rebuild(place t: Table[K], needed: int) -> unit:
                 continue
         t.place_entry(p, h)
     unit
+
+# T rebuilt for NEEDED entries (rebuild) together with VALUES, a
+# collection's per-entry payload aligned with T's positions, compacted the
+# same way: a map's rebuild (its values are no field of the table, and a
+# module has no private members, so the map's own module declares no
+# rebuild of its own).
+fn rebuild_with(place t: Table[K], place values: MutableVector[V], needed: int) -> unit:
+    t.compact_values(values)
+    t.rebuild(needed)
 
 # Empties T: no entry, the smallest index.
 fn clear(place t: Table[K]) -> unit:

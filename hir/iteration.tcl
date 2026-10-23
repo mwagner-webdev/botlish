@@ -282,7 +282,7 @@ proc hir::iteration::Rewrite {hirVar parent e protocol type} {
         set inner [dict get $hir exprs [lindex $body 0] reachable]
     }
     # if iteration_live?(x#domain, x#position): (nothing) else: continue
-    set live [OperationCall hir $protocol live [list [Ref hir $d $origin $scope $inner] \
+    set live [OperationCall hir $protocol live [list [Ref hir $d $origin $bodyScope $inner] \
         [Ref hir $position $origin $bodyScope $inner]] bool $origin $bodyScope $inner]
     set thenScope [NewScope hir branch $bodyScope $origin]
     set elseScope [NewScope hir branch $bodyScope $origin]

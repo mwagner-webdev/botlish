@@ -22,6 +22,9 @@
 #     manifest), first a release build of the copy's native backend (a mutant
 #     that does not build is reported NOT-BUILT, never counted as killed).
 #
+# Each detector run is limited to -timeout seconds (600): a mutant that makes
+# a probe or a rebuild loop forever is killed as "did not complete".
+#
 # -jobs N runs the mutants in N processes, each with its own copy; native
 # mutants all go to the first (the only copy whose native/target is a real
 # copy, rebuilt per mutant; the others link this checkout's). A mutant every
@@ -34,7 +37,7 @@ set root [file dirname [file dirname [file dirname [file dirname $script]]]]
 
 set options [dict create -only "" -jobs 1 -shard "" \
     -tests {tests/ordered-table.test tests/mutable-map.test tests/mutable-set.test tests/collection-iteration.test} \
-    -fuzz-count 7 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 2400]
+    -fuzz-count 7 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 600]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value

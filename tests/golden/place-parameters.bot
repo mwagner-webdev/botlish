@@ -1,0 +1,645 @@
+# place-parameters.bot -- place parameters (PLACE-PARAMETERS.md) and the
+# MutableVector index proofs that account for them (vector bounds,
+# ORDERED-MUTABLE-MAP-SET.md, "Compiler changes"), ported from
+# tests/place-parameters.test and tests/vector-bounds.test.
+#
+# * A parameter declared `place b: T` is its caller's place itself: the
+#   caller passes a place of its own (a local, a parameter, a context
+#   parameter's member, a field path from one), uncopied, and every update
+#   the function makes through it is the caller's place's -- through method
+#   syntax, recursion, a field path, a parameter passed on as a place.
+# * A place is still a value: a copy made before or after a place call, the
+#   callee's own copy and its result, an argument the same call reads while
+#   it updates an overlapping place, and an argument read before a later
+#   argument's place call never observe another update.
+# * The argument of a place parameter must be a place (a temporary is
+#   MutablePlaceReceiver), a nested function may not capture one
+#   (MutablePlaceCapture), a function with one is never a value
+#   (MutablePlaceReceiver), one call gives one place to one place parameter
+#   only (MutablePlaceReceiver), and the parameter's type holds a mutable
+#   collection and is unrestricted (Type).
+# * A MutableVector's element read is proven in range by a guard, a counted
+#   loop or a reduced index over the vector's own length exactly when
+#   nothing in its function resizes it -- a push, pop or clear, or a place
+#   call giving it or a struct holding it to a place parameter -- and its
+#   root is no context parameter; every other read is UnhandledError
+#   without a handler.
+#
+# What a Botlish program cannot observe stays in the Tcl suites: the
+# syntax errors and the contextual marker (parser), HIR text, the native
+# allocation report (no logical copy for a place call), and the diagnostics
+# of a private library module (a module binding given to a place
+# parameter, a trait requirement implemented by a place function).
+#
+# The vector-bounds tests' one-field struct is VBag here (Bag is the place
+# tests' two-field struct).
+import std::compiler
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::coroutine
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only).
+
+# ppDecls: a bag of Ints, a holder of a bag and another vector, and the
+# place functions over them.
+struct Bag:
+    items: MutableVector[int]
+    label: str
+
+struct Holder:
+    bag: Bag
+    other: MutableVector[int]
+
+fn empty_bag() -> Bag:
+    Bag {items: std::mutable_vector::from_list([]), label: "b"}
+
+fn add(place b: Bag, x: int) -> unit:
+    b.items.push(x)
+
+fn add_twice(place b: Bag, x: int) -> unit:
+    add(b, x)
+    b.add(x)
+
+fn size(b: Bag) -> int:
+    b.items.length()
+
+# pp-context-member: a context whose member is a place.
+context struct Log:
+    lines: MutableVector[str]
+
+fn note(place v: MutableVector[str], text: str) -> unit:
+    v.push(text)
+
+fn write(text: str, context log: Log) -> unit:
+    note(log.lines, text)
+
+fn count_lines(context log: Log) -> int:
+    log.lines.length()
+
+fn log_run(context log: Log) -> int:
+    write("a")
+    write("b")
+    count_lines()
+
+# A test body is a function value, which cannot require a context: the
+# context is installed here and the body reads what the program observed.
+with context Log {lines: std::mutable_vector::from_list([])}
+context_member_count = log_run()
+
+# pp-imprinted: an applied struct.
+struct Box[T]:
+    items: MutableVector[T]
+
+fn put(place b: Box[T], x: T) -> unit:
+    b.items.push(x)
+
+fn fresh_int_box() -> Box[int]:
+    Box[int] {items: std::mutable_vector::from_list([])}
+
+fn fresh_str_box() -> Box[str]:
+    Box[str] {items: std::mutable_vector::from_list([])}
+
+# pp-diag-parameter-type: a coroutine protocol (an affine element type).
+struct Command:
+    value: int
+
+struct Event:
+    value: int
+
+# vbDecls (Bag renamed VBag).
+struct VBag:
+    items: MutableVector[int]
+
+fn three() -> MutableVector[int]:
+    std::mutable_vector::from_list([10, 20, 30])
+
+# vb-unproven-context-member: a context holding a vector.
+context struct VLog:
+    lines: MutableVector[int]
+
+# ---------------------------------------------------------------------------
+# Places: what the caller sees
+
+fn register_place_tests():
+    # the function's update through a place parameter is its caller's place's: the binding shows it, on every backend
+    fn b_pp_caller_sees_update() errors std::compiler::CompilerError:
+        static compile:
+            b = empty_bag()
+            add(b, 1)
+            add(b, 2)
+            add_twice(b, 3)
+            b.items.length()
+    std::test::value("pp-caller-sees-update", 4, b_pp_caller_sees_update)
+
+    # a function with a place parameter first is called with method syntax like a collection operation: `b.add(x)` updates b
+    fn b_pp_method_syntax() errors std::compiler::CompilerError:
+        static compile:
+            b = empty_bag()
+            b.add(7)
+            b.add_twice(8)
+            first = b.items.at(0):
+                on IndexNotFound:
+                    -1
+            first * 100 + b.items.length()
+    std::test::value("pp-method-syntax", 703, b_pp_method_syntax)
+
+    # a place is still a value: a copy made before or after a place call never observes another update (`c = b`, a struct field, a List element, an argument kept by a callee)
+    fn b_pp_copies_independent() errors std::compiler::CompilerError:
+        static compile:
+            fn keep(b: Bag) -> Bag:
+                b
+            b = empty_bag()
+            before = b
+            add(b, 1)
+            after = b
+            h = Holder {bag: b, other: std::mutable_vector::from_list([])}
+            xs = [b]
+            k = keep(b)
+            add(b, 2)
+            add_twice(b, 3)
+            [b.items.length(), before.items.length(), after.items.length(), h.bag.items.length(), size(std::list::at(xs, 0)), k.items.length()]
+    std::test::value("pp-copies-independent", [4, 0, 1, 1, 1, 1], b_pp_copies_independent)
+
+    # inside the function the place parameter is a place it does not own: a copy of it (`snapshot = b`) and its result (returned as a value) are logical copies the caller's later updates never change
+    fn b_pp_callee_copy_and_result() errors std::compiler::CompilerError:
+        static compile:
+            fn grab(place b: Bag) -> Bag:
+                snapshot = b
+                b.items.push(1)
+                b.items.push(snapshot.items.length())
+                b
+            b = empty_bag()
+            b.items.push(10)
+            g = grab(b)
+            b.items.push(20)
+            third = b.items.at(2):
+                on IndexNotFound:
+                    -1
+            [b.items.length(), g.items.length(), third]
+    std::test::value("pp-callee-copy-and-result", [4, 3, 1], b_pp_callee_copy_and_result)
+
+    # a recursive place function updates the same place at every depth (the caller's), and a place parameter passes on to another place parameter uncopied
+    fn b_pp_recursion() errors std::compiler::CompilerError:
+        static compile:
+            fn fill(place b: Bag, n: int) -> unit:
+                if n <= 0:
+                    return unit
+                b.add(n)
+                fill(b, n - 1)
+            b = empty_bag()
+            fill(b, 50)
+            b.items.length()
+    std::test::value("pp-recursion", 50, b_pp_recursion)
+
+    # a field path of a place is a place: `add(h.bag, x)` updates the field's headers, never a sibling field's
+    fn b_pp_field_path() errors std::compiler::CompilerError:
+        static compile:
+            fn push_other(place v: MutableVector[int], x: int) -> unit:
+                v.push(x)
+            h = Holder {bag: empty_bag(), other: std::mutable_vector::from_list([])}
+            add(h.bag, 1)
+            add(h.bag, 2)
+            push_other(h.other, 9)
+            [h.bag.items.length(), h.other.length(), h.bag.label]
+    std::test::value("pp-field-path", [2, 1, "b"], b_pp_field_path)
+
+    # a function's ordinary parameter is a place of its own (its logical copy): giving it to a place parameter updates the callee's copy, never its caller's
+    fn b_pp_parameter_as_place() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(b: Bag) -> int:
+                add(b, 1)
+                add(b, 2)
+                b.items.length()
+            b = empty_bag()
+            add(b, 0)
+            n = grown(b)
+            [n, b.items.length()]
+    std::test::value("pp-parameter-as-place", [3, 1], b_pp_parameter_as_place)
+
+    # a loop variable is a place of its iteration (its logical copy): a place call on it never changes the iterated List's element
+    fn b_pp_loop_variable() errors std::compiler::CompilerError:
+        static compile:
+            b = empty_bag()
+            add(b, 1)
+            bags = [b, b]
+            ns = loop c in bags:
+                add(c, 5)
+                c.items.length()
+            ms = loop c in bags:
+                c.items.length()
+            [ns, ms]
+    std::test::value("pp-loop-variable", [[2, 2], [1, 1]], b_pp_loop_variable)
+
+    # a context parameter's member is a place: a place call on it updates the installed context, which every function sharing it sees (installed at the top level: a body cannot require a context)
+    fn b_pp_context_member() errors std::compiler::CompilerError:
+        static compile:
+            context_member_count
+    std::test::value("pp-context-member", 2, b_pp_context_member)
+
+    # a bare MutableVector or MutableArray is a place parameter's type too: push and set through it update the caller's collection
+    fn b_pp_vector_and_array_places() errors std::compiler::CompilerError:
+        static compile:
+            fn grow(place v: MutableVector[int]) -> unit:
+                v.push(v.length())
+            fn bump(place a: MutableArray[int], i: int) -> unit errors IndexNotFound:
+                a.set(i, a.at(i) + 1)
+            v = std::mutable_vector::from_list([])
+            grow(v)
+            grow(v)
+            a = std::mutable_array::create(2, 0)
+            r = bump(a, 1):
+                on IndexNotFound:
+                    unit
+            s = bump(a, 1):
+                on IndexNotFound:
+                    unit
+            k = a.at(1):
+                on IndexNotFound:
+                    -1
+            [v.length(), k]
+    std::test::value("pp-vector-and-array-places", [2, 2], b_pp_vector_and_array_places)
+
+    # an imprinted function's place parameter establishes its variables like any applied type, and every specialization updates the caller's place
+    fn b_pp_imprinted() errors std::compiler::CompilerError:
+        static compile:
+            b = fresh_int_box()
+            s = fresh_str_box()
+            put(b, 1)
+            put(s, "x")
+            put(s, "y")
+            [b.items.length(), s.items.length()]
+    std::test::value("pp-imprinted", [1, 2], b_pp_imprinted)
+
+    # an argument a callee only reads is handed over by reference unless the same call updates a place overlapping it: then it is a copy, and reads the value it had when the call began
+    fn b_pp_observer_overlap_copied() errors std::compiler::CompilerError:
+        static compile:
+            fn both(place b: Bag, seen: MutableVector[int]) -> int:
+                b.items.push(9)
+                seen.length()
+            b = empty_bag()
+            add(b, 1)
+            n = both(b, b.items)
+            [n, b.items.length()]
+    std::test::value("pp-observer-overlap-copied", [1, 2], b_pp_observer_overlap_copied)
+
+    # an argument read by reference is copied when a later argument of the same call gives an overlapping place to a place parameter
+    fn b_pp_written_later_copied() errors std::compiler::CompilerError:
+        static compile:
+            fn touch(place b: Bag) -> int:
+                b.items.push(1)
+                0
+            fn pair(v: MutableVector[int], k: int) -> int:
+                v.length() + k
+            b = empty_bag()
+            n = pair(b.items, touch(b))
+            [n, b.items.length()]
+    std::test::value("pp-written-later-copied", [0, 1], b_pp_written_later_copied)
+
+    # `place` is contextual: `place: T` and a bare `place` are ordinary parameters named place, and `place` an ordinary name elsewhere (the marker-before-a-name half is the Tcl test's own)
+    fn b_pp_syntax_contextual() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place: int) -> int:
+                place + 1
+            fn g(place) -> int:
+                place
+            place = 4
+            [f(place), g(2)]
+    std::test::value("pp-syntax-contextual", [5, 2], b_pp_syntax_contextual)
+
+# ---------------------------------------------------------------------------
+# Places: what is refused
+
+fn register_place_diagnostic_tests():
+    # the argument of a place parameter must be a place: a temporary's update would be lost
+    fn b_pp_diag_temporary() errors std::compiler::CompilerError:
+        static compile:
+            add(empty_bag(), 1)
+            1
+    std::test::rejects("pp-diag-temporary", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_temporary)
+
+    # an untyped parameter passed to a place parameter is a place of its own function (its logical copy), held to the place parameter's type like any argument
+    fn b_pp_diag_untyped_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x) -> int:
+                add(x, 1)
+                x.items.length()
+            b = empty_bag()
+            [f(b), b.items.length()]
+    std::test::value("pp-diag-untyped-argument", [1, 0], b_pp_diag_untyped_argument)
+
+    # a nested function cannot update a place it captured
+    fn b_pp_diag_capture_receiver() errors std::compiler::CompilerError:
+        static compile:
+            fn outer() -> int:
+                b = empty_bag()
+                fn inner() -> unit:
+                    add(b, 1)
+                add(b, 2)
+                b.items.length()
+            outer()
+    std::test::rejects("pp-diag-capture/receiver", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_capture_receiver)
+
+    # a place parameter is a place root of its function: a nested function referring to it is MutablePlaceCapture
+    fn b_pp_diag_capture_place_parameter() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place b: Bag) -> int:
+                fn g() -> int:
+                    b.items.length()
+                g()
+            1
+    std::test::rejects("pp-diag-capture-place-parameter", std::compiler::DiagnosticCode::MutablePlaceCapture, b_pp_diag_capture_place_parameter)
+
+    # a function with a place parameter is only called, never a value: a call through the value would update whatever its caller passes
+    fn b_pp_diag_function_value() errors std::compiler::CompilerError:
+        static compile:
+            f = add
+            1
+    std::test::rejects("pp-diag-function-value", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_function_value)
+
+    # one call gives one place to one place parameter only: the same place twice
+    fn b_pp_diag_overlapping_places_same() errors std::compiler::CompilerError:
+        static compile:
+            fn two(place a: Bag, place b: Bag) -> unit:
+                a.items.push(1)
+            b = empty_bag()
+            two(b, b)
+            1
+    std::test::rejects("pp-diag-overlapping-places/same", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_overlapping_places_same)
+
+    # one call gives one place to one place parameter only: a struct and a field of it
+    fn b_pp_diag_overlapping_places_field() errors std::compiler::CompilerError:
+        static compile:
+            fn two(place h: Holder, place v: MutableVector[int]) -> unit:
+                v.push(1)
+            h = Holder {bag: empty_bag(), other: std::mutable_vector::from_list([])}
+            two(h, h.other)
+            1
+    std::test::rejects("pp-diag-overlapping-places/field", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_pp_diag_overlapping_places_field)
+
+    # two disjoint field paths of one struct are two places: one call may give both
+    fn b_pp_diag_overlapping_places_disjoint() errors std::compiler::CompilerError:
+        static compile:
+            fn two(place a: MutableVector[int], place b: MutableVector[int]) -> unit:
+                a.push(1)
+                b.push(2)
+            h = Holder {bag: empty_bag(), other: std::mutable_vector::from_list([])}
+            two(h.bag.items, h.other)
+            [h.bag.items.length(), h.other.length()]
+    std::test::value("pp-diag-overlapping-places/disjoint", [1, 1], b_pp_diag_overlapping_places_disjoint)
+
+    # a place parameter's type holds a mutable collection: an Int is Type
+    fn b_pp_diag_parameter_type_int() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place n: int) -> int:
+                n
+            1
+    std::test::rejects("pp-diag-parameter-type/int", std::compiler::DiagnosticCode::Type, b_pp_diag_parameter_type_int)
+
+    # a place parameter's type is unrestricted: a vector of coroutines is Type
+    fn b_pp_diag_parameter_type_affine() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place q: MutableVector[Coroutine{args: [Command], return: Event}]) -> int:
+                q.length()
+            1
+    std::test::rejects("pp-diag-parameter-type/affine", std::compiler::DiagnosticCode::Type, b_pp_diag_parameter_type_affine)
+
+    # a place call may resize every collection under its place: an index guarded before it is not proven after it
+    fn b_pp_lengths_across_place_calls_inside() errors std::compiler::CompilerError:
+        static compile:
+            fn clear_all(place b: Bag) -> unit:
+                b.items.clear()
+            fn f(b: Bag, i: int) -> int:
+                if i >= 0 and i < b.items.length():
+                    clear_all(b)
+                    return b.items.at(i)
+                0
+            1
+    std::test::rejects("pp-lengths-across-place-calls/inside", std::compiler::DiagnosticCode::UnhandledError, b_pp_lengths_across_place_calls_inside)
+
+    # a collection outside the place keeps its length: the read stays proven
+    fn b_pp_lengths_across_place_calls_outside() errors std::compiler::CompilerError:
+        static compile:
+            fn clear_all(place b: Bag) -> unit:
+                b.items.clear()
+            fn f(h: Holder, i: int) -> int:
+                if i >= 0 and i < h.other.length():
+                    clear_all(h.bag)
+                    return h.other.at(i)
+                0
+            f(Holder {bag: empty_bag(), other: std::mutable_vector::from_list([])}, 0)
+    std::test::value("pp-lengths-across-place-calls/outside", 0, b_pp_lengths_across_place_calls_outside)
+
+# ---------------------------------------------------------------------------
+# MutableVector index proofs: proven
+
+fn register_vector_bound_tests():
+    # a guard on a name against the vector's own length proves the read: no IndexNotFound to handle, and the value on every backend
+    fn b_vb_guard() errors std::compiler::CompilerError:
+        static compile:
+            fn get(v: MutableVector[int], i: int) -> int:
+                if i < 0 or i >= v.length():
+                    return -1
+                v.at(i)
+            [get(three(), 0), get(three(), 2), get(three(), 3), get(three(), -1)]
+    std::test::value("vb-guard", [10, 30, -1, -1], b_vb_guard)
+
+    # a counted loop over the vector's own length proves the read
+    fn b_vb_counted_loop() errors std::compiler::CompilerError:
+        static compile:
+            fn all(v: MutableVector[int]) -> List[int]:
+                loop i from 0 to v.length():
+                    v.at(i)
+            all(three())
+    std::test::value("vb-counted-loop", [10, 20, 30], b_vb_counted_loop)
+
+    # an index reduced by the vector's length (mod) or masked by it minus one after a zero guard proves the read, whatever the index
+    fn b_vb_reduced() errors std::compiler::CompilerError:
+        static compile:
+            fn wrap(v: MutableVector[int], h: int) -> int:
+                v.at(h.mod(v.length()))
+            fn mask(v: MutableVector[int], h: int) -> int:
+                if v.length() == 0:
+                    return -1
+                v.at(bit_and(h, v.length() - 1))
+            [wrap(three(), 7), wrap(three(), -1), wrap(three(), 100000000000000000000), mask(std::mutable_vector::from_list([1, 2, 3, 4]), 6)]
+    std::test::value("vb-reduced", [20, 30, 20, 3], b_vb_reduced)
+
+    # a field path is one place however often it is written: the guard and the read through `b.items` agree
+    fn b_vb_field_path() errors std::compiler::CompilerError:
+        static compile:
+            fn get(b: VBag, i: int) -> int:
+                if i >= 0 and i < b.items.length():
+                    return b.items.at(i)
+                -1
+            get(VBag {items: three()}, 2)
+    std::test::value("vb-field-path", 30, b_vb_field_path)
+
+    # a swap between the guard and the read only replaces an element: the length is the same, the read proven
+    fn b_vb_keeps_length() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    old = v.swap(0, 99):
+                        on IndexNotFound:
+                            0
+                    return v.at(i)
+                -1
+            f(three(), 0)
+    std::test::value("vb-keeps-length", 99, b_vb_keeps_length)
+
+    # a copy of the vector pushed into is another value: the original's length is unchanged and its read still proven
+    fn b_vb_copy_pushed() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                w = v
+                w.push(1)
+                if i >= 0 and i < v.length():
+                    return v.at(i) + w.length()
+                -1
+            f(three(), 2)
+    std::test::value("vb-copy-pushed", 34, b_vb_copy_pushed)
+
+# ---------------------------------------------------------------------------
+# MutableVector index proofs: unproven
+
+fn register_vector_unproven_tests():
+    # a push of the vector anywhere in its function leaves the read unproven
+    fn b_vb_unproven_resize_between_push() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    v.push(1)
+                    return v.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-resize-between/push", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_push)
+
+    # a pop of the vector anywhere in its function leaves the read unproven
+    fn b_vb_unproven_resize_between_pop() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    x = v.pop():
+                        on IndexNotFound:
+                            0
+                    return v.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-resize-between/pop", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_pop)
+
+    # a clear of the vector anywhere in its function leaves the read unproven
+    fn b_vb_unproven_resize_between_clear() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    v.clear()
+                    return v.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-resize-between/clear", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_between_clear)
+
+    # a resize after the read in the same function counts too: a place resized anywhere is no stable length
+    fn b_vb_unproven_resize_after() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    x = v.at(i)
+                    v.push(x)
+                    return x
+                -1
+            1
+    std::test::rejects("vb-unproven-resize-after", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_resize_after)
+
+    # a call giving a struct holding the vector to a place parameter may resize it
+    fn b_vb_unproven_place_call_struct() errors std::compiler::CompilerError:
+        static compile:
+            fn grow(place b: VBag) -> unit:
+                b.items.push(1)
+            fn f(b: VBag, i: int) -> int:
+                if i >= 0 and i < b.items.length():
+                    grow(b)
+                    return b.items.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-place-call/struct", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_place_call_struct)
+
+    # a call giving the vector itself to a place parameter may resize it
+    fn b_vb_unproven_place_call_vector() errors std::compiler::CompilerError:
+        static compile:
+            fn shrink(place v: MutableVector[int]) -> unit:
+                v.clear()
+            fn f(b: VBag, i: int) -> int:
+                if i >= 0 and i < b.items.length():
+                    shrink(b.items)
+                    return b.items.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-place-call/vector", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_place_call_vector)
+
+    # a context parameter's vector may change in any function sharing the context: its reads are never proven by a length
+    fn b_vb_unproven_context_member() errors std::compiler::CompilerError:
+        static compile:
+            fn f(i: int, context log: VLog) -> int:
+                if i >= 0 and i < log.lines.length():
+                    return log.lines.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-context-member", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_context_member)
+
+    # a guard against one vector proves nothing about another
+    fn b_vb_unproven_other_vector() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], w: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    return w.at(i)
+                -1
+            1
+    std::test::rejects("vb-unproven-other-vector", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_other_vector)
+
+    # a mask by the length minus one needs the length proven nonzero
+    fn b_vb_unproven_mask_without_guard() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int], h: int) -> int:
+                v.at(bit_and(h, v.length() - 1))
+            1
+    std::test::rejects("vb-unproven-mask-without-guard", std::compiler::DiagnosticCode::UnhandledError, b_vb_unproven_mask_without_guard)
+
+    # every proven read the tests above compile runs in range on every backend (the proof's claim, observed): a sweep of guarded and reduced indices over vectors of lengths 0 to 5
+    fn b_vb_proven_reads_run() errors std::compiler::CompilerError:
+        static compile:
+            fn get(v: MutableVector[int], i: int) -> int:
+                if i >= 0 and i < v.length():
+                    return v.at(i)
+                -1
+            fn wrap(v: MutableVector[int], h: int) -> int:
+                if v.length() == 0:
+                    return -1
+                v.at(h.mod(v.length()))
+            fn sized(n: int) -> MutableVector[int]:
+                v = three()
+                v.clear()
+                loop k from 0 to n:
+                    v.push(k * k)
+                v
+            rows = loop n from 0 through 5:
+                v = sized(n)
+                xs = loop i from -2 to 8:
+                    get(v, i) + wrap(v, i * 3)
+                xs
+            rows
+    std::test::value("vb-proven-reads-run", [[-2, -2, -2, -2, -2, -2, -2, -2, -2, -2], [-1, -1, 0, -1, -1, -1, -1, -1, -1, -1], [-1, 0, 0, 2, -1, 0, -1, 0, -1, 0], [-1, -1, 0, 1, 4, -1, -1, -1, -1, -1], [3, 0, 0, 10, 8, 10, -1, 8, 3, 0], [15, 3, 0, 10, 5, 25, 20, -1, 8, 0]], b_vb_proven_reads_run)
+
+# ---------------------------------------------------------------------------
+
+fn register_place_parameter_tests():
+    register_place_tests()
+    register_place_diagnostic_tests()
+    register_vector_bound_tests()
+    register_vector_unproven_tests()
+
+with context std::test::suite()
+register_place_parameter_tests()
+std::test::report()
