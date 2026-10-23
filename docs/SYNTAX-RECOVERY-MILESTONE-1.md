@@ -640,7 +640,10 @@ mutants, and the rule each is:
 | (the damage and the prefix) | `lexical-damage-ignored`, `prefix-past-damage`, `swallowed-lines-ignored`, `signature-unmarked` |
 
 **37 mutants, 37 killed**, each by the focused tests its `%%` line names
-(`results/mutants-after.txt` lists the killing tests). The first run, of 39
+(`results/mutants-after.txt` lists the killing tests; the run is on the tree
+merged with `main` at `4361226c`, as is a fifth fuzzer seed, 23: 53 damaged
+texts, 47 partial, 5 stopped by a loader error and 1 by a declaration's, no
+failure). The first run, of 39
 mutants, was not that clean, and what it found changed the tests and one
 rule:
 
