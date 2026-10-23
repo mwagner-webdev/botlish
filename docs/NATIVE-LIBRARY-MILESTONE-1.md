@@ -220,7 +220,7 @@ test reads the NIR.
 **The mutant `export-root-specialized` (section 15).** It returns
 `ProgramValues` to its old behavior, so the export becomes whatever
 instance Botlish code specialized. It reproduces `checked(-5) = -10` and
-fails 16 tests.
+fails 18 tests (the final run, section 15).
 
 ### Checks
 
@@ -1062,25 +1062,25 @@ own native build. The detectors are:
 
 | Mutant | The bug | Killed by |
 |---|---|---|
-| export-root-specialized | an export is the instance its call sites specialized (`checked(-5) = -10`) | 16 tests, `nl-export-root-checked` among them |
+| export-root-specialized | an export is the instance its call sites specialized (`checked(-5) = -10`) | 18 tests, `nl-export-root-checked` among them |
 | export-context-accepted | an export requiring a context is accepted | `nl-front-end-diagnostics` |
 | library-top-level-accepted | an entry file may hold statements | `nl-library-checks` |
 | symbols-global | runtime and program symbols stay global | `nl-symbols`, `nl-two-libraries`, `nl-nested-libraries` |
-| error-table-unwritten | no NIR error table: identities become numbers | 6 tests |
+| error-table-unwritten | no NIR error table: identities become numbers | 7 tests |
 | float-argument-converted | a `double` argument converted to an integer | `nl-abi-types` |
 | utf8-unchecked | a `str` argument is not validated | `nl-abi-types` |
 | nonfinite-admitted | NaN and infinities enter | `nl-abi-types` |
 | int-result-wrapped | an out-of-range Int result becomes -1 | `nl-abi-types`, `nl-export-root-no-caller` |
 | arguments-unrooted | a converted argument is no root while the next allocates | `nl-abi-types` (three `str` arguments, GC stress) |
-| declared-identity-numeric | a declared error's identity is its number | 6 tests |
-| payload-dropped | a declared error carries no fields | 6 tests |
+| declared-identity-numeric | a declared error's identity is its number | 7 tests |
+| payload-dropped | a declared error carries no fields | 7 tests |
 | released-buffer-kept | release leaves the struct pointing at freed memory | `nl-abi-types` |
 | foreign-buffer-freed | a buffer the library never made is freed | `nl-abi-types`, `nl-two-libraries` |
 | wrong-thread-accepted | another thread's call runs | `nl-threads` |
 | reentrant-accepted | a call from inside a call runs | `nl-reentrant` |
 | destroyed-handle-live | a destroyed instance stays registered | `nl-lifecycle` |
 | stack-ceiling-unset | the walk climbs into the host's frames | `nl-walk-boundary` |
-| descriptor-errors-dropped | the descriptor's error table read as empty | `program_descriptor_round_trips`, 6 tests |
+| descriptor-errors-dropped | the descriptor's error table read as empty | `program_descriptor_round_trips`, 7 tests |
 | fingerprint-unchecked | a record of another runtime build accepted | `linked_program_refuses_a_foreign_record` |
 
 The first run, against the test file as it then was, left four
@@ -1106,8 +1106,8 @@ survivors.
     other program ever shares it.
   * It was removed from `mutants.txt`, whose header records why.
 
-The three new detectors kill their mutants (a rerun of those three with
-`-only`). Every other mutant was killed in the first run.
+The final run, all 20 mutants against the final tests (the table's
+column): 20 killed, 0 survived.
 
 The existing harnesses' mutants were checked against the changed files.
 Two no longer applied and were updated to the code they mutate, keeping
