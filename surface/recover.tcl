@@ -353,7 +353,9 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     # The valid prefix: the real tokens before AT.
     set prefix {}
     set after {}
-    foreach token [dict get $state tokens] {
+    set tokens [dict get $state tokens]
+    for {set index [FirstAt $tokens $start]} {$index < [llength $tokens]} {incr index} {
+        set token [lindex $tokens $index]
         set s [dict get $token span start]
         set e [dict get $token span end]
         if {$s < $start} continue
@@ -450,6 +452,23 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     return [dict create kind hole id [dict get $statement id] span $span at $at \
         name $name nameSpan $nameSpan valueSpan $valueSpan binds $binds types $types \
         externs $externs installs $installs]
+}
+
+# The index of the first of TOKENS (in source order) that starts at or after
+# OFFSET: a bisection, so that a hole reads its own tokens and not the
+# file's.
+proc surface::recover::FirstAt {tokens offset} {
+    set low 0
+    set high [llength $tokens]
+    while {$low < $high} {
+        set middle [expr {($low + $high) / 2}]
+        if {[dict get [lindex $tokens $middle] span start] < $offset} {
+            set low [expr {$middle + 1}]
+        } else {
+            set high $middle
+        }
+    }
+    return $low
 }
 
 # 1 if the malformed STATEMENT's text after its damage at AT (AFTER, its

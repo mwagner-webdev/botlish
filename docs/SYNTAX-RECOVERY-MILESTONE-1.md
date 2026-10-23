@@ -576,7 +576,19 @@ analysis never fails internally, that its syntax diagnostics are exactly a
 strict parse's, that it built a partial HIR unless a loader error stopped
 it, that no reported semantic diagnostic lies in malformed text, that no
 backend accepts the HIR, that queries at random positions answer, and that
-export and import keep it. @@FUZZ-RESULTS@@
+export and import keep it. Four seeds of 150 cases each (1, 5, 17, 41):
+
+| seed | damaged texts analyzed | partial | stopped by a loader error | stopped by a declaration's error | still parsing (skipped) | failures |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 54 | 53 | 1 | 0 | 96 | 0 |
+| 5 | 57 | 55 | 2 | 0 | 93 | 0 |
+| 17 | 58 | 56 | 0 | 2 | 92 | 0 |
+| 41 | 59 | 57 | 2 | 0 | 91 | 0 |
+
+The loader errors are damage that names a module that does not exist (an
+import cut short); the declaration errors, a struct field's type cut short
+(`v: boo`, or a type whose declaration the damage made malformed): an error
+that stops any compilation (section 11).
 
 The fuzzer was written after the Neovim session found the one internal
 failure recovery had: a statement the parser failed on whose diagnostic
@@ -618,10 +630,51 @@ mutants, and the rule each is:
 | a recovered HIR leaks into another revision | `partial-not-activated` |
 | (the damage and the prefix) | `lexical-damage-ignored`, `prefix-past-damage`, `swallowed-lines-ignored`, `signature-unmarked` |
 
-@@MUTATION-RESULTS@@
+**37 mutants, 37 killed**, each by the focused tests its `%%` line names
+(`results/mutants-after.txt` lists the killing tests). The first run, of 39
+mutants, was not that clean, and what it found changed the tests and one
+rule:
+
+* `dependent-binding-guessed`, `references-include-dependent`,
+  `definition-by-spelling` and `import-loses-markers` survived because the
+  tests meant to exercise a name after a binding hole wrote the hole as
+  `{p, q} = (`: the open bracket swallowed the next line, so the "dependent"
+  name was inside the hole. The tests now write `{p, q} =`.
+* `missing-result-inferred` survived because the test's malformed line was
+  its function's last statement, which makes the result poison anyway; the
+  test now has the malformed line in the middle.
+* `methods-known` survived because the test module's malformed line (`$$`)
+  also made its importers' type names dependent, which hid the same
+  diagnostic; the test now uses a binding hole that declares no type.
+* `partial-not-activated` survived because the isolation test's queries
+  read nothing from the registries; it now compares every answer before
+  and after other analyses, with conflicting struct and domain
+  declarations (as `cs-activation-interleaved` does).
+* `installs-ignored` and `conformance-ignored` survived because the
+  conformance rule withheld conformance diagnostics whenever *any* file had
+  a malformed top-level statement, which also covered the installs rule.
+  The rule was broader than its reason: it now applies only while a
+  malformed top-level statement may declare a function
+  (`surface::recover::Hole`'s `functions`), and `sr-trait-conformance`
+  checks both sides (a malformed function header withholds
+  TRAIT-NOT-SATISFIED, a malformed value binding does not).
+* `dependent-units-reported` now also runs `sr-context-installation`,
+  whose MISSING-CONTEXT only unit taint withholds.
+* Two mutants were equivalent and are recorded as such in `mutants.txt`: a
+  hole's range taken as no value (`hir/range.tcl`), and a semantic instance
+  of a function whose body holds a hole. Every check skips a poisoned value
+  and a hole is poison, so no program observes either; the guards stay.
 
 The existing harnesses were rerun against the changed code:
-@@OTHER-MUTANTS@@
+diagnostic-recovery 25 of 25 killed (one mutant's text, `module-abort`,
+follows the loader's new `hir::buildSyntax` call), compiler-service 21 of
+21, LSP 30 of 30, HIR interchange 27 of 27, static compile 21 of 21; every
+mutant of every other harness still applies. `roundtrip.tcl -via
+interchange` (12 suites, 108 artifacts and outcomes) and `-via cache` (12
+suites, 120) found no difference; `efficiency.tcl` reports exactly the
+baseline's figures (29 primaries, 27 in the first compilation, no cascade,
+14 clean); `audit/static-compile/tools/fuzz.tcl` seeds 1 and 17, no
+disagreement.
 
 ### 9.5 Regressions and CI
 
@@ -629,7 +682,141 @@ The existing harnesses were rerun against the changed code:
 
 ## 10. Performance
 
-@@PERFORMANCE@@
+Measured with `bench/syntax-recovery.tcl` (new: parsing, analysis,
+typing, worker transfer, memory; `-root` measures another checkout) and
+`bench/lsp.tcl` (the LSP milestone's harness; new `-malformed 1`: every
+other edit of the imported module leaves the edited expression unfinished),
+each run on this branch and on the baseline `85753d95` (a worktree; the
+benchmark scripts copied into it), on a 4-core container (Xeon 2.80 GHz,
+Tcl 9.0.1), one benchmark at a time. The reports are in
+`../audit/syntax-recovery/results/performance/`. Wall-clock figures on a shared
+machine scatter by 10-30 % between runs; the comparisons below are within
+one run or interleaved.
+
+### 10.1 Parsing
+
+The parser always parsed with recovery; what recovery adds is the damage
+record and `surface::recover::apply`. Microseconds, median of 5:
+
+| file | lines | strict parse | 1 error: parse | 1 error: recovery | 3 errors: parse | 3 errors: recovery |
+|---|---:|---:|---:|---:|---:|---:|
+| csv.bot | 107 | 34,828 | 34,273 | 359 | 37,068 | 1,043 |
+| game2048.bot | 281 | 114,099 | 110,722 | 2,840 | 112,467 | 2,634 |
+| tower.bot | 414 | 217,318 | 183,869 | 1,936 | 195,471 | 2,608 |
+| golden.bot (2048) | 565 | 553,457 | 540,800 | 8,028 | 630,658 | 15,529 |
+| mutable-array.bot | 2,931 | 1,789,545 | 1,626,879 | 60,372 | 1,846,202 | 80,845 |
+
+Recovery is 1-5 % of the parse it follows. The first implementation lexed
+the text again to read the prefixes' tokens, which cost as much as the
+parse (csv: 23 ms of 29); the damage record now carries the parse's tokens,
+and a hole finds its own tokens by bisection.
+
+### 10.2 Analysis
+
+`service::analyze` in a warm process, the edited files' cached ASTs
+dropped first; milliseconds (median of 5) and the whole-program builds of
+one analysis. Baseline: the same programs and edits on `85753d95`, where a
+syntax error ended the analysis.
+
+| workload | valid | entry | module | transitive | several |
+|---|---:|---:|---:|---:|---:|
+| csv | 212 (1) | 259 (1) | - | - | 159 (1) |
+| *baseline* | *207 (1)* | *36.7* | - | - | *33.5* |
+| 2048 demo | 1,652 (2) | - | 1,199 (1) | 1,338 (1) | 1,300 (1) |
+| *baseline* | *1,434 (2)* | - | *100* | *122* | *97.0* |
+| icy headless | 3,327 (5) | 3,354 (5) | 3,447 (5) | 4,013 (5) | 4,019 (5) |
+| *baseline* | *2,594 (5)* | *3.60* | *48.8* | *183* | *42.7* |
+| 2048 golden | 11,436 (3) | - | 6,103 (1) | - | 6,451 (1) |
+| *baseline* | *9,868 (3)* | - | *646* | - | *686* |
+| chain (new, 3 x 40 functions) | 451 (1) | 531 (1) | 697 (1) | 712 (1) | 694 (1) |
+| *baseline* | *440 (1)* | *34.9* | *113* | *97.3* | *117* |
+
+* **A program with syntax errors now costs one analysis** -- 0.5 to 1.5
+  times its valid version's -- where it used to cost a parse: that is the
+  price of its semantics. The 2048 golden suite is cheaper recovered than
+  valid because its static blocks are not decided (they are holes) and the
+  trait plan's second build does not run.
+* **Never more builds than the valid program**, and never a build per
+  malformed statement: one front end, one build, plus the method
+  decisions' trial builds the valid program makes too (icy: 5 and 5).
+  Recovery never compiles variants of the program to salvage declarations.
+* **Valid programs:** the "valid" columns differ by up to 28 % between the
+  two runs, in both directions on other runs, which is the machine's
+  scatter. Interleaved (each tree's process alternating, 7 analyses of the
+  2048 demo each, parse cache cleared), the medians were 2,253 and 2,431 ms
+  on this branch against 2,215 and 2,453 on the baseline: no difference the
+  machine can resolve. A program without syntax errors builds the same HIR
+  as before (`sr-valid-programs-unchanged`), and what recovery adds to its
+  path is a few existence checks of side tables it does not have.
+
+### 10.3 Successive incomplete versions
+
+`        partial = scores.get(i, 0) * 2 + std::list::length(scores)` typed into
+2048's engine one character at a time, each of the 66 versions analyzed
+(the engine is a transitive dependency of the demo, a direct one of the
+golden suite). Milliseconds:
+
+| program | versions that parse: median / max | that do not (23 of 66): median / max | baseline, that do not: median / max |
+|---|---:|---:|---:|
+| demo.bot | 1,315 / 2,379 | 1,371 / 1,720 | 126 / 170 |
+| golden.bot | 5,968 / 11,134 | 4,550 / 5,717 | 141 / 194 |
+
+A third of the versions of a statement being typed do not parse; each now
+gets a partial revision for the price of an analysis.
+
+### 10.4 Worker transfer and memory
+
+`service::export` of a revision and `service::import` of the text, as the
+language server's worker and server do; milliseconds (median of 5) and
+KiB:
+
+| workload | complete: export / import / KiB | recovered: export / import / KiB | baseline, recovered |
+|---|---:|---:|---:|
+| csv | 1.73 / 11.4 / 216 | 1.83 / 11.7 / 215 | 0.03 / 0.08 / 5 |
+| 2048 demo | 12.1 / 75.8 / 1,687 | 8.54 / 54.4 / 893 | 0.07 / 0.15 / 16 |
+| icy headless | 9.53 / 42.1 / 576 | 9.03 / 39.4 / 576 | 0.09 / 0.26 / 29 |
+| 2048 golden | 32.6 / 176 / 2,078 | 34.7 / 162 / 2,061 | 0.12 / 0.33 / 39 |
+| chain | 5.25 / 35.0 / 435 | 4.24 / 33.3 / 436 | 0.02 / 0.05 / 7 |
+
+A partial revision transfers like a complete one (the complete figures
+equal the baseline's). Ten revisions of the 2048 golden suite retained at
+once add 19.9 MiB each when recovered and 19.6 MiB when complete (the
+baseline's recovered revision, without a HIR, 0.23 MiB). The language server
+keeps at most two revisions per program (the latest and the latest
+complete one), so a document with a syntax error costs one more retained
+HIR than before, never one per version.
+
+### 10.5 Language server latency
+
+`bench/lsp.tcl`: 20 edits of the imported module per session, 150-300 ms
+apart, a hover of the entry inside each interval (and of the module every
+third); with `-malformed 1` every other edit is a syntax error. Hover
+latency while editing, milliseconds, median / p99 / max:
+
+| workload | scheduler | branch, malformed | baseline, malformed | branch, valid edits | baseline, valid edits |
+|---|---|---:|---:|---:|---:|
+| csv | worker | 3 / 8 / 8 | 3 / 9 / 9 | 3 / 8 / 8 | 3 / 8 / 8 |
+| 2048 | worker | 3 / 87 / 87 | 3 / 84 / 84 | 3 / 104 / 104 | 3 / 83 / 83 |
+| icy | worker | 3 / 7 / 7 | 3 / 8 / 8 | 3 / 12 / 12 | 3 / 8 / 8 |
+| 2048-golden | worker | 3 / 14 / 14 | 3 / 13 / 13 | 3 / 13 / 13 | 3 / 12 / 12 |
+| 2048 | sync | 747 / 1,968 / 1,968 | 192 / 1,655 / 1,655 | 757 / 1,904 / 1,904 | 310 / 1,414 / 1,414 |
+| 2048-golden | sync | 5,841 / 7,751 / 7,751 | 6,588 / 8,499 / 8,499 | 5,275 / 7,185 / 7,185 | 6,301 / 8,208 / 8,210 |
+
+With the worker scheduler, the default, hover latency while typing through
+syntax errors is what it was: a few milliseconds, the worst case a revision
+import (the event loop's longest callback stayed 54-166 ms). The time from
+the last edit to its diagnostics is the analysis time as before (2048:
+2,735 ms against the baseline's 2,187 with `-malformed 1`; 2,217 and 2,423
+with valid edits, the scatter of one sample each), and every scheduler's
+final diagnostics and idle answers agree. The worker analyzes more now --
+2048's mean analysis in the worker is 1,703 ms with syntax errors against
+the baseline's 883, which skipped the malformed versions -- and the
+superseded analyses it kills cost the same. The synchronous scheduler,
+which analyzes in the server's own event loop, now blocks during a syntax
+error's analysis as it always did during a valid one's (its median
+latency equals its valid-edit figure); it is the reference design, not the
+default (LSP-MILESTONE-1.md, section 6). Server and worker memory are
+unchanged (2048: 96 and 79 MiB resident at most, against 85 and 79).
 
 ## 11. Limitations
 
@@ -737,7 +924,43 @@ Changes to the brief's plan, each with its evidence:
 
 ## 13. Next milestone
 
-@@NEXT@@
+**Recommended: completion** (`textDocument/completion`), built on the
+partial revisions.
+
+The evidence, against the brief's candidates:
+
+* **Where the cursor is.** While a statement is typed, a third of its
+  versions do not parse (23 of 66 in section 10.3), and in every one of
+  them the cursor is inside the malformed statement -- the one place this
+  milestone deliberately knows nothing. Hover there falls back to the last
+  complete analysis, marked stale, or answers nothing (the Neovim session,
+  section 1). What an editor offers at that position is completion, and
+  completion is exactly what reads the program *around* the cursor: the
+  bindings in scope before it with their types, the receiver of a `.`, the
+  members of an imported module, the method candidates of a receiver's type.
+  After this milestone every one of those is in a partial revision -- the
+  scope a hole sits in is resolved, every binding before it typed, every
+  well-formed module member known, binding holes and dependent names marked
+  -- so completion needs no further recovery machinery except typing the
+  hole's valid prefix up to the cursor (in `total.`, the name `total`,
+  resolved in the hole's scope by the same rule `AfterBindingHole` states).
+* **Semantic queries for type annotations and declarations** would answer
+  at positions that are already well formed and usually read rather than
+  typed; useful, and smaller in effect on editing.
+* **Better recovery of malformed declarations**: a malformed function
+  header keeps only its name (section 11). In the sessions it mattered
+  briefly -- an unfinished header is quickly finished -- and its callers
+  keep their own facts.
+* **Faster analysis of large projects**: the worker kept hover latency at a
+  few milliseconds through syntax errors in every workload (section 10.5);
+  diagnostics take one analysis as before. Not the limit editing hits first
+  at today's program sizes.
+
+The milestone should implement completion without guessing: its candidates
+are what the partial revision resolves in the cursor's scope -- a name a
+binding hole may shadow is never offered as its outer binding -- nothing is
+read from a hole's text after the cursor, and this milestone's rule holds:
+what is unknown is shown as unknown.
 
 ## 14. Files and usage
 
