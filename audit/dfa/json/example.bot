@@ -1,0 +1,31 @@
+# example.bot -- the JSON workload in one run (DFA-COROUTINE-EXPLORATION.md):
+#
+#   tclsh9.0 main.tcl -backend cranelift audit/dfa/json/example.bot
+#
+# A document's token count, or where and why it is not JSON: a lexical error
+# -100 - AT, a structural one -1000 - AT, a truncated token -2.
+#
+# expect: [18, -1003, -101, -103, -1003, -2, -1002, -107, -103]
+
+import json
+
+fn verdict(text: str) -> int errors IndexNotFound:
+    s = json::validate_text([text], 64, 100000):
+        on json::Lexical {at}:
+            return -100 - at
+        on json::Truncated:
+            return -2
+        on json::Structure {at}:
+            return -1000 - at
+        on json::TooDeep:
+            return -3
+        on json::TokenTooLong:
+            return -4
+    s.tokens
+
+fn all() -> List[int] errors IndexNotFound:
+    [verdict("{\"a\": [1, -2.5e3, true, null], \"b\": {}}"), verdict("[1,]"), verdict("01"), verdict("1.2.3"), verdict("[1 2]"), verdict("\"abc"), verdict("  "), verdict("{\"a\":1}x"), verdict("\"a\\q\"")]
+
+all():
+    on IndexNotFound:
+        []
