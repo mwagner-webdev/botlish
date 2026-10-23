@@ -131,11 +131,15 @@ test workload-icy-tower-sdl-modules-warning-clean {main.bot, sdl.bot and render.
     list ok [lsort -stride 2 $statuses]
 } -result {ok {{entry program} ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
 
-# The game module of expression E (its file's name), "" outside the game.
+# The game module of expression E (its file's name), "" outside the game: a
+# file of the stage's root, never of a subdirectory (the staged binding has
+# a render.bot of its own, sdl3/render.bot).
 proc icyModuleOf {hir e} {
     set origin [dict get $hir exprs $e origin]
     if {[lindex $origin 0] ne "file"} { return "" }
-    set file [file rootname [file tail [lindex [split [hir::originLocation $hir $origin] :] 0]]]
+    set path [lindex [split [hir::originLocation $hir $origin] :] 0]
+    if {[file normalize [file dirname $path]] ne [file normalize [file join [tcltest::temporaryDirectory] icy-tower-stage]]} { return "" }
+    set file [file rootname [file tail $path]]
     return [expr {$file in {main sdl render tower hud options} ? $file : ""}]
 }
 

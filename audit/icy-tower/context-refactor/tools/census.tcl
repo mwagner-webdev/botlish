@@ -50,7 +50,7 @@ try {
             close $channel
         }
     }
-    set stage [file join $tmp app]
+    set stage [file normalize [file join $tmp app]]
     exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $app -into $stage
     set hir [surface::readProgramFile [file join $stage main.bot] -warnings off -target linux-x86_64 -cache ""]
 
@@ -63,11 +63,15 @@ try {
         lappend game $name
     }
 
+    # The game module of expression E and its line and column, "" outside
+    # the game: a file of the stage's root, never of a subdirectory (the
+    # staged binding has a render.bot of its own, sdl3/render.bot).
     proc ModuleOf {hir e} {
         set origin [dict get $hir exprs $e origin]
         if {[lindex $origin 0] ne "file"} { return "" }
         set location [hir::originLocation $hir $origin]
         if {![regexp {^(.*):(\d+):(\d+)$} $location -> path line column]} { return "" }
+        if {[file normalize [file dirname $path]] ne $::stage} { return "" }
         return [list [file rootname [file tail $path]] $line $column]
     }
 

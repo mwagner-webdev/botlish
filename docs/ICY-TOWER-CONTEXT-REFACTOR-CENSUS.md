@@ -520,6 +520,68 @@ GPU resource do not. SDL's property sets could hold any pointer under a
 name, but the binding gives the name parameters no contract (Botlish bytes
 cannot be lent to them) and binds none of SDL's `SDL_PROP_*` names.
 
+### 7.1 A context trait between render.bot and SDL
+
+`variants/canvas/` takes Design B one step further: render.bot declares
+
+```
+context trait Canvas:
+    fn color(r: std::ffi::c::UChar, g: std::ffi::c::UChar, b: std::ffi::c::UChar) -> bool
+    fn clear() -> bool
+    fn present() -> bool
+    fn fill(x: Float64, y: Float64, w: Float64, h: Float64) -> bool errors NonFiniteFloat
+    fn line(x1: Float64, y1: Float64, x2: Float64, y2: Float64) -> bool errors NonFiniteFloat
+    fn text(x: Float64, y: Float64, text: str) -> bool errors NonFiniteFloat
+    fn scale(factor: Float64) -> bool errors NonFiniteFloat
+```
+
+and its drawing functions require `context canvas: Canvas` and call
+`canvas.fill(...)`; it imports no SDL module. `sdl::Sdl` satisfies Canvas
+through sdl.bot's own functions with **no change to sdl.bot or main.bot**
+(`main.tcl -traits`: `context sdl::Sdl implements render::Canvas (color ->
+sdl::color, ...)`), and a recording context in a test program (a
+`MutableVector[str]` log) satisfies it too. Results:
+
+* **It works and costs nothing at run time.** The trait plan clones the 8
+  render functions and the 3 of main.bot on their path, each clone
+  replacing its original; the NIR is the committed game's up to
+  renumbering, the generated code's instruction counts are identical, the
+  executable 16 bytes smaller, and the SDL call trace identical (204,299
+  calls, `diff` empty). Every reference behavior holds.
+* **Rendering becomes testable on every backend.** The recording program
+  draws `tower::new_world(7, 1)` (92 commands) and the world after 600
+  frames (81 commands, the HUD reading SCORE 260, FLOOR 26, BEST 29.1 M,
+  TIME 10.0, the player's rectangle at x 262.8) with identical logs on
+  interp, compile, cranelift-generic and cranelift, also under GC stress.
+* **But a golden test cannot draw inside its check.** A check is stored as
+  a function value, and a function requiring a context cannot be a value
+  (`CONTEXT-FUNCTION-VALUE`: "function first_frame requires context
+  recorder::Recorder, render::Canvas, so it can only be called"). Drawing
+  when the suite registers its cases works -- 3 rendering tests, 68 of 68
+  passing on four backends, and a planted spacing bug fails 3 of them --
+  at the price of failure isolation (an unhandled error at registration
+  aborts the suite) and of one shared recorder (one installed value per
+  context type).
+* **Satisfaction is structural and by name.** A forwarding or recording
+  canvas cannot sit beside `sdl::Sdl` (`AMBIGUOUS-CONTEXT-IMPLEMENTATION`:
+  "no installed context is preferred over another"), so decorating the
+  real canvas (a frame recorder, a debug overlay) would need sdl.bot's
+  drawing functions renamed and an adapter context of its own module.
+  And with sdl.bot's exact types the trait names a C type
+  (`std::ffi::c::UChar`); a game domain (`type Channel = Int in 0..255`)
+  satisfies just as well and keeps render.bot free of C.
+* **Front-end time doubles for a program that loaded no trait before**:
+  golden.bot's `-check` goes from 7 s to 17 s (TRAITS.md's second build),
+  its four-backend run from 36 s to 69 s. The game itself already paid
+  it (main.bot imports `std::io`).
+
+**Not adopted into the game**, deliberately: the gain (render.bot
+testable) comes with a doubled front end for the workload's suite in every
+CI run, a test pattern (draw at registration) that is a workaround of the
+function-value frontier, and a coupling of sdl.bot's function names to a
+trait contract. It belongs in the package design instead (section 12),
+where an adapter module can own the implementation.
+
 **A hybrid is the package shape** (section 12): B's ownership and
 lifetime (one root context, one close), and, where several resources of a
 kind exist, unrestricted typed handles -- indices into the context's table
