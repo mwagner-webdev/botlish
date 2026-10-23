@@ -170,7 +170,8 @@ test nl-signature-diagnostics {a C signature is declared and has a C representat
         0
     }
     regsub -all -line {^        } $source {} source
-    catch {surface::compile $source t.bot} message options
+    # A Linux program (std::linux::io): compiled for the Linux target on any host.
+    catch {surface::compile $source t.bot -target [linuxTarget]} message options
     lmap d [dict get $options -diagnostics] {
         list [lindex [dict get $d errorcode] end] [regexp -inline {exported c fn "[a-z_]+"} [dict get $d message]]
     }

@@ -760,7 +760,21 @@ program.rs, runtime/library.rs, runtime/aotimage.rs, runtime/vm.rs
   Native host probe, `host-spike.tcl -stack-kib 512` with and without
   `-gc-stress 1` (section 11).
 
-Pending when this was written: the Linux x86-64 and arm64 test workflows
-(dispatched on the branch), and the macOS and Windows workflows, which
-check that executables there are unaffected (no library is built on
-either).
+CI on the branch (commit 9da4e4f8), as of 13:55 UTC:
+
+* Linux x86-64 (`tests.yml`, dispatched): the whole Tcl suite on interp,
+  the cranelift coverage and the method-call filter audit passed; the
+  compile suite, the cranelift-generic coverage, the golden shards, the
+  Rust unit tests, the stub-linked executables and the warning gate were
+  still queued or running.
+* macOS arm64: Tier A passed; Tier B failed in two test files. One was this
+  milestone's: `nl-signature-diagnostics` compiled a program importing
+  `std::linux::io` for the host's target, UNSUPPORTED-PLATFORM on macOS;
+  it now compiles it for `linuxTarget`, as AGENTS.md asks, and passes. The
+  other, `cf-renamed-binding-native-name` in `tests/c-ffi.test`, failed the
+  same way on main before this branch (main's run 39938910401); main's fix
+  (4361226c) is merged into the branch.
+* Linux arm64 (`tests-arm64.yml`, dispatched) and Windows x86-64: still
+  queued.
+
+The macOS and Windows workflows run again on the branch's next push.
