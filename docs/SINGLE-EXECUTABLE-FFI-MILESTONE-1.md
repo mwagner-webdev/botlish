@@ -1131,10 +1131,11 @@ The jobs this milestone adds:
   library check, then **3,266 tests, 3,186 passed, 80 skipped, 0 failed**
   over the 61 files, and under GC stress **260 tests, 254 passed, 6
   skipped, 0 failed**. The same run's interp suite, golden shard 3,
-  stub-linked executables, native Rust unit tests, warning gate and
-  method-filter audit passed too; its compile suite, golden shards 1, 2
-  and 4 and the cranelift and cranelift-generic coverage were still
-  queued or running when this was written.
+  stub-linked executables, native Rust unit tests, warning gate,
+  method-filter audit, golden shards 1, 2 and 4 and the cranelift and
+  cranelift-generic coverage passed too. Its compile suite was still
+  running when this was written (PENDING-TESTS-COMPILE). The GC-stress
+  job runs on pushes to main only.
 * **tests-arm64.yml `system-linker`** (ubuntu-24.04-arm): the same on
   AArch64. **Passed** on 658737d8 (run 39971747629; section 25 has the
   numbers), and so did every other job of that run: interp, compile,
@@ -1180,7 +1181,10 @@ numbers. Every other macOS job (smoke, both acceptance shards, the Linux
 control) passed on the same head: the rustc-linked tiers are unaffected
 by the runtime archive in the build. On the final head (658737d8, the
 helper fix of section 30 included) every macOS job **passed** again, the
-system-linker job's GC-stress step included (run 39971727086).
+system-linker job's GC-stress step included (run 39971727086). On
+3cc2a2b1, which changes system-linker.test for Windows (section 27), the
+system-linker job, smoke, acceptance shard 1/2 and the Linux control
+**passed** (run 40001867659); shard 2/2: PENDING-MACOS-RERUN.
 
 ## 34. Windows CI
 
