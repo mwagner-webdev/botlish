@@ -204,6 +204,14 @@ jobs:
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native
 
+      - name: What the system linker links with
+        run: native/target/release/botlish-native system-linker
+
+      # The libraries the driver passes after the runtime archive, against
+      # rustc's account of them (relinks the archive: before any test runs).
+      - name: The runtime archive's system libraries
+        run: tclsh9.0 native/runtime-archive/libraries.tcl
+
       - name: Executable and C tests, system-linked
         shell: bash
         run: |

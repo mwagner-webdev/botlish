@@ -549,6 +549,11 @@ jobs:
           $failed = 0
           native/target/release/botlish-native.exe system-linker
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          # The libraries the driver passes after the runtime archive,
+          # against rustc's account of them (codegen/aot.rs's
+          # runtime_system_libraries).
+          tclsh9.0 native/runtime-archive/libraries.tcl
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
           # A system-linked executable: the link command (BOTLISH_NATIVE_LINK_LOG),
           # its run and what it imports.
           $env:BOTLISH_NATIVE_LINKER = "system"
@@ -562,7 +567,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           dumpbin /nologo /dependents sl/hello-windows.exe
           Remove-Item env:BOTLISH_NATIVE_LINK_LOG
-          tclsh9.0 tests/system-linker.test
+          tclsh9.0 tests/all.tcl -file system-linker.test
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }

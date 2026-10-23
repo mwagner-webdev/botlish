@@ -11,12 +11,17 @@
 # that does not build is reported NOT-BUILT, never counted as killed), and
 # the detectors run against it:
 #
-#   * cargo test --bin botlish-native aot (the link plan's unit tests);
+#   * cargo test --bin botlish-native aot (the link plans' unit tests, the
+#     system linker's among them) and --lib aotimage (the stub image's and
+#     the system-linked description's encoding and checks);
 #   * tests/native-executable.test (formats, parity, paths, diagnostics,
 #     stack overflows, coroutines);
 #   * tests/argv.test's standalone tests (argv-standalone-*);
 #   * tests/workload-2048.test's workload-2048-bench-executable (a moved
 #     multi-file application);
+#   * tests/system-linker.test (the system linker against the rustc and
+#     stub linkers: startup reports, outputs under GC stress, C, failures;
+#     SINGLE-EXECUTABLE-FFI-MILESTONE-1.md);
 #   * tests/platform/aot-facts.tcl (the host's tools on the object and the
 #     executable, the standalone runs);
 #   * tests/platform/native-status.tcl (the executable, object and C call
@@ -233,15 +238,18 @@ try {
             continue
         }
         set killers {}
-        lassign [run $timeout $tree cargo test --release --manifest-path $manifest --bin botlish-native aot] status output
-        if {$status != 0} {
-            set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-            lappend killers "rust ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+        foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib aotimage} {
+            lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target $filter] status output
+            if {$status != 0} {
+                set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+                lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+            }
         }
         foreach {label file match} {
             native-executable.test native-executable.test *
             argv.test argv.test argv-standalone-*
             workload-2048.test workload-2048.test workload-2048-bench-executable
+            system-linker.test system-linker.test *
         } {
             set tmp [file tempdir botlish-native-aot-mutant-run]
             lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output

@@ -25,7 +25,8 @@
 #   C  borrowed Bytes and MutableBytes (bcf_sum reads, bcf_fill writes)
 #   D  errno read right after a failed call, and the (size_t)-1 sentinel
 #   E  portable IO that calls no C: still the stub linker, built with no C
-#      compiler on PATH at all
+#      compiler on PATH at all -- on x86-64, where the stub runs; on AArch64,
+#      which has no stub, the system linker (auto's choice there)
 #
 # Checked for each: the build needs no rustc (nothing on PATH, no Rust
 # process started: strace when present), the executable runs -- also under
@@ -187,10 +188,17 @@ for name in a b c d; do
   if tail -c 8 "$name" | grep -q BOTLIMG1; then fail "$name was stub-linked"; fi
   echo "   built $name ($(stat -c %s "$name") bytes)"
 done
-# E: no C compiler at all on PATH, and still an executable.
-env -i HOME="$work/home" PATH=/nonexistent "$botlish" -warnings off -emit-native-executable e.bot >/dev/null || fail "build e without a C compiler"
-[[ $(tail -c 8 e) == BOTLIMG1 ]] || fail "e was not stub-linked"
-echo "   built e ($(stat -c %s e) bytes, stub-linked, no C compiler on PATH)"
+# E: no C compiler at all on PATH, and still an executable (the stub, on
+# x86-64); on AArch64 the system linker links it.
+if [[ $(uname -m) == x86_64 ]]; then
+  env -i HOME="$work/home" PATH=/nonexistent "$botlish" -warnings off -emit-native-executable e.bot >/dev/null || fail "build e without a C compiler"
+  [[ $(tail -c 8 e) == BOTLIMG1 ]] || fail "e was not stub-linked"
+  echo "   built e ($(stat -c %s e) bytes, stub-linked, no C compiler on PATH)"
+else
+  run -warnings off -emit-native-executable e.bot >/dev/null || fail "build e"
+  if tail -c 8 e | grep -q BOTLIMG1; then fail "e was stub-linked on $(uname -m)"; fi
+  echo "   built e ($(stat -c %s e) bytes, system-linked: no stub on $(uname -m))"
+fi
 
 # No temporary directory left beside the outputs.
 if compgen -G '.botlish-aot-*' >/dev/null; then fail "a link left its work directory"; fi
@@ -238,9 +246,14 @@ expect_failure "a missing library" "definitely_missing_botlish_lib" \
 printf 'import std::ffi::c\n\nextern c library "botlish_cffi_fixture"\nextern c fn nope named "botlish_no_such_symbol"(x: std::ffi::c::Int) -> std::ffi::c::Int\n\nnope(1)\n' >undefined.bot
 expect_failure "an undefined symbol" "botlish_no_such_symbol" \
   env -i HOME="$work/home" PATH="$path" "$botlish" -warnings off -L "$work/lib" -emit-native-executable undefined.bot
-# A native backend's run of a program that calls C: linked, then run.
-[[ $(env -i HOME="$work/home" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot) == \
+# A native backend's run of a program that calls C, with a cache this run
+# fills itself: the runtime archive installed for it, the program linked,
+# then run.
+[[ $(env -i HOME="$work/home-run" PATH="$path" "$botlish" -backend cranelift -warnings off -L "$work/lib" b.bot) == \
    "== b.bot (cranelift)"$'\n'"   value: ${expected[b]}" ]] || fail "-backend cranelift of b"
 echo "   ran b on -backend cranelift"
+# An explicit linker is the user's: BOTLISH_NATIVE_LINKER=stub refuses C.
+expect_failure "the stub linker, chosen" "the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library" \
+  env -i HOME="$work/home" PATH="$path" BOTLISH_NATIVE_LINKER=stub "$botlish" -warnings off -L "$work/lib" -emit-native-executable a.bot
 if compgen -G '.botlish-aot-*' >/dev/null; then fail "a failed link left its work directory"; fi
 echo "ok"

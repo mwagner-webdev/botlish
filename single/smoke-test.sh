@@ -45,6 +45,24 @@ for tool in tclsh tclsh9.0 rustc cargo cc ld; do
   echo "   host $tool: $(command -v "$tool" || echo no)"
 done
 
+# A run that cannot link installs the native executables and not the runtime
+# archive, which only a run that may link gets (SINGLE-EXECUTABLE-FFI-
+# MILESTONE-1.md); the cache directory is named by all three, the archive's
+# size among them.
+env -i HOME="$work/home-nolink" "$botlish" -backend compile -warnings off samples/01-arithmetic.bot >/dev/null ||
+  fail "a compile run"
+installed=$(ls -d "$work/home-nolink"/.cache/botlish/native-* 2>/dev/null) || fail "a compile run installed nothing"
+[[ -x $installed/botlish-native && ! -e $installed/libbotlish_runtime.a ]] ||
+  fail "a run that links nothing installed the runtime archive (or no driver): $(ls "$installed")"
+env -i HOME="$work/home-nolink" "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || fail "emit hello"
+archive_size=$(wc -c <"$installed/libbotlish_runtime.a") || fail "-emit-native-executable installed no runtime archive"
+# Exact modes (a test run as root reads and runs files whatever their mode).
+modes=$(stat -c %a "$installed/botlish-native" "$installed/botlish-aot-stub" "$installed/libbotlish_runtime.a" | tr '\n' ' ')
+[[ $modes == "755 755 644 " ]] || fail "installed with modes $modes (want 755 755 644)"
+[[ $(basename "$installed") == *-"$archive_size" || $(basename "$installed") == *-"$archive_size"-* ]] ||
+  fail "the cache directory $(basename "$installed") is not named by the runtime archive ($archive_size bytes)"
+echo "   installed: the driver and the stub for any run, the runtime archive for one that may link"
+
 for backend in interp compile cranelift; do
   run -backend "$backend" -warnings off samples/* >"$work/$backend.out" ||
     fail "backend $backend"

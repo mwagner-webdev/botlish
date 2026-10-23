@@ -6,8 +6,8 @@
 # the executable's own arguments. The archive holds this repository's compiler
 # stack under //zipfs:/app/botlish -- main.tcl, core/, compiler/, hir/,
 # surface/, native/*.tcl, stdlib/ and compilerpedia/, at the same relative paths
-# as in a checkout -- and the native backend's two Rust executables under
-# //zipfs:/app/native-bin. This script
+# as in a checkout -- and the native backend's two Rust executables and its
+# runtime archive under //zipfs:/app/native-bin. This script
 #
 #   1. makes UTF-8 the system and standard-channel encoding (a checkout's
 #      canonical setup is LANG=C.utf8, AGENTS.md; a single executable does not
@@ -79,7 +79,13 @@ proc ::single::Install {dir linking} {
         set partial [file join $dir .$name.[pid].partial]
         try {
             file copy -force $source $partial
-            file attributes $partial -permissions [expr {$name eq $runtime ? 0644 : 0755}]
+            # (Permissions as strings, which `file attributes` reads as
+            # octal: expr would read 0755 as the decimal number 755.)
+            if {$name eq $runtime} {
+                file attributes $partial -permissions 0644
+            } else {
+                file attributes $partial -permissions 0755
+            }
             file rename -force $partial $target
         } on error {message options} {
             file delete -force $partial
@@ -92,7 +98,8 @@ proc ::single::Install {dir linking} {
 # runs a native backend (which links a program that calls C to run it). The
 # runtime archive is installed for those only.
 proc ::single::MayLink {argv} {
-    set backend [expr {[info exists ::env(CORE_BACKEND)] ? $::env(CORE_BACKEND) : ""}]
+    set backend ""
+    if {[info exists ::env(CORE_BACKEND)]} { set backend $::env(CORE_BACKEND) }
     for {set i 0} {$i < [llength $argv]} {incr i} {
         switch -- [lindex $argv $i] {
             -emit-native-executable { return 1 }

@@ -2548,12 +2548,23 @@ an executable (SINGLE-EXECUTABLE.md):
 * `stub` needs only `botlish-aot-stub` beside the driver (or
   `BOTLISH_NATIVE_AOT_STUB`): the prebuilt runtime with the program's image
   appended, which it maps and relocates at startup. The single-file compiler
-  links this way. Its executables have no ELF symbols for Botlish functions.
-  It is Linux x86-64's only: macOS executables are the system linker's.
+  links a program that calls no C this way. Its executables have no ELF
+  symbols for Botlish functions. It is Linux x86-64's only: macOS
+  executables are the system linker's.
+* `system` needs the host's C compiler driver (`cc`; Microsoft's link.exe
+  from a Developer environment on Windows; or `BOTLISH_NATIVE_SYSTEM_LINKER`)
+  and the precompiled runtime archive `libbotlish_runtime.a` beside the
+  driver (or `BOTLISH_NATIVE_RUNTIME`), built with it by the same `cargo
+  build`: it links the program object, a startup object holding the
+  program's description, and the archive, whose `main` starts the program
+  -- no rustc (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+* `auto` is `system` for a program that calls C and `stub` for any other
+  where the stub runs: the single-file compiler's choice.
 
 A program that calls C (C-FFI.md) is linked with its declared libraries by
-the platform linker on both: GNU ld's link plan on Linux, Apple's ld's on
-macOS (MACOS-AARCH64-MILESTONE-6.md). The stub linker refuses it.
+the platform linker with the rustc and the system linker: GNU ld's link plan
+on Linux, Apple's ld's on macOS (MACOS-AARCH64-MILESTONE-6.md), link.exe's
+on Windows. The stub linker refuses it.
 
 The executable uses the target's baseline instructions and the system's own
 libraries (glibc, libm and libgcc on Linux; libSystem on macOS); it needs no

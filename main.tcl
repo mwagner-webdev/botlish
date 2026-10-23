@@ -98,8 +98,11 @@
 # on Windows FILE.exe): ELF on Linux glibc (x86_64, aarch64), Mach-O on macOS
 # (aarch64), PE on Windows (x86_64, MSVC's toolchain), for the host's target only,
 # linked as BOTLISH_NATIVE_LINKER says (rustc, the default, everywhere; stub
-# needs no toolchain, is Linux x86_64's only, and is what the single-file
-# compiler uses: SINGLE-EXECUTABLE.md). It does not evaluate the program.
+# needs no toolchain and is Linux x86_64's only; system needs the host's C
+# compiler driver and the runtime archive, never rustc; auto, what the
+# single-file compiler uses, is system for a program that calls C and stub
+# for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+# It does not evaluate the program.
 # Running the executable prints its value.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without

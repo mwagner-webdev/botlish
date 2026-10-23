@@ -3,8 +3,10 @@
 #
 #   single/build.sh [-o OUTPUT] [--basekit PATH]
 #
-# OUTPUT (default single/out/botlish) is one Linux x86-64 executable that needs
-# only glibc: a static Tcl 9 "zipkit" base with the compiler stack and the
+# OUTPUT (default single/out/botlish) is one Linux executable of the host's
+# architecture -- x86-64, the published one; AArch64 builds too, without a
+# stub linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) -- that needs only
+# glibc: a static Tcl 9 "zipkit" base with the compiler stack and the
 # native backend packed into its attached zip archive (single/package.tcl,
 # single/main.tcl). It takes main.tcl's options and arguments and runs every
 # backend, -emit-native-executable included (through the toolchain-free `stub`
@@ -26,7 +28,7 @@
 # packed with their debug information stripped when `strip` is available.
 # The runtime archive's system libraries, which the driver passes the linker
 # after it, are checked against rustc's own account of them
-# (`--print native-static-libs`).
+# (`--print native-static-libs`; native/runtime-archive/libraries.tcl).
 set -euo pipefail
 
 TCL_VERSION=9.0.1
@@ -92,13 +94,7 @@ echo "== base kit: $basekit (Tcl $(echo 'puts [info patchlevel]' | "$basekit"))"
 # --- the native backend -------------------------------------------------------
 echo "== building the native backend"
 (cd "$root" && cargo build --release --manifest-path native/Cargo.toml)
-expected=$(cd "$root" && cargo rustc --release --manifest-path native/Cargo.toml -p botlish-runtime -- --print native-static-libs 2>&1 |
-  sed -n 's/^note: native-static-libs: //p' | tail -n 1)
-actual=$("$root/native/target/release/botlish-native" system-linker | sed -n 's/^libraries //p')
-if [[ $expected != "$actual" ]]; then
-  echo "the runtime archive's system libraries changed: rustc says '$expected', the driver passes '$actual' (codegen/aot.rs's runtime_system_libraries)" >&2
-  exit 1
-fi
+"$basekit" "$root/native/runtime-archive/libraries.tcl"
 mkdir -p "$work/native"
 for name in botlish-native botlish-aot-stub libbotlish_runtime.a; do
   cp "$root/native/target/release/$name" "$work/native/$name"

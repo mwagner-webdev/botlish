@@ -176,7 +176,7 @@ jobs:
       - name: What the system linker links with
         run: |
           native/target/release/botlish-native system-linker
-          cargo rustc --release --manifest-path native/Cargo.toml -p botlish-runtime -- --print native-static-libs 2>&1 | grep native-static-libs
+          tclsh9.0 native/runtime-archive/libraries.tcl
 
       # A system-linked executable: the link command (BOTLISH_NATIVE_LINK_LOG),
       # its run, the Mach-O as the host's tools see it.
@@ -190,7 +190,7 @@ jobs:
           for exe in sl/*; do [[ $exe == *.bot ]] && continue; file "$exe"; otool -L "$exe"; "$exe"; done
 
       - name: The system linker's tests
-        run: tclsh9.0 tests/system-linker.test
+        run: tclsh9.0 tests/all.tcl -file system-linker.test
 
       - name: Executable and C tests, system-linked
         run: |

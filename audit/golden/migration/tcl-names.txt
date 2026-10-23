@@ -7701,6 +7701,7 @@ tests/system-linker.test system-linker-linked-run pass
 tests/system-linker.test system-linker-no-rust-toolchain pass
 tests/system-linker.test system-linker-ordinary-executable pass
 tests/system-linker.test system-linker-outcomes pass
+tests/system-linker.test system-linker-process-setup pass
 tests/system-linker.test system-linker-runtime-failures pass
 tests/system-linker.test system-linker-startup-parity pass
 tests/system-linker.test system-linker-static-incorporation pass

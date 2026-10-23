@@ -70,6 +70,51 @@ jobs:
           path: dist/botlish
           if-no-files-found: error
 
+  # The same single executable built on Linux AArch64
+  # (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, section 25): not published, and
+  # not the toolchain-free compiler x86-64's is -- there is no stub linker
+  # for AArch64, so every executable is linked by the system linker, a
+  # program that calls no C too -- but packed and checked the same way:
+  # programs that call C, linked with only gcc on PATH, run without the
+  # compiler.
+  build-arm64:
+    name: build and C FFI smoke test (Linux AArch64)
+    runs-on: ubuntu-24.04-arm
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the static Tcl base kit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish-single
+          key: single-basekit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/build.sh') }}
+
+      - name: Build the single executable
+        run: single/build.sh -o dist/botlish
+
+      - name: C FFI smoke test on the build machine
+        run: |
+          sudo apt-get install -y strace >/dev/null
+          file dist/botlish
+          single/ffi-smoke-test.sh dist/botlish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: botlish-linux-aarch64
+          path: dist/botlish
+          if-no-files-found: error
+
   smoke:
     name: smoke test (${{ matrix.image }})
     needs: build

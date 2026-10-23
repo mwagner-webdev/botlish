@@ -744,12 +744,15 @@ const RUNTIME_ARCHIVE: &str = if cfg!(target_env = "msvc") { "botlish_runtime.li
 /// The system libraries the runtime archive needs, after it, in the
 /// FLAVOR linker's spelling: Rust's standard library's and the runtime's
 /// own (rustc's `--print native-static-libs` for native/runtime-archive,
-/// which `.github/workflows/single-executable.yml` compares with this list
-/// on every build). On Windows the C runtime is `crt_args`'s, below.
+/// which native/runtime-archive/libraries.tcl compares with this list, as
+/// `botlish-native system-linker` prints it: on every single-executable
+/// build and in every host's system-linker CI job). On Windows the C
+/// runtime is `system_link_args`'s: the static one, `crt_args_for`'s
+/// policy.
 fn runtime_system_libraries(flavor: LinkerFlavor) -> &'static [&'static str] {
     match flavor {
         LinkerFlavor::Gnu => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
-        LinkerFlavor::Apple => &["-lSystem", "-lc", "-lm"],
+        LinkerFlavor::Apple => &["-liconv", "-lSystem", "-lc", "-lm"],
         LinkerFlavor::Msvc => &["kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib"],
     }
 }
@@ -1829,7 +1832,7 @@ mod tests {
         assert_eq!(&args[..2], ["-arch", "arm64"]);
         assert!(args.contains(&"-Wl,-dead_strip".to_string()));
         let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
-        assert_eq!(tail, ["/w/program.o", "/w/startup.o", "-L/opt/lib", "-lfirst", "-lsecond", "/rt/libbotlish_runtime.a", "-lSystem", "-lc", "-lm"]);
+        assert_eq!(tail, ["/w/program.o", "/w/startup.o", "-L/opt/lib", "-lfirst", "-lsecond", "/rt/libbotlish_runtime.a", "-liconv", "-lSystem", "-lc", "-lm"]);
         assert!(args.iter().all(|a| !a.contains("group") && !a.contains("-pie") && !a.contains("--")));
     }
 

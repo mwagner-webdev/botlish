@@ -5,7 +5,11 @@
 toolchain, no C compiler or linker, no checkout. It is `main.tcl`: it takes
 the same options and arguments and does the same things, on every backend
 (`interp`, `compile`, `cranelift`, `cranelift-generic`), and
-`-emit-native-executable` builds standalone executables with it too.
+`-emit-native-executable` builds standalone executables with it too. A
+program that calls C (C-FFI.md) needs, besides, the host's C compiler driver
+(`cc`, with its linker) and the C libraries it declares -- never Rust or a
+checkout: the compiler carries its precompiled runtime
+(SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "The system linker" below).
 
 ```sh
 single/build.sh                     # -> single/out/botlish
@@ -68,11 +72,16 @@ zipfs-enabled tclsh) and a directory.
                     service/, lsp/, native/*.tcl, stdlib/, compilerpedia/ (its engine, topics/
                     and generated/), BUILD (the source revision -version
                     prints) (checkout-relative paths)
-   native-bin/      botlish-native, botlish-aot-stub, ID
+   native-bin/      botlish-native, botlish-aot-stub, libbotlish_runtime.a, ID
    ```
 
-The result is about 7.5 MB: a 3.5 MB static tclsh, plus the compressed
-archive.
+The result is about 13.6 MB: a 3.5 MB static tclsh, plus the compressed
+archive, 5 MB of which is the runtime archive (16 MB stripped, uncompressed;
+SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "Sizes"). `single/build.sh` also checks
+that the system libraries the driver passes the linker after the runtime
+archive are the ones rustc reports for it (`--print native-static-libs`;
+`native/runtime-archive/libraries.tcl`, which every host's system-linker CI
+job runs too).
 
 ## How it runs
 
@@ -84,15 +93,24 @@ archive.
 * It installs the two native executables. The kernel cannot execute a file
   inside the archive, so they are copied once per build into
   `$BOTLISH_CACHE_DIR`, `$XDG_CACHE_HOME/botlish` or `~/.cache/botlish`, in a
-  directory named by `native-bin/ID` (their CRC and size). Each file is written
-  under a temporary name and renamed into place, so concurrent first runs
-  never execute a partial file. Later runs only check the files exist with
-  the right size. Without any writable cache directory, a private temporary
-  directory serves the run and is removed when it exits. Directories of
-  earlier builds stay until you delete them; deleting one is always safe.
+  directory named by `native-bin/ID` (the CRC and size of each of the three
+  files). Each file is written under a temporary name and renamed into
+  place, so concurrent first runs never execute (or link) a partial file.
+  Later runs only check the files exist with the right size. Without any
+  writable cache directory, a private temporary directory serves the run and
+  is removed when it exits. Directories of earlier builds stay until you
+  delete them; deleting one is always safe.
+* A run that may link a native executable -- `-emit-native-executable`, or a
+  native backend (`-backend cranelift`, `cranelift-generic`, or
+  `CORE_BACKEND` naming one), which links a program that calls C to run it
+  -- also installs the runtime archive into the same directory: the host's
+  linker cannot read a file inside the archive either. Any other run never
+  unpacks its 16 MB.
 * It points the native backend at them: `BOTLISH_NATIVE_BIN`
-  (`native::binary`'s existing override), `BOTLISH_NATIVE_LINKER=stub` and
-  `BOTLISH_NATIVE_AOT_STUB`.
+  (`native::binary`'s existing override), `BOTLISH_NATIVE_AOT_STUB`, and
+  `BOTLISH_NATIVE_LINKER=auto` unless the environment names a linker
+  already (an explicit choice is kept, for diagnostics and tests). The
+  driver finds the runtime archive beside itself.
 * An invocation that runs no program -- no arguments (the usage summary),
   `-help` or `-version` first -- skips both steps above: it installs nothing
   and creates no cache directory (COMPILERPEDIA.md, "Packaging"). `-help`
@@ -108,7 +126,73 @@ archive.
 
 The only processes a run starts are the kit itself and its installed
 `botlish-native`. `strace -f -e trace=execve` of
-`botlish -emit-native-executable` shows no rustc, cc, ld or system tclsh.
+`botlish -emit-native-executable` shows no rustc, cc, ld or system tclsh --
+for a program that calls C, `cc` and the linker it drives (`collect2`, `ld`)
+besides, and still no rustc.
+
+## The linkers
+
+`BOTLISH_NATIVE_LINKER` names the linker of a standalone executable
+(`native/src/codegen/aot.rs`):
+
+| | `rustc` (default) | `stub` | `system` |
+| --- | --- | --- | --- |
+| needs at compile time | rustc, a system linker, `libbotlish_native.rlib` and `deps/` | `botlish-aot-stub` | the host's C compiler driver (link.exe on Windows) and the runtime archive `libbotlish_runtime.a` |
+| links C | yes | no: refused | yes |
+| hosts | Linux x86-64, AArch64; macOS AArch64; Windows x86-64 | Linux x86-64 | the same as rustc |
+| startup | generated Rust, compiled | the image appended to the stub | the description in a startup object, read by the archive's `main` |
+
+`auto` -- what the single executable sets -- is the system linker for a
+program that calls C or declares a library (the NIR's `foreign` and `link`
+entries, never its source text) and the stub for any other on a host that
+has it, the system linker elsewhere. It never chooses rustc. All three link
+the same program object and start it the same way (`runtime::aot::run`);
+`tests/system-linker.test` checks that their startups install exactly the
+same program state (`BOTLISH_NATIVE_STARTUP_REPORT`).
+
+## The system linker
+
+SINGLE-EXECUTABLE-FFI-MILESTONE-1.md has the design and its evidence. In
+short:
+
+* **The runtime archive** (`native/runtime-archive`, the `botlish-runtime`
+  package of `native/`'s workspace) is botlish-native's runtime library as a
+  Rust `staticlib`, `libbotlish_runtime.a` (`botlish_runtime.lib` on
+  Windows), built by the same `cargo build --release --manifest-path
+  native/Cargo.toml` as the driver. It holds the runtime and Rust's standard
+  library, no code generator, and the executable's C `main`.
+* **The startup object** is data only: `botlish_program_description`, the
+  stub image's own metadata (`runtime::aotimage::Image`: program information,
+  constant pool, module statics, every function's code sizes and stack maps,
+  the ABI fingerprint) with no machine code, then the addresses of the
+  startup interface and of every function's two entries, which the linker's
+  relocations fill in. The driver makes it with Cranelift's object writer,
+  for the program object's target.
+* **The link** is the host's: `cc -pie ... program.o startup.o -L... -Wl,--start-group
+  -l... -Wl,--end-group libbotlish_runtime.a -lgcc_s -lutil -lrt -lpthread -lm
+  -ldl -lc` on Linux (Apple clang with `-dead_strip` and no group on macOS,
+  link.exe with the static C runtime on Windows), the program's link plan in
+  the rustc linker's terms, every path one argument, never a shell. The
+  compiler driver is `cc` on PATH (link.exe on Windows, from a Developer
+  environment), or `BOTLISH_NATIVE_SYSTEM_LINKER`; the archive is the one
+  beside the driver, or `BOTLISH_NATIVE_RUNTIME`.
+* **At startup** the archive's `main` does what Rust's own startup does to
+  the process (SIGPIPE ignored, missing standard descriptors opened on
+  /dev/null), reads the description -- its revision, bounds, the ABI
+  fingerprint, that it carries no code -- and runs the program with
+  `aot::run`, as the other two startups do.
+* **Failures** say what failed: `NATIVE LINK TOOLCHAIN` / `NATIVE AOT
+  TOOLCHAIN` (no C compiler driver, no linker, a `link.exe` that is not
+  Microsoft's), `... RUNTIME` (the archive missing, not an archive, of
+  another platform or startup interface), `NATIVE LINK` with the linker's
+  own lines (a missing library or symbol), `NATIVE STARTUP` from the
+  executable (a description of another runtime build). A failed link
+  publishes nothing. `BOTLISH_NATIVE_LINK_LOG=FILE` appends every system
+  link's command line and the linker's output to FILE.
+* **The executable** is an ordinary one of the platform: its Botlish
+  functions are symbols, it imports only the system's libraries (and any
+  shared library the program declared), and it needs neither the compiler
+  nor the archive to run.
 
 ## The stub linker
 
@@ -217,10 +301,14 @@ passing except the 10 that read rustc-linked symbols, which now skip.
   `-emit-native-executable`: the `stub` linker it relies on is x86-64 only.
   LINUX-SYSCALL-TRANSPORTS.md, "Single-file compiler on AArch64", lists what
   an AArch64 stub linker and build need.
-* No C calls yet. The stub linker links no C library, so the native link of
-  a program that calls C or declares a library is refused (`NATIVE LINK`;
-  C-FFI.md, section 11); the Tcl backends run such a program to its first C
-  call. Linking one needs a checkout's rustc linker.
+* A program that calls C links with the system linker, which needs the
+  host's C compiler driver and linker (`apt install gcc` on Debian and
+  Ubuntu) and the program's C libraries; without a driver its link is
+  refused (`NATIVE LINK TOOLCHAIN`), and every other program still links
+  with no toolchain at all. Only Linux x86-64 has a single executable;
+  the system linker itself runs on Linux AArch64, macOS AArch64 and Windows
+  x86-64 too (from a checkout's build), where a single-file distribution
+  is a later milestone's.
 * The single executable runs the checkout's code as of its build. It reports
   library diagnostics at `//zipfs:/app/...` paths, and it has no tests or
   tools. Its standard library is the packed one: an application adds modules
