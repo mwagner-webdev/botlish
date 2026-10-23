@@ -56,7 +56,7 @@ error KeyNotFound
 
 # M with its dead entries dropped and its index sized for COUNT entries.
 fn rebuild(place m: MutableMap[K, V], count: int) -> unit:
-    std::ordered_table::compact_values(m.table, m.vals)
+    m.table.compact_values(m.vals)
     std::ordered_table::rebuild(m.table, count)
 
 fn create() -> MutableMap[K, V]:
@@ -72,45 +72,41 @@ fn empty?(m: MutableMap[K, V]) -> bool:
     std::ordered_table::length(m.table) == 0
 
 fn contains(m: MutableMap[K, V], key: K) -> bool:
-    std::ordered_table::slot_of(m.table, std::table_hash::of(key), key) >= 0
+    m.table.slot_of(std::table_hash::of(key), key) >= 0
 
 fn at(m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
-    slot = std::ordered_table::slot_of(m.table, std::table_hash::of(key), key)
-    if slot < 0:
-        fail KeyNotFound
-    value = m.vals.at(std::ordered_table::position(m.table, slot)):
+    slot = m.table.slot_of(std::table_hash::of(key), key)
+    value = std::mutable_vector::at(m.vals, m.table.position(slot)):
         on IndexNotFound:
             fail KeyNotFound
     value
 
 fn set(place m: MutableMap[K, V], key: K, value: V) -> unit:
     h = std::table_hash::of(key)
-    slot = std::ordered_table::slot_of(m.table, h, key)
+    slot = m.table.slot_of(h, key)
     if slot >= 0:
-        old = m.vals.swap(std::ordered_table::position(m.table, slot), value):
+        old = m.vals.swap(m.table.position(slot), value):
             on IndexNotFound:
                 value
         return unit
     if std::ordered_table::full?(m.table):
         rebuild(m, std::ordered_table::length(m.table) + 1)
-    std::ordered_table::append(m.table, h, key)
+    m.table.append(h, key)
     m.vals.push(value)
 
 fn remove(place m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
-    slot = std::ordered_table::slot_of(m.table, std::table_hash::of(key), key)
-    if slot < 0:
-        fail KeyNotFound
-    value = m.vals.at(std::ordered_table::position(m.table, slot)):
+    slot = m.table.slot_of(std::table_hash::of(key), key)
+    value = std::mutable_vector::at(m.vals, m.table.position(slot)):
         on IndexNotFound:
             fail KeyNotFound
-    std::ordered_table::remove_slot(m.table, slot)
+    m.table.remove_slot(slot)
     if std::ordered_table::garbage?(m.table):
         rebuild(m, std::ordered_table::length(m.table))
     value
 
 fn clear(place m: MutableMap[K, V]) -> unit:
     std::ordered_table::clear(m.table)
-    m.vals.clear()
+    std::mutable_vector::clear(m.vals)
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.
@@ -119,7 +115,7 @@ nomethod fn iteration_end(m: MutableMap[K, V]) -> int:
     std::ordered_table::positions(m.table)
 
 nomethod fn iteration_live?(m: MutableMap[K, V], i: int) -> bool:
-    std::ordered_table::live_at?(m.table, i)
+    m.table.live_at?(i)
 
 nomethod fn iteration_at(m: MutableMap[K, V], i: int) -> MutableMapEntry[K, V]:
-    MutableMapEntry[K, V] {key: std::ordered_table::key_at(m.table, i), value: m.vals.at(i.mod(m.vals.length()))}
+    MutableMapEntry[K, V] {key: m.table.key_at(i), value: std::mutable_vector::at(m.vals, i.mod(std::mutable_vector::length(m.vals)))}

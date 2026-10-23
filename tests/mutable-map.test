@@ -231,8 +231,8 @@ test mm-typed-probe {a key read back from the table keeps its type: natively the
     set hir [surface::compile "${::mmDecls}a = std::mutable_map::create\[str, int\]()\na.set(\"x\", 1)\nb = int_map()\nb.set(1, 2)\n\[a.contains(\"x\"), b.contains(1)\]\n" -warnings off]
     set nir [native::nir $hir]
     set generic [native::nir $hir -specialize 0]
-    list [expr {"streq" in [mmOps $nir std::ordered_table::probe {std::ordered_table::Table[str], int, str, int}]}] \
-        [expr {[llength [lsearch -all -inline -regexp [mmOps $nir std::ordered_table::probe {std::ordered_table::Table[int], int, int, int}] {^r?ieq$}]] > 0}] \
+    list [expr {"streq" in [mmOps $nir std::ordered_table::holds? {std::ordered_table::Table[str], int, int, str}]}] \
+        [expr {[llength [lsearch -all -inline -regexp [mmOps $nir std::ordered_table::holds? {std::ordered_table::Table[int], int, int, int}] {^r?ieq$}]] > 0}] \
         [regexp -all {op veq } $nir] [regexp -all {op veq } $generic] [expr {[regexp -all {op veqtotal } $generic] > 0}]
 } -cleanup {unset -nocomplain hir nir generic} -result {1 1 0 0 1}
 

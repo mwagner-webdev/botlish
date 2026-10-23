@@ -94,7 +94,7 @@ fn length(t: Table[K]) -> int:
 
 # The number of entry positions, live or dead: one past the last.
 fn positions(t: Table[K]) -> int:
-    t.hashes.length()
+    std::mutable_vector::length(t.hashes)
 
 # Whether position I holds a live entry.
 fn live_at?(t: Table[K], i: int) -> bool:
@@ -107,40 +107,42 @@ fn live_at?(t: Table[K], i: int) -> bool:
 # Total: the index is reduced into the entries' own count, which a live
 # position makes nonzero.
 fn key_at(t: Table[K], i: int) -> K:
-    t.keys.at(i.mod(t.keys.length()))
+    t.keys.at(i.mod(std::mutable_vector::length(t.keys)))
 
 # ---------------------------------------------------------------------------
 # Lookup
 
-fn probe(t: Table[K], h: int, key: K, slot: int) -> int:
-    if t.index.length() == 0:
-        return -1
-    s = bit_and(slot, t.index.length() - 1)
-    e = t.index.at(s)
-    if e < 0:
-        return -1
+# Whether position E (a position the index holds: a live entry) is the entry
+# of KEY, whose keyed hash is H: the stored hash is compared first, the key
+# only when the hashes are equal.
+fn holds?(t: Table[K], e: int, h: int, key: K) -> bool:
     stored = t.hashes.at(e):
         on IndexNotFound:
-            return -1
-    if stored == h:
-        k = t.keys.at(e):
-            on IndexNotFound:
-                return -1
-        if k == key:
-            return s
-    probe(t, h, key, s + 1)
+            -1
+    stored == h and t.key_at(e) == key
+
+# The probe from SLOT on (reduced into the index): the slot holding KEY's
+# position, or -1 at the first empty slot.
+fn probe(t: Table[K], h: int, key: K, slot: int) -> int:
+    s = bit_and(slot, std::mutable_vector::length(t.index) - 1)
+    e = t.index.at(s):
+        on IndexNotFound:
+            -1
+    if e >= 0 and not t.holds?(e, h, key):
+        return t.probe(h, key, s + 1)
+    if e < 0:
+        return -1
+    s
 
 # The index slot holding the position of KEY (keyed hash H), or -1 when KEY
 # is absent: the probe sequence from H's home slot, up to the first empty
-# slot.
+# slot. The index is never empty (min_slots()).
 fn slot_of(t: Table[K], h: int, key: K) -> int:
-    if t.index.length() == 0:
-        return -1
-    probe(t, h, key, bit_and(h, t.index.length() - 1))
+    t.probe(h, key, h)
 
 # The entry position index slot SLOT holds (SLOT a slot slot_of returned).
 fn position(t: Table[K], slot: int) -> int:
-    if slot < 0 or slot >= t.index.length():
+    if slot < 0 or slot >= std::mutable_vector::length(t.index):
         return -1
     t.index.at(slot)
 
@@ -149,33 +151,33 @@ fn position(t: Table[K], slot: int) -> int:
 
 # Whether one more entry would exceed the maximum load.
 fn full?(t: Table[K]) -> bool:
-    (length(t) + 1) * 10 > t.index.length() * 7
+    (t.length() + 1) * 10 > std::mutable_vector::length(t.index) * 7
 
 # Whether the dead entries are enough to rebuild for (the garbage rule).
 fn garbage?(t: Table[K]) -> bool:
-    dead = positions(t) - length(t)
-    dead >= min_slots() and dead >= length(t)
+    dead = t.positions() - t.length()
+    dead >= min_slots() and dead >= t.length()
 
 # Adds DELTA to the live count.
-fn counted(place t: Table[K], delta: int) -> unit:
-    n = length(t)
+fn add_live(place t: Table[K], delta: int) -> unit:
+    n = t.length()
     t.live.set(0, n + delta):
         on IndexNotFound:
             unit
 
 # The first empty slot from SLOT on (the index is never full), or -1.
 fn empty_slot(t: Table[K], slot: int) -> int:
-    if t.index.length() == 0:
+    if std::mutable_vector::length(t.index) == 0:
         return -1
-    s = bit_and(slot, t.index.length() - 1)
+    s = bit_and(slot, std::mutable_vector::length(t.index) - 1)
     if t.index.at(s) < 0:
         return s
-    empty_slot(t, s + 1)
+    t.empty_slot(s + 1)
 
 # Stores entry position P (keyed hash H) at the first empty index slot of
 # H's probe sequence.
 fn place_entry(place t: Table[K], p: int, h: int) -> unit:
-    s = empty_slot(t, bit_and(h, t.index.length() - 1))
+    s = t.empty_slot(h)
     if s >= 0:
         t.index.swap(s, p):
             on IndexNotFound:
@@ -186,11 +188,11 @@ fn place_entry(place t: Table[K], p: int, h: int) -> unit:
 # its position at the first empty slot of H's probe sequence. Returns the
 # position.
 fn append(place t: Table[K], h: int, key: K) -> int:
-    p = t.hashes.length()
-    place_entry(t, p, h)
+    p = std::mutable_vector::length(t.hashes)
+    t.place_entry(p, h)
     t.hashes.push(h)
     t.keys.push(key)
-    counted(t, 1)
+    t.add_live(1)
     p
 
 # ---------------------------------------------------------------------------
@@ -206,9 +208,9 @@ fn between?(k: int, i: int, j: int) -> bool:
 # The index after the slot HOLE was emptied, the entries after it shifted
 # back: J is the last slot looked at.
 fn shift(place t: Table[K], hole: int, j: int) -> unit:
-    if t.index.length() == 0:
+    if std::mutable_vector::length(t.index) == 0:
         return unit
-    mask = t.index.length() - 1
+    mask = std::mutable_vector::length(t.index) - 1
     n = bit_and(j + 1, mask)
     e = t.index.at(n):
         on IndexNotFound:
@@ -221,25 +223,25 @@ fn shift(place t: Table[K], hole: int, j: int) -> unit:
     h = t.hashes.at(e):
         on IndexNotFound:
             -1
-    if between?(bit_and(h, mask), hole, n):
-        return shift(t, hole, n)
+    if bit_and(h, mask).between?(hole, n):
+        return t.shift(hole, n)
     t.index.swap(hole, e):
         on IndexNotFound:
             -1
-    shift(t, n, n)
+    t.shift(n, n)
 
 # Removes the entry whose position index slot SLOT holds (a slot slot_of
 # returned): its slot leaves the index by backward shift, and the entry is
 # marked dead.
 fn remove_slot(place t: Table[K], slot: int) -> unit:
-    p = position(t, slot)
+    p = t.position(slot)
     if p < 0:
         return unit
-    shift(t, slot, slot)
+    t.shift(slot, slot)
     t.hashes.swap(p, -1):
         on IndexNotFound:
             -1
-    counted(t, -1)
+    t.add_live(-1)
 
 # ---------------------------------------------------------------------------
 # Rebuilding: compaction and resizing
@@ -248,15 +250,15 @@ fn remove_slot(place t: Table[K], slot: int) -> unit:
 # the dead entries' slots dropped, the live ones moved down in order: what
 # rebuild will do to T's own entries. Called before rebuild.
 fn compact_values(t: Table[K], place values: MutableVector[V]) -> unit:
-    if positions(t) == length(t):
+    if t.positions() == t.length():
         return unit
-    kept = loop p from 0 to values.length():
-        if not live_at?(t, p):
+    kept = loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
             continue
         values.at(p):
             on IndexNotFound:
                 continue
-    values.clear()
+    std::mutable_vector::clear(values)
     loop v in kept:
         values.push(v)
     unit
@@ -264,41 +266,41 @@ fn compact_values(t: Table[K], place values: MutableVector[V]) -> unit:
 # T with its dead entries dropped (the live ones in order) and its index
 # rebuilt at slots_for(NEEDED) slots, NEEDED at least its live entry count.
 fn rebuild(place t: Table[K], needed: int) -> unit:
-    if positions(t) != length(t):
-        hs = loop p from 0 to t.hashes.length():
+    if t.positions() != t.length():
+        hs = loop p from 0 to std::mutable_vector::length(t.hashes):
             h = t.hashes.at(p):
                 on IndexNotFound:
                     continue
             if h < 0:
                 continue
             h
-        ks = loop p from 0 to t.keys.length():
-            if not live_at?(t, p):
+        ks = loop p from 0 to std::mutable_vector::length(t.keys):
+            if not t.live_at?(p):
                 continue
             t.keys.at(p):
                 on IndexNotFound:
                     continue
-        t.hashes.clear()
+        std::mutable_vector::clear(t.hashes)
         loop h in hs:
             t.hashes.push(h)
-        t.keys.clear()
+        std::mutable_vector::clear(t.keys)
         loop k in ks:
             t.keys.push(k)
-    t.index.clear()
+    std::mutable_vector::clear(t.index)
     loop s from 0 to slots_for(needed):
         t.index.push(-1)
-    loop p from 0 to t.hashes.length():
+    loop p from 0 to std::mutable_vector::length(t.hashes):
         h = t.hashes.at(p):
             on IndexNotFound:
                 continue
-        place_entry(t, p, h)
+        t.place_entry(p, h)
     unit
 
 # Empties T: no entry, the smallest index.
 fn clear(place t: Table[K]) -> unit:
-    t.hashes.clear()
-    t.keys.clear()
-    t.index.clear()
+    std::mutable_vector::clear(t.hashes)
+    std::mutable_vector::clear(t.keys)
+    std::mutable_vector::clear(t.index)
     loop s from 0 to min_slots():
         t.index.push(-1)
     t.live.set(0, 0):

@@ -48,24 +48,24 @@ fn empty?(s: MutableSet[T]) -> bool:
     std::ordered_table::length(s.table) == 0
 
 fn contains(s: MutableSet[T], x: T) -> bool:
-    std::ordered_table::slot_of(s.table, std::table_hash::of(x), x) >= 0
+    s.table.slot_of(std::table_hash::of(x), x) >= 0
 
 fn add(place s: MutableSet[T], x: T) -> bool:
     h = std::table_hash::of(x)
-    if std::ordered_table::slot_of(s.table, h, x) >= 0:
+    if s.table.slot_of(h, x) >= 0:
         return false
     if std::ordered_table::full?(s.table):
-        std::ordered_table::rebuild(s.table, std::ordered_table::length(s.table) + 1)
-    std::ordered_table::append(s.table, h, x)
+        s.table.rebuild(std::ordered_table::length(s.table) + 1)
+    s.table.append(h, x)
     true
 
 fn remove(place s: MutableSet[T], x: T) -> bool:
-    slot = std::ordered_table::slot_of(s.table, std::table_hash::of(x), x)
+    slot = s.table.slot_of(std::table_hash::of(x), x)
     if slot < 0:
         return false
-    std::ordered_table::remove_slot(s.table, slot)
+    s.table.remove_slot(slot)
     if std::ordered_table::garbage?(s.table):
-        std::ordered_table::rebuild(s.table, std::ordered_table::length(s.table))
+        s.table.rebuild(std::ordered_table::length(s.table))
     true
 
 fn clear(place s: MutableSet[T]) -> unit:
@@ -78,7 +78,7 @@ nomethod fn iteration_end(s: MutableSet[T]) -> int:
     std::ordered_table::positions(s.table)
 
 nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
-    std::ordered_table::live_at?(s.table, i)
+    s.table.live_at?(i)
 
 nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
-    std::ordered_table::key_at(s.table, i)
+    s.table.key_at(i)
