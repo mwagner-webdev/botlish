@@ -1030,6 +1030,18 @@ All pass.
 * **Command line and reference.** `main-cli`, `compilerpedia` (`check`:
   793 topics, 593 examples, 0 problems).
 * **The warning gate** (`audit/refactor/tools/gate.tcl`: passed).
+* **C calls and linked runs**, which go through the shared startup:
+  `c-ffi` 115 (5 skipped by constraint), `c-ffi-error-capture` 27,
+  `c-pointer-borrowing` 62, `c-byte-borrowing` 19 (1 skipped), `argv` 71
+  (6 skipped), `native-program-output` 11; `tests/platform/aot-facts.tcl`:
+  every fact as recorded.
+* **The compiler service and the language server**, which report the new
+  diagnostics: `compiler-service` 54, `lsp` 70.
+* **HIR interchange** (the block field `exported c` is new HIR text):
+  * `audit/hir-interchange/tools/roundtrip.tcl -via interchange`: 12
+    suites, 108 artifacts and outcomes, 0 differ;
+  * `-via cache`: 120, 0 differ;
+  * `audit/hir-interchange/tools/mutate.tcl`: 27 mutants, 27 killed.
 
 ### Probes
 
