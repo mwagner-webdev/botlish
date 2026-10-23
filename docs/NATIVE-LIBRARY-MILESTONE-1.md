@@ -1115,7 +1115,9 @@ their rule:
 
 * `audit/native-aot/tools/mutants.txt`'s `startup-no-stack-maps` now
   removes the stack maps from `program::instantiate`, which both startups
-  and libraries share.
+  and libraries share. The harness's whole run after the change: 20
+  mutants on linux-x86_64, 16 killed, 0 survived, 4 skipped (other hosts'
+  code), `startup-no-stack-maps` among the killed.
 * `audit/target-model/tools/mutants.txt`'s `driver-runs-any-target`
   includes `library` among the commands that check the target.
 
