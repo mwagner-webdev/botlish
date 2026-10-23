@@ -493,10 +493,10 @@ tclsh9.0 tests/all.tcl
 ```
 
 From Windows, run the same thing inside WSL for Linux GC-stress results
-when validating the Linux frame walk or the stack guard: Windows-native
+when validating the Linux frame walk or the Linux stack guard: Windows-native
 execution walks its frames another way (Windows' unwinder across Rust
-frames: "Windows x86-64 (MSVC)", below) and has no stack guard, so it
-validates neither:
+frames) and guards its stack another way (a vectored exception handler:
+"Windows x86-64 (MSVC)", below), so it validates neither:
 
 ```powershell
 wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
@@ -920,36 +920,56 @@ capability of the host target, not `nativeLinux`.
 
 ## The native stack guard
 
-A native run that exhausts a stack -- the worker thread's or a coroutine's
--- ends in `NATIVE LIMIT STACK` on every host the native backend runs on
-(MACOS-AARCH64-MILESTONE-4.md, NATIVE-STACK-OVERFLOW.md): Linux x86-64 and
-AArch64 and macOS AArch64, `native_stack_overflow_supported()`. One guard
-serves them all, `runtime/platform/guard.rs`; a host adds only how the
-current thread's stack and guard are found and how a thread is named
+A native run that exhausts a stack -- the worker thread's or a coroutine's,
+in Botlish code, the runtime or C -- ends in `NATIVE LIMIT STACK` on every
+host the native backend runs on (MACOS-AARCH64-MILESTONE-4.md,
+NATIVE-STACK-OVERFLOW.md, WINDOWS-X86-64-MILESTONE-4.md): Linux x86-64 and
+AArch64, macOS AArch64 and Windows x86-64, `native_stack_overflow_supported()`.
+One contract serves them all (`runtime/platform/mod.rs`: `OverflowGuard`
+installed by the thread that runs Botlish code for as long as it runs it,
+`set_result_file`, `OVERFLOW_LINE`, exit status 0 for the driver and 1 for
+an executable), with one mechanism per exception model: POSIX signals,
+`runtime/platform/guard.rs`, where a host adds only how the current
+thread's stack and guard are found and how a thread is named
 (`platform/linux.rs`: glibc's report; `platform/macos.rs`: libpthread's
-bounds, the usable low bound and the guard confirmed with `mach_vm_region`).
-Keep it so:
+bounds, the usable low bound and the guard confirmed with `mach_vm_region`);
+and Windows' STATUS_STACK_OVERFLOW, `runtime/platform/windows.rs` (a
+vectored exception handler first in the chain, run in the thread's stack
+guarantee). Keep it so:
 
 * The handler only classifies and reports: an address in the guard of the
-  stack *published* as running, on the guarded thread, writes the result
-  line and `_exit`s. It never resumes, unwinds, allocates or touches the
+  stack *published* as running, on the guarded thread (POSIX), or
+  STATUS_STACK_OVERFLOW on the guarded thread at an address of its stack
+  (Windows), writes the result line and ends the process (`_exit`;
+  TerminateProcess). It never resumes, unwinds, allocates or touches the
   runtime, and it uses nothing but lock-free atomics stored before the
-  fault and async-signal-safe calls. Any other fault goes to the
-  disposition the process had before the guard; never relabel one.
+  fault and calls that take no lock (async-signal-safe ones; WriteFile and
+  TerminateProcess), its destination resolved before the fault. Any other
+  fault or exception goes on as if the guard did not exist (the
+  disposition the process had before it; the next vectored handler);
+  never relabel one -- an access violation, also one in a stack's
+  uncommitted reservation, is never an overflow.
 * A guard is confirmed, never assumed from a reported stack end: a host
   that cannot confirm one reports none (`guard_low == low_bound`) and
   install refuses it. The macOS main thread's lowest reported page is
-  itself inaccessible: its usable bound is above the reported one.
+  itself inaccessible: its usable bound is above the reported one. On
+  Windows an exhausted stack is an exception, not an address range: install
+  confirms the system's guard page above the uncommitted reservation and a
+  stack guarantee of at least `GUARANTEE` (measured: never lower it without
+  measuring the handler's path again), and refuses otherwise.
 * Every coroutine switch publishes the stack it *arrives* on, after the
   switch (runtime/coroutine.rs's `segment`, `co_body`, `rt_co_yield`), never
   the one it is about to switch to: bl_co_switch's pushes land on the stack
   it leaves. Publication stays inlined atomic stores (no frame of its own).
 * NATIVE LIMIT STACK is terminal: no in-process recovery, no Botlish
-  handler, no new error. Its line is RtError::StackOverflow's.
+  handler, no new error, and no call effect for it where native frames
+  hold the roots (only the fallback plan's shadow stack can fail a call).
+  Its line is RtError::StackOverflow's.
 
 A Tcl test of an overflow carries `nativeStackGuard` (tests/helpers.tcl), a
-capability of the host target, not `nativeLinux`. If you change the guard,
-a host's stack discovery, publication or the switch, the stack probes or
+capability of the host target, not `nativeLinux`, and one of a coroutine's
+stack `nativeCoroutines` too. If you change the guard, a host's stack
+discovery, publication or the switch, the stack probes or
 `native_stack_overflow_supported()`, run `cargo test --release
 --manifest-path native/Cargo.toml --test native_stack` (it runs every
 faulting check in a child process: never fault in a test's own process),
@@ -959,10 +979,14 @@ the Rust tests (also under `BOTLISH_NATIVE_GC_STRESS=1`),
 `audit/native-stack/tools/mutate.tcl` (every mutant in its `mutants.txt`
 that applies to the host must still apply and be killed: update a mutant's
 text when you change the code it mutates, keeping it a mutant of the same
-rule; a mutant of `platform/macos.rs` runs on macOS only), and the macOS
-smoke job and `CI-Tests: native-stack-overflow.test rust
-native-stack-mutants` on a branch (macOS facts are CI's: the shared Mac is
-not used). `bench/native-stack-guard.tcl` compares a driver against a
+rule; a mutant of `platform/macos.rs` runs on macOS only, of
+`platform/windows.rs` on Windows only: the tier item
+`native-stack-mutants`), and the macOS smoke job and `CI-Tests:
+native-stack-overflow.test rust native-stack-mutants` on a branch (macOS
+facts are CI's: the shared Mac is not used); for the Windows guard, the
+Windows workflow on the branch (its smoke job runs the native stack
+checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
+mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
 
@@ -1118,14 +1142,15 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   order does). `BOTLISH_NATIVE_UNWIND_CHECK=1` compares every Botlish
   function's entry and every walked Botlish frame with Windows' unwinder
   and reports a count on standard error at the end of a run.
-* Depth: with no stack guard yet, a function with a Botlish call checks its
-  stack pointer against the Vm's stack limit (the thread's stack plus a
-  margin: `native_stack::stack_limit_checked`, `NativeStack::stack_limit`,
-  `clif.rs`'s `prologue_stack_limit`) and fails with NATIVE LIMIT STACK;
-  nir's call effects read the same predicate (`depth_checked`), so no call
-  site skips the check (WINDOWS-X86-64-MILESTONE-1.md, section 3.4). It
-  bounds the bytes of stack used, which a shadow slot count does not once
-  roots live in native frames. No shadow stack is allocated on Windows.
+* Depth: the stack guard (`runtime/platform/windows.rs`,
+  WINDOWS-X86-64-MILESTONE-4.md; "The native stack guard", above) bounds
+  recursion, as on Linux and macOS: no function checks its depth, no
+  Botlish call can fail for the stack (`depth_checked` is false where
+  native frames hold the roots), and no shadow stack is allocated.
+  Native-frame roots need the guard (`native_stack.rs`'s assertion): never
+  bring back a stack-pointer check, a depth token or a call effect for the
+  stack on a host that has native-frame roots; a host without the guard
+  starts on the fallback plan.
 * The fallback plan (shadow-stack roots and depth, leaf frames published,
   no walk) remains the bootstrap of a host without native-frame roots: the
   `fallback-roots` cargo feature builds it on any host, to run the suite
@@ -1135,10 +1160,11 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   make it coroutine-aware; a host with native coroutines needs native-frame
   roots.
 * Stack probes are on on Windows (`codegen::stack_probes`): Windows
-  commits a thread's stack a page at a time. They are not a stack guard:
-  there is none on Windows yet, and the stack-limit check is the only
-  clean NATIVE LIMIT STACK there (deep recursion in the runtime, or one
-  frame larger than the check's margin, still ends the process).
+  commits a thread's stack a page at a time, and a frame that skipped the
+  system's guard page would fault in the uncommitted reservation (an
+  access violation, which the guard never relabels) instead of raising the
+  STATUS_STACK_OVERFLOW the guard reports. They are stack growth, not the
+  guard: never turn them off.
 * Arguments: a Windows process's command line, split by the Microsoft C
   runtime's rules (Rust's `args_os`), each argument's UTF-16 as WTF-8
   (`runtime::aot::wtf8_from_utf16`): never `OsString`'s internal encoding,
@@ -1147,8 +1173,8 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   `tests/platform/native-status.tcl` (its windows-x86_64 row) and
   `native/native.tcl`'s `capabilities` table (which tests/helpers.tcl's
   `executableAot`, `nativeCCalls`, `nativeCoroutines`, `nativeStackGuard`,
-  `nativeFrameRoots` (and from the last two `nativeDepthChecked`: true on
-  Windows) and the golden runner read); the test files that do not pass on
+  `nativeFrameRoots` (and from the last two `nativeDepthChecked`: false on
+  Windows since its guard) and the golden runner read); the test files that do not pass on
   Windows yet,
   with their causes, in `tests/platform/tier.tcl`'s `notYetByHost`. A
   milestone that changes one updates it in the same change; never weaken a
@@ -1175,7 +1201,7 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
 
 If you change Windows unwind information (`codegen::unwind`,
 `add_windows_unwind`, `codegen::jitunwind`), the Windows walk
-(`framewalk::windows`), the stack-limit check, or Cranelift's version, run
+(`framewalk::windows`) or Cranelift's version, run
 the Rust tests (on Windows too: the JIT's function table and the virtual
 unwind tests run there only), `tests/platform/gc-workloads.tcl
 -unwind-check 1` and `tests/platform/aot-facts.tcl` on Windows, and

@@ -140,6 +140,19 @@ extern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long
 
 labs(-5)
 } {}] \
+    c-access-violation [list program {direct module
+import std::ffi::c
+
+extern c fn memset(dst: std::ffi::c::Ptr[std::ffi::c::Void], c: std::ffi::c::Int, n: std::ffi::c::ULongLong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+# The C library's memset writing through a null pointer: an ordinary
+# invalid memory access inside C, which no stack guard takes for an
+# exhausted stack. The linked program dies of it (SIGSEGV; Windows'
+# STATUS_ACCESS_VIOLATION), and the driver says so.
+nothing = std::ffi::c::null[std::ffi::c::Void]()
+written = memset(nothing, 0, 1)
+std::ffi::c::null?(written)
+} {}] \
     c-byte-borrow [list program {import std::abi
 import std::abi::bytes
 import std::byte
@@ -309,7 +322,11 @@ f(1)
 # linker ran (NATIVE LINK, "C calls are linked on Linux glibc only"). Byte
 # storage exposed to the system C library (memcmp reading two buffers,
 # memset writing a private copy) gives the same values everywhere: on
-# macos-aarch64 checked since milestone 7 (MACOS-AARCH64-MILESTONE-7.md).
+# macos-aarch64 checked since milestone 7 (MACOS-AARCH64-MILESTONE-7.md). A C
+# function's invalid memory access (memset through a null pointer) kills
+# the linked program with the host's own fault -- SIGSEGV, or on Windows
+# STATUS_ACCESS_VIOLATION -- never NATIVE LIMIT STACK: no stack guard
+# relabels a fault that is no stack's exhaustion.
 # Darwin I/O (stdlib/darwin.bot, stdlib/darwin/io.bot: libSystem's write, read,
 # close and the thread's errno; the portable std::io::IO through DarwinIO; a
 # Mach-O executable printing through it) runs on macos-aarch64 since
@@ -317,10 +334,12 @@ f(1)
 # before anything runs: `darwin` is the macOS platform's namespace
 # (UNSUPPORTED-PLATFORM), as `linux` is Linux's. A
 # native stack overflow is NATIVE LIMIT STACK on
-# every host, the thread's stack and a coroutine's alike: on macos-aarch64
-# since milestone 4 (MACOS-AARCH64-MILESTONE-4.md), where until then the
-# driver died in Rust's stack-overflow abort (the thread's stack) or of
-# SIGBUS (a coroutine's).
+# every host, the thread's stack and a coroutine's alike, in Botlish code
+# (a tiny frame, a large frame) and inside the runtime (a List equality
+# recursing past a 16 MiB stack): on macos-aarch64 since milestone 4
+# (MACOS-AARCH64-MILESTONE-4.md), where until then the driver died in
+# Rust's stack-overflow abort (the thread's stack) or of SIGBUS (a
+# coroutine's).
 #
 # On windows-x86_64 (WINDOWS-X86-64-MILESTONE-1.md, MSVC's toolchain) the
 # JIT, the collector -- with the fallback root plan, no frame walk -- program
@@ -336,18 +355,20 @@ f(1)
 # printing through it) runs, refused everywhere else (`windows` is the
 # Windows platform's namespace: UNSUPPORTED-PLATFORM). A variadic C call is
 # still a codegen error on Windows (no Win64 variadic lowering), as are
-# coroutines (NATIVE UNSUPPORTED); there is no stack guard. Since milestone 3
+# coroutines (NATIVE UNSUPPORTED). Since milestone 3
 # (WINDOWS-X86-64-MILESTONE-3.md) the collector finds the roots in native
-# frames (gc-frame-walk: Windows' unwinder across Rust frames), and a
-# function with a Botlish call checks its stack pointer against the thread's
-# stack instead of the shadow stack's depth: so the 4 MiB stack of the
-# stack-overflow probe ends in NATIVE LIMIT STACK too, where until then it
-# killed the driver before the shadow stack's depth check fired (Rust's own
-# stack overflow report, recorded as the probe's NATIVE BUG). The
-# recursion-limit probe is the same limit reached by a compiled program whose
-# functions cannot otherwise fail: the check's failure is a call's error
-# there (nir's call effects), and until milestone 1 a caller that did not
-# check for it crashed in rt_int_add.
+# frames (gc-frame-walk: Windows' unwinder across Rust frames). Since
+# milestone 4 (WINDOWS-X86-64-MILESTONE-4.md) the stack guard reports every
+# exhausted stack, as on the other hosts: Botlish recursion
+# (stack-overflow, stack-depth-limit, recursion-limit, large-frame-overflow)
+# and the runtime's own (runtime-stack-overflow, which until then killed the
+# driver in Rust's stack overflow report). Milestone 3 ended the Botlish
+# recursions with a check of the stack pointer in every function with a
+# Botlish call -- an error every caller checked (nir's call effects), and
+# until milestone 1 a caller that did not crashed in rt_int_add -- and
+# before it the 4 MiB stack of the stack-overflow probe killed the driver
+# before the shadow stack's depth check fired. The outcomes are the same
+# line; what makes it is now the guard, and no call can fail for it.
 #
 # Since milestone 2 (MACOS-AARCH64-MILESTONE-2.md) a program importing a
 # Linux namespace does not compile for macos-aarch64 at all
@@ -365,6 +386,7 @@ set linux [dict create \
     coroutine {value {[10, 7]}} \
     linux-syscall {value 0} \
     c-call {value 5} \
+    c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: 11 (SIGSEGV)*}} \
     c-byte-borrow {value {[true, true, 0, true, 0]}} \
     darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform (the standard namespace std::darwin and every namespace under it)*unavailable for target linux-*}} \
     darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform*unavailable for target linux-*}} \
@@ -397,6 +419,7 @@ set expected [dict create \
         coroutine {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         c-call {value 5} \
+        c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: *}} \
         c-byte-borrow {value {[true, true, 0, true, 0]}} \
         darwin-read-write {value {[0, 0, -1, 9]}} \
         darwin-errno {value {[-1, 9, 0, 0, -1, 9]}} \
@@ -424,6 +447,7 @@ unit}}} \
         coroutine {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         c-call {value 5} \
+        c-access-violation {error {NATIVE BUG} {the linked program reported no result (exit code: * (0xc0000005))}} \
         c-byte-borrow {value {[true, true, 0, true, 0]}} \
         darwin-read-write {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         darwin-errno {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::darwin" belongs to the macOS platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \

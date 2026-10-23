@@ -8,8 +8,9 @@
 # once: the UNWIND_INFO encoder (codegen/unwind.rs), the object's .pdata and
 # .xdata (codegen/mod.rs), the JIT's function table and its lifetime
 # (codegen/jitunwind.rs), the collector's walk across Rust and Botlish
-# frames (runtime/framewalk.rs), the stack-limit check and the call effects
-# it implies (codegen/clif.rs, runtime/vm.rs, nir.rs). For each mutant that
+# frames (runtime/framewalk.rs). (The stack-limit check's mutants went with
+# it: WINDOWS-X86-64-MILESTONE-4.md; the stack guard's are
+# audit/native-stack's.) For each mutant that
 # applies to this host (its %% line), a private copy of the checkout gets the
 # replacements, its native backend is rebuilt (a mutant that does not build
 # is NOT-BUILT, never counted as killed), and the detectors run against it,
@@ -18,15 +19,14 @@
 #   * the native Rust tests (`cargo test --lib --bins`): the encoder, the
 #     object's sections, a caller's root across its callee's collections,
 #     and on Windows the JIT's function table, a virtual unwind of JIT frames
-#     to their callers, the collector's walk checked against Windows', the
-#     stack limit;
+#     to their callers, the collector's walk checked against Windows';
 #   * on Windows, tests/platform/native-status.tcl (the frame walk under GC
-#     stress, the stack overflow and recursion limits);
+#     stress, the stack overflows);
 #   * tests/platform/gc-workloads.tcl on the URI and 2048 workloads, once
 #     plainly and once under GC stress, with BOTLISH_NATIVE_UNWIND_CHECK on
 #     Windows (-unwind-check 1);
 #   * on Windows, tests/platform/aot-facts.tcl (the object's .pdata, the
-#     executable's unwind check, the standalone stack limits).
+#     executable's unwind check, the standalone stack overflows).
 #
 # A mutant every detector misses SURVIVES. A mutant of code this host never
 # compiles or never runs (the JIT's function table off Windows) is SKIPPED.

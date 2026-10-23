@@ -123,12 +123,14 @@ testConstraint rustcLinker [expr {![info exists ::env(BOTLISH_NATIVE_LINKER)] ||
 # a test that needs Linux syscalls keeps nativeLinux.
 testConstraint nativeCoroutines [native::hostSupports coroutines]
 
-# The native stack guard (runtime/platform/, MACOS-AARCH64-MILESTONE-4.md):
-# the runtime knows the bounds of the thread's stack and of every coroutine
-# stack, and a native run that exhausts one -- the thread's or a
-# coroutine's -- ends in NATIVE LIMIT STACK, with stack probes and no
+# The native stack guard (runtime/platform/, MACOS-AARCH64-MILESTONE-4.md,
+# WINDOWS-X86-64-MILESTONE-4.md): the runtime knows the bounds of the
+# thread's stack and of every coroutine stack, and a native run that
+# exhausts one -- the thread's or a coroutine's, in Botlish code, the
+# runtime or C -- ends in NATIVE LIMIT STACK, with stack probes and no
 # shadow-stack depth token. A capability, not an operating system: Linux
-# x86-64 and AArch64 and macOS AArch64.
+# x86-64 and AArch64, macOS AArch64 and Windows x86-64 (a coroutine's stack
+# only where nativeCoroutines is true too).
 testConstraint nativeStackGuard [native::hostSupports stackGuard]
 
 # GC roots in native frames (runtime/framewalk.rs's NATIVE_FRAME_ROOTS,
@@ -141,12 +143,11 @@ testConstraint nativeFrameRoots [native::hostSupports frameRoots]
 
 # A depth check bounds Botlish recursion (runtime::native_stack::depth_checked):
 # unless native frames hold the roots and the stack guard reports an exhausted
-# stack (Windows, where a function with a Botlish call checks its stack
-# pointer against the thread's stack: native_stack::stack_limit_checked; the
-# fallback plan, where the shadow stack's end is the bound). Every function
-# with a Botlish call then fails with NATIVE LIMIT STACK from its prologue,
-# which nir's call effects record as may_error: a test of a call's effects
-# expects it by this.
+# stack -- on the fallback plan, where the shadow stack's end is the bound
+# (on Windows until WINDOWS-X86-64-MILESTONE-4.md, also a check of the stack
+# pointer). Every function with a Botlish call then fails with NATIVE LIMIT
+# STACK from its prologue, which nir's call effects record as may_error: a
+# test of a call's effects expects it by this.
 testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && [testConstraint nativeStackGuard])}]
 
 # Standalone executables (native::executable, native/src/codegen/aot.rs): the

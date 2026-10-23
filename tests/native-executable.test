@@ -237,32 +237,58 @@ proc processOutcome {dir args} {
 
 # Exhausting a stack in a standalone executable -- the thread's (the NIR
 # fixture's tiny frames on a 4 MiB stack, a source recursion on 16 MiB and on
-# the default 1 GiB) or a coroutine's -- ends the process with exit status 1
-# and exactly the guard's NATIVE LIMIT STACK line on standard error, nothing
-# on standard output and no signal (NATIVE-STACK-OVERFLOW.md,
-# MACOS-AARCH64-MILESTONE-4.md); a deep recursion that fits returns its
-# value. On a host with the guard and native coroutines only (on Windows
-# there is neither yet: tests/platform/aot-facts.tcl records what a Windows
-# executable's exhausted stack does).
-test native-executable-stack-overflow {standalone stack exhaustion, of the thread's stack or a coroutine's, is the NATIVE LIMIT STACK line on standard error and exit status 1, never a signal; a deep finite recursion returns its value} -constraints {executableAot nativeStackGuard nativeCoroutines} -body {
+# the default 1 GiB, a List equality recursing inside the runtime on 16 MiB)
+# or a coroutine's -- ends the process with exit status 1 and exactly the
+# guard's NATIVE LIMIT STACK line on standard error, nothing on standard
+# output and no signal or exception status (NATIVE-STACK-OVERFLOW.md,
+# MACOS-AARCH64-MILESTONE-4.md, WINDOWS-X86-64-MILESTONE-4.md); a deep
+# recursion that fits returns its value. The thread's on every host with the
+# guard, a coroutine's on one with native coroutines too.
+
+# processOutcome of the executable PATH with ENVIRONMENT ({NAME VALUE ...})
+# set for it.
+proc stackOutcome {dir environment path} {
+    set saved [array get ::env]
+    try {
+        foreach {name value} $environment { set ::env($name) $value }
+        return [processOutcome $dir $path]
+    } finally {
+        foreach {name value} $environment { unset -nocomplain ::env($name) }
+        array set ::env $saved
+    }
+}
+
+test native-executable-stack-overflow {standalone exhaustion of the thread's stack, in Botlish code or inside the runtime, is the NATIVE LIMIT STACK line on standard error and exit status 1, never a crash; a deep finite recursion returns its value} -constraints {executableAot nativeStackGuard} -body {
     set dir [makeDirectory {aot stack test}]
     try {
-        set binary [file join $dir program]
+        set binary [native::executableFile [file join $dir program]]
         native::Driver executable [core::ReadFile [file join $::projectRoot native tests fixtures stack_overflow.ir]] $binary
-        set results [list [processOutcome $dir env BOTLISH_NATIVE_STACK_BYTES=4194304 $binary]]
+        set results [list [stackOutcome $dir {BOTLISH_NATIVE_STACK_BYTES 4194304} $binary]]
         set down "fn down(n: int) -> int:\n    if n == 0:\n        return 0\n\n    1 + down(n - 1)\n\n"
-        native::executable [surface::compile "${down}down(100000000)" down.bot] [file join $dir down]
-        lappend results [processOutcome $dir env BOTLISH_NATIVE_STACK_BYTES=16777216 [file join $dir down]]
-        lappend results [processOutcome $dir [file join $dir down]]
-        native::executable [surface::compile "${down}struct Event:\n    value: int\n\nfn worker(depth: int) -> Event:\n    yield Event {value: 0}\n    return Event {value: down(depth)}\n\ncoroutine {step, first} = worker(100000000)\nstep().value\n" co.bot] [file join $dir co]
-        lappend results [processOutcome $dir [file join $dir co]]
-        native::executable [surface::compile "${down}down(100000)" finite.bot] [file join $dir finite]
-        lappend results [processOutcome $dir [file join $dir finite]]
+        set path [native::executable [surface::compile "${down}down(100000000)" down.bot] [file join $dir down]]
+        lappend results [stackOutcome $dir {BOTLISH_NATIVE_STACK_BYTES 16777216} $path]
+        lappend results [stackOutcome $dir {} $path]
+        set nest "import std::mutable_array\n\nfn empty() -> List\[any\]:\n    \[\]\n\nfn nest(n: int) -> List\[any\]:\n    cell = std::mutable_array::create(1, empty())\n    loop i from 0 to n:\n        cell.set(0, \[cell.at(0)\])\n    cell.at(0)\n\nnest(1000000) == nest(1000000)\n"
+        set path [native::executable [surface::compile $nest nest.bot] [file join $dir nest]]
+        lappend results [stackOutcome $dir {BOTLISH_NATIVE_STACK_BYTES 16777216} $path]
+        set path [native::executable [surface::compile "${down}down(100000)" finite.bot] [file join $dir finite]]
+        lappend results [stackOutcome $dir {} $path]
         join $results \n
     } finally {
         removeDirectory {aot stack test}
     }
 } -result [join [list {*}[lrepeat 4 [list 1 {} "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n"]] [list 0 "100000\n" {}]] \n]
+
+test native-executable-stack-overflow-coroutine {standalone exhaustion of a coroutine's stack is the NATIVE LIMIT STACK line on standard error and exit status 1, never a signal} -constraints {executableAot nativeStackGuard nativeCoroutines} -body {
+    set dir [makeDirectory {aot coroutine stack test}]
+    try {
+        set down "fn down(n: int) -> int:\n    if n == 0:\n        return 0\n\n    1 + down(n - 1)\n\n"
+        set path [native::executable [surface::compile "${down}struct Event:\n    value: int\n\nfn worker(depth: int) -> Event:\n    yield Event {value: 0}\n    return Event {value: down(depth)}\n\ncoroutine {step, first} = worker(100000000)\nstep().value\n" co.bot] [file join $dir co]]
+        stackOutcome $dir {} $path
+    } finally {
+        removeDirectory {aot coroutine stack test}
+    }
+} -result [list 1 {} "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n"]
 
 # The format, architecture and kind of a program object and of an executable
 # are the host target's (ELF on Linux, Mach-O on macOS, COFF and PE on

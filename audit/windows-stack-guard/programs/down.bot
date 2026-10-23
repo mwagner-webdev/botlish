@@ -1,0 +1,8 @@
+# Botlish recursion that no stack holds: 10^8 calls deep.
+fn down(n: int) -> int:
+    if n == 0:
+        return 0
+
+    1 + down(n - 1)
+
+down(100000000)

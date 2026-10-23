@@ -92,13 +92,11 @@
 //!                                                  runtime/metrics.rs's Tcl dict)
 //! ```
 //!
-//! Native code runs on a worker thread with a large native stack. On
-//! Linux (x86-64, AArch64) and macOS AArch64 the stack guard
-//! (runtime/platform/) supplies overflow protection; on Windows there is no
-//! guard yet: a function with a Botlish call checks its stack pointer
-//! (NATIVE LIMIT STACK), and a native stack exhausted otherwise -- inside
-//! the runtime, or by one frame larger than the check's margin -- ends the
-//! process (WINDOWS-X86-64-MILESTONE-1.md, -3.md).
+//! Native code runs on a worker thread with a large native stack, whose
+//! exhaustion the stack guard (runtime/platform/) reports as NATIVE LIMIT
+//! STACK and ends the process: on Linux (x86-64, AArch64) and macOS AArch64
+//! a signal handler, on Windows x86-64 a vectored exception handler
+//! (WINDOWS-X86-64-MILESTONE-4.md).
 
 mod codegen;
 mod launch;

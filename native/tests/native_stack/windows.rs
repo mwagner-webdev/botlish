@@ -140,7 +140,9 @@ fn touch(address: usize) {
 ///                       reservation, which only a skipped guard page
 ///                       reaches), `guard-page` (the system's guard page: the
 ///                       stack grows), `raised` (STATUS_STACK_OVERFLOW by
-///                       RaiseException), `other-thread` (another thread's
+///                       RaiseException), `raised-in-stack` (the same on
+///                       the guarded thread, its record naming its stack),
+///                       `other-thread` (another thread's
 ///                       stack exhausted), `other-thread-raised` (another
 ///                       thread raising STATUS_STACK_OVERFLOW at an address
 ///                       of the guarded stack)
@@ -206,6 +208,15 @@ fn child(scenario: &str) -> ! {
                     "raised" => unsafe { RaiseException(EXCEPTION_STACK_OVERFLOW as u32, 0, 0, std::ptr::null()) },
                     "other-thread" => {
                         std::thread::Builder::new().stack_size(1 << 20).spawn(|| exhaust(0)).unwrap().join().ok();
+                    }
+                    // STATUS_STACK_OVERFLOW raised by software on the
+                    // guarded thread itself, its record naming an address of
+                    // its own stack: exactly a real exhaustion's record but
+                    // for EXCEPTION_SOFTWARE_ORIGINATE.
+                    "raised-in-stack" => {
+                        let arguments = [1usize, stack.low_bound + 4096];
+                        // SAFETY: deliberately raises the code.
+                        unsafe { RaiseException(EXCEPTION_STACK_OVERFLOW as u32, 0, 2, arguments.as_ptr()) };
                     }
                     // STATUS_STACK_OVERFLOW raised by another thread, its
                     // record naming an address of the guarded stack.
@@ -361,7 +372,8 @@ fn guard_checks(report: &mut Report) {
 /// without the guard.
 fn fault_checks(report: &mut Report) {
     for (kind, expected) in [("null", Some(ACCESS_VIOLATION)), ("reserved", Some(ACCESS_VIOLATION)), ("guard-page", Some(0)),
-        ("raised", Some(STACK_OVERFLOW)), ("other-thread", Some(STACK_OVERFLOW)), ("other-thread-raised", Some(STACK_OVERFLOW))] {
+        ("raised", Some(STACK_OVERFLOW)), ("raised-in-stack", Some(STACK_OVERFLOW)), ("other-thread", Some(STACK_OVERFLOW)),
+        ("other-thread-raised", Some(STACK_OVERFLOW))] {
         let with = run_child(&format!("fault:{kind}"));
         let without = run_child(&format!("fault:{kind}:unguarded"));
         let same = with.code == without.code && with.stdout == without.stdout;

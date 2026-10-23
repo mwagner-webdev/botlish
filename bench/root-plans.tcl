@@ -31,14 +31,21 @@
 #     a frame walk against the shadow stack's scan;
 #   * each driver's machine code size (botlish-native size), and the
 #     program object's unwind information (.pdata and .xdata, Windows'
-#     COFF object only).
+#     COFF object only);
+#   * what each driver's code checks: the Botlish calls whose result is
+#     checked for an error (nir's call effects, botlish-native calls) and
+#     the functions that check their depth in their prologue
+#     (codegen::roots, botlish-native roots).
 #
 # Times are observations of one machine at one moment: read the ratios
 # against each round's spread, never as a limit.
 #
 # -name names BINARY in the report (default "fallback"), for comparing a
-# driver of another build -- a probe's (audit/windows-unwind) -- the same
-# way. -workloads runs only those; -code prints, after each named
+# driver of another build the same way -- a probe's (audit/windows-unwind),
+# or another revision's: the Windows workflow's roots job compares this
+# checkout's driver with the one before WINDOWS-X86-64-MILESTONE-4.md, whose
+# functions checked the stack pointer and whose calls checked for its error
+# (-name checks). -workloads runs only those; -code prints, after each named
 # workload's rows, the machine code each driver compiles it to
 # (botlish-native vcode): where a difference comes from.
 
@@ -253,6 +260,21 @@ try {
                 set unwind [format ", .pdata %d + .xdata %d bytes" [dict getdef $sizes .pdata 0] [dict getdef $sizes .xdata 0]]
             }
             append line [format "%s code %d bytes%s   " [label $which] $total $unwind]
+        }
+        puts $line
+        # What each driver's code checks: Botlish calls whose result is
+        # checked for an error (nir's call effects: botlish-native calls)
+        # and functions that check their depth in their prologue
+        # (codegen::roots: botlish-native roots).
+        set line "  checks    "
+        foreach which {native fallback} {
+            withEnv [list BOTLISH_NATIVE_BIN [dict get $drivers $which]] {
+                set calls [join [native::Driver calls $text] \n]
+                set roots [join [native::Driver roots $text] \n]
+            }
+            regexp {exact_calls=(\d+) .*completion_checks_removed=(\d+)} $calls -> exact unchecked
+            append line [format "%s %d of %d Botlish calls checked for an error, %d prologue depth checks   " \
+                [label $which] [expr {$exact - $unchecked}] $exact [regexp -all {depth reservation: yes} $roots]]
         }
         puts $line
         if {$name in $code} {

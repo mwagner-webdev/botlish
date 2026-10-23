@@ -24,7 +24,11 @@
 //!   * it is `STATUS_STACK_OVERFLOW`,
 //!   * on the guarded thread (`GUARDED`, its thread id), while installed,
 //!   * at an address (the record's second parameter: the access that could
-//!     not grow the stack) inside the guarded thread's stack reservation.
+//!     not grow the stack) inside the guarded thread's stack reservation,
+//!   * and raised by Windows' memory manager, not by software: the record's
+//!     flags lack `EXCEPTION_SOFTWARE_ORIGINATE`, which RaiseException sets
+//!     (WINDOWS-X86-64-MILESTONE-4.md, "Experiments": 0 for every real
+//!     exhaustion, 0x80 for RaiseException's).
 //!
 //! It then writes the driver's result line `error {NATIVE LIMIT STACK}
 //! {...}` (a standalone executable: to its standard error) with WriteFile
@@ -34,8 +38,9 @@
 //! in the stack's uncommitted reservation, which only a frame that skipped
 //! the guard page reaches: a missing stack probe, never exhaustion), any
 //! exception on another thread, a `STATUS_STACK_OVERFLOW` that names no
-//! address of the guarded stack (RaiseException's) -- continues the search
-//! as if the guard did not exist: never relabelled.
+//! address of the guarded stack or that software raised (RaiseException's)
+//! -- continues the search as if the guard did not exist: never
+//! relabelled.
 //!
 //! Why that is a valid recovery: NATIVE LIMIT STACK is terminal for a native
 //! invocation, so nothing of the run is resumed. The handler never returns
@@ -66,18 +71,23 @@ use windows_sys::Win32::System::Diagnostics::Debug::{
     AddVectoredExceptionHandler, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS, RemoveVectoredExceptionHandler,
 };
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_GUARD, VirtualQuery};
+use windows_sys::Win32::System::SystemServices::EXCEPTION_SOFTWARE_ORIGINATE;
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThreadId, GetCurrentThreadStackLimits, SetThreadStackGuarantee, TerminateProcess,
 };
 
 /// The stack guarantee the guard needs: the room Windows keeps committed at
-/// a stack's end for the handlers of its `STATUS_STACK_OVERFLOW`. The
-/// handler's whole path -- the kernel's exception frame and the dispatcher
-/// down to the vectored handlers, the handler, WriteFile and
-/// TerminateProcess -- measured at under 6 KiB on Windows Server 2025
-/// (WINDOWS-X86-64-MILESTONE-4.md, "Experiments"); 32 KiB leaves it five
-/// times that. Rust's runtime asks 20 KiB for its own threads; the guard
-/// asks its own, and refuses to install when the thread does not have it.
+/// a stack's end for the handlers of its `STATUS_STACK_OVERFLOW`. Measured
+/// on Windows Server 2025 (WINDOWS-X86-64-MILESTONE-4.md, "Experiments"):
+/// the exception arrives with the guarantee and about 4 KiB more left
+/// (least when the stack ran out in a probe loop, Cranelift's pattern),
+/// the dispatcher takes 3.7 to 4 KiB of it before the vectored handler
+/// runs, and the handler's own path below that -- WriteFile 120 bytes,
+/// TerminateProcess 4.7 KiB -- about 5 KiB. 32 KiB leaves the handler
+/// some 33 KiB where it needs 5; the 12 KiB Windows leaves a thread that
+/// asked for nothing would leave it 9. Rust's runtime asks 20 KiB for its
+/// own threads; the guard asks its own, and refuses to install when the
+/// thread does not have it.
 pub const GUARANTEE: u32 = 32 << 10;
 
 /// The calling thread's own stack: the reservation the system made for it
@@ -165,11 +175,12 @@ pub fn set_result_file(file: &std::fs::File) {
     RESULT.store(file.as_raw_handle() as usize, Ordering::Relaxed);
 }
 
-/// Whether an exception with CODE, whose record holds PARAMETERS, raised on
-/// the thread THREAD, is the exhaustion of the guarded stack.
+/// Whether an exception with CODE and FLAGS, whose record holds
+/// PARAMETERS, raised on the thread THREAD, is the exhaustion of the guarded
+/// stack.
 #[inline(always)]
-fn is_overflow(code: i32, parameters: &[usize], thread: usize) -> bool {
-    if code != EXCEPTION_STACK_OVERFLOW {
+fn is_overflow(code: i32, flags: u32, parameters: &[usize], thread: usize) -> bool {
+    if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
         return false;
     }
     let guarded = GUARDED.load(Ordering::Acquire);
@@ -184,7 +195,7 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     // SAFETY: Windows hands a vectored handler a valid record.
     let record = unsafe { &*(*info).ExceptionRecord };
     let count = (record.NumberParameters as usize).min(record.ExceptionInformation.len());
-    if is_overflow(record.ExceptionCode, &record.ExceptionInformation[..count], thread_token()) {
+    if is_overflow(record.ExceptionCode, record.ExceptionFlags, &record.ExceptionInformation[..count], thread_token()) {
         write_overflow_line();
         terminate();
     }
@@ -339,27 +350,29 @@ mod tests {
         }
     }
 
-    /// Only STATUS_STACK_OVERFLOW, on the guarded thread, at an address of
-    /// its stack, is an overflow; nothing is one while no guard is installed.
+    /// Only STATUS_STACK_OVERFLOW the memory manager raised, on the guarded
+    /// thread, at an address of its stack, is an overflow; nothing is one
+    /// while no guard is installed.
     #[test]
     fn only_the_guarded_stacks_overflow_is_claimed() {
         const ACCESS_VIOLATION: i32 = 0xC000_0005_u32 as i32;
         let stack = current_stack().unwrap();
         let inside = stack.low_bound + 4096;
         let me = thread_token();
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, inside], me), "no guard installed");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "no guard installed");
         let guard = OverflowGuard::install(&stack).expect("the guard installs");
         assert!(stack_guarantee() >= GUARANTEE);
-        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, inside], me));
-        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, &[0, stack.high_bound - 1], me));
-        assert!(!is_overflow(ACCESS_VIOLATION, &[1, inside], me), "an access violation in the stack");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, inside], me + 4), "another thread");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[], me), "raised with no address");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, stack.low_bound - 1], me), "below the reservation");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, stack.high_bound], me), "above it");
+        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me));
+        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[0, stack.high_bound - 1], me));
+        assert!(!is_overflow(ACCESS_VIOLATION, 0, &[1, inside], me), "an access violation in the stack");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, EXCEPTION_SOFTWARE_ORIGINATE, &[1, inside], me), "raised by software");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me + 4), "another thread");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[], me), "raised with no address");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.low_bound - 1], me), "below the reservation");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.high_bound], me), "above it");
         assert!(OverflowGuard::install(&stack).is_err(), "one guard per process");
         drop(guard);
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, &[1, inside], me), "the guard removed");
+        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "the guard removed");
         drop(OverflowGuard::install_executable(&stack).expect("a guard installs again"));
     }
 }

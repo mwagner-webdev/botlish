@@ -141,11 +141,10 @@ pub struct RootPlan {
     pub storage: RootStorage,
     /// The function bounds recursion in its prologue
     /// (`native_stack::depth_checked`, for a function with a Botlish call):
-    /// with `RuntimeStack` storage its shadow slots against the shadow
-    /// array's end, with `NativeFrame` storage its stack pointer against the
-    /// Vm's stack limit (`native_stack::stack_limit_checked`: Windows until
-    /// its guard). False on Linux and macOS, whose stack guard reports an
-    /// exhausted stack.
+    /// its shadow slots against the shadow array's end, which only the
+    /// fallback plan's `RuntimeStack` storage has. False wherever native
+    /// frames hold the roots: every such host has the stack guard, which
+    /// reports an exhausted stack (runtime::native_stack's assertion).
     pub depth_reservation: bool,
     /// `RootStorage::NativeFrame` on the native-stack-map path only: for
     /// each safepoint instruction (by its index into `f.body`), the
@@ -798,6 +797,10 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
             safepoint_slots.insert(idx, slots);
         }
     }
+    // Only the shadow stack bounds recursion in a prologue: native-frame
+    // storage leaves it to the stack guard (codegen::clif reserves nothing
+    // for it).
+    assert!(!(depth_reservation && storage == RootStorage::NativeFrame), "native-frame storage with a depth reservation");
     RootPlan {
         slot_of,
         num_slots,

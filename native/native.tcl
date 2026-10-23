@@ -151,12 +151,12 @@ namespace eval native {
 #
 # Windows x86-64 (MSVC) runs native code and links executables since
 # WINDOWS-X86-64-MILESTONE-1.md and C calls since WINDOWS-X86-64-MILESTONE-2.md
-# (the Win64 C ABI, link.exe's link plan), and keeps its GC roots in native
+# (the Win64 C ABI, link.exe's link plan), keeps its GC roots in native
 # frames since WINDOWS-X86-64-MILESTONE-3.md (unwind information for
-# Botlish code, Windows' unwinder across Rust frames); its variadic C calls,
-# coroutines and stack guard are later milestones'. Without the guard, a
-# function with a Botlish call checks its stack pointer and can fail with
-# NATIVE LIMIT STACK (tests/helpers.tcl's nativeDepthChecked).
+# Botlish code, Windows' unwinder across Rust frames) and has the stack
+# guard since WINDOWS-X86-64-MILESTONE-4.md (a vectored handler of
+# STATUS_STACK_OVERFLOW: no Botlish call can fail for the stack, as on the
+# other hosts); its variadic C calls and coroutines are later milestones'.
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
@@ -164,7 +164,7 @@ namespace eval native {
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
-        stackGuard {linux-x86_64 linux-aarch64 macos-aarch64} \
+        stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}]
 }
 

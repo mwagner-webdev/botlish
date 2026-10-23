@@ -1,0 +1,15 @@
+import std::mutable_array
+
+# A List nested a million deep, built by a loop, compared with another: the
+# runtime's equality (Rust) recurses once per level, so on a 16 MiB stack
+# the stack is exhausted inside the runtime, not in Botlish code.
+fn empty() -> List[any]:
+    []
+
+fn nest(n: int) -> List[any]:
+    cell = std::mutable_array::create(1, empty())
+    loop i from 0 to n:
+        cell.set(0, [cell.at(0)])
+    cell.at(0)
+
+nest(1000000) == nest(1000000)

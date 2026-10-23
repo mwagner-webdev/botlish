@@ -23,8 +23,8 @@ target-lexicon = "0.13"
 # Windows' unwinder (RtlVirtualUnwind and the JIT's function tables), the
 # JIT's code range and the thread's stack bounds
 # (WINDOWS-X86-64-MILESTONE-3.md); the stack-overflow guard's handler, its
-# stack guarantee and its report (WINDOWS-X86-64-MILESTONE-4.md: WriteFile
-# and the standard handles).
+# stack guarantee and its report (WINDOWS-X86-64-MILESTONE-4.md: WriteFile,
+# the standard handles, the exception record's flags).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -34,6 +34,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_Kernel",
     "Win32_System_Memory",
+    "Win32_System_SystemServices",
     "Win32_System_Threading",
 ] }
 

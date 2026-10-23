@@ -72,17 +72,48 @@ test native-stack-shallow-1 {ordinary recursive calls remain ABI-valid} -constra
 
 test native-stack-overflow-1 {two separate exhausted stacks report the same controlled error} -constraints nativeStackGuard -body {
     set path [file join $fixtureDir stack_overflow.ir]
-    set first [exec env BOTLISH_NATIVE_STACK_BYTES=4194304 [native::binary] run $path]
-    set second [exec env BOTLISH_NATIVE_STACK_BYTES=4194304 [native::binary] run $path]
-    list $first $second
+    withEnv {BOTLISH_NATIVE_STACK_BYTES 4194304} {
+        list [exec [native::binary] run $path] [exec [native::binary] run $path]
+    }
 } -result [list {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}                 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}]
 
 test native-stack-overflow-wide-1 {a large native frame probes each page before exhausting the guard} -constraints nativeStackGuard -body {
-    exec env BOTLISH_NATIVE_STACK_BYTES=4194304 [native::binary] run [file join $fixtureDir large_frame_overflow.nir]
+    withEnv {BOTLISH_NATIVE_STACK_BYTES 4194304} {
+        exec [native::binary] run [file join $fixtureDir large_frame_overflow.nir]
+    }
 } -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
 
+# A recursion whose every frame holds 3000 live Strings across its call: a
+# frame of about 24 KiB, more than five pages, which Cranelift probes with
+# its probe loop (one page touched per iteration, the stack pointer moving
+# with it) rather than unrolled probes.
+proc nsHugeFrameNir {} {
+    set n 3000
+    set lines [list "nir 1" "" "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"" \
+        "    %0 = call 1" "    ret %0" "end" \
+        "func 1 \"huge_recurse\" params=0 env=0 regs=[expr {$n + 3}] pnames=\"\" captures=0 rawregs=\"\""]
+    set all {}
+    for {set i 0} {$i < $n} {incr i} {
+        lappend lines "    %$i = str \"x\""
+        lappend all %$i
+    }
+    lappend lines "    %$n = op listnew [join $all]" "    %[expr {$n + 1}] = call 1" \
+        "    %[expr {$n + 2}] = op listlen %$n" "    ret %[expr {$n + 2}]" "end"
+    return "[join $lines \n]\n"
+}
+
+test native-stack-overflow-probe-loop {frames of about 24 KiB, probed by Cranelift's probe loop, exhaust a 16 MiB stack in NATIVE LIMIT STACK, never stepping over the guard} -constraints nativeStackGuard -body {
+    set path [file join [temporaryDirectory] huge_frame_overflow.nir]
+    set channel [open $path w]
+    puts -nonewline $channel [nsHugeFrameNir]
+    close $channel
+    withEnv {BOTLISH_NATIVE_STACK_BYTES 16777216} {
+        exec [native::binary] run $path
+    }
+} -cleanup {file delete -force [file join [temporaryDirectory] huge_frame_overflow.nir]} -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
+
 test native-stack-gc-1 {400 live recursive allocating frames survive forced GC} -constraints nativeStackGuard -body {
-    set output [exec env BOTLISH_NATIVE_GC_STRESS=1 [native::binary] run [file join $fixtureDir build400.nir]]
+    set output [withEnv {BOTLISH_NATIVE_GC_STRESS 1} {exec [native::binary] run [file join $fixtureDir build400.nir]}]
     set value [lindex [lindex $output 1] 1]
     expr {$value eq [string repeat xy 400]}
 } -result 1

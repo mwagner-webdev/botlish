@@ -476,6 +476,24 @@ jobs:
           git apply -R audit/windows-unwind/tools/anchors.patch
           tclsh9.0 bench/root-plans.tcl -fallback native/target-anchors/release/botlish-native.exe -name anchors -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee anchors.log
 
+      # The stack guard against the interim checks it replaced
+      # (WINDOWS-X86-64-MILESTONE-4.md, sections 1 and 8): the driver of the
+      # last revision before it -- every function with a Botlish call
+      # checking its stack pointer, every such call checked for the error,
+      # no guard -- built here, against this checkout's, which has the guard
+      # and neither check: what each does with an exhausted stack
+      # (audit/windows-stack-guard/tools/before-after.tcl), then their
+      # performance (bench/root-plans.tcl). On demand, with the anchors
+      # probe: "[ci-probes]" in the head commit, or a manual run with probes.
+      - name: "Probe: the interim stack-limit checks' cost"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git fetch --quiet --depth 1 origin 85753d95992f4c262e6556d914d1cde634a0add0
+          git worktree add --quiet --detach "$RUNNER_TEMP/checks" FETCH_HEAD
+          cargo build --release --manifest-path "$RUNNER_TEMP/checks/native/Cargo.toml" --target-dir native/target-checks
+          tclsh9.0 audit/windows-stack-guard/tools/before-after.tcl before=native/target-checks/release/botlish-native.exe after=native/target/release/botlish-native.exe fallback=native/target-fallback/release/botlish-native.exe 2>&1 | tee before-after.log
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-checks/release/botlish-native.exe -name checks -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee checks.log
+
       - name: Publish summary
         if: always()
         run: |
@@ -488,6 +506,8 @@ jobs:
             [ -f fallback-gc-workloads.log ] && grep -a '^FAILED' fallback-gc-workloads.log
             [ -f root-plans.log ] && cat root-plans.log
             [ -f anchors.log ] && cat anchors.log
+            [ -f before-after.log ] && cat before-after.log
+            [ -f checks.log ] && cat checks.log
             echo '```'
             if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
               echo '```'

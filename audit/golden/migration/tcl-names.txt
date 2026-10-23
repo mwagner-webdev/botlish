@@ -4421,6 +4421,7 @@ tests/native-executable.test native-executable-roots pass
 tests/native-executable.test native-executable-runtime-error pass
 tests/native-executable.test native-executable-source-refinements pass
 tests/native-executable.test native-executable-stack-overflow pass
+tests/native-executable.test native-executable-stack-overflow-coroutine pass
 tests/native-executable.test native-executable-values pass
 tests/native-executable.test native-executable-cli-paths pass
 tests/native-executable.test native-executable-coroutines pass
@@ -4722,6 +4723,7 @@ tests/native-stack-overflow.test native-stack-gc-1 pass
 tests/native-stack-overflow.test native-stack-overflow-1 pass
 tests/native-stack-overflow.test native-stack-overflow-default-size pass
 tests/native-stack-overflow.test native-stack-overflow-wide-1 pass
+tests/native-stack-overflow.test native-stack-overflow-probe-loop pass
 tests/native-stack-overflow.test native-stack-shallow-1 pass
 tests/native-stack-overflow.test ns-co-after-yields pass
 tests/native-stack-overflow.test ns-co-edge pass

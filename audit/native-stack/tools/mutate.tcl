@@ -1,40 +1,52 @@
 # mutate.tcl -- mutation testing of the native stack guard
-# (MACOS-AARCH64-MILESTONE-4.md, "Mutation testing").
+# (MACOS-AARCH64-MILESTONE-4.md, "Mutation testing";
+# WINDOWS-X86-64-MILESTONE-4.md, "Mutation testing").
 #
 #   tclsh9.0 audit/native-stack/tools/mutate.tcl ?-only NAME,...? ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
 # once. For each mutant that applies to this host (its %% line), a private
-# copy of the compiler, library and native backend (a temporary directory)
-# gets the replacements, its native backend is rebuilt (a mutant that does
-# not build is reported NOT-BUILT, never counted as killed), and the
-# detectors run against it:
+# copy of the checkout's sources, tests and native backend (a temporary
+# directory) gets the replacements, its native backend is rebuilt (a mutant
+# that does not build is reported NOT-BUILT, never counted as killed), and
+# the detectors run against it, cheapest first, until one fails:
 #
+#   * the native Rust tests (`cargo test --lib --bins`): the host's stack
+#     discovery, the Windows guard's classification and guard page, the
+#     root plan, the call effects, the stack probes;
 #   * native/tests/native_stack.rs (`cargo test --test native_stack`): the
-#     host's stack facts, the guard, coroutine overflows, unrelated faults,
-#     publication and the switch sweep, every faulting check in a child
-#     process;
-#   * the runtime's Rust tests (`cargo test --lib`);
-#   * tests/native-stack-overflow.test (with a private -tmpdir).
+#     host's stack facts, the guard in every mode, coroutine overflows,
+#     unrelated faults, publication and the switch sweep (on Windows: the
+#     guard on every kind of thread, its modes, the faults it must not
+#     claim), every faulting check in a child process;
+#   * tests/native-stack-overflow.test (with a private -tmpdir);
+#   * tests/platform/native-status.tcl (the driver's overflows: Botlish
+#     recursion, a large frame, the runtime's own recursion);
+#   * tests/platform/aot-facts.tcl (a standalone executable's overflows);
+#   * the fallback plan's Rust tests (`cargo test --lib --features
+#     fallback-roots`, a build of its own): what only the shadow stack's
+#     depth check decides.
 #
 # A mutant every detector misses SURVIVES. A mutant of code this host never
-# compiles (macos.rs on Linux) is SKIPPED. The report lists each mutant and
-# what killed it; it exits 1 on a survivor or a mutant that no longer
-# applies. Portable to macOS: no GNU timeout, no /proc. The real checkout,
-# its native/target included, is never modified.
+# compiles (macos.rs on Linux, guard.rs on Windows) is SKIPPED. The report
+# lists each mutant and the detector that killed it; it exits 1 on a
+# survivor or a mutant that no longer applies or builds. Portable to macOS
+# and Windows: no GNU timeout, no /proc. The real checkout, its native/target
+# included, is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
+source [file join $root core core.tcl]
 
 set options [dict create -only "" -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
 }
-# This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64).
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
-    [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
+# This host's target (linux-x86_64, linux-aarch64, macos-aarch64,
+# windows-x86_64).
+set host [core::cabi::hostTarget]
+set windows [string match windows-* $host]
 
 # The mutants of mutants.txt, as {NAME DESCRIPTION HOSTS {FILE OLD NEW ...}}
 # (HOSTS empty: every host).
@@ -109,7 +121,7 @@ proc run {timeout dir args} {
     cd $dir
     set pipe [open |[concat $args [list 2>@1]] r]
     cd $here
-    fconfigure $pipe -blocking 0 -translation lf -encoding utf-8
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
     set ::runOutput ""
     set ::runDone 0
     fileevent $pipe readable [list apply {{pipe} {
@@ -120,7 +132,13 @@ proc run {timeout dir args} {
     vwait ::runDone
     after cancel $timer
     if {$::runDone eq "timeout"} {
-        catch {exec kill -9 {*}[pid $pipe]}
+        foreach id [pid $pipe] {
+            if {$::windows} {
+                catch {exec taskkill /F /T /PID $id}
+            } else {
+                catch {exec kill -9 $id}
+            }
+        }
         catch {close $pipe}
         return [list timeout $::runOutput]
     }
@@ -137,6 +155,44 @@ proc lastLine {output} {
     return [string range [lindex [split [string trim $output] \n] end] 0 120]
 }
 
+# The detectors, cheapest first: {NAME COMMAND FAILURES}, FAILURES a script
+# reading $status and $output and returning what failed ("" for nothing).
+set tclsh [info nameofexecutable]
+set manifest native/Cargo.toml
+set detectors [list \
+    rust [list cargo test --release --manifest-path $manifest --lib --bins --no-fail-fast] {
+        if {$status == 0} { return "" }
+        set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+        expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}
+    } \
+    native_stack [list cargo test --release --manifest-path $manifest --test native_stack] {
+        if {$status == 0} { return "" }
+        set failing [lmap {- n} [regexp -all -inline -line {^FAIL (.+?):} $output] {set n}]
+        expr {$failing eq {} ? [lastLine $output] : "[join [lrange $failing 0 5] {, }][expr {[llength $failing] > 6 ? ", ..." : ""}]"}
+    } \
+    native-stack-overflow.test [list $tclsh tests/native-stack-overflow.test -tmpdir TMPDIR] {
+        set failed [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
+        if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
+            return "did not complete: [lastLine $output]"
+        }
+        expr {$failed eq {} ? "" : "[llength $failed] failed: [join [lrange $failed 0 5] {, }]"}
+    } \
+    native-status [list $tclsh tests/platform/native-status.tcl] {
+        if {$status == 0} { return "" }
+        set failing [lmap {- n} [regexp -all -inline -line {^FAIL\s+(\S+)} $output] {set n}]
+        expr {$failing eq {} ? [lastLine $output] : [join $failing {, }]}
+    } \
+    aot-facts [list $tclsh tests/platform/aot-facts.tcl] {
+        if {$status == 0} { return "" }
+        set failing [lmap {- n} [regexp -all -inline -line {^FAIL\s+(\S+)} $output] {set n}]
+        expr {$failing eq {} ? [lastLine $output] : [join $failing {, }]}
+    } \
+    fallback [list cargo test --release --manifest-path $manifest --features fallback-roots --target-dir native/target-fallback --lib --no-fail-fast] {
+        if {$status == 0} { return "" }
+        set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+        expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}
+    }]
+
 set only [split [dict get $options -only] ,]
 set selected {}
 foreach {name description hosts edits} [readMutants [file join [file dirname [file normalize [info script]]] mutants.txt]] {
@@ -144,31 +200,41 @@ foreach {name description hosts edits} [readMutants [file join [file dirname [fi
     lappend selected $name $description $hosts $edits
 }
 
-# A private copy of the front end, the tests and the native backend, its
-# native/target a real copy (each mutant rebuilds it), following a linked
-# target: a copied link would build every mutant into another checkout.
-set tree [file tempdir botlish-native-stack-mutants]
-foreach dir {compiler core hir surface stdlib tests .cargo} {
+# A private copy of the checkout's sources, the tests and their programs, and
+# the native backend, its native/target a real copy (each mutant rebuilds
+# it), following a linked target: a copied link would build every mutant
+# into another checkout. On a CI runner, under its own temporary directory:
+# a shorter path than the user profile's, for Windows' build tools.
+if {[info exists ::env(RUNNER_TEMP)]} {
+    set tree [file tempdir [file join $::env(RUNNER_TEMP) nsm]]
+} else {
+    set tree [file tempdir botlish-native-stack-mutants]
+}
+foreach dir {compiler core hir surface stdlib tests examples bench audit service lsp compilerpedia .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file copy [file join $root $dir] [file join $tree $dir]
 }
 file mkdir [file join $tree native]
 foreach entry [glob -directory [file join $root native] *] {
-    if {[file tail $entry] ne "target"} {
-        file copy $entry [file join $tree native]
-    } else {
+    if {[file tail $entry] eq "target"} {
         while {[file type $entry] eq "link"} {
             set entry [file join [file dirname $entry] [file readlink $entry]]
         }
-        exec cp -a $entry [file join $tree native target]
+        if {$windows} {
+            file copy $entry [file join $tree native target]
+        } else {
+            exec cp -a $entry [file join $tree native target]
+        }
+    } elseif {![string match target-* [file tail $entry]]} {
+        file copy $entry [file join $tree native]
     }
 }
 foreach entry [glob -directory $root -types f *.tcl] {
     file copy $entry $tree
 }
+unset -nocomplain ::env(BOTLISH_NATIVE_BIN) ::env(BOTLISH_NATIVE_GC_STRESS) ::env(BOTLISH_NATIVE_UNWIND_CHECK) ::env(BOTLISH_NATIVE_STACK_BYTES)
 
 set results {}
-set manifest [file join $tree native Cargo.toml]
 set timeout [dict get $options -timeout]
 try {
     foreach {name description hosts edits} $selected {
@@ -210,35 +276,27 @@ try {
         if {$status != 0} {
             lappend results [list $name $description NOT-BUILT ""]
             puts "NOT-BUILT $name: [lastLine $output]"
+            foreach line [lrange [split [string trim $output] \n] end-11 end] {
+                puts "    $line"
+            }
             eval $restore
             continue
         }
-        set killers {}
-        lassign [run $timeout $tree cargo test --release --manifest-path $manifest --test native_stack] status output
-        if {$status != 0} {
-            set failing [lmap {- n} [regexp -all -inline -line {^FAIL (.+?):} $output] {set n}]
-            lappend killers "native_stack ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}][expr {[llength $failing] > 6 ? ", ..." : ""}])"
+        set killer ""
+        foreach {detector command failures} $detectors {
+            set tmp [file tempdir botlish-native-stack-mutant-run]
+            lassign [run $timeout $tree {*}[lmap word $command {expr {$word eq "TMPDIR" ? $tmp : $word}}]] status output
+            file delete -force $tmp
+            set failed [apply [list {status output} $failures] $status $output]
+            if {$failed ne ""} {
+                set killer "$detector ($failed)"
+                break
+            }
         }
-        lassign [run $timeout $tree cargo test --release --manifest-path $manifest --lib] status output
-        if {$status != 0} {
-            set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-            lappend killers "rust ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
-        }
-        set tmp [file tempdir botlish-native-stack-mutant-run]
-        lassign [run $timeout $tree tclsh9.0 [file join $tree tests native-stack-overflow.test] -tmpdir $tmp] status output
-        file delete -force $tmp
-        set failedTests [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
-        if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
-            lappend killers "native-stack-overflow.test (did not complete: [lastLine $output])"
-        } elseif {$failedTests ne {}} {
-            lappend killers "native-stack-overflow.test ([llength $failedTests] failed: [join [lrange $failedTests 0 5] {, }][expr {[llength $failedTests] > 6 ? ", ..." : ""}])"
-        }
-        set verdict [expr {$killers eq {} ? "SURVIVED" : "KILLED"}]
-        lappend results [list $name $description $verdict $killers]
+        set verdict [expr {$killer eq "" ? "SURVIVED" : "KILLED"}]
+        lappend results [list $name $description $verdict $killer]
         puts "$verdict $name -- $description"
-        foreach killer $killers {
-            puts "    $killer"
-        }
+        if {$killer ne ""} { puts "    $killer" }
         flush stdout
         eval $restore
     }

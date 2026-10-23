@@ -53,9 +53,9 @@
 # none of the Visual C++ runtime or the UCRT's (the C runtime is linked
 # statically); its name (NAME.exe); and the standalone runs, from another
 # directory with only the system directory on PATH, where the outcomes
-# differ from Unix's exactly as recorded: native coroutines are refused, and
-# the stack-limit check's NATIVE LIMIT STACK is reported as any run-time
-# error is (MESSAGE (CODE)), no stack guard yet. The object's unwind
+# differ from Unix's exactly as recorded: native coroutines are refused; an
+# exhausted stack is the stack guard's line, as on Unix
+# (WINDOWS-X86-64-MILESTONE-4.md). The object's unwind
 # information (.pdata, .xdata) is read too, and the executable is run with
 # BOTLISH_NATIVE_UNWIND_CHECK=1 under GC stress: Windows' unwinder against
 # every Botlish function and frame (WINDOWS-X86-64-MILESTONE-3.md). C calls
@@ -766,17 +766,14 @@ proc windowsChecks {} {
         && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
     set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {}]
     check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
-    # The stack-limit check (codegen::clif's prologue_stack_limit, where
-    # codegen::roots's depth_reservation: no stack guard yet) bounds Botlish
-    # recursion by the bytes of the thread's stack it uses: NATIVE LIMIT
-    # STACK, exit status 1, as everywhere -- an ordinary run-time error here,
-    # which the executable reports as it reports every one (MESSAGE (CODE),
-    # like standalone-error), where the guard of the other hosts writes its
-    # own fixed line ($overflowLine) -- on the default 1 GiB stack and on a
-    # 16 MiB one alike. Until milestone 3 the shadow stack's slot count was
-    # the bound, which the 16 MiB stack did not reach: the process ended in
+    # Botlish recursion exhausting the thread's stack, on the default 1 GiB
+    # stack and on a 16 MiB one: the stack guard's own line on standard error
+    # and exit status 1, as on every host (WINDOWS-X86-64-MILESTONE-4.md).
+    # Until then a stack-limit check in every function with a Botlish call
+    # (milestone 3) ended it as an ordinary run-time error, reported as
+    # every one is (MESSAGE (CODE)); before that the 16 MiB stack ended in
     # Rust's own stack overflow report.
-    set limited [list 1 "" "native stack exhausted: too many nested calls (NATIVE LIMIT STACK)\n"]
+    set limited [list 1 "" "$overflowLine\n"]
     set outcome [{*}$standalone $runDir $cwdDir overflow [string map {DEPTH 100000000} $downProgram] {}]
     check standalone-depth-limit [expr {$outcome eq $limited}] "1 GiB stack: [shown $outcome]"
     set outcome [windowsRun $cwdDir [file join $runDir overflow.exe] {BOTLISH_NATIVE_STACK_BYTES 16777216}]
