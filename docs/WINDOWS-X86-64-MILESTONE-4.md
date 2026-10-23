@@ -58,7 +58,7 @@ the interim stack-limit checks are gone.
   machine code is 7 to 50 % smaller, and run time and collection cost are
   unchanged within the noise (section 8).
 * **Checked** on real Windows by the smoke, `roots`, acceptance and
-  GC-stress tiers (⟨GC-RESULT⟩). All 21 Windows-relevant mutants of the
+  GC-stress tiers (runs 39954270512 and 39986842398). All 21 Windows-relevant mutants of the
   stack guard and all 17 of the unwind information were killed there
   (section 7.6). Linux and macOS are unchanged and green (section 7.7).
 * **Not covered:** an interactive console as the destination, and native
@@ -611,7 +611,13 @@ What section 6 claims, checked:
 * **Windows, an exhausted stack under GC stress.** `ns-gc-stress-main`
   (native-stack-overflow.test, the acceptance tier's shard 2) fills a
   1 MiB stack with an allocating recursion and ends in the guard's line.
-  ⟨GC-TIER⟩
+  The GC-stress tier (run
+  [39986842398](https://github.com/mwagner-webdev/botlish/actions/runs/39986842398),
+  d38feb0, `[ci-full]`) ran the whole acceptance tier under
+  `BOTLISH_NATIVE_GC_STRESS=1` on interp and compile, in four shards of
+  28, 48, 23 and 57 minutes, with no test failed. Shard 2 held
+  native-stack-overflow.test and native-executable.test, and shard 4
+  c-ffi.test, hashable.test and native-root-storage.test.
 * **The cost of a collection.** Under GC stress it is what it was (section
   8.2): the frames lost instructions, not shape.
 * **Linux x86-64, a controlled experiment.** Under
@@ -968,7 +974,10 @@ windows-x86_64 row of `tests/platform/native-status.tcl`):
   against MSVC-built callees, with a double passed in both registers
   (AGENTS.md, "Windows x86-64 (MSVC)"). This is the smaller one.
 
-The recommendation is native coroutines next. The guard it needs is the
+The recommendation is native coroutines next. They would also let the
+golden suites run on Windows' native backends: the golden runner
+(stdlib/test.bot) is a coroutine, so every acceptance shard above ran
+them on interp and compile only. The guard it needs is the
 one this milestone built, and the Windows guard's design (one stack's
 bounds, published, read by the handler) already leaves room for a running
 stack that changes.
