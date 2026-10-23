@@ -1,0 +1,777 @@
+nir 1 call-effects=1 statics=0
+shape 0 named "Ch" fields="code"
+shape 1 named "Answer" fields="took done"
+
+func 0 "<program>" params=0 env=0 regs=5 pnames="" captures=0 instance="generic"
+    pusherrorexit L0 @e457
+    %1 = str "{\"a\": [1, -2.5, 30], \"b\\\"c\": {\"d\": 400}, \"e\": [6.0, 7]}" @e460
+    %2 = call 6 %1 @e458
+    poperrorexit @e457
+    %0 = move %2 @e457
+    jump L1 @e457
+  label L0
+    %3 = declarederroreq 1073741825 @e457
+    br %3 L2 L3 @e457
+  label L2
+    cleardeclarederror @e457
+    %4 = op listnew @e461
+    %0 = move %4 @e457
+    jump L1 @e457
+  label L3
+    reraise @e457
+  label L1
+    ret %0
+end
+
+func 1 "digit?" params=1 env=0 regs=12 pnames="c" captures=0 instance="int" rawregs="2 6" @e12
+    %1 = int 48 @e17
+    %2 = rawint 48
+    %3 = op ige %0 %1 @e14
+    br %3 L0 L1 @e13
+  label L0
+    %5 = int 57 @e22
+    %6 = rawint 57
+    %7 = op ile %0 %5 @e19
+    br %7 L3 L4 @e18
+  label L3
+    %9 = bool true @e23
+    %8 = move %9
+    jump L5
+  label L4
+    %10 = bool false @e24
+    %8 = move %10
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L1
+    %11 = bool false @e25
+    %4 = move %11
+    jump L2
+  label L2
+    ret %4
+end
+
+func 2 "chars" params=1 env=0 regs=21 pnames="text" captures=0 instance="str" rawregs="2 4 5 12 13 16 18 19" @e27
+    %1 = int 0 @e29
+    %2 = rawint 0
+    %3 = op strlen %0 @e30
+    %4 = op runbox %3
+    %5 = move %2 @e28
+    jump L0 @e28
+  label L0
+    %7 = op rilt %5 %4 @e28
+    br %7 L1 L3 @e28
+  label L1
+    %8 = op rbox %5
+    %9 = op strcharatproven %0 %8 @e37
+    %10 = op charcodepoint %9 @e35
+    %11 = op coyield %10 @e33
+    jump L2 @e28
+  label L2
+    %12 = rawint 1 @e28
+    %13 = op riadd %5 %12 @e28
+    %5 = move %13 @e28
+    jump L0 @e28
+  label L3
+    %14 = unit @e28
+    %6 = move %14 @e28
+    jump L4 @e28
+  label L4
+    %15 = int 0 @e44
+    %16 = rawint 0
+    %17 = int 1 @e45
+    %18 = rawint 1
+    %19 = op risub %16 %18 @e42
+    %20 = op rbox %19
+    ret %20 @e41
+end
+
+func 3 "digit_run" params=0 env=0 regs=10 pnames="" captures=0 instance="generic" @e47
+    jump L0 @e48
+  label L0
+    %1 = bool true @e53
+    %2 = bool false @e54
+    %3 = structnew 1 %1 %2 @e52
+    %4 = op coyield %3 @e50
+    %6 = structget 0 %4 @e59
+    %7 = call 1 %6 @e57
+    br %7 L3 L2 @e57
+  label L2
+    %8 = structget 0 %4 @e64
+    ret %8 @e63
+  label L3
+    %9 = unit
+    %5 = move %9
+    jump L4
+  label L4
+    jump L0 @e48
+end
+
+func 4 "number" params=0 env=0 regs=44 pnames="" captures=0 instance="generic" rawregs="6 23" @e67
+    %0 = bool false @e72
+    %1 = bool false @e73
+    %2 = structnew 1 %0 %1 @e71
+    %3 = op coyield %2 @e69
+    %4 = structget 0 %3 @e78
+    %5 = int 45 @e80
+    %6 = rawint 45
+    %7 = op ieq %4 %5 @e76
+    br %7 L0 L1 @e75
+  label L0
+    %9 = bool true @e84
+    %10 = bool false @e85
+    %11 = structnew 1 %9 %10 @e83
+    %12 = op coyield %11 @e81
+    %8 = move %12
+    jump L2
+  label L1
+    %8 = move %3
+    jump L2
+  label L2
+    %14 = structget 0 %8 @e91
+    %15 = call 1 %14 @e89
+    br %15 L4 L3 @e89
+  label L3
+    %16 = bool false @e97
+    %17 = bool true @e98
+    %18 = structnew 1 %16 %17 @e96
+    ret %18 @e95
+  label L4
+    %19 = unit
+    %13 = move %19
+    jump L5
+  label L5
+    %20 = call 3 @e100
+    %22 = int 46 @e107
+    %23 = rawint 46
+    %24 = op ieq %20 %22 @e104
+    br %24 L7 L6 @e104
+  label L6
+    %25 = bool false @e112
+    %26 = bool true @e113
+    %27 = structnew 1 %25 %26 @e111
+    ret %27 @e110
+  label L7
+    %28 = unit
+    %21 = move %28
+    jump L8
+  label L8
+    %29 = bool true @e118
+    %30 = bool false @e119
+    %31 = structnew 1 %29 %30 @e117
+    %32 = op coyield %31 @e115
+    %34 = structget 0 %32 @e124
+    %35 = call 1 %34 @e122
+    br %35 L10 L9 @e122
+  label L9
+    %36 = bool false @e130
+    %37 = bool true @e131
+    %38 = structnew 1 %36 %37 @e129
+    ret %38 @e128
+  label L10
+    %39 = unit
+    %33 = move %39
+    jump L11
+  label L11
+    %40 = call 3 @e132
+    %41 = bool false @e135
+    %42 = bool true @e136
+    %43 = structnew 1 %41 %42 @e134
+    ret %43
+end
+
+func 5 "string" params=0 env=0 regs=54 pnames="" captures=0 instance="generic" rawregs="11 20 22 23 33 42 44 45" @e138
+    %0 = bool false @e143
+    %1 = bool false @e144
+    %2 = structnew 1 %0 %1 @e142
+    %3 = op coyield %2 @e140
+    jump L0 @e145
+  label L0
+    %5 = bool true @e150
+    %6 = bool false @e151
+    %7 = structnew 1 %5 %6 @e149
+    %8 = op coyield %7 @e147
+    %9 = structget 0 %8 @e155
+    %10 = int 34 @e157
+    %11 = rawint 34
+    %12 = op ieq %9 %10 @e153
+    br %12 L2 L3 @e152
+  label L2
+    %14 = bool true @e160
+    %15 = bool true @e161
+    %16 = structnew 1 %14 %15 @e159
+    ret %16 @e158
+  label L3
+    %17 = unit
+    %13 = move %17
+    jump L4
+  label L4
+    %18 = structget 0 %8 @e165
+    %19 = int 0 @e169
+    %20 = rawint 0
+    %21 = int 1 @e170
+    %22 = rawint 1
+    %23 = op risub %20 %22 @e167
+    %24 = op rbox %23
+    %25 = op ieq %18 %24 @e163
+    br %25 L5 L6 @e162
+  label L5
+    %27 = bool false @e173
+    %28 = bool true @e174
+    %29 = structnew 1 %27 %28 @e172
+    ret %29 @e171
+  label L6
+    %30 = unit
+    %26 = move %30
+    jump L7
+  label L7
+    %31 = structget 0 %8 @e178
+    %32 = int 92 @e180
+    %33 = rawint 92
+    %34 = op ieq %31 %32 @e176
+    br %34 L8 L9 @e175
+  label L8
+    %36 = bool true @e185
+    %37 = bool false @e186
+    %38 = structnew 1 %36 %37 @e184
+    %39 = op coyield %38 @e182
+    %40 = structget 0 %39 @e190
+    %41 = int 0 @e194
+    %42 = rawint 0
+    %43 = int 1 @e195
+    %44 = rawint 1
+    %45 = op risub %42 %44 @e192
+    %46 = op rbox %45
+    %47 = op ieq %40 %46 @e188
+    br %47 L11 L12 @e187
+  label L11
+    %49 = bool false @e198
+    %50 = bool true @e199
+    %51 = structnew 1 %49 %50 @e197
+    ret %51 @e196
+  label L12
+    %52 = unit
+    %48 = move %52
+    jump L13
+  label L13
+    %35 = move %48
+    jump L10
+  label L9
+    %53 = unit
+    %35 = move %53
+    jump L10
+  label L10
+    jump L0 @e145
+end
+
+func 6 "lex" params=1 env=0 regs=213 pnames="text" captures=0 instance="str" rawregs="8 11 13 17 22 24 25 33 42 52 54 60 67 83 85 90 96 105 115 117 123 130 146 148 153 160 163 166 169 172 175 178 180 185 192 201 204 207 210" @e201
+    %1 = closure 7 %0 @e207
+    %2 = op cocreate %1 @e205
+    pusherrorexit L0 @e212
+    %3 = op costart %2 @e212
+    poperrorexit @e212
+    jump L1 @e212
+  label L0
+    %4 = declarederroreq 1073741825 @e212
+    br %4 L2 L3 @e212
+  label L2
+    %5 = op corelease %2 @e212
+    reraise @e212
+  label L3
+    reraise @e212
+  label L1
+    %6 = unit @e215
+    %7 = int 1 @e219
+    %8 = rawint 1
+    %9 = op mutarraycreate %7 %3 @e217
+    %10 = int 4 @e224
+    %11 = rawint 4
+    %12 = int 0 @e225
+    %13 = rawint 0
+    %14 = op mutarraycreate %10 %12 @e222
+    jump L4 @e226
+  label L4
+    pusherrorexit L6 @e228
+    %16 = int 0 @e231
+    %17 = rawint 0
+    %18 = op mutarraygetproven %9 %16 @e228
+    poperrorexit @e228
+    jump L7 @e228
+  label L6
+    %19 = declarederroreq 1073741825 @e228
+    br %19 L8 L9 @e228
+  label L8
+    %20 = op corelease %2 @e228
+    reraise @e228
+  label L9
+    reraise @e228
+  label L7
+    %21 = int 0 @e238
+    %22 = rawint 0
+    %23 = int 1 @e239
+    %24 = rawint 1
+    %25 = op risub %22 %24 @e236
+    %26 = op rbox %25
+    %27 = op ieq %18 %26 @e233
+    br %27 L10 L11 @e232
+  label L10
+    %29 = unit
+    %15 = move %29 @e240
+    jump L5 @e240
+  label L11
+    %30 = unit
+    %28 = move %30
+    jump L12
+  label L12
+    %32 = int 45 @e246
+    %33 = rawint 45
+    %34 = op ieq %18 %32 @e243
+    br %34 L13 L16 @e243
+  label L16
+    %35 = call 1 %18 @e249
+    br %35 L13 L14 @e249
+  label L13
+    %36 = fnvalue 8 @e257
+    %37 = op cocreate %36 @e255
+    %38 = op costart %37 @e260
+    %39 = unit @e263
+    jump L17 @e264
+  label L17
+    pusherrorexit L19 @e269
+    %41 = int 0 @e272
+    %42 = rawint 0
+    %43 = op mutarraygetproven %9 %41 @e269
+    poperrorexit @e269
+    jump L20 @e269
+  label L19
+    %44 = declarederroreq 1073741825 @e269
+    br %44 L21 L22 @e269
+  label L21
+    %45 = op corelease %2 @e269
+    %46 = op corelease %37 @e269
+    reraise @e269
+  label L22
+    reraise @e269
+  label L20
+    %47 = structnew 0 %43 @e268
+    %48 = op coresume %37 %47 @e266
+    %49 = structget 0 %48 @e275
+    br %49 L23 L24 @e274
+  label L23
+    pusherrorexit L26 @e277
+    %51 = int 3 @e280
+    %52 = rawint 3
+    pusherrorexit L27 @e283
+    %53 = int 3 @e286
+    %54 = rawint 3
+    %55 = op mutarraygetproven %14 %53 @e283
+    poperrorexit @e283
+    jump L28 @e283
+  label L27
+    %56 = declarederroreq 1073741825 @e283
+    br %56 L29 L30 @e283
+  label L29
+    %57 = op corelease %2 @e283
+    %58 = op corelease %37 @e283
+    reraise @e283
+  label L30
+    reraise @e283
+  label L28
+    %59 = int 1 @e287
+    %60 = rawint 1
+    %61 = op iadd %55 %59 @e281
+    %62 = op mutarraysetproven %14 %51 %61 @e277
+    poperrorexit @e277
+    jump L31 @e277
+  label L26
+    %63 = declarederroreq 1073741825 @e277
+    br %63 L32 L33 @e277
+  label L32
+    %64 = op corelease %2 @e277
+    %65 = op corelease %37 @e277
+    reraise @e277
+  label L33
+    reraise @e277
+  label L31
+    pusherrorexit L34 @e288
+    %66 = int 0 @e291
+    %67 = rawint 0
+    pusherrorexit L35 @e292
+    %68 = op coresume0 %2 @e292
+    poperrorexit @e292
+    jump L36 @e292
+  label L35
+    %69 = declarederroreq 1073741825 @e292
+    br %69 L37 L38 @e292
+  label L37
+    %70 = op corelease %2 @e292
+    %71 = op corelease %37 @e292
+    reraise @e292
+  label L38
+    reraise @e292
+  label L36
+    %72 = op mutarraysetproven %9 %66 %68 @e288
+    poperrorexit @e288
+    jump L39 @e288
+  label L34
+    %73 = declarederroreq 1073741825 @e288
+    br %73 L40 L41 @e288
+  label L40
+    %74 = op corelease %2 @e288
+    %75 = op corelease %37 @e288
+    reraise @e288
+  label L41
+    reraise @e288
+  label L39
+    %50 = move %72
+    jump L25
+  label L24
+    %76 = unit
+    %50 = move %76
+    jump L25
+  label L25
+    %77 = structget 1 %48 @e296
+    br %77 L42 L43 @e295
+  label L42
+    %79 = unit
+    %40 = move %79 @e298
+    jump L18 @e298
+  label L43
+    %80 = unit
+    %78 = move %80
+    jump L44
+  label L44
+    jump L17 @e264
+  label L18
+    %81 = op corelease %37 @e264
+    pusherrorexit L45 @e299
+    %82 = int 0 @e302
+    %83 = rawint 0
+    pusherrorexit L46 @e305
+    %84 = int 0 @e308
+    %85 = rawint 0
+    %86 = op mutarraygetproven %14 %84 @e305
+    poperrorexit @e305
+    jump L47 @e305
+  label L46
+    %87 = declarederroreq 1073741825 @e305
+    br %87 L48 L49 @e305
+  label L48
+    %88 = op corelease %2 @e305
+    reraise @e305
+  label L49
+    reraise @e305
+  label L47
+    %89 = int 1 @e309
+    %90 = rawint 1
+    %91 = op iadd %86 %89 @e303
+    %92 = op mutarraysetproven %14 %82 %91 @e299
+    poperrorexit @e299
+    jump L50 @e299
+  label L45
+    %93 = declarederroreq 1073741825 @e299
+    br %93 L51 L52 @e299
+  label L51
+    %94 = op corelease %2 @e299
+    reraise @e299
+  label L52
+    reraise @e299
+  label L50
+    %31 = move %92
+    jump L15
+  label L14
+    %95 = int 34 @e314
+    %96 = rawint 34
+    %97 = op ieq %18 %95 @e311
+    br %97 L53 L54 @e310
+  label L53
+    %99 = fnvalue 9 @e318
+    %100 = op cocreate %99 @e316
+    %101 = op costart %100 @e321
+    %102 = unit @e324
+    jump L56 @e325
+  label L56
+    pusherrorexit L58 @e330
+    %104 = int 0 @e333
+    %105 = rawint 0
+    %106 = op mutarraygetproven %9 %104 @e330
+    poperrorexit @e330
+    jump L59 @e330
+  label L58
+    %107 = declarederroreq 1073741825 @e330
+    br %107 L60 L61 @e330
+  label L60
+    %108 = op corelease %2 @e330
+    %109 = op corelease %100 @e330
+    reraise @e330
+  label L61
+    reraise @e330
+  label L59
+    %110 = structnew 0 %106 @e329
+    %111 = op coresume %100 %110 @e327
+    %112 = structget 0 %111 @e336
+    br %112 L62 L63 @e335
+  label L62
+    pusherrorexit L65 @e338
+    %114 = int 3 @e341
+    %115 = rawint 3
+    pusherrorexit L66 @e344
+    %116 = int 3 @e347
+    %117 = rawint 3
+    %118 = op mutarraygetproven %14 %116 @e344
+    poperrorexit @e344
+    jump L67 @e344
+  label L66
+    %119 = declarederroreq 1073741825 @e344
+    br %119 L68 L69 @e344
+  label L68
+    %120 = op corelease %2 @e344
+    %121 = op corelease %100 @e344
+    reraise @e344
+  label L69
+    reraise @e344
+  label L67
+    %122 = int 1 @e348
+    %123 = rawint 1
+    %124 = op iadd %118 %122 @e342
+    %125 = op mutarraysetproven %14 %114 %124 @e338
+    poperrorexit @e338
+    jump L70 @e338
+  label L65
+    %126 = declarederroreq 1073741825 @e338
+    br %126 L71 L72 @e338
+  label L71
+    %127 = op corelease %2 @e338
+    %128 = op corelease %100 @e338
+    reraise @e338
+  label L72
+    reraise @e338
+  label L70
+    pusherrorexit L73 @e349
+    %129 = int 0 @e352
+    %130 = rawint 0
+    pusherrorexit L74 @e353
+    %131 = op coresume0 %2 @e353
+    poperrorexit @e353
+    jump L75 @e353
+  label L74
+    %132 = declarederroreq 1073741825 @e353
+    br %132 L76 L77 @e353
+  label L76
+    %133 = op corelease %2 @e353
+    %134 = op corelease %100 @e353
+    reraise @e353
+  label L77
+    reraise @e353
+  label L75
+    %135 = op mutarraysetproven %9 %129 %131 @e349
+    poperrorexit @e349
+    jump L78 @e349
+  label L73
+    %136 = declarederroreq 1073741825 @e349
+    br %136 L79 L80 @e349
+  label L79
+    %137 = op corelease %2 @e349
+    %138 = op corelease %100 @e349
+    reraise @e349
+  label L80
+    reraise @e349
+  label L78
+    %113 = move %135
+    jump L64
+  label L63
+    %139 = unit
+    %113 = move %139
+    jump L64
+  label L64
+    %140 = structget 1 %111 @e357
+    br %140 L81 L82 @e356
+  label L81
+    %142 = unit
+    %103 = move %142 @e359
+    jump L57 @e359
+  label L82
+    %143 = unit
+    %141 = move %143
+    jump L83
+  label L83
+    jump L56 @e325
+  label L57
+    %144 = op corelease %100 @e325
+    pusherrorexit L84 @e360
+    %145 = int 1 @e363
+    %146 = rawint 1
+    pusherrorexit L85 @e366
+    %147 = int 1 @e369
+    %148 = rawint 1
+    %149 = op mutarraygetproven %14 %147 @e366
+    poperrorexit @e366
+    jump L86 @e366
+  label L85
+    %150 = declarederroreq 1073741825 @e366
+    br %150 L87 L88 @e366
+  label L87
+    %151 = op corelease %2 @e366
+    reraise @e366
+  label L88
+    reraise @e366
+  label L86
+    %152 = int 1 @e370
+    %153 = rawint 1
+    %154 = op iadd %149 %152 @e364
+    %155 = op mutarraysetproven %14 %145 %154 @e360
+    poperrorexit @e360
+    jump L89 @e360
+  label L84
+    %156 = declarederroreq 1073741825 @e360
+    br %156 L90 L91 @e360
+  label L90
+    %157 = op corelease %2 @e360
+    reraise @e360
+  label L91
+    reraise @e360
+  label L89
+    %98 = move %155
+    jump L55
+  label L54
+    %159 = int 123 @e380
+    %160 = rawint 123
+    %161 = op ieq %18 %159 @e377
+    br %161 L92 L99 @e377
+  label L99
+    %162 = int 125 @e386
+    %163 = rawint 125
+    %164 = op ieq %18 %162 @e383
+    br %164 L92 L98 @e383
+  label L98
+    %165 = int 91 @e394
+    %166 = rawint 91
+    %167 = op ieq %18 %165 @e391
+    br %167 L92 L97 @e391
+  label L97
+    %168 = int 93 @e402
+    %169 = rawint 93
+    %170 = op ieq %18 %168 @e399
+    br %170 L92 L96 @e399
+  label L96
+    %171 = int 58 @e410
+    %172 = rawint 58
+    %173 = op ieq %18 %171 @e407
+    br %173 L92 L95 @e407
+  label L95
+    %174 = int 44 @e418
+    %175 = rawint 44
+    %176 = op ieq %18 %174 @e415
+    br %176 L92 L93 @e415
+  label L92
+    pusherrorexit L100 @e421
+    %177 = int 2 @e424
+    %178 = rawint 2
+    pusherrorexit L101 @e427
+    %179 = int 2 @e430
+    %180 = rawint 2
+    %181 = op mutarraygetproven %14 %179 @e427
+    poperrorexit @e427
+    jump L102 @e427
+  label L101
+    %182 = declarederroreq 1073741825 @e427
+    br %182 L103 L104 @e427
+  label L103
+    %183 = op corelease %2 @e427
+    reraise @e427
+  label L104
+    reraise @e427
+  label L102
+    %184 = int 1 @e431
+    %185 = rawint 1
+    %186 = op iadd %181 %184 @e425
+    %187 = op mutarraysetproven %14 %177 %186 @e421
+    poperrorexit @e421
+    jump L105 @e421
+  label L100
+    %188 = declarederroreq 1073741825 @e421
+    br %188 L106 L107 @e421
+  label L106
+    %189 = op corelease %2 @e421
+    reraise @e421
+  label L107
+    reraise @e421
+  label L105
+    %158 = move %187
+    jump L94
+  label L93
+    %190 = unit
+    %158 = move %190
+    jump L94
+  label L94
+    pusherrorexit L108 @e432
+    %191 = int 0 @e435
+    %192 = rawint 0
+    pusherrorexit L109 @e436
+    %193 = op coresume0 %2 @e436
+    poperrorexit @e436
+    jump L110 @e436
+  label L109
+    %194 = declarederroreq 1073741825 @e436
+    br %194 L111 L112 @e436
+  label L111
+    %195 = op corelease %2 @e436
+    reraise @e436
+  label L112
+    reraise @e436
+  label L110
+    %196 = op mutarraysetproven %9 %191 %193 @e432
+    poperrorexit @e432
+    jump L113 @e432
+  label L108
+    %197 = declarederroreq 1073741825 @e432
+    br %197 L114 L115 @e432
+  label L114
+    %198 = op corelease %2 @e432
+    reraise @e432
+  label L115
+    reraise @e432
+  label L113
+    %98 = move %196
+    jump L55
+  label L55
+    %31 = move %98
+    jump L15
+  label L15
+    jump L4 @e226
+  label L5
+    %199 = op corelease %2 @e226
+    %200 = int 0 @e444
+    %201 = rawint 0
+    %202 = op mutarraygetproven %14 %200 @e441
+    %203 = int 1 @e448
+    %204 = rawint 1
+    %205 = op mutarraygetproven %14 %203 @e445
+    %206 = int 2 @e452
+    %207 = rawint 2
+    %208 = op mutarraygetproven %14 %206 @e449
+    %209 = int 3 @e456
+    %210 = rawint 3
+    %211 = op mutarraygetproven %14 %209 @e453
+    %212 = op listnew %202 %205 %208 %211 @e439
+    ret %212
+end
+
+func 7 "" params=0 env=1 regs=4 pnames="" captures=1 instance="generic" rawregs="3" @e207
+    %0 = capture 0
+    %1 = call 2 %0 @e208
+    %2 = int -1 @e208
+    %3 = rawint -1
+    ret %2
+end
+
+func 8 "" params=0 env=0 regs=1 pnames="" captures=0 instance="generic" @e257
+    %0 = call 4 @e258
+    ret %0
+end
+
+func 9 "" params=0 env=0 regs=1 pnames="" captures=0 instance="generic" @e318
+    %0 = call 5 @e319
+    ret %0
+end

@@ -61,7 +61,10 @@
 # interpreter, the IDs of every release call (core::coroutines::
 # releaseCalls) against the oracle's obligations, and no Tcl coroutine alive
 # after `drive`; natively (-native 1), the runtime's counters: every
-# construction released, none swept by a collection.
+# construction released, none swept by a collection. The counters are the
+# general coroutine runtime's, read with coroutine fusion off (a fused
+# coroutine has no runtime object to count: COROUTINE-FUSION-MILESTONE-1.md);
+# cranelift-unfused among the backends compares that runtime's values too.
 #
 # A third of the programs carry one ownership fault, each with the diagnostic
 # the oracle predicts: a use after a move into a binding, a call, a struct or
@@ -75,7 +78,7 @@
 # coroutine where an explicit Fn is declared (COROUTINE-NOT-FUNCTION).
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
-set options [dict create -n 30 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift} -native 1]
+set options [dict create -n 30 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift cranelift-unfused} -native 1]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "fuzz.tcl: unknown option $option"
@@ -738,7 +741,7 @@ proc Run {} {
                 incr releasesChecked [dict size $ids]
             }
             if {$problem eq "" && [dict get $options -native] && $::tcl_platform(os) eq "Linux"} {
-                set counters [dict get [native::allocationReport $probeless summary] coroutines]
+                set counters [dict get [withoutCoroutineFusion {native::allocationReport $probeless summary}] coroutines]
                 if {[dict get $counters released] != [dict size $ids] || [dict get $counters sweptSuspended] != 0} {
                     set problem "native release counters $counters for [dict size $ids] identities"
                 }

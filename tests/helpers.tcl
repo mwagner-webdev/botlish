@@ -419,6 +419,12 @@ proc outcomeUnderHir {backend hir} {
     if {$backend eq "interp"} {
         return [outcomeUnder $backend [hir::lower $hir]]
     }
+    if {$backend eq "cranelift-unfused"} {
+        # The specialized native backend with coroutine fusion off: every
+        # coroutine on the general runtime (COROUTINE-FUSION-MILESTONE-1.md),
+        # the oracle fused code is compared with.
+        return [withoutCoroutineFusion {outcomeUnderHir cranelift $hir}]
+    }
     set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
     resetEffects
     if {[catch {
@@ -627,6 +633,28 @@ proc withImports {source} {
 # delete each other's module, and a run cut short leaves it behind. The copy
 # is a tcltest temporary directory, named per process so runs that share a
 # -tmpdir do not collide either.
+# Runs SCRIPT in the caller's frame with the native driver's coroutine
+# fusion off (BOTLISH_NATIVE_COROUTINE_FUSION=0; native/src/codegen/
+# fusion.rs, COROUTINE-FUSION-MILESTONE-1.md): every coroutine then runs on
+# the general runtime, as a test of that runtime's own objects, stacks and
+# releases needs, and as the oracle fused code is compared with.
+proc withoutCoroutineFusion {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_COROUTINE_FUSION)]
+    if {$had} {
+        set saved $::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+    }
+    set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
+    try {
+        uplevel 1 $script
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+        }
+    }
+}
+
 proc withPrivateLibrary {script} {
     set saved $::core::libraryDir
     set name private-lib-[pid]-[incr ::privateLibraryCounter]

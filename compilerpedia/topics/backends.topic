@@ -298,7 +298,9 @@ other platforms.
                              Windows x86-64 (MSVC's toolchain; MinGW's
                              windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
-                             (hand-written stack switching); elsewhere
+                             (hand-written stack switching, or, for a
+                             coroutine closed inside one function, none:
+                             COROUTINE-FUSION-MILESTONE-1.md); elsewhere
                              (Windows) NATIVE UNSUPPORTED; the Tcl
                              backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack

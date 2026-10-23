@@ -1,0 +1,26 @@
+# grid-procedural.bot -- grid.bot written by hand without a coroutine: the
+# same cells in the same order, computed by the same cell function and
+# folded row by row (COROUTINE-FUSION-MILESTONE-1.md's procedural
+# baseline).
+#
+# expect: 49981
+
+import std::mutable_array
+
+fn cell(x: int, y: int) -> int:
+    v = x * 31 + y * 17
+    v.mod(101)
+
+fn row(y: int, width: int) -> int:
+    acc = std::mutable_array::create(1, 0)
+    loop x from 0 to width:
+        acc.set(0, acc.at(0) + x.cell(y))
+    acc.at(0)
+
+fn total(width: int, height: int) -> int:
+    acc = std::mutable_array::create(1, 0)
+    loop y from 0 to height:
+        acc.set(0, acc.at(0) + y.row(width))
+    acc.at(0) + -1
+
+total(10, 100)

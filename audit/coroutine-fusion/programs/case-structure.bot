@@ -1,0 +1,58 @@
+# case-structure.bot -- structure: a construction per loop iteration; two coroutines of two
+# constructions alive at once in one function; a coroutine whose code
+# constructs and drives another (nested fusion); a coroutine per frame of a
+# recursion.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [[10, 10, 10, 10], 100004, [0, [2, 3, -1]], 11111]
+
+import std::coroutine
+import std::mutable_array
+
+fn counter(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    return n
+
+fn squares(n: int) -> int:
+    loop i from 0 to n:
+        yield i * i
+    return -1
+
+# A construction per loop iteration: one coroutine of the site at a time.
+fn per_iteration(n: int) -> List[int]:
+    loop i from 0 to n:
+        coroutine {step, first} = counter(i + 1)
+        first + step() * 10
+
+# Two coroutines of two sites alive at once in one function.
+fn zipped(n: int) -> int:
+    coroutine {step: a, first: a0} = counter(n)
+    coroutine {step: b, first: b0} = squares(n)
+    acc = std::mutable_array::create(1, a0 * b0)
+    loop i from 1 to n:
+        acc.set(0, acc.at(0) + a() * b())
+    acc.at(0) * 1000 + a() + b()
+
+# A coroutine whose code drives another coroutine it constructs.
+fn outer(n: int) -> int:
+    loop i from 0 to n:
+        coroutine {step, first} = counter(i)
+        yield first + step() + step()
+    return -1
+
+fn nested(n: int) -> list:
+    coroutine {step, first} = outer(n)
+    rest = loop i from 0 to n:
+        step()
+    [first, rest]
+
+# A coroutine per frame of a recursion, all alive at once.
+fn held(k: int) -> int:
+    if k == 0:
+        return 0
+    coroutine {step, first} = counter(k)
+    below = held(k - 1)
+    below * 10 + first + step()
+
+[per_iteration(4), zipped(5), nested(3), held(5)]

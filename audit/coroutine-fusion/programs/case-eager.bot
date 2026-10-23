@@ -1,0 +1,46 @@
+# case-eager.bot -- construction order: the construction's arguments are evaluated first, in
+# order, then the body runs eagerly to its first yield; side effects before
+# and after yields happen in segment order; a second, never-resumed
+# coroutine runs only its first segment.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [14, 70, 7, 9, 79, 1, 2]
+
+import std::mutable_array
+
+struct V:
+    n: int
+
+context struct Log:
+    a: MutableArray[int]
+
+fn note(i: int, v: int, context log: Log) -> int:
+    std::mutable_array::set(log.a, i, v):
+        on IndexNotFound:
+            unit
+    v
+
+fn get(i: int, context log: Log) -> int:
+    std::mutable_array::at(log.a, i):
+        on IndexNotFound:
+            -1
+
+fn run(base: int, flags :twice) -> V:
+    note(2, get(0) * 10 + get(1))
+    if twice:
+        yield V {n: base * 2}
+    note(3, get(3) + 1)
+    yield V {n: base}
+    note(3, get(3) + 100)
+    return V {n: 0}
+
+fn drive() -> List[int]:
+    coroutine {step: s, first: f} = note(0, 7).run(:twice)
+    seen = get(2)
+    coroutine {first: only} = run(note(1, 9))
+    after = get(3)
+    x = s()
+    [f.n, seen, x.n, only.n, get(2), after, get(3)]
+
+with context Log {a: std::mutable_array::create(4, 0)}
+drive()

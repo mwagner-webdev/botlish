@@ -2651,6 +2651,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         FfiFixtureCopy => ("rt_ffi_fixture_copy", None, true, None),
                         FfiFixtureMixed => ("rt_ffi_fixture_mixed", None, true, None),
                         CoRelease => ("rt_co_release", None, false, None),
+                        CoFailed => ("rt_co_failed", None, false, Some(("cofailed", KIND_COROUTINE))),
                         AffineDrop => ("rt_affine_drop", None, false, None),
                         // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
                         MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),

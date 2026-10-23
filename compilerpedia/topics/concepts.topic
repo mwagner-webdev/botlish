@@ -3289,7 +3289,7 @@ index: concepts
 alias: coroutines; yield; generator; resume a coroutine
 keywords: coroutine, yield, resume, step, first, done?, handle, generator, iterator, UNWRAPPED-YIELD, suspend, message, scheduler
 related: concept.affine concept.function-types concept.mutable-vector concept.testing stdlib.module.std::coroutine error.unwrapped-yield error.use-after-move
-docs: COROUTINES.md AFFINE-VALUES.md
+docs: COROUTINES.md AFFINE-VALUES.md COROUTINE-FUSION-MILESTONE-1.md
 
 == WHAT IT IS
 `coroutine {step, first} = counter(3)` starts the call: `first` is what it
@@ -3318,7 +3318,12 @@ protocol.
 Coroutines give schedulers, generators and test runners resumable
 computations without threads or callbacks; affine handles make "who may
 resume this" a compile-time fact. Native coroutines switch stacks on Linux
-x86-64 and AArch64; the Tcl backends run them everywhere.
+x86-64 and AArch64 and macOS AArch64, except a coroutine whose handle never
+leaves the function that constructs it (and whose yielding helpers are
+neither recursive nor closures): the native compiler builds that one into
+the function itself -- no stack of its own, no switch, its suspended state
+a few registers -- with the same meaning (COROUTINE-FUSION-MILESTONE-1.md).
+The Tcl backends run coroutines everywhere.
 
 == EXAMPLES
 @example accept

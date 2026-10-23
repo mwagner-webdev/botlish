@@ -504,11 +504,13 @@ test hoc-affine-error-edge {a coroutine live across a call an erased callable fa
     sourceAgree $hocCoroutine {interp compile}
 } -result {value {[10, -1, 0]}}
 
-test hoc-affine-error-edge-native {natively: every coroutine released, none swept} -constraints {
+test hoc-affine-error-edge-native {natively: the value on every backend; on the general coroutine runtime (coroutine fusion off: a fused coroutine has no runtime object to count) every coroutine released, none swept} -constraints {
     nativeCoroutines
 } -body {
     set text [string map {test_hoc_live() 0} $hocCoroutine]
-    list [sourceAgree $text] [dict get [native::allocationReport [surface::compile $text -warnings off] summary] coroutines]
+    list [sourceAgree $text] [withoutCoroutineFusion {
+        dict get [native::allocationReport [surface::compile $text -warnings off] summary] coroutines
+    }]
 } -result {{value {[10, -1, 0]}} {stacksMapped 1 stacksReused 1 released 2 releasedSuspended 1 sweptSuspended 0}}
 
 cleanupTests
