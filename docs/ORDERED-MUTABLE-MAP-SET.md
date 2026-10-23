@@ -473,7 +473,49 @@ are. `oracle.py selftest` checks the model on the rules themselves.
 
 ## Fuzzing
 
-TBD.
+`audit/mutable-map/tools/fuzz.tcl` writes stateful programs and compares
+every observation with the oracle's, on every backend.
+
+* **A program** is one long operation sequence over several collections
+  of one key kind: two to start (a map and a set), then copies of them
+  (`b = a`, up to seven variables) mutated in turn. The operations: `set`
+  of a new or an existing key, `at` hit and miss, `contains`, `remove` hit
+  and miss, `add`, `length`, `clear`, iteration, a copy, a fill (a run of
+  fresh keys: several rebuilds), a drain (most of the last fills' keys
+  removed: compaction and the index shrinking) and a bump (a loop that
+  mutates the collection it iterates: replacement, insertion, removal and
+  growth during iteration, against the snapshot rule). Every operation
+  pushes observations (a found value, a membership bit, a length, every
+  key and value in iteration order); the program's result is their List.
+* **Keys** of eight kinds: Int, String, an enum, a struct, a nested struct
+  (a struct and a List inside), a List, the public hash's collision corpus
+  (`collide`) and the keyed collision corpus under its key (`kcollide`).
+  Each key is built where it is used from an integer id, injectively, so
+  the oracle needs only the ids. **Values** of five kinds per program: an
+  Int, its text, a struct, a List and a MutableVector (collections inside
+  the map, copied when read out or moved between entries), built from an
+  Int and read back to it.
+* **Runs.** Every program runs on interp (every third program: it is two
+  orders of magnitude slower), compile, cranelift-generic and cranelift;
+  with `-keyed 1` (the default) again on every compiled backend under two
+  fixed hidden keys, whose observations must be the same; with
+  `-gc-stress 1` once more natively with a collection at every allocation
+  site. Every fourth program writes its calls with method syntax, the
+  others qualified. `-profile large` uses key pools of 50 to 349 and fills
+  of 40 to 439 keys (for the compiled backends).
+
+Runs for this report (all on the final engine, 0 disagreements):
+
+| run | programs | operations | observations | backend runs |
+|---|---:|---:|---:|---:|
+| `-n 24 -seed 101` | 24 | 3,260 | 22,537 | 224 |
+| `-n 16 -seed 202 -gc-stress 1` | 16 | 2,176 | 11,744 | 166 |
+<!-- FUZZ-LARGE -->
+
+The mutation harness runs the fuzzer once more against every mutant (8
+programs, every key kind, 50 operations each). The smaller runs made
+during development, on earlier states of the engine, found no
+disagreement either.
 
 ## Mutation testing
 
