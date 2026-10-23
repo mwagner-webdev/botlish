@@ -307,6 +307,14 @@ proc hir::syntax::withNoMethod {block} {
     return $block
 }
 
+# BLOCK (a `block` node) declared `exported ABI fn` (ABI: c): the function
+# is a C export of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
+# hir/exports.tcl).
+proc hir::syntax::withExported {block abi} {
+    dict set block exported $abi
+    return $block
+}
+
 # BLOCK (a `block` node) declaring a variadic section at ORIGIN
 # (VARIADICS-VERTICAL-SLICE-1.md): its last ordinary parameter is the
 # variadic one, bound at each call to the List of the call's trailing

@@ -1,0 +1,220 @@
+# Mutants of native libraries (audit/native-library/tools/mutate.tcl;
+# NATIVE-LIBRARY-MILESTONE-1.md, "Mutation results"): export roots
+# (hir/specialize.tcl), the export checks (hir/exports.tcl), the library
+# build and its checks (native/library.tcl), the error table
+# (native/lower.tcl), the trampolines (native/src/codegen/library.rs), the
+# runtime ABI (native/src/runtime/library.rs) and the program record
+# (native/src/runtime/program.rs).
+#
+#   @@ NAME DESCRIPTION
+#   %% HOST ...        (optional) the host targets the mutant applies to
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant with no %% line applies on every host that builds libraries.
+# Lines starting with # outside an edit are comments.
+#
+# Not here, because it is equivalent: ProgramScope's drop not restoring the
+# thread's previous program (runtime/library.rs). A call sets its program
+# for itself, which is needed (create leaves the thread's program as it
+# found it), but the restore matters only when two programs share one
+# runtime copy, as the driver's JIT runs them. A library never does: its
+# runtime is a private copy with its own thread-local, so a call of another
+# library inside a call (nl-nested-libraries) cannot reach it either way.
+
+# ---------------------------------------------------------------------------
+# Export roots and the export checks
+
+@@ export-root-specialized an export is the instance its Botlish call sites specialized (the census's defect: checked(-5) = -10)
+## hir/specialize.tcl
+<<<<
+    return [lsort -unique [concat $values [dict get $state exports]]]
+====
+    return $values
+>>>>
+
+@@ export-context-accepted an exported function that requires a context is accepted (a C caller installs none)
+## hir/exports.tcl
+<<<<
+    set required [hir::contexts::required $hir $e]
+====
+    set required {}
+>>>>
+
+@@ library-top-level-accepted a library's entry file may hold statements, which every create would run
+## native/library.tcl
+<<<<
+proc native::library::TopLevelProblems {hir} {
+    set top [dict get $hir top]
+====
+proc native::library::TopLevelProblems {hir} {
+    return {}
+    set top [dict get $hir top]
+>>>>
+
+@@ symbols-global the library's runtime and program symbols stay global (two libraries collide)
+## native/library.tcl
+<<<<
+        library::Tool objcopy --strip-debug --keep-global-symbols=$keep $linked $final
+====
+        library::Tool objcopy --strip-debug $linked $final
+>>>>
+
+@@ error-table-unwritten the NIR carries no error table: a declared error has no identity but its number
+## native/lower.tcl
+<<<<
+        dict for {name id} $errorIds {
+            lappend header "error $id [Quote $name]"
+        }
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The trampolines
+
+@@ float-argument-converted a double argument is converted to an integer, not passed as its bits
+## native/src/codegen/library.rs
+<<<<
+                    Boundary::Float64 => vec![b.ins().bitcast(I64, MemFlagsData::new(), values[next])],
+====
+                    Boundary::Float64 => vec![b.ins().fcvt_to_sint_sat(I64, values[next])],
+>>>>
+
+# ---------------------------------------------------------------------------
+# Values at the boundary
+
+@@ utf8-unchecked a str argument is not validated as UTF-8
+## native/src/runtime/library.rs
+<<<<
+            let Ok(text) = std::str::from_utf8(bytes) else {
+                return Err(LibError::new(STATUS_BOUNDARY, "ARGUMENT-NOT-UTF8", format!("argument {index} is not UTF-8")).with_argument(index));
+            };
+====
+            // SAFETY: none: the mutant.
+            let text = unsafe { std::str::from_utf8_unchecked(bytes) };
+>>>>
+
+@@ nonfinite-admitted a NaN or infinite double argument enters as a Float64
+## native/src/runtime/library.rs
+<<<<
+            let Some(bits) = FloatType::Float64.admit(x) else {
+                return Err(LibError::new(STATUS_BOUNDARY, "ARGUMENT-NOT-FINITE", format!("argument {index} is {x}: a Float64 is a finite number")).with_argument(index));
+            };
+====
+            let bits = FloatType::Float64.admit(x).unwrap_or(x.to_bits());
+>>>>
+
+@@ int-result-wrapped an Int result outside int64_t becomes some int64_t instead of RESULT-OUT-OF-RANGE
+## native/src/runtime/library.rs
+<<<<
+                None => i64::try_from(int_to_big(value)).map_err(|_| {
+                    LibError::new(STATUS_BOUNDARY, "RESULT-OUT-OF-RANGE", format!("the result {} is outside int64_t", super::show::show(value)))
+                })?,
+====
+                None => i64::try_from(int_to_big(value)).unwrap_or(-1),
+>>>>
+
+@@ arguments-unrooted a converted argument is not a root while the next one allocates
+## native/src/runtime/library.rs
+<<<<
+    vm.temp_roots.push(value);
+    Ok(value)
+====
+    Ok(value)
+>>>>
+
+@@ declared-identity-numeric a declared error's identity is its number, not its canonical name
+## native/src/runtime/library.rs
+<<<<
+            .map(|(_, name)| name.clone())
+====
+            .map(|(id, _)| format!("error#{id}"))
+>>>>
+
+@@ payload-dropped a declared error carries no fields
+## native/src/runtime/library.rs
+<<<<
+                e.fields.push((name.clone().into_bytes(), field_value(value)));
+====
+                let _ = (name, value);
+>>>>
+
+@@ released-buffer-kept releasing a result leaves its struct pointing at the freed buffer
+## native/src/runtime/library.rs
+<<<<
+    unsafe { libc::free(b.ptr as *mut c_void) };
+    b.ptr = std::ptr::null_mut();
+    b.len = 0;
+====
+    unsafe { libc::free(b.ptr as *mut c_void) };
+>>>>
+
+@@ foreign-buffer-freed a buffer the library never handed out is freed
+## native/src/runtime/library.rs
+<<<<
+    if !lock(&BUFFERS).remove(&(b.ptr as usize)) {
+        return STATUS_INVOCATION;
+    }
+====
+    lock(&BUFFERS).remove(&(b.ptr as usize));
+>>>>
+
+# ---------------------------------------------------------------------------
+# Instances
+
+@@ wrong-thread-accepted an instance runs a call on a thread that did not create it
+## native/src/runtime/library.rs
+<<<<
+    if entry.owner != std::thread::current().id() {
+        return Err(invocation("WRONG-THREAD", "an instance is called only on the thread that created it"));
+    }
+====
+>>>>
+
+@@ reentrant-accepted an instance runs a call from inside one of its own calls
+## native/src/runtime/library.rs
+<<<<
+    if entry.busy {
+        return Err(invocation("REENTRANT-CALL", "the instance is running a call on this thread already (a call from inside one of its calls)"));
+    }
+====
+>>>>
+
+@@ destroyed-handle-live a destroyed instance stays registered (its handle reaches freed memory)
+## native/src/runtime/library.rs
+<<<<
+            instances.remove(&instance).unwrap().instance
+====
+            instances.get(&instance).unwrap().instance
+>>>>
+
+@@ stack-ceiling-unset the collector's walk of a call climbs into the host's frames
+## native/src/runtime/library.rs
+<<<<
+    vm.stack_ceiling = super::framewalk::frame_record();
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The program record
+
+@@ descriptor-errors-dropped the descriptor's error table is read as empty
+## native/src/runtime/program.rs
+<<<<
+            info.errors.push((id, r.str()?));
+====
+            let _ = (id, r.str()?);
+>>>>
+
+@@ fingerprint-unchecked a program record compiled for another runtime build is accepted
+## native/src/runtime/program.rs
+<<<<
+    if linked.fingerprint != super::aotimage::abi_fingerprint() {
+        return Err("the program was compiled for a different native runtime build".to_string());
+    }
+====
+>>>>

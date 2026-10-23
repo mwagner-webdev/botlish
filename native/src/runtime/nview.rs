@@ -557,7 +557,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn with_vm<R>(f: impl FnOnce(*mut Vm) -> R) -> R {
-        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Off);
+        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Off);
         f(&mut *vm as *mut Vm)
     }
 

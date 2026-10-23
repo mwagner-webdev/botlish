@@ -274,14 +274,20 @@ the test suite, still install the `.deb`s.
   `botlish_fn_N` symbols (objdump, `strace -k`) or tests rustc's invocation
   carries the `rustcLinker` constraint (`tests/helpers.tcl`). CI's
   `stub-linker` job runs every executable test file with the stub linker.
-* The two startups must build the Vm identically: the generated startup crate
-  (`codegen/aot.rs`'s `startup`) and `aotimage::Loaded::instantiate`. If you
-  change either, `runtime::aot::run`, `constants::install`, what
+* The two startups build the Vm identically because they share it: the
+  startup crate (`codegen/aot.rs`'s constant `STARTUP`) and
+  `aotimage::Loaded::instantiate` both read the program object's
+  `botlish_program` record with `runtime::program::instantiate_linked`, the
+  one place a Vm is built from a program's descriptor (native libraries use
+  it too: NATIVE-LIBRARY-MILESTONE-1.md, next sections). Never generate
+  per-program startup code again. If you change the descriptor, the record,
+  `program::instantiate`, `runtime::aot::run`, `constants::install`, what
   `emit_object` emits (sections, relocation types: `codegen::aot::image`
   rejects any type it does not handle), the image format, or the ABI
   fingerprint's inputs, run `cargo test --release --manifest-path
-  native/Cargo.toml --lib aotimage`, `tests/aot-stub-linker.test`, and the
-  executable test files with the stub linker. The `stub-linker` job in
+  native/Cargo.toml --lib -- aotimage program`, `tests/aot-stub-linker.test`,
+  `tests/native-library.test`, and the executable test files with the stub
+  linker. The `stub-linker` job in
   `.github/workflows/tests.yml` has the command. Run them once more under
   `BOTLISH_NATIVE_GC_STRESS=1`.
 
@@ -2318,6 +2324,65 @@ what they cover. The BoringSSL acceptance tests need the package-owned
 static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
+
+## Native libraries (exported c fn)
+
+`exported c fn NAME(PARAMS) -> T` declares a C export
+(NATIVE-LIBRARY-MILESTONE-1.md): an ordinary Botlish function to every
+backend and to its Botlish callers, which `native::library` (`main.tcl
+-emit-native-library NAME`) also gives a C entry point in a static archive,
+a shared library, a C header and a JSON manifest. Keep it so:
+
+* An export is a compilation root under its declaration only: its generic
+  instance, open (`hir::specialize::ProgramValues` materializes it), never
+  an instance its Botlish callers specialized. Never give an export a fact
+  of its call sites, never read its C ABI from them, and never disable
+  specialization of internal calls because a function is exported.
+  Export identity is the resolved block (`hir::exports::of`/`select`),
+  never a name searched for in NIR or symbols.
+* Exported, public and foreign are three things: a module's functions are
+  visible to importers (no visibility modifiers), `extern c fn` is a C
+  function Botlish calls, `exported c fn` a Botlish function C calls. No
+  attribute system, no export of anything but an environment-free
+  top-level function whose boundary types are declared (the EXPORT-*
+  checks run in every compilation, `hir::exports::verify`).
+* The C ABI is C types only: no `Value`, Vm, Rust type or GC pointer
+  crosses. An Int result outside `int64_t` is a BOUNDARY error, never
+  wrapped; a `str` result is a `malloc`ed copy the caller releases, never a
+  pointer into the heap; an error is an owned object whose identity and
+  scalar fields are data (the NIR error table), never parsed from its
+  message. Nothing unwinds across the boundary (`guarded`).
+* A library's every symbol but its public C names is local (`objcopy
+  --keep-global-symbols`): each library carries a private runtime, and a
+  call makes its own program the thread's current one and restores the
+  previous one (`ProgramScope`). Never let two libraries share a symbol,
+  a static or the active program, and never fix a collision with a global
+  lock or a singleton.
+* Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
+  one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
+  (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
+  and runs on its caller's stack: stack overflow is process-fatal there,
+  and no document may claim otherwise until a library-owned stack exists.
+  The walk of a call's stack ends at the call (`Vm::stack_ceiling`).
+* A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
+  creating an instance runs module static initialization, never a script.
+* Libraries are Linux glibc's (x86_64, aarch64: `codegen::library::
+  SUPPORTED`, `native/native.tcl`'s `libraries`). Never use `ld -r
+  --gc-sections` for the archive: GNU ld 2.42 makes the Rust standard
+  library's weak references strong there and consumers fail to link.
+
+If you change any of that (NATIVE-LIBRARY-MILESTONE-1.md, "What to run when
+changing this", lists the files), run `tests/native-library.test`,
+`tests/native-executable.test` and `tests/aot-stub-linker.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
+native/Cargo.toml --lib program` and `audit/native-library/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus `audit/native-aot/tools/mutate.tcl` for a change to
+the shared startup. `audit/compiler-service/probes/export/run.sh` (the Tcl
+extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
+foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
+no longer runs.
 
 ## C FFI error capture
 

@@ -1,75 +1,82 @@
-# exports.bot -- the Botlish side of the exported-function probe
-# (COMPILER-SERVICE-CENSUS.md, "FFI and JSON feasibility"; run.sh builds it).
+# exports.bot -- the C-facing adapter of the JSON tokenizer
+# (COMPILER-SERVICE-CENSUS.md, "FFI and JSON feasibility"), built as a
+# native library by the compiler (NATIVE-LIBRARY-MILESTONE-1.md):
 #
-# Botlish has no `exported c fn` (C-ABI-TYPES.md:42, :686-693). The audit
-# stand-in audit/react-native/tools/libmode.tcl exports top-level functions
-# whose parameters and results are declared int, str or bool, and which the
-# top level calls with exactly those types (native lowering compiles only
-# what the program reaches). This file is shaped for it.
+#   tclsh9.0 main.tcl -emit-native-library bj -out DIR exports.bot
+#
+# writes DIR/libbj.a, libbj.so, bj.h and bj.manifest.json; run.sh builds the
+# Tcl extension probe.c over them. The tokenizer (../json/json_tokens.bot)
+# stays ordinary Botlish, rich values and declared errors included; this file
+# only adapts it to the C boundary's types (int, bool, Float64, str).
+#
+# It holds declarations only: creating an instance initializes the modules
+# and runs nothing else. There is no top-level call to make lowering compile
+# an export, and nothing depends on argv(): each `exported c fn` is an export
+# root, compiled under its declared contract whatever its Botlish callers
+# pass. `sample` below is such a caller: it calls token_count and checked
+# with constants, which specializes their Botlish-called instances -- the
+# instances the census's stand-in exported, which then miscounted longer
+# inputs and returned -10 for checked(-5) (COMPILER-SERVICE-CENSUS.md,
+# section 8.2). The exported entries are not those instances.
 
 import json_tokens
+import std::int
 import std::list
 import std::str
 
 error Rejected:
     code: int
 
-# The number of JSON tokens in TEXT, or -1 - OFFSET of the first malformed
-# character: the tokenizer's errors folded into an Int, because an export's
-# result can only be a scalar or a str.
-fn token_count(text: str) -> int:
-    r = json_tokens::tokenize(text, 1000000):
-        on json_tokens::Malformed details:
-            return -1 - details.at
-        on json_tokens::TooManyTokens:
-            return -2
-        on IndexNotFound:
-            return -3
-        on LowerUnderrun:
-            return -3
-        on UpperOverrun:
-            return -3
-    std::list::length(r)
+# The number of JSON tokens in TEXT. A malformed input fails with the
+# tokenizer's own declared error, json_tokens::Malformed {at: OFFSET}, which
+# reaches C with its identity and its `at` field as data.
+exported c fn token_count(text: str) -> int errors IndexNotFound, LowerUnderrun, UpperOverrun, json_tokens::Malformed, json_tokens::TooManyTokens:
+    std::list::length(json_tokens::tokenize(text, 1000000))
 
-# A str result: TEXT with "!" appended (allocates on the Botlish heap).
-fn shout(text: str) -> str:
+fn joined(lines: List[str], i: int, so_far: str) -> str errors IndexNotFound:
+    if i >= std::list::length(lines):
+        return so_far
+    joined(lines, i + 1, std::str::concat(so_far, std::list::at(lines, i)))
+
+# The tokens of TEXT as a table, one line "KIND START END" per token: a
+# structured result returned as one owned UTF-8 buffer.
+exported c fn token_table(text: str) -> str errors IndexNotFound, LowerUnderrun, UpperOverrun, json_tokens::Malformed, json_tokens::TooManyTokens:
+    lines = loop t in json_tokens::tokenize(text, 1000000):
+        std::str::concat(t.kind, std::str::concat(" ", std::str::concat(std::int::to_string(t.start), std::str::concat(" ", std::str::concat(std::int::to_string(t.end), "\n")))))
+    joined(lines, 0, "")
+
+# A str result: TEXT with "!" appended (allocates on the Botlish heap; C gets
+# a copy it owns).
+exported c fn shout(text: str) -> str:
     std::str::concat(text, "!")
 
-# A declared error crossing the boundary.
-fn checked(n: int) -> int errors Rejected:
+# A declared error with a payload crossing the boundary.
+exported c fn checked(n: int) -> int errors Rejected:
     if n < 0:
         fail Rejected {code: n}
     n * 2
 
 # Allocation pressure: N appends, so the collector runs while the caller's
-# (Tcl's) frames are below the export's on the stack.
-fn churn(n: int) -> int:
+# (Tcl's) frames are above the export's on the stack.
+exported c fn churn(n: int) -> int:
     xs = loop i from 0 to n:
         [i, i + 1]
     std::list::length(xs)
 
-# The arguments the top level passes must be opaque to the analyses. The
-# stand-in exports the native instance compiled for these calls, and an
-# instance is specialized by its call sites' facts: with the constant calls
-# token_count("[1, 2]") and checked(1), the exported token_count miscounted
-# every input longer than its 6-character constant and checked(-5) returned
-# -10 instead of failing (its `n < 0` branch was proven dead).
-# COMPILER-SERVICE-CENSUS.md, section 8.2, records both. Here every argument
-# depends on argv(), so each instance assumes only its declared types.
-arguments = argv():
-    on InvalidArgumentEncoding:
-        []
-unknown = std::list::length(arguments)
-big = "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, true, false, null, \"abcdefghijklmnopqrstuvwxyz\"]"
-cut = std::str::substring(big, 0, std::str::length(big) - unknown + 1):
-    on LowerUnderrun:
-        ""
-    on UpperOverrun:
-        ""
-first = token_count(cut)
-second = shout(cut)
-third = checked(unknown - 5):
-    on Rejected:
-        0
-fourth = churn(unknown + 3)
-[first, std::str::length(second), third, fourth]
+# Botlish callers with constant arguments (see the header): 5 + 2.
+exported c fn sample() -> int:
+    count = token_count("[1, 2]"):
+        on IndexNotFound:
+            -1
+        on LowerUnderrun:
+            -1
+        on UpperOverrun:
+            -1
+        on json_tokens::Malformed:
+            -1
+        on json_tokens::TooManyTokens:
+            -1
+    doubled = checked(1):
+        on Rejected:
+            0
+    count + doubled

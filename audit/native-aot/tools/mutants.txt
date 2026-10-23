@@ -157,12 +157,14 @@ const C_CALLS: bool = cfg!(any(
 # ---------------------------------------------------------------------------
 # The generated startup and the standalone runtime
 
-@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame)
-## native/src/codegen/aot.rs
+@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame): the one instantiation both startups and native libraries share (NATIVE-LIBRARY-MILESTONE-1.md)
+## native/src/runtime/program.rs
 <<<<
-    s.push_str("map.finish();\nvm.set_framemap(Rc::new(map));\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    vm.set_framemap(Rc::new(map));
 ====
-    s.push_str("map.finish();\nlet _ = map;\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    let _ = map;
 >>>>
 
 @@ startup-no-guard a standalone executable runs without the stack-overflow guard
