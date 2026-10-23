@@ -982,6 +982,53 @@ never touch x18. A Tcl test that needs coroutines, the collector around
 them or native counters carries `nativeCoroutines` (tests/helpers.tcl), a
 capability of the host target, not `nativeLinux`.
 
+## Coroutine fusion
+
+The native driver fuses coroutines (COROUTINE-FUSION-MILESTONE-1.md,
+native/src/codegen/fusion.rs): a coroutine whose handle never leaves the
+function that constructs it, and whose yielding call chain is
+environment-free and non-recursive, is compiled into that function -- the
+chain inlined once as a template, a copy per start and resume over the same
+registers, a state register, no coroutine object, stack, switch or runtime
+coroutine operation. It is a NIR-to-NIR pass in the driver's load path
+(main.rs), so the JIT, objects, executables and every inspection command
+compile the fused program. Keep it so:
+
+* Fusion never changes what a program means. A site it cannot prove keeps
+  the general runtime (reported `kept` with its reason), never an error;
+  every rewritten function is validated (`nir::validate_function`) or
+  discarded. Never weaken a condition of `fuse_site` (a handle use it does
+  not follow, a recursive or capturing yielding function, more than one
+  live coroutine of a site) without the proof in the report.
+* The general runtime stays the oracle: `BOTLISH_NATIVE_COROUTINE_FUSION=0`
+  turns the pass off, `cranelift-unfused` (tests/helpers.tcl) runs a
+  program so, and tests/coroutines.test's `coAgree` and the coroutine
+  fuzzer compare fused code with it on every program. A test of the
+  runtime's own objects, stacks or releases runs inside
+  `withoutCoroutineFusion`; never make such a test pass by fusing.
+* A copy per operation keeps the control flow graph exact (a segment
+  returns only to the operation that ran it): never share one copy between
+  operations through a run-time return address without the validator's and
+  the root plan's precision argument (the report, 4.3).
+* The only runtime addition is `op cofailed` (`rt_co_failed`): a fused
+  coroutine's cached failure, raised again by `coresume0`. Fusion adds no
+  coroutine-specific code to the collector or codegen.
+* Fusion runs only where native coroutines exist
+  (`runtime::coroutine::STACK_SWITCHING`): it must not make a program run
+  where the general runtime refuses it.
+
+If you change fusion.rs, nirtext.rs, `cofailed`, `live_at_many`/`def_use`,
+or what NIR the coroutine operations lower to, run
+`tests/coroutine-fusion.test`, `tests/coroutines.test`,
+`audit/coroutines/tools/fuzz.tcl` (several seeds; its default backends
+include cranelift-unfused), `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native -- fusion nirtext` and
+`audit/coroutine-fusion/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule).
+`audit/coroutine-fusion/tools/evidence.tcl` regenerates the native evidence
+(commit it); `bench/coroutine-fusion.tcl` is the performance report.
+
 ## The native stack guard
 
 A native run that exhausts a stack -- the worker thread's or a coroutine's

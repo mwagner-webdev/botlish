@@ -1,0 +1,1 @@
+fused total e62 {inlined {{#5} scan row cell} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 4 template 91 copied 308 unboxed 0}

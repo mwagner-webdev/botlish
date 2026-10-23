@@ -435,7 +435,8 @@ that has completed is not this error: it returns the same final result
 again.
 
 One form is a resource limit instead, on the native backends only: "cannot
-map a N-byte coroutine stack: ...". Each live native coroutine has its own
+map a N-byte coroutine stack: ...". Each live native coroutine the compiler
+did not fuse into its consumer (COROUTINE-FUSION-MILESTONE-1.md) has its own
 stack, 8 MiB of address space by default
 (BOTLISH_NATIVE_COROUTINE_STACK_BYTES sets it, at least 64 KiB), and the
 system refused another one.
@@ -1062,7 +1063,9 @@ code: TCL LIMIT STACK
 Run time. Recursion depth is a resource limit, not semantics, so the
 backends stop at different depths:
   * native backends and executables: native code runs on a 1 GiB stack,
-    and a coroutine's body on an 8 MiB stack of its own; overflowing either
+    and a coroutine's body on an 8 MiB stack of its own (one the native
+    compiler fused into the function that drives it on that function's
+    stack: COROUTINE-FUSION-MILESTONE-1.md); overflowing either
     stops the run with "native stack exhausted: too many nested calls"
     (NATIVE LIMIT STACK), never a crash, on Linux x86-64 and AArch64 and
     macOS AArch64. A standalone executable prints it on stderr as `error

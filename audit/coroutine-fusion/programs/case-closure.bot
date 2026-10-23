@@ -1,0 +1,23 @@
+# case-closure.bot -- a yielding nested function that captures a value is a closure: the
+# coroutine keeps the general runtime (fusion inlines environment-free
+# functions only), and runs the same.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: 76
+
+import std::coroutine
+
+# A yielding nested function that captures (base): a closure, which the
+# fused form does not inline; the coroutine keeps the general runtime.
+fn outer(base: int) -> int:
+    fn inner(k: int) -> unit:
+        yield base + k
+        unit
+    fn root() -> int:
+        inner(1)
+        inner(2)
+        0
+    coroutine {step, first} = root()
+    first + step() * 10 + step() * 100
+
+outer(5)

@@ -1,0 +1,133 @@
+# Mutants of coroutine fusion (audit/coroutine-fusion/tools/mutate.tcl;
+# COROUTINE-FUSION-MILESTONE-1.md): deliberate bugs of the fusion pass,
+# native/src/codegen/fusion.rs -- in what it proves, in the state machine it
+# writes and in the scalar transport of the values it passes.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# What the pass proves
+
+@@ escape-followed a handle that reaches an instruction fusion does not follow (a call, a field, a List, a return) is fused anyway
+## native/src/codegen/fusion.rs
+<<<<
+            other => {
+                return Err(format!("its handle reaches `{}`, which fusion does not follow", text(program, other)));
+            }
+        };
+====
+            _ => continue,
+        };
+>>>>
+
+@@ recursion-unchecked a recursive yielding function is inlined like any other (until the budget stops it)
+## native/src/codegen/fusion.rs
+<<<<
+        if self.stack.contains(&g) {
+====
+        if self.stack.contains(&g) && false {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The state machine
+
+@@ yield-state-lost a yield does not record which yield the coroutine is suspended at: the next resume continues after the previous one
+## native/src/codegen/fusion.rs
+<<<<
+                    self.emit(Inst::RawInt { dst: self.st, digits: k.to_string() }, origin);
+====
+>>>>
+
+@@ completion-not-cached the root's return does not mark the coroutine completed: a later resume runs its code again
+## native/src/codegen/fusion.rs
+<<<<
+                        self.emit(Inst::RawInt { dst: self.st, digits: DONE.to_string() }, origin);
+====
+>>>>
+
+@@ failure-not-cached a failure marks the coroutine completed instead of failed: a later resume returns the last outward value instead of raising the failure again
+## native/src/codegen/fusion.rs
+<<<<
+        code.push((Inst::RawInt { dst: self.st, digits: FAILED.to_string() }, origin));
+====
+        code.push((Inst::RawInt { dst: self.st, digits: DONE.to_string() }, origin));
+>>>>
+
+@@ terminal-swapped a resume of a completed coroutine raises (the failure stub) and one of a failed coroutine returns the cached value
+## native/src/codegen/fusion.rs
+<<<<
+            code.push((Inst::Br { cond: c, then: back_to, otherwise: raise }, origin));
+====
+            code.push((Inst::Br { cond: c, then: raise, otherwise: back_to }, origin));
+>>>>
+
+@@ message-dropped a resume does not hand its message in: the yield evaluates to unit
+## native/src/codegen/fusion.rs
+<<<<
+                        body.push((Inst::Move { dst: b.msg, src: args[1] }, origin));
+====
+                        body.push((Inst::Unit { dst: b.msg }, origin));
+>>>>
+
+@@ done-inverted std::coroutine::done? of a fused coroutine is true while it is suspended (st > 0) instead of when it is terminal
+## native/src/codegen/fusion.rs
+<<<<
+                body.push((Inst::Op { dst: *dst, op: OpCode::RILt, args: vec![b.st, zero] }, origin));
+====
+                body.push((Inst::Op { dst: *dst, op: OpCode::RIGt, args: vec![b.st, zero] }, origin));
+>>>>
+
+@@ captures-confused every capture of the thunk reads the first captured value: the construction's later arguments are lost
+## native/src/codegen/fusion.rs
+<<<<
+                    let src = self.caps[*index as usize];
+====
+                    let src = self.caps[0];
+>>>>
+
+@@ tail-no-rebind an inlined self tail call jumps back without rebinding the parameters: the loop never advances
+## native/src/codegen/fusion.rs
+<<<<
+                    for (i, t) in temps.iter().enumerate() {
+                        self.emit(Inst::Move { dst: reg(i as Reg), src: *t }, origin);
+                    }
+                    self.emit(Inst::Jump(entry), origin);
+====
+                    let _ = temps;
+                    self.emit(Inst::Jump(entry), origin);
+>>>>
+
+@@ raw-parameter-not-unboxed a raw parameter of an inlined function's tagged ABI gets the tagged argument as it is (no unboxing)
+## native/src/codegen/fusion.rs
+<<<<
+                self.emit(Inst::Op { dst: p, op: OpCode::RUnbox, args: vec![*a] }, None);
+====
+                self.emit(Inst::Move { dst: p, src: *a }, None);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Scalar transport and what is left over
+
+@@ transport-escape-ignored a passed struct that some use needs as an object (a List, a call) is scalar-replaced anyway
+## native/src/codegen/fusion.rs
+<<<<
+            _ if defs.iter().chain(&uses).any(|r| class.contains(r)) => return 0,
+====
+            _ if defs.iter().any(|r| class.contains(r)) => return 0,
+>>>>
+
+@@ referenced-dropped the code of a function only a Block value refers to is dropped as unreferenced
+## native/src/codegen/fusion.rs
+<<<<
+                Inst::FnValue { func, .. } | Inst::Closure { func, .. } => Some(*func),
+====
+                Inst::FnValue { .. } | Inst::Closure { .. } => None,
+>>>>

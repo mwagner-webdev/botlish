@@ -468,6 +468,30 @@ proc native::clif {hir args} {
     return [join $lines \n]
 }
 
+# What coroutine fusion (native/src/codegen/fusion.rs,
+# COROUTINE-FUSION-MILESTONE-1.md) did with each construction site of the
+# program-mode HIR program HIR: a list of {fused FUNCTION ORIGIN FACTS} and
+# {kept FUNCTION ORIGIN REASON} (the driver's `fusion` report), in the
+# order the driver considered them; empty when fusion is off
+# (BOTLISH_NATIVE_COROUTINE_FUSION=0, or a host without native coroutines).
+proc native::fusion {hir args} {
+    set lines [Driver fusion [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [lmap line $lines {if {$line eq ""} continue; set line}]
+}
+
+# The NIR of the program-mode HIR program HIR after coroutine fusion: what
+# every native consumer compiles (the driver's `fused`).
+proc native::fusedNir {hir args} {
+    set lines [Driver fused [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [join $lines \n]
+}
+
 # The pre-regalloc Cranelift VCode of the program-mode HIR program HIR.
 proc native::vcode {hir args} {
     set lines [Driver vcode [nir $hir {*}$args]]

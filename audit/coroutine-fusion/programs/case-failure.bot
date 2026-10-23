@@ -1,0 +1,53 @@
+# case-failure.bot -- terminal failure with a payload: a failure in the construction or in a
+# segment crosses that construction or resume, handled there; every later
+# resume raises the cached failure again and runs no code; done? is true.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [[1, 6, 10, 7, 7, 1], [1, 6, -30, -300, -300, 1], [-2000, -20, -20, -200, -200, 1]]
+
+import std::coroutine
+
+error Broken:
+    at: int
+
+struct Msg:
+    v: int
+
+struct Ev:
+    v: int
+
+fn check(v: int) -> int errors Broken:
+    if v < 0:
+        fail Broken {at: v}
+    v
+
+fn worker(start: int, resume Msg) -> Ev errors Broken:
+    a = yield Ev {v: check(start)}
+    b = yield Ev {v: check(a.v) + 1}
+    c = yield Ev {v: check(b.v) + 1}
+    return Ev {v: check(c.v)}
+
+fn later(start: int, second: int) -> List[int]:
+    coroutine {step, first} = worker(start):
+        on Broken details:
+            Ev {v: details.at * 1000}
+    x = step(Msg {v: 5}):
+        on Broken details:
+            Ev {v: details.at * 10}
+    y = step(Msg {v: second}):
+        on Broken details:
+            Ev {v: details.at * 10}
+    z = step(Msg {v: 7}):
+        on Broken details:
+            Ev {v: details.at * 100}
+    again = step(Msg {v: 8}):
+        on Broken details:
+            Ev {v: details.at * 100}
+    d = std::coroutine::done?(step)
+    dn = if d:
+        1
+    else:
+        0
+    [first.v, x.v, y.v, z.v, again.v, dn]
+
+[later(1, 9), later(1, -3), later(-2, 9)]

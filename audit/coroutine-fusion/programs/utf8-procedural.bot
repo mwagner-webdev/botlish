@@ -1,0 +1,157 @@
+# utf8-procedural.bot -- utf8.bot's validator written by hand without a
+# coroutine (COROUTINE-FUSION-MILESTONE-1.md's procedural baseline): the
+# same verdicts over the same chunks, its state -- the continuation bytes
+# still needed and the range of the next one -- in a MutableArray, the way
+# a hand-written streaming decoder keeps it between chunks.
+#
+# expect: [1, 1, 0, -1, -1, -1]
+
+import std::mutable_array
+
+fn max_zero(n: int) -> int:
+    if n < 0:
+        return 0
+    n
+
+# The state: [verdict (1, 0 or -1), bytes still needed, the next byte's
+# low and high bound], updated in place for every byte of every chunk.
+fn validate(chunks: List[List[int]]) -> int:
+    state = std::mutable_array::create(4, 0)
+    state.set(0, 1)
+    loop chunk in chunks:
+        loop b in chunk:
+            need = state.at(1)
+            if state.at(0) == -1:
+                continue
+            if need == 0:
+                n = if b < 128:
+                    0
+                elif b >= 194 and b <= 223:
+                    1
+                elif b >= 224 and b <= 239:
+                    2
+                elif b >= 240 and b <= 244:
+                    3
+                else:
+                    -1
+                lo = if b == 224:
+                    160
+                elif b == 240:
+                    144
+                else:
+                    128
+                hi = if b == 237:
+                    159
+                elif b == 244:
+                    143
+                else:
+                    191
+                verdict = if n == -1:
+                    -1
+                elif n == 0:
+                    1
+                else:
+                    0
+                state.set(0, verdict)
+                state.set(1, n.max_zero())
+                state.set(2, lo)
+                state.set(3, hi)
+                continue
+            inside = b >= state.at(2) and b <= state.at(3)
+            verdict = if not inside:
+                -1
+            elif need == 1:
+                1
+            else:
+                0
+            state.set(0, verdict)
+            state.set(1, need - 1)
+            state.set(2, 128)
+            state.set(3, 191)
+    state.at(0)
+
+# The I-th byte of utf8.bot's benchmark input; validate_pattern is validate
+# over N bytes of it, the same state machine fed the same bytes.
+fn pattern(i: int) -> int:
+    k = i.mod(10)
+    if k == 0:
+        return 97
+    elif k == 1:
+        return 195
+    elif k == 2:
+        return 169
+    elif k == 3:
+        return 226
+    elif k == 4:
+        return 130
+    elif k == 5:
+        return 172
+    elif k == 6:
+        return 240
+    elif k == 7:
+        return 159
+    elif k == 8:
+        return 152
+    128
+
+fn validate_pattern(count: int) -> int:
+    state = std::mutable_array::create(4, 0)
+    state.set(0, 1)
+    loop i from 0 to count:
+        b = pattern(i)
+        need = state.at(1)
+        if state.at(0) == -1:
+            continue
+        if need == 0:
+            n = if b < 128:
+                0
+            elif b >= 194 and b <= 223:
+                1
+            elif b >= 224 and b <= 239:
+                2
+            elif b >= 240 and b <= 244:
+                3
+            else:
+                -1
+            lo = if b == 224:
+                160
+            elif b == 240:
+                144
+            else:
+                128
+            hi = if b == 237:
+                159
+            elif b == 244:
+                143
+            else:
+                191
+            verdict = if n == -1:
+                -1
+            elif n == 0:
+                1
+            else:
+                0
+            state.set(0, verdict)
+            state.set(1, n.max_zero())
+            state.set(2, lo)
+            state.set(3, hi)
+            continue
+        inside = b >= state.at(2) and b <= state.at(3)
+        verdict = if not inside:
+            -1
+        elif need == 1:
+            1
+        else:
+            0
+        state.set(0, verdict)
+        state.set(1, need - 1)
+        state.set(2, 128)
+        state.set(3, 191)
+    state.at(0)
+
+[validate([[104, 101], [108], [108, 111]]),
+ validate([[97, 195], [169, 226, 130], [172, 240], [159, 152], [128]]),
+ validate([[226], [130]]),
+ validate([[192, 128]]),
+ validate([[237, 160], [128]]),
+ validate([[226, 40, 161]])]

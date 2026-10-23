@@ -1,0 +1,82 @@
+# case-owners.bot -- ownership: moves keep one continuation (never restarted or duplicated,
+# each segment runs once); an abandoned suspended coroutine runs nothing
+# after its yield; early returns, breaks and continues leave it suspended.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [[1, 2, 3, 4, 4], [1, 1, 1, 1], [1, 2], [3, 2, 1, 1], [1, 1, 100, 1001]]
+
+import std::coroutine
+import std::mutable_array
+
+struct T:
+    n: int
+
+context struct Log:
+    a: MutableArray[int]
+
+fn count(i: int, context log: Log) -> int:
+    std::mutable_array::at(log.a, i):
+        on IndexNotFound:
+            -1
+
+fn bump(i: int, context log: Log) -> unit:
+    v = count(i) + 1
+    std::mutable_array::set(log.a, i, v):
+        on IndexNotFound:
+            unit
+    unit
+
+fn if_true(b: bool, v: int) -> int:
+    if b:
+        return v
+    0
+
+fn t() -> T:
+    bump(0)
+    yield T {n: 1}
+    bump(1)
+    yield T {n: 2}
+    bump(2)
+    yield T {n: 3}
+    bump(3)
+    return T {n: 4}
+
+# Moves: one continuation, never restarted or duplicated.
+fn moved() -> List[int]:
+    coroutine {step, first} = t()
+    a = step()
+    next = step
+    b = next()
+    third = next
+    c = third()
+    d = third()
+    [first.n, a.n, b.n, c.n, d.n]
+
+# Abandoned while suspended: nothing after its yield ever runs.
+fn abandoned(k: int) -> int:
+    coroutine {step, first} = t()
+    if k > 0:
+        return step().n
+    first.n
+
+# Early exits with the coroutine suspended.
+fn exits(k: int) -> int:
+    coroutine {step, first} = t()
+    xs = loop i from 0 to 4:
+        if i == k:
+            break
+        if i == 1:
+            continue
+        step().n
+    if k == 3:
+        return first.n * 100
+    std::coroutine::done?(step).if_true(1000) + first.n
+
+with context Log {a: std::mutable_array::create(4, 0)}
+m = moved()
+counts = [count(0), count(1), count(2), count(3)]
+x = abandoned(0)
+y = abandoned(1)
+after = [count(0), count(1), count(2), count(3)]
+e = [exits(0), exits(2), exits(3), exits(4)]
+[m, counts, [x, y], after, e]

@@ -1,0 +1,45 @@
+# case-gc.bot -- collection: the coroutine holds a growing MutableVector and Strings only
+# in its suspended frames, two deep, while its consumer allocates between
+# resumes (tests/coroutine-fusion.test runs it under GC stress).
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [6, [26, 26, 26, 26, 26, 26, 26, 26, 26, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 3003127]]
+
+import std::coroutine
+import std::mutable_vector
+import std::int
+import std::str
+import std::list
+import std::mutable_array
+
+# The coroutine keeps heap values -- a growing MutableVector of Strings, and
+# a String built before each yield -- only in its own suspended frames, at
+# two depths, while its consumer allocates between resumes.
+fn label(i: int) -> str:
+    std::str::concat("item-", i.to_string())
+
+fn deep(names: MutableVector[str], i: int) -> int:
+    text = label(i)
+    yield std::str::length(text)
+    std::str::length(std::str::concat(text, "!"))
+
+fn grow(n: int) -> int:
+    names = std::mutable_vector::from_list(["start"])
+    after = std::mutable_vector::from_list([0])
+    loop i from 0 to n:
+        names.push(label(i))
+        after.push(deep(names, i))
+    last = names.pop():
+        on IndexNotFound:
+            "none"
+    names.length() * 100000 + after.length() * 100 + std::str::length(last)
+
+fn drive(n: int) -> list:
+    coroutine {step, first} = grow(n)
+    rest = loop i from 0 to n:
+        noise = loop j from 0 to 20:
+            std::str::concat("noise-", j.to_string())
+        std::list::length(noise) + step()
+    [first, rest]
+
+drive(30)

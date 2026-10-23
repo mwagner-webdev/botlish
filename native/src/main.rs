@@ -23,6 +23,16 @@
 //!                                        BOTLISH_NATIVE_LINKER: rustc, the
 //!                                        default, or stub: codegen/aot.rs)
 //!   botlish-native check FILE.nir        parse and validate only
+//!   botlish-native fusion FILE.nir       what coroutine fusion did with each
+//!                                        construction site (codegen::fusion,
+//!                                        COROUTINE-FUSION-MILESTONE-1.md):
+//!                                        one Tcl list per site, `fused` with
+//!                                        what was inlined and eliminated, or
+//!                                        `kept` with the reason; empty when
+//!                                        fusion is off
+//!   botlish-native fused FILE.nir        the NIR the program is after fusion
+//!                                        (codegen::nirtext), what every other
+//!                                        command compiles
 //!   botlish-native target TRIPLE         how this driver reads a target
 //!                                        triple: architecture, operating
 //!                                        system, pointer width, object format,
@@ -309,7 +319,7 @@ fn extract_link_dirs(args: &[String]) -> Option<(Vec<String>, Vec<String>)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -348,7 +358,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object" | "executable", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check", [file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -358,13 +368,26 @@ fn cli(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let program = match nir::parse(&text) {
+    let mut program = match nir::parse(&text) {
         Ok(p) => p,
         Err(e) => {
             emit_error(&["NATIVE", "INVALID-NIR"], &e.to_string());
             return 0;
         }
     };
+    // Coroutine fusion (codegen::fusion, COROUTINE-FUSION-MILESTONE-1.md):
+    // every command sees the program code generation compiles.
+    let fusion = if codegen::fusion::enabled() { codegen::fusion::fuse(&mut program) } else { Vec::new() };
+    // BOTLISH_NATIVE_COROUTINE_FUSION_LOG=FILE appends the `fusion`
+    // command's report of every program the driver loads: a census of a
+    // whole test run (audit/coroutine-fusion/tools/census.tcl).
+    if let Ok(path) = std::env::var("BOTLISH_NATIVE_COROUTINE_FUSION_LOG") {
+        if !fusion.is_empty() {
+            if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                let _ = writeln!(log, "{}", codegen::fusion::report(&fusion));
+            }
+        }
+    }
     if matches!(command, "run" | "bench" | "batch" | "object" | "executable") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
@@ -377,6 +400,14 @@ fn cli(args: &[String]) -> i32 {
     match command {
         "check" => {
             emit("ok");
+            0
+        }
+        "fusion" => {
+            emit(&codegen::fusion::report(&fusion));
+            0
+        }
+        "fused" => {
+            emit(codegen::nirtext::program_text(&text, &program).trim_end());
             0
         }
         "roots" => {

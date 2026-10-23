@@ -194,7 +194,7 @@ fn is_safepoint(inst: &Inst) -> bool {
 /// use no register (their string operands are literals, not NIR values) and
 /// always end the block they are in, so they contribute nothing here beyond
 /// being a terminator with no successor (see `Cfg::build`).
-fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
+pub(crate) fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
     match inst {
         Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
         | Inst::ClearDeclaredError
@@ -408,7 +408,9 @@ struct Liveness {
     def_edges: Vec<(Reg, Reg)>,
 }
 
-fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
+/// Each block's LiveIn and LiveOut (one flag per register): ordinary
+/// backward "may" dataflow over CFG, iterated to its fixed point.
+fn block_liveness(f: &Function, cfg: &Cfg) -> (Vec<Vec<bool>>, Vec<Vec<bool>>) {
     let regs = f.regs as usize;
     let nb = cfg.blocks.len();
     let mut live_in: Vec<Vec<bool>> = vec![vec![false; regs]; nb];
@@ -462,6 +464,45 @@ fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
             break;
         }
     }
+    (live_in, live_out)
+}
+
+/// The registers live into and out of each instruction INDICES names (one
+/// flag per register, in the order given), by the CFG and the liveness the
+/// root plan itself uses: what the coroutine fusion pass (codegen::fusion)
+/// asks of a construction site and of a fused coroutine's dispatches.
+pub(crate) fn live_at_many(f: &Function, indices: &[usize]) -> Vec<(Vec<bool>, Vec<bool>)> {
+    let cfg = Cfg::build(f);
+    let (_, live_out) = block_liveness(f, &cfg);
+    let step = |live: &mut Vec<bool>, idx: usize| {
+        let (defs, uses) = def_use(&f.body[idx], f.params);
+        for d in &defs {
+            live[*d as usize] = false;
+        }
+        for u in &uses {
+            live[*u as usize] = true;
+        }
+    };
+    indices
+        .iter()
+        .map(|&index| {
+            let b = cfg.blocks.iter().position(|&(s, e)| s <= index && index < e).expect("an instruction of F");
+            let (_, e) = cfg.blocks[b];
+            let mut live = live_out[b].clone();
+            for idx in (index + 1..e).rev() {
+                step(&mut live, idx);
+            }
+            let out = live.clone();
+            step(&mut live, index);
+            (live, out)
+        })
+        .collect()
+}
+
+fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
+    let regs = f.regs as usize;
+    let nb = cfg.blocks.len();
+    let (_, live_out) = block_liveness(f, cfg);
 
     // A register defined only by `contextload` (CONTEXTS.md) holds a context
     // leaf: a tagged immediate (small Int, Bool, Unit, UnicodeChar) that is

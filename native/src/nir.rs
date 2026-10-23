@@ -404,6 +404,17 @@ pub enum OpCode {
     CoYield,
     CoDone,
     CoRelease,
+    /// `%f = op cofailed` (COROUTINE-FUSION-MILESTONE-1.md): a terminal,
+    /// failed coroutine object holding the pending error (taken from the
+    /// Vm exactly as a coroutine body's unhandled failure is: the error, its
+    /// declared id and its payload), which is cleared. Emitted only by the
+    /// coroutine fusion pass (codegen::fusion), where a fused coroutine's
+    /// segment fails: `coresume0 %f` then raises the cached failure again,
+    /// at the resume that ran the segment and at every later one, through
+    /// the general runtime's own stable-terminal-failure path
+    /// (runtime/coroutine.rs's `reraise`). Allocates (a safepoint), never
+    /// fails, never runs code and holds no stack.
+    CoFailed,
     /// C addresses (C-ABI-TYPES.md; runtime/value.rs's immediate C address
     /// word). `cptrnull`: the null pointer (a constant word). `cptrisnull
     /// %p`: Bool, %p is null (a word comparison; no memory is read).
@@ -925,6 +936,7 @@ op_spellings! {
     "ffifixturecopy" => FfiFixtureCopy,
     "ffifixturemixed" => FfiFixtureMixed,
     "corelease" => CoRelease,
+    "cofailed" => CoFailed,
     "affinedrop" => AffineDrop,
     "mvfromlist" => MvFromList,
     "mvlen" => MvLen,
@@ -1042,7 +1054,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew => None,
-            Argv | CPtrNull => Some(0),
+            Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
@@ -1367,6 +1379,7 @@ impl Inst {
     }
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub id: FuncId,
     pub name: String,
@@ -1804,6 +1817,11 @@ pub struct Program {
     /// bounds its Capture indices. Zero for a program with no module-static
     /// bindings.
     pub statics: u32,
+    /// The header's `call-effects` flag (default 1): whether call sites
+    /// take their callee's settled effect summary (`summarize_call_effects`).
+    /// Kept so a pass that rewrites functions (codegen::fusion) can settle
+    /// the summaries again (`resummarize`).
+    pub call_effects: bool,
 }
 
 #[derive(Debug)]
@@ -1956,6 +1974,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         statics: 0,
         context_bytes: 0,
         contexts: Vec::new(),
+        call_effects: true,
     };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
@@ -2058,9 +2077,18 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
     if current.is_some() {
         return p.err("missing end");
     }
+    program.call_effects = call_effects;
     validate(&program)?;
     summarize_call_effects(&mut program, call_effects);
     Ok(program)
+}
+
+/// Settles every function's effect summary and every call site's effects
+/// again, from the bodies as they now are: after a pass rewrote functions
+/// (codegen::fusion), exactly as `parse` settled them.
+pub fn resummarize(program: &mut Program) {
+    let enabled = program.call_effects;
+    summarize_call_effects(program, enabled);
 }
 
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
@@ -2781,8 +2809,19 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
     })
 }
 
-/// Structural checks, so code generation can assume well-formed input.
-fn validate(program: &Program) -> Result<(), NirError> {
+/// Structural checks, so code generation can assume well-formed input
+/// (`parse` runs them; a pass that rewrites a program runs them again).
+pub fn validate(program: &Program) -> Result<(), NirError> {
+    validate_selected(program, None)
+}
+
+/// `validate`'s checks of function INDEX alone (with the program-level
+/// ones): what a pass that rewrote that one function runs (codegen::fusion).
+pub fn validate_function(program: &Program, index: usize) -> Result<(), NirError> {
+    validate_selected(program, Some(index))
+}
+
+fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirError> {
     let fail = |message: String| Err(NirError { line: 0, message });
     for (i, f) in program.functions.iter().enumerate() {
         if f.id as usize != i {
@@ -2791,6 +2830,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
     }
     let func = |id: FuncId| program.functions.get(id as usize);
     for f in &program.functions {
+        if only.is_some_and(|i| i != f.id as usize) {
+            continue;
+        }
         let ctx = |m: String| format!("function {} ({}): {m}", f.id, f.name);
         if f.params > f.regs {
             return fail(ctx("params > regs".into()));
@@ -3234,7 +3276,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
             || program.functions[0].results != 1 {
         return fail("function 0 must be the program: no parameters, no environment, one result".into());
     }
-    validate_plans(program)
+    validate_plans(program, only)
 }
 
 /// The virtual-construction plan discipline (M8.a), checked structurally so
@@ -3266,9 +3308,12 @@ fn validate(program: &Program) -> Result<(), NirError> {
 /// span): every allowed use above consumes its register; a use of a
 /// register that may already have been consumed on some path reaching it
 /// is rejected; a (re)definition makes a register unconsumed again.
-fn validate_plans(program: &Program) -> Result<(), NirError> {
+fn validate_plans(program: &Program, only: Option<usize>) -> Result<(), NirError> {
     let fail = |message: String| Err(NirError { line: 0, message });
     for f in &program.functions {
+        if only.is_some_and(|i| i != f.id as usize) {
+            continue;
+        }
         let ctx = |m: String| format!("function {} ({}): {m}", f.id, f.name);
         let plan = &f.plan_regs;
         if f.id == 0 && f.plan_result {

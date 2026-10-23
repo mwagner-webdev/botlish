@@ -1,0 +1,33 @@
+# case-context.bot -- contexts: a context installed before the construction, read two calls
+# below the coroutine's root, fixed for every segment.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [0, [2, 4, 6, 200]]
+
+import std::coroutine
+
+context struct Mode:
+    double: bool
+
+fn scaled(n: int, context m: Mode) -> int:
+    if m.double:
+        return n * 2
+    n
+
+fn emit(n: int) -> unit:
+    yield scaled(n)
+    unit
+
+fn producer(n: int) -> int:
+    loop i from 0 to n:
+        emit(i)
+    return scaled(100)
+
+fn drive(n: int) -> list:
+    coroutine {step, first} = producer(n)
+    rest = loop i from 0 to n:
+        step()
+    [first, rest]
+
+with context Mode {double: true}
+drive(4)
