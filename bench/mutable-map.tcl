@@ -45,7 +45,8 @@
 #
 # Allocation accounting (-allocations 1): per size, the allocations of a
 # lookup, replacement, loop, mixed or churn run beyond its build's own, per
-# operation (three passes against one), from native::allocationReport.
+# operation (three passes against one), and of a build per insertion (three
+# builds against one), from native::allocationReport.
 # Rows (TSV) to stdout and -out:
 #
 #   keys n mode m reps best-us per-op-ns checksum
@@ -571,6 +572,12 @@ foreach kind [dict get $options -keys] {
                 set a1 [allocations $hir $number $n $m 1 {*}$p]
                 set a3 [allocations $hir $number $n $m 3 {*}$p]
                 row [list $kind $n $mode-allocations $m 2 [expr {$a3 - $a1}] [format %.4f [expr {($a3 - $a1) / double(2 * $m)}]] -]
+            }
+            if {[dict get $options -allocations] && $mode in {build presized set-build}} {
+                # Per insertion: three builds against one.
+                set a1 [allocations $hir $number $n $m 1 {*}$p]
+                set a3 [allocations $hir $number $n $m 3 {*}$p]
+                row [list $kind $n $mode-allocations $m 2 [expr {$a3 - $a1}] [format %.4f [expr {($a3 - $a1) / double(2 * $n)}]] -]
             }
         }
     }

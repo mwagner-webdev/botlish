@@ -748,7 +748,37 @@ follow-up (Limitations):
 * writing an Int's canonical input to SipHash in one call instead of three
   (an output-identical change: the same bytes) would shorten the hash.
 
-<!-- ALLOCATIONS -->
+### Allocations
+
+Managed-heap objects allocated natively (`native::allocationReport`,
+`bench/mutable-map.tcl -allocations 1`, 4096 entries, every key kind:
+`allocations.tsv`), per operation beyond the build's own:
+
+| operation | Int | String | struct | nested |
+|---|---:|---:|---:|---:|
+| `at` hit, `at` miss, `contains` hit and miss, replacing `set` | 0 | 0 | 0 | 0 |
+| MutableSet `contains` hit and miss | 0 | 0 | 0 | 0 |
+| a loop over the map (per loop, any length) | 1 | 1 | 1 | 1 |
+| mixed (80 % `at`, 10 % `set`, 10 % `remove`), per 10,000 operations | 0.5 | 0.55 | 0.55 | 0.7 |
+| churn, per 10,000 insertion-removal pairs | 4.9 | 5.0 | 5.0 | 5.1 |
+| a build, growing or presized, per table | 12 | 12 | 12 | 12 |
+
+* A lookup, a miss (handled) and a replacement allocate nothing; neither
+  does an iteration step. A loop's one object is the List it yields, as
+  for every loop: `loop e in m: continue` allocates one object over a map
+  of 1000 entries, as `loop x in xs: continue` does over a List (the
+  snapshot shares the map's vectors and allocates nothing).
+* A table is 12 objects whatever its size: the map and table structs, the
+  vectors' headers, the live count. Growth reallocates the vectors'
+  backings (amortized doubling inside each vector, which the report does
+  not count as objects) and allocates no new object; `with_capacity` sizes
+  the index in one filled array, and the entry vectors still grow by
+  doubling (MutableVector has no reserve: Limitations).
+* The few allocations of mixed and churn workloads are the rebuilds'
+  compaction counters (a one-cell MutableArray per compaction pass), one
+  rebuild per several thousand operations.
+
+<!-- BACKENDS -->
 
 ## Compiler changes
 
