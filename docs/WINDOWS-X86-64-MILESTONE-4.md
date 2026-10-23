@@ -714,7 +714,36 @@ the same run (338 s), every one by the Rust tests, as in milestone 3.
 
 ### 7.7 Linux and macOS
 
-⟨OTHER-HOSTS⟩
+The guard's contract is shared (`runtime/platform/mod.rs`), and the
+compiler change reads a predicate every host answers, so Linux and macOS
+were run in full:
+
+* **Linux x86-64.**
+  - Run [39944778138](https://github.com/mwagner-webdev/botlish/actions/runs/39944778138)
+    (eee16a5; `tests.yml`, dispatched): every job green. That is the Tcl
+    suite on interp and compile, its cranelift and cranelift-generic
+    coverage, the native Rust tests, the four golden shards, the
+    stub-linked executables, the warning gate and the method-filter audit.
+    Its GC-stress job runs on pushes to main only.
+  - Controlled experiments in this session's container:
+    - `tests/local.tcl` on 2bab253: ⟨LOCAL⟩;
+    - the stub linker's run of the executable tests;
+    - the GC-stress checks of section 7.5;
+    - the mutants of section 7.6.
+* **Linux AArch64.** Run
+  [39944781420](https://github.com/mwagner-webdev/botlish/actions/runs/39944781420)
+  (eee16a5, dispatched): every job green but the GC-stress job, which
+  section 7.5's defect held past four hours until it was cancelled.
+  ⟨ARM-RERUN⟩
+* **macOS AArch64.** Run
+  [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468)
+  (eee16a5, dispatched with the mutants): every job green. That is the
+  smoke job (native-status' new probes, aot-facts'
+  `standalone-runtime-overflow`, the Rust tests and the native stack
+  checks), both acceptance shards, the ubuntu control and Tier C's
+  mutants. On macOS, `c-access-violation` ends in the signal it always
+  did, as native-status records.
+  ⟨MAC-FULL⟩
 
 ### 7.8 The CI runs
 
