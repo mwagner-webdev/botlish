@@ -68,14 +68,15 @@ no HIR or Core IR node. Concretely:
   a static byte table (bytes and ascii) or the new general NIR `switch`
   (Cranelift's `br_table` or a balanced search), never a call. Against
   the prototype on the same machine (section 15) the recognizers' own
-  compile cost fell 3-5x at every stage -- a program using one recognizer
-  of the JSON module spends 0.38 s in the front end (1.5-1.6 s, plus the
+  compile cost fell at every stage -- a program using one recognizer of
+  the JSON module spends 0.38 s in the front end (1.5-1.6 s, plus the
   preprocessor), the lexer's native lowering takes 0.53-0.77 s (1.5 s), its
   fused driver compile 33-46 ms (144 ms), its machine code 19.4 KB (29.1
-  KB) -- while the fused code runs as fast: the JSON lexer at 14.1-14.5 ns
-  per character (13.3-14.1), the validator at 25.5-26.5 (26.4-27.3), and
-  json_number fed digits within 5% of the same recognizer written by
-  hand. The JSON workloads' whole front end stays near 4 s: its drivers
+  KB) -- while the fused code runs about as fast: the JSON lexer at
+  14.1-14.5 ns per character (13.3-14.1, 4% slower), the validator at
+  25.5-26.5 (26.4-27.3), the UTF-8 validator at 7.4-7.7 ns per byte
+  (7.8-8.2), and json_number fed digits within 5% of the same recognizer
+  written by hand. The JSON workloads' whole front end stays near 4 s: its drivers
   module, not its recognizers (about 20 ms), dominates it (section 17).
 * **Integration.** Modules (qualified and rooted names, imports, a module's
   rejected recognizer dependent at its users), diagnostic recovery, syntax
@@ -819,11 +820,261 @@ What the code shows:
 
 ## 15. Performance
 
-@@PERFORMANCE@@
+### Method
+
+`bench/dfa.tcl` measures this milestone; the exploration's own benchmark
+(`audit/dfa/tools/bench.tcl`) was run from a worktree of its final commit
+(e5286ad5) on the same machine with the same parameters (`-runs 3 -rounds
+3 -scale 1.0`). The reports are `audit/dfa/milestone-2/bench.md` and
+`bench-exploration.md`. A time is nanoseconds per input item (a character;
+a byte for the UTF-8 workloads), natively on cranelift: the best of three
+in-process runs, then the minimum and the median over three interleaved
+driver processes, at 2,000, 20,000 and 200,000 items.
+
+The machine is a shared container: minima repeat within about 5%, single
+medians can double (`dfa-lex/switch` at 2,000: 17.9 minimum, 27.8 median),
+and compile times of identical code vary by about 30% between runs
+(`dfa-lex` and `dfa-lex/table` compile the same program: lowering 772 and
+533 ms, the driver 45.5 and 33.2 ms). The tables below therefore give
+minima as ranges over the three sizes, and compile times as the range of
+the runs that compiled the same code. The `dfa-validate`, `yaml-tokens`
+and UTF-8 rows come from re-runs of those workloads alone on a quiet
+machine (another process shared it during their first run), as does
+`yaml-tokens/tree`; the front end of the same YAML or UTF-8 program
+measured 1,295 and 2,108 ms, 521 and 603 ms, in two runs.
+
+### Runtime, before and after
+
+Fused, nanoseconds per item (minimum over the three sizes):
+
+| workload | prototype | milestone 2 |
+|---|---:|---:|
+| JSON lexer (`dfa-lex`: json_lex.bot's tokens, counting) | 13.3-14.1 | 14.1-14.5 |
+| JSON validator (`dfa-validate`: the same with the structural layer) | 26.4-27.3 | 25.5-26.5 |
+| UTF-8 validator (`utf8-dfa`: utf8_text over bytes) | 7.8-8.2 | 7.4-7.7 |
+| hand-written UTF-8 coroutine / procedural (baselines) | 9.0-9.1 / 9.4-9.5 | 8.9-9.2 / 9.2-9.6 |
+| hand-written coroutine tokenizer (a subset of JSON; baseline) | 11.4-11.7 | 11.2-11.7 |
+| one recognizer fed digits (`dfa-micro`) / by hand (`hand-micro`) | -- | 4.0-4.1 / 3.8-3.9 |
+| YAML flow tokens (`yaml-tokens`, two symbols of lookahead) | -- | 22.1-22.7 |
+| the general runtime: JSON lexer | 323-337 | 333-342 |
+| recognizer from a factory (`dfa-lex-factory`, not fusible) | 310-326 | 310-329 |
+
+* **The count protocol costs no more than the Bool protocol did**, to
+  within the machine's noise, with one exception: the lexer is about 0.5
+  ns per character (4%) slower than the prototype, the validator about
+  1 ns (3%) faster. The lexer's difference is not attributed: the fused
+  code differs in the completion's encoding (`#run`'s result and the
+  driver's test of it) and in the driver's buffering, and it is not the
+  dispatch (the tree, the prototype's shape, is slower here; below). An
+  earlier state of this milestone measured 18.9-19.7 ns for the lexer,
+  32.2-33.4 for the validator and 9.8-10.1 for UTF-8 (20-40% slower than
+  the prototype); since then the range analysis proves every state number (`dfa#transition` declares a nonnegative
+  result: native lowering checks no state), a recognizer of one state
+  skips the state's part of the table index, and the JSON driver keeps
+  the current symbol instead of a ring buffer (its lookahead is 1).
+* **A declared recognizer runs like a hand-written one.** json_number,
+  constructed once and fed digits, takes 4.0-4.1 ns per symbol declared
+  and 3.8-3.9 written by hand as an ordinary coroutine (by_hand.bot, the
+  same protocol and the same cases) -- within 5%, while the declaration
+  states once what the hand-written one spreads over eight functions.
+* **Fused against general**: 22-25x for the lexer, 16x for the validator,
+  15x for YAML, 17-22x for UTF-8, as in the exploration. The declared UTF-8
+  validator stays the fastest of the three UTF-8 validators, as it was in
+  the exploration. The factory probe
+  stays about as slow as the general runtime: its handles leave the
+  function that makes them, so fusion keeps them (section 9).
+* **Allocations** (20,000 characters, fused): 2 for the lexer (5 before),
+  4 for the validator (7), 4 for YAML, 0 for the UTF-8 validator: the
+  drivers' own cursor and result, nothing per symbol.
+
+### The native dispatch, measured
+
+The same compact front end, each dispatch forced
+(`BOTLISH_NATIVE_DFA_DISPATCH`), the JSON lexer fused:
+
+| dispatch | ns per character (min) | machine code | driver compile ms |
+|---|---:|---:|---:|
+| table (the default for these recognizers) | 14.0-14.9 | 19,406 | 33-46 |
+| tree (nested comparisons) | 15.6-16.2 | 42,654 | 91 |
+| switch (NIR `switch`) | 17.6-18.8 | 31,166 | 53 |
+| the front end's decision trees (the exploration's shape) | 15.0-15.5 | 33,169 | 174 |
+
+YAML's recognizers are unicode with wide classes (ns-char reaches
+U+10FFFF), so their default is the switch; forced to the tree:
+
+| dispatch | ns per character (min) | machine code | driver compile ms |
+|---|---:|---:|---:|
+| switch (the default for these recognizers) | 22.1-22.7 | 32,196 | 67 |
+| tree | 22.7-23.6 | 74,972 | 201 |
+
+The table is the fastest and the smallest where it applies, so it is the
+default there (every row's intervals in -1..255). The switch is the
+default elsewhere: over wide Unicode classes it is a little faster than
+the tree, with less than half its machine code and a third of its driver
+compile. It is slower than the tree on the lexer's ASCII rows, where the
+table applies anyway; why (the switch's indirect jumps and searches
+against the tree's comparisons) was not profiled. The decision-tree lowering in the front end
+(the last row) is kept as an option only to measure: the same recognizers
+cost 6.1 s of front end against 3.7-4.0 s, 1.64-1.75 s of native lowering
+against 0.53-0.77 s, and 174 ms of driver compile against 33-46 ms.
+
+### Compile cost, before and after
+
+| measure | prototype | milestone 2 |
+|---|---:|---:|
+| a program using one recognizer of the JSON module: front end, cold / warm | 1,500-1,600 / 1,200 ms (plus the preprocessor) | 378 / 304 ms |
+| its NIR (table dispatch) | -- | 10.6 KB, 270 lines; lowering 112 ms, driver 5.9 ms |
+| UTF-8 validator program: front end | 2,666 ms | 521-603 ms |
+| native lowering: lexer / validator / UTF-8 | 1,499 / 2,128 / 526 ms | 533-772 / 1,146 / 167-169 ms |
+| driver compile, fused: lexer / validator / UTF-8 | 144 / 191 / 23 ms | 33-46 / 49 / 8-13 ms |
+| machine code, fused: lexer / validator / UTF-8 | 29.1 / 37.1 / 8.4 KB | 19.4 / 27.0 / 5.3 KB |
+| lexer workload: front end | 3,992 ms | 3,688-4,028 ms |
+| validator workload: front end | 4,241 ms | 3,643 ms |
+| the JSON module's source | 1,985 generated lines (from a 218-line `.dfa` file) | 219 lines |
+
+* **The recognizers' own cost fell at every stage**: about 4x in the front
+  end of a program that uses one recognizer (4-5x for the UTF-8 program),
+  2-3x in native lowering, 2-4x in the driver's compile with fusion, and
+  by a quarter to a third in machine code.
+* **The whole JSON workloads' front end did not fall much**, and that is
+  not the recognizers: checking and lowering every recognizer of
+  json_lex.bot takes about 20 ms. The drivers module (json.bot: four
+  drivers with explicit buffering, the structural layer, decoding) costs
+  two whole-program builds, one of them the method-call decision's
+  certificate build -- 2.45 s warm, against 1.41 s for the same module
+  written with function-call syntax (section 17). The imperative
+  tokenizer's front end moved from 779 to 912 ms between the two runs
+  with no change to it, which bounds what these front-end rows can
+  resolve.
 
 ## 16. Regressions
 
-@@REGRESSIONS@@
+### The test suite
+
+* **`tests/local.tcl`** (every Tcl test file on interp and compile, every
+  golden suite on all four backends through the front-end cache; 49
+  minutes with 4 jobs): **all 104 golden suites passed on every backend**
+  (5,090 tests on interp and on compile, 5,100 on cranelift, 4,998 on
+  cranelift-generic), and the Tcl test files passed 7,083 tests on interp
+  and 7,078 on compile, with **four files failing on both**: three
+  inventories that enumerate what exists -- the compiler service's query
+  indexes, the root natives, the String constants the front end
+  synthesizes -- and the warning gate's list of corpus programs, each
+  missing what this milestone added (below). Corrected, those files and
+  every other file whose code changed during the run passed again on both
+  backends: compiler-service, stdlib-namespaces, one-char-string-literal,
+  warning-gate, numeric-looking-names, dfa, dfa-workloads, hir-cache,
+  golden, golden-duplicates, syntax-recovery, lsp, main-cli, static-compile
+  and compilerpedia -- 596 tests on interp and 595 on compile, 0 failures.
+* **The new tests**: `tests/dfa.test` (85: the grammar, each of the 17
+  diagnostics with its location and related locations, independence and
+  dependence of diagnostics, the protocol on every backend, the model
+  comparison against tests/dfa-support.tcl's reference interpreter, modules
+  and HIR interchange, names that read as numbers, each native dispatch, fusion without allocation, the
+  compiler service) and `tests/dfa-workloads.test` (21: the JSON and YAML
+  workloads of sections 11 and 12, two of them against CPython). Their 106
+  tests are census rows of the golden migration (KEEP-PARSER,
+  KEEP-NOT-EXPRESSIBLE, KEEP-MULTI-PROGRAM, KEEP-INTERNAL: diagnostics'
+  locations, the service, native code and external oracles are nothing a
+  golden suite can state); the manifest is regenerated from them.
+* **Native**: `cargo test --release` (296 library tests and 85 driver tests, all
+  passing), six of them new
+  (codegen::clif's `switch_tests`: a dense switch through `br_table`, a
+  sparse one through a search, every probe against the intervals' own
+  answer, one case and none, unsigned table loads, and a switch over a
+  tagged register or with overlapping or unsorted cases refused by the
+  parser or the validator).
+* **Compilerpedia**: `tools/compilerpedia.tcl check` -- 809 topics, 606
+  examples, 0 problems.
+* **Warnings**: the examples are outside the warning gate's corpus, so
+  `dfa-lowering-warning-clean` and `dfa-workloads-warning-clean` compile
+  every module and program of examples/dfa under `-warnings error`.
+* **Retired with the prototype**: its four test files under
+  `audit/dfa/tests` (never part of tests/local.tcl) and their subjects;
+  what they covered is covered by the two files above.
+* **CI**: the macOS and Windows workflows run on every push of the branch
+  (their runs on the final commit were pending when this was written). Linux's `tests.yml` and `static-decisions.yml` run on pushes to
+  main (the front end changed, so static-decisions' batched-against-
+  sequential comparison runs then); no golden suite declares a
+  recognizer, so no static decision should move.
+
+### What the regression run found
+
+* **The compiler service's export of a revision** with its query indexes
+  (`cs-export-import-derived`) refused the recognizer name index the
+  service had computed: import accepted only the four kinds it knew. The
+  index is now a query index like the others -- `service::prepare`
+  computes it, `service::import` accepts it -- and tests/lsp.test, whose
+  worker returns revisions that way, passes.
+* **Three inventories** now list this milestone's additions: the internal
+  native `dfa#transition` (`ns-root-inventory`), the String constants a
+  recognizer's lowering builds, marked `synthesized`
+  (`oc-synthesized-string-consts-enumerated`; the warning's fuzzer, 40
+  seeds, finds no failure), and `stdlib/dfa.bot` in the warning gate's
+  corpus list (`audit/refactor/manifest.txt`: it compiles under
+  `-warnings error`).
+* **A real bug: names that read as numbers.** `numeric-looking-names.test`'s
+  source rule found five places where the checker selected a name with
+  `expr`'s `?:`. A state named `nan` failed the compilation with a domain
+  error and one named `inf` with `key "Inf" not known` -- reproduced, then
+  fixed with `if`; `dfa-protocol-names-read-as-numbers` runs a recognizer
+  named `inf` with states `nan` and `Infinity`, a class `NaN` and a callee
+  `infinity` on every backend and checks the diagnostics that name them.
+* **Mutation harnesses.** Every mutant whose text lies in a file this
+  milestone changed (328 edits across the harnesses) still applies but
+  one: the front-end cache key gained the recognizers' lowering, so
+  `key-ignores-scheduler` follows the key's new last line. A new mutant,
+  `key-ignores-dfa-lowering`, drops that input; `hc-key` now pins it and
+  kills both.
+* **The syntax-recovery fuzzer** damages the recognizer modules too (seeds
+  17 and 23 pass); its seed 1 found the pre-existing module-struct failure
+  of section 17.
+
+### The mistake census
+
+`audit/dfa/tools/mistakes.tcl` applies each of 35 mistakes alone to
+json_lex.bot and reports what catches it: the compiler (static), the
+differential run (tests: 318 JSONTestSuite files and 2,000 generated
+texts against CPython) or neither (`audit/dfa/milestone-2/mistakes.md`):
+
+| kind | mistakes | static | tests | survived |
+|---|---:|---:|---:|---:|
+| structure | 8 | 8 | | |
+| alphabet | 2 | 2 | | |
+| boundary (the end of the input) | 2 | 2 | | |
+| progress | 1 | 1 | | |
+| lookahead | 5 | 2 | 3 | |
+| grammar | 17 | | 15 | 2 |
+
+* **Every structural mistake is a compile-time error**, as in the
+  exploration (13 of 13), now with the declaration's location: ambiguity,
+  a forgotten end, an unreachable state, a misspelled target, a token that
+  never ends, a character where a byte is meant, a unicode callee of a
+  bytes recognizer, the end consumed, a dead call, a recursive call. The
+  exploration's reconsidering move (`=>`) is no longer syntax at all.
+* **Lookahead mistakes that break the bound are compile-time errors**
+  (`unread-beyond`: "0," leaving two unread, DFA-UNREAD-BEYOND-INPUT;
+  `call-lookahead`: a callee that can leave two unread under a state that
+  reconsiders one, DFA-CALL-LOOKAHEAD). Those that respect the bound are a
+  different language, and the differential run catches all three: a
+  number giving back its last digit (130 disagreements), a literal giving
+  back a symbol at the end (169), a string giving back its closing quote
+  (342).
+* **The two grammar mistakes that survive the differential** are the
+  exploration's two. `no-boundary` (a number or literal followed by
+  anything: `123abc` lexes as `123` and then fails at `a`) changes where
+  a document is rejected, never whether, so a document oracle cannot see
+  it; `dfa-json-boundaries` asserts where `123abc` fails (in json_number's
+  `integer`, at its fourth symbol), and with the mistake applied it fails,
+  as does `dfa-json-documents`, which pins where each document is
+  rejected. `utf8-lead-c0`
+  (C0 and C1 accepted as leads by utf8_char) is equivalent in this
+  program: both callers of utf8_char hand it only 0xC2..0xF4
+  (json_string_bytes, utf8_text), so no input reaches the mutated
+  transition. Applied alone it fails no test, rightly: it changes no
+  verdict of this program; a recognizer meant to be called on its own
+  would need conformance cases of its own (the model comparison holds the
+  compiled recognizer to its declaration, mistakes included).
 
 ## 17. Side findings
 

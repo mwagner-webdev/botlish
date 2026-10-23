@@ -136,6 +136,7 @@ program stdlib/binary.bot
 program stdlib/byte.bot
 program stdlib/compiler.bot
 program stdlib/darwin.bot
+program stdlib/dfa.bot
 program stdlib/float64.bot
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot
