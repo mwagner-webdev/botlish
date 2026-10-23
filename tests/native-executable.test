@@ -246,11 +246,13 @@ proc processOutcome {dir args} {
 # guard, a coroutine's on one with native coroutines too.
 
 # processOutcome of the executable PATH with ENVIRONMENT ({NAME VALUE ...})
-# set for it.
+# set for it (an empty VALUE unsets NAME).
 proc stackOutcome {dir environment path} {
     set saved [array get ::env]
     try {
-        foreach {name value} $environment { set ::env($name) $value }
+        foreach {name value} $environment {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) $value }
+        }
         return [processOutcome $dir $path]
     } finally {
         foreach {name value} $environment { unset -nocomplain ::env($name) }
@@ -270,7 +272,11 @@ test native-executable-stack-overflow {standalone exhaustion of the thread's sta
         lappend results [stackOutcome $dir {} $path]
         set nest "import std::mutable_array\n\nfn empty() -> List\[any\]:\n    \[\]\n\nfn nest(n: int) -> List\[any\]:\n    cell = std::mutable_array::create(1, empty())\n    loop i from 0 to n:\n        cell.set(0, \[cell.at(0)\])\n    cell.at(0)\n\nnest(1000000) == nest(1000000)\n"
         set path [native::executable [surface::compile $nest nest.bot] [file join $dir nest]]
-        lappend results [stackOutcome $dir {BOTLISH_NATIVE_STACK_BYTES 16777216} $path]
+        # Without GC stress whatever the suite's environment: under stress
+        # building the million Lists is quadratic (native-stack-overflow.test's
+        # ns-runtime-helper says how much), and the guard under GC stress is
+        # that file's ns-gc-stress-main's subject.
+        lappend results [stackOutcome $dir {BOTLISH_NATIVE_STACK_BYTES 16777216 BOTLISH_NATIVE_GC_STRESS {}} $path]
         set path [native::executable [surface::compile "${down}down(100000)" finite.bot] [file join $dir finite]]
         lappend results [stackOutcome $dir {} $path]
         join $results \n

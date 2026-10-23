@@ -147,7 +147,11 @@ test ns-main-with-suspended-coroutines {the thread's stack overflows while two c
 
 # A List nested DEPTH deep, built by a loop, compared with another: the
 # runtime's equality (Rust) recurses once per level, so the stack ends
-# inside the runtime, below the Botlish frames that called it.
+# inside the runtime, below the Botlish frames that called it. It runs
+# without GC stress whatever the suite's environment: under stress the
+# loop's every allocation would trace every List it has built (quadratic:
+# 2.7 s for 10,000 levels, 22 s for 30,000, hours for a million), and the
+# guard under GC stress is ns-gc-stress-main's subject, not this test's.
 set nest {import std::mutable_array
 fn empty() -> List[any]:
     []
@@ -160,7 +164,7 @@ nest(DEPTH) == nest(DEPTH)
 }
 
 test ns-runtime-helper {a 16 MiB thread stack exhausted inside a runtime helper (the equality of Lists nested a million deep) is NATIVE LIMIT STACK; a thousand levels return their value} -constraints nativeStackGuard -body {
-    withEnv {BOTLISH_NATIVE_STACK_BYTES 16777216} {
+    withEnv {BOTLISH_NATIVE_STACK_BYTES 16777216 BOTLISH_NATIVE_GC_STRESS {}} {
         list [nsBoth [string map {DEPTH 1000} $nest]] [nsBoth [string map {DEPTH 1000000} $nest]]
     }
 } -result [list [lrepeat 2 {value true}] [lrepeat 2 {NATIVE LIMIT STACK}]]
