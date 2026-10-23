@@ -258,7 +258,8 @@ impl Vm {
         // native frames hold the roots (where no guard reports an exhausted
         // stack, the stack pointer is checked instead: `stack_limit`).
         let mut shadow = if super::framewalk::NATIVE_FRAME_ROOTS { Vec::new() } else { vec![0u64; SHADOW_STACK_SLOTS] };
-        let native_stack = {
+        // Typed: on a host outside the list the block is a bare `None`.
+        let native_stack: Option<NativeStack> = {
             #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64")))]
             { Some(NativeStack::current().expect("the thread's stack bounds")) }
             #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64"))))]
