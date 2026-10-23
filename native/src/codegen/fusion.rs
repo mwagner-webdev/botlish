@@ -50,12 +50,17 @@
 //! Every start and resume of the coroutine gets its own *copy* of the
 //! template's code over those same registers (its labels renamed), placed
 //! after the function's code, whose every yield and completion jumps
-//! straight back to the code after that start or resume. Control flow stays
-//! exact: a segment returns only to the operation that ran it, as in the
-//! source, so liveness, root plans and the validator's dataflow (a
-//! collecting loop's private plan) see no path the program cannot take.
-//! The price is code size: a copy per start and resume (code reachable only
-//! from another operation's copy is dead in this one).
+//! straight back to the code after that start or resume. A segment returns
+//! only to the operation that ran it, as in the source, so liveness, root
+//! plans and the validator's dataflow (a collecting loop's private plan) see
+//! no path between operations the program cannot take. The price is code
+//! size: a copy per start and resume (code reachable only from another
+//! operation's copy is dead in this one). One imprecision remains, in each
+//! copy's dispatch, which the graph lets reach every continuation whatever
+//! `st` holds: a plan register some continuation reads is cleared where the
+//! template suspends at a yield whose continuation does not read it, and
+//! where it completes or fails (`clear_plans`), so no path the graph has
+//! consumes a plan twice.
 //!
 //! * `cocreate` sets `st` to 0 (and the handle register to unit);
 //! * `costart` jumps to its copy's entry; `coresume`/`coresume0` store the

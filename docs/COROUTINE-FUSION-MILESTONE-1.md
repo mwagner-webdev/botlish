@@ -94,7 +94,14 @@ baseline.
   scheduler, stored, returned) are not fused: the pass reasons within one
   function.
 * A recursive yielding function (a tree walk) is not fused: its suspended
-  frames are unboundedly many, which no fixed set of registers holds.
+  frames are unboundedly many, which no fixed set of registers holds. Nor
+  is a yielding closure called through its environment, or a yielding
+  function with several results (`callmulti`): the inliner handles neither
+  yet (section 7's census: 22 sites of the whole suite).
+* The pass's own cost grows faster than its sites: 0.2 to 0.7 ms for one,
+  12 to 13 ms for the tokenizer's three nested ones and the golden coroutine
+  suite's 56, because each site recomputes liveness over its whole,
+  growing function (section 12).
 * Fused code is larger: every start and resume gets its own copy of the
   coroutine's code (a precise control-flow graph, section 4.3). The
   generator's consumer grows from 640 to 2,279 bytes; whole programs by up
@@ -439,7 +446,9 @@ off: the oracle every test compares with.
   printed by codegen::nirtext (it reads back: `cf-fused-nir-reads-back`;
   `native::fusedNir`).
 * `BOTLISH_NATIVE_COROUTINE_FUSION_LOG=FILE` -- appends the report of every
-  program the driver loads: a census of a whole test run.
+  program the driver loads: a census of a whole test run, which
+  audit/coroutine-fusion/tools/census.tcl summarizes (`-run COMMAND` runs
+  the command with the log set).
 * audit/coroutine-fusion/tools/evidence.tcl -- the NIR before and after and
   the machine code of each workload's consumer (section 9).
 
@@ -623,7 +632,7 @@ over whole runs (every native compilation the run made):
 |---|---:|---:|---|
 | tests/coroutines.test | 194 | 13 | 12 a recursive `deep` helper, 1 a recursive `down` |
 | audit/coroutines/tools/fuzz.tcl, seeds 1, 3000, 7000 (300 programs) | 2,196 | 0 | -- |
-| the golden suites (every backend) | see section 8 | | |
+| the 65 test files that mention coroutines, every test, and the 104 golden suites on every backend (section 8) | 2,006 | 715 | 651 a handle that leaves its function, 40 a recursive yielding function, 22 a yielding closure or multi-result yielding call, 2 a handle register written otherwise |
 
 The fuzzer's generator never stores, passes or recursively yields a handle
 (COROUTINES.md point 52), so all of its sites are fusible; the coroutine
@@ -673,32 +682,96 @@ reaching a call kept, a recursive yielding function kept, the report's
 text) and the NIR printer's round trip (`nirtext`).
 
 **Mutation testing** (audit/coroutine-fusion/tools/mutate.tcl, mutants.txt):
-13 deliberate bugs of the pass, each applied to a private copy of the
+15 deliberate bugs of the pass, each applied to a private copy of the
 compiler and native backend, rebuilt, and run against the fusion pass's Rust
 tests, tests/coroutine-fusion.test, tests/coroutines.test and the coroutine
-fuzzer (25 programs, seed 11, five backends). **13 killed, 0 survived**:
+fuzzer (25 programs, seed 11, five backends). **15 killed, 0 survived**
+(18 min 40 s for the run):
 
 | mutant | what killed it |
 |---|---|
 | **escape-followed**: a handle reaching a call, field, List or return is fused anyway | `cf-fallbacks`, `cf-workloads-agree`; the Rust test of a handle reaching a call |
 | **recursion-unchecked**: a recursive yielding function is inlined (until the budget stops it) | `cf-fallbacks`; the Rust test of recursion |
 | **yield-state-lost**: a yield does not record where the coroutine is suspended | 51 tests; 17/25 fuzz programs; the Rust generator test |
-| **completion-not-cached**: the root's return does not mark the coroutine completed | 16 tests; 5/25 fuzz programs |
+| **completion-not-cached**: the root's return does not mark the coroutine completed | 16 tests; 5/25 fuzz programs; the Rust tests (a fused run aborts) |
 | **failure-not-cached**: a failure marks the coroutine completed, not failed | 7 tests (`co-errors-segment`, `co-errors-startup`, `co-context-portable-io`, ...); 2/25 fuzz programs |
-| **terminal-swapped**: a completed coroutine's resume raises, a failed one's returns | 23 tests; 7/25 fuzz programs |
+| **terminal-swapped**: a completed coroutine's resume raises, a failed one's returns | 23 tests; 7/25 fuzz programs; the Rust tests |
 | **message-dropped**: a resume does not hand its message in | 23 tests; 9/25 fuzz programs |
-| **done-inverted**: `done?` is true while suspended | 14 tests; 11/25 fuzz programs |
-| **captures-confused**: every capture reads the first captured value | `cf-gc-stress`, `cf-workloads-agree` |
+| **done-inverted**: `done?` is true while suspended | 14 tests; 11/25 fuzz programs; the Rust test of a plan across yields |
+| **captures-confused**: every capture reads the first captured value | `cf-cases-agree`, `cf-gc-stress`, `cf-workloads-agree` |
 | **tail-no-rebind**: an inlined self tail call does not rebind its parameters | `cf-cases-agree` (case-tail), `cf-gc-stress`, `co-effect-recursive` |
 | **raw-parameter-not-unboxed**: a raw parameter of the tagged ABI gets the tagged argument | `cf-cases-fused` -- the rewrite no longer validates, so the site silently keeps the general runtime (the safety net of 4.7), and only the test that pins fusion notices |
+| **plans-not-cleared**: no plan is cleared where the coroutine suspends elsewhere or completes (4.5) | `cf-cases-fused` (case-plan falls back, as the golden suites' sites did); the Rust test of a plan across yields |
+| **plans-cleared-at-own-continuation**: plan liveness stops at the next yield, so a plan read after the second of two yields is cleared at the first | `cf-cases-agree`, `cf-gc-stress` (the run fails in the List construction); the Rust test of a plan across yields |
 | **transport-escape-ignored**: a passed struct some use needs as an object is scalar-replaced anyway | 6 tests (`cf-scalar-transport-escapes`, `co-terminal-identity`, ...); 18/25 fuzz programs |
 | **referenced-dropped**: a function only a Block value refers to loses its code | `cf-workloads-agree` |
 
 The fuzzer alone misses the mutants of constructs it never generates
 (handles that escape, recursive or tail-calling yielding functions, multiple
-captures, raw parameters, closures); a focused test kills each.
+captures, raw parameters, closures, collecting loops across yields); a
+focused test kills each.
 
-REGRESSION-PLACEHOLDER
+**The whole suite.** `tclsh9.0 tests/local.tcl` (every Tcl test file on
+interp and compile, golden duplicates skipped, and every golden suite on the
+four backends), with the fusion census logged: on its first run with fusion
+on by default, 528 of 542 files and suites passed. The 14 failures, in 7
+files, were all this milestone's, and are fixed:
+
+| failure | cause | fix |
+|---|---|---|
+| none (12 sites kept: "does not validate") | the dispatch's edge to every continuation: a collecting loop's plan consumed before completion, consumed again on a path only the graph has (4.3) | `clear_plans` (4.5), case-plan.bot, a Rust test, two mutants |
+| c-ffi-error-capture.test: 3 machine-code window tests | they looked for a coroutine producer's C call in the producer's own function; fused, that function has no code and the call is in the consumer | `ecHolders` checks the window where the call is: in the fused consumer, each copy's window from the C call to errno() has no allocation or helper, as the property requires |
+| affine.test's bounded fuzzer run, golden-framework.test (2), structural-contract-completions.test, higher-order-completions.test | they count the general runtime's coroutine objects, stacks and releases, which a fused coroutine does not have | the counts are taken with fusion off (`withoutCoroutineFusion`), the values still compared fused; the affine, mutable-array and mutable-vector fuzzers likewise, and the affine fuzzer runs cranelift-unfused too |
+| native-stack-overflow.test's `ns-co-edge` | it bisects the edge of a coroutine's own 8 MiB stack; fused, the coroutine runs on the thread's stack (3.2) | the coroutine-stack tests run on the general runtime; `ns-co-fused` shows the fused overflow is the thread stack's NATIVE LIMIT STACK |
+| coroutine-fusion.test's `cf-cases-fused` | case-plan.bot, added mid-run, run by the driver without the fix | passes with the fix |
+
+Then, with the fixes, the 65 test files that mention coroutines run with
+every test (`tests/local.tcl -all 1`: the golden duplicates included, as CI
+runs them) on interp and compile, and all 104 golden suites on the four
+backends: **7,417 tests passed, 0 failed** (81 skipped by host constraints),
+and the golden suites' 5,090 (interp, compile), 4,998 (cranelift-generic)
+and 5,100 (cranelift) tests all passed. Its census: 2,006 sites fused (1,195
+with scalar transport), 715 kept, none for a fused function that did not
+validate. The kept ones, grouped:
+
+| reason | sites |
+|---|---:|
+| the handle leaves its function: returned (`ret`, `retmulti`) | 352 |
+| passed to a call (`call`, `callmulti`) | 186 |
+| stored: a List (`listnew`), a struct (`structnew`), a MutableVector (`mvpush`, `mvswapdrop`), an error payload (`faildeclared`) | 113 |
+| a recursive yielding function (`deep`, `leaves`, `down`) | 40 |
+| a yielding closure (`callenv`) or a multi-result yielding call (`callmulti`) | 22 |
+| a handle register also written by a move of something else | 2 |
+
+These are the test suite's own programs, which exercise exactly the forms
+that move a handle around (ownership, payloads, collections); the workloads
+and the coroutine fuzzer's programs keep none.
+
+With the final driver, also:
+
+* **Rust**: `cargo test --release --manifest-path native/Cargo.toml`, 375
+  tests (296 of the library, 79 of the driver), passing, and again under
+  `BOTLISH_NATIVE_GC_STRESS=1`.
+* **GC stress**: tests/coroutines.test (81/81) and
+  tests/coroutine-fusion.test (17/17) under `BOTLISH_NATIVE_GC_STRESS=1`.
+* **The coroutine fuzzer**, seeds 1, 3000 and 7000: the numbers above (178
+  accepted, 0 disagreements, 2,196 sites fused, none kept).
+* **The coroutine milestone's native mutants**
+  (audit/coroutines/tools/mutate.tcl, its 13 mutants of the runtime and
+  of native lowering's releases): 13 killed. Fusion did not hide them: the
+  general runtime still runs every program of tests/coroutines.test
+  (cranelift-unfused), and the tests of its stacks and releases run with
+  fusion off.
+* `tools/compilerpedia.tcl check`: 785 topics, 588 examples, 0 problems.
+
+Not run here: the static-decision comparison (CI's, never local, per
+AGENTS.md; fusion runs in the driver after every static decision, so it
+cannot move one), the Linux AArch64 and macOS workflows (the pass is
+target-independent NIR, but only those hosts run its code on AArch64), and
+Windows (fusion is off there, 3.4). The first whole-suite run's other files
+passed with fusion on; the fix after it changes only sites whose plans live
+across a yield (the workloads' fused NIR is byte-identical before and after
+it).
 
 ## 9. Native evidence
 
@@ -950,7 +1023,49 @@ What the numbers say:
 
 ## 12. Compiler costs
 
-COMPILE-PLACEHOLDER
+Fusion runs in the driver, after native lowering: the front end and
+native lowering (Tcl) do the same work with it on or off (section 10's
+"lower ms" columns differ by noise). What it adds is the pass itself and
+Cranelift's work on the code it copies. Per program, the driver's NIR before
+and after fusion, the sites, and the driver's wall time (best of 15
+process runs, start-up included) for `check`
+(parse, validate, fuse) and `size` (that plus Cranelift for every function),
+fusion off and on, and the machine code it produces:
+
+| program | NIR lines | fused NIR lines | fused | kept | check off ms | check on ms | size off ms | size on ms | code off | code on |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lcg | 154 | 369 | 1 | 0 | 2.09 | 2.36 | 4.62 | 5.88 | 1,530 | 2,572 |
+| lcg-struct | 158 | 373 | 1 | 0 | 1.81 | 2.20 | 4.54 | 5.73 | 1,620 | 2,572 |
+| grid | 175 | 442 | 1 | 0 | 1.79 | 2.23 | 4.38 | 5.83 | 1,425 | 1,889 |
+| tokens | 777 | 1,496 | 3 | 0 | 2.10 | 13.77 | 9.42 | 24.76 | 6,763 | 6,672 |
+| utf8 (a literal input) | 396 | 854 | 1 | 0 | 1.90 | 3.81 | 7.19 | 11.30 | 5,766 | 6,524 |
+| held | 68 | 156 | 1 | 0 | 1.88 | 2.07 | 4.28 | 4.43 | 1,212 | 1,166 |
+| fallbacks | 301 | 1,076 | 3 | 6 | 2.17 | 2.84 | 9.56 | 13.01 | 6,333 | 8,150 |
+| tests/golden/coroutines.bot | 6,111 | 13,604 | 56 | 3 | 6.47 | 19.56 | 94.20 | 119.78 | 101,516 | 96,092 |
+
+* **The pass.** On a program with one site it costs 0.2 to 0.7 ms. It is
+  not linear in the sites: the tokenizer's three (a source and two
+  recognizers, nested) take 11.7 ms, the golden coroutine suite's 56 take
+  13.1 ms. Each site recomputes liveness over its whole function, which
+  grows with every site fused in it (a function with several sites is
+  rewritten, validated and analyzed once per site), and nested fusion
+  copies the inner coroutine into every copy of the outer one. Liveness
+  over the template's registers only, or one liveness per function for all
+  its sites, would bring this down; it is not yet a problem at these sizes.
+* **Cranelift.** The rest of the difference is code generation of the
+  copies: 1.2 to 1.5 ms more per single-site program, 15 ms more for the
+  tokenizer, 25.6 ms (27%) more for the golden coroutine suite.
+* **Code.** NIR grows by 1.9 to 3.6 times in the fused functions' programs
+  (the copies); machine code grows less, because Cranelift drops each
+  copy's unreachable part and fusion drops the producers' own functions:
+  the golden coroutine suite's machine code *shrinks*, from 101,516 to
+  96,092 bytes, and so do tokens' and held's (section 10).
+* **Budgets.** A template is at most 20,000 inlined instructions
+  (`INLINE_LIMIT`), its copies at most 100,000 (`COPY_LIMIT`), a fused
+  function at most 200,000 (`FUNCTION_LIMIT`), and a function holds at
+  most 64 fused coroutines (`SITES_PER_FUNCTION`); past any of them the
+  site keeps the general runtime, with the reason. No program of the test
+  suite reaches one.
 
 ## 13. Future architecture
 
@@ -987,7 +1102,14 @@ COMPILE-PLACEHOLDER
 * **Dispatch.** A resume compares `st` against each yield in turn. With many
   yields, a jump table (a NIR `switch`, Cranelift's `br_table`) or jump
   threading where `st` is statically known at a resume (after the first
-  yield of a loop with one yield, it always is) would remove it.
+  yield of a loop with one yield, it always is) would remove it. The same
+  knowledge would remove the dispatch's infeasible edges, and with them the
+  plan clearing (4.5) and the longer rooting of values another continuation
+  reads (section 11).
+* **The pass's own cost.** Each site recomputes liveness over its whole
+  function, which grows with every site fused in it (section 12). One
+  liveness of the template's registers per site, or one per function for
+  all its sites, would make the pass linear in the code it writes.
 * **Hosts.** On Windows, fusion would let fused coroutines run where the
   general runtime cannot yet; a later milestone can decide to accept that
   difference (or to finish the Windows stack switch first).
@@ -1032,7 +1154,7 @@ the reason it was proposed.**
 
 | file | what |
 |---|---|
-| native/src/codegen/fusion.rs | the pass: recognition, the template, the copies, scalar transport, dead-code removal, the report; its Rust tests |
+| native/src/codegen/fusion.rs | the pass: recognition, the template, plan clearing, the copies, scalar transport, dead-code removal, the report; its Rust tests |
 | native/src/codegen/nirtext.rs | NIR text from a parsed program (`fused`), with a round-trip test |
 | native/src/codegen/roots.rs | `def_use` and `live_at_many` shared with the pass (`block_liveness` factored out of the root analysis) |
 | native/src/nir.rs | `cofailed`; `validate_function`, `resummarize`, the header's `call_effects` kept; `Function: Clone` |
@@ -1043,9 +1165,14 @@ the reason it was proposed.**
 | tests/helpers.tcl | the `cranelift-unfused` backend, `withoutCoroutineFusion` |
 | tests/coroutine-fusion.test | this milestone's tests |
 | tests/coroutines.test | `coAgree` on five backends; the runtime's resource tests pinned to the general runtime; `cofailed` in the source audit |
-| audit/coroutine-fusion/programs/ | the workloads, their procedural baselines, the correctness cases, the fallbacks |
+| audit/coroutine-fusion/programs/ | the workloads, their procedural baselines, the correctness cases (case-plan.bot among them), the fallbacks |
 | audit/coroutine-fusion/tools/evidence.tcl, evidence/ | the native evidence |
+| audit/coroutine-fusion/tools/census.tcl | what fusion did over a whole run, from `BOTLISH_NATIVE_COROUTINE_FUSION_LOG` (sections 7, 8) |
 | audit/coroutine-fusion/tools/mutate.tcl, mutants.txt | mutation testing of the pass |
 | audit/coroutines/tools/fuzz.tcl | cranelift-unfused among its default backends |
+| audit/affine/tools/fuzz.tcl, audit/mutable-array/tools/fuzz.tcl, audit/mutable-vector/tools/fuzz.tcl | the general runtime's release counters read with fusion off; cranelift-unfused among the affine fuzzer's backends |
+| tests/c-ffi-error-capture.test | `ecHolders`: a fused producer's C-call windows checked in its consumer |
+| tests/golden-framework.test, tests/structural-contract-completions.test, tests/higher-order-completions.test | the general runtime's coroutine counters read with fusion off |
+| tests/native-stack-overflow.test | the coroutine-stack tests on the general runtime; `ns-co-fused` |
 | bench/coroutine-fusion.tcl | the performance report |
 | bench/coroutines.tcl | pinned to the general runtime |
