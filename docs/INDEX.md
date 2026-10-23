@@ -137,7 +137,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [STATIC-COMPILE.md](STATIC-COMPILE.md) -- `static compile:`: compiler diagnostics as recoverable values
 - [STATIC-DECISION-ECONOMICS.md](STATIC-DECISION-ECONOMICS.md) -- how many builds deciding static blocks takes
-- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind: fewer trial builds, the same decisions
+- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind and named-struct declaration: fewer trial builds, the same decisions
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals

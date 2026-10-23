@@ -51,7 +51,11 @@ its own tests and mutants:
 
 and one correction: `==` refused inside an opaque struct names the opaque
 values, never their representation (a map's index would otherwise show the
-hidden hash's placement in an error message).
+hidden hash's placement in an error message). A follow-up taught the
+method-call kind filter to tell two named structs apart by their
+declarations, so `m.length()` and `s.length()` in a program importing both
+collections take no more builds than the same calls written qualified
+(Compiler changes, item 6).
 
 The evidence: six Tcl test files (107 tests, also under GC stress) and
 four golden suites (90 cases, every backend), an independent Python model,
@@ -1021,6 +1025,29 @@ proofs", "Opaque equality refusals").
    standard-library module no program may import, as an intrinsic namespace
    can already be internal (`std::table_hash`). `std::ordered_table` is the
    first.
+6. **Nominal exclusion in the method-call kind filter** (a follow-up,
+   METHOD-DECISION-FILTER.md). `m.length()` in a program that imports both
+   collections has two candidates of the one kind `struct`, which the kind
+   filter could not tell apart: such a program got the exact decision's
+   whole-program trial builds (the three golden suites of this milestone,
+   written as one suite importing both, took 45 builds and a 173 s front end
+   against 47 s split by imports). The filter now also rules out a module
+   function whose declared first parameter is a named struct of another
+   declaration than the receiver's named struct
+   (`hir::methodfilter::NominalMismatch`): named structs are nominal, so the
+   ordinary call is a TYPE error. Only the declaration is compared (never the
+   type arguments), only a declared parameter (never an inferred contract),
+   only for a named-struct receiver. A small program that calls `length` on
+   a map and a set: 9 builds (6 method trials) before, 3 after -- the same 3
+   as the program written with qualified calls -- 3.0 s to 1.0 s. Evidence: 5
+   Tcl tests (`mf-excluded-by-nominal-identity`, `mf-nominal-*`), 5 mutants
+   (the rule dropped, type arguments compared, the same declaration
+   excluded, an inferred contract trusted, a receiver that is no named
+   struct), the method-filter fuzzer extended to named-struct, MutableMap
+   and MutableSet receivers (60 seeds, 0 disagreements). Extending the
+   fuzzer also found a defect of the exact decision that predates this
+   milestone (METHOD-DECISION-FILTER.md, "A defect of the exact decision"),
+   left as it is.
 
 ## Regression and CI
 
@@ -1086,22 +1113,6 @@ CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
 
 Deliberate omissions, and costs measured but not fixed:
 
-* **Method syntax with both collections imported.** `m.length()` in a
-  program that imports std::mutable_map *and* std::mutable_set has two
-  candidates of one kind (`struct`), which the method-call kind filter
-  (METHOD-DECISION-FILTER.md) may not tell apart: it excludes by the plain
-  value kinds only, never by a type's name (AGENTS.md). Such a program gets
-  the exact decision's whole-program trial builds. The cost is real: the
-  three golden suites of this milestone, written as one suite importing
-  both, took 45 builds (40 method trials) and a 173 s front end; split by
-  imports (a call both modules define written qualified in the one suite
-  that needs both), 47 s for the same 47 cases. A small program importing
-  both compiles in 2.2 s with method calls against 0.9 s without (7 builds
-  against 3). The fix is a general one -- exclude a candidate whose first
-  parameter is a different nominal struct than the receiver's -- and needs
-  a design decision on that AGENTS.md rule, so it is a follow-up, not part
-  of this milestone. Until then: import the collection a program uses, or
-  write the shared names qualified.
 * **No get-with-default and no update-in-place.** A lookup of a key that
   may be absent is `at` with a handler, and incrementing a value is `at`
   then `set` (two probes, two keyed hashes). An `update` or `entry` API is

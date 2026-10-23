@@ -2850,10 +2850,16 @@ outcome. Keep it so:
 * The filter *excludes*, it never *accepts*. A candidate is excluded only when
   the ordinary call is provably invalid by kind (a native's first parameter,
   a module function's declared or inferred first-parameter contract, the plain
-  value kinds only); that a survivor is valid is the certificate's job (a
-  build with no problem in the call), never an inference. Never exclude a
-  lexical name, never exclude by a domain, a refinement or a type's name, and
-  never decide a call with several survivors (no precedence, ever).
+  value kinds only) or by a named struct's declaration (a module function
+  whose *declared* first parameter is a named struct of another declaration
+  than the receiver's named struct: named structs are nominal,
+  `hir::types::subtype`; `NominalMismatch`); that a survivor is valid is the
+  certificate's job (a build with no problem in the call), never an
+  inference. Never exclude a lexical name, never exclude by a domain or a
+  refinement, by a struct's type arguments, by an inferred contract's struct
+  or by a type's spelling (a declaration identity is the type, never matched
+  as text), and never decide a call with several survivors (no precedence,
+  ever).
 * One statement of each rule. The native receiver rule is
   `hir::methodfilter::NativeMismatch`, which `hir::MethodCallProblems` also
   asks; a second copy of it, a restated admission rule, or a table of
@@ -2868,7 +2874,8 @@ outcome. Keep it so:
 
 If you change `hir/methodfilter.tcl`, `hir::DecideMethodCalls`,
 `hir::MethodCallProblems`, `hir::resolve::MethodCandidates`, the contracts
-`hir/signatures.tcl` records on a first parameter, or `hir::types::kindOf`, run
+`hir/signatures.tcl` records on a first parameter, `hir::types::kindOf`, or
+when a struct type is a subtype of a named one (`hir::types::subtype`), run
 `tests/method-filter.test`, `tests/static-economics.test`,
 `tests/static-compile.test`, `tests/method-sugar.test`,
 `audit/method-filter/tools/fuzz.tcl` (several seeds) and

@@ -21,6 +21,14 @@
 #               lists and through the values they return, so that one call's
 #               receiver is another call's result and, in the narrowing form,
 #               the same binding is a receiver after an earlier call;
+#   structs     receivers of named structs (typed parameters, locals bound to
+#               constructions, constructions, fields), from three modules of a
+#               private library: two Box declarations with the same fields,
+#               applications of a Pair[A, B] (imprinted and concrete
+#               parameters over it), a Cell[T]; and MutableMap and MutableSet
+#               receivers; calls of size, weight, tag (untyped in one module:
+#               an inferred contract) and peek, which the modules declare
+#               over different structs, and length;
 #   shape       one to three functions, two to five statements each, which
 #               call one another.
 #
@@ -61,6 +69,32 @@ while {[llength $args] >= 2} {
         default { puts stderr "unknown option [lindex $args 0]"; exit 2 }
     }
     set args [lrange $args 2 end]
+}
+
+# The private library: a copy of the standard library beside three modules
+# whose functions take named structs (removed at the end). None defines a
+# function named like a method of the other receivers (length, at, get): a
+# struct-parameter `length` beside std::list::length makes the exact
+# decision reject `xs.at(0).length()`, whose outer call, standing at that
+# candidate in a trial, rejects the inner call's result at the inner call's
+# own node, which hir::MethodCallProblems counts as the inner call's problem
+# (a defect of the exact decision, not of the filter, which decides the
+# chain correctly: METHOD-DECISION-FILTER.md, "A defect of the exact
+# decision").
+set library [file tempdir botlish-method-filter-fuzz]
+foreach entry [glob -nocomplain -directory $::core::libraryDir *] {
+    file copy -force $entry $library
+}
+set ::core::libraryDir $library
+foreach {name text} {
+    fza "struct Box:\n    v: int\n\nstruct Pair\[A, B\]:\n    a: A\n    b: B\n\nfn size(b: Box) -> int:\n    b.v\n\nfn weight(p: Pair\[A, B\]) -> int:\n    1\n\nfn tag(x) -> int:\n    size(x)\n\nfn peek(b: Box, k: int) -> int:\n    b.v + k\n"
+    fzb "import std::fza\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn weight(p: std::fza::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n\nfn peek(c: Cell\[T\], k: int) -> int:\n    k\n"
+    fzc "import std::fzb\n\nfn size(c: std::fzb::Cell\[T\]) -> int:\n    3\n"
+} {
+    set f [open [file join $library $name.bot] w]
+    fconfigure $f -encoding utf-8
+    puts -nonewline $f [subst -nocommands -novariables $text]
+    close $f
 }
 
 proc pick {list} { lindex $list [expr {int(rand() * [llength $list])}] }
@@ -230,6 +264,74 @@ proc untypedText {form} {
     }
 }
 
+# Named-struct receivers: tag -> {type text, a construction}. COLLECTIONS adds
+# MutableMap and MutableSet ones.
+set nominalReceivers {
+    abox {{std::fza::Box} {std::fza::Box {v: 2}}}
+    bbox {{std::fzb::Box} {std::fzb::Box {v: 3}}}
+    pairis {{std::fza::Pair[int, str]} {std::fza::Pair[int, str] {a: 1, b: "x"}}}
+    pairii {{std::fza::Pair[int, int]} {std::fza::Pair[int, int] {a: 1, b: 2}}}
+    pairbox {{std::fza::Pair[std::fzb::Box, int]} {std::fza::Pair[std::fzb::Box, int] {a: std::fzb::Box {v: 4}, b: 5}}}
+    cell {{std::fzb::Cell[int]} {std::fzb::Cell[int] {t: 6}}}
+}
+set collectionReceivers {
+    map {{std::mutable_map::MutableMap[int, int]} {std::mutable_map::create[int, int]()}}
+    set {{std::mutable_set::MutableSet[int]} {std::mutable_set::create[int]()}}
+}
+
+# Receiver tag -> the calls some candidate fits (the others fit none: a
+# function made only of those is rejected, so they are drawn less often).
+set nominalCalls {
+    abox {size() tag() peek(1)} bbox {size() tag()} pairis weight() pairii weight()
+    pairbox weight() cell {peek(1) size()} map length() set length()
+}
+
+# A function of method calls on named-struct receivers: {TEXT ARGS}, ARGS
+# the constructions its parameters are called with.
+proc nominalText {name collections} {
+    set receivers $::nominalReceivers
+    if {$collections} {
+        set receivers [dict merge $receivers $::collectionReceivers]
+    }
+    set params {}
+    set args {}
+    set body {}
+    set terms {}
+    set n [expr {2 + int(rand() * 4)}]
+    for {set i 0} {$i < $n} {incr i} {
+        set tag [pick [dict keys $receivers]]
+        lassign [dict get $receivers $tag] type construction
+        switch -- [pick {param param local inline field}] {
+            param {
+                lappend params "r$i: $type"
+                lappend args $construction
+                set recv r$i
+            }
+            local {
+                lappend body "    r$i = $construction"
+                set recv r$i
+            }
+            inline {
+                set recv $construction
+            }
+            field {
+                lassign [dict get $receivers pairbox] - pairbox
+                set recv "${pairbox}.a"
+                set tag bbox
+            }
+        }
+        if {[chance 0.85]} {
+            set call [pick [dict get $::nominalCalls $tag]]
+        } else {
+            set call [pick {size() weight() tag() peek(1) length()}]
+        }
+        lappend body "    c$i = ${recv}.$call"
+        lappend terms c$i
+    }
+    lappend body "    [join $terms { + }]"
+    return [list "fn ${name}([join $params {, }]) -> int:\n[join $body \n]\n" $args]
+}
+
 proc program {} {
     set fns {}
     set callable {}
@@ -253,9 +355,17 @@ proc program {} {
         lappend fns $ctext
         set chain [list $cargs $chandled]
     }
+    set nominal ""
+    set collections 0
+    if {[chance 0.5]} {
+        set collections [chance 0.3]
+        lassign [nominalText nm $collections] ntext nargs
+        lappend fns $ntext
+        set nominal [list $nargs]
+    }
     # The entry: call the last typed function (with its arguments), the
-    # untyped one and the chain; a function that can fail IndexNotFound is
-    # called under a handler.
+    # untyped one, the chain and the named-struct one; a function that can
+    # fail IndexNotFound is called under a handler.
     lassign [lindex $callable end] name types handled
     set args [lmap t $types {gen $t {} 1}]
     set lines {}
@@ -273,7 +383,16 @@ proc program {} {
         lappend lines [entryLine c1 "ch($cargs)" $chandled]
         lappend sum c1
     }
-    set head "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\n\n"
+    set head "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\n"
+    if {$nominal ne ""} {
+        lappend lines [entryLine n1 "nm([join [lindex $nominal 0] {, }])" 0]
+        lappend sum n1
+        append head "import std::fza\nimport std::fzb\nimport std::fzc\n"
+        if {$collections} {
+            append head "import std::mutable_map\nimport std::mutable_set\n"
+        }
+    }
+    append head "\n"
     return "$head[join $fns \n]\n[join $lines \n]\n[join $sum { + }]\n"
 }
 
@@ -375,6 +494,7 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         if {!$dump} { puts "$text" }
     }
 }
+file delete -force $library
 puts "method-filter-fuzz seeds $seeds programs $programs certified $certified fallbacks $fallbacks (accepted programs: $wasted) rejected $rejected evictions $evictions builds exact $exactBuilds filter $filterBuilds disagreements $disagreements"
 puts "rejections by kind: $kinds"
 exit [expr {$disagreements > 0}]

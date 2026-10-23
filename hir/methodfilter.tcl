@@ -19,7 +19,10 @@
 #     parameter has another known kind (exactly the TYPE problem
 #     hir::MethodCallProblems reports for it, one rule for both:
 #     NativeMismatch), or a module function whose declared, trusted or checked
-#     first-parameter contract has another known kind. An exclusion is a
+#     first-parameter contract has another known kind -- or, for a receiver
+#     of a named struct type, whose declared first parameter is a named
+#     struct of another declaration (named structs are nominal: no other
+#     struct is ever one's subtype, hir::types::subtype). An exclusion is a
 #     proof that the candidate is invalid, never that another is valid: the
 #     filter over-approximates validity, so it can neither accept a call that
 #     is ambiguous (two valid candidates are both among the survivors) nor
@@ -60,6 +63,9 @@ namespace eval hir::methodfilter {
     # Candidate -> the kinds of its first parameter's contracts, for the HIR
     # being read (ResetCache clears it with every new build).
     variable paramKinds [dict create]
+    # Candidate -> its first parameter's declared type ("" when it has none),
+    # for the HIR being read (ResetCache clears it too).
+    variable declaredParams [dict create]
     # The expressions of the method-style calls of the HIR Closed reads.
     variable methodExprs [dict create]
     # 1 prints what the filter does, one line per event, on stderr
@@ -80,7 +86,9 @@ proc hir::methodfilter::Trace {args} {
 
 proc hir::methodfilter::ResetCache {} {
     variable paramKinds
+    variable declaredParams
     set paramKinds [dict create]
+    set declaredParams [dict create]
 }
 
 # {KIND WANTED} when the receiver of type RECEIVERTYPE is of a statically
@@ -117,22 +125,13 @@ proc hir::methodfilter::ParamKinds {hir ns cand} {
         return [dict get $paramKinds $cand]
     }
     set kinds {}
-    if {[dict exists $hir modules $ns]} {
-        set scope [dict get $hir modules $ns]
-        if {[dict exists $hir scopes $scope names $cand]} {
-            set b [dict get $hir scopes $scope names $cand]
-            set d [dict get $hir bindings $b declaredBy]
-            if {$d ne "" && [dict exists $hir exprs $d value]} {
-                set v [dict get $hir exprs $d value]
-                if {[dict get $hir exprs $v kind] eq "block"} {
-                    foreach field {declaredParamTypes inferredParamTypes checkedParamTypes} {
-                        if {![dict exists $hir exprs $v $field]} continue
-                        set t [lindex [dict get $hir exprs $v $field] 0]
-                        if {$t ne ""} {
-                            lappend kinds [hir::types::kindOf $t]
-                        }
-                    }
-                }
+    set v [CandidateBlock $hir $ns $cand]
+    if {$v ne ""} {
+        foreach field {declaredParamTypes inferredParamTypes checkedParamTypes} {
+            if {![dict exists $hir exprs $v $field]} continue
+            set t [lindex [dict get $hir exprs $v $field] 0]
+            if {$t ne ""} {
+                lappend kinds [hir::types::kindOf $t]
             }
         }
     }
@@ -140,9 +139,63 @@ proc hir::methodfilter::ParamKinds {hir ns cand} {
     return $kinds
 }
 
+# The declared type of the first parameter of module function CAND (display
+# "NS::NAME") in HIR, "" when it declares none or is no module function. Only
+# a declaration: NominalMismatch is stated for declared types, and an
+# inferred contract's struct stays the kind rule's (which compares no
+# declarations).
+proc hir::methodfilter::DeclaredParam {hir ns cand} {
+    variable declaredParams
+    if {[dict exists $declaredParams $cand]} {
+        return [dict get $declaredParams $cand]
+    }
+    set t ""
+    set v [CandidateBlock $hir $ns $cand]
+    if {$v ne "" && [dict exists $hir exprs $v declaredParamTypes]} {
+        set t [lindex [dict get $hir exprs $v declaredParamTypes] 0]
+    }
+    dict set declaredParams $cand $t
+    return $t
+}
+
+# The block of module function CAND (display "NS::NAME") in HIR, or "".
+proc hir::methodfilter::CandidateBlock {hir ns cand} {
+    if {![dict exists $hir modules $ns]} {
+        return ""
+    }
+    set scope [dict get $hir modules $ns]
+    if {![dict exists $hir scopes $scope names $cand]} {
+        return ""
+    }
+    set b [dict get $hir scopes $scope names $cand]
+    set d [dict get $hir bindings $b declaredBy]
+    if {$d eq "" || ![dict exists $hir exprs $d value]} {
+        return ""
+    }
+    set v [dict get $hir exprs $d value]
+    if {[dict get $hir exprs $v kind] ne "block"} {
+        return ""
+    }
+    return $v
+}
+
+# 1 if a receiver of type R rules out a first parameter declared DECLARED by
+# nominal identity: both are named structs (applications or not) of two
+# declarations. Named structs are nominal -- an argument is admitted to a
+# struct parameter by hir::types::subtype alone
+# (hir::range::ProvesValueAcceptedBy), and no other struct, named or
+# anonymous, is ever a named one's subtype -- so the ordinary call is a TYPE
+# error whatever the type arguments are. The arguments are never compared:
+# a declared parameter's are often imprint variables.
+proc hir::methodfilter::NominalMismatch {declared R} {
+    expr {[hir::types::IsNamedStruct $declared] && [hir::types::IsNamedStruct $R]
+        && [lindex $declared 1] ne [lindex $R 1]}
+}
+
 # 1 if candidate CAND (a display of a methodCalls entry) is invalid for a
-# receiver of type R by kind alone. A bare name is a lexical candidate (a
-# function of the file, a parameter, a binding): never excluded.
+# receiver of type R by kind alone, or by a named struct's identity
+# (NominalMismatch). A bare name is a lexical candidate (a function of the
+# file, a parameter, a binding): never excluded.
 proc hir::methodfilter::Excluded {hir cand R} {
     variable comparableKinds
     if {$R eq "never"} {
@@ -163,7 +216,7 @@ proc hir::methodfilter::Excluded {hir cand R} {
             return 1
         }
     }
-    return 0
+    return [NominalMismatch [DeclaredParam $hir $ns $cand] $R]
 }
 
 # The type binding B was defined with: a parameter's declared type, else the
