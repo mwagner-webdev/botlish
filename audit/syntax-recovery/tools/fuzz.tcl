@@ -57,6 +57,8 @@ set corpus {
     {examples/games/icy-tower/headless.bot examples/games/icy-tower/tower.bot}
     {tests/golden/branch-form-boolean.bot tests/golden/branch-form-boolean.bot}
     {tests/golden/structs-and-enums.bot tests/golden/structs-and-enums.bot}
+    {examples/dfa/json/json.bot examples/dfa/json/json_lex.bot}
+    {examples/dfa/yaml/yaml.bot examples/dfa/yaml/yaml_lex.bot}
 }
 foreach extra [lsort [glob -directory [file join $root examples surface] *.bot]] {
     set rel [string range $extra [string length $root/] end]
@@ -65,7 +67,7 @@ foreach extra [lsort [glob -directory [file join $root examples surface] *.bot]]
     }
 }
 
-set inserts [list ( ) \[ \] \{ \} : + = \" ' , . "fn " "if " "return " "\n" "\t" "    " \$ "import " "->"]
+set inserts [list ( ) \[ \] \{ \} : + = \" ' , . "fn " "if " "return " "\n" "\t" "    " \$ "import " "->" "dfa " "class " "accept before " "call "]
 
 proc pick {list} {
     return [lindex $list [expr {int(rand() * [llength $list])}]]
