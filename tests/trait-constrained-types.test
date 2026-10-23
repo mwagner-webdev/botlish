@@ -1,0 +1,945 @@
+# trait-constrained-types.test -- parameterized structs and trait-constrained
+# type slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+#
+#   struct Map[K satisfies Hashable, V]:
+#       keys: MutableArray[K]
+#       vals: MutableArray[V]
+#
+#   fn get(m: Map[K, V], key: K) -> V errors KeyNotFound
+#
+# A struct may declare type slots; a slot may be constrained by one trait.
+# Its types are its applications, each valid only when every constrained
+# slot's argument satisfies its trait by the ordinary trait satisfaction.
+# Functions stay imprinted: matching Map[K, V] establishes K and V as any
+# applied type does, and gives the body the constructor's obligation "K
+# satisfies Hashable" -- K itself, never a trait view. There is no generic
+# function declaration.
+#
+# Every behavioral case runs on interp, compile, cranelift-generic and
+# cranelift (sourceAgree / moduleAgree): one HIR, four backends, one value.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# {KIND MESSAGE} of the first diagnostic of SOURCE's compile rejection (the
+# first entry of -diagnostics, location-free), or "accepted".
+proc tcRejection {source} {
+    if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        set kind [lindex $code end]
+        if {[lindex $code 1] eq "SYNTAX"} {
+            set kind SYNTAX
+        }
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc tcKind {source} {
+    return [lindex [tcRejection $source] 0]
+}
+
+# The kinds of every diagnostic of SOURCE's rejection, in order.
+proc tcKinds {source} {
+    if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+        }
+        return [list [lindex [dict get $options -errorcode] end]]
+    }
+    return {}
+}
+
+proc tcHir {source} {
+    return [surface::compile $source t.bot -warnings off]
+}
+
+# Writes the module files FILES ({PATH TEXT ...}) into the current (private)
+# library: each is a standard namespace (std::NAME, STD-NAMESPACE.md).
+proc tcWriteModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+proc tcModuleAgree {files source {backends {interp compile cranelift-generic cranelift}}} {
+    withPrivateLibrary {
+        tcWriteModules $files
+        set result [sourceAgree $source $backends]
+    }
+    return $result
+}
+
+proc tcModuleRejection {files source} {
+    withPrivateLibrary {
+        tcWriteModules $files
+        set result [tcRejection $source]
+    }
+    return $result
+}
+
+proc tcModuleHir {files source} {
+    withPrivateLibrary {
+        tcWriteModules $files
+        set hir [surface::compile $source t.bot -warnings off]
+    }
+    return $hir
+}
+
+# The NIR text of HIR (OPTIONS native::lower::program's).
+proc tcNir {hir args} {
+    return [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0 {*}$args] text]
+}
+
+# The body lines of NIR function NAME (expression origins dropped).
+proc tcNirBody {nir name} {
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            set inside [string match "func * \"$name\" *" $line]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+            continue
+        }
+        if {$inside} {
+            lappend lines [string trim [regsub -all {@e[0-9]+} $line ""]]
+        }
+    }
+    return $lines
+}
+
+# The NIR ops (the word after `op`) of function NAME, sorted, unique.
+proc tcOps {nir name} {
+    set ops {}
+    foreach line [tcNirBody $nir $name] {
+        if {[regexp {= op (\S+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return [lsort -unique $ops]
+}
+
+# The `instance=` keys of NIR function NAME's instances.
+proc tcInstances {nir name} {
+    set keys {}
+    foreach line [split $nir \n] {
+        if {[regexp "^func \[0-9\]+ \"$name\" .* instance=\"(\[^\"\]*)\"" $line -> key]} {
+            lappend keys $key
+        }
+    }
+    return [lsort $keys]
+}
+
+# {KEY OPS} for each instance of NIR function NAME, sorted by KEY: its
+# `instance=` key and the NIR ops of its body (sorted, unique).
+proc tcInstanceOps {nir name} {
+    set result {}
+    set key ""
+    foreach line [split $nir \n] {
+        if {[string match "func *" $line]} {
+            if {$key ne ""} {
+                lappend result [list $key [lsort -unique $ops]]
+            }
+            set key ""
+            if {[regexp "^func \[0-9\]+ \"$name\" .* instance=\"(\[^\"\]*)\"" $line -> key]} {
+                set ops {}
+            }
+            continue
+        }
+        if {$key ne "" && [regexp {= op (\S+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    if {$key ne ""} {
+        lappend result [list $key [lsort -unique $ops]]
+    }
+    return [lsort -index 0 $result]
+}
+
+# The HIR expression ids of kind KIND in pre-order.
+proc tcFind {hir kind} {
+    set result {}
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq $kind} {
+            lappend result $e
+        }
+    }
+    return $result
+}
+
+# The block bound to the top-level function named NAME.
+proc tcBlock {hir name} {
+    foreach e [tcFind $hir bind] {
+        if {[dict get $hir bindings [hir::get $hir $e binding] name] eq $name} {
+            return [hir::get $hir $e value]
+        }
+    }
+    return ""
+}
+
+# The names of the functions HIR binds (clones included).
+proc tcFunctionNames {hir} {
+    set names {}
+    foreach e [tcFind $hir bind] {
+        if {[hir::kind $hir [hir::get $hir $e value]] eq "block"} {
+            lappend names [dict get $hir bindings [hir::get $hir $e binding] name]
+        }
+    }
+    return $names
+}
+
+# The declarations every program below starts from.
+set ::tcDecls {struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Box[T]:
+    value: T
+
+struct Map[K satisfies Hashable, V]:
+    keys: List[K]
+    vals: List[V]
+
+struct H[K satisfies Hashable]:
+    key: K
+
+fn twice(x: int) -> int:
+    x * 2
+}
+
+# TEXT after the shared declarations, its imports (which belong in the file
+# header) before them.
+proc tcProgram {text} {
+    set imports {}
+    set rest {}
+    foreach line [split $text \n] {
+        if {[string match "import *" $line]} {
+            lappend imports $line
+        } else {
+            lappend rest $line
+        }
+    }
+    return "[join [concat $imports [list $::tcDecls]] \n]\n[join $rest \n]"
+}
+
+# The trait modules the ordinary-trait cases use: a trait and two witnesses,
+# each implementing it in its own module (TRAITS.md: an owner's functions).
+set ::tcTraitModules {
+    printable.bot {trait Printable:
+    fn describe(value: Printable) -> str
+}
+    people.bot {struct Person:
+    name: str
+
+fn describe(p: Person) -> str:
+    p.name
+}
+    dogs.bot {struct Dog:
+    age: int
+
+fn describe(d: Dog) -> str:
+    "dog"
+}
+}
+
+set ::tcTraitHeader {import std::people
+import std::dogs
+import type std::printable::Printable
+
+struct P[T satisfies Printable]:
+    value: T
+}
+
+# ---------------------------------------------------------------------------
+# Syntax: slots, `satisfies`, n-ary applications
+
+test tc-parse-slots {a struct declaration may name type slots, each optionally "satisfies TRAIT": the structdecl node carries them in written order (only when there are some)} -body {
+    set ast [surface::parse {struct Map[K satisfies Hashable, V]:
+    keys: List[K]
+struct Plain:
+    x: int
+} t.bot]
+    set map [lindex [dict get $ast body] 0]
+    set plain [lindex [dict get $ast body] 1]
+    list [lmap slot [dict get $map slots] {list [dict get $slot name] [dict get $slot trait]}] \
+        [dict exists $plain slots]
+} -result {{{K Hashable} {V {}}} 0}
+
+test tc-parse-nary-application {a type application may have several arguments: Map[K, V] is {apply Map {K V}}, one argument stays {NAME ARG}} -body {
+    set ast [surface::parse {fn f(m: Map[K, List[V]], b: Box[int]) -> int:
+    1
+} t.bot]
+    lmap param [dict get [lindex [dict get $ast body] 0] params] {lindex $param 2}
+} -result {{apply Map {K {List V}}} {Box int}}
+
+test tc-parse-constraint-word {the constraint relation is "satisfies" only: ":", where, requires, implements and extends are syntax errors with their own message} -body {
+    lmap text {
+        "struct M\[K: Hashable\]:\n    k: K\n"
+        "struct M\[K where Hashable\]:\n    k: K\n"
+        "struct M\[K requires Hashable\]:\n    k: K\n"
+        "struct M\[K implements Hashable\]:\n    k: K\n"
+    } {
+        catch {surface::parse $text t.bot} message options
+        list [lrange [dict get $options -errorcode] 0 1] [string match {*satisfies*} $message]
+    }
+} -result {{{SURFACE SYNTAX} 1} {{SURFACE SYNTAX} 1} {{SURFACE SYNTAX} 1} {{SURFACE SYNTAX} 1}}
+
+test tc-parse-no-generic-binder {there is no declaration-side generic function binder: fn get[K, V](...) and a where clause stay syntax errors} -body {
+    lmap text {
+        "fn get\[K, V\](m: Map\[K, V\]) -> V:\n    1\n"
+        "fn get(m: Map\[K, V\]) -> V where K: Hashable:\n    1\n"
+        "fn get(m: Map\[K, V\]) satisfies K: Hashable -> V:\n    1\n"
+    } {
+        catch {surface::parse $text t.bot} message options
+        lrange [dict get $options -errorcode] 0 1
+    }
+} -result {{SURFACE SYNTAX} {SURFACE SYNTAX} {SURFACE SYNTAX}}
+
+# ---------------------------------------------------------------------------
+# Declarations
+
+test tc-decl-registry {a parameterized struct's slots and constraints are its declaration's: a field names a slot as the variable carrying the slot's declared trait} -body {
+    set hir [tcHir [tcProgram 1]]
+    list [hir::structs::slots Map] [hir::structs::slotConstraints Map] \
+        [hir::structs::fieldTypes Map] [hir::structs::isParameterized Pair] \
+        [hir::structs::isParameterized nope]
+} -result {{K V} {K Hashable V {}} {keys {list {imprint K Hashable}} vals {list {imprint V}}} 1 0}
+
+test tc-decl-slot-name {a slot is named like an imprint variable (one capital letter, optional digits): another name is a TYPE error at the slot} -body {
+    list [tcRejection "struct Box\[Key\]:\n    value: Key\n1\n"] [tcKind "struct Box\[T2\]:\n    value: T2\n1\n"]
+} -result {{TYPE {type slot "Key" of struct "Box": a slot is named like an imprint variable, one capital letter optionally followed by digits (T, K, V, T2)}} accepted}
+
+test tc-decl-duplicate-slot {a slot is declared once} -body {
+    tcRejection "struct Box\[T, T\]:\n    value: T\n1\n"
+} -result {TYPE {duplicate type slot "T" in struct "Box"}}
+
+test tc-decl-unknown-trait {the trait of "satisfies" must be a visible trait: an unknown name, or a type that is no trait, is rejected at the slot} -body {
+    list [tcRejection "struct Box\[T satisfies Nope\]:\n    value: T\n1\n"] \
+        [tcRejection "struct Point:\n    x: int\nstruct Box\[T satisfies Point\]:\n    value: T\n1\n"]
+} -result {{TYPE {unknown trait "Nope" in "T satisfies Nope" (struct "Box"): no trait "Nope" is visible here}} {TYPE {unknown trait "Point" in "T satisfies Point" (struct "Box"): "Point" is a type, not a trait: a slot is constrained only by a trait every argument must satisfy}}}
+
+test tc-decl-slot-shadows-type {a slot never shadows a visible type: a slot named like a declared struct is rejected} -body {
+    tcRejection "struct T:\n    x: int\nstruct Box\[T\]:\n    value: T\n1\n"
+} -result {TYPE {type slot "T" of struct "Box" names a visible type: a slot is a name of its own, never a type of the program (choose another variable name)}}
+
+test tc-decl-context-struct {a context struct has no slots (a context is required by its exact type), and a context trait constrains no slot (no type satisfies one)} -body {
+    list [tcKind "context struct C\[T\]:\n    value: T\n1\n"] \
+        [lindex [tcRejection "context trait Clock:\n    fn now() -> int\nstruct Box\[T satisfies Clock\]:\n    value: T\n1\n"] 0]
+} -result {TYPE TYPE}
+
+test tc-decl-undeclared-capital {a field may name only its struct's own slots: another capital token is the unknown type it always was} -body {
+    tcRejection "struct Box\[T\]:\n    value: X\n1\n"
+} -result {TYPE {unknown or invalid type X for field "value" of struct "Box": core::type: unknown type "X"}}
+
+test tc-decl-nested-obligation-required {an enclosing declaration states the obligations of the applications its fields hold: struct Outer[T] holding Map[T, int] is rejected at the field, struct Outer[T satisfies Hashable] is accepted} -body {
+    list [tcRejection [tcProgram "struct Outer\[T\]:\n    inner: Map\[T, int\]\n1\n"]] \
+        [tcKind [tcProgram "struct Outer\[T satisfies Hashable\]:\n    inner: Map\[T, int\]\n1\n"]]
+} -result {{TRAIT-NOT-SATISFIED {invalid type Map[T, int] for field "inner" of struct "Outer": type argument for "K" in Map[T, int] does not satisfy Hashable: its type is the imprint variable T, which no constraint holds to total equality and hashing (a type slot satisfies exactly the traits its declaration states: struct Outer[... satisfies TRAIT])}} accepted}
+
+test tc-decl-nested-composite {an obligation on a composite argument is checked through its components: Map[List[T], int] needs T satisfies Hashable; Map[Pair[T, U], int] needs both} -body {
+    list [tcKind [tcProgram "struct O1\[T\]:\n    inner: Map\[List\[T\], int\]\n1\n"]] \
+        [tcKind [tcProgram "struct O2\[T satisfies Hashable\]:\n    inner: Map\[List\[T\], int\]\n1\n"]] \
+        [tcKind [tcProgram "struct O3\[T satisfies Hashable, U\]:\n    inner: Map\[Pair\[T, U\], int\]\n1\n"]] \
+        [tcKind [tcProgram "struct O4\[T satisfies Hashable, U satisfies Hashable\]:\n    inner: Map\[Pair\[T, U\], int\]\n1\n"]]
+} -result {TRAIT-NOT-SATISFIED accepted TRAIT-NOT-SATISFIED accepted}
+
+test tc-decl-concrete-field {a concrete application in any declaration is checked where it is written: a struct field, a List of applications, a payload field} -body {
+    set fn {Fn{args: [int], return: int, errors: []}}
+    list [tcKind [tcProgram "struct Holder:\n    m: Map\[$fn, int\]\n1\n"]] \
+        [tcKind [tcProgram "struct Holder:\n    m: List\[Map\[$fn, int\]\]\n1\n"]] \
+        [tcKind [tcProgram "error Bad:\n    m: H\[$fn\]\n1\n"]] \
+        [tcKind [tcProgram "struct Holder:\n    m: Map\[str, $fn\]\n1\n"]]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED accepted}
+
+# ---------------------------------------------------------------------------
+# Applications
+
+test tc-app-arity {an application gives one type per slot: too few, too many, none, or arguments to a struct with no slots are TYPE errors of the application, before any field is used} -body {
+    lmap t {"Pair\[int\]" "Pair\[int, str, bool\]" "Pair" "Point\[int\]" "List\[int, str\]"} {
+        tcRejection [tcProgram "struct Point:\n    x: int\nfn f(p: $t) -> int:\n    1\nf\n"]
+    }
+} -result {{TYPE {unknown or invalid type Pair[int] for parameter "p": struct "Pair" takes 2 type argument(s), A, B, but Pair[int] gives 1}} {TYPE {unknown or invalid type Pair[int, str, bool] for parameter "p": struct "Pair" takes 2 type argument(s), A, B, but Pair[int, str, bool] gives 3}} {TYPE {unknown or invalid type Pair for parameter "p": struct "Pair" takes 2 type argument(s): it is a type constructor, and only an application of it, Pair[A, B] with a type for each slot, is a type}} {TYPE {unknown or invalid type Point[int] for parameter "p": "Point" is not a type constructor: struct Point declares no type slots, so it takes no type arguments (write Point)}} {TYPE {unknown or invalid type List[int, str] for parameter "p": "List" takes 1 type argument(s), got 2}}}
+
+test tc-app-hashable-constraint {Hashable as a slot constraint: Map[str, int] and Map[Pair[int, str], int] are valid, a function, a struct holding one, a MutableArray or any is not -- each at the application, naming the slot and why in source terms} -body {
+    set fn {Fn{args: [int], return: int, errors: []}}
+    lmap t [list "str" "Pair\[int, str\]" $fn "Box\[$fn\]" "MutableArray\[int\]" "any"] {
+        tcRejection [tcProgram "fn f(m: Map\[$t, int\]) -> int:\n    1\nf\n"]
+    }
+} -result {accepted accepted {TRAIT-NOT-SATISFIED {the type of parameter "m" is invalid: type argument for "K" in Map[Fn{args: [int], return: int, errors: []}, int] does not satisfy Hashable: a function has no total equality (== of two functions is not defined: there is no function identity)}} {TRAIT-NOT-SATISFIED {the type of parameter "m" is invalid: type argument for "K" in Map[Box[Fn{args: [int], return: int, errors: []}], int] does not satisfy Hashable: field "value" of Box[Fn{args: [int], return: int, errors: []}] (Fn{args: [int], return: int, errors: []}): a function has no total equality (== of two functions is not defined: there is no function identity)}} {TRAIT-NOT-SATISFIED {the type of parameter "m" is invalid: type argument for "K" in Map[MutableArray[int], int] does not satisfy Hashable: a MutableArray has no total equality (a mutable header's identity is never a value's)}} {TRAIT-NOT-SATISFIED {the type of parameter "m" is invalid: type argument for "K" in Map[any, int] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)}}}
+
+test tc-app-everywhere {a bad application is rejected wherever a type is written: a result, inside a List, a MutableArray, a function type, an explicit imprint, a construction} -body {
+    set fn {Fn{args: [int], return: int, errors: []}}
+    set bad "Map\[$fn, int\]"
+    list [tcKind [tcProgram "fn f() -> List\[$bad\]:\n    \[\]\nf\n"]] \
+        [tcKind [tcProgram "fn f(xs: List\[$bad\]) -> int:\n    1\nf\n"]] \
+        [tcKind [tcProgram "fn f(xs: MutableArray\[$bad\]) -> int:\n    1\nf\n"]] \
+        [tcKind [tcProgram "fn f(g: Fn{args: \[$bad\], return: int, errors: \[\]}) -> int:\n    1\nf\n"]] \
+        [tcKind [tcProgram "fn e() -> List\[T\]:\n    \[\]\ne\[$bad\]()\n"]] \
+        [tcKind [tcProgram "H\[$fn\] {key: twice}\n"]]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test tc-app-slot-argument-kinds {a slot takes a concrete, unrestricted type: a trait (no erased trait representation), a context trait or an affine type is no argument} -body {
+    list [tcKind [tcProgram "fn f(b: Box\[Hashable\]) -> int:\n    1\nf\n"]] \
+        [tcKind [tcProgram "context trait Clock:\n    fn now() -> int\nfn f(b: Box\[Clock\]) -> int:\n    1\nf\n"]] \
+        [tcKind [tcProgram "fn f(b: Box\[Coroutine{args: \[\], return: int, errors: \[\]}\]) -> int:\n    1\nf\n"]]
+} -result {TRAIT-STORAGE-UNSUPPORTED CONTEXT-TRAIT-POSITION TYPE}
+
+test tc-app-distinct-and-invariant {applications of one constructor are distinct static types, invariant in every slot: a Box[str] is no Box[int], a Box[Small] (an integer domain) no Box[int], and the message names the slot} -body {
+    list [tcRejection [tcProgram "fn f(b: Box\[int\]) -> int:\n    b.value\nf(Box {value: \"x\"})\n"]] \
+        [tcKind [tcProgram "type Small = Int in 0..10\nfn f(b: Box\[int\]) -> int:\n    b.value\nfn s(x: int) -> Small:\n    3\nf(Box {value: s(1)})\n"]] \
+        [tcKind [tcProgram "fn f(b: Box\[int\]) -> int:\n    b.value\nf(Box\[int\] {value: 3})\n"]]
+} -result {{TYPE {argument for parameter "b" cannot be proven to satisfy Box[int] (argument type: Box[str]); Box[str] and Box[int] are distinct applications of Box (T is str, not int): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}} TYPE accepted}
+
+test tc-app-show {an application shows as written, Pair[int, str]; its canonical form is {nstruct ID ARGS}, the constructor's identity and the arguments -- no witness} -body {
+    set hir [tcHir [tcProgram "p = Pair\[int, Map\[str, int\]\] {first: 1, second: Map {keys: \[\"a\"\], vals: \[1\]}}\np\n"]]
+    set e [lindex [tcFind $hir struct] 0]
+    list [hir::types::show [hir::typeOf $hir $e]] [hir::typeOf $hir $e]
+} -result {{Pair[int, Map[str, int]]} {nstruct Pair {int {nstruct Map {str int}}}}}
+
+# ---------------------------------------------------------------------------
+# Fields, projection and construction
+
+test tc-field-substitution {an application's field types are the declaration's with every slot replaced by its argument: Pair[int, str].first is int, Map[str, int].keys is List[str], and nested applications substitute through} -body {
+    set hir [tcHir [tcProgram "struct Storage\[K satisfies Hashable, V\]:\n    keys: MutableArray\[K\]\n    inner: Pair\[List\[K\], Box\[V\]\]\nfn f(s: Storage\[str, int\]) -> int:\n    1\nf\n"]]
+    list [hir::types::show [hir::types::StructField {nstruct Pair {int str}} first]] \
+        [hir::types::show [hir::types::StructField {nstruct Map {str int}} keys]] \
+        [hir::types::show [hir::types::StructField {nstruct Storage {str int}} keys]] \
+        [hir::types::show [hir::types::StructField {nstruct Storage {str int}} inner]] \
+        [hir::types::StructField {nstruct Pair {int str}} nope]
+} -result {int {List[str]} {MutableArray[str]} {Pair[List[str], Box[int]]} {}}
+
+test tc-projection-types {a projection of a value of an application has the substituted field type, in a generic body the function's own variables} -body {
+    set hir [tcHir [tcProgram "fn swap(p: Pair\[A, B\]) -> Pair\[B, A\]:\n    Pair\[B, A\] {first: p.second, second: p.first}\np = Pair {first: 1, second: \"x\"}\n\[p.first, swap(p).first\]\n"]]
+    lmap e [tcFind $hir project] {hir::types::show [hir::typeOf $hir $e]}
+} -result {B A int str}
+
+test tc-construction-explicit {an explicit application's construction holds every field value to the substituted field type, and runs on every backend} -body {
+    list [sourceAgree [tcProgram "p = Pair\[int, str\] {first: 1, second: \"x\"}\n\[p.first, p.second\]\n"]] \
+        [tcRejection [tcProgram "Pair\[int, str\] {first: \"no\", second: \"x\"}\n"]]
+} -result {{value {[1, "x"]}} {TYPE {field "first" of struct Pair[int, str] cannot be proven to satisfy its declared type int (value type: str)}}}
+
+test tc-construction-inferred {without an application the field values establish the slots, as a call's arguments establish its variables: an exact function's identity is no part of a slot, its contract is} -body {
+    set hir [tcHir [tcProgram "a = Pair {first: 1, second: \[\"x\"\]}\nb = Box {value: twice}\nc = Map {keys: \[\"k\"\], vals: \[Box {value: 2}\]}\n1\n"]]
+    lmap e [tcFind $hir struct] {hir::types::show [hir::typeOf $hir $e]}
+} -result {{Pair[int, List[str]]} {Box[Fn{args: [int], return: int, errors: []}]} {Map[str, Box[int]]} {Box[int]}}
+
+test tc-construction-deep-values {an application's argument is bounded where a value standing in its fields is: a construction of nested Lists of any depth, inferred or written, holds its value (List admission is invariant, so an argument cut a level earlier would admit none)} -body {
+    list [sourceAgree [tcProgram "a = Box {value: \[\[\[1\]\]\]}\nb = Box {value: \[\[\[\[\[\[1\]\]\]\]\]\]}\nfn f(x: Box\[List\[List\[List\[int\]\]\]\]) -> int:\n    1\n\[a.value, b.value, f(a), f(Box\[List\[List\[List\[int\]\]\]\] {value: \[\[\[2\]\]\]})\]\n"]] \
+        [sourceAgree [tcProgram "p = Pair {first: Box {value: \[\[\[1\]\]\]}, second: \[Pair {first: \[\[\[\"x\"\]\]\], second: 2}\]}\np.first.value\n"]]
+} -result {{value {[[[[1]]], [[[[[[1]]]]]], 1, 1]}} {value {[[[1]]]}}}
+
+test tc-construction-unestablished {a construction whose values establish no type for a slot (an empty List says nothing), or two different ones, is IMPRINT: the application must be written} -body {
+    list [tcRejection [tcProgram "struct Bag\[T\]:\n    items: List\[T\]\nBag {items: \[\]}\n"]] \
+        [tcRejection [tcProgram "struct Two\[T\]:\n    a: T\n    b: T\nTwo {a: 1, b: \"x\"}\n"]] \
+        [tcKind [tcProgram "struct Bag\[T\]:\n    items: List\[T\]\nBag\[int\] {items: \[\]}\n"]]
+} -result {{IMPRINT {the construction Bag {...} does not establish type slot T from its field values (no field holds a value whose type says what T is): write the application, Bag[T] {...}}} {IMPRINT {the construction Two {...} cannot establish its type slots from field "b": imprint variable T is int by an earlier argument but str by field 2}} accepted}
+
+test tc-construction-constrained {a construction makes an application: an invalid one (a function for a Hashable slot) is rejected at the construction, as a poison value nothing restates} -body {
+    list [tcRejection [tcProgram "h = H {key: twice}\nhash(h)\n"]] [tcKinds [tcProgram "h = H {key: twice}\nhash(h)\n"]]
+} -result {{TRAIT-NOT-SATISFIED {the construction is invalid: type argument for "K" in H[Fn{args: [int], return: int, errors: []}] does not satisfy Hashable: a function has no total equality (== of two functions is not defined: there is no function identity)}} TRAIT-NOT-SATISFIED}
+
+test tc-construction-in-generic-body {a body may construct an application of its own variables, Map[K, V] {...}: they are its function's, constrained as its signature constrains them} -body {
+    sourceAgree [tcProgram "import std::list\nfn put(m: Map\[K, V\], k: K, v: V) -> Map\[K, V\]:\n    Map\[K, V\] {keys: std::list::append(m.keys, k), vals: std::list::append(m.vals, v)}\nfn empty() -> Map\[K, V\]:\n    Map\[K, V\] {keys: \[\], vals: \[\]}\nm = put(put(empty\[str, int\](), \"a\", 1), \"b\", 2)\n\[m.keys, m.vals\]\n"]
+} -result {value {[["a", "b"], [1, 2]]}}
+
+test tc-construction-opaque {an opaque parameterized struct is constructed and inspected only by its owner, with or without an application} -body {
+    tcModuleRejection {
+        tm.bot {opaque struct Map[K satisfies Hashable, V]:
+    keys: List[K]
+
+fn make(k: List[K]) -> Map[K, int]:
+    Map[K, int] {keys: k}
+}
+    } {import std::tm
+m = std::tm::make(["a"])
+std::tm::Map[str, int] {keys: ["b"]}
+}
+} -result {OPAQUE-CONSTRUCTION {std::tm::Map has an opaque representation owned by module "std::tm"; construct it through the public operations provided by that module}}
+
+test tc-branches-and-handlers {applications join like any nominal type: one application through both arms of an if and a handler keeps its type; two different ones have no join (any), so a projection after it is unproven} -body {
+    list [sourceAgree [tcProgram "fn pick(c: bool) -> Box\[int\]:\n    if c:\n        Box {value: 1}\n    else:\n        Box\[int\] {value: 2}\nfn safe(xs: List\[Box\[int\]\]) -> Box\[int\]:\n    std::list::at(xs, 5):\n        on IndexNotFound:\n            Box {value: 0}\nimport std::list\n\[pick(true).value, pick(false).value, safe(\[\]).value\]\n"]] \
+        [tcKind [tcProgram "fn pick(c: bool):\n    if c:\n        Box {value: 1}\n    else:\n        Box {value: \"x\"}\npick(true).value\n"]]
+} -result {{value {[1, 2, 0]}} UNPROVEN-FIELD}
+
+# ---------------------------------------------------------------------------
+# Imprinting: matching an application establishes its variables
+
+test tc-imprint-establishes {matching Pair[A, B] establishes A and B from the argument's application, as List[T] establishes T} -body {
+    sourceAgree [tcProgram "fn firstOf(p: Pair\[A, B\]) -> A:\n    p.first\nfn swap(p: Pair\[A, B\]) -> Pair\[B, A\]:\n    Pair\[B, A\] {first: p.second, second: p.first}\np = Pair {first: 1, second: \"x\"}\n\[firstOf(p), firstOf(swap(p)), swap(swap(p)).first\]\n"]
+} -result {value {[1, "x", 1]}}
+
+test tc-imprint-unchanged {imprinting is what it was: an unconstrained identity(x: T) -> T is still rejected, first(xs: List[T]) still accepted, and a variable is still not a generic parameter (no declaration names it)} -body {
+    list [tcKind "fn identity(x: T) -> T:\n    x\nidentity(1)\n"] \
+        [sourceAgree "import std::list\nfn first(xs: List\[T\]) -> T errors IndexNotFound:\n    std::list::at(xs, 0)\nfn f() -> str:\n    first(\[\"a\"\]):\n        on IndexNotFound:\n            \"none\"\nf()\n"]
+} -result {TYPE {value {"a"}}}
+
+test tc-imprint-rigid {multiple occurrences of a variable stay rigid and must agree: with Map[str, int] established, an Int key is a TYPE error of the argument} -body {
+    tcRejection [tcProgram "fn replace(m: Map\[K, V\], key: K, value: V) -> Map\[K, V\]:\n    m\nreplace(Map {keys: \[\"a\"\], vals: \[1\]}, 3, 4)\n"]
+} -result {TYPE {argument for parameter "key" cannot be proven to satisfy str (argument type: int)}}
+
+test tc-imprint-not-manufactured {a constraint never establishes a variable: a result-only K needs explicit imprints as before (IMPRINT), and the explicit imprints are then held to the constraint (TRAIT-NOT-SATISFIED, a trait failure)} -body {
+    set fn {Fn{args: [int], return: int, errors: []}}
+    set decl "fn empty() -> Map\[K, int\]:\n    Map\[K, int\] {keys: \[\], vals: \[\]}\n"
+    list [tcKind [tcProgram "${decl}empty()\n"]] \
+        [tcRejection [tcProgram "${decl}empty\[$fn\]()\n"]] \
+        [tcKind [tcProgram "${decl}empty\[str\]()\n"]] \
+        [tcKind [tcProgram "fn bad(key: K, m: Map\[K, int\]) -> int:\n    1\nbad\n"]]
+} -result {IMPRINT {TRAIT-NOT-SATISFIED {empty: type argument for "K" in Map[Fn{args: [int], return: int, errors: []}, int] does not satisfy Hashable: a function has no total equality (== of two functions is not defined: there is no function identity)}} accepted TYPE}
+
+test tc-result-constraint {a constrained application in the result alone constrains a variable an argument establishes: make([twice], [1]) would return Map[Fn, int], so the call is rejected, and the body may hash a K} -body {
+    set decl {import std::list
+fn make(ks: List[K], vs: List[V]) -> Map[K, V]:
+    Map[K, V] {keys: ks, vals: vs}
+fn hashed(ks: List[K], k: K) -> Map[K, int]:
+    Map[K, int] {keys: ks, vals: [hash(k)]}
+}
+    set h [tcHir [tcProgram "${decl}1\n"]]
+    list [lindex [tcRejection [tcProgram "${decl}make(\[Box {value: twice}\], \[1\])\n"]] 0] \
+        [sourceAgree [tcProgram "${decl}\[make(\[\"a\"\], \[1\]).keys, hashed(\[\"a\"\], \"a\").vals == \[hash(\"a\")\]\]\n"]] \
+        [hir::types::show [lindex [hir::get $h [tcBlock $h make] declaredParamTypes] 0]] \
+        [lindex [hir::get $h [tcBlock $h make] declaredParamTypes] 0]
+} -result {TRAIT-NOT-SATISFIED {value {[["a"], true]}} {List[K]} {list {imprint K Hashable}}}
+
+test tc-diagnostic-order {imprinting comes first: a variable that cannot be established is IMPRINT, an established one whose constraint fails is TRAIT-NOT-SATISFIED -- never the other way round -- and an argument already rejected (a poisoned construction) establishes nothing and adds no diagnostic of the call} -body {
+    set decl "import std::list\nfn make(ks: List\[K\], vs: List\[V\]) -> Map\[K, V\]:\n    Map\[K, V\] {keys: ks, vals: vs}\nfn get(m: Map\[K, V\], key: K) -> int:\n    1\nfn plain(x):\n    x\n"
+    list [tcKinds [tcProgram "${decl}fn e() -> Map\[K, V\]:\n    Map\[K, V\] {keys: \[\], vals: \[\]}\ne\[str\]()\n"]] \
+        [tcKinds [tcProgram "${decl}make(\[Box {value: plain}\], \[1\])\n"]] \
+        [tcKinds [tcProgram "${decl}get(Map {keys: \[Box {value: twice}\], vals: \[1\]}, 1)\n"]] \
+        [tcKinds [tcProgram "${decl}get(make(\[\], \[1\]), 1)\n"]]
+} -result {IMPRINT TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED IMPRINT}
+
+# ---------------------------------------------------------------------------
+# Constraint propagation: the body knows K satisfies Hashable, and K stays K
+
+test tc-constraint-derived {a function's variables are constrained by the applications of its own signature, at every occurrence: Map[K, V] gives K Hashable, V nothing; an unconstrained variable is unchanged} -body {
+    set hir [tcHir [tcProgram "fn get(m: Map\[K, V\], key: K) -> V errors IndexNotFound:\n    std::list::at(m.vals, 0)\nfn first(xs: List\[T\]) -> T errors IndexNotFound:\n    std::list::at(xs, 0)\nimport std::list\n1\n"]]
+    list [hir::get $hir [tcBlock $hir get] declaredParamTypes] [hir::get $hir [tcBlock $hir get] declaredResult] \
+        [hir::get $hir [tcBlock $hir first] declaredParamTypes]
+} -result {{{nstruct Map {{imprint K Hashable} {imprint V}}} {imprint K Hashable}} {imprint V} {{list {imprint T}}}}
+
+test tc-constraint-not-a-view {K satisfies Hashable constrains K; it does not replace K: the key's type in the body is the variable, usable in List[K], MutableArray[K], a field of K, an argument and a result -- never the trait Hashable} -body {
+    set src [tcProgram {import std::mutable_array
+fn keep(m: Map[K, V], key: K) -> List[K]:
+    a = std::mutable_array::create(1, key)
+    b = Box {value: key}
+    c = std::mutable_array::at(a, 0):
+        on IndexNotFound:
+            key
+    [key, b.value, c]
+keep(Map {keys: ["a"], vals: [1]}, "z")
+}]
+    set hir [tcHir $src]
+    set block [tcBlock $hir keep]
+    set types {}
+    foreach e [tcFind $hir ref] {
+        if {[dict get $hir bindings [hir::get $hir $e binding] name] eq "key"} {
+            lappend types [hir::typeOf $hir $e]
+        }
+    }
+    list [lsort -unique $types] [sourceAgree $src]
+} -result {{{imprint K Hashable}} {value {["z", "z", "z"]}}}
+
+test tc-constraint-hash-total {hashing a K known through "K satisfies Hashable" selects the total hash: hashtotal, no error edge -- an unconstrained T keeps the dynamic hash} -constraints nativeBuilt -body {
+    set nir [tcNir [tcHir [tcProgram "fn fingerprint(m: Map\[K, V\], key: K) -> int:\n    hash(key)\nfn dynamic(xs: List\[T\], x: T) -> int:\n    hash(x)\n\[fingerprint(Map {keys: \[1\], vals: \[1\]}, 3), dynamic(\[1\], 3)\]\n"]] -specialize 0]
+    list [tcOps $nir fingerprint] [tcOps $nir dynamic]
+} -result {hashtotal hash}
+
+test tc-constraint-equality-total {equality of two values of a K satisfying Hashable (total equality) lowers to the total comparison; an unconstrained T's is the fallible veq} -constraints nativeBuilt -body {
+    set nir [tcNir [tcHir [tcProgram "fn same(h: H\[K\], b: K) -> bool:\n    h.key == b\nfn eq(xs: List\[T\], a: T, b: T) -> bool:\n    a == b\n\[same(H {key: 1}, 1), eq(\[1\], 1, 2)\]\n"]] -specialize 0]
+    list [tcOps $nir same] [tcOps $nir eq]
+} -result {veqtotal veq}
+
+# The privileged fixture of the private table hash: a standard-library
+# module (only one may call it, HASHABLE-AND-KEYED-HASH.md) holding a
+# Map-like constructor, and one whose variable no constraint holds.
+set ::tcTableHashModules {
+    tablefix.bot {import std::table_hash
+
+struct Table[K satisfies Hashable, V]:
+    keys: List[K]
+    vals: List[V]
+
+fn slot(t: Table[K, V], key: K) -> int:
+    std::table_hash::of(key)
+
+fn make(ks: List[K], vs: List[V]) -> Table[K, V]:
+    Table[K, V] {keys: ks, vals: vs}
+}
+    loose.bot {import std::table_hash
+
+fn loose(xs: List[T], x: T) -> int:
+    std::table_hash::of(x)
+}
+}
+
+test tc-constraint-table-hash {the private table hash, whose admission requires Hashable, accepts a K known through "K satisfies Hashable" and lowers to tablehashtotal (no error edge); an unconstrained T is rejected as before} -constraints nativeBuilt -body {
+    set src "import std::tablefix\nt = std::tablefix::make(\[\"a\"\], \[1\])\n\[std::tablefix::slot(t, \"a\") == std::tablefix::slot(std::tablefix::make(\[\"a\"\], \[2\]), \"a\"), std::tablefix::slot(t, \"a\") == std::tablefix::slot(t, \"b\"), std::tablefix::slot(std::tablefix::make(\[7\], \[\"x\"\]), 7) == std::tablefix::slot(std::tablefix::make(\[7\], \[\"y\"\]), 7)\]\n"
+    list [tcModuleAgree $::tcTableHashModules $src] \
+        [tcOps [tcNir [tcModuleHir $::tcTableHashModules $src] -specialize 0] std::tablefix::slot] \
+        [lindex [tcModuleRejection $::tcTableHashModules "import std::loose\nstd::loose::loose(\[1\], 1)\n"] 0]
+} -result {{value {[true, false, true]}} {runbox tablehashtotal} TRAIT-NOT-SATISFIED}
+
+test tc-constraint-values {hash and equality through a constrained K agree with the concrete values' on every backend} -body {
+    sourceAgree [tcProgram "fn fingerprint(h: H\[K\]) -> int:\n    hash(h.key)\nfn same(h: H\[K\], b: K) -> bool:\n    h.key == b\n\[fingerprint(H {key: \"x\"}) == hash(\"x\"), fingerprint(H {key: Pair {first: 1, second: \[2\]}}) == hash(Pair {first: 1, second: \[2\]}), same(H {key: 3}, 3), same(H {key: \"a\"}, \"b\")\]\n"]
+} -result {value {[true, true, true, false]}}
+
+test tc-constraint-method-operation {Hashable's operation in method syntax, k.hash() on a constrained K, is the trait's operation, the public hash, on every backend (the interpreter included: no stand-in of an unplanned trait operation remains)} -body {
+    sourceAgree [tcProgram "fn fingerprint(h: H\[K\]) -> int:\n    h.key.hash()\n\[H {key: \"xy\"}.fingerprint() == \"xy\".hash(), H {key: 3}.fingerprint() == hash(3)\]\n"]
+} -result {value {[true, true]}}
+
+test tc-constraint-composite {a composite argument in an imprinted signature, Map[List[K], V], gives each of its variables the intrinsic trait (List[K] is Hashable exactly when K is): the body hashes a K totally} -constraints nativeBuilt -body {
+    set hir [tcHir [tcProgram "fn f(m: Map\[List\[K\], V\], k: K) -> int:\n    hash(k)\nf(Map {keys: \[\[1\]\], vals: \[2\]}, 5)\n"]]
+    list [hir::get $hir [tcBlock $hir f] declaredParamTypes] [tcOps [tcNir $hir -specialize 0] f]
+} -result {{{nstruct Map {{list {imprint K Hashable}} {imprint V}}} {imprint K Hashable}} hashtotal}
+
+test tc-constraint-forgetting {an implementation never adds a constraint to its contract: a function whose signature does not hold K in a constrained slot may not construct a Map[K, ...] of it (TRAIT-NOT-SATISFIED in its body), whatever its callers pass} -body {
+    tcRejection [tcProgram "fn wrap(ks: List\[K\]) -> int:\n    m = Map {keys: ks, vals: \[1\]}\n    1\nwrap(\[\"a\"\])\n"]
+} -result {TRAIT-NOT-SATISFIED {the construction is invalid: type argument for "K" in Map[K, int] does not satisfy Hashable: its type is the imprint variable K, which no constraint holds to total equality and hashing}}
+
+test tc-constraint-any {any never satisfies a constraint merely because some of its values might: an untyped value passed for a constrained variable is rejected} -body {
+    tcRejection [tcProgram "fn get(h: H\[K\]) -> int:\n    1\nfn caller(x) -> int:\n    get(H {key: x})\ncaller(1)\n"]
+} -result {TRAIT-NOT-SATISFIED {the construction is invalid: type argument for "K" in H[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)}}
+
+test tc-constraint-strengthening {a constrained K is usable where an unconstrained variable is expected, keeping its facts: a K passed through first(List[T]) comes back a K} -body {
+    set src [tcProgram "import std::list\nfn first(xs: List\[T\]) -> T errors IndexNotFound:\n    std::list::at(xs, 0)\nfn hashFirst(h: H\[K\]) -> int:\n    k = first(\[h.key\]):\n        on IndexNotFound:\n            return 0\n    hash(k)\nhashFirst(H {key: 7}) == hash(7)\n"]
+    list [sourceAgree $src]
+} -result {{value true}}
+
+# ---------------------------------------------------------------------------
+# Ordinary (source-declared) traits as constraints
+
+test tc-ordinary-application {an ordinary trait constrains a slot through ordinary conformance (the witness's owner's functions): P[Person] is valid, P[int] is not and says why} -body {
+    list [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nx = P {value: std::people::Person {name: \"a\"}}\n1\n"] \
+        [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nfn f(p: P\[int\]) -> int:\n    1\nf\n"]
+} -result {accepted {TRAIT-NOT-SATISFIED {the type of parameter "p" is invalid: type argument for "T" in P[int] does not satisfy std::printable::Printable: int cannot be a trait witness: int has no canonical operation namespace}}}
+
+test tc-ordinary-operation {a trait operation on a T known through "T satisfies Printable" resolves as the trait's operation and runs the witness's own implementation, on every backend} -body {
+    tcModuleAgree $::tcTraitModules "$::tcTraitHeader\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nfn twice(p: P\[T\]) -> List\[str\]:\n    \[show(p), show(p)\]\n\[show(P {value: std::people::Person {name: \"Ann\"}}), show(P {value: std::dogs::Dog {age: 3}}), twice(P {value: std::dogs::Dog {age: 4}})\]\n"
+} -result {value {["Ann", "dog", ["dog", "dog"]]}}
+
+test tc-ordinary-monomorphized {each operation is a direct call of the implementation in a specialization per binding, named by it -- the same monomorphization as a trait view's, no runtime trait value, dispatch or indirect call} -constraints nativeBuilt -body {
+    set hir [tcModuleHir $::tcTraitModules "$::tcTraitHeader\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\n\[show(P {value: std::people::Person {name: \"Ann\"}}), show(P {value: std::dogs::Dog {age: 3}})\]\n"]
+    set nir [tcNir $hir]
+    list [lsort [lsearch -all -inline [tcFunctionNames $hir] show*]] \
+        [regexp {callvalue|call_indirect} $nir] \
+        [llength [lsearch -all -inline [tcNirBody $nir {show<T=std::people::Person>}] {*= call *}]]
+} -result {{show<T=std::dogs::Dog> show<T=std::people::Person>} 0 1}
+
+test tc-ordinary-self-result {a requirement returning its trait returns T itself: the value stays T, so it can be stored as one} -body {
+    tcModuleAgree {
+        norm.bot {trait Norm:
+    fn normalize(value: Norm) -> Norm
+}
+        word.bot {struct Word:
+    text: str
+    n: int
+
+fn normalize(w: Word) -> Word:
+    Word {text: w.text, n: w.n + 1}
+}
+    } {import std::word
+import type std::norm::Norm
+
+struct N[T satisfies Norm]:
+    value: T
+
+fn again(n: N[T]) -> N[T]:
+    N[T] {value: n.value.normalize().normalize()}
+
+again(N {value: std::word::Word {text: "x", n: 0}}).value.n
+}
+} -result {value 2}
+
+test tc-ordinary-no-clone-without-operation {an obligation alone selects nothing: a function whose code makes no trait operation on its constrained variable stays one function (no specialization per binding), as does every function constrained only by Hashable} -body {
+    set hir [tcModuleHir $::tcTraitModules "$::tcTraitHeader\nstruct Map\[K satisfies Hashable, V\]:\n    keys: List\[K\]\n    vals: List\[V\]\nfn holds(p: P\[T\]) -> P\[T\]:\n    p\nfn h(m: Map\[K, V\], k: K) -> int:\n    hash(k)\nx = holds(P {value: std::people::Person {name: \"a\"}})\ny = holds(P {value: std::dogs::Dog {age: 1}})\n\[h(Map {keys: \[1\], vals: \[1\]}, 1), h(Map {keys: \[\"a\"\], vals: \[1\]}, \"a\")\]\n"]
+    list [lsearch -all -inline [tcFunctionNames $hir] holds*] [lsearch -all -inline [tcFunctionNames $hir] h*]
+} -result {holds {holds h}}
+
+test tc-ordinary-two-constraints {a variable may carry two constructors' different obligations: K satisfies Hashable and Printable, both usable} -body {
+    tcModuleAgree $::tcTraitModules "$::tcTraitHeader\nstruct H\[K satisfies Hashable\]:\n    key: K\nfn both(h: H\[K\], p: P\[K\]) -> bool:\n    hash(h.key) == hash(p.value) and p.value.describe() == \"dog\"\nd = std::dogs::Dog {age: 2}\nboth(H {key: d}, P {value: d})\n"
+} -result {value true}
+
+test tc-ordinary-ambiguous {two traits of one variable that both declare the operation make a method call of it ambiguous (no trait is ranked above another)} -body {
+    lindex [tcModuleRejection [concat $::tcTraitModules {
+        named.bot {trait Named:
+    fn describe(value: Named) -> str
+}
+    }] "import type std::named::Named\n$::tcTraitHeader\nstruct Q\[T satisfies Named\]:\n    value: T\nfn both(p: P\[T\], q: Q\[T\]) -> str:\n    p.value.describe()\n1\n"] 0
+} -result {AMBIGUOUS-METHOD-CALL}
+
+test tc-ordinary-trait-view-into-slot {a trait view where a concrete T is expected is no argument: a struct stores one concrete representation, so P {value: v} of a view is P[any], which no constraint admits} -body {
+    lindex [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nfn wrap(v: Printable) -> int:\n    x = P {value: v}\n    1\nwrap(std::dogs::Dog {age: 1})\n"] 0
+} -result {TRAIT-NOT-SATISFIED}
+
+test tc-ordinary-applied-witness {an application of a parameterized struct may itself be an ordinary trait's witness when its owner implements the trait for exactly that application} -body {
+    tcModuleAgree $::tcTraitModules "$::tcTraitHeader\nstruct Wrap\[T\]:\n    value: T\nfn describe(w: Wrap\[int\]) -> str:\n    \"wrapped\"\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nshow(P {value: Wrap {value: 1}})\n"
+} -result {value {"wrapped"}}
+
+test tc-ordinary-polymorphic-recursion {recursion that imprints a specialized function's unconstrained variable with ever new types makes no new specialization -- only the variables a source trait constrains select one -- and runs; and an owner's imprinted function is no implementation for an application (conformance admits exact parameter types), so a recursion through ever new would-be witnesses Wrap[Wrap[...]] is rejected, never specialized forever} -body {
+    set grow "$::tcTraitHeader\nstruct Box\[T\]:\n    value: T\nfn deep(b: Box\[U\], p: P\[T\], n: int) -> List\[str\]:\n    if n == 0:\n        \[p.value.describe()\]\n    else:\n        deep(Box {value: \[b.value\]}, p, n - 1)\ndeep(Box {value: 1}, P {value: std::dogs::Dog {age: 1}}, 9)\n"
+    list [tcModuleAgree $::tcTraitModules $grow] \
+        [lsearch -all -inline [tcFunctionNames [tcModuleHir $::tcTraitModules $grow]] deep*] \
+        [lindex [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nstruct Wrap\[T\]:\n    value: T\nfn describe(w: Wrap\[T\]) -> str:\n    \"w\"\nfn deep(p: P\[T\], n: int) -> str:\n    if n == 0:\n        p.value.describe()\n    else:\n        deep(P {value: Wrap {value: p.value}}, n - 1)\ndeep(P {value: std::dogs::Dog {age: 1}}, 3)\n"] 0]
+} -result {{value {["dog"]}} deep<T=std::dogs::Dog> TRAIT-NOT-SATISFIED}
+
+test tc-ordinary-nested-function {a function that applies an ordinary trait's operation to a value of its own constrained variable is specialized per binding, so like a trait-polymorphic function it is top-level only (TRAIT-NESTED-POLYMORPHIC, never an internal failure); a nested one that only hashes, or that calls a top-level one with a concrete binding, is fine} -body {
+    list [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nfn outer() -> str:\n    fn show(p: P\[T\]) -> str:\n        p.value.describe()\n    show(P {value: std::dogs::Dog {age: 1}})\nouter()\n"] \
+        [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nfn outer() -> str:\n    fn relay(p: P\[T\]) -> str:\n        show(p)\n    relay(P {value: std::dogs::Dog {age: 1}})\nouter()\n"] \
+        [tcModuleAgree $::tcTraitModules "$::tcTraitHeader\nstruct H\[K satisfies Hashable\]:\n    key: K\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nfn outer() -> List\[any\]:\n    fn fingerprint(h: H\[K\]) -> int:\n        hash(h.key)\n    fn dog(p: P\[std::dogs::Dog\]) -> str:\n        show(p)\n    \[fingerprint(H {key: 3}) == hash(3), dog(P {value: std::dogs::Dog {age: 1}})\]\nouter()\n"]
+} -result {{TRAIT-NESTED-POLYMORPHIC {a function that applies a trait's operation to a value of one of its own constrained imprint variables must be declared at the top level of a module or the entry program: a nested one is not supported yet (its specializations, one per binding of the variables, would have to be made per activation of the enclosing function)}} {TRAIT-NESTED-POLYMORPHIC {a function that applies a trait's operation to a value of one of its own constrained imprint variables must be declared at the top level of a module or the entry program: a nested one is not supported yet (its specializations, one per binding of the variables, would have to be made per activation of the enclosing function)}} {value {[true, "dog"]}}}
+
+# ---------------------------------------------------------------------------
+# Runtime representation: one struct per constructor
+
+test tc-runtime-shared {applications share their constructor's runtime representation: a Pair[int, str] and a Pair[str, int] are the same kind of struct value (no type-argument vector, witness or generic header), on the Tcl backends and in NIR (one shape)} -constraints nativeBuilt -body {
+    set hir [tcHir [tcProgram "a = Pair\[int, str\] {first: 1, second: \"x\"}\nb = Pair\[str, int\] {first: \"y\", second: 2}\n\[a, b\]\n"]]
+    set value [core::compiler::evalHir $hir]
+    set nir [tcNir $hir -struct-opt 0]
+    set shapes [lsort -unique [regexp -all -inline {structnew [0-9]+} $nir]]
+    list [lmap v [core::value::items $value] {lindex $v 1 0}] [llength $shapes] [core::formatValue $value]
+} -result {{Pair Pair} 1 {[Pair {first: 1, second: "x"}, Pair {first: "y", second: 2}]}}
+
+test tc-runtime-no-checks {a statically valid application costs nothing at run time: a constrained function's NIR is the unconstrained one's with only the total operations it selects} -constraints nativeBuilt -body {
+    set nir [tcNir [tcHir [tcProgram "fn keyOf(h: H\[K\]) -> K:\n    h.key\nfn valueOf(b: Box\[T\]) -> T:\n    b.value\n\[keyOf(H {key: 1}), valueOf(Box {value: 1})\]\n"]] -specialize 0]
+    list [expr {[tcNirBody $nir keyOf] eq [tcNirBody $nir valueOf]}] [tcNirBody $nir keyOf]
+} -result {1 {{%1 = structget 0 %0} {ret %1}}}
+
+# ---------------------------------------------------------------------------
+# Specialization and the typed-storage probe (CO-3)
+
+test tc-specialize-instances {native specialization keeps a concrete application's slots: Holder[int], Holder[str] and Holder[Point] are three instances, and in each the slot's own type selects the operation (ieq, streq, veqtotal)} -constraints nativeBuilt -body {
+    set nir [tcNir [tcHir [tcProgram "struct Point:\n    x: int\n    y: int\nstruct Holder\[K satisfies Hashable\]:\n    key: K\nfn same(h: Holder\[K\], k: K) -> bool:\n    h.key == k\n\[same(Holder {key: 1}, 1), same(Holder {key: \"a\"}, \"b\"), same(Holder {key: Point {x: 1, y: 2}}, Point {x: 1, y: 2})\]\n"]]]
+    tcInstanceOps $nir same
+} -result {{{Holder[Point], Point} veqtotal} {{Holder[int], int} ieq} {{Holder[str], str} streq}}
+
+test tc-typed-storage-probe {the Map-like fixture keeps its key type through field projection: t.keys is MutableArray[K] (never MutableArray[any]), its element a K that is still Hashable -- generic code compares with veqtotal, and the String and Int instances reach streq and ieq} -constraints nativeBuilt -body {
+    set src [tcProgram {import std::mutable_array
+struct Table[K satisfies Hashable, V]:
+    hashes: MutableArray[int]
+    keys: MutableArray[K]
+    vals: MutableArray[V]
+
+fn matches(t: Table[K, V], i: int, key: K) -> bool:
+    k = std::mutable_array::at(t.keys, i):
+        on IndexNotFound:
+            return false
+    k == key
+
+fn table(ks: List[K], vs: List[V]) -> Table[K, V]:
+    Table[K, V] {hashes: std::mutable_array::from_list([hash(ks)]), keys: std::mutable_array::from_list(ks), vals: std::mutable_array::from_list(vs)}
+
+[matches(table(["a"], [1]), 0, "a"), matches(table(["a"], [1]), 0, "b"), matches(table([7], ["x"]), 0, 7)]
+}]
+    set hir [tcHir $src]
+    set block [tcBlock $hir matches]
+    set projections {}
+    foreach e [tcFind $hir project] {
+        if {[hir::get $hir $e name] eq "keys"} {
+            lappend projections [hir::typeOf $hir $e]
+        }
+    }
+    set specialized [tcNir $hir]
+    set generic [tcNir $hir -specialize 0]
+    list [lsort -unique $projections] [sourceAgree $src] [tcOps $generic matches] \
+        [lsort -unique [regexp -all -inline {op (?:streq|ieq|veqtotal|veq)\M} [join [tcNirBody $specialized matches] \n]]]
+} -result {{{mutarray {imprint K Hashable}}} {value {[true, false, true]}} {mutarrayget veqtotal} {{op ieq} {op streq}}}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, cache, compilation isolation
+
+set ::tcRoundTripProgram {import std::list
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct H[K satisfies Hashable, V]:
+    key: K
+    value: V
+
+fn keyHash(h: H[K, V]) -> int:
+    hash(h.key)
+
+fn pairs(h: H[K, V], xs: List[H[K, V]]) -> List[H[K, V]]:
+    std::list::append(xs, h)
+
+fn swap(p: Pair[A, B]) -> Pair[B, A]:
+    Pair[B, A] {first: p.second, second: p.first}
+
+h = H[str, int] {key: "a", value: 1}
+[keyHash(h) == hash("a"), std::list::length(pairs(h, [])), swap(Pair {first: 1, second: "x"}).first]
+}
+
+# BACKEND's outcome for HIR: {ok VALUE} or {error CODE}.
+proc tcRun {hir backend} {
+    set failed [catch {
+        switch -- $backend {
+            interp {
+                set saved [core::useBackend]
+                core::useBackend interp
+                try {
+                    core::formatValue [core::evalProgram [hir::lower $hir]]
+                } finally {
+                    core::useBackend $saved
+                }
+            }
+            compile { core::formatValue [core::compiler::evalHir $hir] }
+            cranelift { core::formatValue [native::evalHir $hir] }
+            cranelift-generic { core::formatValue [native::evalHir $hir -specialize 0] }
+        }
+    } value options]
+    if {$failed} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list ok $value]
+}
+
+proc tcOutcomes {hir} {
+    return [lmap backend {interp compile cranelift cranelift-generic} {tcRun $hir $backend}]
+}
+
+test tc-hir-text {HIR text prints a parameterized struct's slots with their traits and applications as written, and reads back the same HIR: the text, every expression's type (a constrained variable's constraints included) and the outcome} -constraints nativeBuilt -body {
+    set hir [tcHir $::tcRoundTripProgram]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    set diff 0
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $back exprs $e] && [hir::typeOf $hir $e] ne [hir::typeOf $back $e]} {
+            incr diff
+        }
+    }
+    list [lsearch -all -inline [split $text \n] {struct *}] [expr {[hir::format $back] eq $text}] $diff \
+        [expr {[tcOutcomes $back] eq [tcOutcomes $hir]}] [lindex [tcOutcomes $back] 0]
+} -result {{{struct Pair name Pair ns - slots [A, B] fields first: A, second: B} {struct H name H ns - slots [K satisfies Hashable, V] fields key: K, value: V}} 1 0 1 {ok {[true, 1, "x"]}}}
+
+test tc-interchange {a HIR written as interchange text and read back after a compilation that declares the same names differently (other slots, no constraint) is the HIR written, lowers to the same artifacts and runs the same} -constraints nativeBuilt -body {
+    set hir [tcHir $::tcRoundTripProgram]
+    set before [tcOutcomes $hir]
+    set artifacts [list [hir::lower $hir] [native::nir $hir] [native::nir $hir -specialize 0]]
+    set text [hir::interchange::encode $hir]
+    tcHir "struct H\[V, K\]:\n    key: V\n    value: K\nstruct Pair:\n    first: int\n1\n"
+    set read [hir::interchange::decode $text]
+    list [expr {$read eq [dict remove $hir traitSource]}] \
+        [expr {[list [hir::lower $read] [native::nir $read] [native::nir $read -specialize 0]] eq $artifacts}] \
+        [expr {[tcOutcomes $read] eq $before}] [hir::structs::slotConstraints H]
+} -result {1 1 1 {K Hashable V {}}}
+
+test tc-interchange-fresh-process {interchange text read by a fresh process that runs no front end has the same artifacts and outcome} -constraints nativeBuilt -setup {
+    set dir [makeDirectory tc-fresh]
+} -body {
+    set hir [tcHir $::tcRoundTripProgram]
+    set path [hir::interchange::writeFile [file join $dir program.hirx] $hir]
+    set script [file join $dir child.tcl]
+    set f [open $script w]
+    puts $f [string map [list @ROOT@ $::projectRoot] {
+        source [file join {@ROOT@} compiler compiler.tcl]
+        source [file join {@ROOT@} native native.tcl]
+        set builds [dict get [hir::BuildStats] builds]
+        set hir [hir::interchange::readFile [lindex $argv 0]]
+        set artifacts [list [hir::lower $hir] [native::nir $hir] [native::nir $hir -specialize 0]]
+        puts [list [zlib crc32 [encoding convertto utf-8 $artifacts]] [core::formatValue [core::compiler::evalHir $hir]] \
+            [core::formatValue [native::evalHir $hir]] [expr {[dict get [hir::BuildStats] builds] - $builds}]]
+    }]
+    close $f
+    lassign [exec [info nameofexecutable] $script $path] crc compiled native builds
+    set artifacts [list [hir::lower $hir] [native::nir $hir] [native::nir $hir -specialize 0]]
+    list [expr {$crc == [zlib crc32 [encoding convertto utf-8 $artifacts]]}] $compiled $native $builds
+} -cleanup {
+    removeDirectory tc-fresh
+} -result {1 {[true, 1, "x"]} {[true, 1, "x"]} 0}
+
+test tc-cache {through the front-end cache a parameterized program's HIR is the build's; a constraint or a slot order changed in the source is a miss, never a stale hit} -setup {
+    set dir [makeDirectory tc-cache]
+    set cache [file join $dir cache]
+} -body {
+    set path [file join $dir main.bot]
+    set f [open $path w]; puts -nonewline $f $::tcRoundTripProgram; close $f
+    surface::cache::resetStats
+    set built [surface::readProgramFile $path -cache $cache -warnings off]
+    set hit [surface::readProgramFile $path -cache $cache -warnings off]
+    set hits [dict get [surface::cache::stats] hits]
+    set slots {}
+    foreach {from to} {"H[K satisfies Hashable, V]" "H[K, V]" "struct Pair[A, B]:\n    first: A\n    second: B" "struct Pair[B, A]:\n    first: A\n    second: B"} {
+        set f [open $path w]; puts -nonewline $f [string map [list $from $to] $::tcRoundTripProgram]; close $f
+        surface::cache::resetStats
+        set changed [surface::readProgramFile $path -cache $cache -warnings off]
+        lappend slots [dict get [surface::cache::stats] hits] \
+            [lmap entry [hir::sourceTypes $changed] {dict getdef $entry slots {}}]
+    }
+    list [expr {[dict remove $hit traitSource] eq [dict remove $built traitSource]}] $hits $slots
+} -cleanup {
+    removeDirectory tc-cache
+} -result {1 1 {0 {{{A {}} {B {}}} {{K {}} {V {}}}} 0 {{{B {}} {A {}}} {{K Hashable} {V {}}}}}}
+
+test tc-isolation {compilation isolation: a HIR keeps its own parameterized declarations -- slot count, order, constraint and the trait identity -- after another compilation declares the same names differently, on every backend} -constraints nativeBuilt -body {
+    set a [tcHir $::tcRoundTripProgram]
+    set before [tcOutcomes $a]
+    tcHir "struct H\[V\]:\n    key: V\n    value: V\nstruct Pair\[B, A\]:\n    first: A\n    second: B\nfn keyHash(h: H\[V\]) -> int:\n    1\n1\n"
+    set after [tcOutcomes $a]
+    hir::activate $a
+    list [expr {$after eq $before}] [hir::structs::slots H] [hir::structs::slotConstraints H] [hir::structs::slots Pair]
+} -result {1 {K V} {K Hashable V {}} {A B}}
+
+# ---------------------------------------------------------------------------
+# static compile: a bad application is a recoverable diagnostic
+
+test tc-static-compile {a static compile block observes a bad type application as a compiler diagnostic -- a constraint failure (TraitNotSatisfied), an arity error (Type), an unestablished slot (Imprint) -- while the rest of the program compiles and runs} -body {
+    sourceAgree [tcProgram {import std::compiler
+fn rejects(f: Fn{args: [], return: any, errors: [std::compiler::CompilerError]}, expected: std::compiler::DiagnosticCode) -> bool:
+    f():
+        on std::compiler::CompilerError {code}:
+            return code == expected
+    false
+
+fn constraint() errors std::compiler::CompilerError:
+    static compile:
+        H {key: twice}
+
+fn arity() errors std::compiler::CompilerError:
+    static compile:
+        fn f(p: Pair[int]) -> int:
+            1
+        1
+
+fn unestablished() errors std::compiler::CompilerError:
+    static compile:
+        struct_free = Box[List[int]] {value: []}
+        b = Map {keys: [], vals: [1]}
+        1
+
+fn valid() errors std::compiler::CompilerError:
+    static compile:
+        Map[str, int] {keys: ["a"], vals: [1]}.keys
+
+[rejects(constraint, std::compiler::DiagnosticCode::TraitNotSatisfied), rejects(arity, std::compiler::DiagnosticCode::Type), rejects(unestablished, std::compiler::DiagnosticCode::Imprint), valid()]
+}]
+} -result {value {[true, true, true, ["a"]]}}
+
+test tc-diagnostic-vocabulary {the diagnostics speak of slots, applications and traits in source terms: never of the compiler's machinery (HashClass, Totality, an intrinsic witness, an internal id)} -body {
+    set messages {}
+    foreach text [list "fn f(m: Map\[MutableArray\[int\], int\]) -> int:\n    1\nf\n" "H {key: twice}\n" \
+            "struct O\[T\]:\n    m: Map\[T, int\]\n1\n" "fn e() -> Map\[K, int\]:\n    Map\[K, int\] {keys: \[\], vals: \[\]}\ne\[Fn{args: \[\], return: int, errors: \[\]}\]()\n"] {
+        lappend messages [lindex [tcRejection [tcProgram $text]] 1]
+    }
+    list [regexp {HashClass|Totality|intrinsic witness|block\(e[0-9]|\me[0-9]+\M|\mnstruct\M|\{imprint} [join $messages \n]] [llength $messages]
+} -result {0 4}
+
+cleanupTests

@@ -2744,12 +2744,13 @@ proc hir::staticdeps::CanCarry {hir type {seen {}}} {
         return 0
     }
     if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$id in $seen} {
+        # (An application's fields, its slots replaced by the arguments:
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        if {$type in $seen} {
             return 0
         }
-        lappend seen $id
-        foreach {name t} [hir::structs::fieldTypes $id] {
+        lappend seen $type
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
             if {[CanCarry $hir $t $seen]} {
                 return 1
             }

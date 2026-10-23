@@ -2199,6 +2199,11 @@ included -- and the message names the field or element that is not
 Hashable (a function has no total equality). The argument of `hash` is
 held to it too when its type shows it is not Hashable.
 
+A parameterized struct's application is held to its slots' traits the same
+way (concept.parameterized-structs): `type argument for "K" in
+Map[Fn{...}, int] does not satisfy Hashable: ...`, wherever the
+application is written, made by a construction or by a call's binding.
+
 == LIKELY CAUSES
   * no implementation, or one with a different parameter or result type;
   * an implementation for another type of the same name: one namespace
@@ -2529,12 +2534,12 @@ say(Person {value: "Ada"})
 
 @topic error.trait-nested-polymorphic
 title: TRAIT-NESTED-POLYMORPHIC: a nested function with a trait parameter
-summary: A function with a trait-typed parameter must be declared at the top level of a module or the entry program; nested trait-polymorphic functions are not supported yet.
+summary: A function with a trait-typed parameter, or one applying a trait operation to its own constrained imprint variable, must be declared at the top level.
 index: errors
-alias: nested trait polymorphic function; trait parameter in a nested function
-keywords: trait, nested function, specialization, monomorphization, top level
-related: concept.traits error.affine-generic-nested-unsupported error.trait-nested
-docs: TRAITS.md
+alias: nested trait polymorphic function; trait parameter in a nested function; nested function over a constrained slot
+keywords: trait, nested function, specialization, monomorphization, top level, satisfies, slot
+related: concept.traits concept.parameterized-structs error.affine-generic-nested-unsupported error.trait-nested
+docs: TRAITS.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
 code: CORE SEMANTIC TRAIT-NESTED-POLYMORPHIC
 
 == MEANING
@@ -2545,9 +2550,19 @@ its copies made per activation of the enclosing function (it may capture
 its locals), which the current specialization does not do. This is a
 limit of the implementation.
 
+The same holds for a function over a constrained type slot whose code
+applies a trait's operation to a value of its own variable (`fn show(p:
+P[T]) -> str: p.value.describe()` over `struct P[T satisfies Printable]`)
+or passes one to such a function: it is specialized once per binding of
+the variable, so it is top-level only too. A nested function that only
+hashes or compares a Hashable variable, or calls a top-level one with a
+concrete binding, is fine.
+
 == LIKELY CAUSES
   * a helper with a trait parameter declared inside the function that
-    uses it.
+    uses it;
+  * a helper over a constrained struct slot, calling the trait's
+    operation, declared inside the function that uses it.
 
 == WHAT TO DO
 Move the function to the top level, passing what it captured as

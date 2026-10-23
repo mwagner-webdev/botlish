@@ -81,9 +81,14 @@
 
 namespace eval hir::structs {
     # ID -> {id ID name NAME namespace NS opaque 0|1 context 0|1 names {FIELD...} types
-    # {FIELD TYPE ...} spans {FIELD SPAN ...} span SPAN}: the registry of the
-    # current compilation's declarations. `namespace` is the declaring module
-    # and, for an opaque struct, the owner of its representation.
+    # {FIELD TYPE ...} spans {FIELD SPAN ...} span SPAN slots {SLOT ...}
+    # constraints {SLOT {TRAIT ...} ...}}: the registry of the current
+    # compilation's declarations. `namespace` is the declaring module and,
+    # for an opaque struct, the owner of its representation. SLOTS are a
+    # parameterized struct's type slots in declared order (empty for every
+    # other struct), CONSTRAINTS the trait identities each slot's `satisfies`
+    # names (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md); a field type names a slot
+    # as the variable {imprint SLOT TRAITS}.
     variable registry [dict create]
     # Entries of the previous compilation's registration are dropped by the
     # next compilation that brings declarations of any kind, before it
@@ -269,6 +274,240 @@ proc hir::structs::display {id} {
     return $id
 }
 
+# ---------------------------------------------------------------------------
+# Parameterized structs (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+#
+#   struct Map[K satisfies Hashable, V]:
+#       keys: MutableArray[K]
+#       values: MutableArray[V]
+#
+# declares a *type constructor*: its types are its applications
+# {nstruct Map {A B}} (hir/types.tcl), one type per slot, each valid only if
+# every constrained slot's argument satisfies its trait -- by the ordinary
+# trait satisfaction (hir::traits::satisfies), whatever supplies the witness.
+# A slot is a static imprinted type position: a field type names it as the
+# variable {imprint K {Hashable}}, and an application's field types are the
+# declaration's with every slot replaced by its argument (AppliedFieldTypes).
+# There is no generic function behind it and no runtime generic object: a
+# value of Map[str, int] is an ordinary Map struct value (one representation
+# per constructor, hir::types::StructShape), its arguments static only.
+
+# The type slots of struct ID in declared order ("" if it has none).
+proc hir::structs::slots {id} {
+    variable registry
+    return [dict getdef $registry $id slots {}]
+}
+
+# 1 if the current compilation declares a parameterized struct.
+proc hir::structs::anyParameterized {} {
+    variable registry
+    dict for {id entry} $registry {
+        if {[dict getdef $entry slots {}] ne {}} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if struct ID declares type slots.
+proc hir::structs::isParameterized {id} {
+    return [expr {[slots $id] ne {}}]
+}
+
+# {SLOT {TRAIT ...} ...}: the traits each slot of struct ID is declared to
+# satisfy (an unconstrained slot's list is empty).
+proc hir::structs::slotConstraints {id} {
+    variable registry
+    return [dict getdef $registry $id constraints {}]
+}
+
+# {SLOT TYPE ...}: the imprint binding of application TYPE, each slot of its
+# constructor to its argument ("" for a struct type that is no application).
+proc hir::structs::SlotBinding {type} {
+    if {![hir::types::IsAppliedStruct $type]} {
+        return ""
+    }
+    set binding [dict create]
+    foreach slot [slots [lindex $type 1]] arg [lindex $type 2] {
+        dict set binding $slot $arg
+    }
+    return $binding
+}
+
+# {FIELD TYPE ...}, in declared order: the field types of the named struct
+# type TYPE -- for an application, the declaration's with every slot
+# replaced by its argument. Static typing reads these; the runtime
+# representation reads the declaration's own (fieldTypes), one per
+# constructor.
+proc hir::structs::AppliedFieldTypes {type} {
+    set fields [fieldTypes [lindex $type 1]]
+    set binding [SlotBinding $type]
+    if {$binding eq ""} {
+        return $fields
+    }
+    set result {}
+    foreach {name t} $fields {
+        lappend result $name [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+    }
+    return $result
+}
+
+# "" when every application in TYPE, at any depth, is valid -- each argument
+# of a constrained slot satisfies the slot's traits, by the ordinary trait
+# satisfaction (hir::traits::satisfies: an intrinsic trait's witness
+# predicate, an ordinary trait's conformance through the witness's owner, a
+# constrained variable's own constraints) -- else the first failure's
+# message, in source terms. A `never` argument (no value) is vacuous; `any`
+# satisfies nothing, though some of its values might.
+proc hir::structs::ApplicationProblem {type} {
+    if {[string first nstruct $type] < 0} {
+        return ""
+    }
+    if {[hir::types::IsAppliedStruct $type]} {
+        set id [lindex $type 1]
+        set constraints [slotConstraints $id]
+        foreach slot [slots $id] arg [lindex $type 2] {
+            if {$arg eq "never"} {
+                continue
+            }
+            foreach trait [dict getdef $constraints $slot {}] {
+                set s [hir::traits::satisfies $arg $trait]
+                if {[dict get $s ok]} {
+                    continue
+                }
+                set why [dict get $s reason]
+                if {[dict get $s requirement] ne ""} {
+                    # An ordinary trait's explanation: the requirement and what
+                    # was found (hir::traits::explain, past its first line).
+                    set why [join [lrange [split [hir::traits::explain $arg $trait] \n] 1 end] \n]
+                }
+                return [format {type argument for "%s" in %s does not satisfy %s: %s} \
+                    $slot [hir::types::presented $type] $trait $why]
+            }
+        }
+    }
+    foreach t [hir::imprint::Parts $type] {
+        set problem [ApplicationProblem $t]
+        if {$problem ne ""} {
+            return $problem
+        }
+    }
+    return ""
+}
+
+# Diagnoses the invalid applications HIR's code writes or makes
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), as TRAIT-NOT-SATISFIED -- the
+# failure belongs to the type application, never to a later operation on a
+# value of it: a block's declared parameter and result types, a
+# parameterized struct's construction (explicit or inferred), a call's
+# explicit imprints. (A struct field's or payload's application is the
+# declaration's, VerifyDeclarations; one a call's binding makes is the
+# call's, hir::imprint::verify.)
+proc hir::structs::verifyApplications {hirVar} {
+    upvar 1 $hirVar hir
+    if {![anyParameterized]} {
+        return
+    }
+    dict for {e node} [dict get $hir exprs] {
+        switch -- [dict get $node kind] {
+            block {
+                if {![dict exists $node declaredParamTypes]} continue
+                set names [lmap b [dict get $node params] {hir::semantic::SourceName $hir $b}]
+                foreach t [dict get $node declaredParamTypes] name $names {
+                    if {$t eq ""} continue
+                    set problem [ApplicationProblem $t]
+                    if {$problem ne ""} {
+                        hir::Diagnose hir TRAIT-NOT-SATISFIED "the type of parameter \"$name\" is invalid: $problem" $e
+                    }
+                }
+                set result [dict getdef $node declaredResult {}]
+                if {$result ne ""} {
+                    set problem [ApplicationProblem $result]
+                    if {$problem ne ""} {
+                        hir::Diagnose hir TRAIT-NOT-SATISFIED "the declared result type is invalid: $problem" $e
+                    }
+                }
+            }
+            struct {
+                # (Recorded by its typing, hir::types::Struct: the
+                # construction is poison.)
+                if {![dict exists $node structApplicationProblem]} continue
+                if {[dict exists $node reachable] && ![dict get $node reachable]} continue
+                hir::Diagnose hir TRAIT-NOT-SATISFIED \
+                    "the construction is invalid: [dict get $node structApplicationProblem]" $e
+            }
+            call {
+                if {![dict exists $node imprint]} continue
+                if {[dict exists $node reachable] && ![dict get $node reachable]} continue
+                foreach t [dict get $node imprint] {
+                    set problem [ApplicationProblem $t]
+                    if {$problem ne ""} {
+                        hir::Diagnose hir TRAIT-NOT-SATISFIED "an explicit imprint is invalid: $problem" $e
+                        break
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Raises the first invalid application of the current compilation's
+# declarations (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): a struct field's type
+# or an error payload field's, located at the field's type. Inside a
+# parameterized struct a slot is the variable with its declared traits, so
+#
+#   struct Outer[T]:                 inner: Map[T, int]
+#
+# is rejected here -- T does not declare the Hashable its field's type
+# requires -- and `struct Outer[T satisfies Hashable]` is accepted: an
+# enclosing declaration states the obligations of the applications it
+# holds, never hides one. Run once every declaration and implementation is
+# known (an ordinary trait's conformance reads the implementation index).
+proc hir::structs::VerifyDeclarations {} {
+    variable registry
+    dict for {id entry} $registry {
+        set spans [dict getdef $entry typeSpans {}]
+        foreach {name t} [dict get $entry types] {
+            set problem [ApplicationProblem $t]
+            if {$problem eq ""} continue
+            set span [dict getdef $spans $name ""]
+            set message [format {invalid type %s for field "%s" of struct "%s": %s} \
+                [hir::types::show $t] $name [dict get $entry name] $problem]
+            if {[dict exists $entry constraints] && [string first imprint $t] >= 0} {
+                append message " (a type slot satisfies exactly the traits its declaration states: struct [dict get $entry name]\[... satisfies TRAIT\])"
+            }
+            if {$span eq ""} {
+                core::semanticError TRAIT-NOT-SATISFIED $message
+            }
+            Fail $span $message TRAIT-NOT-SATISFIED
+        }
+    }
+    foreach {error fields spans} [hir::errordecls::PayloadTypes] {
+        foreach {name t} $fields {
+            set problem [ApplicationProblem $t]
+            if {$problem eq ""} continue
+            set message [format {invalid type %s for payload field "%s" of error "%s": %s} \
+                [hir::types::show $t] $name $error $problem]
+            set span [dict getdef $spans $name ""]
+            if {$span eq ""} {
+                core::semanticError TRAIT-NOT-SATISFIED $message
+            }
+            Fail $span $message TRAIT-NOT-SATISFIED
+        }
+    }
+}
+
+# The type of field NAME of the named struct type TYPE (AppliedFieldTypes),
+# or "" if it has no such field.
+proc hir::structs::AppliedFieldType {type name} {
+    set t [fieldType [lindex $type 1] $name]
+    set binding [SlotBinding $type]
+    if {$t eq "" || $binding eq ""} {
+        return $t
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $t $binding]]
+}
+
 # 1 if struct ID was declared `opaque struct`.
 proc hir::structs::isOpaque {id} {
     variable registry
@@ -414,12 +653,24 @@ proc hir::structs::apply {decls} {
             dict set spans $fieldName [dict get $field nameSpan]
         }
         dict set byId $id $decl
+        lassign [DeclaredSlots $decl] slotNames constraints
         # The skeleton first: a field type may name any struct of the batch,
-        # declared earlier, later, or this one itself.
+        # declared earlier, later, or this one itself (its slots too: an
+        # application's arity is checked as its field types resolve).
         dict set registry $id [dict create id $id name $name namespace $ns \
             opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] \
             context [expr {[dict exists $decl context] && [dict get $decl context]}] names $names \
-            types {} spans $spans span [dict get $decl nameSpan]]
+            types {} spans $spans span [dict get $decl nameSpan] slots $slotNames constraints $constraints]
+    }
+    foreach decl $decls {
+        # A slot names no visible type (every type of the batch is
+        # registered now): inside the declaration the name is the slot's.
+        foreach slot [dict getdef $decl slots {}] {
+            set slotName [dict get $slot name]
+            if {![catch {hir::types::resolveNamed $slotName [dict get $decl namespace]}]} {
+                Fail [dict get $slot nameSpan] "type slot \"$slotName\" of struct \"[dict get $decl name]\" names a visible type: a slot is a name of its own, never a type of the program (choose another variable name)"
+            }
+        }
     }
     set entries {}
     foreach decl $decls {
@@ -427,10 +678,16 @@ proc hir::structs::apply {decls} {
         set ns [dict get $decl namespace]
         set id [identity $name $ns]
         set types {}
+        # A parameterized struct's fields may name its slots: the variables
+        # {imprint SLOT TRAITS} (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+        set slotNames [dict get $registry $id slots]
+        set imprints [if {$slotNames eq {}} {string cat 0} else {set slotNames}]
         foreach field [dict get $decl fields] {
             set fieldName [dict get $field name]
             set typeExpr [dict get $field type]
-            if {[catch {hir::resolve::ResolveTypeExpr $typeExpr $ns} resolved options]} {
+            if {[catch {hir::imprint::ConstrainVariables \
+                    [hir::resolve::ResolveTypeExpr $typeExpr $ns $imprints] \
+                    [dict get $registry $id constraints]} resolved options]} {
                 Fail [dict get $field typeSpan] \
                     [format {unknown or invalid type %s for field "%s" of struct "%s": %s} \
                         [hir::resolve::ShowTypeExpr $typeExpr] $fieldName $name $resolved] \
@@ -452,8 +709,18 @@ proc hir::structs::apply {decls} {
             lappend types $fieldName $resolved
         }
         dict set registry $id types $types
+        dict set registry $id typeSpans [concat {*}[lmap field [dict get $decl fields] {
+            list [dict get $field name] [dict get $field typeSpan]
+        }]]
         set entry [dict create kind struct name $name id $id namespace $ns \
             opaque [dict get $registry $id opaque] fields $types]
+        if {$slotNames ne {}} {
+            # Present only for a parameterized struct, so an ordinary
+            # declaration's entry is unchanged: {SLOT {TRAIT ...}} pairs.
+            dict set entry slots [lmap slot $slotNames {
+                list $slot [dict get $registry $id constraints $slot]
+            }]
+        }
         if {[dict get $registry $id context]} {
             # Present only for a context struct (CONTEXTS.md), so an ordinary
             # declaration's entry is unchanged.
@@ -496,13 +763,70 @@ proc hir::structs::applyEntries {entries} {
     foreach entry $entries {
         set names {}
         foreach {fieldName type} [dict get $entry fields] { lappend names $fieldName }
+        set slotNames {}
+        set constraints {}
+        foreach pair [dict getdef $entry slots {}] {
+            lassign $pair slot traits
+            lappend slotNames $slot
+            dict set constraints $slot $traits
+        }
         dict set registry [dict get $entry id] [dict create id [dict get $entry id] \
             name [dict get $entry name] namespace [dict get $entry namespace] \
             opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] \
             context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
-            types [dict get $entry fields] spans {} span {}]
+            types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints]
     }
     set affinity [dict create]
+}
+
+# {SLOTS CONSTRAINTS}: the type slots of struct declaration DECL (apply's)
+# and the trait identities each one's `satisfies` names, {SLOT {TRAIT ...}
+# ...} -- after checking them (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): a
+# slot is named like an imprint variable (one capital letter, optionally
+# digits), at most once; its trait is a trait declaration visible to the
+# declaring namespace (TRAITS.md's lookup, `import type` included), never a
+# context trait (installed contexts satisfy those, never a type). A context
+# struct has no slots: its type is what a context parameter names exactly.
+proc hir::structs::DeclaredSlots {decl} {
+    set name [dict get $decl name]
+    set ns [dict get $decl namespace]
+    set slotNames {}
+    set constraints [dict create]
+    if {![dict exists $decl slots]} {
+        return [list {} {}]
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail [dict get $decl nameSpan] "context struct \"$name\" cannot have type slots: a context is installed and required by its exact struct type (CONTEXTS.md), and a type constructor has no type of its own (declare a context struct of the applied field types you need)"
+    }
+    foreach slot [dict get $decl slots] {
+        set slotName [dict get $slot name]
+        if {![hir::imprint::IsVariableName $slotName]} {
+            Fail [dict get $slot nameSpan] "type slot \"$slotName\" of struct \"$name\": a slot is named like an imprint variable, one capital letter optionally followed by digits (T, K, V, T2)"
+        }
+        if {$slotName in $slotNames} {
+            Fail [dict get $slot nameSpan] "duplicate type slot \"$slotName\" in struct \"$name\""
+        }
+        lappend slotNames $slotName
+        set traits {}
+        set spelled [dict get $slot trait]
+        if {$spelled ne ""} {
+            set trait [hir::traits::lookup $spelled $ns]
+            if {$trait eq ""} {
+                set why "no trait \"$spelled\" is visible here"
+                if {[lookup $spelled $ns] ne "" || [hir::enums::lookup $spelled $ns] ne ""
+                        || [core::type::valid [hir::types::CanonicalTypeName $spelled $ns]]} {
+                    set why "\"$spelled\" is a type, not a trait: a slot is constrained only by a trait every argument must satisfy"
+                }
+                Fail [dict get $slot traitSpan] "unknown trait \"$spelled\" in \"$slotName satisfies $spelled\" (struct \"$name\"): $why"
+            }
+            if {[hir::traits::isContext $trait]} {
+                Fail [dict get $slot traitSpan] "\"$slotName satisfies $spelled\" (struct \"$name\"): $trait is a context trait: installed contexts provide one, and no type satisfies it"
+            }
+            lappend traits $trait
+        }
+        dict set constraints $slotName $traits
+    }
+    return [list $slotNames $constraints]
 }
 
 # Adds the entries of DECLS (as apply takes them) to the registry without

@@ -223,7 +223,8 @@ proc hir::format::TypeDecl {entry} {
     }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
-        # [opaque] fields F1: T1, F2: T2" (NS "-" for the entry program), the
+        # [opaque] [context] [slots [S, ...]] fields F1: T1, F2: T2" (NS "-"
+        # for the entry program), the
         # fields in declared (slot) order with their resolved types. The
         # `opaque` word is printed only for an opaque struct
         # (OPAQUE-STRUCTS.md), so ordinary declarations print as they always
@@ -235,6 +236,21 @@ proc hir::format::TypeDecl {entry} {
         set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
         if {[dict exists $entry context] && [dict get $entry context]} {
             append opaque "context "
+        }
+        if {[dict exists $entry slots]} {
+            # A parameterized struct's type slots (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md), in declared order, each with the trait
+            # identity it is constrained by: "slots [K satisfies Hashable,
+            # V]". Printed only for one, so other declarations are as they
+            # were.
+            append opaque "slots \[[join [lmap pair [dict get $entry slots] {
+                lassign $pair slot traits
+                if {$traits eq {}} {
+                    set slot
+                } else {
+                    string cat $slot " satisfies " [join $traits " "]
+                }
+            }] {, }]\] "
         }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }

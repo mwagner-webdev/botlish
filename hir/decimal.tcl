@@ -103,26 +103,32 @@ proc hir::decimal::Precision {type} {
 
 # 1 if TYPE mentions a DecimalRounded type (itself, or in a List, set,
 # vector, array or struct field).
-proc hir::decimal::Mentions {type} {
+proc hir::decimal::Mentions {type {seen {}}} {
     set type [hir::types::Unrefined $type]
     if {[IsDecimal $type]} {
         return 1
     }
     if {[hir::types::IsList $type] || [hir::types::IsSet $type]
             || [hir::types::IsMutVec $type] || [hir::types::IsMutArray $type]} {
-        return [Mentions [lindex $type 1]]
+        return [Mentions [lindex $type 1] $seen]
     }
     if {[hir::types::IsStruct $type]} {
         foreach {name t} [lindex $type 1] {
-            if {[Mentions $t]} {
+            if {[Mentions $t $seen]} {
                 return 1
             }
         }
         return 0
     }
     if {[hir::types::IsNamedStruct $type]} {
-        foreach {name t} [hir::structs::fieldTypes [lindex $type 1]] {
-            if {[Mentions $t]} {
+        # (An application's fields, its slots replaced by the arguments:
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md. SEEN guards a struct that
+        # holds itself.)
+        if {$type in $seen} {
+            return 0
+        }
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[Mentions $t [concat $seen [list $type]]]} {
                 return 1
             }
         }
@@ -428,11 +434,17 @@ proc hir::decimal::Expectations {hir} {
                     continue
                 }
                 set id [dict get $node structId]
+                # (A parameterized struct's construction: its application's
+                # field types, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+                set structType [list nstruct $id]
+                if {[hir::structs::isParameterized $id]} {
+                    set structType [hir::typeOf $hir $e]
+                }
                 foreach name [dict get $node names] field [dict get $node fields] {
-                    set declared [hir::structs::fieldType $id $name]
+                    set declared [hir::types::StructField $structType $name]
                     if {$declared ne "" && [MentionsRefined $declared]} {
                         lappend result {*}[Expected $hir $field $declared \
-                            [format {field "%s" of %s} $name [hir::structs::display $id]]]
+                            [format {field "%s" of %s} $name [hir::types::show $structType]]]
                     }
                 }
             }
@@ -976,6 +988,10 @@ proc hir::decimal::Show {value type} {
             set fieldType any
             if {[hir::types::IsStruct $type] && [dict exists [lindex $type 1] $field]} {
                 set fieldType [dict get [lindex $type 1] $field]
+            } elseif {[hir::types::IsNamedStruct $type] && [hir::types::StructField $type $field] ne ""} {
+                # (The static type's own field: an application's, its slots
+                # replaced, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+                set fieldType [hir::types::StructField $type $field]
             } elseif {$id ne "" && [hir::structs::fieldType $id $field] ne ""} {
                 set fieldType [hir::structs::fieldType $id $field]
             }

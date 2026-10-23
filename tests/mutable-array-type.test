@@ -139,14 +139,14 @@ test mat-syn-3 {canonical rendering is source-legible and stable (a List literal
         [maLast "fn f(g: Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}) -> Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}:\n    g\nfn h(m: MutableArray\[str\]) -> List\[int\]:\n    \[1\]\nf(h)"]
 } -result {{MutableArray[int]} {MutableArray[List[str]]} {List[MutableArray[int]]{length: 1}} {MutableArray[MutableArray[str]]} {block(e5)/1 -> List[int]} {Fn{args: [MutableArray[str]], return: List[int], errors: []}}}
 
-test mat-syn-4 {the type is a real constructor: arity errors, unknown constructors, hyphenated spellings} -body {
+test mat-syn-4 {the type is a real constructor: arity errors (two arguments are resolution's since the grammar is n-ary, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), unknown constructors, hyphenated spellings} -body {
     lmap src {
         "fn f(m: MutableArray):\n    0\nf(1)"
         "fn f(m: MutableArray\[int, str\]):\n    0\nf(1)"
         "fn f(m: mutable-array\[int\]):\n    0\nf(1)"
         "fn f(m: Array\[int\]):\n    0\nf(1)"
     } {lindex [maRejects $src *] 0}
-} -result {{CORE SEMANTIC TYPE} {SURFACE SYNTAX} {SURFACE SYNTAX} {CORE SEMANTIC TYPE}}
+} -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {SURFACE SYNTAX} {CORE SEMANTIC TYPE}}
 
 test mat-syn-5 {no source-level type variables or generic syntax were added} -body {
     lmap src {

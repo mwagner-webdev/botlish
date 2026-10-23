@@ -1,0 +1,667 @@
+# trait-constrained-types.bot -- parameterized structs and trait-constrained
+# type slots, as source can observe them (TRAIT-CONSTRAINED-IMPRINTED-
+# TYPES.md; the Tcl originals are tests/trait-constrained-types.test's):
+#
+#   * applications: arity, the Hashable constraint at every place a type is
+#     written, the kinds of type a slot takes, distinct and invariant
+#     applications;
+#   * construction: explicit and inferred applications, unestablished and
+#     conflicting slots, an invalid application made by a construction, a
+#     generic body's own applications, joins;
+#   * imprinting: matching an application establishes its variables, rigidly;
+#     a constraint never establishes one; a result-only application
+#     constrains; IMPRINT before TRAIT-NOT-SATISFIED;
+#   * constraint propagation: K stays K, its hash and equality are the
+#     concrete values', a constraint is never added by an implementation nor
+#     met by any;
+#   * ordinary traits as constraints: conformance, the operation on a
+#     constrained variable, a self-typed result, two constraints, ambiguity,
+#     a view into a slot, an application as a witness.
+#
+# What only Tcl observes stays there: the parser's nodes and syntax errors,
+# the registry, HIR types and text, NIR (the total operations, instances,
+# one struct shape), interchange, the cache, isolation, module programs, and
+# the full text of most messages (a fragment is pinned here).
+#
+# The Tcl tests' trait modules (std::printable, std::people, std::dogs) are
+# this suite's own declarations: a witness's owner is the suite's namespace,
+# so each trait's witnesses implement differently named operations
+# (Printable's describe, Measured's length -- str's is std::str::length --,
+# Labeled's label, Norm's normalize).
+import std::compiler
+import std::list
+import std::mutable_array
+import std::test
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Box[T]:
+    value: T
+
+struct Map[K satisfies Hashable, V]:
+    keys: List[K]
+    vals: List[V]
+
+struct H[K satisfies Hashable]:
+    key: K
+
+struct Point:
+    x: int
+
+struct Bag[T]:
+    items: List[T]
+
+struct Two[T]:
+    a: T
+    b: T
+
+type Small = Int in 0..10
+
+fn twice(x: int) -> int:
+    x * 2
+
+trait Printable:
+    fn describe(value: Printable) -> str
+
+trait Named:
+    fn describe(value: Named) -> str
+
+struct Person:
+    name: str
+
+fn describe(p: Person) -> str:
+    p.name
+
+struct P[T satisfies Printable]:
+    value: T
+
+struct Q[T satisfies Named]:
+    value: T
+
+trait Measured:
+    fn length(value: Measured) -> int
+
+struct Ruler:
+    n: int
+
+fn length(value: Ruler) -> int:
+    value.n
+
+struct M[T satisfies Measured]:
+    value: T
+
+trait Labeled:
+    fn label(value: Labeled) -> str
+
+struct Wrap[T]:
+    value: T
+
+fn label(w: Wrap[int]) -> str:
+    "wrapped"
+
+struct L[T satisfies Labeled]:
+    value: T
+
+trait Norm:
+    fn normalize(value: Norm) -> Norm
+
+struct Word:
+    text: str
+    n: int
+
+fn normalize(w: Word) -> Word:
+    Word {text: w.text, n: w.n + 1}
+
+struct N[T satisfies Norm]:
+    value: T
+
+fn register_application_tests():
+    # tc-app-arity: one type per slot; a struct without slots takes none.
+    fn too_few() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: Pair[int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-arity/too-few", std::compiler::DiagnosticCode::Type, "struct \"Pair\" takes 2 type argument(s), A, B, but Pair[int] gives 1", too_few)
+    fn too_many() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: Pair[int, str, bool]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-arity/too-many", std::compiler::DiagnosticCode::Type, "but Pair[int, str, bool] gives 3", too_many)
+    fn bare() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: Pair) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-arity/bare", std::compiler::DiagnosticCode::Type, "it is a type constructor, and only an application of it, Pair[A, B] with a type for each slot, is a type", bare)
+    fn no_slots() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: Point[int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-arity/no-slots", std::compiler::DiagnosticCode::Type, "struct Point declares no type slots, so it takes no type arguments (write Point)", no_slots)
+    fn list_two() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: List[int, str]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-arity/list", std::compiler::DiagnosticCode::Type, "\"List\" takes 1 type argument(s), got 2", list_two)
+
+    # tc-app-hashable-constraint: Hashable decides a slot by the ordinary
+    # satisfaction, at the application.
+    fn str_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[str, int]) -> int:
+                1
+            f(Map {keys: ["a"], vals: [1]})
+    std::test::value("tc-app-hashable-constraint/str", 1, str_key)
+    fn pair_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[Pair[int, str], int]) -> int:
+                1
+            f(Map {keys: [Pair {first: 1, second: "a"}], vals: [1]})
+    std::test::value("tc-app-hashable-constraint/pair", 1, pair_key)
+    fn function_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[Fn{args: [int], return: int, errors: []}, int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-hashable-constraint/function", std::compiler::DiagnosticCode::TraitNotSatisfied, "type argument for \"K\" in Map[Fn{args: [int], return: int, errors: []}, int] does not satisfy Hashable: a function has no total equality", function_key)
+    fn box_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[Box[Fn{args: [int], return: int, errors: []}], int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-hashable-constraint/box-of-function", std::compiler::DiagnosticCode::TraitNotSatisfied, "field \"value\" of Box[Fn{args: [int], return: int, errors: []}]", box_key)
+    fn array_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[MutableArray[int], int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-hashable-constraint/mutable-array", std::compiler::DiagnosticCode::TraitNotSatisfied, "a MutableArray has no total equality", array_key)
+    fn any_key() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: Map[any, int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-app-hashable-constraint/any", std::compiler::DiagnosticCode::TraitNotSatisfied, "in Map[any, int] does not satisfy Hashable: its static type is any", any_key)
+
+    # tc-app-everywhere: wherever a type is written.
+    fn in_result() errors std::compiler::CompilerError:
+        static compile:
+            fn f() -> List[Map[Fn{args: [int], return: int, errors: []}, int]]:
+                []
+            1
+    std::test::rejects("tc-app-everywhere/result", std::compiler::DiagnosticCode::TraitNotSatisfied, in_result)
+    fn in_list() errors std::compiler::CompilerError:
+        static compile:
+            fn f(xs: List[Map[Fn{args: [int], return: int, errors: []}, int]]) -> int:
+                1
+            1
+    std::test::rejects("tc-app-everywhere/list", std::compiler::DiagnosticCode::TraitNotSatisfied, in_list)
+    fn in_array() errors std::compiler::CompilerError:
+        static compile:
+            fn f(xs: MutableArray[Map[Fn{args: [int], return: int, errors: []}, int]]) -> int:
+                1
+            1
+    std::test::rejects("tc-app-everywhere/mutable-array", std::compiler::DiagnosticCode::TraitNotSatisfied, in_array)
+    fn in_function_type() errors std::compiler::CompilerError:
+        static compile:
+            fn f(g: Fn{args: [Map[Fn{args: [int], return: int, errors: []}, int]], return: int, errors: []}) -> int:
+                1
+            1
+    std::test::rejects("tc-app-everywhere/function-type", std::compiler::DiagnosticCode::TraitNotSatisfied, in_function_type)
+    fn in_imprint() errors std::compiler::CompilerError:
+        static compile:
+            fn e() -> List[T]:
+                []
+            std::list::length(e[Map[Fn{args: [int], return: int, errors: []}, int]]())
+    std::test::rejects("tc-app-everywhere/explicit-imprint", std::compiler::DiagnosticCode::TraitNotSatisfied, in_imprint)
+    fn in_construction() errors std::compiler::CompilerError:
+        static compile:
+            H[Fn{args: [int], return: int, errors: []}] {key: twice}
+            1
+    std::test::rejects("tc-app-everywhere/construction", std::compiler::DiagnosticCode::TraitNotSatisfied, in_construction)
+
+    # tc-app-slot-argument-kinds: no trait and no affine type as an argument.
+    fn trait_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn f(b: Box[Hashable]) -> int:
+                1
+            1
+    std::test::rejects("tc-app-slot-argument-kinds/trait", std::compiler::DiagnosticCode::TraitStorageUnsupported, trait_argument)
+    fn affine_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn f(b: Box[Coroutine{args: [], return: int, errors: []}]) -> int:
+                1
+            1
+    std::test::rejects("tc-app-slot-argument-kinds/affine", std::compiler::DiagnosticCode::Type, affine_argument)
+
+    # tc-app-distinct-and-invariant: no slot is converted, widened or narrowed.
+    fn distinct() errors std::compiler::CompilerError:
+        static compile:
+            fn f(b: Box[int]) -> int:
+                b.value
+            f(Box {value: "x"})
+    std::test::rejects_containing("tc-app-distinct-and-invariant/str", std::compiler::DiagnosticCode::Type, "Box[str] and Box[int] are distinct applications of Box (T is str, not int)", distinct)
+    fn domain() errors std::compiler::CompilerError:
+        static compile:
+            fn f(b: Box[int]) -> int:
+                b.value
+            fn s(x: int) -> Small:
+                3
+            f(Box {value: s(1)})
+    std::test::rejects("tc-app-distinct-and-invariant/domain", std::compiler::DiagnosticCode::Type, domain)
+    fn same_application() errors std::compiler::CompilerError:
+        static compile:
+            fn f(b: Box[int]) -> int:
+                b.value
+            f(Box[int] {value: 3})
+    std::test::value("tc-app-distinct-and-invariant/explicit", 3, same_application)
+
+fn register_construction_tests():
+    # tc-construction-explicit.
+    fn explicit() errors std::compiler::CompilerError:
+        static compile:
+            p = Pair[int, str] {first: 1, second: "x"}
+            [p.first == 1, p.second == "x"]
+    std::test::value("tc-construction-explicit/value", [true, true], explicit)
+    fn explicit_mismatch() errors std::compiler::CompilerError:
+        static compile:
+            Pair[int, str] {first: "no", second: "x"}
+            1
+    std::test::rejects_containing("tc-construction-explicit/mismatch", std::compiler::DiagnosticCode::Type, "field \"first\" of struct Pair[int, str] cannot be proven to satisfy its declared type int (value type: str)", explicit_mismatch)
+
+    # tc-construction-inferred: the values establish the slots, which typed
+    # parameters observe (an exact function's contract, not its identity).
+    fn inferred() errors std::compiler::CompilerError:
+        static compile:
+            fn a(p: Pair[int, List[str]]) -> int:
+                p.first
+            fn b(x: Box[Fn{args: [int], return: int, errors: []}]) -> int:
+                f = x.value
+                f(3)
+            fn c(m: Map[str, Box[int]]) -> int:
+                1
+            [a(Pair {first: 1, second: ["x"]}), b(Box {value: twice}), c(Map {keys: ["k"], vals: [Box {value: 2}]})]
+    std::test::value("tc-construction-inferred", [1, 6, 1], inferred)
+
+    # tc-construction-deep-values: an argument is bounded where a value
+    # standing in its fields is.
+    fn deep_inferred() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x: Box[List[List[List[int]]]]) -> int:
+                1
+            a = Box {value: [[[1]]]}
+            b = Box {value: [[[[[[1]]]]]]}
+            [a.value == [[[1]]], b.value == [[[[[[1]]]]]], f(a), f(Box[List[List[List[int]]]] {value: [[[2]]]})]
+    std::test::value("tc-construction-deep-values/lists", [true, true, 1, 1], deep_inferred)
+    fn deep_nested() errors std::compiler::CompilerError:
+        static compile:
+            p = Pair {first: Box {value: [[[1]]]}, second: [Pair {first: [[["x"]]], second: 2}]}
+            p.first.value == [[[1]]]
+    std::test::value("tc-construction-deep-values/nested", true, deep_nested)
+
+    # tc-construction-unestablished.
+    fn empty_bag() errors std::compiler::CompilerError:
+        static compile:
+            Bag {items: []}
+            1
+    std::test::rejects_containing("tc-construction-unestablished/empty", std::compiler::DiagnosticCode::Imprint, "does not establish type slot T from its field values", empty_bag)
+    fn conflict() errors std::compiler::CompilerError:
+        static compile:
+            Two {a: 1, b: "x"}
+            1
+    std::test::rejects_containing("tc-construction-unestablished/conflict", std::compiler::DiagnosticCode::Imprint, "imprint variable T is int by an earlier argument but str by field 2", conflict)
+    fn written_bag() errors std::compiler::CompilerError:
+        static compile:
+            std::list::length(Bag[int] {items: []}.items)
+    std::test::value("tc-construction-unestablished/explicit", 0, written_bag)
+
+    # tc-construction-constrained: the construction is the invalid
+    # application.
+    fn constrained() errors std::compiler::CompilerError:
+        static compile:
+            h = H {key: twice}
+            hash(h)
+    std::test::rejects_containing("tc-construction-constrained", std::compiler::DiagnosticCode::TraitNotSatisfied, "the construction is invalid: type argument for \"K\" in H[Fn{args: [int], return: int, errors: []}] does not satisfy Hashable", constrained)
+
+    # tc-construction-in-generic-body.
+    fn generic_body() errors std::compiler::CompilerError:
+        static compile:
+            fn put(m: Map[K, V], k: K, v: V) -> Map[K, V]:
+                Map[K, V] {keys: std::list::append(m.keys, k), vals: std::list::append(m.vals, v)}
+            fn empty() -> Map[K, V]:
+                Map[K, V] {keys: [], vals: []}
+            m = put(put(empty[str, int](), "a", 1), "b", 2)
+            [m.keys, m.vals]
+    std::test::value("tc-construction-in-generic-body", [["a", "b"], [1, 2]], generic_body)
+
+    # tc-branches-and-handlers.
+    fn joins() errors std::compiler::CompilerError:
+        static compile:
+            fn pick(c: bool) -> Box[int]:
+                if c:
+                    Box {value: 1}
+                else:
+                    Box[int] {value: 2}
+            fn safe(xs: List[Box[int]]) -> Box[int]:
+                std::list::at(xs, 5):
+                    on IndexNotFound:
+                        Box {value: 0}
+            [pick(true).value, pick(false).value, safe([]).value]
+    std::test::value("tc-branches-and-handlers/joins", [1, 2, 0], joins)
+    fn no_join() errors std::compiler::CompilerError:
+        static compile:
+            fn pick(c: bool):
+                if c:
+                    Box {value: 1}
+                else:
+                    Box {value: "x"}
+            pick(true).value
+    std::test::rejects("tc-branches-and-handlers/distinct", std::compiler::DiagnosticCode::UnprovenField, no_join)
+
+fn register_imprint_tests():
+    # tc-imprint-establishes.
+    fn establishes() errors std::compiler::CompilerError:
+        static compile:
+            fn first_of(p: Pair[A, B]) -> A:
+                p.first
+            fn swap(p: Pair[A, B]) -> Pair[B, A]:
+                Pair[B, A] {first: p.second, second: p.first}
+            p = Pair {first: 1, second: "x"}
+            [first_of(p) == 1, first_of(swap(p)) == "x", swap(swap(p)).first == 1]
+    std::test::value("tc-imprint-establishes", [true, true, true], establishes)
+
+    # tc-imprint-unchanged.
+    fn identity() errors std::compiler::CompilerError:
+        static compile:
+            fn identity(x: T) -> T:
+                x
+            identity(1)
+    std::test::rejects("tc-imprint-unchanged/identity", std::compiler::DiagnosticCode::Type, identity)
+    fn first() errors std::compiler::CompilerError:
+        static compile:
+            fn first(xs: List[T]) -> T errors IndexNotFound:
+                std::list::at(xs, 0)
+            fn f() -> str:
+                first(["a"]):
+                    on IndexNotFound:
+                        "none"
+            f()
+    std::test::value("tc-imprint-unchanged/first", "a", first)
+
+    # tc-imprint-rigid.
+    fn rigid() errors std::compiler::CompilerError:
+        static compile:
+            fn replace(m: Map[K, V], key: K, value: V) -> Map[K, V]:
+                m
+            replace(Map {keys: ["a"], vals: [1]}, 3, 4)
+            1
+    std::test::rejects_containing("tc-imprint-rigid", std::compiler::DiagnosticCode::Type, "argument for parameter \"key\" cannot be proven to satisfy str (argument type: int)", rigid)
+
+    # tc-imprint-not-manufactured.
+    fn result_only() errors std::compiler::CompilerError:
+        static compile:
+            fn empty() -> Map[K, int]:
+                Map[K, int] {keys: [], vals: []}
+            empty().vals
+    std::test::rejects("tc-imprint-not-manufactured/result-only", std::compiler::DiagnosticCode::Imprint, result_only)
+    fn explicit_bad() errors std::compiler::CompilerError:
+        static compile:
+            fn empty() -> Map[K, int]:
+                Map[K, int] {keys: [], vals: []}
+            empty[Fn{args: [int], return: int, errors: []}]().vals
+    std::test::rejects_containing("tc-imprint-not-manufactured/explicit-bad", std::compiler::DiagnosticCode::TraitNotSatisfied, "empty: type argument for \"K\" in Map[Fn{args: [int], return: int, errors: []}, int] does not satisfy Hashable", explicit_bad)
+    fn explicit_good() errors std::compiler::CompilerError:
+        static compile:
+            fn empty() -> Map[K, int]:
+                Map[K, int] {keys: [], vals: []}
+            empty[str]().vals
+    std::test::value("tc-imprint-not-manufactured/explicit", [], explicit_good)
+    fn bare_first() errors std::compiler::CompilerError:
+        static compile:
+            fn bad(key: K, m: Map[K, int]) -> int:
+                1
+            1
+    std::test::rejects("tc-imprint-not-manufactured/bare-first", std::compiler::DiagnosticCode::Type, bare_first)
+
+    # tc-result-constraint.
+    fn result_rejected() errors std::compiler::CompilerError:
+        static compile:
+            fn make(ks: List[K], vs: List[V]) -> Map[K, V]:
+                Map[K, V] {keys: ks, vals: vs}
+            make([Box {value: twice}], [1]).vals
+    std::test::rejects("tc-result-constraint/rejected", std::compiler::DiagnosticCode::TraitNotSatisfied, result_rejected)
+    fn result_value() errors std::compiler::CompilerError:
+        static compile:
+            fn make(ks: List[K], vs: List[V]) -> Map[K, V]:
+                Map[K, V] {keys: ks, vals: vs}
+            fn hashed(ks: List[K], k: K) -> Map[K, int]:
+                Map[K, int] {keys: ks, vals: [hash(k)]}
+            [make(["a"], [1]).keys, hashed(["a"], "a").vals == [hash("a")]]
+    std::test::value("tc-result-constraint/value", [["a"], true], result_value)
+
+    # tc-diagnostic-order: IMPRINT before TRAIT-NOT-SATISFIED; a poisoned
+    # argument establishes nothing.
+    fn order_unestablished() errors std::compiler::CompilerError:
+        static compile:
+            fn e() -> Map[K, V]:
+                Map[K, V] {keys: [], vals: []}
+            e[str]().vals
+    std::test::rejects("tc-diagnostic-order/unestablished", std::compiler::DiagnosticCode::Imprint, order_unestablished)
+    fn order_constraint() errors std::compiler::CompilerError:
+        static compile:
+            fn make(ks: List[K], vs: List[V]) -> Map[K, V]:
+                Map[K, V] {keys: ks, vals: vs}
+            fn plain(x):
+                x
+            make([Box {value: plain}], [1]).vals
+    std::test::rejects("tc-diagnostic-order/constraint", std::compiler::DiagnosticCode::TraitNotSatisfied, order_constraint)
+    fn order_construction() errors std::compiler::CompilerError:
+        static compile:
+            fn get(m: Map[K, V], key: K) -> int:
+                1
+            get(Map {keys: [Box {value: twice}], vals: [1]}, 1)
+    std::test::rejects("tc-diagnostic-order/construction", std::compiler::DiagnosticCode::TraitNotSatisfied, order_construction)
+    fn order_poisoned() errors std::compiler::CompilerError:
+        static compile:
+            fn make(ks: List[K], vs: List[V]) -> Map[K, V]:
+                Map[K, V] {keys: ks, vals: vs}
+            fn get(m: Map[K, V], key: K) -> int:
+                1
+            get(make([], [1]), 1)
+    std::test::rejects("tc-diagnostic-order/poisoned", std::compiler::DiagnosticCode::Imprint, order_poisoned)
+
+fn register_constraint_tests():
+    # tc-constraint-not-a-view: K stays K.
+    fn not_a_view() errors std::compiler::CompilerError:
+        static compile:
+            fn keep(m: Map[K, V], key: K) -> List[K]:
+                a = std::mutable_array::create(1, key)
+                b = Box {value: key}
+                c = std::mutable_array::at(a, 0):
+                    on IndexNotFound:
+                        key
+                [key, b.value, c]
+            keep(Map {keys: ["a"], vals: [1]}, "z")
+    std::test::value("tc-constraint-not-a-view", ["z", "z", "z"], not_a_view)
+
+    # tc-constraint-values.
+    fn values() errors std::compiler::CompilerError:
+        static compile:
+            fn fingerprint(h: H[K]) -> int:
+                hash(h.key)
+            fn same(h: H[K], b: K) -> bool:
+                h.key == b
+            [fingerprint(H {key: "x"}) == hash("x"), fingerprint(H {key: Pair {first: 1, second: [2]}}) == hash(Pair {first: 1, second: [2]}), same(H {key: 3}, 3), same(H {key: "a"}, "b")]
+    std::test::value("tc-constraint-values", [true, true, true, false], values)
+
+    # tc-constraint-method-operation.
+    fn method() errors std::compiler::CompilerError:
+        static compile:
+            fn fingerprint(h: H[K]) -> int:
+                h.key.hash()
+            [H {key: "xy"}.fingerprint() == "xy".hash(), H {key: 3}.fingerprint() == hash(3)]
+    std::test::value("tc-constraint-method-operation", [true, true], method)
+
+    # tc-constraint-forgetting.
+    fn forgetting() errors std::compiler::CompilerError:
+        static compile:
+            fn wrap(ks: List[K]) -> int:
+                m = Map {keys: ks, vals: [1]}
+                1
+            wrap(["a"])
+    std::test::rejects_containing("tc-constraint-forgetting", std::compiler::DiagnosticCode::TraitNotSatisfied, "in Map[K, int] does not satisfy Hashable: its type is the imprint variable K, which no constraint holds to total equality and hashing", forgetting)
+
+    # tc-constraint-any.
+    fn untyped() errors std::compiler::CompilerError:
+        static compile:
+            fn get(h: H[K]) -> int:
+                1
+            fn caller(x) -> int:
+                get(H {key: x})
+            caller(1)
+    std::test::rejects_containing("tc-constraint-any", std::compiler::DiagnosticCode::TraitNotSatisfied, "in H[any] does not satisfy Hashable: its static type is any", untyped)
+
+    # tc-constraint-strengthening.
+    fn strengthening() errors std::compiler::CompilerError:
+        static compile:
+            fn first(xs: List[T]) -> T errors IndexNotFound:
+                std::list::at(xs, 0)
+            fn hash_first(h: H[K]) -> int:
+                k = first([h.key]):
+                    on IndexNotFound:
+                        return 0
+                hash(k)
+            hash_first(H {key: 7}) == hash(7)
+    std::test::value("tc-constraint-strengthening", true, strengthening)
+
+# The functions of the ordinary-trait tests: a function that applies a
+# trait's operation to a value of its own constrained variable is specialized
+# per binding, so it is declared at the top level (tc-ordinary-nested-function).
+fn show_printable(p: P[T]) -> str:
+    p.value.describe()
+
+fn size_of(m: M[T]) -> int:
+    m.value.length()
+
+fn sizes_of(m: M[T]) -> List[int]:
+    [size_of(m), size_of(m)]
+
+fn normalize_twice(n: N[T]) -> N[T]:
+    N[T] {value: n.value.normalize().normalize()}
+
+fn hash_and_describe(h: H[K], p: P[K]) -> bool:
+    hash(h.key) == hash(p.value) and p.value.describe() == "d"
+
+fn show_label(l: L[T]) -> str:
+    l.value.label()
+
+# tc-ordinary-trait-view-into-slot: a view whose witness is abstract (a
+# trait-typed parameter's) into a slot; the rejected block is the body of a
+# trait-polymorphic function, which is top-level only.
+fn view_into_slot(v: Printable) -> int errors std::compiler::CompilerError:
+    static compile:
+        x = P {value: v}
+        1
+
+fn register_ordinary_tests():
+    # tc-ordinary-application.
+    fn conforming() errors std::compiler::CompilerError:
+        static compile:
+            x = P {value: Person {name: "a"}}
+            1
+    std::test::value("tc-ordinary-application/valid", 1, conforming)
+    fn not_conforming() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: P[int]) -> int:
+                1
+            1
+    std::test::rejects_containing("tc-ordinary-application/int", std::compiler::DiagnosticCode::TraitNotSatisfied, "type argument for \"T\" in P[int] does not satisfy Printable: int cannot be a trait witness", not_conforming)
+
+    # tc-ordinary-operation: the witness's own implementation (str's is
+    # std::str::length).
+    fn operation() errors std::compiler::CompilerError:
+        static compile:
+            [show_printable(P {value: Person {name: "Ann"}}) == "Ann", size_of(M {value: "abc"}) == 3, size_of(M {value: Ruler {n: 7}}) == 7, sizes_of(M {value: Ruler {n: 4}}) == [4, 4]]
+    std::test::value("tc-ordinary-operation", [true, true, true, true], operation)
+
+    # tc-ordinary-self-result.
+    fn self_result() errors std::compiler::CompilerError:
+        static compile:
+            normalize_twice(N {value: Word {text: "x", n: 0}}).value.n
+    std::test::value("tc-ordinary-self-result", 2, self_result)
+
+    # tc-ordinary-two-constraints.
+    fn two_constraints() errors std::compiler::CompilerError:
+        static compile:
+            d = Person {name: "d"}
+            hash_and_describe(H {key: d}, P {value: d})
+    std::test::value("tc-ordinary-two-constraints", true, two_constraints)
+
+    # tc-ordinary-ambiguous.
+    fn ambiguous() errors std::compiler::CompilerError:
+        static compile:
+            fn both(p: P[T], q: Q[T]) -> str:
+                p.value.describe()
+            1
+    std::test::rejects("tc-ordinary-ambiguous", std::compiler::DiagnosticCode::AmbiguousMethodCall, ambiguous)
+
+    # tc-ordinary-trait-view-into-slot.
+    fn view() errors std::compiler::CompilerError:
+        view_into_slot(Person {name: "a"})
+    std::test::rejects("tc-ordinary-trait-view-into-slot", std::compiler::DiagnosticCode::TraitNotSatisfied, view)
+
+    # tc-ordinary-applied-witness.
+    fn applied_witness() errors std::compiler::CompilerError:
+        static compile:
+            show_label(L {value: Wrap {value: 1}})
+    std::test::value("tc-ordinary-applied-witness", "wrapped", applied_witness)
+
+    # tc-ordinary-nested-function.
+    fn nested() errors std::compiler::CompilerError:
+        static compile:
+            fn size(m: M[T]) -> int:
+                m.value.length()
+            size(M {value: "abc"})
+    std::test::rejects("tc-ordinary-nested-function", std::compiler::DiagnosticCode::TraitNestedPolymorphic, nested)
+
+fn register_static_tests():
+    # tc-static-compile: a bad application is a recoverable diagnostic.
+    fn constraint() errors std::compiler::CompilerError:
+        static compile:
+            H {key: twice}
+            1
+    std::test::rejects("tc-static-compile/constraint", std::compiler::DiagnosticCode::TraitNotSatisfied, constraint)
+    fn arity() errors std::compiler::CompilerError:
+        static compile:
+            fn f(p: Pair[int]) -> int:
+                1
+            1
+    std::test::rejects("tc-static-compile/arity", std::compiler::DiagnosticCode::Type, arity)
+    fn unestablished() errors std::compiler::CompilerError:
+        static compile:
+            struct_free = Box[List[int]] {value: []}
+            b = Map {keys: [], vals: [1]}
+            1
+    std::test::rejects("tc-static-compile/unestablished", std::compiler::DiagnosticCode::Imprint, unestablished)
+    fn valid() errors std::compiler::CompilerError:
+        static compile:
+            Map[str, int] {keys: ["a"], vals: [1]}.keys
+    std::test::value("tc-static-compile/valid", ["a"], valid)
+
+fn register_trait_constrained_types_tests():
+    register_application_tests()
+    register_construction_tests()
+    register_imprint_tests()
+    register_constraint_tests()
+    register_ordinary_tests()
+    register_static_tests()
+
+with context std::test::suite()
+register_trait_constrained_types_tests()
+std::test::report()

@@ -790,7 +790,22 @@ proc hir::specialize::Analyze {id} {
                     # directly rather than routed through narrow) or an
                     # already-specialized scalar key sharing the declared
                     # type's base, unioned with its evidence via narrow.
-                    set type [if {[hir::types::IsSpecific $declaredType]} {set declaredType} else {hir::types::narrow $type $declaredType}]
+                    #
+                    # A bare imprint variable (`key: K`, hir/imprint.tcl) is
+                    # the exception: the declared fact is "whatever each call
+                    # imprints", which an instance keyed by a concrete type
+                    # knows better (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md,
+                    # "Specialization"): `key: str` there, so the instance's
+                    # `==` of two K values is a String comparison. Only the
+                    # generic instance (key any) adopts the variable, with
+                    # the constraints its contract gives it.
+                    if {[hir::types::IsImprint $declaredType] && $type ne "any"} {
+                        # (Kept: the instance's own key type.)
+                    } elseif {[hir::types::IsSpecific $declaredType]} {
+                        set type $declaredType
+                    } else {
+                        set type [hir::types::narrow $type $declaredType]
+                    }
                 } elseif {([hir::types::IsList [hir::types::Unrefined $type]] && [hir::types::IsList [hir::types::Unrefined $declaredType]])
                         || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])
                         || ([hir::types::IsMutVec $type] && [hir::types::IsMutVec $declaredType])

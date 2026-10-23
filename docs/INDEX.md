@@ -67,6 +67,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [TRAITS.md](TRAITS.md) -- traits: eager structural views, monomorphized away
 - [HASHABLE-AND-KEYED-HASH.md](HASHABLE-AND-KEYED-HASH.md) -- the intrinsic trait `Hashable` (witnesses the language supplies), total hashing and equality, and the private keyed table hash
+- [TRAIT-CONSTRAINED-IMPRINTED-TYPES.md](TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) -- parameterized structs (`struct Pair[A, B]:`) and trait-constrained type slots (`struct Map[K satisfies Hashable, V]:`): applications validated by ordinary trait satisfaction, imprinting that establishes a slot's obligation without replacing the variable, total hashing and equality of a constrained key, the typed-storage probe answering CO-3 (completion report)
 - [CONTEXTS.md](CONTEXTS.md) -- contexts: static execution-environment dependencies
 - [CONTEXT-TRAITS.md](CONTEXT-TRAITS.md) -- context traits: portable I/O and textual paths
 - [IMPORTS.md](IMPORTS.md) -- imports: explicit namespace dependencies

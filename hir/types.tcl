@@ -48,6 +48,21 @@
 #                                   the identity is the declaration, never
 #                                   the fields, and the schema is the
 #                                   declaration's (hir::structs::fieldType).
+#   {nstruct ID {A1 ... An}}        an *application* of the parameterized
+#                                   struct ID (TRAIT-CONSTRAINED-IMPRINTED-
+#                                   TYPES.md): a value of ID whose type slots
+#                                   are A1..An, in declared slot order, each
+#                                   a canonical type (an imprint variable in
+#                                   an imprinted signature). Its field types
+#                                   are the declaration's with every slot
+#                                   replaced by its argument
+#                                   (hir::structs::AppliedFieldType). The
+#                                   identity is the constructor's and the
+#                                   arguments', never a witness: two
+#                                   applications are one type iff their
+#                                   arguments are (invariant in every slot);
+#                                   their runtime representation is the
+#                                   constructor's alone (StructShape).
 #   {enum ID}                       an *enum* (ENUMS.md): a value that is one
 #                                   case of the enum declared as ID
 #                                   (hir/enums.tcl). Nominal: the identity is
@@ -219,6 +234,21 @@
 #                                   body (only T itself, never, and any
 #                                   relate to it); substituted at every
 #                                   call. Unrestricted.
+#   {imprint T {TRAIT ...}}         a *constrained* imprint variable
+#                                   (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+#                                   T itself -- not a trait view, not the
+#                                   trait -- plus the facts "T satisfies
+#                                   TRAIT" its function's contract entails,
+#                                   because T is the argument of a slot
+#                                   constrained by TRAIT in an application
+#                                   of its signature (hir::imprint::
+#                                   Constrain). The traits are sorted and
+#                                   derived, never declared on a function:
+#                                   every occurrence of T in one signature
+#                                   carries the same ones, so T stays rigid.
+#                                   Inside a parameterized struct's own
+#                                   declaration, a slot reference is this
+#                                   form too, with its declared trait.
 #
 # The list and immutableSet forms are *aggregate facts*. Semantic inference
 # (infer) never produces a *shaped* (positional) one: a program's HIR types
@@ -283,6 +313,12 @@ namespace eval hir::types {
     # depth. Lattices of bounded types have finite height.
     variable aggregateDepth 3
     variable shapeLength 8
+    # The depth past which an application of a parameterized struct keeps
+    # its constructor but no longer its arguments (MakeApplied,
+    # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): deeper than the aggregate bound,
+    # so a declared type of practical depth is never cut, and finite, so
+    # inference over applications terminates.
+    variable appliedDepth 6
     # Registered *type constructors* (MINIMAL-APPLIED-LIST-TYPES.md): NAME
     # -> arity. A source type annotation "NAME[ARG]" (surface::parser::
     # TypeExpr) is resolved generically against this table (resolveNamed/
@@ -334,6 +370,11 @@ proc hir::types::resolveNamed {name {ns ""}} {
     # struct named like any registered type).
     set id [hir::structs::lookup $name $ns]
     if {$id ne ""} {
+        if {[hir::structs::isParameterized $id]} {
+            # A parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+            # is a type constructor: only an application of it is a type.
+            error "struct \"$name\" takes [llength [hir::structs::slots $id]] type argument(s): it is a type constructor, and only an application of it, $name\[[join [hir::structs::slots $id] {, }]\] with a type for each slot, is a type"
+        }
         return [list nstruct $id]
     }
     # An enum (ENUMS.md): the same type namespace and visibility rules,
@@ -529,7 +570,24 @@ proc hir::types::IsNativeMemory {type} {
 }
 # An imprint variable (hir/imprint.tcl).
 proc hir::types::IsImprint {type} {
-    return [expr {[llength $type] == 2 && [lindex $type 0] eq "imprint"}]
+    return [expr {[llength $type] in {2 3} && [lindex $type 0] eq "imprint"}]
+}
+
+# The traits the (constrained) imprint variable TYPE is known to satisfy
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): its sorted trait identities, ""
+# for an unconstrained one.
+proc hir::types::ImprintConstraints {type} {
+    return [lindex $type 2]
+}
+
+# The imprint variable NAME constrained by TRAITS (any order, duplicates
+# allowed): {imprint NAME} when there are none.
+proc hir::types::MakeImprint {name traits} {
+    set traits [lsort -unique $traits]
+    if {$traits eq {}} {
+        return [list imprint $name]
+    }
+    return [list imprint $name $traits]
 }
 
 # ---------------------------------------------------------------------------
@@ -788,6 +846,9 @@ proc hir::types::MentionsTrait {type} {
             if {[MentionsTrait $t]} { return 1 }
         }
     }
+    foreach t [StructArgs $type] {
+        if {[MentionsTrait $t]} { return 1 }
+    }
     return 0
 }
 
@@ -812,6 +873,8 @@ proc hir::types::MentionedContextTrait {type} {
         set inner [concat [FnArgs $type] [list [FnReturn $type]]]
     } elseif {[IsStruct $type]} {
         set inner [lmap {name t} [lindex $type 1] {set t}]
+    } elseif {[IsAppliedStruct $type]} {
+        set inner [StructArgs $type]
     }
     foreach t $inner {
         set id [MentionedContextTrait $t]
@@ -1076,6 +1139,11 @@ proc hir::types::ForgetInferred {type} {
             }
             return [list struct $fields]
         }
+        nstruct {
+            if {[llength $type] == 3} {
+                return [list nstruct [lindex $type 1] [lmap t [lindex $type 2] {ForgetInferred $t}]]
+            }
+        }
         fn - coroutine {
             set fields [lindex $type 1]
             dict set fields args [lmap t [dict get $fields args] {ForgetInferred $t}]
@@ -1115,9 +1183,52 @@ proc hir::types::IsStruct {type} {
     return [expr {[lindex $type 0] eq "struct" && [llength $type] == 2}]
 }
 
-# 1 if TYPE is a named struct type.
+# 1 if TYPE is a named struct type (an application of a parameterized one
+# included).
 proc hir::types::IsNamedStruct {type} {
-    return [expr {[lindex $type 0] eq "nstruct" && [llength $type] == 2}]
+    return [expr {[lindex $type 0] eq "nstruct" && [llength $type] in {2 3}}]
+}
+
+# 1 if TYPE is an application {nstruct ID ARGS} of a parameterized struct
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+proc hir::types::IsAppliedStruct {type} {
+    return [expr {[lindex $type 0] eq "nstruct" && [llength $type] == 3}]
+}
+
+# The type arguments of the application TYPE, in slot order ("" for any
+# other type).
+proc hir::types::StructArgs {type} {
+    if {[IsAppliedStruct $type]} {
+        return [lindex $type 2]
+    }
+    return ""
+}
+
+# The canonical application of parameterized struct ID to ARGS (types, one
+# per slot), nested DEPTH aggregate forms and NESTING applications deep.
+# Every argument is bounded at the application's own aggregate depth
+# (Bound): an argument is the type of the fields that name its slot, so it
+# is cut exactly where a value of it standing in that position is (List
+# admission and applications are invariant: an argument cut a level earlier
+# than its values' types would admit none of them). An application directly
+# in an argument is one application deeper, and past appliedDepth
+# applications the arguments are `any` -- a sound description of every
+# value of the constructor, which keeps inferred types finite (a function
+# whose result wraps its own result) and declared types of any practical
+# depth intact.
+proc hir::types::MakeApplied {id args {depth 0} {nesting 0}} {
+    variable appliedDepth
+    if {$nesting >= $appliedDepth} {
+        return [list nstruct $id [lrepeat [llength $args] any]]
+    }
+    set inner [expr {$nesting + 1}]
+    return [list nstruct $id [lmap a $args {
+        if {[IsAppliedStruct $a]} {
+            MakeApplied [lindex $a 1] [lindex $a 2] $depth $inner
+        } else {
+            Unviewed [Unshaped [Bound $a $depth]]
+        }
+    }]]
 }
 
 # 1 if TYPE is any precise struct type, anonymous or named.
@@ -1173,6 +1284,11 @@ proc hir::types::StructField {type name} {
     if {[IsStruct $type]} {
         set fields [lindex $type 1]
         return [dict getdef $fields $name ""]
+    }
+    if {[IsAppliedStruct $type]} {
+        # (An application's fields: the declaration's, its slots replaced by
+        # the arguments, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        return [hir::structs::AppliedFieldType $type $name]
     }
     if {[IsNamedStruct $type]} {
         return [hir::structs::fieldType [lindex $type 1] $name]
@@ -1685,11 +1801,11 @@ proc hir::types::MentionsMutable {type {seen {}}} {
     }
     if {[IsNamedStruct $type]} {
         set id [lindex $type 1]
-        if {$id in $seen} {
+        if {$type in $seen} {
             return 0
         }
-        foreach {name t} [hir::structs::fieldTypes $id] {
-            if {[MentionsMutable $t [concat $seen [list $id]]]} { return 1 }
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[MentionsMutable $t [concat $seen [list $type]]]} { return 1 }
         }
     }
     return 0
@@ -1800,6 +1916,9 @@ proc hir::types::Bound {type depth} {
     }
     if {[IsStruct $type]} {
         return [MakeStruct [lindex $type 1] $depth]
+    }
+    if {[IsAppliedStruct $type]} {
+        return [MakeApplied [lindex $type 1] [lindex $type 2] $depth]
     }
     if {[IsExactBlock $type]} {
         if {$depth >= $aggregateDepth} {
@@ -2303,6 +2422,14 @@ proc hir::types::Totality {operation type {seen {}}} {
         return [list none [NoTotality $operation block]]
     }
     if {[IsImprint $type]} {
+        foreach trait [ImprintConstraints $type] {
+            if {$operation in [hir::traits::intrinsicGuarantees $trait]} {
+                # A constrained variable (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+                # whose contract says it satisfies a trait guaranteeing the
+                # operation: every type a call can imprint as it has it.
+                return {total ""}
+            }
+        }
         return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
     }
     if {[hir::cabi::IsFloating $type]} {
@@ -2333,18 +2460,22 @@ proc hir::types::Totality {operation type {seen {}}} {
                 return [Components $operation $parts $seen]
             }
             nstruct {
+                # (SEEN holds the struct types being walked, an application
+                # with its arguments: a recursive parameterized struct's
+                # applications are finitely many, hir::structs::apply.)
                 set id [lindex $type 1]
-                if {$id in $seen} {
+                if {$type in $seen} {
                     return {total ""}
                 }
                 if {![hir::structs::declared $id] && [hir::layouts::OfStructId $id] eq ""} {
                     return [list unknown "$id is not a declared struct"]
                 }
                 set parts {}
-                foreach {name t} [hir::structs::fieldTypes $id] {
-                    lappend parts [list "field \"$name\" of $id" [if {$t eq {}} {string cat any} else {set t}]]
+                set shown [show $type]
+                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+                    lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
                 }
-                return [Components $operation $parts [concat $seen [list $id]]]
+                return [Components $operation $parts [concat $seen [list $type]]]
             }
         }
     }
@@ -2569,7 +2700,11 @@ proc hir::types::show {type} {
                 return "struct{[join [lmap {name t} [lindex $type 1] {format {%s: %s} $name [show $t]}] {, }]}"
             }
             nstruct {
-                # A named struct, by its declared name.
+                # A named struct, by its declared name; an application of a
+                # parameterized one with its arguments, Pair[int, str].
+                if {[llength $type] == 3} {
+                    return "[hir::structs::display [lindex $type 1]]\[[join [lmap t [lindex $type 2] {show $t}] {, }]\]"
+                }
                 return [hir::structs::display [lindex $type 1]]
             }
             enum {
@@ -2686,6 +2821,11 @@ proc hir::types::Presentable {type} {
                 lappend fields $name [Presentable $t]
             }
             return [list struct $fields]
+        }
+        nstruct {
+            if {[llength $type] == 3} {
+                return [list nstruct [lindex $type 1] [lmap t [lindex $type 2] {Presentable $t}]]
+            }
         }
         fn - coroutine {
             set fields [lindex $type 1]
@@ -3701,6 +3841,61 @@ proc hir::types::LoopResult {hir ctx e result clauses} {
 # (the declaration is the contract; hir::range::VerifyStruct proves each value
 # admissible); an anonymous one has the canonical structural type of its
 # fields' own types.
+# The application of parameterized struct ID that the construction E with
+# field value types FIELDTYPES (name -> type) makes when none is written
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): each slot established by the
+# values of the fields that hold it, exactly as a call's arguments
+# establish its imprint variables (hir::imprint::MatchInner, the inferred
+# List lengths forgotten), a bare `value: T` field included. A slot no field
+# establishes (only an empty List or a function's type says it), or two
+# fields that establish differently, is the construction's IMPRINT problem
+# (recorded on E as structInferProblem, diagnosed by hir::imprint::verify):
+# the type is then "" (the construction is poison), and the application
+# must be written.
+proc hir::types::InferApplication {hirVar e id fieldTypes} {
+    upvar 1 $hirVar hir
+    set binding [dict create]
+    set problem ""
+    set index 0
+    foreach name [hir::structs::names $id] {
+        incr index
+        set declared [hir::structs::fieldType $id $name]
+        if {$declared eq "" || ![dict exists $fieldTypes $name] || ![hir::imprint::Mentions $declared]} {
+            continue
+        }
+        set value [dict get $fieldTypes $name]
+        set problem [hir::imprint::MatchInner $declared $value binding $index]
+        if {$problem ne ""} {
+            set problem [format {the construction %s {...} cannot establish its type slots from field "%s": %s} \
+                [hir::structs::display $id] $name [regsub {argument ([0-9]+)} $problem {field \1}]]
+            break
+        }
+    }
+    set slots [hir::structs::slots $id]
+    if {$problem eq ""} {
+        foreach slot $slots {
+            if {![dict exists $binding $slot] || [dict get $binding $slot] eq "never"} {
+                set problem [format {the construction %s {...} does not establish type slot %s from its field values (no field holds a value whose type says what %s is): write the application, %s[%s] {...}} \
+                    [hir::structs::display $id] $slot $slot [hir::structs::display $id] [join $slots {, }]]
+                break
+            }
+        }
+    }
+    if {$problem ne ""} {
+        if {[dict getdef $hir exprs $e structInferProblem ""] ne $problem} {
+            dict set hir exprs $e structInferProblem $problem
+        }
+        return ""
+    }
+    if {[dict exists $hir exprs $e structInferProblem]} {
+        dict unset hir exprs $e structInferProblem
+    }
+    # (A slot is a type a declaration could state: an exact function's
+    # identity is no part of it, its structural contract is --
+    # Box {value: f} is a Box[Fn{...}], as Box[Fn{...}] {value: f} is.)
+    return [MakeApplied $id [lmap slot $slots {Presentable [dict get $binding $slot]}]]
+}
+
 proc hir::types::Struct {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
@@ -3730,6 +3925,36 @@ proc hir::types::Struct {hirVar ctxVar e} {
         set id [dict get $node structId]
         if {$id eq ""} {
             return "any"
+        }
+        if {[hir::structs::isParameterized $id]} {
+            # A parameterized struct's construction (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md): an explicit application, Pair[int, str]
+            # {...} -- the declaration is the contract, its slots the
+            # written arguments -- or the one its field values establish.
+            # An application that is invalid (a constrained slot's argument
+            # does not satisfy its trait) or not established is poison: no
+            # context makes it valid, and its diagnostic is the
+            # construction's (hir::structs::verifyApplications,
+            # hir::imprint::verify).
+            if {[dict exists $node structArgs]} {
+                set type [MakeApplied $id [dict get $node structArgs]]
+            } else {
+                set type [InferApplication hir $e $id $fieldTypes]
+                if {$type eq ""} {
+                    return [Poison hir $e]
+                }
+            }
+            set problem [hir::structs::ApplicationProblem $type]
+            if {$problem ne ""} {
+                if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
+                    dict set hir exprs $e structApplicationProblem $problem
+                }
+                return [Poison hir $e]
+            }
+            if {[dict exists $hir exprs $e structApplicationProblem]} {
+                dict unset hir exprs $e structApplicationProblem
+            }
+            return $type
         }
         return [list nstruct $id]
     }

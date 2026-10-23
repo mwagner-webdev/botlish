@@ -1158,6 +1158,8 @@ the written order.
     the struct are ordinary functions, called with method syntax.
   * Anonymous struct types cannot be written in annotations; declare a
     named struct to name the type.
+  * A struct may declare type slots, `struct Pair[A, B]:`, and constrain
+    one by a trait: concept.parameterized-structs.
   * A struct of another module is spelled qualified; `import type` does not
     import structs (capability.struct-type-import).
 
@@ -1195,6 +1197,127 @@ p.x
 
 == MORE
 STRUCTS.md; concept.destructuring to bind several fields at once.
+
+@topic concept.parameterized-structs
+title: Parameterized structs: type slots, and slots constrained by a trait
+summary: `struct Map[K satisfies Hashable, V]:` is a type constructor whose applications are types; a function over `Map[K, V]` learns K satisfies Hashable by imprinting.
+index: concepts
+alias: parameterized struct; generic struct; type slot; type parameter; satisfies; type constructor; struct type arguments; Map[K, V]
+keywords: slot, satisfies, Hashable, imprint, application, type constructor, constraint, obligation, generic, K, V, TRAIT-NOT-SATISFIED, IMPRINT
+related: concept.structs concept.traits concept.hashable error.imprint error.trait-not-satisfied error.type
+docs: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md STRUCTS.md C-ABI-TYPES.md
+
+== WHAT IT IS
+    struct Pair[A, B]:                      slots A and B
+        first: A
+        second: B
+
+    struct Map[K satisfies Hashable, V]:    K must satisfy Hashable
+        keys: MutableArray[K]
+        vals: MutableArray[V]
+
+    fn get(m: Map[K, V], key: K) -> V       an ordinary imprinted function
+
+A struct with slots is a type constructor: its types are its applications,
+`Pair[int, str]`, one type per slot. Its fields name the slots, and an
+application's fields are the declaration's with every slot replaced:
+`Map[str, int].keys` is a `MutableArray[str]`. Construct one with the
+application written, `Pair[int, str] {first: 1, second: "x"}`, or let the
+field values establish it, `Pair {first: 1, second: "x"}`.
+
+A slot declared `K satisfies TRAIT` makes `Map[X, Y]` a valid type only
+when X satisfies the trait -- by the ordinary trait satisfaction, so an
+intrinsic trait (Hashable) and a trait of a module both work. There is no
+generic function declaration: `get` is imprinted, exactly as `fn
+first(xs: List[T]) -> T` is. Matching its argument's `Map[str, int]`
+against `Map[K, V]` establishes K and V, and because every valid Map
+application has a Hashable first argument, the body knows that K
+satisfies Hashable: it may hash a K (the total hash) and compare two
+(total equality), and call a trait's operations on a K. K stays K -- a
+type a `List[K]`, a field and a result may hold -- never a trait view.
+
+== RULES
+  * A slot is named like an imprint variable (T, K, V, T2), at most once,
+    and is constrained by at most one trait: `satisfies TRAIT`, never `:`,
+    `where`, `requires` or an expression.
+  * An application gives one type per slot (TYPE otherwise); the bare
+    constructor `Pair` is no type. A slot takes an unrestricted concrete
+    type: no trait, context trait or affine type.
+  * An invalid application -- a constrained slot's argument that does not
+    satisfy the trait (a function for Hashable, `any`) -- is
+    TRAIT-NOT-SATISFIED where it is written: a parameter, a result, a
+    field, a List element, a construction, an explicit imprint.
+  * A declaration states the obligations of the applications its fields
+    hold: `struct Outer[T]: inner: Map[T, int]` is rejected,
+    `struct Outer[T satisfies Hashable]` accepted.
+  * A function learns obligations only from the applications of its own
+    signature, its parameters and its result; its body adds none. A
+    constraint never establishes a variable: a result-only K still needs
+    explicit imprints, `empty[str, int]()`.
+  * Applications are invariant in every slot: a `Box[str]` is no
+    `Box[int]`, and two different applications have no join.
+  * A function applying a source trait's operation to its constrained
+    variable is specialized once per binding (as a trait-polymorphic
+    function is per witness), so it is top-level only
+    (TRAIT-NESTED-POLYMORPHIC); Hashable's operations need no
+    specialization.
+  * At run time an application is its constructor's struct value: no
+    type arguments, no witness, no check.
+
+== WHY
+A hash table needs keys whose equality and hash are total; the type that
+requires it is the table, so the table's declaration says so once, and
+every function over a table learns it by matching the table's type. The
+key type itself is kept, so the table's storage is a `MutableArray[K]`,
+not erased to `any`, and a String-keyed instance compares Strings.
+
+== EXAMPLES
+@example accept
+struct H[K satisfies Hashable]:
+    key: K
+
+fn fingerprint(h: H[K]) -> int:
+    h.key.hash()
+
+fn same(h: H[K], other: K) -> bool:
+    h.key == other
+
+[H {key: "xy"}.fingerprint() == "xy".hash(), H[int] {key: 3}.same(3)]
+@caption The body may hash and compare a K: K satisfies Hashable because H's slot requires it
+@value [true, true]
+@end
+
+@example reject
+struct H[K satisfies Hashable]:
+    key: K
+
+fn twice(n: int) -> int:
+    n * 2
+
+h = H {key: twice}
+1
+@caption A function is no argument for a Hashable slot: the application H[Fn{...}] is invalid
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 7:5
+@end
+
+@example reject
+struct Map[K satisfies Hashable, V]:
+    keys: List[K]
+    vals: List[V]
+
+struct Outer[T]:
+    inner: Map[T, int]
+
+1
+@caption Outer's T does not state the Hashable its field's application requires
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 6:12
+@end
+
+== MORE
+TRAIT-CONSTRAINED-IMPRINTED-TYPES.md; concept.structs; error.imprint for
+how a function's variables are established.
 
 @topic concept.opaque-structs
 title: Opaque structs: representation owned by one module
@@ -2991,7 +3114,10 @@ Not Hashable: a function (functions have no equality), a coroutine handle,
 a MutableArray or MutableVector, a C pointer or native view, a
 DecimalRounded value, and any struct, List or set that holds one; `any`
 and an untyped field, whose values are not known (one may hold a
-function); a view of another trait; an imprint variable.
+function); a view of another trait; an imprint variable -- unless a
+constrained slot of its signature holds it (`fn f(m: Map[K, V])` with
+`struct Map[K satisfies Hashable, V]`: concept.parameterized-structs),
+then it is.
 
 == RULES
   * A value enters Hashable at a Hashable parameter or result, like any
