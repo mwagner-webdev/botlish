@@ -39,6 +39,10 @@ set argv {}
 source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root bench backends.tcl]
+# The general runtime's costs: natively every coroutine runs on it, unfused
+# (bench/coroutine-fusion.tcl compares it with fused code,
+# COROUTINE-FUSION-MILESTONE-1.md).
+set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
 interp recursionlimit {} 200000
 
 set runs 5

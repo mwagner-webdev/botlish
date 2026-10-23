@@ -1,0 +1,35 @@
+# lcg.bot -- a producer/consumer pair (COROUTINE-FUSION-MILESTONE-1.md).
+#
+# numbers is a coroutine yielding the values of a linear congruential
+# generator: its state lives across yields, in a MutableArray local to the
+# coroutine, and so does its loop counter. sum drives it with one resume per
+# item and folds the items into an accumulator; the coroutine's final result
+# (-1) is the last thing it hands out. Nothing here is written for fusion:
+# the coroutine is the program's structure, and its native code is the
+# compiler's business.
+#
+# The last line's argument is the item count (bench/coroutine-fusion.tcl
+# replaces it).
+#
+# expect: 507467
+
+import std::coroutine
+import std::mutable_array
+
+fn numbers(seed: int, count: int) -> int:
+    state = std::mutable_array::create(1, seed)
+    loop i from 0 to count:
+        raw = state.at(0) * 1103515245 + 12345
+        next = raw.mod(2147483648)
+        state.set(0, next)
+        yield next.mod(1000)
+    return -1
+
+fn sum(count: int) -> int:
+    coroutine {step, first} = numbers(42, count)
+    acc = std::mutable_array::create(1, first)
+    loop i from 1 to count:
+        acc.set(0, acc.at(0) + step())
+    acc.at(0) + step()
+
+sum(1000)

@@ -1,0 +1,26 @@
+# case-tail.bot -- a yielding function that loops by a self tail call: inlined
+# into the fused coroutine, the tail call is a jump back to its own inlined
+# entry, its parameters rebound at once (COROUTINE-FUSION-MILESTONE-1.md,
+# tests/coroutine-fusion.test).
+#
+# expect: [[0, [3, 6, 9, 12]], [0, []], [0, [3]]]
+
+import std::coroutine
+import std::mutable_array
+
+# from..to-1, by a self tail call (a loop in the native code) that yields.
+fn walk(from: int, to: int, step: int) -> int:
+    if from >= to:
+        return from
+    yield from
+    return walk(from + step, to, step)
+
+fn drive(n: int) -> list:
+    coroutine {step: next, first} = walk(0, n, 3)
+    rest = loop i from 0 to n:
+        if std::coroutine::done?(next):
+            break
+        next()
+    [first, rest]
+
+[drive(10), drive(0), drive(1)]

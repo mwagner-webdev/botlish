@@ -1,0 +1,33 @@
+# case-early.bot -- a body that returns before any yield completes during the construction
+# (done? at once); every later resume returns the cached final result.
+# (COROUTINE-FUSION-MILESTONE-1.md, tests/coroutine-fusion.test)
+#
+# expect: [[100, 1, 100, 100, 1], [0, 0, 101, 101, 1], [0, 0, 1, 102, 1], [0, 0, 1, 2, 0]]
+
+import std::coroutine
+
+struct V:
+    n: int
+
+fn w(k: int) -> V:
+    loop i from 0 to k:
+        yield V {n: i}
+    return V {n: 100 + k}
+
+fn f(k: int) -> List[int]:
+    coroutine {step, first} = w(k)
+    d = std::coroutine::done?(step)
+    dn = if d:
+        1
+    else:
+        0
+    a = step()
+    b = step()
+    e = std::coroutine::done?(step)
+    en = if e:
+        1
+    else:
+        0
+    [first.n, dn, a.n, b.n, en]
+
+[f(0), f(1), f(2), f(3)]

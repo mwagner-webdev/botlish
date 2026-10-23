@@ -1,0 +1,396 @@
+nir 1 call-effects=1 statics=0
+shape 0 named "Byte" fields="value"
+
+func 0 "<program>" params=0 env=0 regs=77 pnames="" captures=0 instance="generic" rawregs="1 3 6 9 11 16 18 21 23 25 28 30 33 35 38 43 46 51 53 58 60 63 68 70 72"
+    %0 = int 104 @e332
+    %1 = rawint 104
+    %2 = int 101 @e333
+    %3 = rawint 101
+    %4 = op listnew %0 %2 @e330
+    %5 = int 108 @e336
+    %6 = rawint 108
+    %7 = op listnew %5 @e334
+    %8 = int 108 @e339
+    %9 = rawint 108
+    %10 = int 111 @e340
+    %11 = rawint 111
+    %12 = op listnew %8 %10 @e337
+    %13 = op listnew %4 %7 %12 @e328
+    %14 = call 3 %13 @e326
+    %15 = int 97 @e347
+    %16 = rawint 97
+    %17 = int 195 @e348
+    %18 = rawint 195
+    %19 = op listnew %15 %17 @e345
+    %20 = int 169 @e351
+    %21 = rawint 169
+    %22 = int 226 @e352
+    %23 = rawint 226
+    %24 = int 130 @e353
+    %25 = rawint 130
+    %26 = op listnew %20 %22 %24 @e349
+    %27 = int 172 @e356
+    %28 = rawint 172
+    %29 = int 240 @e357
+    %30 = rawint 240
+    %31 = op listnew %27 %29 @e354
+    %32 = int 159 @e360
+    %33 = rawint 159
+    %34 = int 152 @e361
+    %35 = rawint 152
+    %36 = op listnew %32 %34 @e358
+    %37 = int 128 @e364
+    %38 = rawint 128
+    %39 = op listnew %37 @e362
+    %40 = op listnew %19 %26 %31 %36 %39 @e343
+    %41 = call 3 %40 @e341
+    %42 = int 226 @e371
+    %43 = rawint 226
+    %44 = op listnew %42 @e369
+    %45 = int 130 @e374
+    %46 = rawint 130
+    %47 = op listnew %45 @e372
+    %48 = op listnew %44 %47 @e367
+    %49 = call 3 %48 @e365
+    %50 = int 192 @e381
+    %51 = rawint 192
+    %52 = int 128 @e382
+    %53 = rawint 128
+    %54 = op listnew %50 %52 @e379
+    %55 = op listnew %54 @e377
+    %56 = call 3 %55 @e375
+    %57 = int 237 @e389
+    %58 = rawint 237
+    %59 = int 160 @e390
+    %60 = rawint 160
+    %61 = op listnew %57 %59 @e387
+    %62 = int 128 @e393
+    %63 = rawint 128
+    %64 = op listnew %62 @e391
+    %65 = op listnew %61 %64 @e385
+    %66 = call 3 %65 @e383
+    %67 = int 226 @e400
+    %68 = rawint 226
+    %69 = int 40 @e401
+    %70 = rawint 40
+    %71 = int 161 @e402
+    %72 = rawint 161
+    %73 = op listnew %67 %69 %71 @e398
+    %74 = op listnew %73 @e396
+    %75 = call 3 %74 @e394
+    %76 = op listnew %14 %41 %49 %56 %66 %75 @e324
+    ret %76
+end
+
+func 1 "continuation" params=2 env=0 regs=14 pnames="lo hi" captures=0 instance="int, int" rawregs="3" @e12
+    %2 = int 0 @e16
+    %3 = rawint 0
+    %4 = op coyield %2 @e14
+    %5 = structget 0 %4 @e20
+    %6 = op ige %5 %0 @e18
+    br %6 L0 L1 @e17
+  label L0
+    %8 = structget 0 %4 @e26
+    %9 = op ile %8 %1 @e24
+    br %9 L3 L4 @e23
+  label L3
+    %11 = bool true @e29
+    %10 = move %11
+    jump L5
+  label L4
+    %12 = bool false @e30
+    %10 = move %12
+    jump L5
+  label L5
+    %7 = move %10
+    jump L2
+  label L1
+    %13 = bool false @e31
+    %7 = move %13
+    jump L2
+  label L2
+    ret %7
+end
+
+func 2 "utf8" params=0 env=0 regs=101 pnames="" captures=0 instance="generic" rawregs="2 6 11 14 17 20 23 26 29 32 35 37 39 43 45 49 51 53 57 59 63 65 67 69 73 76 78 82 85 87 94 96 97" @e33
+    jump L0 @e34
+  label L0
+    %1 = int 1 @e38
+    %2 = rawint 1
+    %3 = op coyield %1 @e36
+    %4 = structget 0 %3 @e40
+    %5 = int 128 @e46
+    %6 = rawint 128
+    %7 = op ige %4 %5 @e43
+    br %7 L2 L3 @e42
+  label L2
+    %10 = int 194 @e53
+    %11 = rawint 194
+    %12 = op ige %4 %10 @e50
+    br %12 L8 L6 @e50
+  label L8
+    %13 = int 223 @e58
+    %14 = rawint 223
+    %15 = op ile %4 %13 @e55
+    br %15 L5 L6 @e55
+  label L5
+    %16 = int 1 @e62
+    %17 = rawint 1
+    %9 = move %16
+    jump L7
+  label L6
+    %19 = int 224 @e68
+    %20 = rawint 224
+    %21 = op ige %4 %19 @e65
+    br %21 L12 L10 @e65
+  label L12
+    %22 = int 239 @e73
+    %23 = rawint 239
+    %24 = op ile %4 %22 @e70
+    br %24 L9 L10 @e70
+  label L9
+    %25 = int 2 @e77
+    %26 = rawint 2
+    %18 = move %25
+    jump L11
+  label L10
+    %28 = int 240 @e83
+    %29 = rawint 240
+    %30 = op ige %4 %28 @e80
+    br %30 L16 L14 @e80
+  label L16
+    %31 = int 244 @e88
+    %32 = rawint 244
+    %33 = op ile %4 %31 @e85
+    br %33 L13 L14 @e85
+  label L13
+    %34 = int 3 @e92
+    %35 = rawint 3
+    %27 = move %34
+    jump L15
+  label L14
+    %36 = int 0 @e93
+    %37 = rawint 0
+    %27 = move %36
+    jump L15
+  label L15
+    %18 = move %27
+    jump L11
+  label L11
+    %9 = move %18
+    jump L7
+  label L7
+    %38 = int 224 @e99
+    %39 = rawint 224
+    %40 = op ieq %4 %38 @e96
+    br %40 L17 L18 @e95
+  label L17
+    %42 = int 160 @e100
+    %43 = rawint 160
+    %41 = move %42
+    jump L19
+  label L18
+    %44 = int 240 @e105
+    %45 = rawint 240
+    %46 = op ieq %4 %44 @e102
+    br %46 L20 L21 @e101
+  label L20
+    %48 = int 144 @e106
+    %49 = rawint 144
+    %47 = move %48
+    jump L22
+  label L21
+    %50 = int 128 @e107
+    %51 = rawint 128
+    %47 = move %50
+    jump L22
+  label L22
+    %41 = move %47
+    jump L19
+  label L19
+    %52 = int 237 @e113
+    %53 = rawint 237
+    %54 = op ieq %4 %52 @e110
+    br %54 L23 L24 @e109
+  label L23
+    %56 = int 159 @e114
+    %57 = rawint 159
+    %55 = move %56
+    jump L25
+  label L24
+    %58 = int 244 @e119
+    %59 = rawint 244
+    %60 = op ieq %4 %58 @e116
+    br %60 L26 L27 @e115
+  label L26
+    %62 = int 143 @e120
+    %63 = rawint 143
+    %61 = move %62
+    jump L28
+  label L27
+    %64 = int 191 @e121
+    %65 = rawint 191
+    %61 = move %64
+    jump L28
+  label L28
+    %55 = move %61
+    jump L25
+  label L25
+    %67 = op runbox %9
+    %68 = int 0 @e129
+    %69 = rawint 0
+    %70 = op rigt %67 %69 @e126
+    br %70 L33 L30 @e126
+  label L33
+    %71 = call 1 %41 %55 @e131
+    br %71 L32 L30 @e131
+  label L32
+    %72 = int 2 @e143
+    %73 = rawint 2
+    %74 = op rilt %67 %73 @e140
+    br %74 L29 L34 @e140
+  label L34
+    %75 = int 128 @e148
+    %76 = rawint 128
+    %77 = int 191 @e149
+    %78 = rawint 191
+    %79 = call 1 %75 %77 @e146
+    br %79 L29 L30 @e146
+  label L29
+    %81 = int 3 @e160
+    %82 = rawint 3
+    %83 = op rilt %67 %82 @e157
+    br %83 L35 L38 @e157
+  label L38
+    %84 = int 128 @e165
+    %85 = rawint 128
+    %86 = int 191 @e166
+    %87 = rawint 191
+    %88 = call 1 %84 %86 @e163
+    br %88 L35 L36 @e163
+  label L35
+    %89 = bool true @e169
+    %80 = move %89
+    jump L37
+  label L36
+    %90 = bool false @e170
+    %80 = move %90
+    jump L37
+  label L37
+    %66 = move %80
+    jump L31
+  label L30
+    %91 = bool false @e171
+    %66 = move %91
+    jump L31
+  label L31
+    br %66 L40 L39 @e174
+  label L39
+    %93 = int 0 @e180
+    %94 = rawint 0
+    %95 = int 1 @e181
+    %96 = rawint 1
+    %97 = op risub %94 %96 @e178
+    %98 = op rbox %97
+    ret %98 @e177
+  label L40
+    %99 = unit
+    %92 = move %99
+    jump L41
+  label L41
+    %8 = move %92
+    jump L4
+  label L3
+    %100 = unit
+    %8 = move %100
+    jump L4
+  label L4
+    jump L0 @e34
+end
+
+func 3 "validate" params=1 env=0 regs=44 pnames="chunks" captures=0 instance="List[List[int]]" rawregs="6 10 17 25 33 37 42" planregs="21 31" @e183
+    %1 = fnvalue 4 @e187
+    %2 = op cocreate %1 @e185
+    %3 = op costart %2 @e191
+    %4 = unit @e194
+    %5 = int 1 @e198
+    %6 = rawint 1
+    %7 = op mutarraycreate %5 %3 @e196
+    %8 = op listlen %0 @e200
+    %9 = int 0 @e200
+    %10 = rawint 0
+    %11 = move %9 @e200
+    jump L0 @e200
+  label L0
+    %13 = op ilt %11 %8 @e200
+    br %13 L1 L3 @e200
+  label L1
+    %14 = op listget %0 %11 @e200
+    %15 = op listlen %14 @e202
+    %16 = int 0 @e202
+    %17 = rawint 0
+    %18 = move %16 @e202
+    %20 = op listnew @e202
+    %21 = move %20 @e202
+    jump L5 @e202
+  label L5
+    %22 = op ilt %18 %15 @e202
+    br %22 L6 L8 @e202
+  label L6
+    %23 = op listget %14 %18 @e202
+    pusherrorexit L10 @e204
+    %24 = int 0 @e207
+    %25 = rawint 0
+    %26 = structnew 0 %23 @e210
+    %27 = op coresume %2 %26 @e208
+    %28 = op mutarraysetproven %7 %24 %27 @e204
+    poperrorexit @e204
+    jump L11 @e204
+  label L10
+    %29 = declarederroreq 1073741825 @e204
+    br %29 L12 L13 @e204
+  label L12
+    %30 = op corelease %2 @e204
+    reraise @e204
+  label L13
+    reraise @e204
+  label L11
+    %31 = construct list plan %21 elem %28 @e202
+    %21 = move %31 @e202
+    jump L7 @e202
+  label L7
+    %32 = int 1 @e202
+    %33 = rawint 1
+    %34 = op iadd %18 %32 @e202
+    %18 = move %34 @e202
+    jump L5 @e202
+  label L8
+    %35 = construct list flat %21 @e202
+    %19 = move %35 @e202
+    jump L9 @e202
+  label L9
+    jump L2 @e200
+  label L2
+    %36 = int 1 @e200
+    %37 = rawint 1
+    %38 = op iadd %11 %36 @e200
+    %11 = move %38 @e200
+    jump L0 @e200
+  label L3
+    %39 = unit @e200
+    %12 = move %39 @e200
+    jump L4 @e200
+  label L4
+    %40 = op corelease %2 @e200
+    %41 = int 0 @e216
+    %42 = rawint 0
+    %43 = op mutarraygetproven %7 %41 @e213
+    ret %43
+end
+
+func 4 "" params=0 env=0 regs=3 pnames="" captures=0 instance="generic" rawregs="2" @e187
+    %0 = call 2 @e188
+    %1 = int -1 @e188
+    %2 = rawint -1
+    ret %1
+end

@@ -1,0 +1,98 @@
+# fallbacks.bot -- coroutines the fusion pass leaves on the general runtime
+# (COROUTINE-FUSION-MILESTONE-1.md, "Fallback"), each for its stated reason,
+# beside two it fuses. Every one is a valid program and runs the same either
+# way: a site fusion cannot prove keeps the general runtime, never an error.
+#
+# expect: [9, 9, 9, 4, 2, 9, 6, 4]
+
+import std::coroutine
+import std::list
+
+struct Holder:
+    co: Coroutine{args: [], return: int, errors: []}
+
+fn counter(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    return n
+
+# The handle is an argument: drain owns it now, and the construction's
+# function no longer sees every use of it.
+fn drain(h: Coroutine{args: [], return: int, errors: []}) -> int:
+    a = h()
+    b = h()
+    c = h()
+    a + b + c + h()
+
+fn passed() -> int:
+    coroutine {step, first} = counter(3)
+    first + drain(step)
+
+# The handle is a struct field.
+fn stored() -> int:
+    coroutine {step, first} = counter(3)
+    holder = Holder {co: step}
+    {co} = holder
+    first + co.drain()
+
+# The handle is the function's result.
+fn made() -> Coroutine{args: [], return: int, errors: []}:
+    coroutine {step} = counter(3)
+    step
+
+fn returned() -> int:
+    co = made()
+    co.drain()
+
+# A recursive yielding function: a suspended coroutine's frames are as many
+# as the recursion is deep, which no fixed set of registers holds.
+fn leaves(depth: int) -> unit:
+    if depth == 0:
+        yield 1
+        return unit
+    leaves(depth - 1)
+    leaves(depth - 1)
+
+fn walk() -> int:
+    leaves(2)
+    0
+
+fn tree() -> int:
+    coroutine {step, first} = walk()
+    first + step() + step() + step() + step()
+
+# Handles in a List.
+fn listed() -> int:
+    coroutine {step: a} = counter(1)
+    coroutine {step: b} = counter(2)
+    hs = [a, b]
+    std::list::length(hs)
+
+# Fused, one coroutine per frame of a recursion: each activation of held
+# has its own registers, so its own fused coroutine, all alive at once.
+fn held(k: int) -> int:
+    if k == 0:
+        return 0
+    coroutine {step, first} = counter(k)
+    below = held(k - 1)
+    below + first + step()
+
+# Fused, for comparison: the same counter driven inside one function, and a
+# yielding nested function (environment-free, so a plain function).
+fn local() -> int:
+    coroutine {step, first} = counter(3)
+    first + step() + step() + step() + step()
+
+fn nested() -> int:
+    fn twice(k: int) -> unit:
+        yield k
+        yield k
+        unit
+    fn both() -> int:
+        twice(1)
+        twice(2)
+        0
+    coroutine {step, first} = both()
+    first + step() + step() + step() + step()
+
+[passed(), stored(), returned(), tree(), listed(), local(), nested(), held(4)]

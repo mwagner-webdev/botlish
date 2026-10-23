@@ -1,0 +1,36 @@
+# grid.bot -- a deep-yield producer (COROUTINE-FUSION-MILESTONE-1.md, "Deep
+# yields"). The coroutine's root scans a grid row by row, row scans one row
+# cell by cell, and cell yields the cell's value: every yield is two calls
+# below the root, so a suspended coroutine is a call chain scan -> row ->
+# cell, three frames deep. total drives it and folds the cells.
+#
+# The last line's arguments are the grid's width and height.
+#
+# expect: 49981
+
+import std::coroutine
+import std::mutable_array
+
+fn cell(x: int, y: int) -> unit:
+    v = x * 31 + y * 17
+    yield v.mod(101)
+    unit
+
+fn row(y: int, width: int) -> unit:
+    loop x from 0 to width:
+        x.cell(y)
+    unit
+
+fn scan(width: int, height: int) -> int:
+    loop y from 0 to height:
+        y.row(width)
+    return -1
+
+fn total(width: int, height: int) -> int:
+    coroutine {step, first} = scan(width, height)
+    acc = std::mutable_array::create(1, first)
+    loop i from 1 to width * height:
+        acc.set(0, acc.at(0) + step())
+    acc.at(0) + step()
+
+total(10, 100)

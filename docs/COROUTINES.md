@@ -29,6 +29,12 @@ points below that it changes (30, 31, 33, 36, 37, 38 and the two release
 sections) say so where they stand; coroutine control semantics are
 unchanged.
 
+COROUTINE-FUSION-MILESTONE-1.md makes the native implementation below
+optional: a coroutine whose protocol is closed inside one function is
+compiled into that function's control flow (no coroutine object, stack or
+switch); everything else, and every program with fusion off, runs on the
+runtime this document describes, which is unchanged.
+
 ## Contents
 
 * [The principal program](#the-principal-program)

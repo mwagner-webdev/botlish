@@ -1,0 +1,373 @@
+nir 1 call-effects=1 statics=0
+shape 0 named "Item" fields="value"
+
+
+
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 rawregs="0"
+    %0 = rawint 1000 @e107
+    %1 = call 2 %0 @e105
+    ret %1
+end
+
+func 1 "numbers" params=2 env=0 regs=44 pnames="seed count" captures=0 rawregs="1 3 6 7 11 14 17 20 22 25 27 29 30 34 35 38 40 41" rawparams="1"
+    unreachable
+end
+
+func 2 "sum" params=1 env=0 regs=112 pnames="count" captures=0 rawregs="0 7 11 12 16 18 28 29 32 40 46 48 51 53 56 57 61 64 67 70 72 75 77 79 80 84 85 88 90 91 95 97 100 102" rawparams="0"
+    %1 = op rbox %0
+    %44 = move %1 @e62
+    %40 = rawint 0 @e60
+    %3 = unit @e60
+    %54 = unit @e60
+    %108 = unit @e60
+    %42 = unit @e60
+    %43 = unit @e60
+    jump L20 @e68
+  label L18
+    %94 = op coresume0 %43 @e68
+    unreachable @e68
+  label L17
+    %105 = move %108 @e68
+    %5 = unit @e71
+    %6 = int 1 @e75
+    %7 = rawint 1
+    %8 = move %105 @e76
+    %9 = op mutarraycreate %6 %8 @e73
+    %10 = int 1 @e79
+    %11 = rawint 1
+    %12 = move %11 @e78
+    jump L0 @e78
+  label L0
+    %14 = op rilt %12 %0 @e78
+    br %14 L1 L3 @e78
+  label L1
+    pusherrorexit L5 @e81
+    %15 = int 0 @e84
+    %16 = rawint 0
+    pusherrorexit L6 @e87
+    %17 = int 0 @e90
+    %18 = rawint 0
+    %19 = op mutarraygetproven %9 %17 @e87
+    poperrorexit @e87
+    jump L7 @e87
+  label L6
+    %20 = declarederroreq 1073741825 @e87
+    br %20 L8 L9 @e87
+  label L8
+    %21 = unit @e87
+    reraise @e87
+  label L9
+    reraise @e87
+  label L7
+    %42 = unit @e92
+    jump L43 @e92
+  label L32
+    %99 = op coresume0 %43 @e92
+    unreachable @e92
+  label L31
+    %106 = move %108 @e92
+    %23 = move %106 @e91
+    %24 = op iadd %19 %23 @e85
+    %25 = op mutarraysetproven %9 %15 %24 @e81
+    poperrorexit @e81
+    jump L10 @e81
+  label L5
+    %26 = declarederroreq 1073741825 @e81
+    br %26 L11 L12 @e81
+  label L11
+    %27 = unit @e81
+    reraise @e81
+  label L12
+    reraise @e81
+  label L10
+    jump L2 @e78
+  label L2
+    %28 = rawint 1 @e78
+    %29 = op riadd %12 %28 @e78
+    %12 = move %29 @e78
+    jump L0 @e78
+  label L3
+    %30 = unit @e78
+    %13 = move %30 @e78
+    jump L4 @e78
+  label L4
+    pusherrorexit L13 @e97
+    %31 = int 0 @e100
+    %32 = rawint 0
+    %33 = op mutarraygetproven %9 %31 @e97
+    poperrorexit @e97
+    jump L14 @e97
+  label L13
+    %34 = declarederroreq 1073741825 @e97
+    br %34 L15 L16 @e97
+  label L15
+    %35 = unit @e97
+    reraise @e97
+  label L16
+    reraise @e97
+  label L14
+    %42 = unit @e102
+    jump L58 @e102
+  label L47
+    %104 = op coresume0 %43 @e102
+    unreachable @e102
+  label L46
+    %107 = move %108 @e102
+    %37 = move %107 @e101
+    %38 = op iadd %33 %37 @e95
+    %39 = unit @e95
+    ret %38
+  label L29
+    pusherrorexit L30 @e68
+  label L20
+    %45 = int 42 @e65
+    %46 = rawint 42
+    %47 = move %44
+    %48 = op runbox %47
+    %50 = move %45
+    %51 = move %48
+  label L22
+    %52 = int 1 @e16
+    %53 = rawint 1
+    %54 = op mutarraycreate %52 %50 @e14
+    %55 = int 0 @e19
+    %56 = rawint 0
+    %57 = move %56 @e18
+    jump L23 @e18
+  label L23
+    %59 = op rilt %57 %51 @e18
+    br %59 L24 L26 @e18
+  label L24
+    %60 = int 0 @e29
+    %61 = rawint 0
+    %62 = op mutarraygetproven %54 %60 @e26
+    %63 = int 1103515245 @e30
+    %64 = rawint 1103515245
+    %65 = op imul %62 %63 @e24
+    %66 = int 12345 @e31
+    %67 = rawint 12345
+    %68 = op iadd %65 %66 @e22
+    %69 = int 2147483648 @e36
+    %70 = rawint 2147483648
+    %71 = int 2147483647 @e33
+    %72 = rawint 2147483647
+    %73 = op iand %68 %71 @e33
+    %74 = int 0 @e40
+    %75 = rawint 0
+    %76 = op mutarraysetproven %54 %74 %73 @e37
+    %77 = op runbox %73
+    %78 = int 1000 @e48
+    %79 = rawint 1000
+    %80 = op rimodtotal %77 %79 @e45
+    %81 = op rbox %80
+    %110 = move %81 @e44
+    %108 = move %110 @e42
+    %40 = rawint 1 @e42
+    jump L17 @e42
+  label L28
+    %83 = move %42 @e42
+    jump L25 @e18
+  label L25
+    %84 = rawint 1 @e18
+    %85 = op riadd %57 %84 @e18
+    %57 = move %85 @e18
+    jump L23 @e18
+  label L26
+    %86 = unit @e18
+    %58 = move %86 @e18
+    jump L27 @e18
+  label L27
+    %87 = int 0 @e53
+    %88 = rawint 0
+    %89 = int 1 @e54
+    %90 = rawint 1
+    %91 = op risub %88 %90 @e51
+    %92 = op rbox %91
+    %111 = move %92 @e50
+    %109 = move %111 @e49
+    jump L21 @e49
+  label L21
+    %108 = move %109
+    %40 = rawint -1
+    jump L17
+    poperrorexit @e68
+  label L30
+    %43 = op cofailed @e68
+    %40 = rawint -2 @e68
+    jump L18 @e68
+  label L43
+    pusherrorexit L44 @e92
+    %95 = rawint 1 @e92
+    %96 = op rieq %40 %95 @e92
+    br %96 L42 L45 @e92
+  label L45
+    %97 = rawint -1 @e92
+    %98 = op rieq %40 %97 @e92
+    br %98 L31 L32 @e92
+  label L34
+    %45 = int 42 @e65
+    %46 = rawint 42
+    %47 = move %44
+    %48 = op runbox %47
+    %50 = move %45
+    %51 = move %48
+  label L36
+    %52 = int 1 @e16
+    %53 = rawint 1
+    %54 = op mutarraycreate %52 %50 @e14
+    %55 = int 0 @e19
+    %56 = rawint 0
+    %57 = move %56 @e18
+    jump L37 @e18
+  label L37
+    %59 = op rilt %57 %51 @e18
+    br %59 L38 L40 @e18
+  label L38
+    %60 = int 0 @e29
+    %61 = rawint 0
+    %62 = op mutarraygetproven %54 %60 @e26
+    %63 = int 1103515245 @e30
+    %64 = rawint 1103515245
+    %65 = op imul %62 %63 @e24
+    %66 = int 12345 @e31
+    %67 = rawint 12345
+    %68 = op iadd %65 %66 @e22
+    %69 = int 2147483648 @e36
+    %70 = rawint 2147483648
+    %71 = int 2147483647 @e33
+    %72 = rawint 2147483647
+    %73 = op iand %68 %71 @e33
+    %74 = int 0 @e40
+    %75 = rawint 0
+    %76 = op mutarraysetproven %54 %74 %73 @e37
+    %77 = op runbox %73
+    %78 = int 1000 @e48
+    %79 = rawint 1000
+    %80 = op rimodtotal %77 %79 @e45
+    %81 = op rbox %80
+    %110 = move %81 @e44
+    %108 = move %110 @e42
+    %40 = rawint 1 @e42
+    jump L31 @e42
+  label L42
+    %83 = move %42 @e42
+    jump L39 @e18
+  label L39
+    %84 = rawint 1 @e18
+    %85 = op riadd %57 %84 @e18
+    %57 = move %85 @e18
+    jump L37 @e18
+  label L40
+    %86 = unit @e18
+    %58 = move %86 @e18
+    jump L41 @e18
+  label L41
+    %87 = int 0 @e53
+    %88 = rawint 0
+    %89 = int 1 @e54
+    %90 = rawint 1
+    %91 = op risub %88 %90 @e51
+    %92 = op rbox %91
+    %111 = move %92 @e50
+    %109 = move %111 @e49
+    jump L35 @e49
+  label L35
+    %108 = move %109
+    %40 = rawint -1
+    jump L31
+    poperrorexit @e92
+  label L44
+    %43 = op cofailed @e92
+    %40 = rawint -2 @e92
+    jump L32 @e92
+  label L58
+    pusherrorexit L59 @e102
+    %100 = rawint 1 @e102
+    %101 = op rieq %40 %100 @e102
+    br %101 L57 L60 @e102
+  label L60
+    %102 = rawint -1 @e102
+    %103 = op rieq %40 %102 @e102
+    br %103 L46 L47 @e102
+  label L49
+    %45 = int 42 @e65
+    %46 = rawint 42
+    %47 = move %44
+    %48 = op runbox %47
+    %50 = move %45
+    %51 = move %48
+  label L51
+    %52 = int 1 @e16
+    %53 = rawint 1
+    %54 = op mutarraycreate %52 %50 @e14
+    %55 = int 0 @e19
+    %56 = rawint 0
+    %57 = move %56 @e18
+    jump L52 @e18
+  label L52
+    %59 = op rilt %57 %51 @e18
+    br %59 L53 L55 @e18
+  label L53
+    %60 = int 0 @e29
+    %61 = rawint 0
+    %62 = op mutarraygetproven %54 %60 @e26
+    %63 = int 1103515245 @e30
+    %64 = rawint 1103515245
+    %65 = op imul %62 %63 @e24
+    %66 = int 12345 @e31
+    %67 = rawint 12345
+    %68 = op iadd %65 %66 @e22
+    %69 = int 2147483648 @e36
+    %70 = rawint 2147483648
+    %71 = int 2147483647 @e33
+    %72 = rawint 2147483647
+    %73 = op iand %68 %71 @e33
+    %74 = int 0 @e40
+    %75 = rawint 0
+    %76 = op mutarraysetproven %54 %74 %73 @e37
+    %77 = op runbox %73
+    %78 = int 1000 @e48
+    %79 = rawint 1000
+    %80 = op rimodtotal %77 %79 @e45
+    %81 = op rbox %80
+    %110 = move %81 @e44
+    %108 = move %110 @e42
+    %40 = rawint 1 @e42
+    jump L46 @e42
+  label L57
+    %83 = move %42 @e42
+    jump L54 @e18
+  label L54
+    %84 = rawint 1 @e18
+    %85 = op riadd %57 %84 @e18
+    %57 = move %85 @e18
+    jump L52 @e18
+  label L55
+    %86 = unit @e18
+    %58 = move %86 @e18
+    jump L56 @e18
+  label L56
+    %87 = int 0 @e53
+    %88 = rawint 0
+    %89 = int 1 @e54
+    %90 = rawint 1
+    %91 = op risub %88 %90 @e51
+    %92 = op rbox %91
+    %111 = move %92 @e50
+    %109 = move %111 @e49
+    jump L50 @e49
+  label L50
+    %108 = move %109
+    %40 = rawint -1
+    jump L46
+    poperrorexit @e102
+  label L59
+    %43 = op cofailed @e102
+    %40 = rawint -2 @e102
+    jump L47 @e102
+end
+
+func 3 "" params=0 env=1 regs=5 pnames="" captures=1 rawregs="1 3"
+    unreachable
+end

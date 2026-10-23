@@ -832,6 +832,9 @@ foreach option [dict get $commandLine options] {
         }
         -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
         -L {
+            if {$value eq ""} {
+                usageError "-L needs a directory (found an empty one)"
+            }
             lappend native::linkDirs [file normalize $value]
         }
         -lsp-scheduler {
