@@ -17,6 +17,21 @@ game is `examples/games/icy-tower/`; the evidence -- counting tools,
 minimal reproducers, design variants, the warning census, the call-trace
 comparison -- is `audit/icy-tower/context-refactor/`.
 
+**Since NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md**, which reached main while
+this census was written and was merged into it afterwards, hud.bot and
+options.bot use the standard library's text conversions, and render.bot
+labels a milestone floor with `std::int::to_string` instead of
+`hud::int_text`. On the merged tree every measure of section 2 that
+concerns SDL, pointers, cleanup or the airlock is unchanged
+(`tools/census.tcl`); only the counts of hud's and options' functions (14
+and 9 before, 7 and 8 now) and of render.bot's calls into other game
+modules (39, now 38) moved. The merged executable's SDL call trace equals
+that of main's own executable but for the Handles record's
+`SDL_malloc(56)` and `SDL_free`, as in section 9, and the golden suite has
+67 tests. The numbers below are the census's, measured on the game before
+that milestone; the design variants were written against commit 4be79514
+(their README says how to build them).
+
 ## Contents
 
 1. Result
