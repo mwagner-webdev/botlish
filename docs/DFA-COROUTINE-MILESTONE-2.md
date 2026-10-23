@@ -893,6 +893,32 @@ returns (a `-> never` result the checker proves), so that calling it is a
 statement of intent rather than an accident; it is not part of this
 milestone.
 
+### Syntax recovery in a module's struct (found by the fuzzer)
+
+Extending the syntax-recovery fuzzer to damage the recognizer modules
+(`audit/syntax-recovery/tools/fuzz.tcl`'s corpus now holds json_lex.bot
+and yaml_lex.bot; seeds 17 and 23 pass) changed which damage seed 1 draws,
+and it found a failure that predates this milestone -- it reproduces at the
+exploration's final commit, e5286ad5. A syntax error inside a struct of an
+imported module, followed by a struct whose field names that type,
+
+```
+# m.bot                          # main.bot
+struct P:                        import m
+    x: int    y: int
+                                 m::get(m::W {p: m::P {x: 1, y: 2}})
+struct W:
+    p: P
+```
+
+makes `-check` report `unknown or invalid type P for field "p" of struct
+"W"` (TYPE) and not the syntax error; the same text in the entry file
+reports the syntax error. Struct registration (hir/structs.tcl's
+field-type resolution) fails hard on a type the module's hole may declare,
+where SYNTAX-RECOVERY-MILESTONE-1.md says such a reference is dependent.
+It is the syntax recovery's to fix, with its own tests and mutants; it is
+recorded here, not worked around.
+
 ## 18. Next steps
 
 * **Interprocedural fusion** is the one dependency that limits
