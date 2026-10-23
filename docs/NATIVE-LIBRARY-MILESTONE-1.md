@@ -79,8 +79,11 @@ linux-x86_64, observed:
   library, reproducing every line of the census's output, also under GC
   stress, and recursion that killed the process now fails as a JS Error
   (section 11).
-* Executables are unchanged in behavior: the native, executable, stub-linker
-  and platform-fact tests pass, and the full local suite (section 15).
+* Executables are unchanged in behavior: the full local suite
+  (`tests/local.tcl`: 6,946 Tcl tests on interp and 6,941 on compile, 0
+  failed; all 104 golden suites on all four backends, 0 failed),
+  `tests/platform/aot-facts.tcl` and the native-aot stack-map mutant
+  (killed) pass on linux-x86_64.
 * No worker thread, scheduler or implicit concurrency was added: an
   instance belongs to its creating thread, and the library refuses
   everything else (section 7).
@@ -509,7 +512,7 @@ retained result after a collecting call: kept!
 error after later calls: BOTLISH DECLARED Rejected {code -7}
 after destroy: {BOTLISH INVOCATION {INVOCATION DESTROYED} {}} {the instance was destroyed}
 after create: checked(2) = 4
-20000 x token_count(193 bytes): 36.8 us per call; rss 14 -> 14 MiB
+20000 x token_count(193 bytes): 20.9 us per call; rss 14 -> 14 MiB
 200 x churn(10000): rss 14 -> 14 MiB
 2000 x destroy + create + call: rss 14 -> 14 MiB
 ```
@@ -623,13 +626,19 @@ Observed, on one 4-core container (single runs: timings move between runs
 by tens of percent, so only orders of magnitude are claimed):
 
 * **Calls.** 100,000 `reverse` calls from Hermes through the TurboModule:
-  88 ms (the census: 77 to 125 ms across runs with the stand-in), so the
-  instance lookup, the thread check and the owned-result copy add nothing
-  visible at a microsecond a call. `token_count` from Tcl on a 193-byte
-  message: 36.8 µs a call, measured while the full test suite loaded all four
-  cores (the census: 36 µs); the tokenizer dominates.
-* **Build.** `main.tcl -emit-native-library rnprobe`: to be measured on an idle machine (front end,
-  native lowering, the driver, `ld -r`, `objcopy`, `ar`, `cc -shared`).
+  83 to 84 ms in three runs on the idle machine (88 ms while the test
+  suite ran beside it; the census: 77 to 125 ms across runs with the
+  stand-in), so the instance lookup, the thread check and the owned-result
+  copy add nothing visible at under a microsecond a call. `token_count`
+  from Tcl on a 193-byte message: 20.9 and 24.9 µs a call in two idle runs
+  (36.8 µs with the test suite running; the census recorded 36 µs, under
+  conditions it does not state), so this is no claim that the library is
+  faster than the stand-in: only that it is not slower in any way these
+  runs can see. The tokenizer dominates.
+* **Build.** `main.tcl -emit-native-library rnprobe`: 0.79 to 0.86 s in
+  three runs, everything included (front end, native lowering, the driver,
+  `ld -r`, `objcopy`, `ar`, `cc -shared`); the census's stand-in took 1.5 s
+  for the same six exports.
 * **Size** (rnprobe, six exports): `librnprobe.a` 13.4 MB on disk, one
   relocatable object holding 1.83 MB of code and data -- the rest is its
   relocations and symbol tables (`ld -r` keeps them; debug information is
@@ -725,3 +734,31 @@ clif.rs (local linkage, the stack-limit plan), codegen/roots.rs
 program.rs, runtime/library.rs, runtime/aotimage.rs, runtime/vm.rs
 (`swap_current_program`, `set_stack_boundary`), runtime/framewalk.rs
 (`frame_address`), native/Cargo.toml (the staticlib crate type).
+
+### What was run for this report (linux-x86_64, observed)
+
+* `tclsh9.0 tests/local.tcl`: every Tcl test file on interp and compile
+  (6,946 and 6,941 passed, 0 failed) and every golden suite on interp,
+  compile, cranelift-generic and cranelift (104 suites, 0 failed), 53
+  minutes on 4 jobs.
+* `tests/native-library.test` (22 tests: its C suite statically linked,
+  under GC stress and shared; the JSON library from C),
+  `tests/native-executable.test` (18), `tests/aot-stub-linker.test` (6),
+  `tests/main-cli.test` (61), `tests/compilerpedia.test` (39),
+  `tests/platform/aot-facts.tcl`.
+* `cargo test --release --manifest-path native/Cargo.toml --lib` (301
+  passed, the five of runtime::program and runtime::library included) and
+  `--bin botlish-native` (73 passed).
+* Mutants whose text this milestone moved, each still applying and killed:
+  native-aot's `startup-no-stack-maps` (now in runtime/program.rs: 8
+  native-executable tests, the 2048 executable and aot-facts' GC-stress
+  runs kill it), trait-constrained-types' `generic-function-binder`, c-ffi's
+  `named-ignored`; every other mutant of every `mutants.txt` still applies.
+* The JSON probe as a Tcl extension, `run.sh` (section 10), and the React
+  Native host probe, `host-spike.tcl -stack-kib 512` with and without
+  `-gc-stress 1` (section 11).
+
+Pending when this was written: the Linux x86-64 and arm64 test workflows
+(dispatched on the branch), and the macOS and Windows workflows, which
+check that executables there are unaffected (no library is built on
+either).
