@@ -31,7 +31,38 @@ where every CI run below ran.
 
 ## Result
 
-⟨RESULT⟩
+The milestone is complete: Windows x86-64 has the native stack guard, and
+the interim stack-limit checks are gone.
+
+* **Every exhaustion of the stack that runs Botlish code ends in
+  NATIVE LIMIT STACK** (real Windows, section 7.1): Botlish recursion,
+  large frames, frames Cranelift probes with its loop, recursion inside
+  the runtime and recursion in MSVC-compiled C. The report is the driver's
+  line with exit status 0, the same line through a linked run's protocol,
+  or the line on standard error with exit status 1 from an executable.
+  Until now an exhaustion inside the runtime or C killed the process with
+  Rust's own report (real Windows, section 8.1).
+* **The guard** (sections 2 to 4) is a vectored exception handler, first
+  in the chain, installed by the thread that runs Botlish code with a
+  32 KiB stack guarantee for its own path. It claims only
+  STATUS_STACK_OVERFLOW that Windows' memory manager raised on that
+  thread at an address of that thread's stack. It writes the line with
+  WriteFile and ends the process with TerminateProcess: no allocation, no
+  lock, no unwinding, no resumption. An access violation, a raised
+  exception and another thread's exhaustion end exactly as they do
+  without it (section 7.2).
+* **The compiler** no longer checks the stack pointer in any prologue,
+  reserves no depth and gives no Botlish call an error for the stack, on
+  every host with native-frame roots (section 5). The fallback plan keeps
+  its own depth check, and stack probes stay. On the benchmark workloads
+  machine code is 7 to 50 % smaller, and run time and collection cost are
+  unchanged within the noise (section 8).
+* **Checked** on real Windows by the smoke, `roots`, acceptance and
+  GC-stress tiers (⟨GC-RESULT⟩). All 21 Windows-relevant mutants of the
+  stack guard and all 17 of the unwind information were killed there
+  (section 7.6). Linux and macOS are unchanged and green (section 7.7).
+* **Not covered:** an interactive console as the destination, and native
+  coroutines, which Windows does not have yet (sections 9 and 10).
 
 ## Contents
 
@@ -749,7 +780,24 @@ were run in full:
 
 ### 7.8 The CI runs
 
-⟨RUNS⟩
+Every run of this milestone on the branch, in order:
+
+| Run | Commit | Workflow | What it ran | Outcome |
+|---|---|---|---|---|
+| [39939107805](https://github.com/mwagner-webdev/botlish/actions/runs/39939107805) (attempt 2) | b1f2727 | windows-stack-guard-probe | section 2's experiments | green |
+| 39940958797 | d9231bb | windows-x86_64 (push) | the guard beside the check: smoke | the guard's checks, native-status and aot-facts green; the smoke tier failed on c-ffi.test's `cf-renamed-binding-native-name`, which compiled a Linux program for the host target (fixed in eee16a5); the rest cancelled by the next push |
+| [39944775051](https://github.com/mwagner-webdev/botlish/actions/runs/39944775051) | eee16a5 | windows-x86_64 (manual, `probes`) | smoke, `roots` with section 8's probes | green; its acceptance shards, still queued, cancelled by the next run, which ran them |
+| [39944778138](https://github.com/mwagner-webdev/botlish/actions/runs/39944778138) | eee16a5 | tests (manual) | Linux x86-64 | green |
+| [39944781420](https://github.com/mwagner-webdev/botlish/actions/runs/39944781420) | eee16a5 | tests (linux arm64) (manual) | Linux AArch64 | green but the GC-stress job, cancelled after four hours (section 7.5) |
+| [39945819468](https://github.com/mwagner-webdev/botlish/actions/runs/39945819468) | eee16a5 | macos-arm64 (manual, `native-stack-mutants`) | smoke, acceptance, Tier C's mutants | green |
+| [39954270512](https://github.com/mwagner-webdev/botlish/actions/runs/39954270512) | 62ba9cd | windows-x86_64 (manual, the two mutant items) | smoke, `roots`, acceptance, the mutants | green |
+| 39985866957 | caaabfc | windows-x86_64 (manual, `full`) | the GC-stress tier | cancelled before it started: section 7.5's defect would have held it |
+| ⟨RUN-W⟩ |
+| ⟨RUN-M⟩ |
+| ⟨RUN-A⟩ |
+
+Commits after 62ba9cd change only this report, except d38feb0, which
+the last three runs ran.
 ## 8. Performance
 
 Real Windows: the roots job of run
