@@ -760,21 +760,26 @@ program.rs, runtime/library.rs, runtime/aotimage.rs, runtime/vm.rs
   Native host probe, `host-spike.tcl -stack-kib 512` with and without
   `-gc-stress 1` (section 11).
 
-CI on the branch (commit 9da4e4f8), as of 13:55 UTC:
+CI on the branch, as of 15:20 UTC:
 
-* Linux x86-64 (`tests.yml`, dispatched): the whole Tcl suite on interp,
-  the cranelift coverage and the method-call filter audit passed; the
-  compile suite, the cranelift-generic coverage, the golden shards, the
-  Rust unit tests, the stub-linked executables and the warning gate were
-  still queued or running.
-* macOS arm64: Tier A passed; Tier B failed in two test files. One was this
-  milestone's: `nl-signature-diagnostics` compiled a program importing
-  `std::linux::io` for the host's target, UNSUPPORTED-PLATFORM on macOS;
-  it now compiles it for `linuxTarget`, as AGENTS.md asks, and passes. The
-  other, `cf-renamed-binding-native-name` in `tests/c-ffi.test`, failed the
-  same way on main before this branch (main's run 39938910401); main's fix
-  (4361226c) is merged into the branch.
-* Linux arm64 (`tests-arm64.yml`, dispatched) and Windows x86-64: still
-  queued.
-
-The macOS and Windows workflows run again on the branch's next push.
+* Linux x86-64 (`tests.yml`, dispatched on 9da4e4f8): passed -- the Tcl
+  suite on interp and on compile, the cranelift and cranelift-generic
+  coverage, golden shards 2-4 beside their Tcl originals, the stub-linked
+  executables, the warning gate and the method-call filter audit; the Rust
+  unit tests and golden shard 1 were still queued.
+* Linux arm64 (`tests-arm64.yml`, dispatched on 9da4e4f8): the Rust unit
+  tests (also under GC stress) and all four golden shards passed. The
+  cranelift-generic coverage failed in one test, this milestone's:
+  `nl-build-manifest` expected the manifest's target to be
+  `linux-x86_64`; it now compares it with the host's own target. The
+  interp, compile, cranelift coverage and GC-stress jobs were still running.
+* macOS arm64 (on 9da4e4f8): Tier A passed; Tier B failed in two test
+  files. One was this milestone's: `nl-signature-diagnostics` compiled a
+  program importing `std::linux::io` for the host's target,
+  UNSUPPORTED-PLATFORM on macOS; it now compiles it for `linuxTarget`, as
+  AGENTS.md asks. The other, `cf-renamed-binding-native-name` in
+  `tests/c-ffi.test`, failed the same way on main before this branch
+  (main's run 39938910401); main's fix (4361226c) is merged into the
+  branch. The run on 69246fc6, which carries both, was in progress.
+* Windows x86-64: the run on 9da4e4f8 was superseded before a runner took
+  it; the one on 69246fc6 was still queued.

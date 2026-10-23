@@ -332,13 +332,13 @@ test nl-build-manifest {the manifest states every export's C interface, from the
     }] 0]
     list [lsp::json::text [lsp::json::get $manifest format]] [lsp::json::integer [lsp::json::get $manifest version]] \
         [lsp::json::text [lsp::json::get $manifest library]] \
-        [lsp::json::text [lsp::json::dig $manifest {target name} {}]] \
+        [expr {[lsp::json::text [lsp::json::dig $manifest {target name} {}]] eq [core::cabi::hostTarget]}] \
         [lsp::json::text [lsp::json::get $checked symbol]] \
         [lmap p [lsp::json::elements [lsp::json::get $checked params]] {lsp::json::text [lsp::json::get $p type]}] \
         [lsp::json::text [lsp::json::dig $checked {result type} {}]] \
         [lmap x [lsp::json::elements [lsp::json::get $checked errors]] {lsp::json::text $x}] \
         [lsp::json::text [lsp::json::dig $manifest {api create} {}]]
-} -result {botlish-native-library 1 alpha linux-x86_64 alpha_checked int int Rejected alpha_create}
+} -result {botlish-native-library 1 alpha 1 alpha_checked int int Rejected alpha_create}
 
 test nl-build-header-compiles {the header is C and C++ on its own} -constraints nativeLibrary -body {
     lassign [nlBuilt] dir
