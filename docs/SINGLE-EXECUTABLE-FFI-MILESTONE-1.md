@@ -647,12 +647,16 @@ A system-linked executable:
   status;
 * writes its startup report on request.
 
-`tests/all.tcl` over the 60 test files that build an executable or link a
-program that calls C passes with `BOTLISH_NATIVE_LINKER=system`:
-**3,172 passed, 80 skipped, 0 failed (executed, Linux x86-64)**. The
-skipped tests are the same ones skipped under the rustc linker on this
-host (another host's tests, BoringSSL, SDL3), plus the two tests of
-rustc's own invocation.
+`tests/all.tcl` over the 61 test files that build an executable or link a
+program that calls C passes with `BOTLISH_NATIVE_LINKER=system` (the
+compile backend, this milestone's merged head): **3,265 tests, 3,191
+passed, 74 skipped, 0 failed (executed, Linux x86-64)**. The skipped
+tests are the same ones skipped under the rustc linker on this host:
+other hosts' tests (Darwin IO 12, macOS's write interposer 4, other Apple
+checks 2, Windows 24, AArch64 2, MinGW 9), a cross generation without the
+arm64 C library (1), and BoringSSL (9) and Tcl's acceptance (9) without
+their packages. The 2 tests of rustc's own invocation (`rustcLinker`)
+make up the rest of the 74.
 
 ## 22. GC and coroutines
 
