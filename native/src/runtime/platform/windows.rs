@@ -79,15 +79,18 @@ use windows_sys::Win32::System::Threading::{
 /// The stack guarantee the guard needs: the room Windows keeps committed at
 /// a stack's end for the handlers of its `STATUS_STACK_OVERFLOW`. Measured
 /// on Windows Server 2025 (WINDOWS-X86-64-MILESTONE-4.md, "Experiments"):
-/// the exception arrives with the guarantee and about 4 KiB more left
-/// (least when the stack ran out in a probe loop, Cranelift's pattern),
-/// the dispatcher takes 3.7 to 4 KiB of it before the vectored handler
-/// runs, and the handler's own path below that -- WriteFile 120 bytes,
-/// TerminateProcess 4.7 KiB -- about 5 KiB. 32 KiB leaves the handler
-/// some 33 KiB where it needs 5; the 12 KiB Windows leaves a thread that
-/// asked for nothing would leave it 9. Rust's runtime asks 20 KiB for its
-/// own threads; the guard asks its own, and refuses to install when the
-/// thread does not have it.
+/// a vectored handler starts with about the guarantee left above the
+/// reservation's last page, which is never committed -- the exception
+/// arrives with some 4 KiB more and the dispatcher takes 3.7 to 3.8 KiB of
+/// it -- and 3.5 KiB less when the stack ran out in a probe loop
+/// (Cranelift's pattern): about 29 KiB with this guarantee, 5.2 KiB on a
+/// thread that asked for none. The handler's path is WriteFile (120 bytes)
+/// and TerminateProcess of this process, which completed with those 5.2
+/// KiB, the least any experiment left (ending another process takes 4.7
+/// KiB). So 32 KiB leaves it more than five times what it has been seen to
+/// need, where no guarantee leaves it about that. Rust's runtime asks 20
+/// KiB for its own threads; the guard asks its own, and refuses to install
+/// when the thread does not have it.
 pub const GUARANTEE: u32 = 32 << 10;
 
 /// The calling thread's own stack: the reservation the system made for it
