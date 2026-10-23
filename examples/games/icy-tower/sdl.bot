@@ -89,8 +89,10 @@ layout Handles:
     field event: std::ffi::c::Ptr[sdl3::ctypes::SDL_Event] at 48
 
 # An open session: its Handles, and whether presenting a frame waits for
-# the display (vertical sync).
-struct Session:
+# the display (vertical sync). Opaque: a view is unrestricted, and reading
+# one someone else made takes no authority, so an importer must not be
+# able to hold one of these and read the pointers out of it.
+opaque struct Session:
     handles: NativeView[Handles]
     synced: bool
 

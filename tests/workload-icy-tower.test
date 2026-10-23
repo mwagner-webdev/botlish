@@ -171,6 +171,42 @@ test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-
     lsort -unique $found
 } -result {}
 
+# 1 if TYPE holds a C pointer, a native view or a native edit: itself, or
+# through struct fields (HIR's sourceTypes), Lists, vectors and arrays.
+proc icyHoldsRaw {hir type {seen {}}} {
+    if {[llength $type] < 2} { return 0 }
+    set head [lindex $type 0]
+    if {$head in {cptr cfnptr nview nedit}} { return 1 }
+    if {$head eq "nstruct"} {
+        set id [lindex $type 1]
+        if {$id in $seen} { return 0 }
+        foreach entry [hir::sourceTypes $hir] {
+            if {[dict exists $entry kind] && [dict get $entry kind] eq "struct" && [dict get $entry id] eq $id} {
+                foreach {field fieldType} [dict get $entry fields] {
+                    if {[icyHoldsRaw $hir $fieldType [concat $seen [list $id]]]} { return 1 }
+                }
+            }
+        }
+        return 0
+    }
+    foreach part [lrange $type 1 end] {
+        if {[icyHoldsRaw $hir $part $seen]} { return 1 }
+    }
+    return 0
+}
+
+test workload-icy-tower-sdl-records-opaque {every struct sdl.bot declares that holds a C pointer, a native view or a native edit is opaque, so an importer can neither make one nor read a pointer out of one: a view is unrestricted, and reading one someone else made takes no authority (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, 6.D)} -body {
+    set hir [icyStagedHir]
+    set found {}
+    foreach entry [hir::sourceTypes $hir] {
+        if {![dict exists $entry kind] || [dict get $entry kind] ne "struct" || [dict get $entry namespace] ne "sdl"} continue
+        if {[icyHoldsRaw $hir [list nstruct [dict get $entry id]]] && ![dict get $entry opaque]} {
+            lappend found [dict get $entry id]
+        }
+    }
+    set found
+} -result {}
+
 test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
     set text [core::ReadFile [file join $gameDir golden.bot]]
     lsort -unique [regexp -all -inline {motion\([a-z]+\(\), [0-9.]+\)} $text]

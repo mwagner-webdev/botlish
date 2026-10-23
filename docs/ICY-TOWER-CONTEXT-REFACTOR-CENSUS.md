@@ -49,7 +49,9 @@ workaround inside it.**
   main.bot and render.bot before), and no SDL function is called (one
   before). `render.bot` draws with `sdl::fill(x, y, w, h)`; `main.bot`'s
   frame loop carries the world and nothing else. `tests/workload-icy-
-  tower.test`'s new `workload-icy-tower-sdl-airlock` pins it.
+  tower.test`'s new `workload-icy-tower-sdl-airlock` pins it, and
+  `workload-icy-tower-sdl-records-opaque` that sdl.bot's one struct
+  holding SDL state, the session, is opaque.
 * The behavior is the same, call for call: over a 2400-frame dummy-driver
   run the SDL call trace -- 204,297 calls with every argument, rectangles,
   strings and colors included -- is identical but for one `SDL_malloc(56)`
@@ -125,7 +127,7 @@ render.bot  main.bot                    ordinary modules: values and sdl:: opera
 sdl.bot                                 the airlock (status contextualized)
   opaque context struct Sdl:              installed once: with context sdl::create()
       open: MutableVector[Session]        empty = closed; one Session = open
-  Session {handles: NativeView[Handles], synced: bool}
+  opaque Session {handles: NativeView[Handles], synced: bool}
   layout Handles (native memory, 56 B)   record, window, renderer, keys, rect, text, event
   operations: open close synced? poll seconds sleep counter
               color clear present fill line text scale
@@ -388,6 +390,16 @@ repro.tcl` runs all of them (55 runs, all as expected). None needs SDL.
   becoming direct. No diagnostic. Not a context-system bug -- a view is
   meant to be shareable -- but the most likely way for an airlock to leak,
   and the reason section 11's rule includes views (R3).
+* The refactor's `Session` holds that view, and is opaque for that reason.
+  The adversarial review of the refactor wrote, in an ordinary importer,
+  `fn leak(s: sdl::Session) -> ...: s.handles.window` against the
+  non-opaque Session of the first draft: it compiled, and the module
+  stayed ordinary. Nothing could call it -- no public operation returns a
+  Session, a view or a pointer -- but `opaque struct Session` makes it
+  unwritable (`OPAQUE-REPRESENTATION`), at no cost: the executable
+  differs only in the shape table's opaque flag, which only printing
+  reads. `workload-icy-tower-sdl-records-opaque` requires every struct of
+  sdl.bot holding a pointer, a view or an edit to be opaque.
 
 ### E. Context nesting and wrapping -- composition, not encapsulation
 
@@ -732,7 +744,7 @@ rebuilt by build.sh) against the baseline built from commit 6df89a8e:
 | traces of the failure paths (`SDL_VIDEO_DRIVER=nosuch`, `SDL_RENDER_DRIVER=nosuch`) | identical (the record is allocated after the last failure point that logs) |
 | `--headless` | no SDL call at all, before and after (the interposer never runs) |
 | summaries: headless and dummy driver, 600 frames, seed 7; 2400 frames (a restart); 120 frames seed 11 with and without `BOTLISH_NATIVE_GC_STRESS=1`; 600 frames under GC stress | identical to the baseline and to the oracle |
-| `tests/workload-icy-tower.test` (16 tests: the 15 of the vertical slice and the new airlock test) on interp and compile, executables included (the package-owned libSDL3 built) | all passed |
+| `tests/workload-icy-tower.test` (17 tests: the 15 of the vertical slice, the new airlock test and the new opaque-records test) on interp and compile, executables included (the package-owned libSDL3 built) | all passed |
 | `golden.bot`, 65 tests, four backends | passed (the pure modules are unchanged) |
 | `audit/icy-tower/mutate.tcl` | 26 of 26 mutants killed |
 | `python3 audit/icy-tower/oracle.py compare` | 0 differences |
@@ -889,7 +901,12 @@ the airlock's own resource handed back (suspicious) or V's own, which the
 airlock merely uses (legitimate -- V then has raw authority of its own,
 being direct or another airlock). No such case arose; if one does,
 excluding callers that are themselves contextualized or designated direct
-is the natural refinement.
+is the natural refinement. Nor does the rule see a non-opaque record of
+the airlock that holds a view no operation hands out (the refactor's own
+Session before the review, 6.D): no site, since nothing crosses, and
+harmless until an operation returns one -- which R3 reports. Warning on
+the declaration alone would be a warning without use evidence; the game
+declares it opaque instead, and its test pins that.
 
 ### Severity
 
@@ -1122,7 +1139,7 @@ Follow-ups, in order:
 | `audit/icy-tower/context-refactor/tools/sdltrace.c`, `tools/trace-compare.sh` | the call-trace comparison (section 9) |
 | `audit/icy-tower/context-refactor/variants/` | the ID variant, Design A, the Canvas trait (section 7) |
 | `audit/icy-tower/context-refactor/tools/escape-candidates.tcl`, `warning-census/` | the warning candidate's instrument and the repository census (section 11) |
-| `tests/workload-icy-tower.test` | `workload-icy-tower-sdl-airlock` (new): no pointer, view, edit or SDL call outside sdl.bot |
+| `tests/workload-icy-tower.test` | `workload-icy-tower-sdl-airlock` (new): no pointer, view, edit or SDL call outside sdl.bot; `workload-icy-tower-sdl-records-opaque` (new): every struct of sdl.bot holding one is opaque |
 | `tests/c-ffi.test` | `cf-renamed-binding-native-name` (new): the compiler fix of section 10 |
 | `hir/affine.tcl` | the fix: `hir::affine::NativeName` |
 | `AGENTS.md`, "Workloads (examples/games/icy-tower)" | the airlock rule and the trace comparison added to what to run |

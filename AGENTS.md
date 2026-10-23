@@ -2691,8 +2691,10 @@ generated SDL3 binding. Keep its layering:
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
   the session's view or a pointer (a module has no private members:
-  anything it returns, every importer gets). `workload-icy-tower-sdl-
-  airlock` checks it.
+  anything it returns, every importer gets). A struct of `sdl.bot` that
+  holds a pointer, a view or an edit is opaque (an importer reads a view
+  it holds without any authority). `workload-icy-tower-sdl-airlock` and
+  `workload-icy-tower-sdl-records-opaque` check it.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
   beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
   into the example directory or hand-write a parallel SDL declaration.
