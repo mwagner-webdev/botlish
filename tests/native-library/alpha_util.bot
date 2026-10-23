@@ -1,0 +1,8 @@
+# alpha_util.bot -- an application module of the library `alpha`
+# (tests/native-library.test): its exported c fn is the library's too, and
+# its module binding is initialized when an instance is created.
+
+greeting = "hello from a module"
+
+exported c fn util_greeting() -> str:
+    greeting

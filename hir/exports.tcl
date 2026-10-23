@@ -102,12 +102,19 @@ proc hir::exports::of {hir} {
 #   EXPORT-SIGNATURE  a parameter or the result without a declared type that
 #                     has a C representation; a flag, context, variadic or
 #                     resume section; a function that may yield
-#   EXPORT-CAPTURE    a captured binding (an export is environment-free)
+#   EXPORT-CAPTURE    a captured binding that is no environment-free
+#                     function (an export is environment-free:
+#                     hir::aot::StaticBlocks)
 #   EXPORT-SYMBOL     a stated C symbol another export states too
 proc hir::exports::verify {hirVar} {
     upvar 1 $hirVar hir
     set symbols [dict create]
-    foreach e [blocks $hir] {
+    set exported [blocks $hir]
+    if {$exported eq {}} {
+        return
+    }
+    set statics [hir::aot::StaticBlocks $hir]
+    foreach e $exported {
         set node [dict get $hir exprs $e]
         set name [hir::semantic::CallableName $hir $e]
         set what "exported c fn \"$name\""
@@ -144,8 +151,13 @@ proc hir::exports::verify {hirVar} {
         if {[dict exists $hir coroutines mayYield $e] || ($binding ne "" && [dict exists $hir coroutines mayYield $binding])} {
             hir::Diagnose hir EXPORT-SIGNATURE "$what: it may yield, and a C caller is no coroutine" $e
         }
-        if {[dict get $node captures] ne {}} {
-            set names [lmap b [dict get $node captures] {hir::semantic::SourceName $hir $b}]
+        if {$e ni $statics} {
+            # Its environment: what it captures beyond the static functions
+            # (blocks environment-free themselves, hir::aot::StaticBlocks).
+            set names [lmap b [dict get $node captures] {
+                if {[hir::aot::BoundBlock $hir $b] in $statics} continue
+                hir::semantic::SourceName $hir $b
+            }]
             hir::Diagnose hir EXPORT-CAPTURE \
                 "$what: it captures [join $names {, }]: an exported function is environment-free, since a native library never runs its root file's statements; make each a function, or move it into a module" $e
         }

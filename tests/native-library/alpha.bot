@@ -1,0 +1,117 @@
+# alpha.bot -- the first library of tests/native-library.test
+# (NATIVE-LIBRARY-MILESTONE-1.md): export roots, every boundary type,
+# declared errors with payloads, recursion, allocation. Built as the native
+# library `alpha`; its root file declares and runs nothing.
+import std::str
+import std::char
+import std::list
+import alpha_util
+
+error Rejected:
+    code: int
+
+error Detail:
+    count: int
+    huge: int
+    label: str
+    flag: bool
+    ratio: Float64
+
+# --- Export roots ----------------------------------------------------------
+# Every Botlish caller below passes a constant, so the instances those calls
+# use are specialized for it; the C entry point must not be.
+
+# A declared error behind a branch every Botlish call proves dead.
+exported c fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+
+# The commas of TEXT, by a walk bounded by its length.
+fn commas_from(text: str, i: int, acc: int) -> int errors IndexNotFound:
+    if i >= std::str::length(text):
+        return acc
+    c = std::char::scalar_value(std::str::char_at(text, i))
+    next = if c == 44:
+        acc + 1
+    else:
+        acc
+    commas_from(text, i + 1, next)
+
+exported c fn commas(text: str) -> int errors IndexNotFound:
+    commas_from(text, 0, 0)
+
+fn constant_callers() -> int:
+    a = checked(1):
+        on Rejected:
+            0
+    b = commas("[1, 2]"):
+        on IndexNotFound:
+            0
+    a * 100 + b
+
+# 201: checked(1) is 2, commas("[1, 2]") is 1.
+exported c fn internal() -> int:
+    constant_callers()
+
+# No Botlish caller at all.
+exported c fn orphan(a: int, b: int) -> int:
+    a * 1000 + b
+
+# A tiny leaf that inlining folds into its callers.
+exported c fn inc(n: int) -> int:
+    n + 1
+
+fn uses_inc() -> int:
+    inc(41)
+
+exported c fn inc_twice() -> int:
+    inc(uses_inc())
+
+# A stated C symbol.
+exported c fn stated named "alpha_stated_entry"(n: int) -> int:
+    n - 1
+
+# --- Boundary types --------------------------------------------------------
+
+exported c fn shout(text: str) -> str:
+    std::str::concat(text, "!")
+
+exported c fn length(text: str) -> int:
+    std::str::length(text)
+
+exported c fn negate(b: bool) -> bool:
+    not b
+
+exported c fn half(x: Float64) -> Float64 errors NonFiniteFloat:
+    x / 2.0
+
+exported c fn nothing(n: int) -> unit errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    unit
+
+# An Int result beyond int64_t for |n| > 3037000499.
+exported c fn square(n: int) -> int:
+    n * n
+
+# A declared error with a payload of every field kind (huge beyond int64_t).
+exported c fn detail(n: int) -> int errors Detail:
+    fail Detail {count: n, huge: n * n * n, label: "labél", flag: n > 0, ratio: 0.5}
+
+# A builtin declared error for an index past the List's end.
+exported c fn element(n: int) -> int errors IndexNotFound:
+    std::list::at([10, 20, 30], n)
+
+# --- Recursion and allocation ----------------------------------------------
+
+# Not a tail call: one frame per level.
+exported c fn depth(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + depth(n - 1)
+
+exported c fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        [i, i + 1]
+    std::list::length(xs)

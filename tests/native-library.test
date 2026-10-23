@@ -1,0 +1,414 @@
+# Native libraries: exported c fn, export roots, the C boundary, several
+# libraries and instances in one process (NATIVE-LIBRARY-MILESTONE-1.md).
+#
+# The libraries alpha and beta (tests/native-library/) are built once, into
+# a directory whose path has a space, by the compiler's Tcl API
+# (native::library); C callers that include only their generated headers
+# (conformance.c, json.c) are compiled against them, statically and
+# dynamically, and run -- also under BOTLISH_NATIVE_GC_STRESS=1.
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set nlFixtures [file join $::projectRoot tests native-library]
+
+# The program at FILE (a fixture, or a path) as the front end builds it.
+proc nlHir {file} {
+    surface::readProgramFile $file -warnings off -warning-channel ""
+}
+
+# The HIR of the source text TEXT, written to a file of its own.
+proc nlSourceHir {text {name lib.bot}} {
+    regsub -all -line {^        } $text {} text
+    set dir [makeDirectory {nl sources}]
+    set path [file join $dir $name]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return [nlHir $path]
+}
+
+# The error code and message of SCRIPT, run in the caller.
+proc nlFailure {script} {
+    if {[catch {uplevel 1 $script} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return "no error"
+}
+
+# The libraries alpha and beta, built once: {DIR RESULTS}.
+proc nlBuilt {} {
+    global nlBuilt nlFixtures
+    if {![info exists nlBuilt]} {
+        set dir [makeDirectory {native library out}]
+        set results [dict create]
+        foreach name {alpha beta} {
+            dict set results $name [native::library [nlHir [file join $nlFixtures $name.bot]] -name $name -out $dir]
+        }
+        set nlBuilt [list $dir $results]
+    }
+    return $nlBuilt
+}
+
+# The C caller SOURCE (a fixture file) compiled against the built
+# libraries, LINK static or shared. Returns the executable's path.
+proc nlCompile {source link {libraries {alpha beta}} {dir ""}} {
+    global nlFixtures
+    if {$dir eq ""} {
+        lassign [nlBuilt] dir
+    }
+    set exe [file join $dir "[file rootname $source]-$link"]
+    set command [list cc -O1 -I$dir [file join $nlFixtures $source] -o $exe]
+    foreach library $libraries {
+        if {$link eq "static"} {
+            lappend command [file join $dir lib$library.a]
+        } else {
+            lappend command -L$dir -l$library
+        }
+    }
+    lappend command -lgcc_s -lutil -lrt -lpthread -lm -ldl
+    exec {*}$command 2>@1
+    return $exe
+}
+
+# Runs EXE SECTION... with the environment ENV (NAME VALUE ...): its "not ok"
+# lines and its "done" line.
+proc nlRun {exe args} {
+    set env {}
+    set sections {}
+    foreach arg $args {
+        if {[regexp {^[A-Z_]+=} $arg]} {
+            lappend env $arg
+        } else {
+            lappend sections $arg
+        }
+    }
+    lassign [nlBuilt] dir
+    set results {}
+    foreach section [expr {$sections eq {} ? {{}} : $sections}] {
+        set command [list env LD_LIBRARY_PATH=$dir {*}$env $exe]
+        if {$section ne ""} {
+            lappend command $section
+        }
+        catch {exec {*}$command 2>@1} output
+        foreach line [split $output \n] {
+            if {[string match "not ok *" $line] || [string match "done *" $line] || [string match "*panicked*" $line]} {
+                lappend results $line
+            }
+        }
+    }
+    return $results
+}
+
+set nlSections {roots types errors invalid instances two-libraries threads stack gc}
+set nlExpected [list {done roots 16} {done types 25} {done errors 23} {done invalid 11} {done instances 7} \
+    {done two-libraries 5} {done threads 3} {done stack 5} {done gc 1}]
+
+# ---------------------------------------------------------------------------
+# The declaration
+
+test nl-syntax-exported-c-fn {exported c fn is a function declaration with a C entry point, its symbol optional} -body {
+    set hir [nlSourceHir {
+        exported c fn twice(n: int) -> int:
+            n * 2
+
+        exported c fn hello named "say_hello"(name: str) -> str:
+            name
+    }]
+    lmap record [hir::exports::of $hir] {
+        list [dict get $record name] [dict get $record symbol] [dict get $record params] [dict get $record result]
+    }
+} -cleanup {removeDirectory {nl sources}} -result {{twice {} {{n int}} int} {hello say_hello {{name str}} str}}
+
+test nl-syntax-contextual {exported, c and named stay ordinary names everywhere else} -body {
+    set hir [nlSourceHir {
+        exported = 1
+        c = 2
+        named = 3
+        fn f(exported, c, named):
+            exported + c + named
+        f(exported, c, named)
+    }]
+    outcomeUnderHir interp $hir
+} -cleanup {removeDirectory {nl sources}} -result {value 6 {}}
+
+test nl-syntax-errors {the declaration's syntax errors} -body {
+    set results {}
+    foreach source {
+        "exported fn f(n: int) -> int:\n    n\n"
+        "exported rust fn f(n: int) -> int:\n    n\n"
+        "fn f named \"x\"(n: int) -> int:\n    n\n"
+        "exported c fn f named \"9x\"(n: int) -> int:\n    n\n"
+        "fn g():\n    exported c fn f(n: int) -> int:\n        n\n    1\n"
+    } {
+        set code [lindex [nlFailure {surface::compile $source t.bot}] 0]
+        lappend results [list {*}[lrange $code 0 1] [dict get [lindex $code 2] code] [dict get [lindex $code 2] line]]
+    }
+    set results
+} -result {{SURFACE SYNTAX EXPORT-SYNTAX 1} {SURFACE SYNTAX EXPORT-SYNTAX 1} {SURFACE SYNTAX EXPORT-SYNTAX 1} {SURFACE SYNTAX EXPORT-SYNTAX 1} {SURFACE SYNTAX EXPORT-SYNTAX 2}}
+
+test nl-signature-diagnostics {a C signature is declared and has a C representation: every violation is a diagnostic} -body {
+    set source {
+        import std::linux::io
+        top = 3
+        exported c fn untyped(x) -> int:
+            1
+        exported c fn listed(x: List[int]) -> int:
+            1
+        exported c fn no_result(x: int):
+            x
+        exported c fn captured(x: int) -> int:
+            x + top
+        exported c fn flagged(x: int, flags :loud) -> int:
+            x
+        exported c fn one named "dup"(x: int) -> int:
+            x
+        exported c fn two named "dup"(x: int) -> int:
+            x
+        exported c fn needs(x: int, context io: std::linux::io::LinuxIO) -> int:
+            x
+        0
+    }
+    regsub -all -line {^        } $source {} source
+    catch {surface::compile $source t.bot} message options
+    lmap d [dict get $options -diagnostics] {
+        list [lindex [dict get $d errorcode] end] [regexp -inline {exported c fn "[a-z_]+"} [dict get $d message]]
+    }
+} -result {{EXPORT-SIGNATURE {{exported c fn "untyped"}}} {EXPORT-SIGNATURE {{exported c fn "listed"}}} {EXPORT-SIGNATURE {{exported c fn "no_result"}}} {EXPORT-CAPTURE {{exported c fn "captured"}}} {EXPORT-SIGNATURE {{exported c fn "flagged"}}} {EXPORT-SYMBOL {{exported c fn "two"}}} {EXPORT-SIGNATURE {{exported c fn "needs"}}}}
+
+test nl-ordinary-function {to every backend an exported function is an ordinary function} -body {
+    set hir [nlSourceHir {
+        import std::list
+
+        error Rejected:
+            code: int
+
+        exported c fn checked(n: int) -> int errors Rejected:
+            if n < 0:
+                fail Rejected {code: n}
+            n * 2
+
+        args = argv():
+            on InvalidArgumentEncoding:
+                []
+        a = checked(21)
+        b = checked(std::list::length(args) - 2):
+            on Rejected details:
+                details.code
+        [a, b]
+    }]
+    lmap backend {interp compile cranelift-generic cranelift} {outcomeUnderHir $backend $hir}
+} -cleanup {removeDirectory {nl sources}} -result {{value {[42, -1]} {}} {value {[42, -1]} {}} {value {[42, -1]} {}} {value {[42, -1]} {}}}
+
+test nl-hir-text {the HIR text states the export and reads it back} -body {
+    set hir [nlSourceHir {
+        exported c fn twice(n: int) -> int:
+            n * 2
+        exported c fn hello named "say_hello"(name: str) -> str:
+            name
+    }]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [regexp -all {exported c named say_hello} $text] [regexp -all {exported c } $text] \
+        [lmap r [hir::exports::of $back] {dict get $r symbol}]
+} -cleanup {removeDirectory {nl sources}} -result {1 2 {{} say_hello}}
+
+# ---------------------------------------------------------------------------
+# Export roots (the census's defect, section 8.2)
+
+# The NIR functions of NAME in the library lowering of HIR: {INSTANCE BODY}.
+proc nlFunctions {nir name} {
+    set found {}
+    foreach chunk [split [string map [list "\nend\n" "\nend\x01"] $nir] \x01] {
+        if {[regexp "func \[0-9\]+ \"$name\" \[^\n\]*instance=\"(\[^\"\]*)\"" $chunk -> instance]} {
+            lappend found $instance $chunk
+        }
+    }
+    return $found
+}
+
+test nl-root-keeps-the-error-branch {the export root of checked keeps n < 0, which the instance for its constant Botlish caller drops} -body {
+    set hir [nlHir [file join $nlFixtures alpha.bot]]
+    set exports [lmap r [hir::exports::of $hir] {
+        dict create block [dict get $r block] symbol alpha_[namespace tail [dict get $r name]] name [dict get $r name] \
+            params [lmap p [dict get $r params] {lindex $p 1}] result [dict get $r result]
+    }]
+    set nir [native::nir $hir -library alpha -exports $exports]
+    set functions [nlFunctions $nir checked]
+    list [lsort [dict keys $functions]] \
+        [regexp {faildeclared [0-9]+ "Rejected"} [dict get $functions generic]] \
+        [regexp {faildeclared} [dict get $functions int]] \
+        [regexp {export [0-9]+ "alpha_checked" func=([0-9]+)} $nir -> func] \
+        [regexp "func $func \"checked\" \[^\n\]*instance=\"generic\"" $nir]
+} -result {{generic int} 1 0 1 1}
+
+test nl-root-specialization-unchanged {an executable of the same program lowers its internal calls as before: export roots exist only in a library} -body {
+    set hir [nlSourceHir {
+        exported c fn checked(n: int) -> int:
+            if n < 0:
+                return 0
+            n * 2
+
+        checked(1)
+    }]
+    set nir [native::nir $hir]
+    list [lsort [dict keys [nlFunctions $nir checked]]] [regexp {^export} $nir] [regexp {library=} $nir]
+} -cleanup {removeDirectory {nl sources}} -result {int 0 0}
+
+test nl-root-open-in-range-analysis {the root instance is open: the range analysis folds no caller's argument into it} -body {
+    set hir [nlHir [file join $nlFixtures alpha.bot]]
+    set block [dict get [lindex [lmap r [hir::exports::of $hir] {
+        if {[dict get $r name] ne "checked"} continue
+        set r
+    }] 0] block]
+    set spec [hir::specialize::analyze $hir -roots [list $block]]
+    set root [hir::specialize::genericInstance $hir $spec $block]
+    set without [hir::specialize::analyze $hir]
+    list [expr {$root ne ""}] [dict exists [hir::range::OpenInstances $spec $hir] $root] \
+        [hir::specialize::genericInstance $hir $without $block]
+} -result {1 1 {}}
+
+test nl-root-refinement-facts {an export root's Botlish calls prove no named refinement for its foreign ones} -body {
+    set hir [nlSourceHir {
+        exported c fn f(n: int) -> int:
+            n
+        f(1)
+    }]
+    set block [dict get [lindex [hir::exports::of $hir] 0] block]
+    hir::activate $hir
+    list [dict exists [hir::specialize::RefinementFacts $hir {}] $block] [dict exists [hir::specialize::RefinementFacts $hir [list $block]] $block]
+} -cleanup {removeDirectory {nl sources}} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# Building
+
+test nl-build-artifacts {native::library writes the archive, the shared library, the header and the manifest} -constraints nativeLibrary -body {
+    lassign [nlBuilt] dir results
+    set alpha [dict get $results alpha]
+    list [lsort [lmap f [glob -directory $dir -tails *alpha*] {expr {[string match *conformance* $f] ? [continue] : $f}}]] \
+        [file exists [dict get $alpha archive]] [file exists [dict get $alpha shared]] \
+        [lmap r [dict get $alpha exports] {dict get $r symbol}]
+} -result {{alpha.h alpha.json libalpha.a libalpha.so} 1 1 {alpha_util_greeting alpha_checked alpha_commas alpha_internal alpha_orphan alpha_inc alpha_inc_twice alpha_stated_entry alpha_shout alpha_length alpha_negate alpha_half alpha_nothing alpha_square alpha_detail alpha_element alpha_depth alpha_churn}}
+
+test nl-build-public-symbols {only the library's public API is global: no Botlish function, runtime helper or Rust symbol} -constraints nativeLibrary -body {
+    lassign [nlBuilt] dir
+    set archive [lsort -unique [lmap line [split [exec nm -g --defined-only [file join $dir libalpha.a]] \n] {
+        if {[llength $line] != 3} continue
+        lindex $line 2
+    }]]
+    set shared [lsort -unique [lmap line [split [exec nm -D --defined-only [file join $dir libalpha.so]] \n] {
+        if {[llength $line] != 3} continue
+        lindex $line 2
+    }]]
+    list [lmap s $archive {expr {[string match alpha_* $s] ? [continue] : $s}}] \
+        [lmap s $shared {expr {[string match alpha_* $s] ? [continue] : $s}}] \
+        [llength $archive] [expr {$archive eq $shared}] \
+        [regexp -all {botlish_fn_|botlish_entry_|botlish_program|rt_int_add|botlish_library_call} [exec nm -g [file join $dir libalpha.a]]]
+} -result {{} {} 34 1 0}
+
+test nl-build-deterministic {two builds write the same header, manifest and archive, byte for byte} -constraints nativeLibrary -body {
+    set results {}
+    foreach build {one two} {
+        set out [makeDirectory "nl deterministic $build"]
+        native::library [nlHir [file join $nlFixtures beta.bot]] -name beta -out $out -shared 0
+        lappend results [lmap file {beta.h beta.json libbeta.a} {
+            set channel [open [file join $out $file] rb]
+            set bytes [read $channel]
+            close $channel
+            set bytes
+        }]
+    }
+    lmap a [lindex $results 0] b [lindex $results 1] {expr {$a eq $b}}
+} -cleanup {removeDirectory {nl deterministic one}; removeDirectory {nl deterministic two}} -result {1 1 1}
+
+test nl-build-manifest {the manifest states every export's C interface, from the compiler's facts} -constraints nativeLibrary -body {
+    lassign [nlBuilt] dir
+    source [file join $::projectRoot lsp json.tcl]
+    set manifest [lsp::json::parse [core::ReadFile [file join $dir alpha.json]]]
+    set checked [lindex [lmap e [lsp::json::elements [lsp::json::get $manifest exports]] {
+        if {[lsp::json::text [lsp::json::get $e name]] ne "checked"} continue
+        set e
+    }] 0]
+    list [lsp::json::text [lsp::json::get $manifest format]] [lsp::json::integer [lsp::json::get $manifest version]] \
+        [lsp::json::text [lsp::json::get $manifest library]] \
+        [lsp::json::text [lsp::json::dig $manifest {target name} {}]] \
+        [lsp::json::text [lsp::json::get $checked symbol]] \
+        [lmap p [lsp::json::elements [lsp::json::get $checked params]] {lsp::json::text [lsp::json::get $p type]}] \
+        [lsp::json::text [lsp::json::dig $checked {result type} {}]] \
+        [lmap x [lsp::json::elements [lsp::json::get $checked errors]] {lsp::json::text $x}] \
+        [lsp::json::text [lsp::json::dig $manifest {api create} {}]]
+} -result {botlish-native-library 1 alpha linux-x86_64 alpha_checked int int Rejected alpha_create}
+
+test nl-build-header-compiles {the header is C and C++ on its own} -constraints nativeLibrary -body {
+    lassign [nlBuilt] dir
+    set c [file join [temporaryDirectory] nl-header.c]
+    set channel [open $c w]
+    puts $channel "#include \"alpha.h\"\n#include \"beta.h\"\nint main(void) { return alpha_abi_version() == ALPHA_ABI_VERSION ? 0 : 1; }"
+    close $channel
+    exec cc -std=c99 -Wall -Werror -pedantic -fsyntax-only -I$dir $c
+    if {[auto_execok c++] ne ""} {
+        exec c++ -x c++ -Wall -Werror -fsyntax-only -I$dir $c
+    }
+    file delete $c
+    set ok 1
+} -result 1
+
+test nl-build-errors {what a library build refuses, with its structured error} -constraints nativeLibrary -body {
+    set out [makeDirectory {nl refused}]
+    set results {}
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "fn f(n: int) -> int:\n    n\n"] -name x -out $out}] 0]
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "exported c fn f(n: int) -> int:\n    n\n"] -name 9x -out $out}] 0]
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "exported c fn f(n: int) -> int:\n    n\nf(1)\n"] -name x -out $out}] 0]
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "exported c fn create(n: int) -> int:\n    n\n"] -name x -out $out}] 0]
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "fn f(n: int) -> int:\n    n\n"] -name x -out $out -exports {g}}] 0]
+    lappend results [lindex [nlFailure {native::library [nlSourceHir "fn f(n):\n    n\n"] -name x -out $out -exports {f}}] 0]
+    set results
+} -cleanup {removeDirectory {nl refused}; removeDirectory {nl sources}} -result {{NATIVE LIBRARY EXPORT} {NATIVE LIBRARY NAME} {NATIVE LIBRARY TOP-LEVEL} {NATIVE LIBRARY SYMBOL} {NATIVE LIBRARY EXPORT} {CORE SEMANTIC EXPORT-SIGNATURE}}
+
+test nl-build-export-list {-exports selects top-level functions: the same representation as exported c fn} -constraints nativeLibrary -body {
+    set out [makeDirectory {nl selected}]
+    set hir [nlSourceHir {
+        fn twice(n: int) -> int:
+            n * 2
+        exported c fn thrice(n: int) -> int:
+            n * 3
+    }]
+    set built [native::library $hir -name sel -out $out -exports {twice} -shared 0]
+    lmap r [dict get $built exports] {dict get $r symbol}
+} -cleanup {removeDirectory {nl selected}; removeDirectory {nl sources}} -result {sel_twice sel_thrice}
+
+test nl-build-cli {main.tcl -emit-native-library builds the library; its options need it} -constraints nativeLibrary -body {
+    set out [makeDirectory {nl cli out}]
+    set lines [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
+        -emit-native-library beta -library-dir $out [file join $nlFixtures beta.bot]]
+    list [lmap line [split $lines \n] {lindex [split $line :] 0}] \
+        [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -export f [file join $nlFixtures beta.bot]} message] \
+        [regexp {options of -emit-native-library} $message]
+} -cleanup {removeDirectory {nl cli out}} -result {{archive shared header manifest} 1 1}
+
+# ---------------------------------------------------------------------------
+# C callers
+
+test nl-c-static {a C program linking both libraries statically: every conformance section} -constraints nativeLibrary -body {
+    nlRun [nlCompile conformance.c static] {*}$nlSections
+} -result $nlExpected
+
+test nl-c-static-gc-stress {the same, collecting at every allocation} -constraints nativeLibrary -body {
+    nlRun [nlCompile conformance.c static] BOTLISH_NATIVE_GC_STRESS=1 {*}$nlSections
+} -result $nlExpected
+
+test nl-c-shared {the same program linking both shared libraries} -constraints nativeLibrary -body {
+    nlRun [nlCompile conformance.c shared] {*}$nlSections
+} -result $nlExpected
+
+test nl-c-json {the compiler service census's JSON probe as a library, called from C} -constraints nativeLibrary -body {
+    set dir [makeDirectory {nl json probe}]
+    foreach file {audit/compiler-service/probes/export/exports.bot audit/compiler-service/probes/json/json_tokens.bot} {
+        file copy [file join $::projectRoot {*}[file split $file]] $dir
+    }
+    native::library [nlHir [file join $dir exports.bot]] -name bj -out $dir -shared 0
+    set exe [nlCompile json.c static bj $dir]
+    list [nlRun $exe] [nlRun $exe BOTLISH_NATIVE_GC_STRESS=1]
+} -cleanup {removeDirectory {nl json probe}} -result {{{done json 15}} {{done json 15}}}
+
+cleanupTests

@@ -163,6 +163,11 @@ testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && 
 # nativeCCalls.
 testConstraint executableAot [native::hostSupports executables]
 
+# Native libraries with C exports (native::library,
+# NATIVE-LIBRARY-MILESTONE-1.md): a host whose native backend builds them,
+# with the C compiler driver the tests compile their C callers with.
+testConstraint nativeLibrary [expr {[native::hostSupports libraries] && [auto_execok cc] ne ""}]
+
 # A Unix shell for scripts the tests write and run (`#!/bin/sh` wrappers, `sh
 # -c`): a test that needs one carries this, never an operating system.
 testConstraint unixShell [expr {$::tcl_platform(platform) eq "unix" && [auto_execok sh] ne ""}]

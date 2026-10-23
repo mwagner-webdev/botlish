@@ -1,0 +1,22 @@
+# beta.bot -- the second library of tests/native-library.test: function
+# names alpha has too, with other results, so a call reaching the other
+# library's code shows.
+import std::str
+import std::list
+
+error Oops:
+    n: int
+
+exported c fn checked(n: int) -> int:
+    n + 1000
+
+exported c fn shout(text: str) -> str:
+    std::str::concat(text, "?")
+
+exported c fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        [i, i, i]
+    std::list::length(xs) * 2
+
+exported c fn fails(n: int) -> int errors Oops:
+    fail Oops {n: n}
