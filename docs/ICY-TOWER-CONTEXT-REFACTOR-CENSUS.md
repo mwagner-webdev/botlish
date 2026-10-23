@@ -794,7 +794,90 @@ TODO(after agents)
 
 ## 12. SDL3 wrapper package implications
 
-TODO(after agents)
+A sketch the refactor and its variants support -- not a final design, and
+nothing of it is built. Four layers:
+
+```
+application        ordinary modules: values, operations, its own context traits (Canvas)
+     |               requires the root context (inferred), never names SDL
+sdl3 (the airlock) one contextualized module (or a few with one owner):
+     |               opaque context struct Sdl -- SDL's lifetime, every resource table
+     |               operations taking and returning values and typed handles
+     |               adapters implementing the application-facing context traits
+sdl3::raw          tiny helpers below the airlock: scratch records, C strings,
+     |               event-type and key-state layouts (EventType, KeyState)
+generated/c/sdl3   the generated binding: extern declarations, constants, layouts
+```
+
+**What the evidence decides.**
+
+* **Retain resources inside one root context; hide raw pointers entirely.**
+  Design B removed every pointer, clone and cleanup site above the airlock
+  (section 2); Design A could not remove main.bot's handle threading, and
+  its immediate-mode spellings cost 37-49 lines where B costs 26 (section
+  7). No public operation of the package should take or return a C
+  pointer, a native view or edit, or a non-opaque struct holding one -- the
+  warning of section 11 enforces exactly that boundary.
+* **One root context, not one context per subsystem or window.** A context
+  type is installed once, only by the entry program, and a wrapper cannot
+  install or hide a lower one (6.E, 6.G). So `Sdl` owns SDL's lifetime and
+  a *table* per resource kind (windows, renderers, textures, audio
+  streams), and close releases everything it holds before SDL_Quit -- the
+  ordering Design A cannot express once SDL's lifetime is its own value
+  (its notes, "Multiple windows").
+* **Multiplicity through unrestricted typed handles.** A window or a
+  texture the application names is an opaque, non-affine handle (`opaque
+  struct Texture: slot: int, generation: int`) into the root context's
+  table: copyable into display lists and loops (where an affine texture
+  cannot go: AFFINE-LIST-OPERATION-UNSUPPORTED), checked at each use (a
+  stale handle is a declared error, as SDL's own window IDs are a NULL),
+  never a pointer. Both other designs converge here: B' uses SDL's IDs
+  where they exist (windows, input devices), A needs ids for textures in a
+  display list.
+* **Retention mechanism: native records today.** SDL's IDs cover windows,
+  joysticks, gamepads, haptics and sensors and cost a hash lookup per
+  renderer access (B'); textures, streams, surfaces and GPU objects have
+  only their pointer. Until contexts can own affine members (6.A), the
+  package keeps its pointers in native records held by views inside
+  MutableVector members, as Icy Tower's sdl.bot does -- an implementation
+  detail the API does not show, so it can change when 6.A does.
+* **Stateless rendering above a retained renderer.** Icy Tower's draw
+  operations take coordinates and colors and nothing else; a package
+  exposes the same, plus handles for textures. Whether the application
+  draws immediately (B) or builds a display list (A's S3) is the
+  application's choice; with B it costs nothing either way.
+* **Application-facing context traits, implemented by adapters.** The
+  Canvas variant makes rendering code SDL-free and testable on all four
+  backends with a recording canvas at zero run-time cost (7.1). Because
+  satisfaction is structural and by name, the package should implement
+  such traits in an adapter module of its own (its functions named after
+  the trait's requirements, its context forwarding to the root), not by
+  making the root context's own functions match a trait -- that keeps the
+  root's names free and lets a test or a decorator install a different
+  implementation.
+* **Event polling as value production.** `poll` returns a value (quit, the
+  keys asked for, a failure). A package would return a List of event
+  values; that needs `SDL_Event` read field by field, which the generated
+  binding cannot yet describe (C bool fields: ICY-TOWER-VERTICAL-SLICE-1.md,
+  "FFI").
+* **Error retrieval inside the airlock.** `SDL_GetError`'s text reaches the
+  user only through `SDL_Log` today (no C-string decoding); a package would
+  put it into the declared error's payload (`SdlFailed {call, message}`)
+  once a C string can become a String.
+* **Lifecycle.** `open` and `close` as idempotent operations on a context
+  installed closed (6.G); close safe after close. Use-after-close is a
+  run-time `false`, not a compile error (Design A's one advantage).
+* **Headless and tests.** A headless SDL is the same root context opened
+  with the dummy or offscreen driver; tests of application rendering use
+  a recording implementation of the application's traits (7.1), within the
+  limits of one installed value per type and no context in a golden
+  check.
+
+**What a package needs from the language, in order** (none blocks it):
+module privacy (so the airlock's helpers and lookups need not be public,
+section 5); context-owned affine members (6.A, to retire the native
+records); C-string decoding and C bool layout fields (FFI); the native
+context slot for views (6.B, small).
 
 ## 13. Language conclusions
 
