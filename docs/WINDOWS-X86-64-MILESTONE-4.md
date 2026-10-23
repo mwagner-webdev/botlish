@@ -71,18 +71,19 @@ the Windows runs of milestone 3 and against the probe (section 2).
 
 | Exhaustion | Milestone 3 on Windows | Evidence |
 |---|---|---|
-| Botlish recursion | NATIVE LIMIT STACK as an ordinary error, from the stack-limit check | real Windows: milestone 3's native-status and aot-facts runs |
-| a frame larger than the check's margin (64 KiB to 1 MiB) | the frame's probes ran past the stack: STATUS_STACK_OVERFLOW, Rust's own report ("thread ... has overflowed its stack"), the process ended with 0xC00000FD | code inspection; the same mechanism as the next row |
-| recursion inside the runtime (Rust) | the same: Rust's report, 0xC00000FD -- no check runs in Rust code | real Windows: the first run of native-status's `runtime-stack-overflow` before the guard was installed (section 7.1) |
-| recursion inside C | the same | code inspection, section 2's probe |
+| Botlish recursion | NATIVE LIMIT STACK as an ordinary error, from the stack-limit check: the driver's `error` line; an executable's `MESSAGE (CODE)` on standard error | real Windows: before-after's `down` with the driver of 85753d9 (section 8.1) |
+| a frame larger than a page (3,000 live values, about 24 KiB) | the same, while the frame stays under the check's margin (64 KiB to 1 MiB) | real Windows: before-after's `huge-frame` (section 8.1) |
+| a frame larger than the margin | its probes run past the stack: STATUS_STACK_OVERFLOW, Rust's own report, the process ended with 0xC00000FD | code inspection; the same mechanism as the next row |
+| recursion inside the runtime (Rust) | Rust's report (`thread '<unknown>' has overflowed its stack`), the process ended by the exception, nothing on the driver's protocol: no check runs in Rust code | real Windows: before-after's `runtime-overflow`, in the JIT and as an executable (section 8.1) |
+| recursion inside C | the same | code inspection; section 2's probe (MSVC-compiled C on a Rust thread) |
 | an access violation unrelated to the stack | the process ended with 0xC0000005, nothing reported | section 2 |
 
 ### 1.3 What had to change
 
-The first four rows are one event to Windows -- the thread's stack is
-exhausted, wherever the code that exhausts it came from -- and the fifth
+The first five rows are one event to Windows -- the thread's stack is
+exhausted, wherever the code that exhausts it came from -- and the sixth
 is another. So the guard (section 3) is one handler of that event, in place
-for the whole run on the thread that runs Botlish code, and the fifth stays
+for the whole run on the thread that runs Botlish code, and the sixth stays
 what it was. Once the guard reports every exhaustion, the check that made
 every Botlish call fallible has nothing left to do (section 5). The error
 system is unchanged: NATIVE LIMIT STACK keeps its code, its message and its
