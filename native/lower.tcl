@@ -9915,11 +9915,12 @@ proc native::lower::NativeCallOp {e node} {
 #           a dense one), then one on the symbol over its row's intervals
 #           (codegen::clif's switch lowering picks a jump table or a search
 #           per switch)
-#   table   for a bytes or ascii recognizer: the code read from a static
-#           byte table indexed by state and symbol (`op rtabload`), the
-#           out-of-alphabet symbols the row's default; a unicode one as
-#           switch
-#   auto    (the default) table for bytes and ascii, switch otherwise
+#   table   when every row's intervals lie in -1..255 (every bytes or
+#           ascii recognizer, and a unicode one that names no symbol above
+#           255): the code read from a static byte table indexed by state
+#           and symbol (`op rtabload`), every other symbol the row's
+#           default; any other recognizer as switch
+#   auto    (the default) table where it applies, switch otherwise
 #
 # Every form computes exactly core::dfa::Lookup's code. The state is a
 # number the table itself produced, so outside its rows is the compiler's

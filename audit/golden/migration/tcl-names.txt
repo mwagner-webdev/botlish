@@ -1393,6 +1393,7 @@ tests/dfa-workloads.test dfa-json-long pass
 tests/dfa-workloads.test dfa-json-long-interp pass
 tests/dfa-workloads.test dfa-json-model pass
 tests/dfa-workloads.test dfa-json-strict pass
+tests/dfa-workloads.test dfa-workloads-warning-clean pass
 tests/dfa-workloads.test dfa-yaml-boundaries pass
 tests/dfa-workloads.test dfa-yaml-chunks pass
 tests/dfa-workloads.test dfa-yaml-count pass

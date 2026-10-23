@@ -130,9 +130,17 @@
 @@ key-ignores-scheduler the cache key leaves out the static scheduler
 ## surface/cache.tcl
 <<<<
-        scheduler [if {[info exists ::env(BOTLISH_STATIC_SCHEDULER)]} {set ::env(BOTLISH_STATIC_SCHEDULER)} else {string cat ""}]]
+        scheduler [if {[info exists ::env(BOTLISH_STATIC_SCHEDULER)]} {set ::env(BOTLISH_STATIC_SCHEDULER)} else {string cat ""}] \
 ====
-        scheduler {}]
+        scheduler {} \
+>>>>
+
+@@ key-ignores-dfa-lowering the cache key leaves out how declared recognizers are lowered: a build under the tree lowering hits the compact one's HIR
+## surface/cache.tcl
+<<<<
+        dfa-lowering $::surface::dfa::lowering]
+====
+        dfa-lowering compact]
 >>>>
 
 @@ key-ignores-root the cache key leaves out the application root: one relative path from another working directory hits the other application's HIR

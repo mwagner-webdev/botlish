@@ -66,7 +66,17 @@ no HIR or Core IR node. Concretely:
 * **Economical lowering.** A recognizer's transitions are one call of an
   internal root native over a constant table; native lowering turns it into
   a static byte table (bytes and ascii) or the new general NIR `switch`
-  (Cranelift's `br_table` or a balanced search), never a call. @@RESULT-COST@@
+  (Cranelift's `br_table` or a balanced search), never a call. Against
+  the prototype on the same machine (section 15) the recognizers' own
+  compile cost fell 3-5x at every stage -- a program using one recognizer
+  of the JSON module spends 0.38 s in the front end (1.5-1.6 s, plus the
+  preprocessor), the lexer's native lowering takes 0.53-0.77 s (1.5 s), its
+  fused driver compile 33-46 ms (144 ms), its machine code 19.4 KB (29.1
+  KB) -- while the fused code runs as fast: the JSON lexer at 14.1-14.5 ns
+  per character (13.3-14.1), the validator at 25.5-26.5 (26.4-27.3), and
+  json_number fed digits within 5% of the same recognizer written by
+  hand. The JSON workloads' whole front end stays near 4 s: its drivers
+  module, not its recognizers (about 20 ms), dominates it (section 17).
 * **Integration.** Modules (qualified and rooted names, imports, a module's
   rejected recognizer dependent at its users), diagnostic recovery, syntax
   recovery, the front-end cache, HIR interchange, the Tcl compiler and both
@@ -347,27 +357,51 @@ proves nothing about RFC 8259 or YAML 1.2.2.
 The input source advances monotonically: no rewind of a file, socket or
 source coroutine. The **driver** -- the function that feeds a recognizer --
 keeps the last L symbols it read, L the most any recognizer it runs leaves
-unread (json.bot: 1; yaml.bot: 2), and hands back what a token left unread
-to the next token. examples/dfa/json/json.bot:
+unread (its static lookahead), and hands back what a token left unread to
+the next token. The two workloads show both shapes.
+
+**L = 1 (examples/dfa/json/json.bot).** json_lex's lookahead is 1: a
+number or a literal ends before the symbol after it, and nothing is left
+unread at the end. The buffer is the current symbol:
 
 ```
-ring        MutableArray of L symbols: the last ones read from the source,
-            symbol at offset P in slot P mod L
+cursor[0]   the offset of the current symbol
+cursor[1]   the current symbol (-1: the end of the input, no symbol)
+cursor[2]   tokens so far
+cursor[3]   the current token's count: 0 while it runs, then what it left unread
+```
+
+A recognizer is handed the current symbol; when it answers 0 the driver
+reads the next. When it completes leaving one unread, that symbol stays
+current -- the next token's first -- and nothing is read again; leaving
+none, the driver reads the next (unless the current one was the end).
+
+**L = 2 (examples/dfa/yaml/yaml.bot).** yaml_token's lookahead is 2 (a
+plain scalar ends two symbols before the one after its `:`), so the
+driver keeps a ring:
+
+```
+ring        the last two symbols read, symbol at offset P in slot P mod 2
 cursor[0]   pos: the offset of the next symbol to hand over
 cursor[1]   read: how many symbols the source has supplied
 ```
 
-The next symbol is `ring[pos mod L]` while pos < read, else the source's
-(kept in the ring); the end, -1, advances nothing and is never kept. When a
-token completes leaving U unread, pos goes back by U. The invariant
-`pos <= read <= pos + L` holds because a recognizer leaves unread at most
-what it was handed and at most L (the static bound), so the symbols given
-back are still in the ring. No symbol is lost (each is read once from the
-source and kept until handed over again), duplicated or assigned to two
-tokens (a token is the interval [start, pos - U), the next starts at
-pos - U). Chunks are the source's business: the source coroutine yields
-symbols across chunk boundaries, an empty chunk yields none, and the
-driver never sees a boundary.
+The next symbol is `ring[pos mod 2]` while pos < read (a symbol given
+back), else the source's, kept in the ring; the end, -1, advances nothing
+and is never kept. When a token completes leaving U unread, pos goes back
+by U. The invariant `pos <= read <= pos + 2` holds because a recognizer
+leaves unread at most what it was handed and at most its lookahead (the
+static bound), so the symbols given back are still in the ring.
+
+In both, no symbol is lost (each is read once from the source and kept
+until handed over again), duplicated or assigned to two tokens (a token is
+the interval [start, pos - U), the next starts at pos - U). Chunks are the
+source's business: the source coroutine yields symbols across chunk
+boundaries, an empty chunk yields none, and the driver never sees a
+boundary. The JSON driver first used a ring too; keeping only the
+current symbol where the lookahead is 1 was one of the three changes that
+took the fused validator from 32-33 to 25.5-26.5 ns per character
+(section 15).
 
 ### A standard-library helper?
 
@@ -378,11 +412,11 @@ copy (MUTABLE-ARRAY.md), so a helper cannot advance the driver's buffer in
 place. A coroutine helper -- a buffered source that owns the source's
 handle and takes "rewind U" messages -- is expressible, but the source's
 handle then leaves the driver, and fusion keeps both on the general runtime
-(the factory probe's cost: about 22x, section 15). The ring is eight lines
-per driver, and its size is the recognizers' static lookahead. A helper
+(the factory probe's cost: about 22x, section 15). The buffer is a few
+lines per driver, and its size is the recognizers' static lookahead. A helper
 becomes worthwhile when interprocedural fusion (COROUTINE-FUSION-
 MILESTONE-1.md, "Limits") lets a handle cross a call; until then each
-driver spells it out, as json.bot's four drivers and yaml.bot's one do.
+driver spells it out, as json.bot's four drivers and yaml.bot's two do.
 Nothing makes a recognizer depend on where its symbols come from.
 
 ### Tested
@@ -479,13 +513,16 @@ native/lower.tcl's DfaTransition expands a transition call at compile time
 into control flow over its constant table, the form chosen per recognizer
 (`-dfa-dispatch`, BOTLISH_NATIVE_DFA_DISPATCH):
 
-* **table** -- for bytes and ascii recognizers (the default): one static
-  byte table (16-bit entries when a code exceeds 255) indexed by state
-  times 257 plus the symbol (the end at index 0), read by `op rtabload8`
-  or `rtabload16`; symbols outside the byte range take the row's default.
-* **switch** -- for unicode recognizers (the default) and on request: a
-  multiway branch on the state, then one on the symbol over its row's
-  intervals.
+* **table** -- the default for a recognizer whose transitions name only
+  symbols in -1..255 (every bytes and ascii recognizer, and a unicode one
+  such as json_token, whose other symbols all reject): one static byte
+  table (16-bit entries when a code exceeds 255) indexed by state times 257
+  plus the symbol (the end at index 0), read by `op rtabload8` or
+  `rtabload16`; a symbol outside the byte range takes the row's default. A
+  recognizer of one state skips the state's part of the index.
+* **switch** -- the default otherwise (json_string's rows name
+  U+0080..U+10FFFF) and on request: a multiway branch on the state, then
+  one on the symbol over its row's intervals.
 * **tree** -- nested comparisons, the exploration's shape, built here
   instead of in the front end (kept to measure).
 
@@ -529,8 +566,8 @@ MILESTONE-1.md); nothing in fusion knows recognizers.
 * **Compact dispatch shrinks the copies.** Fusion copies the template per
   start and resume; the template is now a table load and a code dispatch
   instead of a decision tree per state, so the fused lexer's machine code
-  fell from 29.1 KB (prototype) to about 19-21 KB, and the driver's compile
-  with fusion from about 144 ms to 30-46 ms (section 15).
+  fell from 29.1 KB (prototype) to 19.4 KB, and the driver's compile
+  with fusion from about 144 ms to 33-46 ms (section 15).
 * **What fusion cannot follow** stays on the general runtime, as before and
   by design: a handle that leaves the function that constructs it. The
   factory probe (`composition.bot`, `dfa-json-composition`) keeps its
@@ -725,7 +762,60 @@ unrestricted parser.
 
 ## 14. Native code evidence
 
-@@EVIDENCE@@
+`audit/dfa/tools/evidence.tcl` compiles four workloads, fused and on the
+general runtime, and keeps each consumer function's NIR, its machine code
+(objdump of the program object) and fusion's report
+(`audit/dfa/milestone-2/evidence/`; `summary.md` lists every helper each
+one calls):
+
+| workload | consumer | fused bytes | fused calls | general bytes | general calls | fusion inlined |
+|---|---|---:|---:|---:|---:|---|
+| utf8 | `validate_pattern` | 3,861 | 42 | 636 | 24 | utf8_text, utf8_char |
+| lex | `json::lex_text` | 15,293 | 152 | 3,621 | 82 | json_token, json_string, json_escape, json_number, json_literal; the chunk source |
+| validate-bytes | `json::validate_bytes` | 22,157 | 251 | 4,469 | 107 | json_token_bytes, json_string_bytes, json_escape, utf8_char, json_number, json_literal; the byte source; the structural coroutine |
+| yaml | `yaml::tokens` | 28,541 | 225 | 6,085 | 110 | yaml_token, yaml_double_quoted, yaml_escape, yaml_comment, yaml_plain_flow, yaml_single_quoted; the chunk source |
+
+What the code shows:
+
+* **Every coroutine of every workload is fused** (`fused ... inlined`,
+  no `kept`): a recognizer, the recognizers it calls (each a deep yield
+  of its caller's chain) and the driver's own source coroutines. The fused
+  consumers call no coroutine operation on the per-symbol path: their
+  `rt_co_resume0` and `rt_co_failed` calls are fusion's cold paths (a
+  resume after completion, a cached failure raised again), and the
+  general variants' `rt_co_create`/`rt_co_resume`/`rt_closure_new`/
+  `rt_struct_new` (a coroutine object, a resume message per symbol) are
+  gone.
+* **A transition is a table load or a branch, never a call.** No
+  `dfa#transition` call survives native lowering
+  (`dfa-lowering-native-dispatch`). The fused UTF-8 validator reads its
+  transitions from two static byte tables: utf8_char's by `imul $0x101`
+  (state times 257) and one `movzbq` from the table's payload (or the
+  row's default for a symbol outside the byte range), utf8_text's, a
+  recognizer of one state, by the `movzbq` alone. The lexer's 16 table
+  loads serve its ascii rows (and json_token's, a unicode recognizer whose
+  named symbols are all ASCII); json_string's rows name U+0080..U+10FFFF,
+  so its transitions are NIR `switch`es on the state and then the symbol,
+  sparse enough for codegen to emit balanced searches. YAML's recognizers are
+  unicode with wide classes: 40 switches, three of them dense enough for
+  `br_table` (`movslq (%rcx,%rax,4)` / `jmp *%rcx`).
+* **Nothing is allocated per symbol.** The resume message is a fused
+  register, the unread count an Int in a register; the fused lexer's
+  allocations are the driver's cursor (a MutableArray of four counters)
+  and its result -- 2 for 20,000 characters (section 15).
+* **What remains per symbol** besides the load is the code dispatch
+  after it (`if next < STATES ... `): an integer comparison materializes
+  a tagged Bool (a `cmov`) that the branch then compares with true, a
+  pattern Cranelift does not fold. That is the ordinary lowering of a
+  comparison, shared with every program, not a recognizer cost: the
+  hand-written json_number coroutine takes 3.8-3.9 ns per digit, the
+  declared one 4.0-4.1 (section 15).
+* **Fused code is larger than general code** -- a copy of the template
+  per start and resume, as COROUTINE-FUSION-MILESTONE-1.md designed --
+  but a third smaller than the prototype's for the same workload (the
+  lexer's program 19.4 KB against 29.1 KB; the validator's 27.0 against
+  37.1), because the template is a load and a code dispatch instead of a
+  decision tree per state.
 
 ## 15. Performance
 

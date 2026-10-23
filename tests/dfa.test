@@ -743,7 +743,7 @@ s = w():
 "
 }
 
-test dfa-lowering-native-dispatch {natively a transition call is control flow over its constant table: a byte-table load per state and symbol (table, for a bytes or ascii recognizer; a unicode one as switch), multiway branches on the state and on the symbol (switch: Cranelift lowers each to a jump table or a balanced search), or nested ifs (tree); auto takes table for bytes and ascii, switch otherwise -- the same answers every way} -body {
+test dfa-lowering-native-dispatch {natively a transition call is control flow over its constant table: a byte-table load per state and symbol (table, when every row's intervals lie in -1..255; any other recognizer as switch), multiway branches on the state and on the symbol (switch: Cranelift lowers each to a jump table or a balanced search), or nested ifs (tree); auto takes table where it applies, switch otherwise -- the same answers every way} -body {
     set hir [surface::compile [dfaDriverProgram 3] t.bot -warnings off]
     set out {}
     foreach mode {auto tree switch table} {

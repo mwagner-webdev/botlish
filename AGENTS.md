@@ -2859,8 +2859,11 @@ native/Cargo.toml --bin botlish-native switch_tests`,
 `audit/dfa/tools/differential.tcl -suite DIR -fuzz 2000 -seeds 1-12`
 (JSONTestSuite's test_parsing in DIR; 0 disagreements) and
 `audit/dfa/tools/mistakes.tcl` (every structural and lookahead mistake
-static, the grammar ones caught or recorded as surviving), plus the warning
-gate for a change to examples/dfa. `bench/dfa.tcl` regenerates the
+static, the grammar ones caught or recorded as surviving). The warning
+gate's corpus leaves examples/dfa out: tests/dfa-workloads.test's
+`dfa-workloads-warning-clean` compiles its modules under `-warnings error`
+instead (answer a warning in the code, as the gate asks). `bench/dfa.tcl`
+regenerates the
 performance report and `audit/dfa/tools/evidence.tcl` the native evidence.
 
 ## Workloads (examples/games/2048)
