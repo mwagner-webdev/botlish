@@ -1,0 +1,23 @@
+# E1. Contexts compose as requirements, not as ownership
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies", E).
+#
+# A wrapper context that holds the lower layer's context as a field does not
+# install it: wrapper::sprite requires lowlevel::Native transitively, and the
+# entry program, which installs only the wrapper, gets MISSING-CONTEXT with
+# the chain sprite -> lowlevel::allocate. main-both.bot installs both and
+# runs. So an SDL wrapper can turn raw authority into its own context (the
+# wrapper mediates raw.bot's direct calls with Platform: no DIRECT error),
+# but a layered package (SDL root -> window -> renderer, or SDL -> a game's
+# platform context) cannot hide its lower contexts: every layer is installed
+# by the entry program, in dependency order, and appears in requirement
+# chains. (Only one value of each context type can be installed at all.)
+#
+# expect interp: MISSING-CONTEXT
+# expect compile: MISSING-CONTEXT
+# expect cranelift-generic: MISSING-CONTEXT
+# expect cranelift: MISSING-CONTEXT
+import wrapper
+
+with context wrapper::create()
+
+wrapper::sprite(3)

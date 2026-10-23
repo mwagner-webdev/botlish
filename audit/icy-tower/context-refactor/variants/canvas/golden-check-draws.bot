@@ -1,0 +1,38 @@
+# golden-check-draws.bot -- the golden test that cannot be written
+# (variant "canvas" of ICY-TOWER-CONTEXT-REFACTOR-CENSUS): a check that
+# draws when the case runs. Run beside tower.bot, hud.bot, render.bot and
+# recorder.bot; the front end rejects it:
+#
+#   CONTEXT-FUNCTION-VALUE: function first_frame requires context
+#   recorder::Recorder, render::Canvas, so it can only be called (or bound to
+#   another name as a statement): it cannot be passed, returned or stored as
+#   a value, because a call through an unknown function value could not
+#   prove that context installed
+#
+# std::test stores a case's check as a function value (Fn{args: [], return:
+# std::test::Match}), and a function whose requirement is not empty never
+# becomes a value (CONTEXTS.md, "higher-order frontier";
+# GOLDEN-TEST-FRAMEWORK.md, "No parameters, no context"). golden.bot beside
+# this file draws at registration time instead.
+import std::list
+import std::test
+import recorder
+import render
+import tower
+
+fn register_render_tests():
+    fn first_frame() -> list:
+        recorder::forget()
+        world = tower::new_world(7, 1):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        ok = render::frame(world):
+            on NonFiniteFloat:
+                false
+        [ok, std::list::length(recorder::recorded())]
+    std::test::value("icy-render-first-frame", [true, 92], first_frame)
+
+with context std::test::suite()
+with context recorder::create()
+register_render_tests()
+std::test::report()

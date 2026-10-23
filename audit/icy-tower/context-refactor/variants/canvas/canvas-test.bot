@@ -1,0 +1,48 @@
+# canvas-test.bot -- render.bot's frames drawn on a recording canvas
+# (variant "canvas" of ICY-TOWER-CONTEXT-REFACTOR-CENSUS).
+#
+# Run beside the game's pure modules, tower.bot and hud.bot, and the
+# variant's render.bot and recorder.bot (no SDL module, no SDL binding):
+#
+#   tclsh9.0 main.tcl -backend B canvas-test.bot      (B: interp, compile,
+#                                                      cranelift-generic,
+#                                                      cranelift)
+#
+# It installs recorder::Recorder, the one installed context implementing
+# render::Canvas, so render.bot's functions are cloned for it and every
+# Canvas operation is a direct call of recorder.bot's function. It draws
+# two worlds through render::frame: tower::new_world(7, 1), and that world
+# after tower::simulate's 600 frames (the state of the reference smoke
+# run). Its value is, for each world: whether the frame succeeded, how many
+# operations it recorded, its first eight and every text operation; then
+# the later frame's whole log. All four backends print the same value.
+import std::list
+import recorder
+import render
+import tower
+
+# The first N of ENTRIES.
+fn first(entries: List[str], n: int) -> List[str]:
+    loop entry in entries and i from 0 to std::list::length(entries):
+        if i >= n:
+            continue
+        entry
+
+# WORLD drawn on a fresh log: [succeeded, operations, first eight, texts].
+fn drawn(world: tower::World) -> list errors NonFiniteFloat:
+    recorder::forget()
+    ok = render::frame(world)
+    entries = recorder::recorded()
+    [ok, std::list::length(entries), entries.first(8), entries.only("text")]
+
+fn run() -> list errors NonFiniteFloat:
+    start = tower::new_world(7, 1)
+    later = start.simulate(600)
+    [start.drawn(), later.drawn(), recorder::recorded()]
+
+with context recorder::create()
+
+result = run():
+    on NonFiniteFloat:
+        ["non-finite"]
+result

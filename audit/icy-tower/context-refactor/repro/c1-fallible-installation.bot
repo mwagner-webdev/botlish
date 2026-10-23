@@ -1,0 +1,36 @@
+# C1. A context whose construction can fail cannot be installed with the
+# failure handled (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Does cleanup
+# become simpler?").
+#
+# The natural airlock is `with context sdl::open(...)`: acquire SDL while
+# installing its context. But `with context EXPR` takes one expression and
+# no block, so a declared error of the constructor cannot be handled there
+# (UNHANDLED-ERROR; adding a handler is a syntax error, c1b), and an
+# installation cannot be conditional (c2): a resource that may fail to open,
+# or that a run may not want (Icy Tower's --headless, --help and usage
+# errors open no window), cannot be acquired at installation. The refactored
+# sdl.bot therefore installs an empty context (`sdl::create()`, no SDL call)
+# and makes opening an ordinary contextual operation whose failure is an
+# ordinary declared error.
+#
+# expect interp: UNHANDLED-ERROR
+# expect compile: UNHANDLED-ERROR
+# expect cranelift-generic: UNHANDLED-ERROR
+# expect cranelift: UNHANDLED-ERROR
+context struct Session:
+    id: int
+
+error OpenFailed:
+    reason: str
+
+fn open(ok: bool) -> Session errors OpenFailed:
+    if not ok:
+        fail OpenFailed {reason: "no display"}
+    Session {id: 1}
+
+fn id(context s: Session) -> int:
+    s.id
+
+with context open(false)
+
+id()

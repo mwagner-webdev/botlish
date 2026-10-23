@@ -1,0 +1,45 @@
+# G1. An airlock can leak raw memory -- pointers included -- through an
+# unrestricted NativeView result, and nothing reports it
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies", D, and the
+# warning proposal's rule R3).
+#
+# airlock.bot is contextualized: its raw calls (malloc's retaining result
+# use, the views and edits it makes) are mediated by its own Airlock
+# context. Its public `record()` returns the view of its native record. This
+# entry program -- an ordinary module, it makes no direct call -- reads the
+# C string pointer out of that view (reading a view someone else made needs
+# no authority: NATIVE-LAYOUT-VIEWS.md) and hands it to strlen, whose
+# contract (`read noescape`) makes the call non-retaining and so no direct
+# edge either. The value is 2 ("hi"); `main.tcl -direct` reports the entry
+# program ordinary and airlock contextualized. Returning ordinary values from
+# contextual operations leaks nothing (Icy Tower's sdl::Polled); a view is
+# not an ordinary value. The refactored sdl.bot therefore reads its session
+# inline in every operation and has no function returning the view.
+#
+# expect interp: NATIVE-ONLY
+# expect compile: NATIVE-ONLY
+# expect cranelift-generic: value: 2
+# expect cranelift: value: 2
+import std::binary
+import std::ffi::c
+import airlock
+
+extern c fn strlen(s: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::ULong
+
+with context airlock::create()
+
+fn length() -> int:
+    opened = airlock::open():
+        on NativeEditNull:
+            return -1
+        on NativeViewNull:
+            return -1
+        on IndexNotFound:
+            return -1
+    view = airlock::record():
+        on IndexNotFound:
+            return -1
+    name = view.name
+    strlen(name)
+
+length()

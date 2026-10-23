@@ -1,0 +1,29 @@
+# C2. A context is installed once, unconditionally, at the entry program's
+# top level (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Does cleanup become
+# simpler?"; CONTEXTS.md, "Installation").
+#
+# Installing a session only on the path that wants one -- inside the function
+# that plays, after the options are read -- is
+# CONTEXT-INSTALLATION-UNSUPPORTED, and the call that needed it is then
+# MISSING-CONTEXT. So a context's *lifetime* is the program's: a resource
+# with a shorter lifetime (a window opened by `play` and closed when it
+# returns) is state inside a context installed for the whole run, opened and
+# closed by contextual operations (b1).
+#
+# expect interp: CONTEXT-INSTALLATION-UNSUPPORTED MISSING-CONTEXT
+# expect compile: CONTEXT-INSTALLATION-UNSUPPORTED MISSING-CONTEXT
+# expect cranelift-generic: CONTEXT-INSTALLATION-UNSUPPORTED MISSING-CONTEXT
+# expect cranelift: CONTEXT-INSTALLATION-UNSUPPORTED MISSING-CONTEXT
+context struct Session:
+    id: int
+
+fn id(context s: Session) -> int:
+    s.id
+
+fn play(headless: bool) -> int:
+    if headless:
+        return 0
+    with context Session {id: 1}
+    id()
+
+play(false)

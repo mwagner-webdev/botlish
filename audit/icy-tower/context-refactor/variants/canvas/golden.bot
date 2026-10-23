@@ -1,0 +1,683 @@
+# golden.bot -- golden tests of the Icy Tower vertical slice's rules
+# (tower.bot), text (hud.bot) and command line (options.bot), through their
+# public API, as the game uses them (ICY-TOWER-VERTICAL-SLICE-1.md,
+# "Tests").
+#
+# Run with `tclsh9.0 examples/games/icy-tower/run.tcl -suite`
+# (tests/workload-icy-tower.test runs it on every backend): the modules are
+# the application modules beside it (IMPORTS.md).
+#
+# Expected values are written out. Motion is checked with time steps that
+# are exact binary fractions (0.25 s, 0.125 s), so every expected Float64
+# is the exact result too; properties (gaps a jump can clear, a camera
+# that never moves down) are checked over generated towers; the long run's
+# summary comes from an independent implementation of the rules,
+# audit/icy-tower/oracle.py.
+#
+# A test body may declare no error but std::compiler::CompilerError
+# (stdlib/test.bot), and every Float64 operation may fail with NonFiniteFloat,
+# so each helper below handles it, answering a value no expectation has.
+import std::compiler
+import std::decimal_rounded
+import std::float64
+import hud
+import std::list
+import options
+import recorder
+import render
+import std::test
+import tower
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+fn idle() -> tower::Input:
+    tower::Input {left: false, right: false, restart: false}
+
+fn right() -> tower::Input:
+    tower::Input {left: false, right: true, restart: false}
+
+fn left() -> tower::Input:
+    tower::Input {left: true, right: false, restart: false}
+
+fn both() -> tower::Input:
+    tower::Input {left: true, right: true, restart: false}
+
+fn restart() -> tower::Input:
+    tower::Input {left: false, right: false, restart: true}
+
+# (nomethod: four coordinates of equal standing.)
+nomethod fn player(x: Float64, y: Float64, vx: Float64, vy: Float64) -> tower::Player:
+    tower::Player {x: x, y: y, vx: vx, vy: vy}
+
+nomethod fn platform(x: Float64, y: Float64, width: Float64, floor: int) -> tower::Platform:
+    tower::Platform {x: x, y: y, width: width, floor: floor}
+
+fn values(p: tower::Player) -> List[Float64]:
+    [p.x, p.y, p.vx, p.vy]
+
+# P after DT seconds of INPUT, before any landing: [x, y, vx, vy].
+fn motion(p: tower::Player, input: tower::Input, dt: Float64) -> list:
+    m = p.moved(input, dt):
+        on NonFiniteFloat:
+            return ["non-finite"]
+    m.values()
+
+# Whether the player moving from BEFORE to AFTER lands on P.
+fn lands(p: tower::Platform, before: tower::Player, after: tower::Player) -> list:
+    landed = p.lands_on?(before, after):
+        on NonFiniteFloat:
+            return ["non-finite"]
+    [landed]
+
+# The landing of the move BEFORE to AFTER among PLATFORMS: [landed, floor].
+fn landing_of(platforms: List[tower::Platform], before: tower::Player, after: tower::Player) -> list:
+    l = platforms.landing(before, after):
+        on NonFiniteFloat:
+            return ["non-finite"]
+    [l.landed, l.platform.floor]
+
+# A player falling onto P, one unit above its top, ten units in from its
+# left end.
+fn dropping_onto(p: tower::Platform) -> tower::Player:
+    x = p.x + 10.0:
+        on NonFiniteFloat:
+            0.0
+    y = p.y + 1.0:
+        on NonFiniteFloat:
+            0.0
+    player(x, y, 0.0, -100.0)
+
+fn new_world(seed: int) -> tower::World:
+    w = tower::new_world(seed, 1):
+        on NonFiniteFloat:
+            return tower::World {player: player(0.0, 0.0, 0.0, 0.0), platforms: [], camera: tower::Camera {bottom: 0.0, rising: false}, rng: 0, floor: -1, best: tower::no_height(), time: 0.0, over: true, round: -1}
+    w
+
+# WORLD with its player, camera and floor replaced.
+fn world_with(world: tower::World, p: tower::Player, camera: tower::Camera, floor: int) -> tower::World:
+    tower::World {player: p, platforms: world.platforms, camera: camera, rng: world.rng, floor: floor, best: world.best, time: world.time, over: world.over, round: world.round}
+
+fn over(world: tower::World) -> tower::World:
+    tower::World {player: world.player, platforms: world.platforms, camera: world.camera, rng: world.rng, floor: world.floor, best: world.best, time: world.time, over: true, round: world.round}
+
+fn stepped(world: tower::World, input: tower::Input, dt: Float64) -> tower::World:
+    next = world.step(input, dt):
+        on NonFiniteFloat:
+            return world.world_with(player(-1.0, -1.0, -1.0, -1.0), world.camera, -1)
+    next
+
+# The facts of WORLD a test compares: [player values, camera bottom,
+# rising, floor, time, over, round].
+fn facts(world: tower::World) -> list:
+    [world.player.values(), world.camera.bottom, world.camera.rising, world.floor, world.time, world.over, world.round]
+
+fn rows(platforms: List[tower::Platform]) -> List[list]:
+    loop p in platforms:
+        [p.x, p.y, p.width, p.floor]
+
+# The platforms of SEED's tower grown up to altitude TOP.
+fn tower_of(seed: int, top: Float64) -> List[tower::Platform]:
+    floor0 = platform(tower::wall, tower::ground, tower::inner_width, 0)
+    grown = [floor0].grown(seed.mod(4294967296), top):
+        on NonFiniteFloat:
+            return []
+    grown.platforms
+
+fn simulated(world: tower::World, frames: int) -> tower::World:
+    later = world.simulate(frames):
+        on NonFiniteFloat:
+            return world.over()
+    later
+
+fn summary_after(world: tower::World, frames: int) -> str:
+    text = world.simulated(frames).summary(frames):
+        on NonFiniteFloat:
+            return "non-finite"
+    text
+
+fn shown(y: Float64) -> str:
+    fn text() -> str errors NonFiniteFloat, UnrepresentableDecimal:
+        tower::metres(y).metres_text()
+    shown = text():
+        on NonFiniteFloat:
+            "non-finite"
+        on UnrepresentableDecimal:
+            "unrepresentable"
+    shown
+
+fn timer(seconds: Float64) -> str:
+    text = hud::timer_text(seconds):
+        on NonFiniteFloat:
+            return "non-finite"
+    text
+
+fn parsed(args: List[str]) -> list:
+    o = options::parse(args):
+        on options::UsageError {message}:
+            return ["usage error", message]
+    [o.seed, o.seeded, o.frames, o.headless, o.autopilot, o.fixed_step, o.help]
+
+# ---------------------------------------------------------------------------
+# Motion
+
+fn register_motion_tests():
+    fn gravity() -> list:
+        player(100.0, 500.0, 0.0, 0.0).motion(idle(), 0.25)
+    std::test::value("icy-gravity-pulls-down", [100.0, 368.75, 0.0, -525.0], gravity)
+
+    fn rising() -> list:
+        player(100.0, 500.0, 0.0, 800.0).motion(idle(), 0.125)
+    std::test::value("icy-gravity-slows-a-rise", [100.0, 567.1875, 0.0, 537.5], rising)
+
+    fn run_right() -> list:
+        player(100.0, 500.0, 0.0, 0.0).motion(right(), 0.125)
+    std::test::value("icy-run-right-accelerates", [137.5, 467.1875, 300.0, -262.5], run_right)
+
+    fn run_left() -> list:
+        player(300.0, 500.0, 0.0, 0.0).motion(left(), 0.125)
+    std::test::value("icy-run-left-accelerates", [262.5, 467.1875, -300.0, -262.5], run_left)
+
+    fn capped() -> list:
+        player(100.0, 500.0, 400.0, 0.0).motion(right(), 0.125)
+    std::test::value("icy-run-capped-at-full-speed", [152.5, 467.1875, 420.0, -262.5], capped)
+
+    fn friction() -> list:
+        player(100.0, 500.0, 300.0, 0.0).motion(idle(), 0.125)
+    std::test::value("icy-friction-slows", [109.375, 467.1875, 75.0, -262.5], friction)
+
+    fn stops() -> list:
+        [player(100.0, 500.0, -100.0, 0.0).motion(idle(), 0.125), player(100.0, 500.0, 100.0, 0.0).motion(idle(), 0.125)]
+    std::test::value("icy-friction-stops-without-reversing", [[100.0, 467.1875, 0.0, -262.5], [100.0, 467.1875, 0.0, -262.5]], stops)
+
+    fn both_keys() -> list:
+        player(100.0, 500.0, 300.0, 0.0).motion(both(), 0.125)
+    std::test::value("icy-both-directions-held-is-neither", [109.375, 467.1875, 75.0, -262.5], both_keys)
+
+    fn left_wall() -> list:
+        player(30.0, 500.0, -420.0, 0.0).motion(left(), 0.125)
+    std::test::value("icy-left-wall-sends-back", [20.0, 467.1875, 252.0, -262.5], left_wall)
+
+    fn right_wall() -> list:
+        player(430.0, 500.0, 420.0, 0.0).motion(right(), 0.125)
+    std::test::value("icy-right-wall-sends-back", [434.0, 467.1875, -252.0, -262.5], right_wall)
+
+# ---------------------------------------------------------------------------
+# Collision and landing
+
+fn register_collision_tests():
+    p = platform(100.0, 300.0, 120.0, 3)
+
+    fn descending() -> list:
+        p.lands(player(150.0, 310.0, 0.0, -100.0), player(150.0, 295.0, 0.0, -120.0))
+    std::test::value("icy-lands-falling-through-the-top", [true], descending)
+
+    fn exactly_on() -> list:
+        p.lands(player(150.0, 300.0, 0.0, -10.0), player(150.0, 299.0, 0.0, -45.0))
+    std::test::value("icy-lands-from-standing-on-the-top", [true], exactly_on)
+
+    fn rising_through() -> list:
+        p.lands(player(150.0, 290.0, 0.0, 400.0), player(150.0, 305.0, 0.0, 380.0))
+    std::test::value("icy-rising-through-a-platform-does-not-land", [false], rising_through)
+
+    fn above_still() -> list:
+        p.lands(player(150.0, 320.0, 0.0, -50.0), player(150.0, 310.0, 0.0, -80.0))
+    std::test::value("icy-falling-above-the-top-does-not-land-yet", [false], above_still)
+
+    fn started_below() -> list:
+        p.lands(player(150.0, 299.0, 0.0, -10.0), player(150.0, 290.0, 0.0, -40.0))
+    std::test::value("icy-falling-below-the-top-does-not-land", [false], started_below)
+
+    fn beside() -> list:
+        p.lands(player(230.0, 310.0, 0.0, -100.0), player(230.0, 295.0, 0.0, -120.0))
+    std::test::value("icy-no-horizontal-overlap-no-landing", [false], beside)
+
+    fn touching_left() -> list:
+        p.lands(player(74.0, 310.0, 0.0, -100.0), player(74.0, 295.0, 0.0, -120.0))
+    std::test::value("icy-edges-touching-is-no-overlap", [false], touching_left)
+
+    fn corner() -> list:
+        p.lands(player(75.0, 310.0, 0.0, -100.0), player(75.0, 295.0, 0.0, -120.0))
+    std::test::value("icy-one-unit-of-overlap-lands", [true], corner)
+
+    fn fast_fall() -> list:
+        p.lands(player(150.0, 900.0, 0.0, -9000.0), player(150.0, -900.0, 0.0, -9100.0))
+    std::test::value("icy-no-speed-tunnels-through-a-platform", [true], fast_fall)
+
+    fn highest() -> list:
+        platforms = [platform(100.0, 200.0, 120.0, 2), p, platform(100.0, 400.0, 120.0, 4)]
+        platforms.landing_of(player(150.0, 350.0, 0.0, -100.0), player(150.0, 150.0, 0.0, -2000.0))
+    std::test::value("icy-lands-on-the-highest-platform-crossed", [true, 3], highest)
+
+    fn none_crossed() -> list:
+        [p].landing_of(player(150.0, 350.0, 0.0, -100.0), player(150.0, 320.0, 0.0, -150.0))
+    std::test::value("icy-no-platform-crossed-no-landing", [false, -1], none_crossed)
+
+    fn standing_bounce() -> list:
+        b = player(150.0, 295.0, 0.0, -120.0).bounced(p):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        b.values()
+    std::test::value("icy-bounce-from-standing", [150.0, 300.0, 0.0, 860.0], standing_bounce)
+
+    fn running_bounce() -> list:
+        b = player(150.0, 295.0, -420.0, -120.0).bounced(p):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        b.values()
+    std::test::value("icy-bounce-at-full-run-is-higher", [150.0, 300.0, -420.0, 1300.0], running_bounce)
+
+    fn half_run() -> list:
+        b = player(150.0, 295.0, 210.0, -120.0).bounced(p):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        b.values()
+    std::test::value("icy-bounce-grows-with-speed", [150.0, 300.0, 210.0, 1080.0], half_run)
+
+    fn first_frame() -> list:
+        new_world(7).stepped(idle(), 0.25).facts()
+    std::test::value("icy-first-step-bounces-off-the-ground", [[227.0, 40.0, 0.0, 860.0], 0.0, false, 0, 0.05, false, 1], first_frame)
+
+    fn after_bounce() -> list:
+        new_world(7).stepped(idle(), 0.25).stepped(idle(), 0.03125).facts()
+    std::test::value("icy-bounce-then-flight", [[227.0, 64.82421875, 0.0, 794.375], 0.0, false, 0, 0.08125, false, 1], after_bounce)
+
+    fn long_frame() -> list:
+        w = new_world(7).stepped(idle(), 30.0)
+        [w.time, w.player.y]
+    std::test::value("icy-a-stalled-frame-counts-as-max-dt", [0.05, 40.0], long_frame)
+
+    fn backwards() -> list:
+        w = new_world(7).stepped(idle(), -1.0)
+        [w.time, w.player.values()]
+    std::test::value("icy-a-negative-frame-moves-nothing", [0.0, [227.0, 40.0, 0.0, 0.0]], backwards)
+
+# ---------------------------------------------------------------------------
+# The camera
+
+fn register_camera_tests():
+    still = tower::Camera {bottom: 0.0, rising: false}
+
+    fn follows() -> list:
+        c = still.camera_after(player(100.0, 1000.0, 0.0, 300.0), tower::no_height(), 0, 0.125):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [c.bottom, c.rising]
+    std::test::value("icy-camera-follows-the-player-up", [604.0, false], follows)
+
+    fn stays_low() -> list:
+        c = still.camera_after(player(100.0, 300.0, 0.0, 300.0), tower::no_height(), 0, 0.125):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [c.bottom, c.rising]
+    std::test::value("icy-camera-waits-below-the-follow-line", [0.0, false], stays_low)
+
+    fn never_down() -> list:
+        c = tower::Camera {bottom: 500.0, rising: false}.camera_after(player(100.0, 0.0, 0.0, -900.0), tower::no_height(), 0, 0.125):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [c.bottom, c.rising]
+    std::test::value("icy-camera-never-moves-down", [500.0, false], never_down)
+
+    nomethod fn rising_at(y: Float64) -> list:
+        fn camera() -> tower::Camera errors NonFiniteFloat:
+            best = tower::no_height().best_after(player(100.0, y, 0.0, 0.0))
+            still.camera_after(player(100.0, 100.0, 0.0, 0.0), best, 4, 0.25)
+        c = camera():
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [c.bottom, c.rising]
+
+    fn below_threshold() -> list:
+        rising_at(634.0)
+    std::test::value("icy-tower-still-below-the-displayed-6.0", [0.0, false], below_threshold)
+
+    fn at_threshold() -> list:
+        rising_at(635.0)
+    std::test::value("icy-tower-rises-once-the-display-reads-6.0", [8.4, true], at_threshold)
+
+    fn keeps_rising() -> list:
+        c = tower::Camera {bottom: 100.0, rising: true}.camera_after(player(100.0, 150.0, 0.0, 0.0), tower::no_height(), 200, 0.5):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [c.bottom, c.rising]
+    std::test::value("icy-a-rising-tower-keeps-rising-at-its-cap", [185.0, true], keeps_rising)
+
+    fn speeds() -> list:
+        nomethod fn speed(floor: int) -> Float64:
+            s = tower::rise_speed(floor):
+                on NonFiniteFloat:
+                    return -1.0
+            s
+        [speed(0), speed(10), speed(100), speed(155), speed(400)]
+    std::test::value("icy-rise-speed-grows-then-caps", [30.0, 39.0, 120.0, 169.5, 170.0], speeds)
+
+    fn record() -> list:
+        fn texts() -> List[str] errors NonFiniteFloat:
+            b1 = tower::no_height().best_after(player(0.0, 1274.0, 0.0, 0.0))
+            b2 = b1.best_after(player(0.0, 1270.0, 0.0, 0.0))
+            b3 = b2.best_after(player(0.0, 1290.0, 0.0, 0.0))
+            b4 = b3.best_after(player(0.0, 400.0, 0.0, 0.0))
+            loop b in [b1, b2, b3, b4]:
+                b.metres_text()
+        shown = texts():
+            on NonFiniteFloat:
+                return ["non-finite"]
+        shown
+    std::test::value("icy-best-height-only-grows-in-displayed-steps", ["12.3", "12.3", "12.5", "12.5"], record)
+
+# ---------------------------------------------------------------------------
+# Platforms
+
+fn gaps_ok?(platforms: List[tower::Platform]) -> bool errors NonFiniteFloat:
+    loop p in platforms and i from 0 to std::list::length(platforms):
+        if i == 0:
+            continue
+        below = platforms.get(i - 1, p)
+        gap = p.y - below.y
+        if gap < 72.0 or gap > 150.0 or p.floor != below.floor + 1:
+            return false
+    true
+
+fn widths_ok?(platforms: List[tower::Platform]) -> bool errors NonFiniteFloat:
+    loop p in platforms:
+        if p.width < 48.0 or p.width > tower::inner_width or p.x < tower::wall or p.x + p.width > tower::view_width - tower::wall:
+            return false
+    true
+
+fn register_platform_tests():
+    fn generator() -> List[int]:
+        a = tower::next_random(0)
+        b = tower::next_random(a)
+        c = tower::next_random(b)
+        [a, b, c, tower::next_random(4294967295)]
+    std::test::value("icy-generator-is-numerical-recipes-lcg", [1013904223, 1196435762, 3519870697, 1012239698], generator)
+
+    fn same_seed() -> bool:
+        tower_of(42, 5000.0).rows() == tower_of(42, 5000.0).rows()
+    std::test::value("icy-a-seed-is-a-tower", true, same_seed)
+
+    fn other_seed() -> bool:
+        tower_of(42, 2000.0).rows() != tower_of(43, 2000.0).rows()
+    std::test::value("icy-another-seed-another-tower", true, other_seed)
+
+    fn first_floors() -> List[list]:
+        tower_of(7, 300.0).rows()
+    std::test::value("icy-tower-of-seed-7-starts-so", [
+        [20.0, 40.0, 440.0, 0],
+        [171.5911100693047, 122.6530224609375, 192.49937744140627, 1],
+        [291.106737305373, 235.77538391113282, 123.20285400390624, 2],
+        [41.79159433379769, 324.11086746215824, 123.129814453125, 3],
+    ], first_floors)
+
+    fn climbable() -> list:
+        loop seed in [1, 2, 3, 4, 5]:
+            ps = seed.tower_of(25000.0)
+            gaps = gaps_ok?(ps):
+                on NonFiniteFloat:
+                    false
+            widths = widths_ok?(ps):
+                on NonFiniteFloat:
+                    false
+            [gaps, widths]
+    std::test::value("icy-every-gap-is-climbable-and-every-platform-inside", [[true, true], [true, true], [true, true], [true, true], [true, true]], climbable)
+
+    fn milestones() -> list:
+        ps = tower_of(5, 6000.0)
+        loop p in ps:
+            if p.floor == 0 or not tower::milestone?(p.floor):
+                continue
+            [p.floor, p.x, p.width]
+    std::test::value("icy-every-25th-floor-spans-the-tower", [[25, 20.0, 440.0], [50, 20.0, 440.0]], milestones)
+
+    fn new_tower() -> list:
+        w = new_world(7)
+        n = std::list::length(w.platforms)
+        top = w.platforms.get(n - 1, platform(0.0, 0.0, 0.0, -1))
+        below_top = w.platforms.get(n - 2, platform(0.0, 0.0, 0.0, -1))
+        gaps = gaps_ok?(w.platforms):
+            on NonFiniteFloat:
+                false
+        [n, below_top.y <= 920.0, top.y > 920.0, gaps]
+    std::test::value("icy-a-new-tower-reaches-just-above-the-view", [10, true, true, true], new_tower)
+
+    fn kept() -> list:
+        ps = tower_of(7, 1000.0)
+        fn both() -> List[List[tower::Platform]] errors NonFiniteFloat:
+            [ps.pruned(150.0), ps.pruned(400.0)]
+        pruned = both():
+            on NonFiniteFloat:
+                return ["non-finite"]
+        same = pruned.get(0, [])
+        fewer = pruned.get(1, [])
+        lowest = fewer.get(0, platform(0.0, 0.0, 0.0, -1))
+        [std::list::length(ps), std::list::length(same), std::list::length(fewer), lowest.floor, lowest.y >= 280.0]
+    std::test::value("icy-platforms-dropped-only-below-the-view", [11, 11, 8, 3, true], kept)
+
+    fn growing() -> list:
+        w = new_world(7)
+        once = w.world_with(player(100.0, 3000.0, 0.0, 500.0), w.camera, 0).stepped(idle(), 0.03125)
+        kept = once.platforms.get(0, platform(0.0, 0.0, 0.0, -1))
+        top_before = w.platforms.get(std::list::length(w.platforms) - 1, platform(0.0, 0.0, 0.0, -1))
+        high = once.stepped(idle(), 0.03125)
+        gaps = gaps_ok?(high.platforms):
+            on NonFiniteFloat:
+                false
+        limit = high.camera.bottom - 120.0:
+            on NonFiniteFloat:
+                return ["non-finite"]
+        under = loop p in high.platforms:
+            if p.y >= limit:
+                continue
+            p.floor
+        lowest = high.platforms.get(0, platform(0.0, 0.0, 0.0, -1))
+        [kept.floor == top_before.floor, kept.y == top_before.y, high.camera.bottom > 2000.0, gaps, under, lowest.floor > 20]
+    # A camera far above every platform: the first frame keeps the highest,
+    # the one the next is placed above, and grows the tower from it (it
+    # never starts again from nothing); the next frame sheds what is below.
+    std::test::value("icy-the-tower-grows-and-sheds-as-the-camera-climbs", [true, true, true, true, [], true], growing)
+
+# ---------------------------------------------------------------------------
+# Score, game over, restart
+
+fn register_game_tests():
+    w = new_world(7)
+
+    fn score() -> list:
+        ground = w.platforms.get(0, platform(0.0, 0.0, 0.0, -1))
+        third = w.platforms.get(3, ground)
+        landed = w.world_with(third.dropping_onto(), w.camera, 1).stepped(idle(), 0.03125)
+        [landed.floor, tower::score(landed), landed.player.y == third.y]
+    std::test::value("icy-landing-on-floor-3-scores-30", [3, 30, true], score)
+
+    fn no_loss() -> list:
+        first = w.platforms.get(1, platform(0.0, 0.0, 0.0, -1))
+        landed = w.world_with(first.dropping_onto(), w.camera, 4).stepped(idle(), 0.03125)
+        [landed.floor, tower::score(landed), landed.player.vy]
+    std::test::value("icy-landing-lower-keeps-the-score", [4, 40, 860.0], no_loss)
+
+    fn falls() -> list:
+        doomed = w.world_with(player(100.0, 900.0, 0.0, -600.0), tower::Camera {bottom: 1000.0, rising: false}, 6).stepped(idle(), 0.03125)
+        [doomed.over, doomed.floor]
+    std::test::value("icy-falling-below-the-view-ends-the-game", [true, 6], falls)
+
+    fn margin() -> list:
+        alive = w.world_with(player(100.0, 910.0, 0.0, 0.0), tower::Camera {bottom: 1000.0, rising: false}, 6).stepped(idle(), 0.03125)
+        [alive.over]
+    std::test::value("icy-a-head-within-the-margin-is-not-over", [false], margin)
+
+    fn frozen() -> list:
+        ended = w.over().stepped(right(), 0.25)
+        ended.facts()
+    std::test::value("icy-a-game-over-stays-frozen", [[227.0, 40.0, 0.0, 0.0], 0.0, false, 0, 0.0, true, 1], frozen)
+
+    fn restarted() -> list:
+        dying = w.world_with(player(300.0, 2900.0, 420.0, -900.0), tower::Camera {bottom: 3000.0, rising: true}, 30).over()
+        fresh = dying.stepped(restart(), 0.25)
+        best = fresh.best.metres_text():
+            on NonFiniteFloat:
+                "non-finite"
+        [fresh.facts(), best, std::list::length(fresh.platforms)]
+    std::test::value("icy-restart-resets-everything-but-the-round", [[[227.0, 40.0, 0.0, 0.0], 0.0, false, 0, 0.0, false, 2], "0.0", 11], restarted)
+
+    fn next_tower() -> bool:
+        fresh = w.over().stepped(restart(), 0.25)
+        fresh.platforms.rows() != w.platforms.rows()
+    std::test::value("icy-restart-climbs-a-new-tower", true, next_tower)
+
+    fn ignored() -> list:
+        w.stepped(restart(), 0.25).facts()
+    std::test::value("icy-restart-does-nothing-mid-game", [[227.0, 40.0, 0.0, 860.0], 0.0, false, 0, 0.05, false, 1], ignored)
+
+    fn autopilot_restarts() -> list:
+        doomed = w.world_with(player(100.0, 900.0, 0.0, -600.0), tower::Camera {bottom: 1000.0, rising: false}, 6)
+        input = tower::autopilot(doomed.stepped(idle(), 0.03125)):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        [input.left, input.right, input.restart]
+    std::test::value("icy-the-autopilot-restarts-a-lost-game", [false, false, true], autopilot_restarts)
+
+    fn short_run() -> str:
+        new_world(7).summary_after(240)
+    std::test::value("icy-seed-7-after-240-frames", "frames=240 round=1 floor=8 score=80 best=9.9 time=4.0 over=no x=266 y=1030 camera=634 platforms=12 rng=2686829111", short_run)
+
+# ---------------------------------------------------------------------------
+# Text
+
+fn register_text_tests():
+    fn ints() -> str:
+        texts = loop n in [0, 7, 10, 305, 1234567, -42]:
+            hud::int_text(n)
+        hud::spaced(texts)
+    std::test::value("icy-int-text", "0 7 10 305 1234567 -42", ints)
+
+    fn tenths() -> List[str]:
+        loop n in [0, 5, 10, 123, -5, -123]:
+            hud::tenths_text(n)
+    std::test::value("icy-tenths-text", ["0.0", "0.5", "1.0", "12.3", "-0.5", "-12.3"], tenths)
+
+    fn heights() -> List[str]:
+        loop y in [40.0, 1274.0, 634.0, 635.0, 0.0]:
+            shown(y)
+    std::test::value("icy-height-shown-at-one-decimal", ["0.0", "12.3", "5.9", "6.0", "-0.4"], heights)
+
+    fn timers() -> List[str]:
+        loop t in [0.0, 20.0, 0.05, 1.25, 0.25, 2.35, 59.96]:
+            timer(t)
+    std::test::value("icy-timer-rounds-half-to-even-at-one-place", ["0.0", "20.0", "0.1", "1.2", "0.2", "2.4", "60.0"], timers)
+
+    fn status() -> list:
+        lines = hud::status_lines(new_world(7)):
+            on NonFiniteFloat:
+                return ["non-finite"]
+        lines
+    std::test::value("icy-status-lines", ["SCORE 0", "FLOOR 0", "BEST 0.0 M", "TIME 0.0"], status)
+
+    fn banners() -> list:
+        w = new_world(7)
+        later = w.simulated(190)
+        [hud::banner_lines(w), hud::banner_lines(w.over()), hud::banner_lines(later)]
+    std::test::value("icy-banner-lines", [
+        ["LEFT/RIGHT OR A/D TO RUN", "LAND TO BOUNCE - CLIMB!"],
+        ["GAME OVER", "R: PLAY AGAIN   ESC: QUIT"],
+        [],
+    ], banners)
+
+# ---------------------------------------------------------------------------
+# The command line
+
+fn register_option_tests():
+    fn defaults() -> list:
+        parsed([])
+    std::test::value("icy-options-defaults", [7, false, 0, false, false, false, false], defaults)
+
+    fn headless() -> list:
+        parsed(["--headless", "--frames", "600", "--seed", "123"])
+    std::test::value("icy-options-headless", [123, true, 600, true, false, false, false], headless)
+
+    fn smoke() -> list:
+        parsed(["--autopilot", "--fixed-step", "--frames", "30"])
+    std::test::value("icy-options-smoke", [7, false, 30, false, true, true, false], smoke)
+
+    fn mistakes() -> list:
+        [
+            parsed(["--fly"]),
+            parsed(["--seed"]),
+            parsed(["--seed", "12x"]),
+            parsed(["--frames", ""]),
+            parsed(["--headless"]),
+        ]
+    std::test::value("icy-options-errors", [
+        ["usage error", "unknown option: --fly"],
+        ["usage error", "--seed needs a number"],
+        ["usage error", "not a number: 12x"],
+        ["usage error", "not a number: "],
+        ["usage error", "--headless needs --frames N (N > 0)"],
+    ], mistakes)
+
+# ---------------------------------------------------------------------------
+# Rendering (variant "canvas", ICY-TOWER-CONTEXT-REFACTOR-CENSUS): render.bot
+# draws on the context trait render::Canvas, which recorder::Recorder (the
+# context installed below, beside the suite) implements by logging each
+# operation.
+
+# The frame of WORLD drawn on a fresh log: [succeeded, operations, text
+# operations, scale operations].
+fn drawing(world: tower::World) -> list:
+    recorder::forget()
+    ok = render::frame(world):
+        on NonFiniteFloat:
+            return ["non-finite"]
+    entries = recorder::recorded()
+    [ok, std::list::length(entries), entries.only("text"), entries.only("scale")]
+
+# The frames are drawn here, when the tests are registered, and each check
+# returns what was drawn: a check that drew would require render::Canvas
+# (and recorder::Recorder), and a function that requires a context cannot
+# be a value (CONTEXT-FUNCTION-VALUE), so it could not be registered.
+fn register_render_tests():
+    start = drawing(new_world(7))
+    fn first_frame() -> list:
+        start
+    std::test::value("icy-render-first-frame", [true, 92, [
+        "text 28.0 8.0 SCORE 0",
+        "text 28.0 20.0 FLOOR 0",
+        "text 28.0 32.0 BEST 0.0 M",
+        "text 28.0 44.0 TIME 0.0",
+        "text 24.0 150.0 LEFT/RIGHT OR A/D TO RUN",
+        "text 28.0 162.0 LAND TO BOUNCE - CLIMB!",
+    ], ["scale 2.0", "scale 1.0"]], first_frame)
+
+    later = drawing(new_world(7).simulated(600))
+    fn later_frame() -> list:
+        later
+    std::test::value("icy-render-after-600-frames", [true, 81, [
+        "text 28.0 8.0 SCORE 260",
+        "text 28.0 20.0 FLOOR 26",
+        "text 28.0 32.0 BEST 29.1 M",
+        "text 28.0 44.0 TIME 10.0",
+    ], []], later_frame)
+
+    ended = drawing(new_world(7).over())
+    fn game_over() -> list:
+        ended
+    std::test::value("icy-render-game-over-banner", [true, 92, [
+        "text 28.0 8.0 SCORE 0",
+        "text 28.0 20.0 FLOOR 0",
+        "text 28.0 32.0 BEST 0.0 M",
+        "text 28.0 44.0 TIME 0.0",
+        "text 84.0 150.0 GAME OVER",
+        "text 20.0 162.0 R: PLAY AGAIN   ESC: QUIT",
+    ], ["scale 2.0", "scale 1.0"]], game_over)
+
+with context std::test::suite()
+with context recorder::create()
+register_motion_tests()
+register_collision_tests()
+register_camera_tests()
+register_platform_tests()
+register_game_tests()
+register_text_tests()
+register_option_tests()
+register_render_tests()
+std::test::report()

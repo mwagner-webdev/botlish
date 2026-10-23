@@ -1,0 +1,44 @@
+# airlock.bot -- the contextualized module of g1 (g1-view-leak/main.bot): it
+# owns a C string in native memory behind its context, as sdl.bot owns its
+# Handles record, and -- the mistake g1 shows -- has a public function that
+# returns the record's native view.
+import std::binary
+import std::binary::native
+import std::ffi::c
+import std::mutable_vector
+
+extern c fn malloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+layout Record:
+    size 8
+    align 8
+    field name: std::ffi::c::Ptr[std::ffi::c::Char] at 0
+
+layout Text:
+    size 8
+    align 1
+    field chars: array 8 of std::ffi::c::Char at 0
+
+opaque context struct Airlock:
+    records: MutableVector[NativeView[Record]]
+
+fn create() -> Airlock:
+    Airlock {records: std::mutable_vector::from_list([])}
+
+fn hello(e: NativeEdit[Text]) errors IndexNotFound:
+    std::binary::store_element(e.chars, 0, 104)
+    std::binary::store_element(e.chars, 1, 105)
+    std::binary::store_element(e.chars, 2, 0)
+
+# Makes the record (a leak of 16 bytes: this is a reproducer).
+fn open(context a: Airlock) errors NativeEditNull, NativeViewNull, IndexNotFound:
+    record = malloc(8)
+    name = std::ffi::c::retype[std::ffi::c::Char](malloc(8))
+    std::binary::native::edit(Text, name).hello()
+    e = std::binary::native::edit(Record, record)
+    std::binary::store(e, Record.name, name)
+    a.records.push(std::binary::native::view(Record, record))
+
+# The mistake: an unrestricted view of the record, to anyone.
+fn record(context a: Airlock) -> NativeView[Record] errors IndexNotFound:
+    a.records.at(0)

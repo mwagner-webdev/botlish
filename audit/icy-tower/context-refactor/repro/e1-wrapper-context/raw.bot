@@ -1,0 +1,22 @@
+direct module
+# raw.bot -- a designated direct module of e1 (e1-wrapper-context/main.bot):
+# it makes native views (std::binary::native, raw memory authority) with no
+# context, so anyone calling it must either be direct too or mediate the call
+# through a context of its own (DIRECT-MODULES.md). e1's wrapper mediates.
+import std::binary
+import std::binary::native
+import std::ffi::c
+
+layout Cell:
+    size 8
+    align 8
+    field value: std::ffi::c::Long at 0
+
+# X plus the value a null address holds -- that is, X + 1: a view of a null
+# pointer is NativeViewNull.
+fn poke(x: int) -> int:
+    p = std::ffi::c::null[std::ffi::c::Long]()
+    v = std::binary::native::view(Cell, p):
+        on NativeViewNull:
+            return x + 1
+    v.value + x

@@ -255,6 +255,13 @@ Nothing the game computes in DecimalRounded reaches C, and nothing could:
 a DecimalRounded value is no C type, and only its explicit decay is a
 Float64.
 
+> **Since this milestone:** ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md moved
+> SDL's objects behind the `sdl::Sdl` context. The line counts above, the
+> `run(video, ...)` loop below and the Video threading of "Resource
+> lifetime" describe the vertical slice as it was built (commit 6df89a8e);
+> the game now loops over the world alone, and sdl.bot's operations take
+> and return values only. Behavior, rules and SDL calls are unchanged.
+
 ## The game loop and timing
 
 ```
@@ -364,6 +371,12 @@ down, starts rising exactly at the displayed 6.0, rises at its cap; the
 `camera-follows-down` mutant fails ten tests.
 
 ## Resource lifetime
+
+> Superseded by ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md: the session now
+> lives in the installed `sdl::Sdl` context and `sdl::close` needs no value.
+> That census also found the affine Video's cleanup guarantee weaker than
+> stated below: an affine value may be dropped, and `play` dropped its Video
+> without closing SDL on two (unreachable) error paths.
 
 `sdl::open` makes, in order: a 128-byte text buffer (`SDL_malloc`),
 `SDL_Init(SDL_INIT_VIDEO)`, the window, the renderer, a scratch
@@ -743,7 +756,10 @@ repository; it should be next.
    no observing parameter, no field read of a pointer-holding struct, no
    temporary given to an observing extern call. The Video threading that
    results is correct and made cleanup total, but it is the most
-   ceremony in the program.
+   ceremony in the program. (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md: the
+   ceremony was the application's architecture -- with the session behind
+   the `sdl::Sdl` context none of it remains above sdl.bot, and no
+   observing parameter is needed; nor was the cleanup total.)
 3. **Names for types and values**: no type aliases (DecimalRounded spelled
    out ten times), no struct values at module level (the sentinel had to be
    a function), no struct update syntax (`World` rebuilt with all nine
@@ -848,7 +864,10 @@ No APK artifact exists.
    `represent` (the proven precision without a precision walk).
 3. Float64 ranges, so bounded simulations need no `NonFiniteFloat` clauses.
 4. A way to read a pointer field without consuming its struct (or an
-   observing parameter mode) for affine C pointers.
+   observing parameter mode) for affine C pointers. (Withdrawn by
+   ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md: unnecessary once SDL's objects
+   live behind a context; what that census found missing instead is a way
+   for a context to own affine members.)
 5. Type aliases for scalar refinements; struct values at module level;
    struct update syntax.
 6. Generated bindings: contracts for read-only string parameters

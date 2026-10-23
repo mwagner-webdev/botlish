@@ -1,0 +1,56 @@
+# B1. A context can own state that evolves, when the state is not affine
+# (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies", B).
+#
+# The lifecycle the refactored sdl.bot uses: the installed context's one
+# member is a MutableVector, empty while the resource is closed and holding
+# the session while it is open. `open` pushes, `close` pops, every function
+# requiring the context sees the same vector (MUTABLE-VECTOR.md, "Context-
+# field receiver mutation"; natively the header is a GC root of the context
+# slot). Using the resource after close is a defined outcome (the vector is
+# empty), and closing twice closes once. Nothing here is SDL.
+#
+# expect interp: value: [-1, 42, -1, -1]
+# expect compile: value: [-1, 42, -1, -1]
+# expect cranelift-generic: value: [-1, 42, -1, -1]
+# expect cranelift: value: [-1, 42, -1, -1]
+import std::ffi::c
+import std::mutable_vector
+
+struct Session:
+    window: std::ffi::c::UInt
+    synced: bool
+
+opaque context struct Video:
+    open: MutableVector[Session]
+
+fn create() -> Video:
+    Video {open: std::mutable_vector::from_list([])}
+
+fn open(id: std::ffi::c::UInt, context v: Video):
+    if v.open.empty?():
+        v.open.push(Session {window: id, synced: true})
+
+fn window(context v: Video) -> std::ffi::c::UInt errors IndexNotFound:
+    v.open.at(0).window
+
+fn close(context v: Video):
+    closed = v.open.pop():
+        on IndexNotFound:
+            return unit
+
+fn report() -> int:
+    first = window():
+        on IndexNotFound:
+            return -1
+    first
+
+with context create()
+
+before = report()
+open(42)
+during = report()
+close()
+after = report()
+close()
+again = report()
+[before, during, after, again]

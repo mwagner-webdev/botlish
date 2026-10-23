@@ -1,0 +1,58 @@
+# B2b. A native view is an immediate word, yet a native context slot does not
+# hold one (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, "Context deficiencies").
+#
+# b2-native-handle-table.bot keeps its view inside a MutableVector member,
+# whose header a context slot holds (a GC root). Holding the view directly is
+# accepted by the front end -- a NativeView is unrestricted -- but native
+# lowering rejects the installation: StaticContextEligible
+# (native/lower.tcl) admits Ints of small domains, Bools, Unit, characters,
+# enums and vector/array headers, and gives every other kind the reason "a
+# value that may be (or contain) a GC-managed heap object". A view's word is
+# the C address word, an immediate (native/src/runtime/value.rs, CPTR_TAG),
+# never a heap pointer, so the rule's own principle -- "a leaf must be a
+# value whose tagged word is never a heap pointer" (CONTEXTS.md, section 5)
+# -- admits it; the enumeration does not. A gap, not a design decision; it
+# costs nothing here because a session also needs a closed state, which a
+# bare view cannot express (the vector's emptiness is that state).
+#
+# (Native only: the Tcl backends refuse the C call that makes the pointer.)
+#
+# expect interp: NATIVE-ONLY
+# expect compile: NATIVE-ONLY
+# expect cranelift-generic: CONTEXT-NATIVE-LOWERING-UNSUPPORTED
+# expect cranelift: CONTEXT-NATIVE-LOWERING-UNSUPPORTED
+import std::binary
+import std::binary::native
+import std::ffi::c
+
+extern c fn malloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+layout Cell:
+    size 8
+    align 8
+    field value: std::ffi::c::Long at 0
+
+# The authority to make the view (b2's Store does both jobs).
+opaque context struct Memory:
+    tag: unit
+
+opaque context struct Store:
+    cell: NativeView[Cell]
+
+fn memory() -> Memory:
+    Memory {tag: unit}
+
+fn store(context m: Memory) -> Store:
+    p = malloc(8)
+    v = std::binary::native::view(Cell, p):
+        on NativeViewNull:
+            return store()
+    Store {cell: v}
+
+fn value(context s: Store) -> int:
+    s.cell.value
+
+with context memory()
+with context store()
+
+value()

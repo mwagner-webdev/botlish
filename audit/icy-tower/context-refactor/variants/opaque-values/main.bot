@@ -1,0 +1,192 @@
+# main.bot -- the Icy Tower vertical slice (ICY-TOWER-VERTICAL-SLICE-1.md),
+# Design A of ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md: a window, the keyboard,
+# the frame loop, and the run's summary.
+#
+#   examples/games/icy-tower/build.sh     the Linux executable
+#   icy-tower                             play (a tower from the clock)
+#   icy-tower --seed 7                    play the tower of seed 7
+#   icy-tower --headless --frames 1200    no SDL: the autopilot's run, its
+#                                         summary printed
+#   SDL_VIDEO_DRIVER=dummy icy-tower --autopilot --fixed-step --frames 600
+#                                         the real SDL loop, no display
+#
+# Controls: Left/A and Right/D run; landing on a platform bounces; R
+# starts a new game after a fall; Escape (or closing the window) quits.
+#
+# The program's value, which the executable prints, is the run's summary
+# line (hud::summary). A run that fails -- SDL cannot start, or a frame
+# cannot be drawn -- logs SDL's error, releases what it made and exits with
+# status 1: Botlish has no exit status of its own, so that is C's exit().
+#
+# The frame loop is one self-tail-recursive function, `run`, which the
+# native backend compiles to a loop: the world is an immutable value
+# replaced each frame, and the SDL objects (one opaque, affine sdl::Video)
+# travel with it, so that every way out of the loop hands them back to
+# sdl::close. Nothing checks that every way out does: an affine value may
+# be dropped, so a path that forgets to close compiles (NOTES.md).
+import std::ffi::c
+import std::float64
+import std::io
+import std::linux::io
+import std::list
+import hud
+import options
+import std::str
+import render
+import sdl
+import sdl3::scancode
+import tower
+
+# C's exit(3): the process's exit status, which Botlish cannot set.
+extern c fn exit(status: std::ffi::c::Int) -> unit
+
+# The keys the game reads, in the order of `input`'s list.
+fn scancodes() -> List[std::ffi::c::UInt]:
+    [
+        sdl3::scancode::SDL_SCANCODE_LEFT,
+        sdl3::scancode::SDL_SCANCODE_A,
+        sdl3::scancode::SDL_SCANCODE_RIGHT,
+        sdl3::scancode::SDL_SCANCODE_D,
+        sdl3::scancode::SDL_SCANCODE_R,
+        sdl3::scancode::SDL_SCANCODE_ESCAPE,
+    ]
+
+# The player's input from HELD, which of scancodes() are held.
+fn input(held: List[bool]) -> tower::Input:
+    tower::Input {
+        left: held.get(0, false) or held.get(1, false),
+        right: held.get(2, false) or held.get(3, false),
+        restart: held.get(4, false),
+    }
+
+fn escape?(held: List[bool]) -> bool:
+    held.get(5, false)
+
+# How a run ended: the SDL objects to release, the last world, the frames
+# played, and what failed ("" when nothing did).
+struct Ended:
+    video: sdl::Video
+    world: tower::World
+    frames: int
+    failure: str
+
+# The length of the frame that started at NOW after the one that started at
+# LAST, by the clock or, with --fixed-step, a 60th of a second.
+fn frame_length(now: Float64, last: Float64, o: options::Options) -> Float64 errors NonFiniteFloat:
+    if o.fixed_step:
+        return tower::frame_time
+    now - last
+
+# Sleeps out the rest of a 60 Hz frame that started at NOW, unless the
+# display paces the loop (vertical sync) or the steps are fixed (a smoke
+# run goes as fast as it can).
+fn pace(now: Float64, synced: bool, o: options::Options) errors NonFiniteFloat:
+    if synced or o.fixed_step:
+        return unit
+    sdl::sleep(tower::frame_time - (sdl::seconds() - now))
+
+# The frame loop: plays WORLD on VIDEO until a quit (the window closed,
+# Escape), the frame limit of OPTIONS or a failure. FRAMES have been
+# played, the last one started at LAST seconds.
+fn run(video: sdl::Video, world: tower::World, frames: int, last: Float64, o: options::Options) -> Ended:
+    if o.frames > 0 and frames >= o.frames:
+        return Ended {video: video, world: world, frames: frames, failure: ""}
+    {video: polled, quit, held, failure: unread} = video.poll(scancodes())
+    if unread != "":
+        return Ended {video: polled, world: world, frames: frames, failure: unread}
+    if quit or held.escape?():
+        return Ended {video: polled, world: world, frames: frames, failure: ""}
+    wanted = if o.autopilot:
+        tower::autopilot(world):
+            on NonFiniteFloat:
+                return Ended {video: polled, world: world, frames: frames, failure: "the autopilot"}
+    else:
+        held.input()
+    now = sdl::seconds():
+        on NonFiniteFloat:
+            return Ended {video: polled, world: world, frames: frames, failure: "reading the clock"}
+    dt = now.frame_length(last, o):
+        on NonFiniteFloat:
+            return Ended {video: polled, world: world, frames: frames, failure: "reading the clock"}
+    next = world.step(wanted, dt):
+        on NonFiniteFloat:
+            return Ended {video: polled, world: world, frames: frames, failure: "a step of the game"}
+    {video: drawn, synced, failure: undrawn} = polled.draw(next)
+    if undrawn != "":
+        return Ended {video: drawn, world: next, frames: frames + 1, failure: undrawn}
+    paced = now.pace(synced, o):
+        on NonFiniteFloat:
+            unit
+    drawn.run(next, frames + 1, now, o)
+
+# Plays with SDL: opens the window, runs the loop, closes everything; the
+# summary, or, after a failure (logged), exit status 1. A Float64 failing
+# while the window is open closes it before the failure goes on.
+fn play(o: options::Options) -> str errors NonFiniteFloat:
+    video = sdl::open("Icy Tower - Botlish", 480, 720, not o.fixed_step):
+        on sdl::SdlFailed {call}:
+            exit(1)
+            return "failed: ".concat(call)
+    seed = if o.seeded:
+        o.seed
+    else:
+        sdl::counter()
+    world = tower::new_world(seed, 1):
+        on NonFiniteFloat {result}:
+            video.close("")
+            fail NonFiniteFloat {result: result}
+    start = sdl::seconds():
+        on NonFiniteFloat {result}:
+            video.close("")
+            fail NonFiniteFloat {result: result}
+    {video: done, world: last, frames, failure} = video.run(world, 0, start, o)
+    done.close(failure)
+    if failure != "":
+        exit(1)
+        return "failed: ".concat(failure)
+    last.summary(frames)
+
+# The autopilot's headless run: no SDL at all.
+fn headless(o: options::Options) -> str errors NonFiniteFloat:
+    tower::new_world(o.seed, 1).simulate(o.frames).summary(o.frames)
+
+# The run OPTIONS ask for: headless, or played with SDL.
+fn session(o: options::Options) -> str errors NonFiniteFloat:
+    if o.headless:
+        return headless(o)
+    play(o)
+
+fn main(arguments: List[str]) -> str errors std::io::WriteFailed:
+    o = options::parse(arguments):
+        on options::UsageError {message}:
+            std::io::write_error_line("icy-tower: ".concat(message))
+            loop line in options::usage():
+                std::io::write_error_line(line)
+            exit(2)
+            return message
+    if o.help:
+        loop line in options::usage():
+            std::io::print_line(line)
+        return "help"
+    ran = o.session():
+        on NonFiniteFloat:
+            exit(1)
+            "failed: a number left the finite Float64s"
+    ran
+
+with context std::linux::io::create()
+with context sdl::authority()
+
+fn arguments() -> List[str]:
+    everything = argv():
+        on InvalidArgumentEncoding:
+            return []
+    loop arg in everything and i from 0 to std::list::length(everything):
+        if i == 0:
+            continue
+        arg
+
+result = main(arguments()):
+    on std::io::WriteFailed:
+        "failed: writing to the terminal"
+result
