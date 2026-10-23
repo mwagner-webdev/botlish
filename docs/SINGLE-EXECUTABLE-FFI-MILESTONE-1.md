@@ -1103,7 +1103,9 @@ executable and C test file, and the GC-stress set with darwin-io.test
 added. On this milestone's merged head it **passed**: section 26 has the
 numbers. Every other macOS job (smoke, both acceptance shards, the Linux
 control) passed on the same head: the rustc-linked tiers are unaffected
-by the runtime archive in the build. PENDING-MACOS-LAST
+by the runtime archive in the build. On the final head (658737d8, the
+helper fix of section 30 included) every macOS job **passed** again, the
+system-linker job's GC-stress step included (run 39971727086).
 
 ## 34. Windows CI
 
