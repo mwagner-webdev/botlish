@@ -38,7 +38,8 @@
 #     No program runs, no native code is generated;
 #   * `exec` refused inside a test (it runs the file's top level -- fixture
 #     builds -- unchanged); a refused `exec` of main.tcl with a .bot argument
-#     is recorded as a `subprocess` capture of that program's directory.
+#     is recorded as a `subprocess` capture of that program's directory (a
+#     `repo` one, not copied, for a program of the repository itself).
 #
 # The real front end runs, so that a body continues past its compilations
 # and so that each capture carries the test's own outcome: ok, `diagnostics
@@ -352,6 +353,12 @@ proc ::exec args {
                 set path [file normalize $a]
                 set id [incr ::extract::n]
                 incr ::extract::captures
+                if {[::extract::Under $path $::extract::root] && ![::extract::Under $path $::extract::out]} {
+                    ::extract::Append captures.tsv [list $id $::extract::test $::extract::constraints repo \
+                        [string range $path [string length $::extract::root/] end] [lrange $args 1 end] 0 \
+                        "not compiled (main.tcl subprocess)" $path]
+                    continue
+                }
                 set dir [file join $::extract::out programs $id]
                 set app [file dirname $path]
                 foreach rel [::extract::BotFiles $app] {
