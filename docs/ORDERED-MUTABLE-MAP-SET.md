@@ -510,7 +510,7 @@ Runs for this report (all on the final engine, 0 disagreements):
 |---|---:|---:|---:|---:|
 | `-n 24 -seed 101` | 24 | 3,260 | 22,537 | 224 |
 | `-n 16 -seed 202 -gc-stress 1` | 16 | 2,176 | 11,744 | 166 |
-<!-- FUZZ-LARGE -->
+| `-n 16 -seed 303 -profile large`, compiled backends | 16 | 2,172 | 87,567 | 144 |
 
 The mutation harness runs the fuzzer once more against every mutant (8
 programs, every key kind, 50 operations each). The smaller runs made
@@ -676,7 +676,79 @@ ns per operation:
   (Rust's `lp` hashes with the experiment's public hash too; `std` with its
   own keyed SipHash, which is why it is the one other row that stays flat.)
 
-<!-- INSTRUCTIONS -->
+### Where the instructions go
+
+Instructions per operation (`instructions.tsv`, `experiment-instructions.tsv`;
+a miss is a `contains` miss):
+
+| keys | operation | n | MutableMap | `lpa` | `cd` | Rust `lp` | Rust `std` |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Int | insert, growing | 1024 | 2,510 | 1,334 | 1,233 | 398 | 509 |
+| Int | hit | 1024 | 1,078 | 491 | 571 | 144 | 106 |
+| Int | hit | 65536 | 1,104 | 525 | 629 | 184 | 106 |
+| Int | miss | 1024 | 1,149 | 640 | 645 | 351 | 104 |
+| Int | replace | 1024 | 1,066 | 480 | 597 | 189 | 131 |
+| String | insert, growing | 1024 | 2,532 | 1,344 | 1,276 | 822 | 1,126 |
+| String | hit | 1024 | 1,125 | 669 | 756 | 130 | 168 |
+| String | miss | 1024 | 875 | 564 | 568 | 103 | 161 |
+| struct | insert, growing | 1024 | 3,646 | 1,937 | 1,797 | 486 | 659 |
+| struct | hit | 1024 | 2,472 | 1,358 | 1,448 | 326 | 127 |
+| struct | miss | 1024 | 2,116 | 1,168 | 1,173 | 460 | 123 |
+
+A callgrind profile of the native runs (runtime functions by name; the
+compiled Botlish code is anonymous) splits an Int hit at 1024 entries,
+1,045 instructions, into:
+
+* **the keyed hash, about 425 (41 %)**: SipHash-1-3 over the key's canonical
+  input (`Sip::write` 207, `rt_table_hash` 101 -- the state's
+  initialization and the three finalization rounds --, the Int's decimal
+  text 70, the walk 37). The experiment's tables hashed with the public
+  FNV-1a, a few dozen instructions for the same input. This is the price
+  of the collision resistance the table above shows, and of the brief's
+  rule that placement uses the keyed hash only; Rust's `std` pays it too,
+  in 106 instructions for the whole hit.
+* **MutableVector reads, about 175 (17 %)**: every element read of the
+  index and the entry vectors is a runtime call (`rt_mv_at`, `rt_mv_len`),
+  including the reads the bounds proofs settle (Compiler changes, item 3);
+  the experiment's `cd` read its index, a MutableArray, inline.
+* **the compiled probe and the map's own code, about 445 (42 %)**: the
+  probe, the stored-hash comparison, the position and value reads' own
+  logic, the calls between the map and the engine.
+
+A presized insertion (1,486) adds the vector writes (`writable`'s
+copy-on-write check 112, `rt_mv_push` 102: three pushes, one index swap,
+the live count); a growing one (2,510) adds about 1,000 more for the
+rebuilds, most of it in per-element vector calls: refilling the index one
+push per slot (pushes and copy-on-write checks: +290) and re-placing every
+entry (index reads: +150). Before the
+engine built its empty index as one filled array (`fresh`), creating a
+table cost a List construction per index slot: 532 instructions per
+presized insertion, which the same profile found and the change removed
+(2,205 to 1,486). A miss through `at` (1,932) costs about 780 more than a
+`contains` miss: the declared KeyNotFound raised and handled. It cost
+2,563 while `at` read position -1 and converted the IndexNotFound; it now
+fails once.
+
+**Viability (the brief's criterion).** The hash-table experiment found
+ordinary Botlish tables viable at 2-6 times Rust's run time, with `lpa`
+at 4.2-4.4 times Rust's `lp` on hits and 1.7-2.4 on misses. The
+production table runs at 1.0-2.3 times the experiment's own tables on
+lookups and insertions on this machine -- the same regime, an order of
+magnitude from neither -- and at 1.6-9 times Rust's `lp`, the upper end
+on small tables where the keyed hash is most of a lookup. What separates it
+from `lpa` is, in order: the keyed hash (a semantic requirement), vector
+reads as runtime calls, and the index refill on rebuild. The last two are
+general compiler and library work, not table logic, and each is a measured
+follow-up (Limitations):
+
+* a check-free sibling of `mvat` for proven reads, and an inline vector
+  read natively (as MutableArray has), would take most of the 175;
+* a bulk in-place fill of a MutableVector (`resize`-like) would replace
+  the per-slot pushes of a rebuild;
+* writing an Int's canonical input to SipHash in one call instead of three
+  (an output-identical change: the same bytes) would shorten the hash.
+
+<!-- ALLOCATIONS -->
 
 ## Compiler changes
 
@@ -791,6 +863,21 @@ Deliberate omissions, and costs measured but not fixed:
 * **The index shrinks only by the garbage rule** (and `clear`): removing a
   few entries from a large map keeps its index until dead entries reach
   max(8, live).
+* **`remove` of a missing key raises twice.** It reads the value at the
+  missing key's position (-1), whose IndexNotFound it turns into
+  KeyNotFound. `at` fails once instead, by guarding the position and
+  reading the value by a proven read; `remove` cannot, because the same
+  function compacts the values (a place call that resizes them), so no
+  read of them in it is stable for the bounds proof, and a second `fail`
+  site would be SAME-FAILURE. The second raise cost `at` about 630
+  instructions a miss (2,563 against 1,932) before `at` was changed.
+* **General performance follow-ups** (Performance, "Where the instructions
+  go"): MutableVector reads are runtime calls even where proven, the
+  rebuild refills the index one push per slot (no bulk vector fill), an
+  Int's canonical input reaches SipHash in three writes, and a declared
+  failure raised and handled costs about 780 instructions natively. None is
+  table logic, and none was changed here: each is a change to MutableVector,
+  native lowering or the keyed hash's runtime, with its own harnesses.
 * **The reference interpreter is slow on these collections**: about 4 ms
   per operation (every engine helper is interpreted), against about 0.1 ms
   on the Tcl compiler and 60-300 ns natively. The fuzzer runs the
