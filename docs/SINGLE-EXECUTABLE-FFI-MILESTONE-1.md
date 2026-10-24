@@ -967,17 +967,39 @@ environment, with `BOTLISH_NATIVE_LINKER=system`):
 private copy of the tree and run against its detectors:
 
 * `audit/native-aot/tools/mutate.tcl`, whose detectors are the driver's
-  `aot` unit tests, the library's `aotimage` tests and now
+  `aot` unit tests, the library's `aotimage` and `program` tests and now
   `tests/system-linker.test` beside the executable tests it ran before. It
-  gains 25 `sys-*` mutants of the system linker, the description and the
-  linked startup.
+  gained 25 `sys-*` mutants of the system linker, the description and the
+  linked startup; since the merge (section 5) it has 20.
 * `audit/single-executable/tools/mutate.tcl` (new): 9 mutants of
   `single/package.tcl` and `single/main.tcl`. For each one it packs a
   single executable from the mutated tree (its `single/package.tcl`, the
   static tclsh `single/build.sh` cached and this checkout's native build)
   and runs `single/smoke-test.sh` and `single/ffi-smoke-test.sh` on it.
 
-**The `sys-*` mutants: 25, 25 killed.**
+**The `sys-*` mutants on the merged tree: 20, 20 killed** (executed,
+Linux x86-64). The nine that mutated the removed startup object and its
+reader (`sys-description-local`, `sys-interface-not-referenced`,
+`sys-entries-swapped`, `sys-constant-dropped`, `sys-stack-maps-dropped`,
+`sys-root-dropped`, `sys-revision-unchecked`, `sys-fingerprint-unchecked`,
+`sys-interface-unchecked`) went with it: the descriptor and the record's
+checks they stood for are main's now, every linker's, and main's mutants
+cover them (`startup-no-stack-maps` here, and audit/native-library's
+`fingerprint-unchecked` and `descriptor-errors-dropped`). Four mutants of
+what replaced them are new:
+
+| mutant | what it breaks | killed by |
+|---|---|---|
+| sys-archive-main-runs-nothing | the archive's `main` returns without starting the record | 12 system-linker tests |
+| sys-startup-failure-succeeds | a record that cannot be read exits with status 0 | system-linker-damaged-description |
+| sys-helper-unclassified | an archive without a helper the program calls taken for the program's link failure | system-linker-runtime-failures |
+| sys-helper-prefix | lld's undefined helper matched without its line's end | `undefined_helper_names_the_runtime_helper` |
+
+The other 16 were killed again on the merged tree, by the detectors the
+table below names (the merged run's: unchanged but for the removed
+tests). Before the merge, all 25:
+
+**The `sys-*` mutants before the merge: 25, 25 killed.**
 
 | mutant | what it breaks | killed by |
 |---|---|---|
