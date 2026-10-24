@@ -775,7 +775,8 @@ Results:
 * **Real Windows:**
   - run 40123395211's `roots` job (48056543): the fallback plan's Rust
     tests, 278 + 96 passed, the refusal among them;
-  - the smoke job's Rust tests: PENDING-WIN-RUST.
+  - run 40131658659's smoke job (fa711b43): `--lib --bins`, 293 + 96
+    passed, every coroutine test above among them.
 * **Cross build:** `cargo check --all-targets` for `x86_64-pc-windows-msvc`,
   with and without `fallback-roots`: clean, no warnings.
 
@@ -798,7 +799,25 @@ child process. The coroutine checks:
 
 Results:
 
-* **Real Windows:** PENDING-WIN-NATIVE-STACK.
+* **Real Windows** (run 40131658659's smoke job, fa711b43). Every check
+  passed but one:
+  - every exhaustion ended in the overflow line, with status 0 in the
+    driver's mode and 1 in the executable's;
+  - every fault ended as it does without the guard;
+  - publication: "publication ok";
+  - the sweeps: resume from the thread 22 overflowed / 107 completed,
+    resume from a coroutine 22 / 107, yield from a coroutine 15 / 114;
+  - **the start from the thread overflowed at all 129 offsets and
+    completed at none.** It was the child's first coroutine, so its
+    start converted the thread and created a fiber within 2 KiB of the
+    stack's end, and those calls always needed more. Every overflow was
+    reported as one, never a crash, but the sweep never reached the
+    edge's other side.
+
+  Commit a4d5d108 runs that sweep on a pooled fiber, as every start but a
+  thread's first runs. It adds `fresh-start-from-thread`, which sweeps the
+  first start from 0 to 64 KiB in 512-byte steps. Their result:
+  PENDING-WIN-SWEEP.
 * **Other hosts (Linux):** the POSIX checks of the same file pass. The
   sweeps there gave 12/85, 48/49, 12/85 and 6/91 completed/overflowed.
 
@@ -835,8 +854,20 @@ Results:
 
 Results:
 
-* **Real Windows** (smoke, the acceptance tier's four shards,
-  system-linker): PENDING-WIN-ACCEPTANCE.
+* **Real Windows** (run 40131658659, fa711b43):
+  - the smoke job's checks: `native-status.tcl` ("every native capability
+    behaves as recorded for windows-x86_64", the new coroutine probes
+    among them), `aot-facts.tcl`, `gc-workloads.tcl` under GC stress and
+    under the unwind check (the check reports every Botlish frame as
+    Windows unwinds it);
+  - the smoke tier: 28 Tcl test files on interp and on compile, ok;
+    coroutines.bot on all four backends, ok;
+  - the acceptance tier's four shards: every Tcl test file on interp and
+    every golden suite on interp, compile, cranelift-generic and
+    cranelift, ok (shard 1, for one: 59 test files and 27 suites). The
+    golden suites run on Windows' native backends for the first time,
+    the golden runner being a coroutine;
+  - the system linker's job, ok.
 * **Other hosts (Linux):**
   - `tclsh9.0 tests/local.tcl`, the whole local suite: Tcl tests on interp
     7320 passed and on compile 7315 passed, 0 failed; golden suites 108
@@ -851,20 +882,34 @@ Results:
 
 | Mutation tool | Mutant | Breaks | Killed on |
 |---|---|---|---|
-| audit/native-stack | `publish-before-switch` | the stack about to run published before the switch | Linux (native_stack sweeps); Windows PENDING-WIN-MUTANTS |
-| audit/native-stack | `start-publishes-thread-stack` | a first segment publishes the thread's stack | Linux; Windows pending |
-| audit/native-stack | `resume-not-published` | a resumed coroutine does not publish its stack | Linux; Windows pending |
-| audit/native-stack | `yield-not-restored` | the resumer does not publish its stack when a segment returns | Linux; Windows pending |
-| audit/native-stack | `fallback-runs-coroutines` | the fallback plan starts native coroutines | Linux (the fallback build's refusal test) |
-| audit/native-stack | `win-published-stack-ignored` | the Windows guard reads the stack it was installed with | Windows pending |
-| audit/native-stack | `win-fiber-without-guarantee` | a fiber gets no stack guarantee, and none is checked | Windows pending |
-| audit/native-stack | `win-fiber-never-pooled` | a fiber is deleted, never pooled | Windows pending |
-| audit/native-stack | `win-fiber-not-restarted` | a pooled fiber continues where it parked | Windows pending |
-| audit/native-stack | `win-host-fiber-converted-back` | a host's conversion taken for the runtime's | Windows pending |
-| audit/windows-unwind | `walk-suspended-stacks-skipped` | the collector never walks a suspended stack | Windows pending |
-| audit/windows-unwind | `walk-suspended-with-the-running-bounds` | a suspended stack walked within the running stack's bounds | Windows pending |
-| audit/windows-unwind | `switch-records-its-callers-stack-pointer` | the switch's record off by its return address | Windows pending |
-| audit/windows-unwind | `switch-records-no-frame-register` | the switch's record without RBP | Windows pending |
+| audit/native-stack | `publish-before-switch` | the stack about to run published before the switch | Linux: native_stack's sweeps. Windows: the sweeps resuming from the thread and from a coroutine |
+| audit/native-stack | `start-publishes-thread-stack` | a first segment publishes the thread's stack | Linux; Windows: coroutine fresh, wide, publication |
+| audit/native-stack | `resume-not-published` | a resumed coroutine does not publish its stack | Linux; Windows: coroutine after-yields, nested, publication |
+| audit/native-stack | `yield-not-restored` | the resumer does not publish its stack when a segment returns | Linux; Windows: publication, the sweep resuming from the thread |
+| audit/native-stack | `fallback-runs-coroutines` | the fallback plan starts native coroutines | Linux: the fallback build's refusal test. Windows: PENDING-WIN-RERUN |
+| audit/native-stack | `win-published-stack-ignored` | the Windows guard reads the stack it was installed with | Windows: every coroutine exhaustion check |
+| audit/native-stack | `win-fiber-without-guarantee` | a fiber gets no stack guarantee, and none is checked | Windows: the fiber's guarantee and commit tests |
+| audit/native-stack | `win-fiber-never-pooled` | a fiber is deleted, never pooled | Windows: the pooling and lifecycle tests |
+| audit/native-stack | `win-fiber-not-restarted` | a pooled fiber continues where it parked | Windows: the driver's Rust tests |
+| audit/native-stack | `win-host-fiber-converted-back` | a host's conversion taken for the runtime's | Windows: `a_thread_made_a_fiber_by_its_host_stays_the_hosts` |
+| audit/windows-unwind | `walk-suspended-stacks-skipped` | the collector never walks a suspended stack | Windows: the driver's Rust tests (`suspended_root_tests`) |
+| audit/windows-unwind | `walk-suspended-with-the-running-bounds` | a suspended stack walked within the running stack's bounds | Windows: the driver's Rust tests |
+| audit/windows-unwind | `switch-records-its-callers-stack-pointer` | the switch's record off by its return address | Windows: `a_suspended_stack_unwinds_to_its_fibers_start` |
+| audit/windows-unwind | `switch-records-no-frame-register` | the switch's record without RBP | Windows: the driver's Rust tests |
+
+On real Windows (run 40131658659's mutant tier, fa711b43):
+
+* **audit/native-stack:** 50 mutants on windows-x86_64, 31 killed, 0
+  survived, 19 skipped (another host's code).
+* **audit/windows-unwind:** 21 mutants, 21 killed.
+
+Four of those kills were not evidence. The mutation tool runs its
+detectors cheapest first and stops at the first that fails, and on fa711b43
+native_stack failed without any mutant (the start sweep above). So
+`win-driver-unguarded`, `win-executable-unguarded`,
+`effects-infallible-on-fallback` and `fallback-runs-coroutines` were
+"killed" by that sweep alone, and their own detectors never ran. They were
+run again on a4d5d108, with the sweep fixed: PENDING-WIN-RERUN.
 
 * **Linux:** `audit/native-stack/tools/mutate.tcl` (the six above with
   `gc-walk-half-stack`): 6 mutants on linux-x86_64, 6 killed.
@@ -895,8 +940,14 @@ The evidence:
 * machine code identical before and after on 31 programs (section 9.5);
 * the local suite and the GC-stress, fuzz and mutant runs above (other
   hosts, Linux x86-64);
-* CI: tests.yml PENDING-LINUX-CI, tests-arm64.yml PENDING-ARM64-CI,
-  macos-arm64.yml PENDING-MACOS-CI.
+* CI on 48056543 (other hosts):
+  - tests.yml run 40123417447, every job green: interp, compile, the
+    cranelift and cranelift-generic coverage, the four golden shards,
+    the native Rust unit tests, the stub- and system-linked executables,
+    the warning gate, the method-call decision audit; its GC-stress job
+    runs on main only;
+  - tests-arm64.yml run 40123419578, green;
+  - macos-arm64.yml: PENDING-MACOS-CI.
 
 ## 9. Performance
 
