@@ -1055,7 +1055,7 @@ Dispatched or triggered on `ccr-2d88975d-17ru75`, at its first commit
 
 | Workflow (run) | Result |
 |---|---|
-| `tests.yml` (40026039279), Linux x86-64 | compile, cranelift and cranelift-generic coverage, Rust unit tests, stub-linked executables, warning gate, method-filter audit, golden shards 1-4: success. interp: still running at this writing. (Its GC-stress job runs on pushes to main only.) |
+| `tests.yml` (40026039279), Linux x86-64 | compile, cranelift and cranelift-generic coverage, Rust unit tests, stub-linked executables, warning gate, method-filter audit, golden shards 1-4: success. interp: success (9,295 tests, 0 failed; none skipped for `nativeLibraries` or `nm`). Every job: success. (Its GC-stress job runs on pushes to main only.) |
 | `tests-arm64.yml` (40026035898), Linux AArch64 | every job success (section 1) |
 | `macos-arm64.yml` (40026023595) | success: the driver and runtime with this milestone's code build, and their tests pass, on macOS AArch64 (where libraries are not offered) |
 | `windows-x86_64.yml` (40026023638) | smoke, root plans and acceptance shards 1, 3 and 4: success. Shard 2 failed in `tests/coroutine-fusion.test` (`cf-executable` and the fusion-site tests), which expect native coroutines Windows lacks; main's own run 40009251881 fails identically, so it is not this milestone's |
