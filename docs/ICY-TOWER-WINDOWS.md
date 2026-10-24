@@ -13,6 +13,17 @@ and published as the `icy-tower-windows-latest` release:
 Every run of the workflow, on any branch, also keeps the game as its
 `icy-tower-windows-x86_64` artifact.
 
+**Outcome.** On a Windows Server 2025 runner (run 40124226885) the binding
+generates from the pinned SDL 3.4.18 headers with clang 20.1.8's MSVC
+target, the game compiles under `-warnings error` and links against
+SDL3.lib, and the executable passes its six Windows tests: its
+`--headless --frames 600 --seed 7` run and its 600 frames of the real SDL
+loop on SDL's dummy video driver both print seed 7's summary, the
+independent oracle's (`frames=600 round=1 floor=26 score=260 ...
+rng=3699965314`), as the Linux executable does. The shipped folder is
+`icy-tower.exe` (892 KB), `SDL3.dll` (4.3 MB), a README and the two
+licenses.
+
 ## 1. What the port needed
 
 Five things stood between the Linux game and a Windows executable. The
@@ -75,12 +86,15 @@ links the game. The workflow keeps each run's binding as its
 `sdl3-binding-windows-x86_64` artifact (modules, report, manifest, layouts
 and their C check), for review.
 
-**What differs from linux-x86_64's binding.** Measured on Linux with
-Wine's MSVCRT headers standing in for MSVC's (a development aid while
+**What differs from linux-x86_64's binding.** On the Windows runner the
+binding has 1,216 direct functions, 5 aliases, 15 thunks and 159
+unsupported names (Linux: 1,215, 3, 15 and 172), and its preprocessed
+translation unit is 363,645 tokens (Linux: 42,475; clang's intrinsic
+headers and the Universal CRT are most of it, which is the image-dependent
+part a committed manifest would record). Compared name by name on Linux,
+with Wine's MSVCRT headers standing in for MSVC's (a development aid while
 writing this, never used by the build: `tools/c-bindgen.tcl diff`), the two
-bind the same API (1,216 direct functions, 16 thunks, 160 unsupported
-names, against Linux's 1,215, 15 and 172) and differ in the target's own
-facts, as they should:
+differ in the target's own facts, as they should:
 
 * LLP64: `size_t`, `int64_t` and `uint64_t` are `long long` types
   (`std::ffi::c::ULongLong`, `LongLong`), which are `long` on Linux;
@@ -220,12 +234,18 @@ SDL3.dll built, clang and bash):
 | `-windows-sdl-failure` | an unknown video driver: status 1 and `Icy Tower: SDL_Init failed: nosuch not available` on standard error |
 | `-windows-usage` | a usage error is status 2; `--help` prints the usage |
 
+The test runs build-windows.sh with `sh`, which on Windows only Git for
+Windows provides: the first CI run asked for `bash`, and the first `bash`
+on the runner's PATH was System32's, WSL's launcher with no distribution
+installed. On the Windows runner (run 40124226885) all six pass.
+
 The Linux tests are unchanged in what they check, with the module lists
 and the private helpers updated for game.bot and the new sdl.bot helpers.
 On Linux: `workload-icy-tower.test` 20 passed (the six Windows tests
 skipped), `oracle.py compare` 0 differences, the SDL call trace identical,
 `c-bindgen.test` and the header archaeology's `parser.test` (three new
-tests) and `corpus.test` passing, every committed binding current.
+tests) and `corpus.test` passing, every committed binding current, every
+icy-tower mutant still applying and killed.
 
 ## 9. Not done
 
