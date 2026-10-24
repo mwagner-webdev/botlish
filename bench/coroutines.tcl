@@ -300,7 +300,9 @@ set perCollection {}
 foreach k {0 1000} {
     lassign [native::measure [surface::compile [gcHeldText $k $gcM] -warnings off] $runs] _ _ with withCollections
     lassign [native::measure [surface::compile [gcHeldText $k 0] -warnings off] $runs] _ _ without withoutCollections
-    set collections [expr {$withCollections - $withoutCollections}]
+    # The driver counts collections over all RUNS runs (Vm::reset keeps the
+    # heap's count); the time is one run's, the best.
+    set collections [expr {($withCollections - $withoutCollections) / $runs}]
     set each [expr {($with - $without) * 1000.0 / max(1, $collections)}]
     dict set perCollection $k $each
     puts "| $k | $collections | [ns $each] |"
