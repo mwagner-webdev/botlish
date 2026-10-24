@@ -655,41 +655,45 @@ proc hir::decimal::verify {hirVar} {
         if {[dict get $node kind] ne "call" || ![dict get $node reachable]} {
             continue
         }
-        set t [hir::typeOf $hir $e]
-        if {[lindex $t 0] eq "immutableSet" && [llength $t] == 2 && [Mentions [lindex $t 1]]} {
-            hir::Diagnose hir TYPE [format \
-                {this call makes %s: a set compares and hashes its members by value, which knows no precision, so it cannot hold DecimalRounded values (a List can; decay the members with std::float64::from_decimal_rounded to build a set of Float64)} \
-                [hir::types::show $t]] $e
-            continue
-        }
-        set name [CalledNative $hir $e]
-        switch -- $name {
-            std::float64::from_decimal_rounded - std::decimal_rounded::to_string {
-                # An observation at the argument's guaranteed precision: of a
-                # DecimalRounded value whose type states one.
-                set a [lindex [dict get $node args] 0]
-                set t [hir::typeOf $hir $a]
-                set what [if {$name eq "std::decimal_rounded::to_string"} {string cat "made a String"} else {string cat "decayed to a Float64"}]
-                if {[IsDecimal $t]} {
-                    if {![IsRefined $t]} {
-                        PrecisionUnknown hir $e $t $what
-                    }
-                } elseif {[hir::types::kindOf $t] ni {"" any} && ![hir::types::Poisoned $hir $a]} {
-                    # A value statically of another kind: nothing converts
-                    # one implicitly, and no precision is known to read it
-                    # at (an erased value -- any -- is refused by the check
-                    # form when it runs).
-                    hir::Diagnose hir TYPE [format \
-                        {the argument of %s is %s, not a DecimalRounded value: only a DecimalRounded value is %s at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)} \
-                        $name [hir::types::show $t] $what] $e
-                }
+        # (Each problem below is the call's own with its callee: the value
+        # it is given, or the set it makes; hir::CheckingCall.)
+        hir::CheckingCall $e {
+            set t [hir::typeOf $hir $e]
+            if {[lindex $t 0] eq "immutableSet" && [llength $t] == 2 && [Mentions [lindex $t 1]]} {
+                hir::Diagnose hir TYPE [format \
+                    {this call makes %s: a set compares and hashes its members by value, which knows no precision, so it cannot hold DecimalRounded values (a List can; decay the members with std::float64::from_decimal_rounded to build a set of Float64)} \
+                    [hir::types::show $t]] $e
+                continue
             }
-            std::decimal_rounded::round {
-                set t [hir::typeOf $hir $e]
-                if {![IsRefined $t] && ![hir::imprint::Unbound $hir $e] && $t ni {never any}} {
-                    hir::Diagnose hir TYPE [format \
-                        {std::decimal_rounded::round makes a DecimalRounded value of the precision its imprint states, so it is imprinted with a DecimalRounded{...} type (std::decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 2}](x)), not %s} \
-                        [hir::types::show $t]] $e
+            set name [CalledNative $hir $e]
+            switch -- $name {
+                std::float64::from_decimal_rounded - std::decimal_rounded::to_string {
+                    # An observation at the argument's guaranteed precision: of a
+                    # DecimalRounded value whose type states one.
+                    set a [lindex [dict get $node args] 0]
+                    set t [hir::typeOf $hir $a]
+                    set what [if {$name eq "std::decimal_rounded::to_string"} {string cat "made a String"} else {string cat "decayed to a Float64"}]
+                    if {[IsDecimal $t]} {
+                        if {![IsRefined $t]} {
+                            PrecisionUnknown hir $e $t $what
+                        }
+                    } elseif {[hir::types::kindOf $t] ni {"" any} && ![hir::types::Poisoned $hir $a]} {
+                        # A value statically of another kind: nothing converts
+                        # one implicitly, and no precision is known to read it
+                        # at (an erased value -- any -- is refused by the check
+                        # form when it runs).
+                        hir::Diagnose hir TYPE [format \
+                            {the argument of %s is %s, not a DecimalRounded value: only a DecimalRounded value is %s at the precision its type guarantees, and nothing converts a value of another type implicitly (std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one)} \
+                            $name [hir::types::show $t] $what] $e
+                    }
+                }
+                std::decimal_rounded::round {
+                    set t [hir::typeOf $hir $e]
+                    if {![IsRefined $t] && ![hir::imprint::Unbound $hir $e] && $t ni {never any}} {
+                        hir::Diagnose hir TYPE [format \
+                            {std::decimal_rounded::round makes a DecimalRounded value of the precision its imprint states, so it is imprinted with a DecimalRounded{...} type (std::decimal_rounded::round[DecimalRounded{minDecimalsPreserved: 2}](x)), not %s} \
+                            [hir::types::show $t]] $e
+                    }
                 }
             }
         }

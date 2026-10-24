@@ -80,7 +80,7 @@ satisfy str (argument type: any)". The explicit spelling `std::str::concat(s,
   failure is definitional, asks `UnimportedCandidates`: the functions of
   that name the call would apply if their namespace were imported -- by
   method resolution's own rules (`MethodCandidates`,
-  `hir::MethodCallProblems`): not imported by the code the call is in,
+  `hir::methods::NativeMismatch`): not imported by the code the call is in,
   not `nomethod`, of the call's arity (the receiver first), an intrinsic's
   first parameter of the receiver's kind. The candidates are the intrinsics
   of every namespace and the members of every module the compilation

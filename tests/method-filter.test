@@ -1,47 +1,51 @@
-# method-filter.test -- the kind filter of the method-call decision
-# (METHOD-DECISION-FILTER.md, hir/methodfilter.tcl).
+# method-filter.test -- the kind proofs of the method-call decision
+# (METHOD-DECISION-FILTER.md, METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md,
+# hir/methods.tcl).
 #
-# hir::DecideMethodCalls decides a method-style call with several visible
-# candidates; the filter reaches the same decisions with fewer whole-program
-# builds when the receivers' kinds settle every call, and gives every other
-# decision to the exact one. These tests pin
+# hir::methods::Decide decides a method-style call with several visible
+# candidates by the rule of METHOD-SUGAR.md, certified relative to the
+# decided configuration itself. A candidate the receiver's kind (or a named
+# struct's declaration) rules out is not applicable without a build of its
+# own: the kind proofs, which also choose the stand-ins the certification
+# starts from (the kind waves). These tests pin
 #
 #   * the exclusion rule (by kind, and by a named struct's declaration) and
 #     its one statement (NativeMismatch);
-#   * what the filter decides and how many builds it takes;
-#   * that it never decides what is not unambiguously decided (an untyped
-#     receiver, a lexical candidate, no applicable method): those are the
-#     exact decision's, with its diagnostics;
-#   * that the filter's result is the exact one's (hir::methodFilterAudit),
-#     and that the audit can fail;
+#   * what the kind waves settle and how many builds a decision takes;
+#   * that a kind proof never decides what is not unambiguously decided (an
+#     untyped receiver, a lexical candidate, no applicable method): those
+#     candidates are judged by their own builds;
+#   * that the decision is the reference rule's (every candidate judged by
+#     its own build: hir::methodKindProofs 0), checked by
+#     hir::methodReferenceAudit, and that the audit can fail;
 #   * the switches.
 #
-# The exact decision's own reuse is tests/static-economics.test's
-# (se-method-memo), which runs with the filter off.
+# The decision's build reuse is tests/static-economics.test's
+# (se-method-memo); the milestone's semantics, tests/method-resolution.test.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 interp recursionlimit {} 100000
 
 # The compilation of TEXT (-strict 0, so a rejection stays a diagnostic)
-# with the kind filter FILTER (0|1) and its audit AUDIT: a dict of the HIR,
-# its diagnostics ({kind message}), its decided method calls, and the
-# build counters the compilation moved.
-proc mfCompile {text {filter 1} {audit 0}} {
-    set saved [list $hir::methodFilter $hir::methodFilterAudit]
-    set hir::methodFilter $filter
-    set hir::methodFilterAudit $audit
+# with the kind proofs KIND (0|1) and the reference audit AUDIT: a dict of
+# the HIR, its diagnostics ({kind message}), its decided method calls, and
+# the build counters the compilation moved.
+proc mfCompile {text {kind 1} {audit 0}} {
+    set saved [list $hir::methodKindProofs $hir::methodReferenceAudit]
+    set hir::methodKindProofs $kind
+    set hir::methodReferenceAudit $audit
     try {
         set before [hir::BuildStats]
         set hir [surface::compile $text -strict 0 -warnings off]
         set after [hir::BuildStats]
     } finally {
-        lassign $saved hir::methodFilter hir::methodFilterAudit
+        lassign $saved hir::methodKindProofs hir::methodReferenceAudit
     }
     set result [dict create hir $hir \
         diagnostics [lmap d [dict get $hir diagnostics] {list [dict get $d kind] [dict get $d message]}] \
         decided [expr {[dict exists $hir methodDecided] ? [lsort -stride 2 [dict get $hir methodDecided]] : {}}]]
-    foreach counter {builds methodTrials methodFinals methodReused methodFiltered methodFilterAbandoned methodFilterEvicted} {
+    foreach counter {builds methodTrials methodFinals methodReused methodDeviations} {
         dict set result $counter [expr {[dict get $after $counter] - [dict get $before $counter]}]
     }
     return $result
@@ -55,22 +59,22 @@ proc mfSame {a b} {
         && [hir::format [dict get $a hir]] eq [hir::format [dict get $b hir]]}
 }
 
-# Runs SCRIPT with the filter's guess for the second link of $::mfChain wrong
-# (`std::list::at`, the candidate the build's default narrowing makes of it): a
-# decision made from a receiver the next build does not give it.
+# Runs SCRIPT with the kind waves' guess for the second link of $::mfChain
+# wrong (`std::list::at`, the candidate the build's default narrowing makes of
+# it): a stand-in from a receiver the build does not give it.
 proc mfWithWrongGuess {script} {
-    rename hir::methodfilter::Survivors hir::methodfilter::SurvivorsReal
-    proc hir::methodfilter::Survivors {hir calls key {guess 0}} {
+    rename hir::methods::Survivors hir::methods::SurvivorsReal
+    proc hir::methods::Survivors {hir calls key receiver R guess} {
         if {$guess && [string match {*/y=/*} $key]} {
             return std::list::at
         }
-        hir::methodfilter::SurvivorsReal $hir $calls $key $guess
+        hir::methods::SurvivorsReal $hir $calls $key $receiver $R $guess
     }
     try {
         uplevel 1 $script
     } finally {
-        rename hir::methodfilter::Survivors {}
-        rename hir::methodfilter::SurvivorsReal hir::methodfilter::Survivors
+        rename hir::methods::Survivors {}
+        rename hir::methods::SurvivorsReal hir::methods::Survivors
     }
 }
 
@@ -103,14 +107,12 @@ set ::mfNarrowed "${::mfImports}fn u(x) -> int errors IndexNotFound:\n    n = st
 # once the first calls are decided.
 set ::mfNested "${::mfImports}fn n() -> int errors IndexNotFound:\n    ll = \[\[1, 2\], \[3\]\]\n    a = std::mutable_array::create(2, \[7, 8, 9\])\n    m = ll.get(0, \[0\])\n    k = a.at(0)\n    m.length() + k.length() + ll.at(1).length()\n\nr = n():\n    on IndexNotFound:\n        -1\nr\n"
 
-# A call nothing can settle (a function of the file named like the method
-# fits a List receiver as std::list::length does) beside calls that are settled:
-# the filter must give up before it builds.
+# A call nothing can settle by kind (a function of the file named like the
+# method fits a List receiver as std::list::length does) beside calls that
+# are settled.
 set ::mfHopeless "${::mfImports}fn length(xs: List\[int\]) -> int:\n    0\n\nfn m(ys: List\[int\]) -> int:\n    ys.length()\n\nfn f() -> int errors IndexNotFound:\n    arr = std::mutable_array::create(3, 0)\n    arr.at(0) + arr.at(1) + m(\[1, 2\])\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"
 
-# Two functions, the first needing two decisions in a row and the second one:
-# the exact decision records the second function's call before the first's
-# second one, the filter in the order of the calls.
+# Two functions, the first needing two decisions in a row and the second one.
 set ::mfOrder "${::mfImports}fn first(v: MutableVector\[int\]) -> int errors IndexNotFound:\n    c = v.length()\n    c + v.at(0)\n\nfn second(s: str) -> int:\n    s.length()\n\nr = first(std::mutable_vector::from_list(\[4, 5\])):\n    on IndexNotFound:\n        -1\nr + second(\"abc\")\n"
 
 # Runs SCRIPT with two modules in a private library whose functions take
@@ -132,24 +134,26 @@ proc mfWithNominalModules {script} {
 # ---------------------------------------------------------------------------
 # The exclusion rule
 
-test mf-native-mismatch-rule {NativeMismatch is the rule hir::MethodCallProblems reports a native's TYPE problem by: a receiver of a known kind other than the one the native's first parameter requires, nothing for an unknown kind, never, or a native that requires none} -body {
-    list [hir::methodfilter::NativeMismatch std::str::length {list int}] \
-        [hir::methodfilter::NativeMismatch std::list::length {list int}] \
-        [hir::methodfilter::NativeMismatch std::list::length int] \
-        [hir::methodfilter::NativeMismatch std::list::length never] \
-        [hir::methodfilter::NativeMismatch std::list::length any] \
-        [hir::methodfilter::NativeMismatch std::mutable_array::at {list int}] \
-        [hir::methodfilter::NativeMismatch std::mutable_array::at {mutarray int}]
+test mf-native-mismatch-rule {NativeMismatch is the rule a call's own problems report a native's TYPE problem by: a receiver of a known kind other than the one the native's first parameter requires, nothing for an unknown kind, never, or a native that requires none} -body {
+    list [hir::methods::NativeMismatch std::str::length {list int}] \
+        [hir::methods::NativeMismatch std::list::length {list int}] \
+        [hir::methods::NativeMismatch std::list::length int] \
+        [hir::methods::NativeMismatch std::list::length never] \
+        [hir::methods::NativeMismatch std::list::length any] \
+        [hir::methods::NativeMismatch std::mutable_array::at {list int}] \
+        [hir::methods::NativeMismatch std::mutable_array::at {mutarray int}]
 } -result {{list str} {} {int list} {} {} {list mutarray} {}}
 
-test mf-native-rule-one-statement {hir::MethodCallProblems asks NativeMismatch for the native TYPE problem and states no kind rule of its own} -body {
-    set body [info body hir::MethodCallProblems]
-    list [regexp {hir::methodfilter::NativeMismatch} $body] [regexp {paramTypes|core::type::base} $body]
-} -result {1 0}
+test mf-native-rule-one-statement {a call's own problems and the kind proof ask NativeMismatch for the native TYPE problem and state no kind rule of their own} -body {
+    set problems [info body hir::methods::CallProblems]
+    set excluded [info body hir::methods::Excluded]
+    list [regexp {NativeMismatch} $problems] [regexp {paramTypes|core::type::base} $problems] \
+        [regexp {NativeMismatch} $excluded] [regexp {paramTypes|core::type::base} $excluded]
+} -result {1 0 1 0}
 
 test mf-excluded-by-kind {a native is ruled out by its first parameter's kind, a module function by the kind of its declared or inferred first-parameter contract, a lexical name (a bare display) never; an unknown or never receiver rules out nothing} -body {
     set hir [dict get [mfCompile $::mfChain 0] hir]
-    proc excluded {hir cand type} {hir::methodfilter::ResetCache; hir::methodfilter::Excluded $hir $cand $type}
+    proc excluded {hir cand type} {hir::methods::ResetCache; hir::methods::Excluded $hir $cand $type}
     list [excluded $hir std::list::at {mutarray int}] \
         [excluded $hir std::mutable_array::at {mutarray int}] \
         [excluded $hir std::mutable_array::at {list int}] \
@@ -165,173 +169,13 @@ test mf-excluded-by-kind {a native is ruled out by its first parameter's kind, a
         [excluded $hir nosuch::fn {list int}]
 } -result {1 0 1 1 1 0 1 0 0 0 1 0 0}
 
-# ---------------------------------------------------------------------------
-# What the filter decides, and its cost
-
-test mf-chain-decided-in-one-wave {a receiver chain of three calls on one MutableArray: the earlier calls stand at `std::list::at` in the first build, which narrows the binding to nothing for the later ones, so their receivers are `never`; the filter reads them as the binding's defined type, decides the three in one wave and finds the receivers right in the one build it makes (the exact decision tries every candidate index of every pass: six builds), and the decisions and the program are the exact one's} -body {
-    set exact [mfCompile $::mfChain 0]
-    set filtered [mfCompile $::mfChain 1]
-    list [dict get $exact methodTrials] [dict get $exact methodFinals] \
-        [dict get $filtered methodTrials] [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned] \
-        [mfSame $filtered $exact] [dict get $filtered diagnostics]
-} -result {6 1 1 1 0 1 {}}
-
-test mf-typed-receivers-one-build {every receiver typed: the first wave decides all five calls (`v.at(0)` has the receiver `never` while `v.length()` stands at its first candidate, `std::list::length`, which narrows `v` to a List, so it is read as the parameter's declared type) and the one build is the final program} -body {
-    set exact [mfCompile $::mfTyped 0]
-    set filtered [mfCompile $::mfTyped 1]
-    list [dict get $filtered methodTrials] [dict get $filtered methodFiltered] \
-        [expr {[dict get $exact builds] > [dict get $filtered builds]}] \
-        [mfSame $filtered $exact] [dict size [dict get $filtered hir methodDecided]]
-} -result {1 1 1 1 5}
-
-test mf-first-candidates-no-build {calls the filter decides to their first candidate need no build at all: the first build is the final program} -body {
-    set text "${::mfImports}xs = \[1, 2\]\nxs.length()\n"
-    set filtered [mfCompile $text 1]
-    list [dict get $filtered builds] [dict get $filtered methodTrials] [dict get $filtered methodFiltered] \
-        [dict get $filtered methodReused] [mfSame $filtered [mfCompile $text 0]]
-} -result {1 0 1 1 1}
-
-test mf-trait-operation-needs-no-build {a trait operation decided before any build lets a program whose other calls settle at their first candidates be certified without a build at all} -body {
-    set text "import std::list\nimport std::str\n\ntrait Measured:\n    fn length(value: Measured) -> int\n\nfn size(v: Measured) -> int:\n    v.length()\n\nsize(\"abcd\") + \[1, 2\].length()\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [dict get $filtered methodFiltered] [mfSame $filtered $exact] \
-        [expr {[dict get $filtered builds] < [dict get $exact builds]}]
-} -result {1 1 1}
-
-test mf-audit-returns-the-exact-program {under the audit the program is the exact decision's own, down to the order it records its decisions in (which is not the order of the calls when a later call is decided in an earlier pass)} -body {
-    set audited [mfCompile $::mfOrder 1 1]
-    set exact [mfCompile $::mfOrder 0]
-    set filtered [mfCompile $::mfOrder 1 0]
-    list [dict get $audited hir methodDecided] \
-        [expr {[dict get $audited hir methodDecided] eq [dict get $exact hir methodDecided]}] \
-        [expr {[dict get $filtered hir methodDecided] ne [dict get $exact hir methodDecided]}] \
-        [expr {[lsort -stride 2 [dict get $filtered hir methodDecided]] eq [lsort -stride 2 [dict get $exact hir methodDecided]]}]
-} -match glob -result {* 1 1 1}
-
-test mf-stale-decision-taken-back {a decision made from a receiver that the next build does not give is taken back (here the filter is made to decide the second link of the chain to `std::list::at`), decided again from the receiver the build gives (with the decision after it, whose receiver the wrong one had poisoned), and the certified result is the exact decision's} -body {
-    set exact [mfCompile $::mfChain 0]
-    mfWithWrongGuess {
-        set filtered [mfCompile $::mfChain 1]
-        set audited [mfCompile $::mfChain 1 1]
-    }
-    list [dict get $filtered methodFilterEvicted] [dict get $filtered methodFiltered] \
-        [dict get $filtered methodTrials] [dict get $filtered diagnostics] \
-        [mfSame $filtered $exact] [mfSame $audited $exact]
-} -result {2 1 3 {} 1 1}
-
-test mf-narrowed-untyped-receiver {an untyped receiver that an explicit qualified call narrowed first is settled by its narrowed kind} -body {
-    set exact [mfCompile $::mfNarrowed 0]
-    set filtered [mfCompile $::mfNarrowed 1]
-    list [dict get $filtered methodFiltered] [dict get $filtered diagnostics] [mfSame $filtered $exact] \
-        [expr {[dict get $filtered builds] < [dict get $exact builds]}]
-} -result {1 {} 1 1}
-
-test mf-nominal-receivers-decided {MutableMap and MutableSet receivers in a program importing both modules: `length` is a function of each, and each receiver rules out the other's by its struct's declaration, so the filter decides every call in one wave and certifies the exact decision's program, which takes several trial builds} -body {
-    set text "import std::mutable_map\nimport std::mutable_set\n\nfn f(m: std::mutable_map::MutableMap\[int, int\]) -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(3)\n    e = if m.empty?():\n        1\n    else:\n        0\n    m.length() + s.length() + e\n\nm = std::mutable_map::create\[int, int\]()\nm.set(1, 2)\nf(m)\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [dict get $filtered diagnostics] [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned] \
-        [dict get $filtered methodTrials] [expr {[dict get $exact methodTrials] > 1}] \
-        [mfSame $filtered $exact] [mfSame [mfCompile $text 1 1] $exact]
-} -result {{} 1 0 1 1 1 1}
-
-test mf-nominal-same-fields-excluded {a struct with the same fields as another module's struct is still another declaration: `b.size()` on a std::mfnb::Box (a typed parameter, and a local bound to a construction) rules std::mfna::size out, and the filter's decision and program are the exact decision's} -body {
-    mfWithNominalModules {
-        set text "import std::mfna\nimport std::mfnb\n\nfn g(b: std::mfnb::Box) -> int:\n    c = std::mfna::Box {v: 5}\n    b.size() + c.size()\n\ng(std::mfnb::Box {v: 4})\n"
-        set exact [mfCompile $text 0]
-        set filtered [mfCompile $text 1]
-        list [dict get $filtered diagnostics] [dict get $filtered methodFiltered] \
-            [lsort -unique [lmap {k v} [dict get $filtered decided] {set v}]] \
-            [expr {[dict get $filtered builds] < [dict get $exact builds]}] \
-            [mfSame $filtered $exact] [mfSame [mfCompile $text 1 1] $exact]
-    }
-} -result {{} 1 {std::mfna::size std::mfnb::size} 1 1 1}
-
-# ---------------------------------------------------------------------------
-# What is not the filter's
-
-test mf-untyped-receiver-is-the-exact-decisions {an untyped receiver fits every candidate: the filter decides nothing, builds nothing, and the exact decision's AMBIGUOUS-METHOD-CALL is reported} -body {
-    set exact [mfCompile $::mfAmbiguous 0]
-    set filtered [mfCompile $::mfAmbiguous 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-        [dict get $filtered builds] [dict get $exact builds] \
-        [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned]
-} -match glob -result {AMBIGUOUS-METHOD-CALL 1 * * 0 0}
-
-test mf-no-applicable-method-is-the-exact-decisions {an Int receiver rules out every candidate: no survivor, no build by the filter, the exact decision's NO-APPLICABLE-METHOD} -body {
-    set exact [mfCompile $::mfNoApplicable 0]
-    set filtered [mfCompile $::mfNoApplicable 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-        [expr {[dict get $filtered builds] == [dict get $exact builds]}] [dict get $filtered methodFiltered]
-} -result {NO-APPLICABLE-METHOD 1 1 0}
-
-test mf-lexical-candidate-never-excluded {a function of the file named like the method fits as an imported one does: the filter cannot rule a lexical name out by kind, so both candidates survive and the exact decision reports the ambiguity} -body {
-    set exact [mfCompile $::mfLexical 0]
-    set filtered [mfCompile $::mfLexical 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] [dict get $filtered methodFiltered]
-} -result {AMBIGUOUS-METHOD-CALL 1 0}
-
-test mf-domain-parameter-not-compared {a candidate whose first parameter is an integer domain is not ruled out by an Int receiver (a literal in the domain is admitted by its range): the file's own `pick(n: Int)` and the module's `pick(n: Small)` both fit `5.pick()`, and the exact decision's ambiguity is reported} -body {
-    withPrivateLibrary {
-        set f [open [file join $::core::libraryDir pickdom.bot] w]
-        puts $f "type Small = Int in 0..10\n\nfn pick(n: Small) -> int:\n    n\n"
-        close $f
-        set text "import std::pickdom\n\nfn pick(n: int) -> int:\n    n\n\n5.pick()\n"
-        set exact [mfCompile $text 0]
-        set filtered [mfCompile $text 1]
-        list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-            [dict get $filtered methodFiltered] [mfSame [mfCompile $text 1 1] $exact]
-    }
-} -result {AMBIGUOUS-METHOD-CALL 1 0 1}
-
-test mf-nominal-arguments-not-compared {the type arguments of a named struct never rule a candidate out: a std::mfna::Pair[str, str] receiver leaves std::mfnb::weight (declared over Pair[int, int]) a survivor beside std::mfna::weight, so the call is the exact decision's, which finds the second invalid and decides the first; a Pair[int, int] receiver fits both, and the exact decision's ambiguity is reported (comparing arguments would rule the imprinted Pair[A, B] out and accept the other)} -body {
-    mfWithNominalModules {
-        set results {}
-        foreach {args values} {{str, str} {"x", b: "y"} {int, int} {1, b: 2}} {
-            set text "import std::mfna\nimport std::mfnb\n\nfn h(p: std::mfna::Pair\[$args\]) -> int:\n    p.weight()\n\nh(std::mfna::Pair\[$args\] {a: $values})\n"
-            set exact [mfCompile $text 0]
-            set filtered [mfCompile $text 1]
-            lappend results [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [dict get $filtered methodFiltered] \
-                [lmap {k v} [dict get $filtered decided] {set v}] [mfSame $filtered $exact] \
-                [mfSame [mfCompile $text 1 1] $exact]
-        }
-        set results
-    }
-} -result {{} 0 std::mfna::weight 1 1 AMBIGUOUS-METHOD-CALL 0 {} 1 1}
-
-test mf-nominal-inferred-contract-not-compared {an inferred first-parameter contract is no declaration: std::mfna::tag (untyped, inferred std::mfna::Box) is not ruled out by a std::mfnb::Box receiver, so the call is the exact decision's (which finds the inferred contract rejecting the receiver and decides std::mfnb::tag)} -body {
-    mfWithNominalModules {
-        set text "import std::mfna\nimport std::mfnb\n\nfn k(b: std::mfnb::Box) -> int:\n    b.tag()\n\nk(std::mfnb::Box {v: 4})\n"
-        set exact [mfCompile $text 0]
-        set filtered [mfCompile $text 1]
-        list [dict get $filtered methodFiltered] [mfSame $filtered $exact] [dict get $exact diagnostics] \
-            [lmap {k v} [dict get $exact decided] {set v}]
-    }
-} -result {0 1 {} std::mfnb::tag}
-
-test mf-problem-in-the-chosen-candidate {a call whose only surviving candidate has a problem of its own (an argument the candidate's inferred contract rejects) is not certified: the exact decision finds no valid candidate and reports NO-APPLICABLE-METHOD, which the filter must not turn into the candidate's own TYPE error} -body {
-    set text "${::mfImports}xs = \[1, 2\]\nxs.get(\"k\", 0)\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] [dict get $filtered methodFiltered]
-} -result {{NO-APPLICABLE-METHOD TYPE} 1 0}
-
-test mf-trait-operation-is-not-the-filters {a method-style call on a trait view is an operation of the trait: it is decided by the trait before the filter looks, whatever candidates are visible by name, and never taken back by a later wave; the filter decides the calls beside it, in a build of its own, and certifies the lot} -body {
-    set text "import std::list\nimport std::str\nimport std::mutable_array\n\ntrait Measured:\n    fn length(value: Measured) -> int\n\nfn size(v: Measured) -> int:\n    v.length()\n\nfn h() -> int errors IndexNotFound:\n    a = std::mutable_array::allocate(2)\n    std::mutable_array::set(a, 0, 5)\n    a.at(0) + a.get(1, -1)\n\nr = h():\n    on IndexNotFound:\n        -1\nsize(\"abcd\") + \[1, 2\].length() + r\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [dict get $filtered diagnostics] [mfSame $filtered $exact] [dict get $filtered methodFiltered] \
-        [mfSame [mfCompile $text 1 1] $exact]
-} -result {{} 1 1 1}
-
 test mf-contract-kinds-by-source {a module function is ruled out by the kind of its declared first parameter, of the contract inferred for an untyped one by forwarding it to a declared parameter (trusted), and of the contract a native's parameter imposes on it (checked); a receiver of the right kind, or any, is not ruled out} -body {
     withPrivateLibrary {
         set f [open [file join $::core::libraryDir mfkinds.bot] w]
         puts $f "import std::list\n\nfn declared(xs: List\[int\]) -> int:\n    1\n\nfn trusted(xs) -> int:\n    declared(xs)\n\nfn checked(xs) -> int:\n    std::list::length(xs)\n"
         close $f
         set hir [dict get [mfCompile "import std::list\nimport std::mfkinds\n\n1\n" 0] hir]
-        proc excluded {hir cand type} {hir::methodfilter::ResetCache; hir::methodfilter::Excluded $hir $cand $type}
+        proc excluded {hir cand type} {hir::methods::ResetCache; hir::methods::Excluded $hir $cand $type}
         set results {}
         foreach cand {std::mfkinds::declared std::mfkinds::trusted std::mfkinds::checked} {
             lappend results [excluded $hir $cand str] [excluded $hir $cand {list int}] [excluded $hir $cand any] [excluded $hir $cand never]
@@ -342,24 +186,24 @@ test mf-contract-kinds-by-source {a module function is ruled out by the kind of 
 
 test mf-kinds-outside-the-comparable-set-exclude-nothing {a parameter or receiver kind that is not one of the plain value kinds excludes nothing (a domain or a refinement is named by another kind, and a pointer is not compared): only int str bool unit UnicodeChar list struct enum mutvec mutarray are} -body {
     set hir [dict get [mfCompile $::mfChain 0] hir]
-    set saved $hir::methodfilter::paramKinds
+    set saved $hir::methods::paramKinds
     try {
-        dict set hir::methodfilter::paramKinds mfx::f cptr
-        dict set hir::methodfilter::paramKinds mfx::g list
-        dict set hir::methodfilter::paramKinds mfx::h Small
-        list [hir::methodfilter::Excluded $hir mfx::f {list int}] \
-            [hir::methodfilter::Excluded $hir mfx::g {mutarray int}] \
-            [hir::methodfilter::Excluded $hir mfx::g {list int}] \
-            [hir::methodfilter::Excluded $hir mfx::h {list int}]
+        dict set hir::methods::paramKinds mfx::f cptr
+        dict set hir::methods::paramKinds mfx::g list
+        dict set hir::methods::paramKinds mfx::h Small
+        list [hir::methods::Excluded $hir mfx::f {list int}] \
+            [hir::methods::Excluded $hir mfx::g {mutarray int}] \
+            [hir::methods::Excluded $hir mfx::g {list int}] \
+            [hir::methods::Excluded $hir mfx::h {list int}]
     } finally {
-        set hir::methodfilter::paramKinds $saved
+        set hir::methods::paramKinds $saved
     }
 } -result {0 1 0 0}
 
 test mf-excluded-by-nominal-identity {a module function whose declared first parameter is a named struct is ruled out for a receiver of another named struct -- another declaration, whatever its fields -- and never by the type arguments (an application of the same struct survives, even one the parameter's arguments reject), an inferred contract, or a receiver that is no named struct} -body {
     mfWithNominalModules {
         set hir [dict get [mfCompile "import std::mfna\nimport std::mfnb\n\n1\n" 0] hir]
-        proc excluded {hir cand type} {hir::methodfilter::ResetCache; hir::methodfilter::Excluded $hir $cand $type}
+        proc excluded {hir cand type} {hir::methods::ResetCache; hir::methods::Excluded $hir $cand $type}
         list [excluded $hir std::mfna::size {nstruct std::mfnb::Box}] \
             [excluded $hir std::mfna::size {nstruct std::mfna::Box}] \
             [excluded $hir std::mfnb::size {nstruct std::mfna::Box}] \
@@ -373,162 +217,312 @@ test mf-excluded-by-nominal-identity {a module function whose declared first par
     }
 } -result {1 0 1 0 1 0 0 0 0 1}
 
-test mf-seeds-are-decided {a call seeded by an earlier round is decided: with every call seeded the filter has nothing to decide, and with some seeded it decides the rest around them} -body {
+# ---------------------------------------------------------------------------
+# What the kind proofs settle, and the cost
+
+test mf-chain-decided-in-one-wave {a receiver chain of three calls on one MutableArray: the earlier calls stand at `std::list::at` in the first build, which narrows the binding to nothing for the later ones, so their receivers are `never`; the kind wave reads them as the binding's defined type, settles the three in one wave, and certification finds every receiver right in the one build it makes (the reference rule judges every candidate by its own build, round after round), and the decisions and the program are the reference rule's} -body {
+    set reference [mfCompile $::mfChain 0]
+    set decided [mfCompile $::mfChain 1]
+    list [expr {[dict get $reference methodTrials] > 3}] \
+        [dict get $decided methodTrials] [dict get $decided methodDeviations] [dict get $decided methodFinals] \
+        [mfSame $decided $reference] [dict get $decided diagnostics]
+} -result {1 1 0 0 1 {}}
+
+test mf-typed-receivers-one-build {every receiver typed: the first wave settles all five calls (`v.at(0)` has the receiver `never` while `v.length()` stands at its first candidate, `std::list::length`, which narrows `v` to a List, so it is read as the parameter's declared type) and the one build is the final program} -body {
+    set reference [mfCompile $::mfTyped 0]
+    set decided [mfCompile $::mfTyped 1]
+    list [dict get $decided methodTrials] [dict get $decided methodDeviations] \
+        [expr {[dict get $reference builds] > [dict get $decided builds]}] \
+        [mfSame $decided $reference] [dict size [dict get $decided hir methodDecided]]
+} -result {1 0 1 1 5}
+
+test mf-first-candidates-no-build {calls the kind proofs settle at their first candidate need no build at all: the first build is the final program} -body {
+    set text "${::mfImports}xs = \[1, 2\]\nxs.length()\n"
+    set decided [mfCompile $text 1]
+    list [dict get $decided builds] [dict get $decided methodTrials] [dict get $decided methodFinals] \
+        [dict get $decided methodReused] [mfSame $decided [mfCompile $text 0]]
+} -result {1 0 0 1 1}
+
+test mf-trait-operation-needs-no-build {a trait operation decided before any build lets a program whose other calls settle at their first candidates be certified without a build at all} -body {
+    set text "import std::list\nimport std::str\n\ntrait Measured:\n    fn length(value: Measured) -> int\n\nfn size(v: Measured) -> int:\n    v.length()\n\nsize(\"abcd\") + \[1, 2\].length()\n"
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [dict get $decided methodTrials] [dict get $decided methodFinals] [mfSame $decided $reference] \
+        [expr {[dict get $decided builds] < [dict get $reference builds]}]
+} -result {0 0 1 1}
+
+test mf-audit-returns-the-reference-program {under the reference audit the program is the reference rule's own; the decisions are recorded in the order of the calls whatever the rule} -body {
+    set audited [mfCompile $::mfOrder 1 1]
+    set reference [mfCompile $::mfOrder 0]
+    set decided [mfCompile $::mfOrder 1 0]
+    list [expr {[dict get $audited hir methodDecided] eq [dict get $reference hir methodDecided]}] \
+        [expr {[dict get $decided hir methodDecided] eq [dict get $reference hir methodDecided]}] \
+        [expr {[dict keys [dict get $decided hir methodDecided]] eq [dict keys [dict get $decided hir methodCalls]]}]
+} -result {1 1 1}
+
+test mf-wrong-guess-corrected {a stand-in the kind wave guesses wrong (here the second link of the chain is made `std::list::at`) is corrected by certification, which reads the receivers the build really gives: the decided program is the reference rule's} -body {
+    set reference [mfCompile $::mfChain 0]
+    mfWithWrongGuess {
+        set decided [mfCompile $::mfChain 1]
+        set audited [mfCompile $::mfChain 1 1]
+    }
+    list [expr {[dict get $decided methodTrials] > 1}] [dict get $decided diagnostics] \
+        [mfSame $decided $reference] [mfSame $audited $reference]
+} -result {1 {} 1 1}
+
+test mf-narrowed-untyped-receiver {an untyped receiver that an explicit qualified call narrowed first is settled by its narrowed kind} -body {
+    set reference [mfCompile $::mfNarrowed 0]
+    set decided [mfCompile $::mfNarrowed 1]
+    list [dict get $decided methodDeviations] [dict get $decided diagnostics] [mfSame $decided $reference] \
+        [expr {[dict get $decided builds] < [dict get $reference builds]}]
+} -result {0 {} 1 1}
+
+test mf-nominal-receivers-decided {MutableMap and MutableSet receivers in a program importing both modules: `length` is a function of each, and each receiver rules out the other's by its struct's declaration, so the kind wave settles every call and certification needs no single deviation; the reference rule judges every candidate by its own build} -body {
+    set text "import std::mutable_map\nimport std::mutable_set\n\nfn f(m: std::mutable_map::MutableMap\[int, int\]) -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(3)\n    e = if m.empty?():\n        1\n    else:\n        0\n    m.length() + s.length() + e\n\nm = std::mutable_map::create\[int, int\]()\nm.set(1, 2)\nf(m)\n"
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [dict get $decided diagnostics] [dict get $decided methodDeviations] \
+        [dict get $decided methodTrials] [expr {[dict get $reference methodTrials] > 1}] \
+        [mfSame $decided $reference] [mfSame [mfCompile $text 1 1] $reference]
+} -result {{} 0 1 1 1 1}
+
+test mf-nominal-same-fields-excluded {a struct with the same fields as another module's struct is still another declaration: `b.size()` on a std::mfnb::Box (a typed parameter, and a local bound to a construction) rules std::mfna::size out, and the decision and program are the reference rule's} -body {
+    mfWithNominalModules {
+        set text "import std::mfna\nimport std::mfnb\n\nfn g(b: std::mfnb::Box) -> int:\n    c = std::mfna::Box {v: 5}\n    b.size() + c.size()\n\ng(std::mfnb::Box {v: 4})\n"
+        set reference [mfCompile $text 0]
+        set decided [mfCompile $text 1]
+        list [dict get $decided diagnostics] [dict get $decided methodDeviations] \
+            [lsort -unique [lmap {k v} [dict get $decided decided] {set v}]] \
+            [expr {[dict get $decided builds] < [dict get $reference builds]}] \
+            [mfSame $decided $reference] [mfSame [mfCompile $text 1 1] $reference]
+    }
+} -result {{} 0 {std::mfna::size std::mfnb::size} 1 1 1}
+
+# ---------------------------------------------------------------------------
+# What the kind proofs leave to the candidates' own builds
+
+test mf-untyped-receiver-judged-by-builds {an untyped receiver fits every candidate: no kind proof rules one out, each is judged by its own build (the standing one by the first build, the other two by one each -- the trial round's, which certification reads again as their single deviations), and the call is AMBIGUOUS-METHOD-CALL as under the reference rule} -body {
+    set reference [mfCompile $::mfAmbiguous 0]
+    set decided [mfCompile $::mfAmbiguous 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+        [dict get $decided methodTrials]
+} -result {AMBIGUOUS-METHOD-CALL 1 2}
+
+test mf-no-applicable-method {an Int receiver rules out every candidate: no survivor, and NO-APPLICABLE-METHOD with every candidate's reason, which its own build gives (made for the message only), as under the reference rule} -body {
+    set reference [mfCompile $::mfNoApplicable 0]
+    set decided [mfCompile $::mfNoApplicable 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference]
+} -result {NO-APPLICABLE-METHOD 1}
+
+test mf-lexical-candidate-never-excluded {a function of the file named like the method fits as an imported one does: no kind proof rules a lexical name out, so both candidates are judged by their builds and the ambiguity is reported} -body {
+    set reference [mfCompile $::mfLexical 0]
+    set decided [mfCompile $::mfLexical 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+        [dict get $decided methodTrials]
+} -result {AMBIGUOUS-METHOD-CALL 1 1}
+
+test mf-domain-parameter-not-compared {a candidate whose first parameter is an integer domain is not ruled out by an Int receiver (a literal in the domain is admitted by its range): the file's own `pick(n: Int)` and the module's `pick(n: Small)` both fit `5.pick()`, and the ambiguity is reported} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir pickdom.bot] w]
+        puts $f "type Small = Int in 0..10\n\nfn pick(n: Small) -> int:\n    n\n"
+        close $f
+        set text "import std::pickdom\n\nfn pick(n: int) -> int:\n    n\n\n5.pick()\n"
+        set reference [mfCompile $text 0]
+        set decided [mfCompile $text 1]
+        list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+            [mfSame [mfCompile $text 1 1] $reference]
+    }
+} -result {AMBIGUOUS-METHOD-CALL 1 1}
+
+test mf-nominal-arguments-not-compared {the type arguments of a named struct never rule a candidate out: a std::mfna::Pair[str, str] receiver leaves std::mfnb::weight (declared over Pair[int, int]) a survivor beside std::mfna::weight, and its own build finds it not applicable, so the call is std::mfna::weight; a Pair[int, int] receiver fits both, and the ambiguity is reported (comparing arguments would rule the imprinted Pair[A, B] out and accept the other)} -body {
+    mfWithNominalModules {
+        set results {}
+        foreach {args values} {{str, str} {"x", b: "y"} {int, int} {1, b: 2}} {
+            set text "import std::mfna\nimport std::mfnb\n\nfn h(p: std::mfna::Pair\[$args\]) -> int:\n    p.weight()\n\nh(std::mfna::Pair\[$args\] {a: $values})\n"
+            set reference [mfCompile $text 0]
+            set decided [mfCompile $text 1]
+            lappend results [lmap d [dict get $decided diagnostics] {lindex $d 0}] \
+                [lmap {k v} [dict get $decided decided] {set v}] [mfSame $decided $reference] \
+                [mfSame [mfCompile $text 1 1] $reference]
+        }
+        set results
+    }
+} -result {{} std::mfna::weight 1 1 AMBIGUOUS-METHOD-CALL {} 1 1}
+
+test mf-nominal-inferred-contract-not-compared {an inferred first-parameter contract is no declaration: std::mfna::tag (untyped, inferred std::mfna::Box) is not ruled out by a std::mfnb::Box receiver; its own build finds the inferred contract rejecting the receiver, and the call is std::mfnb::tag} -body {
+    mfWithNominalModules {
+        set text "import std::mfna\nimport std::mfnb\n\nfn k(b: std::mfnb::Box) -> int:\n    b.tag()\n\nk(std::mfnb::Box {v: 4})\n"
+        set reference [mfCompile $text 0]
+        set decided [mfCompile $text 1]
+        list [dict get $decided methodTrials] [mfSame $decided $reference] [dict get $decided diagnostics] \
+            [lmap {k v} [dict get $decided decided] {set v}]
+    }
+} -result {1 1 {} std::mfnb::tag}
+
+test mf-problem-in-the-only-survivor {a call whose only surviving candidate has a problem of its own (an argument the candidate's inferred contract rejects) has no applicable candidate: NO-APPLICABLE-METHOD, beside the candidate's own TYPE error, which the decision must not drop} -body {
+    set text "${::mfImports}xs = \[1, 2\]\nxs.get(\"k\", 0)\n"
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference]
+} -result {{NO-APPLICABLE-METHOD TYPE} 1}
+
+test mf-trait-operation-is-the-traits {a method-style call on a trait view is an operation of the trait: it is decided by the trait before any candidate is judged, whatever candidates are visible by name; the calls beside it are decided around it} -body {
+    set text "import std::list\nimport std::str\nimport std::mutable_array\n\ntrait Measured:\n    fn length(value: Measured) -> int\n\nfn size(v: Measured) -> int:\n    v.length()\n\nfn h() -> int errors IndexNotFound:\n    a = std::mutable_array::allocate(2)\n    std::mutable_array::set(a, 0, 5)\n    a.at(0) + a.get(1, -1)\n\nr = h():\n    on IndexNotFound:\n        -1\nsize(\"abcd\") + \[1, 2\].length() + r\n"
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [dict get $decided diagnostics] [mfSame $decided $reference] [dict get $decided methodDeviations] \
+        [mfSame [mfCompile $text 1 1] $reference]
+} -result {{} 1 0 1}
+
+test mf-seeds-are-decided {a call seeded by an earlier round is decided as it is: with every call seeded nothing is built, and with some seeded the rest are decided around them} -body {
     set captured {}
-    rename hir::methodfilter::Decide hir::methodfilter::DecideReal
-    proc hir::methodfilter::Decide {args} {
+    rename hir::methods::Decide hir::methods::DecideReal
+    proc hir::methods::Decide {args} {
         if {$::captured eq ""} { set ::captured $args }
-        hir::methodfilter::DecideReal {*}$args
+        hir::methods::DecideReal {*}$args
     }
     try {
         mfCompile $::mfChain 1
     } finally {
-        rename hir::methodfilter::Decide {}
-        rename hir::methodfilter::DecideReal hir::methodfilter::Decide
+        rename hir::methods::Decide {}
+        rename hir::methods::DecideReal hir::methods::Decide
     }
     lassign $::captured nodes options given hir seeds
     set decided [dict get [dict get [mfCompile $::mfChain 0] hir] methodDecided]
     set keys [dict keys $decided]
-    set none [hir::methodfilter::Decide $nodes $options $given $hir $decided]
+    set before [dict get [hir::BuildStats] builds]
+    set none [hir::methods::Decide $nodes $options $given $hir $decided]
+    set noneBuilds [expr {[dict get [hir::BuildStats] builds] - $before}]
     hir::activate $hir
     # (The first build of a round is made with its seeds as the choices.)
     set seeds [dict create [lindex $keys 0] [dict get $decided [lindex $keys 0]]]
     set seeded [hir::BuildOnce $nodes $options $given $seeds 0 checked]
-    set some [hir::methodfilter::Decide $nodes $options $given $seeded $seeds]
-    list [dict get $none attempted] [dict get $some attempted] [dict get $some certified] \
-        [expr {[dict get $some hir methodDecided] eq [dict get $some hir methodChoices]}] \
-        [expr {[lsort -stride 2 [dict get $some hir methodDecided]] eq [lsort -stride 2 $decided]}]
-} -result {0 1 1 1 1}
+    set some [hir::methods::Decide $nodes $options $given $seeded $seeds]
+    list $noneBuilds [expr {[dict get $none methodDecided] eq $decided}] \
+        [expr {[lsort -stride 2 [dict get $some methodDecided]] eq [lsort -stride 2 $decided]}]
+} -result {0 1 1}
 
-test mf-poisoned-receiver-is-not-guessed {a receiver that is `never` because the program itself narrowed its binding to nothing (an explicit call of `std::mutable_array::at` on a List) is read as the binding's defined type only as a guess: the decision `std::list::at`, which is the first candidate and so needs no build, is not certified, because the receiver in the build is still `never`; the exact decision reports the ambiguity a `never` receiver has} -body {
+test mf-never-receiver-is-not-guessed {a receiver that is `never` because the program itself narrowed its binding to nothing (an explicit call of `std::mutable_array::at` on a List) is read as the binding's defined type only by the kind waves' guess: certification reads the receiver the build gives, `never`, which every candidate accepts, and the call is AMBIGUOUS-METHOD-CALL} -body {
     set text "${::mfImports}fn bad(a: List\[int\]) -> int errors IndexNotFound:\n    n = std::mutable_array::at(a, 0)\n    n + a.at(0)\n\nr = bad(\[1\]):\n    on IndexNotFound:\n        -1\nr\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-        [dict get $filtered methodFiltered] [mfSame [mfCompile $text 1 1] $exact]
-} -result {AMBIGUOUS-METHOD-CALL 1 0 1}
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+        [mfSame [mfCompile $text 1 1] $reference]
+} -result {AMBIGUOUS-METHOD-CALL 1 1}
 
-test mf-two-survivors-are-not-decided {two candidates that both fit a receiver (the String receiver of a module's `length(s: str)` and `std::str::length`, with `std::list::length` ruled out and so the first of the survivors not the standing first candidate) are the exact decision's: the filter makes no build for them, however it could order them} -body {
+test mf-two-survivors-judged-by-builds {two candidates that both fit a receiver (the String receiver of a module's `length(s: str)` and `std::str::length`, with `std::list::length` ruled out, so neither survivor is the standing first candidate): each survivor is judged by its own build, and both are applicable} -body {
     withPrivateLibrary {
         set f [open [file join $::core::libraryDir mfpick.bot] w]
         puts $f "fn length(s: str) -> int:\n    1\n"
         close $f
         set text "import std::list\nimport std::str\nimport std::mfpick\n\nfn m(s: str) -> int:\n    s.length()\n\nm(\"ab\")\n"
-        set exact [mfCompile $text 0]
-        set filtered [mfCompile $text 1]
-        list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-            [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned] \
-            [expr {[dict get $filtered builds] == [dict get $exact builds]}]
+        set reference [mfCompile $text 0]
+        set decided [mfCompile $text 1]
+        list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+            [dict get $decided methodTrials]
     }
-} -result {AMBIGUOUS-METHOD-CALL 1 0 0 1}
+} -result {AMBIGUOUS-METHOD-CALL 1 2}
 
-test mf-nested-results-need-a-second-wave {a method call whose receiver is another's result, or a binding bound to it, is settled once that one is decided: the first wave decides the five calls whose receivers are known (and builds), the second the sixth, whose decision is the build's own standing candidate and needs no build, and neither wave hands over for the receivers it cannot read yet} -body {
-    set exact [mfCompile $::mfNested 0]
-    set filtered [mfCompile $::mfNested 1]
-    list [dict get $filtered methodFiltered] [dict get $filtered methodTrials] [dict get $filtered diagnostics] \
-        [mfSame $filtered $exact] [mfSame [mfCompile $::mfNested 1 1] $exact]
-} -result {1 1 {} 1 1}
+test mf-nested-results-need-a-second-wave {a method call whose receiver is another's result, or a binding bound to it, is settled once that one is: the first wave settles the five calls whose receivers are known, the build it makes gives the sixth its receiver, and certification needs no deviation} -body {
+    set reference [mfCompile $::mfNested 0]
+    set decided [mfCompile $::mfNested 1]
+    list [dict get $decided methodDeviations] [dict get $decided diagnostics] \
+        [mfSame $decided $reference] [mfSame [mfCompile $::mfNested 1 1] $reference]
+} -result {0 {} 1 1}
 
-test mf-user-function-result-is-not-closed {a receiver that is the result of a function of the program is not settled before the calls inside that function are: its result is inferred from them, so the filter waits for the second wave instead of handing the outer call over} -body {
+test mf-user-function-result {a receiver that is the result of a function of the program is settled once the calls inside that function are: its result is inferred from them} -body {
     set text "${::mfImports}fn pick(a: MutableArray\[List\[int\]\]):\n    a.get(0, \[0\])\n\nfn n() -> int:\n    arr = std::mutable_array::create(2, \[7, 8\])\n    pick(arr).length()\n\nn()\n"
-    set exact [mfCompile $text 0]
-    set filtered [mfCompile $text 1]
-    list [dict get $filtered methodFiltered] [dict get $filtered diagnostics] [mfSame $filtered $exact] \
-        [mfSame [mfCompile $text 1 1] $exact]
-} -result {1 {} 1 1}
+    set reference [mfCompile $text 0]
+    set decided [mfCompile $text 1]
+    list [dict get $decided methodDeviations] [dict get $decided diagnostics] [mfSame $decided $reference] \
+        [mfSame [mfCompile $text 1 1] $reference]
+} -result {0 {} 1 1}
 
-test mf-hopeless-call-wastes-no-build {a call with two survivors and a receiver nothing can change is the exact decision's and so is the program: the filter hands over before it builds for the calls it could settle} -body {
-    set exact [mfCompile $::mfHopeless 0]
-    set filtered [mfCompile $::mfHopeless 1]
-    list [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [mfSame $filtered $exact] \
-        [dict get $filtered methodFilterAbandoned] [expr {[dict get $filtered builds] == [dict get $exact builds]}]
-} -result {AMBIGUOUS-METHOD-CALL 1 0 1}
+test mf-unsettled-call-beside-settled-ones {a call no kind proof settles (a function of the file beside std::list::length, both fitting a List) beside calls that are settled: the kind wave's one build settles those, one more judges the unsettled call's other survivor, and only the unsettled call is rejected} -body {
+    set reference [mfCompile $::mfHopeless 0]
+    set decided [mfCompile $::mfHopeless 1]
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+        [dict get $decided methodTrials] [expr {[dict size [dict get $decided hir methodDecided]] == 2}]
+} -result {AMBIGUOUS-METHOD-CALL 1 2 1}
 
-test mf-wave-limit-hands-over {a decision that needs more waves than the limit is the exact decision's, with the same outcome; the abandoned builds are counted} -body {
-    set saved $hir::methodfilter::maxWaves
-    set hir::methodfilter::maxWaves 1
+test mf-wave-limit {a decision that needs more waves than the limit is certified all the same, to the reference rule's outcome} -body {
+    set saved $hir::methods::maxWaves
+    set hir::methods::maxWaves 0
     try {
-        mfWithWrongGuess {
-            set filtered [mfCompile $::mfChain 1]
-        }
+        set decided [mfCompile $::mfChain 1]
     } finally {
-        set hir::methodfilter::maxWaves $saved
+        set hir::methods::maxWaves $saved
     }
-    list [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned] \
-        [mfSame $filtered [mfCompile $::mfChain 0]]
-} -result {0 1 1}
+    list [dict get $decided diagnostics] [mfSame $decided [mfCompile $::mfChain 0]]
+} -result {{} 1}
 
 # ---------------------------------------------------------------------------
-# The audit
+# The reference audit
 
-test mf-audit-agrees {under the audit every certified decision is made by the exact decision as well and found the same, and the program is the exact one's} -body {
-    set before $hir::methodFilterAudits
+test mf-audit-agrees {under the audit every decision is made by the reference rule as well and found the same, and the program is the reference rule's} -body {
+    set before $hir::methodReferenceAudits
     set results {}
-    set raw {}
     foreach text [list $::mfChain $::mfTyped $::mfNarrowed $::mfAmbiguous $::mfNoApplicable $::mfLexical] {
         set audited [mfCompile $text 1 1]
-        set exact [mfCompile $text 0]
-        lappend results [mfSame $audited $exact]
-        # (The audit returns the exact decision's own program, down to the
-        # order its decisions are recorded in.)
-        foreach key {methodChoices methodDecided} {
-            lappend raw [expr {[dict get $audited hir $key] eq [dict get $exact hir $key]}]
-        }
+        set reference [mfCompile $text 0]
+        lappend results [mfSame $audited $reference]
     }
-    list $results $raw [expr {$hir::methodFilterAudits - $before}]
-} -result {{1 1 1 1 1 1} {1 1 1 1 1 1 1 1 1 1 1 1} 3}
+    list $results [expr {$hir::methodReferenceAudits - $before}]
+} -result {{1 1 1 1 1 1} 6}
 
-test mf-audit-can-fail {the audit fails when the filter decides what the exact decision does not: a Survivors that always offers the first candidate decides the lexical-versus-imported ambiguity, which the exact decision reports} -body {
-    rename hir::methodfilter::Survivors hir::methodfilter::SurvivorsReal
-    proc hir::methodfilter::Survivors {hir calls key {guess 0}} {
-        lrange [hir::methodfilter::SurvivorsReal $hir $calls $key $guess] 0 0
+test mf-audit-can-fail {the audit fails when a kind proof rules out what the candidate's own build would not: an Excluded that rules out every lexical candidate decides the lexical-versus-imported ambiguity, which the reference rule reports} -body {
+    rename hir::methods::Excluded hir::methods::ExcludedReal
+    proc hir::methods::Excluded {hir cand R} {
+        if {![string match *::* $cand]} { return 1 }
+        hir::methods::ExcludedReal $hir $cand $R
     }
     try {
         catch {mfCompile $::mfLexical 1 1} message
     } finally {
-        rename hir::methodfilter::Survivors {}
-        rename hir::methodfilter::SurvivorsReal hir::methodfilter::Survivors
+        rename hir::methods::Excluded {}
+        rename hir::methods::ExcludedReal hir::methods::Excluded
     }
-    regexp {^hir::methodFilterAudit: the filter decided method(Choices|Decided) differently} $message
+    regexp {^hir::methodReferenceAudit: the decision's method(Choices|Decided) differs from the reference rule's} $message
 } -result 1
 
-test mf-audit-compares-programs {the audit compares the programs as well as the decisions: an exact decision that gave a different HIR for the same decisions is found} -body {
-    rename hir::DecideMethodCallsExact hir::DecideMethodCallsExactReal
-    proc hir::DecideMethodCallsExact {args} {
-        set r [hir::DecideMethodCallsExactReal {*}$args]
-        dict set r types [dict get $r types]
-        dict set r mfAudit different
+test mf-audit-compares-programs {the audit compares the programs as well as the decisions: a reference decision that gave a different HIR for the same decisions is found} -body {
+    rename hir::methods::Decide hir::methods::DecideReal
+    proc hir::methods::Decide {args} {
+        set r [hir::methods::DecideReal {*}$args]
+        if {!$::hir::methodKindProofs} {
+            dict set r mfAudit different
+        }
         return $r
     }
     try {
         catch {mfCompile $::mfChain 1 1} message
     } finally {
-        rename hir::DecideMethodCallsExact {}
-        rename hir::DecideMethodCallsExactReal hir::DecideMethodCallsExact
+        rename hir::methods::Decide {}
+        rename hir::methods::DecideReal hir::methods::Decide
     }
-    regexp {the filter's program differs from the exact decision's in: mfAudit} $message
+    regexp {the decision's program differs from the reference rule's in: mfAudit} $message
 } -result 1
 
 # ---------------------------------------------------------------------------
 # The switches
 
-test mf-switches {the filter is off with methodFilter 0, and the exact decision's own audits (methodBuildAudit, methodBuildReuse 0) run without it} -body {
+test mf-switches {the kind proofs are off with methodKindProofs 0 (every candidate judged by its own build, no wave), and the build reuse and its audit work either way} -body {
     set results {}
-    foreach {filter reuse audit} {0 1 0  1 0 0  1 1 1  1 1 0} {
+    foreach {kind reuse audit} {0 1 0  1 0 0  1 1 1  1 1 0} {
         set saved [list $hir::methodBuildReuse $hir::methodBuildAudit]
         set hir::methodBuildReuse $reuse
         set hir::methodBuildAudit $audit
         try {
-            set r [mfCompile $::mfChain $filter]
+            set r [mfCompile $::mfChain $kind]
         } finally {
             lassign $saved hir::methodBuildReuse hir::methodBuildAudit
         }
-        lappend results [dict get $r methodFiltered]
+        lappend results [expr {[dict get $r methodDeviations] > 0}] [dict get $r diagnostics]
     }
     set results
-} -result {0 0 0 1}
+} -result {1 {} 0 {} 0 {} 0 {}}
 
-test mf-certified-program-runs {the program a certified decision gives runs to the value the exact decision's program has, on the interpreter and the Tcl compiler} -body {
+test mf-certified-program-runs {the program the decision gives runs to the value the reference rule's program has, on the interpreter and the Tcl compiler} -body {
     set results {}
     foreach text [list $::mfChain $::mfTyped $::mfNarrowed] {
         foreach backend {interp compile} {

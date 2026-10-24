@@ -33,7 +33,7 @@
 #     ownership analysis's erasure of an argument (AFFINE-ERASURE-
 #     UNSUPPORTED) is not reported when an earlier check rejected that
 #     argument, or the call itself (anything but an obligation a valid call
-#     may still carry: hir::MethodObligationKinds) -- `p + 1` with a pointer
+#     may still carry: hir::methods::ObligationKinds) -- `p + 1` with a pointer
 #     `p`, a call of a value that cannot be called: no program has that
 #     position to own a value in.
 #
@@ -118,7 +118,7 @@ proc hir::recovery::OwnedPositions {hir diagnostics} {
                 && ([dict exists $rejected $e] || [dict exists $rejected [dict get $callOf $e]])} {
             continue
         }
-        if {[dict get $d kind] ni [hir::MethodObligationKinds]} {
+        if {[dict get $d kind] ni [hir::methods::ObligationKinds]} {
             dict set rejected $e 1
         }
         lappend result $d

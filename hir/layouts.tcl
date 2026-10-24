@@ -1929,9 +1929,12 @@ proc hir::layouts::verify {hirVar} {
         if {$name eq ""} continue
         set role [Role $name]
         if {$role eq "" || ![dict get $node reachable]} continue
-        foreach problem [Problems $hir $e $name $role] {
-            lassign $problem kind message expr
-            hir::Diagnose hir $kind $message $expr
+        # (The call's own problems with its operation: hir::CheckingCall.)
+        hir::CheckingCall $e {
+            foreach problem [Problems $hir $e $name $role] {
+                lassign $problem kind message expr
+                hir::Diagnose hir $kind $message $expr
+            }
         }
     }
     dict for {e node} [dict get $hir exprs] {

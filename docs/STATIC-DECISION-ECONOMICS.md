@@ -1097,7 +1097,11 @@ reads whether the site fails and, if it does, its first diagnostic -- the
 trial builds of a method-style call (`hir::MethodCallProblems`: the
 diagnostics inside the call, minus those every candidate shares), and the
 plan's gate (`C:plan`), which a failing site keeps closed whatever its
-reports.
+reports. (Since METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md a method-style
+call's builds read its *own* problems instead -- the diagnostics whose
+`subject` is the call, `hir::methods::Problems` -- and a report is the
+call's only when the call's own check makes it: `Subsume`'s argument check
+of the call, `SubsumeHandle`'s of a handle the call receives.)
 
 **The gate: only while a report can be the first diagnostic.**
 `hir::CheckOnce` records the diagnostics reported before the completion walk
@@ -1375,7 +1379,8 @@ builds (METHOD-SUGAR.md). Now:
   name, and is applied only to a call still present with that candidate
   among its candidates.
 * **No configuration built twice** (`hir::MethodConfig`,
-  `hir::MethodTrialRecord`): a build is a pure function of its
+  `hir::MethodTrialRecord`; now `hir::methods::Config` and `Record`): a
+  build is a pure function of its
   *configuration* -- the candidate every multi-candidate call resolves to --
   so one decision builds each configuration once. A trial whose
   configuration an earlier build of the decision had (the initial build, or
@@ -1531,12 +1536,34 @@ exact decision's, made from the start (METHOD-DECISION-FILTER.md). The exact
 decision above is unchanged and is what `hir::methodFilter 0` runs; the
 filter's waves count as `methodTrials`.
 
+**Since then: one decision, certified** (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md).
+The exact decision judged a candidate by the diagnostics located inside the
+call, so an outer candidate's rejection of an inner call's result counted
+against the inner call (EXACT-METHOD-DECISION-MISATTRIBUTION.md), and a
+program's outcome depended on whether the filter or the exact decision
+decided it. Both are replaced by `hir/methods.tcl`: a candidate is
+applicable when the call's own checks (diagnostics whose `subject` is the
+call) find nothing in the build of the decided configuration with the call
+moved to it, and the decision is the configuration in which every call has
+exactly the candidate it stands at applicable. The search (the filter's
+kind waves, then coordinated trial rounds) only proposes a configuration;
+certification judges every candidate the kind proofs leave by the decided
+build or a single deviation of it. The floor is no longer n - 1
+configurations per chain link but one single deviation per candidate a kind
+proof does not rule out; every build is still made once (the records above,
+keyed by configuration), and the seeds across rounds are unchanged. That
+report's "Economics" has the corpus measurements.
+
 ## Instrumentation
 
 * `hir::BuildStats`: process counters of whole-program builds
   (`hir::BuildOnce`), method trial builds (the kind filter's waves among
   them), method final builds, and builds reused, and the kind filter's
   decisions completed, handed over and taken back; read as differences.
+  (Since METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md: builds,
+  `methodTrials` -- the kind waves', the trial rounds' and the single
+  deviations' --, `methodDeviations` among them, `methodFinals` and
+  `methodReused`.)
 * `staticStats` on every decided HIR: scheduler, rounds, builds, method
   trials/finals/reused, `committedWithoutBuild`, the dependency analysis's
   milliseconds (`depMs`), `mispredicted`, and with `hir::static::trace 1` (or

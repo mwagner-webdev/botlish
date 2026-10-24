@@ -1,0 +1,179 @@
+# Mutants of the method-call decision (audit/method-resolution/tools/
+# mutate.tcl; METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, "Mutation
+# testing"): deliberate breaks of a call's own problems (the `subject` of a
+# diagnostic, hir/hir.tcl's hir::CheckingCall and the checks that use it) and
+# of the decision (hir/methods.tcl). Each must be killed by
+# tests/method-resolution.test or tests/method-filter.test, or else by the
+# independent oracle (audit/method-resolution/tools/oracle.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# Ownership: which diagnostics are a call's own
+
+@@ owned-by-location a call's problems are the diagnostics located at it (the old rule): an outer call's rejection of an inner call's result, reported at the inner call's node, is charged to the inner call
+## hir/methods.tcl
+<<<<
+        dict lappend owned [dict get $d subject] [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+====
+        dict lappend owned [dict get $d expr] [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+>>>>
+
+@@ nested-call-problems-charged a call's problems include those of the calls in its arguments (the old subtree rule): an inner call's failure in the build of an outer candidate rules that candidate out
+## hir/methods.tcl
+<<<<
+    set problems [dict getdef $owned $e {}]
+====
+    set problems [dict getdef $owned $e {}]
+    foreach a [dict get $hir exprs $e args] {
+        lappend problems {*}[dict getdef $owned $a {}]
+    }
+>>>>
+
+@@ subject-not-recorded no diagnostic records the call whose check produced it: no candidate has a problem of its own but a native's kind mismatch
+## hir/hir.tcl
+<<<<
+    if {$checkingCall ne ""} {
+        dict set diagnostic subject $checkingCall
+    }
+    dict lappend hir diagnostics $diagnostic
+}
+
+# Diagnose, locating
+====
+    dict lappend hir diagnostics $diagnostic
+}
+
+# Diagnose, locating
+>>>>
+
+@@ subject-leaks a call's check leaves its subject behind: the diagnostics reported after it are charged to it
+## hir/hir.tcl
+<<<<
+    set code [catch {uplevel 1 $script} result options]
+    set checkingCall $saved
+====
+    set code [catch {uplevel 1 $script} result options]
+>>>>
+
+@@ argument-check-unowned the admission of a call's arguments by its callee's parameters (hir/range.tcl's VerifyCall) is no check of the call's own
+## hir/range.tcl
+<<<<
+    hir::CheckingCall $e {VerifyCallChecks hir $ranges $e $node}
+====
+    VerifyCallChecks hir $ranges $e $node
+>>>>
+
+@@ instance-check-unowned an invalid semantic instance of the callee for the call's arguments is no problem of the call's own
+## hir/semantic.tcl
+<<<<
+        hir::CheckingCall $e {
+            hir::Diagnose hir [DerivedKind $own $callee] [Derived $hir $callee $e $own] $e
+        }
+====
+        hir::Diagnose hir [DerivedKind $own $callee] [Derived $hir $callee $e $own] $e
+>>>>
+
+# ---------------------------------------------------------------------------
+# The decision
+
+@@ standing-only-judged no single deviation is built: a call's candidates other than the one it stands at are taken to be not applicable, so a call is decided to whatever stand-in the search left it at
+## hir/methods.tcl
+<<<<
+        foreach cand $survivors {
+            if {$cand eq $standing} continue
+            set deviation [Build state [dict merge $choices [list $key $cand]] deviation]
+====
+        foreach cand {} {
+            if {$cand eq $standing} continue
+            set deviation [Build state [dict merge $choices [list $key $cand]] deviation]
+>>>>
+
+@@ deviations-accumulate the deviations of one call are built on top of each other's and of the calls judged before it: a call is judged in a configuration where other calls deviate too
+## hir/methods.tcl
+<<<<
+            if {$cand eq $standing} continue
+            set deviation [Build state [dict merge $choices [list $key $cand]] deviation]
+====
+            if {$cand eq $standing} continue
+            set choices [dict merge $choices [list $key $cand]]
+            set deviation [Build state $choices deviation]
+>>>>
+
+@@ standing-problems-ignored the candidate a call stands at is applicable whatever its own problems
+## hir/methods.tcl
+<<<<
+        if {$standing in $survivors} {
+            dict set problems $standing [dict get $entry problems]
+        }
+====
+        if {$standing in $survivors} {
+            dict set problems $standing {}
+        }
+>>>>
+
+@@ first-applicable-decides a call with several applicable candidates is decided to the first (a precedence by candidate order)
+## hir/methods.tcl
+<<<<
+        if {[llength $applicable] == 1} {
+            dict set decided $key [lindex $applicable 0]
+        }
+====
+        if {[llength $applicable] >= 1} {
+            dict set decided $key [lindex $applicable 0]
+        }
+>>>>
+
+@@ ambiguity-reported-as-none a call with several applicable candidates is reported as having none
+## hir/methods.tcl
+<<<<
+    if {[llength $valid] > 1} {
+====
+    if {[llength $valid] > 99} {
+>>>>
+
+@@ certification-on-guesses certification reads the receivers the kind waves guess, not the ones the build gives
+## hir/methods.tcl
+<<<<
+            survivors [Survivors $hir $calls $key $receiver $R 0] \
+====
+            survivors [Survivors $hir $calls $key $receiver $R 1] \
+>>>>
+
+@@ proposal-is-the-decision certification never moves a call: the configuration the trial rounds proposed is the decision whatever its single deviations find
+## hir/methods.tcl
+<<<<
+        set next $choices
+        dict for {key verdict} $verdicts {
+            set applicable [dict get $verdict applicable]
+            if {$applicable ne {}} {
+                dict set next $key [lindex $applicable 0]
+            } else {
+                dict set next $key [lindex [dict get $calls $key candidates] 0]
+            }
+        }
+====
+        set next $choices
+>>>>
+
+@@ oscillation-decided a call still moving at the bound keeps the candidate it moved to and is decided, never rejected
+## hir/methods.tcl
+<<<<
+                    dict set unstable $key [list [dict get $choices $key] $choice]
+====
+                    dict set choices $key $choice
+>>>>
+
+@@ final-any-build the final program is the last build made, whatever its configuration: a single deviation's
+## hir/methods.tcl
+<<<<
+    if {$methodBuildReuse && $config eq $lastConfig} {
+====
+    if {$methodBuildReuse} {
+>>>>

@@ -277,7 +277,8 @@ kinds or assumed the only number is Int. All now include the float family,
 through `core::type::scalarKinds`/`isFloat`, not a second list:
 
 * `hir::types::IsEqualityTotal`: the kinds whose `==` never fails.
-* `hir/methodfilter.tcl`'s comparable kinds.
+* `hir/methodfilter.tcl`'s comparable kinds (now `hir/methods.tcl`'s kind
+  proofs: METHOD-DECISION-FILTER.md).
 * `hir/modulebinding.tcl`'s value kinds.
 * `hir/mutvec.tcl`'s `MayHoldVector`: a float holds no vector.
 * `hir/containers.tcl`'s `NonRetaining`.

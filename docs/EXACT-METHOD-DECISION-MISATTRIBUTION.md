@@ -1,8 +1,14 @@
 # The exact method-call decision charges an outer call's problem to an inner call
 
-Status: **open, not fixed.** Reported 2026-10-24 and deliberately left
-alone. This document records the defect, how to reproduce it, how it works
-and what a fix would involve. Nothing here has been changed in the compiler.
+Status: **fixed** by METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, which
+replaced the exact decision and the kind filter with one decision whose
+verdicts are a call's own checks (`subject`), certified relative to the
+decided configuration (`hir/methods.tcl`). The reproducer below compiles and
+runs; `tests/method-resolution.test` pins it and its variants
+(`mr-reported-chain-*`, `mr-argument-nested-*`). The rest of this document is
+the defect as reported, 2026-10-24: it names procedures
+(`hir::DecideMethodCallsExact`, `hir::MethodCallProblems`,
+`hir/methodfilter.tcl`) that no longer exist.
 
 ## Summary
 

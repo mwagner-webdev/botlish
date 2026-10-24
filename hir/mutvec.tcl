@@ -350,7 +350,9 @@ proc hir::mutvec::verify {hirVar} {
                     }
                 }
                 if {$problem ne ""} {
-                    hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $arg
+                    # The call's own problem: its callee's place parameter is
+                    # given no place of this function (hir::CheckingCall).
+                    hir::CheckingCall $e {hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $arg}
                     continue
                 }
                 lappend given $path $index
@@ -363,7 +365,8 @@ proc hir::mutvec::verify {hirVar} {
         if {$receiver eq ""} continue
         set problem [ReceiverProblem $hir $e $receiver]
         if {$problem ne ""} {
-            hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $receiver
+            # The call's own problem: its mutating callee is given no place.
+            hir::CheckingCall $e {hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $receiver}
             continue
         }
         set root [lindex [Path $hir $receiver] 0]

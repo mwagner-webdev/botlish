@@ -261,7 +261,7 @@ code require nothing.
 `data.write()` is the ordinary call `write(data)` (METHOD-SUGAR.md). A context
 is an obligation of the selected call, never an extra receiver or argument,
 and a missing context is not evidence that a candidate does not fit:
-`MISSING-CONTEXT` is one of `hir::MethodObligationKinds`, like an unhandled
+`MISSING-CONTEXT` is one of `hir::methods::ObligationKinds`, like an unhandled
 declared error. With two visible candidates of the name, the consumer is
 still chosen and its call fails as `MISSING-CONTEXT`, never
 `NO-APPLICABLE-METHOD` (`contexts-method-sugar`).
