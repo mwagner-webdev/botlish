@@ -645,12 +645,14 @@ coroutine fusion off):
 
 | seed | accepted | rejected (by the predicted diagnostic) | coroutine identities whose releases were checked | disagreements |
 |---|---:|---|---:|---:|
-| 1 | 26 | 14 (AFFINE-CONTEXT-COPY-OUT 12, AFFINE-CAPTURE-UNSUPPORTED 1, MUTABLE-PLACE-RECEIVER 1) | 44 | 0 |
-| 101 | 26 | 14 (AFFINE-CONTEXT-COPY-OUT 8, AFFINE-EQUALITY-UNSUPPORTED 3, AFFINE-ELEMENT-COPY-OUT 1, MUTABLE-PLACE-RECEIVER 1, NO-APPLICABLE-METHOD 1) | 41 | 0 |
-| 201 | 31 | 9 (AFFINE-CONTEXT-COPY-OUT 6, AFFINE-CAPTURE-UNSUPPORTED 2, AFFINE-ELEMENT-COPY-OUT 1) | 52 | 0 |
-| 301 | 32 | 8 (AFFINE-CONTEXT-COPY-OUT 6, AFFINE-EQUALITY-UNSUPPORTED 1, AFFINE-ELEMENT-COPY-OUT 1) | 46 | 0 |
+| 1 | 27 | 13 (AFFINE-CONTEXT-COPY-OUT 10, MUTABLE-PLACE-RECEIVER 2, AFFINE-EQUALITY-UNSUPPORTED 1) | 55 | 0 |
+| 101 | 28 | 12 (AFFINE-CONTEXT-COPY-OUT 9, AFFINE-CAPTURE-UNSUPPORTED 1, AFFINE-ELEMENT-COPY-OUT 1, NO-APPLICABLE-METHOD 1) | 52 | 0 |
+| 201 | 19 | 21 (AFFINE-CONTEXT-COPY-OUT 13, NO-APPLICABLE-METHOD 4, AFFINE-EQUALITY-UNSUPPORTED 2, AFFINE-ELEMENT-COPY-OUT 1, MUTABLE-PLACE-RECEIVER 1) | 32 | 0 |
+| 301 | 32 | 8 (AFFINE-CONTEXT-COPY-OUT 5, AFFINE-CAPTURE-UNSUPPORTED 1, AFFINE-EQUALITY-UNSUPPORTED 2) | 58 | 0 |
 
-160 programs, 0 disagreements. The fuzzer's first runs found two faults
+160 programs, 0 disagreements (the final generator: an installation's
+context also holds a job made before it and the top level keeps a log it
+reads at the end; each seed ran in 66 to 94 seconds). The fuzzer's first runs found two faults
 of its own, both a method-call rule rather than a context one: with both
 `std::mutable_vector` and `std::mutable_array` imported, `v.element(0)` on a
 collection no context owns and `c.jobs.at(0)` have two candidates, each of
