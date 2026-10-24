@@ -64,18 +64,23 @@ brief holds there, observed rather than predicted:
 | The React Native host probe consumes the new artifact | `audit/react-native/tools/host-spike.tcl` (section 11), under GC stress and a 512 KiB stack |
 | Executables still correct | the suites of section 15 |
 
-**Built, not verified: Linux AArch64.** The library path holds no x86-64
-code:
+**Verified in CI: Linux AArch64.** The library path holds no x86-64 code:
 
 * The trampolines are Cranelift IR over the host ISA.
 * The record and forwarders are target-independent.
 * `codegen::library::SUPPORTED` (`native/src/codegen/library.rs:40`) and
   `native/native.tcl`'s `libraries` capability both name `linux-aarch64`.
 
-No AArch64 machine, cross toolchain or qemu was available in this
-container. `tests/native-library.test` runs there in CI's arm64 workflow
-(`tests-arm64.yml`), dispatched on this milestone's branch; its result is
-the AArch64 evidence.
+This container had no AArch64 machine, cross toolchain or qemu, so the
+evidence is CI's. `tests-arm64.yml`, dispatched on this branch (run
+40026035898, ubuntu-24.04-arm), passed every job:
+
+* the Tcl suite on interp (9,295 tests, 0 failed) and on compile, with no
+  test skipped for `nativeLibraries` or `nm`, so `tests/native-library.test`
+  ran in full on AArch64;
+* the whole suite under GC stress;
+* the Rust unit tests, also under GC stress, the golden suites and both
+  native coverage jobs.
 
 **Not supported: macOS, Windows and mobile targets.**
 
@@ -928,7 +933,7 @@ Sizes, x86-64, for `rnprobe.bot`:
     a 256 MiB worker that owns its instance.
   * A recoverable overflow (a library-owned stack or a guard per instance)
     belongs to the thread/actor milestone.
-* **Hosts.** Linux glibc only; x86-64 verified, AArch64 built but unrun
+* **Hosts.** Linux glibc only: x86-64 tested here, AArch64 in CI
   (section 1). No macOS, Windows, musl or mobile libraries.
 * **Values.** Only int, bool, Float64, str and unit cross. No Lists,
   structs, maps, bytes buffers, callbacks or handles to Botlish objects.
@@ -1042,6 +1047,18 @@ All pass.
     suites, 108 artifacts and outcomes, 0 differ;
   * `-via cache`: 120, 0 differ;
   * `audit/hir-interchange/tools/mutate.tcl`: 27 mutants, 27 killed.
+
+### CI on the branch
+
+Dispatched or triggered on `ccr-2d88975d-17ru75`, at its first commit
+(f1033617):
+
+| Workflow (run) | Result |
+|---|---|
+| `tests.yml` (40026039279), Linux x86-64 | compile, cranelift and cranelift-generic coverage, Rust unit tests, stub-linked executables, warning gate, method-filter audit, golden shards 1-4: success. interp: still running at this writing. (Its GC-stress job runs on pushes to main only.) |
+| `tests-arm64.yml` (40026035898), Linux AArch64 | every job success (section 1) |
+| `macos-arm64.yml` (40026023595) | success: the driver and runtime with this milestone's code build, and their tests pass, on macOS AArch64 (where libraries are not offered) |
+| `windows-x86_64.yml` (40026023638) | smoke, root plans and acceptance shards 1, 3 and 4: success. Shard 2 failed in `tests/coroutine-fusion.test` (`cf-executable` and the fusion-site tests), which expect native coroutines Windows lacks; main's own run 40009251881 fails identically, so it is not this milestone's |
 
 ### Probes
 
