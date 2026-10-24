@@ -142,7 +142,7 @@ proc makeMutantTree {scratch} {
         file copy -force $f [file join $scratch native]
     }
     file mkdir [file join $scratch tests]
-    foreach f {helpers.tcl binary-header.tcl contexts.test} {
+    foreach f {helpers.tcl ctoolchain.tcl binary-header.tcl contexts.test} {
         file copy -force [file join $root tests $f] [file join $scratch tests]
     }
     file mkdir [file join $scratch examples linux]
