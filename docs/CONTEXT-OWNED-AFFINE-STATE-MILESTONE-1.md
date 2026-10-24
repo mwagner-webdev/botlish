@@ -609,9 +609,17 @@ Updated, because the semantics changed on purpose: `tests/c-abi-types.test`'s
 `ca-affine-containers-contexts` (a context struct may hold a pointer now;
 the test adds the observation and the copy-out), `tests/mutable-array.
 test`'s `ma-roles-audit` (the two element places' roles),
-`tests/static-compile.test`'s `sc-codes-one-to-one` (113 codes), and
-`tests/workload-icy-tower.test`'s airlock (the installation of the opaque
-Sdl) and helpers-private (the new private names) tests.
+`tests/static-compile.test`'s `sc-codes-one-to-one` and
+`tests/golden-framework.test`'s `gf-code-name-complete` (113 codes:
+`std::test::code_name` spells the new case, stdlib/test.bot),
+`tests/stdlib-namespaces.test`'s `ns-qualified-inventory` (the two element
+places; audit/stdlib-census/after.tsv regenerated), `tests/windows-io.test`'s
+`wi-context-holds-devices` (it pinned "a C pointer cannot live in a context";
+WindowsIO still holds devices, for its other reason -- a cached standard
+handle would outlive the process replacing it -- and the test now checks
+WindowsIO's fields hold no C address), and `tests/workload-icy-tower.test`'s
+airlock (the installation of the opaque Sdl) and helpers-private (the new
+private names) tests.
 
 ### 5.3 Fuzzing
 
@@ -656,11 +664,70 @@ on a temporary). The faults now spell the qualified call, and a
 
 `audit/context-affine/tools/mutate.tcl` (mutants.txt, 18 mutants; the
 detectors tests/context-affine.test and the owned-state fuzzer):
-[[TBD:mutation results]]
+18 mutants, 18 killed, 0 survived. Each is a deliberate bug of one rule,
+and every one is caught by a test of behavior, most also by the fuzzer:
+
+| mutant | the bug | tests that fail | fuzzer programs that disagree (30) |
+|---|---|---:|---:|
+| `install-does-not-consume` | installation observes its value instead of moving it: the temporary stays its owner and is released after the installation | 1 | 10 |
+| `install-erases` | the pre-milestone rule: installation erases its value | 22 | 20 |
+| `context-binding-owns` | a context parameter's binding is an owner (runtime loads mint owners), released at its last use | 4 | 19 |
+| `context-copy-accepted` | a move of a context place stays a move: context access copies an affine member | 4 | 9 |
+| `context-erasure-accepted` | an erasure of a context place stays the old AFFINE-ERASURE-UNSUPPORTED | 1 | 0 |
+| `element-copy-accepted` | affine vector elements are treated as unrestricted: an element place may be bound or pushed | 2 | 3 |
+| `observation-consumes` | an observed context place is a temporary nothing owns | 17 | 30 |
+| `projection-not-place` | a projection of a context place is no place step | 19 | 30 |
+| `capture-accepted` | a closure may capture the installed context's affine state | 1 | 0 |
+| `later-argument-unchecked` | an element place observed across a later argument that runs code | 1 | 1 |
+| `element-receiver-unchecked` | an element place of a collection no context owns is accepted | 1 | 1 |
+| `element-place-unregistered` | the vector's element is registered as no element place | 13 | 30 |
+| `non-affine-context-rejected` | a non-affine context is judged by the context rule too | 7 | 20 |
+| `share-affine-struct-off` | the pre-milestone ShareDescriptor: an unrestricted vector member of an affine context aliases its source | 2 | 2 |
+| `take-leaves-slot-populated` | take returns the element and keeps it in the vector (two owners) | 3 | 1 |
+| `context-roots-lost` | an installed vector header is never registered as a GC root (killed by GC stress) | 2 | 0 |
+| `view-eligibility-overgeneralized` | a String member is an "immediate" context-slot leaf | 1 | 0 |
+| `pointer-not-eligible` | the pre-milestone eligibility: no pointer or view leaf | 15 | 19 |
+
+Two mutation targets the brief names have no mutant, for a reason
+mutants.txt records: *the context-trait plan copies installed state* --
+the plan binds no context value at all, so there is no copy to make, and
+`cao-trait-plan-no-state-copy` checks the monomorphized HIR has none; and
+*a private helper bypasses affinity* -- privacy has no ownership code path,
+so every mutant above applies to private helpers alike (the helpers of
+`cao-helpers-wrappers-traits` and of Icy Tower are private). The first
+complete run counted two mutants killed by the fuzzer alone through a
+fault of the fuzzer's own (2.7's method-call note), and showed that
+`context-erasure-accepted` was killed by nothing else: the test now covers
+an erasure through a parameter declared `any` (its own row), and the
+fuzzer's installations now hold a job made before the installation and a
+log the top level keeps (`install-does-not-consume` and
+`share-affine-struct-off` are now killed by the fuzzer too).
 
 ### 5.5 Regression
 
-[[TBD:regression]]
+`tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile, every
+golden suite on all four backends; 64 minutes with 4 jobs):
+
+| layer | result |
+|---|---|
+| Tcl tests on interp | 7,362 passed, 2 failed, 74 skipped (2,250 golden duplicates skipped) |
+| Tcl tests on compile | 7,357 passed, 2 failed, 79 skipped |
+| golden suites (108) | 0 failed: interp 5,180/5,180, compile 5,180/5,180, cranelift-generic 5,088/5,088, cranelift 5,190/5,190 |
+
+The two failures were tests pinning the old rules, found by this run and
+updated with it (5.2): `gf-code-name-complete` (stdlib/test.bot's
+`std::test::code_name` did not spell the new DiagnosticCode case) and
+`wi-context-holds-devices` (it pinned AFFINE-ERASURE-UNSUPPORTED for a
+context holding a pointer). [[TBD:rerun]]
+
+The harnesses AGENTS.md names for the files this milestone changed:
+
+| harness | result |
+|---|---|
+| `audit/affine/tools/fuzz.tcl -n 40`, seeds 3, 17, 41 | 120 programs, 0 disagreements (307 identities' releases checked) |
+| [[TBD:harnesses]] | |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 848 topics (2 new, 2 generated notes), 633 examples run, 0 problems |
+| `tclsh9.0 audit/icy-tower/context-refactor/tools/repro.tcl` | all as expected (5.1) |
 
 ### 5.6 Targets
 

@@ -397,11 +397,13 @@ test wi-pure-parts {the parts of stdlib/windows.bot that call no C run on the Tc
 # ---------------------------------------------------------------------------
 # The context and its selection (stdlib/windows/io.bot)
 
-test wi-context-holds-devices {WindowsIO holds the process's standard devices, never a handle: a C pointer cannot live in a context (an installed context is erased: AFFINE-ERASURE-UNSUPPORTED), so a write reads the device's current handle (GetStdHandle) when it needs it; WindowsIO is opaque outside its module} -body {
+test wi-context-holds-devices {WindowsIO holds the process's standard devices, never a handle -- a context may own a C pointer since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md (the Holder program is accepted), but a cached standard handle would outlive a SetStdHandle, so a write reads the device's current handle (GetStdHandle) when it needs it, and WindowsIO's fields are devices, no C address; WindowsIO is opaque outside its module} -body {
     set handleContext [wiRejection "import std::ffi::c\n\ncontext struct Holder:\n    h: std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nfn f(context c: Holder) -> int:\n    1\n\nwith context Holder {h: std::ffi::c::null\[std::ffi::c::Void\]()}\nf()\n"]
     set opaque [wiRejection "import std::io\nimport std::windows::io\n\nfn peek(context io: std::windows::io::WindowsIO) -> bool:\n    io.stdout == io.stderr\n\nwith context std::windows::io::create()\npeek()\n"]
-    list [lindex $handleContext 0] [lindex $opaque 0]
-} -result {AFFINE-ERASURE-UNSUPPORTED OPAQUE-REPRESENTATION}
+    set hir [wiHir "import std::windows::io\n\nwith context std::windows::io::create()\n0\n" windows-x86_64 {}]
+    set fields [lmap {name type} [hir::structs::fieldTypes std::windows::io::WindowsIO] {list $name [hir::types::IsAffine $type]}]
+    list [lindex $handleContext 0] [lindex $opaque 0] $fields
+} -cleanup {unset -nocomplain handleContext opaque hir fields} -result {accepted OPAQUE-REPRESENTATION {{stdout 0} {stderr 0}}}
 
 test wi-same-function-two-platforms {examples/io/hello.bot and hello-windows.bot are one program on two platforms: their statements differ only in the platform import and the installed context, and each compiles hello to a clone over its own context's write_text, called directly -- no dispatch, no hidden argument} -body {
     set strip {apply {{text} {

@@ -18,9 +18,10 @@
 # What the context holds is the process's standard *devices* -- its output
 # and its error -- never a handle: a Windows standard handle is the process's
 # slot, read with GetStdHandle when a write needs it (windows::
-# standard_handle), and a C pointer cannot live in a context anyway (an
-# installed context is erased: AFFINE-ERASURE-UNSUPPORTED, C-ABI-TYPES.md).
-# So every write uses the handle the process has at that moment -- a
+# standard_handle): a context may own a C pointer (CONTEXT-OWNED-AFFINE-
+# STATE-MILESTONE-1.md), but a cached standard handle would outlive the
+# process replacing it (SetStdHandle). So every write uses the handle the
+# process has at that moment -- a
 # console, a file or a pipe, whatever the launcher redirected it to -- and
 # the context owns nothing: no handle is opened, duplicated or closed here.
 #

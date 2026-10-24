@@ -1348,7 +1348,9 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   kernel32's GetStdHandle, WriteFile and GetLastError through ordinary
   `extern c fn`s, the last-error code read right after the failed call. A
   standard handle is borrowed: never close one, never cache it in a
-  context (WindowsIO holds devices; a C pointer cannot live in a context).
+  context (WindowsIO holds devices: a cached handle would outlive the
+  process replacing it, although a context may own a pointer since
+  CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md).
   No Win32 call in `io` or any portable module, no console mode, code page
   or UTF-16 conversion of the bytes, no compiler knowledge of printing.
 * An executable's name ends in `.exe` (`codegen::aot::executable_path`: a

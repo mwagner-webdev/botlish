@@ -12,7 +12,10 @@
 #   slots  MutableArray[Ptr[Int]]              an affine array (two slots)
 #   log    MutableVector[int]                  an unrestricted member
 #
-# installed with a literal or through a binding, and then a top level of
+# installed with a literal or through a binding -- empty, or already
+# holding a job made before the installation, its log a fresh vector or one
+# the top level keeps a binding of (whose length the program reads at the
+# end: the installation must not alias it) -- and then a top level of
 # 4..14 calls of the prelude's operations, each a public wrapper that turns
 # the declared errors into numbers: open a job (push a new coroutine),
 # resume one where it is stored (the element place's coroutine resumed in
@@ -311,7 +314,27 @@ proc generateOwned {seed} {
     set created 0
     set released {}
     set lines {}
-    set literal "Owner {root: address($rootA), pair: Pair {a: address($pairA), b: address($pairB)}, jobs: std::mutable_vector::from_list(\[\]), cells: std::mutable_vector::from_list(\[\]), slots: std::mutable_array::generate(2, slot_address), log: std::mutable_vector::from_list(\[[join $log {, }]\])}"
+    # The installed value: empty, or holding a first job made before the
+    # installation (moved in by it); its log a fresh List's vector, or a
+    # vector the top level keeps a binding of (log0), which the installed
+    # context must not alias -- the program's last value reads log0's
+    # length.
+    set jobsInit "std::mutable_vector::from_list(\[\])"
+    if {[chance 50]} {
+        set seedv [rnd 90]
+        lappend lines "coroutine {step: first} = w($seedv)"
+        set jobsInit "std::mutable_vector::from_list(\[Job {step: first, tag: $seedv}\])"
+        lappend jobs [list $created $seedv $seedv]
+        incr created
+    }
+    set logInit "std::mutable_vector::from_list(\[[join $log {, }]\])"
+    set log0 ""
+    if {[chance 50]} {
+        lappend lines "log0 = $logInit"
+        set logInit log0
+        set log0 [llength $log]
+    }
+    set literal "Owner {root: address($rootA), pair: Pair {a: address($pairA), b: address($pairB)}, jobs: $jobsInit, cells: std::mutable_vector::from_list(\[\]), slots: std::mutable_array::generate(2, slot_address), log: $logInit}"
     if {[chance 50]} {
         lappend lines "with context $literal"
     } else {
@@ -483,6 +506,10 @@ proc generateOwned {seed} {
         }
         lappend lines "r$s = $call"
         lappend results r$s $value
+    }
+    if {$log0 ne ""} {
+        lappend lines "rlog = log0.length()"
+        lappend results rlog $log0
     }
     set names [lmap {r v} $results {set r}]
     set prelude $::ownedPrelude

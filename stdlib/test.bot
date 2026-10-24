@@ -301,6 +301,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
     codes = [
         std::compiler::DiagnosticCode::AffineCaptureUnsupported,
         std::compiler::DiagnosticCode::AffineContainerUnsupported,
+        std::compiler::DiagnosticCode::AffineContextCopyOut,
         std::compiler::DiagnosticCode::AffineDuplicationUnsupported,
         std::compiler::DiagnosticCode::AffineElementCopyOut,
         std::compiler::DiagnosticCode::AffineEqualityUnsupported,
@@ -415,6 +416,7 @@ fn code_name(code: std::compiler::DiagnosticCode) -> str:
     names = [
         "AffineCaptureUnsupported",
         "AffineContainerUnsupported",
+        "AffineContextCopyOut",
         "AffineDuplicationUnsupported",
         "AffineElementCopyOut",
         "AffineEqualityUnsupported",
