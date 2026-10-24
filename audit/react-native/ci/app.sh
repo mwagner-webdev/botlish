@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# app.sh WORK LIBRARY-DIR PACKAGE-OPTION... -- an ordinary React Native 0.88
+# app.sh WORK LIBRARY-DIR PACKAGE-OPTION... -- HISTORY: the census's step,
+# run by .github/workflows/react-native-probe.yml from the census's tree
+# (its CENSUS_REF); this tree's rnpackage.tcl reads the compiler's library
+# manifest instead (-manifest, NATIVE-LIBRARY-MILESTONE-1.md). An ordinary React Native 0.88
 # app, `WORK/probe app` (a path with a space), with the generated package
 # installed from its npm tarball and audit/react-native/app/App.tsx as its
 # screen (REACT-NATIVE-TARGET-CENSUS.md). LIBRARY-DIR holds libmode.tcl's

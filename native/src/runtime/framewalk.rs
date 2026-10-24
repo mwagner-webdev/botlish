@@ -161,6 +161,30 @@ fn current_fp() -> usize {
     fp
 }
 
+/// The calling function's own frame record (its frame pointer): where a
+/// native library's call puts the collector's walk ceiling
+/// (runtime::library's `enter`, Vm::stack_ceiling). 0 on a host whose
+/// frames are not walked by frame pointer (Windows walks by its unwinder,
+/// which the ceiling bounds by stack pointer).
+#[inline(always)]
+pub fn frame_record() -> usize {
+    #[cfg(any(all(target_arch = "x86_64", not(windows)), target_arch = "aarch64"))]
+    {
+        current_fp()
+    }
+    #[cfg(all(target_arch = "x86_64", windows))]
+    {
+        let sp: usize;
+        // SAFETY: reads a register.
+        unsafe { std::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+        sp
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        0
+    }
+}
+
 /// The address of the root a stack-map ENTRY of a safepoint names, for the
 /// frame whose record is at RECORD (the callee of the Botlish frame the
 /// safepoint belongs to) and holds CALLER_FP (that Botlish frame's own frame

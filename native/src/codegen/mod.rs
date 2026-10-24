@@ -14,6 +14,7 @@
 pub mod aot;
 pub mod clif;
 pub mod fusion;
+pub mod library;
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod jitunwind;
 pub mod nirtext;
@@ -247,7 +248,7 @@ impl CraneliftJit {
             builder.symbol(&decl.symbol, crate::runtime::ffi::rt_ffi_unlinked as *const u8);
         }
         let mut module = JITModule::new(builder);
-        let symbols = clif::declare(&mut module, program, false)?;
+        let symbols = clif::declare(&mut module, program, false, false)?;
         let mut pool = ConstPool::default();
         let mut sites = Vec::new();
         let mut listing = options.clif.then(|| clif::legend(&symbols));
@@ -411,19 +412,31 @@ pub struct ObjectProgram {
 }
 
 pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
-    emit_object_with(program, isa(true)?)
+    emit_object_with(program, isa(true)?, None)
 }
 
-fn emit_object_with(program: &Program, isa: OwnedTargetIsa) -> Result<ObjectProgram, BackendError> {
+/// The program object of native library NAME (NATIVE-LIBRARY-MILESTONE-1.md):
+/// the program's code, descriptor and record with local symbols only, and the
+/// library's public C functions (codegen::library), its only global ones.
+pub fn emit_library_object(program: &Program, name: &str) -> Result<ObjectProgram, BackendError> {
+    emit_object_with(program, isa(true)?, Some(name))
+}
+
+fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str>) -> Result<ObjectProgram, BackendError> {
     let builder = cranelift_object::ObjectBuilder::new(isa, "botlish", cranelift_module::default_libcall_names())
         .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
     let mut module = cranelift_object::ObjectModule::new(builder);
-    let symbols = clif::declare(&mut module, program, true)?;
+    let symbols = clif::declare(&mut module, program, true, library.is_some())?;
     let mut pool = ConstPool::default();
     let mut sites = Vec::new();
     let mut functions = Vec::new();
     for f in &program.functions {
         functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, false)?);
+    }
+    let linkage = if library.is_some() { cranelift_module::Linkage::Local } else { cranelift_module::Linkage::Export };
+    let record = define_program_record(&mut module, &symbols, program, &pool, &functions, linkage)?;
+    if let Some(name) = library {
+        library::define(&mut module, program, name, record)?;
     }
     let mut product = module.finish();
     add_windows_unwind(&mut product, &symbols, &functions)?;
@@ -432,6 +445,74 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa) -> Result<ObjectProg
         relax_context_got(&mut bytes);
     }
     Ok(ObjectProgram { bytes, pool, functions })
+}
+
+/// The program's startup data (runtime::program, NATIVE-LIBRARY-MILESTONE-1.md,
+/// "One startup"): its descriptor (`botlish_descriptor`, the encoded
+/// ProgramDescriptor: metadata, the constant pool POOL, the statics count,
+/// every function's code sizes and stack maps from FUNCTIONS, the exports),
+/// its code table (`botlish_code`: each function's direct and generic entry
+/// address, relocated by the link) and the record that points at both
+/// (`botlish_program`, a LinkedProgram, with LINKAGE: global for an
+/// executable, whose startup names it, local for a library). Returns the
+/// record's id.
+fn define_program_record(
+    module: &mut cranelift_object::ObjectModule,
+    symbols: &clif::Symbols,
+    program: &Program,
+    pool: &ConstPool,
+    functions: &[clif::DefineResult],
+    linkage: cranelift_module::Linkage,
+) -> Result<cranelift_module::DataId, BackendError> {
+    use crate::runtime::program::{FunctionShape, LINKED_MAGIC, ProgramDescriptor, program_info};
+    use cranelift_module::{DataDescription, Linkage, Module};
+    let error = |e: cranelift_module::ModuleError| BackendError::Codegen(format!("{e:?}"));
+    let descriptor = ProgramDescriptor {
+        info: std::rc::Rc::new(program_info(program)),
+        constants: pool.entries.clone(),
+        statics: program.statics,
+        functions: functions
+            .iter()
+            .map(|f| FunctionShape { direct_size: f.direct_size, entry_size: f.entry_size, safepoints: f.safepoints.clone() })
+            .collect(),
+        exports: program.exports.clone(),
+    }
+    .encode();
+    let descriptor_len = descriptor.len();
+    let descriptor_id = module.declare_data("botlish_descriptor", Linkage::Local, false, false).map_err(error)?;
+    let mut data = DataDescription::new();
+    data.define(descriptor.into_boxed_slice());
+    data.set_align(8);
+    module.define_data(descriptor_id, &data).map_err(error)?;
+
+    let count = program.functions.len();
+    let code_id = module.declare_data("botlish_code", Linkage::Local, false, false).map_err(error)?;
+    let mut data = DataDescription::new();
+    data.define(vec![0u8; 16 * count].into_boxed_slice());
+    data.set_align(8);
+    for i in 0..count {
+        let direct = module.declare_func_in_data(symbols.direct[i], &mut data);
+        data.write_function_addr((16 * i) as u32, direct);
+        let entry = module.declare_func_in_data(symbols.entry[i], &mut data);
+        data.write_function_addr((16 * i + 8) as u32, entry);
+    }
+    module.define_data(code_id, &data).map_err(error)?;
+
+    let record_id = module.declare_data("botlish_program", linkage, false, false).map_err(error)?;
+    let mut record = vec![0u8; 48];
+    record[0..8].copy_from_slice(&LINKED_MAGIC.to_le_bytes());
+    record[8..16].copy_from_slice(&crate::runtime::aotimage::abi_fingerprint().to_le_bytes());
+    record[24..32].copy_from_slice(&(descriptor_len as u64).to_le_bytes());
+    record[40..48].copy_from_slice(&(count as u64).to_le_bytes());
+    let mut data = DataDescription::new();
+    data.define(record.into_boxed_slice());
+    data.set_align(8);
+    let descriptor_gv = module.declare_data_in_data(descriptor_id, &mut data);
+    data.write_data_addr(16, descriptor_gv, 0);
+    let code_gv = module.declare_data_in_data(code_id, &mut data);
+    data.write_data_addr(32, code_gv, 0);
+    module.define_data(record_id, &data).map_err(error)?;
+    Ok(record_id)
 }
 
 /// Adds the Windows x64 unwind sections to PRODUCT when its functions have
@@ -649,7 +730,7 @@ mod context_area_tests {
         let clif = compiled.clif.clone().unwrap();
         assert!(clif.contains("symbol_value.i64"), "{clif}");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -701,7 +782,7 @@ mod mutarray_inline_tests {
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mode = if count_accesses { AllocMode::Summary } else { AllocMode::Off };
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             mode,
         );
         compiled.install_constants(&mut vm);
@@ -807,7 +888,7 @@ mod short_string_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -886,7 +967,7 @@ mod packed_ascii_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -1041,7 +1122,7 @@ mod object_format_tests {
             "    %12 = op iadd %11 %4\n    %13 = op iadd %12 %5\n    %14 = op iadd %13 %6\n    ret %14\nend\n",
         );
         let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
-        let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc")).unwrap_or_else(|e| panic!("{}", e.message()));
+        let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc"), None).unwrap_or_else(|e| panic!("{}", e.message()));
         let file = cranelift_object::object::File::parse(&*object.bytes).unwrap();
         let pdata = file.section_by_name(".pdata").expect(".pdata");
         let xdata = file.section_by_name(".xdata").expect(".xdata");
@@ -1125,7 +1206,7 @@ mod euclid_mod_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -1260,7 +1341,7 @@ mod c_word_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Off,
         );
         compiled.install_constants(&mut vm);
@@ -1332,7 +1413,7 @@ mod caller_root_tests {
         for stress in [false, true] {
             let functions = [(0, ""), (1, "l"), (1, "n"), (1, "i")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
             let mut vm = Vm::new(
-                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
                 AllocMode::Off,
             );
             compiled.install_constants(&mut vm);

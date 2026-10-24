@@ -92,6 +92,10 @@ pub struct ProgramInfo {
     /// The program's enums, indexed by the enum number an enum word carries
     /// (NIR's `enum` declarations, in order).
     pub enums: Vec<EnumInfo>,
+    /// The canonical identity of each declared error by its NIR id (NIR's
+    /// `error` declarations): a native library's account of a declared error
+    /// (runtime::library). Empty but for a library's program.
+    pub errors: Vec<(u32, String)>,
 }
 
 thread_local! {
@@ -101,6 +105,14 @@ thread_local! {
 /// Runs F with the program currently executing on this thread.
 pub fn current_program<R>(f: impl FnOnce(&ProgramInfo) -> R) -> R {
     PROGRAM.with(|p| f(p.borrow().as_ref().expect("no native program is running")))
+}
+
+/// Makes PROGRAM the one currently executing on this thread and returns the
+/// previous one: a native library's call makes its instance's program current
+/// for the call and restores the previous one after it (runtime::library),
+/// so two programs on one thread never read each other's metadata.
+pub fn swap_current_program(program: Option<Rc<ProgramInfo>>) -> Option<Rc<ProgramInfo>> {
+    PROGRAM.with(|p| std::mem::replace(&mut *p.borrow_mut(), program))
 }
 
 /// Runs F with the program currently executing on this thread, if there is
@@ -235,6 +247,14 @@ pub struct Vm {
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
     native_stack: Option<NativeStack>,
+    /// The frame record above which the collector never walks this thread's
+    /// own stack (0: no ceiling, the walk climbs to the stack's top): a
+    /// native library's call sets it to its entry frame
+    /// (runtime::library's `enter`), so the host's frames above the call --
+    /// whose frame-pointer registers are not Botlish's to read -- are never
+    /// walked (NATIVE-LIBRARY-MILESTONE-1.md, "The collector at the
+    /// boundary"). Executables and the driver leave it 0.
+    pub stack_ceiling: usize,
     /// The innermost running coroutine (COROUTINES.md, runtime/coroutine.rs),
     /// null while the main stack runs. With each running coroutine's own
     /// `resumer` link it is the chain of running coroutines: every one a GC
@@ -302,6 +322,7 @@ impl Vm {
             empty_mutbytes: BytesObj::new_static_mutable_empty(),
             framemap: Rc::new(ProgramMap::new()),
             native_stack,
+            stack_ceiling: 0,
             co_current: std::ptr::null_mut(),
         })
     }
@@ -468,13 +489,21 @@ impl Vm {
         let stack_of = |co: *mut CoroutineObj, main: Option<NativeStack>| -> Option<NativeStack> {
             if co.is_null() { main } else { unsafe { (*co).stack.as_ref().map(|s| s.bounds()) } }
         };
-        let current = stack_of(self.co_current, self.native_stack);
+        // The thread's own stack, up to the ceiling a library call set
+        // (`stack_ceiling`): no frame above it is walked.
+        let main_stack = self.native_stack.map(|mut stack| {
+            if self.stack_ceiling != 0 {
+                stack.high_bound = stack.high_bound.min(self.stack_ceiling);
+            }
+            stack
+        });
+        let current = stack_of(self.co_current, main_stack);
         super::framewalk::walk(&self.framemap, current.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
         let mut running = self.co_current;
         while !running.is_null() {
             native_frame_roots.push(running as Value);
             let (resumer, resumer_sp) = unsafe { ((*running).resumer, (*running).resumer_sp) };
-            let bounds = stack_of(resumer, self.native_stack);
+            let bounds = stack_of(resumer, main_stack);
             super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
                 native_frame_roots.push(unsafe { *addr })
             });

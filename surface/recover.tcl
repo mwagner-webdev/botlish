@@ -56,7 +56,7 @@ namespace eval surface::recover {
     # Contextual words that start a declaration when the next token is right
     # (surface/parser.tcl's Statement), and the type-level declarations.
     variable declarationWords {enum layout trait union refined opaque context extern}
-    variable functionModifiers {nomethod}
+    variable functionModifiers {nomethod exported}
 }
 
 proc surface::recover::apply {ast source} {
@@ -393,6 +393,10 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     set texts [lmap t $prefix {dict get $t text}]
     set i 0
     while {[lindex $kinds $i] eq "IDENT" && [lindex $texts $i] in $functionModifiers} {
+        if {[lindex $texts $i] eq "exported" && [lindex $kinds $i+1] eq "IDENT"} {
+            # `exported c fn`: the modifier's foreign ABI.
+            incr i
+        }
         incr i
     }
     if {$prefix eq ""} {

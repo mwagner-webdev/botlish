@@ -22,10 +22,12 @@
 #   -stack-kib N           runs them with an N KiB main-thread stack (the JS
 #                          thread's: 512 is an iOS release build's)
 #
-# Steps: libmode.tcl builds the probe's Botlish library for the host;
-# rnpackage.tcl generates the package (running Codegen); the generated
-# adapter, ReactCommon's TurboModule sources and host/host_main.cpp are
-# compiled and linked with Hermes and the library; host/probe.js runs. Then
+# Steps: the compiler builds the probe's Botlish library for the host
+# (main.tcl -emit-native-library rnprobe: NATIVE-LIBRARY-MILESTONE-1.md);
+# rnpackage.tcl generates the package from its manifest and header (running
+# Codegen); the generated adapter, ReactCommon's TurboModule sources and
+# host/host_main.cpp are compiled and linked with Hermes and the library's
+# archive; host/probe.js runs. Then
 # the asynchronous probe: host/NativeBotlishAsync.ts joins the package's
 # specs, Codegen runs again, and host/host_async.cpp (Promise methods on a
 # Botlish worker thread) runs host/async.js.
@@ -70,11 +72,12 @@ proc run {args} {
 
 set lib [file join $work botlish]
 set pkg [file join $work "generated package"]
-run $tclsh [file join $here libmode.tcl] -o $lib -prefix rnprobe \
-    [file join $root audit react-native probe rnprobe.bot] add reverse require_positive depth same pick
+file delete -force $lib
+run $tclsh [file join $root main.tcl] -warnings off -emit-native-library rnprobe -out $lib \
+    [file join $root audit react-native probe rnprobe.bot]
 file delete -force $pkg
 run $tclsh [file join $here rnpackage.tcl] -o $pkg \
-    -exports [file join $lib rnprobe_botlish.exports] -header [file join $lib rnprobe_botlish.h] \
+    -manifest [file join $lib rnprobe.manifest.json] -header [file join $lib rnprobe.h] \
     -name react-native-botlish-probe -codegen-project $project
 
 set generated [file join $pkg android generated jni]
@@ -94,11 +97,18 @@ proc compile {includes source object} {
         -DMODULE_HEADER="BotlishProbeModule.h" -DMODULE_CLASS=BotlishProbeModule -c $source -o $object
     return $object
 }
+# The library's archive and the system libraries its manifest names.
+source [file join $root lsp json.tcl]
+set f [open [file join $lib rnprobe.manifest.json]]
+set systemLibraries [lmap l [lsp::json::elements [lsp::json::get [lsp::json::parse [read $f]] link]] {
+    lsp::json::text $l
+}]
+close $f
 proc link {out objects} {
-    global lib hermesBuild
-    run clang++ -o $out {*}$objects [file join $lib librnprobe_botlish.a] \
+    global lib hermesBuild systemLibraries
+    run clang++ -o $out {*}$objects [file join $lib librnprobe.a] \
         -L[file join $hermesBuild lib] -lhermesvm [file join $hermesBuild jsi libjsi.a] \
-        -Wl,-rpath,[file join $hermesBuild lib] -lglog -lpthread -ldl -lm
+        -Wl,-rpath,[file join $hermesBuild lib] -lglog {*}$systemLibraries
 }
 set objects {}
 set n 0

@@ -3628,3 +3628,127 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
 @caption Decay, compute, round back
 @value 0.75
 @end
+
+@topic error.export-signature
+title: EXPORT-SIGNATURE: an exported c fn's signature has no C form
+summary: An `exported c fn` declares every parameter as int, bool, Float64 or str and its result as one of those or unit; no flags, context parameters, variadic parameter or resume clause.
+index: errors
+alias: exported c fn parameter type; export signature; C export type
+keywords: exported c fn, int64_t, double, bool, str, unit, -> unit, flags, context, variadic
+related: backend.native-library error.export-environment error.export-placement error.export-name
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-SIGNATURE
+
+== MEANING
+A C export's C ABI is read from its declaration alone -- never from how
+Botlish code calls it -- so every boundary type must be declared, and must
+be one the C boundary converts: int (int64_t), bool, Float64 (double), str
+(text: a pointer and a length in, an owned buffer out) and, for the
+result, unit. A List, a struct, an undeclared parameter or an undeclared
+result has no C form.
+
+== WHAT TO DO
+Declare the types (`-> unit` for no result). For a richer value, export an
+adapter that converts it to a boundary type -- e.g. a table as a str -- and
+keep the rich function an ordinary one.
+
+@example reject
+exported c fn total(xs: List[int]) -> int:
+    0
+@caption A List has no C form
+@error CORE SEMANTIC EXPORT-SIGNATURE
+@at 1:20
+@end
+
+@example accept
+exported c fn twice(n: int) -> int:
+    n * 2
+
+twice(21)
+@caption Declared boundary types
+@end
+
+@topic error.export-placement
+title: EXPORT-PLACEMENT: a C export is a top-level function
+summary: An `exported c fn` is declared at the top level of a program or a module, never inside another function.
+index: errors
+alias: nested exported c fn; export inside a function
+keywords: exported c fn, top level, nested function, -export
+related: backend.native-library error.export-signature
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-PLACEMENT
+
+== MEANING
+A C export is a function the library's host calls directly, with no
+enclosing call: it is declared where the program's or a module's other
+functions are. The same kind refuses a name -export asks for that is no
+top-level function of the entry program.
+
+== WHAT TO DO
+Move the function to the top level of its file.
+
+@example reject
+fn outer() -> int:
+    exported c fn inner(n: int) -> int:
+        n
+    inner(2)
+
+outer()
+@caption Declared inside another function
+@error CORE SEMANTIC EXPORT-PLACEMENT
+@at 2:24
+@end
+
+@topic error.export-name
+title: EXPORT-NAME: a C export's name is a C identifier
+summary: An `exported c fn`'s name is the suffix of its C symbol (LIBRARY_NAME), so it is a C identifier: ASCII letters, digits and _, not starting with a digit.
+index: errors
+alias: exported c fn name; question mark in an export
+keywords: exported c fn, C identifier, symbol, predicate, ?
+related: backend.native-library error.export-signature
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-NAME
+
+== WHAT TO DO
+Rename the export (a predicate `ready?` can be exported as `is_ready`,
+calling the predicate).
+
+@example reject
+exported c fn ready?(n: int) -> bool:
+    n > 0
+@caption `?` is no C identifier character
+@error CORE SEMANTIC EXPORT-NAME
+@at 1:21
+@end
+
+@topic error.export-environment
+title: EXPORT-ENVIRONMENT: a C export is environment-free
+summary: An `exported c fn` captures no value, requires no context and never suspends: a C caller has no environment, no installed context and no coroutine to give it.
+index: errors
+alias: exported c fn captures; export requires a context; export yields
+keywords: exported c fn, capture, closure, context, yield, coroutine, module static
+related: backend.native-library error.export-signature concept.contexts
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-ENVIRONMENT
+
+== MEANING
+Calling other top-level functions is fine; reading a top-level value of
+the entry program is capturing it. A module's top-level value is a module
+static, which an export may read.
+
+== WHAT TO DO
+Move the value into an imported module, or into the function.
+
+@example reject
+limit = 3
+
+exported c fn capped(n: int) -> int:
+    if n > limit:
+        return limit
+    n
+
+capped(5)
+@caption Captures the entry program's `limit`
+@error CORE SEMANTIC EXPORT-ENVIRONMENT
+@at 3:21
+@end

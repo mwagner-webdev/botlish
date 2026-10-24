@@ -250,6 +250,10 @@ namespace eval hir::static {
         DUPLICATE-FLAG                           DuplicateFlag
         DUPLICATE-FLAG-DECLARATION               DuplicateFlagDeclaration
         DUPLICATE-LOOP-VARIABLE                  DuplicateLoopVariable
+        EXPORT-ENVIRONMENT                       ExportEnvironment
+        EXPORT-NAME                              ExportName
+        EXPORT-PLACEMENT                         ExportPlacement
+        EXPORT-SIGNATURE                         ExportSignature
         FLAG-BINDING-COLLISION                   FlagBindingCollision
         FLAG-CALLEE-UNKNOWN                      FlagCalleeUnknown
         FLAG-FUNCTION-VALUE                      FlagFunctionValue
