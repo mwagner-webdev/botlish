@@ -327,7 +327,8 @@ core::native::register std::mutable_vector::empty? -arity 1 -impl core::mutvec::
     -param-types {mutvec} -result-type bool -ownership {observe}
 core::native::register std::mutable_vector::at -arity 2 -impl core::mutvec::at \
     -param-types {mutvec int} -result-type any -runtime range-check \
-    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {copy-out observe}
+    -result-shape {mutvec-element 0} -errors IndexNotFound -bounds {index mutvec 0 1} \
+    -ownership {copy-out observe}
 core::native::register std::mutable_vector::push -arity 2 -impl core::mutvec::push \
     -param-types {mutvec any} -result-type unit -runtime mutvec-mutate -ownership {place move}
 core::native::register std::mutable_vector::pop -arity 1 -impl core::mutvec::pop \

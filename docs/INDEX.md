@@ -92,6 +92,8 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md](MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md) -- `MutableArray` construction and refinement
 - [TYPED-MUTARRAY-BUILDER-REFACTOR.md](TYPED-MUTARRAY-BUILDER-REFACTOR.md) -- typed `MutableArray` builder source refactor
 - [MINIMAL-IMMUTABLE-SET.md](MINIMAL-IMMUTABLE-SET.md) -- `ImmutableSet[T]`
+- [ORDERED-MUTABLE-MAP-SET.md](ORDERED-MUTABLE-MAP-SET.md) -- `MutableMap[K satisfies Hashable, V]` and `MutableSet[T satisfies Hashable]`: insertion-ordered tables written in Botlish over MutableVectors, placed by the keyed table hash; the loop protocol, MutableVector index proofs, the oracle, fuzzer, mutants and benchmarks (completion report)
+- [PLACE-PARAMETERS.md](PLACE-PARAMETERS.md) -- `place m: T`: a parameter that is the caller's place, so a Botlish function can mutate its caller's collection in place
 
 ### Strings, bytes and text
 
@@ -137,7 +139,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [STATIC-COMPILE.md](STATIC-COMPILE.md) -- `static compile:`: compiler diagnostics as recoverable values
 - [STATIC-DECISION-ECONOMICS.md](STATIC-DECISION-ECONOMICS.md) -- how many builds deciding static blocks takes
-- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind: fewer trial builds, the same decisions
+- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind and named-struct declaration: fewer trial builds, the same decisions
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals
@@ -283,5 +285,6 @@ Botlish to find what the language, library, compiler and tools need.
 - [POST-M8A-COMMON-INEFFICIENCY-CENSUS.md](POST-M8A-COMMON-INEFFICIENCY-CENSUS.md) -- post-M8.a cross-workload inefficiency census
 - [POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md](POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- post-module-statics exact-target census
 - [POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md](POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md) -- dynamic callable census after structural function types
+- [EXACT-METHOD-DECISION-MISATTRIBUTION.md](EXACT-METHOD-DECISION-MISATTRIBUTION.md) -- an open defect of the exact method-call decision: an outer call's rejected receiver charged to the inner call, so a valid `xs.at(i).length()` chain is rejected when the exact decision decides it
 - [FUZZING-EXAMPLES-AOT.md](FUZZING-EXAMPLES-AOT.md) -- fuzzing the example applications as executables
 - [FUZZING-ARGV-PROGRAMS.md](FUZZING-ARGV-PROGRAMS.md) -- fuzzing argv-driven programs

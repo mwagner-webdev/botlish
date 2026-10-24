@@ -123,7 +123,13 @@
 #                  followed by a type (ResumeMarker); `resume`, `resume: T`
 #                  are an ordinary parameter named resume. At most one, and
 #                  always last
-#   param        = IDENT [ ":" typeExpr ]
+#   param        = [ "place" ] IDENT [ ":" typeExpr ]
+#                  -- "place" (PLACE-PARAMETERS.md): the argument is the
+#                  caller's place itself, which the function mutates in
+#                  place; the type is then required. "place" is contextual
+#                  exactly like "variadic": the marker only when directly
+#                  followed by a name; `place`, `place: T` are an ordinary
+#                  parameter named place
 #   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
 #                  contextual: `flags :name` only (an ordinary name otherwise)
 #   flagDecl     = ":" IDENT                          -- the name glued to ":"
@@ -1317,6 +1323,11 @@ proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     set open [Expect p ( "\"(\" after the requirement name"]
     lassign [ParamSections p] params flags contexts resume variadic
     set paramsSpan [SpanFrom p [dict get $open span]]
+    foreach param $params {
+        if {[llength $param] > 4} {
+            Fail [dict create span [lindex $param 4]] "requirement \"[dict get $name value]\" of $what \"$trait\" declares a place parameter \"[lindex $param 0]\": a trait requirement takes values, and a place is no value (an implementation that mutates its argument in place is no implementation of a requirement)"
+        }
+    }
     if {$variadic ne ""} {
         FailCode [dict get $variadic span] MALFORMED-VARIADIC-SECTION \
             "requirement \"[dict get $name value]\" of $what \"$trait\" declares a variadic parameter: a trait requirement is a fixed signature (variadic trait operations are not supported)"
@@ -2705,7 +2716,7 @@ proc surface::parser::Function {pVar} {
 #   params       = [ ordinary ] [ flagSection ] [ contextSection ]
 #                                                     (see paramSectionOrder)
 #   ordinary     = param { "," param }
-#   param        = IDENT [ ":" typeExpr ]
+#   param        = [ "place" ] IDENT [ ":" typeExpr ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }
 #   flagDecl     = ":" IDENT                          -- no space after ":"
 #   contextSection = "context" contextDecl { "," contextDecl }
@@ -2713,7 +2724,8 @@ proc surface::parser::Function {pVar} {
 #   variadicSection = "variadic" IDENT ":" typeExpr
 #
 # optionally followed by a trailing ",". Returns {PARAMS FLAGS CONTEXTS
-# RESUME VARIADIC}: PARAMS the ordinary parameters {NAME SPAN TYPE TYPESPAN},
+# RESUME VARIADIC}: PARAMS the ordinary parameters {NAME SPAN TYPE TYPESPAN}
+# (a place parameter's with its marker's span as a fifth element),
 # FLAGS the declared flags {NAME SPAN} in written order (SPAN covers
 # ":name"), CONTEXTS the declared context parameters {name nameSpan type
 # typeSpan} dicts in written order (CONTEXTS.md), VARIADIC the variadic
@@ -2805,6 +2817,10 @@ proc surface::parser::ParamSections {pVar} {
         } elseif {$section eq "context"} {
             lappend contexts [ContextEntry p]
         } else {
+            set place ""
+            if {[PlaceMarker p]} {
+                set place [dict get [Advance p] span]
+            }
             set param [Expect p IDENT "a parameter name"]
             if {$section ne "ordinary"} {
                 FailCode [dict get $param span] MALFORMED-FLAG-SECTION \
@@ -2817,8 +2833,15 @@ proc surface::parser::ParamSections {pVar} {
                 set typeStart [dict get [Peek p] span]
                 set type [TypeExpr p "a parameter type after \":\""]
                 set typeSpan [SpanFrom p $typeStart]
+            } elseif {$place ne ""} {
+                Fail $param \
+                    "place parameter \"[dict get $param value]\" needs its type: write \"place [dict get $param value]: T\" (a place is a collection or a struct holding collections, and its declaration says which)"
             }
-            lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
+            if {$place eq ""} {
+                lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
+            } else {
+                lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan $place]
+            }
         }
         if {[Kind p] eq ","} {
             Advance p
@@ -2828,6 +2851,18 @@ proc surface::parser::ParamSections {pVar} {
     }
     Advance p
     return [list $params $flags $contexts $resume $variadic]
+}
+
+# 1 if the next tokens are a place parameter's marker (PLACE-PARAMETERS.md):
+# the name `place` directly followed by another name -- `place m:
+# MutableMap[K, V]`. Never an ordinary parameter (a parameter name is
+# followed by ":", "," or ")"), so `fn f(place)` and `fn f(place: T)` keep
+# their meaning.
+proc surface::parser::PlaceMarker {pVar} {
+    upvar 1 $pVar p
+    set name [Peek p]
+    return [expr {[dict get $name kind] eq "IDENT" && [dict get $name value] eq "place"
+        && [Kind p 1] eq "IDENT"}]
 }
 
 # The canonical order of a declaration's parameter sections: the variadic

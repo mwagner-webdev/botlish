@@ -1,0 +1,211 @@
+# collection-iteration.bot -- loops over std::mutable_map::MutableMap and
+# std::mutable_set::MutableSet (ORDERED-MUTABLE-MAP-SET.md, "Iteration"),
+# ported from tests/collection-iteration.test.
+#
+# * `loop x in c` visits a map's entries (MutableMapEntry: key, value) and a
+#   set's elements in insertion order -- a removed entry never, a re-added
+#   one last, a replaced value in its key's place -- and collects,
+#   continues and breaks like any loop.
+# * The loop iterates the collection as it was when the loop began:
+#   replacing, inserting, removing, clearing and growing it in the body
+#   change the collection, never what the loop visits; two nested loops over
+#   one collection are independent.
+# * A lockstep loop cannot iterate a collection (Type), and the loop
+#   protocol is internal to the standard library: naming one of its
+#   operations is InternalNamespace, calling one with method syntax
+#   NomethodCall (importing the engine module, std::ordered_table, is the
+#   Tcl test's own half: an import is a program's, not a block's).
+
+# What a Botlish program cannot observe stays in the Tcl suites: the
+# representation's invariants (tests/ordered-table.test), the hidden hash
+# key's independence across fixed keys, injected collisions of the keyed
+# hash (a private library), the run-time EQUALITY of `==` on two
+# collections, the static type of a loop variable, the elaborated loop's HIR
+# and every native fact (typed probes, one keyed hash per operation,
+# allocation and copy counts).
+
+# Imports: both collections. A call both modules define (length, contains,
+# remove, clear) is written qualified here: with both imported, method
+# syntax would leave it two candidates of one kind (struct), which only the
+# exact method-call decision's whole-program trial builds settle -- about
+# forty builds for this suite (ORDERED-MUTABLE-MAP-SET.md, "Limitations").
+import std::compiler
+import std::list
+import std::str
+import std::mutable_map
+import std::mutable_set
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only).
+
+# ciDecls: a map of three letters, a set of the first N Ints.
+fn letters() -> std::mutable_map::MutableMap[str, int]:
+    m = std::mutable_map::create[str, int]()
+    m.set("a", 1)
+    m.set("b", 2)
+    m.set("c", 3)
+    m
+
+fn digits(n: int) -> std::mutable_set::MutableSet[int]:
+    s = std::mutable_set::create[int]()
+    loop i from 0 to n:
+        s.add(i)
+    s
+
+# ---------------------------------------------------------------------------
+# Loops over the collections
+
+fn register_iteration_tests():
+    # a loop visits a map's entries (MutableMapEntry[K, V]: key, value) and a set's elements in insertion order, and collects the body's values
+    fn b_ci_order_and_element() errors std::compiler::CompilerError:
+        static compile:
+            m = letters()
+            keys = loop e in m:
+                e.key
+            pairs = loop e in m:
+                [e.key]
+            values = loop e in m:
+                e.value * 10
+            xs = loop x in digits(4):
+                x * x
+            [keys, values, xs, std::list::length(pairs)]
+    std::test::value("ci-order-and-element", [["a", "b", "c"], [10, 20, 30], [0, 1, 4, 9], 3], b_ci_order_and_element)
+
+    # continue skips an element (contributes nothing), break ends the loop with the List collected so far
+    fn b_ci_continue_break() errors std::compiler::CompilerError:
+        static compile:
+            xs = loop x in digits(10):
+                if x.mod(2) == 1:
+                    continue
+                if x > 6:
+                    break
+                x
+            ys = loop e in letters():
+                if e.key == "b":
+                    continue
+                e.value
+            [xs, ys]
+    std::test::value("ci-continue-break", [[0, 2, 4, 6], [1, 3]], b_ci_continue_break)
+
+    # a removed entry is never visited, a re-added one is visited last, and a replaced value is visited in its key's place
+    fn b_ci_removed_not_visited() errors std::compiler::CompilerError:
+        static compile:
+            m = letters()
+            r = std::mutable_map::remove(m, "a"):
+                on std::mutable_map::KeyNotFound:
+                    0
+            m.set("b", 20)
+            m.set("a", 100)
+            s = digits(5)
+            std::mutable_set::remove(s, 0)
+            std::mutable_set::remove(s, 3)
+            s.add(0)
+            ks = loop e in m:
+                [e.key, e.value]
+            xs = loop x in s:
+                x
+            [ks, xs]
+    std::test::value("ci-removed-not-visited", [[["b", 20], ["c", 3], ["a", 100]], [1, 2, 4, 0]], b_ci_removed_not_visited)
+
+    # a loop over an empty collection, or one emptied by removal or clear, runs no iteration
+    fn b_ci_empty() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            s = digits(3)
+            std::mutable_set::remove(s, 0)
+            std::mutable_set::remove(s, 1)
+            std::mutable_set::remove(s, 2)
+            t = digits(20)
+            std::mutable_set::clear(t)
+            a = loop e in m:
+                e.key
+            b = loop x in s:
+                x
+            c = loop x in t:
+                x
+            [std::list::length(a), std::list::length(b), std::list::length(c)]
+    std::test::value("ci-empty", [0, 0, 0], b_ci_empty)
+
+    # the loop iterates the collection as it was when it began: replacing a value, inserting, removing, clearing and growing the collection in the body change the collection, never what the loop visits
+    fn b_ci_mutation_during_iteration() errors std::compiler::CompilerError:
+        static compile:
+            m = letters()
+            seen = loop e in m:
+                m.set(e.key, e.value * 100)
+                m.set(std::str::concat("new", e.key), 0)
+                r = std::mutable_map::remove(m, "c"):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+                [e.key, e.value]
+            after = loop e in m:
+                [e.key, e.value]
+            s = digits(3)
+            xs = loop x in s:
+                std::mutable_set::clear(s)
+                loop k from 0 to 50:
+                    s.add(k + 100)
+                x
+            [seen, after, xs, std::mutable_set::length(s)]
+    std::test::value("ci-mutation-during-iteration", [[["a", 1], ["b", 2], ["c", 3]], [["a", 100], ["b", 200], ["newa", 0], ["newb", 0], ["newc", 0]], [0, 1, 2], 50], b_ci_mutation_during_iteration)
+
+    # the snapshot holds wherever the loop is: over a parameter, and over a place parameter the function updates in the body
+    fn b_ci_mutation_in_function() errors std::compiler::CompilerError:
+        static compile:
+            fn sum(s: std::mutable_set::MutableSet[int]) -> List[int]:
+                loop x in s:
+                    x * 2
+            fn double_all(place s: std::mutable_set::MutableSet[int]) -> List[int]:
+                loop x in s:
+                    std::mutable_set::remove(s, x)
+                    s.add(x * 10)
+                    x
+            s = digits(4)
+            a = sum(s)
+            b = double_all(s)
+            c = loop x in s:
+                x
+            [a, b, c]
+    std::test::value("ci-mutation-in-function", [[0, 2, 4, 6], [0, 1, 2, 3], [0, 10, 20, 30]], b_ci_mutation_in_function)
+
+    # two loops over one collection, nested, are independent: each iterates its own snapshot
+    fn b_ci_nested() errors std::compiler::CompilerError:
+        static compile:
+            s = digits(3)
+            pairs = loop x in s:
+                ys = loop y in s:
+                    x * 10 + y
+                ys
+            pairs
+    std::test::value("ci-nested", [[0, 1, 2], [10, 11, 12], [20, 21, 22]], b_ci_nested)
+
+    # a lockstep loop cannot iterate a collection: its clauses advance over a count the compiler proves equal, which a collection's is not
+    fn b_ci_lockstep_refused() errors std::compiler::CompilerError:
+        static compile:
+            xs = loop x in digits(3) and i from 0 to 3:
+                x + i
+            xs
+    std::test::rejects("ci-lockstep-refused", std::compiler::DiagnosticCode::Type, b_ci_lockstep_refused)
+
+    # the loop protocol is internal to the standard library: a program naming one of its operations is refused
+    fn b_ci_protocol_internal_qualified() errors std::compiler::CompilerError:
+        static compile:
+            s = digits(2)
+            std::mutable_set::iteration_end(s)
+    std::test::rejects("ci-protocol-internal/qualified", std::compiler::DiagnosticCode::InternalNamespace, b_ci_protocol_internal_qualified)
+
+    # with method syntax too (the operations are nomethod)
+    fn b_ci_protocol_internal_method() errors std::compiler::CompilerError:
+        static compile:
+            s = digits(2)
+            s.iteration_at(0)
+    std::test::rejects("ci-protocol-internal/method", std::compiler::DiagnosticCode::NomethodCall, b_ci_protocol_internal_method)
+
+# ---------------------------------------------------------------------------
+
+fn register_collection_iteration_tests():
+    register_iteration_tests()
+
+with context std::test::suite()
+register_collection_iteration_tests()
+std::test::report()

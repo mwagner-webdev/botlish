@@ -1,0 +1,239 @@
+# place-parameters.test -- place parameters (PLACE-PARAMETERS.md).
+#
+# A parameter declared `place m: T` is its caller's place itself: a call
+# passes a place path of the caller's (a local, a parameter, a context
+# parameter, or a field path from one), uncopied, and every update the
+# function makes through it -- a collection operation on a path of it, or a
+# call giving it on to another place parameter -- is the caller's place's.
+# It is the seam that lets an ordinary Botlish function mutate a collection
+# value in place the way a collection operation does (std::mutable_map's
+# set, std::mutable_set's add): a collection stays a value, its copies stay
+# independent, and nothing of it exists at run time.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ppDecls {import std::mutable_vector
+import std::mutable_array
+
+struct Bag:
+    items: MutableVector[int]
+    label: str
+
+struct Holder:
+    bag: Bag
+    other: MutableVector[int]
+
+fn empty_bag() -> Bag:
+    Bag {items: std::mutable_vector::from_list([]), label: "b"}
+
+fn add(place b: Bag, x: int) -> unit:
+    b.items.push(x)
+
+fn add_twice(place b: Bag, x: int) -> unit:
+    add(b, x)
+    b.add(x)
+
+fn size(b: Bag) -> int:
+    b.items.length()
+
+}
+
+proc ppRun {body} {
+    return [sourceAgree "$::ppDecls$body"]
+}
+
+# The error code of TEXT's first diagnostic, or "ok".
+proc ppCode {body} {
+    if {[catch {surface::compile "$::ppDecls$body" -warnings off} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# Every diagnostic of TEXT as {CODE LINE MESSAGE}, lines counted from the
+# body's first line.
+proc ppDiagnostics {body} {
+    set offset [llength [split $::ppDecls \n]]
+    if {![catch {surface::compile "$::ppDecls$body" -warnings off} message options]} {
+        return {}
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] {
+        set text [dict get $d message]
+        set line ""
+        if {[regexp {^[^:]*:([0-9]+):[0-9]+: (.*)$} $text -> n rest]} {
+            set line [expr {$n - $offset + 1}]
+            set text $rest
+        }
+        regsub { \(CORE [^)]*\)$} $text {} text
+        lappend result [list [lindex [dict get $d errorcode] end] $line $text]
+    }
+    return $result
+}
+
+proc ppNative {body} {
+    set hir [surface::compile "$::ppDecls$body" -warnings off]
+    set report [native::allocationReport $hir summary]
+    return [list [dict get $report mutableVector] [dict get $report mutableArray]]
+}
+
+# ---------------------------------------------------------------------------
+# Syntax
+
+test pp-syntax-contextual {"place" is contextual: the marker only before a parameter name; `place` and `place: T` are an ordinary parameter named place, and `place` is an ordinary name elsewhere} -body {
+    list [sourceAgree "fn f(place: int) -> int:\n    place + 1\nfn g(place) -> int:\n    place\nplace = 4\n\[f(place), g(2)\]\n"] \
+        [lindex [sourceAgree "import std::mutable_vector\nfn h(place place: MutableVector\[int\]) -> unit:\n    place.push(1)\nv = std::mutable_vector::from_list(\[\])\nh(v)\nv.length()\n"] 1]
+} -result {{value {[5, 2]}} 1}
+
+test pp-syntax-type-required {a place parameter's type is always written: its declaration says which collection, or struct of collections, the function updates} -body {
+    set code [catch {surface::compile "fn f(place p) -> unit:\n    unit\n1\n" -warnings off} message options]
+    list $code [lrange [dict get $options -errorcode] 0 1] [regexp {place parameter "p" needs its type} $message]
+} -cleanup {unset -nocomplain code message options} -result {1 {SURFACE SYNTAX} 1}
+
+test pp-syntax-trait-requirement {a trait requirement takes values: a place parameter in one is a syntax error} -body {
+    set code [catch {surface::compile "trait T:\n    fn op(place value: T) -> unit\n1\n" -warnings off} message options]
+    list $code [regexp {declares a place parameter "value"} $message]
+} -cleanup {unset -nocomplain code message options} -result {1 1}
+
+test pp-hir-text {HIR text prints a function's place parameters (`places (I ...)`) and reads them back: the same text, the same outcome} -body {
+    set hir [surface::compile "$::ppDecls\nb = empty_bag()\nadd_twice(b, 3)\nsize(b)\n" -warnings off]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [llength [regexp -all -inline { places \(0\) } $text]] [expr {[hir::format $back] eq $text}] \
+        [lindex [outcomeUnderHir interp $back] 1] [lindex [outcomeUnderHir compile $back] 1]
+} -cleanup {unset -nocomplain hir text back} -result {2 1 2 2}
+
+# ---------------------------------------------------------------------------
+# Semantics: the caller's place
+
+test pp-caller-sees-update {the function's update through a place parameter is its caller's place's: the binding shows it, on every backend} -body {
+    ppRun "b = empty_bag()\nadd(b, 1)\nadd(b, 2)\nadd_twice(b, 3)\nb.items.length()\n"
+} -result {value 4}
+
+test pp-method-syntax {a function with a place parameter first is called with method syntax like a collection operation: `b.add(x)` updates b} -body {
+    ppRun "b = empty_bag()\nb.add(7)\nb.add_twice(8)\nfirst = b.items.at(0):\n    on IndexNotFound:\n        -1\nfirst * 100 + b.items.length()\n"
+} -result {value 703}
+
+test pp-copies-independent {a place is still a value: a copy made before or after a place call never observes another update (`c = b`, a struct field, a List element, an argument kept by a callee)} -body {
+    ppRun "fn keep(b: Bag) -> Bag:\n    b\nb = empty_bag()\nbefore = b\nadd(b, 1)\nafter = b\nh = Holder {bag: b, other: std::mutable_vector::from_list(\[\])}\nxs = \[b\]\nk = keep(b)\nadd(b, 2)\nadd_twice(b, 3)\n\[b.items.length(), before.items.length(), after.items.length(), h.bag.items.length(), size(std::list::at(xs, 0)), k.items.length()\]\n"
+} -setup {set ::ppDecls [string map [list "import std::mutable_array\n" "import std::mutable_array\nimport std::list\n"] $::ppDecls]} -cleanup {set ::ppDecls [string map [list "import std::list\n" ""] $::ppDecls]} -result {value {[4, 0, 1, 1, 1, 1]}}
+
+test pp-callee-copy-and-result {inside the function the place parameter is a place it does not own: a copy of it (`snapshot = b`) and its result (returned as a value) are logical copies the caller's later updates never change} -body {
+    ppRun "fn grab(place b: Bag) -> Bag:\n    snapshot = b\n    b.items.push(1)\n    b.items.push(snapshot.items.length())\n    b\nb = empty_bag()\nb.items.push(10)\ng = grab(b)\nb.items.push(20)\nthird = b.items.at(2):\n    on IndexNotFound:\n        -1\n\[b.items.length(), g.items.length(), third\]\n"
+} -result {value {[4, 3, 1]}}
+
+test pp-recursion {a recursive place function updates the same place at every depth (the caller's), and a place parameter passes on to another place parameter uncopied} -body {
+    ppRun "fn fill(place b: Bag, n: int) -> unit:\n    if n <= 0:\n        return unit\n    b.add(n)\n    fill(b, n - 1)\nb = empty_bag()\nfill(b, 50)\nb.items.length()\n"
+} -result {value 50}
+
+test pp-field-path {a field path of a place is a place: `add(h.bag, x)` updates the field's headers, never a sibling field's} -body {
+    ppRun "fn push_other(place v: MutableVector\[int\], x: int) -> unit:\n    v.push(x)\nh = Holder {bag: empty_bag(), other: std::mutable_vector::from_list(\[\])}\nadd(h.bag, 1)\nadd(h.bag, 2)\npush_other(h.other, 9)\n\[h.bag.items.length(), h.other.length(), h.bag.label\]\n"
+} -result {value {[2, 1, "b"]}}
+
+test pp-parameter-as-place {a function's ordinary parameter is a place of its own (its logical copy): giving it to a place parameter updates the callee's copy, never its caller's} -body {
+    ppRun "fn grown(b: Bag) -> int:\n    add(b, 1)\n    add(b, 2)\n    b.items.length()\nb = empty_bag()\nadd(b, 0)\nn = grown(b)\n\[n, b.items.length()\]\n"
+} -result {value {[3, 1]}}
+
+test pp-loop-variable {a loop variable is a place of its iteration (its logical copy): a place call on it never changes the iterated List's element} -body {
+    ppRun "b = empty_bag()\nadd(b, 1)\nbags = \[b, b\]\nns = loop c in bags:\n    add(c, 5)\n    c.items.length()\nms = loop c in bags:\n    c.items.length()\n\[ns, ms\]\n"
+} -result {value {[[2, 2], [1, 1]]}}
+
+test pp-context-member {a context parameter's member is a place: a place call on it updates the installed context, which every function sharing it sees} -body {
+    sourceAgree "import std::mutable_vector\ncontext struct Log:\n    lines: MutableVector\[str\]\nfn note(place v: MutableVector\[str\], text: str) -> unit:\n    v.push(text)\nfn write(text: str, context log: Log) -> unit:\n    note(log.lines, text)\nfn count(context log: Log) -> int:\n    log.lines.length()\nfn run(context log: Log) -> int:\n    write(\"a\")\n    write(\"b\")\n    count()\nwith context Log {lines: std::mutable_vector::from_list(\[\])}\nrun()\n"
+} -result {value 2}
+
+test pp-vector-and-array-places {a bare MutableVector or MutableArray is a place parameter's type too: push and set through it update the caller's collection} -body {
+    ppRun "fn grow(place v: MutableVector\[int\]) -> unit:\n    v.push(v.length())\nfn bump(place a: MutableArray\[int\], i: int) -> unit errors IndexNotFound:\n    a.set(i, a.at(i) + 1)\nv = std::mutable_vector::from_list(\[\])\ngrow(v)\ngrow(v)\na = std::mutable_array::create(2, 0)\nr = bump(a, 1):\n    on IndexNotFound:\n        unit\ns = bump(a, 1):\n    on IndexNotFound:\n        unit\nk = a.at(1):\n    on IndexNotFound:\n        -1\n\[v.length(), k\]\n"
+} -result {value {[2, 2]}}
+
+test pp-imprinted {an imprinted function's place parameter establishes its variables like any applied type, and every specialization updates the caller's place} -body {
+    sourceAgree "import std::mutable_vector\nstruct Box\[T\]:\n    items: MutableVector\[T\]\nfn put(place b: Box\[T\], x: T) -> unit:\n    b.items.push(x)\nfn fresh() -> Box\[int\]:\n    Box\[int\] {items: std::mutable_vector::from_list(\[\])}\nfn fresh_str() -> Box\[str\]:\n    Box\[str\] {items: std::mutable_vector::from_list(\[\])}\nb = fresh()\ns = fresh_str()\nput(b, 1)\nput(s, \"x\")\nput(s, \"y\")\n\[b.items.length(), s.items.length()\]\n"
+} -result {value {[1, 2]}}
+
+# ---------------------------------------------------------------------------
+# The argument copies around a place call
+
+test pp-observer-overlap-copied {an argument a callee only reads is handed over by reference unless the same call updates a place overlapping it: then it is a copy, and reads the value it had when the call began} -body {
+    ppRun "fn both(place b: Bag, seen: MutableVector\[int\]) -> int:\n    b.items.push(9)\n    seen.length()\nb = empty_bag()\nadd(b, 1)\nn = both(b, b.items)\n\[n, b.items.length()\]\n"
+} -result {value {[1, 2]}}
+
+test pp-written-later-copied {an argument read by reference is copied when a later argument of the same call gives an overlapping place to a place parameter} -body {
+    ppRun "fn touch(place b: Bag) -> int:\n    b.items.push(1)\n    0\nfn pair(v: MutableVector\[int\], k: int) -> int:\n    v.length() + k\nb = empty_bag()\nn = pair(b.items, touch(b))\n\[n, b.items.length()\]\n"
+} -result {value {[0, 1]}}
+
+test pp-no-copies {a place call copies nothing: 10000 updates through a recursive place function make no logical copy and no detach, natively} -constraints nativeBuilt -body {
+    ppNative "fn fill(place b: Bag, n: int) -> unit:\n    if n <= 0:\n        return unit\n    b.add(n)\n    fill(b, n - 1)\nb = empty_bag()\nfill(b, 10000)\nb.items.length()\n"
+} -match glob -result {{shares 0 detaches 0 detachElements 0 growths * growthBytes *} {reads 0 writes 0 shares 0 detaches 0 detachElements 0}}
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+proc AffinePlaceDiagnostic {} {
+    catch {surface::compile "import std::coroutine\nimport std::mutable_vector\nstruct Command:\n    value: int\nstruct Event:\n    value: int\nfn f(place q: MutableVector\[Coroutine{args: \[Command\], return: Event}\]) -> int:\n    q.length()\n1\n" -warnings off} message options
+    list [lindex [dict get $options -errorcode] end] [regexp {place parameter "q" of f has the affine type} $message]
+}
+
+test pp-diag-temporary {the argument of a place parameter must be a place: a temporary's update would be lost (MUTABLE-PLACE-RECEIVER)} -body {
+    ppDiagnostics "add(empty_bag(), 1)\n1\n"
+} -result {{MUTABLE-PLACE-RECEIVER 1 {the argument for place parameter "b" of add is not a place: it is a temporary value, so the update the function makes would be lost (bind the value to a name, pass the name, and use the name afterwards)}}}
+
+test pp-diag-module-binding {a module binding is no place: every user of the module shares it} -body {
+    set code [catch {withPrivateLibrary {
+        set f [open [file join $::core::libraryDir ppshared.bot] w]
+        puts -nonewline $f "import std::mutable_vector\nshared = std::mutable_vector::from_list(\[1\])\nfn grow(place v: MutableVector\[int\]) -> unit:\n    v.push(2)\nfn touch() -> int:\n    grow(shared)\n    shared.length()\n"
+        close $f
+        surface::compile "import std::ppshared\nstd::ppshared::touch()\n" -warnings off
+    }} message options]
+    list $code [lindex [dict get $options -errorcode] end] [regexp {is `std::ppshared::shared`, which is not a local binding, a parameter or a context parameter of this function} $message]
+} -cleanup {unset -nocomplain code message options f} -result {1 MUTABLE-PLACE-RECEIVER 1}
+
+test pp-diag-untyped-argument {an untyped parameter passed to a place parameter is a place of its own function, held to the place parameter's type like any argument} -body {
+    list [ppCode "fn f(x) -> int:\n    add(x, 1)\n    x.items.length()\nf(empty_bag())\n"] [ppRun "fn f(x) -> int:\n    add(x, 1)\n    x.items.length()\nb = empty_bag()\n\[f(b), b.items.length()\]\n"]
+} -result {ok {value {[1, 0]}}}
+
+test pp-diag-capture {a nested function cannot update a place it captured, nor capture a place its function updates (MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE)} -body {
+    lmap d [ppDiagnostics "fn outer() -> int:\n    b = empty_bag()\n    fn inner() -> unit:\n        add(b, 1)\n    add(b, 2)\n    b.items.length()\nouter()\n"] {lrange $d 0 1}
+} -result {{MUTABLE-PLACE-RECEIVER 4} {MUTABLE-PLACE-CAPTURE 4}}
+
+test pp-diag-capture-place-parameter {a place parameter is a place root of its function: a nested function referring to it is MUTABLE-PLACE-CAPTURE} -body {
+    lmap d [ppDiagnostics "fn f(place b: Bag) -> int:\n    fn g() -> int:\n        b.items.length()\n    g()\n1\n"] {lrange $d 0 1}
+} -result {{MUTABLE-PLACE-CAPTURE 3}}
+
+test pp-diag-function-value {a function with a place parameter is only called, never a value: a call through the value would update whatever its caller passes} -body {
+    lmap d [ppDiagnostics "f = add\n1\n"] {lindex $d 0}
+} -result {MUTABLE-PLACE-RECEIVER}
+
+test pp-diag-overlapping-places {one call gives one place to one place parameter only: the same place twice, or a struct and a field of it, would let each parameter see the other's updates} -body {
+    list [lmap d [ppDiagnostics "fn two(place a: Bag, place b: Bag) -> unit:\n    a.items.push(1)\nb = empty_bag()\ntwo(b, b)\n1\n"] {lrange $d 0 1}] \
+        [lmap d [ppDiagnostics "fn two(place h: Holder, place v: MutableVector\[int\]) -> unit:\n    v.push(1)\nh = Holder {bag: empty_bag(), other: std::mutable_vector::from_list(\[\])}\ntwo(h, h.other)\n1\n"] {lrange $d 0 1}] \
+        [ppRun "fn two(place a: MutableVector\[int\], place b: MutableVector\[int\]) -> unit:\n    a.push(1)\n    b.push(2)\nh = Holder {bag: empty_bag(), other: std::mutable_vector::from_list(\[\])}\ntwo(h.bag.items, h.other)\n\[h.bag.items.length(), h.other.length()\]\n"]
+} -result {{{MUTABLE-PLACE-RECEIVER 4}} {{MUTABLE-PLACE-RECEIVER 4}} {value {[1, 1]}}}
+
+test pp-diag-parameter-type {a place parameter's type holds a mutable collection and is unrestricted: an Int, or an affine collection, is TYPE} -body {
+    list [lmap d [ppDiagnostics "fn f(place n: int) -> int:\n    n\n1\n"] {lrange $d 0 2}] \
+        [AffinePlaceDiagnostic]
+} -result {{{TYPE 1 {place parameter "n" of f has the type int, which holds no mutable collection: only a MutableVector, a MutableArray or a struct whose fields hold one changes in place (pass the value as an ordinary parameter)}}} {TYPE 1}}
+
+
+test pp-diag-trait-implementation {a function with a place parameter is no implementation of a trait requirement} -body {
+    set text "trait Grow:\n    fn grow(value: Grow) -> int\nfn use(g: Grow) -> int:\n    g.grow()\n"
+    set code [catch {withPrivateLibrary {
+        set f [open [file join $::core::libraryDir ppbag.bot] w]
+        puts -nonewline $f "import std::mutable_vector\nstruct PBag:\n    items: MutableVector\[int\]\nfn grow(place value: PBag) -> int:\n    value.items.push(1)\n    value.items.length()\nfn make() -> PBag:\n    PBag {items: std::mutable_vector::from_list(\[\])}\n"
+        close $f
+        surface::compile "import std::ppbag\n${text}use(std::ppbag::make())\n" -warnings off
+    }} message options]
+    list $code [lindex [dict get $options -errorcode] end] [regexp {has a place parameter: a trait requirement takes values} $message]
+} -cleanup {unset -nocomplain text code message options f} -result {1 TRAIT-NOT-SATISFIED 1}
+
+# ---------------------------------------------------------------------------
+# Lengths across a place call (hir/cardinality.tcl)
+
+test pp-lengths-across-place-calls {a place call may resize every collection under its place: a vector read before it and after it have unrelated lengths, so an index guarded before it is not proven after it -- but a collection outside its place keeps its length} -body {
+    list [lmap d [ppDiagnostics "fn clear_all(place b: Bag) -> unit:\n    b.items.clear()\nfn f(b: Bag, i: int) -> int:\n    if i >= 0 and i < b.items.length():\n        clear_all(b)\n        return b.items.at(i)\n    0\n1\n"] {lrange $d 0 1}] \
+        [ppDiagnostics "fn clear_all(place b: Bag) -> unit:\n    b.items.clear()\nfn f(h: Holder, i: int) -> int:\n    if i >= 0 and i < h.other.length():\n        clear_all(h.bag)\n        return h.other.at(i)\n    0\n1\n"]
+} -result {{{UNHANDLED-ERROR 6}} {}}
+
+cleanupTests

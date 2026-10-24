@@ -2512,11 +2512,13 @@ summary: `loop x in xs:` and `loop i from a to b:` collect their body's values i
 index: concepts
 alias: loop; for loop; while loop; collecting loop; break and continue; counted loop
 keywords: loop, in, from, to, through, down from, break, continue, while, for, collect, map, filter, iteration, iterator, iterate, range, placement
-related: concept.lockstep concept.lists concept.if-expressions rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
+related: concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
 docs: COLLECTING-LOOPS.md RETURNING-ITERABLE-LOOPS.md PAYLOAD-FREE-BREAK.md
 
 == WHAT IT IS
-    loop x in xs:                  every element of a List (or vector)
+    loop x in xs:                  every element of a List (or vector), or
+                                   of a MutableMap or MutableSet in
+                                   insertion order
     loop i from a to b:            a <= i < b, ascending
     loop i from a through b:       a <= i <= b
     loop i down from b to a:       b >= i > a, descending
@@ -3382,7 +3384,7 @@ summary: MutableVector[T] grows and shrinks in place (push, pop, take, swap); it
 index: concepts
 alias: MutableVector; growable list; dynamic array; vector type
 keywords: mutable_vector, push, pop, take, swap, clear, at, length, place, copy-on-write, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, affine
-related: concept.mutable-array concept.values concept.affine concept.lists stdlib.module.std::mutable_vector capability.assignment error.mutable-place-receiver
+related: concept.mutable-array concept.values concept.affine concept.lists concept.place-parameters stdlib.module.std::mutable_vector capability.assignment error.mutable-place-receiver
 docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 
 == WHAT IT IS
@@ -3403,7 +3405,8 @@ elements copy-on-write, so copying is cheap.
     not a place, and a nested function cannot mutate an enclosing
     function's vector (MUTABLE-PLACE-CAPTURE).
   * A callee mutates its own copy: to give a caller the change, return the
-    vector.
+    vector, or declare the parameter a place (`place v: MutableVector[T]`,
+    concept.place-parameters): then the callee mutates the caller's own.
   * pop, take and at fail with IndexNotFound unless proven safe.
   * A vector of affine elements is affine: it moves whole and elements
     leave it only through pop, take, swap or a consuming loop.
@@ -3447,6 +3450,215 @@ fresh().push(1)
 
 == MORE
 MUTABLE-VECTOR.md.
+
+@topic concept.place-parameters
+title: Place parameters: `place m: T` updates the caller's collection
+summary: A parameter declared `place m: T` is the caller's place itself, so the function mutates the caller's collection (or struct of collections) in place, as the collection's own operations do.
+index: concepts
+alias: place parameter; place; in-out parameter; inout; mutable parameter; pass by reference; by-reference parameter; out parameter
+keywords: place, parameter, mutate, caller, MutableVector, MutableArray, MutableMap, MutableSet, struct, MUTABLE-PLACE-RECEIVER, MUTABLE-PLACE-CAPTURE, overlap
+related: concept.mutable-vector concept.mutable-array concept.mutable-map concept.values concept.functions error.mutable-place-receiver capability.assignment
+docs: PLACE-PARAMETERS.md MUTABLE-VECTOR.md ORDERED-MUTABLE-MAP-SET.md
+
+== WHAT IT IS
+    fn push_twice(place v: MutableVector[int], x: int) -> unit:
+        v.push(x)
+        v.push(x)
+
+    v = std::mutable_vector::from_list([1])
+    push_twice(v, 7)               v now holds [1, 7, 7]
+
+An ordinary parameter is the function's own value (a logical copy of the
+argument), so pushing into it changes nothing the caller sees. A place
+parameter is the caller's place: the caller passes a place of its own and
+every mutation the function makes through the parameter -- a collection
+operation on it or on a field path of it, or a call passing it on to
+another place parameter -- is the caller's. std::mutable_map's set and
+std::mutable_set's add are ordinary functions of this kind.
+
+== RULES
+  * The parameter's type is written and holds a mutable collection: a
+    MutableVector, a MutableArray, or a struct whose fields hold one (a
+    MutableMap is one); it is not affine. Otherwise TYPE.
+  * The argument is a place of the caller: a local, a parameter, a context
+    parameter's member, or a field path from one -- not a temporary, a
+    module binding or an enclosing function's binding
+    (MUTABLE-PLACE-RECEIVER).
+  * One call gives one place to one place parameter only: `f(a, a)` or
+    `f(h, h.items)` is MUTABLE-PLACE-RECEIVER.
+  * A function with a place parameter is only called, never used as a
+    value (MUTABLE-PLACE-RECEIVER), and a nested function cannot capture a
+    place parameter (MUTABLE-PLACE-CAPTURE). A trait requirement takes
+    values: it has no place parameters.
+  * Everything else is a value as before: a copy of the place made before
+    or after the call, the callee's own copy (`snapshot = v`) and its
+    result never observe a later update.
+  * `place` marks a parameter only before its name: `fn f(place: int)`
+    declares an ordinary parameter named place.
+
+== WHY
+Botlish has no references and no assignment: a collection is a value, and
+its in-place mutations are made through places (concept.mutable-vector).
+A place parameter extends that rule across one call -- the function's
+updates are the caller's place's -- without making the collection a
+reference: nothing can store, return or capture the place, and nothing of
+it exists at run time.
+
+== EXAMPLES
+@example accept
+import std::mutable_vector
+
+struct Bag:
+    items: MutableVector[int]
+
+fn add(place b: Bag, x: int) -> unit:
+    b.items.push(x)
+
+b = Bag {items: std::mutable_vector::from_list([])}
+before = b
+b.add(1)
+b.add(2)
+[b.items.length(), before.items.length()]
+@caption The caller's bag grows; a copy made before the call does not
+@value [2, 0]
+@end
+
+@example reject
+import std::mutable_vector
+
+fn grow(place v: MutableVector[int]) -> unit:
+    v.push(1)
+
+grow(std::mutable_vector::from_list([]))
+0
+@caption A temporary is not a place: its update would be lost
+@error CORE SEMANTIC MUTABLE-PLACE-RECEIVER
+@at 6:6
+@end
+
+== MORE
+PLACE-PARAMETERS.md.
+
+@topic concept.mutable-map
+title: MutableMap[K, V]: an insertion-ordered mutable map
+summary: std::mutable_map::MutableMap[K, V] maps Hashable keys to values and iterates in insertion order: a replaced value keeps its key's place, a removed and re-set key goes last.
+index: concepts
+alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
+keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value
+related: concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
+docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
+
+== WHAT IT IS
+    m = std::mutable_map::create[str, int]()
+    m.set("pear", 3)               a new key goes last
+    m.set("pear", 4)               a present key keeps its place
+    n = m.at("pear"):              KeyNotFound when absent
+        on std::mutable_map::KeyNotFound:
+            0
+    loop e in m:                   MutableMapEntry {key, value}, in
+        e.key                      insertion order
+
+After `import std::mutable_map`: create[K, V](), with_capacity[K, V](n),
+length, empty?, contains, at, set, remove (returns the value), clear, and
+`loop e in m:`. Expected cost: O(1) for contains, at, set and remove,
+O(n) for a loop.
+
+== RULES
+  * K must satisfy Hashable (TRAIT-NOT-SATISFIED otherwise): Ints, Strings,
+    enums, and structs and Lists of such values; never a function, a
+    collection or `any`. Keys are compared by `==`.
+  * Order is insertion order, whatever the keys and on every backend:
+    set of a present key replaces only its value; remove then set adds the
+    key last. Growth and removal never reorder the rest.
+  * at and remove of a missing key fail with the declared error
+    std::mutable_map::KeyNotFound (handle it or declare it); there is no
+    default value.
+  * A map is a value, like a MutableVector: `n = m`, an argument, a result
+    or a struct field is a logical copy, and mutating one copy never
+    changes another. Mutations take the map as a place
+    (concept.place-parameters): `m.set(k, v)` needs `m` to be a place.
+  * A loop iterates the map as it was when the loop began: the body may
+    mutate the map, which never changes what the loop visits.
+  * A map is not Hashable, and `==` of two maps is a run-time EQUALITY
+    error: compare contents with a loop and contains/at.
+
+== WHY
+The keyed hash that places a key is private and different in every
+process (HASHABLE-AND-KEYED-HASH.md); iteration follows insertion order so
+that no program can observe it, and a program's output is the same
+everywhere.
+
+== EXAMPLES
+@example accept
+import std::mutable_map
+
+m = std::mutable_map::create[str, int]()
+loop w in ["fig", "pear", "fig", "kiwi", "pear", "fig"]:
+    n = m.at(w):
+        on std::mutable_map::KeyNotFound:
+            0
+    m.set(w, n + 1)
+loop e in m:
+    [e.key, e.value]
+@caption Counting words; the order is first occurrence
+@value [["fig", 3], ["pear", 2], ["kiwi", 1]]
+@end
+
+@example reject
+import std::mutable_map
+
+m = std::mutable_map::create[int, int]()
+m.at(1)
+@caption A missing key is a declared error to handle
+@error CORE SEMANTIC UNHANDLED-ERROR
+@at 4:1
+@end
+
+== MORE
+ORDERED-MUTABLE-MAP-SET.md.
+
+@topic concept.mutable-set
+title: MutableSet[T]: an insertion-ordered mutable set
+summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
+index: concepts
+alias: MutableSet; ordered set; mutable set
+keywords: mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
+related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
+docs: ORDERED-MUTABLE-MAP-SET.md
+
+== WHAT IT IS
+After `import std::mutable_set`: create[T](), with_capacity[T](n), length,
+empty?, contains, add (true when it added), remove (true when it removed),
+clear, and `loop x in s:`. Expected cost: O(1) for contains, add and
+remove, O(n) for a loop.
+
+== RULES
+  * T must satisfy Hashable; membership is `==`.
+  * Order is insertion order: adding a present element changes nothing,
+    removing one and adding it again adds it last.
+  * A set is a value (copies are independent), its mutations take it as a
+    place, and a loop iterates it as it was when the loop began.
+  * A set is not Hashable and has no `==`; std::immutable_set is the
+    immutable, comparable set (concept.immutable-set).
+
+== EXAMPLES
+@example accept
+import std::mutable_set
+
+s = std::mutable_set::create[int]()
+added = loop x in [5, 2, 5, 9, 2]:
+    s.add(x)
+s.remove(5)
+s.add(5)
+order = loop x in s:
+    x
+[added, order]
+@caption Duplicates add nothing; removing and re-adding moves an element last
+@value [[true, true, false, true, false], [2, 9, 5]]
+@end
+
+== MORE
+ORDERED-MUTABLE-MAP-SET.md.
 
 @topic concept.mutable-array
 title: MutableArray[T]: a fixed-length mutable value

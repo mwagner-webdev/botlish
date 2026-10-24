@@ -109,13 +109,13 @@ test cf-workloads-agree {every workload and its procedural baseline has the valu
     }
 } -result {1 1 1 1 1 1 1 1 1}
 
-test cf-workloads-fused {the producer/consumer pairs, the deep-yield scan, the tokenizer's three coroutines (two alive at once) and the streaming validator are fused into their consumers} -body {
+test cf-workloads-fused {the producer/consumer pairs, the deep-yield scan, the tokenizer's three coroutines (two alive at once) and the streaming validator are fused into their consumers} -constraints nativeCoroutines -body {
     lmap name {lcg lcg-struct grid tokens utf8} {
         cfSites [cfText $name]
     }
 } -result {{{fused sum}} {{fused sum}} {{fused total}} {{fused lex} {fused lex} {fused lex}} {{fused validate}}}
 
-test cf-fallbacks {a handle passed to a function, stored in a struct, returned or put in a List, a recursive yielding function and a capturing yielding closure keep the general runtime, each for its reason; a coroutine per frame of a recursion and an environment-free nested yielding function are fused} -body {
+test cf-fallbacks {a handle passed to a function, stored in a struct, returned or put in a List, a recursive yielding function and a capturing yielding closure keep the general runtime, each for its reason; a coroutine per frame of a recursion and an environment-free nested yielding function are fused} -constraints nativeCoroutines -body {
     list [cfSites [cfText fallbacks]] [lmap {function reason} [cfKept [cfText fallbacks]] {
         regsub -all {%[0-9]+} $reason %N reason
         regsub -all {call [0-9]+} $reason {call F} reason
@@ -132,13 +132,13 @@ test cf-cases-agree {construction order, early completion, terminal failure, own
     }
 } -result {1 1 1 1 1 1 1 1 1 1}
 
-test cf-cases-fused {each correctness case's coroutines are fused (the closure's excepted): the property under test is the fused code's} -body {
+test cf-cases-fused {each correctness case's coroutines are fused (the closure's excepted): the property under test is the fused code's} -constraints nativeCoroutines -body {
     lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-plan case-closure} {
         lsort -unique [lmap entry [cfSites [cfText $name]] {lindex $entry 0}]
     }
 } -result {fused fused fused fused fused fused fused fused fused kept}
 
-test cf-nested-fusion {a coroutine constructed by a fused producer is fused in the consumer too: the outer copies duplicate its construction, one site of several cocreates} -body {
+test cf-nested-fusion {a coroutine constructed by a fused producer is fused in the consumer too: the outer copies duplicate its construction, one site of several cocreates} -constraints nativeCoroutines -body {
     set hir [surface::compile [cfText case-structure] -warnings off]
     set nested [lsearch -inline -index 1 -all [native::fusion $hir] nested]
     set outer [lsearch -inline -index 1 -all [native::fusion $hir] outer]
@@ -160,7 +160,7 @@ test cf-gc-stress {under GC stress (a collection attempt at every allocation sit
 # ---------------------------------------------------------------------------
 # Evidence
 
-test cf-nir-no-coroutine-operations {the fused consumer's NIR has no coroutine operation but the failure path's (cofailed, and coresume0 of the failed object, one per start and resume); the general runtime's has create, start, resume and release} -body {
+test cf-nir-no-coroutine-operations {the fused consumer's NIR has no coroutine operation but the failure path's (cofailed, and coresume0 of the failed object, one per start and resume); the general runtime's has create, start, resume and release} -constraints nativeCoroutines -body {
     lmap name {lcg grid tokens utf8} function {sum total lex validate} {
         set nir [native::nir [surface::compile [cfText $name] -warnings off]]
         set before [lsort -unique [regexp -all -inline {co[a-z0-9]+} [join [regexp -all -inline {op co[a-z0-9]+} [lindex [regexp -inline "func \[0-9\]+ \"$function\"\[^\n\]*\n(.*?)\nend" $nir] 1]]]]]
@@ -173,7 +173,7 @@ test cf-nir-no-coroutine-operations {the fused consumer's NIR has no coroutine o
     }
 } -cleanup {unset -nocomplain nir before fused ops failed boxes made} -result {{{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume costart} {cofailed coresume0} 1}}
 
-test cf-clif-no-coroutine-helpers {natively the fused program refers to no coroutine helper but the failure path's (rt_co_failed, rt_co_resume0); the general program refers to create, start, resume, release and (its producers) yield} -body {
+test cf-clif-no-coroutine-helpers {natively the fused program refers to no coroutine helper but the failure path's (rt_co_failed, rt_co_resume0); the general program refers to create, start, resume, release and (its producers) yield} -constraints nativeCoroutines -body {
     lmap name {lcg grid tokens utf8} {
         set text [cfText $name]
         list [cfClifHelpers $text] [withoutCoroutineFusion {cfClifHelpers $text}]
@@ -213,9 +213,8 @@ test cf-fusion-off {BOTLISH_NATIVE_COROUTINE_FUSION=0 turns the pass off: no sit
     list [withoutCoroutineFusion {native::fusion $hir}] [expr {[lindex $ops 2] eq [lindex $ops 3]}] [llength [lindex $ops 2]]
 } -cleanup {unset -nocomplain hir ops text} -result {{} 1 9}
 
-test cf-executable {a standalone executable of a fused program prints the same value, also under GC stress} -constraints executableAot -body {
-    set exe [file join [temporaryDirectory] cf-tokens-[pid]]
-    native::executable [surface::compile [cfText tokens] -warnings off] $exe
+test cf-executable {a standalone executable of a fused program prints the same value, also under GC stress} -constraints {executableAot nativeCoroutines} -body {
+    set exe [native::executable [surface::compile [cfText tokens] -warnings off] [file join [temporaryDirectory] cf-tokens-[pid]]]
     set plain [exec $exe]
     set stressed [cfGcStress {exec $exe}]
     file delete $exe

@@ -96,10 +96,12 @@
 @@ param-mutation-leaks an array parameter is never copied for its callee (no entry copy, no caller-side copy of a consumed parameter's argument): the callee's mutations reach the caller's array
 ## hir/mutvec.tcl
 <<<<
-        } elseif {![dict exists $convention consumed $b]} {
+        } elseif {![dict exists $convention consumed $b] && ![IsPlaceParam $hir $b]} {
+            # (A place parameter is the caller's place itself: no entry copy.)
             EntryRename hir $b $d
 ====
-        } elseif {![dict exists $convention consumed $b] && [Kind [hir::affine::BindingType $hir $b]] ne "array"} {
+        } elseif {![dict exists $convention consumed $b] && ![IsPlaceParam $hir $b] && [Kind [hir::affine::BindingType $hir $b]] ne "array"} {
+            # (A place parameter is the caller's place itself: no entry copy.)
             EntryRename hir $b $d
 >>>>
 ## hir/mutvec.tcl

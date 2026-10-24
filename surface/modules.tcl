@@ -1492,7 +1492,15 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
 # under core::libraryDir that are no application module (LoadNamespace
 # records those); the entry program is never one, and no application module
 # can be a standard namespace (RESERVED-NAMESPACE).
-proc surface::modules::CheckInternal {state own ns span} {
+proc surface::modules::CheckInternal {state own ns span {member ""}} {
+    if {$member ne "" && [hir::iteration::IsOperation $ns $member]
+            && ($own eq "" || [dict exists $state application $own])} {
+        # An operation of a collection's loop protocol (hir/iteration.tcl):
+        # its positions are the representation, which only the standard
+        # library may see.
+        Error INTERNAL-NAMESPACE $span \
+            "\"${ns}::$member\" is internal to the standard library: it is an operation of the loop protocol of a collection of \"$ns\", which only its modules may name ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one); iterate the collection with a loop instead"
+    }
     if {![core::native::isInternalNamespace $ns]} {
         return
     }
@@ -1550,7 +1558,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         Error NOT-A-STRUCT $span \
             "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
     }
-    CheckInternal $state $own $namespaceName $span
+    CheckInternal $state $own $namespaceName $span $symbolName
     if {$namespaceName ni $imported} {
         if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor $state $key $namespaceName]
                 && ![NamespaceExists ${standardRoot}::$namespaceName]} {

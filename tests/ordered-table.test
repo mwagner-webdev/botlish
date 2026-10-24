@@ -1,0 +1,429 @@
+# ordered-table.test -- the invariants of std::ordered_table, the engine of
+# std::mutable_map and std::mutable_set (ORDERED-MUTABLE-MAP-SET.md,
+# "Representation").
+#
+# White-box tests of the representation, which no program can observe: each
+# runs a random operation sequence on the Tcl compiler's backend, keeps a
+# logical copy of the collection after every operation (a snapshot: its own
+# headers over the backings as they were), and reads every snapshot's
+# vectors here, through the Tcl runtime (core::value, core::mutvec), against
+# an independent Tcl model (a dict: insertion-ordered, a new key last, an
+# existing key in place). After every operation:
+#
+#   index     a power of two of at least 8 slots, each -1 or the position
+#             of a live entry, every live position in exactly one slot
+#   probe     every live entry's slot is reachable from its home slot (its
+#             stored hash masked by the slot count) through occupied slots
+#   hashes    a live entry's stored hash is the table hash of its key under
+#             the process key in force; a dead entry's is exactly -1
+#   aligned   hashes, keys (and a map's values) have one element per
+#             position
+#   load      at most 7/10 of the slots hold an entry
+#   garbage   fewer than max(8, live) dead entries
+#   size      the index at most four times the positions plus one (no index
+#             left large after mass removal outlives the next rebuild)
+#   contents  the live keys in position order are the model's keys in order,
+#             a map's values the model's values
+#
+# The policy (the 7/10 load, the garbage rule, the slot counts) is the
+# engine's, not a semantic commitment: a change to it changes these tests
+# and the report, never a program's observations.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# A deterministic generator.
+proc otRand {n} {
+    global otSeed
+    set otSeed [expr {($otSeed * 1103515245 + 12345) % 2147483648}]
+    return [expr {($otSeed / 65536) % $n}]
+}
+
+# A random sequence of COUNT operations on key ids from a pool of POOL:
+# {set ID VALUE} (a set's add ignores VALUE), {remove ID}, {clear}, and
+# {fill FROM COUNT} (COUNT fresh keys: growth), {drain FROM COUNT} (their
+# removal: compaction and shrinking).
+proc otOps {seed count pool} {
+    set ::otSeed $seed
+    set ops {}
+    set fill 1000
+    for {set i 0} {$i < $count} {incr i} {
+        set r [otRand 100]
+        if {$r < 50} {
+            lappend ops [list set [otRand $pool] [otRand 1000]]
+        } elseif {$r < 85} {
+            lappend ops [list remove [otRand $pool]]
+        } elseif {$r < 87} {
+            lappend ops clear
+        } elseif {$r < 94} {
+            set n [expr {5 + [otRand 60]}]
+            lappend ops [list fill $fill $n]
+            incr fill 1000
+        } else {
+            lappend ops [list drain [expr {$fill - 1000}] 1000]
+        }
+    }
+    return $ops
+}
+
+# The program applying OPS to a WHAT (map or set) of key kind KIND (int or
+# str), returning the List of its snapshots: the collection before the first
+# operation and after each.
+proc otProgram {what kind ops} {
+    set t [expr {$kind eq "int" ? "int" : "str"}]
+    set key [expr {$kind eq "int" ? "i" : "std::int::to_string(i)"}]
+    if {$what eq "map"} {
+        set type "std::mutable_map::MutableMap\[$t, int\]"
+        set create "std::mutable_map::create\[$t, int\]()"
+        set put "c.set(key(arg(op, 1)), arg(op, 2))"
+        set putLoop "c.set(key(i), i)"
+        set drop "r = c.remove(key(arg(op, 1))):\n            on std::mutable_map::KeyNotFound:\n                -1"
+        set dropLoop "r = c.remove(key(i)):\n                on std::mutable_map::KeyNotFound:\n                    -1"
+    } else {
+        set type "std::mutable_set::MutableSet\[$t\]"
+        set create "std::mutable_set::create\[$t\]()"
+        set put "c.add(key(arg(op, 1)))"
+        set putLoop "c.add(key(i))"
+        set drop "c.remove(key(arg(op, 1)))"
+        set dropLoop "c.remove(key(i))"
+    }
+    set codes {}
+    foreach op $ops {
+        switch -- [lindex $op 0] {
+            set { lappend codes "\[0, [lindex $op 1], [lindex $op 2]\]" }
+            remove { lappend codes "\[1, [lindex $op 1]\]" }
+            clear { lappend codes "\[2\]" }
+            fill { lappend codes "\[3, [lindex $op 1], [lindex $op 2]\]" }
+            drain { lappend codes "\[4, [lindex $op 1], [lindex $op 2]\]" }
+        }
+    }
+    return "import std::list
+import std::int
+import std::mutable_$what
+import std::mutable_vector
+
+fn arg(op: List\[int\], i: int) -> int:
+    x = std::list::at(op, i):
+        on IndexNotFound:
+            0
+    x
+
+fn key(i: int) -> $t:
+    $key
+
+fn apply(place c: $type, op: List\[int\]) -> unit:
+    code = arg(op, 0)
+    if code == 0:
+        $put
+    if code == 1:
+        $drop
+    if code == 2:
+        c.clear()
+    if code == 3:
+        loop i from arg(op, 1) to arg(op, 1) + arg(op, 2):
+            $putLoop
+    if code == 4:
+        loop i from arg(op, 1) to arg(op, 1) + arg(op, 2):
+            $dropLoop
+    unit
+
+ops = \[[join $codes {, }]\]
+c = $create
+snaps = std::mutable_vector::from_list(\[c\])
+loop op in ops:
+    apply(c, op)
+    snaps.push(c)
+loop s in snaps:
+    s
+"
+}
+
+# The model's states: the dict (key id -> value) before the first operation
+# and after each.
+proc otModel {ops} {
+    set m [dict create]
+    set states [list $m]
+    foreach op $ops {
+        switch -- [lindex $op 0] {
+            set { dict set m [lindex $op 1] [lindex $op 2] }
+            remove { dict unset m [lindex $op 1] }
+            clear { set m [dict create] }
+            fill {
+                lassign $op - from n
+                for {set i $from} {$i < $from + $n} {incr i} {
+                    dict set m $i $i
+                }
+            }
+            drain {
+                lassign $op - from n
+                for {set i $from} {$i < $from + $n} {incr i} {
+                    dict unset m $i
+                }
+            }
+        }
+        lappend states $m
+    }
+    return $states
+}
+
+proc otInts {vector} {
+    return [lmap x [core::mutvec::items $vector] {core::value::intOf $x}]
+}
+
+proc otKey {kind id} {
+    return [expr {$kind eq "int" ? [core::value::intFromNumber $id] : [core::value::str $id]}]
+}
+
+# The problems of snapshot SNAP (a raw map or set value) against the model
+# state STATE: "" when every invariant holds.
+proc otProblems {what kind snap state} {
+    set table [core::value::structGet $snap table]
+    set index [otInts [core::value::structGet $table index]]
+    set hashes [otInts [core::value::structGet $table hashes]]
+    set keys [core::mutvec::items [core::value::structGet $table keys]]
+    set live [core::value::intOf [lindex [core::mutarray::items [core::value::structGet $table live]] 0]]
+    set slots [llength $index]
+    set positions [llength $hashes]
+    set problems {}
+    if {$slots < 8 || ($slots & ($slots - 1)) != 0} {
+        lappend problems "index of $slots slots"
+    }
+    if {[llength $keys] != $positions} {
+        lappend problems "[llength $keys] keys for $positions positions"
+    }
+    if {$what eq "map"} {
+        set vals [otInts [core::value::structGet $snap vals]]
+        if {[llength $vals] != $positions} {
+            lappend problems "[llength $vals] values for $positions positions"
+        }
+    }
+    set livePositions {}
+    for {set p 0} {$p < $positions} {incr p} {
+        set h [lindex $hashes $p]
+        if {$h >= 0} {
+            lappend livePositions $p
+            set expected [core::value::intOf [core::hashing::tableHash [lindex $keys $p]]]
+            if {$h != $expected} {
+                lappend problems "position $p: stored hash $h, its key's is $expected"
+            }
+        } elseif {$h != -1} {
+            lappend problems "position $p: dead hash $h"
+        }
+    }
+    if {[llength $livePositions] != $live} {
+        lappend problems "live count $live, [llength $livePositions] live entries"
+    }
+    set dead [expr {$positions - [llength $livePositions]}]
+    set slotOf [dict create]
+    for {set s 0} {$s < $slots} {incr s} {
+        set e [lindex $index $s]
+        if {$e == -1} continue
+        if {$e < 0 || $e >= $positions || [lindex $hashes $e] < 0} {
+            lappend problems "slot $s holds $e, no live position"
+        } elseif {[dict exists $slotOf $e]} {
+            lappend problems "position $e in slots [dict get $slotOf $e] and $s"
+        } else {
+            dict set slotOf $e $s
+        }
+    }
+    foreach p $livePositions {
+        if {![dict exists $slotOf $p]} {
+            lappend problems "live position $p in no slot"
+            continue
+        }
+        set s [dict get $slotOf $p]
+        set home [expr {[lindex $hashes $p] & ($slots - 1)}]
+        for {set j $home} {$j != $s} {set j [expr {($j + 1) % $slots}]} {
+            if {[lindex $index $j] == -1} {
+                lappend problems "position $p at slot $s, empty slot $j after its home $home"
+                break
+            }
+        }
+    }
+    if {[llength $livePositions] * 10 > $slots * 7} {
+        lappend problems "load [llength $livePositions] of $slots slots"
+    }
+    if {$dead >= 8 && $dead >= [llength $livePositions]} {
+        lappend problems "$dead dead entries for [llength $livePositions] live"
+    }
+    if {$slots > max(8, 4 * ($positions + 1))} {
+        lappend problems "$slots slots for $positions positions"
+    }
+    set got [lmap p $livePositions {lindex $keys $p}]
+    set want [lmap id [dict keys $state] {otKey $kind $id}]
+    if {$got ne $want} {
+        lappend problems "keys [lrange $got 0 5]... are not the model's [lrange $want 0 5]..."
+    }
+    if {$what eq "map" && [lmap p $livePositions {lindex $vals $p}] ne [dict values $state]} {
+        lappend problems "values are not the model's"
+    }
+    return $problems
+}
+
+# Runs OPS on a WHAT of KIND on the Tcl compiler's backend and checks every
+# snapshot: the problems of the first snapshot that has some, or "" (and
+# the number of snapshots checked).
+proc otCheck {what kind ops} {
+    set hir [surface::compile [otProgram $what $kind $ops] -warnings off]
+    set snaps [lindex [core::compiler::evalHir $hir] 1]
+    set states [otModel $ops]
+    if {[llength $snaps] != [llength $states]} {
+        return "[llength $snaps] snapshots for [llength $states] states"
+    }
+    foreach snap $snaps state $states op [concat [list start] $ops] {
+        set problems [otProblems $what $kind $snap $state]
+        if {$problems ne {}} {
+            return "after $op: [join [lrange $problems 0 3] {; }]"
+        }
+    }
+    return [list ok [llength $snaps]]
+}
+
+# The largest SLOTS and POSITIONS any snapshot of OPS had.
+proc otExtent {what ops} {
+    set hir [surface::compile [otProgram $what int $ops] -warnings off]
+    set slots 0
+    set positions 0
+    foreach snap [lindex [core::compiler::evalHir $hir] 1] {
+        set table [core::value::structGet $snap table]
+        set slots [expr {max($slots, [llength [core::mutvec::items [core::value::structGet $table index]]])}]
+        set positions [expr {max($positions, [llength [core::mutvec::items [core::value::structGet $table hashes]]])}]
+    }
+    return [list $slots $positions]
+}
+
+test ot-invariants-map-int {a MutableMap[int, int]: every invariant after each of 400 random operations (small key pool: replacement, removal, reinsertion, churn; fills and drains: growth, compaction, shrinking)} -body {
+    otCheck map int [otOps 7 400 24]
+} -result {ok 401}
+
+test ot-invariants-map-str {a MutableMap[str, int]: every invariant after each of 300 random operations} -body {
+    otCheck map str [otOps 19 300 40]
+} -result {ok 301}
+
+test ot-invariants-set-int {a MutableSet[int]: every invariant after each of 400 random operations} -body {
+    otCheck set int [otOps 31 400 24]
+} -result {ok 401}
+
+test ot-invariants-set-str {a MutableSet[str]: every invariant after each of 300 random operations} -body {
+    otCheck set str [otOps 43 300 40]
+} -result {ok 301}
+
+test ot-invariants-hidden-keys {under two fixed hidden keys every stored hash is that key's table hash and every invariant holds: the key decides placement only} -body {
+    set ops [otOps 53 250 30]
+    set results {}
+    foreach key {{1 2} {0x9e3779b97f4a7c15 0xbf58476d1ce4e5b9}} {
+        core::hashing::useTableHashKey $key
+        try {
+            lappend results [otCheck map int $ops]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    set results
+} -cleanup {unset -nocomplain ops results key} -result {{ok 251} {ok 251}}
+
+test ot-churn-bounded {churn -- 600 insertions of fresh keys, each removed two operations later, at most three live -- keeps the entries and the index small: dead entries never accumulate} -body {
+    set ops {}
+    for {set i 0} {$i < 600} {incr i} {
+        lappend ops [list set [expr {100 + $i}] $i]
+        if {$i >= 2} {
+            lappend ops [list remove [expr {100 + $i - 2}]]
+        }
+    }
+    list [otCheck map int $ops] [otExtent map $ops]
+} -cleanup {unset -nocomplain ops i} -result {{ok 1199} {8 10}}
+
+test ot-shrink-after-removal {growing to 2000 entries and removing all but 3 shrinks the index back: the garbage rule's rebuild sizes it for the live entries} -body {
+    set ops [list [list fill 0 2000] [list drain 3 1997] [list set 5000 1]]
+    set hir [surface::compile [otProgram map int $ops] -warnings off]
+    set extents [lmap snap [lindex [core::compiler::evalHir $hir] 1] {
+        set table [core::value::structGet $snap table]
+        list [llength [core::mutvec::items [core::value::structGet $table index]]] \
+            [llength [core::mutvec::items [core::value::structGet $table hashes]]]
+    }]
+    list [otCheck map int $ops] $extents
+} -cleanup {unset -nocomplain ops hir extents} -result {{ok 4} {{8 0} {4096 2000} {16 7} {16 8}}}
+
+test ot-clear-is-minimal {clear leaves no entry and the smallest index, whatever the collection held} -body {
+    set ops [list [list fill 0 500] clear]
+    list [otCheck set int $ops] [lindex [otExtent set [list clear]] 0]
+} -cleanup {unset -nocomplain ops} -result {{ok 3} 8}
+
+test ot-keys-compared-on-hash-match-only {a probe compares a key only at an entry whose stored hash is the key's: 200 hits compare 200 keys, 200 misses and 200 insertions of fresh keys none (struct keys, whose equality the Tcl compiler's code calls core::value::equal for)} -body {
+    set hir [surface::compile "import std::list
+import std::mutable_map
+struct P:
+    a: int
+m = std::mutable_map::create\[P, int\]()
+loop i from 0 to 200:
+    m.set(P {a: i * 3}, i)
+hits = loop i from 0 to 200:
+    if not m.contains(P {a: i * 3}):
+        continue
+    i
+misses = loop i from 0 to 200:
+    if m.contains(P {a: i * 3 + 1}):
+        continue
+    i
+\[m.length(), std::list::length(hits), std::list::length(misses)\]
+" -warnings off]
+    set ::otEqualDepth 0
+    set ::otEqualCalls 0
+    set trace [list ::apply {{args} {
+        if {[lindex $args end] eq "enter"} {
+            if {$::otEqualDepth == 0} {
+                incr ::otEqualCalls
+            }
+            incr ::otEqualDepth
+        } else {
+            incr ::otEqualDepth -1
+        }
+    }}]
+    trace add execution core::value::equal {enter leave} $trace
+    try {
+        set value [core::value::show [core::compiler::evalHir $hir]]
+    } finally {
+        trace remove execution core::value::equal {enter leave} $trace
+    }
+    list $value $::otEqualCalls
+} -cleanup {unset -nocomplain hir trace value ::otEqualDepth ::otEqualCalls} -result {{[200, 200, 200]} 200}
+
+test ot-keyed-collisions {genuine collisions of the table's own hash: under the hidden key {1 2}, the first 64 keys of audit/mutable-map/data/keyed-collide.txt share one home slot in every index of up to 1024 slots; built into one probe cluster, removed from it (backward shift), replaced and reinserted, every invariant holds after every operation} -body {
+    set keys [lrange [string trim [core::ReadFile [file join $::projectRoot audit mutable-map data keyed-collide.txt]]] 0 63]
+    set ops {}
+    foreach k $keys {
+        lappend ops [list set $k 1]
+    }
+    foreach k $keys j [lsearch -all $keys *] {
+        switch -- [expr {$j % 3}] {
+            0 { lappend ops [list remove $k] }
+            1 { lappend ops [list set $k 2] }
+        }
+    }
+    foreach k $keys j [lsearch -all $keys *] {
+        if {$j % 3 == 0 && $j < 40} {
+            lappend ops [list set $k 3]
+        }
+    }
+    core::hashing::useTableHashKey {1 2}
+    try {
+        set homes [lsort -unique [lmap k $keys {
+            expr {[core::value::intOf [core::hashing::tableHash [core::value::intFromNumber $k]]] & 1023}
+        }]]
+        set check [otCheck map int $ops]
+        set snap [lindex [core::compiler::evalHir [surface::compile [otProgram map int $ops] -warnings off]] 1 64]
+        set table [core::value::structGet $snap table]
+        set index [otInts [core::value::structGet $table index]]
+        set hashes [otInts [core::value::structGet $table hashes]]
+        set mask [expr {[llength $index] - 1}]
+        set clustered [lsort -unique [lmap h $hashes {expr {$h & $mask}}]]
+        set run 0
+        while {[lindex $index [expr {([lindex $clustered 0] + $run) & $mask}]] != -1} {
+            incr run
+        }
+    } finally {
+        core::hashing::useTableHashKey ""
+    }
+    list $homes $check [llength $clustered] $run
+} -cleanup {unset -nocomplain keys ops k j homes check snap table index hashes mask clustered run} -result {0 {ok 122} 1 64}
+
+cleanupTests

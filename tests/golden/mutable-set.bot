@@ -1,0 +1,193 @@
+# mutable-set.bot -- std::mutable_set::MutableSet[T satisfies Hashable]
+# (ORDERED-MUTABLE-MAP-SET.md), ported from tests/mutable-set.test.
+#
+# * A MutableSet is a mutable value of distinct elements iterated in
+#   insertion order: adding a present element changes nothing (not its
+#   place) and answers false, removing one and adding it again adds it
+#   last. Growth and compaction keep the order.
+# * Membership is Botlish equality, exactly a MutableMap key's; the element
+#   type must satisfy Hashable (TraitNotSatisfied), and a set is not
+#   Hashable.
+# * Copies are independent through every mutation.
+
+# What a Botlish program cannot observe stays in the Tcl suites: the
+# representation's invariants (tests/ordered-table.test), the hidden hash
+# key's independence across fixed keys, injected collisions of the keyed
+# hash (a private library), the run-time EQUALITY of `==` on two
+# collections, the static type of a loop variable, the elaborated loop's HIR
+# and every native fact (typed probes, one keyed hash per operation,
+# allocation and copy counts).
+
+# Imports: std::mutable_set and not std::mutable_map (mutable-map.bot's), so
+# that a set's length, contains, remove and clear have one candidate.
+import std::compiler
+import std::list
+import std::str
+import std::mutable_array
+import std::mutable_set
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only).
+
+# msDecls: reading a set out as a List, an empty set.
+fn elems(s: std::mutable_set::MutableSet[int]) -> List[int]:
+    loop x in s:
+        x
+
+fn int_set() -> std::mutable_set::MutableSet[int]:
+    std::mutable_set::create[int]()
+
+# ms-membership-is-equality: a struct element (P in the Tcl program).
+struct SetKey:
+    a: int
+    b: List[str]
+
+# ---------------------------------------------------------------------------
+# Operations, order, copies, elements
+
+fn register_set_tests():
+    # create, length, empty?, contains, add (true when it added), remove (true when it removed) and clear
+    fn b_ms_basics() errors std::compiler::CompilerError:
+        static compile:
+            s = int_set()
+            e0 = s.empty?()
+            a = [s.add(3), s.add(1), s.add(3)]
+            c = [s.contains(1), s.contains(2)]
+            r = [s.remove(3), s.remove(3), s.remove(9)]
+            n = s.length()
+            s.clear()
+            [e0, a, c, r, n, s.length(), s.empty?(), elems(s)]
+    std::test::value("ms-basics", [true, [true, true, false], [true, false], [true, false, false], 1, 0, true, []], b_ms_basics)
+
+    # iteration is insertion order; adding a present element does not move it; removing and adding again adds it last
+    fn b_ms_order() errors std::compiler::CompilerError:
+        static compile:
+            s = int_set()
+            loop x in [5, 2, 8, 2, 5, 1]:
+                s.add(x)
+            a = elems(s)
+            s.remove(2)
+            s.add(2)
+            s.add(8)
+            [a, elems(s)]
+    std::test::value("ms-order", [[5, 2, 8, 1], [5, 8, 1, 2]], b_ms_order)
+
+    # growth and compaction keep the order: 400 elements, three in four removed, some added again
+    fn b_ms_growth_compaction() errors std::compiler::CompilerError:
+        static compile:
+            s = int_set()
+            loop i from 0 to 400:
+                s.add(i * 3)
+            loop i from 0 to 400:
+                if i.mod(4) != 0:
+                    s.remove(i * 3)
+            loop i from 0 to 5:
+                s.add(i * 3)
+            xs = elems(s)
+            first = std::list::at(xs, 0):
+                on IndexNotFound:
+                    -1
+            last = std::list::at(xs, std::list::length(xs) - 1):
+                on IndexNotFound:
+                    -1
+            [s.length(), first, last, std::list::length(xs)]
+    std::test::value("ms-growth-compaction", [103, 0, 9, 103], b_ms_growth_compaction)
+
+    # a copy of a set never observes the original's later adds, removals and clear, nor the original the copy's
+    fn b_ms_copies_independent() errors std::compiler::CompilerError:
+        static compile:
+            a = int_set()
+            loop i from 0 to 10:
+                a.add(i)
+            b = a
+            loop i from 10 to 50:
+                a.add(i)
+            b.remove(0)
+            c = b
+            b.clear()
+            c.add(99)
+            [a.length(), b.length(), elems(c)]
+    std::test::value("ms-copies-independent", [50, 0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 99]], b_ms_copies_independent)
+
+    # membership is Botlish equality: equal Strings, structs and nested Lists built independently are one element
+    fn b_ms_membership_is_equality() errors std::compiler::CompilerError:
+        static compile:
+            s = std::mutable_set::create[SetKey]()
+            s.add(SetKey {a: 1, b: ["x"]})
+            added = s.add(SetKey {a: 1, b: [std::str::concat("", "x")]})
+            t = std::mutable_set::create[str]()
+            t.add("ab")
+            t.add(std::str::concat("a", "b"))
+            [s.length(), added, t.length()]
+    std::test::value("ms-membership-is-equality", [1, false, 1], b_ms_membership_is_equality)
+
+    # the collision corpus's 512 keys are ordinary elements: membership, order and removal are right
+    fn b_ms_collision_corpus() errors std::compiler::CompilerError:
+        static compile:
+            ks = [263, 429, 2191, 4100, 4931, 5235, 5468, 6201, 7303, 7664, 8416, 8690, 9929, 11113, 11254, 12628, 14172, 15179, 16912, 17645, 17999, 19180, 19777, 20171, 21433, 23695, 25169, 26542, 27989, 28261, 29873, 31177, 31780, 31906, 32002, 32288, 33092, 33618, 34527, 34794, 35995, 36341, 36547, 38350, 39454, 39713, 42786, 44894, 45710, 46117, 47419, 49174, 50954, 51012, 51698, 52134, 52439, 52673, 53050, 53861, 55676, 58525, 58778, 59588, 59702, 60944, 62274, 66155, 66348, 67721, 68089, 68236, 68470, 70268, 70435, 72482, 72608, 73791, 76024, 77140, 78145, 79872, 80270, 80436, 80689, 83532, 85246, 86405, 87460, 87626, 89840, 90745, 90899, 91272, 92013, 92354, 93898, 94929, 95416, 95690, 96079, 97384, 97537, 98235, 98468, 99100, 99931, 102509, 102783, 103928, 104011, 104297, 104820, 105162, 106080, 106677, 107296, 111691, 112324, 114744, 115040, 116027, 116294, 117569, 117910, 118847, 119295, 122077, 122680, 122806, 123188, 123302, 124192, 124718, 125762, 126983, 127328, 129443, 129924, 130733, 130874, 132195, 134892, 135802, 136025, 136278, 137071, 138566, 141023, 141504, 142758, 143722, 144514, 144653, 145049, 147515, 149607, 151400, 154003, 154564, 155167, 155916, 157701, 157987, 158379, 159772, 161007, 161876, 163306, 164844, 165021, 166055, 166248, 167881, 169304, 169623, 171785, 172199, 173112, 173798, 174913, 175150, 175961, 176173, 176339, 176634, 177776, 178438, 178665, 179231, 180998, 181445, 184828, 185823, 186062, 187083, 187209, 188301, 189135, 189768, 191505, 192632, 193370, 193536, 193789, 196917, 197293, 199215, 201574, 202621, 205808, 207019, 208106, 208977, 210187, 210730, 211368, 211535, 212116, 212390, 212967, 213803, 214491, 217582, 217708, 218240, 219742, 220496, 221280, 221477, 224247, 224441, 230552, 231120, 231559, 231911, 232558, 233122, 233885, 235407, 237706, 237980, 238978, 240344, 241440, 242427, 242694, 244241, 244447, 248968, 249130, 249787, 249901, 251500, 252264, 252703, 253601, 253887, 255067, 255816, 258486, 259610, 260658, 261020, 261459, 261811, 262252, 263606, 263880, 265323, 265604, 267022, 267985, 269349, 271685, 274163, 274729, 275667, 277575, 277849, 279331, 280119, 281956, 282474, 284036, 284289, 284670, 286908, 287086, 287842, 288991, 289538, 289765, 290495, 291517, 292310, 296233, 297371, 298091, 300516, 300790, 301964, 302301, 303135, 303768, 304372, 305779, 306284, 306437, 310917, 311293, 314632, 315370, 315536, 315789, 317505, 318526, 318760, 320204, 320723, 322109, 322383, 324345, 327014, 327353, 329016, 329290, 329867, 331228, 332513, 332654, 333550, 334018, 334692, 335088, 335202, 336809, 337662, 340130, 340787, 340901, 341968, 342132, 343108, 343382, 344156, 345793, 345919, 347243, 348440, 349344, 351033, 352717, 353619, 353893, 354481, 355455, 355648, 357978, 358706, 358980, 362817, 363674, 363933, 365193, 366732, 367982, 368280, 368477, 369496, 370461, 371839, 372359, 372720, 374285, 378771, 379633, 379974, 380538, 380765, 381991, 382060, 382226, 382851, 383805, 385375, 387131, 387900, 388956, 389119, 390027, 390294, 391569, 391910, 392744, 393040, 394324, 397691, 399918, 400096, 400852, 401006, 401877, 405183, 405309, 406058, 407097, 407211, 410642, 411469, 411810, 412194, 412327, 413395, 414941, 416671, 417078, 417225, 418888, 419818, 420414, 420753, 423349, 424546, 425879, 426557, 426751, 428252, 429606, 429880, 431575, 431849, 432163, 432729, 433667, 437685, 439070, 439489, 439636, 442241, 442447, 444427, 444694, 446344, 447440, 448243, 452486, 453610, 454138, 454365, 458264, 458703, 459601, 459887, 461493, 462940, 463543, 463824, 464432, 466456, 469141, 469747, 470590, 470716, 471203, 471764, 473829, 474200, 476501, 477335, 477568, 478266, 484197, 484311, 485396, 486106, 486977, 489019, 490466, 491124, 492240, 493742, 494369, 495094, 495227, 496095, 497841, 498116, 498390, 498967, 499803, 501571, 502295, 503847, 504918, 506178, 506325, 507502, 507788, 509324, 510304, 510623, 514511, 514797, 514959, 515196, 515952, 516009, 516283, 517158, 518007, 518876]
+            s = int_set()
+            loop k in ks:
+                s.add(k)
+            loop k in ks:
+                if k.mod(2) == 1:
+                    s.remove(k)
+            missing = loop k in ks:
+                if s.contains(k) == (k.mod(2) == 0):
+                    continue
+                k
+            [std::list::length(missing), elems(s)]
+    std::test::value("ms-collision-corpus", [0, [4100, 5468, 7664, 8416, 8690, 11254, 12628, 14172, 16912, 19180, 26542, 31780, 31906, 32002, 32288, 33092, 33618, 34794, 38350, 39454, 42786, 44894, 45710, 49174, 50954, 51012, 51698, 52134, 53050, 55676, 58778, 59588, 59702, 60944, 62274, 66348, 68236, 68470, 70268, 72482, 72608, 76024, 77140, 79872, 80270, 80436, 83532, 85246, 87460, 87626, 89840, 91272, 92354, 93898, 95416, 95690, 97384, 98468, 99100, 103928, 104820, 105162, 106080, 107296, 112324, 114744, 115040, 116294, 117910, 122680, 122806, 123188, 123302, 124192, 124718, 125762, 127328, 129924, 130874, 134892, 135802, 136278, 138566, 141504, 142758, 143722, 144514, 151400, 154564, 155916, 159772, 161876, 163306, 164844, 166248, 169304, 173112, 173798, 175150, 176634, 177776, 178438, 180998, 184828, 186062, 189768, 192632, 193370, 193536, 201574, 205808, 208106, 210730, 211368, 212116, 212390, 217582, 217708, 218240, 219742, 220496, 221280, 230552, 231120, 232558, 233122, 237706, 237980, 238978, 240344, 241440, 242694, 248968, 249130, 251500, 252264, 255816, 258486, 259610, 260658, 261020, 262252, 263606, 263880, 265604, 267022, 281956, 282474, 284036, 284670, 286908, 287086, 287842, 289538, 292310, 300516, 300790, 301964, 303768, 304372, 306284, 314632, 315370, 315536, 318526, 318760, 320204, 327014, 329016, 329290, 331228, 332654, 333550, 334018, 334692, 335088, 335202, 337662, 340130, 341968, 342132, 343108, 343382, 344156, 348440, 349344, 355648, 357978, 358706, 358980, 363674, 366732, 367982, 368280, 369496, 372720, 379974, 380538, 382060, 382226, 387900, 388956, 390294, 391910, 392744, 393040, 394324, 399918, 400096, 400852, 401006, 406058, 410642, 411810, 412194, 417078, 418888, 419818, 420414, 424546, 428252, 429606, 429880, 439070, 439636, 444694, 446344, 447440, 452486, 453610, 454138, 458264, 462940, 463824, 464432, 466456, 470590, 470716, 471764, 474200, 477568, 478266, 485396, 486106, 490466, 491124, 492240, 493742, 495094, 498116, 498390, 504918, 506178, 507502, 507788, 509324, 510304, 515196, 515952, 517158, 518876]], b_ms_collision_corpus)
+
+    # order-independent content equality is ordinary Botlish over the public API
+    fn b_ms_content_comparison() errors std::compiler::CompilerError:
+        static compile:
+            fn same(a: std::mutable_set::MutableSet[int], b: std::mutable_set::MutableSet[int]) -> bool:
+                if a.length() != b.length():
+                    return false
+                out = loop x in a:
+                    if b.contains(x):
+                        continue
+                    x
+                std::list::length(out) == 0
+            a = int_set()
+            b = int_set()
+            loop x in [1, 2, 3]:
+                a.add(x)
+            loop x in [3, 1, 2]:
+                b.add(x)
+            c = b
+            c.remove(2)
+            c.add(4)
+            [same(a, b), same(a, c)]
+    std::test::value("ms-content-comparison", [true, false], b_ms_content_comparison)
+
+    # an element type must satisfy Hashable: a function type is none
+    fn b_ms_element_must_be_hashable_function() errors std::compiler::CompilerError:
+        static compile:
+            s = std::mutable_set::create[Fn{args: [int], return: int}]()
+            1
+    std::test::rejects("ms-element-must-be-hashable/function", std::compiler::DiagnosticCode::TraitNotSatisfied, b_ms_element_must_be_hashable_function)
+
+    # a MutableArray is no element type
+    fn b_ms_element_must_be_hashable_array() errors std::compiler::CompilerError:
+        static compile:
+            fn f(s: std::mutable_set::MutableSet[MutableArray[int]]) -> int:
+                0
+            1
+    std::test::rejects("ms-element-must-be-hashable/array", std::compiler::DiagnosticCode::TraitNotSatisfied, b_ms_element_must_be_hashable_array)
+
+    # a MutableSet is not Hashable: hash refuses it statically (the run-time EQUALITY of == is the Tcl test's own half)
+    fn b_ms_not_hashable_no_equality() errors std::compiler::CompilerError:
+        static compile:
+            hash(int_set())
+    std::test::rejects("ms-not-hashable-no-equality", std::compiler::DiagnosticCode::TraitNotSatisfied, b_ms_not_hashable_no_equality)
+
+# ---------------------------------------------------------------------------
+
+fn register_mutable_set_tests():
+    register_set_tests()
+
+with context std::test::suite()
+register_mutable_set_tests()
+std::test::report()

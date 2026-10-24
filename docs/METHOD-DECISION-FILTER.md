@@ -25,7 +25,8 @@ List cannot be `std::str::length`, because the native's first parameter is a Str
 (`hir::MethodCallProblems`). The filter derives the same fact without a build.
 
 * **Excluded.** A candidate is *excluded* for a call when the receiver's type
-  already makes the ordinary call invalid by kind alone:
+  already makes the ordinary call invalid by kind alone, or by a named
+  struct's declaration:
   * a qualified native (`std::list::at`) whose first parameter has another known
     kind than the receiver's -- `hir::methodfilter::NativeMismatch`, the one
     statement of the rule: `hir::MethodCallProblems` reports its TYPE problem
@@ -34,7 +35,25 @@ List cannot be `std::str::length`, because the native's first parameter is a Str
     contracts -- declared, trusted-inferred or checked-inferred
     (hir/signatures.tcl) -- has another kind than the receiver's, when both
     are among the plain value kinds `int str bool unit UnicodeChar list struct
-    enum mutvec mutarray`.
+    enum mutvec mutarray`;
+  * a module function (`std::mutable_set::length`) whose *declared* first
+    parameter is a named struct of another declaration than the receiver's
+    named struct type (a `std::mutable_map::MutableMap[int, int]`) --
+    `hir::methodfilter::NominalMismatch`. Every struct has the kind `struct`,
+    so the kind rule cannot tell two structs apart; their declarations can,
+    because named structs are nominal: a struct argument is admitted by
+    subtyping alone (`hir::range::ProvesValueAcceptedBy`), and a struct type
+    is a subtype of a named one only when it is the same declaration
+    (`hir::types::subtype`), never a struct of the same fields from another
+    declaration or an anonymous one, so the ordinary call is the TYPE problem
+    a trial would find. Only the
+    declaration is compared, never the type arguments (a declared
+    `MutableMap[K, V]` carries imprint variables, and two applications of one
+    struct are the exact decision's to judge); only a declared parameter
+    counts, never an inferred contract (`mf-nominal-inferred-contract-not-compared`);
+    and only a receiver that is itself a named struct (an application or
+    not): `any`, an imprint variable, a trait view or an anonymous struct
+    excludes nothing by it.
 
   A candidate that is not excluded is a *survivor*. Nothing excludes a lexical
   candidate (a bare name: a function of the file, a parameter, a binding), and
@@ -113,7 +132,8 @@ differently, wherever the receiver is not the same in the final build).
 ## What it touches
 
 * `hir/methodfilter.tcl`: `Decide`, `Survivors`, `Receiver`, `Excluded`,
-  `ParamKinds`, `Closed`, `NativeMismatch`; `hir::methodfilter::maxWaves`; a trace
+  `ParamKinds`, `DeclaredParam`, `NominalMismatch`, `Closed`,
+  `NativeMismatch`; `hir::methodfilter::maxWaves`; a trace
   (`BOTLISH_METHOD_FILTER_TRACE=1`: one line per wave, decision taken back and
   hand-over, on stderr).
 * `hir/hir.tcl`: `hir::DecideMethodCalls` tries the filter and otherwise calls
@@ -208,14 +228,20 @@ filter's one wave): 19.1 s to 6.0 s with other jobs running.
 * `tests/method-filter.test`: the rule, what is decided and at what cost, what
   is handed over, the audit and that it can fail, the switches.
 * `audit/method-filter/tools/fuzz.tcl`: random programs of receivers of every
-  kind, chained and narrowed, with ambiguous, wrongly-typed and lexical cases;
-  each is compiled with the filter off and under the audit and the outcomes
-  must be equal. The summary also reports the builds both took.
+  kind, chained and narrowed, with ambiguous, wrongly-typed and lexical cases,
+  and of named-struct receivers (three modules of a private library: two
+  structs of the same fields, a parameterized struct with imprinted and
+  concrete parameters over it, an untyped function with an inferred
+  contract; MutableMap and MutableSet); each is compiled with the filter off
+  and under the audit and the outcomes must be equal. The summary also
+  reports the builds both took.
 * `audit/method-filter/tools/mutate.tcl`: mutants of the filter and of its use
   (an exclusion rule weakened or reversed, a lexical name excluded, a contract
-  source ignored, the eviction, the certificate's checks, the seeds and trait
-  decisions, the audit's comparisons); each must be killed by the unit tests
-  or the fuzzer.
+  source ignored, the nominal rule dropped, comparing type arguments,
+  excluding the same declaration, trusting an inferred contract or a receiver
+  that is no named struct, the eviction, the certificate's checks, the seeds
+  and trait decisions, the audit's comparisons); each must be killed by the
+  unit tests or the fuzzer.
 * `bench/method-filter.tcl`: the table above.
 
 Validation at the time of writing: `tests/method-filter.test` 30 tests;
@@ -230,11 +256,28 @@ last under `BOTLISH_METHOD_FILTER_AUDIT=1`; the static-decision mutants of
 `hir/hir.tcl` (`audit/static-decisions/tools/mutate.tcl`) are all still killed,
 and its fuzzer and the method-sugar fuzzer find nothing under the audit.
 
+The nominal rule (added later, for ORDERED-MUTABLE-MAP-SET.md's collections)
+was validated the same way: `tests/method-filter.test` 35 tests (5 of them the
+rule's); the fuzzer with named-struct, MutableMap and MutableSet receivers 60
+seeds, 0 disagreements, 26 programs certified, 719 builds with the filter off
+against 524 on; `audit/method-filter/tools/mutate.tcl` 32 mutants (5 of the
+rule), all killed by the unit tests; `bench/method-filter.tcl -audit 1` on the
+19 suites of the table and six later ones (collection-iteration, mutable-map,
+mutable-set, place-parameters, hashable, trait-constrained-types) with the same
+builds and method trials as before the rule in every one (223 → 155 builds, 103
+→ 46 trials: no suite calls a function two structs' modules share by method
+syntax), every certified decision agreeing under the audit; `method-sugar`,
+`imports`, `static-economics`, `static-compile` and `surface-modules` pass. A
+program calling `length` on a MutableMap and a MutableSet took 9 builds (6
+method trials) before the rule and takes 3, as with the calls written
+qualified.
+
 If you change `hir/methodfilter.tcl`, `hir::DecideMethodCalls`,
 `hir::MethodCallProblems`, the candidate gathering of method calls
 (`hir::resolve::MethodCandidates`), what a trusted or checked parameter
 contract records (`hir/signatures.tcl`'s `inferredParamTypes` and
-`checkedParamTypes`), or the kind a type has (`hir::types::kindOf`), run
+`checkedParamTypes`), the kind a type has (`hir::types::kindOf`), or when a
+struct type is a subtype of a named one (`hir::types::subtype`), run
 `tests/method-filter.test`, `tests/static-economics.test`,
 `tests/static-compile.test`, `tests/method-sugar.test`, `tests/imports.test`,
 `audit/method-filter/tools/fuzz.tcl` (several seeds) and
@@ -242,6 +285,66 @@ contract records (`hir/signatures.tcl`'s `inferredParamTypes` and
 mutant's text when you change the code it mutates, keeping it a mutant of the
 same rule); and run the suites above and the golden suites under
 `BOTLISH_METHOD_FILTER_AUDIT=1`.
+
+## A defect of the exact decision
+
+Extending the fuzzer to named-struct receivers found a program the exact
+decision rejects and the filter accepts. It is not the filter's: the
+compiler before the nominal rule rejects it the same way, and the filter
+decides it as METHOD-SUGAR.md says. With a module `std::boxlen` that
+declares `struct Box` and `fn length(b: Box) -> int`:
+
+```
+import std::list
+import std::str
+import std::mutable_array
+import std::mutable_vector
+import std::boxlen
+
+fn f() -> int errors IndexNotFound:
+    [[1, 2], [3], [4, 5, 6]].at(2).length()
+```
+
+`std::list::length(std::list::at(xs, 2))` compiles clean, and so does the
+method spelling with the filter on (it rules out every candidate of both
+calls but the List ones, by kind). With the filter off -- or wherever the
+filter hands a program over -- the exact decision reports NO-APPLICABLE-METHOD
+for `at` ("std::list::at: argument for parameter "b" cannot be proven to
+satisfy std::boxlen::Box (argument type: List[int])") and then
+AMBIGUOUS-METHOD-CALL for `length`.
+
+The cause is what "inside the call" means. A candidate is valid when its
+trial build has no diagnostic located in the call's subtree
+(`hir::MethodCallProblems`), and the subtree includes the call's own node.
+Candidates are ordered by name, and trial t gives every undecided call its
+t-th candidate, so `std::list::at` (the first of `at`'s three) is judged by
+trial 0, where `length` stands at its first candidate too:
+`std::boxlen::length`, whose name sorts before `std::list::length`. That
+candidate rejects its receiver -- the `at` call's List result -- and a
+rejected receiver is diagnosed at the receiver (METHOD-SUGAR.md, "Source
+locations and diagnostics"), which is the `at` call's node. So the outer
+call's problem is read as the inner call's, in the trial that judges the
+inner call's one valid candidate; the other two have problems of their own
+kind (and an invalid candidate's result is poison, which the outer check
+skips), so nothing is shared and std::list::at is found invalid.
+
+It needs an inner method call with several candidates (one with a single
+candidate is not decided) and an outer candidate that rejects the inner
+result and sorts first: a module whose name sorts after `std::list`
+(`std::zbox`) does not trigger it, and an application module does, since
+`bag::length` sorts before every `std::` name. The same program with
+`import bag` (a `struct Bag` and `fn length(b: Bag)`) compiles clean with the
+filter and fails with it off, or wherever the filter hands the program over
+because of some other call.
+
+The fuzzer leaves the trigger out (its modules define no `length`, `at` or
+`get`); the unit tests and the fuzzer test the filter, not this. Fixing it
+changes the exact decision -- which diagnostics a call owns -- so it is a
+decision of its own: the outcome changes for programs the exact decision
+rejects today, and the static-decision harnesses would have to agree.
+EXACT-METHOD-DECISION-MISATTRIBUTION.md is the full report (open, not
+fixed): the reproduction, the variants, the mechanism step by step, when it
+occurs and what a fix would involve.
 
 ## What was tried and not done
 
