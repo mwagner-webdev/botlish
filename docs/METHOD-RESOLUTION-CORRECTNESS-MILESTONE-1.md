@@ -69,9 +69,9 @@ commit is `0e89f694`, the milestone's last the commit that adds this report.
 * **Observed.** The reported chain compiles in every configuration; four
   further defects of the old decision found by this milestone are fixed
   (section 6); an independent declarative oracle agrees with the new
-  decision on all 200 generated programs (564 method calls, every program
-  checked again with its modules renamed) and disagrees with the old one on
-  70 of them; every golden suite decides and builds the same program as before;
+  decision on all 1,000 generated programs (2,670 method calls, every
+  program checked again with its modules renamed) and disagrees with the
+  old one on 70 of the first 200; every golden suite decides and builds the same program as before;
   every mutant of the new harnesses is killed.
 
 ## 2. Architecture census
@@ -496,14 +496,16 @@ procedure.
 
 | tree | programs | method calls | checks accepted / rejected | disagreeing programs |
 |---|---:|---:|---:|---:|
-| this milestone | 200 | 564 (x2: as written, renamed) | 122 / 278 | 0 |
-| base `d88b5fef` | 200 | (each program stops at its first disagreement) | -- | 70 |
+| this milestone, seeds 1-200 | 200 | 564 (x2: as written, renamed) | 122 / 278 | 0 |
+| this milestone, seeds 201-1000 | 800 | 2,106 (x2) | 584 / 1,016 | 0 |
+| base `d88b5fef`, seeds 1-200 | 200 | (each program stops at its first disagreement) | -- | 70 |
 
 The base's first disagreement per program: 23 valid calls rejected
 (NO-APPLICABLE-METHOD), 21 genuinely ambiguous calls **decided**, 4 calls
 with no applicable candidate **decided**, 22 rejections of the wrong kind.
 Reproduce: `tclsh9.0 audit/method-resolution/tools/oracle.tcl 200 1` (about
-80 s); `-seed-only S -dump 1` prints one program.
+80 s on a quiet machine; `800 201` for the rest); `-seed-only S -dump 1`
+prints one program.
 
 ### 7.2 The fuzzer, its collisions restored
 
