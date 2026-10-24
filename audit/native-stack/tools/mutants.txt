@@ -1,9 +1,15 @@
 # Mutants of the native stack guard (audit/native-stack/tools/mutate.tcl;
-# MACOS-AARCH64-MILESTONE-4.md, "Mutation testing"): the host's stack
-# discovery (native/src/runtime/platform/linux.rs, macos.rs), the shared
-# guard (platform/guard.rs), the publication of the running stack on
-# coroutine switches (runtime/coroutine.rs) and the bounds the collector's
-# frame walk reads (runtime/vm.rs).
+# MACOS-AARCH64-MILESTONE-4.md, "Mutation testing";
+# WINDOWS-X86-64-MILESTONE-4.md, "Mutation testing"): the host's stack
+# discovery (native/src/runtime/platform/linux.rs, macos.rs, windows.rs),
+# the POSIX guard (platform/guard.rs) and the Windows guard
+# (platform/windows.rs), the drivers that install them (main.rs,
+# runtime/aot.rs), the publication of the running stack on coroutine
+# switches (runtime/coroutine.rs), the bounds the collector's frame walk
+# reads (runtime/vm.rs), and what the guard lets the compiler leave out:
+# the depth reservation of native-frame functions (codegen/roots.rs), the
+# call effects of a Botlish call (nir.rs) and the stack probes that keep a
+# large frame from stepping over a guard (codegen/mod.rs).
 #
 #   @@ NAME DESCRIPTION
 #   %% HOST ...        (optional) the host targets the mutant applies to
@@ -15,9 +21,9 @@
 #   >>>>
 #
 # A mutant with no %% line applies on every host with the guard. One whose
-# code a host never compiles (platform/macos.rs on Linux) is skipped there,
-# never counted as killed. Lines starting with # outside an edit are
-# comments.
+# code a host never compiles (platform/macos.rs on Linux, guard.rs on
+# Windows) is skipped there, never counted as killed. Lines starting with #
+# outside an edit are comments.
 
 # ---------------------------------------------------------------------------
 # A host's stack discovery
@@ -128,6 +134,7 @@
 # Publication of the running stack (runtime/coroutine.rs)
 
 @@ publish-before-switch the stack about to run published before the switch, not on arrival
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/coroutine.rs
 <<<<
         (*co).state = CO_RUNNING;
@@ -157,6 +164,7 @@
 >>>>
 
 @@ start-publishes-thread-stack a coroutine's first segment publishes the thread's stack, not its own
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/coroutine.rs
 <<<<
         // Arrived on this fresh stack (segment's doc).
@@ -168,6 +176,7 @@
 >>>>
 
 @@ resume-not-published a resumed coroutine does not publish its stack
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/coroutine.rs
 <<<<
         // Resumed: arrived on this coroutine's stack again (segment's doc).
@@ -178,6 +187,7 @@
 >>>>
 
 @@ yield-not-restored the resumer does not publish its stack when a segment returns to it
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/coroutine.rs
 <<<<
         let outer_stack = if outer.is_null() { None } else { (*outer).stack.as_ref().map(|s| s.bounds()) };
@@ -190,6 +200,7 @@
 # The guard (platform/guard.rs)
 
 @@ guard-range-swapped the published guard and low bound swapped: no address is in the guard
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     SLOTS[next][0].store(stack.guard_low, Ordering::Relaxed);
@@ -200,6 +211,7 @@
 >>>>
 
 @@ guard-includes-stack the guard range runs up into the usable stack: a fault there is an overflow too
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     address >= guard_low && address < low_bound
@@ -208,6 +220,7 @@
 >>>>
 
 @@ every-fault-overflows every fault on the guarded thread is reported as an overflow
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     address >= guard_low && address < low_bound
@@ -219,6 +232,7 @@
 >>>>
 
 @@ any-thread-overflows the faulting thread is not checked: another thread's fault in the guard is an overflow
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     if guarded == UNGUARDED || guarded == BUSY || guarded != super::thread_token() {
@@ -227,6 +241,7 @@
 >>>>
 
 @@ no-alternate-stack the handler is installed without SA_ONSTACK: it runs on the stack that overflowed
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
             action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
@@ -235,6 +250,7 @@
 >>>>
 
 @@ report-without-line the overflow ends the process without its result line
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     let mut rest = OVERFLOW_LINE;
@@ -243,6 +259,7 @@
 >>>>
 
 @@ report-ignores-result-fd the overflow line goes to standard output, not the --result descriptor
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
     let fd = if executable { libc::STDERR_FILENO } else { RESULT_FD.load(Ordering::Relaxed) };
@@ -251,6 +268,7 @@
 >>>>
 
 @@ defer-exits-quietly an unrelated fault ends the process with exit status 0, not under the disposition it had before
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
         libc::sigaction(signal, &action, std::ptr::null_mut());
@@ -264,6 +282,7 @@
 >>>>
 
 @@ drop-leaves-guard-busy a dropped guard never returns to UNGUARDED: no second guard installs
+%% linux-x86_64 linux-aarch64 macos-aarch64
 ## native/src/runtime/platform/guard.rs
 <<<<
             libc::sigaltstack(&self.old_stack, std::ptr::null_mut());
@@ -283,4 +302,212 @@
         let current = stack_of(self.co_current, main_stack);
 ====
         let current = stack_of(self.co_current, main_stack.map(|s| NativeStack { high_bound: s.low_bound + (s.high_bound - s.low_bound) / 2, ..s }));
+>>>>
+
+# ---------------------------------------------------------------------------
+# The Windows guard (platform/windows.rs) and the drivers that install it
+
+@@ win-handler-not-registered the vectored handler is never added: the guard installs and nothing claims an overflow (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+        let handler = unsafe { AddVectoredExceptionHandler(1, Some(handler)) };
+====
+        let handler = { let _ = handler as unsafe extern "system" fn(*mut EXCEPTION_POINTERS) -> i32; std::ptr::NonNull::<core::ffi::c_void>::dangling().as_ptr() };
+>>>>
+
+@@ win-any-exception-code any exception at an address of the guarded stack is an overflow, whatever its code (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
+====
+    if flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
+>>>>
+
+@@ win-access-violation-is-overflow an access violation at an address of the guarded stack is reported as an overflow (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
+====
+    if (code != EXCEPTION_STACK_OVERFLOW && code != 0xC000_0005_u32 as i32) || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
+>>>>
+
+@@ win-software-raised-claimed a STATUS_STACK_OVERFLOW raised by software (RaiseException) naming the guarded stack is claimed (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
+====
+    if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE == u32::MAX {
+>>>>
+
+@@ win-any-thread the raising thread is not checked: another thread's exception naming the guarded stack is claimed (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    if guarded == UNGUARDED || guarded == BUSY || guarded != thread {
+====
+    let _ = thread;
+    if guarded == UNGUARDED || guarded == BUSY {
+>>>>
+
+@@ win-no-address-check STATUS_STACK_OVERFLOW is claimed whatever address its record names, or none (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high
+====
+    let _ = (parameters, low, high);
+    true
+>>>>
+
+@@ win-no-guarantee the guard asks for no stack guarantee and checks none: the thread keeps whatever it had (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+        if unsafe { SetThreadStackGuarantee(&mut size) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let guarantee = stack_guarantee();
+        if guarantee < GUARANTEE {
+            return Err(io::Error::new(io::ErrorKind::Unsupported,
+                format!("the thread's stack guarantee is {guarantee} bytes, the guard needs {GUARANTEE}")));
+        }
+====
+        let _ = &mut size;
+>>>>
+
+@@ win-guard-page-assumed the system's guard page taken for granted, unconfirmed (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    let Some((base, size, state, _)) = region(stack.low_bound) else { return false };
+====
+    if stack.high_bound > stack.low_bound {
+        return true;
+    }
+    let Some((base, size, state, _)) = region(stack.low_bound) else { return false };
+>>>>
+
+@@ win-no-destination the report's destination never stored: the line goes nowhere (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+        DESTINATION.store(destination, Ordering::Relaxed);
+====
+        DESTINATION.store(0, Ordering::Relaxed);
+        let _ = destination;
+>>>>
+
+@@ win-result-file-ignored the driver's line goes to standard output, not the --result file (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+            0 => (unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }) as usize,
+            file => file,
+====
+            _ => (unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }) as usize,
+>>>>
+
+@@ win-report-without-line the overflow ends the process without its result line (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    let mut rest = OVERFLOW_LINE;
+====
+    let mut rest: &[u8] = b"";
+>>>>
+
+@@ win-statuses-swapped the driver exits 1 and an executable 0 after an overflow (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+    let status = if EXECUTABLE.load(Ordering::Relaxed) { 1 } else { 0 };
+====
+    let status = if EXECUTABLE.load(Ordering::Relaxed) { 0 } else { 1 };
+>>>>
+
+@@ win-handler-returns the handler writes the line and returns instead of ending the process (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+        write_overflow_line();
+        terminate();
+====
+        write_overflow_line();
+>>>>
+
+@@ win-drop-leaves-guard-busy a dropped guard never returns to UNGUARDED: no second guard installs (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+        unsafe { RemoveVectoredExceptionHandler(self.handler) };
+        GUARDED.store(UNGUARDED, Ordering::Release);
+====
+        unsafe { RemoveVectoredExceptionHandler(self.handler) };
+>>>>
+
+@@ win-driver-unguarded the driver runs Botlish code without the guard (Windows)
+%% windows-x86_64
+## native/src/main.rs
+<<<<
+    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+    let _overflow_guard = {
+====
+    #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+    let _overflow_guard = {
+>>>>
+
+@@ win-executable-unguarded a standalone executable runs its program without the guard (Windows)
+%% windows-x86_64
+## native/src/runtime/aot.rs
+<<<<
+        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+        let _guard = {
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+        };
+====
+        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+        let _guard = {
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+        };
+>>>>
+
+# ---------------------------------------------------------------------------
+# What the guard lets the compiler leave out, on every host with it
+
+@@ effects-fallible-again a Botlish call is fallible again where native frames hold the roots: callers check for an error the guard makes impossible
+## native/src/nir.rs
+<<<<
+        local[i].0 = depth_checked && f.has_botlish_call();
+====
+        local[i].0 = f.has_botlish_call();
+>>>>
+
+@@ effects-infallible-on-fallback a Botlish call proven infallible on the fallback plan, whose shadow stack's depth check can fail it: callers do not check
+## native/src/nir.rs
+<<<<
+        local[i].0 = depth_checked && f.has_botlish_call();
+====
+        local[i].0 = false && depth_checked && f.has_botlish_call();
+>>>>
+
+@@ depth-reserved-on-native-frames a function with a Botlish call reserves depth where native frames hold the roots, as the stack-limit check did
+## native/src/codegen/roots.rs
+<<<<
+    let depth_reservation = has_call && crate::runtime::native_stack::depth_checked(native_frame_supported);
+====
+    let depth_reservation = has_call;
+>>>>
+
+@@ stack-probes-disabled generated code does not probe a frame larger than a page: a large frame steps over the system's guard
+## native/src/codegen/mod.rs
+<<<<
+    crate::runtime::native_stack::native_stack_overflow_supported() || cfg!(target_os = "windows")
+====
+    false
 >>>>

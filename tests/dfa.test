@@ -15,8 +15,9 @@
 #   RECOVERY.md);
 # * the protocol on every backend (interp, compile, cranelift-generic,
 #   cranelift -- fused where the driver keeps the handle -- and
-#   cranelift-unfused): unread counts, the end of the input, stable terminal
-#   states, rejections' payloads;
+#   cranelift-unfused; the native ones where the host has native
+#   coroutines, nativeCoroutines): unread counts, the end of the input,
+#   stable terminal states, rejections' payloads;
 # * model-based testing of the compiled recognizers against the reference
 #   interpreter of tests/dfa-support.tcl (which reads the declarations
 #   directly: no interval arithmetic, no effective table, no generated code);
@@ -89,9 +90,10 @@ proc dfaMessage {source} {
 }
 
 # The value of the entry program SOURCE on every backend (sourceAgree; with
-# the fused and the unfused native runtime).
+# the fused and the unfused native runtime where the host has native
+# coroutines: dfatest::hosted).
 proc dfaAgree {source} {
-    return [sourceAgree [dfaHoist $source] {interp compile cranelift-generic cranelift cranelift-unfused}]
+    return [sourceAgree [dfaHoist $source] [dfatest::hosted {interp compile cranelift-generic cranelift cranelift-unfused}]]
 }
 
 # SOURCE with its import lines in the header, once each: its pieces -- a
@@ -568,7 +570,7 @@ test dfa-model-tree {the decision-tree lowering (kept for measurements) agrees w
 } -result {}
 
 foreach mode {tree switch table} {
-    test dfa-model-dispatch-$mode "the native dispatch $mode of the transition call agrees with the reference (the dispatch is the same NIR in every native mode)" -setup {
+    test dfa-model-dispatch-$mode "the native dispatch $mode of the transition call agrees with the reference (the dispatch is the same NIR in every native mode)" -constraints nativeCoroutines -setup {
         set ::env(BOTLISH_NATIVE_DFA_DISPATCH) $mode
         set saved $::dfatest::backends
         set ::dfatest::backends {cranelift-generic}
@@ -668,7 +670,7 @@ test dfa-modules-names {a recognizer's states, its local classes and its generat
         [lindex [dfaDiag "dfa d over ascii:\n    start:\n        'x' -> accept\nfn f(c: int) -> int errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:\n    c.d()\n0" ] 0 0]
 } -result {UNBOUND UNBOUND NOMETHOD-CALL}
 
-test dfa-modules-interchange {a program with recognizers read back from HIR interchange runs as it was built (everything a backend reads is in the HIR)} -body {
+test dfa-modules-interchange {a program with recognizers read back from HIR interchange runs as it was built (everything a backend reads is in the HIR)} -constraints nativeCoroutines -body {
     set dir [dfatest::workspace tokens.bot $::dfaTokens main.bot [dfaHoist "import std::dfa\nimport tokens\n[dfaRunner tokens::number]\n\[run(49, \[50, 32\]), run(49, \[120\])\]\n"]]
     set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
     set read [hir::interchange::decode [hir::interchange::encode $hir]]
@@ -750,7 +752,7 @@ s = w():
 "
 }
 
-test dfa-lowering-native-dispatch {natively a transition call is control flow over its constant table: a byte-table load per state and symbol (table, when every row's intervals lie in -1..255; any other recognizer as switch), multiway branches on the state and on the symbol (switch: Cranelift lowers each to a jump table or a balanced search), or nested ifs (tree); auto takes table where it applies, switch otherwise -- the same answers every way} -body {
+test dfa-lowering-native-dispatch {natively a transition call is control flow over its constant table: a byte-table load per state and symbol (table, when every row's intervals lie in -1..255; any other recognizer as switch), multiway branches on the state and on the symbol (switch: Cranelift lowers each to a jump table or a balanced search), or nested ifs (tree); auto takes table where it applies, switch otherwise -- the same answers every way} -constraints nativeCoroutines -body {
     set hir [surface::compile [dfaDriverProgram 3] t.bot -warnings off]
     set out {}
     foreach mode {auto tree switch table} {
@@ -761,7 +763,7 @@ test dfa-lowering-native-dispatch {natively a transition call is control flow ov
     set out
 } -result {auto 3 2 {list {{int 1} {int 0}}} tree 0 0 {list {{int 1} {int 0}}} switch 6 0 {list {{int 1} {int 0}}} table 3 2 {list {{int 1} {int 0}}}}
 
-test dfa-lowering-fused-no-allocation {a recognizer resumed only in the function that constructs it is fused into it -- no coroutine object, stack or switch -- and feeding it a symbol allocates nothing: the same allocations for ten symbols and a thousand (the driver's counter and the program's result List)} -body {
+test dfa-lowering-fused-no-allocation {a recognizer resumed only in the function that constructs it is fused into it -- no coroutine object, stack or switch -- and feeding it a symbol allocates nothing: the same allocations for ten symbols and a thousand (the driver's counter and the program's result List)} -constraints nativeCoroutines -body {
     set hir [surface::compile [dfaDriverProgram 10] t.bot -warnings off]
     set fused [lmap entry [native::fusion $hir] {lrange $entry 0 1}]
     set counts {}

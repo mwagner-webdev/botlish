@@ -156,11 +156,16 @@ jobs:
           cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
           cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
 
-      # No stack guard on Windows yet: the test target says so and checks
-      # nothing (it must still build and run).
-      - name: Native stack test target (no guard on this host)
+      # The stack-overflow guard (WINDOWS-X86-64-MILESTONE-4.md,
+      # native/tests/native_stack/windows.rs): each kind of thread's stack and
+      # its guard page; the guard on it, the stack exhausted for real -- small
+      # frames, 64 KiB frames, Cranelift's probe pattern -- in the driver's,
+      # an executable's and the result file's modes; the faults that are not
+      # the guarded stack's overflow, each ending as it does without the
+      # guard. Every check that faults runs in a child process.
+      - name: Native stack guard checks
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: cargo test --release --manifest-path native/Cargo.toml --test native_stack
+        run: cargo test --release --manifest-path native/Cargo.toml --test native_stack 2>&1 | tee native-stack.log
 
       - name: C ABI facts against core::cabi's windows-x86_64 row (clang, MSVC target)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -351,7 +356,7 @@ jobs:
               grep -a -A12 '^error' rust-tests.log | head -n 100
               echo '```'
             fi
-            for log in native-status.log aot-facts.log gc-workloads.log gc-workloads-unwind.log; do
+            for log in native-stack.log native-status.log aot-facts.log gc-workloads.log gc-workloads-unwind.log; do
               if [ -f "$log" ] && grep -aqE '^(FAIL|FAILED)' "$log"; then
                 echo "### $log"
                 echo '```'
@@ -375,7 +380,7 @@ jobs:
             done
             echo '### Checks'
             echo '```'
-            for log in native-status.log aot-facts.log; do
+            for log in native-stack.log native-status.log aot-facts.log; do
               [ -f "$log" ] && grep -aE '^(ok|FAIL)' "$log"
             done
             [ -f gc-workloads.log ] && tail -n 1 gc-workloads.log
@@ -389,7 +394,7 @@ jobs:
               echo '### Rust tests'
               echo '```'
               grep -a 'test result' rust-tests.log
-              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack)' rust-tests.log
+              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
               grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
               echo '```'
             fi
@@ -476,6 +481,24 @@ jobs:
           git apply -R audit/windows-unwind/tools/anchors.patch
           tclsh9.0 bench/root-plans.tcl -fallback native/target-anchors/release/botlish-native.exe -name anchors -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee anchors.log
 
+      # The stack guard against the interim checks it replaced
+      # (WINDOWS-X86-64-MILESTONE-4.md, sections 1 and 8): the driver of the
+      # last revision before it -- every function with a Botlish call
+      # checking its stack pointer, every such call checked for the error,
+      # no guard -- built here, against this checkout's, which has the guard
+      # and neither check: what each does with an exhausted stack
+      # (audit/windows-stack-guard/tools/before-after.tcl), then their
+      # performance (bench/root-plans.tcl). On demand, with the anchors
+      # probe: "[ci-probes]" in the head commit, or a manual run with probes.
+      - name: "Probe: the interim stack-limit checks' cost"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git fetch --quiet --depth 1 origin 85753d95992f4c262e6556d914d1cde634a0add0
+          git worktree add --quiet --detach "$RUNNER_TEMP/checks" FETCH_HEAD
+          cargo build --release --manifest-path "$RUNNER_TEMP/checks/native/Cargo.toml" --target-dir native/target-checks
+          tclsh9.0 audit/windows-stack-guard/tools/before-after.tcl before=native/target-checks/release/botlish-native.exe after=native/target/release/botlish-native.exe fallback=native/target-fallback/release/botlish-native.exe 2>&1 | tee before-after.log
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-checks/release/botlish-native.exe -name checks -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee checks.log
+
       - name: Publish summary
         if: always()
         run: |
@@ -488,6 +511,8 @@ jobs:
             [ -f fallback-gc-workloads.log ] && grep -a '^FAILED' fallback-gc-workloads.log
             [ -f root-plans.log ] && cat root-plans.log
             [ -f anchors.log ] && cat anchors.log
+            [ -f before-after.log ] && cat before-after.log
+            [ -f checks.log ] && cat checks.log
             echo '```'
             if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
               echo '```'

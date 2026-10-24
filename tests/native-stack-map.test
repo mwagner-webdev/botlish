@@ -126,7 +126,7 @@ test stack-map-fib-1 {fib<int> uses native roots where native frames hold them (
 } -result [list [if {[testConstraint nativeFrameRoots]} {string cat "native frame"} else {string cat "runtime stack"}] \
     [expr {[testConstraint nativeStackGuard] && [testConstraint nativeFrameRoots] ? "no" : "yes"}]]
 
-test stack-map-fib-2 {fib<int> has no depth helper where the native stack guard is (nativeStackGuard: Linux x86-64 and AArch64, macOS AArch64)} -body {
+test stack-map-fib-2 {fib<int> has no depth helper where the native stack guard is (nativeStackGuard: Linux x86-64 and AArch64, macOS AArch64, Windows x86-64)} -body {
     set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
     set clif [native::clif $hir]
     usesHelper $clif [clifFunctionBlock $clif fib] rt_stack_overflow

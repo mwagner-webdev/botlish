@@ -172,16 +172,18 @@ pub trait Backend {
 ///     AArch64): without probes a large Cranelift frame could jump over the
 ///     thread library's guard pages entirely, and the guard
 ///     (runtime::platform) would never see the overflow;
-///   * on Windows, whether or not a guard exists (it does not yet): Windows
-///     commits a thread's stack one page at a time, as each access to the
-///     guard page just below the committed part moves it down, so a frame
-///     larger than a page that touches its far end first skips the guard
-///     page and faults on reserved, uncommitted memory -- an ordinary
-///     program would crash with plenty of stack left. Every Windows C
-///     compiler probes for the same reason (`__chkstk`).
+///   * on Windows, whether or not a guard exists (it does since
+///     WINDOWS-X86-64-MILESTONE-4.md): Windows commits a thread's stack one
+///     page at a time, as each access to the guard page just below the
+///     committed part moves it down, so a frame larger than a page that
+///     touches its far end first skips the guard page and faults on
+///     reserved, uncommitted memory -- an ordinary program would crash with
+///     plenty of stack left, and an exhausted one with an access violation
+///     instead of the STATUS_STACK_OVERFLOW the guard reports. Every Windows
+///     C compiler probes for the same reason (`__chkstk`).
 ///
-/// This is stack growth, not overflow handling: on Windows a native stack
-/// exhausted for real still ends the process (WINDOWS-X86-64-MILESTONE-1.md).
+/// This is stack growth, not overflow handling: the guard reports the
+/// exhaustion the probes reach.
 fn stack_probes() -> bool {
     crate::runtime::native_stack::native_stack_overflow_supported() || cfg!(target_os = "windows")
 }

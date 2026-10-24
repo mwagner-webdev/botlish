@@ -2207,10 +2207,11 @@ pub fn resummarize(program: &mut Program) {
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
     let n = program.functions.len();
     let mut local = vec![(false, false); n];
-    // Where the shadow stack's depth check bounds recursion (Windows), a
-    // function making a Botlish call fails with NATIVE LIMIT STACK from its
-    // own prologue (codegen::roots's `depth_reservation`), so its callers
-    // must check: elsewhere the stack guard ends an exhausted run instead.
+    // Where the shadow stack's depth check bounds recursion (the fallback
+    // plan), a function making a Botlish call fails with NATIVE LIMIT STACK
+    // from its own prologue (codegen::roots's `depth_reservation`), so its
+    // callers must check: wherever native frames hold the roots the stack
+    // guard ends an exhausted run instead, and no call fails for it.
     let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
     for (i, f) in program.functions.iter().enumerate() {
         local[i].0 = depth_checked && f.has_botlish_call();
@@ -3852,11 +3853,13 @@ mod effect_tests {
     }
 
     /// WINDOWS-X86-64-MILESTONE-1.md, section 3: where the depth check
-    /// bounds recursion, a function that cannot otherwise fail still fails
-    /// with NATIVE LIMIT STACK from its prologue once it makes a Botlish
-    /// call, so its raw result carries a status word and its callers check
-    /// it (a caller that did not added the error sentinel as an Int). A
-    /// function without one has no reservation and stays infallible.
+    /// bounds recursion (the fallback plan), a function that cannot otherwise
+    /// fail still fails with NATIVE LIMIT STACK from its prologue once it
+    /// makes a Botlish call, so its raw result carries a status word and its
+    /// callers check it (a caller that did not added the error sentinel as an
+    /// Int). A function without one has no reservation and stays infallible;
+    /// and where the stack guard bounds recursion, so does every function
+    /// here.
     #[test]
     fn a_botlish_call_fails_exactly_where_depth_is_checked() {
         let text = concat!(
@@ -3878,7 +3881,11 @@ mod effect_tests {
             .filter_map(|inst| if let Inst::Call { may_error, .. } = inst { Some(*may_error) } else { None })
             .collect();
         assert_eq!(checked, vec![false, depth_checked]);
-        assert_eq!(depth_checked, cfg!(any(target_os = "windows", feature = "fallback-roots")));
+        // Only the fallback plan checks depth: on every host with
+        // native-frame roots the stack guard ends an exhausted run, Windows
+        // included since WINDOWS-X86-64-MILESTONE-4.md (where until then the
+        // stack-limit check made every Botlish call fallible).
+        assert_eq!(depth_checked, cfg!(feature = "fallback-roots"));
     }
 
     #[test]

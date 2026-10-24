@@ -14,8 +14,25 @@
 
 namespace eval dfaref {}
 namespace eval dfatest {
-    variable backends {interp compile cranelift-generic cranelift cranelift-unfused}
+    variable natives {cranelift-generic cranelift cranelift-unfused}
 }
+
+# BACKENDS minus the native ones on a host without native coroutines
+# (tests/helpers.tcl's nativeCoroutines: a recognizer is a coroutine, and
+# the native backend refuses one there, while the Tcl backends run them
+# everywhere).
+proc dfatest::hosted {backends} {
+    variable natives
+    if {[testConstraint nativeCoroutines]} {
+        return $backends
+    }
+    return [lmap b $backends {
+        if {$b in $natives} continue
+        set b
+    }]
+}
+
+set ::dfatest::backends [dfatest::hosted {interp compile cranelift-generic cranelift cranelift-unfused}]
 
 # ---------------------------------------------------------------------------
 # The reference interpreter
@@ -493,12 +510,17 @@ proc dfatest::workspace {args} {
 }
 set ::dfatest::counter 0
 
-# The outcome of the program file PATH on each of BACKENDS: {BACKEND
-# OUTCOME ...} in outcomeUnderHir's shape (the test log dropped).
+# The outcome of the program file PATH on each of BACKENDS that runs on
+# this host (hosted): {BACKEND OUTCOME ...} in outcomeUnderHir's shape (the
+# test log dropped).
 proc dfatest::outcomes {path {which ""}} {
     variable backends
     if {$which eq ""} {
         set which $backends
+    }
+    set which [hosted $which]
+    if {$which eq ""} {
+        error "no backend runs here: a test of native code carries nativeCoroutines"
     }
     set hir [surface::readProgramFile $path -warnings off]
     set out {}

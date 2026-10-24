@@ -48,12 +48,11 @@
 //!     function with no Botlish call, published to `vm.native_roots_ptr`/
 //!     `_len` (`prologue_native_frame`).
 //!
-//! On Linux and macOS the stack guard handles native overflow, so a calling
-//! function has no Botlish-specific depth instructions. On Windows, whose
-//! native frames hold the roots but which has no guard yet, a calling
-//! function compares its stack pointer with the Vm's stack limit
-//! (`prologue_stack_limit`); the fallback plan's `RuntimeStack` frames are
-//! bounded by the shadow array's end.
+//! Where native frames hold the roots the stack guard handles native
+//! overflow (runtime::platform: Linux, macOS and, since
+//! WINDOWS-X86-64-MILESTONE-4.md, Windows), so a calling function has no
+//! Botlish-specific depth instructions; the fallback plan's `RuntimeStack`
+//! frames are bounded by the shadow array's end.
 //!
 //! Whichever combination applies, `self.base` is simply "the address slot 0
 //! lives at" for the rest of this file: `def`/`def_raw`/`zero_root_slots`
@@ -70,7 +69,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
+    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -863,7 +862,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             instrument_sites,
             // Not yet inside `f.body` (still building the prologue): an
             // out-of-range sentinel, so a call the prologue itself emits
-            // (`rt_stack_overflow` past the stack limit) can never
+            // (`rt_stack_overflow` past the shadow stack's end) can never
             // accidentally match a real safepoint's index and have stack-map
             // entries misattached to it (`mark_safepoint`'s own guard).
             current_index: usize::MAX,
@@ -958,16 +957,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         Ok(())
     }
 
-    /// Reserves the physical root slots, after bounding the recursion where
-    /// this function must (`RootPlan::depth_reservation`): `RuntimeStack`
-    /// storage reserves its slots in the shadow array, whose end is the
-    /// bound; native-frame storage checks the stack pointer
-    /// (`prologue_stack_limit`). Linux and macOS, whose guard reports an
-    /// exhausted stack, need neither.
+    /// Reserves the physical root slots. `RuntimeStack` storage reserves
+    /// them in the shadow array, whose end bounds the recursion
+    /// (`RootPlan::depth_reservation`); native-frame storage reserves
+    /// nothing anywhere else, its recursion bounded by the stack guard
+    /// (runtime::native_stack's `depth_checked`).
     fn prologue_root_frame(&mut self) {
-        if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation {
-            self.prologue_stack_limit();
-        }
         match self.plan.storage {
             RootStorage::RuntimeStack => self.prologue_runtime_stack(),
             RootStorage::NativeFrame if self.plan.num_slots == 0 => {
@@ -981,34 +976,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             RootStorage::NativeFrame => self.prologue_native_frame(),
         }
-    }
-
-    /// `RootPlan::depth_reservation` where native frames hold the roots but
-    /// no guard reports an exhausted stack (Windows x86-64 until its stack
-    /// guard: runtime::native_stack's `stack_limit_checked`): the frame,
-    /// already allocated and probed, fails with NATIVE LIMIT STACK
-    /// (`rt_stack_overflow`) when the stack pointer is below `vm.stack_limit`
-    /// -- the thread's stack bound plus a margin for what may run below a
-    /// checked frame (`Vm::new`). A bound in bytes of the native stack the
-    /// recursion actually uses, which the shadow stack's slot count is not
-    /// once the roots live in native frames (WINDOWS-X86-64-MILESTONE-3.md,
-    /// section 5). Nothing to undo on the way out; the failure is an error
-    /// every caller checks, as the shadow stack's was (nir's call effects,
-    /// `depth_checked`).
-    fn prologue_stack_limit(&mut self) {
-        let sp = self.b.ins().get_stack_pointer(I64);
-        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STACK_LIMIT_OFFSET);
-        let over = self.b.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
-        let overflow = self.b.create_block();
-        let setup = self.b.create_block();
-        self.b.ins().brif(over, overflow, &[], setup, &[]);
-        self.b.set_cold_block(overflow);
-
-        self.b.switch_to_block(overflow);
-        self.call_helper("rt_stack_overflow", &[self.vm]);
-        self.return_zeros();
-
-        self.b.switch_to_block(setup);
     }
 
     /// `RootStorage::RuntimeStack`'s prologue: reserve and clear this
@@ -1107,8 +1074,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// this milestone); `NativeFrame` restores the fallback path's
     /// `vm.native_roots_ptr`/`_len` publish when it made one (nothing to do
     /// on the stack-map path, which never publishes anything -- see
-    /// `prologue_native_frame`'s own doc). The stack-limit check
-    /// (`prologue_stack_limit`) reserves nothing and has nothing to undo.
+    /// `prologue_native_frame`'s own doc).
     fn restore_root_frame(&mut self) {
         match self.plan.storage {
             RootStorage::RuntimeStack => {
@@ -1517,7 +1483,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// calling operation) and, more importantly, every call made *outside*
     /// `f.body` translation, i.e. `self.current_index == usize::MAX`
     /// (`Translator::new`'s own doc) during prologue codegen -- a
-    /// `prologue_stack_limit` failure's own `rt_stack_overflow` call must
+    /// `prologue_runtime_stack` failure's own `rt_stack_overflow` call must
     /// never be mistaken for a real instruction's safepoint (it runs before
     /// this frame's own slots hold anything meaningful at all).
     ///

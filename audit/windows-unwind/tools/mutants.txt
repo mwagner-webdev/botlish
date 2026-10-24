@@ -1,8 +1,10 @@
 # Mutants of Windows unwind information and the native-frame GC roots built
 # on it (audit/windows-unwind/tools/mutate.tcl; WINDOWS-X86-64-MILESTONE-3.md,
 # section 7): the UNWIND_INFO encoder, the object's .pdata and .xdata, the
-# JIT's function table, the collector's walk on Windows, the stack-limit
-# check and the call effects that go with it.
+# JIT's function table, the collector's walk on Windows. (The stack-limit
+# check and the call effects that went with it were removed by
+# WINDOWS-X86-64-MILESTONE-4.md, and their mutants with them: the guard that
+# replaced them is audit/native-stack's.)
 #
 #   @@ NAME DESCRIPTION
 #   %% HOST ...        (optional) the host targets the mutant applies to
@@ -249,39 +251,4 @@
         if check {
             WALKS.fetch_add(1, Ordering::Relaxed);
         }
->>>>
-
-# ---------------------------------------------------------------------------
-# The stack-limit check (codegen/clif.rs, runtime/vm.rs) and the call
-# effects it implies (nir.rs)
-
-@@ stack-limit-unchecked no stack-limit check in a function's prologue: deep recursion exhausts the stack
-%% windows-x86_64
-## native/src/codegen/clif.rs
-<<<<
-        if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation {
-            self.prologue_stack_limit();
-        }
-====
-        if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation && self.f.id == u32::MAX {
-            self.prologue_stack_limit();
-        }
->>>>
-
-@@ stack-limit-at-the-stacks-end the stack limit at the stack's low bound: no margin for what runs below a checked frame
-%% windows-x86_64
-## native/src/runtime/native_stack.rs
-<<<<
-        self.low_bound + (size / 8).clamp(64 << 10, 1 << 20)
-====
-        self.low_bound + (size / 8).clamp(0, 0)
->>>>
-
-@@ effects-infallible a function with a Botlish call proven infallible although its stack check can fail: callers do not check
-%% windows-x86_64
-## native/src/nir.rs
-<<<<
-        local[i].0 = depth_checked && f.has_botlish_call();
-====
-        local[i].0 = depth_checked && f.has_botlish_call() && f.id == u32::MAX;
 >>>>

@@ -1,0 +1,30 @@
+[package]
+name = "windows-stack-guard-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The Windows stack guard's feasibility probe (WINDOWS-X86-64-MILESTONE-4.md,
+# "Experiments"): what Windows does when a thread's stack is exhausted --
+# in Rust, in MSVC-compiled C, in an inline probe loop like Cranelift's --
+# with a vectored exception handler watching, and how much stack that
+# handler has. Independent of botlish-native: nothing here is production
+# code, and nothing in native/ reads it.
+[dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_IO",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+debug = 1

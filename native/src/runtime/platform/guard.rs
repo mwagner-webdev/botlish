@@ -1,7 +1,9 @@
-//! The native stack-overflow guard (MACOS-AARCH64-MILESTONE-4.md), shared by
-//! every host that has one: Linux x86-64 and AArch64 and macOS AArch64. What
-//! differs by host is only how the current thread's stack is found and how a
-//! thread is named (`current_stack`, `thread_token`: linux.rs, macos.rs).
+//! The POSIX native stack-overflow guard (MACOS-AARCH64-MILESTONE-4.md),
+//! shared by the hosts whose faults are signals: Linux x86-64 and AArch64
+//! and macOS AArch64 (Windows' is windows.rs, by the same contract: mod.rs).
+//! What differs by host is only how the current thread's stack is found and
+//! how a thread is named (`current_stack`, `thread_token`: linux.rs,
+//! macos.rs).
 //!
 //! A fault on the guarded thread at an address in the guard region of the
 //! stack running now -- the thread's own, or the coroutine stack it switched
@@ -56,10 +58,10 @@ static SLOTS: [[AtomicUsize; 2]; 2] = [[AtomicUsize::new(0), AtomicUsize::new(0)
 static SLOT: AtomicUsize = AtomicUsize::new(0);
 /// A standalone executable reports to standard error and exits 1.
 static EXECUTABLE: AtomicBool = AtomicBool::new(false);
-/// Where the driver's result lines go (set_result_fd): standard output, or
-/// the file of botlish-native's `--result`.
+/// Where the driver's result lines go (set_result_file): standard output,
+/// or the file of botlish-native's `--result`.
 static RESULT_FD: AtomicI32 = AtomicI32::new(libc::STDOUT_FILENO);
-const OVERFLOW_LINE: &[u8] = b"error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n";
+const OVERFLOW_LINE: &[u8] = super::OVERFLOW_LINE;
 
 /// The signals a guard hit raises: SIGSEGV, or SIGBUS (macOS reports a
 /// protection fault on a mapped page so).
@@ -73,11 +75,12 @@ struct Previous(UnsafeCell<[MaybeUninit<libc::sigaction>; 2]>);
 unsafe impl Sync for Previous {}
 static PREVIOUS: Previous = Previous(UnsafeCell::new([MaybeUninit::uninit(), MaybeUninit::uninit()]));
 
-/// Makes FD the descriptor the driver's overflow report is written to, with
-/// its other result lines: the `--result` file, so that a program's own
-/// standard output never carries it.
-pub fn set_result_fd(fd: libc::c_int) {
-    RESULT_FD.store(fd, Ordering::Relaxed);
+/// Makes FILE the one the driver's overflow report is written to, with its
+/// other result lines: the `--result` file, so that a program's own
+/// standard output never carries it. FILE must stay open while a guard is
+/// installed.
+pub fn set_result_file(file: &std::fs::File) {
+    RESULT_FD.store(std::os::unix::io::AsRawFd::as_raw_fd(file), Ordering::Relaxed);
 }
 
 /// Makes STACK the stack whose guard region the handler reports as an

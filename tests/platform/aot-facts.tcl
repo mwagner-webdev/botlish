@@ -53,9 +53,9 @@
 # none of the Visual C++ runtime or the UCRT's (the C runtime is linked
 # statically); its name (NAME.exe); and the standalone runs, from another
 # directory with only the system directory on PATH, where the outcomes
-# differ from Unix's exactly as recorded: native coroutines are refused, and
-# the stack-limit check's NATIVE LIMIT STACK is reported as any run-time
-# error is (MESSAGE (CODE)), no stack guard yet. The object's unwind
+# differ from Unix's exactly as recorded: native coroutines are refused; an
+# exhausted stack is the stack guard's line, as on Unix
+# (WINDOWS-X86-64-MILESTONE-4.md). The object's unwind
 # information (.pdata, .xdata) is read too, and the executable is run with
 # BOTLISH_NATIVE_UNWIND_CHECK=1 under GC stress: Windows' unwinder against
 # every Botlish function and frame (WINDOWS-X86-64-MILESTONE-3.md). C calls
@@ -176,6 +176,23 @@ set downProgram {fn down(n: int) -> int:
     1 + down(n - 1)
 
 down(DEPTH)
+}
+
+# A List nested a million deep, built by a loop, compared with another: the
+# runtime's equality (Rust) recurses once per level, so on a 16 MiB stack
+# the stack is exhausted inside the runtime, not in Botlish code.
+set runtimeOverflowProgram {import std::mutable_array
+
+fn empty() -> List[any]:
+    []
+
+fn nest(n: int) -> List[any]:
+    cell = std::mutable_array::create(1, empty())
+    loop i from 0 to n:
+        cell.set(0, [cell.at(0)])
+    cell.at(0)
+
+nest(1000000) == nest(1000000)
 }
 
 set coroutineOverflowProgram {struct Event:
@@ -420,7 +437,7 @@ proc cCalls {} {
 
 proc checks {} {
     global work facts prefix macos root program programValue coroutineProgram downProgram
-    global coroutineOverflowProgram errorProgram overflowLine runDir cwdDir
+    global coroutineOverflowProgram errorProgram overflowLine runDir cwdDir runtimeOverflowProgram
     set sourceDir [file join $work "source dir"]
     set buildDir [file join $work "build dir"]
     set runDir [file join $work "run dir"]
@@ -597,6 +614,8 @@ proc checks {} {
     check standalone-stack-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "[shown $outcome] ($overflowMs ms, link included)"
     set outcome [run env -i [file join $runDir overflow]]
     check standalone-overflow-default [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "1 GiB stack: [shown $outcome]"
+    set outcome [standalone runtime-overflow $runtimeOverflowProgram {BOTLISH_NATIVE_STACK_BYTES=16777216}]
+    check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
     set outcome [standalone co-overflow $coroutineOverflowProgram {}]
     check standalone-co-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] [shown $outcome]
 
@@ -639,7 +658,7 @@ if {$::tcl_platform(platform) eq "windows"} {
     set systemDir [file join [if {[info exists ::env(SystemRoot)]} {set ::env(SystemRoot)} else {set ::env(WINDIR)}] System32]
 }
 proc windowsChecks {} {
-    global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root
+    global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root runtimeOverflowProgram
     set sourceDir [file join $work "source dir"]
     set buildDir [file join $work "build dir"]
     set runDir [file join $work "run dir"]
@@ -747,21 +766,24 @@ proc windowsChecks {} {
         && [string match "*(CORE SEMANTIC RANGE)\n" [lindex $outcome 2]]}] [shown $outcome]
     set outcome [{*}$standalone $runDir $cwdDir down [string map {DEPTH 100000} $downProgram] {}]
     check standalone-deep-finite [expr {$outcome eq [list 0 "100000\n" ""]}] [shown $outcome]
-    # The stack-limit check (codegen::clif's prologue_stack_limit, where
-    # codegen::roots's depth_reservation: no stack guard yet) bounds Botlish
-    # recursion by the bytes of the thread's stack it uses: NATIVE LIMIT
-    # STACK, exit status 1, as everywhere -- an ordinary run-time error here,
-    # which the executable reports as it reports every one (MESSAGE (CODE),
-    # like standalone-error), where the guard of the other hosts writes its
-    # own fixed line ($overflowLine) -- on the default 1 GiB stack and on a
-    # 16 MiB one alike. Until milestone 3 the shadow stack's slot count was
-    # the bound, which the 16 MiB stack did not reach: the process ended in
+    # Botlish recursion exhausting the thread's stack, on the default 1 GiB
+    # stack and on a 16 MiB one: the stack guard's own line on standard error
+    # and exit status 1, as on every host (WINDOWS-X86-64-MILESTONE-4.md).
+    # Until then a stack-limit check in every function with a Botlish call
+    # (milestone 3) ended it as an ordinary run-time error, reported as
+    # every one is (MESSAGE (CODE)); before that the 16 MiB stack ended in
     # Rust's own stack overflow report.
-    set limited [list 1 "" "native stack exhausted: too many nested calls (NATIVE LIMIT STACK)\n"]
+    set limited [list 1 "" "$overflowLine\n"]
     set outcome [{*}$standalone $runDir $cwdDir overflow [string map {DEPTH 100000000} $downProgram] {}]
     check standalone-depth-limit [expr {$outcome eq $limited}] "1 GiB stack: [shown $outcome]"
     set outcome [windowsRun $cwdDir [file join $runDir overflow.exe] {BOTLISH_NATIVE_STACK_BYTES 16777216}]
     check standalone-stack-overflow [expr {$outcome eq $limited}] "16 MiB stack: [shown $outcome]"
+    # An exhaustion inside the runtime (Rust), which no check of generated
+    # code sees: the stack guard's own line on standard error and exit
+    # status 1, as on every host (WINDOWS-X86-64-MILESTONE-4.md); until
+    # then the process died in Rust's own report (STATUS_STACK_OVERFLOW).
+    set outcome [{*}$standalone $runDir $cwdDir runtime-overflow $runtimeOverflowProgram {BOTLISH_NATIVE_STACK_BYTES 16777216}]
+    check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
     set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
     check standalone-coroutine-refused [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
         && [string match "native coroutines need stack switching*(NATIVE UNSUPPORTED value)\n" [lindex $outcome 2]]}] [shown $outcome]

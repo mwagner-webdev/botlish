@@ -617,6 +617,22 @@ link.exe /NOLOGO /SUBSYSTEM:CONSOLE /INCREMENTAL:NO /OPT:REF /OPT:ICF /NXCOMPAT 
   ...". A `link` that is not Microsoft's (Git's or MSYS2's coreutils) is
   refused by its missing banner, `toolchain_error` as well.
 
+**The archive's system libraries after the merge with native
+libraries.** From the merge (905c8a1a, run 40081313624) on, the library
+check failed the Windows system-linker job, every test in it still
+passing: rustc's account became `legacy_stdio_definitions.lib
+kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib`. The cause was
+main's native libraries, not a toolchain change. runtime::library calls
+`libc::malloc` and `libc::free` on every host, so the libc crate, which
+rustc loads only where code names it, is now part of the Windows build
+too. On MSVC its declarations of the printf family carry
+`#[link(name = "legacy_stdio_definitions")]`. Building native/runtime-archive
+for `x86_64-pc-windows-msvc` on Linux shows it (a staticlib needs no
+linker): 3cc2a2b1's account has no `legacy_stdio_definitions.lib`, the
+merged tree's names it first. The MSVC list now starts with it, in
+rustc's order. Nothing in the archive calls a printf, so link.exe takes
+no member of it, and the executable's imports stay as listed above.
+
 ## 18. Static libraries
 
 **Executed** (Linux x86-64):

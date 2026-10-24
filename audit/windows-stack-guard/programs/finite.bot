@@ -1,0 +1,8 @@
+# Botlish recursion that a 16 MiB stack holds: 10^5 calls deep.
+fn down(n: int) -> int:
+    if n == 0:
+        return 0
+
+    1 + down(n - 1)
+
+down(100000)

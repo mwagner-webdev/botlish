@@ -1,1 +1,4 @@
 /target
+# Other target directories of the same builds: the fallback-roots driver,
+# the probes and baselines the Windows workflow builds beside the main one.
+/target-*/

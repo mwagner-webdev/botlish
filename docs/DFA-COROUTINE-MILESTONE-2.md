@@ -997,6 +997,18 @@ against 0.53-0.77 s, and 174 ms of driver compile against 33-46 ms.
   main (the front end changed, so static-decisions' batched-against-
   sequential comparison runs then); no golden suite declares a
   recognizer, so no static decision should move.
+* **Hosts without native coroutines.** Main's first Windows run (run
+  40093343678) failed 20 tests of `tests/dfa.test` and 16 of
+  `tests/dfa-workloads.test`: a recognizer is a coroutine, and the native
+  backend refuses one where it has no stack switching (NATIVE
+  UNSUPPORTED), but the tests ran every program on the native backends
+  unconditionally. The backends a test compares are now
+  `dfatest::hosted`'s: the native ones only where `nativeCoroutines`
+  holds, so on Windows the protocol, the model comparison and the
+  workloads still run on interp and compile. The tests that are about
+  native code -- the native dispatch modes, fusion's report, the
+  allocation count, interchange read by cranelift -- carry
+  `nativeCoroutines`.
 
 ### What the regression run found
 

@@ -5,8 +5,11 @@
 > in `runtime/platform/guard.rs`, with each host's stack discovery in
 > `platform/linux.rs` and `platform/macos.rs`; an unrelated fault goes to
 > the disposition the process had before the guard, and coroutine
-> switches publish the stack they arrive on. The text below is Phase B's
-> account of the Linux x86-64 original; those three points supersede it.
+> switches publish the stack they arrive on. Windows x86-64 has a guard of
+> the same contract since WINDOWS-X86-64-MILESTONE-4.md, a vectored
+> exception handler for STATUS_STACK_OVERFLOW (`platform/windows.rs`). The
+> text below is Phase B's account of the Linux x86-64 original; those
+> points supersede it.
 
 The x86-64/Linux JIT runs on the existing Rust worker pthread. `main.rs`
 requests a 1 GiB stack with `thread::Builder::stack_size`; the optional

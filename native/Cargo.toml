@@ -30,13 +30,19 @@ target-lexicon = "0.13"
 
 # Windows' unwinder (RtlVirtualUnwind and the JIT's function tables), the
 # JIT's code range and the thread's stack bounds
-# (WINDOWS-X86-64-MILESTONE-3.md).
+# (WINDOWS-X86-64-MILESTONE-3.md); the stack-overflow guard's handler, its
+# stack guarantee and its report (WINDOWS-X86-64-MILESTONE-4.md: WriteFile,
+# the standard handles, the exception record's flags).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_IO",
     "Win32_System_Kernel",
     "Win32_System_Memory",
+    "Win32_System_SystemServices",
     "Win32_System_Threading",
 ] }
 
@@ -46,6 +52,11 @@ windows-sys = { version = "0.61", features = [
 [workspace]
 members = [".", "runtime-archive"]
 default-members = [".", "runtime-archive"]
+
+# The native stack test's threads of CreateThread's own (tests/native_stack/
+# windows.rs): Rust's runtime set no stack guarantee for them.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security"] }
 
 [profile.release]
 debug = 1

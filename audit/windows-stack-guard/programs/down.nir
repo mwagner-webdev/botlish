@@ -1,0 +1,32 @@
+nir 1 call-effects=1 statics=0
+
+func 0 "<program>" params=0 env=0 regs=3 pnames="" captures=0 instance="generic" rawregs="1"
+    %0 = int 100000000 @e21
+    %1 = rawint 100000000
+    %2 = call 1 %0 @e19
+    ret %2
+end
+
+func 1 "down" params=1 env=0 regs=15 pnames="n" captures=0 instance="int" rawregs="2 6 9 11" @e2
+    %1 = int 0 @e7
+    %2 = rawint 0
+    %3 = op ieq %0 %1 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = int 0 @e9
+    %6 = rawint 0
+    ret %5 @e8
+  label L1
+    %7 = unit
+    %4 = move %7
+    jump L2
+  label L2
+    %8 = int 1 @e12
+    %9 = rawint 1
+    %10 = int 1 @e18
+    %11 = rawint 1
+    %12 = op isub %0 %10 @e15
+    %13 = call 1 %12 @e13
+    %14 = op iadd %8 %13 @e10
+    ret %14
+end

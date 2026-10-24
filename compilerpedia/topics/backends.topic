@@ -398,9 +398,7 @@ other platforms.
                              backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and
-                             AArch64 and macOS AArch64; on Windows only
-                             for Botlish recursion the stack-limit check
-                             stops, otherwise the process ends
+                             AArch64, macOS AArch64 and Windows x86-64
                              (error.native-limit-stack)
     Linux system calls, io   Linux; x86-64 through std::linux::abi::x86_64,
                              AArch64 through std::linux::abi::aarch64 (one
