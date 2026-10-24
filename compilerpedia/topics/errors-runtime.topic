@@ -1072,7 +1072,8 @@ backends stop at different depths:
     runtime (a deep structural comparison) or in a C function the program
     calls alike. A standalone executable prints it on stderr as `error
     {NATIVE LIMIT STACK} {native stack exhausted: ...}` and exits 1.
-    (Windows has no native coroutines yet.)
+    (On Windows a coroutine's stack is a fiber of its own, with the same
+    8 MiB and the same report.)
   * interp and compile: Tcl's evaluation limit, raised by the compiler to
     about 14,000 nested Botlish calls on interp and 99,000 on compile,
     stops the run with "too many nested evaluations (infinite loop?)"

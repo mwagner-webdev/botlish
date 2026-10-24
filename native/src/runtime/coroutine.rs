@@ -76,6 +76,19 @@
 //! mapping (no MAP_STACK on Darwin) whose guard and size are multiples of the
 //! host page size (16 KiB there).
 //!
+//! # Windows x86-64 (MSVC)
+//!
+//! A coroutine's stack is a Windows fiber (WINDOWS-X86-64-MILESTONE-5.md,
+//! coroutine/windows.rs): SwitchToFiber is the switch, because a Windows
+//! stack is also the TEB's account of it (its bounds, its guard page, its
+//! stack guarantee), which Windows reads to grow it, to report its
+//! exhaustion and to unwind it, and which only the fiber switch keeps. The
+//! module gives this one the same pieces the assembly above does -- a stack
+//! (`CoStack`, a fiber with its own stack guarantee), a fresh start
+//! (`prepare`), a switch (`bl_co_switch`) and a suspended stack's walk start
+//! (`SwitchPoint`, its fiber and the frame its switch left) -- so everything
+//! below is the code Linux and macOS run.
+//!
 //! # GC
 //!
 //! Running coroutines form a chain (`Vm::co_current` and each one's
@@ -88,22 +101,28 @@
 //! (no frame on it owns a Rust value with a destructor). The cached final
 //! value and the cached failure's values are traced like any field.
 use super::error::RtError;
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 use super::native_stack::{NativeStack, StackState};
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 use super::ops::GenericEntry;
 use super::value::*;
 use super::vm::Vm;
 use std::cell::RefCell;
 
-/// Whether this host has the stack switch native coroutines run on (the
-/// hosts `CoStack::new` maps a stack for): elsewhere starting one is NATIVE
-/// UNSUPPORTED. The coroutine fusion pass (codegen::fusion) runs only where
-/// it is true, so fusing a coroutine never makes a program run that the
-/// general runtime refuses.
+/// Whether native coroutines run here: the host has the stack switch they
+/// run on (the hosts `CoStack::new` makes a stack for) and its collector
+/// finds roots in native frames (runtime::framewalk's NATIVE_FRAME_ROOTS: a
+/// suspended coroutine's frames are walked like the running stack's; the
+/// fallback plan's shadow stack cannot hold a suspended coroutine's roots,
+/// and is never made coroutine-aware). Elsewhere starting one is NATIVE
+/// UNSUPPORTED (`rt_co_start`). The coroutine fusion pass (codegen::fusion)
+/// runs only where it is true, so fusing a coroutine never makes a program
+/// run that the general runtime refuses.
 pub const STACK_SWITCHING: bool = cfg!(any(
     all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
-    all(target_os = "macos", target_arch = "aarch64")
-));
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(windows, target_arch = "x86_64", target_env = "msvc")
+)) && super::framewalk::NATIVE_FRAME_ROOTS;
 
 pub const CO_FRESH: u8 = 0;
 pub const CO_RUNNING: u8 = 1;
@@ -111,6 +130,21 @@ pub const CO_SUSPENDED: u8 = 2;
 pub const CO_COMPLETED: u8 = 3;
 pub const CO_FAILED: u8 = 4;
 pub const CO_RELEASED: u8 = 5;
+
+/// Where a context switched away (`bl_co_switch`'s SAVE): its stack pointer
+/// on the POSIX hosts; on Windows its fiber and the frame its switch left
+/// (coroutine/windows.rs).
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
+pub type SwitchPoint = usize;
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+pub use windows::SwitchPoint;
+
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+mod windows;
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+use windows::{bl_co_switch, prepare};
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+pub use windows::{thread_converted, CoStack};
 
 /// The bytes between a suspended stack's saved stack pointer and the frame
 /// record `bl_co_switch` opened: the control words (8) and five callee-saved
@@ -141,10 +175,12 @@ pub struct CoroutineObj {
     pub failure: Option<Box<(RtError, u32, Vec<Value>, u32)>>,
     /// The coroutine's stack, from its start until it is terminal.
     pub stack: Option<CoStack>,
-    /// The coroutine's own stack pointer while it is suspended (or fresh).
-    pub saved_sp: usize,
-    /// The resumer's stack pointer while this coroutine runs.
-    pub resumer_sp: usize,
+    /// The coroutine's own stack pointer while it is suspended (or fresh):
+    /// on Windows its fiber and the frame its switch left (`SwitchPoint`).
+    pub saved_sp: SwitchPoint,
+    /// The resumer's stack pointer while this coroutine runs (on Windows,
+    /// the same of the resumer).
+    pub resumer_sp: SwitchPoint,
     /// The coroutine whose segment resumed this one (null: the main stack),
     /// while this one runs.
     pub resumer: *mut CoroutineObj,
@@ -169,17 +205,21 @@ pub fn fields(co: &CoroutineObj) -> Vec<Value> {
 // Stacks
 
 /// One mapped coroutine stack: [base, base + guard) is PROT_NONE, the rest
-/// is usable.
+/// is usable. (Windows': a fiber, coroutine/windows.rs.)
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 pub struct CoStack {
     base: usize,
     size: usize,
     guard: usize,
 }
 
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+/// Below a stack's usable bytes: on the POSIX hosts its PROT_NONE guard; on
+/// Windows the room its reservation keeps below them for the stack's
+/// guarantee, its guard page and the page Windows never commits.
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 const GUARD_BYTES: usize = 64 * 1024;
 const POOL_LIMIT: usize = 32;
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 const DEFAULT_STACK_BYTES: usize = 8 << 20;
 
 thread_local! {
@@ -189,7 +229,7 @@ thread_local! {
 /// The usable size of every coroutine stack: BOTLISH_NATIVE_COROUTINE_STACK_BYTES
 /// (at least 64 KiB, rounded up to a page) or 8 MiB. Address space only: pages are committed as
 /// they are touched.
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 fn stack_bytes() -> usize {
     std::env::var("BOTLISH_NATIVE_COROUTINE_STACK_BYTES")
         .ok()
@@ -210,6 +250,12 @@ fn round_to_page(size: usize) -> usize {
     (size + page - 1) & !(page - 1)
 }
 
+/// Windows x86-64's pages are 4 KiB.
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+fn round_to_page(size: usize) -> usize {
+    (size + 4095) & !4095
+}
+
 /// How a coroutine stack is mapped: Linux marks it MAP_STACK and reserves no
 /// swap; Darwin has no MAP_STACK (its stack-ness is only in the thread
 /// library) and MAP_NORESERVE is a no-op there, so a stack is a plain private
@@ -219,6 +265,7 @@ const MAP_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::M
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const MAP_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
 
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 impl CoStack {
     pub fn bounds(&self) -> NativeStack {
         NativeStack {
@@ -269,11 +316,12 @@ impl CoStack {
     #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
     fn new() -> Result<(CoStack, bool), RtError> {
         Err(RtError::Unsupported(
-            "native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only (COROUTINES.md)".to_string(),
+            "native coroutines need stack switching, implemented for Linux x86-64 and AArch64, macOS AArch64 and Windows x86-64 only (COROUTINES.md)".to_string(),
         ))
     }
 }
 
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 impl Drop for CoStack {
     fn drop(&mut self) {
         let returned = POOL.try_with(|pool| {
@@ -451,15 +499,16 @@ unsafe extern "C" {
     fn bl_co_trampoline();
 }
 
-#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
 unsafe fn bl_co_switch(_save: *mut usize, _load: usize, _transfer: usize) -> usize {
     unreachable!("no coroutine stack exists on this host")
 }
 
-/// The first frame of every coroutine stack (entered from bl_co_trampoline):
-/// runs the body to its end, records the terminal state, and switches back
-/// to the resumer of the final segment for good.
-#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+/// The first frame of every coroutine stack (entered from bl_co_trampoline;
+/// on Windows from a fiber's restart, coroutine/windows.rs): runs the body
+/// to its end, records the terminal state, and switches back to the resumer
+/// of the final segment for good.
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 extern "C" fn co_body(p: *mut Vm, co: *mut CoroutineObj) -> ! {
     // SAFETY: CO is the running coroutine (rooted through Vm::co_current for
     // as long as it runs); P is the Vm every frame shares.
@@ -492,7 +541,7 @@ extern "C" fn co_body(p: *mut Vm, co: *mut CoroutineObj) -> ! {
             (*co).value = result;
             (*co).state = CO_COMPLETED;
         }
-        let mut finished = 0usize;
+        let mut finished = SwitchPoint::default();
         bl_co_switch(&mut finished, (*co).resumer_sp, 0);
     }
     std::process::abort()
@@ -515,8 +564,8 @@ pub extern "C" fn rt_co_create(p: *mut Vm, thunk: Value) -> Value {
             value: UNIT,
             failure: None,
             stack: None,
-            saved_sp: 0,
-            resumer_sp: 0,
+            saved_sp: SwitchPoint::default(),
+            resumer_sp: SwitchPoint::default(),
             resumer: std::ptr::null_mut(),
         },
         0,
@@ -532,6 +581,12 @@ pub extern "C" fn rt_co_start(p: *mut Vm, handle: Value) -> Value {
     unsafe {
         if (*co).state != CO_FRESH {
             return vm(p).fail(RtError::Semantic { kind: "COROUTINE-STATE", message: "the coroutine was already started".to_string() });
+        }
+        if !super::framewalk::NATIVE_FRAME_ROOTS {
+            return vm(p).fail(RtError::Unsupported(
+                "native coroutines need GC roots in native frames: the fallback root plan (a fallback-roots build) runs none (COROUTINES.md)"
+                    .to_string(),
+            ));
         }
         let stack = match CoStack::new() {
             Ok((stack, reused)) => {
@@ -600,7 +655,7 @@ unsafe fn prepare(stack: &CoStack, p: *mut Vm, co: *mut CoroutineObj) -> usize {
     sp
 }
 
-#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+#[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
 unsafe fn prepare(_stack: &CoStack, _p: *mut Vm, _co: *mut CoroutineObj) -> usize {
     0
 }
@@ -773,8 +828,8 @@ pub extern "C" fn rt_co_failed(p: *mut Vm) -> Value {
             value: UNIT,
             failure: None,
             stack: None,
-            saved_sp: 0,
-            resumer_sp: 0,
+            saved_sp: SwitchPoint::default(),
+            resumer_sp: SwitchPoint::default(),
             resumer: std::ptr::null_mut(),
         },
         0,
@@ -794,11 +849,24 @@ pub extern "C" fn rt_co_failed(p: *mut Vm) -> Value {
 
 /// The stack frame record a suspended context's walk starts at: the frame
 /// bl_co_switch opened, `SWITCH_FRAME_OFFSET` above its saved stack pointer.
+#[cfg(not(all(windows, target_arch = "x86_64", target_env = "msvc")))]
 pub fn suspended_rbp(saved_sp: usize) -> usize {
     saved_sp + SWITCH_FRAME_OFFSET
 }
 
-#[cfg(all(test, any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+/// Windows: the frame a suspended context's walk starts at is the frame its
+/// bl_co_switch recorded (RIP, RSP and RBP), from which Windows' unwinder
+/// climbs (runtime::framewalk's `walk_from`).
+#[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
+pub fn suspended_rbp(saved_sp: SwitchPoint) -> super::framewalk::windows::Frame {
+    saved_sp.frame
+}
+
+#[cfg(all(
+    test,
+    any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")),
+    not(feature = "fallback-roots")
+))]
 mod tests {
     use super::*;
     use crate::runtime::metrics::{AllocMode, GcReason};
@@ -1178,7 +1246,7 @@ mod tests {
         )
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(windows)))]
     #[unsafe(naked)]
     extern "C" fn pattern_call(_f: usize, _p: *mut Vm, _a: Value, _b: Value, _seed: usize) -> usize {
         std::arch::naked_asm!(
@@ -1236,6 +1304,78 @@ mod tests {
             "pop r12",
             "pop rbx",
             "pop rbp",
+            "ret",
+        )
+    }
+
+    /// Windows x86-64: the Win64 callee-saved state -- RBX, RBP, RDI, RSI,
+    /// R12-R15 and both halves of XMM6-XMM15 -- loaded from SEED around
+    /// F(P, A, B); the count of those that differ afterwards.
+    #[cfg(all(target_arch = "x86_64", windows))]
+    #[unsafe(naked)]
+    extern "C" fn pattern_call(_f: usize, _p: *mut Vm, _a: Value, _b: Value, _seed: usize) -> usize {
+        std::arch::naked_asm!(
+            "push rbp", "push rbx", "push rdi", "push rsi", "push r12", "push r13", "push r14", "push r15",
+            "sub rsp, 200",
+            "movaps [rsp + 32], xmm6", "movaps [rsp + 48], xmm7", "movaps [rsp + 64], xmm8", "movaps [rsp + 80], xmm9",
+            "movaps [rsp + 96], xmm10", "movaps [rsp + 112], xmm11", "movaps [rsp + 128], xmm12", "movaps [rsp + 144], xmm13",
+            "movaps [rsp + 160], xmm14", "movaps [rsp + 176], xmm15",
+            // The fifth argument, above the return address and the caller's
+            // shadow space: 40 bytes above the entry's stack pointer.
+            "mov rax, [rsp + 304]",
+            "mov [rsp + 192], rax",
+            "mov r10, rcx",
+            "mov rcx, rdx",
+            "mov rdx, r8",
+            "mov r8, r9",
+            "lea rbx, [rax + 1]", "lea rbp, [rax + 2]", "lea rdi, [rax + 3]", "lea rsi, [rax + 4]",
+            "lea r12, [rax + 5]", "lea r13, [rax + 6]", "lea r14, [rax + 7]", "lea r15, [rax + 8]",
+            "lea r11, [rax + 0x16]", "movq xmm6, r11", "lea r11, [rax + 0x26]", "movq xmm0, r11", "punpcklqdq xmm6, xmm0",
+            "lea r11, [rax + 0x17]", "movq xmm7, r11", "lea r11, [rax + 0x27]", "movq xmm0, r11", "punpcklqdq xmm7, xmm0",
+            "lea r11, [rax + 0x18]", "movq xmm8, r11", "lea r11, [rax + 0x28]", "movq xmm0, r11", "punpcklqdq xmm8, xmm0",
+            "lea r11, [rax + 0x19]", "movq xmm9, r11", "lea r11, [rax + 0x29]", "movq xmm0, r11", "punpcklqdq xmm9, xmm0",
+            "lea r11, [rax + 0x1a]", "movq xmm10, r11", "lea r11, [rax + 0x2a]", "movq xmm0, r11", "punpcklqdq xmm10, xmm0",
+            "lea r11, [rax + 0x1b]", "movq xmm11, r11", "lea r11, [rax + 0x2b]", "movq xmm0, r11", "punpcklqdq xmm11, xmm0",
+            "lea r11, [rax + 0x1c]", "movq xmm12, r11", "lea r11, [rax + 0x2c]", "movq xmm0, r11", "punpcklqdq xmm12, xmm0",
+            "lea r11, [rax + 0x1d]", "movq xmm13, r11", "lea r11, [rax + 0x2d]", "movq xmm0, r11", "punpcklqdq xmm13, xmm0",
+            "lea r11, [rax + 0x1e]", "movq xmm14, r11", "lea r11, [rax + 0x2e]", "movq xmm0, r11", "punpcklqdq xmm14, xmm0",
+            "lea r11, [rax + 0x1f]", "movq xmm15, r11", "lea r11, [rax + 0x2f]", "movq xmm0, r11", "punpcklqdq xmm15, xmm0",
+            "call r10",
+            "mov r9, [rsp + 192]",
+            "xor eax, eax",
+            "lea r10, [r9 + 1]", "cmp rbx, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 2]", "cmp rbp, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 3]", "cmp rdi, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 4]", "cmp rsi, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 5]", "cmp r12, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 6]", "cmp r13, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 7]", "cmp r14, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "lea r10, [r9 + 8]", "cmp r15, r10", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm6", "lea r11, [r9 + 0x16]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm6, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x26]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm7", "lea r11, [r9 + 0x17]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm7, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x27]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm8", "lea r11, [r9 + 0x18]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm8, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x28]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm9", "lea r11, [r9 + 0x19]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm9, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x29]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm10", "lea r11, [r9 + 0x1a]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm10, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2a]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm11", "lea r11, [r9 + 0x1b]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm11, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2b]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm12", "lea r11, [r9 + 0x1c]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm12, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2c]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm13", "lea r11, [r9 + 0x1d]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm13, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2d]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm14", "lea r11, [r9 + 0x1e]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm14, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2e]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movq r10, xmm15", "lea r11, [r9 + 0x1f]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "pshufd xmm0, xmm15, 0xee", "movq r10, xmm0", "lea r11, [r9 + 0x2f]", "cmp r10, r11", "setne r11b", "movzx r11d, r11b", "add rax, r11",
+            "movaps xmm6, [rsp + 32]", "movaps xmm7, [rsp + 48]", "movaps xmm8, [rsp + 64]", "movaps xmm9, [rsp + 80]",
+            "movaps xmm10, [rsp + 96]", "movaps xmm11, [rsp + 112]", "movaps xmm12, [rsp + 128]", "movaps xmm13, [rsp + 144]",
+            "movaps xmm14, [rsp + 160]", "movaps xmm15, [rsp + 176]",
+            "add rsp, 200",
+            "pop r15", "pop r14", "pop r13", "pop r12", "pop rsi", "pop rdi", "pop rbx", "pop rbp",
             "ret",
         )
     }
@@ -1364,6 +1504,7 @@ mod tests {
     /// The frame-record chain of a suspended coroutine, from the record
     /// `bl_co_switch` opened: each (frame pointer, return address) pair up
     /// to the zero record the trampoline opened.
+    #[cfg(not(windows))]
     fn chain_of(co: Value) -> Vec<(usize, usize)> {
         let co = coroutine_of(co);
         let bounds = co.stack.as_ref().unwrap().bounds();
@@ -1386,6 +1527,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_suspended_stacks_frame_chain_ends_in_the_trampolines_zero_record() {
         let mut vm = new_vm();
@@ -1401,6 +1543,258 @@ mod tests {
         // Every earlier record returns into code (a nonzero address).
         assert!(chain[..chain.len() - 1].iter().all(|&(_, ra)| ra != 0), "{chain:x?}");
         assert_eq!(rt_co_resume(&mut *vm, co, make_small(0)), make_small(10));
+    }
+
+
+    // -- Windows x86-64 (WINDOWS-X86-64-MILESTONE-5.md): a coroutine's stack is
+    // a fiber of its own, as Windows itself reports it while the coroutine
+    // runs; its switch's record is where Windows' unwinder climbs a suspended
+    // stack from; a pooled fiber starts at its top again.
+
+    /// Windows' unwinder from a suspended coroutine's switch record up to
+    /// the end of its fiber's stack: each frame's (RIP, RSP), and whether the
+    /// climb ended at a zero return address inside the stack.
+    #[cfg(windows)]
+    fn unwound_from(co: Value) -> (Vec<(u64, u64)>, bool) {
+        use crate::runtime::framewalk::windows::{unwind_one, Context};
+        let co = coroutine_of(co);
+        let bounds = co.stack.as_ref().unwrap().bounds();
+        let mut context = Context::at(suspended_rbp(co.saved_sp));
+        let mut frames = Vec::new();
+        for _ in 0..64 {
+            let (pc, sp) = (context.0.Rip, context.0.Rsp);
+            if pc == 0 {
+                return (frames, bounds.contains(sp as usize, 8));
+            }
+            assert!(bounds.contains(sp as usize, 8), "rsp {sp:#x} outside the coroutine's stack after {frames:x?}");
+            frames.push((pc, sp));
+            // SAFETY: a frame of a suspended stack of this thread, exact in
+            // RIP, RSP and RBP (bl_co_switch's record), then as unwound.
+            unsafe { unwind_one(&mut context, None) };
+            assert!(context.0.Rsp > sp, "the climb does not ascend: {:#x} after {sp:#x}", context.0.Rsp);
+        }
+        (frames, false)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_suspended_stack_unwinds_to_its_fibers_start() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, counting);
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        // bl_co_switch -> rt_co_yield -> counting -> co_body -> the fiber's
+        // entry -> Windows' fiber start, ended by a zero return address.
+        let (frames, ended) = unwound_from(co);
+        assert!(ended, "{frames:x?}");
+        assert!(frames.len() >= 5, "{frames:x?}");
+        let entry = windows_entry_range();
+        assert!(frames.iter().any(|&(pc, _)| entry.contains(&(pc as usize))), "no frame in the fiber's entry: {frames:x?}");
+        assert_eq!(rt_co_resume(&mut *vm, co, make_small(0)), make_small(10));
+    }
+
+    /// The code of the fibers' entry stub, whose return address every
+    /// coroutine body's first frame holds.
+    #[cfg(windows)]
+    fn windows_entry_range() -> std::ops::Range<usize> {
+        unsafe extern "C" {
+            fn bl_co_fiber_entry(slot: *mut std::ffi::c_void);
+        }
+        let start = bl_co_fiber_entry as *const () as usize;
+        start..start + 32
+    }
+
+    #[cfg(windows)]
+    thread_local! {
+        static SEEN: std::cell::RefCell<Vec<(crate::runtime::native_stack::NativeStack, u32, usize, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Records the stack Windows reports while the body runs, its stack
+    /// guarantee, its stack pointer and whether the thread is a fiber, then
+    /// yields and records them again.
+    #[cfg(windows)]
+    extern "C" fn reporting(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        use crate::runtime::platform::windows::{current_stack, stack_guarantee};
+        let sp: usize;
+        // SAFETY: reads a register.
+        unsafe { std::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+        // SAFETY: a query of the calling thread.
+        let fiber = unsafe { windows_sys::Win32::System::Threading::IsThreadAFiber() } != 0;
+        SEEN.with(|seen| seen.borrow_mut().push((current_stack().unwrap(), stack_guarantee(), sp, fiber)));
+        rt_co_yield(p, make_small(1));
+        SEEN.with(|seen| seen.borrow_mut().push((current_stack().unwrap(), stack_guarantee(), sp, fiber)));
+        make_small(2)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_coroutine_runs_on_a_fiber_of_its_own_with_the_guards_guarantee() {
+        use crate::runtime::platform::windows::{confirmed_guard_page, current_stack, stack_guarantee, GUARANTEE};
+        std::thread::spawn(|| {
+            let thread = current_stack().unwrap();
+            let thread_guarantee = stack_guarantee();
+            let mut vm = new_vm();
+            let t = thunk(&mut vm, reporting);
+            vm.temp_roots.push(t);
+            let co = rt_co_create(&mut *vm, t);
+            vm.temp_roots.push(co);
+            SEEN.with(|seen| seen.borrow_mut().clear());
+            assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+            let bounds = coroutine_of(co).stack.as_ref().unwrap().bounds();
+            // The thread's own stack and guarantee, as before.
+            let back = current_stack().unwrap();
+            assert_eq!((back.low_bound, back.high_bound), (thread.low_bound, thread.high_bound));
+            assert_eq!(stack_guarantee(), thread_guarantee);
+            assert!(thread_converted(), "the runtime made the thread a fiber");
+            assert_eq!(rt_co_resume0(&mut *vm, co), make_small(2));
+            let seen = SEEN.with(|seen| seen.borrow().clone());
+            assert_eq!(seen.len(), 2);
+            for (stack, guarantee, sp, fiber) in seen {
+                // What Windows reports while the body runs is the coroutine's
+                // own stack: its bounds, a guard page, its guarantee.
+                assert_eq!((stack.low_bound, stack.high_bound), (bounds.low_bound, bounds.high_bound));
+                assert!(stack.contains(sp, 8), "rsp {sp:#x} outside {:#x}..{:#x}", stack.low_bound, stack.high_bound);
+                assert!(stack.high_bound - stack.low_bound >= stack_bytes(), "a reservation smaller than the usable size");
+                assert!(guarantee >= GUARANTEE, "the fiber's guarantee is {guarantee}");
+                assert!(fiber);
+                let _ = confirmed_guard_page;
+            }
+            assert!(bounds.high_bound <= thread.low_bound || bounds.low_bound >= thread.high_bound, "the fiber's stack overlaps the thread's");
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[cfg(windows)]
+    fn read_mxcsr() -> u32 {
+        let mut value = 0u32;
+        // SAFETY: stores MXCSR into a local.
+        unsafe { std::arch::asm!("stmxcsr [{}]", in(reg) &mut value, options(nostack, preserves_flags)) };
+        value
+    }
+
+    #[cfg(windows)]
+    fn write_mxcsr(value: u32) {
+        // SAFETY: loads a valid MXCSR (the default's masks); tests restore it.
+        unsafe { std::arch::asm!("ldmxcsr [{}]", in(reg) &value, options(nostack, preserves_flags)) };
+    }
+
+    /// MXCSR travels with a context (FIBER_FLAG_FLOAT_SWITCH): the body
+    /// rounds toward zero and yields; the resumer keeps its own mode, and
+    /// the body its own again.
+    #[cfg(windows)]
+    extern "C" fn mxcsr_body(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        let before = read_mxcsr();
+        write_mxcsr(before | 0x6000);
+        rt_co_yield(p, make_small(1));
+        let kept = read_mxcsr() == before | 0x6000;
+        write_mxcsr(before);
+        make_small(if kept && before == 0x1F80 { 1 } else { 0 })
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn mxcsr_is_part_of_the_context() {
+        let mut vm = new_vm();
+        let t = thunk(&mut vm, mxcsr_body);
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        assert_eq!(read_mxcsr(), 0x1F80);
+        assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+        assert_eq!(read_mxcsr(), 0x1F80, "the coroutine's rounding mode leaked into its resumer");
+        assert_eq!(rt_co_resume0(&mut *vm, co), make_small(1));
+        assert_eq!(read_mxcsr(), 0x1F80);
+    }
+
+    #[cfg(windows)]
+    thread_local! {
+        static TOPS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Records its stack pointer, then yields forever.
+    #[cfg(windows)]
+    extern "C" fn top_recording(p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        let sp: usize;
+        // SAFETY: reads a register.
+        unsafe { std::arch::asm!("mov {}, rsp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+        TOPS.with(|tops| tops.borrow_mut().push(sp));
+        loop {
+            rt_co_yield(p, UNIT);
+        }
+    }
+
+    /// A pooled fiber -- its coroutine completed, released while suspended,
+    /// or swept -- starts its next coroutine at its top again: the same
+    /// stack, the same stack pointer at the body.
+    #[cfg(windows)]
+    #[test]
+    fn a_pooled_fiber_starts_again_at_its_top() {
+        std::thread::spawn(|| {
+            let mut vm = new_vm();
+            TOPS.with(|tops| tops.borrow_mut().clear());
+            let mut stacks = Vec::new();
+            for round in 0..4 {
+                let t = thunk(&mut vm, top_recording);
+                vm.temp_roots.push(t);
+                let co = rt_co_create(&mut *vm, t);
+                vm.temp_roots.push(co);
+                assert_eq!(rt_co_start(&mut *vm, co), UNIT);
+                stacks.push(coroutine_of(co).stack.as_ref().unwrap().bounds().low_bound);
+                match round {
+                    // Released while suspended, parked mid-body.
+                    0 | 1 => {
+                        rt_co_release(&mut *vm, co);
+                    }
+                    // Abandoned: swept by the collector.
+                    _ => {
+                        vm.temp_roots.clear();
+                        vm.collect_for_test(GcReason::Explicit);
+                    }
+                }
+            }
+            let tops = TOPS.with(|tops| tops.borrow().clone());
+            assert_eq!(tops.len(), 4);
+            assert!(tops.iter().all(|&sp| sp == tops[0]), "{tops:x?}");
+            assert!(stacks.iter().all(|&low| low == stacks[0]), "one fiber for every round: {stacks:x?}");
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// A thread something else made a fiber stays one, its fiber unchanged:
+    /// the runtime switches from it and back, converting nothing.
+    #[cfg(windows)]
+    #[test]
+    fn a_thread_made_a_fiber_by_its_host_stays_the_hosts() {
+        use windows_sys::Win32::System::Threading::{ConvertFiberToThread, ConvertThreadToFiberEx, IsThreadAFiber};
+        std::thread::spawn(|| {
+            // SAFETY: converts this thread, then converts it back at the end.
+            let host = unsafe { ConvertThreadToFiberEx(std::ptr::null(), 0) } as usize;
+            assert_ne!(host, 0);
+            let mut vm = new_vm();
+            let t = thunk(&mut vm, counting);
+            vm.temp_roots.push(t);
+            let co = rt_co_create(&mut *vm, t);
+            vm.temp_roots.push(co);
+            assert_eq!(rt_co_start(&mut *vm, co), make_small(1));
+            assert_eq!(rt_co_resume(&mut *vm, co, make_small(5)), make_small(15));
+            assert_eq!(rt_co_resume(&mut *vm, co, make_small(21)), make_small(42));
+            let current: usize;
+            // SAFETY: NT_TIB's FiberData.
+            unsafe { std::arch::asm!("mov {}, qword ptr gs:[0x20]", out(reg) current, options(nostack, preserves_flags, readonly)) };
+            assert_eq!(current, host, "the runtime switched back to another fiber than the host's");
+            assert!(!thread_converted());
+            // SAFETY: the host's own conversion, undone by the host.
+            unsafe {
+                assert_ne!(IsThreadAFiber(), 0);
+                assert_ne!(ConvertFiberToThread(), 0);
+            }
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
@@ -1445,5 +1839,39 @@ mod tests {
         assert!(mapped <= 52, "{mapped} stacks mapped for 300 sequential coroutines");
         assert!(pooled_stacks() >= pooled);
         assert!(pooled_stacks() <= POOL_LIMIT);
+    }
+}
+
+/// The fallback root plan runs no native coroutine (STACK_SWITCHING): its
+/// shadow stack cannot hold a suspended coroutine's roots, and it is never
+/// made coroutine-aware (WINDOWS-X86-64-MILESTONE-3.md, -5.md). A start is
+/// NATIVE UNSUPPORTED, before any stack is made.
+#[cfg(all(test, feature = "fallback-roots"))]
+mod fallback_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::ProgramInfo;
+
+    extern "C" fn never(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        panic!("a coroutine body ran on the fallback root plan")
+    }
+
+    #[test]
+    fn the_fallback_plan_refuses_native_coroutines() {
+        assert!(!STACK_SWITCHING);
+        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
+        let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+        let t = vm.alloc(
+            ClosureObj { hdr: Header::new(KIND_CLOSURE, false), func: 0, arity: 0, code: never as *const () as usize, ncaps: 0, caps: Box::into_raw(caps) as *mut Value },
+            0,
+        );
+        vm.temp_roots.push(t);
+        let co = rt_co_create(&mut *vm, t);
+        vm.temp_roots.push(co);
+        let before = pooled_stacks();
+        assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
+        assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["NATIVE", "UNSUPPORTED", "value"]));
+        assert!(coroutine_of(co).stack.is_none());
+        assert_eq!(pooled_stacks(), before);
     }
 }

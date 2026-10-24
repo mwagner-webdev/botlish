@@ -368,7 +368,7 @@ index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
 related: backend.targets backend.overview backend.native-executable backend.single-executable
-docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md MACOS-AARCH64-MILESTONE-8.md
+docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md WINDOWS-X86-64-MILESTONE-5.md MACOS-AARCH64-MILESTONE-8.md
 
 == WHAT IS TESTED
 The repository's continuous integration runs every test on Linux x86-64 and
@@ -376,11 +376,12 @@ Linux AArch64 (the Tcl backends, the native backends, the golden suites)
 and builds the single executable on Linux x86-64. A separate workflow runs
 the native JIT, native coroutines, the native stack guard, standalone
 executables, C calls and Darwin I/O on Apple Silicon macOS, and
-another the native JIT, standalone executables, C calls (against
-libraries MSVC's cl builds), Windows I/O, the collector under GC stress
-(its roots found in native frames, checked against Windows' own
-unwinder), and every Tcl test file and golden suite on the Tcl backends,
-on Windows x86-64 with MSVC's toolchain. Nothing here is a promise about
+another the native JIT, native coroutines, the native stack guard,
+standalone executables, C calls (against libraries MSVC's cl builds),
+Windows I/O, the collector under GC stress (its roots found in native
+frames, checked against Windows' own unwinder), every Tcl test file on
+the Tcl backends and every golden suite on all four, on Windows x86-64
+with MSVC's toolchain. Nothing here is a promise about
 other platforms.
 
 == PER COMPONENT
@@ -391,10 +392,11 @@ other platforms.
                              Windows x86-64 (MSVC's toolchain; MinGW's
                              windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
-                             (hand-written stack switching, or, for a
-                             coroutine closed inside one function, none:
-                             COROUTINE-FUSION-MILESTONE-1.md); elsewhere
-                             (Windows) NATIVE UNSUPPORTED; the Tcl
+                             (hand-written stack switching), Windows
+                             x86-64 (a Windows fiber per coroutine stack:
+                             WINDOWS-X86-64-MILESTONE-5.md), or, for a
+                             coroutine closed inside one function, none
+                             (COROUTINE-FUSION-MILESTONE-1.md); the Tcl
                              backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
                              and a coroutine's, on Linux x86-64 and

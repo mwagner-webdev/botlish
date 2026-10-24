@@ -32,7 +32,9 @@ target-lexicon = "0.13"
 # JIT's code range and the thread's stack bounds
 # (WINDOWS-X86-64-MILESTONE-3.md); the stack-overflow guard's handler, its
 # stack guarantee and its report (WINDOWS-X86-64-MILESTONE-4.md: WriteFile,
-# the standard handles, the exception record's flags).
+# the standard handles, the exception record's flags); coroutine fibers
+# (WINDOWS-X86-64-MILESTONE-5.md: FIBER_FLAG_FLOAT_SWITCH is
+# WindowsProgramming's).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -44,6 +46,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Memory",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
 ] }
 
 # The runtime archive (native/runtime-archive) is a member built with the

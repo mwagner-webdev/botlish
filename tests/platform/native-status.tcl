@@ -5,7 +5,8 @@
 #
 # Runs one small probe per native capability -- the JIT, the GC's frame walk
 # under stress, a native stack overflow (of the thread's stack and of a
-# coroutine's), coroutines, a Linux syscall, a C call, byte storage exposed
+# coroutine's), coroutines (fused and on the general runtime, coroutine
+# fusion off: COROUTINE-FUSION-MILESTONE-1.md), a Linux syscall, a C call, byte storage exposed
 # to the system C library, Darwin I/O (libSystem's read and write, errno,
 # the portable std::io::IO through DarwinIO, an executable), Windows I/O
 # (kernel32's WriteFile, the portable std::io::IO through WindowsIO, an
@@ -111,6 +112,36 @@ fn worker(depth: int) -> Event:
 coroutine {step, first} = worker(100000000)
 step().value
 } {}] \
+    coroutine-general [list program {struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn worker(base: int, resume Message) -> Event:
+    message = yield Event {value: base}
+    return Event {value: message.value}
+
+coroutine {step, first} = worker(10)
+second = step(Message {value: 7})
+[first.value, second.value]
+} {BOTLISH_NATIVE_COROUTINE_FUSION 0}] \
+    coroutine-stack-overflow-general [list program {struct Event:
+    value: int
+
+fn down(n: int) -> int:
+    if n == 0:
+        return 0
+
+    1 + down(n - 1)
+
+fn worker(depth: int) -> Event:
+    yield Event {value: 0}
+    return Event {value: down(depth)}
+
+coroutine {step, first} = worker(100000000)
+step().value
+} {BOTLISH_NATIVE_COROUTINE_FUSION 0}] \
     coroutine [list program {struct Message:
     value: int
 
@@ -354,8 +385,13 @@ f(1)
 # and GetLastError; the portable std::io::IO through WindowsIO; a PE executable
 # printing through it) runs, refused everywhere else (`windows` is the
 # Windows platform's namespace: UNSUPPORTED-PLATFORM). A variadic C call is
-# still a codegen error on Windows (no Win64 variadic lowering), as are
-# coroutines (NATIVE UNSUPPORTED). Since milestone 3
+# still a codegen error on Windows (no Win64 variadic lowering), and until
+# milestone 5 (WINDOWS-X86-64-MILESTONE-5.md) coroutines were NATIVE
+# UNSUPPORTED ("native coroutines need stack switching"): since then each
+# coroutine stack is a Windows fiber, a coroutine yields and completes
+# (coroutine, and coroutine-general on the general runtime, coroutine
+# fusion off) and its stack's exhaustion is NATIVE LIMIT STACK
+# (coroutine-stack-overflow-general), as on every host. Since milestone 3
 # (WINDOWS-X86-64-MILESTONE-3.md) the collector finds the roots in native
 # frames (gc-frame-walk: Windows' unwinder across Rust frames). Since
 # milestone 4 (WINDOWS-X86-64-MILESTONE-4.md) the stack guard reports every
@@ -384,6 +420,8 @@ set linux [dict create \
     recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
     coroutine {value {[10, 7]}} \
+    coroutine-stack-overflow-general {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+    coroutine-general {value {[10, 7]}} \
     linux-syscall {value 0} \
     c-call {value 5} \
     c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: 11 (SIGSEGV)*}} \
@@ -417,6 +455,8 @@ set expected [dict create \
         recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         coroutine {value {[10, 7]}} \
+        coroutine-stack-overflow-general {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        coroutine-general {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         c-call {value 5} \
         c-access-violation {error {NATIVE BUG} {the linked program reported no result (signal: *}} \
@@ -443,8 +483,10 @@ unit}}} \
         runtime-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         large-frame-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
         recursion-limit {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
-        coroutine-stack-overflow {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
-        coroutine {error {NATIVE UNSUPPORTED value} {native coroutines need stack switching, implemented for Linux x86-64 and AArch64 and macOS AArch64 only*}} \
+        coroutine-stack-overflow {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        coroutine {value {[10, 7]}} \
+        coroutine-stack-overflow-general {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}} \
+        coroutine-general {value {[10, 7]}} \
         linux-syscall {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::linux" belongs to the Linux platform*unavailable for target windows-x86_64 (Windows on x86_64)*}} \
         c-call {value 5} \
         c-access-violation {error {NATIVE BUG} {the linked program reported no result (exit code: * (0xc0000005))}} \

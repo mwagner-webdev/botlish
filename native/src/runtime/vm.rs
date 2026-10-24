@@ -321,14 +321,14 @@ impl Vm {
     /// to the stack it runs on (runtime::platform's guard).
     #[inline(always)]
     pub fn publish_active_stack(&mut self, stack: Option<NativeStack>) {
-        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64")))]
+        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
         {
             let stack = stack.or(self.native_stack);
             if let Some(stack) = stack {
                 super::platform::set_active_stack(&stack);
             }
         }
-        #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"))))]
+        #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         let _ = stack;
     }
 
