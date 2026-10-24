@@ -691,6 +691,13 @@ dictionary, slot or indirect call.
   callee-saved registers and the MXCSR/x87 control words on the current
   stack, behind a standard frame record, so a suspended stack's frame chain
   starts at `saved_sp + 48` and is read by the ordinary frame walker.
+  (AArch64, Linux and macOS: the same with AAPCS64's state,
+  MACOS-AARCH64-MILESTONE-3.md. Windows x86-64: the stack is a Windows fiber
+  -- 8 MiB reserved, grown by Windows' guard page, its own stack guarantee --
+  and the switch is SwitchToFiber, which also keeps the TEB's account of the
+  running stack; the coroutine object holds the fiber and the frame its
+  switch left, from which Windows' unwinder walks it:
+  WINDOWS-X86-64-MILESTONE-5.md.)
 
 ### 42. GC tracing of suspended state
 
@@ -788,8 +795,11 @@ evaluator.
 * AOT executables link the same runtime; the principal program and a program
   printing through `std::io::print_line` from inside a coroutine run as
   executables, also under `BOTLISH_NATIVE_GC_STRESS=1`.
-* Hosts: x86-64 Linux. Elsewhere `rt_co_start` reports `NATIVE UNSUPPORTED`
-  (no stack switch exists there yet; COROUTINE-PREREQUISITES.md R3).
+* Hosts: x86-64 Linux; since then AArch64 Linux and macOS
+  (MACOS-AARCH64-MILESTONE-3.md) and Windows x86-64
+  (WINDOWS-X86-64-MILESTONE-5.md). Elsewhere, and on the fallback root plan
+  of a `fallback-roots` build, `rt_co_start` reports `NATIVE UNSUPPORTED`
+  (COROUTINE-PREREQUISITES.md R3).
 
 ### 47. Deep-yield backend evidence
 
@@ -1196,10 +1206,11 @@ What this says about the architecture (no optimization was attempted):
 
 ### 59. Current limitations
 
-* **Hosts.** Native coroutines need the stack switch, written for x86-64
-  Linux (SysV). Windows (fibers or a Win64 switch, plus frame pointers for
-  the GC walk) and wasm (no program-visible stack) are later work
-  (COROUTINE-PREREQUISITES.md R3); the Tcl backends run coroutines
+* **Hosts.** Native coroutines need a stack switch and native-frame GC
+  roots: x86-64 and AArch64 Linux and AArch64 macOS switch with assembly of
+  their own, Windows x86-64 with fibers (WINDOWS-X86-64-MILESTONE-5.md). wasm
+  (no program-visible stack) is later work (COROUTINE-PREREQUISITES.md R3),
+  and the fallback root plan runs none; the Tcl backends run coroutines
   everywhere.
 * **Stack reclamation is static, not total.** A coroutine is released right
   after its handle's last use ([Release at the last

@@ -1,6 +1,8 @@
 # Mutants of the native stack guard (audit/native-stack/tools/mutate.tcl;
 # MACOS-AARCH64-MILESTONE-4.md, "Mutation testing";
-# WINDOWS-X86-64-MILESTONE-4.md, "Mutation testing"): the host's stack
+# WINDOWS-X86-64-MILESTONE-4.md, "Mutation testing";
+# WINDOWS-X86-64-MILESTONE-5.md, "Tests": Windows' coroutine fibers, their
+# guarantees and their publication): the host's stack
 # discovery (native/src/runtime/platform/linux.rs, macos.rs, windows.rs),
 # the POSIX guard (platform/guard.rs) and the Windows guard
 # (platform/windows.rs), the drivers that install them (main.rs,
@@ -134,7 +136,7 @@
 # Publication of the running stack (runtime/coroutine.rs)
 
 @@ publish-before-switch the stack about to run published before the switch, not on arrival
-%% linux-x86_64 linux-aarch64 macos-aarch64
+%% linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64
 ## native/src/runtime/coroutine.rs
 <<<<
         (*co).state = CO_RUNNING;
@@ -164,7 +166,7 @@
 >>>>
 
 @@ start-publishes-thread-stack a coroutine's first segment publishes the thread's stack, not its own
-%% linux-x86_64 linux-aarch64 macos-aarch64
+%% linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64
 ## native/src/runtime/coroutine.rs
 <<<<
         // Arrived on this fresh stack (segment's doc).
@@ -176,7 +178,7 @@
 >>>>
 
 @@ resume-not-published a resumed coroutine does not publish its stack
-%% linux-x86_64 linux-aarch64 macos-aarch64
+%% linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64
 ## native/src/runtime/coroutine.rs
 <<<<
         // Resumed: arrived on this coroutine's stack again (segment's doc).
@@ -187,7 +189,7 @@
 >>>>
 
 @@ yield-not-restored the resumer does not publish its stack when a segment returns to it
-%% linux-x86_64 linux-aarch64 macos-aarch64
+%% linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64
 ## native/src/runtime/coroutine.rs
 <<<<
         let outer_stack = if outer.is_null() { None } else { (*outer).stack.as_ref().map(|s| s.bounds()) };
@@ -510,4 +512,89 @@
     crate::runtime::native_stack::native_stack_overflow_supported() || cfg!(target_os = "windows")
 ====
     false
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows' coroutine stacks (WINDOWS-X86-64-MILESTONE-5.md): fibers with
+# their own guarantee, their stack published to the guard, pooled and
+# restarted at their top; and the fallback plan, which runs no coroutine
+
+@@ win-published-stack-ignored the Windows guard reads the stack it was installed with, never the one published as running: a coroutine stack's exhaustion is not claimed (Windows)
+%% windows-x86_64
+## native/src/runtime/platform/windows.rs
+<<<<
+pub fn set_active_stack(stack: &NativeStack) {
+    if GUARDED.load(Ordering::Relaxed) == UNGUARDED {
+        return;
+    }
+    publish(stack);
+}
+====
+pub fn set_active_stack(stack: &NativeStack) {
+    let _ = stack;
+}
+>>>>
+
+@@ win-fiber-without-guarantee a coroutine fiber is given no stack guarantee, and none is checked: its exhaustion's handler runs in whatever Windows leaves (Windows)
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+        let mut size = GUARANTEE;
+        SetThreadStackGuarantee(&mut size);
+        (*slot).guarantee = stack_guarantee();
+====
+        (*slot).guarantee = GUARANTEE;
+>>>>
+
+@@ win-fiber-never-pooled a coroutine fiber is deleted when its coroutine is done with it, never pooled: every start creates a fiber (Windows)
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+            if pool.len() < POOL_LIMIT {
+                pool.push(CoStack { fiber: self.fiber, slot: self.slot, stack: self.stack, usable: self.usable });
+                true
+====
+            if pool.len() > POOL_LIMIT {
+                pool.push(CoStack { fiber: self.fiber, slot: self.slot, stack: self.stack, usable: self.usable });
+                true
+>>>>
+
+@@ win-fiber-not-restarted a start of a pooled fiber does not restart it at its top: it continues where it parked (Windows)
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+    let start = START.with(|start| start.replace(0));
+    if start != 0 {
+====
+    let start = START.with(|start| start.replace(0));
+    if start == usize::MAX {
+>>>>
+
+@@ win-host-fiber-converted-back a thread something else made a fiber is taken for the runtime's own conversion, converted back when it ends (Windows)
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+            if t.state.get() == UNKNOWN {
+                t.state.set(HOSTED);
+            }
+====
+            if t.state.get() == UNKNOWN {
+                t.state.set(CONVERTED);
+            }
+>>>>
+
+@@ fallback-runs-coroutines the fallback root plan starts native coroutines: its shadow stack would hold a suspended coroutine's roots out of order
+## native/src/runtime/coroutine.rs
+<<<<
+        if !super::framewalk::NATIVE_FRAME_ROOTS {
+            return vm(p).fail(RtError::Unsupported(
+====
+        if !super::framewalk::NATIVE_FRAME_ROOTS && false {
+            return vm(p).fail(RtError::Unsupported(
+>>>>
+## native/src/runtime/coroutine.rs
+<<<<
+)) && super::framewalk::NATIVE_FRAME_ROOTS;
+====
+));
 >>>>

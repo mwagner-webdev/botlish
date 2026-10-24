@@ -480,6 +480,29 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fallback.outcome == 'success' }}
         run: tclsh9.0 bench/root-plans.tcl -fallback native/target-fallback/release/botlish-native.exe -runs 20 -rounds 7 -stress-runs 3 2>&1 | tee root-plans.log
 
+      # What coroutines cost on Windows (WINDOWS-X86-64-MILESTONE-5.md,
+      # "Performance"): the general runtime's operations natively -- a fiber
+      # per coroutine, fusion off (bench/coroutines.tcl) -- and the declared
+      # recognizers' workloads, fused and on the general runtime
+      # (bench/dfa.tcl).
+      - name: Coroutine costs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          tclsh9.0 bench/coroutines.tcl -backends native -runs 5 2>&1 | tee coroutine-costs.log
+          tclsh9.0 bench/dfa.tcl -runs 3 -rounds 3 2>&1 | tee dfa-costs.log
+
+      # Programs without coroutines before and after the coroutine milestone
+      # (WINDOWS-X86-64-MILESTONE-5.md): the driver of main before it built
+      # here, against this checkout's, on bench/root-plans.tcl's workloads.
+      # On demand, with the other probes.
+      - name: "Probe: programs without coroutines, before and after native coroutines"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git fetch --quiet --depth 1 origin b5b17a398698931f3e7172bdd379174f7cbb6b4d
+          git worktree add --quiet --detach "$RUNNER_TEMP/before-coroutines" FETCH_HEAD
+          cargo build --release --manifest-path "$RUNNER_TEMP/before-coroutines/native/Cargo.toml" --target-dir native/target-before-coroutines
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-before-coroutines/release/botlish-native.exe -name before-coroutines -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee before-coroutines.log
+
       # Strategy B's per-call cost, measured (WINDOWS-X86-64-MILESTONE-3.md,
       # section 3): a driver built with audit/windows-unwind/tools/anchors.patch
       # stores the stack pointer to the Vm before every runtime call at a GC
@@ -526,6 +549,9 @@ jobs:
             [ -f anchors.log ] && cat anchors.log
             [ -f before-after.log ] && cat before-after.log
             [ -f checks.log ] && cat checks.log
+            [ -f before-coroutines.log ] && cat before-coroutines.log
+            [ -f coroutine-costs.log ] && cat coroutine-costs.log
+            [ -f dfa-costs.log ] && cat dfa-costs.log
             echo '```'
             if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
               echo '```'

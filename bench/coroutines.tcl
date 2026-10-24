@@ -264,7 +264,13 @@ dict for {kind info} [dict get $report byKind] {
     puts "| $kind | $count | $bytes | [format %.2f [expr {double($count) / $n}]] objects, [format %.0f [expr {double($bytes) / $n}]] B |"
 }
 
-# Peak resident memory.
+# Peak resident memory: through Linux's /proc and Python's resource module,
+# which Windows has neither of (WINDOWS-X86-64-MILESTONE-5.md measures a
+# coroutine fiber's committed stack instead).
+if {$::tcl_platform(platform) eq "windows"} {
+    puts "\n(No resident-memory table on Windows: its measure reads /proc and Python's resource module.)"
+    exit 0
+}
 proc nativePeakKiB {hir} {
     set text [native::nir $hir]
     lassign [file tempfile path botlish-bench.nir] channel
