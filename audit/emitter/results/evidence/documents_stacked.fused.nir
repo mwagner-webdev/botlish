@@ -1,0 +1,4154 @@
+nir 1 call-effects=1 statics=0
+shape 0 named "value_emit::Value" fields="kind number text items keys"
+shape 1 named "value_emit::Open" fields="value next"
+enum 0 "value_emit::Kind" cases="Null False True Number String Array Object"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+func 0 "<program>" params=0 env=0 regs=27 pnames="" captures=0 rawregs="1 5 7 8 13 15 16 21 23 24"
+    pusherrorexit L0 @e8308
+    %1 = rawint 4 @e8311
+    %2 = call 24 %1 @e8309
+    poperrorexit @e8308
+    %0 = move %2 @e8308
+    jump L1 @e8308
+  label L0
+    %3 = declarederroreq 1073741825 @e8308
+    br %3 L2 L3 @e8308
+  label L2
+    cleardeclarederror @e8308
+    %4 = int 0 @e8316
+    %5 = rawint 0
+    %6 = int 1 @e8317
+    %7 = rawint 1
+    %8 = op risub %5 %7 @e8314
+    %9 = op rbox %8
+    %10 = op listnew %9 @e8312
+    %0 = move %10 @e8308
+    jump L1 @e8308
+  label L3
+    %11 = declarederroreq 12 @e8308
+    br %11 L4 L5 @e8308
+  label L4
+    cleardeclarederror @e8308
+    %12 = int 0 @e8322
+    %13 = rawint 0
+    %14 = int 2 @e8323
+    %15 = rawint 2
+    %16 = op risub %13 %15 @e8320
+    %17 = op rbox %16
+    %18 = op listnew %17 @e8318
+    %0 = move %18 @e8308
+    jump L1 @e8308
+  label L5
+    %19 = declarederroreq 3 @e8308
+    br %19 L6 L7 @e8308
+  label L6
+    cleardeclarederror @e8308
+    %20 = int 0 @e8328
+    %21 = rawint 0
+    %22 = int 3 @e8329
+    %23 = rawint 3
+    %24 = op risub %21 %23 @e8326
+    %25 = op rbox %24
+    %26 = op listnew %25 @e8324
+    %0 = move %26 @e8308
+    jump L1 @e8308
+  label L7
+    reraise @e8308
+  label L1
+    ret %0
+end
+
+func 1 "number_emit::digit_at" params=2 env=0 regs=73 pnames="r p" captures=0 rawregs="3 8 13 18 21 26 29 32 37 40 43 48 53 56 59 64 69 72"
+    %2 = int 5 @e1276
+    %3 = rawint 5
+    %4 = op imul %2 %1 @e1274
+    %5 = op ige %0 %4 @e1271
+    br %5 L0 L1 @e1270
+  label L0
+    %7 = int 7 @e1284
+    %8 = rawint 7
+    %9 = op imul %7 %1 @e1282
+    %10 = op ige %0 %9 @e1279
+    br %10 L3 L4 @e1278
+  label L3
+    %12 = int 9 @e1292
+    %13 = rawint 9
+    %14 = op imul %12 %1 @e1290
+    %15 = op ige %0 %14 @e1287
+    br %15 L6 L7 @e1286
+  label L6
+    %17 = int 9 @e1295
+    %18 = rawint 9
+    ret %17 @e1294
+  label L7
+    %19 = unit
+    %16 = move %19
+    jump L8
+  label L8
+    %20 = int 8 @e1302
+    %21 = rawint 8
+    %22 = op imul %20 %1 @e1300
+    %23 = op ige %0 %22 @e1297
+    br %23 L9 L10 @e1296
+  label L9
+    %25 = int 8 @e1305
+    %26 = rawint 8
+    ret %25 @e1304
+  label L10
+    %27 = unit
+    %24 = move %27
+    jump L11
+  label L11
+    %28 = int 7 @e1307
+    %29 = rawint 7
+    ret %28 @e1306
+  label L4
+    %30 = unit
+    %11 = move %30
+    jump L5
+  label L5
+    %31 = int 6 @e1314
+    %32 = rawint 6
+    %33 = op imul %31 %1 @e1312
+    %34 = op ige %0 %33 @e1309
+    br %34 L12 L13 @e1308
+  label L12
+    %36 = int 6 @e1317
+    %37 = rawint 6
+    ret %36 @e1316
+  label L13
+    %38 = unit
+    %35 = move %38
+    jump L14
+  label L14
+    %39 = int 5 @e1319
+    %40 = rawint 5
+    ret %39 @e1318
+  label L1
+    %41 = unit
+    %6 = move %41
+    jump L2
+  label L2
+    %42 = int 3 @e1326
+    %43 = rawint 3
+    %44 = op imul %42 %1 @e1324
+    %45 = op ige %0 %44 @e1321
+    br %45 L15 L16 @e1320
+  label L15
+    %47 = int 4 @e1334
+    %48 = rawint 4
+    %49 = op imul %47 %1 @e1332
+    %50 = op ige %0 %49 @e1329
+    br %50 L18 L19 @e1328
+  label L18
+    %52 = int 4 @e1337
+    %53 = rawint 4
+    ret %52 @e1336
+  label L19
+    %54 = unit
+    %51 = move %54
+    jump L20
+  label L20
+    %55 = int 3 @e1339
+    %56 = rawint 3
+    ret %55 @e1338
+  label L16
+    %57 = unit
+    %46 = move %57
+    jump L17
+  label L17
+    %58 = int 2 @e1346
+    %59 = rawint 2
+    %60 = op imul %58 %1 @e1344
+    %61 = op ige %0 %60 @e1341
+    br %61 L21 L22 @e1340
+  label L21
+    %63 = int 2 @e1349
+    %64 = rawint 2
+    ret %63 @e1348
+  label L22
+    %65 = unit
+    %62 = move %65
+    jump L23
+  label L23
+    %66 = op ige %0 %1 @e1351
+    br %66 L24 L25 @e1350
+  label L24
+    %68 = int 1 @e1356
+    %69 = rawint 1
+    ret %68 @e1355
+  label L25
+    %70 = unit
+    %67 = move %70
+    jump L26
+  label L26
+    %71 = int 0 @e1357
+    %72 = rawint 0
+    ret %71
+end
+
+func 2 "number_emit::leading_digit_at" params=2 env=0 regs=68 pnames="r p" captures=0 rawregs="3 8 13 18 21 26 29 32 37 40 43 48 53 56 59 64 67"
+    %2 = int 5 @e1366
+    %3 = rawint 5
+    %4 = op imul %2 %1 @e1364
+    %5 = op ige %0 %4 @e1361
+    br %5 L0 L1 @e1360
+  label L0
+    %7 = int 7 @e1374
+    %8 = rawint 7
+    %9 = op imul %7 %1 @e1372
+    %10 = op ige %0 %9 @e1369
+    br %10 L3 L4 @e1368
+  label L3
+    %12 = int 9 @e1382
+    %13 = rawint 9
+    %14 = op imul %12 %1 @e1380
+    %15 = op ige %0 %14 @e1377
+    br %15 L6 L7 @e1376
+  label L6
+    %17 = int 9 @e1385
+    %18 = rawint 9
+    ret %17 @e1384
+  label L7
+    %19 = unit
+    %16 = move %19
+    jump L8
+  label L8
+    %20 = int 8 @e1392
+    %21 = rawint 8
+    %22 = op imul %20 %1 @e1390
+    %23 = op ige %0 %22 @e1387
+    br %23 L9 L10 @e1386
+  label L9
+    %25 = int 8 @e1395
+    %26 = rawint 8
+    ret %25 @e1394
+  label L10
+    %27 = unit
+    %24 = move %27
+    jump L11
+  label L11
+    %28 = int 7 @e1397
+    %29 = rawint 7
+    ret %28 @e1396
+  label L4
+    %30 = unit
+    %11 = move %30
+    jump L5
+  label L5
+    %31 = int 6 @e1404
+    %32 = rawint 6
+    %33 = op imul %31 %1 @e1402
+    %34 = op ige %0 %33 @e1399
+    br %34 L12 L13 @e1398
+  label L12
+    %36 = int 6 @e1407
+    %37 = rawint 6
+    ret %36 @e1406
+  label L13
+    %38 = unit
+    %35 = move %38
+    jump L14
+  label L14
+    %39 = int 5 @e1409
+    %40 = rawint 5
+    ret %39 @e1408
+  label L1
+    %41 = unit
+    %6 = move %41
+    jump L2
+  label L2
+    %42 = int 3 @e1416
+    %43 = rawint 3
+    %44 = op imul %42 %1 @e1414
+    %45 = op ige %0 %44 @e1411
+    br %45 L15 L16 @e1410
+  label L15
+    %47 = int 4 @e1424
+    %48 = rawint 4
+    %49 = op imul %47 %1 @e1422
+    %50 = op ige %0 %49 @e1419
+    br %50 L18 L19 @e1418
+  label L18
+    %52 = int 4 @e1427
+    %53 = rawint 4
+    ret %52 @e1426
+  label L19
+    %54 = unit
+    %51 = move %54
+    jump L20
+  label L20
+    %55 = int 3 @e1429
+    %56 = rawint 3
+    ret %55 @e1428
+  label L16
+    %57 = unit
+    %46 = move %57
+    jump L17
+  label L17
+    %58 = int 2 @e1436
+    %59 = rawint 2
+    %60 = op imul %58 %1 @e1434
+    %61 = op ige %0 %60 @e1431
+    br %61 L21 L22 @e1430
+  label L21
+    %63 = int 2 @e1439
+    %64 = rawint 2
+    ret %63 @e1438
+  label L22
+    %65 = unit
+    %62 = move %65
+    jump L23
+  label L23
+    %66 = int 1 @e1440
+    %67 = rawint 1
+    ret %66
+end
+
+func 3 "number_emit::magnitude" params=1 env=0 regs=59 pnames="m" captures=0 rawregs="2 7 9 10 14 21 27 28 29 33 44 48 49 50 54"
+    unreachable
+end
+
+func 4 "number_emit::integer" params=1 env=0 regs=21 pnames="n" captures=0 rawregs="2 6 9 13 16"
+    unreachable
+end
+
+func 5 "string_emit::hex_digit" params=1 env=0 regs=16 pnames="n" captures=0 rawregs="0 2 6 7 11 12" rawparams="0"
+    unreachable
+end
+
+func 6 "string_emit::control" params=1 env=0 regs=59 pnames="c" captures=0 rawregs="0 2 5 9 12 16 19 23 26 30 33 37 40 43 46 49 50 53 55 56" rawparams="0"
+    unreachable
+end
+
+func 7 "string_emit::character" params=1 env=0 regs=20 pnames="c" captures=0 rawregs="2 4 7 10 14"
+    unreachable
+end
+
+func 8 "string_emit::string" params=1 env=0 regs=22 pnames="text" captures=0 rawregs="2 5 7 8 15 16 19"
+    unreachable
+end
+
+func 9 "value_emit::null_value" params=0 env=0 regs=7 pnames="" captures=0 rawregs="2"
+    %0 = enum 0 0 @e2562
+    %1 = int 0 @e2563
+    %2 = rawint 0
+    %3 = str "" @e2564
+    %4 = op listnew @e2565
+    %5 = op listnew @e2567
+    %6 = structnew 0 %0 %1 %3 %4 %5 @e2561
+    ret %6
+end
+
+func 10 "value_emit::boolean" params=1 env=0 regs=10 pnames="b" captures=0 rawregs="5"
+    br %0 L0 L1 @e2572
+  label L0
+    %2 = enum 0 2 @e2574
+    %1 = move %2
+    jump L2
+  label L1
+    %3 = enum 0 1 @e2575
+    %1 = move %3
+    jump L2
+  label L2
+    %4 = int 0 @e2578
+    %5 = rawint 0
+    %6 = str "" @e2579
+    %7 = op listnew @e2580
+    %8 = op listnew @e2582
+    %9 = structnew 0 %1 %4 %6 %7 %8 @e2576
+    ret %9
+end
+
+func 11 "value_emit::number" params=1 env=0 regs=6 pnames="n" captures=0
+    %1 = enum 0 3 @e2587
+    %2 = str "" @e2589
+    %3 = op listnew @e2590
+    %4 = op listnew @e2592
+    %5 = structnew 0 %1 %0 %2 %3 %4 @e2586
+    ret %5
+end
+
+func 12 "value_emit::string" params=1 env=0 regs=7 pnames="text" captures=0 rawregs="3"
+    %1 = enum 0 4 @e2597
+    %2 = int 0 @e2598
+    %3 = rawint 0
+    %4 = op listnew @e2600
+    %5 = op listnew @e2602
+    %6 = structnew 0 %1 %2 %0 %4 %5 @e2596
+    ret %6
+end
+
+func 13 "value_emit::array" params=1 env=0 regs=7 pnames="items" captures=0 rawregs="3"
+    %1 = enum 0 5 @e2607
+    %2 = int 0 @e2608
+    %3 = rawint 0
+    %4 = str "" @e2609
+    %5 = op listnew @e2611
+    %6 = structnew 0 %1 %2 %4 %0 %5 @e2606
+    ret %6
+end
+
+func 14 "value_emit::object" params=2 env=0 regs=7 pnames="keys items" captures=0 rawregs="4"
+    %2 = enum 0 6 @e2616
+    %3 = int 0 @e2617
+    %4 = rawint 0
+    %5 = str "" @e2618
+    %6 = structnew 0 %2 %3 %5 %1 %0 @e2615
+    ret %6
+end
+
+func 15 "value_emit::literal_null" params=0 env=0 regs=13 pnames="" captures=0 rawregs="1 4 7 10"
+    unreachable
+end
+
+func 16 "value_emit::literal_true" params=0 env=0 regs=13 pnames="" captures=0 rawregs="1 4 7 10"
+    unreachable
+end
+
+func 17 "value_emit::literal_false" params=0 env=0 regs=16 pnames="" captures=0 rawregs="1 4 7 10 13"
+    unreachable
+end
+
+func 18 "value_emit::scalar" params=1 env=0 regs=25 pnames="v" captures=0
+    unreachable
+end
+
+func 19 "value_emit::members" params=1 env=0 regs=3 pnames="v" captures=0
+    %1 = structget 3 %0 @e2796
+    %2 = op listlen %1 @e2794
+    ret %2
+end
+
+func 20 "value_emit::value_stacked" params=1 env=0 regs=123 pnames="root" captures=0 rawregs="2 8 12 26 29 32 34 43 47 51 55 58 67 70 85 96 101 106 118 121"
+    unreachable
+end
+
+func 21 "value_emit::stacked_source" params=1 env=0 regs=8 pnames="v" captures=0 rawregs="3 5 6"
+    unreachable
+end
+
+func 22 "bench_work::texts" params=0 env=0 regs=9 pnames="" captures=0
+    %0 = str "The quick brown fox jumps over the lazy dog, 0123456789 times." @e7411
+    %1 = str "\"Quoted\" and \\back\\slashed\\ text with a /solidus/ and tabs\t\t." @e7412
+    %2 = str "Latin-1: àéîõü ÀÉÎÕÜ ñç ß ø å æ, and more of the same: àéîõü!" @e7413
+    %3 = str "日本語のテキストと中文文本，还有한국어 텍스트가 섞여 있습니다。" @e7414
+    %4 = str "Line one\nline two\r\nline three\tand a tab, then\n\n\tmore lines." @e7415
+    %5 = str "Emoji: 😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗 and a smile." @e7416
+    %6 = str "Mixed: a\"b\\c/d\te\nf é ü 中 😀 \r\n and the end of the piece." @e7417
+    %7 = str "Plain ASCII words, nothing to escape, nothing to encode at all." @e7418
+    %8 = op listnew %0 %1 %2 %3 %4 %5 %6 %7 @e7409
+    ret %8
+end
+
+func 23 "bench_work::tree" params=1 env=0 regs=57 pnames="count" captures=0 rawregs="0 16 17 26 27 31 32 40 42 43 53 54" planregs="20 52" rawparams="0"
+    %1 = call 22 @e7861
+    %2 = str "id" @e7866
+    %3 = str "name" @e7867
+    %4 = str "flags" @e7868
+    %5 = str "point" @e7869
+    %6 = str "big" @e7870
+    %7 = op listnew %2 %3 %4 %5 %6 @e7864
+    %8 = bool true @e7878
+    %9 = call 10 %8 @e7876
+    %10 = bool false @e7881
+    %11 = call 10 %10 @e7879
+    %12 = call 9 @e7882
+    %13 = op listnew %9 %11 %12 @e7874
+    %14 = call 13 %13 @e7872
+    %15 = int 0 @e7886
+    %16 = rawint 0
+    %17 = move %16 @e7885
+    %19 = op listnew @e7885
+    %20 = move %19 @e7885
+    jump L0 @e7885
+  label L0
+    %21 = op rilt %17 %0 @e7885
+    br %21 L1 L3 @e7885
+  label L1
+    %22 = str "px" @e7891
+    %23 = str "py" @e7892
+    %24 = op listnew %22 %23 @e7889
+    %25 = int 0 @e7903
+    %26 = rawint 0
+    %27 = op risub %26 %17 @e7901
+    %28 = op rbox %27
+    %29 = call 11 %28 @e7899
+    %30 = int 7 @e7910
+    %31 = rawint 7
+    %32 = op rimul %17 %31 @e7907
+    %33 = op rbox %32
+    %34 = call 11 %33 @e7905
+    %35 = op listnew %29 %34 @e7897
+    %36 = call 14 %24 %35 @e7894
+    %37 = op rbox %17
+    %38 = call 11 %37 @e7916
+    %39 = int 8 @e7927
+    %40 = rawint 8
+    %41 = int 7 @e7924
+    %42 = rawint 7
+    %43 = op riand %17 %42 @e7924
+    %44 = op rbox %43
+    %45 = op listget %1 %44 @e7921
+    %46 = call 12 %45 @e7919
+    %47 = int 1180591620717411303424 @e7934
+    %48 = op iadd %47 %37 @e7932
+    %49 = call 11 %48 @e7930
+    %50 = op listnew %38 %46 %14 %36 %49 @e7914
+    %51 = call 14 %7 %50 @e7911
+    %52 = construct list plan %20 elem %51 @e7885
+    %20 = move %52 @e7885
+    jump L2 @e7885
+  label L2
+    %53 = rawint 1 @e7885
+    %54 = op riadd %17 %53 @e7885
+    %17 = move %54 @e7885
+    jump L0 @e7885
+  label L3
+    %55 = construct list flat %20 @e7885
+    %18 = move %55 @e7885
+    jump L4 @e7885
+  label L4
+    %56 = call 13 %18 @e7936
+    ret %56
+end
+
+func 24 "bench_work::documents_stacked" params=1 env=0 regs=991 pnames="count" captures=0 rawregs="0 3 5 14 24 26 31 36 40 43 49 51 56 62 71 74 77 85 89 91 92 96 102 106 120 123 126 128 137 141 145 149 152 161 164 179 190 195 200 212 215 219 222 224 225 232 233 236 241 243 246 249 253 259 261 264 268 271 275 278 282 285 289 292 296 299 302 305 308 309 312 314 315 318 320 324 325 329 330 334 336 340 341 345 346 376 379 382 385 389 392 395 398 402 405 408 411 414 419 423 426 430 433 440 445 447 448 452 459 465 466 467 471 482 486 487 488 492 499 504 506 507 511 518 524 525 526 530 541 545 546 547 551 558 561 563 564 571 572 575 580 582 585 588 592 598 600 603 607 610 614 617 621 624 628 631 635 638 641 644 647 648 651 653 654 657 659 663 664 668 669 673 675 679 680 684 685 691 694 696 697 704 705 708 713 715 718 721 725 731 733 736 740 743 747 750 754 757 761 764 768 771 774 777 780 781 784 786 787 790 792 796 797 801 802 806 808 812 813 817 818 823 824 826 828 830 832 834 836 838 840 842 844 846 848 850 852 854 856 858 860 862 864 866 868 870 872 874 876 878 880 882 884 886 888 890 892 894 896 898 900 902 904 906 908 910 912 914 916 918 920 922 924 926 928 930 932 934 936 938 940 942 944 946 948 950 952 954 956 958 960 962 964 966 968 970 972 974 976 978 980 982 984 986 988" rawparams="0"
+    %1 = call 23 %0 @e7942
+    %2 = int 3 @e7948
+    %3 = rawint 3
+    %4 = int 0 @e7949
+    %5 = rawint 0
+    %6 = op mutarraycreate %2 %4 @e7946
+    %81 = move %1 @e7955
+    %77 = rawint 0 @e7953
+    %8 = unit @e7953
+    %99 = unit @e7953
+    %103 = unit @e7953
+    %107 = unit @e7953
+    %172 = unit @e7953
+    %173 = unit @e7953
+    %217 = unit @e7953
+    %239 = unit @e7953
+    %417 = unit @e7953
+    %438 = unit @e7953
+    %442 = unit @e7953
+    %462 = unit @e7953
+    %463 = unit @e7953
+    %474 = unit @e7953
+    %480 = unit @e7953
+    %483 = unit @e7953
+    %484 = unit @e7953
+    %497 = unit @e7953
+    %501 = unit @e7953
+    %521 = unit @e7953
+    %522 = unit @e7953
+    %533 = unit @e7953
+    %539 = unit @e7953
+    %542 = unit @e7953
+    %543 = unit @e7953
+    %556 = unit @e7953
+    %578 = unit @e7953
+    %689 = unit @e7953
+    %711 = unit @e7953
+    %78 = unit @e7953
+    %79 = unit @e7953
+    %80 = unit @e7953
+    pusherrorexit L0 @e7960
+    jump L44 @e7960
+  label L42
+    %822 = op coresume0 %80 @e7960
+    unreachable @e7960
+  label L41
+    %9 = move %78 @e7960
+    poperrorexit @e7960
+    jump L1 @e7960
+  label L0
+    %10 = declarederroreq 1073741825 @e7960
+    br %10 L2 L3 @e7960
+  label L2
+    %11 = unit @e7960
+    reraise @e7960
+  label L3
+    reraise @e7960
+  label L1
+    %12 = unit @e7963
+    pusherrorexit L4 @e7964
+    %13 = int 2 @e7967
+    %14 = rawint 2
+    %15 = op mutarraysetproven %6 %13 %9 @e7964
+    poperrorexit @e7964
+    jump L5 @e7964
+  label L4
+    %16 = declarederroreq 1073741825 @e7964
+    br %16 L6 L7 @e7964
+  label L6
+    %17 = unit @e7964
+    reraise @e7964
+  label L7
+    reraise @e7964
+  label L5
+    jump L8 @e7969
+  label L8
+    %823 = rawint 0 @e7971
+    %19 = op rilt %77 %823 @e7971
+    br %19 L10 L11 @e7970
+  label L10
+    %21 = unit
+    %18 = move %21 @e7974
+    jump L9 @e7974
+  label L11
+    %22 = unit
+    %20 = move %22
+    jump L12
+  label L12
+    pusherrorexit L13 @e7975
+    %23 = int 0 @e7978
+    %24 = rawint 0
+    pusherrorexit L14 @e7981
+    %25 = int 0 @e7984
+    %26 = rawint 0
+    %27 = op mutarraygetproven %6 %25 @e7981
+    poperrorexit @e7981
+    jump L15 @e7981
+  label L14
+    %28 = declarederroreq 1073741825 @e7981
+    br %28 L16 L17 @e7981
+  label L16
+    %29 = unit @e7981
+    reraise @e7981
+  label L17
+    reraise @e7981
+  label L15
+    pusherrorexit L18 @e7985
+    %30 = int 2 @e7988
+    %31 = rawint 2
+    %32 = op mutarraygetproven %6 %30 @e7985
+    poperrorexit @e7985
+    jump L19 @e7985
+  label L18
+    %33 = declarederroreq 1073741825 @e7985
+    br %33 L20 L21 @e7985
+  label L20
+    %34 = unit @e7985
+    reraise @e7985
+  label L21
+    reraise @e7985
+  label L19
+    %35 = int 31 @e5893
+    %36 = rawint 31
+    %37 = op imul %27 %35 @e5890
+    %38 = op iadd %37 %32 @e5888
+    %39 = int 1 @e5895
+    %40 = rawint 1
+    %41 = op iadd %38 %39 @e5886
+    %42 = int 2147483647 @e5896
+    %43 = rawint 2147483647
+    %44 = op imod %41 %42 @e5884
+    %45 = op mutarraysetproven %6 %23 %44 @e7975
+    poperrorexit @e7975
+    jump L22 @e7975
+  label L13
+    %46 = declarederroreq 1073741825 @e7975
+    br %46 L23 L24 @e7975
+  label L23
+    %47 = unit @e7975
+    reraise @e7975
+  label L24
+    reraise @e7975
+  label L22
+    pusherrorexit L25 @e7989
+    %48 = int 1 @e7992
+    %49 = rawint 1
+    pusherrorexit L26 @e7995
+    %50 = int 1 @e7998
+    %51 = rawint 1
+    %52 = op mutarraygetproven %6 %50 @e7995
+    poperrorexit @e7995
+    jump L27 @e7995
+  label L26
+    %53 = declarederroreq 1073741825 @e7995
+    br %53 L28 L29 @e7995
+  label L28
+    %54 = unit @e7995
+    reraise @e7995
+  label L29
+    reraise @e7995
+  label L27
+    %55 = int 1 @e7999
+    %56 = rawint 1
+    %57 = op iadd %52 %55 @e7993
+    %58 = op mutarraysetproven %6 %48 %57 @e7989
+    poperrorexit @e7989
+    jump L30 @e7989
+  label L25
+    %59 = declarederroreq 1073741825 @e7989
+    br %59 L31 L32 @e7989
+  label L31
+    %60 = unit @e7989
+    reraise @e7989
+  label L32
+    reraise @e7989
+  label L30
+    pusherrorexit L33 @e8000
+    %61 = int 2 @e8003
+    %62 = rawint 2
+    pusherrorexit L34 @e8004
+    %79 = unit @e8004
+    jump L649 @e8004
+  label L347
+    %990 = op coresume0 %80 @e8004
+    unreachable @e8004
+  label L346
+    %63 = move %78 @e8004
+    poperrorexit @e8004
+    jump L35 @e8004
+  label L34
+    %64 = declarederroreq 1073741825 @e8004
+    br %64 L36 L37 @e8004
+  label L36
+    %65 = unit @e8004
+    reraise @e8004
+  label L37
+    reraise @e8004
+  label L35
+    %66 = op mutarraysetproven %6 %61 %63 @e8000
+    poperrorexit @e8000
+    jump L38 @e8000
+  label L33
+    %67 = declarederroreq 1073741825 @e8000
+    br %67 L39 L40 @e8000
+  label L39
+    %68 = unit @e8000
+    reraise @e8000
+  label L40
+    reraise @e8000
+  label L38
+    jump L8 @e7969
+  label L9
+    %69 = unit @e7969
+    %70 = int 1 @e8012
+    %71 = rawint 1
+    %72 = op mutarraygetproven %6 %70 @e8009
+    %73 = int 0 @e8016
+    %74 = rawint 0
+    %75 = op mutarraygetproven %6 %73 @e8013
+    %76 = op listnew %72 %75 @e8007
+    ret %76
+  label L344
+    pusherrorexit L345 @e7960
+  label L44
+    %82 = move %81
+    %86 = move %82
+  label L46
+    %94 = move %86
+  label L48
+    %95 = int 0 @e2807
+    %96 = rawint 0
+    %97 = structnew 1 %94 %95 @e2805
+    %98 = op listnew %97 @e2803
+    %99 = op mvfromlist %98 @e2801
+    %100 = op mvpop %99 @e2808
+    %101 = int 1 @e2814
+    %102 = rawint 1
+    %103 = op mutarraycreate %101 %94 @e2812
+    jump L49 @e2816
+  label L49
+    %105 = int 0 @e2821
+    %106 = rawint 0
+    %107 = op mutarraygetproven %103 %105 @e2818
+    %109 = structget 0 %107 @e2826
+    %110 = enum 0 5 @e2828
+    %111 = op enumeq %109 %110 @e2824
+    br %111 L51 L54 @e2824
+  label L54
+    %112 = structget 0 %107 @e2833
+    %113 = enum 0 6 @e2835
+    %114 = op enumeq %112 %113 @e2831
+    br %114 L51 L52 @e2831
+  label L51
+    %115 = structget 0 %107 @e2841
+    %116 = enum 0 5 @e2843
+    %117 = op enumeq %115 %116 @e2839
+    br %117 L55 L56 @e2838
+  label L55
+    %119 = int 91 @e2846
+    %120 = rawint 91
+    %78 = move %119 @e2844
+    %77 = rawint 1 @e2844
+    jump L41 @e2844
+  label L81
+    %121 = move %79 @e2844
+    %118 = move %121
+    jump L57
+  label L56
+    %122 = int 123 @e2849
+    %123 = rawint 123
+    %78 = move %122 @e2847
+    %77 = rawint 2 @e2847
+    jump L41 @e2847
+  label L82
+    %124 = move %79 @e2847
+    %118 = move %124
+    jump L57
+  label L57
+    %125 = call 19 %107 @e2853
+    %126 = op runbox %125
+    %127 = int 0 @e2856
+    %128 = rawint 0
+    %129 = op rigt %126 %128 @e2851
+    br %129 L58 L59 @e2850
+  label L58
+    %131 = structget 0 %107 @e2860
+    %132 = enum 0 6 @e2862
+    %133 = op enumeq %131 %132 @e2858
+    br %133 L61 L62 @e2857
+  label L61
+    %135 = structget 4 %107 @e2867
+    %136 = int 0 @e2869
+    %137 = rawint 0
+    %138 = op listget %135 %136 @e2865
+    %217 = move %138
+  label L84
+    %218 = int 34 @e1908
+    %219 = rawint 34
+    %78 = move %218 @e1906
+    %77 = rawint 3 @e1906
+    jump L41 @e1906
+  label L90
+    %220 = move %79 @e1906
+    %221 = int 0 @e1910
+    %222 = rawint 0
+    %223 = op strlen %217 @e1911
+    %224 = op runbox %223
+    %225 = move %222 @e1909
+    jump L85 @e1909
+  label L85
+    %227 = op rilt %225 %224 @e1909
+    br %227 L86 L88 @e1909
+  label L86
+    %228 = op rbox %225
+    %229 = op strcharatproven %217 %228 @e1918
+    %230 = op charcodepoint %229 @e1916
+    %239 = move %230
+  label L92
+    %241 = op runbox %239
+    %242 = int 34 @e1877
+    %243 = rawint 34
+    %244 = op rieq %241 %243 @e1874
+    br %244 L93 L96 @e1874
+  label L96
+    %245 = int 92 @e1883
+    %246 = rawint 92
+    %247 = op rieq %241 %246 @e1880
+    br %247 L93 L94 @e1880
+  label L93
+    %248 = int 92 @e1888
+    %249 = rawint 92
+    %78 = move %248 @e1886
+    %77 = rawint 4 @e1886
+    jump L41 @e1886
+  label L100
+    %250 = move %79 @e1886
+    %78 = move %239 @e1889
+    %77 = rawint 5 @e1889
+    jump L41 @e1889
+  label L101
+    %251 = move %79 @e1889
+    %240 = move %251
+    jump L95
+  label L94
+    %252 = int 32 @e1896
+    %253 = rawint 32
+    %254 = op rilt %241 %253 @e1893
+    br %254 L97 L98 @e1892
+  label L97
+    %259 = move %241
+  label L103
+    %260 = int 92 @e1807
+    %261 = rawint 92
+    %78 = move %260 @e1805
+    %77 = rawint 6 @e1805
+    jump L41 @e1805
+  label L119
+    %262 = move %79 @e1805
+    %263 = int 8 @e1812
+    %264 = rawint 8
+    %265 = op rieq %259 %264 @e1809
+    br %265 L104 L105 @e1808
+  label L104
+    %267 = int 98 @e1815
+    %268 = rawint 98
+    %78 = move %267 @e1813
+    %77 = rawint 7 @e1813
+    jump L41 @e1813
+  label L120
+    %269 = move %79 @e1813
+    %266 = move %269
+    jump L106
+  label L105
+    %270 = int 9 @e1820
+    %271 = rawint 9
+    %272 = op rieq %259 %271 @e1817
+    br %272 L107 L108 @e1816
+  label L107
+    %274 = int 116 @e1823
+    %275 = rawint 116
+    %78 = move %274 @e1821
+    %77 = rawint 8 @e1821
+    jump L41 @e1821
+  label L121
+    %276 = move %79 @e1821
+    %273 = move %276
+    jump L109
+  label L108
+    %277 = int 10 @e1828
+    %278 = rawint 10
+    %279 = op rieq %259 %278 @e1825
+    br %279 L110 L111 @e1824
+  label L110
+    %281 = int 110 @e1831
+    %282 = rawint 110
+    %78 = move %281 @e1829
+    %77 = rawint 9 @e1829
+    jump L41 @e1829
+  label L122
+    %283 = move %79 @e1829
+    %280 = move %283
+    jump L112
+  label L111
+    %284 = int 12 @e1836
+    %285 = rawint 12
+    %286 = op rieq %259 %285 @e1833
+    br %286 L113 L114 @e1832
+  label L113
+    %288 = int 102 @e1839
+    %289 = rawint 102
+    %78 = move %288 @e1837
+    %77 = rawint 10 @e1837
+    jump L41 @e1837
+  label L123
+    %290 = move %79 @e1837
+    %287 = move %290
+    jump L115
+  label L114
+    %291 = int 13 @e1844
+    %292 = rawint 13
+    %293 = op rieq %259 %292 @e1841
+    br %293 L116 L117 @e1840
+  label L116
+    %295 = int 114 @e1847
+    %296 = rawint 114
+    %78 = move %295 @e1845
+    %77 = rawint 11 @e1845
+    jump L41 @e1845
+  label L124
+    %297 = move %79 @e1845
+    %294 = move %297
+    jump L118
+  label L117
+    %298 = int 117 @e1850
+    %299 = rawint 117
+    %78 = move %298 @e1848
+    %77 = rawint 12 @e1848
+    jump L41 @e1848
+  label L125
+    %300 = move %79 @e1848
+    %301 = int 48 @e1853
+    %302 = rawint 48
+    %78 = move %301 @e1851
+    %77 = rawint 13 @e1851
+    jump L41 @e1851
+  label L126
+    %303 = move %79 @e1851
+    %304 = int 48 @e1856
+    %305 = rawint 48
+    %78 = move %304 @e1854
+    %77 = rawint 14 @e1854
+    jump L41 @e1854
+  label L127
+    %306 = move %79 @e1854
+    %307 = int 4 @e1862
+    %308 = rawint 4
+    %309 = op rishr %259 %308 @e1859
+    %318 = move %309
+  label L129
+    %319 = int 10 @e1756
+    %320 = rawint 10
+    %321 = op rilt %318 %320 @e1753
+    br %321 L130 L131 @e1752
+  label L130
+    %323 = int 48 @e1761
+    %324 = rawint 48
+    %325 = op riadd %324 %318 @e1759
+    %326 = op rbox %325
+    %78 = move %326 @e1757
+    %77 = rawint 15 @e1757
+    jump L41 @e1757
+  label L133
+    %327 = move %79 @e1757
+    %322 = move %327
+    jump L132
+  label L131
+    %328 = int 87 @e1767
+    %329 = rawint 87
+    %330 = op riadd %329 %318 @e1765
+    %331 = op rbox %330
+    %78 = move %331 @e1763
+    %77 = rawint 16 @e1763
+    jump L41 @e1763
+  label L134
+    %332 = move %79 @e1763
+    %322 = move %332
+    jump L132
+  label L132
+    %333 = unit @e1769
+    %310 = move %333
+    jump L128
+  label L128
+    %311 = int 16 @e1868
+    %312 = rawint 16
+    %313 = int 15 @e1865
+    %314 = rawint 15
+    %315 = op riand %259 %314 @e1865
+    %334 = move %315
+  label L136
+    %335 = int 10 @e1756
+    %336 = rawint 10
+    %337 = op rilt %334 %336 @e1753
+    br %337 L137 L138 @e1752
+  label L137
+    %339 = int 48 @e1761
+    %340 = rawint 48
+    %341 = op riadd %340 %334 @e1759
+    %342 = op rbox %341
+    %78 = move %342 @e1757
+    %77 = rawint 17 @e1757
+    jump L41 @e1757
+  label L140
+    %343 = move %79 @e1757
+    %338 = move %343
+    jump L139
+  label L138
+    %344 = int 87 @e1767
+    %345 = rawint 87
+    %346 = op riadd %345 %334 @e1765
+    %347 = op rbox %346
+    %78 = move %347 @e1763
+    %77 = rawint 18 @e1763
+    jump L41 @e1763
+  label L141
+    %348 = move %79 @e1763
+    %338 = move %348
+    jump L139
+  label L139
+    %349 = unit @e1769
+    %316 = move %349
+    jump L135
+  label L135
+    %294 = move %316
+    jump L118
+  label L118
+    %287 = move %294
+    jump L115
+  label L115
+    %280 = move %287
+    jump L112
+  label L112
+    %273 = move %280
+    jump L109
+  label L109
+    %266 = move %273
+    jump L106
+  label L106
+    %317 = unit @e1869
+    %256 = move %317
+    jump L102
+  label L102
+    %255 = move %256
+    jump L99
+  label L98
+    %78 = move %239 @e1900
+    %77 = rawint 19 @e1900
+    jump L41 @e1900
+  label L142
+    %257 = move %79 @e1900
+    %255 = move %257
+    jump L99
+  label L99
+    %240 = move %255
+    jump L95
+  label L95
+    %258 = unit @e1903
+    %231 = move %258
+    jump L91
+  label L91
+    jump L87 @e1922
+  label L87
+    %232 = rawint 1 @e1909
+    %233 = op riadd %225 %232 @e1909
+    %225 = move %233 @e1909
+    jump L85 @e1909
+  label L88
+    %234 = unit @e1909
+    %226 = move %234 @e1909
+    jump L89 @e1909
+  label L89
+    %235 = int 34 @e1925
+    %236 = rawint 34
+    %78 = move %235 @e1923
+    %77 = rawint 20 @e1923
+    jump L41 @e1923
+  label L143
+    %237 = move %79 @e1923
+    %238 = unit @e1926
+    %139 = move %238
+    jump L83
+  label L83
+    %140 = int 58 @e2872
+    %141 = rawint 58
+    %78 = move %140 @e2870
+    %77 = rawint 21 @e2870
+    jump L41 @e2870
+  label L144
+    %142 = move %79 @e2870
+    %134 = move %142
+    jump L63
+  label L62
+    %143 = unit
+    %134 = move %143
+    jump L63
+  label L63
+    %144 = int 1 @e2878
+    %145 = rawint 1
+    %146 = structnew 1 %107 %144 @e2876
+    %147 = op mvpush %99 %146 @e2873
+    %148 = int 0 @e2882
+    %149 = rawint 0
+    %150 = structget 3 %107 @e2885
+    %151 = int 0 @e2887
+    %152 = rawint 0
+    %153 = op listget %150 %151 @e2883
+    %154 = op mutarraysetproven %103 %148 %153 @e2879
+    jump L49 @e2888
+  label L59
+    %155 = unit
+    %130 = move %155
+    jump L60
+  label L60
+    %156 = structget 0 %107 @e2892
+    %157 = enum 0 5 @e2894
+    %158 = op enumeq %156 %157 @e2890
+    br %158 L64 L65 @e2889
+  label L64
+    %160 = int 93 @e2897
+    %161 = rawint 93
+    %78 = move %160 @e2895
+    %77 = rawint 22 @e2895
+    jump L41 @e2895
+  label L145
+    %162 = move %79 @e2895
+    %159 = move %162
+    jump L66
+  label L65
+    %163 = int 125 @e2900
+    %164 = rawint 125
+    %78 = move %163 @e2898
+    %77 = rawint 23 @e2898
+    jump L41 @e2898
+  label L146
+    %165 = move %79 @e2898
+    %159 = move %165
+    jump L66
+  label L66
+    %108 = move %159
+    jump L53
+  label L52
+    %350 = move %107
+  label L148
+    %351 = structget 0 %350 @e2674
+    %352 = enum 0 0 @e2676
+    %353 = op enumeq %351 %352 @e2672
+    br %353 L149 L150 @e2671
+  label L149
+  label L162
+    %375 = int 110 @e2625
+    %376 = rawint 110
+    %78 = move %375 @e2623
+    %77 = rawint 24 @e2623
+    jump L41 @e2623
+  label L163
+    %377 = move %79 @e2623
+    %378 = int 117 @e2628
+    %379 = rawint 117
+    %78 = move %378 @e2626
+    %77 = rawint 25 @e2626
+    jump L41 @e2626
+  label L164
+    %380 = move %79 @e2626
+    %381 = int 108 @e2631
+    %382 = rawint 108
+    %78 = move %381 @e2629
+    %77 = rawint 26 @e2629
+    jump L41 @e2629
+  label L165
+    %383 = move %79 @e2629
+    %384 = int 108 @e2634
+    %385 = rawint 108
+    %78 = move %384 @e2632
+    %77 = rawint 27 @e2632
+    jump L41 @e2632
+  label L166
+    %386 = move %79 @e2632
+    %387 = unit @e2635
+    %355 = move %387
+    jump L161
+  label L161
+    %354 = move %355
+    jump L151
+  label L150
+    %356 = structget 0 %350 @e2682
+    %357 = enum 0 2 @e2684
+    %358 = op enumeq %356 %357 @e2680
+    br %358 L152 L153 @e2679
+  label L152
+  label L168
+    %388 = int 116 @e2640
+    %389 = rawint 116
+    %78 = move %388 @e2638
+    %77 = rawint 28 @e2638
+    jump L41 @e2638
+  label L169
+    %390 = move %79 @e2638
+    %391 = int 114 @e2643
+    %392 = rawint 114
+    %78 = move %391 @e2641
+    %77 = rawint 29 @e2641
+    jump L41 @e2641
+  label L170
+    %393 = move %79 @e2641
+    %394 = int 117 @e2646
+    %395 = rawint 117
+    %78 = move %394 @e2644
+    %77 = rawint 30 @e2644
+    jump L41 @e2644
+  label L171
+    %396 = move %79 @e2644
+    %397 = int 101 @e2649
+    %398 = rawint 101
+    %78 = move %397 @e2647
+    %77 = rawint 31 @e2647
+    jump L41 @e2647
+  label L172
+    %399 = move %79 @e2647
+    %400 = unit @e2650
+    %360 = move %400
+    jump L167
+  label L167
+    %359 = move %360
+    jump L154
+  label L153
+    %361 = structget 0 %350 @e2690
+    %362 = enum 0 1 @e2692
+    %363 = op enumeq %361 %362 @e2688
+    br %363 L155 L156 @e2687
+  label L155
+  label L174
+    %401 = int 102 @e2655
+    %402 = rawint 102
+    %78 = move %401 @e2653
+    %77 = rawint 32 @e2653
+    jump L41 @e2653
+  label L175
+    %403 = move %79 @e2653
+    %404 = int 97 @e2658
+    %405 = rawint 97
+    %78 = move %404 @e2656
+    %77 = rawint 33 @e2656
+    jump L41 @e2656
+  label L176
+    %406 = move %79 @e2656
+    %407 = int 108 @e2661
+    %408 = rawint 108
+    %78 = move %407 @e2659
+    %77 = rawint 34 @e2659
+    jump L41 @e2659
+  label L177
+    %409 = move %79 @e2659
+    %410 = int 115 @e2664
+    %411 = rawint 115
+    %78 = move %410 @e2662
+    %77 = rawint 35 @e2662
+    jump L41 @e2662
+  label L178
+    %412 = move %79 @e2662
+    %413 = int 101 @e2667
+    %414 = rawint 101
+    %78 = move %413 @e2665
+    %77 = rawint 36 @e2665
+    jump L41 @e2665
+  label L179
+    %415 = move %79 @e2665
+    %416 = unit @e2668
+    %365 = move %416
+    jump L173
+  label L173
+    %364 = move %365
+    jump L157
+  label L156
+    %366 = structget 0 %350 @e2698
+    %367 = enum 0 3 @e2700
+    %368 = op enumeq %366 %367 @e2696
+    br %368 L158 L159 @e2695
+  label L158
+    %370 = structget 1 %350 @e2703
+    %417 = move %370
+  label L181
+    %418 = int 0 @e1546
+    %419 = rawint 0
+    %420 = op ieq %417 %418 @e1543
+    br %420 L182 L183 @e1542
+  label L182
+    %422 = int 48 @e1549
+    %423 = rawint 48
+    %78 = move %422 @e1547
+    %77 = rawint 37 @e1547
+    jump L41 @e1547
+  label L188
+    %424 = move %79 @e1547
+    %421 = move %424
+    jump L184
+  label L183
+    %425 = int 0 @e1554
+    %426 = rawint 0
+    %427 = op ilt %417 %425 @e1551
+    br %427 L185 L186 @e1550
+  label L185
+    %429 = int 45 @e1557
+    %430 = rawint 45
+    %78 = move %429 @e1555
+    %77 = rawint 38 @e1555
+    jump L41 @e1555
+  label L189
+    %431 = move %79 @e1555
+    %432 = int 0 @e1562
+    %433 = rawint 0
+    %434 = op isub %432 %417 @e1560
+    %438 = move %434
+  label L191
+    %439 = int 1 @e1448
+    %440 = rawint 1
+    %441 = op listnew %439 @e1446
+    %442 = op mvfromlist %441 @e1444
+    jump L192 @e1449
+  label L192
+    %444 = op mvlen %442 @e1456
+    %445 = op runbox %444
+    %446 = int 1 @e1459
+    %447 = rawint 1
+    %448 = op risub %445 %447 @e1454
+    %449 = op rbox %448
+    %450 = op mvat %442 %449 @e1451
+    %451 = int 10 @e1466
+    %452 = rawint 10
+    %453 = op imul %450 %451 @e1463
+    %454 = op igt %453 %438 @e1461
+    br %454 L194 L195 @e1460
+  label L194
+    %456 = unit
+    %443 = move %456 @e1468
+    jump L193 @e1468
+  label L195
+    %457 = unit
+    %455 = move %457
+    jump L196
+  label L196
+    %458 = int 10 @e1475
+    %459 = rawint 10
+    %460 = op imul %450 %458 @e1472
+    %461 = op mvpush %442 %460 @e1469
+    jump L192 @e1449
+  label L193
+    %462 = op mvpop %442 @e1477
+    %463 = call 2 %438 %462 @e1481
+    %464 = int 48 @e1489
+    %465 = rawint 48
+    %466 = op runbox %463
+    %467 = op riadd %465 %466 @e1487
+    %468 = op rbox %467
+    %78 = move %468 @e1485
+    %77 = rawint 39 @e1485
+    jump L41 @e1485
+  label L202
+    %469 = move %79 @e1485
+    %470 = int 1 @e1494
+    %471 = rawint 1
+    %472 = op imul %463 %462 @e1498
+    %473 = op isub %438 %472 @e1495
+    %474 = op mutarraycreate %470 %473 @e1492
+    jump L197 @e1502
+  label L197
+    %476 = op mvempty %442 @e1504
+    br %476 L199 L200 @e1503
+  label L199
+    %478 = unit
+    %475 = move %478 @e1507
+    jump L198 @e1507
+  label L200
+    %479 = unit
+    %477 = move %479
+    jump L201
+  label L201
+    %480 = op mvpop %442 @e1509
+    %481 = int 0 @e1516
+    %482 = rawint 0
+    %483 = op mutarraygetproven %474 %481 @e1513
+    %484 = call 1 %483 %480 @e1518
+    %485 = int 48 @e1526
+    %486 = rawint 48
+    %487 = op runbox %484
+    %488 = op riadd %486 %487 @e1524
+    %489 = op rbox %488
+    %78 = move %489 @e1522
+    %77 = rawint 40 @e1522
+    jump L41 @e1522
+  label L203
+    %490 = move %79 @e1522
+    %491 = int 0 @e1531
+    %492 = rawint 0
+    %493 = op imul %484 %480 @e1535
+    %494 = op isub %483 %493 @e1532
+    %495 = op mutarraysetproven %474 %491 %494 @e1528
+    jump L197 @e1502
+  label L198
+    %496 = unit @e1539
+    %435 = move %496
+    jump L190
+  label L190
+    %428 = move %435
+    jump L187
+  label L186
+    %497 = move %417
+  label L205
+    %498 = int 1 @e1448
+    %499 = rawint 1
+    %500 = op listnew %498 @e1446
+    %501 = op mvfromlist %500 @e1444
+    jump L206 @e1449
+  label L206
+    %503 = op mvlen %501 @e1456
+    %504 = op runbox %503
+    %505 = int 1 @e1459
+    %506 = rawint 1
+    %507 = op risub %504 %506 @e1454
+    %508 = op rbox %507
+    %509 = op mvat %501 %508 @e1451
+    %510 = int 10 @e1466
+    %511 = rawint 10
+    %512 = op imul %509 %510 @e1463
+    %513 = op igt %512 %497 @e1461
+    br %513 L208 L209 @e1460
+  label L208
+    %515 = unit
+    %502 = move %515 @e1468
+    jump L207 @e1468
+  label L209
+    %516 = unit
+    %514 = move %516
+    jump L210
+  label L210
+    %517 = int 10 @e1475
+    %518 = rawint 10
+    %519 = op imul %509 %517 @e1472
+    %520 = op mvpush %501 %519 @e1469
+    jump L206 @e1449
+  label L207
+    %521 = op mvpop %501 @e1477
+    %522 = call 2 %497 %521 @e1481
+    %523 = int 48 @e1489
+    %524 = rawint 48
+    %525 = op runbox %522
+    %526 = op riadd %524 %525 @e1487
+    %527 = op rbox %526
+    %78 = move %527 @e1485
+    %77 = rawint 41 @e1485
+    jump L41 @e1485
+  label L216
+    %528 = move %79 @e1485
+    %529 = int 1 @e1494
+    %530 = rawint 1
+    %531 = op imul %522 %521 @e1498
+    %532 = op isub %497 %531 @e1495
+    %533 = op mutarraycreate %529 %532 @e1492
+    jump L211 @e1502
+  label L211
+    %535 = op mvempty %501 @e1504
+    br %535 L213 L214 @e1503
+  label L213
+    %537 = unit
+    %534 = move %537 @e1507
+    jump L212 @e1507
+  label L214
+    %538 = unit
+    %536 = move %538
+    jump L215
+  label L215
+    %539 = op mvpop %501 @e1509
+    %540 = int 0 @e1516
+    %541 = rawint 0
+    %542 = op mutarraygetproven %533 %540 @e1513
+    %543 = call 1 %542 %539 @e1518
+    %544 = int 48 @e1526
+    %545 = rawint 48
+    %546 = op runbox %543
+    %547 = op riadd %545 %546 @e1524
+    %548 = op rbox %547
+    %78 = move %548 @e1522
+    %77 = rawint 42 @e1522
+    jump L41 @e1522
+  label L217
+    %549 = move %79 @e1522
+    %550 = int 0 @e1531
+    %551 = rawint 0
+    %552 = op imul %543 %539 @e1535
+    %553 = op isub %542 %552 @e1532
+    %554 = op mutarraysetproven %533 %550 %553 @e1528
+    jump L211 @e1502
+  label L212
+    %555 = unit @e1539
+    %436 = move %555
+    jump L204
+  label L204
+    %428 = move %436
+    jump L187
+  label L187
+    %421 = move %428
+    jump L184
+  label L184
+    %437 = unit @e1567
+    %371 = move %437
+    jump L180
+  label L180
+    %369 = move %371
+    jump L160
+  label L159
+    %372 = structget 2 %350 @e2707
+    %556 = move %372
+  label L219
+    %557 = int 34 @e1908
+    %558 = rawint 34
+    %78 = move %557 @e1906
+    %77 = rawint 43 @e1906
+    jump L41 @e1906
+  label L225
+    %559 = move %79 @e1906
+    %560 = int 0 @e1910
+    %561 = rawint 0
+    %562 = op strlen %556 @e1911
+    %563 = op runbox %562
+    %564 = move %561 @e1909
+    jump L220 @e1909
+  label L220
+    %566 = op rilt %564 %563 @e1909
+    br %566 L221 L223 @e1909
+  label L221
+    %567 = op rbox %564
+    %568 = op strcharatproven %556 %567 @e1918
+    %569 = op charcodepoint %568 @e1916
+    %578 = move %569
+  label L227
+    %580 = op runbox %578
+    %581 = int 34 @e1877
+    %582 = rawint 34
+    %583 = op rieq %580 %582 @e1874
+    br %583 L228 L231 @e1874
+  label L231
+    %584 = int 92 @e1883
+    %585 = rawint 92
+    %586 = op rieq %580 %585 @e1880
+    br %586 L228 L229 @e1880
+  label L228
+    %587 = int 92 @e1888
+    %588 = rawint 92
+    %78 = move %587 @e1886
+    %77 = rawint 44 @e1886
+    jump L41 @e1886
+  label L235
+    %589 = move %79 @e1886
+    %78 = move %578 @e1889
+    %77 = rawint 45 @e1889
+    jump L41 @e1889
+  label L236
+    %590 = move %79 @e1889
+    %579 = move %590
+    jump L230
+  label L229
+    %591 = int 32 @e1896
+    %592 = rawint 32
+    %593 = op rilt %580 %592 @e1893
+    br %593 L232 L233 @e1892
+  label L232
+    %598 = move %580
+  label L238
+    %599 = int 92 @e1807
+    %600 = rawint 92
+    %78 = move %599 @e1805
+    %77 = rawint 46 @e1805
+    jump L41 @e1805
+  label L254
+    %601 = move %79 @e1805
+    %602 = int 8 @e1812
+    %603 = rawint 8
+    %604 = op rieq %598 %603 @e1809
+    br %604 L239 L240 @e1808
+  label L239
+    %606 = int 98 @e1815
+    %607 = rawint 98
+    %78 = move %606 @e1813
+    %77 = rawint 47 @e1813
+    jump L41 @e1813
+  label L255
+    %608 = move %79 @e1813
+    %605 = move %608
+    jump L241
+  label L240
+    %609 = int 9 @e1820
+    %610 = rawint 9
+    %611 = op rieq %598 %610 @e1817
+    br %611 L242 L243 @e1816
+  label L242
+    %613 = int 116 @e1823
+    %614 = rawint 116
+    %78 = move %613 @e1821
+    %77 = rawint 48 @e1821
+    jump L41 @e1821
+  label L256
+    %615 = move %79 @e1821
+    %612 = move %615
+    jump L244
+  label L243
+    %616 = int 10 @e1828
+    %617 = rawint 10
+    %618 = op rieq %598 %617 @e1825
+    br %618 L245 L246 @e1824
+  label L245
+    %620 = int 110 @e1831
+    %621 = rawint 110
+    %78 = move %620 @e1829
+    %77 = rawint 49 @e1829
+    jump L41 @e1829
+  label L257
+    %622 = move %79 @e1829
+    %619 = move %622
+    jump L247
+  label L246
+    %623 = int 12 @e1836
+    %624 = rawint 12
+    %625 = op rieq %598 %624 @e1833
+    br %625 L248 L249 @e1832
+  label L248
+    %627 = int 102 @e1839
+    %628 = rawint 102
+    %78 = move %627 @e1837
+    %77 = rawint 50 @e1837
+    jump L41 @e1837
+  label L258
+    %629 = move %79 @e1837
+    %626 = move %629
+    jump L250
+  label L249
+    %630 = int 13 @e1844
+    %631 = rawint 13
+    %632 = op rieq %598 %631 @e1841
+    br %632 L251 L252 @e1840
+  label L251
+    %634 = int 114 @e1847
+    %635 = rawint 114
+    %78 = move %634 @e1845
+    %77 = rawint 51 @e1845
+    jump L41 @e1845
+  label L259
+    %636 = move %79 @e1845
+    %633 = move %636
+    jump L253
+  label L252
+    %637 = int 117 @e1850
+    %638 = rawint 117
+    %78 = move %637 @e1848
+    %77 = rawint 52 @e1848
+    jump L41 @e1848
+  label L260
+    %639 = move %79 @e1848
+    %640 = int 48 @e1853
+    %641 = rawint 48
+    %78 = move %640 @e1851
+    %77 = rawint 53 @e1851
+    jump L41 @e1851
+  label L261
+    %642 = move %79 @e1851
+    %643 = int 48 @e1856
+    %644 = rawint 48
+    %78 = move %643 @e1854
+    %77 = rawint 54 @e1854
+    jump L41 @e1854
+  label L262
+    %645 = move %79 @e1854
+    %646 = int 4 @e1862
+    %647 = rawint 4
+    %648 = op rishr %598 %647 @e1859
+    %657 = move %648
+  label L264
+    %658 = int 10 @e1756
+    %659 = rawint 10
+    %660 = op rilt %657 %659 @e1753
+    br %660 L265 L266 @e1752
+  label L265
+    %662 = int 48 @e1761
+    %663 = rawint 48
+    %664 = op riadd %663 %657 @e1759
+    %665 = op rbox %664
+    %78 = move %665 @e1757
+    %77 = rawint 55 @e1757
+    jump L41 @e1757
+  label L268
+    %666 = move %79 @e1757
+    %661 = move %666
+    jump L267
+  label L266
+    %667 = int 87 @e1767
+    %668 = rawint 87
+    %669 = op riadd %668 %657 @e1765
+    %670 = op rbox %669
+    %78 = move %670 @e1763
+    %77 = rawint 56 @e1763
+    jump L41 @e1763
+  label L269
+    %671 = move %79 @e1763
+    %661 = move %671
+    jump L267
+  label L267
+    %672 = unit @e1769
+    %649 = move %672
+    jump L263
+  label L263
+    %650 = int 16 @e1868
+    %651 = rawint 16
+    %652 = int 15 @e1865
+    %653 = rawint 15
+    %654 = op riand %598 %653 @e1865
+    %673 = move %654
+  label L271
+    %674 = int 10 @e1756
+    %675 = rawint 10
+    %676 = op rilt %673 %675 @e1753
+    br %676 L272 L273 @e1752
+  label L272
+    %678 = int 48 @e1761
+    %679 = rawint 48
+    %680 = op riadd %679 %673 @e1759
+    %681 = op rbox %680
+    %78 = move %681 @e1757
+    %77 = rawint 57 @e1757
+    jump L41 @e1757
+  label L275
+    %682 = move %79 @e1757
+    %677 = move %682
+    jump L274
+  label L273
+    %683 = int 87 @e1767
+    %684 = rawint 87
+    %685 = op riadd %684 %673 @e1765
+    %686 = op rbox %685
+    %78 = move %686 @e1763
+    %77 = rawint 58 @e1763
+    jump L41 @e1763
+  label L276
+    %687 = move %79 @e1763
+    %677 = move %687
+    jump L274
+  label L274
+    %688 = unit @e1769
+    %655 = move %688
+    jump L270
+  label L270
+    %633 = move %655
+    jump L253
+  label L253
+    %626 = move %633
+    jump L250
+  label L250
+    %619 = move %626
+    jump L247
+  label L247
+    %612 = move %619
+    jump L244
+  label L244
+    %605 = move %612
+    jump L241
+  label L241
+    %656 = unit @e1869
+    %595 = move %656
+    jump L237
+  label L237
+    %594 = move %595
+    jump L234
+  label L233
+    %78 = move %578 @e1900
+    %77 = rawint 59 @e1900
+    jump L41 @e1900
+  label L277
+    %596 = move %79 @e1900
+    %594 = move %596
+    jump L234
+  label L234
+    %579 = move %594
+    jump L230
+  label L230
+    %597 = unit @e1903
+    %570 = move %597
+    jump L226
+  label L226
+    jump L222 @e1922
+  label L222
+    %571 = rawint 1 @e1909
+    %572 = op riadd %564 %571 @e1909
+    %564 = move %572 @e1909
+    jump L220 @e1909
+  label L223
+    %573 = unit @e1909
+    %565 = move %573 @e1909
+    jump L224 @e1909
+  label L224
+    %574 = int 34 @e1925
+    %575 = rawint 34
+    %78 = move %574 @e1923
+    %77 = rawint 60 @e1923
+    jump L41 @e1923
+  label L278
+    %576 = move %79 @e1923
+    %577 = unit @e1926
+    %373 = move %577
+    jump L218
+  label L218
+    %369 = move %373
+    jump L160
+  label L160
+    %364 = move %369
+    jump L157
+  label L157
+    %359 = move %364
+    jump L154
+  label L154
+    %354 = move %359
+    jump L151
+  label L151
+    %374 = unit @e2709
+    %166 = move %374
+    jump L147
+  label L147
+    %108 = move %166
+    jump L53
+  label L53
+    jump L67 @e2904
+  label L67
+    %168 = op mvempty %99 @e2906
+    br %168 L69 L70 @e2905
+  label L69
+    %170 = unit @e2910
+    %87 = move %170 @e2909
+    jump L47 @e2909
+  label L70
+    %171 = unit
+    %169 = move %171
+    jump L71
+  label L71
+    %172 = op mvpop %99 @e2912
+    %173 = structget 0 %172 @e2916
+    %174 = structget 1 %172 @e2921
+    %175 = call 19 %173 @e2923
+    %176 = op ilt %174 %175 @e2919
+    br %176 L72 L73 @e2918
+  label L72
+    %178 = int 44 @e2928
+    %179 = rawint 44
+    %78 = move %178 @e2926
+    %77 = rawint 61 @e2926
+    jump L41 @e2926
+  label L279
+    %180 = move %79 @e2926
+    %181 = structget 0 %173 @e2932
+    %182 = enum 0 6 @e2934
+    %183 = op enumeq %181 %182 @e2930
+    br %183 L75 L76 @e2929
+  label L75
+    %185 = structget 4 %173 @e2939
+    %186 = structget 1 %172 @e2941
+    %187 = op listget %185 %186 @e2937
+    %689 = move %187
+  label L281
+    %690 = int 34 @e1908
+    %691 = rawint 34
+    %78 = move %690 @e1906
+    %77 = rawint 62 @e1906
+    jump L41 @e1906
+  label L287
+    %692 = move %79 @e1906
+    %693 = int 0 @e1910
+    %694 = rawint 0
+    %695 = op strlen %689 @e1911
+    %696 = op runbox %695
+    %697 = move %694 @e1909
+    jump L282 @e1909
+  label L282
+    %699 = op rilt %697 %696 @e1909
+    br %699 L283 L285 @e1909
+  label L283
+    %700 = op rbox %697
+    %701 = op strcharatproven %689 %700 @e1918
+    %702 = op charcodepoint %701 @e1916
+    %711 = move %702
+  label L289
+    %713 = op runbox %711
+    %714 = int 34 @e1877
+    %715 = rawint 34
+    %716 = op rieq %713 %715 @e1874
+    br %716 L290 L293 @e1874
+  label L293
+    %717 = int 92 @e1883
+    %718 = rawint 92
+    %719 = op rieq %713 %718 @e1880
+    br %719 L290 L291 @e1880
+  label L290
+    %720 = int 92 @e1888
+    %721 = rawint 92
+    %78 = move %720 @e1886
+    %77 = rawint 63 @e1886
+    jump L41 @e1886
+  label L297
+    %722 = move %79 @e1886
+    %78 = move %711 @e1889
+    %77 = rawint 64 @e1889
+    jump L41 @e1889
+  label L298
+    %723 = move %79 @e1889
+    %712 = move %723
+    jump L292
+  label L291
+    %724 = int 32 @e1896
+    %725 = rawint 32
+    %726 = op rilt %713 %725 @e1893
+    br %726 L294 L295 @e1892
+  label L294
+    %731 = move %713
+  label L300
+    %732 = int 92 @e1807
+    %733 = rawint 92
+    %78 = move %732 @e1805
+    %77 = rawint 65 @e1805
+    jump L41 @e1805
+  label L316
+    %734 = move %79 @e1805
+    %735 = int 8 @e1812
+    %736 = rawint 8
+    %737 = op rieq %731 %736 @e1809
+    br %737 L301 L302 @e1808
+  label L301
+    %739 = int 98 @e1815
+    %740 = rawint 98
+    %78 = move %739 @e1813
+    %77 = rawint 66 @e1813
+    jump L41 @e1813
+  label L317
+    %741 = move %79 @e1813
+    %738 = move %741
+    jump L303
+  label L302
+    %742 = int 9 @e1820
+    %743 = rawint 9
+    %744 = op rieq %731 %743 @e1817
+    br %744 L304 L305 @e1816
+  label L304
+    %746 = int 116 @e1823
+    %747 = rawint 116
+    %78 = move %746 @e1821
+    %77 = rawint 67 @e1821
+    jump L41 @e1821
+  label L318
+    %748 = move %79 @e1821
+    %745 = move %748
+    jump L306
+  label L305
+    %749 = int 10 @e1828
+    %750 = rawint 10
+    %751 = op rieq %731 %750 @e1825
+    br %751 L307 L308 @e1824
+  label L307
+    %753 = int 110 @e1831
+    %754 = rawint 110
+    %78 = move %753 @e1829
+    %77 = rawint 68 @e1829
+    jump L41 @e1829
+  label L319
+    %755 = move %79 @e1829
+    %752 = move %755
+    jump L309
+  label L308
+    %756 = int 12 @e1836
+    %757 = rawint 12
+    %758 = op rieq %731 %757 @e1833
+    br %758 L310 L311 @e1832
+  label L310
+    %760 = int 102 @e1839
+    %761 = rawint 102
+    %78 = move %760 @e1837
+    %77 = rawint 69 @e1837
+    jump L41 @e1837
+  label L320
+    %762 = move %79 @e1837
+    %759 = move %762
+    jump L312
+  label L311
+    %763 = int 13 @e1844
+    %764 = rawint 13
+    %765 = op rieq %731 %764 @e1841
+    br %765 L313 L314 @e1840
+  label L313
+    %767 = int 114 @e1847
+    %768 = rawint 114
+    %78 = move %767 @e1845
+    %77 = rawint 70 @e1845
+    jump L41 @e1845
+  label L321
+    %769 = move %79 @e1845
+    %766 = move %769
+    jump L315
+  label L314
+    %770 = int 117 @e1850
+    %771 = rawint 117
+    %78 = move %770 @e1848
+    %77 = rawint 71 @e1848
+    jump L41 @e1848
+  label L322
+    %772 = move %79 @e1848
+    %773 = int 48 @e1853
+    %774 = rawint 48
+    %78 = move %773 @e1851
+    %77 = rawint 72 @e1851
+    jump L41 @e1851
+  label L323
+    %775 = move %79 @e1851
+    %776 = int 48 @e1856
+    %777 = rawint 48
+    %78 = move %776 @e1854
+    %77 = rawint 73 @e1854
+    jump L41 @e1854
+  label L324
+    %778 = move %79 @e1854
+    %779 = int 4 @e1862
+    %780 = rawint 4
+    %781 = op rishr %731 %780 @e1859
+    %790 = move %781
+  label L326
+    %791 = int 10 @e1756
+    %792 = rawint 10
+    %793 = op rilt %790 %792 @e1753
+    br %793 L327 L328 @e1752
+  label L327
+    %795 = int 48 @e1761
+    %796 = rawint 48
+    %797 = op riadd %796 %790 @e1759
+    %798 = op rbox %797
+    %78 = move %798 @e1757
+    %77 = rawint 74 @e1757
+    jump L41 @e1757
+  label L330
+    %799 = move %79 @e1757
+    %794 = move %799
+    jump L329
+  label L328
+    %800 = int 87 @e1767
+    %801 = rawint 87
+    %802 = op riadd %801 %790 @e1765
+    %803 = op rbox %802
+    %78 = move %803 @e1763
+    %77 = rawint 75 @e1763
+    jump L41 @e1763
+  label L331
+    %804 = move %79 @e1763
+    %794 = move %804
+    jump L329
+  label L329
+    %805 = unit @e1769
+    %782 = move %805
+    jump L325
+  label L325
+    %783 = int 16 @e1868
+    %784 = rawint 16
+    %785 = int 15 @e1865
+    %786 = rawint 15
+    %787 = op riand %731 %786 @e1865
+    %806 = move %787
+  label L333
+    %807 = int 10 @e1756
+    %808 = rawint 10
+    %809 = op rilt %806 %808 @e1753
+    br %809 L334 L335 @e1752
+  label L334
+    %811 = int 48 @e1761
+    %812 = rawint 48
+    %813 = op riadd %812 %806 @e1759
+    %814 = op rbox %813
+    %78 = move %814 @e1757
+    %77 = rawint 76 @e1757
+    jump L41 @e1757
+  label L337
+    %815 = move %79 @e1757
+    %810 = move %815
+    jump L336
+  label L335
+    %816 = int 87 @e1767
+    %817 = rawint 87
+    %818 = op riadd %817 %806 @e1765
+    %819 = op rbox %818
+    %78 = move %819 @e1763
+    %77 = rawint 77 @e1763
+    jump L41 @e1763
+  label L338
+    %820 = move %79 @e1763
+    %810 = move %820
+    jump L336
+  label L336
+    %821 = unit @e1769
+    %788 = move %821
+    jump L332
+  label L332
+    %766 = move %788
+    jump L315
+  label L315
+    %759 = move %766
+    jump L312
+  label L312
+    %752 = move %759
+    jump L309
+  label L309
+    %745 = move %752
+    jump L306
+  label L306
+    %738 = move %745
+    jump L303
+  label L303
+    %789 = unit @e1869
+    %728 = move %789
+    jump L299
+  label L299
+    %727 = move %728
+    jump L296
+  label L295
+    %78 = move %711 @e1900
+    %77 = rawint 78 @e1900
+    jump L41 @e1900
+  label L339
+    %729 = move %79 @e1900
+    %727 = move %729
+    jump L296
+  label L296
+    %712 = move %727
+    jump L292
+  label L292
+    %730 = unit @e1903
+    %703 = move %730
+    jump L288
+  label L288
+    jump L284 @e1922
+  label L284
+    %704 = rawint 1 @e1909
+    %705 = op riadd %697 %704 @e1909
+    %697 = move %705 @e1909
+    jump L282 @e1909
+  label L285
+    %706 = unit @e1909
+    %698 = move %706 @e1909
+    jump L286 @e1909
+  label L286
+    %707 = int 34 @e1925
+    %708 = rawint 34
+    %78 = move %707 @e1923
+    %77 = rawint 79 @e1923
+    jump L41 @e1923
+  label L340
+    %709 = move %79 @e1923
+    %710 = unit @e1926
+    %188 = move %710
+    jump L280
+  label L280
+    %189 = int 58 @e2945
+    %190 = rawint 58
+    %78 = move %189 @e2943
+    %77 = rawint 80 @e2943
+    jump L41 @e2943
+  label L341
+    %191 = move %79 @e2943
+    %184 = move %191
+    jump L77
+  label L76
+    %192 = unit
+    %184 = move %192
+    jump L77
+  label L77
+    %193 = structget 1 %172 @e2953
+    %194 = int 1 @e2955
+    %195 = rawint 1
+    %196 = op iadd %193 %194 @e2951
+    %197 = structnew 1 %173 %196 @e2949
+    %198 = op mvpush %99 %197 @e2946
+    %199 = int 0 @e2959
+    %200 = rawint 0
+    %201 = structget 3 %173 @e2962
+    %202 = structget 1 %172 @e2964
+    %203 = op listget %201 %202 @e2960
+    %204 = op mutarraysetproven %103 %199 %203 @e2956
+    %205 = unit
+    %167 = move %205 @e2966
+    jump L68 @e2966
+  label L73
+    %206 = unit
+    %177 = move %206
+    jump L74
+  label L74
+    %207 = structget 0 %173 @e2970
+    %208 = enum 0 5 @e2972
+    %209 = op enumeq %207 %208 @e2968
+    br %209 L78 L79 @e2967
+  label L78
+    %211 = int 93 @e2975
+    %212 = rawint 93
+    %78 = move %211 @e2973
+    %77 = rawint 81 @e2973
+    jump L41 @e2973
+  label L342
+    %213 = move %79 @e2973
+    %210 = move %213
+    jump L80
+  label L79
+    %214 = int 125 @e2978
+    %215 = rawint 125
+    %78 = move %214 @e2976
+    %77 = rawint 82 @e2976
+    jump L41 @e2976
+  label L343
+    %216 = move %79 @e2976
+    %210 = move %216
+    jump L80
+  label L80
+    jump L67 @e2904
+  label L68
+    jump L49 @e2979
+  label L47
+    %88 = int 0 @e3138
+    %89 = rawint 0
+    %90 = int 1 @e3139
+    %91 = rawint 1
+    %92 = op risub %89 %91 @e3136
+    %93 = op rbox %92
+    %83 = move %93
+    jump L45
+  label L45
+    %84 = int -1 @e7956
+    %85 = rawint -1
+    %78 = move %84
+    %77 = rawint -1
+    jump L41
+    poperrorexit @e7960
+  label L345
+    %80 = op cofailed @e7960
+    %77 = rawint -2 @e7960
+    jump L42 @e7960
+  label L649
+    pusherrorexit L650 @e8004
+    %824 = rawint 1 @e8004
+    %825 = op rieq %77 %824 @e8004
+    br %825 L386 L651 @e8004
+  label L651
+    %826 = rawint 2 @e8004
+    %827 = op rieq %77 %826 @e8004
+    br %827 L387 L652 @e8004
+  label L652
+    %828 = rawint 3 @e8004
+    %829 = op rieq %77 %828 @e8004
+    br %829 L395 L653 @e8004
+  label L653
+    %830 = rawint 4 @e8004
+    %831 = op rieq %77 %830 @e8004
+    br %831 L405 L654 @e8004
+  label L654
+    %832 = rawint 5 @e8004
+    %833 = op rieq %77 %832 @e8004
+    br %833 L406 L655 @e8004
+  label L655
+    %834 = rawint 6 @e8004
+    %835 = op rieq %77 %834 @e8004
+    br %835 L424 L656 @e8004
+  label L656
+    %836 = rawint 7 @e8004
+    %837 = op rieq %77 %836 @e8004
+    br %837 L425 L657 @e8004
+  label L657
+    %838 = rawint 8 @e8004
+    %839 = op rieq %77 %838 @e8004
+    br %839 L426 L658 @e8004
+  label L658
+    %840 = rawint 9 @e8004
+    %841 = op rieq %77 %840 @e8004
+    br %841 L427 L659 @e8004
+  label L659
+    %842 = rawint 10 @e8004
+    %843 = op rieq %77 %842 @e8004
+    br %843 L428 L660 @e8004
+  label L660
+    %844 = rawint 11 @e8004
+    %845 = op rieq %77 %844 @e8004
+    br %845 L429 L661 @e8004
+  label L661
+    %846 = rawint 12 @e8004
+    %847 = op rieq %77 %846 @e8004
+    br %847 L430 L662 @e8004
+  label L662
+    %848 = rawint 13 @e8004
+    %849 = op rieq %77 %848 @e8004
+    br %849 L431 L663 @e8004
+  label L663
+    %850 = rawint 14 @e8004
+    %851 = op rieq %77 %850 @e8004
+    br %851 L432 L664 @e8004
+  label L664
+    %852 = rawint 15 @e8004
+    %853 = op rieq %77 %852 @e8004
+    br %853 L438 L665 @e8004
+  label L665
+    %854 = rawint 16 @e8004
+    %855 = op rieq %77 %854 @e8004
+    br %855 L439 L666 @e8004
+  label L666
+    %856 = rawint 17 @e8004
+    %857 = op rieq %77 %856 @e8004
+    br %857 L445 L667 @e8004
+  label L667
+    %858 = rawint 18 @e8004
+    %859 = op rieq %77 %858 @e8004
+    br %859 L446 L668 @e8004
+  label L668
+    %860 = rawint 19 @e8004
+    %861 = op rieq %77 %860 @e8004
+    br %861 L447 L669 @e8004
+  label L669
+    %862 = rawint 20 @e8004
+    %863 = op rieq %77 %862 @e8004
+    br %863 L448 L670 @e8004
+  label L670
+    %864 = rawint 21 @e8004
+    %865 = op rieq %77 %864 @e8004
+    br %865 L449 L671 @e8004
+  label L671
+    %866 = rawint 22 @e8004
+    %867 = op rieq %77 %866 @e8004
+    br %867 L450 L672 @e8004
+  label L672
+    %868 = rawint 23 @e8004
+    %869 = op rieq %77 %868 @e8004
+    br %869 L451 L673 @e8004
+  label L673
+    %870 = rawint 24 @e8004
+    %871 = op rieq %77 %870 @e8004
+    br %871 L468 L674 @e8004
+  label L674
+    %872 = rawint 25 @e8004
+    %873 = op rieq %77 %872 @e8004
+    br %873 L469 L675 @e8004
+  label L675
+    %874 = rawint 26 @e8004
+    %875 = op rieq %77 %874 @e8004
+    br %875 L470 L676 @e8004
+  label L676
+    %876 = rawint 27 @e8004
+    %877 = op rieq %77 %876 @e8004
+    br %877 L471 L677 @e8004
+  label L677
+    %878 = rawint 28 @e8004
+    %879 = op rieq %77 %878 @e8004
+    br %879 L474 L678 @e8004
+  label L678
+    %880 = rawint 29 @e8004
+    %881 = op rieq %77 %880 @e8004
+    br %881 L475 L679 @e8004
+  label L679
+    %882 = rawint 30 @e8004
+    %883 = op rieq %77 %882 @e8004
+    br %883 L476 L680 @e8004
+  label L680
+    %884 = rawint 31 @e8004
+    %885 = op rieq %77 %884 @e8004
+    br %885 L477 L681 @e8004
+  label L681
+    %886 = rawint 32 @e8004
+    %887 = op rieq %77 %886 @e8004
+    br %887 L480 L682 @e8004
+  label L682
+    %888 = rawint 33 @e8004
+    %889 = op rieq %77 %888 @e8004
+    br %889 L481 L683 @e8004
+  label L683
+    %890 = rawint 34 @e8004
+    %891 = op rieq %77 %890 @e8004
+    br %891 L482 L684 @e8004
+  label L684
+    %892 = rawint 35 @e8004
+    %893 = op rieq %77 %892 @e8004
+    br %893 L483 L685 @e8004
+  label L685
+    %894 = rawint 36 @e8004
+    %895 = op rieq %77 %894 @e8004
+    br %895 L484 L686 @e8004
+  label L686
+    %896 = rawint 37 @e8004
+    %897 = op rieq %77 %896 @e8004
+    br %897 L493 L687 @e8004
+  label L687
+    %898 = rawint 38 @e8004
+    %899 = op rieq %77 %898 @e8004
+    br %899 L494 L688 @e8004
+  label L688
+    %900 = rawint 39 @e8004
+    %901 = op rieq %77 %900 @e8004
+    br %901 L507 L689 @e8004
+  label L689
+    %902 = rawint 40 @e8004
+    %903 = op rieq %77 %902 @e8004
+    br %903 L508 L690 @e8004
+  label L690
+    %904 = rawint 41 @e8004
+    %905 = op rieq %77 %904 @e8004
+    br %905 L521 L691 @e8004
+  label L691
+    %906 = rawint 42 @e8004
+    %907 = op rieq %77 %906 @e8004
+    br %907 L522 L692 @e8004
+  label L692
+    %908 = rawint 43 @e8004
+    %909 = op rieq %77 %908 @e8004
+    br %909 L530 L693 @e8004
+  label L693
+    %910 = rawint 44 @e8004
+    %911 = op rieq %77 %910 @e8004
+    br %911 L540 L694 @e8004
+  label L694
+    %912 = rawint 45 @e8004
+    %913 = op rieq %77 %912 @e8004
+    br %913 L541 L695 @e8004
+  label L695
+    %914 = rawint 46 @e8004
+    %915 = op rieq %77 %914 @e8004
+    br %915 L559 L696 @e8004
+  label L696
+    %916 = rawint 47 @e8004
+    %917 = op rieq %77 %916 @e8004
+    br %917 L560 L697 @e8004
+  label L697
+    %918 = rawint 48 @e8004
+    %919 = op rieq %77 %918 @e8004
+    br %919 L561 L698 @e8004
+  label L698
+    %920 = rawint 49 @e8004
+    %921 = op rieq %77 %920 @e8004
+    br %921 L562 L699 @e8004
+  label L699
+    %922 = rawint 50 @e8004
+    %923 = op rieq %77 %922 @e8004
+    br %923 L563 L700 @e8004
+  label L700
+    %924 = rawint 51 @e8004
+    %925 = op rieq %77 %924 @e8004
+    br %925 L564 L701 @e8004
+  label L701
+    %926 = rawint 52 @e8004
+    %927 = op rieq %77 %926 @e8004
+    br %927 L565 L702 @e8004
+  label L702
+    %928 = rawint 53 @e8004
+    %929 = op rieq %77 %928 @e8004
+    br %929 L566 L703 @e8004
+  label L703
+    %930 = rawint 54 @e8004
+    %931 = op rieq %77 %930 @e8004
+    br %931 L567 L704 @e8004
+  label L704
+    %932 = rawint 55 @e8004
+    %933 = op rieq %77 %932 @e8004
+    br %933 L573 L705 @e8004
+  label L705
+    %934 = rawint 56 @e8004
+    %935 = op rieq %77 %934 @e8004
+    br %935 L574 L706 @e8004
+  label L706
+    %936 = rawint 57 @e8004
+    %937 = op rieq %77 %936 @e8004
+    br %937 L580 L707 @e8004
+  label L707
+    %938 = rawint 58 @e8004
+    %939 = op rieq %77 %938 @e8004
+    br %939 L581 L708 @e8004
+  label L708
+    %940 = rawint 59 @e8004
+    %941 = op rieq %77 %940 @e8004
+    br %941 L582 L709 @e8004
+  label L709
+    %942 = rawint 60 @e8004
+    %943 = op rieq %77 %942 @e8004
+    br %943 L583 L710 @e8004
+  label L710
+    %944 = rawint 61 @e8004
+    %945 = op rieq %77 %944 @e8004
+    br %945 L584 L711 @e8004
+  label L711
+    %946 = rawint 62 @e8004
+    %947 = op rieq %77 %946 @e8004
+    br %947 L592 L712 @e8004
+  label L712
+    %948 = rawint 63 @e8004
+    %949 = op rieq %77 %948 @e8004
+    br %949 L602 L713 @e8004
+  label L713
+    %950 = rawint 64 @e8004
+    %951 = op rieq %77 %950 @e8004
+    br %951 L603 L714 @e8004
+  label L714
+    %952 = rawint 65 @e8004
+    %953 = op rieq %77 %952 @e8004
+    br %953 L621 L715 @e8004
+  label L715
+    %954 = rawint 66 @e8004
+    %955 = op rieq %77 %954 @e8004
+    br %955 L622 L716 @e8004
+  label L716
+    %956 = rawint 67 @e8004
+    %957 = op rieq %77 %956 @e8004
+    br %957 L623 L717 @e8004
+  label L717
+    %958 = rawint 68 @e8004
+    %959 = op rieq %77 %958 @e8004
+    br %959 L624 L718 @e8004
+  label L718
+    %960 = rawint 69 @e8004
+    %961 = op rieq %77 %960 @e8004
+    br %961 L625 L719 @e8004
+  label L719
+    %962 = rawint 70 @e8004
+    %963 = op rieq %77 %962 @e8004
+    br %963 L626 L720 @e8004
+  label L720
+    %964 = rawint 71 @e8004
+    %965 = op rieq %77 %964 @e8004
+    br %965 L627 L721 @e8004
+  label L721
+    %966 = rawint 72 @e8004
+    %967 = op rieq %77 %966 @e8004
+    br %967 L628 L722 @e8004
+  label L722
+    %968 = rawint 73 @e8004
+    %969 = op rieq %77 %968 @e8004
+    br %969 L629 L723 @e8004
+  label L723
+    %970 = rawint 74 @e8004
+    %971 = op rieq %77 %970 @e8004
+    br %971 L635 L724 @e8004
+  label L724
+    %972 = rawint 75 @e8004
+    %973 = op rieq %77 %972 @e8004
+    br %973 L636 L725 @e8004
+  label L725
+    %974 = rawint 76 @e8004
+    %975 = op rieq %77 %974 @e8004
+    br %975 L642 L726 @e8004
+  label L726
+    %976 = rawint 77 @e8004
+    %977 = op rieq %77 %976 @e8004
+    br %977 L643 L727 @e8004
+  label L727
+    %978 = rawint 78 @e8004
+    %979 = op rieq %77 %978 @e8004
+    br %979 L644 L728 @e8004
+  label L728
+    %980 = rawint 79 @e8004
+    %981 = op rieq %77 %980 @e8004
+    br %981 L645 L729 @e8004
+  label L729
+    %982 = rawint 80 @e8004
+    %983 = op rieq %77 %982 @e8004
+    br %983 L646 L730 @e8004
+  label L730
+    %984 = rawint 81 @e8004
+    %985 = op rieq %77 %984 @e8004
+    br %985 L647 L731 @e8004
+  label L731
+    %986 = rawint 82 @e8004
+    %987 = op rieq %77 %986 @e8004
+    br %987 L648 L732 @e8004
+  label L732
+    %988 = rawint -1 @e8004
+    %989 = op rieq %77 %988 @e8004
+    br %989 L346 L347 @e8004
+  label L349
+    %82 = move %81
+    %86 = move %82
+  label L351
+    %94 = move %86
+  label L353
+    %95 = int 0 @e2807
+    %96 = rawint 0
+    %97 = structnew 1 %94 %95 @e2805
+    %98 = op listnew %97 @e2803
+    %99 = op mvfromlist %98 @e2801
+    %100 = op mvpop %99 @e2808
+    %101 = int 1 @e2814
+    %102 = rawint 1
+    %103 = op mutarraycreate %101 %94 @e2812
+    jump L354 @e2816
+  label L354
+    %105 = int 0 @e2821
+    %106 = rawint 0
+    %107 = op mutarraygetproven %103 %105 @e2818
+    %109 = structget 0 %107 @e2826
+    %110 = enum 0 5 @e2828
+    %111 = op enumeq %109 %110 @e2824
+    br %111 L356 L359 @e2824
+  label L359
+    %112 = structget 0 %107 @e2833
+    %113 = enum 0 6 @e2835
+    %114 = op enumeq %112 %113 @e2831
+    br %114 L356 L357 @e2831
+  label L356
+    %115 = structget 0 %107 @e2841
+    %116 = enum 0 5 @e2843
+    %117 = op enumeq %115 %116 @e2839
+    br %117 L360 L361 @e2838
+  label L360
+    %119 = int 91 @e2846
+    %120 = rawint 91
+    %78 = move %119 @e2844
+    %77 = rawint 1 @e2844
+    jump L346 @e2844
+  label L386
+    %121 = move %79 @e2844
+    %118 = move %121
+    jump L362
+  label L361
+    %122 = int 123 @e2849
+    %123 = rawint 123
+    %78 = move %122 @e2847
+    %77 = rawint 2 @e2847
+    jump L346 @e2847
+  label L387
+    %124 = move %79 @e2847
+    %118 = move %124
+    jump L362
+  label L362
+    %125 = call 19 %107 @e2853
+    %126 = op runbox %125
+    %127 = int 0 @e2856
+    %128 = rawint 0
+    %129 = op rigt %126 %128 @e2851
+    br %129 L363 L364 @e2850
+  label L363
+    %131 = structget 0 %107 @e2860
+    %132 = enum 0 6 @e2862
+    %133 = op enumeq %131 %132 @e2858
+    br %133 L366 L367 @e2857
+  label L366
+    %135 = structget 4 %107 @e2867
+    %136 = int 0 @e2869
+    %137 = rawint 0
+    %138 = op listget %135 %136 @e2865
+    %217 = move %138
+  label L389
+    %218 = int 34 @e1908
+    %219 = rawint 34
+    %78 = move %218 @e1906
+    %77 = rawint 3 @e1906
+    jump L346 @e1906
+  label L395
+    %220 = move %79 @e1906
+    %221 = int 0 @e1910
+    %222 = rawint 0
+    %223 = op strlen %217 @e1911
+    %224 = op runbox %223
+    %225 = move %222 @e1909
+    jump L390 @e1909
+  label L390
+    %227 = op rilt %225 %224 @e1909
+    br %227 L391 L393 @e1909
+  label L391
+    %228 = op rbox %225
+    %229 = op strcharatproven %217 %228 @e1918
+    %230 = op charcodepoint %229 @e1916
+    %239 = move %230
+  label L397
+    %241 = op runbox %239
+    %242 = int 34 @e1877
+    %243 = rawint 34
+    %244 = op rieq %241 %243 @e1874
+    br %244 L398 L401 @e1874
+  label L401
+    %245 = int 92 @e1883
+    %246 = rawint 92
+    %247 = op rieq %241 %246 @e1880
+    br %247 L398 L399 @e1880
+  label L398
+    %248 = int 92 @e1888
+    %249 = rawint 92
+    %78 = move %248 @e1886
+    %77 = rawint 4 @e1886
+    jump L346 @e1886
+  label L405
+    %250 = move %79 @e1886
+    %78 = move %239 @e1889
+    %77 = rawint 5 @e1889
+    jump L346 @e1889
+  label L406
+    %251 = move %79 @e1889
+    %240 = move %251
+    jump L400
+  label L399
+    %252 = int 32 @e1896
+    %253 = rawint 32
+    %254 = op rilt %241 %253 @e1893
+    br %254 L402 L403 @e1892
+  label L402
+    %259 = move %241
+  label L408
+    %260 = int 92 @e1807
+    %261 = rawint 92
+    %78 = move %260 @e1805
+    %77 = rawint 6 @e1805
+    jump L346 @e1805
+  label L424
+    %262 = move %79 @e1805
+    %263 = int 8 @e1812
+    %264 = rawint 8
+    %265 = op rieq %259 %264 @e1809
+    br %265 L409 L410 @e1808
+  label L409
+    %267 = int 98 @e1815
+    %268 = rawint 98
+    %78 = move %267 @e1813
+    %77 = rawint 7 @e1813
+    jump L346 @e1813
+  label L425
+    %269 = move %79 @e1813
+    %266 = move %269
+    jump L411
+  label L410
+    %270 = int 9 @e1820
+    %271 = rawint 9
+    %272 = op rieq %259 %271 @e1817
+    br %272 L412 L413 @e1816
+  label L412
+    %274 = int 116 @e1823
+    %275 = rawint 116
+    %78 = move %274 @e1821
+    %77 = rawint 8 @e1821
+    jump L346 @e1821
+  label L426
+    %276 = move %79 @e1821
+    %273 = move %276
+    jump L414
+  label L413
+    %277 = int 10 @e1828
+    %278 = rawint 10
+    %279 = op rieq %259 %278 @e1825
+    br %279 L415 L416 @e1824
+  label L415
+    %281 = int 110 @e1831
+    %282 = rawint 110
+    %78 = move %281 @e1829
+    %77 = rawint 9 @e1829
+    jump L346 @e1829
+  label L427
+    %283 = move %79 @e1829
+    %280 = move %283
+    jump L417
+  label L416
+    %284 = int 12 @e1836
+    %285 = rawint 12
+    %286 = op rieq %259 %285 @e1833
+    br %286 L418 L419 @e1832
+  label L418
+    %288 = int 102 @e1839
+    %289 = rawint 102
+    %78 = move %288 @e1837
+    %77 = rawint 10 @e1837
+    jump L346 @e1837
+  label L428
+    %290 = move %79 @e1837
+    %287 = move %290
+    jump L420
+  label L419
+    %291 = int 13 @e1844
+    %292 = rawint 13
+    %293 = op rieq %259 %292 @e1841
+    br %293 L421 L422 @e1840
+  label L421
+    %295 = int 114 @e1847
+    %296 = rawint 114
+    %78 = move %295 @e1845
+    %77 = rawint 11 @e1845
+    jump L346 @e1845
+  label L429
+    %297 = move %79 @e1845
+    %294 = move %297
+    jump L423
+  label L422
+    %298 = int 117 @e1850
+    %299 = rawint 117
+    %78 = move %298 @e1848
+    %77 = rawint 12 @e1848
+    jump L346 @e1848
+  label L430
+    %300 = move %79 @e1848
+    %301 = int 48 @e1853
+    %302 = rawint 48
+    %78 = move %301 @e1851
+    %77 = rawint 13 @e1851
+    jump L346 @e1851
+  label L431
+    %303 = move %79 @e1851
+    %304 = int 48 @e1856
+    %305 = rawint 48
+    %78 = move %304 @e1854
+    %77 = rawint 14 @e1854
+    jump L346 @e1854
+  label L432
+    %306 = move %79 @e1854
+    %307 = int 4 @e1862
+    %308 = rawint 4
+    %309 = op rishr %259 %308 @e1859
+    %318 = move %309
+  label L434
+    %319 = int 10 @e1756
+    %320 = rawint 10
+    %321 = op rilt %318 %320 @e1753
+    br %321 L435 L436 @e1752
+  label L435
+    %323 = int 48 @e1761
+    %324 = rawint 48
+    %325 = op riadd %324 %318 @e1759
+    %326 = op rbox %325
+    %78 = move %326 @e1757
+    %77 = rawint 15 @e1757
+    jump L346 @e1757
+  label L438
+    %327 = move %79 @e1757
+    %322 = move %327
+    jump L437
+  label L436
+    %328 = int 87 @e1767
+    %329 = rawint 87
+    %330 = op riadd %329 %318 @e1765
+    %331 = op rbox %330
+    %78 = move %331 @e1763
+    %77 = rawint 16 @e1763
+    jump L346 @e1763
+  label L439
+    %332 = move %79 @e1763
+    %322 = move %332
+    jump L437
+  label L437
+    %333 = unit @e1769
+    %310 = move %333
+    jump L433
+  label L433
+    %311 = int 16 @e1868
+    %312 = rawint 16
+    %313 = int 15 @e1865
+    %314 = rawint 15
+    %315 = op riand %259 %314 @e1865
+    %334 = move %315
+  label L441
+    %335 = int 10 @e1756
+    %336 = rawint 10
+    %337 = op rilt %334 %336 @e1753
+    br %337 L442 L443 @e1752
+  label L442
+    %339 = int 48 @e1761
+    %340 = rawint 48
+    %341 = op riadd %340 %334 @e1759
+    %342 = op rbox %341
+    %78 = move %342 @e1757
+    %77 = rawint 17 @e1757
+    jump L346 @e1757
+  label L445
+    %343 = move %79 @e1757
+    %338 = move %343
+    jump L444
+  label L443
+    %344 = int 87 @e1767
+    %345 = rawint 87
+    %346 = op riadd %345 %334 @e1765
+    %347 = op rbox %346
+    %78 = move %347 @e1763
+    %77 = rawint 18 @e1763
+    jump L346 @e1763
+  label L446
+    %348 = move %79 @e1763
+    %338 = move %348
+    jump L444
+  label L444
+    %349 = unit @e1769
+    %316 = move %349
+    jump L440
+  label L440
+    %294 = move %316
+    jump L423
+  label L423
+    %287 = move %294
+    jump L420
+  label L420
+    %280 = move %287
+    jump L417
+  label L417
+    %273 = move %280
+    jump L414
+  label L414
+    %266 = move %273
+    jump L411
+  label L411
+    %317 = unit @e1869
+    %256 = move %317
+    jump L407
+  label L407
+    %255 = move %256
+    jump L404
+  label L403
+    %78 = move %239 @e1900
+    %77 = rawint 19 @e1900
+    jump L346 @e1900
+  label L447
+    %257 = move %79 @e1900
+    %255 = move %257
+    jump L404
+  label L404
+    %240 = move %255
+    jump L400
+  label L400
+    %258 = unit @e1903
+    %231 = move %258
+    jump L396
+  label L396
+    jump L392 @e1922
+  label L392
+    %232 = rawint 1 @e1909
+    %233 = op riadd %225 %232 @e1909
+    %225 = move %233 @e1909
+    jump L390 @e1909
+  label L393
+    %234 = unit @e1909
+    %226 = move %234 @e1909
+    jump L394 @e1909
+  label L394
+    %235 = int 34 @e1925
+    %236 = rawint 34
+    %78 = move %235 @e1923
+    %77 = rawint 20 @e1923
+    jump L346 @e1923
+  label L448
+    %237 = move %79 @e1923
+    %238 = unit @e1926
+    %139 = move %238
+    jump L388
+  label L388
+    %140 = int 58 @e2872
+    %141 = rawint 58
+    %78 = move %140 @e2870
+    %77 = rawint 21 @e2870
+    jump L346 @e2870
+  label L449
+    %142 = move %79 @e2870
+    %134 = move %142
+    jump L368
+  label L367
+    %143 = unit
+    %134 = move %143
+    jump L368
+  label L368
+    %144 = int 1 @e2878
+    %145 = rawint 1
+    %146 = structnew 1 %107 %144 @e2876
+    %147 = op mvpush %99 %146 @e2873
+    %148 = int 0 @e2882
+    %149 = rawint 0
+    %150 = structget 3 %107 @e2885
+    %151 = int 0 @e2887
+    %152 = rawint 0
+    %153 = op listget %150 %151 @e2883
+    %154 = op mutarraysetproven %103 %148 %153 @e2879
+    jump L354 @e2888
+  label L364
+    %155 = unit
+    %130 = move %155
+    jump L365
+  label L365
+    %156 = structget 0 %107 @e2892
+    %157 = enum 0 5 @e2894
+    %158 = op enumeq %156 %157 @e2890
+    br %158 L369 L370 @e2889
+  label L369
+    %160 = int 93 @e2897
+    %161 = rawint 93
+    %78 = move %160 @e2895
+    %77 = rawint 22 @e2895
+    jump L346 @e2895
+  label L450
+    %162 = move %79 @e2895
+    %159 = move %162
+    jump L371
+  label L370
+    %163 = int 125 @e2900
+    %164 = rawint 125
+    %78 = move %163 @e2898
+    %77 = rawint 23 @e2898
+    jump L346 @e2898
+  label L451
+    %165 = move %79 @e2898
+    %159 = move %165
+    jump L371
+  label L371
+    %108 = move %159
+    jump L358
+  label L357
+    %350 = move %107
+  label L453
+    %351 = structget 0 %350 @e2674
+    %352 = enum 0 0 @e2676
+    %353 = op enumeq %351 %352 @e2672
+    br %353 L454 L455 @e2671
+  label L454
+  label L467
+    %375 = int 110 @e2625
+    %376 = rawint 110
+    %78 = move %375 @e2623
+    %77 = rawint 24 @e2623
+    jump L346 @e2623
+  label L468
+    %377 = move %79 @e2623
+    %378 = int 117 @e2628
+    %379 = rawint 117
+    %78 = move %378 @e2626
+    %77 = rawint 25 @e2626
+    jump L346 @e2626
+  label L469
+    %380 = move %79 @e2626
+    %381 = int 108 @e2631
+    %382 = rawint 108
+    %78 = move %381 @e2629
+    %77 = rawint 26 @e2629
+    jump L346 @e2629
+  label L470
+    %383 = move %79 @e2629
+    %384 = int 108 @e2634
+    %385 = rawint 108
+    %78 = move %384 @e2632
+    %77 = rawint 27 @e2632
+    jump L346 @e2632
+  label L471
+    %386 = move %79 @e2632
+    %387 = unit @e2635
+    %355 = move %387
+    jump L466
+  label L466
+    %354 = move %355
+    jump L456
+  label L455
+    %356 = structget 0 %350 @e2682
+    %357 = enum 0 2 @e2684
+    %358 = op enumeq %356 %357 @e2680
+    br %358 L457 L458 @e2679
+  label L457
+  label L473
+    %388 = int 116 @e2640
+    %389 = rawint 116
+    %78 = move %388 @e2638
+    %77 = rawint 28 @e2638
+    jump L346 @e2638
+  label L474
+    %390 = move %79 @e2638
+    %391 = int 114 @e2643
+    %392 = rawint 114
+    %78 = move %391 @e2641
+    %77 = rawint 29 @e2641
+    jump L346 @e2641
+  label L475
+    %393 = move %79 @e2641
+    %394 = int 117 @e2646
+    %395 = rawint 117
+    %78 = move %394 @e2644
+    %77 = rawint 30 @e2644
+    jump L346 @e2644
+  label L476
+    %396 = move %79 @e2644
+    %397 = int 101 @e2649
+    %398 = rawint 101
+    %78 = move %397 @e2647
+    %77 = rawint 31 @e2647
+    jump L346 @e2647
+  label L477
+    %399 = move %79 @e2647
+    %400 = unit @e2650
+    %360 = move %400
+    jump L472
+  label L472
+    %359 = move %360
+    jump L459
+  label L458
+    %361 = structget 0 %350 @e2690
+    %362 = enum 0 1 @e2692
+    %363 = op enumeq %361 %362 @e2688
+    br %363 L460 L461 @e2687
+  label L460
+  label L479
+    %401 = int 102 @e2655
+    %402 = rawint 102
+    %78 = move %401 @e2653
+    %77 = rawint 32 @e2653
+    jump L346 @e2653
+  label L480
+    %403 = move %79 @e2653
+    %404 = int 97 @e2658
+    %405 = rawint 97
+    %78 = move %404 @e2656
+    %77 = rawint 33 @e2656
+    jump L346 @e2656
+  label L481
+    %406 = move %79 @e2656
+    %407 = int 108 @e2661
+    %408 = rawint 108
+    %78 = move %407 @e2659
+    %77 = rawint 34 @e2659
+    jump L346 @e2659
+  label L482
+    %409 = move %79 @e2659
+    %410 = int 115 @e2664
+    %411 = rawint 115
+    %78 = move %410 @e2662
+    %77 = rawint 35 @e2662
+    jump L346 @e2662
+  label L483
+    %412 = move %79 @e2662
+    %413 = int 101 @e2667
+    %414 = rawint 101
+    %78 = move %413 @e2665
+    %77 = rawint 36 @e2665
+    jump L346 @e2665
+  label L484
+    %415 = move %79 @e2665
+    %416 = unit @e2668
+    %365 = move %416
+    jump L478
+  label L478
+    %364 = move %365
+    jump L462
+  label L461
+    %366 = structget 0 %350 @e2698
+    %367 = enum 0 3 @e2700
+    %368 = op enumeq %366 %367 @e2696
+    br %368 L463 L464 @e2695
+  label L463
+    %370 = structget 1 %350 @e2703
+    %417 = move %370
+  label L486
+    %418 = int 0 @e1546
+    %419 = rawint 0
+    %420 = op ieq %417 %418 @e1543
+    br %420 L487 L488 @e1542
+  label L487
+    %422 = int 48 @e1549
+    %423 = rawint 48
+    %78 = move %422 @e1547
+    %77 = rawint 37 @e1547
+    jump L346 @e1547
+  label L493
+    %424 = move %79 @e1547
+    %421 = move %424
+    jump L489
+  label L488
+    %425 = int 0 @e1554
+    %426 = rawint 0
+    %427 = op ilt %417 %425 @e1551
+    br %427 L490 L491 @e1550
+  label L490
+    %429 = int 45 @e1557
+    %430 = rawint 45
+    %78 = move %429 @e1555
+    %77 = rawint 38 @e1555
+    jump L346 @e1555
+  label L494
+    %431 = move %79 @e1555
+    %432 = int 0 @e1562
+    %433 = rawint 0
+    %434 = op isub %432 %417 @e1560
+    %438 = move %434
+  label L496
+    %439 = int 1 @e1448
+    %440 = rawint 1
+    %441 = op listnew %439 @e1446
+    %442 = op mvfromlist %441 @e1444
+    jump L497 @e1449
+  label L497
+    %444 = op mvlen %442 @e1456
+    %445 = op runbox %444
+    %446 = int 1 @e1459
+    %447 = rawint 1
+    %448 = op risub %445 %447 @e1454
+    %449 = op rbox %448
+    %450 = op mvat %442 %449 @e1451
+    %451 = int 10 @e1466
+    %452 = rawint 10
+    %453 = op imul %450 %451 @e1463
+    %454 = op igt %453 %438 @e1461
+    br %454 L499 L500 @e1460
+  label L499
+    %456 = unit
+    %443 = move %456 @e1468
+    jump L498 @e1468
+  label L500
+    %457 = unit
+    %455 = move %457
+    jump L501
+  label L501
+    %458 = int 10 @e1475
+    %459 = rawint 10
+    %460 = op imul %450 %458 @e1472
+    %461 = op mvpush %442 %460 @e1469
+    jump L497 @e1449
+  label L498
+    %462 = op mvpop %442 @e1477
+    %463 = call 2 %438 %462 @e1481
+    %464 = int 48 @e1489
+    %465 = rawint 48
+    %466 = op runbox %463
+    %467 = op riadd %465 %466 @e1487
+    %468 = op rbox %467
+    %78 = move %468 @e1485
+    %77 = rawint 39 @e1485
+    jump L346 @e1485
+  label L507
+    %469 = move %79 @e1485
+    %470 = int 1 @e1494
+    %471 = rawint 1
+    %472 = op imul %463 %462 @e1498
+    %473 = op isub %438 %472 @e1495
+    %474 = op mutarraycreate %470 %473 @e1492
+    jump L502 @e1502
+  label L502
+    %476 = op mvempty %442 @e1504
+    br %476 L504 L505 @e1503
+  label L504
+    %478 = unit
+    %475 = move %478 @e1507
+    jump L503 @e1507
+  label L505
+    %479 = unit
+    %477 = move %479
+    jump L506
+  label L506
+    %480 = op mvpop %442 @e1509
+    %481 = int 0 @e1516
+    %482 = rawint 0
+    %483 = op mutarraygetproven %474 %481 @e1513
+    %484 = call 1 %483 %480 @e1518
+    %485 = int 48 @e1526
+    %486 = rawint 48
+    %487 = op runbox %484
+    %488 = op riadd %486 %487 @e1524
+    %489 = op rbox %488
+    %78 = move %489 @e1522
+    %77 = rawint 40 @e1522
+    jump L346 @e1522
+  label L508
+    %490 = move %79 @e1522
+    %491 = int 0 @e1531
+    %492 = rawint 0
+    %493 = op imul %484 %480 @e1535
+    %494 = op isub %483 %493 @e1532
+    %495 = op mutarraysetproven %474 %491 %494 @e1528
+    jump L502 @e1502
+  label L503
+    %496 = unit @e1539
+    %435 = move %496
+    jump L495
+  label L495
+    %428 = move %435
+    jump L492
+  label L491
+    %497 = move %417
+  label L510
+    %498 = int 1 @e1448
+    %499 = rawint 1
+    %500 = op listnew %498 @e1446
+    %501 = op mvfromlist %500 @e1444
+    jump L511 @e1449
+  label L511
+    %503 = op mvlen %501 @e1456
+    %504 = op runbox %503
+    %505 = int 1 @e1459
+    %506 = rawint 1
+    %507 = op risub %504 %506 @e1454
+    %508 = op rbox %507
+    %509 = op mvat %501 %508 @e1451
+    %510 = int 10 @e1466
+    %511 = rawint 10
+    %512 = op imul %509 %510 @e1463
+    %513 = op igt %512 %497 @e1461
+    br %513 L513 L514 @e1460
+  label L513
+    %515 = unit
+    %502 = move %515 @e1468
+    jump L512 @e1468
+  label L514
+    %516 = unit
+    %514 = move %516
+    jump L515
+  label L515
+    %517 = int 10 @e1475
+    %518 = rawint 10
+    %519 = op imul %509 %517 @e1472
+    %520 = op mvpush %501 %519 @e1469
+    jump L511 @e1449
+  label L512
+    %521 = op mvpop %501 @e1477
+    %522 = call 2 %497 %521 @e1481
+    %523 = int 48 @e1489
+    %524 = rawint 48
+    %525 = op runbox %522
+    %526 = op riadd %524 %525 @e1487
+    %527 = op rbox %526
+    %78 = move %527 @e1485
+    %77 = rawint 41 @e1485
+    jump L346 @e1485
+  label L521
+    %528 = move %79 @e1485
+    %529 = int 1 @e1494
+    %530 = rawint 1
+    %531 = op imul %522 %521 @e1498
+    %532 = op isub %497 %531 @e1495
+    %533 = op mutarraycreate %529 %532 @e1492
+    jump L516 @e1502
+  label L516
+    %535 = op mvempty %501 @e1504
+    br %535 L518 L519 @e1503
+  label L518
+    %537 = unit
+    %534 = move %537 @e1507
+    jump L517 @e1507
+  label L519
+    %538 = unit
+    %536 = move %538
+    jump L520
+  label L520
+    %539 = op mvpop %501 @e1509
+    %540 = int 0 @e1516
+    %541 = rawint 0
+    %542 = op mutarraygetproven %533 %540 @e1513
+    %543 = call 1 %542 %539 @e1518
+    %544 = int 48 @e1526
+    %545 = rawint 48
+    %546 = op runbox %543
+    %547 = op riadd %545 %546 @e1524
+    %548 = op rbox %547
+    %78 = move %548 @e1522
+    %77 = rawint 42 @e1522
+    jump L346 @e1522
+  label L522
+    %549 = move %79 @e1522
+    %550 = int 0 @e1531
+    %551 = rawint 0
+    %552 = op imul %543 %539 @e1535
+    %553 = op isub %542 %552 @e1532
+    %554 = op mutarraysetproven %533 %550 %553 @e1528
+    jump L516 @e1502
+  label L517
+    %555 = unit @e1539
+    %436 = move %555
+    jump L509
+  label L509
+    %428 = move %436
+    jump L492
+  label L492
+    %421 = move %428
+    jump L489
+  label L489
+    %437 = unit @e1567
+    %371 = move %437
+    jump L485
+  label L485
+    %369 = move %371
+    jump L465
+  label L464
+    %372 = structget 2 %350 @e2707
+    %556 = move %372
+  label L524
+    %557 = int 34 @e1908
+    %558 = rawint 34
+    %78 = move %557 @e1906
+    %77 = rawint 43 @e1906
+    jump L346 @e1906
+  label L530
+    %559 = move %79 @e1906
+    %560 = int 0 @e1910
+    %561 = rawint 0
+    %562 = op strlen %556 @e1911
+    %563 = op runbox %562
+    %564 = move %561 @e1909
+    jump L525 @e1909
+  label L525
+    %566 = op rilt %564 %563 @e1909
+    br %566 L526 L528 @e1909
+  label L526
+    %567 = op rbox %564
+    %568 = op strcharatproven %556 %567 @e1918
+    %569 = op charcodepoint %568 @e1916
+    %578 = move %569
+  label L532
+    %580 = op runbox %578
+    %581 = int 34 @e1877
+    %582 = rawint 34
+    %583 = op rieq %580 %582 @e1874
+    br %583 L533 L536 @e1874
+  label L536
+    %584 = int 92 @e1883
+    %585 = rawint 92
+    %586 = op rieq %580 %585 @e1880
+    br %586 L533 L534 @e1880
+  label L533
+    %587 = int 92 @e1888
+    %588 = rawint 92
+    %78 = move %587 @e1886
+    %77 = rawint 44 @e1886
+    jump L346 @e1886
+  label L540
+    %589 = move %79 @e1886
+    %78 = move %578 @e1889
+    %77 = rawint 45 @e1889
+    jump L346 @e1889
+  label L541
+    %590 = move %79 @e1889
+    %579 = move %590
+    jump L535
+  label L534
+    %591 = int 32 @e1896
+    %592 = rawint 32
+    %593 = op rilt %580 %592 @e1893
+    br %593 L537 L538 @e1892
+  label L537
+    %598 = move %580
+  label L543
+    %599 = int 92 @e1807
+    %600 = rawint 92
+    %78 = move %599 @e1805
+    %77 = rawint 46 @e1805
+    jump L346 @e1805
+  label L559
+    %601 = move %79 @e1805
+    %602 = int 8 @e1812
+    %603 = rawint 8
+    %604 = op rieq %598 %603 @e1809
+    br %604 L544 L545 @e1808
+  label L544
+    %606 = int 98 @e1815
+    %607 = rawint 98
+    %78 = move %606 @e1813
+    %77 = rawint 47 @e1813
+    jump L346 @e1813
+  label L560
+    %608 = move %79 @e1813
+    %605 = move %608
+    jump L546
+  label L545
+    %609 = int 9 @e1820
+    %610 = rawint 9
+    %611 = op rieq %598 %610 @e1817
+    br %611 L547 L548 @e1816
+  label L547
+    %613 = int 116 @e1823
+    %614 = rawint 116
+    %78 = move %613 @e1821
+    %77 = rawint 48 @e1821
+    jump L346 @e1821
+  label L561
+    %615 = move %79 @e1821
+    %612 = move %615
+    jump L549
+  label L548
+    %616 = int 10 @e1828
+    %617 = rawint 10
+    %618 = op rieq %598 %617 @e1825
+    br %618 L550 L551 @e1824
+  label L550
+    %620 = int 110 @e1831
+    %621 = rawint 110
+    %78 = move %620 @e1829
+    %77 = rawint 49 @e1829
+    jump L346 @e1829
+  label L562
+    %622 = move %79 @e1829
+    %619 = move %622
+    jump L552
+  label L551
+    %623 = int 12 @e1836
+    %624 = rawint 12
+    %625 = op rieq %598 %624 @e1833
+    br %625 L553 L554 @e1832
+  label L553
+    %627 = int 102 @e1839
+    %628 = rawint 102
+    %78 = move %627 @e1837
+    %77 = rawint 50 @e1837
+    jump L346 @e1837
+  label L563
+    %629 = move %79 @e1837
+    %626 = move %629
+    jump L555
+  label L554
+    %630 = int 13 @e1844
+    %631 = rawint 13
+    %632 = op rieq %598 %631 @e1841
+    br %632 L556 L557 @e1840
+  label L556
+    %634 = int 114 @e1847
+    %635 = rawint 114
+    %78 = move %634 @e1845
+    %77 = rawint 51 @e1845
+    jump L346 @e1845
+  label L564
+    %636 = move %79 @e1845
+    %633 = move %636
+    jump L558
+  label L557
+    %637 = int 117 @e1850
+    %638 = rawint 117
+    %78 = move %637 @e1848
+    %77 = rawint 52 @e1848
+    jump L346 @e1848
+  label L565
+    %639 = move %79 @e1848
+    %640 = int 48 @e1853
+    %641 = rawint 48
+    %78 = move %640 @e1851
+    %77 = rawint 53 @e1851
+    jump L346 @e1851
+  label L566
+    %642 = move %79 @e1851
+    %643 = int 48 @e1856
+    %644 = rawint 48
+    %78 = move %643 @e1854
+    %77 = rawint 54 @e1854
+    jump L346 @e1854
+  label L567
+    %645 = move %79 @e1854
+    %646 = int 4 @e1862
+    %647 = rawint 4
+    %648 = op rishr %598 %647 @e1859
+    %657 = move %648
+  label L569
+    %658 = int 10 @e1756
+    %659 = rawint 10
+    %660 = op rilt %657 %659 @e1753
+    br %660 L570 L571 @e1752
+  label L570
+    %662 = int 48 @e1761
+    %663 = rawint 48
+    %664 = op riadd %663 %657 @e1759
+    %665 = op rbox %664
+    %78 = move %665 @e1757
+    %77 = rawint 55 @e1757
+    jump L346 @e1757
+  label L573
+    %666 = move %79 @e1757
+    %661 = move %666
+    jump L572
+  label L571
+    %667 = int 87 @e1767
+    %668 = rawint 87
+    %669 = op riadd %668 %657 @e1765
+    %670 = op rbox %669
+    %78 = move %670 @e1763
+    %77 = rawint 56 @e1763
+    jump L346 @e1763
+  label L574
+    %671 = move %79 @e1763
+    %661 = move %671
+    jump L572
+  label L572
+    %672 = unit @e1769
+    %649 = move %672
+    jump L568
+  label L568
+    %650 = int 16 @e1868
+    %651 = rawint 16
+    %652 = int 15 @e1865
+    %653 = rawint 15
+    %654 = op riand %598 %653 @e1865
+    %673 = move %654
+  label L576
+    %674 = int 10 @e1756
+    %675 = rawint 10
+    %676 = op rilt %673 %675 @e1753
+    br %676 L577 L578 @e1752
+  label L577
+    %678 = int 48 @e1761
+    %679 = rawint 48
+    %680 = op riadd %679 %673 @e1759
+    %681 = op rbox %680
+    %78 = move %681 @e1757
+    %77 = rawint 57 @e1757
+    jump L346 @e1757
+  label L580
+    %682 = move %79 @e1757
+    %677 = move %682
+    jump L579
+  label L578
+    %683 = int 87 @e1767
+    %684 = rawint 87
+    %685 = op riadd %684 %673 @e1765
+    %686 = op rbox %685
+    %78 = move %686 @e1763
+    %77 = rawint 58 @e1763
+    jump L346 @e1763
+  label L581
+    %687 = move %79 @e1763
+    %677 = move %687
+    jump L579
+  label L579
+    %688 = unit @e1769
+    %655 = move %688
+    jump L575
+  label L575
+    %633 = move %655
+    jump L558
+  label L558
+    %626 = move %633
+    jump L555
+  label L555
+    %619 = move %626
+    jump L552
+  label L552
+    %612 = move %619
+    jump L549
+  label L549
+    %605 = move %612
+    jump L546
+  label L546
+    %656 = unit @e1869
+    %595 = move %656
+    jump L542
+  label L542
+    %594 = move %595
+    jump L539
+  label L538
+    %78 = move %578 @e1900
+    %77 = rawint 59 @e1900
+    jump L346 @e1900
+  label L582
+    %596 = move %79 @e1900
+    %594 = move %596
+    jump L539
+  label L539
+    %579 = move %594
+    jump L535
+  label L535
+    %597 = unit @e1903
+    %570 = move %597
+    jump L531
+  label L531
+    jump L527 @e1922
+  label L527
+    %571 = rawint 1 @e1909
+    %572 = op riadd %564 %571 @e1909
+    %564 = move %572 @e1909
+    jump L525 @e1909
+  label L528
+    %573 = unit @e1909
+    %565 = move %573 @e1909
+    jump L529 @e1909
+  label L529
+    %574 = int 34 @e1925
+    %575 = rawint 34
+    %78 = move %574 @e1923
+    %77 = rawint 60 @e1923
+    jump L346 @e1923
+  label L583
+    %576 = move %79 @e1923
+    %577 = unit @e1926
+    %373 = move %577
+    jump L523
+  label L523
+    %369 = move %373
+    jump L465
+  label L465
+    %364 = move %369
+    jump L462
+  label L462
+    %359 = move %364
+    jump L459
+  label L459
+    %354 = move %359
+    jump L456
+  label L456
+    %374 = unit @e2709
+    %166 = move %374
+    jump L452
+  label L452
+    %108 = move %166
+    jump L358
+  label L358
+    jump L372 @e2904
+  label L372
+    %168 = op mvempty %99 @e2906
+    br %168 L374 L375 @e2905
+  label L374
+    %170 = unit @e2910
+    %87 = move %170 @e2909
+    jump L352 @e2909
+  label L375
+    %171 = unit
+    %169 = move %171
+    jump L376
+  label L376
+    %172 = op mvpop %99 @e2912
+    %173 = structget 0 %172 @e2916
+    %174 = structget 1 %172 @e2921
+    %175 = call 19 %173 @e2923
+    %176 = op ilt %174 %175 @e2919
+    br %176 L377 L378 @e2918
+  label L377
+    %178 = int 44 @e2928
+    %179 = rawint 44
+    %78 = move %178 @e2926
+    %77 = rawint 61 @e2926
+    jump L346 @e2926
+  label L584
+    %180 = move %79 @e2926
+    %181 = structget 0 %173 @e2932
+    %182 = enum 0 6 @e2934
+    %183 = op enumeq %181 %182 @e2930
+    br %183 L380 L381 @e2929
+  label L380
+    %185 = structget 4 %173 @e2939
+    %186 = structget 1 %172 @e2941
+    %187 = op listget %185 %186 @e2937
+    %689 = move %187
+  label L586
+    %690 = int 34 @e1908
+    %691 = rawint 34
+    %78 = move %690 @e1906
+    %77 = rawint 62 @e1906
+    jump L346 @e1906
+  label L592
+    %692 = move %79 @e1906
+    %693 = int 0 @e1910
+    %694 = rawint 0
+    %695 = op strlen %689 @e1911
+    %696 = op runbox %695
+    %697 = move %694 @e1909
+    jump L587 @e1909
+  label L587
+    %699 = op rilt %697 %696 @e1909
+    br %699 L588 L590 @e1909
+  label L588
+    %700 = op rbox %697
+    %701 = op strcharatproven %689 %700 @e1918
+    %702 = op charcodepoint %701 @e1916
+    %711 = move %702
+  label L594
+    %713 = op runbox %711
+    %714 = int 34 @e1877
+    %715 = rawint 34
+    %716 = op rieq %713 %715 @e1874
+    br %716 L595 L598 @e1874
+  label L598
+    %717 = int 92 @e1883
+    %718 = rawint 92
+    %719 = op rieq %713 %718 @e1880
+    br %719 L595 L596 @e1880
+  label L595
+    %720 = int 92 @e1888
+    %721 = rawint 92
+    %78 = move %720 @e1886
+    %77 = rawint 63 @e1886
+    jump L346 @e1886
+  label L602
+    %722 = move %79 @e1886
+    %78 = move %711 @e1889
+    %77 = rawint 64 @e1889
+    jump L346 @e1889
+  label L603
+    %723 = move %79 @e1889
+    %712 = move %723
+    jump L597
+  label L596
+    %724 = int 32 @e1896
+    %725 = rawint 32
+    %726 = op rilt %713 %725 @e1893
+    br %726 L599 L600 @e1892
+  label L599
+    %731 = move %713
+  label L605
+    %732 = int 92 @e1807
+    %733 = rawint 92
+    %78 = move %732 @e1805
+    %77 = rawint 65 @e1805
+    jump L346 @e1805
+  label L621
+    %734 = move %79 @e1805
+    %735 = int 8 @e1812
+    %736 = rawint 8
+    %737 = op rieq %731 %736 @e1809
+    br %737 L606 L607 @e1808
+  label L606
+    %739 = int 98 @e1815
+    %740 = rawint 98
+    %78 = move %739 @e1813
+    %77 = rawint 66 @e1813
+    jump L346 @e1813
+  label L622
+    %741 = move %79 @e1813
+    %738 = move %741
+    jump L608
+  label L607
+    %742 = int 9 @e1820
+    %743 = rawint 9
+    %744 = op rieq %731 %743 @e1817
+    br %744 L609 L610 @e1816
+  label L609
+    %746 = int 116 @e1823
+    %747 = rawint 116
+    %78 = move %746 @e1821
+    %77 = rawint 67 @e1821
+    jump L346 @e1821
+  label L623
+    %748 = move %79 @e1821
+    %745 = move %748
+    jump L611
+  label L610
+    %749 = int 10 @e1828
+    %750 = rawint 10
+    %751 = op rieq %731 %750 @e1825
+    br %751 L612 L613 @e1824
+  label L612
+    %753 = int 110 @e1831
+    %754 = rawint 110
+    %78 = move %753 @e1829
+    %77 = rawint 68 @e1829
+    jump L346 @e1829
+  label L624
+    %755 = move %79 @e1829
+    %752 = move %755
+    jump L614
+  label L613
+    %756 = int 12 @e1836
+    %757 = rawint 12
+    %758 = op rieq %731 %757 @e1833
+    br %758 L615 L616 @e1832
+  label L615
+    %760 = int 102 @e1839
+    %761 = rawint 102
+    %78 = move %760 @e1837
+    %77 = rawint 69 @e1837
+    jump L346 @e1837
+  label L625
+    %762 = move %79 @e1837
+    %759 = move %762
+    jump L617
+  label L616
+    %763 = int 13 @e1844
+    %764 = rawint 13
+    %765 = op rieq %731 %764 @e1841
+    br %765 L618 L619 @e1840
+  label L618
+    %767 = int 114 @e1847
+    %768 = rawint 114
+    %78 = move %767 @e1845
+    %77 = rawint 70 @e1845
+    jump L346 @e1845
+  label L626
+    %769 = move %79 @e1845
+    %766 = move %769
+    jump L620
+  label L619
+    %770 = int 117 @e1850
+    %771 = rawint 117
+    %78 = move %770 @e1848
+    %77 = rawint 71 @e1848
+    jump L346 @e1848
+  label L627
+    %772 = move %79 @e1848
+    %773 = int 48 @e1853
+    %774 = rawint 48
+    %78 = move %773 @e1851
+    %77 = rawint 72 @e1851
+    jump L346 @e1851
+  label L628
+    %775 = move %79 @e1851
+    %776 = int 48 @e1856
+    %777 = rawint 48
+    %78 = move %776 @e1854
+    %77 = rawint 73 @e1854
+    jump L346 @e1854
+  label L629
+    %778 = move %79 @e1854
+    %779 = int 4 @e1862
+    %780 = rawint 4
+    %781 = op rishr %731 %780 @e1859
+    %790 = move %781
+  label L631
+    %791 = int 10 @e1756
+    %792 = rawint 10
+    %793 = op rilt %790 %792 @e1753
+    br %793 L632 L633 @e1752
+  label L632
+    %795 = int 48 @e1761
+    %796 = rawint 48
+    %797 = op riadd %796 %790 @e1759
+    %798 = op rbox %797
+    %78 = move %798 @e1757
+    %77 = rawint 74 @e1757
+    jump L346 @e1757
+  label L635
+    %799 = move %79 @e1757
+    %794 = move %799
+    jump L634
+  label L633
+    %800 = int 87 @e1767
+    %801 = rawint 87
+    %802 = op riadd %801 %790 @e1765
+    %803 = op rbox %802
+    %78 = move %803 @e1763
+    %77 = rawint 75 @e1763
+    jump L346 @e1763
+  label L636
+    %804 = move %79 @e1763
+    %794 = move %804
+    jump L634
+  label L634
+    %805 = unit @e1769
+    %782 = move %805
+    jump L630
+  label L630
+    %783 = int 16 @e1868
+    %784 = rawint 16
+    %785 = int 15 @e1865
+    %786 = rawint 15
+    %787 = op riand %731 %786 @e1865
+    %806 = move %787
+  label L638
+    %807 = int 10 @e1756
+    %808 = rawint 10
+    %809 = op rilt %806 %808 @e1753
+    br %809 L639 L640 @e1752
+  label L639
+    %811 = int 48 @e1761
+    %812 = rawint 48
+    %813 = op riadd %812 %806 @e1759
+    %814 = op rbox %813
+    %78 = move %814 @e1757
+    %77 = rawint 76 @e1757
+    jump L346 @e1757
+  label L642
+    %815 = move %79 @e1757
+    %810 = move %815
+    jump L641
+  label L640
+    %816 = int 87 @e1767
+    %817 = rawint 87
+    %818 = op riadd %817 %806 @e1765
+    %819 = op rbox %818
+    %78 = move %819 @e1763
+    %77 = rawint 77 @e1763
+    jump L346 @e1763
+  label L643
+    %820 = move %79 @e1763
+    %810 = move %820
+    jump L641
+  label L641
+    %821 = unit @e1769
+    %788 = move %821
+    jump L637
+  label L637
+    %766 = move %788
+    jump L620
+  label L620
+    %759 = move %766
+    jump L617
+  label L617
+    %752 = move %759
+    jump L614
+  label L614
+    %745 = move %752
+    jump L611
+  label L611
+    %738 = move %745
+    jump L608
+  label L608
+    %789 = unit @e1869
+    %728 = move %789
+    jump L604
+  label L604
+    %727 = move %728
+    jump L601
+  label L600
+    %78 = move %711 @e1900
+    %77 = rawint 78 @e1900
+    jump L346 @e1900
+  label L644
+    %729 = move %79 @e1900
+    %727 = move %729
+    jump L601
+  label L601
+    %712 = move %727
+    jump L597
+  label L597
+    %730 = unit @e1903
+    %703 = move %730
+    jump L593
+  label L593
+    jump L589 @e1922
+  label L589
+    %704 = rawint 1 @e1909
+    %705 = op riadd %697 %704 @e1909
+    %697 = move %705 @e1909
+    jump L587 @e1909
+  label L590
+    %706 = unit @e1909
+    %698 = move %706 @e1909
+    jump L591 @e1909
+  label L591
+    %707 = int 34 @e1925
+    %708 = rawint 34
+    %78 = move %707 @e1923
+    %77 = rawint 79 @e1923
+    jump L346 @e1923
+  label L645
+    %709 = move %79 @e1923
+    %710 = unit @e1926
+    %188 = move %710
+    jump L585
+  label L585
+    %189 = int 58 @e2945
+    %190 = rawint 58
+    %78 = move %189 @e2943
+    %77 = rawint 80 @e2943
+    jump L346 @e2943
+  label L646
+    %191 = move %79 @e2943
+    %184 = move %191
+    jump L382
+  label L381
+    %192 = unit
+    %184 = move %192
+    jump L382
+  label L382
+    %193 = structget 1 %172 @e2953
+    %194 = int 1 @e2955
+    %195 = rawint 1
+    %196 = op iadd %193 %194 @e2951
+    %197 = structnew 1 %173 %196 @e2949
+    %198 = op mvpush %99 %197 @e2946
+    %199 = int 0 @e2959
+    %200 = rawint 0
+    %201 = structget 3 %173 @e2962
+    %202 = structget 1 %172 @e2964
+    %203 = op listget %201 %202 @e2960
+    %204 = op mutarraysetproven %103 %199 %203 @e2956
+    %205 = unit
+    %167 = move %205 @e2966
+    jump L373 @e2966
+  label L378
+    %206 = unit
+    %177 = move %206
+    jump L379
+  label L379
+    %207 = structget 0 %173 @e2970
+    %208 = enum 0 5 @e2972
+    %209 = op enumeq %207 %208 @e2968
+    br %209 L383 L384 @e2967
+  label L383
+    %211 = int 93 @e2975
+    %212 = rawint 93
+    %78 = move %211 @e2973
+    %77 = rawint 81 @e2973
+    jump L346 @e2973
+  label L647
+    %213 = move %79 @e2973
+    %210 = move %213
+    jump L385
+  label L384
+    %214 = int 125 @e2978
+    %215 = rawint 125
+    %78 = move %214 @e2976
+    %77 = rawint 82 @e2976
+    jump L346 @e2976
+  label L648
+    %216 = move %79 @e2976
+    %210 = move %216
+    jump L385
+  label L385
+    jump L372 @e2904
+  label L373
+    jump L354 @e2979
+  label L352
+    %88 = int 0 @e3138
+    %89 = rawint 0
+    %90 = int 1 @e3139
+    %91 = rawint 1
+    %92 = op risub %89 %91 @e3136
+    %93 = op rbox %92
+    %83 = move %93
+    jump L350
+  label L350
+    %84 = int -1 @e7956
+    %85 = rawint -1
+    %78 = move %84
+    %77 = rawint -1
+    jump L346
+    poperrorexit @e8004
+  label L650
+    %80 = op cofailed @e8004
+    %77 = rawint -2 @e8004
+    jump L347 @e8004
+end
+
+func 25 "" params=0 env=1 regs=4 pnames="" captures=1 rawregs="3"
+    unreachable
+end
