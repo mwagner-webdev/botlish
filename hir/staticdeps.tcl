@@ -303,18 +303,19 @@
 # trials), keeps them: a report may become its first diagnostic, also once
 # the program begins to erase something.
 #
-# What reads the reports besides the site's own diagnostics is the trial
-# builds of a method-style call, for the checks inside the call
-# (hir::MethodCallProblems): a candidate's parameter types are the structural
+# What reads the reports besides the site's own diagnostics is the builds
+# that judge a method-style call's candidates, for the call's own checks
+# (hir::methods::Problems: the contract boundary at its arguments is one,
+# hir::CheckingCall): a candidate's parameter types are the structural
 # types the call's own arguments acquire, so their checks may tell the
 # candidates apart. R:region -> C:erased and -> P:input (method-trial) for
 # every call with several candidates of which an argument has a callable part
 # some parameter type could make structural (CallableParts), or a handle whose
 # construction is in this body while a candidate is a coroutine operation
 # (whose positions the check skips; a handle's check reads no parameter
-# type). Every other check inside the call reports alike in every trial: a
-# problem every candidate shares, which decides nothing. A region reaches a
-# site's form only (F:site), never these edges of the site.
+# type). Every other check inside the call is no check of the call's own,
+# which the decision never reads. A region reaches a site's form only
+# (F:site), never these edges of the site.
 #
 # What is not a channel, and why: a demoted trusted contract (hir::check
 # keeps the diagnostics of the check before the demotion, so a demotion
@@ -883,12 +884,11 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
     # program erases (hir::completions::SubsumedRaises), its captures and
     # parameters standing for what they may hold (P:). A coroutine handle's
     # check reads no parameter type (hir::completions::SubsumeHandle): the
-    # same report, at the same expression, in every trial, and a problem
-    # every candidate shares decides nothing (hir::DecideMethodCalls) --
-    # unless a candidate is a coroutine operation, whose positions the check
-    # skips (hir::completions::SubsumeCall). Checks deeper in the call are
-    # each trial's alike: the arguments are analyzed before the call, from
-    # the same facts.
+    # same report, at the same expression, for every candidate but a
+    # coroutine operation, whose positions the check skips
+    # (hir::completions::SubsumeCall), so it tells such a candidate from the
+    # others. Checks deeper in the call are no checks of the call's own
+    # (hir::methods::Problems never reads them).
     set methodTrial [dict create]
     if {[dict exists $hir methodCalls]} {
         set operations [CoroutineOperations]

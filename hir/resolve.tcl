@@ -1248,7 +1248,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 if {[lindex $planned 0] ni {unreachable dead}} {
                     # (The placeholder of never-executed code takes no flags:
                     # it is no call of the function that declares them.)
-                    hir::flags::ResolveCall hir $e $node $ctx
+                    hir::CheckingCall $e {hir::flags::ResolveCall hir $e $node $ctx}
                 }
                 SetField hir $e target ""
                 SetField hir $e known ""
@@ -1311,8 +1311,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set nameOrigin [dict get $written nameOrigin]
                 set chosen [MethodChoice hir $e $node $candidates]
                 SetField hir $e callee [Expr hir [MethodCalleeSyntax $chosen $name $nameOrigin] $ctx]
-                SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e \
-                    [concat [list [dict get $written receiver]] [dict get $node args]]] $ctx]
+                # (The collection of a variadic callee's trailing arguments
+                # is the call's own check: hir::CheckingCall.)
+                set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e \
+                    [concat [list [dict get $written receiver]] [dict get $node args]]}]
+                SetField hir $e args [Sequence hir $argNodes $ctx]
                 SetField hir $e method [dict create name $name nameOrigin $nameOrigin \
                     ns [CtxNamespace $ctx]]
             } else {
@@ -1340,7 +1343,8 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     }
                     SetField hir $e args $args
                 } else {
-                    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e [dict get $node args]] $ctx]
+                    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e [dict get $node args]}]
+                    SetField hir $e args [Sequence hir $argNodes $ctx]
                 }
                 if {![dict exists $node method]} {
                     # `step(m)` on a coroutine handle (COROUTINES.md) is the
@@ -1396,7 +1400,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     SetField hir $e imprint $imprint
                 }
             }
-            hir::flags::ResolveCall hir $e $node $ctx
+            # (The call's flags against its callee's flag interface: its own
+            # check, hir::CheckingCall.)
+            hir::CheckingCall $e {hir::flags::ResolveCall hir $e $node $ctx}
             SetField hir $e target ""
             SetField hir $e known ""
         }
@@ -2186,7 +2192,8 @@ proc hir::resolve::ResolvePlannedCall {hirVar e node action ctx} {
             nameOrigin [dict get $written nameOrigin] ns [CtxNamespace $ctx]]
     }
     SetField hir $e callee $c
-    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
+    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e $argNodes}]
+    SetField hir $e args [Sequence hir $argNodes $ctx]
 }
 
 # Resolves module-qualified reference E (a {NAMESPACE NAME} pair) directly

@@ -930,11 +930,15 @@ proc hir::imprint::verify {hirVar} {
         if {[dict exists $node reachable] && ![dict get $node reachable]} {
             continue
         }
-        if {[dict exists $node imprintTrait]} {
-            hir::Diagnose hir TRAIT-NOT-SATISFIED [dict get $node imprintProblem] $e
-            continue
+        # The call's own problem with its callee: the callee's imprint
+        # variables do not bind for it (hir::CheckingCall).
+        hir::CheckingCall $e {
+            if {[dict exists $node imprintTrait]} {
+                hir::Diagnose hir TRAIT-NOT-SATISFIED [dict get $node imprintProblem] $e
+            } else {
+                hir::Diagnose hir IMPRINT [dict get $node imprintProblem] $e
+            }
         }
-        hir::Diagnose hir IMPRINT [dict get $node imprintProblem] $e
     }
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "ref" || [dict exists $callees $e]} {

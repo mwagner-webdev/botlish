@@ -1252,7 +1252,8 @@ proc hir::traits::verify {hirVar} {
         }
         switch -- $kind {
             call {
-                VerifyCallUse hir $e $node
+                # (The call's own problems with its callee: hir::CheckingCall.)
+                hir::CheckingCall $e {VerifyCallUse hir $e $node}
             }
             if {
                 CheckOperand hir [dict get $node condition] "an \"if\" condition (a Boolean)"

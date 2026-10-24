@@ -67,8 +67,12 @@
 #   diagnostics  list of {kind KIND message TEXT expr ExprId}, optionally
 #                with `origin` (the primary location, when not EXPR's) and
 #                `related` (further locations the diagnostic names, as
-#                origins in message order: a used value's move), and
-#                `internal 1` on a failure of the compiler itself
+#                origins in message order: a used value's move),
+#                `subject` (the call ExprId whose own check -- against
+#                the callee the call resolves to -- produced it: written by
+#                hir::CheckingCall's checks, read only by the method-call
+#                decision, hir/methods.tcl), and `internal 1` on a failure
+#                of the compiler itself
 #   staticSites  the static intrinsics of a source program and their
 #                decisions (hir/static.tcl, STATIC-COMPILE.md): site key ->
 #                {key origin operation outcome accepted|rejected ?diagnostic
@@ -249,53 +253,52 @@ namespace eval hir {
     variable prefixes [dict create expr e scope s binding b symbol y type t file f node n]
     # Whole-program build counters (STATIC-COMPILE.md, "Decision economics"):
     # `builds` counts every hir::BuildOnce, `methodTrials` and `methodFinals`
-    # the method-call decisions' trial and final builds among them, and
-    # `methodReused` the builds those decisions did not repeat because the
-    # one they needed had already been made (DecideMethodCalls). The kind
-    # filter (hir/methodfilter.tcl) counts its waves' builds as method trials
-    # too, `methodFiltered` the decisions it made complete,
-    # `methodFilterAbandoned` the ones it gave to the exact decision after
-    # building and `methodFilterEvicted` the decisions it took back.
-    # Measurement only: read as differences by hir/static.tcl and the
-    # benchmarks, never by an analysis.
+    # the method-call decisions' trial and final builds among them (the
+    # trials: the kind waves' builds and the builds of single deviations,
+    # `methodDeviations` counting the latter), and `methodReused` the builds
+    # a decision did not repeat because the one it needed had already been
+    # made (hir/methods.tcl). Measurement only: read as differences by
+    # hir/static.tcl and the benchmarks, never by an analysis.
     variable buildStats [dict create builds 0 methodTrials 0 methodFinals 0 methodReused 0 \
-        methodFiltered 0 methodFilterAbandoned 0 methodFilterEvicted 0]
-    # 0 makes DecideMethodCalls build every trial and final build again even
-    # when a build of the same configuration was already made (measurement
-    # and audits only).
+        methodDeviations 0]
+    # 0 makes the method-call decision build every build again even when a
+    # build of the same configuration was already made (measurement and
+    # audits only).
     variable methodBuildReuse 1
-    # 1 makes DecideMethodCalls build again every build it reuses and fail
-    # unless the decision reads the same of both (the audit of the reuse:
-    # tests and audit tools only). BOTLISH_METHOD_BUILD_AUDIT=1 sets it for a
-    # whole process, so the existing suites and fuzzers run under it.
+    # 1 makes the method-call decision build again every build it reuses and
+    # fail unless it reads the same of both (the audit of the reuse: tests
+    # and audit tools only). BOTLISH_METHOD_BUILD_AUDIT=1 sets it for a whole
+    # process, so the existing suites and fuzzers run under it.
     variable methodBuildAudit 0
     if {[info exists ::env(BOTLISH_METHOD_BUILD_AUDIT)] && $::env(BOTLISH_METHOD_BUILD_AUDIT) ni {"" 0}} {
         set methodBuildAudit 1
     }
-    # 0 makes DecideMethodCalls make the exact decision only, never trying the
-    # kind filter first (hir/methodfilter.tcl, METHOD-DECISION-FILTER.md):
-    # measurement and the tests of the exact decision. The filter reaches the
-    # exact decision's outcome with fewer builds, so neither this switch nor
-    # the audit below is a front-end input: they are in no cache key.
-    # BOTLISH_METHOD_FILTER=0 sets it for a whole process. The exact
-    # decision's own audits (methodBuildAudit, methodBuildReuse 0) run
-    # without the filter, whatever this says.
-    variable methodFilter 1
-    if {[info exists ::env(BOTLISH_METHOD_FILTER)] && $::env(BOTLISH_METHOD_FILTER) in {0 off no}} {
-        set methodFilter 0
+    # 0 makes the method-call decision judge every candidate by its own build
+    # (the reference rule, hir/methods.tcl), never ruling one out by the
+    # receiver's kind without building it: measurement, the reference of the
+    # audit below and the tests. The kind proofs only save builds -- what
+    # they rule out its build would rule out too, which the audit checks --
+    # so neither this switch nor the audit is a front-end input: they are in
+    # no cache key. BOTLISH_METHOD_KIND_PROOFS=0 sets it for a whole process.
+    variable methodKindProofs 1
+    if {[info exists ::env(BOTLISH_METHOD_KIND_PROOFS)] && $::env(BOTLISH_METHOD_KIND_PROOFS) in {0 off no}} {
+        set methodKindProofs 0
     }
-    # 1 makes DecideMethodCalls make the exact decision as well whenever the
-    # filter certified one, and fail unless both decided the same and gave the
-    # same HIR (the audit of the filter: tests and audit tools only; the
-    # exact decision's result is the one returned). BOTLISH_METHOD_FILTER_AUDIT=1
+    # 1 makes the method-call decision decide every program a second time by
+    # the reference rule (no kind proofs) and fail unless both decide alike
+    # and give the same HIR (tests and audit tools only; the
+    # decision's own result is the one returned). BOTLISH_METHOD_REFERENCE_AUDIT=1
     # sets it for a whole process, so the existing suites and fuzzers run
     # under it.
-    variable methodFilterAudit 0
-    # The certified decisions the audit compared with the exact decision's.
-    variable methodFilterAudits 0
-    if {[info exists ::env(BOTLISH_METHOD_FILTER_AUDIT)] && $::env(BOTLISH_METHOD_FILTER_AUDIT) ni {"" 0}} {
-        set methodFilterAudit 1
+    variable methodReferenceAudit 0
+    # The decisions the audit compared with the reference's.
+    variable methodReferenceAudits 0
+    if {[info exists ::env(BOTLISH_METHOD_REFERENCE_AUDIT)] && $::env(BOTLISH_METHOD_REFERENCE_AUDIT) ni {"" 0}} {
+        set methodReferenceAudit 1
     }
+    # The call whose own check runs now (hir::CheckingCall), "" outside one:
+    # what every diagnostic reported meanwhile records as its `subject`.
+    variable checkingCall ""
     # 0 makes hir::check redo the check after a demotion from the start,
     # sharing nothing with the check before it (measurement and audits only).
     variable recheckReuse 1
@@ -368,6 +371,7 @@ proc hir::NewId {hirVar kind} {
 
 proc hir::Diagnose {hirVar kind message expr {related {}}} {
     upvar 1 $hirVar hir
+    variable checkingCall
     set diagnostic [dict create kind $kind message $message expr $expr]
     if {$related ne {}} {
         # The diagnostic's related locations (origins, in the order its
@@ -375,6 +379,9 @@ proc hir::Diagnose {hirVar kind message expr {related {}}} {
         # primary location -- e.g. where a used value was moved. Data, so a
         # consumer never parses them out of the message (STATIC-COMPILE.md).
         dict set diagnostic related $related
+    }
+    if {$checkingCall ne ""} {
+        dict set diagnostic subject $checkingCall
     }
     dict lappend hir diagnostics $diagnostic
 }
@@ -384,7 +391,33 @@ proc hir::Diagnose {hirVar kind message expr {related {}}} {
 # anchor every check that groups or deduplicates diagnostics uses.
 proc hir::DiagnoseAt {hirVar kind message expr origin} {
     upvar 1 $hirVar hir
-    dict lappend hir diagnostics [dict create kind $kind message $message expr $expr origin $origin]
+    variable checkingCall
+    set diagnostic [dict create kind $kind message $message expr $expr origin $origin]
+    if {$checkingCall ne ""} {
+        dict set diagnostic subject $checkingCall
+    }
+    dict lappend hir diagnostics $diagnostic
+}
+
+# Evaluates SCRIPT in the caller's scope as the check of call E against the
+# callee E resolves to: its arguments' admission by the callee's parameters
+# (types, ranges, traits, contract boundaries, places, ownership roles), its
+# flags and imprints, the validity of the callee's semantic instance for it.
+# Every diagnostic SCRIPT reports records `subject E`: E's own problem with
+# that callee, wherever the diagnostic is located (a rejected argument is
+# reported at the argument, METHOD-SUGAR.md). The method-call decision reads
+# exactly those as a candidate's problems (hir::methods::Problems): a
+# diagnostic another construct's check reports at E's node -- the check of
+# an outer call that rejects E's result as its argument -- is never E's.
+# Semantic data with one invariant: only a check of E itself names E.
+proc hir::CheckingCall {e script} {
+    variable checkingCall
+    set saved $checkingCall
+    set checkingCall $e
+    set code [catch {uplevel 1 $script} result options]
+    set checkingCall $saved
+    dict incr options -level
+    return -options $options $result
 }
 
 # Builds the HIR of the core IR program EXPRS (through hir::syntax::fromIR,
@@ -751,506 +784,55 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
     return $hir
 }
 
-# Diagnostic kinds that say a call is unfit for its receiver the way no
-# other candidate is: everything except the obligations a *fit* call may
-# still carry (an error it declares that nobody handled yet, or that provably
-# always fails) and the ambiguity check itself.
-proc hir::MethodObligationKinds {} {
-    # MISSING-CONTEXT: a context the selected function needs is an obligation
-    # of the call (CONTEXTS.md), never evidence that the candidate does not
-    # fit -- exactly like a declared error nobody handled yet.
-    # DIRECT likewise: the selected function's module is direct, which the
-    # calling function must mediate (DIRECT-MODULES.md) -- an obligation of
-    # the call, never a reason another candidate fits better.
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT DIRECT}
-}
-
-# The diagnostics of HIR (a trial build) located in the call EXPR or anything
-# inside it, minus the obligation kinds: what the call's *validity* with the
-# function this build chose for it consists of -- a sorted unique list of
-# {kind message expr}. Empty: the ordinary call is valid.
-proc hir::MethodCallProblems {hir expr} {
-    set inside [dict create]
-    set stack [list $expr]
-    while {$stack ne ""} {
-        set e [lindex $stack end]
-        set stack [lrange $stack 0 end-1]
-        if {[dict exists $inside $e] || ![dict exists $hir exprs $e]} continue
-        dict set inside $e 1
-        lappend stack {*}[hir::children $hir $e]
-    }
-    set problems {}
-    foreach d [dict get $hir diagnostics] {
-        if {![dict exists $d expr] || ![dict exists $inside [dict get $d expr]]} continue
-        if {[dict get $d kind] in [MethodObligationKinds]} continue
-        lappend problems [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
-    }
-    # A native called with a first argument of a statically known other kind
-    # is not diagnosed at compile time (it is the native's run-time TYPE
-    # error, as for any call), but it is plainly not the function the
-    # method-style call means when another candidate accepts the receiver.
-    set node [dict get $hir exprs $expr]
-    if {[dict get $node kind] eq "call" && [dict get $node args] ne ""} {
-        set callee [dict get $hir exprs [dict get $node callee]]
-        if {[dict get $callee kind] eq "ref" && [dict get $callee binding] ne ""} {
-            set binding [dict get $hir bindings [dict get $callee binding]]
-            if {[dict get $binding kind] eq "root" && [dict get $binding symbol] ne ""
-                    && [dict get $hir symbols [dict get $binding symbol] kind] eq "native"} {
-                set native [dict get $binding name]
-                set receiver [lindex [dict get $node args] 0]
-                # (The one statement of this rule, which the kind filter,
-                # hir/methodfilter.tcl, rules candidates out by.)
-                set mismatch [hir::methodfilter::NativeMismatch $native [hir::typeOf $hir $receiver]]
-                if {$mismatch ne {}} {
-                    lassign $mismatch kind wanted
-                    lappend problems [list TYPE \
-                        "the receiver is a $kind, but argument 1 of native $native requires $wanted" $receiver]
-                }
-            }
-        }
-    }
-    return [lsort -unique $problems]
-}
-
-# The decision of the method-style calls of HIR: the kind filter's when it
-# certifies one (hir/methodfilter.tcl, METHOD-DECISION-FILTER.md), else the
-# exact decision's below, made from the start. Both reach the same decisions
-# and the same program (hir::methodFilterAudit checks it); the filter takes
-# fewer builds. A decision with a rejection -- an ambiguous call, no
-# applicable method -- is always the exact one's.
+# The decision of the method-style calls of HIR (hir/methods.tcl,
+# METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md): the candidate whose ordinary
+# call is the only valid one, relative to the decision itself, every
+# rejection a diagnostic of the returned program. Under
+# hir::methodReferenceAudit the program is decided a second time by the
+# reference rule (every candidate judged by its own build, no kind proof),
+# and the two must agree. (The reuse of builds has its own audit,
+# hir::methodBuildAudit.)
 proc hir::DecideMethodCalls {nodes options given hir {seeds {}}} {
-    variable methodFilter
-    variable methodFilterAudit
-    variable methodBuildAudit
-    variable methodBuildReuse
-    if {!$methodFilter || $methodBuildAudit || !$methodBuildReuse} {
-        return [DecideMethodCallsExact $nodes $options $given $hir $seeds]
+    variable methodReferenceAudit
+    variable methodKindProofs
+    set decided [hir::methods::Decide $nodes $options $given $hir $seeds]
+    if {!$methodReferenceAudit || !$methodKindProofs} {
+        return $decided
     }
-    set outcome [hir::methodfilter::Decide $nodes $options $given $hir $seeds]
-    if {![dict get $outcome certified]} {
-        if {[dict get $outcome builds] > 0} {
-            # The filter's builds left the process in their state: the exact
-            # decision starts from HIR's.
-            hir::activate $hir
-        }
-        return [DecideMethodCallsExact $nodes $options $given $hir $seeds]
-    }
-    set final [dict get $outcome hir]
-    if {!$methodFilterAudit} {
-        return $final
-    }
+    set methodKindProofs 0
     hir::activate $hir
-    set exact [DecideMethodCallsExact $nodes $options $given $hir $seeds]
-    FilterAudit $final $exact $seeds
-    return $exact
+    try {
+        set reference [hir::methods::Decide $nodes $options $given $hir $seeds]
+    } finally {
+        set methodKindProofs 1
+    }
+    ReferenceAudit $decided $reference $seeds
+    return $reference
 }
 
-# Fails unless FILTERED, the program the kind filter certified, is EXACT, the
-# one the exact decision gave: the same decisions (as sets) and the same HIR
-# but for the decisions' own spelling, methodChoices and methodDecided, which
-# the exact decision writes in the order it made them.
-proc hir::FilterAudit {filtered exact seeds} {
-    variable methodFilterAudits
+# Fails unless DECIDED, the program the decision gave, is REFERENCE, the one
+# the reference rule gave: the same decisions and the same HIR.
+proc hir::ReferenceAudit {decided reference seeds} {
+    variable methodReferenceAudits
     foreach key {methodChoices methodDecided} {
-        set a [lsort -stride 2 [dict get $filtered $key]]
-        set b [lsort -stride 2 [dict get $exact $key]]
+        set a [lsort -stride 2 [dict get $decided $key]]
+        set b [lsort -stride 2 [dict get $reference $key]]
         if {$a ne $b} {
-            error "hir::methodFilterAudit: the filter decided $key differently from the exact decision\nfilter: $a\nexact:  $b\nseeds: $seeds"
+            error "hir::methodReferenceAudit: the decision's $key differs from the reference rule's\ndecision:  $a\nreference: $b\nseeds: $seeds"
         }
-        dict unset filtered $key
-        dict unset exact $key
     }
-    if {$filtered ne $exact} {
+    if {$decided ne $reference} {
         set where {}
-        foreach key [lsort -unique [concat [dict keys $filtered] [dict keys $exact]]] {
-            if {![dict exists $filtered $key] || ![dict exists $exact $key]} {
+        foreach key [lsort -unique [concat [dict keys $decided] [dict keys $reference]]] {
+            if {![dict exists $decided $key] || ![dict exists $reference $key]} {
                 lappend where "$key (present in one only)"
-            } elseif {[dict get $filtered $key] ne [dict get $exact $key]} {
+            } elseif {[dict get $decided $key] ne [dict get $reference $key]} {
                 lappend where $key
             }
         }
-        error "hir::methodFilterAudit: the filter's program differs from the exact decision's in: [join $where {, }]"
+        error "hir::methodReferenceAudit: the decision's program differs from the reference rule's in: [join $where {, }]"
     }
-    incr methodFilterAudits
-}
-
-# The exact decision of the method-style calls `receiver.name(args)` that have several
-# distinct visible candidate functions (lexical ones and members of directly
-# imported namespaces, hir/resolve.tcl's MethodCandidates), by the rule of
-# METHOD-SUGAR.md: the call is accepted exactly when the ordinary call with
-# the receiver as first argument is valid. Candidate k of a call is *valid* if
-# a build that resolves the call to k has no diagnostic inside the call
-# (MethodCallProblems) other than those every candidate shares. If exactly one
-# candidate is valid the call is that candidate's; if several are, the call is
-# rejected with AMBIGUOUS-METHOD-CALL (no precedence: not import order, not
-# the shortest name, not locality); if none is, with NO-APPLICABLE-METHOD,
-# which lists why each candidate fails.
-#
-# The calls of a program are decided together: build t (t = 0, 1, ...) gives
-# every undecided call its t-th candidate, so each call's candidates are
-# tried by as many builds as the longest candidate list, and the rounds
-# repeat with the calls decided so far fixed, because a call's receiver may
-# be another undecided call's result. Only calls with several candidates ever
-# cost a build; a program without one is built once. Returns the final HIR.
-#
-# A build is a pure function of its *configuration* (MethodConfig: the
-# candidate every call resolves to), so no configuration is built twice. A
-# trial whose configuration an earlier build of this decision had -- HIR (the
-# build this procedure starts from), or a trial of an earlier pass -- is read
-# from what the decision recorded of that build (MethodTrialRecord): a chain
-# of calls on one receiver decides one link per pass, and a pass whose newly
-# decided calls all chose the t-th candidate leaves the next pass's trial t
-# the configuration it already built. The final build is not made when the
-# last build made has its configuration (HIR when no trial was built since):
-# that build is the final program, and the process state it left behind --
-# the per-compilation registries, the analyses' namespace state -- is the
-# final build's. (An older build of the final configuration is not reused:
-# a later trial's state would be left behind it, and what runs after the
-# decision -- BuildFull's elaborations, hir/static.tcl's attribution and
-# dependency analysis, the warnings -- is not audited for reading it.)
-# hir::methodBuildAudit builds every reused build again and fails unless the
-# decision reads the same of both.
-proc hir::DecideMethodCallsExact {nodes options given hir {seeds {}}} {
-    variable buildStats
-    variable methodBuildReuse
-    variable methodBuildAudit
-    set calls [dict get $hir methodCalls]
-    set decided [dict create]
-    # Calls decided before this build (BuildFull's SEEDS) are decided -- a
-    # call still there, with that candidate still among its candidates.
-    dict for {key choice} $seeds {
-        if {[dict exists $calls $key] && $choice in [dict get $calls $key candidates]} {
-            dict set decided $key $choice
-        }
-    }
-    # The configuration of HIR: what its build resolved every call to.
-    set initial [lmap {key info} $calls {dict get $info chosen}]
-    # Configuration -> what the decision read of the build of it
-    # (MethodTrialRecord), for every build this decision has read.
-    set records [dict create]
-    # The configuration and the HIR of the last build made (HIR, until a
-    # trial is built).
-    set last [list $initial $hir]
-    set validity [dict create]
-    set problemsOf [dict create]
-    # A method-style call on a trait view is an operation of the trait
-    # (TRAITS.md): the candidates visible by name take no part in it, so it
-    # is never ambiguous, whatever the code imports -- decided as is.
-    TraitCallsDecided $hir $calls decided
-    while 1 {
-        set undecided [lmap {key info} $calls {
-            if {[dict exists $decided $key] || [string is integer -strict $key]} continue
-            set key
-        }]
-        if {$undecided eq ""} break
-        set rounds 0
-        foreach key $undecided {
-            set rounds [expr {max($rounds, [llength [dict get $calls $key candidates]])}]
-        }
-        set validity [dict create]
-        set problemsOf [dict create]
-        # Key -> the receiver types the call had in the trial builds: a call
-        # whose receiver another undecided call can change (a candidate's
-        # parameter kind narrows the receiver's binding for what follows)
-        # is decided only once its receiver is the same in every build.
-        set receivers [dict create]
-        for {set t 0} {$t < $rounds} {incr t} {
-            set choices $decided
-            foreach key $undecided {
-                set candidates [dict get $calls $key candidates]
-                dict set choices $key [lindex $candidates [expr {min($t, [llength $candidates] - 1)}]]
-            }
-            set config [MethodConfig $calls $choices]
-            if {$methodBuildReuse && ([dict exists $records $config] || $config eq $initial)} {
-                if {[dict exists $records $config]} {
-                    set record [dict get $records $config]
-                } else {
-                    # HIR itself, asked about for the first time: recorded
-                    # for the calls undecided now, which include every call
-                    # a later pass asks about.
-                    set record [MethodTrialRecord $hir $calls $undecided 1]
-                    dict set records $config $record
-                }
-                dict incr buildStats methodReused
-                if {$methodBuildAudit} {
-                    set trial [BuildOnce $nodes $options $given $choices 0 checked]
-                    set last [list $config $trial]
-                    MethodBuildAudit "trial $t" [MethodRecordFor $record $undecided] \
-                        [MethodTrialRecord $trial $calls $undecided $checked] $choices
-                }
-            } else {
-                set trial [BuildOnce $nodes $options $given $choices 0 checked]
-                dict incr buildStats methodTrials
-                set record [MethodTrialRecord $trial $calls $undecided $checked]
-                dict set records $config $record
-                set last [list $config $trial]
-            }
-            if {![dict get $record checked]} {
-                # Not typeable: no call can be decided on types.
-                set undecided {}
-                break
-            }
-            foreach key $undecided {
-                set candidates [dict get $calls $key candidates]
-                if {$t >= [llength $candidates] || ![dict exists $record calls $key]} continue
-                set entry [dict get $record calls $key]
-                dict set problemsOf $key [lindex $candidates $t] [dict get $entry problems]
-                if {[dict exists $entry receiver]} {
-                    dict lappend receivers $key [dict get $entry receiver]
-                }
-            }
-            # (TraitCallsDecided, as the build of the record reads.)
-            dict for {key chosen} [dict get $record traits] {
-                if {![dict exists $decided $key]} {
-                    dict set decided $key $chosen
-                }
-            }
-        }
-        if {$undecided eq ""} break
-        # A problem every candidate shares says nothing about which fits.
-        foreach key $undecided {
-            set perCandidate [dict get $problemsOf $key]
-            set common {}
-            set first 1
-            dict for {candidate problems} $perCandidate {
-                if {$first} {
-                    set common $problems
-                } else {
-                    set kept {}
-                    foreach p $common {
-                        if {$p in $problems} {
-                            lappend kept $p
-                        }
-                    }
-                    set common $kept
-                }
-                set first 0
-            }
-            dict for {candidate problems} $perCandidate {
-                set own {}
-                foreach p $problems {
-                    if {$p ni $common} {
-                        lappend own $p
-                    }
-                }
-                dict set validity $key $candidate [expr {$own eq ""}]
-            }
-        }
-        set progress 0
-        foreach key $undecided {
-            set valid [dict keys [dict filter [dict get $validity $key] value 1]]
-            set stable [expr {![dict exists $receivers $key] || [llength [lsort -unique [dict get $receivers $key]]] <= 1}]
-            if {[llength $valid] == 1 && $stable} {
-                dict set decided $key [lindex $valid 0]
-                set progress 1
-            }
-        }
-        if {!$progress} {
-            # Every call's receiver depends on another undecided call: the
-            # unique valid candidates decide, as before.
-            foreach key $undecided {
-                set valid [dict keys [dict filter [dict get $validity $key] value 1]]
-                if {[llength $valid] == 1} {
-                    dict set decided $key [lindex $valid 0]
-                    set progress 1
-                }
-            }
-        }
-        if {!$progress} break
-    }
-    # The rest stand in with a valid candidate if any (so the later analysis
-    # sees a call that types), else the first; they are rejected below.
-    set choices $decided
-    set rejected {}
-    foreach key [dict keys $calls] {
-        if {[dict exists $decided $key] || [string is integer -strict $key] || ![dict exists $validity $key]} continue
-        set valid [dict keys [dict filter [dict get $validity $key] value 1]]
-        if {$valid ne ""} {
-            dict set choices $key [lindex $valid 0]
-        }
-        lappend rejected $key $valid
-    }
-    if {$methodBuildReuse && [MethodConfig $calls $choices] eq [lindex $last 0]} {
-        set final [lindex $last 1]
-        dict set final methodChoices $choices
-        dict incr buildStats methodReused
-        if {$methodBuildAudit} {
-            set fresh [BuildOnce $nodes $options $given $choices 0 checked]
-            if {[list $fresh] ne [list $final]} {
-                error "hir::DecideMethodCalls: the reused final build differs from building it again (choices: $choices)"
-            }
-            set final $fresh
-        }
-    } else {
-        set final [BuildOnce $nodes $options $given $choices 0 checked]
-        dict incr buildStats methodFinals
-    }
-    foreach {key valid} $rejected {
-        if {![dict exists $final methodCalls $key]} continue
-        if {[UnknownTraitOperationInside [dict get $problemsOf $key]]} {
-            # A receiver computed by an operation its trait does not declare
-            # (TRAIT-UNKNOWN-OPERATION) fails every candidate: that
-            # diagnostic is the cause and is already reported.
-            continue
-        }
-        set callArgs [dict get $final exprs [dict get $final methodCalls $key expr] args]
-        if {$callArgs ne "" && [hir::types::Poisoned $final [lindex $callArgs 0]]} {
-            # A poisoned receiver (hir/types.tcl, "Poison") fits every
-            # candidate and decides nothing: the diagnostic that rejected it
-            # is the cause, already reported (DIAGNOSTIC-RECOVERY.md).
-            continue
-        }
-        set info [dict get $final methodCalls $key]
-        set e [dict get $info expr]
-        set name [dict get $info name]
-        set origin [dict get $final exprs $e method nameOrigin]
-        if {[llength $valid] > 1} {
-            set message [::format {method-style call "%s" is ambiguous: more than one visible function accepts the receiver (%s); there is no precedence between them: call the one you mean explicitly, e.g. %s(receiver, ...)} \
-                $name [join $valid {, }] [lindex $valid 0]]
-            set kind AMBIGUOUS-METHOD-CALL
-        } else {
-            set reasons {}
-            dict for {candidate problems} [dict get $problemsOf $key] {
-                if {$problems eq ""} {
-                    set reason "no problem found"
-                } else {
-                    set reason [lindex [lindex $problems 0] 1]
-                }
-                lappend reasons "$candidate: $reason"
-            }
-            set message [::format {method-style call "%s": none of the visible functions of that name accepts the receiver (%s)} \
-                $name [join $reasons {; }]]
-            set kind NO-APPLICABLE-METHOD
-        }
-        set diagnostics [dict get $final diagnostics]
-        hir::DiagnoseAt final $kind $message $e $origin
-        set added [lindex [dict get $final diagnostics] end]
-        dict set final diagnostics [concat [list $added] $diagnostics]
-        if {[dict exists $final beforeCompletions]} {
-            # Not one of them: what each candidate's trial build reported
-            # inside the call decided it.
-            lassign [dict get $final beforeCompletions] from to
-            dict set final beforeCompletions [list [expr {$from + 1}] [expr {$to + 1}]]
-        }
-    }
-    # The decided calls (not the rejected ones' stand-ins), for a later build
-    # of a changed program that can reuse them (hir/static.tcl). Bookkeeping
-    # of the decision, never read by an analysis.
-    dict set final methodDecided $decided
-    return $final
-}
-
-# The configuration of a build given the method-call choices CHOICES (key ->
-# candidate display): the candidate it resolves each multi-candidate method
-# call of CALLS (a typed build's `methodCalls`) to, in CALLS' order -- as
-# hir::resolve::MethodChoice picks it: the call's choice when that is one of
-# its candidates, else its first, which is also the candidate of a call with
-# no source identity (keyed by its expression, which no choice names). Builds
-# of one configuration are one build: hir::BuildOnce is a pure function of
-# its inputs, and the choices are the only one that differs between the
-# builds of one decision (DecideMethodCalls).
-proc hir::MethodConfig {calls choices} {
-    set config {}
-    dict for {key info} $calls {
-        set candidates [dict get $info candidates]
-        set want [lindex $candidates 0]
-        if {$key ne [dict get $info expr] && [dict exists $choices $key] && [dict get $choices $key] in $candidates} {
-            set want [dict get $choices $key]
-        }
-        lappend config $want
-    }
-    return $config
-}
-
-# What DecideMethodCalls reads of TRIAL, one build of the program (CHECKED:
-# whether its static checks ran), while the calls UNDECIDED (keys of CALLS)
-# are undecided: a dict
-#
-#   checked  CHECKED
-#   calls    KEY -> {problems P ?receiver T?} for each of UNDECIDED the build
-#            has: the problems of the call with the candidate the build
-#            resolved it to (MethodCallProblems) and its receiver's type
-#            (absent for a call without arguments)
-#   traits   KEY -> the candidate the call stood in with, for every call of
-#            CALLS the build has that it types as a trait operation (what
-#            TraitCallsDecided reads), in CALLS' order
-#
-# Calls are only ever decided, never undecided again, so whenever the
-# decision reads the record again (a later trial of the same configuration)
-# it asks about some of UNDECIDED.
-proc hir::MethodTrialRecord {trial calls undecided checked} {
-    set record [dict create checked $checked calls [dict create] traits [dict create]]
-    if {!$checked} {
-        return $record
-    }
-    foreach key $undecided {
-        if {![dict exists $trial methodCalls $key]} continue
-        set callExpr [dict get $trial methodCalls $key expr]
-        set entry [dict create problems [MethodCallProblems $trial $callExpr]]
-        set callArgs [dict get $trial exprs $callExpr args]
-        if {$callArgs ne ""} {
-            dict set entry receiver [hir::typeOf $trial [lindex $callArgs 0]]
-        }
-        dict set record calls $key $entry
-    }
-    set decided [dict create]
-    TraitCallsDecided $trial $calls decided
-    dict set record traits $decided
-    return $record
-}
-
-# RECORD (MethodTrialRecord) as it reads while the calls UNDECIDED are
-# undecided: its entries of the other calls dropped.
-proc hir::MethodRecordFor {record undecided} {
-    set entries [dict create]
-    foreach key $undecided {
-        if {[dict exists $record calls $key]} {
-            dict set entries $key [dict get $record calls $key]
-        }
-    }
-    dict set record calls $entries
-    return $record
-}
-
-# hir::methodBuildAudit's check of one reused build (WHAT, made with the
-# choices CHOICES): REUSED, the record the decision read, must be FRESH, the
-# record of the same build made again.
-proc hir::MethodBuildAudit {what reused fresh choices} {
-    if {$reused ne $fresh} {
-        error "hir::DecideMethodCalls: the reused build of $what differs from building it again (choices: $choices)"
-    }
-}
-
-# 1 if every candidate's problems (PERCANDIDATE, as MethodCallProblems gives
-# them) include an operation a trait does not declare.
-proc hir::UnknownTraitOperationInside {perCandidate} {
-    if {[dict size $perCandidate] == 0} {
-        return 0
-    }
-    dict for {candidate problems} $perCandidate {
-        if {[lsearch -exact -index 0 $problems TRAIT-UNKNOWN-OPERATION] < 0} {
-            return 0
-        }
-    }
-    return 1
-}
-
-# Marks, in the caller's DECIDEDVAR, every multi-candidate method call of
-# CALLS (a methodCalls table) that HIR (a typed build) types as a trait
-# operation: such a call is decided by its receiver's trait, never by the
-# candidates, so it keeps the candidate its build stood in with.
-proc hir::TraitCallsDecided {hir calls decidedVar} {
-    upvar 1 $decidedVar decided
-    if {![dict exists $hir methodCalls]} {
-        return
-    }
-    dict for {key info} $calls {
-        if {[dict exists $decided $key] || ![dict exists $hir methodCalls $key]} continue
-        set e [dict get $hir methodCalls $key expr]
-        if {[dict exists $hir exprs $e traitCall]} {
-            dict set decided $key [dict get $hir methodCalls $key chosen]
-        }
-    }
+    incr methodReferenceAudits
 }
 
 # Types resolved HIR (inferring every block's intrinsic contract,
@@ -1731,7 +1313,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

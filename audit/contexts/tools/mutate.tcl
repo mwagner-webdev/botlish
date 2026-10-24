@@ -69,7 +69,7 @@ set mutations {
     {placement-check-off hir/contexts.tcl
         {$c ne $r || [hir::get $hir $c scope] ne $top || [hir::mode $hir] ne "program"}
         {0}}
-    {method-candidate-dropped hir/hir.tcl
+    {method-candidate-dropped hir/methods.tcl
         {AMBIGUOUS-METHOD-CALL MISSING-CONTEXT}
         {AMBIGUOUS-METHOD-CALL}}
     {runtime-missing-not-raised core/contexts.tcl

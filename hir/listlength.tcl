@@ -34,28 +34,37 @@ proc hir::listlength::verify {hirVar} {
                 || [hir::decimal::CalledNative $hir $e] ne $native || [hir::imprint::Unbound $hir $e]} {
             continue
         }
-        set t [hir::typeOf $hir $e]
-        if {$t in {never any}} {
-            continue
-        }
-        if {[hir::types::LengthOf $t] eq "" || ![hir::types::IsRefinedApplied $t]} {
-            hir::Diagnose hir TYPE [format \
-                {%s checks a List against the exact length its imprint states, so it is imprinted with a List[T]{length: N} type (%s[List[int]{length: 4}](xs)), not %s} \
-                $native $native [hir::types::show $t]] $e
-            continue
-        }
-        set arg [lindex [dict get $node args] 0]
-        if {$arg eq "" || [dict exists $hir poisoned $arg]} {
-            continue
-        }
-        set argType [hir::typeOf $hir $arg]
-        set base [hir::types::Unrefined $t]
-        if {$argType ne "never" && ![hir::range::ProvesValueAcceptedBy $argType [hir::range::unknown] $base]} {
-            hir::Diagnose hir TYPE [format \
-                {the argument of %s cannot be proven to satisfy %s, the base of its imprint %s (argument type: %s): the check proves a List's length, never its elements} \
-                $native [hir::types::show $base] [hir::types::show $t] \
-                [hir::semantic::ShowType $hir [hir::range::ShownArgType $argType $base]]] $arg
-        }
+        # (Each problem below is the call's own with its callee:
+        # hir::CheckingCall.)
+        hir::CheckingCall $e {VerifyCall hir $e $node}
+    }
+}
+
+# The problems of call E (NODE) of the validator (verify).
+proc hir::listlength::VerifyCall {hirVar e node} {
+    upvar 1 $hirVar hir
+    variable native
+    set t [hir::typeOf $hir $e]
+    if {$t in {never any}} {
+        return
+    }
+    if {[hir::types::LengthOf $t] eq "" || ![hir::types::IsRefinedApplied $t]} {
+        hir::Diagnose hir TYPE [format \
+            {%s checks a List against the exact length its imprint states, so it is imprinted with a List[T]{length: N} type (%s[List[int]{length: 4}](xs)), not %s} \
+            $native $native [hir::types::show $t]] $e
+        return
+    }
+    set arg [lindex [dict get $node args] 0]
+    if {$arg eq "" || [dict exists $hir poisoned $arg]} {
+        return
+    }
+    set argType [hir::typeOf $hir $arg]
+    set base [hir::types::Unrefined $t]
+    if {$argType ne "never" && ![hir::range::ProvesValueAcceptedBy $argType [hir::range::unknown] $base]} {
+        hir::Diagnose hir TYPE [format \
+            {the argument of %s cannot be proven to satisfy %s, the base of its imprint %s (argument type: %s): the check proves a List's length, never its elements} \
+            $native [hir::types::show $base] [hir::types::show $t] \
+            [hir::semantic::ShowType $hir [hir::range::ShownArgType $argType $base]]] $arg
     }
 }
 

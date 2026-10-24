@@ -1066,7 +1066,7 @@ proc hir::structs::MissingImportMessage {name candidates} {
 # The functions NAME that the method-style call whose callee is the
 # projection E (`receiver.NAME`, receiver of static type TYPE) would apply if
 # the code it is written in imported their namespace: by method resolution's
-# own rules (hir/resolve.tcl's MethodCandidates, hir::MethodCallProblems),
+# own rules (hir/resolve.tcl's MethodCandidates, hir::methods::NativeMismatch),
 # the member NAME of a namespace the code does not import -- an intrinsic
 # (`std::str::concat`), or a function of a module this compilation loaded -- not
 # declared nomethod, accepting the call's number of arguments (the receiver

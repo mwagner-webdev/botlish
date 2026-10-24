@@ -2,7 +2,7 @@
 # mutate.tcl; STATIC-COMPILE.md, "Decision economics"): deliberate bugs in
 # the batched scheduler (hir/static.tcl), its dependency analysis
 # (hir/staticdeps.tcl), the reuse of method-call decisions
-# (hir/static.tcl's MethodSeeds, hir/hir.tcl) and the demotion re-check's
+# (hir/static.tcl's MethodSeeds, hir/methods.tcl) and the demotion re-check's
 # reuse of the check before it (hir::check, hir::signatures::infer's
 # rounds; COMPILER-BOTTLENECKS.md 3.9), and in what a diagnostic
 # prints that differs between builds (hir/semantic.tcl's SourceName and
@@ -129,44 +129,46 @@
 >>>>
 
 @@ method-key-alias a reused method-call decision is applied to every call of the same name, not to the one call it was made for
-## hir/hir.tcl
+## hir/methods.tcl
 <<<<
     dict for {key choice} $seeds {
         if {[dict exists $calls $key] && $choice in [dict get $calls $key candidates]} {
-            dict set decided $key $choice
+            dict set fixed $key $choice
         }
     }
 ====
     dict for {key choice} $seeds {
         if {![dict exists $calls $key]} continue
         dict for {other info} $calls {
-            if {[dict get $info name] eq [dict get $calls $key name]} {
-                dict set decided $other $choice
+            if {[dict get $info name] eq [dict get $calls $key name] && $choice in [dict get $info candidates]} {
+                dict set fixed $other $choice
             }
         }
     }
 >>>>
 
-@@ same-choices-unchecked a method-call decision build is taken to be the build it started from whatever the choices (hir::MethodConfig ignores them): every trial reads that build, and the final program keeps the stand-in candidates
-## hir/hir.tcl
+@@ same-choices-unchecked a method-call decision build is taken to be the build it started from whatever the choices (hir::methods::Config ignores them): every build reads that build, and the final program keeps the stand-in candidates
+## hir/methods.tcl
 <<<<
         if {$key ne [dict get $info expr] && [dict exists $choices $key] && [dict get $choices $key] in $candidates} {
 ====
         if {0} {
 >>>>
 
-@@ method-memo-by-index a method-call trial is read from an earlier build of the same trial index, not of the same configuration: the next pass reads the trials in which the calls it has since decided were still varied
-## hir/hir.tcl
+@@ method-memo-by-index a method-call decision build is read from an earlier build of the same kind (wave, trial, deviation, round), not of the same configuration: a single deviation reads another call's
+## hir/methods.tcl
 <<<<
-            set config [MethodConfig $calls $choices]
+    set config [Config $calls $choices]
+    if {$methodBuildReuse && [dict exists $state records $config]} {
 ====
-            set config $t
+    set config $what
+    if {$methodBuildReuse && [dict exists $state records $config]} {
 >>>>
 
-@@ method-final-any-build the method-call decisions' final program is the last build they made, whatever its configuration: it keeps the last trial's candidates
-## hir/hir.tcl
+@@ method-final-any-build the method-call decisions' final program is the last build they made, whatever its configuration: it keeps the last deviation's candidates
+## hir/methods.tcl
 <<<<
-    if {$methodBuildReuse && [MethodConfig $calls $choices] eq [lindex $last 0]} {
+    if {$methodBuildReuse && $config eq $lastConfig} {
 ====
     if {$methodBuildReuse} {
 >>>>
@@ -574,12 +576,12 @@ proc hir::static::Waits {key status deps} {
     if {1} {
 >>>>
 
-@@ method-memo-initial-only a method-call trial is read only from the build the decision started from, never from an earlier trial of the same configuration: each pass of a chain builds the trial the pass before already built
-## hir/hir.tcl
+@@ method-memo-initial-only a method-call decision build is read only from the build the decision started from, never from an earlier build of the same configuration: each certification round builds the deviations the round before already built
+## hir/methods.tcl
 <<<<
-            if {$methodBuildReuse && ([dict exists $records $config] || $config eq $initial)} {
+    if {$methodBuildReuse && [dict exists $state records $config]} {
 ====
-            if {$methodBuildReuse && $config eq $initial} {
+    if {$methodBuildReuse && [dict exists $state records $config] && $config eq [dict get $state initial]} {
 >>>>
 
 @@ never-reuse-methods no method-call decision is reused across rounds

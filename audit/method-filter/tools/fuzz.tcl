@@ -1,17 +1,22 @@
 #!/usr/bin/env tclsh9.0
-# fuzz.tcl -- bounded randomized check of the method-call kind filter
-# (METHOD-DECISION-FILTER.md, hir/methodfilter.tcl) against the exact
-# decision (hir::DecideMethodCalls).
+# fuzz.tcl -- bounded randomized check of the method-call decision's kind
+# proofs (METHOD-DECISION-FILTER.md, METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md,
+# hir/methods.tcl) against its reference rule.
 #
 #   tclsh9.0 audit/method-filter/tools/fuzz.tcl ?SEEDS? ?FIRST-SEED? ?-dump 1?
 #
-# Each program is compiled twice, from the same text: with the filter off
-# (hir::methodFilter 0: the exact decision alone), and with the filter on under
-# its audit (hir::methodFilterAudit 1: whenever the filter certifies a
-# decision the exact decision is made as well, and the compilation fails
-# unless both decided the same calls the same way and gave the same HIR). The
-# two compilations must then have the same outcome: the same error, or the
-# same diagnostics, decided calls and HIR text. The programs are random in
+# Each program is compiled three times, from the same text: under the
+# reference audit (hir::methodReferenceAudit 1: the reference rule,
+# hir::methodKindProofs 0, judges every candidate by its own build as well,
+# and the compilation fails unless both rules decided the same calls the same
+# way and gave the same HIR), under the audit of build reuse
+# (hir::methodBuildAudit 1: every build read from a record is made again and
+# must read the same), and plainly. The three compilations must have the same
+# outcome: the same error, or the same diagnostics, decided calls and HIR
+# text. This is a check of the kind proofs and of build reuse against the
+# rule they stand for; the rule
+# itself is checked by audit/method-resolution/tools/oracle.tcl, which knows
+# its programs' intended outcomes. The programs are random in
 #
 #   receivers   parameters of kinds List, String, MutableArray, MutableVector
 #               (typed), an untyped parameter narrowed by an explicit
@@ -28,17 +33,23 @@
 #               parameters over it), a Cell[T]; and MutableMap and MutableSet
 #               receivers; calls of size, weight, tag (untyped in one module:
 #               an inferred contract) and peek, which the modules declare
-#               over different structs, and length;
+#               over different structs, and length -- which the modules also
+#               declare over their structs, as at and get, beside the
+#               standard collections' (every program imports them, so a
+#               chain's outer call has a candidate that sorts first and
+#               rejects the inner call's result:
+#               EXACT-METHOD-DECISION-MISATTRIBUTION.md);
 #   shape       one to three functions, two to five statements each, which
 #               call one another.
 #
 # The summary line is
 #
-#   method-filter-fuzz seeds N programs P certified C fallbacks F (accepted
-#       programs: A) rejected R evictions E builds exact X filter Y disagreements D
+#   method-filter-fuzz seeds N programs P rejected R deviations V builds
+#       plain Y audited X disagreements D
 #
-# (X and Y are the whole-program builds of the compilations with the filter
-# off and on, without the audit.)
+# (Y and X are the whole-program builds of the plain compilation and of the
+# one under the reference audit, which includes the reference rule's; V the
+# single deviations the plain compilation built.)
 #
 # and the exit status is 1 if D is not zero. Every program is seeded by its
 # own number: `-seed-only S -dump 1` replays one.
@@ -72,23 +83,23 @@ while {[llength $args] >= 2} {
 }
 
 # The private library: a copy of the standard library beside three modules
-# whose functions take named structs (removed at the end). None defines a
-# function named like a method of the other receivers (length, at, get): a
-# struct-parameter `length` beside std::list::length makes the exact
-# decision reject `xs.at(0).length()`, whose outer call, standing at that
-# candidate in a trial, rejects the inner call's result at the inner call's
-# own node, which hir::MethodCallProblems counts as the inner call's problem
-# (a defect of the exact decision, not of the filter, which decides the
-# chain correctly: EXACT-METHOD-DECISION-MISATTRIBUTION.md).
+# whose functions take named structs (removed at the end). They also define
+# functions named like methods of the other receivers (length, at, get)
+# over their structs: beside std::list::length, a struct-parameter `length`
+# that sorts first is the outer candidate of `xs.at(0).length()` that
+# rejects the inner call's result at the inner call's own node -- the
+# misattribution the decision once made (EXACT-METHOD-DECISION-
+# MISATTRIBUTION.md), which this fuzzer left out until the decision was
+# made by a call's own checks.
 set library [file tempdir botlish-method-filter-fuzz]
 foreach entry [glob -nocomplain -directory $::core::libraryDir *] {
     file copy -force $entry $library
 }
 set ::core::libraryDir $library
 foreach {name text} {
-    fza "struct Box:\n    v: int\n\nstruct Pair\[A, B\]:\n    a: A\n    b: B\n\nfn size(b: Box) -> int:\n    b.v\n\nfn weight(p: Pair\[A, B\]) -> int:\n    1\n\nfn tag(x) -> int:\n    size(x)\n\nfn peek(b: Box, k: int) -> int:\n    b.v + k\n"
-    fzb "import std::fza\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn weight(p: std::fza::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n\nfn peek(c: Cell\[T\], k: int) -> int:\n    k\n"
-    fzc "import std::fzb\n\nfn size(c: std::fzb::Cell\[T\]) -> int:\n    3\n"
+    fza "struct Box:\n    v: int\n\nstruct Pair\[A, B\]:\n    a: A\n    b: B\n\nfn size(b: Box) -> int:\n    b.v\n\nfn weight(p: Pair\[A, B\]) -> int:\n    1\n\nfn tag(x) -> int:\n    size(x)\n\nfn peek(b: Box, k: int) -> int:\n    b.v + k\n\nfn length(b: Box) -> int:\n    b.v\n\nfn at(b: Box, i: int) -> int:\n    b.v + i\n"
+    fzb "import std::fza\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn weight(p: std::fza::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n\nfn peek(c: Cell\[T\], k: int) -> int:\n    k\n\nfn get(c: Cell\[T\], i: int, d: int) -> int:\n    d\n"
+    fzc "import std::fzb\n\nfn size(c: std::fzb::Cell\[T\]) -> int:\n    3\n\nfn length(c: std::fzb::Cell\[T\]) -> int:\n    4\n"
 } {
     set f [open [file join $library $name.bot] w]
     fconfigure $f -encoding utf-8
@@ -131,7 +142,13 @@ proc gen {type env depth} {
             switch -- [expr {int(rand() * 6)}] {
                 0 { return "[gen str $env [expr {$depth - 1}]].length()" }
                 1 { return "[gen [pick {ints strs nested mvec}] $env [expr {$depth - 1}]].length()" }
-                2 { set ::needsHandler 1; return "[gen [pick {ints marr mvec}] $env [expr {$depth - 1}]].at([expr {int(rand() * 3)}])" }
+                2 {
+                    set ::needsHandler 1
+                    # (The index sometimes a method call itself: a call in
+                    # an argument position.)
+                    set index [if {[chance 0.3]} {gen int $env 1} else {expr {int(rand() * 3)}}]
+                    return "[gen [pick {ints marr mvec}] $env [expr {$depth - 1}]].at($index)"
+                }
                 3 { return "[gen [pick {ints marr}] $env [expr {$depth - 1}]].get([expr {int(rand() * 5)}], 0)" }
                 4 { return "([gen int $env [expr {$depth - 1}]] + [gen int $env [expr {$depth - 1}]])" }
                 5 { return [literal int] }
@@ -281,8 +298,8 @@ set collectionReceivers {
 # Receiver tag -> the calls some candidate fits (the others fit none: a
 # function made only of those is rejected, so they are drawn less often).
 set nominalCalls {
-    abox {size() tag() peek(1)} bbox {size() tag()} pairis weight() pairii weight()
-    pairbox weight() cell {peek(1) size()} map length() set length()
+    abox {size() tag() peek(1) length() at(1)} bbox {size() tag()} pairis weight() pairii weight()
+    pairbox weight() cell {peek(1) size() length() {get(1, 2)}} map length() set length()
 }
 
 # A function of method calls on named-struct receivers: {TEXT ARGS}, ARGS
@@ -322,7 +339,7 @@ proc nominalText {name collections} {
         if {[chance 0.85]} {
             set call [pick [dict get $::nominalCalls $tag]]
         } else {
-            set call [pick {size() weight() tag() peek(1) length()}]
+            set call [pick {size() weight() tag() peek(1) length() at(1) {get(1, 2)}}]
         }
         lappend body "    c$i = ${recv}.$call"
         lappend terms c$i
@@ -382,11 +399,10 @@ proc program {} {
         lappend lines [entryLine c1 "ch($cargs)" $chandled]
         lappend sum c1
     }
-    set head "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\n"
+    set head "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\nimport std::fza\nimport std::fzb\nimport std::fzc\n"
     if {$nominal ne ""} {
         lappend lines [entryLine n1 "nm([join [lindex $nominal 0] {, }])" 0]
         lappend sum n1
-        append head "import std::fza\nimport std::fzb\nimport std::fzc\n"
         if {$collections} {
             append head "import std::mutable_map\nimport std::mutable_set\n"
         }
@@ -405,10 +421,10 @@ proc entryLine {var call handled} {
 # ---------------------------------------------------------------------------
 # Running
 
-proc compileUnder {filter audit text} {
-    set saved [list $hir::methodFilter $hir::methodFilterAudit]
-    set hir::methodFilter $filter
-    set hir::methodFilterAudit $audit
+proc compileUnder {audit buildAudit text} {
+    set saved [list $hir::methodReferenceAudit $hir::methodBuildAudit]
+    set hir::methodReferenceAudit $audit
+    set hir::methodBuildAudit $buildAudit
     set before [hir::BuildStats]
     try {
         if {[catch {surface::compile $text -strict 0 -warnings off} hir options]} {
@@ -419,25 +435,20 @@ proc compileUnder {filter audit text} {
             set result [dict create error "" diagnostics $diags decided $decided text [hir::format $hir] hir $hir]
         }
     } finally {
-        lassign $saved hir::methodFilter hir::methodFilterAudit
+        lassign $saved hir::methodReferenceAudit hir::methodBuildAudit
     }
     set after [hir::BuildStats]
     dict set result builds [expr {[dict get $after builds] - [dict get $before builds]}]
-    foreach c {methodFiltered methodFilterAbandoned methodFilterEvicted} {
-        dict set result $c [expr {[dict get $after $c] - [dict get $before $c]}]
-    }
+    dict set result methodDeviations [expr {[dict get $after methodDeviations] - [dict get $before methodDeviations]}]
     return $result
 }
 
 set programs 0
-set certified 0
-set fallbacks 0
 set rejected 0
-set exactBuilds 0
-set filterBuilds 0
+set auditedBuilds 0
+set kindBuilds 0
+set deviations 0
 set disagreements 0
-set wasted 0
-set evictions 0
 set kinds [dict create]
 if {$only ne ""} {
     set first $only
@@ -450,42 +461,33 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     if {$dump} {
         puts "---- seed $seed\n$text"
     }
-    set exact [compileUnder 0 0 $text]
-    set filtered [compileUnder 1 1 $text]
-    # (The builds the filter takes, without the audit's second decision.)
-    set cheap [compileUnder 1 0 $text]
-    incr exactBuilds [dict get $exact builds]
-    incr filterBuilds [dict get $cheap builds]
-    if {[dict get $cheap methodFiltered] > 0} { incr certified }
-    if {[dict get $cheap methodFilterEvicted] > 0} {
-        incr evictions [dict get $cheap methodFilterEvicted]
-        if {$dump} { puts "  (the filter took back [dict get $cheap methodFilterEvicted] decision(s))" } else { puts "seed $seed: evictions [dict get $cheap methodFilterEvicted]" }
-    }
-    if {[dict get $cheap methodFilterAbandoned] > 0} {
-        incr fallbacks
-        if {[dict get $exact error] eq "" && [dict get $exact diagnostics] eq ""} {
-            incr wasted
-            if {$dump} { puts "  (abandoned on a program the exact decision accepts)" }
-        }
-    }
-    if {[dict get $exact error] ne "" || [dict get $exact diagnostics] ne ""} {
+    set audited [compileUnder 1 0 $text]
+    set rebuilt [compileUnder 0 1 $text]
+    set cheap [compileUnder 0 0 $text]
+    incr auditedBuilds [dict get $audited builds]
+    incr kindBuilds [dict get $cheap builds]
+    incr deviations [dict get $cheap methodDeviations]
+    if {[dict get $audited error] ne "" || [dict get $audited diagnostics] ne ""} {
         incr rejected
-        if {[dict get $exact error] ne ""} {
+        if {[dict get $audited error] ne ""} {
             dict incr kinds ERROR
         } else {
-            foreach d [lsort -unique [lmap d [dict get $exact diagnostics] {lindex $d 0}]] { dict incr kinds $d }
+            foreach d [lsort -unique [lmap d [dict get $audited diagnostics] {lindex $d 0}]] { dict incr kinds $d }
         }
     }
     set bad ""
-    if {[dict get $filtered error] ne [dict get $exact error]} {
-        set bad "error differs:\n  filter: [dict get $filtered error]\n  exact:  [dict get $exact error]"
-    } elseif {[dict get $exact error] eq ""} {
-        foreach field {diagnostics decided text} {
-            if {[dict get $filtered $field] ne [dict get $exact $field]} {
-                set bad "$field differs"
-                break
+    foreach {name other} [list build-audited $rebuilt plain $cheap] {
+        if {[dict get $other error] ne [dict get $audited error]} {
+            set bad "$name: error differs:\n  $name: [dict get $other error]\n  audited: [dict get $audited error]"
+        } elseif {[dict get $audited error] eq ""} {
+            foreach field {diagnostics decided text} {
+                if {[dict get $other $field] ne [dict get $audited $field]} {
+                    set bad "$name: $field differs"
+                    break
+                }
             }
         }
+        if {$bad ne ""} break
     }
     if {$bad ne ""} {
         incr disagreements
@@ -494,6 +496,6 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     }
 }
 file delete -force $library
-puts "method-filter-fuzz seeds $seeds programs $programs certified $certified fallbacks $fallbacks (accepted programs: $wasted) rejected $rejected evictions $evictions builds exact $exactBuilds filter $filterBuilds disagreements $disagreements"
+puts "method-filter-fuzz seeds $seeds programs $programs rejected $rejected deviations $deviations builds plain $kindBuilds audited $auditedBuilds disagreements $disagreements"
 puts "rejections by kind: $kinds"
 exit [expr {$disagreements > 0}]

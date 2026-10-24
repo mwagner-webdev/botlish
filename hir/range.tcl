@@ -1854,7 +1854,14 @@ proc hir::range::VerifyCallArguments {hirVar ranges e} {
 # types, if any (a call whose target is not a directly-known block -- an
 # unresolved dynamic dispatch -- is outside this feature's scope; see
 # STRICT-TYPED-PARAMETERS.md's "Dynamic/function-value call handling").
+# Every diagnostic is E's own (hir::CheckingCall): a rejected argument is
+# reported at the argument, but it is this call's problem with its callee.
 proc hir::range::VerifyCall {hirVar ranges e node} {
+    upvar 1 $hirVar hir
+    hir::CheckingCall $e {VerifyCallChecks hir $ranges $e $node}
+}
+
+proc hir::range::VerifyCallChecks {hirVar ranges e node} {
     upvar 1 $hirVar hir
     lassign [dict get $node target] targetKind targetBlock
     if {$targetKind eq {}} {
