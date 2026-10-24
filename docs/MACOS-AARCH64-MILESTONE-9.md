@@ -195,7 +195,22 @@ info library: .../decoy
 Tcl's own search finds the framework's scripts (through CoreFoundation's
 bundle of identifier `com.tcltk.tcllibrary`), but tries `$TCL_LIBRARY`
 first: a stock framework Tcl runs whatever script library the environment
-names. So the launcher sets `tcl_library` itself, to the scripts beside the
+names.
+
+C2 also runs that `tclsh9.0` with its framework copied into a directory
+named "non ascii dü" (run 40133897160):
+
+| environment | status |
+|---|---|
+| none (the C locale: codeset US-ASCII) | 139, SIGSEGV |
+| `LC_ALL=C` | 139, SIGSEGV |
+| `LC_CTYPE=UTF-8` | 0 (`utf-8 .../non ascii dü/Tcl.framework/Versions/9.0/Resources/Scripts`) |
+| `LANG=en_US.UTF-8` | 0 |
+| none, the same Tcl in an ASCII directory | 0 |
+| the application copied into "non ascii dü", none and `LC_ALL=C` | 0 (`-version`) |
+
+Tcl 9.0.1 itself crashes at startup in a non-ASCII path without a UTF-8
+locale; the launcher works around it (section 11, step 5). So the launcher sets `tcl_library` itself, to the scripts beside the
 Tcl binary dyld loaded, before `Tcl_Init` (section 11); app-test's
 relocation group runs with a decoy `TCL_LIBRARY` and the
 `tcl-library-from-environment` mutant is killed.
@@ -721,12 +736,15 @@ Developer ID distribution needs, beyond this milestone:
    only its own framework (library validation is compatible: every
    library it loads is signed by the same team or is the system's). The
    driver JITs: the census (C6) ran the native JIT with a hardened-runtime
-   driver with no entitlement, with `com.apple.security.cs.allow-jit` and
-   with `com.apple.security.cs.allow-unsigned-executable-memory` -- all
-   three ran -- on a runner whose SIP status the census records (section
-   3); that observation is the runner's and must be repeated on a
-   standard Mac with a Developer ID signature before the entitlement is
-   chosen. Executables the compiler links are signed by the linker ad hoc
+   driver (`codesign -dv`: `flags=0x10002(adhoc,runtime)`) with no
+   entitlement, with `com.apple.security.cs.allow-jit` and with
+   `com.apple.security.cs.allow-unsigned-executable-memory` -- all three
+   ran. The runner reports `System Integrity Protection status:
+   disabled.` (empty `kern.bootargs`; the crash reports say `"sip" :
+   "disabled"` too), so this says nothing about a Mac with SIP enabled,
+   where the hardened runtime is enforced: the entitlement a Developer ID
+   driver needs must be measured on one before it is chosen (none is
+   added here; AGENTS.md, "The macOS application"). Executables the compiler links are signed by the linker ad hoc
    (`linker-signed`), as any locally built program; a user distributing
    one signs it themselves.
 3. **Notarization**: `xcrun notarytool submit botlish-macos-aarch64.zip
