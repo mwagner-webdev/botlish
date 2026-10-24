@@ -68,15 +68,21 @@ accepted with the candidate whose ordinary call `f(x, a, b)` is valid**:
   qualified, `alpha::f(x, ...)`;
 * none valid: `NO-APPLICABLE-METHOD`, listing why each candidate fails.
 
-"Valid" is checked, not guessed: `hir::buildSyntax` builds the program with
-each candidate chosen (`hir::DecideMethodCalls`) and calls a candidate valid
-if its call carries no diagnostic of its own -- a declared parameter or
-inferred contract the receiver cannot prove, an invalid flag, a native whose
-first parameter has a different known kind, ... A declared error nobody
-handled is not evidence against a candidate (it is the obligation of a call
-that fits). Calls with a single candidate -- almost all -- cost nothing extra.
-Where the receiver's kind leaves one candidate (a List receiver rules out
-`std::str::length`), the call is decided without building the others
+"Valid" is checked, not guessed (`hir::DecideMethodCalls`, `hir/methods.tcl`;
+METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md): a candidate is valid if the
+call's *own* checks against it report nothing -- the diagnostics whose
+`subject` is the call: a declared parameter or inferred contract an argument
+cannot prove, an invalid flag, an invalid instance of the callee for the
+arguments, a native whose first parameter has a different known kind, ...
+A check of the call's result by the construct that uses it (an outer call's
+parameter, an operator, a declared result) is that construct's, never the
+call's, so how a result is used never selects a candidate. A declared error nobody handled is not
+evidence against a candidate either (it is the obligation of a call that
+fits). Validity is judged in the program as decided: with every other call
+at its decided candidate, the call at the candidate (the decided build, or a
+build with only this call moved). Calls with a single candidate -- almost
+all -- cost nothing extra. Where the receiver's kind rules a candidate out
+(a List receiver rules out `std::str::length`), no build of it is needed
 (METHOD-DECISION-FILTER.md); the decisions are the same.
 A candidate that is statically a function of another arity is not a candidate
 (unless none is left, which keeps the ordinary arity error).

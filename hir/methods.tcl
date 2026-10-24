@@ -40,7 +40,8 @@
 #   candidate whose ordinary call is valid, given the others. A call with
 #   several applicable candidates is AMBIGUOUS-METHOD-CALL, with none
 #   NO-APPLICABLE-METHOD (it stands at its first applicable candidate, else
-#   at the one it stood at, so the program keeps a call that types).
+#   at its first candidate: a placeholder that decides nothing, so the
+#   program keeps a call that types).
 #
 # The procedure (Decide)
 # ----------------------
@@ -55,30 +56,35 @@
 #    that settles a receiver chain in one build (the default candidates of
 #    the calls before it may have narrowed the binding to nothing). One
 #    build per wave, until no stand-in moves.
-# 2. Certification. In the build of the current configuration S, with no
-#    guess: a call whose stand-in its receiver rules out moves to its first
-#    survivor (and S is built again). Then every call with several
-#    survivors is judged: each other survivor K by the single deviation
+# 2. Trial rounds (search; Proposal). In the build of the current
+#    configuration, with no guess: a call whose stand-in its receiver rules
+#    out moves to its only survivor; every call with several survivors is
+#    tried at each of them, all at once (one build per survivor index), and
+#    moves to the first that showed no own problem -- when its receiver had
+#    one type in every trial. Until nothing moves.
+# 3. Certification (Verdicts). In the build of the current configuration
+#    S, every call with several survivors is judged: the candidate it
+#    stands at by S's build, each other survivor K by the single deviation
 #    S[C:=K], built (or read from a record of the same configuration). A
-#    call whose applicable set is not {S(C)} moves to its unique applicable
-#    candidate, or to its first when it has several and S(C) is not one;
-#    if any call moved, S is built again and judged again. When nothing
-#    moves, S is the decision: every verdict was computed relative to S
-#    itself. Bounded rounds; a call still moving at the bound depends on
-#    its own decision (an oscillation) and is AMBIGUOUS-METHOD-CALL between
-#    the candidates it moved between.
-# 3. The final program is the build of S: the last build made when it is
-#    S's (its process state is then the final one), else built again. The
-#    rejected calls' diagnostics are prepended, with every candidate's
-#    reason (its first own problem, from its own build).
+#    call whose applicable set is not {S(C)} moves to its canonical stand-in
+#    -- its first applicable candidate, else its first candidate; if any
+#    call moved, S is built again and judged again. When nothing moves,
+#    every verdict was computed relative to S itself. Bounded rounds; a call
+#    still moving at the bound depends on its own decision (an oscillation)
+#    and is AMBIGUOUS-METHOD-CALL between the candidates it moved between.
+# 4. The final program is the build of S: the last build made when it is
+#    S's (its process state is then the final one), else built again. A call
+#    whose applicable set is exactly {S(C)} is decided; every other call is
+#    rejected, its diagnostic prepended, with every candidate's reason (its
+#    first own problem, from its own build) for NO-APPLICABLE-METHOD.
 #
 # Why the outcome is the rule's, and is independent of the search: every
 # verdict that decides is computed relative to the final configuration
 # itself -- in its build, in a single deviation of it, or by a kind proof of
 # its build's receiver -- and owned problems are the call's own checks, so
 # no other call's check or choice is read as this call's verdict. The waves,
-# the stand-ins and the order calls are judged in only choose the
-# configuration the certification starts from. For a program whose calls'
+# the trial rounds, the stand-ins and the order calls are judged in only
+# choose the configuration the certification starts from. For a program whose calls'
 # arguments do not depend on the calls' own decisions (a receiver chain, a
 # call in another call's argument, a call on a function's result: every
 # acyclic program), the decision is unique -- by induction over the calls
@@ -542,14 +548,13 @@ proc hir::methods::Decide {nodes options given hir seeds} {
     dict set state records $config $record
     dict set state initial $config
     dict set state last [list $config $hir]
-    set fixed [dict merge [dict get $record traits] $fixed]
     set choices $fixed
     foreach key $keys {
         if {![dict exists $choices $key]} {
             dict set choices $key [dict get $calls $key chosen]
         }
     }
-    set open [Open $keys $fixed]
+    lassign [Fix $record $fixed $choices [Open $keys $fixed]] fixed choices open
     if {$open eq ""} {
         dict set hir methodChoices [Ordered $calls $choices]
         dict set hir methodDecided [Ordered $calls $fixed]

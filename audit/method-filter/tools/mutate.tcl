@@ -52,17 +52,17 @@ set mutants [list \
         "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n" \
         "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n        if \{\$t eq \"\" && \[dict exists \$hir exprs \$v inferredParamTypes\]\} \{ set t \[lindex \[dict get \$hir exprs \$v inferredParamTypes\] 0\] \}\n"] \
     [list kind-proofs-ignore-switch hir/methods.tcl \
-        "    if \{!\$methodKindProofs\} \{\n        return \$candidates\n    \}" \
+        "    if \{!\$methodKindProofs && !\$guess\} \{\n        return \$candidates\n    \}" \
         "    if \{0\} \{\n        return \$candidates\n    \}"] \
-    [list wave-moves-on-several hir/methods.tcl \
-        "                if \{\[llength \$guessed\] == 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{" \
-        "                if \{\[llength \$guessed\] >= 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{"] \
+    [list waves-move-nothing hir/methods.tcl \
+        "            if \{\[llength \$guessed\] == 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{" \
+        "            if \{0 && \[llength \$guessed\] == 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{"] \
     [list guess-ignored hir/methods.tcl \
         "    if \{\$guess\} \{\n        set node \[dict get \$hir exprs \$receiver\]" \
         "    if \{0\} \{\n        set node \[dict get \$hir exprs \$receiver\]"] \
     [list trait-calls-not-fixed hir/methods.tcl \
-        "    set fixed \[dict merge \[dict get \$record traits\] \$fixed\]" \
-        "    set fixed \[dict merge \{\} \$fixed\]"] \
+        "    dict for \{key chosen\} \[dict get \$record traits\] \{" \
+        "    dict for \{key chosen\} \{\} \{"] \
     [list seeds-ignored hir/methods.tcl \
         "        if \{\[dict exists \$calls \$key\] && \$choice in \[dict get \$calls \$key candidates\]\} \{\n            dict set fixed" \
         "        if \{0\} \{\n            dict set fixed"] \

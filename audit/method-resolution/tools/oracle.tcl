@@ -32,8 +32,10 @@
 # modules whose names sort before and after `std` and that declare
 # overlapping signatures (so a call may be ambiguous, have no applicable
 # candidate, or have an outer candidate that sorts first and rejects an inner
-# call's result). For each program the tool predicts every method call's
-# outcome, compiles the program, and requires
+# call's result), some of them differing only in their result types (a
+# call's use would tell those apart, and must not: it is no check of the
+# call's). For each program the tool predicts every method call's outcome,
+# compiles the program, and requires
 #
 #   * every call the compiler records with several candidates to be decided
 #     to the predicted candidate, or rejected with the predicted kind (the
@@ -98,7 +100,7 @@ proc literal {type} {
         str { return "\"[pick {a bb ccc}]\"" }
         ilist { return "\[[expr {int(rand() * 9)}], [expr {int(rand() * 9)}]\]" }
         slist { return "\[\"x\", \"yy\"\]" }
-        llist { return "\[\[1, 2\], \[3\]\]" }
+        llist { return "\[\[1, 2\], \[3, 4\]\]" }
         bag { return "types::Bag {n: [expr {int(rand() * 9)}]}" }
         box { return "types::Box {v: [expr {int(rand() * 9)}]}" }
     }
@@ -119,7 +121,9 @@ set templates {
     {pick {bag int} int {p0.n + p1}}
     {wrap {int} bag {types::Bag {n: p0}}}
     {wrap {str} box {types::Box {v: 1}}}
-    {first {llist} ilist {[7]}}
+    {first {llist} ilist {[7, 8]}}
+    {size {bag} str {"b"}}
+    {first {llist} int {7}}
 }
 
 # The natives of std::list and std::str named like a method: name ->
@@ -221,9 +225,10 @@ proc gen {type depth} {
     set receiver [gen $recvType [expr {$depth - 1}]]
     set args [lmap a $argTypes {
         if {$a eq "int" && ($name eq "at" || [chance 0.7])} {
-            # (An index is 0 or 1, within every List literal: an index the
-            # completion analysis proves out of range is a KNOWN-ERROR,
-            # which this universe does not model.)
+            # (An index is 0 or 1, within every List a program makes, all
+            # of two elements: an index the completion analysis proves out
+            # of range is a KNOWN-ERROR, which this universe does not
+            # model.)
             list lit [expr {int(rand() * 2)}] int
         } else {
             gen $a [expr {$depth - 2}]

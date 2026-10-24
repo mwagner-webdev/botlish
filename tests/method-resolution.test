@@ -136,6 +136,13 @@ test mr-subject-is-the-checked-call {an argument a call's callee rejects is repo
     set results
 } -result {call call 1}
 
+test mr-consumer-check-has-no-subject {a check that holds a value to the construct that uses it is no call's own check, whatever calls were checked before it: the Float64 operator's rejection of an Int operand carries no subject, while the argument rejected by `take` has `take`'s call as its subject} -body {
+    set r [mrCompile [dict create main.bot "import std::list\n\nfn take(s: str) -> int:\n    0\n\nx = take(std::list::at(\[1\], 0))\ny = std::list::length(\[1\]) + 1.5\n"] 1 0]
+    lmap d [dict get $r hir diagnostics] {
+        list [dict get $d kind] [dict exists $d subject]
+    }
+} -result {{TYPE 1} {TYPE 0}}
+
 test mr-problems-are-owned {a candidate's problems are the diagnostics its call's own checks report, never one located in the call: in the build where the outer `length` stands at `bag::length`, its rejection of the List is reported at the inner call's node, and it is the outer call's problem, not the inner call's} -body {
     set r [mrCompile $::mrChain 1 0]
     set hir [dict get $r hir]
@@ -222,6 +229,34 @@ test mr-argument-nested-qualified {the program with the outer call written quali
     set r [mrCompile $files]
     list [dict get $r diagnostics] [dict get $r decided] [mrValue $r]
 } -result {{} beta::g 3}
+
+# The method names of a compilation's AMBIGUOUS-METHOD-CALL and
+# NO-APPLICABLE-METHOD diagnostics: {KIND NAME} each.
+proc mrRejected {r} {
+    set out {}
+    foreach d [dict get $r diagnostics] {
+        lassign $d kind message
+        if {$kind ni {AMBIGUOUS-METHOD-CALL NO-APPLICABLE-METHOD}} continue
+        regexp {method-style call "([^"]+)"} $message -> name
+        lappend out [list $kind $name]
+    }
+    return $out
+}
+
+test mr-inner-failure-is-not-the-outer-calls {an inner call with no applicable candidate is rejected alone: `(1).pick((7).size())` -- no `size` accepts an Int, both of whose results are Int -- decides the outer call by its own checks to aa::pick (the location rule reported it NO-APPLICABLE-METHOD too, naming the inner call's problem as aa::pick's)} -body {
+    set aa "fn size(s: List\[int\]) -> int:\n    3\n\nfn pick(a: int, b: int) -> int:\n    a + b\n"
+    set zz "fn size(s: List\[str\]) -> int:\n    4\n\nfn pick(a: str, b: int) -> str:\n    a\n"
+    set r [mrCompile [dict create aa.bot $aa zz.bot $zz main.bot "import aa\nimport zz\n\nfn main() -> int:\n    (1).pick((7).size())\n\nmain()\n"]]
+    list [mrRejected $r] [dict get $r decided]
+} -result {{{NO-APPLICABLE-METHOD size}} aa::pick}
+
+test mr-use-does-not-select {how a call's result is used is no check of the call's: two `size`s that accept the receiver and differ only in their results (Int, Float64) are ambiguous as the argument of a function that accepts only an Int, as an operand of a Float64 operator, and as a function's declared Int result (the location rule decided the first by its use)} -body {
+    set aa "fn size(s: List\[int\]) -> int:\n    3\n"
+    set zz "fn size(s: List\[int\]) -> Float64:\n    4.5\n"
+    set main "import aa\nimport zz\n\nfn take(n: int) -> int:\n    n\n\nfn a() -> int:\n    take(\[1, 2\].size())\n\nfn b() -> Float64:\n    \[1, 2\].size() + 1.5\n\nfn c() -> int:\n    \[1, 2\].size()\n\n1\n"
+    set r [mrCompile [dict create aa.bot $aa zz.bot $zz main.bot $main]]
+    list [mrRejected $r] [dict get $r decided]
+} -result {{{AMBIGUOUS-METHOD-CALL size} {AMBIGUOUS-METHOD-CALL size} {AMBIGUOUS-METHOD-CALL size}} {}}
 
 # ---------------------------------------------------------------------------
 # Chains, receivers, modules
