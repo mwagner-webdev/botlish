@@ -89,6 +89,16 @@ jobs:
       - name: Build the game (generate the MSVC SDL3 binding, compile, link)
         run: ICY_TOWER_BINDING="$PWD/dist/sdl3-binding" examples/games/icy-tower/build-windows.sh dist/icy-tower-windows-x86_64
 
+      # The generated binding's account of itself, in the log: what it was
+      # generated from and with, and what it bound.
+      - name: The generated binding
+        run: |
+          b=dist/sdl3-binding/windows-x86_64
+          grep -E '^(target|source|command|toolchain_|evidence|preprocessed_tokens) ' "$b/manifest.txt"
+          sed -n '/^Bound/,/^Pointer contracts/p' "$b/report.txt"
+          grep -E '^extern c fn (SDL_Init|SDL_malloc|SDL_strlcpy|SDL_RenderLine|SDL_GetTicksNS)\b' "$b"/sdl3/*.bot
+          grep -E '^SDL_(SCANCODE_LEFT|EVENT_QUIT) ' "$b"/sdl3/*.bot
+
       - name: Run the Windows executable's tests
         run: |
           tmp=$(mktemp -d)

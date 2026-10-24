@@ -1,7 +1,7 @@
 #!/bin/sh
 # build-windows.sh -- builds the Icy Tower vertical slice's Windows x86-64
 # executable (ICY-TOWER-WINDOWS.md) on Windows, from a clean checkout, in Git
-# for Windows' bash:
+# for Windows' sh or bash:
 #
 #   examples/games/icy-tower/build-windows.sh [OUTDIR]
 #
@@ -33,7 +33,7 @@
 set -eu
 # Windows paths (D:/a/...) for the native programs below: MSYS's /d/a/...
 # means nothing to tclsh9.0.
-winpath() { (cd "$1" && pwd -W); }
+winpath() { (cd "$1" && { pwd -W 2>/dev/null || cygpath -m "$PWD"; }); }
 here=$(winpath "$(dirname "$0")")
 root=$(winpath "$here/../../..")
 out=${1:-icy-tower-windows}

@@ -416,10 +416,12 @@ file delete -force [file dirname $executable]
 
 # Windows, a built native backend, executables, the package-owned SDL3.dll
 # and SDL3.lib (tests/cffi/sdl3.tcl), clang for the MSVC SDL3 binding
-# build-windows.sh generates, and bash (Git for Windows') to run it.
+# build-windows.sh generates, and Git for Windows' sh to run it. (Not
+# `bash`: the first one on a Windows PATH can be System32's, WSL's
+# launcher.)
 testConstraint icyTowerWindowsExecutable [expr {$::tcl_platform(platform) eq "windows" &&
     [testConstraint nativeBuilt] && [testConstraint executableAot] && [cffi::sdl3Dir] ne "" &&
-    [auto_execok clang] ne "" && [auto_execok bash] ne ""}]
+    [auto_execok clang] ne "" && [auto_execok sh] ne ""}]
 
 set windowsGame [file join [tcltest::temporaryDirectory] icy-tower-windows]
 
@@ -438,7 +440,7 @@ proc icyRuntimeDlls {path} {
 
 test workload-icy-tower-windows-builds {build-windows.sh generates the MSVC SDL3 binding (windows-x86_64), stages the game with it, compiles main-windows.bot under -warnings error and links it with SDL3.lib: icy-tower.exe, a console x86-64 PE beside SDL3.dll, importing SDL3.dll; neither needs a C runtime DLL (the executable's C runtime is static, SDL3.dll is built without one)} -constraints icyTowerWindowsExecutable -body {
     file delete -force $windowsGame
-    exec bash [file join $gameDir build-windows.sh] $windowsGame 2>@1
+    exec sh [file join $gameDir build-windows.sh] $windowsGame 2>@1
     set exe [file join $windowsGame icy-tower.exe]
     set dll [file join $windowsGame SDL3.dll]
     set pe [peFacts $exe]
