@@ -604,6 +604,33 @@ proc hir::structs::projectionDenied {type node} {
     return [expr {[declared $id] && [representationDenied $id [dict get $node ns]]}]
 }
 
+# The PRIVATE-ACCESS message of the field access NODE (a `project` node)
+# through a value of TYPE, its receiver's type, when TYPE is a struct or a
+# layout's native view or edit declared `private` by another module than
+# the one NODE's code is in (hir/privacy.tcl: the declaration is not that
+# code's to use, its fields included), else "". A node without an `ns`
+# stamp is trusted (the file header).
+proc hir::structs::PrivateRepresentation {hir type node} {
+    if {![dict exists $node ns]} {
+        return ""
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        set id [lindex $type 1]
+    } else {
+        set id [hir::layouts::OfNativeType $type]
+        if {$id eq "" || [llength $id] != 1} {
+            return ""
+        }
+    }
+    set decls [hir::privacy::Decls $hir]
+    lassign [hir::privacy::Member $id] ns name
+    if {![hir::privacy::Denied $decls $ns types $name [dict get $node ns]]} {
+        return ""
+    }
+    set entry [hir::privacy::Entry $decls $ns types $name]
+    return "field access on $id is not available outside [hir::privacy::UnitPhrase $ns]: [hir::privacy::AccessMessage $ns $name [dict get $entry kind] [dict get $node ns]]"
+}
+
 # The struct declaration the expression-level name NAME could be confused
 # with: a non-struct type of the same spelling, for a better diagnostic.
 proc hir::structs::IsOtherType {name} {
@@ -908,6 +935,10 @@ proc hir::structs::ProjectionProblem {hir e} {
             [expr {[hir::types::IsNativeEdit $type] ? "edit" : "view"}] \
             [hir::types::show $type] $name $view [join [hir::layouts::StructNames $view] {, }]]]
     }
+    set private [PrivateRepresentation $hir $type $node]
+    if {$private ne ""} {
+        return [list PRIVATE-ACCESS $private]
+    }
     if {[projectionDenied $type $node]} {
         set problem OPAQUE-REPRESENTATION
     } elseif {[hir::types::IsStructLike $type]} {
@@ -925,6 +956,20 @@ proc hir::structs::ProjectionProblem {hir e} {
         # The receiver's type is not known here: every intrinsic of that
         # name may be meant.
         set hint [MethodHint $name [IntrinsicsNamed $name]]
+        if {[dict exists $node privateCandidates]} {
+            append hint [::format { (%s %s private: not visible from here)} \
+                [join [lmap c [dict get $node privateCandidates] {string cat ` $c `}] {, }] \
+                [expr {[llength [dict get $node privateCandidates]] == 1 ? "is" : "are"}]]
+        }
+    } elseif {[dict exists $node privateCandidates]} {
+        # A method-style call `receiver.NAME(args)` with no function NAME
+        # visible, whose field call is rejected in every context, where the
+        # functions of that name are private members of imported modules
+        # (hir/privacy.tcl): the call is a private access.
+        set ns [Owner [lindex [dict get $node privateCandidates] 0]]
+        set decls [hir::privacy::Decls $hir]
+        set entry [hir::privacy::Entry $decls $ns values $name]
+        return [list PRIVATE-ACCESS "[hir::privacy::AccessMessage $ns $name [dict get $entry kind] [dict getdef $node ns ""]] (the method-style call \".${name}(...)\" applies only a function visible by that name)"]
     } elseif {[dict exists $node methodCallee]} {
         set candidates [UnimportedCandidates $hir $e $type]
         if {$candidates ne ""} {
@@ -1071,6 +1116,8 @@ proc hir::structs::UnimportedCandidates {hir e type} {
             if {$b eq ""} continue
             if {[dict exists $hir bindings $b nomethod]} continue
             if {[dict get $hir bindings $b kind] ne "local"} continue
+            # (A private member is not this code's to import: hir/privacy.tcl.)
+            if {[hir::privacy::Denied [hir::privacy::Decls $hir] $ns values $name $own]} continue
             lappend found "${ns}::$name"
         }
     }
@@ -1141,7 +1188,7 @@ proc hir::structs::verify {hirVar} {
             set owner [OwnerBlock $hir $e]
             if {$owner ne "program" && $owner ni $live} continue
         }
-        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION}} {
+        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION PRIVATE-ACCESS}} {
             # A failure of the receiver's type, whatever the field: one
             # written destructuring (`{a, b} = x`, an `on E {a, b}:` handler)
             # is the projections of one binding the front end synthesized,

@@ -284,6 +284,7 @@ namespace eval hir::static {
         NOT-AN-ENUM                              NotAnEnum
         OPAQUE-CONSTRUCTION                      OpaqueConstruction
         OPAQUE-REPRESENTATION                    OpaqueRepresentation
+        PRIVATE-ACCESS                           PrivateAccess
         PROOF-CLAUSE                             ProofClause
         REFINEMENT-MINT-AUTHORITY                RefinementMintAuthority
         REFINEMENT-PARAMETER                     RefinementParameter

@@ -1,0 +1,296 @@
+# context-resource-escape.test -- CONTEXT-RESOURCE-ESCAPE, the warning on an
+# airlock that hands its raw foreign representation across its boundary
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md; the rule of
+# ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, section 11).
+#
+# An airlock is a module the direct-module analysis proves contextualized.
+# The warning reports, once per exposing declaration, a public member whose
+# crossing into another unit passes or returns a C address (R2) or a native
+# view or edit (R3) the caller may read, and a non-opaque struct of the
+# airlock holding one that another unit builds or takes apart (R4); an
+# opaque or private struct stops the search, a private member is never a
+# crossing, and an argument passed by a unit with raw authority of its own
+# is its own.
+#
+# The programs compile only (no backend runs a C call here): each is a fresh
+# application directory of the tcltest temporary directory.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::ceCounter 0
+
+proc ceApp {files} {
+    set dir [makeDirectory ce-app-[pid]-[incr ::ceCounter]]
+    foreach {relative text} $files {
+        set path [file join $dir {*}[file split $relative]]
+        file mkdir [file dirname $path]
+        set channel [open $path w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+proc ceRemoveApps {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] ce-app-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc ceHir {dir {mode default}} {
+    return [surface::readProgramFile [file join $dir main.bot] -warnings $mode -warning-channel "" -cache ""]
+}
+
+# The CONTEXT-RESOURCE-ESCAPE warnings compiling FILES: per warning
+# {DECLARATION RULES {CONSUMER SITES ...} LINE}, LINE its primary line.
+proc ceWarnings {files} {
+    set hir [ceHir [ceApp $files]]
+    set result {}
+    foreach w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "CONTEXT-RESOURCE-ESCAPE"} continue
+        set data [dict get $w data]
+        lappend result [list [dict get $data declaration] [dict get $data rules] \
+            [concat {*}[dict get $data consumers]] [dict get [lrange [dict get $w primary] 2 end] line]]
+    }
+    return $result
+}
+
+# The rendered CONTEXT-RESOURCE-ESCAPE warnings compiling FILES, the
+# directory spelled away.
+proc ceText {files} {
+    set dir [ceApp $files]
+    set hir [ceHir $dir]
+    set result {}
+    foreach w [hir::warnings::of $hir] {
+        if {[dict get $w code] eq "CONTEXT-RESOURCE-ESCAPE"} {
+            lappend result [string map [list $dir/ ""] [hir::warnings::render $hir $w]]
+        }
+    }
+    return [join $result \n]
+}
+
+# An airlock: a context of its own mediates its raw calls (a retaining C
+# call, native views and edits), so the direct-module analysis proves it
+# contextualized. BODY is appended: its public and private members.
+proc ceAirlock {body} {
+    return "import std::binary
+import std::binary::native
+import std::ffi::c
+
+extern c fn handle() -> std::ffi::c::Ptr\[std::ffi::c::Void\]
+extern c fn use(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int
+extern c fn callback_of() -> std::ffi::c::FnPtr\[Fn\{args: \[\], return: std::ffi::c::Int\}\]
+
+layout Record:
+    size 8
+    align 8
+    field p: std::ffi::c::Ptr\[std::ffi::c::Void\] at 0
+
+opaque context struct Gfx:
+    ready: bool
+
+fn create() -> Gfx:
+    Gfx \{ready: true\}
+
+fn mediated(context g: Gfx) -> std::ffi::c::Int:
+    p = handle()
+    p.use()
+
+$body"
+}
+
+# An ordinary consumer of the airlock gfx: BODY in a function nobody calls
+# (the warning reads the program's code, not a run).
+proc ceMain {body {header ""}} {
+    return "${header}import gfx
+import std::ffi::c
+
+with context gfx::create()
+
+fn go():
+$body
+
+0
+"
+}
+
+# ---------------------------------------------------------------------------
+# R2, R3, R4
+
+test ce-r2-result {R2: a public function's result is the airlock's C pointer} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]
+} -result {{gfx::renderer R2 {{} 1} 24}}
+
+test ce-r2-parameter {R2: an ordinary module passes a pointer in} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn draw(p: std::ffi::c::Ptr\[std::ffi::c::Void\], context g: Gfx) -> std::ffi::c::Int:\n    p.use()\n"] \
+        main.bot [ceMain "    p = std::ffi::c::null\[std::ffi::c::Void\]()\n    gfx::draw(p)"]]
+} -result {{gfx::draw R2 {{} 1} 24}}
+
+test ce-r2-function-pointer {R2: a C function pointer is a raw address too} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn callback(context g: Gfx) -> std::ffi::c::FnPtr\[Fn\{args: \[\], return: std::ffi::c::Int\}\]:\n    callback_of()\n"] \
+        main.bot [ceMain "    f = gfx::callback()\n    f"]]
+} -match glob -result {{gfx::callback R2 *}}
+
+test ce-r3-view {R3: a native view of the airlock's memory} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn record(context g: Gfx) -> NativeView\[Record\] errors NativeViewNull:\n    p = handle()\n    std::binary::native::view(Record, p)\n"] \
+        main.bot [ceMain "    v = gfx::record():\n        on NativeViewNull:\n            return 0\n    p = v.p\n    0"]]
+} -result {{gfx::record R3 {{} 1} 24}}
+
+test ce-r3-edit {R3: a native edit} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn record(context g: Gfx) -> NativeEdit\[Record\] errors NativeEditNull:\n    p = handle()\n    std::binary::native::edit(Record, p)\n"] \
+        main.bot [ceMain "    e = gfx::record():\n        on NativeEditNull:\n            return 0\n    0"]]
+} -result {{gfx::record R3 {{} 1} 24}}
+
+test ce-r2-nested {R2 through aggregates: a List of open structs holding a pointer} -body {
+    ceWarnings [list gfx.bot [ceAirlock "struct Pair:\n    p: std::ffi::c::Ptr\[std::ffi::c::Void\]\n    n: int\n\nfn pairs(context g: Gfx) -> List\[Pair\]:\n    \[Pair \{p: handle(), n: 1\}\]\n"] \
+        main.bot [ceMain "    xs = gfx::pairs()\n    0"]]
+} -result {{gfx::pairs R2 {{} 1} 28}}
+
+test ce-r4-projection {R4: another module reads the fields of an open struct holding the airlock's pointer -- reported at the struct, its function too} -body {
+    ceWarnings [list gfx.bot [ceAirlock "struct Video:\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Void\]\n    ok: bool\n\nfn open(context g: Gfx) -> Video:\n    Video \{renderer: handle(), ok: true\}\n"] \
+        main.bot [ceMain "    v = gfx::open()\n    \{renderer, ok\} = v\n    renderer"]]
+} -result {{gfx::Video R4 {{} 1} 24} {gfx::open R2 {{} 1} 28}}
+
+test ce-r4-construction {R4: another module constructs it} -body {
+    ceWarnings [list gfx.bot [ceAirlock "struct Video:\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Void\]\n"] \
+        main.bot [ceMain "    v = gfx::Video \{renderer: std::ffi::c::null\[std::ffi::c::Void\]()\}\n    0"]]
+} -result {{gfx::Video R4 {{} 1} 24}}
+
+# ---------------------------------------------------------------------------
+# The stopping rules
+
+test ce-opaque-stops {the opaque stopping rule: a public opaque resource value crosses freely, and a struct holding one is no raw representation} -body {
+    ceWarnings [list gfx.bot [ceAirlock "opaque struct Video:\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nstruct Polled:\n    video: Video\n    quit: bool\n\nfn open(context g: Gfx) -> Video:\n    Video \{renderer: handle()\}\n\nfn poll(v: Video, context g: Gfx) -> Polled:\n    Polled \{video: v, quit: false\}\n\nfn close(v: Video, context g: Gfx) -> std::ffi::c::Int:\n    \{renderer\} = v\n    renderer.use()\n"] \
+        main.bot [ceMain "    v = gfx::open()\n    \{video, quit\} = gfx::poll(v)\n    gfx::close(video)"]]
+} -result {}
+
+test ce-opaque-accessor-warns {opacity shields hidden representation, not a public escape hatch: an operation returning the opaque value's pointer warns} -body {
+    ceWarnings [list gfx.bot [ceAirlock "opaque struct Video:\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nfn open(context g: Gfx) -> Video:\n    Video \{renderer: handle()\}\n\nfn renderer_of(v: Video, context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    \{renderer\} = v\n    renderer\n"] \
+        main.bot [ceMain "    r = gfx::open().renderer_of()\n    r"]]
+} -result {{gfx::renderer_of R2 {{} 1} 30}}
+
+test ce-private-stops {the private stopping rule: a private helper returning the pointer is no crossing; the public operation takes values} -body {
+    ceWarnings [list gfx.bot [ceAirlock "private fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n\nfn draw(context g: Gfx) -> std::ffi::c::Int:\n    r = renderer()\n    r.use()\n"] \
+        main.bot [ceMain "    gfx::draw()"]]
+} -result {}
+
+test ce-private-stops-lenient {the private stopping rule holds by construction -- no other unit can name a private member or hold a private struct's value -- and the analysis keeps it on a lenient HIR too: a private struct of the airlock, though it holds a pointer, is as sealed to another module as an opaque one, so a public signature exposing it is PRIVATE-TYPE-ESCAPE and taking it apart PRIVATE-ACCESS, never also a crossing} -body {
+    set dir [ceApp [list gfx.bot [ceAirlock "private struct H:\n    p: std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nfn leak(context g: Gfx) -> H:\n    H \{p: handle()\}\n"] \
+        main.bot [ceMain "    \{p\} = gfx::leak()\n    p"]]]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -strict 0]
+    list [lsort -unique [lmap d [hir::recovery::reported $hir] {dict get $d kind}]] \
+        [hir::resourceescape::findings [dict getdef $hir traitSource $hir]]
+} -result {{PRIVATE-ACCESS PRIVATE-TYPE-ESCAPE} {}}
+
+test ce-private-view-helper {a private helper returning the airlock's view is implementation} -body {
+    ceWarnings [list gfx.bot [ceAirlock "private fn record(context g: Gfx) -> NativeView\[Record\] errors NativeViewNull:\n    p = handle()\n    std::binary::native::view(Record, p)\n\nfn draw(context g: Gfx) -> std::ffi::c::Int:\n    v = record():\n        on NativeViewNull:\n            return 0\n    p = v.p\n    p.use()\n"] \
+        main.bot [ceMain "    gfx::draw()"]]
+} -result {}
+
+test ce-private-alias-public {a public alias of a private helper is a public member: the crossing is the alias's} -body {
+    ceWarnings [list gfx.bot [ceAirlock "private fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n\nexported = renderer\n"] \
+        main.bot [ceMain "    r = gfx::exported()\n    r"]]
+} -result {{gfx::exported R2 {{} 1} 27}}
+
+test ce-unused-no-warning {evidence-based: a public pointer-returning function no other module uses draws no warning} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n\nfn draw(context g: Gfx) -> std::ffi::c::Int:\n    r = renderer()\n    r.use()\n"] \
+        main.bot [ceMain "    gfx::draw()"]]
+} -result {}
+
+test ce-ordinary-module {an ordinary module (no raw authority to mediate) is no airlock: its pointers cross unreported} -body {
+    ceWarnings [list gfx.bot "import std::ffi::c\n\nextern c fn handle() -> std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nopaque context struct Gfx:\n    ready: bool\n\nfn create() -> Gfx:\n    Gfx \{ready: true\}\n\nfn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n" \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]
+} -result {}
+
+test ce-direct-module {a designated direct module is a raw layer by declaration: no warning} -body {
+    ceWarnings [list gfx.bot "direct module\nimport std::ffi::c\n\nextern c fn handle() -> std::ffi::c::Ptr\[std::ffi::c::Void\]\nextern c fn use(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int\n\nfn renderer() -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n\nfn draw(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int:\n    p.use()\n" \
+        main.bot "direct module\nimport gfx\n\nfn go():\n    r = gfx::renderer()\n    gfx::draw(r)\n\n0\n"]
+} -result {}
+
+test ce-inside-airlock {calls inside the airlock are never crossings} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n\nfn draw(context g: Gfx) -> std::ffi::c::Int:\n    r = renderer()\n    r.use()\n"] \
+        main.bot [ceMain "    gfx::draw()"]]
+} -result {}
+
+test ce-provenance-direct-caller {the provenance rule: a pointer passed in by a module with raw authority of its own is its own resource; its result direction still warns} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn draw(p: std::ffi::c::Ptr\[std::ffi::c::Void\], context g: Gfx) -> std::ffi::c::Int:\n    p.use()\n\nfn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot "direct module\nimport gfx\nimport std::ffi::c\n\nextern c fn mine() -> std::ffi::c::Ptr\[std::ffi::c::Void\]\nextern c fn keep(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int\n\nwith context gfx::create()\n\nfn go():\n    q = mine()\n    keep(q)\n    p = mine()\n    gfx::draw(p)\n    r = gfx::renderer()\n    r\n\n0\n"]
+} -result {{gfx::renderer R2 {{} 1} 27}}
+
+test ce-values-only {routine value results of contextual operations are no resource} -body {
+    ceWarnings [list gfx.bot [ceAirlock "struct Polled:\n    quit: bool\n    held: List\[bool\]\n\nfn poll(context g: Gfx) -> Polled:\n    Polled \{quit: false, held: \[true\]\}\n\nfn seconds(context g: Gfx) -> int:\n    3\n"] \
+        main.bot [ceMain "    \{quit, held\} = gfx::poll()\n    gfx::seconds()"]]
+} -result {}
+
+test ce-value-reference {a public context-free function of the airlock taken as a value crosses with its signature's raw types} -body {
+    ceWarnings [list gfx.bot [ceAirlock "fn raw() -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    std::ffi::c::null\[std::ffi::c::Void\]()\n"] \
+        main.bot [ceMain "    f = gfx::raw\n    0"]]
+} -result {{gfx::raw R2 {{} 1} 24}}
+
+test ce-trait-operation {a trait operation is the trait's contract: calling it through a trait value crosses nothing, though the call runs the airlock's public function; calling that function directly does} -body {
+    set airlock [ceAirlock "opaque struct Handle:\n    n: int\n\nfn make() -> Handle:\n    Handle \{n: 1\}\n\nfn address(h: Handle) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    std::ffi::c::null\[std::ffi::c::Void\]()\n"]
+    set trait "trait Addressed:\n    fn address(value: Addressed) -> std::ffi::c::Ptr\[std::ffi::c::Void\]\n\nfn located(x: Addressed) -> bool:\n    p = x.address()\n    std::ffi::c::null?(p)\n\n"
+    set main "import gfx\nimport std::ffi::c\n\n${trait}with context gfx::create()\n\nfn go():\n%s\n\n0\n"
+    list [ceWarnings [list gfx.bot $airlock main.bot [format $main "    located(gfx::make())"]]] \
+        [ceWarnings [list gfx.bot $airlock main.bot [format $main "    p = gfx::make().address()\n    std::ffi::c::null?(p)"]]]
+} -result {{} {{gfx::address R2 {{} 1} 30}}}
+
+# ---------------------------------------------------------------------------
+# Reporting
+
+test ce-one-per-declaration {one warning per exposing declaration, every consuming unit counted by distinct sites, the first crossing of each a related location} -body {
+    set files [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        render.bot "import gfx\nimport std::ffi::c\n\nfn a() -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    gfx::renderer()\n\nfn b() -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    gfx::renderer()\n" \
+        main.bot [ceMain "    r = gfx::renderer()\n    r" "import render\n"]]
+    set dir [ceApp $files]
+    set hir [ceHir $dir]
+    set w [lindex [lmap w [hir::warnings::of $hir] {if {[dict get $w code] eq "CONTEXT-RESOURCE-ESCAPE"} {set w} else continue}] 0]
+    list [dict get $w data consumers] [lmap o [dict get $w secondary] {string map [list $dir/ ""] [hir::originLocation $hir $o]}]
+} -result {{{{} 1} {render 2}} {main.bot:8:9 render.bot:5:5}}
+
+test ce-message {the text: the declaration, the raw value and where, the airlock and its context, each consumer, the remedies} -body {
+    ceText [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]
+} -result {gfx.bot:24:1: warning: gfx::renderer exposes a raw C pointer (its result: std::ffi::c::Ptr[std::ffi::c::Void]) across the boundary of module "gfx", which mediates its raw authority through its context gfx::Gfx: the entry program receives one (1 call; first at main.bot:7:9). Keep the resource behind the context and give module "gfx" an operation that takes and returns values, or seal the resource in an opaque struct (CONTEXT-RESOURCE-ESCAPE)
+main.bot:7:9: note: a crossing of this resource}
+
+test ce-struct-message {an R4 warning's text names the struct and the open field} -body {
+    ceText [list gfx.bot [ceAirlock "struct Video:\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Void\]\n"] \
+        main.bot [ceMain "    v = gfx::Video \{renderer: std::ffi::c::null\[std::ffi::c::Void\]()\}\n    0"]]
+} -result {gfx.bot:24:8: warning: gfx::Video holds a raw C pointer (in its representation, at .renderer: std::ffi::c::Ptr[std::ffi::c::Void]) and its representation is open across the boundary of module "gfx", which mediates its raw authority through its context gfx::Gfx: the entry program constructs it (1 site; first at main.bot:7:9). Keep the resource behind the context, or declare gfx::Video opaque so that only module "gfx" can build and take it apart (CONTEXT-RESOURCE-ESCAPE)
+main.bot:7:9: note: a crossing of this resource}
+
+test ce-warnings-error {-warnings error makes the first one the compilation's error, with the warning's own code} -body {
+    set dir [ceApp [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]]
+    catch {ceHir $dir error} message options
+    lindex [dict get $options -errorcode] end
+} -result CONTEXT-RESOURCE-ESCAPE
+
+test ce-warnings-off {-warnings off runs no pass} -body {
+    hir::warnings::of [ceHir [ceApp [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]] off]
+} -result {}
+
+test ce-no-semantics {the warning changes nothing a program means: the HIR of a warned program is the one built under -warnings off, but for the attached warnings} -body {
+    set dir [ceApp [list gfx.bot [ceAirlock "fn renderer(context g: Gfx) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    handle()\n"] \
+        main.bot [ceMain "    r = gfx::renderer()\n    r"]]]
+    set a [ceHir $dir default]
+    set b [ceHir $dir off]
+    list [llength [hir::warnings::of $a]] [expr {[hir::lower $a] eq [hir::lower $b]}]
+} -result {1 1}
+
+test ce-g1-reproducer {the census's leaked-view reproducer g1 warns once, at airlock::record (R3)} -body {
+    set dir [file join $::projectRoot audit icy-tower context-refactor repro g1-view-leak]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings default -warning-channel "" -cache ""]
+    lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "CONTEXT-RESOURCE-ESCAPE"} continue
+        list [dict get $w data declaration] [dict get $w data rules]
+    }
+} -result {{airlock::record R3}}
+
+ceRemoveApps
+cleanupTests

@@ -1,0 +1,383 @@
+# Mutants of module privacy and CONTEXT-RESOURCE-ESCAPE
+# (audit/module-privacy/tools/mutate.tcl;
+# MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md, section 25): each breaks
+# one rule of the parser (surface/parser.tcl), the loader
+# (surface/modules.tcl), resolution and method candidates (hir/resolve.tcl),
+# field access (hir/structs.tcl, hir/types.tcl), trait and context-trait
+# conformance (hir/traits.tcl, hir/contexts.tcl), the public-signature check
+# (hir/privacy.tcl), HIR interchange (hir/interchange.tcl) or the warning
+# (hir/resourceescape.tcl, hir/warnings.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit are
+# comments. No mutant edits native/: privacy has no runtime.
+
+# ---------------------------------------------------------------------------
+# Privacy: the one fact and the access rule
+
+@@ parse-drops-private the parser accepts `private` but records nothing: every declaration is public
+## surface/parser.tcl
+<<<<
+    dict set node private 1
+    dict set node privateSpan $span
+====
+>>>>
+
+@@ loader-records-nothing the loader keeps no private set: the fact every check reads is empty
+## surface/modules.tcl
+<<<<
+            dict set private $category $name [dict create kind $kind origin $origin]
+====
+>>>>
+
+@@ same-module-rejected the access rule forgets that the declaring module is the one unit that may use its private members
+## hir/privacy.tcl
+<<<<
+    return [expr {$from ne $ns && [Entry $decls $ns $category $name] ne ""}]
+====
+    return [expr {[Entry $decls $ns $category $name] ne ""}]
+>>>>
+
+@@ qualified-lookup-ignored a qualified value reference of another module is never checked
+## surface/modules.tcl
+<<<<
+    CheckPrivate $state $own $namespaceName $symbolName values $span
+}
+====
+}
+>>>>
+
+@@ rooted-lookup-ignored a rooted reference (::m::f) skips the private check
+## surface/modules.tcl
+<<<<
+    CheckPrivate $state $own $namespaceName $symbolName values $span
+}
+====
+    if {!$rooted} {
+        CheckPrivate $state $own $namespaceName $symbolName values $span
+    }
+}
+>>>>
+
+@@ type-lookup-ignored a qualified type or struct of another module is never checked
+## surface/modules.tcl
+<<<<
+        CheckPrivate $state $own $namespaceName $symbolName types $span
+        return
+    }
+    if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
+====
+        return
+    }
+    if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
+>>>>
+
+@@ error-lookup-ignored a qualified error of another module is never checked
+## surface/modules.tcl
+<<<<
+        CheckPrivate $state $own $namespaceName $symbolName errors $span
+====
+>>>>
+
+@@ type-import-ignored `import type m::T` of a private type is allowed
+## surface/modules.tcl
+<<<<
+        CheckPrivate $state $own $ns $name types $nameSpan
+====
+>>>>
+
+# (No mutant removes the resolver's own check of a qualified reference
+# (hir/resolve.tcl's ResolveQualifiedRef): it is the second line behind the
+# loader, which rejects every reference a source file writes first, and no
+# source program reaches it -- the build itself makes qualified references
+# only for planned trait and context-trait calls, whose implementations
+# conformance already requires to be public (trait-private-implements,
+# context-trait-private-implements). A mutant of it is equivalent; the
+# check's effect shows when the loader's is mutated away (rooted-lookup-
+# ignored), and mp-access-message tells the two apart by the related
+# location only the loader gives.)
+
+# ---------------------------------------------------------------------------
+# Privacy: method syntax, fields, traits
+
+@@ method-sugar-sees-private a private function of an imported module is a method candidate
+## hir/resolve.tcl
+<<<<
+            if {[dict exists $hir scopes $scope names $name]
+                    && [hir::privacy::Denied $decls $ns values $name [CtxNamespace $ctx]]} {
+                lappend private $qualified
+            } elseif {[dict exists $hir scopes $scope names $name]} {
+====
+            if {[dict exists $hir scopes $scope names $name]} {
+>>>>
+
+@@ method-private-only-silent a method-style call reaching only a private function is no private access (it falls to the unknown-field report)
+## hir/structs.tcl
+<<<<
+    } elseif {[dict exists $node privateCandidates]} {
+====
+    } elseif {0} {
+>>>>
+
+@@ import-hint-suggests-private a private function is suggested as the import a method call needs
+## hir/structs.tcl
+<<<<
+            if {[hir::privacy::Denied [hir::privacy::Decls $hir] $ns values $name $own]} continue
+====
+>>>>
+
+@@ private-struct-fields-readable another module reads the fields of a private struct's value
+## hir/structs.tcl
+<<<<
+    set private [PrivateRepresentation $hir $type $node]
+    if {$private ne ""} {
+        return [list PRIVATE-ACCESS $private]
+    }
+====
+>>>>
+
+@@ trait-private-implements a private function implements a trait requirement
+## hir/traits.tcl
+<<<<
+    if {[dict getdef $info private 0]} {
+        return [dict create ok 0 reason [PrivateImplementation $qualified $owner] found ""]
+    }
+====
+>>>>
+
+@@ context-trait-private-implements a private function implements a context-trait operation
+## hir/contexts.tcl
+<<<<
+    if {[dict getdef $info private 0]} {
+        return [dict create ok 0 reason [hir::traits::PrivateImplementation $qualified $owner] found ""]
+    }
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# Privacy: public signatures (PRIVATE-TYPE-ESCAPE)
+
+@@ escape-unchecked no public signature is judged: a private type in a parameter or result is allowed
+## hir/privacy.tcl
+<<<<
+    dict for {unit scope} [dict getdef $hir modules {}] {
+        if {![dict exists $decls $unit]} continue
+        foreach b [dict get $hir scopes $scope bindings] {
+            CheckBinding hir $decls $unit $b
+        }
+    }
+====
+>>>>
+
+@@ escape-inferred-ignored an inferred result is not judged: only a declared one
+## hir/privacy.tcl
+<<<<
+    if {$result eq {} && [dict exists $node resultType] && [dict get $node resultType] ne ""} {
+====
+    if {0} {
+>>>>
+
+@@ escape-applied-shallow a private type inside a List or another applied type escapes unreported
+## hir/privacy.tcl
+<<<<
+        list - immutableSet - mutarray - mutvec - cptr {
+            set found [Find $decls [lindex $type 1]]
+====
+        list - immutableSet - mutarray - mutvec - cptr {
+            return ""
+            set found [Find $decls [lindex $type 1]]
+>>>>
+
+@@ escape-fn-type-ignored a private type in a function type's contract escapes unreported
+## hir/privacy.tcl
+<<<<
+        fn - coroutine {
+            return [FindContract $decls [lindex $type 1]]
+        }
+====
+>>>>
+
+@@ opaque-holding-private-rejected an opaque struct's hidden representation counts as interface: a public opaque struct may not hold a private type
+## hir/privacy.tcl
+<<<<
+            if {[dict get $entry opaque]} {
+                # Hidden representation is no public interface.
+                return
+            }
+====
+>>>>
+
+@@ escape-context-ignored a private context a public function requires is no escape
+## hir/privacy.tcl
+<<<<
+    foreach id [dict getdef $node requiredContexts {}] {
+====
+    foreach id {} {
+>>>>
+
+@@ interchange-loses-private HIR interchange writes the module declarations without their private sets
+## hir/interchange.tcl
+<<<<
+        set hir [dict remove $hir traitSource]
+====
+        set hir [dict remove $hir traitSource]
+        if {[dict exists $hir moduleDecls]} {
+            dict for {ns decl} [dict get $hir moduleDecls] {
+                dict set hir moduleDecls $ns private {}
+            }
+        }
+>>>>
+
+# ---------------------------------------------------------------------------
+# CONTEXT-RESOURCE-ESCAPE
+
+@@ warn-result-ignored a public function returning the airlock's pointer draws no warning
+## hir/resourceescape.tcl
+<<<<
+                set raw [Raw $hir [hir::typeOf $hir $c] $v]
+                if {$raw ne ""} {
+                    set where [Where "its result" $raw]
+====
+                set raw ""
+                if {$raw ne ""} {
+                    set where [Where "its result" $raw]
+>>>>
+
+@@ warn-params-ignored a pointer an ordinary module passes in is no crossing
+## hir/resourceescape.tcl
+<<<<
+                if {![RawAuthority $units $v]} {
+====
+                if {0} {
+>>>>
+
+@@ warn-provenance-ignored the provenance rule is dropped: a direct module's own pointer passed in warns
+## hir/resourceescape.tcl
+<<<<
+    return [expr {$status in {direct provided contextualized}}]
+====
+    return 0
+>>>>
+
+@@ warn-nested-shallow a pointer inside a List or struct is no raw representation
+## hir/resourceescape.tcl
+<<<<
+        list - immutableSet - mutarray - mutvec {
+            set found [Raw $hir [lindex $type 1] $from $seen]
+====
+        list - immutableSet - mutarray - mutvec {
+            return ""
+            set found [Raw $hir [lindex $type 1] $from $seen]
+>>>>
+
+@@ warn-view-ignored a native view or edit is no raw representation
+## hir/resourceescape.tcl
+<<<<
+        nview  { return [list view $type {}] }
+        nedit  { return [list edit $type {}] }
+====
+>>>>
+
+@@ warn-function-pointer-ignored a C function pointer is no raw representation
+## hir/resourceescape.tcl
+<<<<
+        cfnptr { return [list function-address $type {}] }
+====
+>>>>
+
+@@ warn-r4-ignored construction, projection and destructuring of an open resource struct draw no warning
+## hir/resourceescape.tcl
+<<<<
+        if {![hir::types::IsNamedStruct $type]} continue
+        set id [lindex $type 1]
+====
+        continue
+        set id [lindex $type 1]
+>>>>
+
+@@ warn-opaque-stop-removed the opaque stopping rule is dropped: a struct another module may not read still counts as raw
+## hir/resourceescape.tcl
+<<<<
+    if {[hir::structs::declared $id] && [hir::structs::isOpaque $id]} {
+        return 1
+    }
+====
+>>>>
+
+# The private stopping rule holds by construction for members: no other
+# unit can reference a private member (the access mutants above), so the
+# warning has no check of its own for one. What the analysis states is the
+# rule for values: a private struct is as sealed to another module as an
+# opaque one.
+@@ warn-private-stop-removed the private stopping rule is dropped for values: a private struct of the airlock holding a pointer counts as raw representation another module reads
+## hir/resourceescape.tcl
+<<<<
+    lassign [hir::privacy::Member $id] ns name
+    return [expr {[hir::privacy::Entry [hir::privacy::Decls $hir] $ns types $name] ne ""}]
+====
+    return 0
+>>>>
+
+@@ warn-ordinary-is-airlock an ordinary module (no raw authority) is classified an airlock
+## hir/resourceescape.tcl
+<<<<
+        if {[dict get $unit status] eq "contextualized"} {
+====
+        if {[dict get $unit status] in {contextualized ordinary}} {
+>>>>
+
+@@ warn-direct-is-airlock a designated direct module is warned about as an airlock
+## hir/resourceescape.tcl
+<<<<
+        if {[dict get $unit status] eq "contextualized"} {
+====
+        if {[dict get $unit status] in {contextualized direct}} {
+>>>>
+
+@@ warn-inside-airlock calls inside the airlock itself count as crossings
+## hir/resourceescape.tcl
+<<<<
+            if {$u eq "" || ![dict exists $airlocks $u] || $u eq $v} continue
+====
+            if {$u eq "" || ![dict exists $airlocks $u]} continue
+>>>>
+
+@@ warn-per-call-site one warning per crossing call site instead of one per exposing declaration
+## hir/resourceescape.tcl
+<<<<
+            set key binding:$b
+====
+            set key binding:$b:$e
+>>>>
+
+@@ warn-sites-not-distinct a consumer's crossings are counted per reference, not per distinct source location
+## hir/resourceescape.tcl
+<<<<
+    if {$location ni [dict get $consumer sites]} {
+        dict lappend consumer sites $location
+====
+    if {1} {
+        dict lappend consumer sites $location
+>>>>
+
+@@ warn-trait-call-counted a trait operation's call through the airlock counts as a crossing of the implementation
+## hir/resourceescape.tcl
+<<<<
+                if {[dict exists $hir exprs $c traitCall]} continue
+====
+>>>>
+
+@@ warn-evidence-after-elaboration the warnings read the monomorphized program (trait calls already direct calls), not the program as written
+## hir/warnings.tcl
+<<<<
+    set warnings [collect [dict getdef $hir traitSource $hir]]
+====
+    set warnings [collect $hir]
+>>>>

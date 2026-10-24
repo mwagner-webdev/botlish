@@ -9,7 +9,7 @@ summary: Every facility other languages offer that Botlish lacks or offers only 
 index: concepts
 alias: capabilities; missing features; absent features; unsupported features; does it exist; what is missing; limitations of the language
 keywords: capability, absent, missing, unsupported, limitation, feature, exist, alternative
-related: capability.integer-division capability.string-formatting capability.input capability.files capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.visibility capability.struct-type-import
+related: capability.integer-division capability.string-formatting capability.input capability.files capability.process-exit-status capability.test-timeout capability.concurrency capability.exceptions capability.multi-error-handler capability.lambdas capability.match capability.map-filter capability.null capability.assignment capability.struct-type-import
 
 == HOW TO FIND OUT WHETHER SOMETHING EXISTS
 Ask for it as you would name it elsewhere: `-help division`, `-help "exit
@@ -278,23 +278,6 @@ x
 @error CORE SEMANTIC UNBOUND
 @at 1:5
 @end
-
-@topic capability.visibility
-title: Private module members: absent
-summary: A module has no visibility control: every top-level function and value of a module is reachable after `import`; representation privacy exists for structs only, through `opaque struct`.
-index: concepts
-alias: private; public; visibility; export; hide function
-keywords: private, public, export, module, opaque
-related: concept.opaque-structs concept.modules rule.opaque-authority
-
-== STATUS
-No `private`, `pub` or export list. Helpers of a module are importable like
-its API.
-
-== NEAREST ALTERNATIVE
-`opaque struct` makes a struct's fields and construction belong to its
-module: everywhere else the value can be passed and compared but not built
-or inspected, so invariants hold by construction.
 
 @topic capability.match
 title: switch, match and pattern matching: absent

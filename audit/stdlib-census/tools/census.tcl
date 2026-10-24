@@ -21,7 +21,9 @@
 #              builtin (a runtime error or enum every program sees),
 #              demo (a demonstration module), std-internal (a member of an
 #              internal namespace, core::native::declareInternalNamespace,
-#              or that namespace: only standard-library modules may name it)
+#              or that namespace: only standard-library modules may name it),
+#              private (a `private` declaration: only its own module may
+#              name it, MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md)
 #   origin     source (a module file), intrinsic (a registered native or a
 #              compiler-declared type), source+intrinsic (a namespace with
 #              both)
@@ -164,7 +166,7 @@ dict for {ns files} $moduleNamespaces {
                 externfn { set kind extern-fn }
                 default { set kind [dict get $statement kind] }
             }
-            Row $name $kind $ns $role source $location $arch
+            Row $name $kind $ns [if {[dict getdef $statement private 0]} {string cat private} else {set role}] source $location $arch
         }
     }
 }

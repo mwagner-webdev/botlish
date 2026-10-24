@@ -915,6 +915,59 @@ seeds) and `audit/direct-modules/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when you
 change the code it mutates, keeping it a mutant of the same rule).
 
+## Module privacy and CONTEXT-RESOURCE-ESCAPE
+
+`private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) makes a
+top-level declaration -- a function, module binding, type, refinement,
+error, struct, enum, trait, context trait, layout or extern c fn --
+accessible only to code of the module that declares it. One fact decides
+every check: the module declarations' `private` sets (`moduleDecls`, which
+the loader records, surface/modules.tcl's `ModuleDecl`), read through
+`hir::privacy::Entry` and `Denied` (hir/privacy.tcl). Keep it so:
+
+* Never add a second visibility fact, a runtime check, tag or wrapper, a
+  `public`, `internal`, `friend` or package level, or a per-call
+  exception. Declarations stay public by default; never mark library
+  declarations private by usage counts. Access is decided by the
+  canonical module identity (the namespace path): no import, parent,
+  child, entry program or name component grants it.
+* `private` and `opaque` are orthogonal: privacy is who may name a
+  declaration, opacity who may build and take apart a value. Never let one
+  imply the other.
+* A private member of an imported module is invisible to method syntax
+  (`hir::resolve::MethodCandidates`): the call means what it would mean
+  without it, and is PRIVATE-ACCESS only when nothing else applies. A
+  private function implements no trait or context-trait requirement
+  (`hir::traits::ImplInfo`'s `private`). Never let a name match make a
+  private declaration a candidate.
+* PRIVATE-TYPE-ESCAPE (`hir::privacy::verify`) judges every public
+  declaration of a module (never the entry program's) by its declared and
+  inferred interface: parameters, results, errors, proof clauses, context
+  requirements, a struct's fields unless it is opaque, a layout's fields,
+  a refinement's carrier, a trait's requirements, an extern's C signature.
+  An opaque struct's hidden fields are no interface.
+
+`CONTEXT-RESOURCE-ESCAPE` (hir/resourceescape.tcl) reads the direct-module
+analysis's `contextualized` status (`direct units`, its discharging
+contexts), the checked types of a crossing's call, arguments or value
+(`hir::typeOf`), the struct registry's opacity and owner, the module
+declarations' private sets and the trait-call marker, on the program as
+written (`traitSource`). It reports one warning per exposing declaration;
+never add an opt-out, a fixit, a level, a warning on a declaration no other
+unit uses, or a rule that reads a name. If you change the parser's
+modifier, the loader's records or checks, method candidates, trait or
+context-trait conformance, `hir/privacy.tcl`, `hir/resourceescape.tcl`, the
+direct-module statuses or what interchange keeps, run
+`tests/module-privacy.test`, `tests/context-resource-escape.test`,
+`tests/workload-icy-tower.test`, `audit/module-privacy/tools/fuzz.tcl`
+(several seeds) and `audit/module-privacy/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's
+text when you change the code it mutates, keeping it a mutant of the same
+rule), plus the direct-modules, traits, context-traits, opaque-struct and
+interchange harnesses for a change to code they share.
+`audit/module-privacy/tools/warning-census.tcl` re-runs the repository
+census of the warning (audit/module-privacy/census/).
+
 ## Coroutines
 
 Coroutines (COROUTINES.md) are eagerly started, affine resumable
@@ -2853,11 +2906,23 @@ generated SDL3 binding. Keep its layering:
   return values only. Never give a function outside `sdl.bot` a C pointer,
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
-  the session's view or a pointer (a module has no private members:
-  anything it returns, every importer gets). A struct of `sdl.bot` that
-  holds a pointer, a view or an edit is opaque (an importer reads a view
-  it holds without any authority). `workload-icy-tower-sdl-airlock` and
+  the session's view or a pointer (anything a public function returns,
+  every importer gets). A struct of `sdl.bot` that holds a pointer, a view
+  or an edit is opaque (an importer reads a view it holds without any
+  authority). `workload-icy-tower-sdl-airlock` and
   `workload-icy-tower-sdl-records-opaque` check it.
+* Inside `sdl.bot`, every function whose parameter or result is a C
+  pointer, a native view or edit (or holds one, an opaque struct
+  excepted), every layout of native memory and the session record are
+  `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): helpers may
+  take and return pointers and views, and no importer can call them. The
+  session is looked up once, by the private `session`, `handles` and
+  `renderer`. Keep a new pointer-taking helper private; never make one
+  public to call it from another module (CONTEXT-RESOURCE-ESCAPE reports
+  that). `workload-icy-tower-sdl-helpers-private` and
+  `workload-icy-tower-no-resource-escape` check it, and
+  `workload-icy-tower-baseline-warnings` pins the twelve warnings the
+  original boundary (audit/icy-tower/context-refactor/baseline/) draws.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
   beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
   into the example directory or hand-write a parallel SDL declaration.

@@ -445,6 +445,12 @@ subtree imports, implicit imports, import-driven initialization,
 transitive visibility, nested-namespace *creation* or inheritance, overload
 resolution, namespaced `error` declarations.
 
+Private module members came later: a top-level declaration written
+`private` is accessible only to code of its own module, by the module's
+canonical identity (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md). An
+import still loads the whole module; what it may name there is the
+module's public declarations.
+
 Errors (`error NAME`) were the remaining global declaration category; they
 now have the same `NAMESPACE::Name` identity (ERROR-PAYLOADS.md,
 "Module-qualified error identity"): a module's error is named by its short

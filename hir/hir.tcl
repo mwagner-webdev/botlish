@@ -53,9 +53,12 @@
 #                section scope (surface/modules.tcl, hir/resolve.tcl's
 #                ResolveQualifiedRef); absent for a program with no modules
 #   moduleDecls  NAMESPACE ("" for the entry program) -> {direct 0|1 origin
-#                ORIGIN}: each source unit's module declaration (`direct
-#                module`, DIRECT-MODULES.md); absent past the source boundary
-#                (core IR text, HIR text)
+#                ORIGIN private PRIVATE declarations DECLARATIONS}: each
+#                source unit's module declaration (`direct module`,
+#                DIRECT-MODULES.md) and its private declarations and where
+#                its type-level declarations are named (hir/privacy.tcl,
+#                MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md); absent
+#                past the source boundary (core IR text, HIR text)
 #   direct       the module directness summary hir::direct::verify computed
 #                from moduleDecls (hir/direct.tcl): declared, inferred and
 #                final status per unit, and every direct edge with the context
@@ -477,12 +480,16 @@ proc hir::build {exprs args} {
 #                   the HIR's link plan (`foreign`, `links`)
 #   -module-decls D the module declarations of a source program
 #                   (DIRECT-MODULES.md): NAMESPACE ("" for the entry program)
-#                   -> {direct 0|1 origin ORIGIN}, one per unit of the
-#                   compilation, ORIGIN the `direct module` marker's. Given
-#                   (even empty), the program is a source program whose
-#                   modules hir::direct::verify judges, and it is kept as
-#                   HIR's `moduleDecls`; omitted (core IR text, HIR text), the
-#                   program is past the source boundary: no module is judged.
+#                   -> {direct 0|1 origin ORIGIN private P declarations D},
+#                   one per unit of the compilation, ORIGIN the `direct
+#                   module` marker's, P and D its private declarations and
+#                   type-level names (hir/privacy.tcl). Given (even empty),
+#                   the program is a source program whose modules
+#                   hir::direct::verify and hir::privacy::verify judge, and
+#                   it is kept as HIR's `moduleDecls` (from resolution on:
+#                   method candidates read its privacy); omitted (core IR
+#                   text, HIR text), the program is past the source
+#                   boundary: no module is judged.
 #
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
@@ -669,7 +676,7 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         hir::foreign::apply [dict get $options -foreign-decls] [dict get $options -link-decls]
     }
     set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
-        [dict get $options -modules] $choices $externs]
+        [dict get $options -modules] $choices $externs [dict get $options -module-decls]]
     if {$externs} {
         lassign [hir::foreign::tables] foreign links
         if {[dict size $foreign] || $links ne {}} {
@@ -1366,6 +1373,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::structs::verify hir
     hir::contexts::verify hir
     hir::direct::verify hir
+    hir::privacy::verify hir
     hir::coroutines::verify hir
     hir::affine::verify hir
     hir::mutvec::verify hir
@@ -1712,7 +1720,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

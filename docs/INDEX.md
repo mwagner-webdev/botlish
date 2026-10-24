@@ -22,6 +22,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [STRUCT-DESTRUCTURING.md](STRUCT-DESTRUCTURING.md) -- struct destructuring
 - [ENUMS.md](ENUMS.md) -- enums: named, closed, nominal sums of payload-free cases
 - [OPAQUE-STRUCTS.md](OPAQUE-STRUCTS.md) -- `opaque struct`: module-owned representation and construction authority
+- [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `private` module-local declarations (PRIVATE-ACCESS, PRIVATE-TYPE-ESCAPE; orthogonal to `opaque`) and the `CONTEXT-RESOURCE-ESCAPE` warning on an airlock handing raw pointers, views or open records to other modules; Icy Tower's SDL helpers made private, the census re-run with the warning (completion report)
 - [UNICODE-CHAR-LITERALS.md](UNICODE-CHAR-LITERALS.md) -- `UnicodeChar`: a scalar type distinct from Int and String
 - [FLOAT64-MILESTONE-1.md](FLOAT64-MILESTONE-1.md) -- `Float64`: finite binary64 numbers, decimal literals, `/`, `NonFiniteFloat`, C `double` (completion report)
 - [DECIMAL-ROUNDED-MILESTONE-1.md](DECIMAL-ROUNDED-MILESTONE-1.md) -- `DecimalRounded{minDecimalsPreserved: N}`: the first scalar refinement, a decimal-rounding guarantee proven for constants, observed at its precision, independent of its binary64 representation (completion report)
@@ -151,6 +152,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [WARNINGS-PROVES-NAMING.md](WARNINGS-PROVES-NAMING.md) -- `PROVES-NAMING`
 - [WARNINGS-ONE-CHAR-STRING-LITERAL.md](WARNINGS-ONE-CHAR-STRING-LITERAL.md) -- `ONE-CHAR-STRING-LITERAL`
 - [WARNINGS-MANY-BOOLEAN-ARGUMENTS.md](WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) -- `MANY-BOOLEAN-ARGUMENTS`
+- [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `CONTEXT-RESOURCE-ESCAPE` (section 3)
 - [REFACTOR-WARNINGS-CLEAN.md](REFACTOR-WARNINGS-CLEAN.md) -- the corpus under its own warnings
 - [LANGUAGE-LIBRARY-DEFICIENCIES.md](LANGUAGE-LIBRARY-DEFICIENCIES.md) -- language and library gaps that refactor found
 

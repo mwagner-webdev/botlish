@@ -256,6 +256,16 @@
 #              Only a bare call expression may be handled this way (item 9).
 #   error      a statement that could not be parsed (recovering parses only)
 #
+# Every named top-level declaration -- function, bind, typedecl, errordecl,
+# structdecl, enumdecl, traitdecl, layoutdecl, externfn -- may also carry
+# `private` (1 for `private DECLARATION`) and `privateSpan` (the modifier
+# word's span; the node's span then starts there): the declaration is
+# accessible only to code of its own module
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md). Absent on every other
+# node and on a public declaration. A property of the one declaration, like
+# `opaque` and `nomethod`, never a node kind of its own; the loader collects
+# it into the module's declaration record (surface/modules.tcl's ModuleDecl).
+#
 # Node ids
 # --------
 # `id` names a node by its place in the program's structure rather than by
@@ -899,6 +909,19 @@ proc surface::ast::showType {type} {
 }
 
 proc surface::ast::Statement {node indent show linesVar} {
+    upvar 1 $linesVar lines
+    set first [llength $lines]
+    StatementLines $node $indent $show lines
+    if {[dict getdef $node private 0] && [llength $lines] > $first} {
+        # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) is
+        # written first, before every other modifier of the declaration.
+        set pad [string repeat {    } $indent]
+        set line [lindex $lines $first]
+        lset lines $first "${pad}private [string range $line [string length $pad] end]"
+    }
+}
+
+proc surface::ast::StatementLines {node indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
     set at [At $node $show]

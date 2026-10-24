@@ -28,8 +28,18 @@
 #                     keyword: it starts an import only when immediately
 #                     followed by a name or by "type", which no other
 #                     construct allows, so `import` stays an ordinary name.
-#   topStatement = typeDecl | structDecl | enumDecl | layoutDecl | errorDecl
-#                | traitDecl | externDecl | statement
+#   topStatement = [ "private" ] declaration | statement
+#   declaration  = typeDecl | structDecl | enumDecl | layoutDecl | errorDecl
+#                | traitDecl | externDecl | function | binding
+#                  -- "private" (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-
+#                  1.md): the declaration is accessible only to code of the
+#                  module that declares it. Contextual, like every modifier
+#                  (AtPrivate): only directly before a declaration keyword
+#                  or a name; written first, at most once, on a named
+#                  top-level declaration only (PrivateDecl). A property of
+#                  the declaration's node (`private 1`, `privateSpan`),
+#                  independent of `opaque` (who may inspect a
+#                  representation): `private opaque struct` is both
 #   externDecl   = "extern" "c" "library" STRING NEWLINE
 #                | "extern" "c" "fn" IDENT [ "named" STRING ]
 #                  "(" [ externParam { "," externParam } [ "," ] ] ")"
@@ -407,6 +417,10 @@ namespace eval surface::parser {
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
+    # The declarations `private` may modify (PrivateDecl): every named
+    # top-level declaration -- a function, a module binding, a type, an
+    # error, a struct, an enum, a trait, a layout, an extern c fn.
+    variable privateKinds {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn}
     # The static intrinsics (STATIC-COMPILE.md): the operation names that
     # may follow `static` (see the grammar above). The vocabulary is the
     # compiler's, never a scope's: `static compile:` means the same whatever
@@ -1430,6 +1444,56 @@ proc surface::parser::AtStrayFunctionModifier {pVar} {
         && [Kind p 1] in {type struct error}}]
 }
 
+# 1 if the next tokens start a private declaration
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): the contextual word
+# "private" directly followed by a declaration keyword (`fn`, `struct`,
+# `type`, `error`) or by a name (a contextual declaration word, `enum`,
+# `opaque`, `extern`, ..., or a module binding's name). None of these is a
+# valid continuation of an expression, so an ordinary variable called
+# `private` (`private = 1`, `private(x)`, `x.private`) is unaffected.
+proc surface::parser::AtPrivate {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "private"
+        && [Kind p 1] in {IDENT fn struct type error}}]
+}
+
+# "private" declaration -- the access modifier of a top-level declaration:
+# the declaration is accessible only to code of the module that declares it.
+# Written first, before every other modifier (`private opaque struct`,
+# `private nomethod fn`, `private context trait`), once. A property of the
+# one declaration (the node's `private 1` and `privateSpan`, its span
+# widened to the modifier), never a declaration kind of its own: what the
+# declaration is, the parser of its kind decides. Only a named top-level
+# declaration may be private (privateKinds): nested in a function, loop or
+# branch -- privacy is module-local, never lexical -- and before anything
+# else (an `extern c library` line, which names no member; a statement) it
+# is a located syntax error.
+proc surface::parser::PrivateDecl {pVar} {
+    variable privateKinds
+    upvar 1 $pVar p
+    set word [Advance p]
+    set span [dict get $word span]
+    if {![dict get $p topLevel]} {
+        Fail $word "\"private\" is only allowed on a declaration at the top level of a module: privacy is module-local, so a function, loop or branch has no private declarations"
+    }
+    set next [Peek p]
+    if {[dict get $next kind] eq "IDENT" && [dict get $next text] eq "private"} {
+        Fail $next "duplicate modifier \"private\" in this declaration"
+    }
+    set node [Statement p]
+    if {[dict get $node kind] ni $privateKinds} {
+        if {[dict get $node kind] eq "externlib"} {
+            Fail $word "\"private\" modifies a named declaration: an `extern c library` line names no member of the module, so nothing about it can be private"
+        }
+        Fail $word "\"private\" modifies a declaration (fn, struct, type, error, enum, trait, layout, extern c fn, or a NAME = VALUE module binding), not a [dict get $node kind] statement"
+    }
+    dict set node private 1
+    dict set node privateSpan $span
+    dict set node span [surface::ast::cover $span [dict get $node span]]
+    return $node
+}
+
 # 1 if the next tokens start a `with` declaration: the contextual word "with"
 # followed by a name (CONTEXTS.md). `with NAME` is never a valid expression
 # continuation, so an ordinary variable called `with` (`with = 1`, `with(x)`,
@@ -1871,6 +1935,9 @@ proc surface::parser::SkipBlock {pVar} {
 proc surface::parser::Statement {pVar} {
     upvar 1 $pVar p
     set token [Peek p]
+    if {[AtPrivate p]} {
+        return [PrivateDecl p]
+    }
     switch -- [dict get $token kind] {
         fn     { return [Function p] }
         if     { return [If p] }

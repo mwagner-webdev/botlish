@@ -1315,11 +1315,14 @@ proc service::ModuleOf {hir b} {
 }
 
 # The hover line of a construct of TYPE in HIR, whose binding is B ("" for
-# none): a function's signature, "NAME: TYPE" for another binding, TYPE
-# otherwise.
+# none): a function's signature (`private fn ...` for a private one),
+# "NAME: TYPE" for another binding, TYPE otherwise.
 proc service::Hover {hir type b} {
     if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
-        return [hir::signatures::text $hir [lindex $type 1]]
+        # (A private function says so: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
+        # MILESTONE-1.md.)
+        set prefix [expr {$b ne "" && [hir::privacy::BindingPrivate $hir $b] ? "private " : ""}]
+        return "$prefix[hir::signatures::text $hir [lindex $type 1]]"
     }
     if {$b eq ""} {
         return [hir::types::presented $type]

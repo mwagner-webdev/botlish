@@ -118,6 +118,7 @@ enum DiagnosticCode:
     NotAnEnum,
     OpaqueConstruction,
     OpaqueRepresentation,
+    PrivateAccess,
     ProofClause,
     RefinementMintAuthority,
     RefinementParameter,

@@ -274,6 +274,9 @@ proc hir::contexts::TraitImplementation {req w owner} {
     if {$info eq ""} {
         return [dict create ok 0 reason "no function $qualified exists: \"$name\" is not defined by [hir::traits::OwnerPhrase $owner module] (only the namespace that owns $w implements its context-trait operations)" found ""]
     }
+    if {[dict getdef $info private 0]} {
+        return [dict create ok 0 reason [hir::traits::PrivateImplementation $qualified $owner] found ""]
+    }
     if {[dict get $info kind] ne "block"} {
         return [dict create ok 0 reason "$qualified is not a function declaration (a value binding cannot implement a requirement)" found ""]
     }

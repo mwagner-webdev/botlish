@@ -55,6 +55,7 @@ namespace eval hir::warnings {
         PROVES-NAMING     hir::warnings::ProvesNaming
         ONE-CHAR-STRING-LITERAL hir::warnings::OneCharStringLiteral
         MANY-BOOLEAN-ARGUMENTS  hir::warnings::ManyBooleanArguments
+        CONTEXT-RESOURCE-ESCAPE hir::warnings::ContextResourceEscape
     }
     variable modes {default off error}
     # CODE -> number of times its pass has run in this process: test
@@ -258,6 +259,21 @@ proc hir::warnings::entry {hir warning} {
     return [dict create errorcode [dict get $warning code] message [render $hir $warning] \
         summary [dict get $warning message] location [hir::originSpan $hir [dict get $warning primary]] \
         related [lmap o [dict get $warning secondary] {hir::originSpan $hir $o}] record $warning]
+}
+
+# ---------------------------------------------------------------------------
+# CONTEXT-RESOURCE-ESCAPE
+#
+# A module the direct-module analysis proves contextualized -- the airlock of
+# some raw authority -- hands raw foreign representation (a C pointer, a
+# native view or edit, or a struct whose open representation holds one)
+# across its boundary to code of another unit. The analysis, its rules and
+# its stopping rules are hir/resourceescape.tcl's
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md); one warning per
+# exposing declaration.
+
+proc hir::warnings::ContextResourceEscape {hir} {
+    return [hir::resourceescape::findings $hir]
 }
 
 # ---------------------------------------------------------------------------

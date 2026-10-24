@@ -248,7 +248,7 @@
 >>>>
 ## hir/structs.tcl
 <<<<
-        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION}} {
+        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION PRIVATE-ACCESS}} {
 ====
         if {$kind eq "MISSING-IMPORT"} {
             set key [list [dict getdef $node ns ""] \
@@ -256,5 +256,5 @@
             if {[dict exists $missing $key]} continue
             dict set missing $key 1
         }
-        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION}} {
+        if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION PRIVATE-ACCESS}} {
 >>>>
