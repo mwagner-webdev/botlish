@@ -1,0 +1,4 @@
+main.bot 3 1 known v: independent of the malformed transitive dependency
+main.bot 4 1 unavailable w: depends on the malformed function through mid
+mid.bot 4 10 known low::base: a well-formed member of the malformed module
+mid.bot 7 10 binding low::bad: the malformed declaration's name (its value is not known)

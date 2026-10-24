@@ -1,0 +1,199 @@
+# syntax-recovery experiments, compiler at /home/user/botlish
+
+## a-expression
+### malformed
+outcome syntax, semantics none
+  error main.bot:3:12 SURFACE SYNTAX: expected an expression, found end of line
+  main.bot:2:5 (expect known: s: a binding before the malformed line) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:5 (expect known: s: its use after the malformed line (an expression hole binds nothing)) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:3:5 (expect known: t: the binding the malformed line makes) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:6:4 (expect known: other: an unrelated function) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:9:1 (expect known: y: an unrelated top-level binding) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:1 (expect known: z: the declared result of the function with the error) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:5 (expect known: total: its declared signature) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:2:5 => binding s; type int
+  main.bot:4:5 => binding s; type int
+  main.bot:3:5 => binding t; type int
+  main.bot:6:4 => binding other; type Fn{args: [int], return: int, errors: []}
+  main.bot:9:1 => binding y; type int
+  main.bot:10:1 => binding z; type int
+  main.bot:10:5 => binding total; type Fn{args: [int, int], return: int, errors: []}
+### repair-2
+outcome ok, semantics full
+  main.bot:2:5 => binding s; type int
+  main.bot:4:5 => binding s; type int
+  main.bot:3:5 => binding t; type int
+  main.bot:6:4 => binding other; type Fn{args: [int], return: int, errors: []}
+  main.bot:9:1 => binding y; type int
+  main.bot:10:1 => binding z; type int
+  main.bot:10:5 => binding total; type Fn{args: [int, int], return: int, errors: []}
+
+## a-undeclared
+### malformed
+outcome syntax, semantics none
+  error main.bot:5:8 SURFACE SYNTAX: expected an expression, found end of line
+  main.bot:2:5 (expect known: k: before the malformed statement) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:1 (expect unavailable: h: the result of a function whose undeclared result depends on the error) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:5 (expect unavailable: helper: its signature (result inferred from an incomplete body)) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:11:1 (expect known: f: unrelated) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:2:5 => binding k; type int
+  main.bot:10:1 => binding h; type any
+  main.bot:10:5 => binding helper; type Fn{args: [int], return: any, errors: []}
+  main.bot:11:1 => binding f; type int
+### repair-2
+outcome ok, semantics full
+  main.bot:2:5 => binding k; type int
+  main.bot:10:1 => binding h; type str
+  main.bot:10:5 => binding helper; type Fn{args: [int], return: str, errors: []}
+  main.bot:11:1 => binding f; type int
+
+## b-toplevel
+### malformed
+outcome syntax, semantics none
+  error main.bot:4:22 SURFACE SYNTAX: "(" is never closed
+  main.bot:3:1 (expect known: xs: before the malformed statement) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:1 (expect known: n: bound by the malformed statement) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:5:1 (expect unavailable: m: depends on n's unknown value) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:6:1 (expect known: k: independent statement after it) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:8:9 (expect known: k: a reference to it in a later function) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:3:1 => binding xs; type List[int]{length: 3}
+  main.bot:4:1 => binding n; type int
+  main.bot:5:1 => binding m; type int
+  main.bot:6:1 => binding k; type int
+  main.bot:8:9 => binding k; type int
+### repair-2
+outcome ok, semantics full
+  main.bot:3:1 => binding xs; type List[int]{length: 3}
+  main.bot:4:1 => binding n; type bool
+  main.bot:5:1 => binding m; type int
+  main.bot:6:1 => binding k; type int
+  main.bot:8:9 => binding k; type int
+
+## c-declaration
+### malformed
+outcome syntax, semantics none
+  error main.bot:4:22 SURFACE SYNTAX: expected a parameter type after ":", found "->"
+  main.bot:1:4 (expect known: first: before the malformed declaration) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:7:4 (expect known: last: after it) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:8:9 (expect known: first: a reference to an earlier function after the malformed one) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:11:1 (expect known: q: an unrelated call) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:4 (expect known: broken: the name of the malformed declaration) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:1 (expect unavailable: r: the result of the malformed function) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:10:5 (expect unavailable: broken: its signature (the parameter list is incomplete)) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:1:4 => binding first; type Fn{args: [int], return: int, errors: []}
+  main.bot:7:4 => binding last; type Fn{args: [int], return: int, errors: []}
+  main.bot:8:9 => binding first; type Fn{args: [int], return: int, errors: []}
+  main.bot:11:1 => binding q; type int
+  main.bot:4:4 => binding broken; type Fn{args: [int, int], return: int, errors: []}
+  main.bot:10:1 => binding r; type int
+  main.bot:10:5 => binding broken; type Fn{args: [int, int], return: int, errors: []}
+### repair-2
+outcome semantic, semantics full
+  error main.bot:10:15 CORE SEMANTIC TYPE: argument for parameter "b" cannot be proven to satisfy str (argument type: int)
+  main.bot:1:4 => binding first; type Fn{args: [int], return: int, errors: []}
+  main.bot:7:4 => binding last; type Fn{args: [int], return: int, errors: []}
+  main.bot:8:9 => binding first; type Fn{args: [int], return: int, errors: []}
+  main.bot:11:1 => binding q; type int
+  main.bot:4:4 => binding broken; type Fn{args: [int, str], return: str, errors: []}
+  main.bot:10:1 => binding r; type str
+  main.bot:10:5 => binding broken; type Fn{args: [int, str], return: str, errors: []}
+
+## d-module
+### malformed
+outcome syntax, semantics none
+  error geom.bot:5:9 SURFACE SYNTAX: "(" is never closed
+  main.bot:3:1 (expect known: a: a module function before the malformed one) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:3:11 (expect known: geom::area: navigable into the module) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:1 (expect known: p: the declared result of the malformed module function) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:5:1 (expect known: s: a module function after the malformed one) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  geom.bot:8:5 (expect known: area: a reference inside the module after the error) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:3:1 => binding a; type int
+  main.bot:3:11 => binding geom::area; type Fn{args: [int, int], return: int, errors: []}
+  main.bot:4:1 => binding p; type int
+  main.bot:5:1 => binding s; type int
+  geom.bot:8:5 => binding geom::area; type Fn{args: [int, int], return: int, errors: []}
+### repair-2
+outcome ok, semantics full
+  main.bot:3:1 => binding a; type int
+  main.bot:3:11 => binding geom::area; type Fn{args: [int, int], return: int, errors: []}
+  main.bot:4:1 => binding p; type int
+  main.bot:5:1 => binding s; type int
+  geom.bot:8:5 => binding geom::area; type Fn{args: [int, int], return: int, errors: []}
+
+## e-transitive
+### malformed
+outcome syntax, semantics none
+  error low.bot:4:7 SURFACE SYNTAX: "(" is never closed
+  main.bot:3:1 (expect known: v: independent of the malformed transitive dependency) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:1 (expect unavailable: w: depends on the malformed function through mid) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  mid.bot:4:10 (expect known: low::base: a well-formed member of the malformed module) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  mid.bot:7:10 (expect known: low::bad: the malformed declaration's name) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:3:1 => binding v; type int
+  main.bot:4:1 => binding w; type int
+  mid.bot:4:10 => binding low::base; type Fn{args: [], return: int, errors: []}
+  mid.bot:7:10 => binding low::bad; type Fn{args: [int], return: int, errors: []}
+### repair-2
+outcome ok, semantics full
+  main.bot:3:1 => binding v; type int
+  main.bot:4:1 => binding w; type str
+  mid.bot:4:10 => binding low::base; type Fn{args: [], return: int, errors: []}
+  mid.bot:7:10 => binding low::bad; type Fn{args: [int], return: str, errors: []}
+
+## f-errors
+### malformed
+outcome syntax, semantics none
+  error main.bot:4:13 SURFACE SYNTAX: expected ":" after the "if" condition, found end of line
+  main.bot:8:1 (expect known: v: the declared result of the handled call) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:8:5 (expect known: always: its declared signature) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:8:1 => binding v; type int
+  main.bot:8:5 => binding always; type Fn{args: [int], return: int, errors: [Boom]}
+### repair-2
+outcome semantic, semantics full
+  error main.bot:8:5 CORE SEMANTIC KNOWN-ERROR: this call can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) Boom; a handler does not make a statically known failure legal
+  main.bot:8:1 => binding v; type int
+  main.bot:8:5 => binding always; type Fn{args: [int], return: int, errors: [Boom]}
+
+## f-proofs
+### malformed
+outcome syntax, semantics none
+  error pick.bot:3:8 SURFACE SYNTAX: expected an expression, found end of line
+  main.bot:4:1 (expect known: x: typed by the declared result of pick::index) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:4:39 (expect known: pick::index: its declared signature) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome semantic, semantics full
+  error main.bot:4:5 CORE SEMANTIC KNOWN-ERROR: this call of "std::list::at" can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) IndexNotFound; a handler does not make a statically known failure legal
+  main.bot:4:1 => binding x; type int
+  main.bot:4:39 => binding pick::index; type Fn{args: [], return: int, errors: []}
+### repair-2
+outcome ok, semantics full
+  main.bot:4:1 => binding x; type int
+  main.bot:4:39 => binding pick::index; type Fn{args: [], return: int, errors: []}
+
+## f-static
+### malformed
+outcome syntax, semantics none
+  error main.bot:4:8 SURFACE SYNTAX: expected an expression, found end of line
+  main.bot:13:1 (expect known: r: the declared result of probe) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+  main.bot:11:14 (expect unavailable: helper(1): its result depends on the malformed body, and so does the block's decision) => binding -; type - (no semantic analysis: the revision's outcome is syntax (no HIR))
+### repair-1
+outcome ok, semantics full
+  main.bot:13:1 => binding r; type int
+  main.bot:11:14 => binding helper; type Fn{args: [int], return: int, errors: []}
+### repair-2
+outcome ok, semantics full
+  main.bot:13:1 => binding r; type int
+  main.bot:11:14 => binding -; type never

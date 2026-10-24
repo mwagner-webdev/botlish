@@ -1,0 +1,454 @@
+# json.test -- the JSON workload of the DFA prototype at run time
+# (DFA-COROUTINE-EXPLORATION.md, "Correctness"): the generated recognizers
+# against their declarations, the token boundaries of the report's table,
+# the structural layer, arbitrary chunking, the limits and decoding -- on
+# every backend (the interpreter, the Tcl compiler, cranelift-generic,
+# cranelift with coroutine fusion and without). Run by hand:
+#
+#   tclsh9.0 audit/dfa/tests/json.test
+#
+# Not part of tests/local.tcl or CI (the prototype is not the compiler's).
+
+package require tcltest 2.5
+namespace import ::tcltest::*
+source [file join [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]] tests helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot audit dfa tests support.tcl]
+
+set model [dfatest::model [file join $dfatest::json json_lex.dfa]]
+
+# A Botlish string literal of TEXT (whose characters the literal can spell).
+proc literal {text} {
+    return "\"[string map {\\ \\\\ \" \\\" \n \\n \r \\r \t \\t} $text]\""
+}
+
+# The scalar values of TEXT.
+proc scalars {text} {
+    return [lmap c [split $text ""] {scan $c %c}]
+}
+
+# The UTF-8 bytes of TEXT.
+proc utf8 {text} {
+    binary scan [encoding convertto utf-8 $text] cu* bytes
+    return $bytes
+}
+
+# The verdict functions the document cases run (module cases.bot).
+set casesModule {import json
+import std::str
+import std::int
+
+fn cat(a: str, b: str) -> str:
+    std::str::concat(a, b)
+
+fn verdict(chunks: List[str], max_depth: int, max_token: int) -> str errors IndexNotFound:
+    s = json::validate_text(chunks, max_depth, max_token):
+        on json::Lexical {at, state}:
+            return cat(cat(cat("lexical ", std::int::to_string(at)), " "), state)
+        on json::Truncated {state}:
+            return cat("truncated ", state)
+        on json::Structure {at, expected}:
+            return cat(cat(cat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return cat("too long ", std::int::to_string(at))
+    cat(cat(cat("ok ", std::int::to_string(s.tokens)), " "), std::int::to_string(s.symbols))
+
+fn verdict_bytes(chunks: List[List[int]], max_depth: int, max_token: int) -> str:
+    s = json::validate_bytes(chunks, max_depth, max_token):
+        on json::Lexical {at, state}:
+            return cat(cat(cat("lexical ", std::int::to_string(at)), " "), state)
+        on json::Truncated {state}:
+            return cat("truncated ", state)
+        on json::Structure {at, expected}:
+            return cat(cat(cat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return cat("too long ", std::int::to_string(at))
+    cat(cat(cat("ok ", std::int::to_string(s.tokens)), " "), std::int::to_string(s.symbols))
+}
+
+# The outcomes of running CALLS (Botlish expressions of str, using the
+# functions of cases.bot) on every backend: the List of str every backend
+# agrees on.
+proc runCalls {calls {backends ""}} {
+    set program "import cases\nimport json\n\nfn all() -> List\[str\] errors IndexNotFound:\n    \[\n"
+    foreach c $calls {
+        append program "        $c,\n"
+    }
+    append program "    \]\n\nall():\n    on IndexNotFound:\n        \[\"index\"\]\n"
+    set dir [dfatest::workspace cases.bot $::casesModule main.bot $program]
+    try {
+        return [dfatest::strings [dfatest::agreed [dfatest::outcomes [file join $dir main.bot] $backends]]]
+    } finally {
+        file delete -force $dir
+    }
+}
+
+# Every recognizer, every entered state, every symbol class of its table
+# (and a value outside the alphabet), each followed by the end of the
+# input, plus random sequences: the generated code on every backend against
+# a simulator of the declarations (dfatest::simulate), which shares nothing
+# with the lowering.
+test json-model "the generated recognizers do what their declarations say, on every backend" -body {
+    set cases {}
+    foreach r [dict get $model order] {
+        foreach w [dfatest::cases $model $r 40 7] {
+            lappend cases [list $r $w]
+        }
+    }
+    set dir [dfatest::workspace main.bot [dfatest::program json_lex $cases]]
+    try {
+        set outcomes [dfatest::outcomes [file join $dir main.bot]]
+    } finally {
+        file delete -force $dir
+    }
+    set bad {}
+    foreach {backend outcome} $outcomes {
+        foreach c [dfatest::ordered $cases] got [dfatest::strings $outcome] {
+            set want [dfatest::OutcomeText [dfatest::simulate $model {*}$c]]
+            if {$got ne $want} {
+                lappend bad [list $backend $c $want $got]
+            }
+        }
+    }
+    list [expr {[llength $cases] > 1000}] [lrange $bad 0 4]
+} -result {1 {}}
+
+# The report's table of token boundaries, recognizer by recognizer: what
+# each run consumed, and where it stopped.
+test json-boundaries "number and string tokens end where RFC 8259 says, and nowhere else" -body {
+    set cases {}
+    foreach {r text end} {
+        json_number "123," 0
+        json_number "-0.25e+3]" 0
+        json_number "01" 0
+        json_number "1e+" 1
+        json_number "1." 1
+        json_number "1.2.3" 0
+        json_number "7" 1
+        json_number "-" 1
+        json_number "0]" 0
+        json_number "123abc" 0
+        json_string {"a\u0041"} 0
+        json_string {"a\q"} 0
+        json_string "\"abc" 1
+        json_string "\"tab\there\"" 0
+        json_string {"\u12G4"} 0
+        json_literal "true," 0
+        json_literal "truex" 0
+        json_literal "nul" 1
+        json_literal "false" 1
+    } {
+        set w [scalars $text]
+        if {$end} {
+            lappend w -1
+        }
+        lappend cases [list $r $w]
+    }
+    set dir [dfatest::workspace main.bot [dfatest::program json_lex $cases]]
+    try {
+        set got [dfatest::strings [dfatest::agreed [dfatest::outcomes [file join $dir main.bot]]]]
+    } finally {
+        file delete -force $dir
+    }
+    set out {}
+    foreach c [dfatest::ordered $cases] g $got {
+        lappend out "[lindex $c 0] [join [lmap s [lindex $c 1] {expr {$s == -1 ? "<end>" : ($s < 32 ? "<$s>" : [format %c $s])}}] ""] => $g"
+    }
+    join $out \n
+} -result {json_literal true, => accept 4 left
+json_literal truex => unrecognized json_literal.word_end 4
+json_literal nul<end> => end json_literal.start"nul" 3
+json_literal false<end> => accept 5 left
+json_number 123, => accept 3 left
+json_number -0.25e+3] => accept 8 left
+json_number 01 => unrecognized json_number.zero 1
+json_number 1e+<end> => end json_number.exponent_sign 3
+json_number 1.<end> => end json_number.point 2
+json_number 1.2.3 => unrecognized json_number.fraction 3
+json_number 7<end> => accept 1 left
+json_number -<end> => end json_number.minus 1
+json_number 0] => accept 1 left
+json_number 123abc => unrecognized json_number.integer 3
+json_string "a\u0041" => accept 9 took
+json_string "a\q" => unrecognized json_escape.kind 3
+json_string "abc<end> => end json_string.body 4
+json_string "tab<9>here" => unrecognized json_string.body 4
+json_string "\u12G4" => unrecognized json_escape.u3 5}
+
+# Documents: the structural layer over the tokens.
+set documents {
+    {{"a": [1, -2.5e3, true, null], "b": {}}} {ok 18 39}
+    {[]} {ok 2 2}
+    {{}} {ok 2 2}
+    {"x"} {ok 1 3}
+    { 0 } {ok 1 3}
+    {[[[]]]} {ok 6 6}
+    {[1,]} {structure 3 a value}
+    {[,1]} {structure 1 a value or ]}
+    {{"a":1,}} {structure 7 a string}
+    {{"a" 1}} {structure 5 :}
+    {{,}} "structure 1 a string or \}"
+    {{1:2}} {lexical 2 json_number.integer}
+    {[1 2]} {structure 3 , or ]}
+    {1 2} {structure 2 the end of the input}
+    "{\"a\":1}\}" {structure 7 the end of the input}
+    {{"a":1}x} {lexical 7 json_token.start}
+    {} {structure 0 a value}
+    {   } {structure 3 a value}
+    {[} {structure 1 a value or ]}
+    {{"a":[1}} {structure 7 , or ]}
+    {tru} {truncated json_literal.start"tru"}
+    {true1} {lexical 4 json_literal.word_end}
+    {-} {truncated json_number.minus}
+    {0.0e} {truncated json_number.exponent}
+    {"\ud800"} {ok 1 8}
+    {NaN} {lexical 0 json_token.start}
+    {'a'} {lexical 0 json_token.start}
+    {[1.]} {lexical 3 json_number.point}
+}
+
+test json-documents "documents: nesting, token order, trailing commas, several values, trailing content" -body {
+    set calls {}
+    foreach {text want} $::documents {
+        lappend calls "cases::verdict(\[[literal $text]\], 32, 4096)"
+    }
+    set got [runCalls $calls]
+    set out {}
+    foreach {text want} $::documents g $got {
+        if {$g ne $want} {
+            lappend out [list $text $want $g]
+        }
+    }
+    set out
+} -result {}
+
+test json-documents-oracle "every document's verdict is the independent implementation's" -body {
+    set input ""
+    foreach {text want} $::documents {
+        binary scan [encoding convertto utf-8 $text] H* hex
+        append input $hex\n
+    }
+    set verdicts [split [string trim [exec python3 -I [file join $::projectRoot audit dfa tools oracle.py] << $input]] \n]
+    set out {}
+    foreach {text want} $::documents v $verdicts {
+        set ours [expr {[string match "ok *" $want] ? "accept" : "reject"}]
+        if {$ours ne $v} {
+            lappend out [list $text $ours $v]
+        }
+    }
+    set out
+} -result {}
+
+# Over bytes: UTF-8 is validated inside strings, and nothing else may be
+# non-ASCII.
+set byteDocuments [list \
+    [list 34 195 169 34] {ok 1 4} \
+    [list 34 240 159 152 128 34] {ok 1 6} \
+    [list 34 192 128 34] {lexical 1 json_string_bytes.body} \
+    [list 34 226 130 34] {lexical 3 utf8_char.tail1} \
+    [list 34 237 160 128 34] {lexical 2 utf8_char.ed} \
+    [list 34 244 144 128 128 34] {lexical 2 utf8_char.f4} \
+    [list 195 169] {lexical 0 json_token_bytes.start} \
+    [list 239 187 191 49] {lexical 0 json_token_bytes.start} \
+    [list 34 0 34] {lexical 1 json_string_bytes.body} \
+    [list 34 226 130] {truncated utf8_char.tail1} \
+    [list 91 49 44 34 92 117 48 48 101 57 34 93] {ok 5 12} \
+]
+
+test json-bytes "UTF-8 over bytes: overlong forms, surrogates, truncation, a BOM" -body {
+    set calls {}
+    foreach {bytes want} $::byteDocuments {
+        lappend calls "cases::verdict_bytes(\[\[[join $bytes {, }]\]\], 32, 4096)"
+    }
+    set out {}
+    foreach {bytes want} $::byteDocuments g [runCalls $calls] {
+        if {$g ne $want} {
+            lappend out [list $bytes $want $g]
+        }
+    }
+    set out
+} -result {}
+
+test json-bytes-oracle "every byte document's verdict is the independent implementation's" -body {
+    set input ""
+    foreach {bytes want} $::byteDocuments {
+        append input [join [lmap b $bytes {format %02x $b}] ""]\n
+    }
+    set verdicts [split [string trim [exec python3 -I [file join $::projectRoot audit dfa tools oracle.py] << $input]] \n]
+    set out {}
+    foreach {bytes want} $::byteDocuments v $verdicts {
+        set ours [expr {[string match "ok *" $want] ? "accept" : "reject"}]
+        if {$ours ne $v} {
+            lappend out [list $bytes $ours $v]
+        }
+    }
+    set out
+} -result {}
+
+# The same text split at every possible place, and at random places into
+# many chunks: one verdict. Over bytes the splits fall inside UTF-8
+# characters, escapes and numbers.
+proc splits {items count seed} {
+    expr {srand($seed)}
+    set n [llength $items]
+    set out {}
+    for {set cut 0} {$cut <= $n} {incr cut} {
+        lappend out [list [lrange $items 0 [expr {$cut - 1}]] [lrange $items $cut end]]
+    }
+    for {set k 0} {$k < $count} {incr k} {
+        set chunks {}
+        set chunk {}
+        foreach item $items {
+            lappend chunk $item
+            if {rand() < 0.3} {
+                lappend chunks $chunk
+                set chunk {}
+            }
+        }
+        lappend chunks $chunk
+        lappend out $chunks
+    }
+    return $out
+}
+
+test json-partitions "a chunk boundary is not the end of the input: every split, one verdict" -body {
+    set texts [list "{\"key\": \[1.5e-3, -0, \"\\u00e9\\n\", true, null, false\]}" "\[\"abc" "\[12" "{\"a\":1}x" "  \[\[\]\]  "]
+    set calls {}
+    set expected {}
+    foreach text $texts {
+        foreach chunks [splits [split $text ""] 6 3] {
+            lappend calls "cases::verdict(\[[join [lmap c $chunks {literal [join $c ""]}] {, }]\], 32, 4096)"
+            lappend expected "cases::verdict(\[[literal $text]\], 32, 4096)"
+        }
+    }
+    foreach bytes [list [utf8 "\[\"é€😀\", 12.5\]"] [utf8 "\"é"]] {
+        foreach chunks [splits $bytes 6 5] {
+            lappend calls "cases::verdict_bytes(\[[join [lmap c $chunks {string cat \[ [join $c {, }] \]}] {, }]\], 32, 4096)"
+            lappend expected "cases::verdict_bytes(\[\[[join $bytes {, }]\]\], 32, 4096)"
+        }
+    }
+    set got [runCalls [concat $calls $expected] {interp cranelift cranelift-unfused}]
+    set n [llength $calls]
+    set bad {}
+    for {set k 0} {$k < $n} {incr k} {
+        if {[lindex $got $k] ne [lindex $got [expr {$n + $k}]]} {
+            lappend bad [list [lindex $calls $k] [lindex $got $k] [lindex $got [expr {$n + $k}]]]
+        }
+    }
+    list [expr {$n > 100}] [lsort -unique [lrange $got $n end]] [lrange $bad 0 3]
+} -result {1 {{lexical 7 json_token.start} {ok 17 52} {ok 4 8} {ok 5 19} {structure 3 , or ]} {truncated json_string.body} {truncated json_string_bytes.body}} {}}
+
+test json-limits "nesting and token length are bounded by the caller's limits" -body {
+    set deep [string repeat "\[" 33][string repeat "\]" 33]
+    set ok [string repeat "\[" 32][string repeat "\]" 32]
+    set long "\[\"[string repeat x 1500]\"\]"
+    runCalls [list "cases::verdict(\[[literal $deep]\], 32, 4096)" "cases::verdict(\[[literal $ok]\], 32, 4096)" \
+        "cases::verdict(\[[literal $long]\], 32, 1000)" "cases::verdict(\[[literal $long]\], 32, 2000)"]
+} -result {{too deep} {ok 64 64} {too long 1} {ok 3 1504}}
+
+test json-long "a long valid input: 20,000 tokens and a 20,000-symbol string token" -body {
+    set many "\[[string repeat {1, } 9999]1\]"
+    set long "\[\"[string repeat a 20000]\"\]"
+    runCalls [list "cases::verdict(\[[literal $many]\], 32, 100000)" "cases::verdict(\[[literal $long]\], 32, 100000)"] \
+        {compile cranelift-generic cranelift cranelift-unfused}
+} -result {{ok 20001 30000} {ok 3 20004}}
+
+test json-long-interp "the interpreter has no tail calls: its depth bounds a token, as for the imperative probe" -body {
+    set long "\[\"[string repeat a 2000]\"\]"
+    runCalls [list "cases::verdict(\[[literal $long]\], 32, 100000)"] {interp}
+} -result {{ok 3 2004}}
+
+# Decoding a recognized string token.
+test json-decode "escapes, surrogate pairs, and no lossy surrogate" -body {
+    set decode [list \
+        {"a\u0041"} \
+        {"\ud83d\ude00"} \
+        {"\b\f\n\r\t\/\\\""} \
+        {"é\u00e9"} \
+    ]
+    set calls {}
+    foreach text $decode {
+        lappend calls "cases::decoded_text([literal $text])"
+    }
+    foreach text {{"\u00e9"} {"é"} {"\ud83d\ude00x"}} {
+        lappend calls "cases::decoded_bytes(\[[join [utf8 $text] {, }]\])"
+    }
+    foreach text {{"\ud800"} {"\udc00\ud800"} {"\ud800\u0041"}} {
+        lappend calls "cases::decoded_text([literal $text])"
+    }
+    set ::casesModule [string cat $::casesModule {
+fn join(parts: List[str], i: int) -> str errors IndexNotFound:
+    if i >= std::list::length(parts):
+        return ""
+    if i == 0:
+        return std::str::concat(std::list::at(parts, 0), join(parts, 1))
+    std::str::concat(std::str::concat(" ", std::list::at(parts, i)), join(parts, i + 1))
+
+fn show(xs: List[int]) -> str errors IndexNotFound:
+    out = loop x in xs:
+        std::int::to_string(x)
+    std::str::concat(std::str::concat("[", join(out, 0)), "]")
+
+fn decoded_text(text: str) -> str errors IndexNotFound:
+    xs = json::decode_text(text, 0, std::str::length(text)):
+        on json::UnpairedSurrogate {at}:
+            return std::str::concat("unpaired at ", std::int::to_string(at))
+    show(xs)
+
+fn decoded_bytes(bytes: List[int]) -> str errors IndexNotFound:
+    xs = json::decode_bytes(bytes):
+        on json::UnpairedSurrogate {at}:
+            return std::str::concat("unpaired at ", std::int::to_string(at))
+    show(xs)
+}]
+    set ::casesModule [string map {"import std::int\n" "import std::int\nimport std::list\n"} $::casesModule]
+    runCalls $calls
+} -result {{[97 65]} {[128512]} {[8 12 10 13 9 47 92 34]} {[233 233]} {[195 169]} {[195 169]} {[240 159 152 128 120]} {unpaired at 1} {unpaired at 1} {unpaired at 1}}
+
+test json-strict "I-JSON's no-lone-surrogate rule, as finite state" -body {
+    set cases {}
+    foreach text {{"\ud83d\ude00"} {"\ud800"} {"\udc00"} {"\ud800\u0041"} {"\uD83D\uDE00"} {"\ue000"} {"\u0041"}} {
+        lappend cases [list json_string_strict [concat [scalars $text] -1]]
+    }
+    set dir [dfatest::workspace main.bot [dfatest::program json_lex $cases]]
+    try {
+        dfatest::strings [dfatest::agreed [dfatest::outcomes [file join $dir main.bot]]]
+    } finally {
+        file delete -force $dir
+    }
+} -result {{accept 14 took} {unrecognized json_escape_strict.pair_backslash 7} {unrecognized json_escape_strict.d2 4} {unrecognized json_escape_strict.low1 9} {accept 14 took} {accept 8 took} {accept 8 took}}
+
+# The same recognizer written by hand as an ordinary coroutine
+# (audit/dfa/json/by_hand.bot) against the declaration's model cases: the
+# same outcome at the same symbol (the state names are each one's own).
+test json-by-hand "a hand-written coroutine number recognizer agrees with json_number's declaration" -body {
+    set cases {}
+    foreach w [dfatest::cases $model json_number 200 5] {
+        lappend cases [list number_by_hand $w]
+    }
+    set dir [dfatest::workspace by_hand.bot [dfa::ReadText [file join $dfatest::json by_hand.bot]] \
+        main.bot [dfatest::program by_hand $cases]]
+    try {
+        set outcomes [dfatest::outcomes [file join $dir main.bot]]
+    } finally {
+        file delete -force $dir
+    }
+    set bad {}
+    foreach {backend outcome} $outcomes {
+        foreach c $cases got [dfatest::strings $outcome] {
+            set want [dfatest::OutcomeText [dfatest::simulate $model json_number [lindex $c 1]]]
+            regsub {^(unrecognized|end) \S+ } $want {\1 * } want
+            regsub {^(unrecognized|end) \S+ } $got {\1 * } got
+            if {$want ne $got} {
+                lappend bad [list $backend $c $want $got]
+            }
+        }
+    }
+    list [expr {[llength $cases] > 300}] [lrange $bad 0 3]
+} -result {1 {}}
+
+cleanupTests

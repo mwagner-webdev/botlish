@@ -1,0 +1,118 @@
+# yaml.test -- the YAML subset of the DFA prototype (DFA-COROUTINE-
+# EXPLORATION.md, "YAML findings"): the generated recognizers against their
+# declarations on every backend, the subset's cases, and the counterexample
+# a recognizer that leaves one symbol unread cannot get right. Run by hand:
+#
+#   tclsh9.0 audit/dfa/tests/yaml.test
+
+package require tcltest 2.5
+namespace import ::tcltest::*
+source [file join [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]] tests helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot audit dfa tests support.tcl]
+
+set yaml [file join $::projectRoot audit dfa yaml]
+set model [dfatest::model [file join $yaml yaml_lex.dfa]]
+
+proc scalars {text} {
+    return [lmap c [split $text ""] {scan $c %c}]
+}
+
+# The outcomes of CASES ({R SYMBOLS} pairs) every backend agrees on, in
+# dfatest::ordered's order.
+proc run {cases} {
+    set dir [dfatest::workspaceOf $::yaml {dfa.bot yaml_lex.bot} main.bot [dfatest::program yaml_lex $cases]]
+    try {
+        return [dfatest::strings [dfatest::agreed [dfatest::outcomes [file join $dir main.bot]]]]
+    } finally {
+        file delete -force $dir
+    }
+}
+
+test yaml-committed "yaml_lex.bot is what generation produces" -body {
+    expr {[dfa::ReadText [file join $yaml yaml_lex.bot]] eq [dict get [dfa::compileFile [file join $yaml yaml_lex.dfa]] bot]}
+} -result 1
+
+test yaml-model "the generated recognizers do what their declarations say, on every backend" -body {
+    set cases {}
+    foreach r [dict get $model order] {
+        foreach w [dfatest::cases $model $r 40 3] {
+            lappend cases [list $r $w]
+        }
+    }
+    set bad {}
+    foreach c [dfatest::ordered $cases] got [run $cases] {
+        set want [dfatest::OutcomeText [dfatest::simulate $model {*}$c]]
+        if {$got ne $want} {
+            lappend bad [list $c $want $got]
+        }
+    }
+    list [expr {[llength $cases] > 300}] [lrange $bad 0 3]
+} -result {1 {}}
+
+test yaml-cases "quoted scalars, comments, plain scalars" -body {
+    set cases {}
+    foreach {r text end} {
+        yaml_double_quoted {"a|x41|u00e9|U0001F600|"b"} 0
+        yaml_double_quoted "\"tab\there\"" 0
+        yaml_double_quoted {"a|q"} 0
+        yaml_double_quoted {"|x4"} 0
+        yaml_double_quoted "\"two\nlines\"" 0
+        yaml_single_quoted {'it''s'} 1
+        yaml_single_quoted {'it''s' x} 0
+        yaml_single_quoted {'abc} 1
+        yaml_comment "# note\n" 0
+        yaml_comment "# note" 1
+        yaml_plain_flow "abc," 0
+        yaml_plain_flow "a:b " 0
+        yaml_plain_flow "-1\]" 0
+        yaml_plain_flow "- a" 0
+        yaml_plain_flow "a#b " 0
+    } {
+        # A | in a case is a backslash (and a backslash is shown <92>), so
+        # that no escape of this file's own syntax is in the way.
+        set w [scalars [string map {| \\} $text]]
+        if {$end} {
+            lappend w -1
+        }
+        lappend cases [list $r $w]
+    }
+    set out {}
+    foreach c [dfatest::ordered $cases] g [run $cases] {
+        lappend out "[lindex $c 0] [join [lmap s [lindex $c 1] {expr {$s == -1 ? "<end>" : ($s < 32 || $s == 92 ? "<$s>" : [format %c $s])}}] ""] => $g"
+    }
+    join $out \n
+} -result {yaml_comment # note<10> => accept 6 left
+yaml_comment # note<end> => accept 6 left
+yaml_double_quoted "a<92>x41<92>u00e9<92>U0001F600<92>"b" => accept 26 took
+yaml_double_quoted "tab<9>here" => accept 10 took
+yaml_double_quoted "a<92>q" => unrecognized yaml_escape.kind 3
+yaml_double_quoted "<92>x4" => unrecognized yaml_escape.x1 4
+yaml_double_quoted "two<10>lines" => accept 11 took
+yaml_plain_flow abc, => accept 3 left
+yaml_plain_flow a:b  => accept 3 left
+yaml_plain_flow -1] => accept 2 left
+yaml_plain_flow - a => unrecognized yaml_plain_flow.lead 1
+yaml_plain_flow a#b  => accept 3 left
+yaml_single_quoted 'it''s'<end> => accept 7 left
+yaml_single_quoted 'it''s' x => accept 7 left
+yaml_single_quoted 'abc<end> => end yaml_single_quoted.body 4}
+
+# The counterexample. In flow context "a:b" is one plain scalar and "a: b"
+# is the scalar "a" and the mapping indicator ":" (YAML 1.2.2, 7.3.3,
+# ns-plain-char): the ":" belongs to the scalar or not depending on the
+# symbol after it. A recognizer completes leaving at most the symbol it was
+# handed unread, so it cannot end the scalar before the ":" it has already
+# taken: yaml_plain_flow accepts "a:" (two symbols), where YAML's token is
+# "a" (one). The front end accepts the declaration -- it is a deterministic,
+# well-defined automaton -- for the wrong language.
+test yaml-two-symbol-lookahead "the scalar before ': ' needs two symbols of lookahead" -body {
+    run [list [list yaml_plain_flow [scalars "a: b"]] [list yaml_plain_flow [scalars "a:,"]]]
+} -result {{accept 2 left} {accept 2 left}}
+
+test yaml-front-end-accepts-it "no static check can see that the language is wrong" -body {
+    set d [dict get $model dfas yaml_plain_flow]
+    list [dict exists $d failed] [llength [dict get $d entered]]
+} -result {0 4}
+
+cleanupTests

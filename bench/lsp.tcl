@@ -3,7 +3,7 @@
 #
 #   tclsh9.0 bench/lsp.tcl ?-workloads NAMES? ?-schedulers LIST? ?-edits N?
 #                          ?-idle N? ?-seed S? ?-recovery 0|1? ?-sessions 0|1?
-#                          ?-memory ROUNDS? ?-out FILE?
+#                          ?-memory ROUNDS? ?-malformed 0|1? ?-out FILE?
 #
 # Replays one scripted editing session per workload through each scheduler
 # (worker, sync), the real server (`main.tcl -lsp`) in a child process over
@@ -29,7 +29,10 @@
 # workload and scheduler (ROUNDS edits, each analyzed and queried before the
 # next) sampling the resident memory of the server and its worker after
 # each round (steady state against the peaks of the editing sessions);
-# -sessions 0 runs only that.
+# -sessions 0 runs only that. With -malformed 1 every other edit leaves the
+# edited expression unfinished (a syntax error in the imported module), the
+# others restore it: the editing session through syntax errors of
+# SYNTAX-RECOVERY-MILESTONE-1.md, "Performance".
 #
 # The workloads are the compiler-service census's (COMPILER-SERVICE-CENSUS.md,
 # section 7): csv (a single file: the entry is the edited module), the 2048
@@ -40,7 +43,7 @@ set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root tests lsp-client.tcl]
 
 set options [dict create -workloads {csv 2048 icy 2048-golden} -schedulers {worker sync} -edits 20 \
-    -idle 20 -seed 7 -recovery 1 -sessions 1 -memory 0 -out ""]
+    -idle 20 -seed 7 -recovery 1 -sessions 1 -memory 0 -malformed 0 -out ""]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -178,6 +181,9 @@ proc session {name scheduler} {
     set version 1
     for {set k 1} {$k <= [dict get $options -edits]} {incr k} {
         set replacement [if {$k % 2} {dict get $w new} else {dict get $w old}]
+        if {$k % 2 && [dict get $options -malformed]} {
+            append replacement " +"
+        }
         set text [string map [list [dict get $w old] "$replacement # lsp-bench $k"] $moduleText]
         lspc::didChange $c $module [incr version] $text
         set lastEdit [clock milliseconds]
@@ -345,7 +351,7 @@ if {[dict get $options -recovery] && "worker" in [dict get $options -schedulers]
 
 set lines {}
 lappend lines "# Language server benchmark" "" \
-    "[clock format [clock seconds] -format {%Y-%m-%d}], Tcl [info patchlevel], [exec nproc] processors; [dict get $options -edits] edits per session every 150-300 ms, [dict get $options -idle] idle hovers; seed [dict get $options -seed]." "" \
+    "[clock format [clock seconds] -format {%Y-%m-%d}], Tcl [info patchlevel], [exec nproc] processors; [dict get $options -edits] edits per session every 150-300 ms[expr {[dict get $options -malformed] ? ", every other one a syntax error (-malformed 1)" : ""}], [dict get $options -idle] idle hovers; seed [dict get $options -seed]." "" \
     "## Hover latency (ms) while editing, and once idle" "" \
     "| workload | scheduler | editing: median | p95 | p99 | max | idle: median | p95 | max |" \
     "|---|---|---:|---:|---:|---:|---:|---:|---:|"

@@ -1339,20 +1339,24 @@ CONTEXT-NATIVE-LOWERING-UNSUPPORTED)". Declaring `type Depth = Int in
 
 @topic error.surface-syntax
 title: SURFACE SYNTAX: the source does not parse
-summary: SURFACE SYNTAX reports Botlish source that does not parse; every malformed construct is reported once, with its line and column, and a file with syntax errors is not checked further.
+summary: SURFACE SYNTAX reports source that does not parse, each malformed construct once; a run stops there, while -check and the language server also analyze the code around it.
 index: errors rules
 alias: syntax error; parse error; does not parse; unexpected token
-keywords: parser, lexer, expected, found, unterminated string, never closed, unexpected character, indentation, colon, recovery
-related: concept.syntax rule.if-placement rule.loop-placement rule.one-handler-per-error rule.comparison-chains rule.indentation rule.names rule.no-list-destructuring error.list-destructuring
-docs: DIAGNOSTIC-RECOVERY.md README.md
+keywords: parser, lexer, expected, found, unterminated string, never closed, unexpected character, indentation, colon, recovery, syntax recovery, -check, hole
+related: concept.syntax rule.if-placement rule.loop-placement rule.one-handler-per-error rule.comparison-chains rule.indentation rule.names rule.no-list-destructuring error.list-destructuring error.syntax-hole cli.options cli.lsp
+docs: DIAGNOSTIC-RECOVERY.md SYNTAX-RECOVERY-MILESTONE-1.md README.md
 code: SURFACE SYNTAX
 
 == MEANING
 At compile time, before any other check. The lexer and the parser read a
 .bot file into a syntax tree; text that does not fit the grammar is a
 syntax error, reported as FILE:LINE:COLUMN: MESSAGE (SURFACE SYNTAX).
-A file with syntax errors is not analyzed further: its semantic
-diagnostics (TYPE, UNBOUND, ...) appear once it parses.
+A program with a syntax error never runs and is never built: a run (and
+every -emit-... or inspecting option) reports its syntax errors and
+nothing else. -check and the language server report the same syntax
+errors, first and unchanged, and then the semantic diagnostics (TYPE,
+UNBOUND, ...) of the code the syntax errors cannot affect (below, "Checking
+around a syntax error").
 
 Some syntax errors carry a code of their own at the start of the message
 (LIST-DESTRUCTURING: ..., EXTERN-SYNTAX: ...); each has its own page.
@@ -1401,6 +1405,32 @@ behind the commonest errors have their own pages (listed below), and the
 help line printed under a syntax error names its rule's page when there is
 one.
 
+== CHECKING AROUND A SYNTAX ERROR
+-check and the language server analyze a program with syntax errors
+(SYNTAX-RECOVERY-MILESTONE-1.md). Each malformed statement or declaration
+becomes a hole: source that has no value, no type and never runs. Its
+first tokens, before the point where the text goes wrong, say what it is:
+`total = add(1, 2` binds total (to a value nobody knows), `fn area(` may
+declare area, a malformed `with context` may install a context, a
+malformed `struct` may declare a type. Everything else is analyzed as
+usual, so:
+  * a reference to a name a hole binds is known to exist, but its value
+    and type are not; a hover there says so;
+  * a diagnostic that could depend on a hole is not reported -- a name a
+    malformed statement in scope might have bound is not called unbound,
+    a call to a function whose body holds a hole is not checked against
+    the result that body would have had, a missing context is not
+    reported after a malformed installation -- and is reported once the
+    line parses, if it is still wrong;
+  * every other diagnostic is reported, and is the one a compilation of
+    the repaired program reports.
+A malformed line in an imported module keeps the module's other
+declarations. A hole never claims anything: no proof, no inferred result,
+no exhaustive handling is drawn from a function whose body holds one,
+except what its declaration states. A `static compile:` block of such a
+program is not decided. That is why -check can report more than a run of
+the same file: a run stops at the syntax errors.
+
 == HOW TO INVESTIGATE
 Read the first error first: the column points at the token where parsing
 went wrong, which may be after the real mistake (a missing ":" or ")" on
@@ -1418,3 +1448,60 @@ result
 @at 4:12
 @message "(" is never closed
 @end
+
+@topic error.syntax-hole
+title: SYNTAX-HOLE: malformed source, as -check and the language server see it
+summary: SYNTAX-HOLE is the analysis's record of a malformed statement or declaration (a hole) in a program with syntax errors; it is never reported: the syntax error is.
+index: errors
+alias: hole; malformed statement; no meaning is known
+keywords: syntax recovery, hole, malformed, -check, language server, hover, unknown, partial analysis
+related: error.surface-syntax error.hir-syntax-recovered cli.options cli.lsp
+docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
+code: CORE SEMANTIC SYNTAX-HOLE
+
+== MEANING
+Only in the analysis -check and the language server make of a program with
+a syntax error (error.surface-syntax, "Checking around a syntax error").
+Each malformed statement or declaration is a hole: it has no value, no
+type and no meaning, and whatever depends on it is analyzed as unknown. The
+analysis records it as a SYNTAX-HOLE diagnostic so that everything that
+depends on the hole is recognized as dependent; the diagnostic itself is
+never printed -- the syntax error that made the hole is. A hover on the
+malformed text answers
+
+    malformed source: no meaning is known for it (its syntax error says why)
+
+and a name a malformed statement may have bound, or may have changed the
+meaning of, has no type, definition or references until the line parses.
+
+== WHAT TO DO
+Fix the syntax error; the hole and everything that waited on it are then
+analyzed.
+
+@topic error.hir-syntax-recovered
+title: HIR SYNTAX-RECOVERED: a program with syntax errors given to a backend
+summary: HIR SYNTAX-RECOVERED is a backend's refusal of a HIR analyzed past syntax errors (as -check does): it is for diagnostics and queries only, never run or built.
+index: errors backends
+alias: recovered HIR; run a program with syntax errors
+keywords: syntax recovery, backend, runnable, hole, -check, language server, tool
+related: error.surface-syntax error.syntax-hole backend.hir-interchange cli.options
+docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
+code: HIR SYNTAX-RECOVERED
+
+== MEANING
+A tool error, never one of a program run from the command line. The
+analysis of a program with syntax errors (-check, the language server,
+surface::readProgramFile -recover-syntax 1) keeps a HIR whose malformed
+statements are holes: source with no meaning. Every backend entry point
+refuses it before it compiles anything:
+
+    this HIR analyzes a program with syntax errors (its malformed source
+    is holes): no backend compiles or runs it (HIR SYNTAX-RECOVERED)
+
+The front-end cache never stores such a HIR, and a strict compilation of
+the program reports its syntax errors (SURFACE SYNTAX) instead of making
+one.
+
+== WHAT TO DO
+Fix the program's syntax errors and compile it again; a tool that wants
+to run or build a program compiles it without -recover-syntax.

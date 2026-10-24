@@ -1,0 +1,198 @@
+# conformance.bot -- the JSON workload as a standalone program for the
+# differential tools (audit/dfa/tools/differential.tcl): every argument
+# after the program's name is one case, its bytes in hexadecimal (an
+# argument starting with "+" continues the previous case: one argument holds
+# at most 128 KiB). For each case it prints one line,
+#
+#   WHOLE | SPLIT
+#
+# the verdict of json::validate_bytes on the bytes as one chunk, and on the
+# same bytes cut into chunks of 1 to 7 bytes (a deterministic generator per
+# case): the same verdict, whatever the chunks (a chunk boundary is not the
+# end of the input), then
+#
+#   | TEXT
+#
+# for bytes that are valid UTF-8, the verdict of json::validate_scalars on
+# their scalar values (the unicode recognizers), or "n/a".
+
+import json
+import std::io
+import std::linux::io
+import std::list
+import std::str
+import std::char
+import std::int
+import std::mutable_vector
+import std::mutable_array
+
+fn cat(a: str, b: str) -> str:
+    std::str::concat(a, b)
+
+fn verdict(chunks: List[List[int]]) -> str:
+    s = json::validate_bytes(chunks, 1000, 10000000):
+        on json::Lexical {at, state}:
+            return cat(cat(cat("lexical ", std::int::to_string(at)), " "), state)
+        on json::Truncated {state}:
+            return cat("truncated ", state)
+        on json::Structure {at, expected}:
+            return cat(cat(cat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return cat("too long ", std::int::to_string(at))
+    cat("ok ", std::int::to_string(s.tokens))
+
+fn verdict_scalars(chunks: List[List[int]]) -> str:
+    s = json::validate_scalars(chunks, 1000, 10000000):
+        on json::Lexical {at, state}:
+            return cat(cat(cat("lexical ", std::int::to_string(at)), " "), state)
+        on json::Truncated {state}:
+            return cat("truncated ", state)
+        on json::Structure {at, expected}:
+            return cat(cat(cat("structure ", std::int::to_string(at)), " "), expected)
+        on json::TooDeep:
+            return "too deep"
+        on json::TokenTooLong {at}:
+            return cat("too long ", std::int::to_string(at))
+    cat("ok ", std::int::to_string(s.tokens))
+
+error NotUtf8
+
+# The scalar values of BYTES, if they are UTF-8 (RFC 3629), written without
+# the recognizers.
+fn utf8_scalars(bytes: List[int]) -> List[int] errors IndexNotFound, NotUtf8:
+    n = std::list::length(bytes)
+    out = std::mutable_vector::from_list([0])
+    std::mutable_vector::pop(out)
+    at = std::mutable_array::create(1, 0)
+    loop:
+        i = std::mutable_array::at(at, 0)
+        if i >= n:
+            break
+        b = std::list::at(bytes, i)
+        width = if b < 128:
+            1
+        elif b >= 194 and b <= 223:
+            2
+        elif b >= 224 and b <= 239:
+            3
+        elif b >= 240 and b <= 244:
+            4
+        else:
+            fail NotUtf8
+        if i + width > n:
+            fail NotUtf8
+        v = std::mutable_array::create(1, b)
+        if width == 2:
+            std::mutable_array::set(v, 0, b - 192)
+        if width == 3:
+            std::mutable_array::set(v, 0, b - 224)
+        if width == 4:
+            std::mutable_array::set(v, 0, b - 240)
+        loop k from 1 to width:
+            t = std::list::at(bytes, i + k)
+            if t < 128 or t > 191:
+                fail NotUtf8
+            std::mutable_array::set(v, 0, std::mutable_array::at(v, 0) * 64 + t - 128)
+        value = std::mutable_array::at(v, 0)
+        if width == 3 and value < 2048 or width == 4 and value < 65536 or value > 1114111 or value >= 55296 and value <= 57343:
+            fail NotUtf8
+        std::mutable_vector::push(out, value)
+        std::mutable_array::set(at, 0, i + width)
+    loop x in out:
+        x
+
+fn text_verdict(bytes: List[int]) -> str errors IndexNotFound:
+    scalars = utf8_scalars(bytes):
+        on NotUtf8:
+            return "n/a"
+    verdict_scalars([scalars])
+
+fn nibble(c: int) -> int:
+    if c >= 97:
+        return c - 87
+    if c >= 65:
+        return c - 55
+    c - 48
+
+# The bytes the hex digits of TEXT from FROM spell, pushed onto OUT.
+fn unhex(text: str, from: int, out: MutableVector[int]) -> MutableVector[int] errors IndexNotFound:
+    n = std::str::length(text)
+    loop i from 0 to (n - from).shift_right(1):
+        k = from + i * 2
+        hi = nibble(std::char::scalar_value(std::str::char_at(text, k)))
+        lo = nibble(std::char::scalar_value(std::str::char_at(text, k + 1)))
+        std::mutable_vector::push(out, hi * 16 + lo)
+    out
+
+fn next_seed(seed: int) -> int:
+    (seed * 1103515245 + 12345).mod(2147483648)
+
+# BYTES cut into chunks of 1 to 7 bytes, the sizes drawn from SEED.
+fn chunked(bytes: List[int], seed: int) -> List[List[int]] errors IndexNotFound:
+    n = std::list::length(bytes)
+    out = std::mutable_vector::from_list([[0]])
+    std::mutable_vector::pop(out)
+    chunk = std::mutable_vector::from_list([0])
+    std::mutable_vector::pop(chunk)
+    state = std::mutable_array::create(2, seed)
+    std::mutable_array::set(state, 1, 1 + seed.mod(7))
+    loop i from 0 to n:
+        std::mutable_vector::push(chunk, std::list::at(bytes, i))
+        if std::mutable_vector::length(chunk) >= std::mutable_array::at(state, 1):
+            piece = loop b in chunk:
+                b
+            std::mutable_vector::push(out, piece)
+            std::mutable_vector::clear(chunk)
+            s = next_seed(std::mutable_array::at(state, 0))
+            std::mutable_array::set(state, 0, s)
+            std::mutable_array::set(state, 1, 1 + s.shift_right(16).mod(7))
+    rest = loop b in chunk:
+        b
+    std::mutable_vector::push(out, rest)
+    loop c in out:
+        c
+
+# Whether argument A continues the previous case ("+HEX").
+fn continues?(a: str) -> bool errors IndexNotFound:
+    std::str::length(a) > 0 and std::char::scalar_value(std::str::char_at(a, 0)) == 43
+
+fn run(arguments: List[str]) -> unit errors IndexNotFound, std::io::WriteFailed:
+    n = std::list::length(arguments)
+    case = std::mutable_vector::from_list([0])
+    std::mutable_vector::pop(case)
+    count = std::mutable_array::create(1, 0)
+    loop i from 1 to n:
+        a = std::list::at(arguments, i)
+        more = continues?(a)
+        start = if more:
+            1
+        else:
+            0
+        if not more:
+            std::mutable_vector::clear(case)
+        grown = unhex(a, start, case)
+        std::mutable_vector::clear(case)
+        loop b in grown:
+            std::mutable_vector::push(case, b)
+        last = i + 1 >= n or not continues?(std::list::at(arguments, i + 1))
+        if last:
+            bytes = loop b in case:
+                b
+            k = std::mutable_array::at(count, 0)
+            std::mutable_array::set(count, 0, k + 1)
+            whole = verdict([bytes])
+            std::io::print_line(cat(cat(cat(cat(whole, " | "), verdict(chunked(bytes, k + 17))), " | "), text_verdict(bytes)))
+    unit
+
+with context std::linux::io::create()
+
+arguments = argv():
+    on InvalidArgumentEncoding:
+        []
+run(arguments):
+    on IndexNotFound:
+        unit
+    on std::io::WriteFailed:
+        unit

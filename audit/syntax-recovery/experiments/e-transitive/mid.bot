@@ -1,0 +1,7 @@
+import low
+
+fn twice() -> int:
+    low::base() * 2
+
+fn usebad():
+    low::bad(1)

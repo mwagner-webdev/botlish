@@ -58,6 +58,7 @@ namespace eval hir::recovery {}
 # The diagnostics of HIR a compilation that rejects it reports (above), in
 # HIR's order.
 proc hir::recovery::reported {hir} {
+    variable conformanceKinds
     set diagnostics [OwnedPositions $hir [dict get $hir diagnostics]]
     if {![dict exists $hir resolutionDiagnostics]} {
         return $diagnostics
@@ -65,11 +66,24 @@ proc hir::recovery::reported {hir} {
     set resolution [dict get $hir resolutionDiagnostics]
     set tainted [Tainted $hir $resolution]
     if {[dict exists $tainted *]} {
-        return [lmap d $diagnostics {if {$d in $resolution} {set d} else {continue}}]
+        return [lmap d $diagnostics {if {$d in $resolution && [dict get $d kind] ne "SYNTAX-HOLE"} {set d} else {continue}}]
     }
     set unitOf [dict get $tainted unitOf]
     set result {}
     foreach d $diagnostics {
+        if {[dict get $d kind] eq "SYNTAX-HOLE"} {
+            # A hole's error is its syntax diagnostic, reported by the parser
+            # (SYNTAX-RECOVERY-MILESTONE-1.md).
+            continue
+        }
+        if {[dict get $d kind] in $conformanceKinds && [dict getdef $hir syntaxRecovery openFiles {}] ne {}} {
+            # Whether a type satisfies a trait, or a context implements a
+            # context trait, reads its owner module's top-level functions: a
+            # malformed statement that may declare one (`openFiles`,
+            # surface/modules.tcl's Recovery) may be the missing
+            # implementation.
+            continue
+        }
         if {$d ni $resolution} {
             set e [dict getdef $d expr ""]
             if {![dict exists $unitOf $e] || [dict exists $tainted units [dict get $unitOf $e]]} {
@@ -150,6 +164,34 @@ proc hir::recovery::Tainted {hir resolution} {
         }
         dict set units [dict get $unitOf $e] 1
     }
+    # Syntax recovery (SYNTAX-RECOVERY-MILESTONE-1.md): a unit holding a
+    # reference whose meaning depends on a hole, and every unit of a file
+    # whose header is malformed (what it imports, so what its names and
+    # method calls may mean, is not known), depend on what nobody wrote.
+    foreach e [dict keys [dict getdef $hir syntaxDependent {}]] {
+        if {[dict exists $unitOf $e]} {
+            dict set units [dict get $unitOf $e] 1
+        }
+    }
+    set files [dict getdef $hir syntaxRecovery taintedFiles {}]
+    if {$files ne {}} {
+        foreach root [dict get $hir roots] {
+            if {[dict getdef [dict get $hir exprs $root origin] file ""] in $files} {
+                dict set units $root 1
+            }
+        }
+    }
+    # And every top-level unit after a hole that may have installed a context
+    # (`with context`, the entry program's top level only): which contexts
+    # its calls receive is not known.
+    set installed 0
+    foreach root [dict get $hir roots] {
+        if {$installed} {
+            dict set units $root 1
+        } elseif {[dict exists $hir exprs $root hole] && [dict get $hir exprs $root hole installs]} {
+            set installed 1
+        }
+    }
     # A unit depends on the units declaring what it refers to: until no
     # tainted unit taints another (`mutual:` groups refer forward).
     set changed 1
@@ -169,6 +211,82 @@ proc hir::recovery::Tainted {hir resolution} {
     return [dict create unitOf $unitOf units $units]
 }
 
+namespace eval hir::recovery {
+    # What a module's top-level declarations decide for code elsewhere
+    # (TRAITS.md, CONTEXT-TRAITS.md): conformance and implementations.
+    variable conformanceKinds {TRAIT-NOT-SATISFIED MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+    # Resolution diagnostics that hold whatever a type-level name denotes: a
+    # misplaced statement, a name bound twice in one scope, an unbound name
+    # (a value, never a type-level name).
+    variable structuralKinds {DUPLICATE BREAK-OUTSIDE-LOOP CONTINUE-OUTSIDE-LOOP RETURN-OUTSIDE-CALLABLE
+        LISTLOOP-BREAK-VALUE DUPLICATE-LOOP-VARIABLE DUPLICATE-FIELD UNBOUND}
+}
+
+# Syntax recovery's part of a resolved HIR (SYNTAX-RECOVERY-MILESTONE-1.md),
+# whose `syntaxRecovery` the front end recorded (surface/modules.tcl's
+# Recovery). Holes are SYNTAX-HOLE diagnostics, and references whose binding
+# a hole may change are `syntaxDependent` already (hir/resolve.tcl's Holes).
+# Three things depend on what nobody wrote beyond that:
+#
+#   * in a file whose type-level names are not all known (`typeFiles`: a
+#     malformed declaration may have declared one, of the file or of a module
+#     it imports, or its header is malformed), a resolution diagnostic is not
+#     known to be true -- an unknown type, struct, error, layout or enum case
+#     may be one that declaration makes -- unless it holds whatever a name
+#     denotes (structuralKinds). It is removed, and the expression it was
+#     about is `syntaxDependent`: its unit is tainted (Tainted), and
+#     inference makes it poison;
+#   * in a file that may declare an extern c fn it cannot name
+#     (`externFiles`), an unbound name may be that function's (an extern is
+#     visible from its file's start): not known to be unbound;
+#   * in a file whose header is malformed or that imports a module whose
+#     malformed top-level statements may define functions (`methodFiles`),
+#     which function a method-style call applies is not known
+#     (METHOD-SUGAR.md): every one is `syntaxDependent`.
+proc hir::recovery::Recovered {hirVar} {
+    upvar 1 $hirVar hir
+    variable structuralKinds
+    set typeFiles [dict get $hir syntaxRecovery typeFiles]
+    set tainted [dict get $hir syntaxRecovery taintedFiles]
+    if {$typeFiles ne {}} {
+        set kept {}
+        foreach d [dict get $hir diagnostics] {
+            if {[dict get $d kind] ni [concat SYNTAX-HOLE $structuralKinds]} {
+                set origin [if {[dict exists $d origin]} {dict get $d origin} else {hir::get $hir [dict get $d expr] origin}]
+                if {[dict getdef $origin file ""] in $typeFiles} {
+                    dict set hir syntaxDependent [dict get $d expr] 1
+                    continue
+                }
+            }
+            lappend kept $d
+        }
+        dict set hir diagnostics $kept
+    }
+    set externFiles [dict getdef $hir syntaxRecovery externFiles {}]
+    if {$externFiles ne {}} {
+        set kept {}
+        foreach d [dict get $hir diagnostics] {
+            if {[dict get $d kind] eq "UNBOUND"
+                    && [dict getdef [hir::get $hir [dict get $d expr] origin] file ""] in $externFiles} {
+                dict set hir syntaxDependent [dict get $d expr] 1
+                continue
+            }
+            lappend kept $d
+        }
+        dict set hir diagnostics $kept
+    }
+    set methodFiles [dict getdef $hir syntaxRecovery methodFiles {}]
+    if {$methodFiles ne {}} {
+        dict for {e node} [dict get $hir exprs] {
+            if {[dict get $node kind] eq "call" && [dict exists $node written]
+                    && [dict get $node written form] eq "method"
+                    && [dict getdef [dict get $node origin] file ""] in $methodFiles} {
+                dict set hir syntaxDependent $e 1
+            }
+        }
+    }
+}
+
 # The HIR a backend compiles for HIR (hir::lower, core::compiler::compileHir,
 # native::prepareHir): HIR itself, unless it has poison (hir/types.tcl). A
 # poisoned expression is typed `never` for the checks, which is not a
@@ -180,6 +298,11 @@ proc hir::recovery::Tainted {hir resolution} {
 # it drops a violated declared type. Only a lenient HIR can have poison: a
 # strict compilation raises it, and a static decision never runs its builds.
 proc hir::recovery::runnable {hir} {
+    if {[dict exists $hir syntaxRecovery]} {
+        # A program with syntax errors analyzed past them
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): an analysis, never a program.
+        throw {HIR SYNTAX-RECOVERED} "this HIR analyzes a program with syntax errors (its malformed source is holes): no backend compiles or runs it"
+    }
     if {![dict exists $hir poisoned]} {
         return $hir
     }

@@ -1,0 +1,340 @@
+# frontend.test -- the DFA front end's static checks and lowering
+# (DFA-COROUTINE-EXPLORATION.md, "Static guarantees"). Run by hand:
+#
+#   tclsh9.0 audit/dfa/tests/frontend.test
+#
+# Like the C header archaeology's tests, these are research tooling's: not
+# part of tests/local.tcl or CI (the prototype is not part of the compiler).
+
+package require tcltest 2.5
+namespace import ::tcltest::*
+source [file join [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]] tests helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot audit dfa tests support.tcl]
+
+# The diagnostics of .dfa TEXT: {CODE LINE:COLUMN ...}, in source order.
+proc diagnosticsOf {text} {
+    set dir [file tempdir dfa-frontend]
+    try {
+        set path [file join $dir t.dfa]
+        dfa::WriteText $path $text
+        set result [dfa::compileFile $path]
+        set out {}
+        foreach e [dict get $result diagnostics] {
+            lappend out [lindex [dict get $e errorcode] 2] \
+                [dict get $e location line]:[dict get $e location column]
+        }
+        return $out
+    } finally {
+        file delete -force $dir
+    }
+}
+
+# The first diagnostic entry of TEXT (the whole dict).
+proc firstEntry {text} {
+    set dir [file tempdir dfa-frontend]
+    try {
+        set path [file join $dir t.dfa]
+        dfa::WriteText $path $text
+        return [lindex [dict get [dfa::compileFile $path] diagnostics] 0]
+    } finally {
+        file delete -force $dir
+    }
+}
+
+# A well-formed recognizer the cases below perturb.
+set number {dfa n over ascii:
+    start:
+        '-' -> minus
+        '0'..'9' -> digits
+    minus:
+        '0'..'9' -> digits
+    digits:
+        '0'..'9' -> digits
+        ',' -> accept before
+        end -> accept
+}
+
+test frontend-clean "a well-formed recognizer has no diagnostic" -body {
+    diagnosticsOf $number
+} -result {}
+
+test frontend-ambiguous "overlapping transitions of one state, with both locations" -body {
+    set e [firstEntry [string map {"'-' -> minus" "'-' '5' -> minus"} $number]]
+    list [dict get $e errorcode] [dict get $e summary] [llength [dict get $e related]] \
+        [dict get [lindex [dict get $e related] 0] line] [dict get [lindex [dict get $e related] 1] line]
+} -result {{CORE SEMANTIC DFA-AMBIGUOUS-TRANSITION} {two transitions of state start in n claim '5': a recognizer takes at most one transition per symbol} 2 3 4}
+
+test frontend-ambiguous-classes "an overlap through named classes is found by its symbols" -body {
+    diagnosticsOf "class digit = '0'..'9'\nclass octal = '0'..'7'\n[string map {"'0'..'9' -> digits\n    minus" "digit -> digits\n        octal -> minus\n    minus"} $number]"
+} -result {DFA-AMBIGUOUS-TRANSITION 7:9}
+
+test frontend-nonprogressing "a cycle of non-consuming moves some symbol takes" -body {
+    diagnosticsOf {dfa spin over ascii:
+    a:
+        'x' => b
+        'y' -> accept
+    b:
+        'x' 'z' => a
+}
+} -result {DFA-NONPROGRESSING-CYCLE 6:9}
+
+test frontend-nonprogressing-disjoint "a cycle no single symbol can take is no cycle" -body {
+    diagnosticsOf {dfa fine over ascii:
+    a:
+        'x' => b
+        'y' -> accept
+    b:
+        'x' -> accept
+        'y' => a
+}
+} -result {}
+
+test frontend-nonprogressing-call "a callee that completes before a symbol, called again on it" -body {
+    diagnosticsOf {dfa word over ascii:
+    start:
+        'a' -> more
+        ',' -> accept before
+        end -> accept
+    more:
+        'a' -> more
+        ',' -> accept before
+        end -> accept
+
+dfa list over ascii:
+    start:
+        'a' ',' -> call word then sep
+    sep:
+        ',' -> call word then sep
+        end -> accept
+}
+} -result {DFA-NONPROGRESSING-CYCLE 15:9}
+
+test frontend-unreachable "a state no transition leads to" -body {
+    diagnosticsOf "$number    orphan:\n        'x' -> accept\n"
+} -result {DFA-UNREACHABLE-STATE 11:5}
+
+test frontend-no-accept "a reachable state from which nothing is accepted" -body {
+    diagnosticsOf [string map {"'-' -> minus" "'-' -> sink" "    minus:" "    sink:\n        '-' -> sink\n    minus:"} $number]
+} -result {DFA-NO-ACCEPT 5:5 DFA-UNREACHABLE-STATE 7:5}
+
+test frontend-accepts-nothing "a recognizer that accepts no input at all" -body {
+    diagnosticsOf {dfa never over ascii:
+    start:
+        'a' -> start
+}
+} -result {DFA-NO-ACCEPT 2:5}
+
+test frontend-dead-transition "a non-consuming transition its target can only reject" -body {
+    diagnosticsOf {dfa d over ascii:
+    start:
+        'a' => only_b
+        'c' -> accept
+    only_b:
+        'b' -> accept
+}
+} -result {DFA-DEAD-TRANSITION 3:9}
+
+test frontend-missing-end "a state accepting before a symbol must say what the end means" -body {
+    diagnosticsOf [string map {"        end -> accept\n" ""} $number]
+} -result {DFA-MISSING-END 7:5}
+
+test frontend-explicit-end-reject "an explicit end -> reject answers it" -body {
+    diagnosticsOf [string map {"end -> accept" "end -> reject"} $number]
+} -result {}
+
+test frontend-end-consumed "the end of the input is never consumed" -body {
+    diagnosticsOf [string map {"end -> accept" "end -> digits"} $number]
+} -result {DFA-END-CONSUMED 10:9}
+
+test frontend-byte-character "a non-ASCII character in a bytes recognizer is no byte" -body {
+    diagnosticsOf {dfa b over bytes:
+    start:
+        'é' -> accept
+        0xC3 -> accept
+}
+} -result {DFA-BYTE-CHARACTER 3:9}
+
+test frontend-alphabet "symbols outside the alphabet" -body {
+    diagnosticsOf {dfa b over bytes:
+    start:
+        0x100 -> accept
+        'a' -> accept
+dfa u over unicode:
+    start:
+        0xD800 -> accept
+        0x110000 -> accept
+        'a' -> accept
+dfa a over ascii:
+    start:
+        'é' -> accept
+        "ét" -> accept
+        'a' -> accept
+}
+} -result {DFA-ALPHABET 3:9 DFA-ALPHABET 7:9 DFA-ALPHABET 8:9 DFA-ALPHABET 12:9 DFA-ALPHABET 13:9}
+
+test frontend-surrogate-gap "a range across the surrogates means its scalar values" -body {
+    set dir [file tempdir dfa-frontend]
+    dfa::WriteText $dir/t.dfa {dfa u over unicode:
+    start:
+        0x20..0x10FFFF -> accept
+}
+    set model [dict get [dfa::compileFile $dir/t.dfa] model]
+    file delete -force $dir
+    lsearch -inline -index 1 [dict get $model dfas u effective start] accept
+} -result {{{32 55295} {57344 1114111}} accept}
+
+test frontend-names "unknown states, classes and recognizers; a later or recursive call" -body {
+    diagnosticsOf {dfa a over ascii:
+    start:
+        'a' -> nowhere
+        'b' -> accept
+        nope -> accept
+        'c' -> call later then accept
+        'd' -> call a then accept
+        'e' -> call ghost then accept
+dfa later over ascii:
+    start:
+        'x' -> accept
+}
+} -result {DFA-UNKNOWN-STATE 3:16 DFA-UNKNOWN-CLASS 5:9 DFA-UNKNOWN-DFA 6:21 DFA-RECURSIVE-CALL 7:21 DFA-UNKNOWN-DFA 8:21}
+
+test frontend-call-alphabet "a callee reads the caller's alphabet or ascii" -body {
+    diagnosticsOf {dfa b over bytes:
+    start:
+        0xC3 -> accept
+dfa u over unicode:
+    start:
+        'a' -> call b then accept
+}
+} -result {DFA-CALL-ALPHABET 6:21}
+
+test frontend-duplicates "a state, a class and a recognizer declared twice" -body {
+    diagnosticsOf {class x = 'x'
+class x = 'y'
+dfa a over ascii:
+    start:
+        'a' -> accept
+    start:
+        'b' -> accept
+dfa a over ascii:
+    s:
+        'a' -> accept
+}
+} -result {DFA-DUPLICATE 2:7 DFA-DUPLICATE 6:5 DFA-DUPLICATE 8:5}
+
+test frontend-syntax "malformed declarations are syntax diagnostics at the place" -body {
+    diagnosticsOf {dfa a over:
+    start:
+        'a' -> accept
+dfa b over ascii:
+    start:
+        'a' ->
+        'b' -> accept maybe
+        'c'.. -> accept
+        'd' => accept
+        'e' -> accept
+}
+} -result {DFA-SYNTAX 1:1 DFA-SYNTAX 6:13 DFA-SYNTAX 7:16 DFA-SYNTAX 8:12 DFA-SYNTAX 9:16}
+
+test frontend-empty "an empty range and an empty class" -body {
+    diagnosticsOf {class none = 'a'..'c' except 'a'..'c'
+dfa a over ascii:
+    start:
+        'z'..'a' -> accept
+        none -> accept
+        'x' -> accept
+}
+} -result {DFA-EMPTY-RANGE 1:7 DFA-EMPTY-RANGE 4:9}
+
+test frontend-no-cascade "every independent diagnostic, none restating another" -body {
+    diagnosticsOf {dfa overlap over unicode:
+    start:
+        '0'..'9' -> int
+        '0' -> int
+    int:
+        end -> accept
+dfa spin over ascii:
+    a:
+        'x' => b
+        'y' -> accept
+    b:
+        'x' => a
+dfa lonely over bytes:
+    start:
+        'é' -> s2
+        'a' -> s2
+    s2:
+        end -> accept
+}
+} -result {DFA-AMBIGUOUS-TRANSITION 4:9 DFA-NONPROGRESSING-CYCLE 12:9 DFA-BYTE-CHARACTER 15:9}
+
+test frontend-raise "diagnostics are raised as the compiler raises them" -body {
+    set dir [file tempdir dfa-frontend]
+    dfa::WriteText $dir/t.dfa [string map {"'-' -> minus" "'-' '5' -> minus"} $number]
+    catch {dfa::raise [dfa::compileFile $dir/t.dfa]} message options
+    file delete -force $dir
+    list [dict get $options -errorcode] [llength [dict get $options -diagnostics]] [lindex [split $message \n] 0]
+} -result {{CORE SEMANTIC DFA-AMBIGUOUS-TRANSITION} 1 {t.dfa:4:9: two transitions of state start in n claim '5': a recognizer takes at most one transition per symbol}}
+
+test frontend-committed "the committed json_lex.bot and dfa.bot are what generation produces" -body {
+    set result [dfa::compileFile [file join $dfatest::json json_lex.dfa]]
+    list [expr {[dfa::ReadText [file join $dfatest::json json_lex.bot]] eq [dict get $result bot]}] \
+        [expr {[dfa::ReadText [file join $dfatest::json dfa.bot]] eq [dfa::SupportModule]}]
+} -result {1 1}
+
+test frontend-deterministic "generation is deterministic" -body {
+    set path [file join $dfatest::json json_lex.dfa]
+    expr {[dict get [dfa::compileFile $path] bot] eq [dict get [dfa::compileFile $path] bot]}
+} -result 1
+
+test frontend-facts "what the front end knows about json_number" -body {
+    set model [dfatest::model [file join $dfatest::json json_lex.dfa]]
+    set d [dict get $model dfas json_number]
+    list [llength [dict get $d entered]] [dict get $d errors] [dict get $dfa::leavesUnread json_number] \
+        [dict get $dfa::leavesUnread json_string] [lsort [dict keys [dict get $d canAccept]]]
+} -result {9 {dfa::UnrecognizedInput dfa::UnexpectedEnd} 1 0 {exponent exponent_digits exponent_sign fraction integer minus point start zero}}
+
+test frontend-errors-precise "a recognizer that cannot fail at the end does not declare it" -body {
+    set dir [file tempdir dfa-frontend]
+    dfa::WriteText $dir/t.dfa {dfa a over ascii:
+    start:
+        'a' -> start
+        end -> accept
+}
+    set d [dict get [dfa::compileFile $dir/t.dfa] model dfas a]
+    file delete -force $dir
+    dict get $d errors
+} -result {dfa::UnrecognizedInput}
+
+test frontend-numeric-looking-names "a state named inf or nan, and a symbol written 0x80, stay as written (AGENTS.md: no expr ?: over a string)" -body {
+    set dir [file tempdir dfa-frontend]
+    dfa::WriteText $dir/t.dfa {dfa d over ascii:
+    start:
+        'n' -> nan
+        'i' -> inf
+    nan:
+        'x' -> accept
+    inf:
+        "ty" -> accept
+}
+    set bot [dict get [dfa::compileFile $dir/t.dfa] bot]
+    dfa::WriteText $dir/u.dfa {dfa e over ascii:
+    start:
+        0x80 -> accept
+}
+    set message [dict get [firstEntry [dfa::ReadText $dir/u.dfa]] message]
+    file delete -force $dir
+    list [regexp -all {"d\.nan"} $bot] [regexp -all {"d\.inf"} $bot] [regexp -all {"d\.inf\\"t\\""} $bot] \
+        [regexp -all {Inf|NaN} $bot] [string match {*: 0x80 is outside the alphabet of e *} $message]
+} -result {1 1 1 0 1}
+
+test frontend-lowering-shape "one suspension point, a self tail call, one call per callee" -body {
+    set text [dfa::ReadText [file join $dfatest::json json_lex.bot]]
+    set body [string range $text [string first "fn dfa_json_string_bytes(" $text] [string first "fn json_string_bytes(" $text]]
+    list [regexp -all {yield} $body] [regexp -all {dfa_json_string_bytes\(target, m.code\)} $body] \
+        [regexp -all {dfa_json_escape\(0, c\)} $body] [regexp -all {dfa_utf8_char\(0, c\)} $body] [regexp -all {\mfail\M} $body] \
+        [regexp -all {Answer|struct} $body]
+} -result {1 1 1 1 2 0}
+
+cleanupTests

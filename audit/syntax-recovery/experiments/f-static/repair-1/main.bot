@@ -1,0 +1,15 @@
+import std::compiler
+
+fn helper(n: int):
+    n + 1
+
+fn need(v: int) -> int:
+    v
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        need(helper(1))
+
+r = probe():
+    on std::compiler::CompilerError:
+        0

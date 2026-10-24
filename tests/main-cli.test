@@ -287,12 +287,32 @@ foreach {name files} {
         set path [file join $dir main.bot]
         set run [runMain -warnings off $path]
         set check [runMain -warnings off -check $path]
-        list [dict get $run status] [dict get $check status] \
+    list [dict get $run status] [dict get $check status] \
             [expr {[checkLines [dict get $run out]] eq [checkLines [dict get $check out]]}] \
             [expr {[llength [checkLines [dict get $check out]]] > 0}] \
             [lindex [split [dict get $check out] \n] 0]
     } -cleanup {file delete -force $dir; unset -nocomplain dir path run check} -result {1 1 1 1 {== main.bot (check)}}
 }
+
+# An "error:" or "help:" line without its indentation and directories.
+proc cliRecoveredLine {line} {
+    return [regsub {^ *(error|help): (?:[^ ]*/)?} $line {\1: }]
+}
+
+test cli-check-recovers-past-syntax {past a syntax error -check reports what a run reports -- the entry's syntax errors, where a run stops -- then the syntax errors of the modules it imports, and then the semantic errors the malformed source cannot affect, which a run does not: an unbound name in an independent statement, not the call of a function whose body is malformed nor the use of a name a malformed statement binds (SYNTAX-RECOVERY-MILESTONE-1.md); both exit 1, and -check of the repaired program reports the same semantic errors} -body {
+    set dir [checkApp recovers {main.bot "import util\n\nfn f(n: int) -> int:\n    n +\n\nx = f(\"s\")\ny = nosuch\nz = (1\nw = z + util::g(1)\n" util.bot "fn g(n: int) -> int:\n    k = n *\n    k\n"}]
+    set path [file join $dir main.bot]
+    set run [runMain -warnings off $path]
+    set check [runMain -warnings off -check $path]
+    set lines [checkLines [dict get $check out]]
+    set runLines [checkLines [dict get $run out]]
+    set repaired [checkApp repaired {main.bot "import util\n\nfn f(n: int) -> int:\n    n + 1\n\nx = f(1)\ny = nosuch\nz = (1)\nw = z + util::g(1)\n" util.bot "fn g(n: int) -> int:\n    k = n * 2\n    k\n"}]
+    set fixed [checkLines [dict get [runMain -warnings off -check [file join $repaired main.bot]] out]]
+    list [dict get $run status] [dict get $check status] \
+        [expr {[lrange $lines 0 [llength $runLines]-1] eq $runLines}] \
+        [lmap line $lines {cliRecoveredLine $line}] \
+        [expr {[lmap line [lrange $lines end-[expr {[llength $fixed] - 1}] end] {cliRecoveredLine $line}] eq [lmap line $fixed {cliRecoveredLine $line}]}]
+} -cleanup {file delete -force $dir $repaired; unset -nocomplain dir repaired path run check lines runLines fixed} -result {1 1 1 {{error: main.bot:4:8: expected an expression, found end of line (SURFACE SYNTAX)} {help: tclsh9.0 main.tcl -help error.surface-syntax} {error: main.bot:8:5: "(" is never closed (SURFACE SYNTAX)} {error: util.bot:2:12: expected an expression, found end of line (SURFACE SYNTAX)} {error: main.bot:7:5: unbound name "nosuch" (CORE SEMANTIC UNBOUND)} {help: tclsh9.0 main.tcl -help error.unbound}} 1}
 
 test cli-check-diagnostic-recovery-corpus {on every case of the diagnostic-recovery corpus, -check prints the error and help lines a run prints} -body {
     set differ {}

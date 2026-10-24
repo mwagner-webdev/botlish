@@ -1,0 +1,4 @@
+import mid
+
+v = mid::twice()
+w = mid::usebad()

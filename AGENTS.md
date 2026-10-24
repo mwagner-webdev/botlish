@@ -3125,7 +3125,11 @@ no semantics of its own. Keep it so:
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
-  merge, reword or add one. Every query reads its revision through
+  merge, reword or add one. Past a syntax error it reports the syntax
+  errors, first and unchanged, then what the recovered analysis reports
+  (next section but one): its outcome is `syntax` whenever there is one,
+  and its `semantics` (`full`, `partial`, `none`) says how much it
+  analyzed. Every query reads its revision through
   `service::Use`, which activates the revision's HIR (COMPILATION-ISOLATION.md);
   a revision never changes once made (derived indexes are computed from it
   on first use and released with it); no query runs or compiles code; no
@@ -3196,6 +3200,65 @@ mutates, keeping it a mutant of the same rule); for a scheduling change
 also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
+
+## Syntax recovery
+
+`-check`, the compiler service and the language server analyze a program
+past its syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md); a run, a build and
+every inspecting option still stop at them. surface/recover.tcl replaces
+each malformed statement -- the innermost statement holding a damaged
+position: a construct the parser failed on, a lexical guess (a bracket it
+closed, a string it ended, a character it skipped), the top-level region of
+a layout problem -- by a `hole` that keeps only what the tokens before the
+damage establish; lowering makes it HIR `syntax#hole` refs
+(`hir::syntax::holeNode`), each with a SYNTAX-HOLE diagnostic that taints
+its unit and is never reported. Keep it so:
+
+* A hole is no value: never `unit`, `never`, `any`, a default or a guessed
+  completion. It is poison to inference (no divergence:
+  `hir::types::Halts` is false for it), unknown to the range and completion
+  analyses, and its innermost function (`holeBlocks`) has no inferred
+  result, contract or semantic instance: only its declaration's types are
+  facts (a hover shows its signature only when it declares every type).
+* What a hole binds is read from its valid prefix alone
+  (`surface::recover::Hole`): `NAME =` and `fn NAME` bind NAME; a form the
+  prefix does not decide, a destructuring, a coroutine binding or a region
+  that swallowed the next line may bind any name (`binds`), and a reference
+  a binding hole may capture is `syntaxDependent`
+  (`hir::resolve::AfterBindingHole`): no binding, definition, references or
+  diagnostic. A top-level hole may declare a type, an extern or install a
+  context, and a module's may declare any member (the loader's
+  `DependentReference`). Never read meaning from the tokens after the
+  damage, and never find a binding by spelling.
+* Dependent diagnostics are suppressed by that dependency model
+  (`hir::recovery::Tainted`, `Recovered`), never by comparing messages or
+  positions; the syntax diagnostics are the parser's, first, unchanged.
+* A recovered HIR (`syntaxRecovery`) never runs and is never built or
+  cached: every backend refuses it (`hir::recovery::runnable`, `HIR
+  SYNTAX-RECOVERED`), the front-end cache never stores it, a strict
+  compilation raises the syntax errors, and a `static compile:` block of
+  such a program is a hole, never decided. Only `-recover-syntax 1`
+  (`surface::readProgramFile`) makes one: never pass it from a path that
+  runs or builds.
+
+If you change any of that (surface/recover.tcl, the damage record of
+surface/parser.tcl and surface/lexer.tcl, hole lowering in surface/lower.tcl,
+the loader's recovery in surface/modules.tcl, hir/recovery.tcl, the hole and
+`syntaxDependent` cases of hir/resolve.tcl, hir/types.tcl, hir/range.tcl,
+hir/completions.tcl, hir/signatures.tcl and hir/static.tcl, the service's
+partial revisions or the server's choice between a partial and a complete
+revision), run `tests/syntax-recovery.test`, `tests/compiler-service.test`,
+`tests/lsp.test`, `tests/lsp-neovim.test` (Neovim), `tests/main-cli.test`,
+`tests/diagnostic-recovery.test`, `audit/syntax-recovery/tools/fuzz.tcl`
+(several seeds) and `audit/syntax-recovery/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule),
+plus the compiler-service, diagnostic-recovery, LSP and hir-interchange
+mutation tools for a change to what they cover.
+`audit/syntax-recovery/tools/experiments.tcl` prints what the experiments'
+programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
+the performance report, and `bench/lsp.tcl -malformed 1` the language
+server's editing session through syntax errors.
 
 ## Compilerpedia (the built-in reference)
 

@@ -1,0 +1,5 @@
+main.bot 3 1 known xs: before the malformed statement
+main.bot 4 1 binding n: bound by the malformed statement (its value is not known)
+main.bot 5 1 unavailable m: depends on n's unknown value
+main.bot 6 1 known k: independent statement after it
+main.bot 8 9 known k: a reference to it in a later function

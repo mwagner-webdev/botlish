@@ -1,0 +1,99 @@
+# variants.bot -- json.bot's lex_text with the token's kind decided by the
+# driver (DFA-COROUTINE-EXPLORATION.md, "Performance"): punctuation is one
+# symbol and needs no recognizer, and each kind of token that needs one has
+# its own construction site -- the shape of the fusion milestone's
+# tokens.bot. The same recognizers; only where the dispatch happens differs
+# (json_token dispatches inside one recognizer, and starts one per token).
+
+import dfa
+import json
+import json_lex
+import std::coroutine
+import std::mutable_array
+
+fn punctuation?(c: int) -> bool:
+    c == 123 or c == 125 or c == 91 or c == 93 or c == 58 or c == 44
+
+fn lex_text_sites(chunks: List[str], max_token: int) -> json::Summary errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong:
+    coroutine {step: next_symbol, first: c0} = json::scalars(chunks)
+    current = std::mutable_array::create(1, c0)
+    offset = std::mutable_array::create(1, 0)
+    tokens = std::mutable_array::create(1, 0)
+    took = std::mutable_array::create(1, false)
+    loop:
+        c = std::mutable_array::at(current, 0)
+        if json::whitespace?(c):
+            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
+            std::mutable_array::set(current, 0, next_symbol())
+            continue
+        if c == -1:
+            break
+        start = std::mutable_array::at(offset, 0)
+        std::mutable_array::set(tokens, 0, std::mutable_array::at(tokens, 0) + 1)
+        if punctuation?(c):
+            std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
+            std::mutable_array::set(current, 0, next_symbol())
+            continue
+        if c == 34:
+            coroutine {step: feed, first} = json_lex::json_string(c):
+                on dfa::UnrecognizedInput {state}:
+                    fail json::Lexical {at: start, state: state}
+                on dfa::UnexpectedEnd {state}:
+                    fail json::Truncated {state: state}
+            std::mutable_array::set(took, 0, first)
+            loop:
+                if std::mutable_array::at(took, 0):
+                    std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
+                    std::mutable_array::set(current, 0, next_symbol())
+                if std::coroutine::done?(feed):
+                    break
+                if std::mutable_array::at(offset, 0) - start >= max_token:
+                    fail json::TokenTooLong {at: start, limit: max_token}
+                answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
+                    on dfa::UnrecognizedInput {state}:
+                        fail json::Lexical {at: std::mutable_array::at(offset, 0), state: state}
+                    on dfa::UnexpectedEnd {state}:
+                        fail json::Truncated {state: state}
+                std::mutable_array::set(took, 0, answer)
+            continue
+        if c == 116 or c == 102 or c == 110:
+            coroutine {step: feed, first} = json_lex::json_literal(c):
+                on dfa::UnrecognizedInput {state}:
+                    fail json::Lexical {at: start, state: state}
+                on dfa::UnexpectedEnd {state}:
+                    fail json::Truncated {state: state}
+            std::mutable_array::set(took, 0, first)
+            loop:
+                if std::mutable_array::at(took, 0):
+                    std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
+                    std::mutable_array::set(current, 0, next_symbol())
+                if std::coroutine::done?(feed):
+                    break
+                answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
+                    on dfa::UnrecognizedInput {state}:
+                        fail json::Lexical {at: std::mutable_array::at(offset, 0), state: state}
+                    on dfa::UnexpectedEnd {state}:
+                        fail json::Truncated {state: state}
+                std::mutable_array::set(took, 0, answer)
+            continue
+        coroutine {step: feed, first} = json_lex::json_number(c):
+            on dfa::UnrecognizedInput {state}:
+                fail json::Lexical {at: start, state: state}
+            on dfa::UnexpectedEnd {state}:
+                fail json::Truncated {state: state}
+        std::mutable_array::set(took, 0, first)
+        loop:
+            if std::mutable_array::at(took, 0):
+                std::mutable_array::set(offset, 0, std::mutable_array::at(offset, 0) + 1)
+                std::mutable_array::set(current, 0, next_symbol())
+            if std::coroutine::done?(feed):
+                break
+            if std::mutable_array::at(offset, 0) - start >= max_token:
+                fail json::TokenTooLong {at: start, limit: max_token}
+            answer = feed(dfa::Symbol {code: std::mutable_array::at(current, 0)}):
+                on dfa::UnrecognizedInput {state}:
+                    fail json::Lexical {at: std::mutable_array::at(offset, 0), state: state}
+                on dfa::UnexpectedEnd {state}:
+                    fail json::Truncated {state: state}
+            std::mutable_array::set(took, 0, answer)
+    json::Summary {tokens: std::mutable_array::at(tokens, 0), symbols: std::mutable_array::at(offset, 0)}
