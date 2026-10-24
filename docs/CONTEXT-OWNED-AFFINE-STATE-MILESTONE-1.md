@@ -742,9 +742,24 @@ The harnesses AGENTS.md names for the files this milestone changed:
 | harness | result |
 |---|---|
 | `audit/affine/tools/fuzz.tcl -n 40`, seeds 3, 17, 41 | 120 programs, 0 disagreements (307 identities' releases checked) |
-| [[TBD:harnesses]] | |
+| `audit/contexts/tools/fuzz.tcl -owned 1 -n 40`, seeds 1, 101, 201, 301 | 160 programs, 0 disagreements (5.3) |
+| `audit/context-affine/tools/mutate.tcl` | 18 of 18 killed (5.4) |
+| `audit/affine/tools/mutate.tcl`, the 14 mutants that edit hir/affine.tcl | 14 of 14 killed |
+| `audit/coroutines/tools/mutate.tcl`, the 17 mutants that edit hir/affine.tcl or native/lower.tcl | 17 of 17 killed |
+| `audit/mutable-vector/tools/mutate.tcl`, the 46 mutants that edit hir/affine.tcl or hir/mutvec.tcl (`affine-move-cow-fork`'s text updated to the new ShareDescriptor) | 46 of 46 killed |
+| `audit/mutable-array/tools/mutate.tcl`, the 12 mutants that edit hir/affine.tcl, hir/mutvec.tcl or native/lower.tcl | 12 of 12 killed |
+| `audit/mutable-map/tools/mutate.tcl`, the 6 mutants that edit hir/mutvec.tcl or native/lower.tcl | 6 of 6 killed |
+| `audit/contexts/tools/mutate.tcl` (26 mutants; core/contexts.tcl changed) | [[TBD:contexts]] |
+| every mutant of every `audit/*/tools/mutants.txt` that edits a file this milestone changed (346 edits) | each still applies to its text exactly once |
+| `tclsh9.0 audit/refactor/tools/gate.tcl` (the warning gate) | passed: the observed warnings are exactly the manifest (75 corpus programs, 30 library loaders) |
 | `tclsh9.0 tools/compilerpedia.tcl check` | 848 topics (2 new, 2 generated notes), 633 examples run, 0 problems |
 | `tclsh9.0 audit/icy-tower/context-refactor/tools/repro.tcl` | all as expected (5.1) |
+
+The affine, coroutine, vector, array and map harnesses ran their mutants of
+the files this milestone changed, not their whole lists: the rest mutate
+code this change does not touch (their texts were checked to apply), and
+the five lists run in full take most of a day in this container. CI runs
+none of these five.
 
 ### 5.6 Targets
 
