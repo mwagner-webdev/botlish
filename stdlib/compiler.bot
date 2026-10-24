@@ -43,6 +43,7 @@
 enum DiagnosticCode:
     AffineCaptureUnsupported,
     AffineContainerUnsupported,
+    AffineContextCopyOut,
     AffineDuplicationUnsupported,
     AffineElementCopyOut,
     AffineEqualityUnsupported,

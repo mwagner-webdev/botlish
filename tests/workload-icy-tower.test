@@ -143,7 +143,21 @@ proc icyModuleOf {hir e} {
     return [expr {$file in {main sdl render tower hud options} ? $file : ""}]
 }
 
-test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md): outside sdl.bot no function's parameter or result holds a C pointer, no call passes or returns one, no SDL function is called, and no native view or edit is made -- every SDL object lives in the installed context's session, and render.bot and main.bot use operations only} -body {
+# 1 if call E is a context installation (`with context EXPR`: the call of
+# context#install) or the installed expression, the value of its hygienic
+# temporary's binding (surface/lower.tcl).
+proc icyInstallation {hir e} {
+    if {[hir::contexts::isInstall $hir $e]} { return 1 }
+    dict for {x node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "bind" && [dict get $node value] eq $e
+                && [string match context#* [dict get $hir bindings [dict get $node binding] name]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md): outside sdl.bot no function's parameter or result holds a C pointer, no call passes or returns one, no SDL function is called, and no native view or edit is made -- every SDL object lives in the installed context's session, and render.bot and main.bot use operations only. The one affine value outside sdl.bot is the opaque Sdl itself, which the entry program's installation moves into the installed context (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): sdl::create()'s result and context#install's argument, its pointers sealed inside it} -body {
     set hir [icyStagedHir]
     set found {}
     dict for {e node} [dict get $hir exprs] {
@@ -163,6 +177,7 @@ test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-
                 if {$native in {std::binary::native::view std::binary::native::edit}} { lappend found "$where: makes a native view or edit" }
                 foreach value [concat [list $e] [dict get $node args]] {
                     set type [hir::typeOf $hir $value]
+                    if {$type eq {nstruct sdl::Sdl} && [icyInstallation $hir $e]} continue
                     if {$type ne "" && [hir::types::IsAffine $type]} { lappend found "$where: a call passing or returning a pointer" }
                 }
             }
@@ -262,7 +277,7 @@ test workload-icy-tower-sdl-helpers-private {every function of sdl.bot whose par
         }
     }
     list [lsort $found] [icyPrivate $hir]
-} -result {{} {types {EventType Handles KeyState Session TextBuffer} values {cstring down? free_text handles log_failure nul quit_requested? release remember renderer session write_text write_text_unchecked}}}
+} -result {{} {types {EventType KeyState Session TextBuffer} values {cstring down? free_text log_failure nul quit_requested? release session_clear session_color session_fill session_line session_present session_scale session_synced? session_text write_chars write_text write_text_unchecked}}}
 
 test workload-icy-tower-no-resource-escape {the refactored airlock hands nothing raw across its boundary: no CONTEXT-RESOURCE-ESCAPE (the warning-clean test above compiles it under -warnings error; this asks the pass itself)} -body {
     set hir [icyStagedHir]

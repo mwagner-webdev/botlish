@@ -18,6 +18,11 @@
 #
 # C calls run natively only (the Tcl backends refuse them: NATIVE-ONLY).
 #
+# Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md this still works, and is no
+# longer necessary to retain pointers: a3-late-acquisition.bot keeps the same
+# session's pointers in the context itself (an affine Session in the
+# vector), and the refactored sdl.bot does so with no Handles record.
+#
 # expect interp: NATIVE-ONLY
 # expect compile: NATIVE-ONLY
 # expect cranelift-generic: value: [-1, 5, -1, -1]

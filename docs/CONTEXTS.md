@@ -179,9 +179,29 @@ There is no other way to obtain a context: no `current()`, `resolve(T)`,
 `context<T>()` or service lookup. A function that wants the value declares the
 dependency.
 
+**A context that holds affine state** (CONTEXT-OWNED-AFFINE-STATE-
+MILESTONE-1.md). Everything above holds for a context whose members are all
+unrestricted. When the installed value holds an affine member -- a C
+pointer, a coroutine, a struct or a MutableVector or MutableArray holding
+one -- the installation owns it, and the context parameter is not a second
+owner: `io` names the installed storage, and every expression reaching into
+it (`io`, `io.handle`, `io.sessions.element(0).window`) is a *context
+place*. An affine value at a context place is observed where it is stored
+(a C call's pointer, `null?`, `clone`'s receiver, a field read), a
+collection member is mutated in place (push moves a value in; take, pop and
+swap move one out), and nothing is copied out: binding, passing, returning,
+storing, destructuring or capturing such state is `AFFINE-CONTEXT-COPY-OUT`
+(or `AFFINE-CAPTURE-UNSUPPORTED` for a closure). Three things stay distinct:
+the *requirement* (`context io: T`, what a function needs), the
+*installation* (`with context EXPR`, which moves the value into the context
+it now owns) and *place access* (a function reaching the installed state
+where it is).
+
 ### Installation
 
-`with context EXPR` evaluates EXPR as any expression and installs its value.
+`with context EXPR` evaluates EXPR as any expression and installs its value
+-- moves it into the installed context, which owns it (an affine value
+installed from a binding leaves the binding moved).
 The installed type is inferred from EXPR exactly as ordinary type inference
 infers any expression; it must be exactly one context struct:
 
@@ -789,7 +809,10 @@ context area, no header line and no different instruction.
 * Function values that need a context are rejected (`CONTEXT-FUNCTION-
   VALUE`), aliases aside; requirements are not part of function types.
 * Native slots only for layouts of non-pointer leaves; a context holding a
-  String, a List, a Bytes, or an unbounded Int is native-unsupported.
+  String, a List, a Bytes, or an unbounded Int is native-unsupported. (Since
+  CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md a C address word -- a pointer, a
+  native view or edit -- is a leaf too: it is an immediate, never a heap
+  pointer.)
 * PC-relative access is `lea` + displaced load (Cranelift does not fold a
   symbol into a load); the JIT uses absolute addresses.
 * `std::linux::io::create()` allocates its 7 objects once (§7).

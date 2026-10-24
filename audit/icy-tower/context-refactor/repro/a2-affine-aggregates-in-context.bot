@@ -3,13 +3,19 @@
 #
 # A struct holding a pointer, and a MutableVector of pointers (the one kind
 # of member a context mutates in place), are affine like the pointer itself
-# (hir::types::IsAffine): installing a context that holds either is the same
-# AFFINE-ERASURE-UNSUPPORTED as a1's. One diagnostic per installation.
+# (hir::types::IsAffine): installing a context that holds either was the
+# same AFFINE-ERASURE-UNSUPPORTED as a1's, one diagnostic per installation.
 #
-# expect interp: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
-# expect compile: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift-generic: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift: AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED
+# Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md both installations are
+# valid on every backend: the slot owns the aggregate -- the struct's
+# pointers, the vector and the pointers in it -- and affinity stays
+# compositional (the vector is still an affine MutableVector: nothing copies
+# it). a3-late-acquisition.bot uses such a member.
+#
+# expect interp: value: 1
+# expect compile: value: 1
+# expect cranelift-generic: value: 1
+# expect cranelift: value: 1
 import std::ffi::c
 import std::mutable_vector
 

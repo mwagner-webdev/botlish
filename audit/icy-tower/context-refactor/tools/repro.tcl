@@ -9,6 +9,8 @@
 # lines
 #
 #   # expect BACKEND: value: TEXT        the program's value on BACKEND
+#   # expect BACKEND: value: *           a value, whatever it is (a program
+#                                        that reads memory nothing wrote)
 #   # expect BACKEND: CODE CODE ...      the diagnostic codes, in order
 #   # expect check: ok                   main.tcl -check accepts it
 #
@@ -82,7 +84,7 @@ foreach file $files {
         set mode [expr {$backend eq "check" ? [list -check] : [list -backend $backend]}]
         catch {exec [info nameofexecutable] [file join $root main.tcl] {*}$mode $file 2>@1} output
         set observed [Observed $output]
-        if {$observed eq $expected} {
+        if {$observed eq $expected || ($expected eq "value: *" && [string match "value: *" $observed])} {
             puts "ok    $name  $backend: $observed"
         } else {
             incr failures

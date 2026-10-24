@@ -32,6 +32,24 @@ that of main's own executable but for the Handles record's
 that milestone; the design variants were written against commit 4be79514
 (their README says how to build them).
 
+**Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md** (follow-up 3 of
+section 14), a context owns its affine members: installation moves the
+value into the installed context, and a contextual function reaches the
+members as places -- observed where they are stored, moved only by a
+collection member's take, pop or swap. The reproducers' outcomes changed
+accordingly (their headers keep the census's account and record the new
+one; the table of 4.1 has both): a1 and a2 are valid on every backend, a1b
+is AFFINE-CONTEXT-COPY-OUT at the destructuring of the whole context (no
+longer AFFINE-ERASURE-UNSUPPORTED at the installation), b2b runs natively
+(a view's word is a context-slot leaf), c3 is unchanged; a3 (late
+acquisition of pointers into the context) and b2c (a written bare view)
+are new. `examples/games/icy-tower/sdl.bot` keeps its pointers in the
+context: the Handles record, its view, its edit and its self-address are
+gone, and the SDL call trace differs from this census's only by the
+record's `SDL_malloc(56)` and `SDL_free`, which are no longer made
+(CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md, "The SDL airlock"). The text
+below is the census as written.
+
 ## Contents
 
 1. Result
@@ -168,14 +186,14 @@ keys the game reads -- values, not authority.
 **No, as affine values; yes, once their affinity is shed -- and today
 that means native memory.** Exactly:
 
-| attempt | result | reproducer |
-|---|---|---|
-| a context struct with a `Ptr` field, read in an operation | `AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE` at the read, `AFFINE-ERASURE-UNSUPPORTED` at the installation | a1 |
-| the same, destructuring the context local instead of reading the field | the read is accepted (it consumes the *local*); the installation is still `AFFINE-ERASURE-UNSUPPORTED` | a1b |
-| a context holding a struct of pointers, or a `MutableVector[Ptr[...]]` | `AFFINE-ERASURE-UNSUPPORTED` at each installation: affinity is compositional | a2 |
-| non-affine state that evolves (a `MutableVector[Session]` member: open pushes, close pops) | supported on all four backends; natively the vector header is a GC root of the context slot | b1 |
-| pointers stored in a native-memory record, its `NativeView` in the context's vector | supported natively (C calls do not run on the Tcl backends) | b2 |
-| the same view as a bare context member | accepted by the front end, `CONTEXT-NATIVE-LOWERING-UNSUPPORTED` natively although a view's word is an immediate | b2b |
+| attempt | result | reproducer | since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md |
+|---|---|---|---|
+| a context struct with a `Ptr` field, read in an operation | `AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE` at the read, `AFFINE-ERASURE-UNSUPPORTED` at the installation | a1 | valid on all four backends: installation moves the Holder in, `h.p.null?()` observes the stored pointer |
+| the same, destructuring the context local instead of reading the field | the read is accepted (it consumes the *local*); the installation is still `AFFINE-ERASURE-UNSUPPORTED` | a1b | the installation is valid; the destructuring of the whole context is `AFFINE-CONTEXT-COPY-OUT` |
+| a context holding a struct of pointers, or a `MutableVector[Ptr[...]]` | `AFFINE-ERASURE-UNSUPPORTED` at each installation: affinity is compositional | a2 | valid on all four backends (still affine: nothing copies them) |
+| non-affine state that evolves (a `MutableVector[Session]` member: open pushes, close pops) | supported on all four backends; natively the vector header is a GC root of the context slot | b1 | unchanged |
+| pointers stored in a native-memory record, its `NativeView` in the context's vector | supported natively (C calls do not run on the Tcl backends) | b2 | unchanged, and no longer needed: a3 keeps the pointer in the context itself |
+| the same view as a bare context member | accepted by the front end, `CONTEXT-NATIVE-LOWERING-UNSUPPORTED` natively although a view's word is an immediate | b2b | runs natively (a C address word is a slot leaf); b2c reads a written cell back |
 
 In the brief's terms: holding affine pointers is **not supported** (a
 deliberate restriction: C-ABI-TYPES.md says "a context struct may not hold

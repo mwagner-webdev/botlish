@@ -1682,6 +1682,66 @@ kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
 
+## Context-owned affine state
+
+An installed context owns what it holds, affine members included
+(CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): `with context EXPR` moves the
+value into the installed context (context#install's ownership role is
+`move`), and a context parameter is no second owner -- its binding names the
+installed storage, never moved, copied or released
+(`hir::affine::IsContextBinding`; `IsAffineBinding` is 0 for it). Every
+expression reaching into it is a *context place* (`hir::affine::
+ContextPlace`: the binding, a field projection of a context place, an
+element place of a collection at one), and an affine value there is
+observed where it is stored, never copied out (`ContextConsumer`:
+AFFINE-CONTEXT-COPY-OUT). Keep it so:
+
+* One meaning per form: a projection of a context place is a place step,
+  never a copy that becomes a move where a move is expected; an element
+  place (a native registered `-element-place`, `std::mutable_vector::
+  element`, `std::mutable_array::element`) is the place of an element
+  whose receiver is a context place (MUTABLE-PLACE-RECEIVER otherwise),
+  never a value, and read by registration, never by name. Moving out of a
+  context goes through a collection member's explicit moves (push in;
+  take, pop, swap out); a direct member is owned for the program's
+  lifetime and only observed or cloned explicitly.
+* No borrow system: never add a reference type, a borrowed or observing
+  parameter, a lifetime, a place binding (`s = c.v.element(0)` stays
+  AFFINE-CONTEXT-COPY-OUT) or an implicit clone; never extend place
+  observation to places not rooted at a context parameter (an owned local's
+  affine field stays AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE) without a
+  design of its own. An observation through an element place whose call's
+  later argument may run code is rejected (`LaterArgumentRunsCode`): never
+  drop that check.
+* No lifecycle: nothing releases what an installed context owns at the
+  program's end (affinity is at most once), and there is no destructor,
+  scoped installation or runtime ownership state; a close is the program's
+  explicit operation.
+* Natively a C address word (a pointer, a native view or edit) is an
+  immediate context-slot leaf (`native::lower::ContextLeaves`'s `cptr`) and
+  a collection header is rooted by `ctxroot`; never admit a kind whose word
+  may be a heap pointer as an immediate leaf, and never add a resource
+  table to the runtime.
+* An affine struct's unrestricted collection slots are copied like an
+  unrestricted struct's (`hir::mutvec::ShareDescriptor` lists them): an
+  unrestricted vector beside an affine member stays a value.
+
+If you change any of that (the report's "What to run when changing this"
+lists the files), run `tests/context-affine.test`, `tests/contexts.test`,
+`tests/context-traits.test`, `tests/affine.test`, `tests/coroutines.test`,
+`tests/mutable-vector.test`, `tests/mutable-array.test`,
+`tests/c-abi-types.test`, `tests/workload-icy-tower.test`,
+`audit/contexts/tools/fuzz.tcl -owned 1` (several seeds) and
+`audit/context-affine/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the affine,
+coroutine, mutable-vector and mutable-array harnesses for a change to
+`hir/affine.tcl` or `hir/mutvec.tcl` (above), a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/context-affine.test` for a change
+to the native slots, and `tclsh9.0 audit/icy-tower/context-refactor/tools/
+repro.tcl` (a reproducer whose outcome changes is a census finding that
+changed: update the census).
+
 ## DecimalRounded and scalar refinements
 
 `DecimalRounded{minDecimalsPreserved: N}` (optionally `maxDecimalsPreserved:
@@ -3221,10 +3281,13 @@ generated SDL3 binding. Keep its layering:
   (`workload-icy-tower-sdl-modules-warning-clean` checks
   `hir::direct::summary`). Do not mark a game module `direct module`.
 * SDL's objects stay behind that context (ICY-TOWER-CONTEXT-REFACTOR-
-  CENSUS.md): the installed `Sdl` holds the open session (the window, the
-  renderer and the scratch memory, in a native-memory record its view
-  reads), and `render.bot` and `main.bot` call operations that take and
-  return values only. Never give a function outside `sdl.bot` a C pointer,
+  CENSUS.md): the installed `Sdl` owns the open session -- the window,
+  the renderer and the scratch memory as affine pointers in a private
+  Session it keeps in its vector (CONTEXT-OWNED-AFFINE-STATE-
+  MILESTONE-1.md: no native-memory record holds them) -- and `render.bot`
+  and `main.bot` call operations that take and return values only. The
+  opaque `Sdl` itself is the one affine value outside `sdl.bot`: the entry
+  program installs it. Never give a function outside `sdl.bot` a C pointer,
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
   the session's view or a pointer (anything a public function returns,
@@ -3236,9 +3299,12 @@ generated SDL3 binding. Keep its layering:
   pointer, a native view or edit (or holds one, an opaque struct
   excepted), every layout of native memory and the session record are
   `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): helpers may
-  take and return pointers and views, and no importer can call them. The
-  session is looked up once, by the private `session`, `handles` and
-  `renderer`. Keep a new pointer-taking helper private; never make one
+  take and return pointers and views, and no importer can call them. Each
+  operation is a public wrapper and a private `session_*` function that
+  reaches the session's pointers where the context stores them
+  (`sdl.open.element(0)`); never copy a session pointer out of the context
+  to share it (a helper that needs one declares the context, or takes an
+  explicit clone). Keep a new pointer-taking helper private; never make one
   public to call it from another module (CONTEXT-RESOURCE-ESCAPE reports
   that). `workload-icy-tower-sdl-helpers-private` and
   `workload-icy-tower-no-resource-escape` check it, and

@@ -104,7 +104,7 @@ proc core::contexts::fresh {script} {
 }
 
 core::native::register context#install -arity 1 -impl core::contexts::installImpl \
-    -param-types {struct} -result-type unit
+    -param-types {struct} -result-type unit -ownership {move}
 core::native::register context#load -arity 1 -impl core::contexts::loadImpl \
     -param-types {str} -result-type struct -result-shape {context-struct 0}
 core::native::register context#unreachable -arity * -impl core::contexts::unreachableImpl \

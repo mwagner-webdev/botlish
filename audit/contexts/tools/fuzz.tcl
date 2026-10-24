@@ -3,7 +3,13 @@
 # (CONTEXTS.md).
 #
 #   tclsh9.0 audit/contexts/tools/fuzz.tcl ?-n N? ?-seed S? ?-dump 1?
-#                                          ?-backends LIST?
+#                                          ?-backends LIST? ?-owned 0|1?
+#                                          ?-native 0|1?
+#
+# With -owned 1 the programs are context-owned affine state's instead
+# (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): owned.tcl, beside this
+# script, says what they are and what its oracle checks (-native 1 also
+# reads the native coroutine counters).
 #
 # Each program has 0..3 synthetic context types (some opaque, some not, all
 # with fields that fit fixed native slots), and functions of five shapes:
@@ -47,12 +53,16 @@ set n 50
 set seed0 1
 set dump 0
 set backends {interp compile cranelift-generic cranelift}
-while {[lindex $args 0] in {-n -seed -dump -backends}} {
+set owned 0
+set native 1
+while {[lindex $args 0] in {-n -seed -dump -backends -owned -native}} {
     switch -- [lindex $args 0] {
         -n { set n [lindex $args 1] }
         -seed { set seed0 [lindex $args 1] }
         -dump { set dump [lindex $args 1] }
         -backends { set backends [lindex $args 1] }
+        -owned { set owned [lindex $args 1] }
+        -native { set native [lindex $args 1] }
     }
     set args [lrange $args 2 end]
 }
@@ -74,6 +84,13 @@ proc chance {percent} {
 }
 
 set localNames {io c ctx env sys a b x q this_one}
+
+if {$owned} {
+    source [file join [file dirname [file normalize [info script]]] owned.tcl]
+    set failed [RunOwned $n $seed0 $backends $dump $native]
+    file delete -force $scratch
+    exit [expr {$failed > 0}]
+}
 
 # One program: {TEXT FUNCS EXPECT} where FUNCS is NAME -> {direct DIRECT
 # required REQUIRED} and EXPECT is {error KIND} or {value TEXT}.

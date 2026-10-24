@@ -43,6 +43,12 @@
 #                                       call's error propagates
 #   std::mutable_array::capacity(a)     the length
 #   std::mutable_array::at(a, i)        the element at i (IndexNotFound)
+#   std::mutable_array::element(a, i)   the *place* of the element at i of an
+#                                       array the installed context owns
+#                                       (IndexNotFound): projected or observed
+#                                       where it is, never copied out
+#                                       (core/native.tcl's elementPlace); at
+#                                       run time the element read
 #   std::mutable_array::set(a, i, x)    installs x at i; unit (IndexNotFound)
 #   std::mutable_array::swap(a, i, x)   installs x at i, returns the old
 #                                       element (IndexNotFound; no change)
@@ -201,6 +207,16 @@ proc core::mutarray::at {v index} {
     variable store
     set id [Id $v std::mutable_array::at]
     set i [Index $id $index std::mutable_array::at]
+    return [lindex $store($id) $i]
+}
+
+# The element place (std::mutable_array::element ARRAY INDEX): what is stored
+# there, read where the place is used (hir/affine.tcl keeps an affine one
+# from being copied out).
+proc core::mutarray::element {v index} {
+    variable store
+    set id [Id $v std::mutable_array::element]
+    set i [Index $id $index std::mutable_array::element]
     return [lindex $store($id) $i]
 }
 
@@ -389,6 +405,10 @@ core::native::register std::mutable_array::at -arity 2 -impl core::mutarray::at 
     -param-types {mutarray int} -result-type any -runtime range-check \
     -result-shape {mutarray-element 0} -errors IndexNotFound -bounds {index mutarray 0 1} \
     -ownership {copy-out observe}
+core::native::register std::mutable_array::element -arity 2 -impl core::mutarray::element \
+    -param-types {mutarray int} -result-type any -runtime range-check \
+    -result-shape {mutarray-element 0} -errors IndexNotFound -bounds {index mutarray 0 1} \
+    -ownership {observe observe} -element-place 1
 core::native::register std::mutable_array::set -arity 3 -impl core::mutarray::set_ -keeps-length 1 \
     -param-types {mutarray int any} -result-type unit -runtime {range-check mutarray-mutate} \
     -errors IndexNotFound -bounds {index mutarray 0 1} -drop-form {mutable_array#set_drop 0} \

@@ -1,0 +1,47 @@
+# B2c. A bare native view as a context member, written before it is read
+# (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): b2b's program with the cell
+# stored through a native edit first, so its value is known. The view's word
+# is an immediate leaf of the native context slot.
+#
+# expect interp: NATIVE-ONLY
+# expect compile: NATIVE-ONLY
+# expect cranelift-generic: value: 42
+# expect cranelift: value: 42
+import std::binary
+import std::binary::native
+import std::ffi::c
+
+extern c fn malloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+layout Cell:
+    size 8
+    align 8
+    field value: std::ffi::c::Long at 0
+
+opaque context struct Memory:
+    tag: unit
+
+opaque context struct Store:
+    cell: NativeView[Cell]
+
+fn memory() -> Memory:
+    Memory {tag: unit}
+
+fn store(context m: Memory) -> Store:
+    p = malloc(8)
+    e = std::binary::native::edit(Cell, p):
+        on NativeEditNull:
+            return store()
+    std::binary::store(e, Cell.value, 42)
+    v = std::binary::native::view(Cell, p):
+        on NativeViewNull:
+            return store()
+    Store {cell: v}
+
+fn value(context s: Store) -> int:
+    s.cell.value
+
+with context memory()
+with context store()
+
+value()

@@ -360,6 +360,20 @@ proc hir::mutvec::verify {hirVar} {
             }
             continue
         }
+        if {[hir::affine::ElementPlace $hir $e]} {
+            # An element place (core/native.tcl's elementPlace) reaches into
+            # the installed context's storage: its receiver is a context
+            # place (hir::affine::ContextPlace), never a collection of the
+            # function's own, whose elements are read with at and moved
+            # with take, pop or swap.
+            set receiver [lindex [dict get $node args] 0]
+            if {$receiver ne "" && ![hir::affine::ContextPlace $hir $receiver]} {
+                set native [hir::affine::NativeName $hir $e]
+                hir::CheckingCall $e {hir::Diagnose hir MUTABLE-PLACE-RECEIVER \
+                    "the receiver of $native is not a place of an installed context: an element place reaches a collection the installed context owns, through a context parameter (`context c: T`, then `c.member.[namespace tail $native](i)`); read an element of any other collection with at, and move one out with take, pop or swap" $receiver}
+            }
+            continue
+        }
         if {[OpKind $hir $e] ne "mutate"} continue
         set receiver [lindex [dict get $node args] 0]
         if {$receiver eq ""} continue
@@ -580,7 +594,12 @@ proc hir::mutvec::ReceiverProblem {hir e r} {
 # The share descriptor of a value of static TYPE, or "" when a logical copy
 # of it shares no header: "h" an unrestricted collection (a vector or an
 # array header), "s"N"."(SLOT"."D)*N a struct whose listed layout slots hold
-# collection-bearing values. An affine type is never copied (it moves).
+# collection-bearing values. An affine collection is never copied (it
+# moves); an affine struct's unrestricted collection slots are -- a struct
+# holding a coroutine or a C pointer beside a MutableVector[str] moves
+# whole, and its vector is still a value: the copy at a place's entry gives
+# the place a header of its own, as for an unrestricted struct (the
+# descriptor lists those slots only; the affine ones move with the struct).
 #
 # A slot whose type is too imprecise to say but may hold a header
 # (MayHoldVector: `any`, a generic position, a struct of such) is listed
@@ -598,7 +617,7 @@ proc hir::mutvec::ReceiverProblem {hir e r} {
 # occurrence shares nothing. (A struct that holds itself in a List, an array
 # or a vector is not walked into there: an element is never a place.)
 proc hir::mutvec::ShareDescriptor {type} {
-    if {[hir::types::IsAffine $type]} {
+    if {[hir::types::IsAffine $type] && ![hir::types::IsStructLike $type]} {
         return ""
     }
     if {[Kind $type] ne ""} {
