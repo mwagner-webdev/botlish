@@ -720,7 +720,13 @@ The two failures were tests pinning the old rules, found by this run and
 updated with it (5.2): `gf-code-name-complete` (stdlib/test.bot's
 `std::test::code_name` did not spell the new DiagnosticCode case) and
 `wi-context-holds-devices` (it pinned AFFINE-ERASURE-UNSUPPORTED for a
-context holding a pointer). [[TBD:rerun]]
+context holding a pointer). With them updated, both files pass
+(golden-framework.test 42 of 42; windows-io.test 12 passed, its 15
+Windows-only tests skipped), with context-affine, golden, compilerpedia and
+stdlib-namespaces rerun beside them; and the golden layer, run again on the
+final tree (`tests/local.tcl -parts golden`: stdlib/test.bot changed, so
+every suite's front end ran anew, 23 minutes), is again 108 suites, 0
+failed, with the same counts on every backend.
 
 The harnesses AGENTS.md names for the files this milestone changed:
 
