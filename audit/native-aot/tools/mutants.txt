@@ -321,17 +321,27 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 %% macos-aarch64
 ## native/src/codegen/aot.rs
 <<<<
-            packaged_runtime_archive(&driver, cfg!(target_os = "macos")).ok_or("cannot locate native runtime")?
+            let path = packaged_runtime_archive(&driver, bundles).ok_or("cannot locate native runtime")?;
 ====
-            packaged_runtime_archive(&driver, false).ok_or("cannot locate native runtime")?
+            let path = packaged_runtime_archive(&driver, false).ok_or("cannot locate native runtime")?;
 >>>>
 
 @@ sys-runtime-bundle-relative a bundle's runtime archive is named relative to the working directory, not by the driver's own path
 ## native/src/codegen/aot.rs
 <<<<
-        Some(contents) if bundled => Some(contents.join("Resources").join(RUNTIME_ARCHIVE)),
+        Some(contents) => Some(contents.join("Resources").join(RUNTIME_ARCHIVE)),
 ====
-        Some(_) if bundled => Some(Path::new("Contents").join("Resources").join(RUNTIME_ARCHIVE)),
+        Some(_) => Some(Path::new("Contents").join("Resources").join(RUNTIME_ARCHIVE)),
+>>>>
+
+@@ sys-runtime-bundle-remedy-build a runtime archive missing from the macOS application is answered with a cargo build in a checkout, not as the application's damage
+## native/src/codegen/aot.rs
+<<<<
+    if application_contents(driver, bundles).is_some() {
+        RUNTIME_BUNDLED
+====
+    if application_contents(driver, bundles).is_some() {
+        RUNTIME_BUILT
 >>>>
 
 @@ sys-apple-remedy-rust the remedy for a Mac without the developer tools is to install Rust (a packaged compiler's user needs only Apple's tools)

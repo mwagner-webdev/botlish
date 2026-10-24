@@ -608,12 +608,22 @@ still wins when set, as on Linux. No environment variable is set for it,
 so programs the compiler runs do not inherit one. The archive keeps every
 check it had: the file, the `!<arch>` format, the first object's machine
 (`Mach-O arm64`), the helpers the linker finds, and the ABI fingerprint the
-executable checks when it starts. Unit test
-`packaged_runtime_archive_follows_the_driver`; `tests/system-linker.test`'s
+executable checks when it starts. When the archive is missing or unusable,
+a driver in an application bundle names the application's damage ("the
+macOS application carries it as Contents/Resources/libbotlish_runtime.a:
+the application is incomplete or damaged (reinstall it)"), never a cargo
+build: its user has no checkout (`runtime_remedy`, read from the same
+`application_contents` test of the driver's path as the archive's
+location; app-test's damage group deletes the archive and replaces it with
+an x86_64 one, and fails on any mention of Rust, cargo, Homebrew or
+installing Tcl). Unit tests
+`packaged_runtime_archive_follows_the_driver` and
+`runtime_remedy_is_the_distributions`; `tests/system-linker.test`'s
 `system-linker-bundle-runtime` places a driver in "Bötlish Test.app",
 runs `botlish-native system-linker` from `/` and links with it (macOS),
 and checks that every other host keeps the archive beside the driver;
-mutants `sys-runtime-bundle-ignored` and `sys-runtime-bundle-relative`.
+mutants `sys-runtime-bundle-ignored`, `sys-runtime-bundle-relative` and
+`sys-runtime-bundle-remedy-build`.
 
 ## 18. System-linker selection
 

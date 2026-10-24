@@ -755,14 +755,15 @@ fn system_linker(flavor: LinkerFlavor) -> Result<PathBuf, LinkError> {
 /// when it starts (the program record's fingerprint,
 /// `runtime::program::read_linked`).
 fn runtime_archive() -> Result<PathBuf, LinkError> {
-    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
-        Some(path) => PathBuf::from(path),
+    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+        Some(path) => (PathBuf::from(path), RUNTIME_BUILT),
         None => {
             let driver = std::env::current_exe().map_err(|e| e.to_string())?;
-            packaged_runtime_archive(&driver, cfg!(target_os = "macos")).ok_or("cannot locate native runtime")?
+            let bundles = cfg!(target_os = "macos");
+            let path = packaged_runtime_archive(&driver, bundles).ok_or("cannot locate native runtime")?;
+            (path, runtime_remedy(&driver, bundles))
         }
     };
-    let built = "the runtime archive is built with the compiler (cargo build --release --manifest-path native/Cargo.toml in a checkout; the single executable carries its own, and the macOS application its Contents/Resources/libbotlish_runtime.a)";
     if !path.is_file() {
         return Err(runtime_error(format!(
             "native link failed: the runtime archive is missing: {}: the system linker links every executable with Botlish's precompiled runtime, and {built}",
@@ -779,22 +780,45 @@ fn runtime_archive() -> Result<PathBuf, LinkError> {
     }
 }
 
+/// Where a missing or unusable runtime archive comes from: a checkout's
+/// build, or the distribution that carries one.
+const RUNTIME_BUILT: &str = "the runtime archive is built with the compiler (cargo build --release --manifest-path native/Cargo.toml in a checkout; the single executable carries its own, and the macOS application its Contents/Resources/libbotlish_runtime.a)";
+/// The same for a driver in the macOS application, whose user has no
+/// checkout to build in: the application is damaged.
+const RUNTIME_BUNDLED: &str = "the macOS application carries it as Contents/Resources/libbotlish_runtime.a: the application is incomplete or damaged (reinstall it)";
+
+/// The remedy runtime_archive's failures name for the driver at DRIVER.
+fn runtime_remedy(driver: &Path, bundles: bool) -> &'static str {
+    if application_contents(driver, bundles).is_some() {
+        RUNTIME_BUNDLED
+    } else {
+        RUNTIME_BUILT
+    }
+}
+
+/// The Contents directory of the application bundle whose Contents/MacOS
+/// holds the driver at DRIVER, with BUNDLES (macOS); None for a driver
+/// anywhere else. Read from the driver's own path, never the working
+/// directory's.
+fn application_contents(driver: &Path, bundles: bool) -> Option<&Path> {
+    let dir = driver.parent()?;
+    let contents = dir.parent()?;
+    let bundled = bundles
+        && dir.file_name().is_some_and(|name| name == "MacOS")
+        && contents.file_name().is_some_and(|name| name == "Contents");
+    bundled.then_some(contents)
+}
+
 /// Where the driver at DRIVER keeps its runtime archive: beside it (a
 /// checkout's native/target/release, the single executable's installed
 /// copies), or, with BUNDLES (macOS) and a driver in an application bundle's
 /// Contents/MacOS, in that bundle's Contents/Resources: the macOS
 /// application's layout (MACOS-AARCH64-MILESTONE-9.md), whose MacOS
-/// directory holds code only. The path is the driver's own directory's,
-/// never the working directory's.
+/// directory holds code only.
 fn packaged_runtime_archive(driver: &Path, bundles: bool) -> Option<PathBuf> {
-    let dir = driver.parent()?;
-    let contents = dir.parent();
-    let bundled = bundles
-        && dir.file_name().is_some_and(|name| name == "MacOS")
-        && contents.and_then(Path::file_name).is_some_and(|name| name == "Contents");
-    match contents {
-        Some(contents) if bundled => Some(contents.join("Resources").join(RUNTIME_ARCHIVE)),
-        _ => Some(dir.join(RUNTIME_ARCHIVE)),
+    match application_contents(driver, bundles) {
+        Some(contents) => Some(contents.join("Resources").join(RUNTIME_ARCHIVE)),
+        None => Some(driver.parent()?.join(RUNTIME_ARCHIVE)),
     }
 }
 
@@ -1758,6 +1782,20 @@ mod tests {
         assert_eq!(at("/x/Botlish.app/Contents/MacOS/botlish-native", false), Path::new("/x/Botlish.app/Contents/MacOS").join(archive));
         assert_eq!(at("/x/Other/MacOS/botlish-native", true), Path::new("/x/Other/MacOS").join(archive));
         assert_eq!(at("MacOS/botlish-native", true), Path::new("MacOS").join(archive));
+    }
+
+    /// A runtime archive missing from the macOS application is the
+    /// application's damage (reinstall it), never a build to run: its user
+    /// has no checkout and no Rust. Every other driver names the build.
+    #[test]
+    fn runtime_remedy_is_the_distributions() {
+        let bundled = runtime_remedy(Path::new("/x/My Apps/Botlish.app/Contents/MacOS/botlish-native"), true);
+        assert!(bundled.contains("reinstall"), "{bundled}");
+        for toolchain in ["cargo", "rustc", "rustup", "Rust"] {
+            assert!(!bundled.contains(toolchain), "{bundled}");
+        }
+        assert_eq!(runtime_remedy(Path::new("/x/Botlish.app/Contents/MacOS/botlish-native"), false), RUNTIME_BUILT);
+        assert_eq!(runtime_remedy(Path::new("/a/native/target/release/botlish-native"), true), RUNTIME_BUILT);
     }
 
     /// The runtime archive's first object names its format and

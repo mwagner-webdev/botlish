@@ -447,7 +447,7 @@ jobs:
 
       - name: The driver's mutants of the application's share
         if: always()
-        run: tclsh9.0 audit/native-aot/tools/mutate.tcl -only sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-apple-remedy-rust,sys-executable-rpath 2>&1 | tee native-aot-mutants.log
+        run: tclsh9.0 audit/native-aot/tools/mutate.tcl -only sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-runtime-bundle-remedy-build,sys-apple-remedy-rust,sys-executable-rpath 2>&1 | tee native-aot-mutants.log
 
       - uses: actions/upload-artifact@v4
         if: always()
