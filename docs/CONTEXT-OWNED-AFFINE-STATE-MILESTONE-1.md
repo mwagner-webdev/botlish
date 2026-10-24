@@ -568,8 +568,8 @@ other module ordinary.
 
 ### 5.1 Reproducers
 
-`tclsh9.0 audit/icy-tower/context-refactor/tools/repro.tcl`: [[TBD:repro]]
-runs, all as expected. The census's programs are unchanged; their headers
+`tclsh9.0 audit/icy-tower/context-refactor/tools/repro.tcl`: 63 runs, all as
+expected. The census's programs are unchanged; their headers
 record the new outcomes beside the old account
 (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md, 4.1, has both):
 
@@ -745,16 +745,16 @@ acceptance workload is Linux x86-64 only, as before.
 
 | check | result |
 |---|---|
-| SDL call trace, 2400 dummy-driver frames, seed 7 (trace-compare.sh, the committed executable before against the refactor's) | 204,299 calls before, 204,297 after: identical except the record's `malloc 56` and its `free` |
+| SDL call trace, 2400 dummy-driver frames, seed 7 (trace-compare.sh, the previously committed executable against the one this milestone commits, `audit/icy-tower/artifacts/icy-tower`, rebuilt by build.sh) | 204,299 calls before, 204,297 after: identical except the record's `malloc 56` and its `free` |
 | failure traces (`SDL_VIDEO_DRIVER=nosuch`, `SDL_RENDER_DRIVER=nosuch`) | identical (3 and 7 calls) |
 | `--headless` 600 frames; dummy driver 600 frames | identical summaries before and after |
-| `tests/workload-icy-tower.test` (20 tests, executables with the package-owned libSDL3) | [[TBD:workload]] |
-| `golden.bot` on four backends | [[TBD:golden]] |
+| `tests/workload-icy-tower.test` (20 tests, executables with the package-owned libSDL3) | 20 passed, 0 skipped (5 min 51 s) |
+| `golden.bot` on four backends | 67 of 67 on interp, compile, cranelift-generic and cranelift, the same report on each (`workload-icy-tower-golden-suite`) |
 | `audit/icy-tower/mutate.tcl` (26 gameplay mutants) | [[TBD:icy mutants]] |
 | `python3 audit/icy-tower/oracle.py compare` (8 seeds; 1, 60, 600, 3600 frames) | 0 differences |
 | valgrind memcheck, 30 frames (the test) and 600 frames | 0 errors; 0 bytes definitely, indirectly or possibly lost (600 frames: 544 bytes still reachable, SDL's own, as in the census) |
 | GC stress (`BOTLISH_NATIVE_GC_STRESS=1`), 120 frames (the test) and 600 dummy-driver frames | the same summary as without, before and after |
-| `audit/icy-tower/tools/xvfb-session.py` (SDL3 with its x11 driver, Xvfb, XTest) | [[TBD:xvfb]] |
+| `audit/icy-tower/tools/xvfb-session.py` (SDL3 with its x11 driver, Xvfb, XTest; the rebuilt committed executable) | every check passes: Right then Left moved the player from x = 319.5 to 481.5 and back to 175.5, Escape exits 0; the autopilot ran 1518 frames in 25 s (vertical sync, 60 Hz) and exits 0; WM_DELETE_WINDOW ends the run cleanly |
 
 ### 5.8 Performance
 
