@@ -1,0 +1,213 @@
+name: icy-tower (windows x86-64)
+
+# The Icy Tower vertical slice on Windows x86-64 (ICY-TOWER-WINDOWS.md): the
+# game's Windows executable built from source on a real Windows Server 2025
+# runner with MSVC's toolchain -- SDL3.dll and SDL3.lib built by CMake and
+# Visual Studio from the release the binding profile pins
+# (tests/cffi/sdl3.tcl), the SDL3 binding of windows-x86_64 generated from
+# the same headers with clang's MSVC target (tools/c-bindgen.tcl), the game
+# compiled by main.tcl and linked by rustc with link.exe
+# (examples/games/icy-tower/build-windows.sh) -- then the Windows
+# executable's tests (tests/workload-icy-tower.test: its imports, and its
+# headless, dummy-driver, GC-stress, failure and usage runs).
+#
+# The game, icy-tower.exe with the SDL3.dll it loads beside it and a
+# README, is uploaded as the run's icy-tower-windows-x86_64 artifact, and
+# the generated binding as sdl3-binding-windows-x86_64. A build of main whose
+# tests pass is published as the icy-tower-windows-latest release's
+# icy-tower-windows-x86_64.zip, which the README's Windows download button
+# links to.
+#
+# Pushes to any branch run it, as tests (windows x86-64) does, so a branch
+# gets the Windows build before this file is on main; a pull request from
+# this repository's own branches skips (its push already ran), one from a
+# fork runs. Documentation-only pushes skip. A newer push to the same branch
+# cancels a running one, except on main. The checkout keeps the
+# repository's bytes (no CRLF conversion).
+
+on:
+  push:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: icy-tower-windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    # Git for Windows' bash, -eo pipefail (a failure piped through tee
+    # fails the step).
+    shell: bash
+
+jobs:
+  build:
+    name: icy-tower (build and test, Windows x86-64, MSVC)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Versions
+        run: |
+          rustc -vV
+          clang --version
+          cmake --version
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the pinned SDL3 source and the package-owned SDL3.dll
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/botlish/c-header-src/sdl3
+            ~/.cache/botlish/sdl3
+          key: icy-tower-windows-sdl3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/cffi/sdl3.tcl') }}
+
+      - name: Build the package-owned SDL3.dll (CMake, Visual Studio, x64)
+        run: tclsh9.0 tests/cffi/sdl3.tcl
+
+      # The binding is generated here (ICY_TOWER_BINDING keeps it for the
+      # artifact): clang's MSVC target reads Visual Studio's and the Windows
+      # SDK's headers, which exist only on Windows.
+      - name: Build the game (generate the MSVC SDL3 binding, compile, link)
+        run: ICY_TOWER_BINDING="$PWD/dist/sdl3-binding" examples/games/icy-tower/build-windows.sh dist/icy-tower-windows-x86_64
+
+      - name: Run the Windows executable's tests
+        run: |
+          tmp=$(mktemp -d)
+          tclsh9.0 tests/workload-icy-tower.test -tmpdir "$(cd "$tmp" && pwd -W)" -match 'workload-icy-tower-windows-*' 2>&1 | tee test.log
+          tab=$(printf '\t')
+          grep -q "Passed${tab}6${tab}" test.log
+          grep -q "Failed${tab}0\$" test.log
+
+      - name: Play it headless and on SDL's dummy driver
+        run: |
+          cd dist/icy-tower-windows-x86_64
+          ./icy-tower.exe --headless --frames 600 --seed 7
+          SDL_VIDEO_DRIVER=dummy ./icy-tower.exe --autopilot --fixed-step --frames 600 --seed 7
+          ./icy-tower.exe --help
+
+      - name: Add the README and the licenses
+        run: |
+          out=dist/icy-tower-windows-x86_64
+          cp LICENSE "$out/LICENSE-Botlish.txt"
+          cp ~/.cache/botlish/c-header-src/sdl3/LICENSE.txt "$out/LICENSE-SDL3.txt"
+          cat > "$out/README.txt" <<EOF
+          Icy Tower, a game written in Botlish -- Windows x86-64
+          =========================================================
+
+          Play: double-click icy-tower.exe, or run it from a terminal. Keep
+          SDL3.dll beside it. A console window opens beside the game window
+          and shows the run's summary when the game ends.
+
+          Controls: Left/A and Right/D run; landing on a platform bounces;
+          R starts a new game after a fall; Escape (or closing the window)
+          quits.
+
+          Options (icy-tower.exe --help):
+            --seed N       play the tower of seed N
+            --frames N     stop after N frames
+            --headless     no window: the autopilot plays N fixed frames
+                           (with --frames) and prints its summary
+            --autopilot    the deterministic player instead of the keyboard
+            --fixed-step   every frame lasts 1/60 s
+
+          The game is examples/games/icy-tower/ of $GITHUB_SERVER_URL/$GITHUB_REPOSITORY,
+          built from $GITHUB_SHA by
+          $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          (docs/ICY-TOWER-WINDOWS.md). SDL3.dll is SDL 3.4.18, built with
+          MSVC; LICENSE-SDL3.txt is its license, LICENSE-Botlish.txt the
+          game's.
+          EOF
+          ls -l "$out"
+
+      - name: Upload the game
+        uses: actions/upload-artifact@v4
+        with:
+          name: icy-tower-windows-x86_64
+          path: dist/icy-tower-windows-x86_64/
+          if-no-files-found: error
+
+      - name: Upload the generated SDL3 binding and the test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdl3-binding-windows-x86_64
+          path: |
+            dist/sdl3-binding/
+            test.log
+          if-no-files-found: warn
+
+  # The README's Windows download button: a rolling prerelease whose tag and
+  # asset follow main, as single-executable.yml's single-latest. Run
+  # artifacts need a GitHub login to download and expire; a release asset
+  # has a stable URL anyone can fetch:
+  #   https://github.com/OWNER/REPO/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip
+  release:
+    name: publish the latest build
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One publication at a time, never cancelled, so two pushes in quick
+    # succession cannot interleave their tag move and upload.
+    concurrency:
+      group: icy-tower-windows-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: icy-tower-windows-latest
+      ASSET: icy-tower-windows-x86_64.zip
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: icy-tower-windows-x86_64
+          path: dist/icy-tower-windows-x86_64
+
+      - name: Publish to the icy-tower-windows-latest release
+        run: |
+          set -euo pipefail
+          # Builds of main can finish out of order: never replace the build
+          # of a later commit with an earlier one. (A tag left on a commit
+          # main no longer holds, after a force push, is "diverged" and is
+          # replaced.)
+          if old=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
+            if [ "$(gh api "repos/$GH_REPO/compare/$old...$GITHUB_SHA" --jq .status)" = behind ]; then
+              echo "$TAG already holds $old, a later commit than $GITHUB_SHA: left as it is."
+              exit 0
+            fi
+            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          fi
+          cd dist
+          zip -r -X "$ASSET" icy-tower-windows-x86_64
+          sha256sum "$ASSET" >"$ASSET.sha256"
+          notes="Icy Tower, a game written in Botlish, for Windows x86-64 (docs/ICY-TOWER-WINDOWS.md): icy-tower.exe and the SDL3.dll it loads, in one zip -- unpack it and run icy-tower.exe. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose Windows build passes its tests.
+
+          Left/A and Right/D run, landing bounces, R restarts after a fall, Escape quits; icy-tower.exe --help lists the options."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
+            gh release edit "$TAG" --notes "$notes"
+          else
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$GITHUB_SHA" \
+              --prerelease --title "Icy Tower for Windows (latest main)" --notes "$notes"
+          fi

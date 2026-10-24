@@ -226,6 +226,21 @@ test cd-calling-convention {an MSVC calling-convention keyword is kept as an att
     dict get [body {int __stdcall f(int); } function f] attrs
 } -result {{cc spec __stdcall}}
 
+test cd-msvc-sized-integers {MSVC's sized integer keywords, as its vcruntime.h spells size_t and intptr_t, are its char, short, int and long long} -body {
+    list [typeOf {typedef unsigned __int64 size_t;} size_t] [typeOf {typedef __int64 intptr_t;} intptr_t] \
+        [typeOf {__int32 a;} a] [typeOf {unsigned __int16 b;} b] [typeOf {signed __int8 c;} c] [typeOf {__int8 d;} d]
+} -result {{int {unsigned long long}} {int {long long}} {int int} {int {unsigned short}} {int {signed char}} {int char}}
+
+test cd-msvc-forceinline {__forceinline is a function specifier, like __inline} -body {
+    set b [body {static __forceinline int f(int x) { return x; }} function f]
+    list [dict get $b storage] [dict get $b inline] [dict get $b definition]
+} -result {static 1 1}
+
+test cd-windows-line-marker {a Windows path in a line marker, its backslashes escaped as clang writes them} -body {
+    set text "# 12 \"C:\\\\Program Files\\\\VC\\\\include\\\\vcruntime.h\" 1 3\nint a;\n"
+    lmap x [::cdecl::parse $text] {dict get [lindex $x 2] loc}
+} -result {{{C:\Program Files\VC\include\vcruntime.h} 12 12}}
+
 # --- directives and locations ----------------------------------------------
 
 test cd-line-markers {line markers locate declarations; flag 3 is a system header} -body {

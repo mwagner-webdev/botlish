@@ -74,14 +74,18 @@ namespace eval ::chdr::toolchain {
     # Botlish C targets (core/cabi.tcl) -> the clang target triple configFor
     # gives them. windows-x86_64-gnu is MinGW-w64's GNU ABI (clang's
     # x86_64-w64-mingw32, with the MinGW-w64 headers and import libraries a
-    # cross installation provides); windows-x86_64 and windows-aarch64 are
-    # MSVC's ABI and toolchain: not implemented.
+    # cross installation provides); windows-x86_64 is MSVC's (clang's
+    # x86_64-pc-windows-msvc, with the headers of Visual Studio and the
+    # Windows SDK, which clang finds by itself on a Windows host and which
+    # exist nowhere else: ICY-TOWER-WINDOWS.md); windows-aarch64 is not
+    # implemented.
     variable triples {
         linux-x86_64 x86_64-linux-gnu
         linux-aarch64 aarch64-linux-gnu
         macos-x86_64 x86_64-apple-macos10.15
         macos-aarch64 arm64-apple-macos11
         windows-x86_64-gnu x86_64-w64-mingw32
+        windows-x86_64 x86_64-pc-windows-msvc
     }
 }
 

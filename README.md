@@ -133,11 +133,13 @@ game in the style of Icy Tower: about 1,300 lines of ordinary Botlish over
 the [generated SDL3 binding](docs/C-BINDGEN.md). It opens a window, reads the
 keyboard, bounces the player off platforms under gravity, generates the
 tower forever, scrolls the camera up, keeps the score, and restarts. It
-compiles to one native Linux x86-64 executable of under 1 MB, with no assets
-beside it.
+compiles to one native executable of under 1 MB, with no assets beside it,
+for Linux x86-64 and for Windows x86-64.
 
 <p align="center">
   <a href="https://github.com/mwagner-webdev/botlish/raw/main/audit/icy-tower/artifacts/icy-tower"><img src="./docs/assets/download-icy-tower.svg" alt="Download Icy Tower: a game written in Botlish, for Linux x86-64" width="460" /></a>
+  <br />
+  <a href="https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip"><img src="./docs/assets/download-icy-tower-windows.svg" alt="Download Icy Tower: a game written in Botlish, for Windows x86-64" width="460" /></a>
 </p>
 
 ```sh
@@ -149,6 +151,15 @@ chmod +x icy-tower
 It needs SDL 3 (`libSDL3.so.0`, from your distribution's SDL 3 package) and
 glibc 2.34 or newer. `examples/games/icy-tower/build.sh` builds it from a
 checkout, where the generated SDL3 binding is.
+
+On Windows, unzip
+[`icy-tower-windows-x86_64.zip`](https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip)
+and run `icy-tower.exe`: the `SDL3.dll` it needs is beside it, and nothing
+else is (no Visual C++ runtime). The zip is the latest build of main by the
+[Windows workflow](https://github.com/mwagner-webdev/botlish/actions/workflows/icy-tower-windows.yml),
+which also keeps every run's game as its `icy-tower-windows-x86_64`
+artifact; `examples/games/icy-tower/build-windows.sh` builds it on Windows
+([ICY-TOWER-WINDOWS.md](docs/ICY-TOWER-WINDOWS.md)).
 Its rules run headless on all four backends, the executable agrees with an
 independent oracle, and valgrind finds no leaks
 ([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).

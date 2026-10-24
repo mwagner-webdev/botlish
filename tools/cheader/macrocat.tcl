@@ -31,7 +31,7 @@ proc ::cmacro::stripParens {toks} {
 
 proc ::cmacro::isTypeWord {t} {
     variable ix
-    expr {$t in {void char short int long float double signed unsigned _Bool struct union enum const volatile * __int128}
+    expr {$t in {void char short int long float double signed unsigned _Bool struct union enum const volatile * __int128 __int8 __int16 __int32 __int64}
           || [dict exists $ix typedef $t]}
 }
 
