@@ -1102,7 +1102,7 @@ CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
   before its shards finished.
 * `tests-arm64.yml` (Linux AArch64: the Tcl suite on interp and compile,
   its native coverage, the golden suites, the Rust tests, GC stress):
-  **passed** on a812dade and on ff9c0c11. On 429718c9: running, pending.
+  **passed** on a812dade, on ff9c0c11 and on 429718c9.
 * `tests.yml` (Linux x86-64, the whole suite with the golden duplicates,
   native coverage, the warning gate, stub-linked executables, the
   method-call kind filter's audit): **passed** on 429718c9, every job. On
