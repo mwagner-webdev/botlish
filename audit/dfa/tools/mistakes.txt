@@ -1,0 +1,360 @@
+# Mistakes in json_lex.dfa (audit/dfa/tools/mistakes.tcl;
+# DFA-COROUTINE-EXPLORATION.md, "Static guarantees"): realistic errors of a
+# recognizer's author, each applied alone. KIND is what the mistake breaks:
+#
+#   structure  the declaration as an automaton (determinism, reachability,
+#              acceptance, names): what the front end can rule out
+#   boundary   where a token ends, or what the end of the input means
+#   progress   a move that consumes nothing
+#   alphabet   bytes, characters and Unicode scalar values confused
+#   grammar    a well-formed automaton for the wrong language
+#
+#   @@ NAME KIND DESCRIPTION
+#   <<<<
+#   text to replace (must occur exactly once in json_lex.dfa)
+#   ====
+#   replacement
+#   >>>>
+
+@@ overlap-digit structure a second transition for a symbol another already takes (integer: '0' -> zero)
+<<<<
+    integer:
+        digit -> integer
+====
+    integer:
+        '0' -> zero
+        digit -> integer
+>>>>
+
+@@ overlap-escape structure u both starts a \u escape and is a one-letter escape
+<<<<
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' -> accept
+====
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' 'u' -> accept
+>>>>
+
+@@ overlap-class structure a class overlapping another transition of its state (unescaped takes the quote)
+<<<<
+dfa json_string over unicode:
+    class unescaped = 0x20..0x21 0x23..0x5B 0x5D..0x10FFFF
+====
+dfa json_string over unicode:
+    class unescaped = 0x20..0x5B 0x5D..0x10FFFF
+>>>>
+
+@@ missing-end boundary a state that ends a number before a delimiter forgets the end of the input
+<<<<
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+====
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+>>>>
+
+@@ unreachable-exponent structure the exponent is never entered (every transition to it forgotten)
+<<<<
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+    point:
+        digit -> fraction
+    fraction:
+        digit -> fraction
+        'e' 'E' -> exponent
+====
+        '.' -> point
+        after_value -> accept before
+        end -> accept
+    integer:
+        digit -> integer
+        '.' -> point
+        after_value -> accept before
+        end -> accept
+    point:
+        digit -> fraction
+    fraction:
+        digit -> fraction
+>>>>
+
+@@ typo-target structure a misspelled target state
+<<<<
+    exponent_sign:
+        digit -> exponent_digits
+====
+    exponent_sign:
+        digit -> exponent_digit
+>>>>
+
+@@ no-closing-quote structure the closing quote forgotten: a string never ends
+<<<<
+    body:
+        '"' -> accept
+        '\\' -> call json_escape then body
+        unescaped -> body
+
+# One UTF-8
+====
+    body:
+        '\\' -> call json_escape then body
+        unescaped -> body
+
+# One UTF-8
+>>>>
+
+@@ latin1-byte alphabet a character written where a byte is meant (the bytes string takes 'é')
+<<<<
+        0x20..0x21 0x23..0x5B 0x5D..0x7F -> body
+====
+        0x20..0x21 0x23..0x5B 0x5D..0x7F 'é' -> body
+>>>>
+
+@@ unicode-callee alphabet a bytes recognizer that calls a unicode one
+<<<<
+        '"' -> call json_string_bytes then accept
+====
+        '"' -> call json_string then accept
+>>>>
+
+@@ end-consumed boundary the end of the input treated as a symbol to continue after
+<<<<
+    word_end:
+        after_value -> accept before
+        end -> accept
+====
+    word_end:
+        after_value -> accept before
+        end -> word_end
+>>>>
+
+@@ reconsider-loop progress a state that hands a symbol back to one that hands it back
+<<<<
+    minus:
+        '0' -> zero
+        nonzero -> integer
+====
+    minus:
+        '0' -> zero
+        nonzero -> integer
+        '+' => start
+    start2:
+        '+' => minus
+>>>>
+
+@@ reconsider-dead structure a reconsidering transition its target always rejects
+<<<<
+    minus:
+        '0' -> zero
+        nonzero -> integer
+====
+    minus:
+        '0' -> zero
+        nonzero -> integer
+        '+' => point
+>>>>
+
+@@ recursive-call structure a string escape that calls the string itself
+<<<<
+        '\\' -> call json_escape then body
+        unescaped -> body
+
+# One UTF-8
+====
+        '\\' -> call json_string then body
+        unescaped -> body
+
+# One UTF-8
+>>>>
+
+@@ trailing-point grammar a fraction without digits accepted ("1." is a number)
+<<<<
+    point:
+        digit -> fraction
+    fraction:
+====
+    point:
+        digit -> fraction
+        after_value -> accept before
+        end -> accept
+    fraction:
+>>>>
+
+@@ leading-zero grammar leading zeros accepted ("01")
+<<<<
+    zero:
+        '.' -> point
+====
+    zero:
+        digit -> integer
+        '.' -> point
+>>>>
+
+@@ delimiter-consumed grammar a number swallows the delimiter that ends it
+<<<<
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+====
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept
+>>>>
+
+@@ no-boundary grammar a number or literal may be followed by anything ("123abc" lexes as 123, abc)
+<<<<
+class after_value = ws ',' ']' '}'
+====
+class after_value = any except digit '.' 'e' 'E' '-' '+'
+>>>>
+
+@@ control-in-string grammar raw control characters allowed in strings
+<<<<
+dfa json_string over unicode:
+    class unescaped = 0x20..0x21 0x23..0x5B 0x5D..0x10FFFF
+====
+dfa json_string over unicode:
+    class unescaped = 0x00..0x21 0x23..0x5B 0x5D..0x10FFFF
+>>>>
+
+@@ control-in-bytes grammar raw control bytes (a tab) allowed in byte strings
+<<<<
+        0x20..0x21 0x23..0x5B 0x5D..0x7F -> body
+====
+        0x09 0x20..0x21 0x23..0x5B 0x5D..0x7F -> body
+>>>>
+
+@@ escape-three-hex grammar a \u escape of three hex digits
+<<<<
+    u3:
+        hex -> u4
+    u4:
+        hex -> accept
+
+# string
+====
+    u3:
+        hex -> accept
+
+# string
+>>>>
+
+@@ utf8-overlong grammar overlong three-byte forms accepted (E0 80..9F)
+<<<<
+    e0:
+        0xA0..0xBF -> tail1
+====
+    e0:
+        0x80..0xBF -> tail1
+>>>>
+
+@@ utf8-surrogate grammar UTF-8 encoded surrogates accepted (ED A0..BF)
+<<<<
+    ed:
+        0x80..0x9F -> tail1
+====
+    ed:
+        0x80..0xBF -> tail1
+>>>>
+
+@@ utf8-beyond grammar code points beyond U+10FFFF accepted (F4 90..BF)
+<<<<
+    f4:
+        0x80..0x8F -> tail2
+====
+    f4:
+        0x80..0xBF -> tail2
+>>>>
+
+@@ utf8-lead-c0 grammar the overlong two-byte leads C0 and C1 accepted
+<<<<
+        0xC2..0xDF -> tail1
+====
+        0xC0..0xDF -> tail1
+>>>>
+
+@@ exponent-sign-only grammar an exponent of a sign and no digit accepted ("1e+")
+<<<<
+    exponent_sign:
+        digit -> exponent_digits
+====
+    exponent_sign:
+        digit -> exponent_digits
+        after_value -> accept before
+        end -> accept
+>>>>
+
+@@ literal-typo grammar a misspelled literal ("nul" for null)
+<<<<
+        "null" -> word_end
+====
+        "nul" -> word_end
+>>>>
+
+@@ extra-escape grammar an escape JSON does not have (\x)
+<<<<
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' -> accept
+====
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' 'x' -> accept
+>>>>
+
+@@ missing-escape grammar a JSON escape forgotten (\/)
+<<<<
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' -> accept
+====
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' 'b' 'f' 'n' 'r' 't' -> accept
+>>>>
+
+@@ hex-uppercase-missing grammar upper-case hex digits forgotten
+<<<<
+class hex = '0'..'9' 'a'..'f' 'A'..'F'
+====
+class hex = '0'..'9' 'a'..'f'
+>>>>
+
+@@ ws-missing-tab grammar a tab is no whitespace after a value
+<<<<
+class ws = ' ' '\t' '\n' '\r'
+====
+class ws = ' ' '\n' '\r'
+>>>>

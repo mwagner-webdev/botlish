@@ -1,0 +1,61 @@
+# case-plan.bot -- a coroutine that yields inside a collecting loop: the
+# loop's List is built in place through a private plan, which lives across
+# both of every pair's yields; the coroutine completes (or fails) after
+# consuming the plan, and is resumed again. Fused, the plan is cleared where
+# the coroutine suspends at a yield after which nothing reads it and where it
+# completes or fails, so no path of the fused function -- a run's or one only
+# the graph has -- consumes it twice (COROUTINE-FUSION-MILESTONE-1.md,
+# section 4.5; tests/coroutine-fusion.test).
+#
+# expect: [[0, [0, 1, 10, 2, 20, [0, 11, 22]], [0, 11, 22], [0, 11, 22]], [[], [], [], []], [0, [1, 1, 1, -102], -12], [-1000, [], -10]]
+
+import std::coroutine
+
+error Stop:
+    at: int
+
+fn pair(a: int, b: int) -> int:
+    yield a
+    yield b
+    a + b
+
+# The List of every pair's sum, collected across the pairs' yields.
+fn collect(n: int) -> any:
+    xs = loop i from 0 to n:
+        pair(i, 10 * i)
+    xs
+
+fn collect_or_fail(n: int, limit: int) -> any errors Stop:
+    xs = loop i from 0 to n:
+        if i == limit:
+            fail Stop {at: i}
+        pair(i, 1)
+    xs
+
+# Every value the coroutine hands out, then two resumes past its completion
+# (its cached result: no code runs).
+fn drive(n: int) -> list:
+    coroutine {step, first} = collect(n)
+    seen = loop k from 0 to 4 * n + 4:
+        if std::coroutine::done?(step):
+            break
+        step()
+    [first, seen, step(), step()]
+
+# The same up to a failure, which every later resume raises again.
+fn drive_failing(n: int, limit: int) -> list:
+    coroutine {step, first} = collect_or_fail(n, limit):
+        on Stop details:
+            -1000 - details.at
+    seen = loop k from 0 to 4 * n + 4:
+        if std::coroutine::done?(step):
+            break
+        step():
+            on Stop details:
+                -100 - details.at
+    again = step():
+        on Stop details:
+            -10 - details.at
+    [first, seen, again]
+
+[drive(3), drive(0), drive_failing(3, 2), drive_failing(3, 0)]

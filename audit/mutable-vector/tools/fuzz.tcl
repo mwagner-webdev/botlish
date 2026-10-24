@@ -1554,7 +1554,10 @@ proc Run {} {
             }
             set nativeOk [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
             if {$problem eq "" && $family eq "affine" && $identities > 0 && [dict get $options -native] && $nativeOk} {
-                set report [native::allocationReport $hir summary]
+                # The general coroutine runtime's counters: coroutine fusion
+                # off, since a fused coroutine has no runtime object to count
+                # (COROUTINE-FUSION-MILESTONE-1.md).
+                set report [withoutCoroutineFusion {native::allocationReport $hir summary}]
                 set counters [expr {[dict exists $report coroutines] ? [dict get $report coroutines] : {}}]
                 if {$counters eq {} || [dict get $counters released] != $identities || [dict get $counters sweptSuspended] != 0} {
                     set problem "native release counters $counters for $identities identities"

@@ -1,0 +1,84 @@
+# mutable_set.bot -- the "std::mutable_set" namespace: MutableSet[T], a
+# mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
+#
+#   std::mutable_set::create[T]()           an empty set
+#   std::mutable_set::with_capacity[T](n)   an empty set holding n elements
+#                                           without growing (a performance
+#                                           request only)
+#   s.length()                              the number of elements
+#   s.empty?()                              whether there is none
+#   s.contains(x)                           whether X is an element
+#   s.add(x)                                X is an element: a new one is
+#                                           added last (true); an element
+#                                           already present keeps its place
+#                                           (false)
+#   s.remove(x)                             X is no element: true when it was
+#                                           one, false when it was not (the
+#                                           set unchanged)
+#   s.clear()                               every element removed
+#   loop x in s:                            every element, in insertion order
+#
+# A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
+# copy, and mutating one copy never changes another. The mutating operations
+# take the set as a place parameter (PLACE-PARAMETERS.md); a loop iterates
+# the set as it was when the loop began. Membership is Botlish equality
+# (`==`), exactly a MutableMap key's; elements are placed by a keyed hash
+# the program cannot observe, and iterated in insertion order. Removing an
+# element and adding it again adds it last. Expected cost: O(1) amortized
+# for contains, add and remove; O(1) for length; O(n) for a loop.
+#
+# The representation is std::ordered_table's alone (the elements are its
+# keys): a set stores no value per element.
+import std::table_hash
+import std::ordered_table
+
+opaque struct MutableSet[T satisfies Hashable]:
+    table: std::ordered_table::Table[T]
+
+fn create() -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](0)}
+
+fn with_capacity(count: int) -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](count)}
+
+fn length(s: MutableSet[T]) -> int:
+    std::ordered_table::length(s.table)
+
+fn empty?(s: MutableSet[T]) -> bool:
+    std::ordered_table::length(s.table) == 0
+
+fn contains(s: MutableSet[T], x: T) -> bool:
+    s.table.slot_of(std::table_hash::of(x), x) >= 0
+
+fn add(place s: MutableSet[T], x: T) -> bool:
+    h = std::table_hash::of(x)
+    if s.table.slot_of(h, x) >= 0:
+        return false
+    if std::ordered_table::full?(s.table):
+        s.table.rebuild(std::ordered_table::length(s.table) + 1)
+    s.table.append(h, x)
+    true
+
+fn remove(place s: MutableSet[T], x: T) -> bool:
+    slot = s.table.slot_of(std::table_hash::of(x), x)
+    if slot < 0:
+        return false
+    s.table.remove_slot(slot)
+    if std::ordered_table::garbage?(s.table):
+        s.table.rebuild(std::ordered_table::length(s.table))
+    true
+
+fn clear(place s: MutableSet[T]) -> unit:
+    std::ordered_table::clear(s.table)
+
+# ---------------------------------------------------------------------------
+# The loop protocol (hir/iteration.tcl): internal to the standard library.
+
+nomethod fn iteration_end(s: MutableSet[T]) -> int:
+    std::ordered_table::positions(s.table)
+
+nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
+    s.table.live_at?(i)
+
+nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
+    s.table.key_at(i)

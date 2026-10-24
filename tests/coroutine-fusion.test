@@ -1,0 +1,347 @@
+# coroutine-fusion.test -- coroutine fusion (COROUTINE-FUSION-MILESTONE-1.md,
+# native/src/codegen/fusion.rs): a coroutine whose protocol is closed inside
+# one function runs natively as that function's own control flow -- no
+# coroutine object, stack, switch or runtime coroutine operation -- and
+# means exactly what it does on the general runtime.
+#
+# * the milestone's workloads and correctness cases
+#   (audit/coroutine-fusion/programs/) agree on every backend, natively
+#   fused (cranelift-generic, cranelift) and on the general runtime
+#   (cranelift-unfused), and each construction site is fused or kept as
+#   stated;
+# * evidence: the fused NIR has no coroutine operation outside the failure
+#   path, the Cranelift IR calls no coroutine helper but the failure path's,
+#   a fused run allocates no coroutine and maps no stack, and the fused NIR
+#   reads back;
+# * GC stress, a standalone executable, the streaming validator over
+#   arbitrary splits of arbitrary input against an independent reference,
+#   and the switch that turns fusion off.
+#
+# tests/coroutines.test runs every one of its programs natively both ways
+# too (its coAgree).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+set cfPrograms [file join $::projectRoot audit coroutine-fusion programs]
+
+# The text of program NAME (audit/coroutine-fusion/programs/NAME.bot).
+proc cfText {name} {
+    return [core::ReadFile [file join $::cfPrograms $name.bot]]
+}
+
+# The value its `# expect:` line states.
+proc cfExpect {name} {
+    regexp -line {^# expect: (.*)$} [cfText $name] -> expect
+    return $expect
+}
+
+# TEXT's outcome on every backend, natively fused and on the general
+# runtime (sourceAgree: an error unless all agree).
+proc cfAgree {text} {
+    return [sourceAgree $text {interp compile cranelift-generic cranelift cranelift-unfused}]
+}
+
+# The fusion report of TEXT: {OUTCOME FUNCTION} per construction site, in
+# the order the driver considered them.
+proc cfSites {text} {
+    set hir [surface::compile $text -warnings off]
+    return [lmap entry [native::fusion $hir] {lrange $entry 0 1}]
+}
+
+# The reasons of TEXT's kept sites.
+proc cfKept {text} {
+    set hir [surface::compile $text -warnings off]
+    set reasons {}
+    foreach entry [native::fusion $hir] {
+        if {[lindex $entry 0] eq "kept"} {
+            lappend reasons [lindex $entry 1] [lindex $entry 3]
+        }
+    }
+    return $reasons
+}
+
+# The NIR function FUNCTION of the fused program TEXT.
+proc cfFunction {text function} {
+    set nir [native::fusedNir [surface::compile $text -warnings off]]
+    set start [string last "func " $nir [string first "\"$function\"" $nir]]
+    set end [string first "\nend" $nir $start]
+    return [string range $nir $start $end]
+}
+
+# The runtime coroutine helpers the Cranelift IR of TEXT's program refers
+# to, sorted: what its fused code can call.
+proc cfClifHelpers {text} {
+    set clif [native::clif [surface::compile $text -warnings off]]
+    set names [dict create]
+    foreach {- id name} [regexp -all -inline -line {^; (u0:[0-9]+) = (rt_co_[a-z0-9_]+)$} $clif] {
+        dict set names $id $name
+    }
+    set used {}
+    foreach {- id} [regexp -all -inline -line {^\s+fn[0-9]+ = (?:colocated )?(u0:[0-9]+) } $clif] {
+        if {[dict exists $names $id]} {
+            lappend used [dict get $names $id]
+        }
+    }
+    return [lsort -unique $used]
+}
+
+proc cfGcStress {script} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The workloads
+
+test cf-workloads-agree {every workload and its procedural baseline has the value its expect line states, on every backend, natively fused and on the general runtime} -constraints nativeCoroutines -body {
+    lmap name {lcg lcg-procedural lcg-struct lcg-struct-procedural grid grid-procedural tokens utf8 fallbacks} {
+        expr {[cfAgree [cfText $name]] eq [list value [cfExpect $name]]}
+    }
+} -result {1 1 1 1 1 1 1 1 1}
+
+test cf-workloads-fused {the producer/consumer pairs, the deep-yield scan, the tokenizer's three coroutines (two alive at once) and the streaming validator are fused into their consumers} -constraints nativeCoroutines -body {
+    lmap name {lcg lcg-struct grid tokens utf8} {
+        cfSites [cfText $name]
+    }
+} -result {{{fused sum}} {{fused sum}} {{fused total}} {{fused lex} {fused lex} {fused lex}} {{fused validate}}}
+
+test cf-fallbacks {a handle passed to a function, stored in a struct, returned or put in a List, a recursive yielding function and a capturing yielding closure keep the general runtime, each for its reason; a coroutine per frame of a recursion and an environment-free nested yielding function are fused} -constraints nativeCoroutines -body {
+    list [cfSites [cfText fallbacks]] [lmap {function reason} [cfKept [cfText fallbacks]] {
+        regsub -all {%[0-9]+} $reason %N reason
+        regsub -all {call [0-9]+} $reason {call F} reason
+        list $function $reason
+    }] [cfKept [cfText case-closure]]
+} -result {{{kept passed} {kept stored} {kept made} {kept tree} {kept listed} {kept listed} {fused held} {fused local} {fused nested}} {{passed {its handle reaches `%N = call F %N`, which fusion does not follow}} {stored {its handle reaches `%N = call F %N`, which fusion does not follow}} {made {its handle reaches `ret %N`, which fusion does not follow}} {tree {its yielding function leaves is recursive}} {listed {its handle reaches `%N = op listnew %N %N`, which fusion does not follow}} {listed {its handle reaches `%N = op listnew %N %N`, which fusion does not follow}}} {outer {its function #5 calls a yielding function in a form fusion does not inline: %1 = callenv 4 %0}}}
+
+# ---------------------------------------------------------------------------
+# Correctness
+
+test cf-cases-agree {construction order, early completion, terminal failure, ownership and exits, structure (loops, two live coroutines, nested and recursive fusion), collection pressure, contexts, a self tail call, a collecting loop across yields, a closure: the same values on every backend, fused and not} -constraints nativeCoroutines -body {
+    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-plan case-closure} {
+        expr {[cfAgree [cfText $name]] eq [list value [cfExpect $name]]}
+    }
+} -result {1 1 1 1 1 1 1 1 1 1}
+
+test cf-cases-fused {each correctness case's coroutines are fused (the closure's excepted): the property under test is the fused code's} -constraints nativeCoroutines -body {
+    lmap name {case-eager case-early case-failure case-owners case-structure case-gc case-context case-tail case-plan case-closure} {
+        lsort -unique [lmap entry [cfSites [cfText $name]] {lindex $entry 0}]
+    }
+} -result {fused fused fused fused fused fused fused fused fused kept}
+
+test cf-nested-fusion {a coroutine constructed by a fused producer is fused in the consumer too: the outer copies duplicate its construction, one site of several cocreates} -constraints nativeCoroutines -body {
+    set hir [surface::compile [cfText case-structure] -warnings off]
+    set nested [lsearch -inline -index 1 -all [native::fusion $hir] nested]
+    set outer [lsearch -inline -index 1 -all [native::fusion $hir] outer]
+    list [llength $nested] [dict get [lindex $nested 0 3] inlined] [llength $outer] \
+        [regexp -all {op co(create|start|resume|yield|done|release) } [cfFunction [cfText case-structure] nested]]
+} -cleanup {unset -nocomplain hir nested outer} -result {1 {{#11} outer} 1 0}
+
+test cf-gc-stress {under GC stress (a collection attempt at every allocation site) every workload and case has the same value, fused and on the general runtime} -constraints nativeCoroutines -body {
+    cfGcStress {
+        lmap name {lcg-struct grid tokens utf8 case-failure case-owners case-structure case-gc case-tail case-plan} {
+            set hir [surface::compile [cfText $name] -warnings off]
+            set fused [lrange [outcomeUnderHir cranelift $hir] 0 1]
+            set general [lrange [outcomeUnderHir cranelift-unfused $hir] 0 1]
+            expr {$fused eq $general && $fused eq [list value [cfExpect $name]]}
+        }
+    }
+} -result {1 1 1 1 1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Evidence
+
+test cf-nir-no-coroutine-operations {the fused consumer's NIR has no coroutine operation but the failure path's (cofailed, and coresume0 of the failed object, one per start and resume); the general runtime's has create, start, resume and release} -constraints nativeCoroutines -body {
+    lmap name {lcg grid tokens utf8} function {sum total lex validate} {
+        set nir [native::nir [surface::compile [cfText $name] -warnings off]]
+        set before [lsort -unique [regexp -all -inline {co[a-z0-9]+} [join [regexp -all -inline {op co[a-z0-9]+} [lindex [regexp -inline "func \[0-9\]+ \"$function\"\[^\n\]*\n(.*?)\nend" $nir] 1]]]]]
+        set fused [cfFunction [cfText $name] $function]
+        set ops [lsort -unique [regexp -all -inline {co[a-z0-9]+} [join [regexp -all -inline {op co[a-z0-9]+} $fused]]]]
+        set failed [regexp -all -inline {= op coresume0 (%[0-9]+)} $fused]
+        set boxes [lsort -unique [lmap {- r} $failed {set r}]]
+        set made [lsort -unique [lmap {- r} [regexp -all -inline {(%[0-9]+) = op cofailed} $fused] {set r}]]
+        list $before $ops [expr {$boxes eq $made}]
+    }
+} -cleanup {unset -nocomplain nir before fused ops failed boxes made} -result {{{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume coresume0 costart} {cofailed coresume0} 1} {{cocreate corelease coresume costart} {cofailed coresume0} 1}}
+
+test cf-clif-no-coroutine-helpers {natively the fused program refers to no coroutine helper but the failure path's (rt_co_failed, rt_co_resume0); the general program refers to create, start, resume, release and (its producers) yield} -constraints nativeCoroutines -body {
+    lmap name {lcg grid tokens utf8} {
+        set text [cfText $name]
+        list [cfClifHelpers $text] [withoutCoroutineFusion {cfClifHelpers $text}]
+    }
+} -cleanup {unset -nocomplain text} -result {{{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume rt_co_resume0 rt_co_start rt_co_yield}} {{rt_co_failed rt_co_resume0} {rt_co_create rt_co_release rt_co_resume rt_co_start rt_co_yield}}}
+
+test cf-no-coroutine-at-run-time {a fused run allocates no coroutine and maps, reuses and releases no stack (the allocation report has no coroutine section); the general runtime allocates one coroutine per construction and runs each on a stack} -constraints nativeCoroutines -body {
+    lmap name {lcg grid tokens utf8} {
+        set hir [surface::compile [cfText $name] -warnings off]
+        set fused [native::allocationReport $hir summary]
+        set general [withoutCoroutineFusion {native::allocationReport $hir summary}]
+        list [dict exists $fused byKind Coroutine] [dict exists $fused coroutines] \
+            [dict get $general byKind Coroutine allocations] [dict get $general coroutines stacksMapped]
+    }
+} -cleanup {unset -nocomplain hir fused general} -result {{0 0 1 1} {0 0 1 1} {0 0 11 2} {0 0 6 1}}
+
+test cf-failure-allocates-the-cache {a fused coroutine that fails allocates exactly one object, its cached failure (cofailed: the two failing runs of case-failure, two objects), and still maps no stack} -constraints nativeCoroutines -body {
+    set hir [surface::compile [cfText case-failure] -warnings off]
+    set report [native::allocationReport $hir summary]
+    list [dict get $report byKind Coroutine allocations] [dict get $report coroutines stacksMapped]
+} -cleanup {unset -nocomplain hir report} -result {2 0}
+
+test cf-fused-nir-reads-back {the fused NIR the driver prints is valid NIR: it reads back, and runs to the same value} -constraints nativeCoroutines -body {
+    lmap name {lcg tokens case-failure} {
+        set hir [surface::compile [cfText $name] -warnings off]
+        set text [native::fusedNir $hir]
+        list [native::Driver check $text] [expr {[native::Outcome [withoutCoroutineFusion {native::Driver run $text}]] eq [native::evalHir $hir]}]
+    }
+} -cleanup {unset -nocomplain hir text} -result {{ok 1} {ok 1} {ok 1}}
+
+test cf-fusion-off {BOTLISH_NATIVE_COROUTINE_FUSION=0 turns the pass off: no site is considered, and the program keeps every coroutine operation the lowering wrote} -body {
+    set hir [surface::compile [cfText lcg] -warnings off]
+    set ops {nir fused}
+    foreach text [list [native::nir $hir] [withoutCoroutineFusion {native::fusedNir $hir}]] {
+        lappend ops [lsort [regexp -all -inline {op co[a-z0-9]+} $text]]
+    }
+    list [withoutCoroutineFusion {native::fusion $hir}] [expr {[lindex $ops 2] eq [lindex $ops 3]}] [llength [lindex $ops 2]]
+} -cleanup {unset -nocomplain hir ops text} -result {{} 1 9}
+
+test cf-executable {a standalone executable of a fused program prints the same value, also under GC stress} -constraints {executableAot nativeCoroutines} -body {
+    set exe [native::executable [surface::compile [cfText tokens] -warnings off] [file join [temporaryDirectory] cf-tokens-[pid]]]
+    set plain [exec $exe]
+    set stressed [cfGcStress {exec $exe}]
+    file delete $exe
+    list $plain [expr {$stressed eq $plain}]
+} -cleanup {unset -nocomplain exe plain stressed} -result {{[6, 4, 17, 29]} 1}
+
+set cfPrincipal {struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+fn deep(base: int, resume Message) -> int:
+    message = yield Event {value: base}
+    message.value
+
+fn worker(base: int, resume Message) -> Event:
+    x = deep(base)
+    message = yield Event {value: x}
+    return Event {value: message.value}
+
+coroutine {step, first} = worker(10)
+
+second = step(Message {value: 20})
+final = step(Message {value: 30})
+again = step(Message {value: 999})
+[first, second, final, again]
+}
+
+test cf-scalar-transport {a struct the fused coroutine sends or receives that nothing but projections reads never becomes an object: the struct-yielding generator's Items, the recognizers' Answers and Chs and the validator's Bytes, one struct per item on the general runtime, none fused} -constraints nativeCoroutines -body {
+    lmap name {lcg-struct tokens utf8} {
+        set hir [surface::compile [cfText $name] -warnings off]
+        set unboxed [lmap entry [native::fusion $hir] {dict get [lindex $entry 3] unboxed}]
+        set fused [native::allocationReport $hir summary]
+        set general [withoutCoroutineFusion {native::allocationReport $hir summary}]
+        list $unboxed [dict get $fused byKind Struct allocations] [dict get $general byKind Struct allocations]
+    }
+} -cleanup {unset -nocomplain hir unboxed fused general} -result {{6 0 1001} {{0 19 13} 0 80} {1 0 25}}
+
+test cf-scalar-transport-escapes {COROUTINES.md's principal program is fused, but the three Events it collects into a List stay objects (its three Messages, read only by projections, do not): the same value as on the general runtime} -constraints nativeCoroutines -body {
+    set hir [surface::compile $cfPrincipal -warnings off]
+    set fused [native::allocationReport $hir summary]
+    set general [withoutCoroutineFusion {native::allocationReport $hir summary}]
+    list [cfAgree $cfPrincipal] [lmap entry [native::fusion $hir] {lrange $entry 0 1}] \
+        [dict get $fused byKind Struct allocations] [dict get $general byKind Struct allocations]
+} -cleanup {unset -nocomplain hir fused general} -result {{value {[Event {value: 10}, Event {value: 20}, Event {value: 30}, Event {value: 30}]}} {{fused <program>}} 3 6}
+
+# ---------------------------------------------------------------------------
+# Streaming recognition: the validator over arbitrary splits
+
+# The verdict of an independent UTF-8 validator (RFC 3629) on BYTES: 1
+# valid, 0 a truncated last character, -1 invalid.
+proc cfUtf8 {bytes} {
+    set need 0
+    set lo 128
+    set hi 191
+    foreach b $bytes {
+        if {$need == 0} {
+            if {$b < 128} {
+                continue
+            } elseif {$b >= 194 && $b <= 223} {
+                set need 1
+            } elseif {$b >= 224 && $b <= 239} {
+                set need 2
+            } elseif {$b >= 240 && $b <= 244} {
+                set need 3
+            } else {
+                return -1
+            }
+            set lo [expr {$b == 224 ? 160 : $b == 240 ? 144 : 128}]
+            set hi [expr {$b == 237 ? 159 : $b == 244 ? 143 : 191}]
+            continue
+        }
+        if {$b < $lo || $b > $hi} {
+            return -1
+        }
+        set lo 128
+        set hi 191
+        incr need -1
+    }
+    expr {$need == 0 ? 1 : 0}
+}
+
+# BYTES split at random into chunks, as a Botlish List of Lists.
+proc cfSplit {bytes} {
+    set chunks {}
+    set chunk {}
+    foreach b $bytes {
+        lappend chunk $b
+        if {rand() < 0.3} {
+            lappend chunks "\[[join $chunk {, }]\]"
+            set chunk {}
+        }
+    }
+    lappend chunks "\[[join $chunk {, }]\]"
+    return "\[[join $chunks {, }]\]"
+}
+
+test cf-streaming-boundaries {the fused validator's verdict on 60 random inputs (valid text, corrupted bytes, truncated ends), each split at random three ways, is the independent reference's for every split, fused and on the general runtime} -constraints nativeCoroutines -body {
+    expr {srand(20261023)}
+    set text [cfText utf8]
+    set prefix [string range $text 0 [string first "\n# \"hello\"" $text]]
+    set calls {}
+    set expected {}
+    for {set n 0} {$n < 60} {incr n} {
+        set bytes {}
+        for {set k 0} {$k < 1 + int(rand() * 12)} {incr k} {
+            set cp [lindex {65 233 8364 128512 2047 55295 57344 65535 65536 1114111} [expr {int(rand() * 10)}]]
+            lappend bytes {*}[lmap c [split [encoding convertto utf-8 [format %c $cp]] ""] {scan $c %c}]
+        }
+        switch [expr {$n % 4}] {
+            1 { lset bytes [expr {int(rand() * [llength $bytes])}] [expr {int(rand() * 256)}] }
+            2 { set bytes [lrange $bytes 0 end-1] }
+            3 { lappend bytes [lindex {192 193 237 245 255 128} [expr {int(rand() * 6)}]] [expr {128 + int(rand() * 64)}] }
+        }
+        set verdict [cfUtf8 $bytes]
+        for {set s 0} {$s < 3} {incr s} {
+            lappend calls "validate([cfSplit $bytes])"
+            lappend expected $verdict
+        }
+    }
+    set program "$prefix\n\[[join $calls ",\n "]\]\n"
+    set hir [surface::compile $program -warnings off]
+    set want [list value "\[[join $expected {, }]\]"]
+    list [lsort -unique [cfSites $program]] [expr {[lrange [outcomeUnderHir cranelift $hir] 0 1] eq $want}] \
+        [expr {[lrange [outcomeUnderHir cranelift-unfused $hir] 0 1] eq $want}] \
+        [llength [lsort -unique $expected]]
+} -cleanup {unset -nocomplain text prefix calls expected n bytes k cp verdict s program hir want} -result {{{fused validate}} 1 1 3}
+
+cleanupTests

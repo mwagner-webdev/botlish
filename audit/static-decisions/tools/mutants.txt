@@ -377,8 +377,12 @@
 ## hir/mutvec.tcl
 <<<<
     set shown [hir::semantic::SourceName $hir $b]
+    if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]} {
+        return "$what is `$shown`, which is not a local binding, a parameter or a context parameter of this function: only those are places a $kind can be mutated in
 ====
     set shown [dict get $binding name]
+    if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]} {
+        return "$what is `$shown`, which is not a local binding, a parameter or a context parameter of this function: only those are places a $kind can be mutated in
 >>>>
 
 @@ hygiene-mutable-capture MUTABLE-PLACE-CAPTURE names the captured place by its NAME#N

@@ -1,0 +1,499 @@
+# mutable-map.bot -- std::mutable_map::MutableMap[K satisfies Hashable, V]
+# (ORDERED-MUTABLE-MAP-SET.md), ported from tests/mutable-map.test.
+#
+# * A MutableMap is a mutable value whose iteration order is insertion
+#   order: a new key is added last, setting a present key replaces its value
+#   in its place, removing a key and setting it again adds it last. A
+#   missing key is the declared error std::mutable_map::KeyNotFound of at
+#   and remove. Growth, compaction and clear never change the order of the
+#   entries that remain.
+# * Keys are compared by Botlish equality: equal values built independently
+#   (Strings, structs, Lists, enum cases, BigInts) are one key, and the
+#   collision corpus's keys are ordinary keys. The key type must satisfy
+#   Hashable wherever an application is written (TraitNotSatisfied); a map
+#   is not Hashable, and its representation is opaque
+#   (OpaqueRepresentation).
+# * Copies are independent through every mutation: a binding, an argument,
+#   a result, a struct field and a List element each keep their own history.
+# * mm-secret-independent runs once per backend, each process drawing its
+#   own hidden key (the Tcl test runs it under two fixed keys as well).
+
+# What a Botlish program cannot observe stays in the Tcl suites: the
+# representation's invariants (tests/ordered-table.test), the hidden hash
+# key's independence across fixed keys, injected collisions of the keyed
+# hash (a private library), the run-time EQUALITY of `==` on two
+# collections, the static type of a loop variable, the elaborated loop's HIR
+# and every native fact (typed probes, one keyed hash per operation,
+# allocation and copy counts).
+
+# Imports: std::mutable_map and not std::mutable_set, so that a map's
+# length, contains, remove and clear have one candidate (the set is
+# mutable-set.bot's).
+import std::compiler
+import std::list
+import std::mutable_map
+import std::mutable_vector
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only).
+
+# mmDecls: reading a map out as Lists, a lookup with a default, an empty map.
+fn entries(m: std::mutable_map::MutableMap[str, int]) -> List[List[str]]:
+    loop e in m:
+        [e.key]
+
+fn items(m: std::mutable_map::MutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn at_or(m: std::mutable_map::MutableMap[int, int], k: int, d: int) -> int:
+    v = m.at(k):
+        on std::mutable_map::KeyNotFound:
+            d
+    v
+
+fn int_map() -> std::mutable_map::MutableMap[int, int]:
+    std::mutable_map::create[int, int]()
+
+# mm-equal-keys: a struct key with a List field (P in the Tcl program).
+struct EqKey:
+    x: int
+    tags: List[str]
+
+# mm-copies-independent: a struct holding a map (Box in the Tcl program).
+struct MapBox:
+    m: std::mutable_map::MutableMap[int, int]
+
+# mm-key-kinds: an enum and nested struct keys (Color, In, Out).
+enum KeyColor:
+    Red, Green
+
+struct KeyIn:
+    a: int
+
+struct KeyOut:
+    in: KeyIn
+    c: KeyColor
+
+# mm-not-hashable/parameter: a Hashable parameter (h in the Tcl program; a
+# trait-typed function is declared at the top level).
+fn hashed(x: Hashable) -> int:
+    hash(x)
+
+# ---------------------------------------------------------------------------
+# Operations, order, copies, keys
+
+fn register_map_tests():
+    # create, length, empty?, contains, at, set, remove and clear
+    fn b_mm_basics() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[str, int]()
+            e0 = m.empty?()
+            m.set("a", 1)
+            m.set("b", 2)
+            n = m.length()
+            c = [m.contains("a"), m.contains("z")]
+            v = m.at("b"):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            r = m.remove("a"):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            after = [m.length(), m.contains("a"), m.empty?()]
+            m.clear()
+            [e0, n, c, v, r, after, m.length(), m.empty?(), m.contains("b")]
+    std::test::value("mm-basics", [true, 2, [true, false], 2, 1, [1, false, false], 0, true, false], b_mm_basics)
+
+    # with_capacity is a performance request only: the map is empty, and behaves as a created one
+    fn b_mm_with_capacity() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::with_capacity[int, int](100)
+            loop i from 0 to 30:
+                m.set(i * 3, i)
+            [m.length(), at_or(m, 27, -1), std::list::length(items(m))]
+    std::test::value("mm-with-capacity", [30, 9, 30], b_mm_with_capacity)
+
+    # a missing key is the error std::mutable_map::KeyNotFound for at and remove, and the map is unchanged by a failed remove
+    fn b_mm_missing_key() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            m.set(1, 10)
+            m.set(2, 20)
+            a = m.at(3):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            r = m.remove(3):
+                on std::mutable_map::KeyNotFound:
+                    -2
+            [a, r, items(m)]
+    std::test::value("mm-missing-key", [-1, -2, [[1, 10], [2, 20]]], b_mm_missing_key)
+
+    # KeyNotFound is a declared error of at: unhandled, it is UnhandledError
+    fn b_mm_missing_key_propagates_unhandled() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            m.at(1)
+    std::test::rejects("mm-missing-key-propagates/unhandled", std::compiler::DiagnosticCode::UnhandledError, b_mm_missing_key_propagates_unhandled)
+
+    # declared, KeyNotFound propagates to the caller's handler
+    fn b_mm_missing_key_propagates_declared() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::mutable_map::MutableMap[int, int]) -> int errors std::mutable_map::KeyNotFound:
+                m.at(5)
+            r = f(int_map()):
+                on std::mutable_map::KeyNotFound:
+                    -7
+            r
+    std::test::value("mm-missing-key-propagates/declared", -7, b_mm_missing_key_propagates_declared)
+
+    # iteration is insertion order
+    fn b_mm_order_insertion() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[str, int]()
+            loop k in ["pear", "fig", "apple", "kiwi", "date"]:
+                m.set(k, 0)
+            entries(m)
+    std::test::value("mm-order-insertion", [["pear"], ["fig"], ["apple"], ["kiwi"], ["date"]], b_mm_order_insertion)
+
+    # setting an existing key replaces its value only: the length is unchanged, the key keeps its place
+    fn b_mm_replace_keeps_position() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop k in [5, 3, 9, 1]:
+                m.set(k, k)
+            m.set(3, 33)
+            m.set(5, 55)
+            m.set(3, 333)
+            [m.length(), items(m)]
+    std::test::value("mm-replace-keeps-position", [4, [[5, 55], [3, 333], [9, 9], [1, 1]]], b_mm_replace_keeps_position)
+
+    # removing a key removes it from iteration; setting it again adds it last
+    fn b_mm_remove_reinsert_moves_last() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop k in [1, 2, 3, 4]:
+                m.set(k, k * 10)
+            r = m.remove(2):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            a = items(m)
+            m.set(2, 7)
+            b = items(m)
+            r2 = m.remove(1):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            m.set(1, 8)
+            [r, a, b, items(m)]
+    std::test::value("mm-remove-reinsert-moves-last", [20, [[1, 10], [3, 30], [4, 40]], [[1, 10], [3, 30], [4, 40], [2, 7]], [[3, 30], [4, 40], [2, 7], [1, 8]]], b_mm_remove_reinsert_moves_last)
+
+    # keys are compared by Botlish equality, never identity: an equal but independently built struct or List key finds, replaces and removes the entry
+    fn b_mm_equal_keys() errors std::compiler::CompilerError:
+        static compile:
+            fn tag(x: int) -> str:
+                if x.mod(2) == 0:
+                    return "u"
+                "v"
+            fn p(x: int) -> EqKey:
+                EqKey {x: x, tags: ["t", tag(x)]}
+            m = std::mutable_map::create[EqKey, int]()
+            m.set(p(1), 1)
+            m.set(EqKey {x: 1, tags: ["t", "v"]}, 2)
+            m.set(p(2), 3)
+            c = m.contains(EqKey {x: 2, tags: ["t", "u"]})
+            r = m.remove(p(2)):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            v = m.at(EqKey {x: 1, tags: ["t", "v"]}):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            [m.length(), c, r, v]
+    std::test::value("mm-equal-keys", [1, true, 3, 2], b_mm_equal_keys)
+
+    # growth from 8 slots through several rebuilds never changes the order or loses an entry (300 keys in a scrambled order)
+    fn b_mm_growth_keeps_order() errors std::compiler::CompilerError:
+        static compile:
+            ks = [5028, 3807, 2586, 1365, 144, -1077, -2298, 6730, -3519, 5509, 4288, 3067, 1846, 625, -596, -1817, -3038, 5990, 4769, 3548, 2327, 1106, -115, -1336, -2557, 6471, -3778, 5250, 4029, 2808, 1587, 366, -855, -2076, 6952, -3297, 5731, 4510, 3289, 2068, 847, -374, -1595, -2816, 6212, 4991, 3770, 2549, 1328, 107, -1114, -2335, 6693, -3556, 5472, 4251, 3030, 1809, 588, -633, -1854, -3075, 5953, 4732, 3511, 2290, 1069, -152, -1373, -2594, 6434, -3815, 5213, 3992, 2771, 1550, 329, -892, -2113, 6915, -3334, 5694, 4473, 3252, 2031, 810, -411, -1632, -2853, 6175, 4954, 3733, 2512, 1291, 70, -1151, -2372, 6656, -3593, 5435, 4214, 2993, 1772, 551, -670, -1891, -3112, 5916, 4695, 3474, 2253, 1032, -189, -1410, -2631, 6397, -3852, 5176, 3955, 2734, 1513, 292, -929, -2150, 6878, -3371, 5657, 4436, 3215, 1994, 773, -448, -1669, -2890, 6138, 4917, 3696, 2475, 1254, 33, -1188, -2409, 6619, -3630, 5398, 4177, 2956, 1735, 514, -707, -1928, 7100, -3149, 5879, 4658, 3437, 2216, 995, -226, -1447, -2668, 6360, -3889, 5139, 3918, 2697, 1476, 255, -966, -2187, 6841, -3408, 5620, 4399, 3178, 1957, 736, -485, -1706, -2927, 6101, 4880, 3659, 2438, 1217, -4, -1225, -2446, 6582, -3667, 5361, 4140, 2919, 1698, 477, -744, -1965, 7063, -3186, 5842, 4621, 3400, 2179, 958, -263, -1484, -2705, 6323, -3926, 5102, 3881, 2660, 1439, 218, -1003, -2224, 6804, -3445, 5583, 4362, 3141, 1920, 699, -522, -1743, -2964, 6064, 4843, 3622, 2401, 1180, -41, -1262, -2483, 6545, -3704, 5324, 4103, 2882, 1661, 440, -781, -2002, 7026, -3223, 5805, 4584, 3363, 2142, 921, -300, -1521, -2742, 6286, -3963, 5065, 3844, 2623, 1402, 181, -1040, -2261, 6767, -3482, 5546, 4325, 3104, 1883, 662, -559, -1780, -3001, 6027, 4806, 3585, 2364, 1143, -78, -1299, -2520, 6508, -3741, 5287, 4066, 2845, 1624, 403, -818, -2039, 6989, -3260, 5768, 4547, 3326, 2105, 884, -337, -1558, -2779, 6249]
+            m = int_map()
+            loop k in ks:
+                m.set(k, k + 1)
+            ok = loop k in ks:
+                if at_or(m, k, 0) != k + 1:
+                    break
+                k
+            order = loop e in m:
+                e.key
+            [m.length(), std::list::length(ok), order == ks]
+    std::test::value("mm-growth-keeps-order", [300, 300, true], b_mm_growth_keeps_order)
+
+    # removing most of the entries (rebuilds and compactions on the way) keeps the survivors' order; keys set again after it are last
+    fn b_mm_compaction_keeps_order() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop i from 0 to 200:
+                m.set(i, i)
+            loop i from 0 to 200:
+                if i.mod(10) != 3:
+                    r = m.remove(i):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            m.set(5, 50)
+            m.set(13, 130)
+            ks = loop e in m:
+                e.key
+            vs = loop e in m:
+                e.value
+            v1 = std::list::at(vs, 1):
+                on IndexNotFound:
+                    -1
+            [m.length(), ks, v1]
+    std::test::value("mm-compaction-keeps-order", [21, [3, 13, 23, 33, 43, 53, 63, 73, 83, 93, 103, 113, 123, 133, 143, 153, 163, 173, 183, 193, 5], 130], b_mm_compaction_keeps_order)
+
+    # insert and remove one key 3000 times, then several: the map ends with exactly its live keys, in order, its lookups right
+    fn b_mm_churn() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop i from 0 to 3000:
+                m.set(i, i)
+                r = m.remove(i):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+            loop i from 0 to 3000:
+                m.set(i.mod(5), i)
+                if i.mod(7) == 0:
+                    r = m.remove(i.mod(5)):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            [m.length(), items(m)]
+    std::test::value("mm-churn", [4, [[3, 2998], [0, 2995], [2, 2997], [4, 2999]]], b_mm_churn)
+
+    # clear empties the map: no entry is iterated or found, and the map grows again from nothing
+    fn b_mm_clear() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop i from 0 to 40:
+                m.set(i, i)
+            m.clear()
+            a = [m.length(), items(m), m.contains(3)]
+            loop i from 0 to 12:
+                m.set(12 - i, i)
+            last = std::list::at(items(m), 11):
+                on IndexNotFound:
+                    []
+            [a, m.length(), at_or(m, 12, -1), last]
+    std::test::value("mm-clear", [[0, [], false], 12, 0, [1, 11]], b_mm_clear)
+
+    # a copy (binding, argument, result, struct field, List element) never observes a later mutation of the original, nor the original one of the copy -- through set, replace, remove, growth, compaction and clear
+    fn b_mm_copies_independent() errors std::compiler::CompilerError:
+        static compile:
+            fn keep(m: std::mutable_map::MutableMap[int, int]) -> std::mutable_map::MutableMap[int, int]:
+                m
+            a = int_map()
+            loop i from 0 to 10:
+                a.set(i, i)
+            b = a
+            box = MapBox {m: a}
+            xs = [a]
+            k = keep(a)
+            loop i from 10 to 60:
+                a.set(i, i)
+            a.set(0, 100)
+            loop i from 1 to 9:
+                r = a.remove(i):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+            b.set(0, -5)
+            b.set(77, 77)
+            c = b
+            b.clear()
+            x0 = std::list::at(xs, 0):
+                on IndexNotFound:
+                    int_map()
+            [a.length(), at_or(a, 0, -1), b.length(), c.length(), at_or(c, 0, -1), box.m.length(), at_or(box.m, 0, -1), std::list::length(items(x0)), k.length(), at_or(k, 5, -1)]
+    std::test::value("mm-copies-independent", [52, 100, 0, 11, -5, 10, 0, 10, 10, 5], b_mm_copies_independent)
+
+    # a, b = a, c = b mutated in turn across growth, deletion, compaction and clear: each is exactly its own history (the arrays of one logical version are never mixed with another's)
+    fn b_mm_copies_adversarial() errors std::compiler::CompilerError:
+        static compile:
+            a = int_map()
+            loop i from 0 to 6:
+                a.set(i, i)
+            b = a
+            loop i from 6 to 40:
+                a.set(i, i)
+            c = b
+            loop i from 0 to 6:
+                r = b.remove(i):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+            b.set(100, 100)
+            loop i from 0 to 40:
+                if i.mod(2) == 0:
+                    r = a.remove(i):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            c.set(3, 33)
+            d = c
+            c.clear()
+            c.set(9, 9)
+            a0 = std::list::at(items(a), 0):
+                on IndexNotFound:
+                    []
+            [std::list::length(items(a)), a0, items(b), items(c), items(d)]
+    std::test::value("mm-copies-adversarial", [20, [1, 1], [[100, 100]], [[9, 9]], [[0, 0], [1, 1], [2, 2], [3, 33], [4, 4], [5, 5]]], b_mm_copies_adversarial)
+
+    # a key holding a collection copy is the value inserted: mutating the source collection afterwards changes neither the stored key nor what finds it
+    fn b_mm_key_copy_semantics() errors std::compiler::CompilerError:
+        static compile:
+            fn snapshot(v: MutableVector[int]) -> List[int]:
+                loop x in v:
+                    x
+            v = std::mutable_vector::from_list([1, 2])
+            m = std::mutable_map::create[List[int], int]()
+            m.set(snapshot(v), 1)
+            v.push(3)
+            m.set(snapshot(v), 2)
+            [m.length(), m.contains([1, 2]), m.contains([1, 2, 3])]
+    std::test::value("mm-key-copy-semantics", [2, true, true], b_mm_key_copy_semantics)
+
+    # String (astral and combining), BigInt, enum, struct, nested struct and List keys
+    fn b_mm_key_kinds() errors std::compiler::CompilerError:
+        static compile:
+            s = std::mutable_map::create[str, int]()
+            s.set("😀", 1)
+            s.set("é", 2)
+            s.set("é", 3)
+            b = std::mutable_map::create[int, int]()
+            b.set(100000000000000000000000000000, 1)
+            b.set(-100000000000000000000000000000, 2)
+            n = std::mutable_map::create[KeyOut, int]()
+            n.set(KeyOut {in: KeyIn {a: 1}, c: KeyColor::Red}, 1)
+            n.set(KeyOut {in: KeyIn {a: 1}, c: KeyColor::Green}, 2)
+            n.set(KeyOut {in: KeyIn {a: 1}, c: KeyColor::Red}, 3)
+            l = std::mutable_map::create[List[KeyColor], int]()
+            l.set([KeyColor::Red, KeyColor::Green], 1)
+            l.set([KeyColor::Green, KeyColor::Red], 2)
+            [s.length(), s.contains("é"), s.contains("e"), b.length(), b.contains(100000000000000000000000000000), n.length(), l.length(), l.contains([KeyColor::Green, KeyColor::Red])]
+    std::test::value("mm-key-kinds", [3, true, false, 2, true, 2, 2, true], b_mm_key_kinds)
+
+    # the hash-table experiment's adversarial keys (audit/hashable/data/int-collide-1024.txt: all on one home slot under the public hash) are ordinary keys to the table: every lookup, removal and the order are right (256 keys)
+    fn b_mm_collision_corpus() errors std::compiler::CompilerError:
+        static compile:
+            ks = [263, 429, 2191, 4100, 4931, 5235, 5468, 6201, 7303, 7664, 8416, 8690, 9929, 11113, 11254, 12628, 14172, 15179, 16912, 17645, 17999, 19180, 19777, 20171, 21433, 23695, 25169, 26542, 27989, 28261, 29873, 31177, 31780, 31906, 32002, 32288, 33092, 33618, 34527, 34794, 35995, 36341, 36547, 38350, 39454, 39713, 42786, 44894, 45710, 46117, 47419, 49174, 50954, 51012, 51698, 52134, 52439, 52673, 53050, 53861, 55676, 58525, 58778, 59588, 59702, 60944, 62274, 66155, 66348, 67721, 68089, 68236, 68470, 70268, 70435, 72482, 72608, 73791, 76024, 77140, 78145, 79872, 80270, 80436, 80689, 83532, 85246, 86405, 87460, 87626, 89840, 90745, 90899, 91272, 92013, 92354, 93898, 94929, 95416, 95690, 96079, 97384, 97537, 98235, 98468, 99100, 99931, 102509, 102783, 103928, 104011, 104297, 104820, 105162, 106080, 106677, 107296, 111691, 112324, 114744, 115040, 116027, 116294, 117569, 117910, 118847, 119295, 122077, 122680, 122806, 123188, 123302, 124192, 124718, 125762, 126983, 127328, 129443, 129924, 130733, 130874, 132195, 134892, 135802, 136025, 136278, 137071, 138566, 141023, 141504, 142758, 143722, 144514, 144653, 145049, 147515, 149607, 151400, 154003, 154564, 155167, 155916, 157701, 157987, 158379, 159772, 161007, 161876, 163306, 164844, 165021, 166055, 166248, 167881, 169304, 169623, 171785, 172199, 173112, 173798, 174913, 175150, 175961, 176173, 176339, 176634, 177776, 178438, 178665, 179231, 180998, 181445, 184828, 185823, 186062, 187083, 187209, 188301, 189135, 189768, 191505, 192632, 193370, 193536, 193789, 196917, 197293, 199215, 201574, 202621, 205808, 207019, 208106, 208977, 210187, 210730, 211368, 211535, 212116, 212390, 212967, 213803, 214491, 217582, 217708, 218240, 219742, 220496, 221280, 221477, 224247, 224441, 230552, 231120, 231559, 231911, 232558, 233122, 233885, 235407, 237706, 237980, 238978, 240344, 241440, 242427, 242694, 244241, 244447, 248968, 249130, 249787, 249901, 251500, 252264, 252703]
+            m = int_map()
+            loop k in ks:
+                m.set(k, 1)
+            hits = loop k in ks:
+                if not m.contains(k):
+                    break
+                k
+            loop k in ks:
+                if k.mod(3) == 0:
+                    r = m.remove(k):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            rest = loop e in m:
+                e.key
+            [std::list::length(hits), rest]
+    std::test::value("mm-collision-corpus", [256, [263, 2191, 4100, 4931, 5468, 7303, 7664, 8416, 8690, 9929, 11113, 11254, 12628, 15179, 16912, 17645, 17999, 19180, 19777, 20171, 21433, 23695, 25169, 26542, 27989, 28261, 29873, 31177, 31780, 31906, 32002, 32288, 33092, 35995, 36341, 36547, 38350, 39454, 39713, 44894, 45710, 46117, 47419, 49174, 50954, 51698, 52439, 52673, 53050, 53861, 55676, 58525, 58778, 59588, 59702, 60944, 66155, 67721, 68089, 68236, 68470, 70268, 70435, 72482, 72608, 76024, 77140, 78145, 80270, 80689, 85246, 86405, 87460, 87626, 89840, 90745, 90899, 92354, 93898, 95416, 95690, 96079, 97384, 97537, 98468, 99100, 99931, 102509, 103928, 104011, 104297, 107296, 111691, 112324, 115040, 116027, 116294, 117569, 117910, 118847, 122077, 122680, 122806, 123188, 123302, 124192, 124718, 125762, 126983, 127328, 129443, 130733, 130874, 135802, 136025, 137071, 138566, 141023, 143722, 144514, 144653, 145049, 147515, 151400, 154003, 154564, 155167, 157987, 159772, 161876, 163306, 166055, 167881, 169304, 171785, 172199, 173798, 174913, 175150, 175961, 176173, 176339, 177776, 178438, 179231, 180998, 181445, 184828, 186062, 192632, 193370, 193789, 197293, 201574, 202621, 205808, 207019, 208106, 210187, 210730, 211535, 212116, 212390, 213803, 217582, 217708, 218240, 219742, 220496, 221477, 224441, 230552, 231559, 231911, 232558, 233122, 233885, 237706, 237980, 238978, 240344, 244241, 244447, 248968, 249130, 249787, 249901, 251500, 252703]], b_mm_collision_corpus)
+
+    # the order of 80 scrambled insertions and every third removed (the Tcl test runs it under two fixed hidden keys and the processes' own, which must agree; the value is the same on every backend, each drawing its own key)
+    fn b_mm_secret_independent() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            loop i from 0 to 80:
+                m.set((i * 7919).mod(1000), i)
+            loop i from 0 to 80:
+                if i.mod(3) == 0:
+                    r = m.remove((i * 7919).mod(1000)):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            m.set(919, -1)
+            [m.length(), items(m)]
+    std::test::value("mm-secret-independent", [53, [[919, -1], [838, 2], [676, 4], [595, 5], [433, 7], [352, 8], [190, 10], [109, 11], [947, 13], [866, 14], [704, 16], [623, 17], [461, 19], [380, 20], [218, 22], [137, 23], [975, 25], [894, 26], [732, 28], [651, 29], [489, 31], [408, 32], [246, 34], [165, 35], [3, 37], [922, 38], [760, 40], [679, 41], [517, 43], [436, 44], [274, 46], [193, 47], [31, 49], [950, 50], [788, 52], [707, 53], [545, 55], [464, 56], [302, 58], [221, 59], [59, 61], [978, 62], [816, 64], [735, 65], [573, 67], [492, 68], [330, 70], [249, 71], [87, 73], [6, 74], [844, 76], [763, 77], [601, 79]]], b_mm_secret_independent)
+
+    # an order-independent content comparison is ordinary Botlish over the public API (same length, every key present with an equal value): insertion order is no part of it
+    fn b_mm_content_comparison() errors std::compiler::CompilerError:
+        static compile:
+            fn same(a: std::mutable_map::MutableMap[int, int], b: std::mutable_map::MutableMap[int, int]) -> bool:
+                if a.length() != b.length():
+                    return false
+                bad = loop e in a:
+                    if at_or(b, e.key, e.value + 1) == e.value:
+                        continue
+                    e.key
+                std::list::length(bad) == 0
+            a = int_map()
+            b = int_map()
+            a.set(1, 10)
+            a.set(2, 20)
+            b.set(2, 20)
+            b.set(1, 10)
+            c = b
+            c.set(1, 11)
+            [same(a, b), same(a, c)]
+    std::test::value("mm-content-comparison", [true, false], b_mm_content_comparison)
+
+# ---------------------------------------------------------------------------
+# Hashable keys, no Hashable map, an opaque representation
+
+fn register_map_diagnostic_tests():
+    # a key type must satisfy Hashable: a function type is no key type
+    fn b_mm_key_must_be_hashable_function() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[Fn{args: [int], return: int}, int]()
+            1
+    std::test::rejects("mm-key-must-be-hashable/function", std::compiler::DiagnosticCode::TraitNotSatisfied, b_mm_key_must_be_hashable_function)
+
+    # a MutableVector is no key type, wherever the application is written
+    fn b_mm_key_must_be_hashable_vector() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::mutable_map::MutableMap[MutableVector[int], int]) -> int:
+                0
+            1
+    std::test::rejects("mm-key-must-be-hashable/vector", std::compiler::DiagnosticCode::TraitNotSatisfied, b_mm_key_must_be_hashable_vector)
+
+    # an untyped key (any) satisfies nothing
+    fn b_mm_key_must_be_hashable_any() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::mutable_map::MutableMap[any, int]) -> int:
+                0
+            1
+    std::test::rejects("mm-key-must-be-hashable/any", std::compiler::DiagnosticCode::TraitNotSatisfied, b_mm_key_must_be_hashable_any)
+
+    # a MutableMap is no Hashable value: hash refuses it statically
+    fn b_mm_not_hashable_hash() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            hash(m)
+    std::test::rejects("mm-not-hashable/hash", std::compiler::DiagnosticCode::TraitNotSatisfied, b_mm_not_hashable_hash)
+
+    # a Hashable parameter refuses a MutableMap (hashed: a top-level function, as a trait-typed one must be)
+    fn b_mm_not_hashable_parameter() errors std::compiler::CompilerError:
+        static compile:
+            hashed(int_map())
+    std::test::rejects("mm-not-hashable/parameter", std::compiler::DiagnosticCode::TraitNotSatisfied, b_mm_not_hashable_parameter)
+
+    # the representation is opaque: no program reads its fields
+    fn b_mm_opaque_table() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            m.table
+    std::test::rejects("mm-opaque/table", std::compiler::DiagnosticCode::OpaqueRepresentation, b_mm_opaque_table)
+
+    # no field of the representation is readable
+    fn b_mm_opaque_vals() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map()
+            m.vals
+    std::test::rejects("mm-opaque/vals", std::compiler::DiagnosticCode::OpaqueRepresentation, b_mm_opaque_vals)
+
+# ---------------------------------------------------------------------------
+
+fn register_mutable_map_tests():
+    register_map_tests()
+    register_map_diagnostic_tests()
+
+with context std::test::suite()
+register_mutable_map_tests()
+std::test::report()

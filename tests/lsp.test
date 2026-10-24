@@ -562,11 +562,13 @@ proc lt::Session {scheduler} {
     lappend out semantic [lt::Diagnostics $c $main 2]
     lspc::didChange $c $main 3 $::ltMain
     lappend out fixed [lt::Diagnostics $c $main 3]
-    # A syntax error: hover in its unchanged text answers from the last
-    # analysis, marked stale; then the fix, and fresh answers again.
+    # A syntax error: the program is analyzed past it, so hover and
+    # definition in its well-formed text answer from the current analysis,
+    # fresh (SYNTAX-RECOVERY-MILESTONE-1.md), and the malformed expression
+    # answers nothing; then the fix.
     lspc::didChange $c $main 4 [string map {"double(a + b)" "double(a + )"} $::ltMain]
     lappend out syntax [lt::Diagnostics $c $main 4]
-    lappend out stale [lt::Hover [lspc::hover $c $main 6 5]] [lt::Location [lt::Result [lspc::definition $c $main 6 5]]] \
+    lappend out during [lt::Hover [lspc::hover $c $main 6 5]] [lt::Location [lt::Result [lspc::definition $c $main 6 5]]] \
         [lt::Hover [lspc::hover $c $main 8 11]]
     lspc::didChange $c $main 5 $::ltMain
     lappend out recovered [lt::Diagnostics $c $main 5] [lt::Hover [lspc::hover $c $main 6 5]]
@@ -575,7 +577,7 @@ proc lt::Session {scheduler} {
     return $out
 }
 
-test lsp-lang-session {an editing session: diagnostics of each version, hover (a function, a parameter, a module's function, nothing), definition (a module's function, a std:: module's function, a function, a binding), references with and without the declaration, a semantic error and its fix, a syntax error during which unchanged text still answers (stale), and recovery} -body {
+test lsp-lang-session {an editing session: diagnostics of each version, hover (a function, a parameter, a module's function, nothing), definition (a module's function, a std:: module's function, a function, a binding), references with and without the declaration, a semantic error and its fix, a syntax error during which the well-formed text answers fresh and the malformed expression nothing, and recovery} -body {
     lt::Session worker
 } -result [list open {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} \
     hover {fn shapes::area(w: int, h: int) -> int} {fn double(n: int) -> int} {a: int} null \
@@ -584,13 +586,103 @@ test lsp-lang-session {an editing session: diagnostics of each version, hover (a
     semantic {{8:11-8:17 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} \
     fixed {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} \
     syntax {{8:11-8:12 1 {SURFACE SYNTAX} {expected an expression, found ")"}}} \
-    stale "fn shapes::area(w: int, h: int) -> int\n(stale: analyzed before the latest changes to main.bot)" shapes.bot:0:3-0:7 null \
+    during {fn shapes::area(w: int, h: int) -> int} shapes.bot:0:3-0:7 null \
     recovered {{7:4-7:32 2 METHOD-ELIGIBLE {call to `std::list::get` is eligible for method syntax}}} {fn shapes::area(w: int, h: int) -> int} \
     status 0]
 
 test lsp-lang-schedulers-agree {the synchronous scheduler and the worker answer the same session identically: the same diagnostics for every version, the same hovers, definitions and references} -body {
     expr {[lt::Session sync] eq [lt::Session worker]}
 } -result 1
+
+# Syntax-error-tolerant analysis (SYNTAX-RECOVERY-MILESTONE-1.md): the
+# editing sequence of its section 11, over real pipes. A program of two
+# modules; an expression left unfinished in one function, then fixed; a
+# syntax error in the imported module, then repaired. A hover says whether it
+# is stale.
+set ::ltRecoverShapes "fn area(w: int, h: int) -> int:\n    w * h\n\nfn scale(n: int) -> int:\n    n * 3\n"
+set ::ltRecoverMain "import shapes\n\nfn double(n: int) -> int:\n    m = n * 2\n    m + n\n\nfn triple(n: int) -> int:\n    n * 3\n\na = shapes::area(3, 4)\nb = double(a)\nc = triple(b)\n"
+
+proc lt::RecoverySession {scheduler} {
+    set dir [lt::Dir recovery-$scheduler]
+    lt::Put $dir/shapes.bot $::ltRecoverShapes
+    lt::Put $dir/main.bot $::ltRecoverMain
+    set c [lt::Start -scheduler $scheduler]
+    set main [lspc::uri $dir/main.bot]
+    set shapes [lspc::uri $dir/shapes.bot]
+    set out {}
+    lspc::didOpen $c $main $::ltRecoverMain
+    lappend out open [lt::Diagnostics $c $main 1]
+    set queries {
+        {hover 2 4} {hover 2 10} {hover 4 4} {hover 4 8} {hover 6 4} {definition 9 12} {hover 10 0} {hover 3 8}
+    }
+    set ask [list apply {{c main queries} {
+        lmap q $queries {
+            lassign $q kind line character
+            if {$kind eq "hover"} {
+                lt::Hover [lspc::hover $c $main $line $character]
+            } else {
+                lt::Location [lt::Result [lspc::definition $c $main $line $character]]
+            }
+        }
+    }} $c $main $queries]
+    set valid [{*}$ask]
+    lappend out valid $valid
+    # 2: an expression left unfinished in `double`.
+    lspc::didChange $c $main 2 [string map {"m = n * 2" "m = n *"} $::ltRecoverMain]
+    lappend out unfinished [lt::Diagnostics $c $main 2] [{*}$ask]
+    # 6, 7: corrected; every answer is the valid program's again.
+    lspc::didChange $c $main 3 $::ltRecoverMain
+    lappend out corrected [lt::Diagnostics $c $main 3] [expr {[{*}$ask] eq $valid}]
+    # 8: a syntax error in the imported module, open in the editor.
+    lspc::didOpen $c $shapes $::ltRecoverShapes
+    lt::Diagnostics $c $shapes 1
+    lspc::didChange $c $shapes 2 [string map {"n * 3" "n *"} $::ltRecoverShapes]
+    lappend out module [lt::Diagnostics $c $shapes 2] [lt::Diagnostics $c $main 3]
+    # 9: the importer's answers are fresh.
+    lappend out importer [lt::Hover [lspc::hover $c $main 9 12]] [lt::Hover [lspc::hover $c $main 9 0]] \
+        [lt::Location [lt::Result [lspc::definition $c $main 9 12]]]
+    # 10, 11: repaired; the syntax diagnostics go, every answer is the valid
+    # program's.
+    lspc::didChange $c $shapes 3 $::ltRecoverShapes
+    lappend out repaired [lt::Diagnostics $c $shapes 3] [expr {[{*}$ask] eq $valid}]
+    lappend out status [lt::Stop $c]
+    file delete -force $dir
+    return $out
+}
+
+test lsp-lang-recovery-session {an editing session through syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md): with an expression unfinished, the same function's and another function's declarations and an imported module's function answer fresh from the current analysis; where the current analysis knows nothing -- a value that depends on the malformed expression, a name inside it -- the last analysis of the program as written answers, marked stale, in text it saw; corrected, everything is as before; a syntax error in the imported module leaves the importer's answers fresh; repaired, its diagnostics go} -body {
+    lt::RecoverySession worker
+} -result [list open {} \
+    valid {{fn double(n: int) -> int} {n: int} {m: int} {n: int} {fn triple(n: int) -> int} shapes.bot:0:3-0:7 {b: int} {n: int}} \
+    unfinished {{3:11-4:0 1 {SURFACE SYNTAX} {expected an expression, found end of line}}} \
+        [list {fn double(n: int) -> int} {n: int} "m: int\n(stale: analyzed before the latest changes to main.bot)" {n: int} {fn triple(n: int) -> int} shapes.bot:0:3-0:7 {b: int} "n: int\n(stale: analyzed before the latest changes to main.bot)"] \
+    corrected {} 1 \
+    module {{4:7-5:0 1 {SURFACE SYNTAX} {expected an expression, found end of line}}} {} \
+    importer {fn shapes::area(w: int, h: int) -> int} {a: int} shapes.bot:0:3-0:7 \
+    repaired {} 1 \
+    status 0]
+
+test lsp-lang-recovery-schedulers-agree {the synchronous scheduler and the worker answer the editing session through syntax errors identically} -body {
+    expr {[lt::RecoverySession sync] eq [lt::RecoverySession worker]}
+} -result 1
+
+test lsp-lang-recovery-declarations {malformed declarations among well-formed ones -- an unfinished function header, an incomplete parameter annotation, a broken struct declaration -- leave the well-formed declarations around them fresh, name the malformed function where it is declared, and every file with a syntax error publishes its own} -body {
+    set dir [lt::Dir recovery-declarations]
+    set geo "struct Point:\n    x int\n\nfn origin() -> int:\n    0\n"
+    set main "import geo\n\nfn first(n: int) -> int:\n    n\n\nfn quad(n: int\n\nfn half(n: ) -> int:\n    n\n\nfn last(n: int) -> int:\n    first(n) + geo::origin()\n\nq = quad(1)\nl = last(2)\n"
+    lt::Put $dir/geo.bot $geo
+    lt::Put $dir/main.bot $main
+    set c [lt::Start]
+    set uri [lspc::uri $dir/main.bot]
+    set geoUri [lspc::uri $dir/geo.bot]
+    lspc::didOpen $c $geoUri $geo
+    lspc::didOpen $c $uri $main
+    set out [list [lt::Diagnostics $c $uri 1] [lt::Diagnostics $c $geoUri 1]]
+    lappend out [lt::Hover [lspc::hover $c $uri 2 4]] [lt::Hover [lspc::hover $c $uri 11 4]] \
+        [lt::Hover [lspc::hover $c $uri 11 16]] [lt::Hover [lspc::hover $c $uri 14 0]] [lt::Hover [lspc::hover $c $uri 13 0]] \
+        [lt::Location [lt::Result [lspc::definition $c $uri 14 5]]] [lt::Location [lt::Result [lspc::definition $c $uri 13 4]]]
+    lappend out [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir geo main c uri geoUri out} -result {{{6:0-7:0 1 {SURFACE SYNTAX} {expected ":" after the parameter list, found end of line}} {7:11-7:12 1 {SURFACE SYNTAX} {expected a parameter type after ":", found ")"}}} {{1:6-1:9 1 {SURFACE SYNTAX} {expected ":" and a type after the field name "x" (a struct field always has an explicit type), found name "int"}}} {fn first(n: int) -> int} {fn first(n: int) -> int} {fn geo::origin() -> int} {l: int} null main.bot:10:3-10:7 main.bot:5:3-5:7 0}
 
 
 # The diagnostics of a -check of PATH, per file: FILE -> {LINE:COL MESSAGE
@@ -1100,7 +1192,7 @@ test lsp-sched-stale-result {a result whose sources changed while it ran publish
     list $versions [lindex [lt::Brief [lspc::published $c $main]] 0 2] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir c main util other versions} -result {{{1 0} {2 1}} {CORE SEMANTIC TYPE} 0}
 
-test lsp-lang-stale-locations {while a syntax error keeps the last analysis in use, its locations are given in the text the documents have now -- moved with the lines above them -- and a location in text that changed is dropped, never given at its old place} -body {
+test lsp-lang-stale-locations {during a syntax error, locations are given in the text the documents have now -- moved with the lines above them -- and a location in text that changed is dropped, never given at its old place} -body {
     set dir [lt::Project stale-locations]
     set c [lt::Start]
     set main [lspc::uri $dir/main.bot]

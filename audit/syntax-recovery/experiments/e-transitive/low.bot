@@ -1,0 +1,4 @@
+fn base() -> int:
+    7
+
+fn bad(

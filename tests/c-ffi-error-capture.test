@@ -626,22 +626,49 @@ proc ecObject {dir options} {
     set hir [ecHir $dir]
     set path [file join $dir object[incr ::appCounter].o]
     native::object $hir $path {*}$options
-    return [list [window::machine $path] [native::nir $hir {*}$options]]
+    return [list [window::machine $path] [native::nir $hir {*}$options] $hir]
+}
+
+# The NIR ids of the functions whose machine code holds the C calls of
+# FOREIGN that function NAME makes. Coroutine fusion
+# (COROUTINE-FUSION-MILESTONE-1.md) inlines a fused coroutine's producer into
+# its consumer and leaves the producer's own function no code: there the
+# window from the C call to errno() is the consumer's (one per start and
+# resume of the copied producer), and is checked there. NAME's own function
+# counts unless fusion inlined it and it no longer makes the call.
+proc ecHolders {functions nir hir name foreign options} {
+    set holders [list $name]
+    foreach entry [native::fusion $hir {*}$options] {
+        if {[lindex $entry 0] eq "fused" && $name in [dict get [lindex $entry 3] inlined]} {
+            lappend holders [lindex $entry 1]
+        }
+    }
+    set ids {}
+    foreach holder [lsort -unique $holders] {
+        foreach {- id} [regexp -all -inline -line "^func (\[0-9\]+) \"$holder\" " $nir] {
+            if {$holder ne $name || [llength $holders] == 1
+                    || $foreign in [window::machineCalls $functions botlish_fn_$id]} {
+                lappend ids $id
+            }
+        }
+    }
+    if {$ids eq ""} {
+        error "ecHolders: no function holds $name's calls of $foreign"
+    }
+    return $ids
 }
 
 # The calls on the paths from each shape's C call to its errno() call, in
 # machine code: {NAME CALLS ...}.
 proc ecMachineWindows {dir options} {
-    lassign [ecObject $dir $options] functions nir
+    lassign [ecObject $dir $options] functions nir hir
     set errno botlish_fn_[window::nirId $nir ec::errno]
     set result {}
     foreach {name foreign} {ec::fill bcf_fill_errno ec::read read status_only bcf_fill_errno direct bcf_fill_errno two bcf_fill2_errno
             alias bcf_reverse_errno wrapped bcf_fill_errno chosen bcf_fill_errno looped bcf_fill_errno suspended bcf_fill_errno} {
         set calls {}
-        foreach id [regexp -all -inline -line "^func (\[0-9\]+) \"[string map {:: ::} $name]\" " $nir] {
-            if {[string is integer -strict $id]} {
-                lappend calls {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
-            }
+        foreach id [ecHolders $functions $nir $hir $name $foreign $options] {
+            lappend calls {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
         }
         lappend result $name [lsort -unique $calls]
     }
@@ -1135,14 +1162,12 @@ test ec-modes-machine-windows {in the object file (objdump with relocations), in
         write_back_large bcf_fill_size large bcf_large_error large_direct bcf_large_error signed_cmp bcf_signed_errno co_large bcf_large_error int_sentinel close}
     set windows {}
     foreach options [concat $::ecModes {{-fault eager-foreign-result}}] {
-        lassign [ecObject $dir $options] functions nir
+        lassign [ecObject $dir $options] functions nir hir
         set errno botlish_fn_[window::nirId $nir ec::errno]
         set calls [dict create]
         foreach {name foreign} $shapes {
-            foreach id [regexp -all -inline -line "^func (\[0-9\]+) \"$name\" " $nir] {
-                if {[string is integer -strict $id]} {
-                    dict lappend calls $name {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
-                }
+            foreach id [ecHolders $functions $nir $hir $name $foreign $options] {
+                dict lappend calls $name {*}[window::machineWindow $functions botlish_fn_$id $foreign $errno]
             }
         }
         lappend windows [dict map {name list} $calls {lsort -unique [lmap call $list {expr {$call in {rt_int_cmp rt_ffi_word_cmp} ? [continue] : $call}}]}]

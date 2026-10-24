@@ -3019,6 +3019,20 @@ proc hir::types::NewContext {} {
 # again without poison first (hir::recovery::runnable, `unpoisoned`).
 # Recovery state, never a type: hir::types::show never prints it.
 
+# Expression E (`syntaxDependent`: its meaning depends on source the front
+# end could not read, SYNTAX-RECOVERY-MILESTONE-1.md) typed as ever -- its
+# children are what they are -- and then poison: its own value is not known.
+proc hir::types::Dependent {hirVar ctxVar e} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    dict unset hir syntaxDependent $e
+    try {
+        Expr hir ctx $e
+    } finally {
+        dict set hir syntaxDependent $e 1
+    }
+    return [SetType hir $e [Poison hir $e]]
+}
+
 # 1 if E (an ExprId or a BindingId; for a block, its result) is poison.
 proc hir::types::Poisoned {hir e} {
     return [dict exists $hir poisoned $e]
@@ -3569,6 +3583,9 @@ proc hir::types::Sequence {hirVar ctxVar exprs} {
 # Types expression E. Returns its type.
 proc hir::types::Expr {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
+    if {[dict exists $hir syntaxDependent $e] && ![dict exists $ctx spec]} {
+        return [Dependent hir ctx $e]
+    }
     set node [dict get $hir exprs $e]
     dict set hir exprs $e reachable [dict get $ctx reachable]
     switch -- [dict get $node kind] {
@@ -3584,6 +3601,12 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [ofValue [dict get $node value]]]
         }
         ref {
+            if {[dict exists $node hole] && ![dict exists $ctx spec]} {
+                # Source the front end could not read
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): an unknown value --
+                # poison, never a divergence.
+                return [SetType hir $e [Poison hir $e]]
+            }
             if {[dict get $node binding] eq ""} {
                 return [SetType hir $e never]
             }
@@ -3617,7 +3640,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
         }
         listloop {
             Expr hir ctx [dict get $node iterable]
-            set elemType [IterationElementOf [hir::typeOf $hir [dict get $node iterable]]]
+            set elemType [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $node iterable]]]
             set poison [Poisoned $hir [dict get $node iterable]]
             if {$poison} {
                 # A poisoned iterable: its element is poison too, and the
@@ -3708,7 +3731,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             foreach domain [dict get $node domains] {
                 if {[dict get $domain kind] eq "list"} {
                     Expr hir ctx [dict get $domain iterable]
-                    set elemType [IterationElementOf [hir::typeOf $hir [dict get $domain iterable]]]
+                    set elemType [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $domain iterable]]]
                     if {[Poisoned $hir [dict get $domain iterable]]} {
                         # (listloop's poisoned iterable.)
                         set poison 1
@@ -4343,9 +4366,13 @@ proc hir::types::Block {hirVar outerVar e self} {
         }
         set assumed $result
     }
-    if {$result eq "never" && $poison} {
+    if {($result eq "never" && $poison)
+            || ($declared eq {} && [dict exists $hir holeBlocks $e] && ![dict exists $outer spec])} {
         # Its every normal completion is poison (no `return` contributes):
-        # so is every call's result (Call), never a divergence.
+        # so is every call's result (Call), never a divergence. Likewise when
+        # its body holds a hole and it declares no result: a malformed
+        # statement may return anything (SYNTAX-RECOVERY-MILESTONE-1.md).
+        set result never
         Poison hir $e
     } elseif {[dict exists $hir poisoned $e]} {
         dict unset hir poisoned $e
@@ -4577,7 +4604,11 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # (No call of a Botlish function is typed by a precomputed
                 # rule instead of its body: MutableArray's relational
                 # constructors are intrinsics, MUTABLE-ARRAY.md.)
-                if {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])} {
+                if {!$spec && ([dict get $ctx reachable] || [hir::traits::IsPolymorphic $hir $block])
+                        && ![dict exists $hir holeBlocks $block]} {
+                    # (Never an instance of a function whose body holds a
+                    # hole: what its body proves is not known, only its
+                    # declared contract -- SYNTAX-RECOVERY-MILESTONE-1.md.)
                     # (A call of a trait-polymorphic function always gets its
                     # instance, reachable or not: its witnesses decide which
                     # specialization the call is, TRAITS.md.)

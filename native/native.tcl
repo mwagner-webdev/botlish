@@ -180,9 +180,15 @@ proc native::hostSupports {capability} {
 }
 
 # Evaluates SCRIPT in the caller's scope with DIRS the linker search
-# directories (native::linkDirs), restored afterwards.
+# directories (native::linkDirs), restored afterwards. An empty string in
+# DIRS is an error, never a directory: it would reach the linker as a bare
+# -L, which takes the linker's next argument for its directory (link.exe
+# refuses a bare /LIBPATH:). A caller with no directory passes none.
 proc native::withLinkDirs {dirs script} {
     variable linkDirs
+    if {"" in $dirs} {
+        error "native::withLinkDirs: an empty string is no link directory (pass no directory instead)"
+    }
     set saved $linkDirs
     set linkDirs [lmap dir $dirs {file normalize $dir}]
     try {
@@ -466,6 +472,30 @@ proc native::executable {hir path args} {
 
 proc native::clif {hir args} {
     set lines [Driver clif [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [join $lines \n]
+}
+
+# What coroutine fusion (native/src/codegen/fusion.rs,
+# COROUTINE-FUSION-MILESTONE-1.md) did with each construction site of the
+# program-mode HIR program HIR: a list of {fused FUNCTION ORIGIN FACTS} and
+# {kept FUNCTION ORIGIN REASON} (the driver's `fusion` report), in the
+# order the driver considered them; empty when fusion is off
+# (BOTLISH_NATIVE_COROUTINE_FUSION=0, or a host without native coroutines).
+proc native::fusion {hir args} {
+    set lines [Driver fusion [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [lmap line $lines {if {$line eq ""} continue; set line}]
+}
+
+# The NIR of the program-mode HIR program HIR after coroutine fusion: what
+# every native consumer compiles (the driver's `fused`).
+proc native::fusedNir {hir args} {
+    set lines [Driver fused [nir $hir {*}$args]]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }

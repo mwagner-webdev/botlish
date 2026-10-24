@@ -13,8 +13,10 @@
 
 pub mod aot;
 pub mod clif;
+pub mod fusion;
 #[cfg(all(windows, target_arch = "x86_64"))]
 pub mod jitunwind;
+pub mod nirtext;
 pub mod roots;
 pub mod target;
 pub mod unwind;

@@ -346,15 +346,16 @@ test cs-overlay-stdlib-module {a standard-library module's buffer is read like a
     lindex [cs::Summary [service::analyze $ws $dir/main.bot]] 2
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws} -result {[21, 99]}
 
-test cs-overlay-module-syntax {a syntax error in an imported module's buffer is a syntax outcome with no HIR, located in the module} -body {
+test cs-overlay-module-syntax {a syntax error in an imported module's buffer is a syntax outcome, located in the module, analyzed past (a partial HIR: SYNTAX-RECOVERY-MILESTONE-1.md)} -body {
     set dir [cs::Dir modsyntax]
     cs::Put $dir/main.bot $::csMain
     set ws [cs::Workspace]
     service::setDocument $ws $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
     set rev [service::analyze $ws $dir/main.bot]
     cs::Put $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
-    list [cs::Brief $rev] [service::hir $rev] [expr {[cs::Service $dir/main.bot] eq [cs::Strict $dir/main.bot]}]
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{{error {SURFACE SYNTAX} util.bot:2:8-2:9 {expected an expression, found end of line}}} {} 1}
+    list [cs::Brief $rev] [dict get [service::revision $rev] outcome] [dict get [service::revision $rev] semantics] \
+        [expr {[cs::Service $dir/main.bot] eq [cs::Strict $dir/main.bot]}]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev} -result {{{error {SURFACE SYNTAX} util.bot:2:8-2:9 {expected an expression, found end of line}}} syntax partial 1}
 
 test cs-snapshot-records-sources {a revision records every source its analysis read (with the text and whether a buffer or the disk said so) and every path it found no file at} -body {
     set dir [cs::Dir snapshot]
@@ -702,20 +703,22 @@ test cs-semantic-error-queries {a revision with semantic errors still answers fr
         [dict get $x hover] [dict get $x definition line]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir text ws rev unbound call x} -result {semantic UNBOUND ref {the name is not resolved (its diagnostic says why)} UNBOUND error.unbound {x: int} 4}
 
-test cs-syntax-error-queries {a revision of a program with a syntax error has no HIR and says so: syntax facts of the recovered AST and the diagnostics remain, every semantic fact is unavailable with the reason; a module that fails to parse has its syntax facts too} -body {
+test cs-syntax-error-queries {a revision of a program with a syntax error keeps the syntax facts of the recovered AST and the diagnostics, answers the well-formed statements semantically, and says why there is no fact in malformed source; a module that fails to parse has its syntax facts too (SYNTAX-RECOVERY-MILESTONE-1.md)} -body {
     set dir [cs::Dir syntax]
     cs::Put $dir/main.bot "import util\nx = util::f(1) +\ny = 2\n"
     cs::Put $dir/util.bot "fn f(n: int) -> int:\n    n *\n"
     set ws [cs::Workspace]
     set rev [service::analyze $ws $dir/main.bot]
     set q [service::at $rev $dir/main.bot 3 1]
-    set entry [list [dict get [service::revision $rev] outcome] [service::hir $rev] [dict get $q syntax kind] \
-        [lsort [dict keys [dict get $q unavailable]]] [string match "no semantic analysis*syntax*" [dict get $q unavailable type]]]
+    set hole [service::at $rev $dir/main.bot 2 6]
+    set entry [list [dict get [service::revision $rev] outcome] [dict get [service::revision $rev] semantics] \
+        [dict get $q syntax kind] [dict get $q binding name] [dict get $q type text] [dict keys [dict get $q unavailable]] \
+        [lsort [dict keys [dict get $hole unavailable]]] [string match "malformed source*" [dict get $hole unavailable type]]]
     service::setDocument $ws $dir/main.bot "import util\nx = util::f(1)\n"
     set rev [service::analyze $ws $dir/main.bot]
     list $entry [dict get [service::revision $rev] outcome] [dict get [service::at $rev $dir/util.bot 2 5] syntax kind] \
         [dict get [service::at $rev $dir/main.bot 2 1] syntax kind]
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev q entry} -result {{syntax {} bind {binding construct definition hover references type} 1} syntax error bind}
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws rev q hole entry} -result {{syntax partial bind y int {} {binding definition hover references type} 1} syntax error bind}
 
 test cs-unicode-positions {positions count Unicode scalar values of the analyzed text: after BMP, astral and combining characters on the same line, a name is found at its scalar column} -body {
     set dir [cs::Dir unicode]
@@ -940,7 +943,7 @@ test cs-export-import-activation {an imported revision's queries read its own de
         [dict get [service::at $a $dir/a/main.bot 3 4] hover]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws text b a} -result {{fn id(n: int[geo::Small]) -> int[geo::Small]} {fn geo::make(n: int[geo::Small]) -> geo::Point} {fn id(n: int[geo::Small]) -> int[geo::Small]}}
 
-test cs-export-import-outcomes {revisions without a HIR -- a syntax error, a loader error -- and a trait program (its queries read the checked source build) export and import with their diagnostics and facts} -body {
+test cs-export-import-outcomes {revisions of a syntax error (a partial HIR: SYNTAX-RECOVERY-MILESTONE-1.md), of a loader error (no HIR) and of a trait program (its queries read the checked source build) export and import with their diagnostics and facts} -body {
     set dir [cs::Dir importoutcomes]
     cs::Put $dir/syntax.bot "x = 1 +\ny = 2\n"
     cs::Put $dir/loader.bot "import nosuch\nx = 1\n"
@@ -950,11 +953,11 @@ test cs-export-import-outcomes {revisions without a HIR -- a syntax error, a loa
     foreach file {syntax loader traits} {
         set rev [service::analyze $ws $dir/$file.bot]
         set imported [service::import $ws [service::export $rev]]
-        lappend out [dict get [service::revision $imported] outcome] [dict get [service::revision $imported] hir] \
+        lappend out [dict get [service::revision $imported] outcome] [dict get [service::revision $imported] semantics] \
             [expr {[service::diagnostics $rev] eq [service::diagnostics $imported] && [cs::AllFacts $rev] eq [cs::AllFacts $imported]}]
     }
     set out
-} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws out file rev imported} -result {syntax 0 1 loader 0 1 ok 1 1}
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir ws out file rev imported} -result {syntax partial 1 loader none 1 ok full 1}
 
 test cs-import-refuses {import refuses text that is no exported revision, an exported revision of another configuration (another front end), and HIR built by another front end} -body {
     lassign [cs::Program refuse] rev path ws dir
@@ -963,13 +966,13 @@ test cs-import-refuses {import refuses text that is no exported revision, an exp
     lappend out [catch {service::import $ws "not a revision"} message options][dict get $options -errorcode]
     set body [string range $text [expr {[string first \n $text] + 1}] end]
     dict set body config frontEnd other
-    lappend out [catch {service::import $ws "botlish-service-revision 1\n$body"} message options][dict get $options -errorcode]
+    lappend out [catch {service::import $ws "[lindex [split $text \n] 0]\n$body"} message options][dict get $options -errorcode]
     set body [string range $text [expr {[string first \n $text] + 1}] end]
     set hir [dict get $body hir]
     set hirBody [string range $hir [expr {[string first \n $hir] + 1}] end]
     dict set hirBody compiler other
     dict set body hir "[lindex [split $hir \n] 0]\n$hirBody"
-    lappend out [catch {service::import $ws "botlish-service-revision 1\n$body"} message options][dict get $options -errorcode]
+    lappend out [catch {service::import $ws "[lindex [split $text \n] 0]\n$body"} message options][dict get $options -errorcode]
     lappend out [llength [service::revisions $ws]]
 } -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain rev path ws dir text out message options body hir hirBody} -result {{1SERVICE IMPORT} {1SERVICE IMPORT} {1HIR INTERCHANGE COMPILER} 1}
 
@@ -986,7 +989,7 @@ test cs-export-import-derived {a revision exported with the query indexes prepar
     set parsedAfterQuery [dict size $::surface::modules::parsed]
     set body [string range $text [expr {[string first \n $text] + 1}] end]
     dict set body derived nonsense 1
-    set refused [catch {service::import $ws2 "botlish-service-revision 1\n$body"} message options]
+    set refused [catch {service::import $ws2 "[lindex [split $text \n] 0]\n$body"} message options]
     list $parsedAfterQuery [expr {$first eq [dict remove [service::at $rev $path 5 5] revision]}] \
         [expr {[cs::AllFacts $imported] eq $direct}] $refused [dict get $options -errorcode] \
         [lsort [dict keys [dict get [service::state] derived]]]

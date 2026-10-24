@@ -165,7 +165,7 @@ proc hir::affine::BindingType {hir b} {
                 && [dict get $hir exprs $block elementBinding] eq $b} {
             # A loop variable: its iterable's element type (a consuming
             # loop's over an affine MutableVector, MUTABLE-VECTOR.md).
-            set t [hir::types::IterationElementOf [hir::typeOf $hir [dict get $hir exprs $block iterable]]]
+            set t [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $hir exprs $block iterable]]]
             if {$t eq ""} {
                 return "any"
             }

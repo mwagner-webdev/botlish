@@ -88,7 +88,7 @@ use super::mutvec::{
     rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
 };
-use super::coroutine::{rt_co_create, rt_co_done, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
+use super::coroutine::{rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
 use super::error::{semantic_kind, RtError};
 use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
@@ -192,6 +192,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // in particular must be a safepoint -- a suspended frame's roots
             // are found only through its stack map.
             | CoCreate | CoStart | CoResume | CoResume0 | CoYield
+            // A fused coroutine's cached failure (codegen::fusion): one
+            // terminal coroutine object.
+            | CoFailed
             // MutableVector (MUTABLE-VECTOR.md): a new header (from_list, a
             // share) or a List (the snapshot); the mutations allocate no
             // Botlish object (runtime/mutvec.rs).
@@ -672,8 +675,24 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
                 return Ok(false);
             }
             for (u, w) in x.fields().iter().zip(y.fields().iter()) {
-                if !equal(p, *u, *w)? {
-                    return Ok(false);
+                match equal(p, *u, *w) {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(false),
+                    Err(()) => {
+                        // An opaque struct's equality is its
+                        // representation's, which no message may show
+                        // (OPAQUE-STRUCTS.md): a refusal inside it is the
+                        // opaque values' (core::value::equal's struct case;
+                        // ORDERED-MUTABLE-MAP-SET.md).
+                        let opaque = current_program(|prog| prog.shapes[x.shape as usize].opaque);
+                        if opaque {
+                            let vm = vm(p);
+                            if matches!(vm.error, Some(RtError::Equality { .. })) {
+                                vm.error = Some(RtError::Equality { a, b });
+                            }
+                        }
+                        return Err(());
+                    }
                 }
             }
             true
@@ -3295,6 +3314,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         // exposures exist only as one call's arguments.
         | FfiFixtureRead | FfiFixtureReadReentrant | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
         | FfiFixtureMixed
+        // A fused coroutine's failure cache exists only in the code the
+        // fusion pass writes (codegen::fusion).
+        | CoFailed
         // The fixed-layout ops exist only in the straight-line code of one
         // statically known layout (native/lower.tcl's LayoutParse /
         // LayoutEmit): a binary operation is never a value.
@@ -3484,6 +3506,7 @@ runtime_helpers! {
     (rt_co_yield, 2),
     (rt_co_done, 2),
     (rt_co_release, 2),
+    (rt_co_failed, 1),
     (rt_affine_drop, 3),
     (rt_mv_from_list, 2),
     (rt_mv_len, 2),

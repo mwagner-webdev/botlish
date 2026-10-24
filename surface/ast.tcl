@@ -1025,7 +1025,10 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         function {
             set params [lmap pair [dict get $node params] {
-                lassign $pair name _ type
+                lassign $pair name _ type _ place
+                if {$place ne ""} {
+                    set name "place $name"
+                }
                 if {$type eq ""} {set name} else {string cat "$name:[showType $type]"}
             }]
             # Explicit join, not a bare "($params)" interpolation: a typed

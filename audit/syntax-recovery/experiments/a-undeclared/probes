@@ -1,0 +1,4 @@
+main.bot 2 5 known k: before the malformed statement
+main.bot 10 1 unavailable h: the result of a function whose undeclared result depends on the error
+main.bot 10 5 unavailable helper: its signature (result inferred from an incomplete body)
+main.bot 11 1 known f: unrelated

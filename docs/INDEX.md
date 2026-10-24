@@ -84,12 +84,16 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [AFFINE-VALUES.md](AFFINE-VALUES.md) -- affinity as a compositional property of a value's type
 - [COROUTINES.md](COROUTINES.md) -- eagerly started, affine, resumable computations with deep `yield`
 - [COROUTINE-PREREQUISITES.md](COROUTINE-PREREQUISITES.md) -- the research coroutines were built on
+- [COROUTINE-FUSION-MILESTONE-1.md](COROUTINE-FUSION-MILESTONE-1.md) -- coroutine fusion: a coroutine closed inside one function compiled natively into that function's control flow (one stack, no coroutine object or switch), deep yields, several coroutines per frame, scalar transport, the general runtime as fallback and oracle (completion report)
+- [DFA-COROUTINE-EXPLORATION.md](DFA-COROUTINE-EXPLORATION.md) -- declarative finite-state recognizers as ordinary coroutines: an isolated prototype (`audit/dfa/`) that checks determinism, rejection, acceptance, progress and boundaries and lowers to fused coroutine code; RFC 8259's lexical grammar, a YAML subset, a mistake census, differential tests, native evidence and a recommendation (exploratory report)
 - [MUTABLE-VECTOR.md](MUTABLE-VECTOR.md) -- `MutableVector[T]`: a growable mutable value
 - [MUTABLE-ARRAY.md](MUTABLE-ARRAY.md) -- `MutableArray[T]` as a copy-on-write value
 - [PARAMETERIZED-MUTABLEARRAY.md](PARAMETERIZED-MUTABLEARRAY.md) -- parameterized `MutableArray[T]`
 - [MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md](MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md) -- `MutableArray` construction and refinement
 - [TYPED-MUTARRAY-BUILDER-REFACTOR.md](TYPED-MUTARRAY-BUILDER-REFACTOR.md) -- typed `MutableArray` builder source refactor
 - [MINIMAL-IMMUTABLE-SET.md](MINIMAL-IMMUTABLE-SET.md) -- `ImmutableSet[T]`
+- [ORDERED-MUTABLE-MAP-SET.md](ORDERED-MUTABLE-MAP-SET.md) -- `MutableMap[K satisfies Hashable, V]` and `MutableSet[T satisfies Hashable]`: insertion-ordered tables written in Botlish over MutableVectors, placed by the keyed table hash; the loop protocol, MutableVector index proofs, the oracle, fuzzer, mutants and benchmarks (completion report)
+- [PLACE-PARAMETERS.md](PLACE-PARAMETERS.md) -- `place m: T`: a parameter that is the caller's place, so a Botlish function can mutate its caller's collection in place
 
 ### Strings, bytes and text
 
@@ -134,7 +138,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [STATIC-COMPILE.md](STATIC-COMPILE.md) -- `static compile:`: compiler diagnostics as recoverable values
 - [STATIC-DECISION-ECONOMICS.md](STATIC-DECISION-ECONOMICS.md) -- how many builds deciding static blocks takes
-- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind: fewer trial builds, the same decisions
+- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind and named-struct declaration: fewer trial builds, the same decisions
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals
@@ -167,6 +171,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [HIR-INTERCHANGE.md](HIR-INTERCHANGE.md) -- the analyzed HIR as a file, and the front-end cache
 - [COMPILER-SERVICE-MILESTONE-1.md](COMPILER-SERVICE-MILESTONE-1.md) -- the compiler service: front-end diagnostics located as data, the source-provider seam (unsaved buffers, one normalization, per-compilation snapshots), immutable analysis revisions and their position queries (bindings, presented types, name-precise definitions, references by identity, Compilerpedia topics), `main.tcl -check`; the std:: trial merge and the S2 recommendation (completion report; the census is `../audit/compiler-service/COMPILER-SERVICE-CENSUS.md`)
 - [LSP-MILESTONE-1.md](LSP-MILESTONE-1.md) -- Botlish's first language server, `botlish -lsp`: Content-Length framing, typed JSON and JSON-RPC in Tcl, document synchronization over the service's overlays, program ownership, UTF-16/UTF-32 positions and file URIs at the boundary, pushed diagnostics, hover, definition and references with a conservative stale-revision policy; the synchronous and persistent-worker schedulers measured against each other (the worker chosen), revisions moved between processes as HIR interchange (`service::export`/`import`); the protocol harness over real pipes, Neovim end to end, mutation testing (completion report)
+- [SYNTAX-RECOVERY-MILESTONE-1.md](SYNTAX-RECOVERY-MILESTONE-1.md) -- syntax-error-tolerant semantic analysis: malformed statements become holes that keep only what their valid prefix establishes (no value, type or proof), uncertainty propagated by the semantic dependency model, modules recovered across imports, independent diagnostics kept and dependent ones suppressed; `-check`, the compiler service's partial revisions and the language server's fresh answers while a document is incomplete, strict compilation and every backend unchanged; experiments, fuzzing, mutation testing, Neovim (completion report)
 - [SINGLE-EXECUTABLE.md](SINGLE-EXECUTABLE.md) -- the single-file compiler, the stub linker and the system linker
 - [SINGLE-EXECUTABLE-FFI-MILESTONE-1.md](SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) -- the system linker: programs that call C linked from the single-file compiler with the host's C compiler driver, a data-only startup object and a precompiled runtime archive, no Rust; the startup census and design, the three linkers' startups compared byte for byte, static libraries, failure diagnostics, packaging, Linux, macOS and Windows results, mutation testing, sizes and costs (completion report)
 - [MACOS-AARCH64-PORT-AUDIT.md](MACOS-AARCH64-PORT-AUDIT.md) -- the macOS Apple Silicon port: every Linux assumption by subsystem, what runs on a real macOS arm64 host today, the macOS CI and its test tiers, and the milestone roadmap
@@ -280,5 +285,6 @@ Botlish to find what the language, library, compiler and tools need.
 - [POST-M8A-COMMON-INEFFICIENCY-CENSUS.md](POST-M8A-COMMON-INEFFICIENCY-CENSUS.md) -- post-M8.a cross-workload inefficiency census
 - [POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md](POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- post-module-statics exact-target census
 - [POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md](POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md) -- dynamic callable census after structural function types
+- [EXACT-METHOD-DECISION-MISATTRIBUTION.md](EXACT-METHOD-DECISION-MISATTRIBUTION.md) -- an open defect of the exact method-call decision: an outer call's rejected receiver charged to the inner call, so a valid `xs.at(i).length()` chain is rejected when the exact decision decides it
 - [FUZZING-EXAMPLES-AOT.md](FUZZING-EXAMPLES-AOT.md) -- fuzzing the example applications as executables
 - [FUZZING-ARGV-PROGRAMS.md](FUZZING-ARGV-PROGRAMS.md) -- fuzzing argv-driven programs

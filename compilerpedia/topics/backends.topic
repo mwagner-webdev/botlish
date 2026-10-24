@@ -310,7 +310,9 @@ other platforms.
                              Windows x86-64 (MSVC's toolchain; MinGW's
                              windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
-                             (hand-written stack switching); elsewhere
+                             (hand-written stack switching, or, for a
+                             coroutine closed inside one function, none:
+                             COROUTINE-FUSION-MILESTONE-1.md); elsewhere
                              (Windows) NATIVE UNSUPPORTED; the Tcl
                              backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
@@ -502,7 +504,10 @@ own process arguments.
     -check            analyze each .bot input and report what compiling it
                       reports: the same error lines (and help lines), its
                       warnings on stderr, "ok" when it has no error; exit
-                      status 1 when an input has one. Only -warnings and
+                      status 1 when an input has one. Past a syntax error
+                      it also reports the semantic errors the malformed
+                      source cannot affect, which a run does not
+                      (error.surface-syntax). Only -warnings and
                       -target combine with it (they decide the analysis);
                       any other option, or an input that is not a .bot
                       file, is a malformed invocation.
@@ -595,6 +600,10 @@ distinct code. Standard output stays the program's.
 With -check (cli.options) the header names no backend and nothing runs: a
 program without an error gets "ok"; a rejected one the same "error:" and
 "help:" lines a run prints, and its warnings go to stderr as a run's do.
+One difference: a program with a syntax error gets its syntax errors and
+then the independent semantic errors of the code around them, where a run
+stops at the syntax errors (error.surface-syntax, "Checking around a
+syntax error").
 
 @topic cli.exit-status
 title: Exit statuses of the compiler and of executables
@@ -653,10 +662,14 @@ editor prefers it).
 
 == PROGRAMS AND STALENESS
 Each open document is analyzed as a program unless another open program
-imports it; then it is that program's module. During a syntax error the
-last analysis still answers where the text is unchanged, its hover marked
-stale. An analysis runs after a short pause in typing, in a worker process,
-so the server answers while it runs.
+imports it; then it is that program's module. A document with a syntax
+error is still analyzed, around its malformed source (error.surface-syntax,
+"Checking around a syntax error"): the code the error cannot affect gets
+fresh diagnostics, hover, definitions and references, and a position
+whose meaning the malformed source may change is answered from the last
+complete analysis where the text is unchanged, its hover marked stale, or
+not at all. An analysis runs after a short pause in typing, in a worker
+process, so the server answers while it runs.
 
 == NOT YET
 Completion, signature help, rename, code actions, formatting, semantic

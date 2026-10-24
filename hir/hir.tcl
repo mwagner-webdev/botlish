@@ -495,7 +495,7 @@ proc hir::BuildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
             -type-decls {} -error-decls {} -struct-decls {} -trait-decls {} -imports {} -module-decls {} \
-            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0} $args]
+            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0 -syntax-recovery {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -583,6 +583,11 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # already says all of this, and it has lost the static types (an
         # affine element type, a declared vector type) the elaboration reads.
         if {[lindex [dict get $options -origin] 0] ne "ir"} {
+            # Loops over the standard library's collection structs
+            # (hir/iteration.tcl), written out as counted loops over their
+            # loop protocol -- before the copies, which then give the loop
+            # its snapshot.
+            hir::iteration::Elaborate hir
             hir::mutvec::Elaborate hir
         }
         # The layout a std::binary::emit reads from its value's static type
@@ -714,6 +719,13 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # -halt-on-resolution-errors and raises the diagnostics itself.
         hir::declarations::stamp hir
         return $hir
+    }
+    if {[dict get $options -syntax-recovery] ne {}} {
+        # A program with syntax errors, its malformed source holes
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): what resolution found that may
+        # depend on them is not known (hir::recovery::Recovered).
+        dict set hir syntaxRecovery [dict get $options -syntax-recovery]
+        hir::recovery::Recovered hir
     }
     if {[dict get $hir diagnostics] ne ""} {
         # The program is checked although it did not resolve: what the
@@ -1362,6 +1374,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::coroutines::verify hir
     hir::affine::verify hir
     hir::mutvec::verify hir
+    hir::iteration::verify hir
     hir::syscall::verify hir
     hir::internal::verify hir
     hir::borrow::verify hir
@@ -1705,7 +1718,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec iteration refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

@@ -1,0 +1,8 @@
+import std::list
+
+xs = [1, 2, 3]
+n = std::list::length(xs)
+m = n + 1
+k = std::list::at(xs, 0)
+fn show(v: int) -> int:
+    v + k

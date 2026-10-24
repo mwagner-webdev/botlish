@@ -1,0 +1,2 @@
+fused json::lex_text e4723 {inlined {{#14} json::scalars} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 24 template 69 copied 242 unboxed 0}
+fused json::lex_text e4800 {inlined {{#15} json_lex::json_token json_lex::dfa_json_token json_lex::dfa_json_string json_lex::dfa_json_escape json_lex::dfa_json_number json_lex::dfa_json_literal} yields 4 creates 1 starts 1 resumes 1 queries 1 releases 15 template 3477 copied 6987 unboxed 1}

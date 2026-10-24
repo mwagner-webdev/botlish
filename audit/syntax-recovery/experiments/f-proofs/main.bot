@@ -1,0 +1,4 @@
+import std::list
+import pick
+
+x = std::list::at([10, 20, 30], pick::index())

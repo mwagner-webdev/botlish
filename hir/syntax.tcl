@@ -161,6 +161,20 @@ proc hir::syntax::rootRef {origin name} {
     return [Node ref $origin name $name root 1]
 }
 
+# A hole: source the front end could not read (SYNTAX-RECOVERY-MILESTONE-1.md;
+# surface/recover.tcl decides which). Written as a reference that resolves to
+# nothing, named `syntax#hole` (no source spells a `#`), carrying `hole {binds
+# B installs I}`: B 1 when the malformed statement it stands for may have
+# bound names the scope after it can see (hir/resolve.tcl's ResolveHole), I 1
+# when it may have installed a context (hir/recovery.tcl's Tainted). It is no value,
+# no divergence and no error the program can raise: resolution reports it as
+# SYNTAX-HOLE (never shown: the syntax diagnostic is the error), inference
+# makes it poison, and no backend compiles a HIR that has one
+# (hir::recovery::runnable).
+proc hir::syntax::holeNode {origin binds {installs 0}} {
+    return [Node ref $origin name syntax#hole root 0 hole [dict create binds $binds installs $installs]]
+}
+
 proc hir::syntax::bindNode {origin name value} {
     core::ir::checkShape [list bind $name {}]
     return [Node bind $origin name $name value $value]
@@ -302,6 +316,21 @@ proc hir::syntax::withVariadic {block origin} {
         core::malformed "a variadic block has its variadic parameter last" [list block]
     }
     dict set block variadic $origin
+    return $block
+}
+
+# BLOCK (a `block` node) whose parameters at the indices of PLACES (a flat
+# list INDEX ORIGIN ...: each place parameter's index and its marker's
+# origin) are place parameters (PLACE-PARAMETERS.md): a call passes the
+# caller's place itself, which the function mutates in place.
+proc hir::syntax::withPlaces {block places} {
+    set n [llength [dict get $block params]]
+    foreach {index origin} $places {
+        if {![string is digit -strict $index] || $index >= $n} {
+            core::malformed "a place parameter is one of the block's parameters" [list block]
+        }
+    }
+    dict set block places $places
     return $block
 }
 

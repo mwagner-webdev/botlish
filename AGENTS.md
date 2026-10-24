@@ -1031,6 +1031,65 @@ never touch x18. A Tcl test that needs coroutines, the collector around
 them or native counters carries `nativeCoroutines` (tests/helpers.tcl), a
 capability of the host target, not `nativeLinux`.
 
+## Coroutine fusion
+
+The native driver fuses coroutines (COROUTINE-FUSION-MILESTONE-1.md,
+native/src/codegen/fusion.rs): a coroutine whose handle never leaves the
+function that constructs it, and whose yielding call chain is
+environment-free and non-recursive, is compiled into that function -- the
+chain inlined once as a template, a copy per start and resume over the same
+registers, a state register, no coroutine object, stack, switch or runtime
+coroutine operation. It is a NIR-to-NIR pass in the driver's load path
+(main.rs), so the JIT, objects, executables and every inspection command
+compile the fused program. Keep it so:
+
+* Fusion never changes what a program means. A site it cannot prove keeps
+  the general runtime (reported `kept` with its reason), never an error;
+  every rewritten function is validated (`nir::validate_function`) or
+  discarded. Never weaken a condition of `fuse_site` (a handle use it does
+  not follow, a recursive or capturing yielding function, more than one
+  live coroutine of a site) without the proof in the report.
+* The general runtime stays the oracle: `BOTLISH_NATIVE_COROUTINE_FUSION=0`
+  turns the pass off, `cranelift-unfused` (tests/helpers.tcl) runs a
+  program so, and tests/coroutines.test's `coAgree` and the coroutine
+  fuzzer compare fused code with it on every program. A test or audit tool
+  that reads the general runtime's own objects, stacks or release counters
+  (`native::allocationReport`'s `coroutines`) reads them inside
+  `withoutCoroutineFusion`; never make such a test pass by fusing. One that
+  inspects a producer's machine code finds it in the fused consumer, where
+  fusion copied it (tests/c-ffi-error-capture.test's `ecHolders`).
+* A copy per operation keeps the control flow graph exact (a segment
+  returns only to the operation that ran it): never share one copy between
+  operations through a run-time return address without the validator's and
+  the root plan's precision argument (the report, 4.3). The dispatch's
+  edges to every continuation are the one imprecision left: a plan register
+  is cleared where the template suspends at a yield whose continuation does
+  not read it, and where it completes or fails (`clear_plans`, 4.5, with
+  liveness that follows each yield into its own continuation); never drop
+  the clearing or stop its liveness at a yield.
+* The only runtime addition is `op cofailed` (`rt_co_failed`): a fused
+  coroutine's cached failure, raised again by `coresume0`. Fusion adds no
+  coroutine-specific code to the collector or codegen.
+* Fusion runs only where native coroutines exist
+  (`runtime::coroutine::STACK_SWITCHING`): it must not make a program run
+  where the general runtime refuses it.
+
+If you change fusion.rs, nirtext.rs, `cofailed`, `live_at_many`/`def_use`,
+or what NIR the coroutine operations lower to, run
+`tests/coroutine-fusion.test`, `tests/coroutines.test`,
+`audit/coroutines/tools/fuzz.tcl` (several seeds; its default backends
+include cranelift-unfused), `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native -- fusion nirtext` and
+`audit/coroutine-fusion/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), and
+take the census of a whole run (`audit/coroutine-fusion/tools/census.tcl
+-run tclsh9.0 tests/local.tcl -parts golden`): a site kept because its
+fused function "does not validate" is a fusion bug to fix, never a fallback
+to accept. `audit/coroutine-fusion/tools/evidence.tcl` regenerates the
+native evidence (commit it); `bench/coroutine-fusion.tcl` is the
+performance report.
+
 ## The native stack guard
 
 A native run that exhausts a stack -- the worker thread's or a coroutine's
@@ -1883,6 +1942,84 @@ and be killed) and `cargo test --release --manifest-path native/Cargo.toml
 any change they name. A change to native tracing or drops also needs a
 `BOTLISH_NATIVE_GC_STRESS=1` run of `tests/mutable-array.test`.
 `bench/mutable-array.tcl` regenerates the performance report.
+
+## MutableMap, MutableSet and place parameters
+
+`std::mutable_map::MutableMap[K satisfies Hashable, V]` and
+`std::mutable_set::MutableSet[T satisfies Hashable]`
+(ORDERED-MUTABLE-MAP-SET.md) are ordinary Botlish: opaque parameterized
+structs over MutableVectors, sharing the internal engine `std::ordered_table`
+(stdlib/ordered_table.bot, `core::native::declareInternalModule`: no program
+imports it). Iteration is insertion order; the private keyed hash
+(`std::table_hash::of`) decides where an entry lives in the index, never
+where it appears. Keep it so:
+
+* No runtime map or set: no native, NIR instruction, runtime object or Tcl
+  helper of either collection, and no compiler knowledge of them beyond the
+  loop protocol's table (`hir::iteration`'s `iterables`). A new collection
+  that needs a language seam gets a general one, with its own tests and
+  mutants, never a collection-specific rule.
+* Placement uses the keyed table hash only, computed once per operation and
+  stored per entry: never the public `hash`, a post-mix of it, an unkeyed
+  fast path or a recomputation in a helper. A probe compares a key only at
+  an entry whose stored hash is equal; equality decides identity. Nothing
+  observable may depend on the hidden key: no API exposes a slot, a stored
+  hash, a capacity, the load or the probe order.
+* Keys keep their type (MutableVector[K]): a probe of Int or String keys
+  lowers to `ieq`/`streq`, a structural key to `veqtotal`, never the
+  fallible `veq`. Neither collection is Hashable, and `==` of two refuses
+  them at run time naming the opaque values, never their representation
+  (core/value.tcl's and ops.rs's opaque-struct cases).
+* Replacement keeps a key's position and its stored key; removal leaves a
+  dead entry (hash -1) that compaction drops, in order, in place; removal
+  then insertion appends. The policy (7/10 load, power-of-two slots of at
+  least 8, the garbage rule) is the engine's and may change: never let a
+  test of a program's behavior depend on it -- tests/ordered-table.test is
+  the one white-box test of the representation.
+* The engine's own method calls are written so the kind filter decides them
+  (a qualified call where a lexical name would be a second candidate):
+  every program importing the collections compiles their modules.
+* A loop over a collection is the loop protocol (hir/iteration.tcl): the
+  owner module's `iteration_end`, `iteration_live?` and `iteration_at`,
+  `nomethod` and internal to the standard library (INTERNAL-NAMESPACE for a
+  program naming one), elaborated after the checks into a counted loop over
+  a logical copy (MutableVector's snapshot rule). Never materialize the
+  collection for a loop, and never let a lockstep loop iterate one.
+* A place parameter (`place m: T`, PLACE-PARAMETERS.md) is the caller's
+  place: no entry copy, never moved, read out by copy; its argument is a
+  place of the caller, never a temporary, a module binding, an enclosing
+  function's binding or a place another argument of the call overlaps.
+  Never give it a runtime existence, a reference type, a function-value
+  form or an affine type, and never let it implement a trait requirement.
+  A call giving a place to a place parameter resizes every vector under it
+  for `hir::cardinality`'s MutableVector length proofs (`VectorLength`,
+  `ResizedPlaces`, `Mutated`).
+
+If you change the collections or the engine (stdlib/mutable_map.bot,
+stdlib/mutable_set.bot, stdlib/ordered_table.bot), the loop protocol
+(hir/iteration.tcl, its uses in hir/types.tcl, hir/affine.tcl,
+hir/lockstep.tcl, surface/modules.tcl's `CheckInternal`), place parameters
+(surface/parser.tcl's `PlaceMarker`, hir/syntax.tcl's `withPlaces`, the
+places of hir/resolve.tcl, hir/format.tcl and hir/read.tcl, hir/mutvec.tcl's
+place section and its uses in `Elaborate`), the MutableVector index proofs
+(hir/cardinality.tcl's `VectorLength`, `ResizedPlaces`, `Mutated`; the
+`mutvec` bounds family) or the opaque equality refusals, run
+`tests/mutable-map.test`, `tests/mutable-set.test`,
+`tests/collection-iteration.test`, `tests/ordered-table.test`,
+`tests/place-parameters.test`, `tests/vector-bounds.test`, their golden
+suites (`tclsh9.0 tests/local.tcl tests/golden/mutable-map.bot
+tests/golden/mutable-set.bot tests/golden/collection-iteration.bot
+tests/golden/place-parameters.bot`), `python3 -I
+audit/mutable-map/tools/oracle.py selftest`,
+`audit/mutable-map/tools/fuzz.tcl` (several seeds; once with `-gc-stress 1`,
+once with `-profile large -backends "compile cranelift-generic cranelift"`)
+and `audit/mutable-map/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the vector and
+array harnesses (above) for a change to hir/mutvec.tcl or hir/cardinality.tcl,
+the Hashable and trait-constrained-type harnesses for a change to how keys
+are constrained or hashed, and the warning gate (the three modules are
+warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
 
 ## Fixed binary layouts
 
@@ -2766,10 +2903,16 @@ outcome. Keep it so:
 * The filter *excludes*, it never *accepts*. A candidate is excluded only when
   the ordinary call is provably invalid by kind (a native's first parameter,
   a module function's declared or inferred first-parameter contract, the plain
-  value kinds only); that a survivor is valid is the certificate's job (a
-  build with no problem in the call), never an inference. Never exclude a
-  lexical name, never exclude by a domain, a refinement or a type's name, and
-  never decide a call with several survivors (no precedence, ever).
+  value kinds only) or by a named struct's declaration (a module function
+  whose *declared* first parameter is a named struct of another declaration
+  than the receiver's named struct: named structs are nominal,
+  `hir::types::subtype`; `NominalMismatch`); that a survivor is valid is the
+  certificate's job (a build with no problem in the call), never an
+  inference. Never exclude a lexical name, never exclude by a domain or a
+  refinement, by a struct's type arguments, by an inferred contract's struct
+  or by a type's spelling (a declaration identity is the type, never matched
+  as text), and never decide a call with several survivors (no precedence,
+  ever).
 * One statement of each rule. The native receiver rule is
   `hir::methodfilter::NativeMismatch`, which `hir::MethodCallProblems` also
   asks; a second copy of it, a restated admission rule, or a table of
@@ -2784,7 +2927,8 @@ outcome. Keep it so:
 
 If you change `hir/methodfilter.tcl`, `hir::DecideMethodCalls`,
 `hir::MethodCallProblems`, `hir::resolve::MethodCandidates`, the contracts
-`hir/signatures.tcl` records on a first parameter, or `hir::types::kindOf`, run
+`hir/signatures.tcl` records on a first parameter, `hir::types::kindOf`, or
+when a struct type is a subtype of a named one (`hir::types::subtype`), run
 `tests/method-filter.test`, `tests/static-economics.test`,
 `tests/static-compile.test`, `tests/method-sugar.test`,
 `audit/method-filter/tools/fuzz.tcl` (several seeds) and
@@ -3034,7 +3178,11 @@ no semantics of its own. Keep it so:
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
-  merge, reword or add one. Every query reads its revision through
+  merge, reword or add one. Past a syntax error it reports the syntax
+  errors, first and unchanged, then what the recovered analysis reports
+  (next section but one): its outcome is `syntax` whenever there is one,
+  and its `semantics` (`full`, `partial`, `none`) says how much it
+  analyzed. Every query reads its revision through
   `service::Use`, which activates the revision's HIR (COMPILATION-ISOLATION.md);
   a revision never changes once made (derived indexes are computed from it
   on first use and released with it); no query runs or compiles code; no
@@ -3105,6 +3253,65 @@ mutates, keeping it a mutant of the same rule); for a scheduling change
 also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
+
+## Syntax recovery
+
+`-check`, the compiler service and the language server analyze a program
+past its syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md); a run, a build and
+every inspecting option still stop at them. surface/recover.tcl replaces
+each malformed statement -- the innermost statement holding a damaged
+position: a construct the parser failed on, a lexical guess (a bracket it
+closed, a string it ended, a character it skipped), the top-level region of
+a layout problem -- by a `hole` that keeps only what the tokens before the
+damage establish; lowering makes it HIR `syntax#hole` refs
+(`hir::syntax::holeNode`), each with a SYNTAX-HOLE diagnostic that taints
+its unit and is never reported. Keep it so:
+
+* A hole is no value: never `unit`, `never`, `any`, a default or a guessed
+  completion. It is poison to inference (no divergence:
+  `hir::types::Halts` is false for it), unknown to the range and completion
+  analyses, and its innermost function (`holeBlocks`) has no inferred
+  result, contract or semantic instance: only its declaration's types are
+  facts (a hover shows its signature only when it declares every type).
+* What a hole binds is read from its valid prefix alone
+  (`surface::recover::Hole`): `NAME =` and `fn NAME` bind NAME; a form the
+  prefix does not decide, a destructuring, a coroutine binding or a region
+  that swallowed the next line may bind any name (`binds`), and a reference
+  a binding hole may capture is `syntaxDependent`
+  (`hir::resolve::AfterBindingHole`): no binding, definition, references or
+  diagnostic. A top-level hole may declare a type, an extern or install a
+  context, and a module's may declare any member (the loader's
+  `DependentReference`). Never read meaning from the tokens after the
+  damage, and never find a binding by spelling.
+* Dependent diagnostics are suppressed by that dependency model
+  (`hir::recovery::Tainted`, `Recovered`), never by comparing messages or
+  positions; the syntax diagnostics are the parser's, first, unchanged.
+* A recovered HIR (`syntaxRecovery`) never runs and is never built or
+  cached: every backend refuses it (`hir::recovery::runnable`, `HIR
+  SYNTAX-RECOVERED`), the front-end cache never stores it, a strict
+  compilation raises the syntax errors, and a `static compile:` block of
+  such a program is a hole, never decided. Only `-recover-syntax 1`
+  (`surface::readProgramFile`) makes one: never pass it from a path that
+  runs or builds.
+
+If you change any of that (surface/recover.tcl, the damage record of
+surface/parser.tcl and surface/lexer.tcl, hole lowering in surface/lower.tcl,
+the loader's recovery in surface/modules.tcl, hir/recovery.tcl, the hole and
+`syntaxDependent` cases of hir/resolve.tcl, hir/types.tcl, hir/range.tcl,
+hir/completions.tcl, hir/signatures.tcl and hir/static.tcl, the service's
+partial revisions or the server's choice between a partial and a complete
+revision), run `tests/syntax-recovery.test`, `tests/compiler-service.test`,
+`tests/lsp.test`, `tests/lsp-neovim.test` (Neovim), `tests/main-cli.test`,
+`tests/diagnostic-recovery.test`, `audit/syntax-recovery/tools/fuzz.tcl`
+(several seeds) and `audit/syntax-recovery/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule),
+plus the compiler-service, diagnostic-recovery, LSP and hir-interchange
+mutation tools for a change to what they cover.
+`audit/syntax-recovery/tools/experiments.tcl` prints what the experiments'
+programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
+the performance report, and `bench/lsp.tcl -malformed 1` the language
+server's editing session through syntax errors.
 
 ## Compilerpedia (the built-in reference)
 

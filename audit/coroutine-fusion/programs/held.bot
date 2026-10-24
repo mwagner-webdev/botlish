@@ -1,0 +1,26 @@
+# held.bot -- many coroutines alive at once (COROUTINE-FUSION-MILESTONE-1.md,
+# "Performance": memory). Every frame of a recursion K deep constructs a
+# counter, holds it suspended across the recursion below, and resumes it
+# once on the way back: K coroutines are suspended at the deepest point. On
+# the general runtime each has a stack of its own; fused, each is a few
+# registers of its frame.
+#
+# The last line's argument is K.
+#
+# expect: 1000
+
+import std::coroutine
+
+fn counter(n: int) -> int:
+    loop i from 0 to n:
+        yield i
+    return n
+
+fn held(k: int) -> int:
+    if k == 0:
+        return 0
+    coroutine {step, first} = counter(k)
+    below = held(k - 1)
+    below + first + step()
+
+held(1000)

@@ -337,7 +337,7 @@ core::native::register table_key -arity 0 -impl core::hashing::TableKeyValue -re
 @@ ordinary-code-can-fully-qualify ordinary code can name the private hash fully qualified (only the import is refused)
 ## surface/modules.tcl
 <<<<
-    CheckInternal $state $own $namespaceName $span
+    CheckInternal $state $own $namespaceName $span $symbolName
     if {$namespaceName ni $imported} {
 ====
     if {$namespaceName ni $imported} {
