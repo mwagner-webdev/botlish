@@ -672,23 +672,23 @@ and every one is caught by a test of behavior, most also by the fuzzer:
 | mutant | the bug | tests that fail | fuzzer programs that disagree (30) |
 |---|---|---:|---:|
 | `install-does-not-consume` | installation observes its value instead of moving it: the temporary stays its owner and is released after the installation | 1 | 10 |
-| `install-erases` | the pre-milestone rule: installation erases its value | 22 | 20 |
-| `context-binding-owns` | a context parameter's binding is an owner (runtime loads mint owners), released at its last use | 4 | 19 |
-| `context-copy-accepted` | a move of a context place stays a move: context access copies an affine member | 4 | 9 |
-| `context-erasure-accepted` | an erasure of a context place stays the old AFFINE-ERASURE-UNSUPPORTED | 1 | 0 |
-| `element-copy-accepted` | affine vector elements are treated as unrestricted: an element place may be bound or pushed | 2 | 3 |
-| `observation-consumes` | an observed context place is a temporary nothing owns | 17 | 30 |
-| `projection-not-place` | a projection of a context place is no place step | 19 | 30 |
+| `install-erases` | the pre-milestone rule: installation erases its value | 23 | 22 |
+| `context-binding-owns` | a context parameter's binding is an owner (runtime loads mint owners), released at its last use | 5 | 20 |
+| `context-copy-accepted` | a move of a context place stays a move: context access copies an affine member | 4 | 4 |
+| `context-erasure-accepted` | an erasure of a context place stays the old AFFINE-ERASURE-UNSUPPORTED | 1 | 3 |
+| `element-copy-accepted` | affine vector elements are treated as unrestricted: an element place may be bound or pushed | 2 | 2 |
+| `observation-consumes` | an observed context place is a temporary nothing owns | 18 | 30 |
+| `projection-not-place` | a projection of a context place is no place step | 20 | 30 |
 | `capture-accepted` | a closure may capture the installed context's affine state | 1 | 0 |
-| `later-argument-unchecked` | an element place observed across a later argument that runs code | 1 | 1 |
-| `element-receiver-unchecked` | an element place of a collection no context owns is accepted | 1 | 1 |
-| `element-place-unregistered` | the vector's element is registered as no element place | 13 | 30 |
-| `non-affine-context-rejected` | a non-affine context is judged by the context rule too | 7 | 20 |
+| `later-argument-unchecked` | an element place observed across a later argument that runs code | 1 | 0 |
+| `element-receiver-unchecked` | an element place of a collection no context owns is accepted | 1 | 2 |
+| `element-place-unregistered` | the vector's element is registered as no element place | 14 | 30 |
+| `non-affine-context-rejected` | a non-affine context is judged by the context rule too | 8 | 23 |
 | `share-affine-struct-off` | the pre-milestone ShareDescriptor: an unrestricted vector member of an affine context aliases its source | 2 | 2 |
-| `take-leaves-slot-populated` | take returns the element and keeps it in the vector (two owners) | 3 | 1 |
+| `take-leaves-slot-populated` | take returns the element and keeps it in the vector (two owners) | 3 | 2 |
 | `context-roots-lost` | an installed vector header is never registered as a GC root (killed by GC stress) | 2 | 0 |
 | `view-eligibility-overgeneralized` | a String member is an "immediate" context-slot leaf | 1 | 0 |
-| `pointer-not-eligible` | the pre-milestone eligibility: no pointer or view leaf | 15 | 19 |
+| `pointer-not-eligible` | the pre-milestone eligibility: no pointer or view leaf | 15 | 20 |
 
 Two mutation targets the brief names have no mutant, for a reason
 mutants.txt records: *the context-trait plan copies installed state* --
@@ -699,11 +699,20 @@ so every mutant above applies to private helpers alike (the helpers of
 `cao-helpers-wrappers-traits` and of Icy Tower are private). The first
 complete run counted two mutants killed by the fuzzer alone through a
 fault of the fuzzer's own (2.7's method-call note), and showed that
-`context-erasure-accepted` was killed by nothing else: the test now covers
-an erasure through a parameter declared `any` (its own row), and the
-fuzzer's installations now hold a job made before the installation and a
-log the top level keeps (`install-does-not-consume` and
-`share-affine-struct-off` are now killed by the fuzzer too).
+`context-erasure-accepted` was caught by nothing else: the test now covers
+an erasure through a parameter declared `any` (its own row), the fuzzer has
+an `any-parameter` fault, and its installations hold a job made before the
+installation and a log the top level keeps (`install-does-not-consume`,
+`context-erasure-accepted` and `share-affine-struct-off` are now killed by
+the fuzzer too). The table is the run on the final tree (16 minutes). No
+program of its 30 catches four mutants: a closure capturing context state
+and a later argument that runs code are single faults (a third of the
+programs carry one of sixteen, so 30 programs hold a given fault about
+every other run; this run's 30, seed 7, rejected 7 programs by
+AFFINE-CONTEXT-COPY-OUT, 2 by MUTABLE-PLACE-RECEIVER and 1 by
+AFFINE-EQUALITY-UNSUPPORTED, none by a capture), and the fuzzer runs no GC
+stress and builds no String member, which the GC-roots and slot-kind
+mutants need. Each of the four has its test.
 
 ### 5.5 Regression
 
@@ -758,7 +767,7 @@ acceptance workload is Linux x86-64 only, as before.
 | `--headless` 600 frames; dummy driver 600 frames | identical summaries before and after |
 | `tests/workload-icy-tower.test` (20 tests, executables with the package-owned libSDL3) | 20 passed, 0 skipped (5 min 51 s) |
 | `golden.bot` on four backends | 67 of 67 on interp, compile, cranelift-generic and cranelift, the same report on each (`workload-icy-tower-golden-suite`) |
-| `audit/icy-tower/mutate.tcl` (26 gameplay mutants) | [[TBD:icy mutants]] |
+| `audit/icy-tower/mutate.tcl` (26 gameplay mutants) | 26 of 26 killed, every one by failing golden tests (23 minutes) |
 | `python3 audit/icy-tower/oracle.py compare` (8 seeds; 1, 60, 600, 3600 frames) | 0 differences |
 | valgrind memcheck, 30 frames (the test) and 600 frames | 0 errors; 0 bytes definitely, indirectly or possibly lost (600 frames: 544 bytes still reachable, SDL's own, as in the census) |
 | GC stress (`BOTLISH_NATIVE_GC_STRESS=1`), 120 frames (the test) and 600 dummy-driver frames | the same summary as without, before and after |
