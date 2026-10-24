@@ -92,7 +92,10 @@ interp recursionlimit {} 100000
 set n 50
 set seed0 1
 set dump 0
-set backends {interp compile cranelift-generic cranelift}
+# cranelift-generic and cranelift run fused code wherever the driver's
+# coroutine fusion proves it (COROUTINE-FUSION-MILESTONE-1.md); cranelift-
+# unfused runs every coroutine on the general runtime.
+set backends {interp compile cranelift-generic cranelift cranelift-unfused}
 while {[lindex $args 0] in {-n -seed -dump -backends}} {
     switch -- [lindex $args 0] {
         -n { set n [lindex $args 1] }

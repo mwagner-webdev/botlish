@@ -22,6 +22,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [STRUCT-DESTRUCTURING.md](STRUCT-DESTRUCTURING.md) -- struct destructuring
 - [ENUMS.md](ENUMS.md) -- enums: named, closed, nominal sums of payload-free cases
 - [OPAQUE-STRUCTS.md](OPAQUE-STRUCTS.md) -- `opaque struct`: module-owned representation and construction authority
+- [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `private` module-local declarations (PRIVATE-ACCESS, PRIVATE-TYPE-ESCAPE; orthogonal to `opaque`) and the `CONTEXT-RESOURCE-ESCAPE` warning on an airlock handing raw pointers, views or open records to other modules; Icy Tower's SDL helpers made private, the census re-run with the warning (completion report)
 - [UNICODE-CHAR-LITERALS.md](UNICODE-CHAR-LITERALS.md) -- `UnicodeChar`: a scalar type distinct from Int and String
 - [FLOAT64-MILESTONE-1.md](FLOAT64-MILESTONE-1.md) -- `Float64`: finite binary64 numbers, decimal literals, `/`, `NonFiniteFloat`, C `double` (completion report)
 - [DECIMAL-ROUNDED-MILESTONE-1.md](DECIMAL-ROUNDED-MILESTONE-1.md) -- `DecimalRounded{minDecimalsPreserved: N}`: the first scalar refinement, a decimal-rounding guarantee proven for constants, observed at its precision, independent of its binary64 representation (completion report)
@@ -68,6 +69,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [TRAITS.md](TRAITS.md) -- traits: eager structural views, monomorphized away
 - [HASHABLE-AND-KEYED-HASH.md](HASHABLE-AND-KEYED-HASH.md) -- the intrinsic trait `Hashable` (witnesses the language supplies), total hashing and equality, and the private keyed table hash
+- [TRAIT-CONSTRAINED-IMPRINTED-TYPES.md](TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) -- parameterized structs (`struct Pair[A, B]:`) and trait-constrained type slots (`struct Map[K satisfies Hashable, V]:`): applications validated by ordinary trait satisfaction, imprinting that establishes a slot's obligation without replacing the variable, total hashing and equality of a constrained key, the typed-storage probe answering CO-3 (completion report)
 - [CONTEXTS.md](CONTEXTS.md) -- contexts: static execution-environment dependencies
 - [CONTEXT-TRAITS.md](CONTEXT-TRAITS.md) -- context traits: portable I/O and textual paths
 - [IMPORTS.md](IMPORTS.md) -- imports: explicit namespace dependencies
@@ -83,12 +85,17 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [AFFINE-VALUES.md](AFFINE-VALUES.md) -- affinity as a compositional property of a value's type
 - [COROUTINES.md](COROUTINES.md) -- eagerly started, affine, resumable computations with deep `yield`
 - [COROUTINE-PREREQUISITES.md](COROUTINE-PREREQUISITES.md) -- the research coroutines were built on
+- [COROUTINE-FUSION-MILESTONE-1.md](COROUTINE-FUSION-MILESTONE-1.md) -- coroutine fusion: a coroutine closed inside one function compiled natively into that function's control flow (one stack, no coroutine object or switch), deep yields, several coroutines per frame, scalar transport, the general runtime as fallback and oracle (completion report)
+- [DFA-COROUTINE-EXPLORATION.md](DFA-COROUTINE-EXPLORATION.md) -- declarative finite-state recognizers as ordinary coroutines: an isolated prototype (`audit/dfa/`) that checks determinism, rejection, acceptance, progress and boundaries and lowers to fused coroutine code; RFC 8259's lexical grammar, a YAML subset, a mistake census, differential tests, native evidence and a recommendation (exploratory report)
+- [DFA-COROUTINE-MILESTONE-2.md](DFA-COROUTINE-MILESTONE-2.md) -- declared recognizers in the language: `class` and `dfa` declarations checked by the compiler and lowered to ordinary coroutine functions, bounded lookahead (`accept before N`), a compact transition table lowered natively to byte tables or the general NIR `switch`, compiler-service facts, the JSON and YAML workloads, before/after measurements (completion report)
 - [MUTABLE-VECTOR.md](MUTABLE-VECTOR.md) -- `MutableVector[T]`: a growable mutable value
 - [MUTABLE-ARRAY.md](MUTABLE-ARRAY.md) -- `MutableArray[T]` as a copy-on-write value
 - [PARAMETERIZED-MUTABLEARRAY.md](PARAMETERIZED-MUTABLEARRAY.md) -- parameterized `MutableArray[T]`
 - [MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md](MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md) -- `MutableArray` construction and refinement
 - [TYPED-MUTARRAY-BUILDER-REFACTOR.md](TYPED-MUTARRAY-BUILDER-REFACTOR.md) -- typed `MutableArray` builder source refactor
 - [MINIMAL-IMMUTABLE-SET.md](MINIMAL-IMMUTABLE-SET.md) -- `ImmutableSet[T]`
+- [ORDERED-MUTABLE-MAP-SET.md](ORDERED-MUTABLE-MAP-SET.md) -- `MutableMap[K satisfies Hashable, V]` and `MutableSet[T satisfies Hashable]`: insertion-ordered tables written in Botlish over MutableVectors, placed by the keyed table hash; the loop protocol, MutableVector index proofs, the oracle, fuzzer, mutants and benchmarks (completion report)
+- [PLACE-PARAMETERS.md](PLACE-PARAMETERS.md) -- `place m: T`: a parameter that is the caller's place, so a Botlish function can mutate its caller's collection in place
 
 ### Strings, bytes and text
 
@@ -124,6 +131,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [C-FFI-ERROR-CAPTURE-MILESTONE-1.md](C-FFI-ERROR-CAPTURE-MILESTONE-1.md) -- the C FFI's error-capture window: a write-exposing C call's write-back value represented as fields (the C result, each private copy's storage) and its MutableBytes built at their use, `keepalive` without a machine call, so nothing the compiler emits allocates, collects or calls between a C function's return and the program's errno read; NIR, object-file and single-step detectors with positive controls, an errno-changing allocator, Linux and macOS evidence (completion report)
 - [C-FFI-ERROR-CAPTURE-MILESTONE-2.md](C-FFI-ERROR-CAPTURE-MILESTONE-2.md) -- foreign-result error-capture invariance: the C error state survives every lowering (struct scalar replacement off, the generic lowering), a write-back value that escapes after the capture (captured, stored, passed, used in a loop) and a 64-bit result outside the small-Int range (`(size_t)-1` compared as the C word it is, `i64`/`u64` NIR registers, boxed only at its first tagged use); the transport a correctness rule, the eager representation a test-only fault injection; detectors in every mode, Linux and macOS evidence (completion report)
 - [C-FLOAT-FFI-MILESTONE-1.md](C-FLOAT-FFI-MILESTONE-1.md) -- C `float` and `double` across the C FFI: `std::ffi::c::Float` (binary32, carrier Float64; no Botlish Float32) and `std::ffi::c::Double` as C representations in extern signatures, function pointers, pointees, layout fields, arrays and unions; finite-only admission, exact widening, checked round-to-nearest-even narrowing (`NonFiniteFloat`, never clamped), the same rule at compile time; native f32/f64 lowering (SysV, AAPCS64, Apple, Win64); the binding generator's float and double, `long double` diagnosed (completion report)
+- [NATIVE-LIBRARY-MILESTONE-1.md](NATIVE-LIBRARY-MILESTONE-1.md) -- native libraries: `exported c fn` and the explicit export list, export roots compiled under their declared contracts (the census's `checked(-5)` and long-input defects fixed with no workaround), one startup data product for executables and libraries (the program descriptor and `LinkedProgram` record), `native::library` / `main.tcl -emit-native-library` writing a static archive, a shared library, a C header and a JSON manifest; a C ABI of int64_t, bool, double and UTF-8 text with owned results, statuses and structured errors, thread-affine instances with an explicit lifecycle, two libraries per process isolated in symbols and runtime state; the JSON/Tcl and React Native host probes migrated (completion report)
 - [ABI-NUMERIC-DOMAINS.md](ABI-NUMERIC-DOMAINS.md) -- `std::abi::I8` ... `std::abi::Usize`
 - [LINUX-X86-64-SYSCALL.md](LINUX-X86-64-SYSCALL.md) -- direct Linux x86-64 syscalls
 - [LINUX-SYSCALL-TRANSPORTS.md](LINUX-SYSCALL-TRANSPORTS.md) -- the AArch64 transport beside the x86-64 one (`std::linux::abi::ARCH::syscall`, one table), `std::linux::sys` as an architecture-specific module the compilation target selects, and what the single-file compiler needs on AArch64
@@ -133,7 +141,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [STATIC-COMPILE.md](STATIC-COMPILE.md) -- `static compile:`: compiler diagnostics as recoverable values
 - [STATIC-DECISION-ECONOMICS.md](STATIC-DECISION-ECONOMICS.md) -- how many builds deciding static blocks takes
-- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind: fewer trial builds, the same decisions
+- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind and named-struct declaration: fewer trial builds, the same decisions
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals
@@ -148,6 +156,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [WARNINGS-PROVES-NAMING.md](WARNINGS-PROVES-NAMING.md) -- `PROVES-NAMING`
 - [WARNINGS-ONE-CHAR-STRING-LITERAL.md](WARNINGS-ONE-CHAR-STRING-LITERAL.md) -- `ONE-CHAR-STRING-LITERAL`
 - [WARNINGS-MANY-BOOLEAN-ARGUMENTS.md](WARNINGS-MANY-BOOLEAN-ARGUMENTS.md) -- `MANY-BOOLEAN-ARGUMENTS`
+- [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `CONTEXT-RESOURCE-ESCAPE` (section 3)
 - [REFACTOR-WARNINGS-CLEAN.md](REFACTOR-WARNINGS-CLEAN.md) -- the corpus under its own warnings
 - [LANGUAGE-LIBRARY-DEFICIENCIES.md](LANGUAGE-LIBRARY-DEFICIENCIES.md) -- language and library gaps that refactor found
 
@@ -166,7 +175,9 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [HIR-INTERCHANGE.md](HIR-INTERCHANGE.md) -- the analyzed HIR as a file, and the front-end cache
 - [COMPILER-SERVICE-MILESTONE-1.md](COMPILER-SERVICE-MILESTONE-1.md) -- the compiler service: front-end diagnostics located as data, the source-provider seam (unsaved buffers, one normalization, per-compilation snapshots), immutable analysis revisions and their position queries (bindings, presented types, name-precise definitions, references by identity, Compilerpedia topics), `main.tcl -check`; the std:: trial merge and the S2 recommendation (completion report; the census is `../audit/compiler-service/COMPILER-SERVICE-CENSUS.md`)
 - [LSP-MILESTONE-1.md](LSP-MILESTONE-1.md) -- Botlish's first language server, `botlish -lsp`: Content-Length framing, typed JSON and JSON-RPC in Tcl, document synchronization over the service's overlays, program ownership, UTF-16/UTF-32 positions and file URIs at the boundary, pushed diagnostics, hover, definition and references with a conservative stale-revision policy; the synchronous and persistent-worker schedulers measured against each other (the worker chosen), revisions moved between processes as HIR interchange (`service::export`/`import`); the protocol harness over real pipes, Neovim end to end, mutation testing (completion report)
-- [SINGLE-EXECUTABLE.md](SINGLE-EXECUTABLE.md) -- the single-file compiler and the stub linker
+- [SYNTAX-RECOVERY-MILESTONE-1.md](SYNTAX-RECOVERY-MILESTONE-1.md) -- syntax-error-tolerant semantic analysis: malformed statements become holes that keep only what their valid prefix establishes (no value, type or proof), uncertainty propagated by the semantic dependency model, modules recovered across imports, independent diagnostics kept and dependent ones suppressed; `-check`, the compiler service's partial revisions and the language server's fresh answers while a document is incomplete, strict compilation and every backend unchanged; experiments, fuzzing, mutation testing, Neovim (completion report)
+- [SINGLE-EXECUTABLE.md](SINGLE-EXECUTABLE.md) -- the single-file compiler, the stub linker and the system linker
+- [SINGLE-EXECUTABLE-FFI-MILESTONE-1.md](SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) -- the system linker: programs that call C linked from the single-file compiler with the host's C compiler driver, a data-only startup object and a precompiled runtime archive, no Rust; the startup census and design, the three linkers' startups compared byte for byte, static libraries, failure diagnostics, packaging, Linux, macOS and Windows results, mutation testing, sizes and costs (completion report)
 - [MACOS-AARCH64-PORT-AUDIT.md](MACOS-AARCH64-PORT-AUDIT.md) -- the macOS Apple Silicon port: every Linux assumption by subsystem, what runs on a real macOS arm64 host today, the macOS CI and its test tiers, and the milestone roadmap
 - [MACOS-AARCH64-MILESTONE-1.md](MACOS-AARCH64-MILESTONE-1.md) -- macOS port milestone 1: the platform audit and the Apple Silicon GitHub Actions infrastructure, with the CI evidence
 - [MACOS-AARCH64-MILESTONE-2.md](MACOS-AARCH64-MILESTONE-2.md) -- macOS port milestone 2: the compilation target as an operating system and an architecture -- target identity, macOS C ABI facts, the Apple AArch64 C convention, platform module resolution, HIR interchange and cache target isolation, and native host/target validation
@@ -279,5 +290,6 @@ Botlish to find what the language, library, compiler and tools need.
 - [POST-M8A-COMMON-INEFFICIENCY-CENSUS.md](POST-M8A-COMMON-INEFFICIENCY-CENSUS.md) -- post-M8.a cross-workload inefficiency census
 - [POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md](POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- post-module-statics exact-target census
 - [POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md](POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md) -- dynamic callable census after structural function types
+- [EXACT-METHOD-DECISION-MISATTRIBUTION.md](EXACT-METHOD-DECISION-MISATTRIBUTION.md) -- an open defect of the exact method-call decision: an outer call's rejected receiver charged to the inner call, so a valid `xs.at(i).length()` chain is rejected when the exact decision decides it
 - [FUZZING-EXAMPLES-AOT.md](FUZZING-EXAMPLES-AOT.md) -- fuzzing the example applications as executables
 - [FUZZING-ARGV-PROGRAMS.md](FUZZING-ARGV-PROGRAMS.md) -- fuzzing argv-driven programs

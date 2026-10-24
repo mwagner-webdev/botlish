@@ -40,7 +40,12 @@
 #   @example accept|reject        an executable example, its code lines, then
 #   @DIRECTIVE ...                  directives (@value, @warn, @nowarn,
 #   @end                            @quiet, @backends, @output, @error, @at,
-#                                   @message, @caption, @target) and @end
+#                                   @message, @caption, @target) and @end;
+#                                   `@module NAME` before the directives
+#                                   starts the text of a module NAME.bot the
+#                                   example's program imports (an application
+#                                   module beside it), up to the next
+#                                   directive
 #
 # Lines before a file's first @topic are its header comment; after it, a
 # line starting with "#" (outside an example) is a comment.
@@ -79,7 +84,7 @@ namespace eval compilerpedia {
         title line summary line index words related words docs words symbol words
         alias phrases keywords phrases code lines match lines
     }
-    variable exampleDirectives {value warn nowarn quiet backends output error at message caption target}
+    variable exampleDirectives {value warn nowarn quiet backends output error at message caption target module}
 }
 
 # ---------------------------------------------------------------------------
@@ -135,12 +140,21 @@ proc compilerpedia::parse {text file} {
                 if {$directive ni $exampleDirectives} {
                     Fail $file $number "unknown example directive @$directive"
                 }
+                set module ""
                 switch -- $directive {
                     warn - nowarn - output { dict lappend example $directive $argument }
                     quiet { dict set example quiet 1 }
                     backends { dict set example backends $argument }
+                    module {
+                        # The lines up to the next directive are the module
+                        # file ARGUMENT.bot's.
+                        set module $argument
+                        dict set example modules $module {}
+                    }
                     default { dict set example $directive $argument }
                 }
+            } elseif {$module ne ""} {
+                dict set example modules $module [concat [dict get $example modules $module] [list $line]]
             } else {
                 dict lappend example lines $line
             }
@@ -156,7 +170,8 @@ proc compilerpedia::parse {text file} {
             if {[regexp {^@example\s+(accept|reject)\s*$} $line -> kind]} {
                 set example [dict create id "[dict get $topic id]#[expr {[llength [dict get $topic examples]] + 1}]" \
                     kind $kind lines {} value "" warn {} nowarn {} quiet 0 backends {interp compile} \
-                    output {} error "" at "" message "" caption "" target "" line $number]
+                    output {} error "" at "" message "" caption "" target "" line $number modules {}]
+                set module ""
                 set state example
                 continue
             }
@@ -971,12 +986,22 @@ proc compilerpedia::RenderExample {example} {
         append head " -- [dict get $example caption]"
     }
     set lines [split [Wrap "$head:" "    "] \n]
-    foreach line [dict get $example lines] {
-        # (Not expr's ?: -- it would read "        0" as the number 0.)
-        if {[string trim $line] eq ""} {
-            lappend lines ""
-        } else {
-            lappend lines "        $line"
+    set files [list "" [dict get $example lines]]
+    dict for {name text} [dict getdef $example modules {}] {
+        # A module the example's program imports, its file named above it.
+        lappend files "-- $name.bot" $text
+    }
+    foreach {title text} $files {
+        if {$title ne ""} {
+            lappend lines "" "      $title"
+        }
+        foreach line $text {
+            # (Not expr's ?: -- it would read "        0" as the number 0.)
+            if {[string trim $line] eq ""} {
+                lappend lines ""
+            } else {
+                lappend lines "        $line"
+            }
         }
     }
     return $lines

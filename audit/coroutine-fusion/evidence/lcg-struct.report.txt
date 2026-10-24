@@ -1,0 +1,1 @@
+fused sum e60 {inlined {{#3} numbers} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 4 template 71 copied 248 unboxed 6}

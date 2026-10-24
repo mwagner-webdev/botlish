@@ -68,7 +68,7 @@ namespace eval service {
     # its `unavailable` dict, with the reason (at).
     variable facts {syntax construct binding type hover definition references diagnostics topics}
     # The format of an exported revision (export, import).
-    variable exportVersion 1
+    variable exportVersion 2
 }
 
 # Raises the service error {SERVICE KIND} with MESSAGE: a misuse of the
@@ -210,10 +210,27 @@ proc service::Provider {workspace} {
 #   ok        a HIR, no error (warnings, if any)
 #   semantic  a HIR and the errors a strict compilation reports for it (the
 #             warning policy's rejection under -warnings error included)
-#   syntax    no HIR: a file's syntax errors (the entry's, or a module's)
+#   syntax    syntax errors in the entry or a module: every file's, then
+#             the semantic errors independent of them; a partial HIR
+#             (semantics `partial`) unless a module also failed to load
 #   loader    no HIR: a module failed to load (resolution of an import, a
 #             module file that cannot be read)
 #   failure   no HIR: the compiler failed (not a diagnostic of the program)
+#
+# A compiler failure (not an error of the program) in a program whose entry
+# has syntax errors is reported as those (outcome syntax, semantics none),
+# and kept in the revision's `failure` all the same: that the analysis past
+# them failed is the compiler's problem, never hidden. An error a
+# declaration raises (an unknown type in a struct's field) stops an analysis
+# past syntax errors as it stops any compilation: the revision reports the
+# syntax errors, which may be its cause (a type a malformed declaration
+# would have declared), and has no semantics.
+#
+# and, separately, what is known of its meaning (`semantics`): `full` (a HIR
+# of the program as written: outcomes ok and semantic), `partial` (a HIR of
+# a program with syntax errors, its malformed source holes and whatever
+# depends on them unknown: SYNTAX-RECOVERY-MILESTONE-1.md), `none` (no HIR).
+# A revision with syntax errors is never `ok`, whatever HIR it has.
 #
 # Editing the workspace afterwards changes nothing in it. An ENTRY with no
 # source file raises, as reading it does (POSIX ENOENT): there is no
@@ -240,7 +257,7 @@ proc service::analyze {ws entry args} {
 # (analyze), without its identity.
 proc service::Analyze {workspace path} {
     set mode [hir::warnings::Mode [dict get $workspace warnings]]
-    set revision [dict create entry $path outcome ok hir "" errors {} warnings {} failure "" \
+    set revision [dict create entry $path outcome ok semantics none hir "" errors {} warnings {} failure "" \
         config [Configuration $workspace $path]]
     # (An entry with no source file raises here.)
     set text [surface::source::text $path]
@@ -251,10 +268,15 @@ proc service::Analyze {workspace path} {
         if {$mode eq "off"} {
             set collect off
         }
-        set hir [surface::readProgramFile $path -strict 0 -warnings $collect \
+        # Past syntax errors: their independent semantics too
+        # (SYNTAX-RECOVERY-MILESTONE-1.md).
+        set hir [surface::readProgramFile $path -strict 0 -warnings $collect -recover-syntax 1 \
             -warning-channel "" -target [dict get $workspace target] -cache [dict get $workspace cache]]
     } on error {message options} {
         set code [dict get $options -errorcode]
+        if {[lindex $code 0] ni {SURFACE POSIX CORE}} {
+            set failure [dict create message $message errorcode $code errorinfo [dict get $options -errorinfo]]
+        }
         if {[lrange $code 0 1] ne {SURFACE SYNTAX}} {
             # The command line parses the entry before it compiles, so
             # every syntax error of the entry is what it reports, even when
@@ -275,8 +297,9 @@ proc service::Analyze {workspace path} {
             dict set revision outcome loader
         } else {
             dict set revision outcome failure
-            dict set revision failure [dict create message $message errorcode $code \
-                errorinfo [dict get $options -errorinfo]]
+        }
+        if {[info exists failure]} {
+            dict set revision failure $failure
         }
         set entries [dict getdef $options -diagnostics [list [dict create errorcode $code message $message]]]
         dict set revision errors [lmap entry $entries {Record error $entry}]
@@ -293,9 +316,19 @@ proc service::Analyze {workspace path} {
         set warnings {}
     }
     dict set revision hir $hir
+    dict set revision semantics full
+    if {[dict exists $hir syntaxRecovery]} {
+        # Syntax errors, analyzed past: every syntax error first, as a
+        # compilation reports one of them first, then the semantic errors
+        # independent of them (the warnings an error hides: none).
+        set errors [concat [dict get $hir syntaxRecovery diagnostics] $errors]
+        dict set revision semantics partial
+    }
     dict set revision errors [lmap entry $errors {Record error $entry}]
     dict set revision warnings [lmap warning $warnings {Record warning [hir::warnings::entry $hir $warning]}]
-    if {$errors ne {}} {
+    if {[dict exists $hir syntaxRecovery]} {
+        dict set revision outcome syntax
+    } elseif {$errors ne {}} {
         dict set revision outcome semantic
     }
     dict set revision sources [surface::source::observed]
@@ -424,6 +457,7 @@ proc service::revision {rev} {
     }
     return [dict create id $rev workspace [dict get $revision workspace] entry [dict get $revision entry] \
         version [dict get $revision version] outcome [dict get $revision outcome] \
+        semantics [dict get $revision semantics] \
         config [dict get $revision config] hir [expr {[dict get $revision hir] ne ""}] \
         errors [llength [dict get $revision errors]] warnings [llength [dict get $revision warnings]] \
         failure [dict get $revision failure] sources $sources]
@@ -524,7 +558,7 @@ proc service::export {rev args} {
         set hir [hir::interchange::encode $hir -trait-source 1]
     }
     set body [dict create]
-    foreach key {entry outcome errors warnings failure config sources} {
+    foreach key {entry outcome semantics errors warnings failure config sources} {
         dict set body $key [dict get $revision $key]
     }
     dict set body hir $hir
@@ -556,7 +590,7 @@ proc service::import {ws text args} {
         Fail IMPORT "not an exported revision of this service (it starts \"[string range $header 0 40]\")"
     }
     set body [string range $text [expr {$newline + 1}] end]
-    set keys {entry outcome errors warnings failure config sources hir}
+    set keys {entry outcome semantics errors warnings failure config sources hir}
     if {[catch {dict size $body}] || [lmap key $keys {dict exists $body $key}] ne [lrepeat [llength $keys] 1]} {
         Fail IMPORT "an exported revision without its [join $keys {, }]"
     }
@@ -567,7 +601,7 @@ proc service::import {ws text args} {
         }
     }
     set revision [dict create]
-    foreach key {entry outcome errors warnings failure config sources} {
+    foreach key {entry outcome semantics errors warnings failure config sources} {
         dict set revision $key [dict get $body $key]
     }
     set hir [dict get $body hir]
@@ -580,7 +614,7 @@ proc service::import {ws text args} {
     dict set revision workspace $ws
     dict set revision version [dict get $options -version]
     set derived [dict getdef $body derived [dict create]]
-    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations}]] ne {declarations lines semantic syntax}} {
+    if {[catch {dict size $derived}] || [lsort -unique [concat [dict keys $derived] {lines syntax semantic declarations dfaNames}]] ne {declarations dfaNames lines semantic syntax}} {
         Fail IMPORT "an exported revision whose derived data are not its query indexes"
     }
     dict set revision derived $derived
@@ -685,6 +719,9 @@ proc service::prepare {rev args} {
             if {$path in $paths} {
                 Derived $rev declarations $f [list service::DeclarationIndex $f]
             }
+        }
+        foreach path $paths {
+            Derived $rev dfaNames $path [list service::DfaNameIndex $path]
         }
     }
     if {[dict get $options -compilerpedia]} {
@@ -851,7 +888,10 @@ proc service::SemanticIndex {revision} {
             set fields [lrange $origin 2 end]
             dict lappend items [lindex $origin 1] [dict get $fields start] [dict get $fields end] $e
         }
-        if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""} {
+        if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""
+                && ![dict exists $hir syntaxDependent $e]} {
+            # (A name whose binding depends on malformed source refers to it
+            # only perhaps: SYNTAX-RECOVERY-MILESTONE-1.md.)
             dict lappend references [dict get $node binding] $e
         }
     }
@@ -897,6 +937,21 @@ proc service::DeclarationIndex {f revision} {
         }
     }
     return [dict create index [IntervalIndex $items] sites $sites]
+}
+
+# The names of recognizer declarations in source PATH of a revision:
+# {index INTERVALS all FACTS}, the intervals of the facts written in PATH,
+# FACTS every fact of the program (surface/dfa.tcl's Fact: {kind use decl
+# hover}).
+proc service::DfaNameIndex {path revision} {
+    set all [dict getdef [dict get $revision hir] dfaNames {}]
+    set items {}
+    foreach fact $all {
+        if {[dict get $fact use file] eq $path} {
+            lappend items [dict get $fact use start] [dict get $fact use end] $fact
+        }
+    }
+    return [dict create index [IntervalIndex $items] all $all]
 }
 
 # The span in TEXT where binding B of HIR is declared by name (above), or "".
@@ -1030,6 +1085,39 @@ proc service::at {rev path line column args} {
         dict set result unavailable $unavailable
         return $result
     }
+    # A name in a recognizer declaration -- a state, a class, a called
+    # recognizer -- is no binding of the program: its facts are the ones the
+    # declaration's checker recorded (the HIR's `dfaNames`, surface/dfa.tcl's
+    # Fact; DFA-COROUTINE-MILESTONE-2.md).
+    set names [Derived $rev dfaNames $source [list service::DfaNameIndex $source]]
+    set chain [Innermost [dict get $names index] $offset]
+    if {$chain ne {}} {
+        set fact [lindex [dict get $names index values] [lindex $chain 0]]
+        set kind [dict get $fact kind]
+        dict set result construct [dict create kind dfa-$kind range [Range [dict get $fact use]]]
+        dict set result hover [dict get $fact hover]
+        dict set result definition [Range [dict get $fact decl]]
+        dict set result references [lmap other [dict get $names all] {
+            if {[dict get $other decl] ne [dict get $fact decl] || [dict get $other use] eq [dict get $other decl]} continue
+            Range [dict get $other use]
+        }]
+        set why [dict get {
+            state "a state of a recognizer is no binding or value of the program"
+            class "a class names symbols of recognizer declarations: it is no binding or value of the program"
+            recognizer "a recognizer a declaration calls is named as a callee here: its declaration's name is the binding of its coroutine function"
+        } $kind]
+        foreach missing {binding type} {
+            dict set unavailable $missing $why
+        }
+        Compilerpedia
+        if {"concept.recognizers" ni [lmap t $topics {dict get $t id}]} {
+            lappend topics [dict create id concept.recognizers \
+                title [dict get [compilerpedia::topic concept.recognizers] title] for [list syntax dfa-$kind]]
+        }
+        dict set result topics $topics
+        dict set result unavailable $unavailable
+        return $result
+    }
     set index [Derived $rev semantic all [list service::SemanticIndex]]
     set f [dict getdef [dict get $index ids] $source ""]
     set construct ""
@@ -1084,8 +1172,17 @@ proc service::at {rev path line column args} {
         return $result
     }
     dict set result construct $construct
+    if {$e ne "" && [dict exists $hir syntaxDependent $e] && [dict get $hir exprs $e kind] eq "ref"} {
+        # Which binding the name denotes depends on malformed source
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): never a guess.
+        set binding ""
+    }
     if {$binding eq ""} {
-        if {[dict get $construct kind] eq "ref"} {
+        if {$e ne "" && [dict exists $hir exprs $e hole]} {
+            set reason "malformed source: no meaning is known for it (its syntax error says why)"
+        } elseif {$e ne "" && [dict exists $hir syntaxDependent $e] && [dict get $hir exprs $e kind] eq "ref"} {
+            set reason "a malformed statement before it, in a scope it sees, may bind this name: which binding it denotes is not known"
+        } elseif {[dict get $construct kind] eq "ref"} {
             set reason "the name is not resolved (its diagnostic says why)"
         } else {
             set reason "this construct is not a name"
@@ -1095,19 +1192,32 @@ proc service::at {rev path line column args} {
         }
         # The expression's own type.
         set type [hir::typeOf $hir $e]
-        dict set result type [dict create text [hir::types::presented $type]]
-        dict set result hover [Hover $hir $type ""]
+        set unknown [TypeUnknown $hir $e "" $type]
+        if {$unknown ne ""} {
+            dict set unavailable type $unknown
+            dict set unavailable hover $unknown
+        } else {
+            dict set result type [dict create text [hir::types::presented $type]]
+            dict set result hover [Hover $hir $type ""]
+        }
     } else {
         set record [BindingFacts $hir $binding]
         dict set result binding $record
         if {$e ne "" && [dict get $hir exprs $e kind] eq "ref"} {
             # A reference: its type where it is read (flow facts included).
             set type [hir::typeOf $hir $e]
+            set unknown [TypeUnknown $hir $e $binding $type]
         } else {
             set type [BindingType $hir $binding]
+            set unknown [TypeUnknown $hir "" $binding $type]
         }
-        dict set result type [dict create text [hir::types::presented $type]]
-        dict set result hover [Hover $hir $type $binding]
+        if {$unknown ne ""} {
+            dict set unavailable type $unknown
+            dict set unavailable hover $unknown
+        } else {
+            dict set result type [dict create text [hir::types::presented $type]]
+            dict set result hover [Hover $hir $type $binding]
+        }
         set definition [Definition $rev $revision $index $binding]
         if {[lindex $definition 0] eq "unavailable"} {
             dict set unavailable definition [lindex $definition 1]
@@ -1195,6 +1305,50 @@ proc service::BindingType {hir b} {
     return [hir::bindingType $hir $b]
 }
 
+# Why the TYPE of expression E ("" for none) or binding B ("" for none) of
+# HIR is not known, or "": E or B is poison (hir/types.tcl, "Poison") --
+# source nobody could read, a value that depends on it
+# (SYNTAX-RECOVERY-MILESTONE-1.md), or one an earlier check proved invalid --
+# or TYPE is a function whose result is (an incomplete body's). Never a
+# placeholder type for an unknown one.
+proc service::TypeUnknown {hir e b type} {
+    if {$e ne "" && [dict exists $hir exprs $e hole]} {
+        return "malformed source: no meaning is known for it (its syntax error says why)"
+    }
+    if {$e ne "" && [dict exists $hir syntaxDependent $e]} {
+        return "its meaning depends on malformed source (a syntax error says where)"
+    }
+    # (A function's poison is its result's, below: the function is known.)
+    if {($e ne "" && [dict exists $hir poisoned $e] && [dict get $hir exprs $e kind] ne "block")
+            || ($b ne "" && [dict exists $hir poisoned $b])} {
+        if {[dict exists $hir syntaxRecovery]} {
+            return "its value is not known: it depends on malformed source or on a construct a diagnostic rejects"
+        }
+        return "its value is not known: it depends on a construct a diagnostic rejects"
+    }
+    if {$b ne "" && [dict get $hir bindings $b kind] eq "param"} {
+        set owner [dict get $hir scopes [dict get $hir bindings $b scope] owner]
+        if {$owner ne "" && [dict exists $hir holeBlocks $owner]
+                && [lindex [dict get $hir exprs $owner declaredParamTypes] \
+                    [lsearch -exact [dict get $hir exprs $owner params] $b]] eq {}} {
+            return "its contract is not known: it declares no type, and its function's body, which would require one, holds malformed source"
+        }
+    }
+    if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
+        set block [lindex $type 1]
+        if {[dict exists $hir holeBlocks $block]
+                && ([dict get $hir exprs $block declaredResult] eq {} || {} in [dict get $hir exprs $block declaredParamTypes])} {
+            # (Only a fully declared signature is known of a function whose
+            # body holds malformed source: SYNTAX-RECOVERY-MILESTONE-1.md.)
+            return "its signature is not known: its body holds malformed source and the signature does not declare every type"
+        }
+        if {[dict exists $hir poisoned $block] && [dict get $hir exprs $block declaredResult] eq {}} {
+            return "its result is not known: its body depends on a construct a diagnostic rejects"
+        }
+    }
+    return ""
+}
+
 # The canonical namespace of the module that declares binding B of HIR, ""
 # for the entry program or a binding of no module (a root one).
 proc service::ModuleOf {hir b} {
@@ -1212,11 +1366,14 @@ proc service::ModuleOf {hir b} {
 }
 
 # The hover line of a construct of TYPE in HIR, whose binding is B ("" for
-# none): a function's signature, "NAME: TYPE" for another binding, TYPE
-# otherwise.
+# none): a function's signature (`private fn ...` for a private one),
+# "NAME: TYPE" for another binding, TYPE otherwise.
 proc service::Hover {hir type b} {
     if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
-        return [hir::signatures::text $hir [lindex $type 1]]
+        # (A private function says so: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
+        # MILESTONE-1.md.)
+        set prefix [expr {$b ne "" && [hir::privacy::BindingPrivate $hir $b] ? "private " : ""}]
+        return "$prefix[hir::signatures::text $hir [lindex $type 1]]"
     }
     if {$b eq ""} {
         return [hir::types::presented $type]

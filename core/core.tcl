@@ -60,7 +60,7 @@ apply {{dir} {
     foreach file {
         errors value completion env ir type regex
         block native callable refine runtime evaluator
-        primitives predicates scalarbits unicodechar float strings tclcompat lists immutableset mutarray hashing process linuxabi bytestore binary decimal listlength inttext contexts coroutines affine mutvec cabi programfile
+        primitives predicates scalarbits unicodechar float strings tclcompat lists immutableset mutarray hashing process linuxabi bytestore binary decimal listlength inttext contexts coroutines affine mutvec cabi programfile dfa
     } {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }

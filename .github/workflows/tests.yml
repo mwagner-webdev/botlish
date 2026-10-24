@@ -179,6 +179,51 @@ jobs:
           files=$(grep -l -e 'native::executable' -e 'emit-native-executable' tests/*.test | xargs -n1 basename | tr '\n' ' ')
           tclsh9.0 tests/all.tcl -file "$files"
 
+  system-linker:
+    name: tests (system-linked executables)
+    # Every test file that builds a standalone executable or links a program
+    # that calls C, with executables linked by the `system` linker the
+    # single-file compiler uses for programs that call C
+    # (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): the host's cc, the program
+    # object and the precompiled runtime archive -- no rustc at link time. The tests of rustc's own invocation are
+    # constrained to rustcLinker (tests/helpers.tcl) and skip here;
+    # tests/system-linker.test compares the linkers' executables directly.
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+      CORE_BACKEND: compile
+      BOTLISH_NATIVE_LINKER: system
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: What the system linker links with
+        run: native/target/release/botlish-native system-linker
+
+      # The libraries the driver passes after the runtime archive, against
+      # rustc's account of them (relinks the archive: before any test runs).
+      - name: The runtime archive's system libraries
+        run: tclsh9.0 native/runtime-archive/libraries.tcl
+
+      - name: Executable and C tests, system-linked
+        shell: bash
+        run: |
+          files=$(grep -l -e 'native::executable' -e 'emit-native-executable' -e 'extern c ' tests/*.test | xargs -n1 basename | tr '\n' ' ')
+          tclsh9.0 tests/all.tcl -file "$files"
+
+      - name: Executable and C tests, system-linked, under GC stress
+        shell: bash
+        env:
+          BOTLISH_NATIVE_GC_STRESS: "1"
+        run: |
+          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
+
   warning-gate:
     name: warning gate (manifest)
     # The shipped stdlib, libraries, examples and benchmarks compile with

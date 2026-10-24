@@ -455,7 +455,7 @@ x = "T"
         [lmap w [hir::warnings::collect $parsed] {core::value::show [dict get $w data value]}] [lindex [outcomeUnderHir interp $hir] 1]
 } -result {{{str T} {str W}} 10:5 {{"T"}} {[4, "T"]}}
 
-test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly five places -- the written literal (surface/lower.tcl), the context load key of a context struct and of a context trait (hir/contexts.tcl), the descriptor argument of a MutableVector share, affine clear or affine swap the elaboration writes out (hir/mutvec.tcl, after every warning check), and the message of a rejected `static compile:` block's reified std::compiler::CompilerError (hir/static.tcl: a compiler diagnostic's text, never one character long; STATIC-COMPILE.md) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
+test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds a String const in exactly six places -- the written literal (surface/lower.tcl), the context load key of a context struct and of a context trait (hir/contexts.tcl), the descriptor argument of a MutableVector share, affine clear or affine swap the elaboration writes out (hir/mutvec.tcl, after every warning check), the message of a rejected `static compile:` block's reified std::compiler::CompilerError (hir/static.tcl: a compiler diagnostic's text, never one character long; STATIC-COMPILE.md), and a declared recognizer's transition table, recognizer and state names (surface/dfa.tcl's Str, each marked `synthesized`, which the warning never reports; DFA-COROUTINE-MILESTONE-2.md) -- and every const node is built by hir::syntax::constNode or read from core IR (hir::syntax::fromIR); a new synthesized String const fails here} -body {
     set found {}
     foreach path [lsort [concat [glob [file join $::projectRoot hir *.tcl]] [glob [file join $::projectRoot surface *.tcl]]]] {
         set channel [open $path]
@@ -471,7 +471,7 @@ test oc-synthesized-string-consts-enumerated {SOURCE AUDIT: the frontend builds 
         }
     }
     set found
-} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/mutvec.tcl {set literal [hir::syntax::constNode $origin str $text]}} {hir/static.tcl {set message [hir::syntax::constNode $origin str [dict get $diagnostic message]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
+} -result {{hir/contexts.tcl {[hir::syntax::constNode $origin str $trait]]]}} {hir/contexts.tcl {[hir::syntax::constNode $origin str $id]]]}} {hir/mutvec.tcl {set literal [hir::syntax::constNode $origin str $text]}} {hir/static.tcl {set message [hir::syntax::constNode $origin str [dict get $diagnostic message]]}} {hir/syntax.tcl {return [Node const $origin literal $args]}} {hir/syntax.tcl {return [Node const $origin literal [lrange $node 1 end]]}} {surface/dfa.tcl {set node [hir::syntax::constNode $origin str $s]}} {surface/lower.tcl {return [hir::syntax::constNode $origin str [dict get $node value]]}}}
 
 test oc-desugarings-build-no-string-const {every construct the frontend desugars -- unary minus, !=, not, and, or, elif, struct destructuring, flags, with context, collecting and lockstep loops, method sugar -- builds no String const: a program using them all without a written String literal has none but the context load key, and no warning} -body {
     set hir [compileWith {context struct Box:
@@ -796,7 +796,7 @@ test oc-no-fine-grained-options {there is no per-warning option: -Wno-one-char-s
 test oc-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code} -body {
     list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes ONE-CHAR-STRING-LITERAL] \
         [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
-} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS} hir::warnings::OneCharStringLiteral 0}
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS CONTEXT-RESOURCE-ESCAPE} hir::warnings::OneCharStringLiteral 0}
 
 test oc-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
     set w [lindex [literalsOf [compileWith $::literalSource default]] 0]

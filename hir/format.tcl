@@ -21,6 +21,9 @@
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
 #                                        omitted when empty; then ?nomethod?,
+#                                        ?exported c?,
+#                                        ?variadic N?, ?places (N ...)?
+#                                        (PLACE-PARAMETERS.md),
 #                                        ?declares TYPE?, ?proves BINDING
 #                                        NAME: TYPE? (a proof contract,
 #                                        REFINEMENT-VALUES.md), ?errors ...?
@@ -223,7 +226,8 @@ proc hir::format::TypeDecl {entry} {
     }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
-        # [opaque] fields F1: T1, F2: T2" (NS "-" for the entry program), the
+        # [opaque] [context] [slots [S, ...]] fields F1: T1, F2: T2" (NS "-"
+        # for the entry program), the
         # fields in declared (slot) order with their resolved types. The
         # `opaque` word is printed only for an opaque struct
         # (OPAQUE-STRUCTS.md), so ordinary declarations print as they always
@@ -235,6 +239,21 @@ proc hir::format::TypeDecl {entry} {
         set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
         if {[dict exists $entry context] && [dict get $entry context]} {
             append opaque "context "
+        }
+        if {[dict exists $entry slots]} {
+            # A parameterized struct's type slots (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md), in declared order, each with the trait
+            # identity it is constrained by: "slots [K satisfies Hashable,
+            # V]". Printed only for one, so other declarations are as they
+            # were.
+            append opaque "slots \[[join [lmap pair [dict get $entry slots] {
+                lassign $pair slot traits
+                if {$traits eq {}} {
+                    set slot
+                } else {
+                    string cat $slot " satisfies " [join $traits " "]
+                }
+            }] {, }]\] "
         }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }
@@ -504,11 +523,20 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict exists $node nomethod]} {
                 append text " nomethod"
             }
+            if {[dict exists $node exported]} {
+                # A C export (NATIVE-LIBRARY-MILESTONE-1.md): its foreign ABI.
+                append text " exported [dict get $node exported]"
+            }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its
                 # first N parameters are the fixed ones, parameter N the List
                 # its calls collect their trailing arguments into.
                 append text " variadic [dict get $node variadic]"
+            }
+            if {[dict exists $node places]} {
+                # Place parameters (PLACE-PARAMETERS.md): the indices of the
+                # parameters its calls pass a place of the caller's for.
+                append text " places ([dict get $node places])"
             }
             if {[dict exists $node traitClone]} {
                 # A trait clone (TRAITS.md): each trait parameter's source

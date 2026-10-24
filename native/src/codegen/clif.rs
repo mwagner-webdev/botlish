@@ -385,8 +385,11 @@ fn module_error(e: cranelift_module::ModuleError) -> BackendError {
     BackendError::Codegen(format!("{e:?}"))
 }
 
-/// Declares the runtime helpers and every function of PROGRAM.
-pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) -> Result<Symbols, BackendError> {
+/// Declares the runtime helpers and every function of PROGRAM: for the AOT
+/// object (EXPORT) with global symbols unless LOCAL (a native library's
+/// object, whose only global symbols are its public C functions:
+/// codegen::library), for the JIT with local ones.
+pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, local: bool) -> Result<Symbols, BackendError> {
     let direct_helpers = export && module.isa().name() == "x64";
     let mut symbols = Symbols {
         status_result: vec![],
@@ -455,7 +458,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
             }
         }
     }
-    let linkage = if export { Linkage::Export } else { Linkage::Local };
+    let linkage = if export && !local { Linkage::Export } else { Linkage::Local };
     for f in &program.functions {
         let params = 1 + f.env as usize + f.params as usize;
         let name = format!("botlish_fn_{}", f.id);
@@ -1589,6 +1592,88 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().iconst(I64, n as i64)
     }
 
+    /// A NIR `switch` on the raw i64 V: to the block of the case whose
+    /// interval holds V, else DEFAULT. CASES are sorted and disjoint
+    /// (nir::validate). A dense switch -- one whose span is small and not
+    /// much larger than the number of intervals it is cut into, gaps and
+    /// the outside included -- is a bounds check and a jump table
+    /// (br_table); any other a balanced search of the intervals, one
+    /// comparison per level (no comparison decides less than half of what
+    /// is left).
+    fn switch(&mut self, v: ir::Value, default: ir::Block, cases: &[(i64, i64, ir::Block)]) {
+        if cases.is_empty() {
+            self.b.ins().jump(default, &[]);
+            return;
+        }
+        // The partition of the whole i64 line: (start, block), the first
+        // start i64::MIN, gaps DEFAULT, adjacent pieces of one block one.
+        let mut pieces: Vec<(i64, ir::Block)> = Vec::new();
+        let push = |pieces: &mut Vec<(i64, ir::Block)>, start: i64, block: ir::Block| {
+            if pieces.last().is_none_or(|(_, b)| *b != block) {
+                pieces.push((start, block));
+            }
+        };
+        let mut at = Some(i64::MIN);
+        for &(lo, hi, block) in cases {
+            if let Some(a) = at {
+                if lo > a {
+                    push(&mut pieces, a, default);
+                }
+            }
+            push(&mut pieces, lo, block);
+            at = hi.checked_add(1);
+        }
+        if let Some(a) = at {
+            push(&mut pieces, a, default);
+        }
+        let lo = cases[0].0;
+        let hi = cases[cases.len() - 1].1;
+        let span = (hi as i128) - (lo as i128) + 1;
+        let intervals = pieces.len() as i128;
+        if intervals >= 5 && span <= 4096 && span <= 8 * intervals {
+            // Dense: V - LO indexes a table of SPAN blocks.
+            let mut table: Vec<ir::Block> = Vec::with_capacity(span as usize);
+            let mut k = 0;
+            for x in lo..=hi {
+                while k + 1 < cases.len() && cases[k].1 < x {
+                    k += 1;
+                }
+                let (clo, chi, block) = cases[k];
+                table.push(if clo <= x && x <= chi { block } else { default });
+            }
+            let index = self.b.ins().iadd_imm_s(v, lo.wrapping_neg());
+            let inside = self.b.ins().icmp_imm_u(IntCC::UnsignedLessThan, index, span as i64);
+            let dispatch = self.b.create_block();
+            self.b.ins().brif(inside, dispatch, &[], default, &[]);
+            self.b.switch_to_block(dispatch);
+            let index = self.b.ins().ireduce(types::I32, index);
+            let default_call = self.b.func.dfg.block_call(default, &[]);
+            let calls: Vec<ir::BlockCall> = table.iter().map(|b| self.b.func.dfg.block_call(*b, &[])).collect();
+            let jt = self.b.create_jump_table(ir::JumpTableData::new(default_call, &calls));
+            self.b.ins().br_table(index, jt);
+            return;
+        }
+        self.search(v, &pieces);
+    }
+
+    /// A balanced search of the partition PIECES (Translator::switch) on V,
+    /// in the current block.
+    fn search(&mut self, v: ir::Value, pieces: &[(i64, ir::Block)]) {
+        if pieces.len() == 1 {
+            self.b.ins().jump(pieces[0].1, &[]);
+            return;
+        }
+        let mid = pieces.len() / 2;
+        let below = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, v, pieces[mid].0);
+        let left = self.b.create_block();
+        let right = self.b.create_block();
+        self.b.ins().brif(below, left, &[], right, &[]);
+        self.b.switch_to_block(left);
+        self.search(v, &pieces[..mid]);
+        self.b.switch_to_block(right);
+        self.search(v, &pieces[mid..]);
+    }
+
     fn label(&mut self, l: nir::Label) -> ir::Block {
         if let Some(block) = self.labels.get(&l) {
             return *block;
@@ -2083,6 +2168,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().brif(flag, t, &[], e, &[]);
                 self.terminated = true;
             }
+            Inst::Switch { value, default, cases } => {
+                let v = self.get(*value);
+                let default = self.label(*default);
+                let cases: Vec<(i64, i64, ir::Block)> = cases.iter().map(|(lo, hi, l)| (*lo, *hi, self.label(*l))).collect();
+                self.switch(v, default, &cases);
+                self.terminated = true;
+            }
             Inst::Jump(l) => {
                 let block = self.label(*l);
                 self.b.ins().jump(block, &[]);
@@ -2449,6 +2541,18 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             StrToAscii => self.call_helper("rt_str_to_ascii", &[self.vm, a[0]]),
             AsciiToStr => self.call_allocating("rt_ascii_to_str", &[self.vm, a[0]], "asciitostr", KIND_STR),
             RIAdd => self.b.ins().iadd(a[0], a[1]),
+            // A static byte storage's payload starts BYTES_PAYLOAD_OFFSET
+            // past its address (runtime/bytesobj.rs); the index is native
+            // lowering's, bounded by the table's shape (DfaTable).
+            RTabLoad8 => {
+                let at = self.b.ins().iadd(a[0], a[1]);
+                self.b.ins().uload8(I64, MemFlagsData::trusted().with_readonly(), at, BYTES_PAYLOAD_OFFSET as i32)
+            }
+            RTabLoad16 => {
+                let scaled = self.b.ins().ishl_imm_u(a[1], 1);
+                let at = self.b.ins().iadd(a[0], scaled);
+                self.b.ins().uload16(I64, MemFlagsData::trusted().with_readonly(), at, BYTES_PAYLOAD_OFFSET as i32)
+            }
             RISub => self.b.ins().isub(a[0], a[1]),
             RIMul => self.b.ins().imul(a[0], a[1]),
             // native/lower.tcl's RawEligibleShift already proved a[0]
@@ -2617,6 +2721,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         FfiFixtureCopy => ("rt_ffi_fixture_copy", None, true, None),
                         FfiFixtureMixed => ("rt_ffi_fixture_mixed", None, true, None),
                         CoRelease => ("rt_co_release", None, false, None),
+                        CoFailed => ("rt_co_failed", None, false, Some(("cofailed", KIND_COROUTINE))),
                         AffineDrop => ("rt_affine_drop", None, false, None),
                         // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
                         MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),
@@ -3964,3 +4069,135 @@ mod aarch64_float_tests {
     }
 }
 
+
+#[cfg(test)]
+mod switch_tests {
+    //! NIR's general multiway branch (`switch`) and the byte-table loads
+    //! (`rtabload8`, `rtabload16`) that declared recognizers' transitions
+    //! lower to (native/lower.tcl's DfaTransition), run through the JIT.
+    use crate::codegen::{Backend, CompileOptions, CraneliftJit};
+    use crate::nir;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::value::{make_small, Value};
+    use crate::runtime::vm::{ProgramInfo, Vm};
+    use std::rc::Rc;
+
+    fn run(text: &str) -> Value {
+        let program = nir::parse(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            AllocMode::Off,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        (compiled.entry)(&mut *vm)
+    }
+
+    /// A program whose value is pick(K): the switch CASES ({LO, HI}) over
+    /// K's raw value, case i answering i, the default 99.
+    fn pick(cases: &[(i64, i64)], k: i64) -> Value {
+        let mut text = String::from("nir 1 call-effects=1 statics=0\n\n");
+        text.push_str("func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n");
+        text.push_str(&format!("    %0 = int {k}\n    %1 = call 1 %0\n    ret %1\nend\n"));
+        text.push_str("func 1 \"pick\" params=1 env=0 regs=4 pnames=\"k\" captures=0 rawregs=\"1 2\"\n");
+        text.push_str("    %1 = op runbox %0\n    switch %1 L99");
+        for (i, (lo, hi)) in cases.iter().enumerate() {
+            text.push_str(&format!(" {lo}:{hi}:L{i}"));
+        }
+        text.push('\n');
+        for i in 0..cases.len() {
+            text.push_str(&format!("  label L{i}\n    %2 = rawint {i}\n    jump L100\n"));
+        }
+        text.push_str("  label L99\n    %2 = rawint 99\n    jump L100\n");
+        text.push_str("  label L100\n    %3 = op rbox %2\n    ret %3\nend\n");
+        run(&text)
+    }
+
+    /// The answer `pick` gives for K by a direct search of CASES.
+    fn expected(cases: &[(i64, i64)], k: i64) -> Value {
+        let i = cases.iter().position(|(lo, hi)| *lo <= k && k <= *hi).map_or(99, |i| i as i64);
+        make_small(i)
+    }
+
+    fn check(cases: &[(i64, i64)], probes: &[i64]) {
+        for &k in probes {
+            assert_eq!(pick(cases, k), expected(cases, k), "pick({k}) over {cases:?}");
+        }
+    }
+
+    /// Every interesting probe of CASES: each bound, one past each, between.
+    fn probes(cases: &[(i64, i64)]) -> Vec<i64> {
+        let mut out = vec![-1_000_000, 1_000_000];
+        for (lo, hi) in cases {
+            out.extend([lo - 1, *lo, (lo + hi) / 2, *hi, hi + 1]);
+        }
+        out
+    }
+
+    #[test]
+    fn a_dense_switch_takes_every_case_and_the_default() {
+        // Seven intervals over a span of 40: a jump table.
+        let cases = [(0, 0), (1, 1), (2, 2), (3, 5), (10, 10), (11, 20), (30, 40)];
+        check(&cases, &probes(&cases));
+    }
+
+    #[test]
+    fn a_sparse_switch_takes_every_case_and_the_default() {
+        // Wide gaps: a balanced search over the intervals.
+        let cases = [(-1, -1), (32, 32), (48, 57), (1000, 1000), (65536, 1114111)];
+        check(&cases, &probes(&cases));
+    }
+
+    #[test]
+    fn a_switch_of_one_case_and_of_none() {
+        check(&[(48, 57)], &[47, 48, 52, 57, 58]);
+        check(&[], &[0, 1]);
+    }
+
+    /// A program whose value is the byte (OP rtabload8) or the 16-bit
+    /// element (rtabload16) at raw index K of the bytes constant HEX.
+    fn load(op: &str, hex: &str, k: i64) -> Value {
+        let text = format!(
+            "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"1 2\"\n    %0 = bytes \"{hex}\"\n    %1 = rawint {k}\n    %2 = op {op} %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
+        );
+        run(&text)
+    }
+
+    #[test]
+    fn byte_table_loads_read_unsigned_elements() {
+        assert_eq!(load("rtabload8", "0a0bff0c", 0), make_small(10));
+        assert_eq!(load("rtabload8", "0a0bff0c", 2), make_small(255));
+        assert_eq!(load("rtabload8", "0a0bff0c", 3), make_small(12));
+        // Little-endian 16-bit elements, the index counting elements.
+        assert_eq!(load("rtabload16", "3412ffff0100", 0), make_small(0x1234));
+        assert_eq!(load("rtabload16", "3412ffff0100", 1), make_small(0xffff));
+        assert_eq!(load("rtabload16", "3412ffff0100", 2), make_small(1));
+    }
+
+    #[test]
+    fn a_switch_over_a_tagged_register_does_not_validate() {
+        let text = "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n    %0 = int 1\n    switch %0 L1 0:0:L0\n  label L0\n    ret %0\n  label L1\n    ret %0\nend\n";
+        // (Parsing validates: the raw operand is checked there.)
+        let rejected = match nir::parse(text) {
+            Err(e) => e.to_string().contains("raw"),
+            Ok(program) => nir::validate_function(&program, 0).is_err(),
+        };
+        assert!(rejected);
+    }
+
+    #[test]
+    fn overlapping_or_unsorted_cases_do_not_parse_or_validate() {
+        for cases in ["0:5:L0 3:7:L1", "5:7:L0 0:1:L1", "3:2:L0"] {
+            let text = format!(
+                "nir 1 call-effects=1 statics=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"1\"\n    %0 = int 1\n    %1 = op runbox %0\n    switch %1 L2 {cases}\n  label L0\n    ret %0\n  label L1\n    ret %0\n  label L2\n    ret %0\nend\n"
+            );
+            let rejected = match nir::parse(&text) {
+                Err(_) => true,
+                Ok(program) => nir::validate_function(&program, 0).is_err(),
+            };
+            assert!(rejected, "{cases}");
+        }
+    }
+}

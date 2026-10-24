@@ -62,6 +62,9 @@
 #                         is its result (Sequence splices the statements in; a
 #                         nested pattern binds a further temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
+#   exported c fn f(a: T):  the same block marked `exported c`: a C export
+#                         of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
+#                         hir/exports.tcl checks and lists them)
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
@@ -143,6 +146,11 @@ namespace eval surface::lower {
     # file may not make (surface/modules.tcl's CollectAndLoad), set by the
     # loader around the file's lowering. Empty for a file without any.
     variable staticDeferred [dict create]
+    # The qualified references of the file being lowered whose loader error
+    # depends on syntax recovery (surface/modules.tcl's DependentReference,
+    # SYNTAX-RECOVERY-MILESTONE-1.md): span start -> 1. Each is lowered as a
+    # hole: what it names is not known. Empty outside such a compilation.
+    variable dependentRefs [dict create]
 }
 
 proc surface::lowerToHir {ast args} {
@@ -288,10 +296,16 @@ proc surface::lower::TraitDeclOf {node namespace} {
 # module identity, never read from the (cached, importer-neutral) AST. `opaque`
 # is the declaration's own modifier.
 proc surface::lower::StructDeclOf {node namespace} {
-    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
+    set decl [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
         namespace $namespace fields [dict get $node fields] span [dict get $node span] \
         opaque [dict getdef $node opaque 0] \
         context [dict getdef $node context 0]]
+    if {[dict exists $node slots]} {
+        # A parameterized struct's type slots (TRAIT-CONSTRAINED-IMPRINTED-
+        # TYPES.md), as written: hir/structs.tcl resolves their traits.
+        dict set decl slots [dict get $node slots]
+    }
+    return $decl
 }
 
 # The declaration dict of a `typedecl` node declared in module NAMESPACE (""
@@ -350,6 +364,13 @@ proc surface::lower::ErrorDeclOf {node {namespace ""}} {
 # receives emitted warnings): the last thing
 # the frontend does, before any backend sees the HIR.
 proc surface::lower::Finish {hir strict {warnings ""} {channel stderr}} {
+    if {$strict && [dict exists $hir syntaxRecovery]} {
+        # A program with syntax errors analyzed past them
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): every syntax diagnostic, then
+        # every independent semantic one.
+        core::raiseDiagnostics [concat [dict get $hir syntaxRecovery diagnostics] \
+            [hir::recovery::entries $hir [hir::recovery::reported $hir] 1]]
+    }
     if {$strict && [hir::diagnostics $hir] ne ""} {
         hir::recovery::raise $hir [hir::recovery::reported $hir] 1
     }
@@ -413,6 +434,13 @@ proc surface::lower::Sequence {nodes} {
             lappend result {*}[Destructure $node]
         } elseif {[dict get $node kind] eq "coroutinebind"} {
             lappend result {*}[CoroutineBind $node]
+        } elseif {[dict get $node kind] eq "hole"} {
+            lappend result {*}[Hole $node]
+        } elseif {[dict get $node kind] in {dfadecl classdecl}} {
+            # A declared recognizer or symbol class (DFA-COROUTINE-
+            # MILESTONE-2.md): the functions it lowers to, or its
+            # diagnostics (surface/dfa.tcl; the loader analyzed it).
+            lappend result {*}[surface::dfa::Nodes $node]
         } elseif {[dict get $node kind] eq "with"} {
             # `with context EXPR` (CONTEXTS.md): the value bound to a hygienic
             # temporary, then the explicit installation of it (placement,
@@ -422,6 +450,26 @@ proc surface::lower::Sequence {nodes} {
         } else {
             lappend result [Node $node]
         }
+    }
+    return $result
+}
+
+# The syntax nodes of a malformed statement (surface/recover.tcl's `hole`,
+# SYNTAX-RECOVERY-MILESTONE-1.md): what its valid prefix establishes and
+# nothing else. A statement that certainly binds NAME (`x = ...`, `fn x(...`)
+# is the binding of NAME to a hole where its value was written; a statement
+# that may bind other names, or binds none, is a hole of its own (`binds`
+# says which).
+proc surface::lower::Hole {node} {
+    set result {}
+    if {[dict get $node name] ne ""} {
+        # (The binding's origin is its name, where the source declares it:
+        # the malformed statement has no declaration node of its own.)
+        lappend result [hir::syntax::bindNode [Origin [dict get $node nameSpan] [dict get $node id]] [dict get $node name] \
+            [hir::syntax::holeNode [Origin [dict get $node valueSpan] [dict get $node id]/value] 0]]
+    }
+    if {[dict get $node binds] || [dict get $node name] eq "" || [dict get $node installs]} {
+        lappend result [hir::syntax::holeNode [OriginOf $node] [dict get $node binds] [dict get $node installs]]
     }
     return $result
 }
@@ -699,6 +747,9 @@ proc surface::lower::Node {node} {
             # binding can ever spell "::", so it is never ambiguous with an
             # ordinary reference even where shown together.
             set qualifiedName "[dict get $node namespace]::[dict get $node name]"
+            if {[dict exists $::surface::lower::dependentRefs [dict get $node span start]]} {
+                return [hir::syntax::holeNode $origin 0]
+            }
             if {[core::native::isQualifiedNative $qualifiedName]} {
                 # A root native whose registered name is itself qualified
                 # (std::linux::abi::x86_64::syscall, core/linuxabi.tcl): a root
@@ -730,6 +781,12 @@ proc surface::lower::Node {node} {
             return [hir::syntax::structNode $origin "" [FieldInits $node]]
         }
         namedstruct {
+            if {[dict get $node namespace] ne ""
+                    && [dict exists $::surface::lower::dependentRefs [dict get $node nameSpan start]]} {
+                # (A construction of a type nobody can say exists:
+                # dependentRefs, above.)
+                return [hir::syntax::holeNode $origin 0]
+            }
             set type [dict create name [dict get $node name] namespace [dict get $node namespace] \
                 origin [Origin [dict get $node nameSpan] [dict get $node id]/type]]
             if {[dict exists $node typeArg]} {
@@ -738,6 +795,16 @@ proc surface::lower::Node {node} {
                 # hir/resolve.tcl's ResolveStruct).
                 dict set type typeArg [dict get $node typeArg]
                 dict set type typeArgOrigin [Origin [dict get $node typeArgSpan] [dict get $node id]/typearg]
+            }
+            if {[dict exists $node typeArgs]} {
+                # NAME[A, B, ...] { ... }: a parameterized struct's
+                # construction (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), one
+                # argument per slot, as written.
+                dict set type typeArgs [dict get $node typeArgs]
+                set i 0
+                dict set type typeArgOrigins [lmap span [dict get $node typeArgSpans] {
+                    Origin $span [dict get $node id]/typearg[incr i]
+                }]
             }
             return [hir::syntax::structNode $origin $type [FieldInits $node]]
         }
@@ -830,9 +897,25 @@ proc surface::lower::Node {node} {
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
             }
+            if {[dict getdef $node exported ""] ne ""} {
+                set block [hir::syntax::withExported $block [dict get $node exported]]
+            }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \
                     [Origin [dict get $variadic span] "[dict get $node id]/variadic"]]
+            }
+            # Place parameters (PLACE-PARAMETERS.md): each one's index and its
+            # marker's origin.
+            set places {}
+            set index -1
+            foreach param [dict get $node params] {
+                incr index
+                if {[llength $param] > 4} {
+                    lappend places $index [Origin [lindex $param 4] "[dict get $node id]/place([lindex $param 0])"]
+                }
+            }
+            if {$places ne {}} {
+                set block [hir::syntax::withPlaces $block $places]
             }
             if {[dict exists $node proves] && [dict get $node proves] ne {}} {
                 set block [hir::syntax::withProofs $block [lmap clause [dict get $node proves] {

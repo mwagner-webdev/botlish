@@ -104,12 +104,14 @@ proc surface::cache::Key {path source mode strict {target ""} {root ""}} {
     # architecture picks an architecture-specific module's file
     # (surface/modules.tcl's ModuleFile). ROOT is the application root (the
     # same PATH as given names another directory from another working
-    # directory).
+    # directory). DFA-LOWERING is how a declared recognizer's table is
+    # written (surface/dfa.tcl's `lowering`: the measurements' choice).
     return [list version $version front-end [hir::interchange::fingerprint] \
         path $path source $source library $::core::libraryDir \
         libraries $::core::loadedLibraries strict $strict warnings $mode target $target \
         root $root \
-        scheduler [if {[info exists ::env(BOTLISH_STATIC_SCHEDULER)]} {set ::env(BOTLISH_STATIC_SCHEDULER)} else {string cat ""}]]
+        scheduler [if {[info exists ::env(BOTLISH_STATIC_SCHEDULER)]} {set ::env(BOTLISH_STATIC_SCHEDULER)} else {string cat ""}] \
+        dfa-lowering $::surface::dfa::lowering]
 }
 
 proc surface::cache::EntryPath {dir key} {

@@ -132,9 +132,12 @@ proc gfReleases {source backend} {
 }
 
 # The native coroutine census of SOURCE's run.
+# The general coroutine runtime's counters for SOURCE's native run: with
+# coroutine fusion off, since a fused coroutine has no runtime object to
+# count (COROUTINE-FUSION-MILESTONE-1.md).
 proc gfNativeCoroutines {source} {
     set hir [gfCompile $source]
-    set report [native::allocationReport $hir summary]
+    set report [withoutCoroutineFusion {native::allocationReport $hir summary}]
     return [dict get $report coroutines]
 }
 
@@ -641,7 +644,7 @@ test gf-coroutine-cleanup {every coroutine a run creates -- the runner and each 
     lmap backend {interp compile} {gfReleases $gfCoroutineSuite $backend}
 } -result {{{["PASS completes", "PASS fails, handled", "PASS abandons", "PASS leaves early", "4 passed, 0 failed"]} {created 5 released 2 3 4 5 1}} {{["PASS completes", "PASS fails, handled", "PASS abandons", "PASS leaves early", "4 passed, 0 failed"]} {created 5 released 2 3 4 5 1}}}
 
-test gf-coroutine-cleanup-native {natively: five coroutines, five releases (the abandoned and the early-returning case's while suspended), none swept by the collector; the same under GC stress} -constraints nativeCoroutines -body {
+test gf-coroutine-cleanup-native {natively, on the general coroutine runtime: five coroutines, five releases (the abandoned and the early-returning case's while suspended), none swept by the collector; the same under GC stress} -constraints nativeCoroutines -body {
     set plain [gfNativeCoroutines $gfCoroutineSuite]
     set stressed [withGcStress {gfNativeCoroutines $gfCoroutineSuite}]
     list [dict get $plain released] [dict get $plain sweptSuspended] \
@@ -816,12 +819,12 @@ test gf-code-name-complete {std::test::code_name spells every std::compiler::Dia
     set shown [gfValue "import std::compiler\nimport std::test\n\[$calls\]\n"]
     set expected "\[[join [lmap c $cases {format {"%s"} $c}] {, }]\]"
     list [llength $cases] [expr {$shown eq $expected}]
-} -result {107 1}
+} -result {112 1}
 
 # ---------------------------------------------------------------------------
 # GC stress and warnings
 
-test gf-gc-stress {natively under GC stress: many registered checks capturing Strings and structs, CompilerError payloads, coroutines and failing results retained until the report; the report equals the Tcl backends'} -constraints nativeCoroutines -body {
+test gf-gc-stress {natively under GC stress: many registered checks capturing Strings and structs, CompilerError payloads, coroutines and failing results retained until the report; the report equals the Tcl backends'; on the general coroutine runtime every coroutine is released and none swept} -constraints nativeCoroutines -body {
     set source {import std::compiler
 import std::str
 import std::test
@@ -870,7 +873,7 @@ std::test::report()
     set hir [gfCompile $source]
     set tcl [golden::run $hir interp]
     set native [withGcStress {golden::run $hir cranelift}]
-    set coroutines [withGcStress {dict get [native::allocationReport $hir summary] coroutines}]
+    set coroutines [withGcStress {withoutCoroutineFusion {dict get [native::allocationReport $hir summary] coroutines}}]
     list [lindex [lindex $tcl 1] end] [expr {[lindex $native 1] eq [lindex $tcl 1]}] \
         [dict get $coroutines released] [dict get $coroutines sweptSuspended]
 } -result {{24 passed, 24 failed} 1 13 0}

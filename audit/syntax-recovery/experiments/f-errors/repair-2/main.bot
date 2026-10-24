@@ -1,0 +1,10 @@
+error Boom
+
+fn always(n: int) -> int errors Boom:
+    if n > 5:
+        return n
+    fail Boom
+
+v = always(3):
+    on Boom:
+        0

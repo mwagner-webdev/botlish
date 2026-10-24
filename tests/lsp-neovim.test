@@ -41,12 +41,13 @@ proc ltPut {path text} {
     close $f
 }
 
-test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botlish.lua, on a two-module program: the .bot filetype, the server attached with UTF-16 positions, the compiler's diagnostics as Neovim shows them, hover, go-to-definition into the module and into std::list, references across files, unsaved edits the client sends, a syntax error during which hover answers stale, and recovery -- and no file written} -constraints neovim -body {
+test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botlish.lua, on a two-module program: the .bot filetype, the server attached with UTF-16 positions, the compiler's diagnostics as Neovim shows them, hover, go-to-definition into the module and into std::list, references across files, unsaved edits the client sends, a syntax error during which hover answers fresh around the malformed line and stale inside it, a syntax error in the imported module (a second buffer) during which the importer's answers stay fresh, and the repairs -- and no file written (SYNTAX-RECOVERY-MILESTONE-1.md)} -constraints neovim -body {
     set dir [file join [temporaryDirectory] lsp-neovim-[pid]]
     file delete -force $dir
     file mkdir $dir
     set dir [file normalize $dir]
-    ltPut $dir/shapes.bot "fn area(w: int, h: int) -> int:\n    w * h\n"
+    set shapes "fn area(w: int, h: int) -> int:\n    w * h\n"
+    ltPut $dir/shapes.bot $shapes
     set main "import shapes\nimport std::list\n\na = shapes::area(3, 4)\nb = std::list::get(\[1, 2\], 5, 0)\na + b + nosuch\n"
     ltPut $dir/main.bot $main
     set out [file join $dir out.json]
@@ -68,16 +69,23 @@ test lsp-neovim-session {Neovim's own client, configured by editors/neovim/botli
         [lsp::json::get $first code] [lsp::json::get $first message] [lsp::json::get $first line] [lsp::json::get $first col] \
         [ltField $r hover] [ltLanded [ltField $r definition]] [ltLanded [ltField $r std_definition]] \
         [lsp::json::write [ltField $r references_area]] [ltField $r fixed_waited] \
-        [ltField $r syntax_waited] [lsp::json::get $syntax code] [ltField $r stale_hover] \
-        [ltField $r recovered_waited] [ltField $r recovered_hover] [ltField $r modified] \
-        [expr {[file exists $out] && [compilerpedia_ReadFile $dir/main.bot] eq $main}]
+        [ltField $r syntax_waited] [lsp::json::get $syntax code] [ltField $r syntax_hover] [ltField $r syntax_hover_b] [ltField $r stale_hover] \
+        [ltField $r recovered_waited] [ltField $r recovered_hover] \
+        [ltField $r module_waited] [lsp::json::write [ltField $r module_syntax]] [ltField $r module_main_errors] \
+        [ltField $r module_hover] [ltField $r module_hover_b] [ltField $r module_repaired] [ltField $r module_repaired_hover] \
+        [ltField $r modified] [ltField $r module_modified] \
+        [expr {[file exists $out] && [compilerpedia_ReadFile $dir/main.bot] eq $main && [compilerpedia_ReadFile $dir/shapes.bot] eq $shapes}]
 } -setup {
     proc compilerpedia_ReadFile {path} { set f [open $path]; fconfigure $f -encoding utf-8; set t [read $f]; close $f; return $t }
-} -cleanup {file delete -force $dir; unset -nocomplain dir main out cmd r first syntax} -result [list {bool 1} {str {}} {str botlish} {str botlish} {str utf-16} \
+} -cleanup {file delete -force $dir; unset -nocomplain dir main shapes out cmd r first syntax} -result [list {bool 1} {str {}} {str botlish} {str botlish} {str utf-16} \
     {str {CORE SEMANTIC UNBOUND}} {str {unbound name "nosuch"}} {num 5} {num 8} \
     "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" shapes.bot:1:3 list.bot:76:3 \
     {["shapes.bot:0","main.bot:3"]} {bool 1} {bool 1} {str {SURFACE SYNTAX}} \
-    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```\n\n*stale: analyzed before the latest changes to main.bot*}" \
-    {bool 1} "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" {bool 1} 1]
+    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" "str {```botlish\nb: int\n```}" \
+    "str {```botlish\na: int\n```\n\n*stale: analyzed before the latest changes to main.bot*}" \
+    {bool 1} "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" \
+    {bool 1} {"1:7: expected an expression, found end of line"} {num 0} \
+    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" "str {```botlish\nb: int\n```}" {bool 1} \
+    "str {```botlish\nfn shapes::area(w: int, h: int) -> int\n```}" {bool 1} {bool 1} 1]
 
 cleanupTests

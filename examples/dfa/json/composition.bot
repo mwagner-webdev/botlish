@@ -1,0 +1,79 @@
+# composition.bot -- one driver for any recognizer (DFA-COROUTINE-
+# MILESTONE-2.md, "Coroutine fusion"; the exploration's composition probe).
+# A function that may yield is never a value (COROUTINES.md 37), so a
+# driver cannot be handed a recognizer; but a function that *starts* one
+# does not yield (the construction is a boundary), returns its handle
+# (AFFINE-VALUES.md: a handle moves through results and fields) and is a
+# value like any other. lex_with is json.bot's lex_text with the recognizer
+# a parameter.
+#
+# Expressible with ordinary coroutine semantics -- and a fallback for
+# coroutine fusion: the handle leaves the factory, so every token's
+# recognizer runs on the general runtime (a stack, a switch per symbol).
+# That cost is the optimizer's interprocedural limit, kept here as its
+# regression and performance probe, never worked around.
+
+import std::dfa
+import json
+import json_lex
+import std::coroutine
+import std::mutable_array
+
+# A started recognizer: its handle, and the count it completed with if its
+# first symbol completed it.
+struct Started:
+    step: Coroutine{args: [std::dfa::Symbol], return: int, errors: [std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd]}
+    first: int
+
+fn token(c: int) -> Started errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    coroutine {step, first} = json_lex::json_token(c)
+    Started {step: step, first: first}
+
+fn token_strict(c: int) -> Started errors std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd:
+    if c == 34:
+        coroutine {step, first} = json_lex::json_string_strict(c)
+        return Started {step: step, first: first}
+    coroutine {step, first} = json_lex::json_token(c)
+    Started {step: step, first: first}
+
+# The tokens of CHUNKS, each recognized by the recognizer MAKE starts (the
+# input buffer is json.bot's: the current symbol).
+fn lex_with(make: Fn{args: [int], return: Started, errors: [std::dfa::UnrecognizedInput, std::dfa::UnexpectedEnd]}, chunks: List[str], max_token: int) -> json::Summary errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong:
+    coroutine {step: next_symbol, first: c0} = json::scalars(chunks)
+    cursor = std::mutable_array::create(4, 0)
+    cursor.set(1, c0)
+    loop:
+        start = cursor.at(0)
+        c = cursor.at(1)
+        if c == -1:
+            break
+        if json::whitespace?(c):
+            cursor.set(0, start + 1)
+            cursor.set(1, next_symbol())
+            continue
+        {step: feed, first} = make(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail json::Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail json::Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, first)
+        loop:
+            if std::coroutine::done?(feed):
+                break
+            p = cursor.at(0) + 1
+            cursor.set(0, p)
+            x = next_symbol()
+            cursor.set(1, x)
+            if p - start >= max_token:
+                fail json::TokenTooLong {at: start, limit: max_token}
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail json::Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail json::Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        if cursor.at(3) == 0 and cursor.at(1) != -1:
+            cursor.set(0, cursor.at(0) + 1)
+            cursor.set(1, next_symbol())
+        cursor.set(2, cursor.at(2) + 1)
+    json::Summary {tokens: cursor.at(2), symbols: cursor.at(0)}

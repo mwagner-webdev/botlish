@@ -352,6 +352,12 @@ proc hir::sourcetypes::TypeExprNames {typeExpr} {
         }
         return [list [lindex $typeExpr 1]]
     }
+    if {[hir::resolve::IsApplyTypeExpr $typeExpr]} {
+        # NAME[A, B, ...] (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+        set names [list [lindex $typeExpr 1]]
+        foreach t [lindex $typeExpr 2] { lappend names {*}[TypeExprNames $t] }
+        return $names
+    }
     lassign $typeExpr head arg
     if {$head eq "fn"} {
         set names {}
@@ -520,10 +526,10 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
         return ""
     }
     if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$id in $visiting} { return "" }
-        foreach {field t} [hir::structs::fieldTypes $id] {
-            set why [ValueStability $t [concat $visiting [list $id]]]
+        # (An application's fields: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        if {$type in $visiting} { return "" }
+        foreach {field t} [hir::structs::AppliedFieldTypes $type] {
+            set why [ValueStability $t [concat $visiting [list $type]]]
             if {$why ne ""} { return "has a field \"$field\" that $why" }
         }
         return ""

@@ -67,7 +67,7 @@ index: proofs stdlib
 alias: bounds proof; bounds; bounds check; IndexNotFound; index proof; range proof; indexed access; list index; index out of range; out of bounds; IndexNotFound proof; array index
 keywords: std::list::at, at, index, length, guard, loop, descending, field, local binding, mod, bit_and, mask, hash, capacity
 related: proof.slices proof.completions proof.ranges concept.lists concept.list-length concept.errors rule.unhandled-errors rule.known-error stdlib.std::list::at stdlib.std::list::get principle.restate-in-proven-form
-docs: STDLIB-NAMESPACES.md STATIC-COMPLETION-PROOFS.md REFACTOR-WARNINGS-CLEAN.md
+docs: STDLIB-NAMESPACES.md STATIC-COMPLETION-PROOFS.md REFACTOR-WARNINGS-CLEAN.md ORDERED-MUTABLE-MAP-SET.md
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::list::at" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::at" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::set" may produce*
@@ -134,6 +134,13 @@ forms:
     0 <= h.mod(n) < n. A mask m keeps bit_and(h, m) in 0..m when m >= 0, so
     the mask needs m >= 0 proven (a guard that the size is not 0, or m's own
     range) but no power of two.
+  * a MutableVector's own length, in any of the forms above, when the
+    vector's length cannot change between the length read and the element
+    read: nothing in the function resizes the place (a push, pop, take or
+    clear on it, or a call giving it, or a struct holding it, to a place
+    parameter: concept.place-parameters), and its root is no context
+    parameter (any function sharing the context may resize it). A swap
+    only replaces an element. A copy of the vector is another place.
   * the List a loop collected (with no break or continue) over a container
     has that container's length, so any of the forms above may use the
     length of another loop's List over the same List or MutableArray -- or

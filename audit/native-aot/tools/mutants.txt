@@ -157,12 +157,14 @@ const C_CALLS: bool = cfg!(any(
 # ---------------------------------------------------------------------------
 # The generated startup and the standalone runtime
 
-@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame)
-## native/src/codegen/aot.rs
+@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame): the one instantiation both startups and native libraries share (NATIVE-LIBRARY-MILESTONE-1.md)
+## native/src/runtime/program.rs
 <<<<
-    s.push_str("map.finish();\nvm.set_framemap(Rc::new(map));\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    vm.set_framemap(Rc::new(map));
 ====
-    s.push_str("map.finish();\nlet _ = map;\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    let _ = map;
 >>>>
 
 @@ startup-no-guard a standalone executable runs without the stack-overflow guard
@@ -255,4 +257,190 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp_") {
 ====
     if flavor == LinkerFlavor::Msvc && diagnostics.contains("unresolved external symbol __imp__") {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): codegen/aot.rs's
+# linker selection, link plan and failure messages; the runtime archive's
+# main and runtime/aot.rs's linked_main and process setup. Their detectors
+# are tests/system-linker.test and the driver's aot tests, with the ones
+# above. The program record they start is every linker's
+# (runtime/program.rs): its mutants are startup-no-stack-maps above and
+# audit/native-library's (fingerprint-unchecked, descriptor-errors-dropped). Not here: the static-or-dynamic choice of a library
+# (the platform linker's search rules decide it, as for the rustc linker;
+# system-linker-static-incorporation checks the result), and a link that
+# leaves the executable depending on the compiler's cache (nothing of the
+# archive's is linked dynamically: no mutant of ours can make it so short of
+# a shared runtime, which is not a mutation of this code).
+
+@@ sys-auto-stub-for-c auto links a program that calls C with the stub, which refuses it
+## native/src/codegen/aot.rs
+<<<<
+        Some("auto") => Ok(if calls_c(program) || !stub { Linker::System } else { Linker::Stub }),
+====
+        Some("auto") => Ok(if !stub { Linker::System } else { Linker::Stub }),
+>>>>
+
+@@ sys-auto-system-for-plain auto links a program that calls no C with the system linker where the stub runs
+%% linux-x86_64
+## native/src/codegen/aot.rs
+<<<<
+        Some("auto") => Ok(if calls_c(program) || !stub { Linker::System } else { Linker::Stub }),
+====
+        Some("auto") => Ok(if calls_c(program) || stub { Linker::System } else { Linker::Stub }),
+>>>>
+
+@@ sys-runtime-omitted the runtime archive is left out of the link
+## native/src/codegen/aot.rs
+<<<<
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+====
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+>>>>
+
+@@ sys-runtime-path-split the runtime archive's path reaches the linker split at its spaces (a shell's word splitting)
+## native/src/codegen/aot.rs
+<<<<
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+====
+    args.extend(runtime.to_string_lossy().split(' ').map(OsString::from));
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+>>>>
+
+@@ sys-runtime-variable-ignored BOTLISH_NATIVE_RUNTIME is not read: the archive beside the driver is always linked
+## native/src/codegen/aot.rs
+<<<<
+    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+====
+    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
+>>>>
+
+@@ sys-runtime-machine-unchecked a runtime archive of another machine is linked (the linker's own failure, not the archive's)
+## native/src/codegen/aot.rs
+<<<<
+        Ok(machine) if machine == HOST_MACHINE => Ok(path),
+====
+        Ok(_) => Ok(path),
+>>>>
+
+@@ sys-archive-main-runs-nothing the runtime archive's main returns without starting the program record
+## native/runtime-archive/src/lib.rs
+<<<<
+    unsafe { aot::linked_main(&*std::ptr::addr_of!(botlish_program)) }
+====
+    let _ = std::ptr::addr_of!(botlish_program);
+    0
+>>>>
+
+@@ sys-startup-failure-succeeds a system-linked executable whose record cannot be read exits with status 0
+## native/src/runtime/aot.rs
+<<<<
+                    std::process::exit(1);
+====
+                    std::process::exit(0);
+>>>>
+
+@@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's
+## native/src/codegen/aot.rs
+<<<<
+        if let Some(helper) = undefined_helper(&text) {
+====
+        if let Some(helper) = undefined_helper(&text).filter(|_| false) {
+>>>>
+
+@@ sys-helper-prefix lld's undefined helper is matched without its line's end: a helper whose name begins another's is named for it
+## native/src/codegen/aot.rs
+<<<<
+            || output.lines().any(|line| line.trim_end().ends_with(&format!("undefined symbol: {name}")))
+====
+            || output.contains(&format!("undefined symbol: {name}"))
+>>>>
+
+@@ sys-group-dropped GNU ld gets the libraries without the archive group: a library declared before the one it needs leaves symbols undefined
+%% linux-x86_64 linux-aarch64
+## native/src/codegen/aot.rs
+<<<<
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
+====
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).filter(|a| !a.contains("group")).map(OsString::from));
+>>>>
+
+@@ sys-link-dirs-lost the -L directories of the plan never reach the linker
+## native/src/codegen/aot.rs
+<<<<
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
+====
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).filter(|a| !a.starts_with("-L") && !a.starts_with("/LIBPATH:")).map(OsString::from));
+>>>>
+
+@@ sys-plan-lost the program's libraries never reach the linker
+## native/src/codegen/aot.rs
+<<<<
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
+====
+    let _ = plan;
+>>>>
+
+@@ sys-not-pie GNU ld links a position-dependent executable, not rustc's PIE
+%% linux-x86_64 linux-aarch64
+## native/src/codegen/aot.rs
+<<<<
+            for flag in ["-pie", "-Wl,--eh-frame-hdr", "-Wl,-z,relro,-z,now", "-Wl,--gc-sections"] {
+====
+            for flag in ["-no-pie", "-Wl,--eh-frame-hdr", "-Wl,-z,relro,-z,now", "-Wl,--gc-sections"] {
+>>>>
+
+@@ sys-failed-link-replaces a system link removes the previous executable before it knows the link succeeds
+## native/src/codegen/aot.rs
+<<<<
+    let runtime = runtime_archive()?;
+    let tool = system_linker(LINKER)?;
+====
+    let _ = std::fs::remove_file(destination);
+    let runtime = runtime_archive()?;
+    let tool = system_linker(LINKER)?;
+>>>>
+
+@@ sys-missing-linker-unclassified gcc's "cannot find 'ld'" is taken for a failed link, not a missing linker
+## native/src/codegen/aot.rs
+<<<<
+            line.contains("collect2: fatal error: cannot find")
+====
+            line.contains("collect2: fatal error: cannot find the linker")
+>>>>
+
+@@ sys-no-command-line-tools-unclassified macOS without the Command Line Tools (xcrun's "invalid active developer path") is taken for a failed link, not a missing toolchain
+## native/src/codegen/aot.rs
+<<<<
+                || line.contains("xcrun: error: invalid active developer path")
+====
+                || line.contains("xcrun: error: invalid active developer path:")
+>>>>
+
+@@ sys-fingerprint-keeps-helpers the ABI fingerprint reads ops::helpers(), every helper's address with its name, so every system-linked executable keeps all the runtime helpers
+## native/src/runtime/aotimage.rs
+<<<<
+    for &(name, params) in super::ops::HELPER_SIGNATURES {
+====
+    for (name, params, _) in super::ops::helpers() {
+>>>>
+
+@@ sys-sigpipe-default a system-linked process keeps SIGPIPE's default: a write to a closed pipe kills it
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+        if libc::signal(libc::SIGPIPE, libc::SIG_IGN) == libc::SIG_ERR {
+====
+        if libc::signal(libc::SIGPIPE, libc::SIG_DFL) == libc::SIG_ERR {
+>>>>
+
+@@ sys-fds-not-sanitized a system-linked process started without a standard descriptor leaves it closed
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+            if libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
+====
+            if false && libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
 >>>>

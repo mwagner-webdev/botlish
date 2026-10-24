@@ -190,9 +190,9 @@
 @@ result-move-context a function's result moves a context member's header out like its own place's: the snapshot it returns aliases the installed member
 ## hir/mutvec.tcl
 <<<<
-    if {[IsContextParam $hir $root] || ![IsResult $hir $parent $e]} {
+    if {[IsContextParam $hir $root] || [IsPlaceParam $hir $root] || ![IsResult $hir $parent $e]} {
 ====
-    if {![IsResult $hir $parent $e]} {
+    if {[IsPlaceParam $hir $root] || ![IsResult $hir $parent $e]} {
 >>>>
 
 @@ snapshot-aliasing a loop over an unrestricted vector iterates the vector itself, not a snapshot: it observes (and here drains) the vector
@@ -278,9 +278,9 @@ proc hir::mutvec::ShareDescriptor {type} {
 @@ byref-place-copied a mutating receiver is copied like a read when a later argument mutates the same place: `v.push(v.pop() + 10)` pushes onto a copy, and the update is lost
 ## hir/mutvec.tcl
 <<<<
-                    && ([PlaceArgument $hir $p $e] || ![WrittenLater $hir $p $e])} {
+                    && ([PlaceArgument $hir $p $e] || (![WrittenLater $hir $p $e] && ![PlaceOverlap $hir $p $e]))} {
 ====
-                    && ![WrittenLater $hir $p $e]} {
+                    && (![WrittenLater $hir $p $e] && ![PlaceOverlap $hir $p $e])} {
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -440,15 +440,9 @@ proc hir::mutvec::ShareDescriptor {type} {
 @@ path-context-moved a context parameter's path moves at its last use in a function like any held path: a local taking a context member's header mutates the installed context
 ## hir/mutvec.tcl
 <<<<
-    if {[IsContextParam $hir $b] || ![dict exists $convention held $b]} {
-        return 0
-    }
-    return [NoLaterUse $hir $parent $e $b]
+    if {[IsContextParam $hir $b] || [IsPlaceParam $hir $b] || ![dict exists $convention held $b]} {
 ====
-    if {![dict exists $convention held $b]} {
-        return 0
-    }
-    return [NoLaterUse $hir $parent $e $b]
+    if {[IsPlaceParam $hir $b] || ![dict exists $convention held $b]} {
 >>>>
 
 @@ path-blind-last-use (economic) every later use of the binding counts, whatever its path (the per-binding rule): a rebuild from a struct's own fields copies every field but the last
@@ -584,9 +578,11 @@ proc hir::mutvec::ShareDescriptor {type} {
 @@ at-accepts-affine `at` of an affine element is accepted: a second owner of an element the vector still owns
 ## core/mutvec.tcl
 <<<<
-    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {copy-out observe}
+    -result-shape {mutvec-element 0} -errors IndexNotFound -bounds {index mutvec 0 1} \
+    -ownership {copy-out observe}
 ====
-    -result-shape {mutvec-element 0} -errors IndexNotFound -ownership {observe observe}
+    -result-shape {mutvec-element 0} -errors IndexNotFound -bounds {index mutvec 0 1} \
+    -ownership {observe observe}
 >>>>
 
 

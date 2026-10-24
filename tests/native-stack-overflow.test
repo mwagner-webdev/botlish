@@ -141,8 +141,10 @@ test ns-main-small-stack {a 1 MiB thread stack (BOTLISH_NATIVE_STACK_BYTES): 100
     }
 } -result [list [lrepeat 2 {value 3000}] [lrepeat 2 {NATIVE LIMIT STACK}]]
 
-test ns-main-with-suspended-coroutines {the thread's stack overflows while two coroutines are suspended on stacks of their own: its own guard, not theirs} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: m.n}\ncoroutine {step: s1, first: f1} = w(1)\ncoroutine {step: s2, first: f2} = w(2)\ndown(100000000) + f1.n + f2.n\n"
+test ns-main-with-suspended-coroutines {on the general coroutine runtime, the thread's stack overflows while two coroutines are suspended on stacks of their own: its own guard, not theirs} -constraints {nativeStackGuard nativeCoroutines} -body {
+    withoutCoroutineFusion {
+        nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: m.n}\ncoroutine {step: s1, first: f1} = w(1)\ncoroutine {step: s2, first: f2} = w(2)\ndown(100000000) + f1.n + f2.n\n"
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
 # A List nested DEPTH deep, built by a loop, compared with another: the
@@ -172,19 +174,38 @@ test ns-runtime-helper {a 16 MiB thread stack exhausted inside a runtime helper 
 # ---------------------------------------------------------------------------
 # A coroutine's own stack (8 MiB by default): it overflows while the
 # thread's stack has ample room, so the guard that faults is the
-# coroutine's, and only the active stack's guard is an overflow.
+# coroutine's, and only the active stack's guard is an overflow. These run
+# on the general coroutine runtime (coroutine fusion off, as the suspended
+# coroutines above do): a fused coroutine has no stack of its own, its code
+# runs on its consumer's (COROUTINE-FUSION-MILESTONE-1.md, section 3.2), as
+# ns-co-fused shows.
 
 test ns-co-fresh {a coroutine overflows its stack at its eager start, before its first yield} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    k = down(n)\n    m = yield V {n: k}\n    return V {n: m.n}\ncoroutine {step, first} = w(100000000)\nfirst.n\n"
+    withoutCoroutineFusion {
+        nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    k = down(n)\n    m = yield V {n: k}\n    return V {n: m.n}\ncoroutine {step, first} = w(100000000)\nfirst.n\n"
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
 test ns-co-after-yields {a coroutine overflows after two yields, in ordinary computation of a later segment} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    m2 = yield V {n: m.n}\n    return V {n: down(m2.n)}\ncoroutine {step, first} = w(1)\na = step(M {n: 2})\nb = step(M {n: 100000000})\na.n + b.n\n"
+    withoutCoroutineFusion {
+        nsBoth "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    m2 = yield V {n: m.n}\n    return V {n: down(m2.n)}\ncoroutine {step, first} = w(1)\na = step(M {n: 2})\nb = step(M {n: 100000000})\na.n + b.n\n"
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
 test ns-co-resumer-holds-references {the resumer holds a String, a List and a struct across the resume that overflows; the coroutine's recursion allocates} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth "import std::str\n${messages}${keep}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: keep(m.n, \"cd\")}\nfn main() -> int:\n    s = std::str::concat(\"held\", \"!\")\n    l = \[s, \"two\"\]\n    v = V {n: 5}\n    coroutine {step, first} = w(1)\n    b = step(M {n: 100000000})\n    b.n + std::str::length(s) + v.n + first.n\nmain()\n"
+    withoutCoroutineFusion {
+        nsBoth "import std::str\n${messages}${keep}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: keep(m.n, \"cd\")}\nfn main() -> int:\n    s = std::str::concat(\"held\", \"!\")\n    l = \[s, \"two\"\]\n    v = V {n: 5}\n    coroutine {step, first} = w(1)\n    b = step(M {n: 100000000})\n    b.n + std::str::length(s) + v.n + first.n\nmain()\n"
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
+
+test ns-co-fused {fused, a coroutine's recursion runs on its consumer's stack: the overflow at its start and after two yields is the thread stack's, NATIVE LIMIT STACK as on the general runtime, and a depth beyond a coroutine stack's 8 MiB returns its value} -constraints {nativeStackGuard nativeCoroutines} -body {
+    set fresh "${messages}${down}fn w(n: int, resume M) -> V:\n    k = down(n)\n    m = yield V {n: k}\n    return V {n: m.n}\ncoroutine {step, first} = w(DEPTH)\nfirst.n\n"
+    set later "${messages}${down}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    m2 = yield V {n: m.n}\n    return V {n: down(m2.n)}\ncoroutine {step, first} = w(1)\na = step(M {n: 2})\nb = step(M {n: DEPTH})\na.n + b.n\n"
+    list [lmap text [list $fresh $later] {
+        lsort -unique [lmap entry [native::fusion [surface::compile [string map {DEPTH 1} $text] -warnings off]] {lindex $entry 0}]
+    }] [nsBoth [string map {DEPTH 100000000} $fresh]] [nsBoth [string map {DEPTH 100000000} $later]] \
+        [nsBoth [string map {DEPTH 2000000} $fresh]] [withoutCoroutineFusion {nsBoth [string map {DEPTH 2000000} $fresh]}]
+} -cleanup {unset -nocomplain fresh later} -result [list {fused fused} [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {NATIVE LIMIT STACK}] [lrepeat 2 {value 2000000}] [lrepeat 2 {NATIVE LIMIT STACK}]]
 
 # main -> a -> b -> c, each suspended and resumed at least once.
 set nested "${messages}${down}fn c(n: int, resume M) -> V:
@@ -212,15 +233,21 @@ y = stepa(M {n: CDEPTH})
 "
 
 test ns-co-nested-deepest {main -> a -> b -> c, suspended and resumed at every level: c overflows its own stack while a and b are running} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth [string map {CDEPTH 100000000 BTAIL 0} $nested]
+    withoutCoroutineFusion {
+        nsBoth [string map {CDEPTH 100000000 BTAIL 0} $nested]
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
 test ns-co-nested-middle {c completes, then b -- active again after c's stack was released -- overflows its own stack} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth [string map {CDEPTH 10 BTAIL {down(100000000)}} $nested]
+    withoutCoroutineFusion {
+        nsBoth [string map {CDEPTH 10 BTAIL {down(100000000)}} $nested]
+    }
 } -result [lrepeat 2 {NATIVE LIMIT STACK}]
 
 test ns-co-nested-finite {the same hierarchy within its stacks returns its value} -constraints {nativeStackGuard nativeCoroutines} -body {
-    nsBoth [string map {CDEPTH 20000 BTAIL {down(20000)}} $nested]
+    withoutCoroutineFusion {
+        nsBoth [string map {CDEPTH 20000 BTAIL {down(20000)}} $nested]
+    }
 } -result [lrepeat 2 {value {[1, 4, 40000]}}]
 
 # The largest depth D of down that returns inside a coroutine (to within 64
@@ -251,9 +278,11 @@ b.n
 }
 
 test ns-co-edge {at the edge of a coroutine's stack every depth either returns or is NATIVE LIMIT STACK, and the edge lies between a thousand and ten million levels} -constraints {nativeStackGuard nativeCoroutines} -body {
-    lmap options {{} {-specialize 0}} {
-        lassign [nsCoroutineEdge $options] lo hi
-        expr {[string is integer -strict $lo] && $lo > 1000 && $hi < 10000000 ? "edge" : [list $lo $hi]}
+    withoutCoroutineFusion {
+        lmap options {{} {-specialize 0}} {
+            lassign [nsCoroutineEdge $options] lo hi
+            expr {[string is integer -strict $lo] && $lo > 1000 && $hi < 10000000 ? "edge" : [list $lo $hi]}
+        }
     }
 } -result {edge edge}
 
@@ -269,9 +298,11 @@ test ns-gc-stress-main {under GC stress, an allocating recursion fills a 1 MiB t
 } -result [list [lrepeat 2 {value 1500}] [lrepeat 2 {NATIVE LIMIT STACK}]]
 
 test ns-gc-stress-coroutine {under GC stress, with 128 KiB coroutine stacks: a coroutine whose resumer holds references recurses, allocating, within its stack (the value) and beyond it (NATIVE LIMIT STACK)} -constraints {nativeStackGuard nativeCoroutines} -body {
-    set text "import std::str\n${messages}${keep}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: keep(m.n, \"cd\")}\nfn main(depth: int) -> int:\n    s = std::str::concat(\"held\", \"!\")\n    l = \[s, \"two\"\]\n    coroutine {step, first} = w(1)\n    coroutine {step: other, first: o} = w(2)\n    b = step(M {n: depth})\n    b.n + std::str::length(s) + first.n + o.n\nmain(DEPTH)\n"
-    withEnv {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_COROUTINE_STACK_BYTES 131072} {
-        list [nsBoth [string map {DEPTH 100} $text]] [nsBoth [string map {DEPTH 100000000} $text]]
+    withoutCoroutineFusion {
+        set text "import std::str\n${messages}${keep}fn w(n: int, resume M) -> V:\n    m = yield V {n: n}\n    return V {n: keep(m.n, \"cd\")}\nfn main(depth: int) -> int:\n    s = std::str::concat(\"held\", \"!\")\n    l = \[s, \"two\"\]\n    coroutine {step, first} = w(1)\n    coroutine {step: other, first: o} = w(2)\n    b = step(M {n: depth})\n    b.n + std::str::length(s) + first.n + o.n\nmain(DEPTH)\n"
+        withEnv {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_COROUTINE_STACK_BYTES 131072} {
+            list [nsBoth [string map {DEPTH 100} $text]] [nsBoth [string map {DEPTH 100000000} $text]]
+        }
     }
 } -result [list [lrepeat 2 {value 308}] [lrepeat 2 {NATIVE LIMIT STACK}]]
 

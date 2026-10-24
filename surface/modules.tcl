@@ -204,14 +204,23 @@ namespace eval surface::modules {
 }
 
 # The AST of the module file PATH (see `parsed` above); its syntax errors
-# raised as surface::parse raises them.
-proc surface::modules::ParseModule {path} {
+# raised as surface::parse raises them -- or, when RECOVERVAR names the
+# loader's state of a syntax-recovering compilation, kept there (its
+# `syntaxEntries`) and the malformed statements made holes
+# (surface/recover.tcl, SYNTAX-RECOVERY-MILESTONE-1.md).
+proc surface::modules::ParseModule {path {stateVar ""}} {
     variable reads
     set source [surface::source::text $path]
     dict set reads $path $source
     set ast [Parse $path $source]
     if {[dict get $ast diagnostics] ne ""} {
-        surface::raiseSyntax [dict get $ast diagnostics]
+        if {$stateVar eq ""} {
+            surface::raiseSyntax [dict get $ast diagnostics]
+        }
+        upvar 1 $stateVar state
+        dict set state syntaxEntries [concat [dict get $state syntaxEntries] \
+            [surface::syntaxEntries [dict get $ast diagnostics]]]
+        set ast [surface::recover::apply $ast $source]
     }
     return $ast
 }
@@ -602,10 +611,11 @@ proc surface::modules::ModuleFile {name target usedAtSpan} {
 # is "", for callers with no source span -- e.g. the native backend's
 # module-native bridge, native/native.tcl), as one diagnostic of
 # core::raiseDiagnostics whose `location` is SPAN itself: the span the text
-# names, as data (COMPILER-SERVICE-MILESTONE-1.md).
-proc surface::modules::Error {kind span message} {
+# names, as data (COMPILER-SERVICE-MILESTONE-1.md). RELATED, if given, is
+# the span of the one further place the diagnostic is about.
+proc surface::modules::Error {kind span message {related ""}} {
     set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
-        summary $message location $span related {}]
+        summary $message location $span related [if {$related eq ""} {list} else {list $related}]]
     if {$span ne ""} {
         dict set entry message "[surface::ast::location $span]: $message"
     }
@@ -665,6 +675,13 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
                 # Pair] {...}` names the layout geo::Pair.
                 TypeRefs [dict get $node typeArg] [dict get $node typeArgSpan] found
             }
+            if {[dict exists $node typeArgs]} {
+                # Pair[geo::Point, int] { ... } (TRAIT-CONSTRAINED-IMPRINTED-
+                # TYPES.md): every argument's references.
+                foreach t [dict get $node typeArgs] span [dict get $node typeArgSpans] {
+                    TypeRefs $t $span found
+                }
+            }
         }
         function {
             # Qualified struct types in parameter and result annotations,
@@ -695,6 +712,13 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
             # field's type.
             foreach field [dict get $node fields] {
                 TypeRefs [dict get $field type] [dict get $field typeSpan] found
+            }
+            # A type slot's trait (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) may
+            # be another module's: `K satisfies ui::Printable`.
+            foreach slot [dict getdef $node slots {}] {
+                if {[dict get $slot trait] ne ""} {
+                    TypeRefs [dict get $slot trait] [dict get $slot traitSpan] found
+                }
             }
         }
         externfn {
@@ -792,6 +816,13 @@ proc surface::modules::TypeRefs {type span foundVar} {
         } else {
             TypeRefs [lindex $type 1] $span found
         }
+        return
+    }
+    if {[llength $type] == 3 && [lindex $type 0] eq "apply"} {
+        # NAME[A, B, ...] (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+        # constructor's reference and every argument's.
+        TypeRefs [lindex $type 1] $span found
+        foreach t [lindex $type 2] { TypeRefs $t $span found }
         return
     }
     lassign $type head arg
@@ -1008,8 +1039,17 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
         # The target's architecture chose the file (ModuleFile).
         dict set state targetRead 1
     }
-    set ast [ParseModule $path]
+    if {[dict get $state recover]} {
+        set ast [ParseModule $path state]
+    } else {
+        set ast [ParseModule $path]
+    }
     foreach statement [dict get $ast body] {
+        if {[dict get $statement kind] eq "hole"} {
+            # A malformed statement (surface/recover.tcl): what it is, the
+            # loader does not know either.
+            continue
+        }
         if {[dict get $statement kind] eq "destructure"} {
             # Not a missing feature of destructuring: a module binding is a
             # context-free, provably immutable value (hir/modulebinding.tcl),
@@ -1025,9 +1065,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
             Error CONTEXT-INSTALLATION-UNSUPPORTED [dict get $statement span] \
                 "context installation is currently supported only in the entry program's top-level scope, as a statement (this one is inside a module: \"$name\", $path)"
         }
-        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn externlib}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn externlib classdecl dfadecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, enum declarations, layout declarations, trait declarations, error declarations and extern declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations, enum declarations, layout declarations, trait declarations, error declarations, extern declarations and class and dfa declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     CheckNativeMembers $ast $name "module \"$name\" ($path)"
@@ -1035,9 +1075,12 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     set fileId f[dict get $state nextFile]
     dict set state files $fileId $path
     dict incr state nextFile
-    CollectAndLoad state $ast $name
+    Recovered state $ast $name $fileId
+    set ast [CollectAndLoad state $ast $name]
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl errordecl structdecl enumdecl traitdecl layoutdecl externlib}} continue
+        if {[dict get $statement kind] in {typedecl errordecl structdecl enumdecl traitdecl layoutdecl externlib classdecl}} continue
+        if {[dict get $statement kind] eq "dfadecl" && [dict exists $statement dfaDuplicate]} continue
+        if {[dict get $statement kind] eq "hole" && [dict get $statement name] eq ""} continue
         dict get $statement name
     }]
     dict set state loaded $name $functionNames
@@ -1116,17 +1159,107 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     dict set state stack [lrange [dict get $state stack] 0 end-1]
 }
 
+# Records, in STATE, the FileId of the file AST of module NAME ("" for the
+# entry program) and what syntax recovery left unknown about it
+# (surface/recover.tcl's `recovered`: its header, value and type-level names
+# its malformed top-level statements may make), which CheckRef and
+# BuildProgram read (SYNTAX-RECOVERY-MILESTONE-1.md).
+proc surface::modules::Recovered {stateVar ast name fileId} {
+    upvar 1 $stateVar state
+    dict set state fileOf $name $fileId
+    if {[dict exists $ast recovered]} {
+        dict set state open $name [dict get $ast recovered]
+    }
+}
+
+# 1 if the reference error of KIND that CheckRef found for REF ({NAMESPACE
+# NAME SPAN KIND ROOTED}) in the file of module KEY depends on source nobody
+# wrote (SYNTAX-RECOVERY-MILESTONE-1.md): the file's header is malformed (an
+# import it may make is not known), or the member is missing from a module
+# whose malformed top-level statements may declare it.
+proc surface::modules::DependentReference {state key ref kind} {
+    if {![dict get $state recover]} {
+        return 0
+    }
+    if {[dict exists $state open $key] && [dict get $state open $key header]} {
+        return 1
+    }
+    set ns [lindex $ref 0]
+    if {$kind eq "UNKNOWN-SYMBOL" && [dict exists $state open $ns]} {
+        set open [dict get $state open $ns]
+        return [expr {[dict get $open values] || [dict get $open types]}]
+    }
+    return 0
+}
+
 # The declaration record of the file AST (FileId FILEID) for hir::buildSyntax's
 # -module-decls (DIRECT-MODULES.md): {direct 1 origin ORIGIN} when the file
 # starts with `direct module` (ORIGIN the marker's), {direct 0 origin ""}
 # otherwise. A namespace's directness is its declaration's: never its name,
 # path or library.
+#
+# It also records the file's `private` declarations
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): `private {CATEGORY
+# {NAME {kind KIND origin ORIGIN} ...} ...}` (hir/privacy.tcl: the one fact
+# every access check reads, CATEGORY its member namespace, ORIGIN its
+# name's), and `declarations {CATEGORY {NAME ORIGIN ...}}`, where each of
+# its type-level declarations and errors is named (what a declaration's
+# PRIVATE-TYPE-ESCAPE is located at).
 proc surface::modules::ModuleDecl {ast fileId} {
     set span [dict getdef $ast direct ""]
     if {$span eq ""} {
-        return [dict create direct 0 origin ""]
+        set decl [dict create direct 0 origin ""]
+    } else {
+        set decl [dict create direct 1 origin [RemapOrigin [surface::lower::Origin $span "direct-module"] $fileId]]
     }
-    return [dict create direct 1 origin [RemapOrigin [surface::lower::Origin $span "direct-module"] $fileId]]
+    set private [dict create]
+    set declarations [dict create]
+    foreach statement [dict get $ast body] {
+        set kind [dict get $statement kind]
+        if {$kind ni {function bind externfn hole typedecl structdecl enumdecl traitdecl layoutdecl errordecl}
+                || [dict get $statement name] eq ""} {
+            continue
+        }
+        set category [hir::privacy::Category $kind]
+        set name [dict get $statement name]
+        set origin [RemapOrigin [surface::lower::Origin [dict get $statement nameSpan] "declaration"] $fileId]
+        if {$category ne "values" && ![dict exists $declarations $category $name]} {
+            dict set declarations $category $name $origin
+        }
+        if {[dict getdef $statement private 0]} {
+            dict set private $category $name [dict create kind $kind origin $origin]
+        }
+    }
+    dict set decl private $private
+    dict set decl declarations $declarations
+    return $decl
+}
+
+# Raises PRIVATE-ACCESS at SPAN when code of unit OWN ("" for the entry
+# program), the file of STATE's module KEY, may not access member NAME of
+# CATEGORY of namespace NS: it is private there (hir/privacy.tcl's Denied).
+# The private declaration is the diagnostic's related location.
+proc surface::modules::CheckPrivate {state own ns name category span} {
+    set decls [dict get $state moduleDecls]
+    if {![hir::privacy::Denied $decls $ns $category $name $own]} {
+        return
+    }
+    set entry [hir::privacy::Entry $decls $ns $category $name]
+    Error PRIVATE-ACCESS $span [hir::privacy::AccessMessage $ns $name [dict get $entry kind] $own] \
+        [OriginSpan $state [dict get $entry origin]]
+}
+
+# The source span of ORIGIN ({file FILEID ...}) of a file STATE loaded, or "".
+proc surface::modules::OriginSpan {state origin} {
+    if {[lindex $origin 0] ne "file" || ![dict exists $state files [lindex $origin 1]]} {
+        return ""
+    }
+    set fields [lrange $origin 2 end]
+    set span [dict create file [dict get $state files [lindex $origin 1]]]
+    foreach key {start end line column endLine endColumn} {
+        dict set span $key [dict get $fields $key]
+    }
+    return $span
 }
 
 # Raises DUPLICATE-NATIVE if the module AST (the file of namespace NAME) defines
@@ -1146,7 +1279,7 @@ proc surface::modules::CheckNativeMembers {ast name who} {
         return
     }
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] in {function bind externfn}
+        if {[dict get $statement kind] in {function bind externfn hole} && [dict get $statement name] ne ""
                 && [core::native::isQualifiedNative "${name}::[dict get $statement name]"]} {
             set member [dict get $statement name]
             Error DUPLICATE-NATIVE [dict get $statement span] \
@@ -1272,6 +1405,14 @@ proc surface::modules::CheckImports {stateVar ast own} {
         } else {
             set typeNames {}
         }
+        if {$name ni $typeNames && [dict get $state recover] && [dict exists $state open $ns]
+                && [dict get $state open $ns types]} {
+            # A type a malformed declaration of the module may be
+            # (SYNTAX-RECOVERY-MILESTONE-1.md): not imported, and the file's
+            # resolution diagnostics are not known (BuildProgram).
+            dict set state typeKeys $own 1
+            continue
+        }
         if {$name ni $typeNames} {
             if {$hasFile} {
                 set functions [dict get $state loaded $ns]
@@ -1305,6 +1446,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
             }
             Error UNKNOWN-SYMBOL $nameSpan "namespace \"$ns\" has no type \"$name\" (its types: [if {$typeNames eq ""} {string cat "none"} else {join [lsort $typeNames] {, }}])"
         }
+        CheckPrivate $state $own $ns $name types $nameSpan
         if {[dict exists $local $name]} {
             Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which this file also declares itself (at [surface::ast::location [dict get $local $name]]); an imported type never shadows or is shadowed by a local one: drop the import and spell the imported type $canonical (after `import $ns`)"
         }
@@ -1340,6 +1482,10 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     set env [CheckImports state $ast $own]
     dict set state imports $key $env
     set imported [dict get $env namespaces]
+    # Declared recognizers and symbol classes (DFA-COROUTINE-MILESTONE-2.md):
+    # checked once the modules the file imports are loaded, against what
+    # they declare, and annotated for lowering (surface/dfa.tcl).
+    set ast [ExpandDfas state $ast $own $imported]
     # STATIC-COMPILE.md: a file using a static intrinsic names the error its
     # rejected blocks complete with, std::compiler::CompilerError -- an ordinary
     # namespaced declaration, so the file imports its namespace like any
@@ -1360,6 +1506,17 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             try {
                 CheckRef state $ast $own $key $env $imported $ref
             } trap {SURFACE MODULE} {message options} {
+                if {[DependentReference $state $key $ref [lindex [dict get $options -errorcode] 2]]} {
+                    # Not known to be wrong (SYNTAX-RECOVERY-MILESTONE-1.md):
+                    # a value or construction is lowered as a hole, and a
+                    # type or error name leaves the file's resolution
+                    # diagnostics unknown (BuildProgram).
+                    dict set state dependentRefs $key [dict get [lindex $ref 2] start] 1
+                    if {[lindex $ref 3] in {type error}} {
+                        dict set state typeKeys $key 1
+                    }
+                    continue
+                }
                 # Kept whole, its location included (Error's entry).
                 dict lappend state referenceErrors {*}[dict getdef $options -diagnostics \
                     [list [dict create errorcode [dict get $options -errorcode] message $message]]]
@@ -1385,6 +1542,38 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
             dict set state {*}$path $deferred
         }
     }
+    return $ast
+}
+
+# The file AST of module KEY (OWN its namespace, IMPORTED the namespaces it
+# imports) with its `class` and `dfa` declarations analyzed
+# (surface::dfa::expand), against the classes and recognizers of the modules
+# loaded before it (STATE's dfaRegistry, which gains the file's own). A
+# qualified class or recognizer of a namespace the file does not import is
+# MISSING-IMPORT, and so is a recognizer declared in a file that does not
+# import std::dfa, its protocol: reported with the file's other references.
+proc surface::modules::ExpandDfas {stateVar ast own imported} {
+    upvar 1 $stateVar state
+    set open 0
+    if {[dict get $state recover] && [dict exists $state open $own]} {
+        set facts [dict get $state open $own]
+        set open [expr {[dict getdef $facts values 0] || [dict getdef $facts types 0] || [dict getdef $facts functions 0]}]
+    }
+    set result [surface::dfa::expand [dict get $ast body] -own $own -imports $imported \
+        -registry [dict get $state dfaRegistry] -open $open]
+    dict set state dfaRegistry [dict get $result registry]
+    dict lappend state dfaNames {*}[dict get $result facts]
+    if {[dict get $result missingImport] ne ""} {
+        set span [dict get $result missingImport]
+        set message "namespace \"$::surface::dfa::protocolNamespace\" is not imported; add `import $::surface::dfa::protocolNamespace` to declare a recognizer (it is resumed with std::dfa::Symbol and fails with std::dfa's errors)"
+        dict lappend state referenceErrors [dict create errorcode [list SURFACE MODULE MISSING-IMPORT] \
+            message "[surface::ast::location $span]: $message" summary $message location $span related {}]
+    }
+    if {[dict get $result referenceErrors] ne {}} {
+        dict lappend state referenceErrors {*}[dict get $result referenceErrors]
+    }
+    dict set ast body [dict get $result statements]
+    return $ast
 }
 
 # Checks the qualified reference REF ({NAMESPACE NAME SPAN KIND}, QualifiedRefs)
@@ -1399,7 +1588,15 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
 # under core::libraryDir that are no application module (LoadNamespace
 # records those); the entry program is never one, and no application module
 # can be a standard namespace (RESERVED-NAMESPACE).
-proc surface::modules::CheckInternal {state own ns span} {
+proc surface::modules::CheckInternal {state own ns span {member ""}} {
+    if {$member ne "" && [hir::iteration::IsOperation $ns $member]
+            && ($own eq "" || [dict exists $state application $own])} {
+        # An operation of a collection's loop protocol (hir/iteration.tcl):
+        # its positions are the representation, which only the standard
+        # library may see.
+        Error INTERNAL-NAMESPACE $span \
+            "\"${ns}::$member\" is internal to the standard library: it is an operation of the loop protocol of a collection of \"$ns\", which only its modules may name ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one); iterate the collection with a loop instead"
+    }
     if {![core::native::isInternalNamespace $ns]} {
         return
     }
@@ -1437,6 +1634,8 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
                 Error AMBIGUOUS-QUALIFIER $span \
                     "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both a namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
             }
+            # (A private enum of another module is no case qualifier there.)
+            CheckPrivate $state $own {*}[hir::privacy::Member $enum] types $span
             return
         }
     }
@@ -1457,7 +1656,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         Error NOT-A-STRUCT $span \
             "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
     }
-    CheckInternal $state $own $namespaceName $span
+    CheckInternal $state $own $namespaceName $span $symbolName
     if {$namespaceName ni $imported} {
         if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor $state $key $namespaceName]
                 && ![NamespaceExists ${standardRoot}::$namespaceName]} {
@@ -1521,6 +1720,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no error \"$symbolName\" (it declares: [if {$errorNames eq ""} {string cat "no errors"} else {join [lsort $errorNames] {, }}])"
         }
+        CheckPrivate $state $own $namespaceName $symbolName errors $span
         return
     }
     if {$symbolName in [hir::cabi::IntrinsicTypeNames $namespaceName]} {
@@ -1555,12 +1755,14 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no [expr {$refKind eq "type" ? "type" : "struct"}] \"$symbolName\" (it declares: [if {$declared eq ""} {string cat "no types"} else {join $declared {, }}])"
         }
+        CheckPrivate $state $own $namespaceName $symbolName types $span
         return
     }
     if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
         # A layout of the module (BINARY-LAYOUT.md), written where a value
         # would be: legal only as a binary operation's layout operand,
         # which HIR resolution decides (LAYOUT-NOT-A-VALUE elsewhere).
+        CheckPrivate $state $own $namespaceName $symbolName types $span
         return
     }
     set functionNames [dict get $state loaded $namespaceName]
@@ -1568,6 +1770,9 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         Error UNKNOWN-SYMBOL $span \
             "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort [concat $functionNames $natives]] {, }])"
     }
+    # The member exists; whether this code may name it is the module's
+    # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
+    CheckPrivate $state $own $namespaceName $symbolName values $span
 }
 
 # The static intrinsics of AST (STATIC-COMPILE.md), outermost first in source
@@ -1619,11 +1824,14 @@ proc surface::modules::StaticDeferred {state key} {
 # surface::lower::Sequence, with that file's deferred static diagnostics.
 proc surface::modules::LowerStatements {state key statements} {
     set saved $::surface::lower::staticDeferred
+    set savedDependent $::surface::lower::dependentRefs
     set ::surface::lower::staticDeferred [StaticDeferred $state $key]
+    set ::surface::lower::dependentRefs [dict getdef $state dependentRefs $key {}]
     try {
         return [surface::lower::Sequence $statements]
     } finally {
         set ::surface::lower::staticDeferred $saved
+        set ::surface::lower::dependentRefs $savedDependent
     }
 }
 
@@ -1735,7 +1943,8 @@ proc surface::modules::NewState {files nextFile} {
         typeDecls {} errorDecls {} structDecls {} traitDecls {} externDecls {} linkDecls {} \
         staticDeferred [dict create] \
         target "" targetRead 0 root "" entry "" application [dict create] moduleDecls [dict create] \
-        referenceErrors {}]
+        referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
+        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {}]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -1789,7 +1998,15 @@ proc surface::modules::LoadNamespaces {namespaces args} {
 # corpus.tcl). ROOT is the program's application root (the directory of its
 # entry file, application modules above), "" for none. Returns HIR before
 # the frontend's finishing steps (surface::lower::Finish).
-proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
+#
+# RECOVER 1 analyzes past syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md): AST
+# is the entry's recovered AST (surface/recover.tcl), every module is parsed
+# with recovery, and a program with any syntax error is built with its
+# malformed source as holes, its syntax diagnostics (the entry's, then each
+# module's as it is parsed) and what the holes leave unknown kept in the
+# HIR's `syntaxRecovery` (hir::buildSyntax's -syntax-recovery). An error of
+# the loader still ends the compilation, the syntax diagnostics first.
+proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0}} {
     set state [NewState [dict create f1 [dict get $ast span file]] 2]
     # The C ABI target (C-ABI-TYPES.md): the host's unless given. Only a
     # file importing std::ffi::c, or an architecture-specific module (ModuleFile),
@@ -1799,8 +2016,24 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
         dict set state root [file normalize $root]
         dict set state entry [file normalize [dict get $ast span file]]
     }
-    CollectAndLoad state $ast ""
-    RaiseReferenceErrors $state
+    dict set state recover $recover
+    if {$recover && [dict get $ast diagnostics] ne ""} {
+        dict set state syntaxEntries [surface::syntaxEntries [dict get $ast diagnostics]]
+    }
+    Recovered state $ast "" f1
+    try {
+        set ast [CollectAndLoad state $ast ""]
+        RaiseReferenceErrors $state
+    } on error {message options} {
+        if {[dict get $state syntaxEntries] eq {}
+                || ([lrange [dict get $options -errorcode] 0 1] ne {SURFACE MODULE} && [lindex [dict get $options -errorcode] 0] ne "POSIX")} {
+            return -options $options $message
+        }
+        # The syntax errors first, as a compilation without recovery
+        # reports one of them first.
+        core::raiseDiagnostics [concat [dict get $state syntaxEntries] [dict getdef $options -diagnostics \
+            [list [dict create errorcode [dict get $options -errorcode] message $message]]]]
+    }
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls ownTraitDecls \
         ownExternDecls ownLinkDecls
     set decls [concat [dict get $state typeDecls] $ownDecls]
@@ -1812,11 +2045,17 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
     # special case").
     set moduleDecls [dict get $state moduleDecls]
     dict set moduleDecls "" [ModuleDecl $ast f1]
+    set nodes [LowerStatements $state "" $executable]
+    set sections [dict get $state sections]
+    set recovery {}
+    if {[dict get $state syntaxEntries] ne {}} {
+        lassign [Recovery $state $nodes $sections] nodes sections recovery
+    }
     # A strict compilation goes on past resolution failures: what checking
     # finds independently of them is reported with them (hir/recovery.tcl).
-    set hir [hir::buildSyntax [LowerStatements $state "" $executable] -strict 0 \
+    set hir [hir::buildSyntax $nodes -strict 0 -syntax-recovery $recovery \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict get $state files] -modules [dict get $state sections] \
+        -files [dict get $state files] -modules $sections \
         -imports [dict get $state imports] -module-decls $moduleDecls \
         -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls -trait-decls $traitDecls \
         -foreign-decls [concat [dict get $state externDecls] $ownExternDecls] \
@@ -1824,7 +2063,80 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
     # The target the HIR was built for, when the build read it (header,
     # "Target dependence"); "" when the HIR is every target's.
     dict set hir target [if {[dict get $state targetRead]} {dict get $state target} else {string cat ""}]
+    # What the recognizer declarations' names denote, for the compiler
+    # service (surface/dfa.tcl's Fact): read by no backend or analysis.
+    if {[dict get $state dfaNames] ne {}} {
+        dict set hir dfaNames [dict get $state dfaNames]
+    }
     return $hir
+}
+
+# {NODES SECTIONS RECOVERY} for a program with syntax errors, loaded into
+# STATE, whose entry program lowers to NODES and its modules to SECTIONS
+# (SYNTAX-RECOVERY-MILESTONE-1.md): every static intrinsic a hole (whether a
+# block compiles is a question about the whole program, which is not known),
+# and hir::buildSyntax's -syntax-recovery: the syntax diagnostics, and, by
+# FileId, the files whose every unit depends on what nobody wrote
+# (`taintedFiles`: a malformed header), whose resolution diagnostics may
+# (`typeFiles`: a type-level name a malformed declaration, a malformed header
+# or a reference into a module with one may make), whose method-style calls
+# may (`methodFiles`: a malformed header, or an imported module whose
+# malformed statements may define functions), whose unbound names may
+# (`externFiles`: an extern c fn a malformed statement may declare), and the
+# files with a malformed top-level statement that may declare a function
+# (`openFiles`: the implementation a trait or context trait needs,
+# hir/recovery.tcl).
+proc surface::modules::Recovery {state nodes sections} {
+    if {[hir::static::present $nodes $sections]} {
+        set decisions [dict create]
+        foreach site [hir::static::Sites $nodes $sections] {
+            dict set decisions [dict get $site key] unknown
+        }
+        lassign [hir::static::Expand $nodes $sections $decisions] nodes sections
+    }
+    set open [dict get $state open]
+    set tainted {}
+    set typeFiles {}
+    set methodFiles {}
+    set externFiles {}
+    set openFiles {}
+    dict for {key fileId} [dict get $state fileOf] {
+        set facts [dict getdef $open $key {header 0 values 0 functions 0 types 0 externs 0 installs 0 holes 0}]
+        set header [dict get $facts header]
+        if {$header} {
+            lappend tainted $fileId
+        }
+        if {[dict get $facts functions]} {
+            # (A malformed top-level statement that may declare a function:
+            # the implementation conformance reads, hir/recovery.tcl.)
+            lappend openFiles $fileId
+        }
+        if {[dict get $facts externs]} {
+            lappend externFiles $fileId
+        }
+        set types [expr {$header || [dict exists $state typeKeys $key] || [dict get $facts types]}]
+        set methods $header
+        if {[dict exists $state imports $key]} {
+            foreach ns [dict get $state imports $key namespaces] {
+                if {[dict exists $open $ns] && [dict get $open $ns types]} {
+                    set types 1
+                }
+                if {[dict exists $open $ns] && [dict get $open $ns values]} {
+                    # (Its functions are method candidates here: IMPORTS.md.)
+                    set methods 1
+                }
+            }
+        }
+        if {$types} {
+            lappend typeFiles $fileId
+        }
+        if {$methods} {
+            lappend methodFiles $fileId
+        }
+    }
+    return [list $nodes $sections [dict create diagnostics [dict get $state syntaxEntries] \
+        taintedFiles $tainted typeFiles $typeFiles methodFiles $methodFiles externFiles $externFiles \
+        openFiles $openFiles]]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,
@@ -1845,7 +2157,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""}} {
 # whole compilation sees one snapshot of it.
 proc surface::modules::compileProgramFile {path args} {
     set options [dict create -strict 1 -warnings [hir::warnings::defaultMode] -warning-channel stderr \
-        -cache [surface::cache::directory] -target ""]
+        -cache [surface::cache::directory] -target "" -recover-syntax 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "surface::modules::compileProgramFile: unknown option \"$option\""
@@ -1876,10 +2188,17 @@ proc surface::modules::CompileProgramFile {path options} {
     variable reads
     set reads [dict create]
     set ast [Parse $path $source]
+    set recover [dict get $options -recover-syntax]
     if {[dict get $ast diagnostics] ne ""} {
-        surface::raiseSyntax [dict get $ast diagnostics]
+        if {!$recover} {
+            surface::raiseSyntax [dict get $ast diagnostics]
+        }
+        set ast [surface::recover::apply $ast $source]
     }
-    set hir [surface::lower::Finish [BuildProgram $ast $strict $target $root] $strict $mode $channel]
-    surface::cache::store $cache $path $source $mode $strict $hir $reads $target $root
+    set hir [surface::lower::Finish [BuildProgram $ast $strict $target $root $recover] $strict $mode $channel]
+    if {![dict exists $hir syntaxRecovery]} {
+        # (A program with syntax errors is never kept: it is no compilation.)
+        surface::cache::store $cache $path $source $mode $strict $hir $reads $target $root
+    }
     return $hir
 }

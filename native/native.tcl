@@ -46,15 +46,19 @@
 #   native::targetFacts TRIPLE          how the driver reads a target triple
 #   native::executable HIR PATH ?OPTIONS?  links a standalone executable: Linux
 #                                         glibc (x86_64; aarch64 with the
-#                                         rustc linker), macOS aarch64
-#                                         (Mach-O, the rustc linker) or
-#                                         Windows x86_64 (PE, MSVC, the rustc
-#                                         linker; PATH.exe for a PATH without
+#                                         rustc or system linker), macOS
+#                                         aarch64 (Mach-O, the rustc or system
+#                                         linker) or Windows x86_64 (PE, MSVC,
+#                                         the rustc or system linker;
+#                                         PATH.exe for a PATH without
 #                                         an extension); returns its path;
 #                                         rejects non-closed HIR.
 #                                         BOTLISH_NATIVE_LINKER picks the
-#                                         linker: rustc (default) or stub
-#                                         (no toolchain, SINGLE-EXECUTABLE.md)
+#                                         linker: rustc (default), stub (no
+#                                         toolchain, SINGLE-EXECUTABLE.md),
+#                                         system (the host's C driver and
+#                                         the runtime archive, no rustc) or
+#                                         auto (system for C, else stub)
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -109,6 +113,7 @@ source [file join [file dirname [file normalize [info script]]] rawabi.tcl]
 source [file join [file dirname [file normalize [info script]]] shortstring.tcl]
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
+source [file join [file dirname [file normalize [info script]]] library.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -141,6 +146,9 @@ namespace eval native {
 #                convention a variadic call is a codegen error)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
+#   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
+#                codegen/library.rs's SUPPORTED; the archive's partial link
+#                and symbol localization are GNU binutils')
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
@@ -165,7 +173,8 @@ namespace eval native {
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}]
+        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        libraries {linux-x86_64 linux-aarch64}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
@@ -176,9 +185,15 @@ proc native::hostSupports {capability} {
 }
 
 # Evaluates SCRIPT in the caller's scope with DIRS the linker search
-# directories (native::linkDirs), restored afterwards.
+# directories (native::linkDirs), restored afterwards. An empty string in
+# DIRS is an error, never a directory: it would reach the linker as a bare
+# -L, which takes the linker's next argument for its directory (link.exe
+# refuses a bare /LIBPATH:). A caller with no directory passes none.
 proc native::withLinkDirs {dirs script} {
     variable linkDirs
+    if {"" in $dirs} {
+        error "native::withLinkDirs: an empty string is no link directory (pass no directory instead)"
+    }
     set saved $linkDirs
     set linkDirs [lmap dir $dirs {file normalize $dir}]
     try {
@@ -395,7 +410,7 @@ proc native::evalHir {hir args} {
 }
 
 # Compile closed, specialized HIR to a standalone executable: a Linux glibc
-# ELF (x86_64, or aarch64 with the rustc linker), a macOS aarch64 Mach-O or a
+# ELF (x86_64, or aarch64 with the rustc or system linker), a macOS aarch64 Mach-O or a
 # Windows x86_64 PE (the rustc linker), for the host's own target. The
 # executable is the file PATH, except on Windows, where a PATH without an
 # extension gets .exe (the driver's codegen/aot.rs executable_path): returns
@@ -462,6 +477,30 @@ proc native::executable {hir path args} {
 
 proc native::clif {hir args} {
     set lines [Driver clif [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [join $lines \n]
+}
+
+# What coroutine fusion (native/src/codegen/fusion.rs,
+# COROUTINE-FUSION-MILESTONE-1.md) did with each construction site of the
+# program-mode HIR program HIR: a list of {fused FUNCTION ORIGIN FACTS} and
+# {kept FUNCTION ORIGIN REASON} (the driver's `fusion` report), in the
+# order the driver considered them; empty when fusion is off
+# (BOTLISH_NATIVE_COROUTINE_FUSION=0, or a host without native coroutines).
+proc native::fusion {hir args} {
+    set lines [Driver fusion [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [lmap line $lines {if {$line eq ""} continue; set line}]
+}
+
+# The NIR of the program-mode HIR program HIR after coroutine fusion: what
+# every native consumer compiles (the driver's `fused`).
+proc native::fusedNir {hir args} {
+    set lines [Driver fused [nir $hir {*}$args]]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }

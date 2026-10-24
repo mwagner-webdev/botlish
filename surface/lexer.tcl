@@ -13,6 +13,10 @@
 #             case does not affect this in any way -- see
 #             R2A2-TRAILING-QUESTION-IDENTIFIERS.md)
 #   INT       decimal digits, no leading zeros              value: the digits
+#   HEX       0x or 0X and hexadecimal digits               value: the
+#             decimal digits of its value. Only a dfa or class declaration's
+#             symbol items take one (DFA-COROUTINE-MILESTONE-2.md); anywhere
+#             else it is a syntax error, never an integer
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
 #   CHAR      '...' on one line, exactly one decoded Unicode scalar value;
 #             escapes \\ \' \n \r \t                        value: the
@@ -75,8 +79,12 @@
 # malformed construct inside it makes), `skipped` those of the diagnostics
 # whose recovery removed source text from the token stream (an unexpected
 # character, the rest of an unterminated string's line: a bracket left open
-# around one is not reported at all), and `synthetic` the
-# start offsets of the zero-width closers it inserted.
+# around one is not reported at all), and `synthetic` the start offsets of
+# the zero-width closers it inserted. For syntax recovery (surface/recover.tcl,
+# SYNTAX-RECOVERY-MILESTONE-1.md), `indentation` holds the indices of the
+# layout diagnostics (a tab, an inconsistent dedent: guesses about which
+# block a line belongs to) and `unclosed` those of the brackets never closed
+# (the opener was written; where the bracket ends is the guess).
 
 namespace eval surface::lexer {
     variable keywords {fn if elif else loop return break continue true false unit and or not type \
@@ -115,6 +123,8 @@ proc surface::lexer::tokenize {source file} {
     set structural {}
     set skipped {}
     set synthetic {}
+    set indentation {}
+    set unclosed {}
     # Where an unterminated literal started: its line's rest, closers
     # included, is in it.
     set absorbing {}
@@ -163,6 +173,7 @@ proc surface::lexer::tokenize {source file} {
                 continue
             }
             if {$tab >= 0} {
+                lappend indentation [llength $diagnostics]
                 Report diagnostics $file $tab $line $lineStart 1 "tab used for indentation"
             }
             set width [expr {$j - $i}]
@@ -176,6 +187,7 @@ proc surface::lexer::tokenize {source file} {
                     lappend tokens [Token DEDENT "" "" $here]
                 }
                 if {$width != [lindex $indents end]} {
+                    lappend indentation [llength $diagnostics]
                     Report diagnostics $file $j $line $lineStart 0 \
                         "inconsistent dedent: indentation does not match any enclosing level"
                 }
@@ -206,6 +218,7 @@ proc surface::lexer::tokenize {source file} {
                         lassign $bracket opener span
                         if {![Absorbed $absorbing $span]} {
                             lappend structural [llength $diagnostics]
+                            lappend unclosed [llength $diagnostics]
                             lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
                         }
                         lappend tokens [Token [Closer $opener] "" "" $here]
@@ -258,6 +271,28 @@ proc surface::lexer::tokenize {source file} {
                     # ("1.f()", "0..9").
                     lappend tokens [Decimal $source $i $j $file $line $lineStart diagnostics]
                     set i [dict get [lindex $tokens end] span end]
+                    continue
+                }
+                if {$digits eq "0" && [string index $source $j] in {x X}
+                        && [string is xdigit -strict [string index $source $j+1]]} {
+                    # A hexadecimal integer (DFA-COROUTINE-MILESTONE-2.md):
+                    # its own token kind, which only a dfa or class
+                    # declaration's symbol items read (every other place an
+                    # integer is written takes INT, and says so).
+                    set end [expr {$j + 1}]
+                    while {$end < $n && [string is xdigit -strict [string index $source $end]]} {
+                        incr end
+                    }
+                    set hexEnd $end
+                    while {$end < $n && [regexp {[A-Za-z0-9_]} [string index $source $end]]} {
+                        incr end
+                    }
+                    if {$end > $hexEnd} {
+                        Report diagnostics $file $i $line $lineStart [expr {$end - $i}] "invalid hexadecimal literal"
+                    }
+                    lappend tokens [Token HEX [string range $source $i $end-1] \
+                        [expr 0x[string range $source $j+1 $hexEnd-1]] [Span $file $i $end $line $lineStart]]
+                    set i $end
                     continue
                 }
                 set end $j
@@ -393,6 +428,7 @@ proc surface::lexer::tokenize {source file} {
         lassign $bracket opener span
         if {![Absorbed $absorbing $span]} {
             lappend structural [llength $diagnostics]
+            lappend unclosed [llength $diagnostics]
             lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
         }
         lappend tokens [Token [Closer $opener] "" "" $here]
@@ -406,7 +442,7 @@ proc surface::lexer::tokenize {source file} {
     }
     lappend tokens [Token EOF "" "" $here]
     return [dict create tokens $tokens diagnostics $diagnostics structural $structural \
-        skipped $skipped synthetic $synthetic]
+        skipped $skipped synthetic $synthetic indentation $indentation unclosed $unclosed]
 }
 
 # True if the physical line starting at offset START cannot continue an

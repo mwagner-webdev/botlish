@@ -154,18 +154,103 @@ no Visual C++ runtime either).
 Every function instance the program uses must be closed (fully known to the
 ahead-of-time compiler); otherwise NATIVE AOT NOT-READY names the cause
 (-aot-spec explains). A .ir file is rejected (NATIVE AOT INPUT): executables
-are built from .bot, .hir or .hirx. Linking: in a checkout the default
-linker uses rustc and the system C linker (BOTLISH_NATIVE_LINKER=rustc),
-on Linux x86-64 and AArch64, on macOS AArch64 and on Windows x86-64
-(MSVC's toolchain: Visual Studio's C++ build tools and the Windows SDK,
-which rustc finds itself); the `stub` linker (BOTLISH_NATIVE_LINKER=stub,
-what the single executable uses) needs no toolchain and is Linux x86-64
-only. A program that calls C links with the rustc linker on Linux and
-macOS, its declared libraries passed to the platform linker; on Windows
-not yet, and the stub linker never (NATIVE LINK). The
+are built from .bot, .hir or .hirx. Linking (BOTLISH_NATIVE_LINKER): in a
+checkout the default linker uses rustc and the system C linker (rustc), on
+Linux x86-64 and AArch64, on macOS AArch64 and on Windows x86-64 (MSVC's
+toolchain: Visual Studio's C++ build tools and the Windows SDK, which rustc
+finds itself); the `system` linker needs no rustc -- the host's C compiler
+driver (cc; on Windows link.exe from a Developer Command Prompt) links the
+program with the precompiled runtime archive (libbotlish_runtime.a, beside
+the driver or BOTLISH_NATIVE_RUNTIME), on the same hosts; the `stub` linker
+needs no toolchain and is Linux x86-64 only; `auto` (what the single
+executable uses) is the system linker for a program that calls C and the
+stub for any other. A program that calls C links with the rustc and the
+system linker, its declared libraries passed to the platform linker, and
+the stub linker never (NATIVE LINK). The
 executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
+
+@topic backend.native-library
+title: Native libraries: Botlish functions a C host calls
+summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
+index: backends
+alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C
+keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding
+related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library
+docs: NATIVE-LIBRARY-MILESTONE-1.md C-FFI.md
+
+== WHAT IT IS
+A Botlish program can be a library a C program calls. Its exports are
+declared in the source:
+
+    error Rejected:
+        code: int
+
+    exported c fn checked(n: int) -> int errors Rejected:
+        if n < 0:
+            fail Rejected {code: n}
+        n * 2
+
+and `-emit-native-library NAME FILE.bot` builds (Linux glibc, x86_64 and
+aarch64):
+
+    libNAME.a            a static library: one object with the program and
+                         a private copy of the runtime; only the library's
+                         public C functions are global symbols
+    libNAME.so           the same as a shared library
+    NAME.h               the C interface
+    NAME.manifest.json   the same interface as data, for tools
+
+C calls `NAME_checked(instance, int64_t n, int64_t *result, NAME_error
+**error)`. An exported c fn is an ordinary function to Botlish code and to
+every backend; only a library makes a C symbol of it.
+
+== THE C INTERFACE
+  * Lifecycle: NAME_create makes an instance on the calling thread and runs
+    the program's initialization (its modules' static initialization); the
+    instance is called and destroyed (NAME_destroy) on that thread only,
+    one call at a time. Instances share nothing; two libraries in one
+    process share nothing but the C library.
+  * Statuses: every call returns NAME_STATUS_OK, DECLARED (a declared
+    Botlish error), RUNTIME, BOUNDARY (an argument or result C cannot
+    carry), INVOCATION (a handle, thread or pointer the rules forbid) or
+    INTERNAL. On failure the optional error out-parameter receives an error
+    the caller owns: its identity (the canonical error name, e.g.
+    "Rejected" or "module::Malformed", or a runtime error's code), its
+    message, and its payload's int, bool, Float64 and str fields.
+  * Types: int is int64_t (an Int result outside it is a BOUNDARY error,
+    never wrapped), bool is bool, Float64 is double (NaN and the
+    infinities are refused), str is UTF-8 -- a pointer and a length in, an
+    owned NAME_bytes buffer out, released with NAME_bytes_release.
+
+== THE EXPORT ROOT
+An exported function is compiled for every argument its declared types
+admit, never for what its Botlish callers happen to pass: Botlish calls of
+it keep their own specialized code, and the export is a separate entry. A
+library's entry file holds declarations only (NATIVE LIBRARY
+LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created.
+
+== THREE DIFFERENT THINGS
+  * A module's top-level functions are visible to every importer unless
+    declared `private` (concept.private); there are no export lists.
+    That is Botlish-to-Botlish reach, through the Botlish calling
+    convention, and it makes no C symbol. `private` decides Botlish names
+    only: a `private exported c fn` is still a C export.
+  * `extern c fn` declares a C function Botlish calls (concept.c-ffi): a
+    foreign import, with no body.
+  * `exported c fn` gives a Botlish function a C entry point a host calls:
+    a foreign export. It changes nothing for Botlish callers, which still
+    call it directly; only -emit-native-library reads it. The explicit
+    `-export FUNCTION` list (native::library -exports) selects top-level
+    functions of the entry program the same way, checked by the same rules.
+
+== LIMITATIONS
+Botlish code runs on the caller's thread and stack, and no stack guard is
+installed in a library: deep recursion needs a large thread stack, and
+exhausting it ends the process. No callbacks, no Lists, structs or other
+values at the boundary, no asynchronous calls; macOS and Windows libraries
+are not made yet.
 
 @topic backend.single-executable
 title: The single-file compiler
@@ -179,15 +264,23 @@ docs: SINGLE-EXECUTABLE.md
 == WHAT IT IS
 A Tcl 9 zipkit (single/build.sh in a checkout): a static tclsh with the
 compiler and main.tcl in an attached archive. It takes main.tcl's options,
-runs every backend, builds standalone executables with the stub linker, and
-answers -help from the packed Compilerpedia, with no source tree present.
+runs every backend, builds standalone executables, and answers -help from
+the packed Compilerpedia, with no source tree present. It links a program
+that calls no C with the stub linker, which needs no toolchain, and one that
+calls C (or declares a C library) with the system linker: the host's C
+compiler driver (cc, with its linker) and the runtime archive the compiler
+carries -- never Rust or a checkout (BOTLISH_NATIVE_LINKER=auto).
 
 == THINGS TO KNOW
 On its first run that needs a native backend it copies its two native
 executables into a cache directory ($BOTLISH_CACHE_DIR,
-$XDG_CACHE_HOME/botlish or ~/.cache/botlish); without a usable cache it uses
-a temporary one. Usage, -help and -version need no installation. It is
-built for Linux x86-64.
+$XDG_CACHE_HOME/botlish or ~/.cache/botlish), and on its first run that may
+link (-emit-native-executable, a native backend) its runtime archive too;
+without a usable cache it uses a temporary one. Usage, -help and -version
+need no installation. It is built for Linux x86-64. A program that calls C
+needs a C compiler on the machine that builds it (Debian, Ubuntu: apt
+install gcc) and the libraries it declares; without one its link says so
+(NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
 
 @topic backend.native-only
 title: Native-only operations
@@ -298,7 +391,9 @@ other platforms.
                              Windows x86-64 (MSVC's toolchain; MinGW's
                              windows-x86_64-gnu is no native target)
     native coroutines        Linux x86-64 and AArch64 and macOS AArch64
-                             (hand-written stack switching); elsewhere
+                             (hand-written stack switching, or, for a
+                             coroutine closed inside one function, none:
+                             COROUTINE-FUSION-MILESTONE-1.md); elsewhere
                              (Windows) NATIVE UNSUPPORTED; the Tcl
                              backends run coroutines everywhere
     native stack overflow    NATIVE LIMIT STACK, for the thread's stack
@@ -449,8 +544,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-library concept.argv
 docs: README.md
 
 == RUNNING
@@ -483,12 +578,23 @@ own process arguments.
                               (backend.native-executable)
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
+    -emit-native-library NAME the native library NAME from the one input:
+                              libNAME.a, libNAME.so, NAME.h and
+                              NAME.manifest.json (backend.native-library)
+    -export FUNCTION          export the entry program's top-level FUNCTION
+                              (repeatable; without it the library exports
+                              the program's `exported c fn`s)
+    -out DIR                  where -emit-native-library writes (default:
+                              the input's directory)
 
 == CHECKING (nothing runs, nothing is built or written)
     -check            analyze each .bot input and report what compiling it
                       reports: the same error lines (and help lines), its
                       warnings on stderr, "ok" when it has no error; exit
-                      status 1 when an input has one. Only -warnings and
+                      status 1 when an input has one. Past a syntax error
+                      it also reports the semantic errors the malformed
+                      source cannot affect, which a run does not
+                      (error.surface-syntax). Only -warnings and
                       -target combine with it (they decide the analysis);
                       any other option, or an input that is not a .bot
                       file, is a malformed invocation.
@@ -581,6 +687,10 @@ distinct code. Standard output stays the program's.
 With -check (cli.options) the header names no backend and nothing runs: a
 program without an error gets "ok"; a rejected one the same "error:" and
 "help:" lines a run prints, and its warnings go to stderr as a run's do.
+One difference: a program with a syntax error gets its syntax errors and
+then the independent semantic errors of the code around them, where a run
+stops at the syntax errors (error.surface-syntax, "Checking around a
+syntax error").
 
 @topic cli.exit-status
 title: Exit statuses of the compiler and of executables
@@ -639,10 +749,14 @@ editor prefers it).
 
 == PROGRAMS AND STALENESS
 Each open document is analyzed as a program unless another open program
-imports it; then it is that program's module. During a syntax error the
-last analysis still answers where the text is unchanged, its hover marked
-stale. An analysis runs after a short pause in typing, in a worker process,
-so the server answers while it runs.
+imports it; then it is that program's module. A document with a syntax
+error is still analyzed, around its malformed source (error.surface-syntax,
+"Checking around a syntax error"): the code the error cannot affect gets
+fresh diagnostics, hover, definitions and references, and a position
+whose meaning the malformed source may change is answered from the last
+complete analysis where the text is unchanged, its hover marked stale, or
+not at all. An analysis runs after a short pause in typing, in a worker
+process, so the server answers while it runs.
 
 == NOT YET
 Completion, signature help, rename, code actions, formatting, semantic

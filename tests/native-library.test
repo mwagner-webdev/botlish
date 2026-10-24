@@ -1,0 +1,1100 @@
+# native-library.test -- native libraries (NATIVE-LIBRARY-MILESTONE-1.md):
+# Botlish programs compiled into static and shared libraries a C host calls.
+#
+#   * export roots: an exported function behaves as its declaration says for
+#     every argument, whatever its Botlish callers pass -- the census's two
+#     defects (checked(-5) returned -10; token_count miscounted inputs longer
+#     than its callers' constant) reproduced with constant Botlish callers
+#     and no argv() -- while those callers stay optimized; an export with no
+#     Botlish caller; a tiny one; one of an imported module;
+#   * the C ABI: int, bool, Float64, str and unit, boundary errors (an Int
+#     result outside int64_t, a NaN, invalid UTF-8, a NULL pointer), owned
+#     String results, declared errors with typed payload fields, runtime
+#     errors, all as data;
+#   * the lifecycle: create, destroy, recreate, invalid and destroyed
+#     handles, double release, the thread rule (wrong thread, a reentrant call
+#     through C), instances on four threads at once; a coroutine run inside a
+#     call (the general runtime's stacks under the call's walk); the walk's
+#     boundary (a call's collections never read the frames above it);
+#   * two independently compiled libraries in one executable, alternating,
+#     allocating, failing, under GC stress; one called from inside the
+#     other's call; their symbols;
+#   * the front end: `exported c fn` in HIR text and interchange, its
+#     diagnostics, the library checks, the explicit export list; the header
+#     and the manifest.
+#
+# Every behavior test links real C (the host's cc) against the generated
+# header and archive only, and runs it, also under BOTLISH_NATIVE_GC_STRESS=1.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+    && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
+    && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
+testConstraint nm [expr {[auto_execok nm] ne ""}]
+set ::nlCounter 0
+
+proc nlWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# A fresh directory, its name with a space in it (every path the library
+# build and the C link take is quoted as data, never through a shell).
+proc nlDir {} {
+    return [makeDirectory "nl [pid]-[incr ::nlCounter]"]
+}
+
+proc nlHir {path args} {
+    return [surface::readProgramFile $path -warnings off -warning-channel "" {*}$args]
+}
+
+# Library NAME from SOURCE (FILE.bot in DIR, beside any MODULES {NAME TEXT}),
+# built into DIR/lib. Returns native::library's result.
+proc nlLibrary {dir name source {modules {}} args} {
+    foreach {module text} $modules {
+        nlWrite [file join $dir $module.bot] $text
+    }
+    nlWrite [file join $dir $name.bot] $source
+    return [native::library [nlHir [file join $dir $name.bot]] -name $name -out [file join $dir lib] {*}$args]
+}
+
+# A C executable from SOURCE, linked with the static libraries LIBS
+# (archive paths) or, with -shared, the shared library DIR/lib/libNAME.so.
+proc nlExecutable {dir source libs args} {
+    nlWrite [file join $dir main.c] $source
+    set exe [file join $dir main]
+    exec cc -O1 -Wall -Werror -I[file join $dir lib] [file join $dir main.c] {*}$libs \
+        {*}$native::library::systemLibraries -o $exe {*}$args
+    return $exe
+}
+
+# EXE's output; with STRESS 1 under BOTLISH_NATIVE_GC_STRESS=1.
+proc nlRun {exe {stress 0}} {
+    set saved [array get ::env BOTLISH_NATIVE_GC_STRESS]
+    if {$stress} {
+        set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    } else {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    try {
+        return [exec $exe 2>@1]
+    } finally {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+        array set ::env $saved
+    }
+}
+
+# EXE's output, which must be the same with and without GC stress.
+proc nlRunBoth {exe} {
+    set plain [nlRun $exe]
+    set stressed [nlRun $exe 1]
+    if {$plain ne $stressed} {
+        error "output differs under GC stress:\n$plain\n--- stressed:\n$stressed"
+    }
+    return $plain
+}
+
+# The C helpers every harness of library NAME uses: `report` prints a
+# failed call's status, identity and fields (and releases its error),
+# `check` aborts on an unexpected status.
+proc nlPrelude {name} {
+    return [string map [list LIB $name] {
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "LIB.h"
+static void report(const char *what, int32_t status, LIB_error **ep) {
+    const uint8_t *p; size_t l;
+    LIB_error *e = ep ? *ep : NULL;
+    printf("%s: status %d", what, (int) status);
+    if (e != NULL) {
+        LIB_error_identity(e, &p, &l);
+        printf(" %.*s", (int) l, (const char *) p);
+        for (size_t i = 0; i < LIB_error_field_count(e); i++) {
+            int64_t n; bool b; double x; const uint8_t *s; size_t sl;
+            LIB_error_field_name(e, i, &p, &l);
+            printf(" %.*s=", (int) l, (const char *) p);
+            switch (LIB_error_field_type(e, i)) {
+            case LIB_FIELD_INT:
+                if (LIB_error_field_int(e, i, &n) == LIB_STATUS_OK) printf("%lld", (long long) n); else printf("(no int64)");
+                break;
+            case LIB_FIELD_BOOL: LIB_error_field_bool(e, i, &b); printf("%s", b ? "true" : "false"); break;
+            case LIB_FIELD_FLOAT64: LIB_error_field_float64(e, i, &x); printf("%g", x); break;
+            case LIB_FIELD_STR: LIB_error_field_str(e, i, &s, &sl); printf("\"%.*s\"", (int) sl, (const char *) s); break;
+            default: printf("(other)");
+            }
+        }
+        LIB_error_release(ep);
+    }
+    printf("\n");
+}
+static void check(const char *what, int32_t status, LIB_error **ep) {
+    if (status != LIB_STATUS_OK) { report(what, status, ep); exit(1); }
+}
+}]
+}
+
+# ---------------------------------------------------------------------------
+# Export roots
+
+# checked(-5): the census's first defect. The one Botlish caller passes the
+# constant 1, so the instance it calls is specialized with `n < 0` dead; the
+# export is the function's own root and keeps the branch.
+set ::nlChecked {
+error Rejected:
+    code: int
+
+exported c fn checked(n: int) -> int errors Rejected:
+    if n < 0:
+        fail Rejected {code: n}
+    n * 2
+
+exported c fn internal() -> int:
+    r = checked(1):
+        on Rejected:
+            0
+    r
+}
+
+test nl-export-root-checked {checked(-5) fails with its declared error though its only Botlish caller passes 1} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    set exe [nlExecutable $dir "[nlPrelude chk]
+int main(void) {
+    chk_instance *in; chk_error *e = NULL; int64_t r;
+    check(\"create\", chk_create(&in, &e), &e);
+    check(\"internal\", chk_internal(in, &r, &e), &e);
+    printf(\"internal() = %lld\\n\", (long long) r);
+    for (int64_t n = -5; n <= 21; n += 13) {
+        int32_t s = chk_checked(in, n, &r, &e);
+        if (s == chk_STATUS_OK) printf(\"checked(%lld) = %lld\\n\", (long long) n, (long long) r);
+        else report(\"checked\", s, &e);
+    }
+    check(\"destroy\", chk_destroy(in), NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {internal() = 2
+checked: status 1 Rejected code=-5
+checked(8) = 16
+checked(21) = 42}
+
+test nl-export-root-internal-stays-optimized {the Botlish caller of checked keeps its call-site facts; the export root does not get them} -constraints nativeBuilt -body {
+    set dir [nlDir]
+    nlWrite [file join $dir chk.bot] $::nlChecked
+    set hir [nlHir [file join $dir chk.bot]]
+    set lowered [lmap r [hir::exports::of $hir] {
+        dict create symbol x_[dict get $r name] block [dict get $r block] \
+            params [lmap {p t} [dict get $r params] {set t}] result [dict get $r result]
+    }]
+    # FUNCTION's text in NIR TEXT, by NIR function id.
+    proc body {text id} {
+        regexp "func $id \"\[^\n\]*\n(?:\[^\n\]*\n)*?end" $text chunk
+        return $chunk
+    }
+    set results {}
+    foreach tiny {1 0} {
+        set text [native::nir $hir -exports $lowered -tiny-leaf-inline-opt $tiny]
+        regexp {export "x_checked" func=(\d+)} $text -> root
+        regexp {export "x_internal" func=(\d+)} $text -> caller
+        set rootText [body $text $root]
+        set callerText [body $text $caller]
+        set facts [list [regexp {instance="generic"} $rootText] [string match *faildeclared* $rootText] \
+            [string match *faildeclared* $callerText]]
+        if {!$tiny} {
+            # Not inlined: the caller calls checked's own instance for an
+            # Int, which never fails either.
+            regexp {call (\d+) } $callerText -> callee
+            set calleeText [body $text $callee]
+            lappend facts [regexp {"checked".*instance="int"} $calleeText] [string match *faildeclared* $calleeText]
+        }
+        lappend results $facts
+    }
+    set results
+} -result {{1 1 0} {1 1 0 1 0}}
+
+test nl-export-root-token-count {token_count of a long input is right though its only Botlish caller tokenizes a 6-character constant} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    file copy [file join $::projectRoot audit compiler-service probes json json_tokens.bot] $dir
+    set source {
+import json_tokens
+import std::list
+
+exported c fn token_count(text: str) -> int errors IndexNotFound, LowerUnderrun, UpperOverrun, json_tokens::Malformed, json_tokens::TooManyTokens:
+    std::list::length(json_tokens::tokenize(text, 1000000))
+
+exported c fn sample() -> int:
+    n = token_count("[1, 2]"):
+        on IndexNotFound:
+            -1
+        on LowerUnderrun:
+            -1
+        on UpperOverrun:
+            -1
+        on json_tokens::Malformed:
+            -1
+        on json_tokens::TooManyTokens:
+            -1
+    n
+}
+    set built [nlLibrary $dir tok $source]
+    # The oracle: the same tokenizer run by the reference interpreter.
+    set long "\[[join [lrepeat 40 {"abc", 12.5e-3, true, null}] {, }]\]"
+    set probe [file join $dir oracle.bot]
+    set literal \"[string map {\\ \\\\ \" \\\"} $long]\"
+    nlWrite $probe "import json_tokens\nimport std::list\n\nfn count(text: str) -> int:\n    r = json_tokens::tokenize(text, 1000000):\n        on IndexNotFound:\n            return -1\n        on LowerUnderrun:\n            return -1\n        on UpperOverrun:\n            return -1\n        on json_tokens::Malformed:\n            return -1\n        on json_tokens::TooManyTokens:\n            return -1\n    std::list::length(r)\n\n\[count($literal), count(\"\\\"abcdefghij\\\"\")\]\n"
+    core::useProgramRecursionLimit
+    set oracle [core::value::show [core::evalProgram [hir::lower [nlHir $probe]]]]
+    set cLong [string map {\\ \\\\ \" \\\"} $long]
+    set exe [nlExecutable $dir "[nlPrelude tok]
+static void count(tok_instance *in, const char *text) {
+    int64_t r; tok_error *e = NULL;
+    int32_t s = tok_token_count(in, (const uint8_t *) text, strlen(text), &r, &e);
+    if (s == tok_STATUS_OK) printf(\"%lld\\n\", (long long) r); else report(\"token_count\", s, &e);
+}
+int main(void) {
+    tok_instance *in; tok_error *e = NULL; int64_t r;
+    check(\"create\", tok_create(&in, &e), &e);
+    check(\"sample\", tok_sample(in, &r, &e), &e);
+    printf(\"sample = %lld\\n\", (long long) r);
+    count(in, \"\[1, 2\]\");
+    count(in, \"\[1, 2, 3\]\");
+    count(in, \"\\\"abcdefghij\\\"\");
+    count(in, \"$cLong\");
+    count(in, \"{\\\"a\\\": tru}\");
+    tok_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]]]
+    list [nlRunBoth $exe] $oracle
+} -result {{sample = 5
+5
+7
+1
+321
+token_count: status 1 json_tokens::Malformed at=6} {[321, 1]}}
+
+test nl-export-root-no-caller {an exported function no Botlish code calls, and a tiny one Botlish calls with constants} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set source {
+exported c fn lonely(a: int, b: int) -> int:
+    a * 1000 + b
+
+exported c fn add1(n: int) -> int:
+    n + 1
+
+exported c fn uses_add1() -> int:
+    add1(41) + add1(0)
+}
+    set built [nlLibrary $dir tiny $source]
+    set exe [nlExecutable $dir "[nlPrelude tiny]
+int main(void) {
+    tiny_instance *in; tiny_error *e = NULL; int64_t r;
+    check(\"create\", tiny_create(&in, &e), &e);
+    check(\"lonely\", tiny_lonely(in, -3, 7, &r, &e), &e); printf(\"lonely = %lld\\n\", (long long) r);
+    check(\"uses_add1\", tiny_uses_add1(in, &r, &e), &e); printf(\"uses_add1 = %lld\\n\", (long long) r);
+    check(\"add1\", tiny_add1(in, -5, &r, &e), &e); printf(\"add1(-5) = %lld\\n\", (long long) r);
+    check(\"add1\", tiny_add1(in, INT64_MAX - 1, &r, &e), &e); printf(\"add1(max - 1) = %lld\\n\", (long long) r);
+    int32_t s = tiny_add1(in, INT64_MAX, &r, &e); report(\"add1(max)\", s, &e);
+    s = tiny_lonely(in, INT64_MIN, 0, &r, &e); report(\"lonely(min)\", s, &e);
+    tiny_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {lonely = -2993
+uses_add1 = 43
+add1(-5) = -4
+add1(max - 1) = 9223372036854775807
+add1(max): status 3 RESULT-OUT-OF-RANGE
+lonely(min): status 3 RESULT-OUT-OF-RANGE}
+
+test nl-export-imported-module {an exported c fn of an imported module is exported by the library of a program that imports it} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set module {
+import std::str
+
+error TooLong:
+    length: int
+
+exported c fn greet(name: str) -> str errors TooLong:
+    if std::str::length(name) > 8:
+        fail TooLong {length: std::str::length(name)}
+    std::str::concat("hello, ", name)
+}
+    set source {
+import greeting
+
+exported c fn local(n: int) -> int:
+    n
+}
+    set built [nlLibrary $dir mod $source [list greeting $module]]
+    set exe [nlExecutable $dir "[nlPrelude mod]
+int main(void) {
+    mod_instance *in; mod_error *e = NULL; mod_bytes out;
+    check(\"create\", mod_create(&in, &e), &e);
+    check(\"greet\", mod_greet(in, (const uint8_t *) \"w\\xc3\\xb6rld\", 6, &out, &e), &e);
+    printf(\"%.*s (%zu bytes)\\n\", (int) out.len, (const char *) out.ptr, out.len);
+    mod_bytes_release(&out);
+    report(\"greet\", mod_greet(in, (const uint8_t *) \"abcdefghijk\", 11, &out, &e), &e);
+    mod_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]]]
+    list [nlRunBoth $exe] [lmap r [dict get $built exports] {list [dict get $r module] [dict get $r name]}]
+} -result {{hello, wörld (13 bytes)
+greet: status 1 greeting::TooLong length=11} {{greeting greet} {{} local}}}
+
+# ---------------------------------------------------------------------------
+# The C ABI
+
+set ::nlTypes {
+import std::float64
+import std::mutable_array
+import std::str
+
+error Odd:
+    count: int
+    flag: bool
+    ratio: Float64
+    note: str
+    items: List[int]
+
+exported c fn negate(b: bool) -> bool:
+    not b
+
+exported c fn half(x: Float64) -> Float64 errors NonFiniteFloat:
+    x / 2.0
+
+exported c fn echo(text: str) -> str:
+    text
+
+exported c fn length(text: str) -> int:
+    std::str::length(text)
+
+exported c fn joined(a: str, b: str, c: str) -> str:
+    std::str::concat(a, std::str::concat("|", std::str::concat(b, std::str::concat("|", c))))
+
+exported c fn nothing(n: int) -> unit:
+    unit
+
+exported c fn odd(n: int) -> int errors Odd:
+    if n > 2:
+        fail Odd {count: n, flag: true, ratio: 0.5, note: "odd ä", items: [n, n]}
+    n
+
+exported c fn huge() -> int:
+    9223372036854775807 * 4
+
+exported c fn range_error(n: int) -> int:
+    xs = std::mutable_array::create(n, 0)
+    0
+}
+
+test nl-abi-types {bool, Float64, str and unit cross the boundary; boundary errors are data} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ty $::nlTypes]
+    set exe [nlExecutable $dir "[nlPrelude ty]
+#include <math.h>
+int main(void) {
+    ty_instance *in; ty_error *e = NULL; bool b; double x; int64_t n; ty_bytes out;
+    check(\"create\", ty_create(&in, &e), &e);
+    check(\"negate\", ty_negate(in, true, &b, &e), &e); printf(\"negate(true) = %d\\n\", b);
+    check(\"half\", ty_half(in, 5.0, &x, &e), &e); printf(\"half(5) = %g\\n\", x);
+    check(\"half\", ty_half(in, -0.0, &x, &e), &e); printf(\"half(-0) = %g, signbit %d\\n\", x, signbit(x) != 0);
+    report(\"half(nan)\", ty_half(in, NAN, &x, &e), &e);
+    report(\"half(inf)\", ty_half(in, INFINITY, &x, &e), &e);
+    check(\"echo\", ty_echo(in, (const uint8_t *) \"a\\0b\\xf0\\x9f\\x98\\x80\", 7, &out, &e), &e);
+    printf(\"echo: %zu bytes, NUL at 1: %d, terminated: %d\\n\", out.len, out.ptr\[1\] == 0, out.ptr\[out.len\] == 0);
+    int32_t first = ty_bytes_release(&out);
+    int32_t second = ty_bytes_release(&out);
+    printf(\"release: %d, again: %d, ptr %s\\n\", first, second, out.ptr == NULL ? \"NULL\" : \"set\");
+    check(\"echo empty\", ty_echo(in, NULL, 0, &out, &e), &e); printf(\"echo(NULL, 0): %zu bytes\\n\", out.len); ty_bytes_release(&out);
+    report(\"echo(NULL, 3)\", ty_echo(in, NULL, 3, &out, &e), &e);
+    report(\"echo(invalid UTF-8)\", ty_echo(in, (const uint8_t *) \"ab\\xff\", 3, &out, &e), &e);
+    report(\"echo(a surrogate's UTF-8)\", ty_echo(in, (const uint8_t *) \"\\xed\\xa0\\x80\", 3, &out, &e), &e);
+    check(\"length\", ty_length(in, (const uint8_t *) \"\\xc3\\xa4\\xf0\\x9f\\x98\\x80\", 6, &n, &e), &e); printf(\"length = %lld\\n\", (long long) n);
+    check(\"joined\", ty_joined(in, (const uint8_t *) \"first\", 5, (const uint8_t *) \"second\", 6, (const uint8_t *) \"third\", 5, &out, &e), &e);
+    printf(\"joined = %.*s\\n\", (int) out.len, (const char *) out.ptr); ty_bytes_release(&out);
+    check(\"nothing\", ty_nothing(in, 3, &e), &e); printf(\"nothing: ok\\n\");
+    report(\"odd(3)\", ty_odd(in, 3, &n, &e), &e);
+    report(\"huge\", ty_huge(in, &n, &e), &e);
+    report(\"range_error(-1)\", ty_range_error(in, -1, &n, &e), &e);
+    report(\"echo(result NULL)\", ty_echo(in, (const uint8_t *) \"x\", 1, NULL, &e), &e);
+    report(\"odd(3), no error requested\", ty_odd(in, 3, &n, NULL), NULL);
+    ty_bytes bogus = { (uint8_t *) \"not ours\", 8 };
+    printf(\"release a foreign buffer: %d\\n\", ty_bytes_release(&bogus));
+    ty_error *none = NULL;
+    printf(\"release NULL error: %d\\n\", ty_error_release(&none));
+    ty_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]] -lm]
+    nlRunBoth $exe
+} -result {negate(true) = 0
+half(5) = 2.5
+half(-0) = 0, signbit 0
+half(nan): status 3 ARGUMENT-NOT-FINITE argument=0
+half(inf): status 3 ARGUMENT-NOT-FINITE argument=0
+echo: 7 bytes, NUL at 1: 1, terminated: 1
+release: 0, again: 0, ptr NULL
+echo(NULL, 0): 0 bytes
+echo(NULL, 3): status 3 ARGUMENT-NULL argument=0
+echo(invalid UTF-8): status 3 ARGUMENT-NOT-UTF8 argument=0
+echo(a surrogate's UTF-8): status 3 ARGUMENT-NOT-UTF8 argument=0
+length = 2
+joined = first|second|third
+nothing: ok
+odd(3): status 1 Odd count=3 flag=true items=(other) note="odd ä" ratio=0.5
+huge: status 3 RESULT-OUT-OF-RANGE
+range_error(-1): status 2 CORE SEMANTIC RANGE
+echo(result NULL): status 4 NULL-POINTER
+odd(3), no error requested: status 1
+release a foreign buffer: 4
+release NULL error: 0}
+
+test nl-abi-results-survive {owned results and errors survive later calls, collections and the instance's destruction} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ty $::nlTypes]
+    set exe [nlExecutable $dir "[nlPrelude ty]
+int main(void) {
+    ty_instance *in; ty_error *e = NULL, *kept = NULL; int64_t n; ty_bytes a, b;
+    check(\"create\", ty_create(&in, &e), &e);
+    check(\"echo\", ty_echo(in, (const uint8_t *) \"first\", 5, &a, &e), &e);
+    ty_odd(in, 5, &n, &kept);
+    for (int i = 0; i < 2000; i++) {
+        check(\"echo\", ty_echo(in, (const uint8_t *) \"scratch text\", 12, &b, &e), &e);
+        ty_bytes_release(&b);
+    }
+    ty_destroy(in);
+    printf(\"%.*s\\n\", (int) a.len, (const char *) a.ptr);
+    report(\"kept\", ty_error_status(kept), &kept);
+    ty_bytes_release(&a);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {first
+kept: status 1 Odd count=5 flag=true items=(other) note="odd ä" ratio=0.5}
+
+# ---------------------------------------------------------------------------
+# Lifecycle and threads
+
+test nl-lifecycle {create, destroy, recreate; destroyed, foreign and NULL handles are refused} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    set exe [nlExecutable $dir "[nlPrelude chk]
+int main(void) {
+    chk_instance *a, *b; chk_error *e = NULL; int64_t r;
+    printf(\"abi %u\\n\", chk_abi_version());
+    check(\"create a\", chk_create(&a, &e), &e);
+    check(\"create b\", chk_create(&b, &e), &e);
+    printf(\"distinct: %d\\n\", a != b);
+    check(\"a\", chk_checked(a, 1, &r, &e), &e);
+    check(\"destroy a\", chk_destroy(a), NULL);
+    report(\"call a\", chk_checked(a, 1, &r, &e), &e);
+    printf(\"destroy a again: %d\\n\", chk_destroy(a));
+    check(\"b\", chk_checked(b, 2, &r, &e), &e); printf(\"b: %lld\\n\", (long long) r);
+    report(\"call NULL\", chk_checked(NULL, 1, &r, &e), &e);
+    report(\"call garbage\", chk_checked((chk_instance *) &r, 1, &r, &e), &e);
+    report(\"create into NULL\", chk_create(NULL, &e), &e);
+    for (int i = 0; i < 50; i++) {
+        check(\"create\", chk_create(&a, &e), &e);
+        check(\"call\", chk_checked(a, i, &r, &e), &e);
+        check(\"destroy\", chk_destroy(a), NULL);
+    }
+    printf(\"50 instances made and destroyed\\n\");
+    check(\"destroy b\", chk_destroy(b), NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {abi 1
+distinct: 1
+call a: status 4 INVALID-INSTANCE
+destroy a again: 4
+b: 4
+call NULL: status 4 INVALID-INSTANCE
+call garbage: status 4 INVALID-INSTANCE
+create into NULL: status 4 NULL-POINTER
+50 instances made and destroyed}
+
+test nl-threads {an instance refuses other threads; instances on four threads run at once} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set source {
+import std::str
+
+exported c fn work(seed: int, rounds: int) -> int:
+    xs = loop i from 0 to rounds:
+        std::str::concat("item ", std::str::concat("x", "y"))
+    total = loop x in xs:
+        std::str::length(x) + seed
+    std::list::length(total)
+
+exported c fn add(a: int, b: int) -> int:
+    a + b
+}
+    set built [nlLibrary $dir thr "import std::list\n$source"]
+    set exe [nlExecutable $dir "[nlPrelude thr]
+#include <pthread.h>
+static thr_instance *shared;
+static void *foreign_call(void *arg) {
+    int64_t r; thr_error *e = NULL;
+    report(\"call from another thread\", thr_add(shared, 1, 2, &r, &e), &e);
+    printf(\"destroy from another thread: %d\\n\", thr_destroy(shared));
+    return NULL;
+}
+static void *own(void *arg) {
+    thr_instance *in; thr_error *e = NULL; int64_t r, sum = 0;
+    if (thr_create(&in, &e) != thr_STATUS_OK) return (void *) 1;
+    for (int i = 0; i < 20; i++) {
+        if (thr_work(in, (int64_t) (intptr_t) arg, 300, &r, &e) != thr_STATUS_OK) return (void *) 2;
+        sum += r;
+    }
+    thr_destroy(in);
+    return sum == 20 * 300 ? NULL : (void *) 3;
+}
+int main(void) {
+    thr_error *e = NULL; int64_t r;
+    check(\"create\", thr_create(&shared, &e), &e);
+    pthread_t t;
+    pthread_create(&t, NULL, foreign_call, NULL);
+    pthread_join(t, NULL);
+    check(\"own thread still works\", thr_add(shared, 1, 2, &r, &e), &e);
+    printf(\"add = %lld\\n\", (long long) r);
+    pthread_t ts\[4\]; void *results\[4\];
+    for (int i = 0; i < 4; i++) pthread_create(&ts\[i\], NULL, own, (void *) (intptr_t) i);
+    for (int i = 0; i < 4; i++) pthread_join(ts\[i\], &results\[i\]);
+    for (int i = 0; i < 4; i++) printf(\"thread %d: %s\\n\", i, results\[i\] == NULL ? \"ok\" : \"failed\");
+    check(\"destroy\", thr_destroy(shared), NULL);
+    return 0;
+}
+" [list [dict get $built static]] -lpthread]
+    nlRunBoth $exe
+} -result {call from another thread: status 4 WRONG-THREAD
+destroy from another thread: 4
+add = 3
+thread 0: ok
+thread 1: ok
+thread 2: ok
+thread 3: ok}
+
+test nl-reentrant {a C function a Botlish export calls cannot call the same instance again; it can call another} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set source {
+extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+exported c fn outer(n: int) -> int:
+    if n < -1000 or n > 1000:
+        return 0
+    host_callback(n) + 0
+
+exported c fn inner(n: int) -> int:
+    n * 10
+}
+    set built [nlLibrary $dir re "import std::ffi::c\n$source" {} -shared 0]
+    set exe [nlExecutable $dir "[nlPrelude re]
+static re_instance *first, *second;
+long long host_callback(long long n) {
+    int64_t r; re_error *e = NULL;
+    int32_t s = re_inner(first, n, &r, &e);
+    report(\"reentrant call of the same instance\", s, &e);
+    check(\"call of another instance\", re_inner(second, n, &r, &e), &e);
+    return r;
+}
+int main(void) {
+    re_error *e = NULL; int64_t r;
+    check(\"create\", re_create(&first, &e), &e);
+    check(\"create\", re_create(&second, &e), &e);
+    check(\"outer\", re_outer(first, 7, &r, &e), &e);
+    printf(\"outer(7) = %lld\\n\", (long long) r);
+    check(\"after\", re_inner(first, 1, &r, &e), &e);
+    printf(\"inner(1) = %lld\\n\", (long long) r);
+    re_destroy(first); re_destroy(second);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {reentrant call of the same instance: status 4 REENTRANT-CALL
+outer(7) = 70
+inner(1) = 10}
+
+# A coroutine inside a call: the export drives a recursive yielding
+# function (recursive, so never fused: the general runtime's stacks and
+# switches), allocating on both stacks, while the collector walks the
+# coroutine's stack and the call's, which ends at the call.
+test nl-coroutine-inside {an export that runs a coroutine on the general runtime, many times, under GC stress} -constraints {nativeLibraries nativeCoroutines} -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir co {
+import std::str
+
+struct Message:
+    text: str
+
+fn produce(i: int, n: int, acc: str, resume Message) -> str:
+    if i >= n:
+        return acc
+    message = yield std::str::concat("item ", acc)
+    produce(i + 1, n, std::str::concat(acc, message.text))
+
+fn drive(step: Coroutine{args: [Message], return: str}, k: int, last: str) -> str:
+    if k <= 0:
+        return last
+    next = step(Message {text: std::str::concat("x", "y")})
+    drive(step, k - 1, next)
+
+exported c fn chain(n: int) -> int:
+    if n < 0 or n > 10000:
+        return 0
+    coroutine {step, first} = produce(0, n, "")
+    std::str::length(drive(step, n + 1, first))
+}]
+    set exe [nlExecutable $dir "[nlPrelude co]
+int main(void) {
+    co_instance *in; co_error *e = NULL; int64_t r = 0, total = 0;
+    check(\"create\", co_create(&in, &e), &e);
+    for (int i = 0; i < 200; i++) {
+        check(\"chain\", co_chain(in, i, &r, &e), &e);
+        total += r;
+    }
+    check(\"chain\", co_chain(in, 3000, &r, &e), &e);
+    printf(\"200 calls: %lld; chain(3000) = %lld\\n\", (long long) total, (long long) r);
+    co_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {200 calls: 39800; chain(3000) = 6000}
+
+# The walk's boundary (Vm::stack_ceiling): a call's collections walk its own
+# frames, never the frames above it. Instance `first`'s export holds a
+# MutableVector across a C call (a safepoint) whose callback runs instance
+# `second` of the same library, which collects. Were the walk to climb past
+# `second`'s call into `first`'s frame -- the callback keeps a frame record
+# -- `second` would mark `first`'s vector in `first`'s heap; `first` would
+# then push into it and, at its next collection, skip the marked vector
+# and free the new elements still in it.
+test nl-walk-boundary {a call's collections never walk the frames above the call, an outer call of another instance included} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set source {
+import std::ffi::c
+import std::list
+import std::mutable_vector
+import std::str
+
+extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+fn churn(k: int) -> int:
+    xs = loop i from 0 to k:
+        std::str::concat("churn ", std::str::concat("x", "y"))
+    std::list::length(xs)
+
+exported c fn outer(n: int) -> int errors IndexNotFound:
+    if n < 0 or n > 1000000:
+        return 0
+    v = std::mutable_vector::from_list([std::str::concat("fir", "st")])
+    r = host_callback(n) + 0
+    v.push(std::str::concat("second ", "element"))
+    v.push(std::str::concat("third ", "one"))
+    c = churn(n)
+    lengths = std::str::length(v.at(0)) + std::str::length(v.at(1)) + std::str::length(v.at(2))
+    if r != n or c != n:
+        return -1
+    lengths
+
+exported c fn busy(n: int) -> int:
+    if n < 0 or n > 1000000:
+        return 0
+    churn(n)
+}
+    set built [nlLibrary $dir wb $source {} -shared 0]
+    set exe [nlExecutable $dir "[nlPrelude wb]
+static wb_instance *second;
+long long host_callback(long long n) {
+    int64_t r; wb_error *e = NULL;
+    check(\"busy\", wb_busy(second, n, &r, &e), &e);
+    return r;
+}
+int main(void) {
+    wb_instance *first; wb_error *e = NULL; int64_t r;
+    check(\"create\", wb_create(&first, &e), &e);
+    check(\"create\", wb_create(&second, &e), &e);
+    for (int i = 0; i < 3; i++) {
+        check(\"outer\", wb_outer(first, 200000, &r, &e), &e);
+        printf(\"outer = %lld\\n\", (long long) r);
+    }
+    wb_destroy(second); wb_destroy(first);
+    return 0;
+}
+" [list [dict get $built static]] -fno-omit-frame-pointer]
+    nlRun $exe
+} -result {outer = 28
+outer = 28
+outer = 28}
+
+# ---------------------------------------------------------------------------
+# Several libraries in one process
+
+set ::nlFirst {
+import std::str
+
+error Negative:
+    value: int
+
+exported c fn twice(n: int) -> int errors Negative:
+    if n < 0:
+        fail Negative {value: n}
+    n * 2
+
+exported c fn tag(text: str) -> str:
+    std::str::concat("first:", text)
+}
+set ::nlSecond {
+import std::str
+import std::list
+
+error Negative:
+    value: int
+    why: str
+
+exported c fn twice(n: int) -> int errors Negative:
+    if n < 0:
+        fail Negative {value: n, why: "second"}
+    xs = loop i from 0 to n:
+        i
+    std::list::length(xs) * 3
+
+exported c fn tag(text: str) -> str:
+    std::str::concat(text, ":second")
+}
+
+test nl-two-libraries {two independently compiled libraries in one executable compute their own results, alternating, under GC stress} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set first [nlLibrary $dir one $::nlFirst]
+    set second [nlLibrary $dir two $::nlSecond]
+    set exe [nlExecutable $dir "[nlPrelude one]
+#include \"two.h\"
+static void report2(const char *what, int32_t status, two_error **ep) {
+    const uint8_t *p; size_t l; two_error *e = *ep;
+    printf(\"%s: status %d\", what, (int) status);
+    if (e) { two_error_identity(e, &p, &l); printf(\" %.*s fields %zu\", (int) l, (const char *) p, two_error_field_count(e)); two_error_release(ep); }
+    printf(\"\\n\");
+}
+int main(void) {
+    one_instance *a; two_instance *b; one_error *ea = NULL; two_error *eb = NULL;
+    int64_t r; one_bytes oa; two_bytes ob;
+    check(\"one\", one_create(&a, &ea), &ea);
+    if (two_create(&b, &eb) != two_STATUS_OK) return 1;
+    for (int i = 0; i < 300; i++) {
+        if (one_twice(a, i, &r, &ea) != 0 || r != 2 * i) { printf(\"one wrong at %d: %lld\\n\", i, (long long) r); return 1; }
+        if (two_twice(b, i, &r, &eb) != 0 || r != 3 * i) { printf(\"two wrong at %d: %lld\\n\", i, (long long) r); return 1; }
+        if (one_tag(a, (const uint8_t *) \"x\", 1, &oa, &ea) != 0 || two_tag(b, (const uint8_t *) \"y\", 1, &ob, &eb) != 0) return 1;
+        if (oa.len != 7 || memcmp(oa.ptr, \"first:x\", 7) || ob.len != 8 || memcmp(ob.ptr, \"y:second\", 8)) { printf(\"tags wrong\\n\"); return 1; }
+        one_bytes_release(&oa); two_bytes_release(&ob);
+    }
+    printf(\"300 alternating rounds right\\n\");
+    report(\"one twice(-1)\", one_twice(a, -1, &r, &ea), &ea);
+    report2(\"two twice(-1)\", two_twice(b, -1, &r, &eb), &eb);
+    printf(\"releasing one's buffer through two: %d\\n\", (one_tag(a, (const uint8_t *) \"z\", 1, &oa, &ea), two_bytes_release((two_bytes *) &oa)));
+    one_bytes_release(&oa);
+    one_destroy(a); two_destroy(b);
+    return 0;
+}
+" [list [dict get $first static] [dict get $second static]]]
+    nlRunBoth $exe
+} -result {300 alternating rounds right
+one twice(-1): status 1 Negative value=-1
+two twice(-1): status 1 Negative fields 2
+releasing one's buffer through two: 4}
+
+test nl-two-instances {two instances of one library alternate allocating calls; destroying one leaves the other, and its own results, intact} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir two $::nlSecond]
+    set exe [nlExecutable $dir "[nlPrelude two]
+int main(void) {
+    two_instance *a, *b; two_error *e = NULL; int64_t r; two_bytes ta, tb;
+    check(\"create a\", two_create(&a, &e), &e);
+    check(\"create b\", two_create(&b, &e), &e);
+    check(\"tag a\", two_tag(a, (const uint8_t *) \"a\", 1, &ta, &e), &e);
+    for (int i = 0; i < 300; i++) {
+        two_instance *x = i % 2 ? a : b;
+        if (two_twice(x, i, &r, &e) != 0 || r != 3 * i) { printf(\"wrong at %d\\n\", i); return 1; }
+        if (i == 150) {
+            check(\"destroy a\", two_destroy(a), NULL);
+            check(\"recreate a\", two_create(&a, &e), &e);
+        }
+    }
+    check(\"tag b\", two_tag(b, (const uint8_t *) \"b\", 1, &tb, &e), &e);
+    check(\"destroy b\", two_destroy(b), NULL);
+    report(\"twice(-2) on the new a\", two_twice(a, -2, &r, &e), &e);
+    printf(\"%.*s %.*s\\n\", (int) ta.len, (const char *) ta.ptr, (int) tb.len, (const char *) tb.ptr);
+    two_bytes_release(&ta); two_bytes_release(&tb);
+    check(\"destroy a\", two_destroy(a), NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {twice(-2) on the new a: status 1 Negative value=-2 why="second"
+a:second b:second}
+
+test nl-two-libraries-shared {the same two libraries as shared libraries} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set first [nlLibrary $dir one $::nlFirst]
+    set second [nlLibrary $dir two $::nlSecond]
+    set lib [file join $dir lib]
+    set exe [nlExecutable $dir "#include <stdio.h>
+#include \"one.h\"
+#include \"two.h\"
+int main(void) {
+    one_instance *a; two_instance *b; int64_t r1, r2;
+    if (one_create(&a, NULL) || two_create(&b, NULL)) return 1;
+    one_twice(a, 21, &r1, NULL); two_twice(b, 21, &r2, NULL);
+    printf(\"%lld %lld\\n\", (long long) r1, (long long) r2);
+    one_destroy(a); two_destroy(b);
+    return 0;
+}
+" {} -L$lib -lone -ltwo -Wl,-rpath,$lib]
+    nlRunBoth $exe
+} -result {42 63}
+
+# A call is scoped to its program: library A's export calls C, which calls
+# library B, and A, continuing, shows an enum value. The display reads the
+# program running on the thread, which B's call -- its own runtime copy,
+# with its own thread-local -- leaves alone.
+test nl-nested-libraries {a library called from inside another library's call leaves the outer call its own program} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set outer [nlLibrary $dir outer {
+import std::ffi::c
+
+enum Color:
+    Red,
+    Green
+
+error Painted:
+    color: Color
+
+extern c fn host_callback(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+exported c fn paint(n: int) -> int errors Painted:
+    if n < -1000 or n > 1000:
+        return 0
+    if host_callback(n) > 0:
+        fail Painted {color: Color::Green}
+    n
+} {} -shared 0]
+    set inner [nlLibrary $dir inner {
+enum Shape:
+    Circle,
+    Square,
+    Triangle
+
+exported c fn grow(n: int) -> int:
+    if Shape::Triangle == Shape::Triangle:
+        return n * 10
+    n
+}]
+    set exe [nlExecutable $dir "[nlPrelude outer]
+#include \"inner.h\"
+static inner_instance *helper;
+long long host_callback(long long n) {
+    int64_t r; inner_error *e = NULL;
+    if (inner_grow(helper, n, &r, &e) != inner_STATUS_OK) return -1;
+    return r;
+}
+int main(void) {
+    outer_instance *in; outer_error *e = NULL; inner_error *ie = NULL; int64_t r;
+    const uint8_t *p; size_t l;
+    check(\"create\", outer_create(&in, &e), &e);
+    if (inner_create(&helper, &ie) != inner_STATUS_OK) return 1;
+    int32_t s = outer_paint(in, 7, &r, &e);
+    printf(\"paint(7): status %d\", (int) s);
+    if (e) { outer_error_message(e, &p, &l); printf(\" %.*s\", (int) l, (const char *) p); outer_error_release(&e); }
+    printf(\"\\n\");
+    inner_destroy(helper); outer_destroy(in);
+    return 0;
+}
+" [list [dict get $outer static] [dict get $inner static]]]
+    nlRunBoth $exe
+} -result {paint(7): status 1 uncaught propagated error: <error Painted {color: Color::Green}>}
+
+test nl-symbols {a library's only global symbols are its public C functions; its runtime and program are local} -constraints {nativeLibraries nm} -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir chk $::nlChecked]
+    set defined [lsort [lmap line [split [exec nm -g --defined-only [dict get $built static]] \n] {
+        if {[llength $line] != 3} continue
+        lindex $line 2
+    }]]
+    set expected [lsort [native::library::PublicNames chk [dict get $built exports]]]
+    set dynamic [lsort [lmap line [split [exec nm -D --defined-only [dict get $built shared]] \n] {
+        if {[llength $line] != 3 || ![string match chk_* [lindex $line 2]]} continue
+        lindex $line 2
+    }]]
+    set local [exec nm [dict get $built static]]
+    list [expr {$defined eq $expected}] [expr {$dynamic eq $expected}] \
+        [regexp -line {^\S+ t botlish_fn_0$} $local] [regexp -line {^\S+ t rt_fail_declared$} $local] \
+        [regexp -line {^\S+ T (botlish_|rt_)} $local]
+} -result {1 1 1 1 0}
+
+# ---------------------------------------------------------------------------
+# The front end
+
+test nl-front-end-diagnostics {an exported c fn's signature, placement, name and environment are checked in every compilation} -body {
+    set dir [nlDir]
+    set path [file join $dir bad.bot]
+    nlWrite $path {
+fn helper(n: int) -> int:
+    n
+
+exported c fn bad?(n: int, xs: List[int], q) -> List[int]:
+    xs
+
+exported c fn noresult(n: int):
+    n
+
+exported c fn flagged(n: int, flags :quick) -> int:
+    n
+
+limit = 3
+
+exported c fn captures(n: int) -> int:
+    n + limit + helper(n)
+
+fn outer() -> int:
+    exported c fn inner(n: int) -> int:
+        n
+    inner(2)
+
+exported c fn yields() -> int:
+    yield 1
+    2
+
+context struct Config:
+    verbose: bool
+
+fn verbose?(context config: Config) -> bool:
+    config.verbose
+
+exported c fn configured(n: int) -> bool:
+    verbose?()
+
+0
+}
+    set hir [surface::readProgramFile $path -warnings off -warning-channel "" -strict 0]
+    lmap d [hir::diagnostics $hir] {
+        if {![string match EXPORT-* [dict get $d kind]]} continue
+        list [dict get $d kind] [dict get $d message]
+    }
+} -result {{EXPORT-NAME {exported c fn "bad?": its name is the suffix of its C symbol (LIBRARY_bad?), so it must be a C identifier -- ASCII letters, digits and _, not starting with a digit}} {EXPORT-SIGNATURE {exported c fn "bad?": parameter "xs" is declared List[int]; a C export's parameters are int (int64_t), bool, Float64 (double) or str (text: a pointer and a length)}} {EXPORT-SIGNATURE {exported c fn "bad?": parameter "q" has no declared type; a C export declares every parameter's type (int, bool, Float64 or str), since its C ABI is read from the declaration alone}} {EXPORT-SIGNATURE {exported c fn "bad?": the result is declared List[int]; a C export's result is int (int64_t), bool, Float64 (double), str (an owned buffer of text) or unit}} {EXPORT-SIGNATURE {exported c fn "noresult" declares no result type; a C export declares its result (int, bool, Float64, str, or -> unit for none), since its C ABI is read from the declaration alone}} {EXPORT-SIGNATURE {exported c fn "flagged" declares flags; a C export's parameters are ordinary ones only}} {EXPORT-ENVIRONMENT {exported c fn "captures" captures limit; a C export is environment-free (a top-level value it reads belongs in a module, where it is a module static)}} {EXPORT-PLACEMENT {"inner" is not a top-level function of a program or module: a C export is a top-level declaration}} {EXPORT-ENVIRONMENT {exported c fn "yields" may suspend (it yields, or calls a function that does); a C export runs to completion}} {EXPORT-ENVIRONMENT {exported c fn "configured" requires the context Config; a C caller installs no context}}}
+
+test nl-front-end-syntax {"exported" names its ABI; elsewhere it is an ordinary name} -body {
+    set dir [nlDir]
+    set path [file join $dir syntax.bot]
+    nlWrite $path "exported = 3\nexported + 1\n"
+    set plain [core::value::show [core::evalProgram [hir::lower [nlHir $path]]]]
+    nlWrite $path "exported rust fn f(n: int) -> int:\n    n\n"
+    catch {nlHir $path} message
+    list $plain $message
+} -match glob -result {4 {*an exported function names its foreign ABI: write "exported c fn NAME(...) -> T:" (the only foreign ABI is c), found name "rust"*}}
+
+test nl-front-end-runs-everywhere {an exported c fn is an ordinary function to every backend} -body {
+    set dir [nlDir]
+    set path [file join $dir run.bot]
+    nlWrite $path "exported c fn twice(n: int) -> int:\n    n * 2\n\ntwice(21)\n"
+    set results {}
+    foreach backend {interp compile} {
+        core::useBackend $backend
+        lappend results [core::value::show [core::evalProgram [hir::lower [nlHir $path]]]]
+    }
+    core::useBackend interp
+    if {[testConstraint nativeBuilt]} {
+        lappend results [core::value::show [native::evalHir [nlHir $path]]]
+    }
+    lsort -unique $results
+} -result 42
+
+test nl-front-end-hir-text {HIR text and interchange carry exported c} -body {
+    set dir [nlDir]
+    set path [file join $dir text.bot]
+    nlWrite $path "exported c fn twice(n: int) -> int:\n    n * 2\n"
+    set hir [nlHir $path]
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    set again [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [regexp {block s\d+ \(b\d+ n:int\) captures \(\) exported c declares int} $text] \
+        [llength [hir::exports::Declarations $read]] [llength [hir::exports::of $again]]
+} -result {1 1 1}
+
+test nl-library-checks {the library checks: declarations only, something exported, symbols of its own} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set results {}
+    foreach {name source} {
+        script "exported c fn f(n: int) -> int:\n    n\nf(1)\n"
+        nothing "fn f(n: int) -> int:\n    n\n"
+        reserved "exported c fn create(n: int) -> int:\n    n\n"
+    } {
+        set path [file join $dir $name.bot]
+        nlWrite $path $source
+        set code [catch {native::library [nlHir $path] -name $name -out [file join $dir lib]} message options]
+        lappend results [lindex [dict get $options -errorcode] end] \
+            [lmap d [dict getdef $options -diagnostics {}] {
+                if {[dict get $d location] eq ""} {string cat none} else {dict get $d location line}
+            }]
+    }
+    set results
+} -result {LIBRARY-TOP-LEVEL 3 LIBRARY-NO-EXPORTS none LIBRARY-SYMBOL 1}
+
+test nl-library-export-list {-exports exports the entry program's top-level functions by name, checked as exported c fns} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set path [file join $dir listed.bot]
+    nlWrite $path "fn plus(a: int, b: int) -> int:\n    a + b\n\nfn loose(a) -> int:\n    1\n"
+    set built [native::library [nlHir $path] -name listed -out [file join $dir lib] -exports plus]
+    catch {native::library [nlHir $path] -name listed -out [file join $dir lib] -exports {loose absent}} message options
+    set exe [nlExecutable $dir "[nlPrelude listed]
+int main(void) {
+    listed_instance *in; listed_error *e = NULL; int64_t r;
+    check(\"create\", listed_create(&in, &e), &e);
+    check(\"plus\", listed_plus(in, 40, 2, &r, &e), &e);
+    printf(\"%lld\\n\", (long long) r);
+    listed_destroy(in);
+    return 0;
+}
+" [list [dict get $built static]]]
+    list [nlRun $exe] [lmap d [dict get $options -diagnostics] {dict get $d shown}]
+} -result {42 {EXPORT-SIGNATURE EXPORT-PLACEMENT}}
+
+test nl-manifest {the manifest states the interface as data, from the compiler's facts} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir ty $::nlTypes]
+    set manifest [lsp::json::parse [core::ReadFile [dict get $built manifest]]]
+    set odd [lindex [lmap e [lsp::json::elements [lsp::json::get $manifest exports]] {
+        if {[lsp::json::text [lsp::json::get $e name]] ne "odd"} continue
+        set e
+    }] 0]
+    set error [lindex [lsp::json::elements [lsp::json::get $odd errors]] 0]
+    list [lsp::json::integer [lsp::json::get $manifest schema]] [lsp::json::text [lsp::json::get $manifest library]] \
+        [lsp::json::text [lsp::json::get [lsp::json::get $manifest artifacts] static]] \
+        [lsp::json::text [lsp::json::get $odd symbol]] [lsp::json::text [lsp::json::get $odd botlish]] \
+        [lmap f [lsp::json::elements [lsp::json::get $error fields]] {
+            list [lsp::json::text [lsp::json::get $f name]] [lsp::json::text [lsp::json::get $f type]]
+        }] \
+        [lmap e [lsp::json::elements [lsp::json::get $manifest exports]] {lsp::json::text [lsp::json::get $e name]}] \
+        [expr {[core::ReadFile [dict get $built manifest]] eq [core::ReadFile [dict get [nlLibrary $dir ty $::nlTypes] manifest]]}]
+} -result {1 ty libty.a ty_odd {odd(n: int) -> int errors Odd {count: int, flag: bool, items: other, note: str, ratio: Float64}} {{count int} {flag bool} {items other} {note str} {ratio float64}} {negate half echo length joined nothing odd huge range_error} 1}
+
+test nl-main-cli {main.tcl -emit-native-library builds a library from one input} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    nlWrite [file join $dir cli.bot] $::nlChecked
+    set out [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off \
+        -emit-native-library cli -out [file join $dir lib] [file join $dir cli.bot]]
+    lmap line [split $out \n] {lindex [split $line :] 0}
+} -result {static shared header manifest}
+
+cleanupTests

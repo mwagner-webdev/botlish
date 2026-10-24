@@ -95,6 +95,16 @@ use super::value::*;
 use super::vm::Vm;
 use std::cell::RefCell;
 
+/// Whether this host has the stack switch native coroutines run on (the
+/// hosts `CoStack::new` maps a stack for): elsewhere starting one is NATIVE
+/// UNSUPPORTED. The coroutine fusion pass (codegen::fusion) runs only where
+/// it is true, so fusing a coroutine never makes a program run that the
+/// general runtime refuses.
+pub const STACK_SWITCHING: bool = cfg!(any(
+    all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")),
+    all(target_os = "macos", target_arch = "aarch64")
+));
+
 pub const CO_FRESH: u8 = 0;
 pub const CO_RUNNING: u8 = 1;
 pub const CO_SUSPENDED: u8 = 2;
@@ -743,6 +753,45 @@ pub extern "C" fn rt_co_release(p: *mut Vm, handle: Value) -> Value {
     UNIT
 }
 
+/// A terminal, failed coroutine holding the pending error, which it takes
+/// from the Vm exactly as `co_body` takes a body's unhandled failure: the
+/// error, its declared id and its payload (COROUTINE-FUSION-MILESTONE-1.md).
+/// The coroutine fusion pass (codegen::fusion) emits it (`cofailed`) where a
+/// fused coroutine's segment fails; resuming the object (`coresume0`) raises
+/// the failure again through `reraise`, so the resume that ran the segment
+/// and every later one fail as a general coroutine's do. It never ran and
+/// never runs code: no thunk, no stack.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_co_failed(p: *mut Vm) -> Value {
+    // Allocated first: a collection the allocation runs still finds the
+    // pending error's values where the Vm roots them.
+    let handle = vm(p).alloc(
+        CoroutineObj {
+            hdr: Header::new(KIND_COROUTINE, false),
+            state: CO_FAILED,
+            thunk: UNIT,
+            value: UNIT,
+            failure: None,
+            stack: None,
+            saved_sp: 0,
+            resumer_sp: 0,
+            resumer: std::ptr::null_mut(),
+        },
+        0,
+    );
+    let vm = vm(p);
+    let error = vm
+        .error
+        .take()
+        .unwrap_or_else(|| RtError::Bug("a fused coroutine failed without recording an error".to_string()));
+    let id = vm.declared_error;
+    vm.declared_error = 0;
+    let payload = std::mem::take(&mut vm.declared_payload);
+    let shape = vm.declared_payload_shape;
+    coroutine_of(handle).failure = Some(Box::new((error, id, payload, shape)));
+    handle
+}
+
 /// The stack frame record a suspended context's walk starts at: the frame
 /// bl_co_switch opened, `SWITCH_FRAME_OFFSET` above its saved stack pointer.
 pub fn suspended_rbp(saved_sp: usize) -> usize {
@@ -756,7 +805,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
     }
 
     /// A zero-argument Block whose code is the Rust function CODE (the

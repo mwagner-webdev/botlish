@@ -16,7 +16,7 @@
 #include <hermes/hermes.h>
 #include <pthread.h>
 
-#include "rnprobe_botlish.h"
+#include "rnprobe.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -46,8 +46,10 @@ class QueueInvoker : public CallInvoker {
   void invokeSync(CallFunc &&) override { std::abort(); }
 };
 
-// One thread that owns the Botlish runtime (its Vm is thread-local) and runs
-// jobs in order, on a stack the size of a Botlish executable's worker's.
+// One thread that owns a Botlish library instance (NATIVE-LIBRARY-MILESTONE-1.md:
+// an instance belongs to the thread that made it) and runs jobs in order, on a
+// stack the size of a Botlish executable's worker's. The instance is made when
+// the thread starts and destroyed, on the same thread, when it stops.
 class BotlishWorker {
  public:
   explicit BotlishWorker(size_t stackBytes) {
@@ -65,7 +67,7 @@ class BotlishWorker {
     ready_.notify_one();
     pthread_join(thread_, nullptr);
   }
-  void post(std::function<void()> job) {
+  void post(std::function<void(rnprobe_instance *)> job) {
     std::lock_guard<std::mutex> lock(mutex_);
     jobs_.push_back(std::move(job));
     ready_.notify_one();
@@ -77,32 +79,47 @@ class BotlishWorker {
     return nullptr;
   }
   void loop() {
+    rnprobe_error *error = nullptr;
+    if (rnprobe_create(&instance_, &error) != rnprobe_STATUS_OK) {
+      rnprobe_error_release(&error);
+      std::abort();
+    }
     for (;;) {
-      std::function<void()> job;
+      std::function<void(rnprobe_instance *)> job;
       {
         std::unique_lock<std::mutex> lock(mutex_);
         ready_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
         if (jobs_.empty()) {
-          return;
+          break;
         }
         job = std::move(jobs_.front());
         jobs_.pop_front();
       }
-      job();
+      job(instance_);
     }
+    rnprobe_destroy(instance_);
   }
   pthread_t thread_;
+  rnprobe_instance *instance_ = nullptr;
   std::mutex mutex_;
   std::condition_variable ready_;
-  std::deque<std::function<void()>> jobs_;
+  std::deque<std::function<void(rnprobe_instance *)>> jobs_;
   bool stopping_ = false;
 };
 
-std::string lastError() {
-  BotlishStr identity, message;
-  rnprobe_last_error(&identity, &message);
-  return std::string(reinterpret_cast<const char *>(identity.ptr), identity.len) + ": " +
-      std::string(reinterpret_cast<const char *>(message.ptr), message.len);
+// "IDENTITY: MESSAGE" of a failed call's error, which it releases.
+std::string describe(rnprobe_error *error) {
+  if (error == nullptr) {
+    return "no error object";
+  }
+  const uint8_t *identity, *message;
+  size_t identityLen, messageLen;
+  rnprobe_error_identity(error, &identity, &identityLen);
+  rnprobe_error_message(error, &message, &messageLen);
+  std::string text = std::string(reinterpret_cast<const char *>(identity), identityLen) + ": " +
+      std::string(reinterpret_cast<const char *>(message), messageLen);
+  rnprobe_error_release(&error);
+  return text;
 }
 
 class BotlishAsyncModule : public NativeBotlishAsyncCxxSpec<BotlishAsyncModule> {
@@ -113,12 +130,13 @@ class BotlishAsyncModule : public NativeBotlishAsyncCxxSpec<BotlishAsyncModule> 
   AsyncPromise<double> depth(jsi::Runtime &rt, double n) {
     AsyncPromise<double> promise(rt, jsInvoker_);
     int64_t k = static_cast<int64_t>(n);
-    worker_->post([promise, k]() mutable {
+    worker_->post([promise, k](rnprobe_instance *instance) mutable {
       int64_t out = 0;
-      if (rnprobe_depth(k, &out) == rnprobe_OK) {
+      rnprobe_error *error = nullptr;
+      if (rnprobe_depth(instance, k, &out, &error) == rnprobe_STATUS_OK) {
         promise.resolve(static_cast<double>(out));
       } else {
-        promise.reject(Error(lastError()));
+        promise.reject(Error(describe(error)));
       }
     });
     return promise;
@@ -126,13 +144,16 @@ class BotlishAsyncModule : public NativeBotlishAsyncCxxSpec<BotlishAsyncModule> 
 
   AsyncPromise<std::string> reverse(jsi::Runtime &rt, std::string s) {
     AsyncPromise<std::string> promise(rt, jsInvoker_);
-    worker_->post([promise, s = std::move(s)]() mutable {
-      BotlishStr out;
-      if (rnprobe_reverse(reinterpret_cast<const uint8_t *>(s.data()), s.size(), &out) == rnprobe_OK) {
-        // The result borrows the worker's Botlish heap: copy it on the worker.
+    worker_->post([promise, s = std::move(s)](rnprobe_instance *instance) mutable {
+      rnprobe_bytes out = {nullptr, 0};
+      rnprobe_error *error = nullptr;
+      if (rnprobe_reverse(instance, reinterpret_cast<const uint8_t *>(s.data()), s.size(), &out, &error) ==
+          rnprobe_STATUS_OK) {
+        // The caller owns the result: copy it, then release it.
         promise.resolve(std::string(reinterpret_cast<const char *>(out.ptr), out.len));
+        rnprobe_bytes_release(&out);
       } else {
-        promise.reject(Error(lastError()));
+        promise.reject(Error(describe(error)));
       }
     });
     return promise;

@@ -65,9 +65,9 @@ decimal_rounded#greater	intrinsic		internal	intrinsic
 decimal_rounded#greater_equal	intrinsic		internal	intrinsic				
 decimal_rounded#less	intrinsic		internal	intrinsic				
 decimal_rounded#less_equal	intrinsic		internal	intrinsic				
-decimal_rounded#round	intrinsic		internal	intrinsic	core/decimal.tcl:818			
-decimal_rounded#to_float64	intrinsic		internal	intrinsic	core/decimal.tcl:812			
-decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:824			
+decimal_rounded#round	intrinsic		internal	intrinsic	core/decimal.tcl:824			
+decimal_rounded#to_float64	intrinsic		internal	intrinsic	core/decimal.tcl:818			
+decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:830			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
 hash	intrinsic		primitive	intrinsic	core/hashing.tcl:444			
@@ -82,12 +82,12 @@ mutable_array#set_drop	intrinsic		internal	intrinsic	core/mutarray.tcl:421
 mutable_array#swap_drop	intrinsic		internal	intrinsic	core/mutarray.tcl:418			
 mutable_array#take_front	intrinsic		internal	intrinsic	core/mutarray.tcl:415			
 mutable_array#to_list	intrinsic		internal	intrinsic	core/mutarray.tcl:410			
-mutable_vector#clear_drop	intrinsic		internal	intrinsic	core/mutvec.tcl:357			
-mutable_vector#consume	intrinsic		internal	intrinsic	core/mutvec.tcl:349			
-mutable_vector#share	intrinsic		internal	intrinsic	core/mutvec.tcl:347			
-mutable_vector#swap_drop	intrinsic		internal	intrinsic	core/mutvec.tcl:359			
-mutable_vector#take_front	intrinsic		internal	intrinsic	core/mutvec.tcl:354			
-mutable_vector#to_list	intrinsic		internal	intrinsic	core/mutvec.tcl:351			
+mutable_vector#clear_drop	intrinsic		internal	intrinsic	core/mutvec.tcl:358			
+mutable_vector#consume	intrinsic		internal	intrinsic	core/mutvec.tcl:350			
+mutable_vector#share	intrinsic		internal	intrinsic	core/mutvec.tcl:348			
+mutable_vector#swap_drop	intrinsic		internal	intrinsic	core/mutvec.tcl:360			
+mutable_vector#take_front	intrinsic		internal	intrinsic	core/mutvec.tcl:355			
+mutable_vector#to_list	intrinsic		internal	intrinsic	core/mutvec.tcl:352			
 mutarray?	intrinsic		primitive	intrinsic				
 ok?	intrinsic		primitive	intrinsic	core/predicates.tcl:54			
 result-error	intrinsic		internal	intrinsic	core/predicates.tcl:59			
@@ -227,7 +227,7 @@ std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestor
 std::char	namespace		api	intrinsic				
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:29			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:160			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:164			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -272,6 +272,10 @@ std::compiler::DiagnosticCode::DuplicateField	enum-case	std::compiler::Diagnosti
 std::compiler::DiagnosticCode::DuplicateFlag	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::DuplicateFlagDeclaration	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::DuplicateLoopVariable	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ExportEnvironment	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ExportName	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ExportPlacement	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ExportSignature	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagBindingCollision	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagCalleeUnknown	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagFunctionValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -336,7 +340,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:154			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:158			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:332			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -393,8 +397,8 @@ std::darwin::read	function	std::darwin	api	source	stdlib/darwin.bot:182	macos
 std::darwin::terminator	function	std::darwin	api	source	stdlib/darwin.bot:190	macos		
 std::darwin::write	function	std::darwin	api	source	stdlib/darwin.bot:171	macos		
 std::decimal_rounded	namespace		api	intrinsic				
-std::decimal_rounded::round	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:814			
-std::decimal_rounded::to_string	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:821			
+std::decimal_rounded::round	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:820			
+std::decimal_rounded::to_string	intrinsic	std::decimal_rounded	api	intrinsic	core/decimal.tcl:827			
 std::ffi::c	namespace		api	source+intrinsic	stdlib/ffi/c.bot			
 std::ffi::c::Bool	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
 std::ffi::c::Char	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
@@ -421,7 +425,7 @@ std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:593
 std::float64	namespace		api	source+intrinsic	stdlib/float64.bot			
 std::float64::abs	function	std::float64	api	source	stdlib/float64.bot:38			
 std::float64::clamp	function	std::float64	api	source	stdlib/float64.bot:44			
-std::float64::from_decimal_rounded	intrinsic	std::float64	api	intrinsic	core/decimal.tcl:809			
+std::float64::from_decimal_rounded	intrinsic	std::float64	api	intrinsic	core/decimal.tcl:815			
 std::float64::from_int	intrinsic	std::float64	api	intrinsic				
 std::float64::max	function	std::float64	api	source	stdlib/float64.bot:32			
 std::float64::min	function	std::float64	api	source	stdlib/float64.bot:26			
@@ -506,16 +510,72 @@ std::mutable_byte_store::freeze_prefix	intrinsic	std::mutable_byte_store	api	int
 std::mutable_byte_store::from_storage	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:288			
 std::mutable_byte_store::replace	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:292			
 std::mutable_byte_store::zeroed	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:286			
+std::mutable_map	namespace		api	source	stdlib/mutable_map.bot			
+std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:55			
+std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:45			
+std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:50			
+std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:72			
+std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:102			
+std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:69			
+std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:57			
+std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:66			
+std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:115			
+std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:109			
+std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:112			
+std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:63			
+std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:92			
+std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:79			
+std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:60			
+std::mutable_set	namespace		api	source	stdlib/mutable_set.bot			
+std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:35			
+std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:53			
+std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:71			
+std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:50			
+std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:38			
+std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:47			
+std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:83			
+std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:77			
+std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:80			
+std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:44			
+std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:62			
+std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:41			
 std::mutable_vector	namespace		api	intrinsic				
 std::mutable_vector::at	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:328			
-std::mutable_vector::clear	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:343			
+std::mutable_vector::clear	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:344			
 std::mutable_vector::empty?	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:326			
 std::mutable_vector::from_list	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:321			
 std::mutable_vector::length	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:324			
-std::mutable_vector::pop	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:333			
-std::mutable_vector::push	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:331			
-std::mutable_vector::swap	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:339			
-std::mutable_vector::take	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:336			
+std::mutable_vector::pop	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:334			
+std::mutable_vector::push	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:332			
+std::mutable_vector::swap	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:340			
+std::mutable_vector::take	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:337			
+std::ordered_table	namespace		std-internal	source	stdlib/ordered_table.bot			
+std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:57			
+std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:164			
+std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:192			
+std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:204			
+std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:332			
+std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:262			
+std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:171			
+std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:84			
+std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:155			
+std::ordered_table::garbage?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:159			
+std::ordered_table::holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:120			
+std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:111			
+std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:91			
+std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:102			
+std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:66			
+std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:181			
+std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:146			
+std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:98			
+std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:128			
+std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:287			
+std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:327			
+std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:238			
+std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:212			
+std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:142			
+std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:71			
+std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:252			
 std::str	namespace		api	intrinsic				
 std::str::append_char	intrinsic	std::str	api	intrinsic	core/strings.tcl:124			
 std::str::char_at	intrinsic	std::str	api	intrinsic	core/strings.tcl:129			
@@ -540,35 +600,35 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:562			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:529			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:546			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:570			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:537			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:554			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:586			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:594			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:542			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:667			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:550			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:675			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:536			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:544			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:595			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:617			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:605			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:643			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:630			
-std::test::report	function	std::test	api	source	stdlib/test.bot:728			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:696			
-std::test::results	function	std::test	api	source	stdlib/test.bot:671			
-std::test::run	function	std::test	api	source	stdlib/test.bot:661			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:554			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:603			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:625			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:613			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:651			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:638			
+std::test::report	function	std::test	api	source	stdlib/test.bot:736			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:704			
+std::test::results	function	std::test	api	source	stdlib/test.bot:679			
+std::test::run	function	std::test	api	source	stdlib/test.bot:669			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:562			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:686			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:719			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:694			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:727			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:577			
+std::test::value	function	std::test	api	source	stdlib/test.bot:585			
 std::web	namespace		api	source	stdlib/web.bot			
 std::web::Emailish	refined-type	std::web	api	source	stdlib/web.bot:71			
 std::web::UriQueryValue	refined-type	std::web	api	source	stdlib/web.bot:226			

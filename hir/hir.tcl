@@ -53,9 +53,12 @@
 #                section scope (surface/modules.tcl, hir/resolve.tcl's
 #                ResolveQualifiedRef); absent for a program with no modules
 #   moduleDecls  NAMESPACE ("" for the entry program) -> {direct 0|1 origin
-#                ORIGIN}: each source unit's module declaration (`direct
-#                module`, DIRECT-MODULES.md); absent past the source boundary
-#                (core IR text, HIR text)
+#                ORIGIN private PRIVATE declarations DECLARATIONS}: each
+#                source unit's module declaration (`direct module`,
+#                DIRECT-MODULES.md) and its private declarations and where
+#                its type-level declarations are named (hir/privacy.tcl,
+#                MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md); absent
+#                past the source boundary (core IR text, HIR text)
 #   direct       the module directness summary hir::direct::verify computed
 #                from moduleDecls (hir/direct.tcl): declared, inferred and
 #                final status per unit, and every direct edge with the context
@@ -124,7 +127,11 @@
 #             that it is never the callee of method syntax; printed by
 #             hir::format as `nomethod` and read back by hir::parse; the
 #             binding of the function carries `nomethod 1` too, which method
-#             resolution reads -- WARNINGS-METHOD-ELIGIBLE.md)
+#             resolution reads -- WARNINGS-METHOD-ELIGIBLE.md),
+#             exported (c, only on an `exported c fn`: a C export of a native
+#             library, NATIVE-LIBRARY-MILESTONE-1.md; printed by hir::format
+#             as `exported c`, read back by hir::parse; hir/exports.tcl
+#             checks and lists the exports)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically).
 #             A call written `receiver.name(args)` with a function `name`
@@ -477,12 +484,16 @@ proc hir::build {exprs args} {
 #                   the HIR's link plan (`foreign`, `links`)
 #   -module-decls D the module declarations of a source program
 #                   (DIRECT-MODULES.md): NAMESPACE ("" for the entry program)
-#                   -> {direct 0|1 origin ORIGIN}, one per unit of the
-#                   compilation, ORIGIN the `direct module` marker's. Given
-#                   (even empty), the program is a source program whose
-#                   modules hir::direct::verify judges, and it is kept as
-#                   HIR's `moduleDecls`; omitted (core IR text, HIR text), the
-#                   program is past the source boundary: no module is judged.
+#                   -> {direct 0|1 origin ORIGIN private P declarations D},
+#                   one per unit of the compilation, ORIGIN the `direct
+#                   module` marker's, P and D its private declarations and
+#                   type-level names (hir/privacy.tcl). Given (even empty),
+#                   the program is a source program whose modules
+#                   hir::direct::verify and hir::privacy::verify judge, and
+#                   it is kept as HIR's `moduleDecls` (from resolution on:
+#                   method candidates read its privacy); omitted (core IR
+#                   text, HIR text), the program is past the source
+#                   boundary: no module is judged.
 #
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
@@ -495,7 +506,7 @@ proc hir::BuildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
             -type-decls {} -error-decls {} -struct-decls {} -trait-decls {} -imports {} -module-decls {} \
-            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0} $args]
+            -foreign-decls {} -link-decls {} -halt-on-resolution-errors 0 -syntax-recovery {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -583,6 +594,11 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # already says all of this, and it has lost the static types (an
         # affine element type, a declared vector type) the elaboration reads.
         if {[lindex [dict get $options -origin] 0] ne "ir"} {
+            # Loops over the standard library's collection structs
+            # (hir/iteration.tcl), written out as counted loops over their
+            # loop protocol -- before the copies, which then give the loop
+            # its snapshot.
+            hir::iteration::Elaborate hir
             hir::mutvec::Elaborate hir
         }
         # The layout a std::binary::emit reads from its value's static type
@@ -669,7 +685,7 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         hir::foreign::apply [dict get $options -foreign-decls] [dict get $options -link-decls]
     }
     set hir [hir::resolve::program $nodes [dict get $options -mode] [dict get $options -origin] \
-        [dict get $options -modules] $choices $externs]
+        [dict get $options -modules] $choices $externs [dict get $options -module-decls]]
     if {$externs} {
         lassign [hir::foreign::tables] foreign links
         if {[dict size $foreign] || $links ne {}} {
@@ -698,6 +714,10 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # generic function for an affine argument resolves its references by
         # (hir::traits::IdentOf, AFFINE-VALUES.md).
         hir::traits::index $hir
+        # A declaration's applications of parameterized structs
+        # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) are valid once every trait
+        # a slot names can be decided: a struct's or a payload's field.
+        hir::structs::VerifyDeclarations
     }
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
@@ -710,6 +730,13 @@ proc hir::BuildOnce {nodes options given choices halt checkedVar} {
         # -halt-on-resolution-errors and raises the diagnostics itself.
         hir::declarations::stamp hir
         return $hir
+    }
+    if {[dict get $options -syntax-recovery] ne {}} {
+        # A program with syntax errors, its malformed source holes
+        # (SYNTAX-RECOVERY-MILESTONE-1.md): what resolution found that may
+        # depend on them is not known (hir::recovery::Recovered).
+        dict set hir syntaxRecovery [dict get $options -syntax-recovery]
+        hir::recovery::Recovered hir
     }
     if {[dict get $hir diagnostics] ne ""} {
         # The program is checked although it did not resolve: what the
@@ -1343,6 +1370,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
         hir::signatures::infer hir $demote
     }
     hir::range::verifyDeclaredResults hir
+    hir::structs::verifyApplications hir
     hir::imprint::verify hir
     hir::cabi::verify hir
     hir::range::verifyDeclaredParams hir
@@ -1354,14 +1382,17 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::structs::verify hir
     hir::contexts::verify hir
     hir::direct::verify hir
+    hir::privacy::verify hir
     hir::coroutines::verify hir
     hir::affine::verify hir
     hir::mutvec::verify hir
+    hir::iteration::verify hir
     hir::syscall::verify hir
     hir::internal::verify hir
     hir::borrow::verify hir
     hir::layouts::verify hir
     hir::semantic::verify hir
+    hir::exports::verify hir
     # {FROM TO}: the diagnostics at indices FROM to TO - 1 were reported
     # before the completion walk -- by resolution and the checks above --
     # and so are no contract-boundary report (hir::completions::Subsume),
@@ -1700,7 +1731,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

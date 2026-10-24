@@ -1456,9 +1456,12 @@ signature, naming no visible type: whatever type a particular call
 imprints there. It is not a declared generic parameter -- Botlish has no
 `fn f[T]` -- and the body is checked once, for every T. A variable is
 established by an argument whose parameter holds it in an applied type
-(`List[T]`, `MutableArray[T]`, `std::ffi::c::Ptr[T]`, ...), left to right; a
-variable that occurs only in the result is supplied at the call. IMPRINT
-reports a call that cannot bind them, or a callable used as a value:
+(`List[T]`, `MutableArray[T]`, `std::ffi::c::Ptr[T]`, a parameterized
+struct's application `Map[K, V]`, ...), left to right; a variable that
+occurs only in the result is supplied at the call. An empty List says
+nothing about its element. IMPRINT reports a call that cannot bind them,
+a parameterized struct's construction whose field values do not establish
+a slot (concept.parameterized-structs), or a callable used as a value:
 
     empty: imprint variable T is not established (it occurs only in the
     result, and no type named T is visible where empty is declared): write
@@ -1473,7 +1476,10 @@ reports a call that cannot bind them, or a callable used as a value:
     the call in a function to pass it on)
 
 A parameter declared with a bare variable (`fn identity(x: T) -> T`)
-establishes nothing; that declaration is a TYPE error, not IMPRINT.
+establishes nothing; that declaration is a TYPE error, not IMPRINT. A
+binding that makes an application of the signature invalid (K bound to a
+function where a slot requires Hashable) is TRAIT-NOT-SATISFIED, not
+IMPRINT: the variables were established.
 
 == WHAT TO DO
 Give explicit imprints, all of them, in first-occurrence order:

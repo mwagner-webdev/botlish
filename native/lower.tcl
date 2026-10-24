@@ -1427,6 +1427,7 @@ proc native::lower::Program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "0" ? 0 : 1}]
     set constructionDefault [expr {[info exists ::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT)]
         && $::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT) eq "0" ? 0 : 1}]
+    set dfaDispatchDefault [if {[info exists ::env(BOTLISH_NATIVE_DFA_DISPATCH)]} {set ::env(BOTLISH_NATIVE_DFA_DISPATCH)} else {string cat auto}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -struct-opt $structDefault \
@@ -1443,7 +1444,7 @@ proc native::lower::Program {hirProgram args} {
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
-            -virtual-construction-opt $constructionDefault \
+            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault -exports {} \
             -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1477,6 +1478,11 @@ proc native::lower::Program {hirProgram args} {
         }
     }
     set reprOpt [dict get $options -repr-opt]
+    variable dfaDispatch
+    set dfaDispatch [dict get $options -dfa-dispatch]
+    if {$dfaDispatch ni {auto tree switch table}} {
+        error "native::lower::program: -dfa-dispatch must be auto, tree, switch or table"
+    }
     set callFactsOpt [dict get $options -call-facts-opt]
     set callEffectsOpt [dict get $options -call-effects-opt]
     set escapeOpt [dict get $options -escape-opt]
@@ -1523,7 +1529,8 @@ proc native::lower::Program {hirProgram args} {
         -call-facts-opt [dict get $options -call-facts-opt] \
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
-        -exact-callable-limit [dict get $options -exact-callable-limit]]
+        -exact-callable-limit [dict get $options -exact-callable-limit] \
+        -exports [lmap export [dict get $options -exports] {dict get $export block}]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -1602,6 +1609,16 @@ proc native::lower::Program {hirProgram args} {
 
     set functions [dict create]
     set pending [list [list [dict get $spec keys program] canonical]]
+    # The export roots (NATIVE-LIBRARY-MILESTONE-1.md, "Export roots"): each
+    # exported function's generic instance, which hir::specialize made a
+    # used, open instance of a materialized block. Its canonical function and
+    # generic entry are what the library's C trampoline calls, whether or not
+    # any Botlish code calls the function (tiny-leaf inlining of its Botlish
+    # calls never removes it: nothing calls this instance but the host).
+    set exportLines {}
+    foreach export [dict get $options -exports] {
+        lappend exportLines "export [Quote [dict get $export symbol]] func=[GenericRef [dict get $export block]] params=[Quote [join [dict get $export params] { }]] result=[dict get $export result]"
+    }
     while {$pending ne ""} {
         set pending [lassign $pending item]
         lassign $item id mode
@@ -1655,6 +1672,19 @@ proc native::lower::Program {hirProgram args} {
     variable contextBytes
     set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
     lappend header {*}[ContextHeader]
+    lappend header {*}[lmap line $exportLines {string map $map $line}]
+    if {[llength $exportLines]} {
+        # A library's error table (NATIVE-LIBRARY-MILESTONE-1.md, "Errors"):
+        # the canonical identity of every declared error a call can end in,
+        # by its NIR id -- the program's own and the runtime's builtin ones
+        # -- so the library reports a declared error's identity as data.
+        dict for {name id} $errorIds {
+            lappend header "error $id [Quote $name]"
+        }
+        dict for {name index} [set ::core::native::builtinErrors] {
+            lappend header "error [ErrorId $name] [Quote $name]"
+        }
+    }
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {
@@ -8215,6 +8245,11 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         # never NativeCall's one-operand-per-argument shape.
         return [SyscallCall fn $e $node $wantVirtual]
     }
+    if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq "dfa#transition"} {
+        # A declared recognizer's transition table (DFA-COROUTINE-MILESTONE-2.md):
+        # control flow over its constant table, never a call.
+        return [DfaTransition fn $e $node $want]
+    }
     if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq [core::contexts::installNative]} {
         # `with context EXPR` (CONTEXTS.md): stores into the type's fixed slot.
         return [ContextInstallCall fn $e $node]
@@ -9887,6 +9922,304 @@ proc native::lower::NativeCallOp {e node} {
             return [list $name $op]
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Declared recognizers' transitions (DFA-COROUTINE-MILESTONE-2.md)
+#
+# `dfa#transition(state, c, TABLE)` (core/dfa.tcl) is the compact form of a
+# recognizer's whole transition table: TABLE is a constant, so the call
+# becomes control flow over it here -- no call, no lookup of a table at run
+# time, nothing allocated. How (-dfa-dispatch, BOTLISH_NATIVE_DFA_DISPATCH):
+#
+#   tree    a balanced search over the state, then over the symbol's
+#           segments of its row: compare and branch (the exploration's
+#           decision trees, built here instead of in the front end)
+#   switch  a multiway branch on the state (NIR `switch`, a jump table for
+#           a dense one), then one on the symbol over its row's intervals
+#           (codegen::clif's switch lowering picks a jump table or a search
+#           per switch)
+#   table   when every row's intervals lie in -1..255 (every bytes or
+#           ascii recognizer, and a unicode one that names no symbol above
+#           255): the code read from a static byte table indexed by state
+#           and symbol (`op rtabload`), every other symbol the row's
+#           default; any other recognizer as switch
+#   auto    (the default) table where it applies, switch otherwise
+#
+# Every form computes exactly core::dfa::Lookup's code. The state is a
+# number the table itself produced, so outside its rows is the compiler's
+# error (INTERNAL); the symbol is any Int (a BigInt is outside every row's
+# intervals: the default).
+
+namespace eval native::lower {
+    variable dfaDispatch auto
+}
+
+# The rows of the table TEXT, each as its full partition of the Int line:
+# {SEGMENTS} with SEGMENTS {LO HI CODE}, sorted, the first LO "" (minus
+# infinity) and the last HI "" (plus infinity), gaps the row's default.
+proc native::lower::DfaRows {text} {
+    set rows {}
+    foreach row $text {
+        lassign $row default lows highs codes
+        set full {}
+        set at ""
+        foreach lo $lows hi $highs code $codes {
+            if {$at eq "" || $lo > $at} {
+                set gapEnd [expr {$lo - 1}]
+                if {$at eq "" || $gapEnd >= $at} {
+                    lappend full [list $at $gapEnd $default]
+                }
+            }
+            lappend full [list $lo $hi $code]
+            set at [expr {$hi + 1}]
+        }
+        lappend full [list $at "" $default]
+        # Adjacent segments of one code are one.
+        set merged {}
+        foreach s $full {
+            if {[llength $merged] && [lindex $merged end 2] == [lindex $s 2]} {
+                lset merged end 1 [lindex $s 1]
+            } else {
+                lappend merged $s
+            }
+        }
+        lappend rows $merged
+    }
+    return $rows
+}
+
+# Emits a balanced search over the full partition SEGS (DfaRows) of the
+# value in register V -- RAW 1 for a raw register, 0 for a tagged Int -- that
+# jumps to the label LABELOF(code) of the segment it is in.
+proc native::lower::DfaSearch {fnVar v raw segs labelOf e} {
+    upvar 1 $fnVar fn
+    if {[llength $segs] == 1} {
+        Emit fn "jump [dict get $labelOf [lindex $segs 0 2]]" $e
+        return
+    }
+    set mid [expr {[llength $segs] / 2}]
+    set bound [lindex $segs $mid 0]
+    if {$raw} {
+        set k [AssignRaw fn "rawint $bound" $e]
+        set t [Assign fn "op rilt $v $k" $e]
+    } else {
+        set k [Assign fn "int $bound" $e]
+        set t [Assign fn "op ilt $v $k" $e]
+    }
+    set left [NewLabel fn]
+    set right [NewLabel fn]
+    Emit fn "br $t $left $right" $e
+    EmitLabel fn $left
+    DfaSearch fn $v $raw [lrange $segs 0 $mid-1] $labelOf $e
+    EmitLabel fn $right
+    DfaSearch fn $v $raw [lrange $segs $mid end] $labelOf $e
+}
+
+# The raw form of the Int in register R (the value of HIR expression X), the
+# value tested first, unless the analyses prove it lies in LO..HI, and a value
+# outside LO..HI sent to OUTSIDE. Returns the raw register: a fresh one,
+# never RawOf's cached one, since this runs on one path of a dispatch (a
+# cached unboxing would be reused where it was never computed).
+proc native::lower::DfaRawIn {fnVar r x lo hi outside e} {
+    upvar 1 $fnVar fn
+    variable ranges
+    variable currentInstance
+    variable reprOpt
+    set range [hir::range::of $ranges $currentInstance $x]
+    set min [dict get $range min]
+    set max [dict get $range max]
+    if {!($reprOpt && $min ne "-inf" && $max ne "inf" && $min >= $lo && $max <= $hi)} {
+        foreach {op bound} [list ilt $lo igt $hi] {
+            set k [Assign fn "int $bound" $e]
+            set t [Assign fn "op $op $r $k" $e]
+            set in [NewLabel fn]
+            Emit fn "br $t $outside $in" $e
+            EmitLabel fn $in
+        }
+    }
+    return [AssignRaw fn "op runbox $r" $e]
+}
+
+# The table dispatch (above) of ROWS (DfaRows) into the raw register RESULT:
+# a static byte table of 257 entries per row -- the codes of the symbols -1
+# (the end) through 255 -- followed by each row's default, a byte per entry
+# (two, little-endian, when a code exceeds 255), indexed by the state (S, of
+# HIR expression STATEEXPR) and the symbol (C, of KEYEXPR); a symbol outside
+# -1..255 reads its row's default. A state outside the rows goes to BAD.
+# Jumps to JOIN.
+proc native::lower::DfaTable {fnVar e stateExpr keyExpr s c rows result bad join} {
+    upvar 1 $fnVar fn
+    set nrows [llength $rows]
+    set max 0
+    foreach row $rows {
+        foreach seg $row {
+            set max [expr {max($max, [lindex $seg 2])}]
+        }
+    }
+    set wide [expr {$max > 255}]
+    set entries {}
+    foreach row $rows {
+        set k 0
+        for {set key -1} {$key <= 255} {incr key} {
+            while {[lindex $row $k 1] ne "" && [lindex $row $k 1] < $key} {
+                incr k
+            }
+            lappend entries [lindex $row $k 2]
+        }
+    }
+    foreach row $rows {
+        lappend entries [lindex $row 0 2]
+    }
+    set hex ""
+    foreach code $entries {
+        if {$wide} {
+            append hex [format %02x%02x [expr {$code & 255}] [expr {$code >> 8}]]
+        } else {
+            append hex [format %02x $code]
+        }
+    }
+    set op [expr {$wide ? "rtabload16" : "rtabload8"}]
+    set table [Assign fn "bytes [Quote $hex]" $e]
+    # A recognizer of one state has one row: the state is not read at all
+    # (every state a generated recognizer computes is a row of its table).
+    if {$nrows > 1} {
+        set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
+    }
+    set outside [NewLabel fn]
+    set rc [DfaRawIn fn $c $keyExpr -1 255 $outside $e]
+    set one [AssignRaw fn "rawint 1" $e]
+    set column [AssignRaw fn "op riadd $rc $one" $e]
+    if {$nrows > 1} {
+        set width [AssignRaw fn "rawint 257" $e]
+        set rowAt [AssignRaw fn "op rimul $rs $width" $e]
+        set index [AssignRaw fn "op riadd $rowAt $column" $e]
+    } else {
+        set index $column
+    }
+    Emit fn "$result = op $op $table $index" $e
+    Emit fn "jump $join" $e
+    EmitLabel fn $outside
+    set base [AssignRaw fn "rawint [expr {$nrows * 257}]" $e]
+    if {$nrows > 1} {
+        set at [AssignRaw fn "op riadd $rs $base" $e]
+    } else {
+        set at $base
+    }
+    Emit fn "$result = op $op $table $at" $e
+    Emit fn "jump $join" $e
+}
+
+# A call NODE (ExprId E) of dfa#transition (above): its code, raw or tagged
+# as WANT asks.
+proc native::lower::DfaTransition {fnVar e node want} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable dfaDispatch
+    lassign [dict get $node args] stateExpr keyExpr tableExpr
+    if {[hir::kind $hir $tableExpr] ne "const"} {
+        throw {NATIVE INVALID-HIR} "native lowering: dfa#transition's table is not a constant ($e)"
+    }
+    set text [core::value::strOf [hir::get $hir $tableExpr value]]
+    set s [Expr fn $stateExpr]
+    if {$s eq "never"} {
+        return {never tagged}
+    }
+    set c [Expr fn $keyExpr]
+    if {$c eq "never"} {
+        return {never tagged}
+    }
+    set rows [DfaRows $text]
+    set nrows [llength $rows]
+    # The codes, a label each, where the result register gets its value.
+    set codes [lsort -integer -unique [concat {*}[lmap row $rows {lmap seg $row {lindex $seg 2}}]]]
+    set result [NewReg fn]
+    MarkRaw fn $result
+    set join [NewLabel fn]
+    set labelOf [dict create]
+    foreach code $codes {
+        dict set labelOf $code [NewLabel fn]
+    }
+    set bad [NewLabel fn]
+    # Which dispatch: table needs every row's explicit intervals in -1..255.
+    set mode $dfaDispatch
+    set narrow 1
+    foreach row $rows {
+        foreach seg [lrange $row 1 end-1] {
+            if {[lindex $seg 0] < -1 || [lindex $seg 1] > 255} {
+                set narrow 0
+            }
+        }
+    }
+    if {$mode eq "auto"} {
+        set mode [expr {$narrow ? "table" : "switch"}]
+    } elseif {$mode eq "table" && !$narrow} {
+        set mode switch
+    }
+    dict incr fn dfaTransitions
+    if {$mode eq "table"} {
+        DfaTable fn $e $stateExpr $keyExpr $s $c $rows $result $bad $join
+        set codes {}
+    } else {
+        # The state, then its row (one row: the state is not read).
+        set rowLabels {}
+        foreach row $rows {
+            lappend rowLabels [NewLabel fn]
+        }
+        if {$nrows > 1} {
+            set rs [DfaRawIn fn $s $stateExpr 0 [expr {$nrows - 1}] $bad $e]
+        }
+        if {$nrows == 1} {
+            Emit fn "jump [lindex $rowLabels 0]" $e
+        } elseif {$mode eq "switch"} {
+            set cases {}
+            for {set i 0} {$i < $nrows} {incr i} {
+                lappend cases $i:$i:[lindex $rowLabels $i]
+            }
+            Emit fn "switch $rs $bad [join $cases { }]" $e
+        } else {
+            set segs {}
+            for {set i 0} {$i < $nrows} {incr i} {
+                lappend segs [list [if {$i == 0} {string cat ""} else {set i}] $i $i]
+            }
+            set rowOf [dict create]
+            for {set i 0} {$i < $nrows} {incr i} {
+                dict set rowOf $i [lindex $rowLabels $i]
+            }
+            DfaSearch fn $rs 1 $segs $rowOf $e
+        }
+        foreach row $rows label $rowLabels {
+            EmitLabel fn $label
+            if {$mode eq "switch" && [llength $row] > 1} {
+                # (A row's two infinite ends are its default: surface/dfa.tcl
+                # writes no interval of the default's code.)
+                set default [dict get $labelOf [lindex $row 0 2]]
+                set rc [DfaRawIn fn $c $keyExpr [lindex $row 1 0] [lindex $row end-1 1] $default $e]
+                set cases {}
+                foreach seg [lrange $row 1 end-1] {
+                    lassign $seg segLo segHi code
+                    if {$code != [lindex $row 0 2]} {
+                        lappend cases $segLo:$segHi:[dict get $labelOf $code]
+                    }
+                }
+                Emit fn "switch $rc $default [join $cases { }]" $e
+            } else {
+                DfaSearch fn $c 0 $row $labelOf $e
+            }
+        }
+    }
+    foreach code $codes {
+        EmitLabel fn [dict get $labelOf $code]
+        Emit fn "$result = rawint $code" $e
+        Emit fn "jump $join" $e
+    }
+    EmitLabel fn $bad
+    Emit fn "raise INTERNAL [Quote "dfa#transition: a state outside the table (the compiler's error)"]" $e
+    EmitLabel fn $join
+    if {$want eq "raw"} {
+        return [list $result raw]
+    }
+    return [list [TaggedOf fn $result] tagged]
 }
 
 # Proven bounds (PROOF-FACT-CENSUS.md G1). hir/completions.tcl proves, per

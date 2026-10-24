@@ -1,0 +1,26 @@
+# lcg-struct-procedural.bot -- lcg-struct.bot written by hand without a
+# coroutine: the same items, each built as the same Item struct and read at
+# once, the same fold (COROUTINE-FUSION-MILESTONE-1.md's procedural
+# baseline). The compiler is free to keep such a struct in registers here
+# (it does), which is the cost the coroutine's outward value adds.
+#
+# expect: 507467
+
+import std::mutable_array
+
+struct Item:
+    value: int
+
+fn sum(count: int) -> int:
+    state = std::mutable_array::create(1, 42)
+    acc = std::mutable_array::create(1, 0)
+    loop i from 0 to count:
+        raw = state.at(0) * 1103515245 + 12345
+        next = raw.mod(2147483648)
+        state.set(0, next)
+        item = Item {value: next.mod(1000)}
+        acc.set(0, acc.at(0) + item.value)
+    last = Item {value: -1}
+    acc.at(0) + last.value
+
+sum(1000)

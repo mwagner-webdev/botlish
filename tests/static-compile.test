@@ -584,31 +584,41 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
             if {$case eq [join [lmap word [split $kind -] {string totitle $word}] ""]} continue
             list $kind $case
         }] [llength $cases]
-} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 107}
+} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 112}
 
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
-# kind the compiler's front end (hir/*.tcl, surface/modules.tcl) can name, by
+# kind the compiler's front end (hir/*.tcl, surface/modules.tcl, and the
+# declared recognizers' surface/dfa.tcl -- top-level declarations, which no
+# static block holds) can name, by
 # class. `recoverable` is exactly the code table; the others are never a
-# static block's rejection, each for its reason. Any other upper-case kind
+# static block's rejection, each for its reason (`syntax-recovery`: a
+# program with a syntax error has no static decision -- its blocks are holes
+# -- and SYNTAX-HOLE is never reported; SYNTAX-RECOVERED is a backend's
+# refusal of such a HIR, SYNTAX-RECOVERY-MILESTONE-1.md). Any other upper-case kind
 # token in that code is a new, unclassified kind: classify it (and give it a
 # case if a block can produce it).
 set scCensus {
     internal {CONTEXT-TRAIT-INTERNAL TRAIT-INTERNAL}
     declaration {CYCLIC-REFINEMENT REFINEMENT-CARRIER TRAIT-DUPLICATE-REQUIREMENT TRAIT-NAME-COLLISION
         TRAIT-OTHER-TRAIT TRAIT-REQUIREMENT-RECEIVER TRAIT-SELF-POSITION ENUM-EMPTY
-        LAYOUT-SIZE LAYOUT-ALIGNMENT LAYOUT-FIELD-TYPE LAYOUT-FIELD-BOUNDS LAYOUT-FIELD-OVERLAP LAYOUT-CYCLE}
+        LAYOUT-SIZE LAYOUT-ALIGNMENT LAYOUT-FIELD-TYPE LAYOUT-FIELD-BOUNDS LAYOUT-FIELD-OVERLAP LAYOUT-CYCLE
+        DFA-ALPHABET DFA-AMBIGUOUS-TRANSITION DFA-BYTE-CHARACTER DFA-CALL-ALPHABET DFA-CALL-LOOKAHEAD
+        DFA-DEAD-TRANSITION DFA-DUPLICATE DFA-EMPTY-RANGE DFA-END-CONSUMED DFA-MISSING-END DFA-NO-ACCEPT
+        DFA-RECURSIVE-CALL DFA-UNKNOWN-CLASS DFA-UNKNOWN-DFA DFA-UNKNOWN-STATE DFA-UNREACHABLE-STATE
+        DFA-UNREAD-BEYOND-INPUT PRIVATE-TYPE-ESCAPE}
     top-level-install {CONTEXT-TYPE-NOT-EXACT DUPLICATE-CONTEXT}
     not-from-source {LISTLOOP-BREAK-VALUE}
     header {CYCLE DUPLICATE-IMPORT DUPLICATE-NATIVE INVALID-TOPLEVEL MODULE-COLLISION NOT-A-TYPE SELF-IMPORT RESERVED-NAMESPACE
         TYPE-IMPORT-COLLISION UNKNOWN-TARGET AMBIGUOUS-MODULE UNSUPPORTED-ARCHITECTURE UNSUPPORTED-PLATFORM
         STALE-DIRECT-MODULE}
     warning {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING
-        ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS}
+        ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS CONTEXT-RESOURCE-ESCAPE}
     parser {STATIC-INTRINSIC-FORM STATIC-UNKNOWN-OPERATION COROUTINE-BINDING-FIELD MALFORMED-CONTEXT-SECTION
         MALFORMED-FLAG-SECTION MALFORMED-FLAG ARGUMENT-AFTER-FLAG FLAG-NOT-A-VALUE LIST-DESTRUCTURING
         ANONYMOUS-ENUM TRAIT-EMPTY TRAIT-REQUIREMENT-FLAGS TRAIT-CONTEXT-REQUIREMENT TRAIT-REQUIREMENT-BODY
         TRAIT-NESTED MALFORMED-VARIADIC-SECTION}
     runtime {NOT-CALLABLE NOT-BOOLEAN}
+    syntax-recovery {SYNTAX-HOLE SYNTAX-RECOVERED}
     other {MODULE-BINDINGS C-ABI-TYPES DIRECT-MODULES A-Z A-Z0-9}
 }
 
@@ -623,7 +633,8 @@ test sc-census-exhaustive {item 22: every diagnostic kind the front end names is
         }
     }
     set seen [dict create]
-    foreach path [concat [glob [file join $::projectRoot hir *.tcl]] [list [file join $::projectRoot surface modules.tcl]]] {
+    foreach path [concat [glob [file join $::projectRoot hir *.tcl]] [list [file join $::projectRoot surface modules.tcl] \
+            [file join $::projectRoot surface dfa.tcl]]] {
         foreach line [split [core::ReadFile $path] \n] {
             if {[regexp {^\s*#} $line]} continue
             foreach token [regexp -all -inline {\m[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\M} $line] {

@@ -1,0 +1,219 @@
+# json_lex.bot -- RFC 8259's lexical grammar as declared recognizers
+# (DFA-COROUTINE-MILESTONE-2.md). An ordinary module: the compiler checks
+# every `class` and `dfa` declaration below where it is written and lowers
+# each recognizer to a coroutine function of its first symbol.
+#
+# Each recognizer recognizes exactly one token: constructed with the token's
+# first symbol and resumed with one std::dfa::Symbol per further symbol, it
+# answers 0 to every symbol it needs more after, and completes
+# (std::coroutine::done?) with the number of the symbols it was handed that
+# are not part of the token -- 0, or 1 where a token ends only at the symbol
+# after it (`accept before`); it fails std::dfa::UnrecognizedInput or
+# std::dfa::UnexpectedEnd on anything else. Nothing here knows JSON's
+# structure: json.bot composes the tokens, gives back what a token left
+# unread, and checks the document.
+#
+# Token boundaries. A string, and punctuation, end at a symbol of their own
+# (the closing quote); a number and the literals true, false and null end at
+# the first symbol that is not part of them, which must be one that may
+# follow a value in a JSON text (RFC 8259 section 2: whitespace, a value
+# separator, the end of an array or object) or the end of the input. That
+# symbol is left unread (`accept before`), and everything else is rejected
+# there: `01`, `1.2.3`, `123abc`, `truex` fail at the symbol that continues
+# them, never as a token followed by another.
+
+import std::dfa
+
+class digit = '0'..'9'
+class nonzero = '1'..'9'
+class hex = '0'..'9' 'a'..'f' 'A'..'F'
+class ws = ' ' '\t' '\n' '\r'
+# FOLLOW(value): the symbols that may come right after a number or literal.
+class after_value = ws ',' ']' '}'
+
+# number = [ minus ] int [ frac ] [ exp ]                  (RFC 8259, 6)
+# int = zero / ( digit1-9 *DIGIT ); frac = "." 1*DIGIT;
+# exp = ("e" / "E") [ "-" / "+" ] 1*DIGIT
+dfa json_number over ascii:
+    start:
+        '-' -> minus
+        '0' -> zero
+        nonzero -> integer
+    minus:
+        '0' -> zero
+        nonzero -> integer
+    zero:
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+    integer:
+        digit -> integer
+        '.' -> point
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+    point:
+        digit -> fraction
+    fraction:
+        digit -> fraction
+        'e' 'E' -> exponent
+        after_value -> accept before
+        end -> accept
+    exponent:
+        '+' '-' -> exponent_sign
+        digit -> exponent_digits
+    exponent_sign:
+        digit -> exponent_digits
+    exponent_digits:
+        digit -> exponent_digits
+        after_value -> accept before
+        end -> accept
+
+# false = %x66.61.6c.73.65; null = %x6e.75.6c.6c; true = %x74.72.75.65  (3)
+dfa json_literal over ascii:
+    start:
+        "true" -> word_end
+        "false" -> word_end
+        "null" -> word_end
+    word_end:
+        after_value -> accept before
+        end -> accept
+
+# escape: "\" followed by one of " \ / b f n r t, or u and four HEXDIG  (7)
+dfa json_escape over ascii:
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' -> accept
+        'u' -> u1
+    u1:
+        hex -> u2
+    u2:
+        hex -> u3
+    u3:
+        hex -> u4
+    u4:
+        hex -> accept
+
+# string = quotation-mark *char quotation-mark; unescaped = %x20-21 /
+# %x23-5B / %x5D-10FFFF                                    (7)
+dfa json_string over unicode:
+    class unescaped = 0x20..0x21 0x23..0x5B 0x5D..0x10FFFF
+    open:
+        '"' -> body
+    body:
+        '"' -> accept
+        '\\' -> call json_escape then body
+        unescaped -> body
+
+# One UTF-8 encoded character after its lead byte, RFC 3629 section 4: no
+# overlong form, no surrogate (U+D800..U+DFFF), nothing past U+10FFFF.
+dfa utf8_char over bytes:
+    lead:
+        0xC2..0xDF -> tail1
+        0xE0 -> e0
+        0xE1..0xEC 0xEE..0xEF -> tail2
+        0xED -> ed
+        0xF0 -> f0
+        0xF1..0xF3 -> tail3
+        0xF4 -> f4
+    e0:
+        0xA0..0xBF -> tail1
+    ed:
+        0x80..0x9F -> tail1
+    f0:
+        0x90..0xBF -> tail2
+    f4:
+        0x80..0x8F -> tail2
+    tail3:
+        0x80..0xBF -> tail2
+    tail2:
+        0x80..0xBF -> tail1
+    tail1:
+        0x80..0xBF -> accept
+
+# A JSON text exchanged between systems is UTF-8 (RFC 8259, 8.1): the same
+# string over bytes, its non-ASCII characters validated as they arrive.
+dfa json_string_bytes over bytes:
+    open:
+        '"' -> body
+    body:
+        '"' -> accept
+        '\\' -> call json_escape then body
+        0x20..0x21 0x23..0x5B 0x5D..0x7F -> body
+        0xC2..0xF4 -> call utf8_char then body
+
+# Valid UTF-8 text as a whole (the coroutine-fusion milestone's utf8.bot,
+# declaratively).
+dfa utf8_text over bytes:
+    text:
+        0x00..0x7F -> text
+        0xC2..0xF4 -> call utf8_char then text
+        end -> accept
+
+# One token of a JSON text whose first symbol is not whitespace: a
+# dispatcher. Which token it was is what its first symbol says.
+dfa json_token over unicode:
+    start:
+        '{' '}' '[' ']' ':' ',' -> accept
+        '"' -> call json_string then accept
+        '-' digit -> call json_number then accept
+        't' 'f' 'n' -> call json_literal then accept
+
+dfa json_token_bytes over bytes:
+    start:
+        '{' '}' '[' ']' ':' ',' -> accept
+        '"' -> call json_string_bytes then accept
+        '-' digit -> call json_number then accept
+        't' 'f' 'n' -> call json_literal then accept
+
+# RFC 8259 permits an escaped surrogate that is not part of a pair ("\ud800";
+# section 8.2: what software does with it is unpredictable). I-JSON (RFC 7493,
+# 2.1) forbids it; so does this stricter escape, as finite state: a high
+# surrogate escape must be followed at once by a low one, and a low one
+# never comes alone.
+dfa json_escape_strict over ascii:
+    class hex_not_d = hex except 'd' 'D'
+    backslash:
+        '\\' -> kind
+    kind:
+        '"' '\\' '/' 'b' 'f' 'n' 'r' 't' -> accept
+        'u' -> u1
+    u1:
+        'd' 'D' -> d2
+        hex_not_d -> u2
+    u2:
+        hex -> u3
+    u3:
+        hex -> u4
+    u4:
+        hex -> accept
+    d2:
+        '0'..'7' -> u3
+        '8'..'9' 'a'..'b' 'A'..'B' -> high3
+    high3:
+        hex -> high4
+    high4:
+        hex -> pair_backslash
+    pair_backslash:
+        '\\' -> pair_u
+    pair_u:
+        'u' -> low1
+    low1:
+        'd' 'D' -> low2
+    low2:
+        'c'..'f' 'C'..'F' -> low3
+    low3:
+        hex -> low4
+    low4:
+        hex -> accept
+
+dfa json_string_strict over unicode:
+    class unescaped = 0x20..0x21 0x23..0x5B 0x5D..0x10FFFF
+    open:
+        '"' -> body
+    body:
+        '"' -> accept
+        '\\' -> call json_escape_strict then body
+        unescaped -> body

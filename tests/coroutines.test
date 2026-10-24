@@ -9,7 +9,9 @@
 # * grammar: `yield`, the coroutine binding form and its fields, the resume
 #   clause, contextual `coroutine`/`resume`;
 # * semantics on every backend (interp, compile, cranelift-generic,
-#   cranelift): the principal theorem, deep yields, the empty loop, resume
+#   cranelift -- natively fused where the driver's coroutine fusion proves
+#   it -- and cranelift-unfused, the general runtime:
+#   COROUTINE-FUSION-MILESTONE-1.md): the principal theorem, deep yields, the empty loop, resume
 #   protocols, binding forms, the transitive yield effect, errors and stable
 #   terminal states, nested coroutines, recursion, handlers across suspension,
 #   context traits and traits;
@@ -35,9 +37,12 @@ testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
 # Helpers
 
 # The outcome of source TEXT on every backend (sourceAgree: an error unless
-# all four agree).
+# all agree).
 proc coAgree {text} {
-    return [sourceAgree $text]
+    # Natively both ways: fused where codegen::fusion proves it
+    # (cranelift-generic, cranelift), and every coroutine on the general
+    # runtime (cranelift-unfused; COROUTINE-FUSION-MILESTONE-1.md).
+    return [sourceAgree $text {interp compile cranelift-generic cranelift cranelift-unfused}]
 }
 
 # The error code of the first diagnostic strict compilation of TEXT raises,
@@ -362,7 +367,9 @@ b = s()
 
 test co-binding-no-aggregate {the binding form builds no two-field value: the construction allocates the handle and nothing else (the literal-argument thunk is a static closure)} -constraints nativeCoroutines -body {
     set hir [surface::compile "struct T:\n    n: int\nfn t(k: int) -> T:\n    yield T {n: k}\n    return T {n: k + 1}\ncoroutine {step, first} = t(1)\n1\n" -warnings off]
-    set report [native::allocationReport $hir summary]
+    # The general runtime's construction (a fused one allocates no handle:
+    # tests/coroutine-fusion.test).
+    set report [withoutCoroutineFusion {native::allocationReport $hir summary}]
     list [dict get $report byKind Coroutine allocations] [dict get $report byKind Struct allocations] \
         [dict get $report byKind List allocations] [dict get $report byKind Block allocations]
 } -cleanup {unset -nocomplain hir report} -result {1 1 0 0}
@@ -1179,8 +1186,11 @@ test co-release-tcl-runtime {on the Tcl backends a released suspended coroutine 
 
 test co-release-native-stacks {natively a released suspended coroutine's stack goes back to the pool at once: 2000 constructions abandoned in a loop map one stack and reuse it 1999 times, and no collection sweeps a coroutine still holding one; the same under GC stress} -constraints nativeCoroutines -body {
     set hir [surface::compile "${releaseDecls}xs = loop i from 0 to 2000:\n    coroutine {first} = w(i)\n    first.n\nstd::list::length(xs)\n" -warnings off]
-    set report [native::allocationReport $hir summary]
-    list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+    # The general runtime's stacks (fusion would map none).
+    withoutCoroutineFusion {
+        set report [native::allocationReport $hir summary]
+        list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+    }
 } -cleanup {unset -nocomplain hir report} -result {{stacksMapped 1 stacksReused 1999 released 2000 releasedSuspended 2000 sweptSuspended 0} {value 2000}}
 
 # ---------------------------------------------------------------------------
@@ -1321,8 +1331,11 @@ test co-exit-release-tcl-runtime {on the Tcl backends no exit leaves a suspended
 
 test co-exit-release-native-stacks {natively every coroutine an exit leaves is released, none is left for a collection: 2100 rows (27900 constructions, 18000 abandoned suspended on an exit or at a last use) map two stacks (an outer and a loop's inner coroutine are alive at once) and sweep none; the same under GC stress} -constraints nativeCoroutines -body {
     set hir [surface::compile "import std::list\n${exitDecls}${exitProgram}xs = loop j from 0 to 300:\n    ys = loop k from 0 to 7:\n        row(k)\n    std::list::length(ys)\nstd::list::length(xs)\n" -warnings off]
-    set report [native::allocationReport $hir summary]
-    list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+    # The general runtime's stacks (fusion would map none).
+    withoutCoroutineFusion {
+        set report [native::allocationReport $hir summary]
+        list [dict get $report coroutines] [withGcStress {lrange [outcomeUnderHir cranelift $hir] 0 1}]
+    }
 } -cleanup {unset -nocomplain hir report} -result {{stacksMapped 2 stacksReused 27898 released 27900 releasedSuspended 18000 sweptSuspended 0} {value 300}}
 
 test co-exit-release-hir-text {HIR text states each exit's releases and each call's per error, and reads back to the same text and the same lowered program} -body {
@@ -1373,13 +1386,13 @@ test co-source-no-iterator-or-exhaustion {no iterator protocol, StopIteration-li
     set hits
 } -cleanup {unset -nocomplain hits path text pattern} -result {}
 
-test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield, done? and release, in the Tcl runtime and in NIR: no copy, fork or move operation exists at run time} -body {
+test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield, done? and release, in the Tcl runtime and in NIR, plus NIR's cofailed (a fused coroutine's cached failure, COROUTINE-FUSION-MILESTONE-1.md): no copy, fork or move operation exists at run time} -body {
     set runtime [coSource core/coroutines.tcl]
     set registered [lmap {- name} [regexp -all -inline {core::native::register ((?:std::)?coroutine\S+)} $runtime] {set name}]
     set nir [coSource native/src/nir.rs]
     set ops [lmap {- name} [regexp -all -inline {"(co[a-z0-9]+)" => Co} $nir] {set name}]
     list $registered [core::coroutines::natives] $ops [regexp {\[llength \$args\] > 1} $runtime]
-} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {cocreate costart coresume coresume0 coyield codone corelease} 1}
+} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {cocreate costart coresume coresume0 coyield codone corelease cofailed} 1}
 
 test co-source-state-machine {the runtime states are exactly fresh, running, suspended, completed, failed and released (the handle is dead): there is no moved sentinel (ownership is static), and a coroutine object is never cloned} -body {
     set runtime [coSource core/coroutines.tcl]

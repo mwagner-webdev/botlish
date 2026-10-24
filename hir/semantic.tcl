@@ -883,10 +883,12 @@ proc hir::semantic::verify {hirVar} {
 proc hir::semantic::DerivedKind {own id} {
     set first [lindex [dict get $own $id] 0]
     set kind [dict get $first kind]
-    if {$kind in {OPAQUE-REPRESENTATION USE-AFTER-MOVE UNHANDLED-ERROR MISSING-IMPORT} || [string match AFFINE-* $kind]} {
+    if {$kind in {OPAQUE-REPRESENTATION USE-AFTER-MOVE UNHANDLED-ERROR MISSING-IMPORT PRIVATE-ACCESS} || [string match AFFINE-* $kind]} {
         # (An ownership violation keeps its own kind: AFFINE-VALUES.md. So
         # does a method-style call whose function's namespace is not
-        # imported: the explicit spelling's diagnostic, DIAGNOSTIC-RECOVERY.md.)
+        # imported: the explicit spelling's diagnostic, DIAGNOSTIC-RECOVERY.md
+        # -- and a private access: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
+        # MILESTONE-1.md.)
         return $kind
     }
     return TYPE

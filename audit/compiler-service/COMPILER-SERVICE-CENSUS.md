@@ -966,6 +966,16 @@ retained from what is reused.
 
 ### 8.2 The exported-function probe: possible today, with one silent defect
 
+> **Since the census:** NATIVE-LIBRARY-MILESTONE-1.md made library mode a
+> compiler facility. `probes/export/` now declares its functions `exported c
+> fn` (no `argv()` workaround: each export is compiled from its declaration),
+> builds them with `main.tcl -emit-native-library bj`, and `probe.c` uses
+> only the generated `bj.h` and `libbj.a`: an instance made in `Init`, owned
+> results and structured errors. Its run is
+> `results/export-probe-library.txt` (37 µs per call; under GC stress,
+> 85 µs). The table and the defect below are the census's, through the
+> stand-in (`results/export-probe.txt`).
+
 `probes/export/` builds that stand-in's static library from
 `probes/export/exports.bot`, links it with a ~100-line C shim (`probe.c`)
 into a Tcl 9 extension, and `load`s it into `tclsh9.0`

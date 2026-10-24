@@ -93,8 +93,14 @@ namespace eval hir::resolve {}
 # binding a namespace's own section scope declares to its qualified
 # spelling afterward, so no two modules' definitions ever share a lowered
 # core IR name either.
-proc hir::resolve::program {nodes mode origin {modules {}} {choices {}} {externs 0}} {
+proc hir::resolve::program {nodes mode origin {modules {}} {choices {}} {externs 0} {decls ""}} {
     set hir [hir::Empty $mode]
+    if {$decls ne ""} {
+        # The units' module declarations (hir/privacy.tcl): which of their
+        # members are private, for method candidates and qualified
+        # references.
+        dict set hir moduleDecls $decls
+    }
     dict set hir laterIndex [dict create]
     dict set hir methodChoices $choices
     dict set hir methodCalls [dict create]
@@ -410,14 +416,27 @@ proc hir::resolve::NoMethodIdentity {hirVar identity} {
 # it. HIDDENVAR, if given, names a caller variable that receives the displays
 # of the nomethod functions that were left out, so the caller can tell "no
 # function of that name is visible" from "only nomethod functions are".
-proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""}} {
+#
+# A private member of an imported module (hir/privacy.tcl) is not visible
+# from code of another module, so it is no candidate either, and it competes
+# with nothing: the call means what it would mean without it (one of the
+# accessible candidates, or the call of a field value). PRIVATEVAR, if
+# given, receives the qualified names of the private functions left out, so
+# a call that then finds nothing can say why (hir::structs::ProjectionProblem:
+# PRIVATE-ACCESS).
+proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""} {privateVar ""}} {
     upvar 1 $hirVar hir
     if {$hiddenVar ne ""} {
         upvar 1 $hiddenVar hidden
     }
+    if {$privateVar ne ""} {
+        upvar 1 $privateVar private
+    }
     set hidden {}
+    set private {}
     set found [dict create]
     set arities [dict create]
+    set decls [hir::privacy::Decls $hir]
     foreach ns [hir::imports::namespaces [CtxNamespace $ctx]] {
         set qualified "${ns}::$name"
         if {[core::native::isQualifiedNative $qualified]} {
@@ -428,7 +447,10 @@ proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""}} 
             }
         } elseif {[dict exists $hir modules $ns]} {
             set scope [dict get $hir modules $ns]
-            if {[dict exists $hir scopes $scope names $name]} {
+            if {[dict exists $hir scopes $scope names $name]
+                    && [hir::privacy::Denied $decls $ns values $name [CtxNamespace $ctx]]} {
+                lappend private $qualified
+            } elseif {[dict exists $hir scopes $scope names $name]} {
                 set b [dict get $hir scopes $scope names $name]
                 set identity [CandidateIdentity hir $b]
                 if {![dict exists $found $identity]} {
@@ -604,7 +626,17 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
         }
         return [hir::refinements::Resolve [lindex $typeExpr 1] [lindex $typeExpr 2]]
     }
+    if {[IsApplyTypeExpr $typeExpr]} {
+        # NAME[A, B, ...] (surface::parser::TypeExpr): an application of
+        # several arguments, a parameterized struct's.
+        return [ResolveApplied [lindex $typeExpr 1] [lindex $typeExpr 2] $ns $imprints]
+    }
     lassign $typeExpr name arg
+    if {$name ne "fn" && ![dict exists $::hir::types::constructors $name] && [hir::structs::lookup $name $ns] ne ""} {
+        # NAME[A]: a one-slot parameterized struct's application (a struct
+        # with no slot is resolveApplication's "not a type constructor").
+        return [ResolveApplied $name [list $arg] $ns $imprints]
+    }
     if {$name eq "fn"} {
         # A structural function type (surface::parser::FnType's
         # {fn FIELDS}; "fn" is a keyword, so never a constructor name):
@@ -689,6 +721,58 @@ proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""} {imprints 0}} {
         return [hir::cabi::ResolveFnPtr $arg $ns $imprints]
     }
     return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg $ns $imprints]]]
+}
+
+# The application of the parameterized struct spelled NAME (in the code of
+# namespace NS) to the type expressions ARGS (TRAIT-CONSTRAINED-IMPRINTED-
+# TYPES.md): one per slot, each resolved as ResolveTypeExpr resolves any
+# type (IMPRINTS likewise), each a type a struct field may hold -- never a
+# trait, a context trait or an affine type. Its slots' trait constraints are
+# not checked here: a concrete argument's satisfaction is decided once the
+# program's declarations and implementations are all known
+# (hir::structs::verifyApplications), a symbolic one (an imprint variable)
+# gives its function the obligation (hir::imprint::Constrain).
+proc hir::resolve::ResolveApplied {name args ns imprints} {
+    set id [hir::structs::lookup $name $ns]
+    if {$id eq ""} {
+        if {[dict exists $::hir::types::constructors $name]} {
+            return -code error -errorcode {BOTLISH TYPE} \
+                "\"$name\" takes [dict get $::hir::types::constructors $name] type argument(s), got [llength $args]"
+        }
+        if {[core::type::valid [hir::types::CanonicalTypeName $name $ns]] || [hir::enums::lookup $name $ns] ne ""} {
+            error "\"$name\" is not a type constructor"
+        }
+        error "unknown type constructor \"$name\""
+    }
+    set slots [hir::structs::slots $id]
+    if {$slots eq {}} {
+        error "\"$name\" is not a type constructor: struct $name declares no type slots, so it takes no type arguments (write $name)"
+    }
+    if {[llength $args] != [llength $slots]} {
+        error "struct \"$name\" takes [llength $slots] type argument(s), [join $slots {, }], but $name\[[join [lmap t $args {ShowTypeExpr $t}] {, }]\] gives [llength $args]"
+    }
+    set types {}
+    foreach slot $slots t $args {
+        set type [ResolveTypeExpr $t $ns $imprints]
+        set what "the argument for slot $slot of $name"
+        set contextTrait [hir::types::MentionedContextTrait $type]
+        if {$contextTrait ne ""} {
+            return -code error -errorcode {BOTLISH CONTEXT-TRAIT-POSITION} \
+                [hir::types::ContextTraitPositionMessage $contextTrait $what]
+        }
+        if {[hir::types::MentionsTrait $type]} {
+            # A struct stores one concrete representation per field (TRAITS.md,
+            # "Storage"): a slot is a field's type.
+            return -code error -errorcode {BOTLISH TRAIT-STORAGE-UNSUPPORTED} \
+                "$what cannot be the trait [hir::types::show $type]: a slot is the type of the values its fields hold, and there is no erased or heterogeneous trait representation (a constrained slot, $slot satisfies TRAIT, takes a concrete type that satisfies the trait)"
+        }
+        if {[hir::types::IsAffine $type]} {
+            return -code error -errorcode {BOTLISH TYPE} \
+                "$what is the affine type [hir::types::show $type]: a type slot takes an unrestricted type (its values may be copied wherever the slot's type is used)"
+        }
+        lappend types $type
+    }
+    return [hir::types::MakeApplied $id $types]
 }
 
 # The diagnostic kind of a failed ResolveTypeExpr whose catch OPTIONS are
@@ -818,6 +902,13 @@ proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ct
 # identical notation over the identical data shape; kept as its own tiny
 # proc rather than a cross-layer call, since hir/*.tcl has no dependency on
 # surface/*.tcl anywhere else.
+# 1 if TYPEEXPR (a surface::parser::TypeExpr result) is an application of
+# several type arguments, {apply NAME {ARG ...}} (TRAIT-CONSTRAINED-
+# IMPRINTED-TYPES.md).
+proc hir::resolve::IsApplyTypeExpr {typeExpr} {
+    return [expr {[llength $typeExpr] == 3 && [lindex $typeExpr 0] eq "apply"}]
+}
+
 proc hir::resolve::ShowTypeExpr {typeExpr} {
     if {[llength $typeExpr] == 1} {
         return $typeExpr
@@ -831,6 +922,9 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
             set head [ShowTypeExpr [lindex $typeExpr 3]]
         }
         return "$head{[join [lmap field [lindex $typeExpr 2] {join $field {: }}] {, }]}"
+    }
+    if {[hir::resolve::IsApplyTypeExpr $typeExpr]} {
+        return "[lindex $typeExpr 1]\[[join [lmap t [lindex $typeExpr 2] {ShowTypeExpr $t}] {, }]\]"
     }
     lassign $typeExpr name arg
     if {$name eq "fn"} {
@@ -871,10 +965,20 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # A decimal literal's exact decimal (hir/decimal.tcl).
                 SetField hir $e decimal [dict get $node decimal]
             }
+            if {[dict exists $node synthesized]} {
+                # A constant the front end wrote for a declaration, not a
+                # literal of the program (surface/dfa.tcl's Str): no
+                # warning about literals reads it.
+                SetField hir $e synthesized [dict get $node synthesized]
+            }
         }
         ref {
             set ident [hir::traits::ExternalIdent $ctx $node]
-            if {$ident ne ""} {
+            if {[dict exists $node hole]} {
+                # Source the front end could not read (SYNTAX-RECOVERY-
+                # MILESTONE-1.md).
+                ResolveHole hir $e $node $ctx
+            } elseif {$ident ne ""} {
                 # A reference of a trait clone's body to a binding outside
                 # its function, resolved to the binding the source function's
                 # own resolution found (TRAITS.md, "Monomorphization").
@@ -925,6 +1029,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set bodyScope [NewScope hir block $scope $e $e $origin]
             if {[dict exists $node nomethod]} {
                 SetField hir $e nomethod 1
+            }
+            if {[dict exists $node exported]} {
+                # A C export (hir/exports.tcl): its foreign ABI.
+                SetField hir $e exported [dict get $node exported]
             }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
@@ -986,6 +1094,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {$variadic >= 0} {
                 SetField hir $e variadic $variadic
             }
+            if {[dict exists $node places]} {
+                # Place parameters (PLACE-PARAMETERS.md): the indices of the
+                # parameters a call passes the caller's place itself for
+                # (hir/mutvec.tcl checks and elaborates them).
+                SetField hir $e places [lsort -integer [dict keys [dict get $node places]]]
+            }
             # Imprint variables (hir/imprint.tcl): each one a parameter uses
             # must be established by an earlier one.
             set declaredParamTypes [hir::imprint::CheckSignature hir $e $declaredParamTypes \
@@ -1008,6 +1122,15 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lset declaredParamTypes $i $witness
                 }
                 SetField hir $e traitClone [dict get $head key]
+                if {[dict get $head imprints] ne {}} {
+                    # A specialization for one binding of the function's
+                    # constrained imprint variables (TRAIT-CONSTRAINED-
+                    # IMPRINTED-TYPES.md): its signature is imprinted with
+                    # it, so its body is checked for those types.
+                    set declaredParamTypes [lmap t $declaredParamTypes {
+                        if {$t eq {}} { set t } else { hir::types::canonical [hir::imprint::Substitute $t [dict get $head imprints]] }
+                    }]
+                }
                 if {[dict get $head selection] ne {}} {
                     # The installed contexts this clone's context-trait
                     # operations call (CONTEXT-TRAITS.md): {TRAIT WITNESS ...}.
@@ -1044,6 +1167,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 } else {
                     set declared $normalized
                 }
+            }
+            if {$head ne "" && [dict get $head imprints] ne {} && $declared ne {}} {
+                set declared [hir::types::canonical [hir::imprint::Substitute $declared [dict get $head imprints]]]
+            }
+            # Constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+            # the obligations the signature's applications of parameterized
+            # structs give its imprint variables, written on every
+            # occurrence -- derived from the contract, never declared.
+            lassign [hir::imprint::Constrain $declaredParamTypes $declared] constrainedParams declared
+            if {$constrainedParams ne $declaredParamTypes} {
+                set declaredParamTypes $constrainedParams
+                SetField hir $e declaredParamTypes $declaredParamTypes
             }
             set resultWitness [hir::traits::ResultOverride $ctx $node $head]
             if {$resultWitness ne ""} {
@@ -1092,7 +1227,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set inner [dict create scope $bodyScope callable $e loop "" errors $errorNames \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]] \
                 namespace [CtxNamespace $ctx]]
-            foreach field {traitContext clone} {
+            foreach field {traitContext clone cloneImprints} {
                 if {[dict exists $ctx $field]} {
                     dict set inner $field [dict get $ctx $field]
                 }
@@ -1103,6 +1238,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set written [dict get $node callee]
             set candidates {}
             set hidden {}
+            set private {}
             set planned [hir::traits::CallAction $ctx $node]
             if {$planned ne "" && $planned ne "field"} {
                 # A call the trait plan rewrites (TRAITS.md): a trait
@@ -1132,7 +1268,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             }
             if {[dict exists $node method] && $planned ne "field"} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
-                    [expr {[llength [dict get $node args]] + 1}] hidden]
+                    [expr {[llength [dict get $node args]] + 1}] hidden private]
+                if {[AfterBindingHole hir $scope ""]} {
+                    # A malformed statement before it may bind the method's
+                    # name: which function it applies is not known (Holes,
+                    # below).
+                    dict set hir syntaxDependent $e 1
+                }
             }
             if {[dict exists $node written]} {
                 # How the call was spelled, and the namespace of the code it
@@ -1221,8 +1363,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 } elseif {[dict exists $node method]} {
                     # No function `name` is visible: this is the call of a
                     # field value it has always been. Only diagnostics need
-                    # to know it was written as a method call.
+                    # to know it was written as a method call -- and which
+                    # private functions of that name are not visible here
+                    # (hir/privacy.tcl).
                     SetField hir [dict get $hir exprs $e callee] methodCallee 1
+                    if {$private ne ""} {
+                        SetField hir [dict get $hir exprs $e callee] privateCandidates $private
+                    }
                 }
             }
             if {[dict exists $node imprint]} {
@@ -1232,13 +1379,18 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set imprint {}
                 set valid 1
                 set variables [hir::imprint::EnclosingVariables $hir $ctx]
+                lappend variables {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+                set constraints [hir::imprint::EnclosingConstraints $hir $ctx]
                 foreach t [dict get $node imprint] origin [dict get $node imprintOrigins] {
                     if {[catch {hir::cabi::ResolveImprint $t [CtxNamespace $ctx] $variables} type options]} {
                         hir::DiagnoseAt hir [TypeErrorKind $options TYPE] \
                             [format {unknown or invalid imprint %s: %s} [ShowTypeExpr $t] $type] $e $origin
                         set valid 0
                     }
-                    lappend imprint $type
+                    # (A forwarded variable is its function's: constrained
+                    # as its signature constrains it -- or, in a
+                    # specialization for a binding, the imprinted type.)
+                    lappend imprint [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type $constraints]]
                 }
                 if {$valid} {
                     SetField hir $e imprint $imprint
@@ -1659,6 +1811,8 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
     # the source wrote can be (a type reference carrying an `id` is core IR's,
     # past the source boundary).
     set denied 0
+    # A parameterized struct's explicit arguments, "" when none are written.
+    set structArgs ""
     if {$named} {
         if {[dict exists $typeRef id]} {
             set id [dict get $typeRef id]
@@ -1668,19 +1822,22 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
                     "unknown struct type \"$id\": no such struct declaration is visible" $e
                 set id ""
             }
+        } elseif {([dict exists $typeRef typeArg] || [dict exists $typeRef typeArgs])
+                && ([dict get $typeRef name] ne "LayoutStruct" || [dict getdef $typeRef namespace ""] ne ""
+                    || [dict exists $typeRef typeArgs])} {
+            # NAME[A, ...] { ... }: the construction of a parameterized
+            # struct's application, applied explicitly (TRAIT-CONSTRAINED-
+            # IMPRINTED-TYPES.md): its fields are the declaration's with the
+            # slots replaced by the arguments (hir::range::VerifyStruct).
+            lassign [ResolveAppliedConstruction hir $e $typeRef $ctx] id spelling structArgs denied
         } elseif {[dict exists $typeRef typeArg]} {
             # NAME[TYPE] { ... } (BINARY-LAYOUT.md): the construction of an
             # applied type, the explicit type the imprinting design writes on
-            # an expression. Only LayoutStruct[L] has one: its fields are L's.
+            # an expression: LayoutStruct[L]'s, whose fields are L's.
             set ctor [dict get $typeRef name]
             set argText [ShowTypeExpr [dict get $typeRef typeArg]]
             set spelling "$ctor\[$argText\]"
-            if {$ctor ne "LayoutStruct"} {
-                set id ""
-                hir::DiagnoseAt hir UNKNOWN-STRUCT \
-                    "$spelling is not a struct type: of the applied types, only LayoutStruct\[L\] is constructed from field values" \
-                    $e [dict get $typeRef origin]
-            } elseif {[catch {hir::layouts::ResolveLayoutStruct [dict get $typeRef typeArg] $ns} type options]} {
+            if {[catch {hir::layouts::ResolveLayoutStruct [dict get $typeRef typeArg] $ns} type options]} {
                 set id ""
                 hir::DiagnoseAt hir [TypeErrorKind $options LAYOUT-STRUCT-PARAMETER] $type $e \
                     [dict get $typeRef typeArgOrigin]
@@ -1797,12 +1954,60 @@ proc hir::resolve::ResolveStruct {hirVar e node ctx} {
         SetField hir $e opaqueDenied 1
     }
     SetField hir $e structId $id
+    if {$structArgs ne ""} {
+        SetField hir $e structArgs $structArgs
+    }
     SetField hir $e names $names
     SetField hir $e nameOrigins $nameOrigins
     SetField hir $e fieldOrigins $fieldOrigins
     SetField hir $e fields $values
     SetField hir $e layout $layout
     SetField hir $e slots [lmap name $names {lsearch -exact $layout $name}]
+}
+
+# {ID SPELLING ARGS DENIED}: the construction E of the explicit application
+# TYPEREF -- `Pair[int, str] {...}`, `geo::Pair[int, str] {...}` -- in
+# context CTX (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the parameterized
+# struct ID its constructor denotes, the construction's spelling, the
+# resolved arguments (an imprint variable of an enclosing function stands for
+# whatever that function's calls imprint, constrained as its signature
+# constrains it) and whether the code lacks authority over an opaque
+# struct's representation. ID "" after a diagnostic.
+proc hir::resolve::ResolveAppliedConstruction {hirVar e typeRef ctx} {
+    upvar 1 $hirVar hir
+    set ns [CtxNamespace $ctx]
+    set ctor [dict get $typeRef name]
+    if {[dict getdef $typeRef namespace ""] ne ""} {
+        set ctor "[dict get $typeRef namespace]::$ctor"
+    }
+    if {[dict exists $typeRef typeArgs]} {
+        set args [dict get $typeRef typeArgs]
+    } else {
+        set args [list [dict get $typeRef typeArg]]
+    }
+    set spelling "$ctor\[[join [lmap t $args {ShowTypeExpr $t}] {, }]\]"
+    set id [hir::structs::lookup $ctor $ns]
+    if {$id eq "" || ![hir::structs::isParameterized $id]} {
+        hir::DiagnoseAt hir UNKNOWN-STRUCT \
+            "$spelling is not a struct type: of the applied types, only LayoutStruct\[L\] and the applications of parameterized structs (struct NAME\[SLOT, ...\]:) are constructed from field values" \
+            $e [dict get $typeRef origin]
+        return [list "" $spelling "" 0]
+    }
+    set variables [hir::imprint::EnclosingVariables $hir $ctx]
+    lappend variables {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+    if {[catch {ResolveApplied $ctor $args $ns [if {$variables eq {}} {string cat 0} else {set variables}]} type options]} {
+        hir::DiagnoseAt hir [TypeErrorKind $options TYPE] \
+            [format {invalid applied type %s: %s} $spelling $type] $e [dict get $typeRef origin]
+        return [list "" $spelling "" 0]
+    }
+    set type [hir::imprint::BodyType $ctx [hir::imprint::ConstrainVariables $type [hir::imprint::EnclosingConstraints $hir $ctx]]]
+    set denied 0
+    if {[hir::structs::representationDenied $id $ns]} {
+        set denied 1
+        hir::DiagnoseAt hir OPAQUE-CONSTRUCTION [hir::structs::ConstructionMessage $id] $e \
+            [dict get $typeRef origin]
+    }
+    return [list $id $spelling [hir::types::StructArgs $type] $denied]
 }
 
 # Resolves the syntax nodes NODES in order.
@@ -1854,7 +2059,8 @@ proc hir::resolve::ResolveClone {hirVar key ctx} {
     set inner [dict replace $ctx namespace [dict get $clone namespace] traitContext $key \
         clone [dict get $clone function] cloneHead [dict create key $key sid [dict get $node value sid] \
             params [dict get $clone params] result [dict get $clone result] \
-            selection [dict get $clone selection]]]
+            selection [dict get $clone selection] imprints [dict getdef $clone imprints {}]] \
+        cloneImprints [dict getdef $clone imprints {}]]
     SetField hir $e value [Expr hir [dict get $node value] $inner]
     return $e
 }
@@ -2017,6 +2223,12 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
             # yet: the ordinary forward-reference rule (nothing is hoisted).
             SetField hir $e binding ""
             SetField hir $e init yes
+            if {[AfterBindingHole hir [dict get $ctx scope] ""]} {
+                # (Unless a malformed statement before it may have: Holes,
+                # below.)
+                dict set hir syntaxDependent $e 1
+                return
+            }
             hir::Diagnose hir UNBOUND \
                 "unbound name \"$qualified\": \"$name\" is not established before this point in its own namespace; forward references are not allowed (a binding is visible only after it is established)" $e
             return
@@ -2032,6 +2244,14 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     set b [dict get $hir scopes $bodyScope names $name]
     SetField hir $e binding $b
     SetField hir $e init yes
+    set decls [hir::privacy::Decls $hir]
+    if {[hir::privacy::Denied $decls $ns values $name [CtxNamespace $ctx]]} {
+        # A private member of another module (hir/privacy.tcl): the loader
+        # rejects every qualified reference a source file writes; this is
+        # the same rule for one the build itself makes.
+        hir::Diagnose hir PRIVATE-ACCESS [hir::privacy::AccessMessage $ns $name \
+            [dict get [hir::privacy::Entry $decls $ns values $name] kind] [CtxNamespace $ctx]] $e
+    }
     hir::flags::NoteRef hir $e
     # The module section scope is never within any enclosing block's own
     # body scope (it is always a sibling of the program's top scope), so
@@ -2308,6 +2528,15 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         set b [Lookup hir $scope $name]
     }
     SetField hir $e binding $b
+    if {$b eq "" && !$root && [AfterBindingHole hir $scope ""]} {
+        # A name nothing established: but a malformed statement before it,
+        # in a scope it sees, may have bound it. That it is unbound is not
+        # known (SYNTAX-RECOVERY-MILESTONE-1.md): no diagnostic, and the
+        # reference stands for an unknown value.
+        SetField hir $e init yes
+        dict set hir syntaxDependent $e 1
+        return
+    }
     if {$b eq ""} {
         SetField hir $e init yes
         set message "unbound name \"$name\""
@@ -2324,6 +2553,12 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
         return
     }
     set binding [dict get $hir bindings $b]
+    if {!$root && [AfterBindingHole hir $scope $b]} {
+        # A malformed statement between the binding and the reference may
+        # have bound the same name in a scope closer to it: which binding
+        # the name denotes is not known (SYNTAX-RECOVERY-MILESTONE-1.md).
+        dict set hir syntaxDependent $e 1
+    }
     # Every binding a reference can resolve to is already established
     # (sequential resolution), except an ambient one: whatever the host
     # environment holds when a closure eventually runs.
@@ -2333,6 +2568,73 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     if {[dict get $binding kind] ne "root"} {
         Capture hir $ctx [dict get $binding scope] $b
     }
+}
+
+# ---------------------------------------------------------------------------
+# Holes (SYNTAX-RECOVERY-MILESTONE-1.md)
+#
+# A hole (hir/syntax.tcl's holeNode) is source the front end could not read: a
+# malformed statement, or a malformed statement's value. It resolves to
+# nothing and is diagnosed SYNTAX-HOLE -- a resolution diagnostic, so the unit
+# holding it is tainted and its checks' diagnostics are not reported
+# (hir/recovery.tcl), and never shown itself (the syntax error is). Two facts
+# are recorded for what follows it:
+#
+#   * a hole that may bind names (`binds 1`: the malformed statement's form
+#     is not known) is counted in its scope's `holes`. A later reference whose
+#     lookup passes such a scope before it reaches the scope of the binding it
+#     finds may denote a binding the hole made instead: a binding in a scope
+#     inside the found one shadows it. (Not one in the found binding's own
+#     scope: there, binding the same name again is DUPLICATE, whichever comes
+#     first.) Such a reference is `syntaxDependent`: its binding is not
+#     known, and inference makes it poison. An unresolved name after such a
+#     hole is not reported (AfterBindingHole);
+#   * its block (the innermost enclosing function) is a `holeBlocks` entry:
+#     the function's body is incomplete, so nothing inferred from it -- an
+#     undeclared result, an inferred parameter contract -- is known
+#     (hir/types.tcl, hir/signatures.tcl). Its declared contract is.
+proc hir::resolve::ResolveHole {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    SetField hir $e name syntax#hole
+    SetField hir $e binding ""
+    SetField hir $e init yes
+    set binds [dict get $node hole binds]
+    SetField hir $e hole [dict create binds $binds installs [dict getdef $node hole installs 0]]
+    if {$binds} {
+        set scope [dict get $ctx scope]
+        dict set hir scopes $scope holes [expr {[dict getdef $hir scopes $scope holes 0] + 1}]
+        dict set hir bindingHoles 1
+    }
+    set callable [dict get $ctx callable]
+    if {$callable ne ""} {
+        dict set hir holeBlocks $callable 1
+    }
+    if {[dict exists $node hole report]} {
+        # A declaration the front end rejected (hir/syntax.tcl's holeNode):
+        # its diagnostic, located where the hole is.
+        lassign [dict get $node hole report] kind message related
+        SetField hir $e hole [dict create binds $binds installs [dict getdef $node hole installs 0] report $kind]
+        hir::Diagnose hir $kind $message $e $related
+        return
+    }
+    hir::Diagnose hir SYNTAX-HOLE "malformed source: no meaning is known for it (its syntax error says why)" $e
+}
+
+# 1 if a reference in scope S to binding B ("" for a name nothing binds) may
+# denote a binding a hole made (ResolveHole): a binding hole in a scope from S
+# out to B's own scope, exclusive (every scope, for an unresolved name).
+proc hir::resolve::AfterBindingHole {hirVar s b} {
+    upvar 1 $hirVar hir
+    if {![dict exists $hir bindingHoles]} {
+        return 0
+    }
+    set own [if {$b eq ""} {list} else {dict get $hir bindings $b scope}]
+    for {} {$s ne "" && $s ne $own} {set s [dict get $hir scopes $s parent]} {
+        if {[dict getdef $hir scopes $s holes 0]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # Establishes the binding of bind expression E (name NAME, in scope SCOPE):

@@ -13,6 +13,10 @@ name: tests (macos arm64)
 #                  bounds and overflow tests, the native status, native
 #                  objects and executables (tests/platform/aot-facts.tcl),
 #                  the smoke tier (tests/platform/tier.tcl smoke)
+#   system-linker  every push: the system linker (SINGLE-EXECUTABLE-FFI-
+#                  MILESTONE-1.md) -- Apple clang and ld, the precompiled
+#                  runtime archive, no rustc -- its tests and the executable
+#                  and C test files linked by it
 #   acceptance     Tier B, every push, two shards: the acceptance tier --
 #                  the test files and golden suites that pass on macOS
 #   linux control  Tier A on ubuntu-latest, every push: the same smoke
@@ -147,6 +151,55 @@ jobs:
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The system linker on macOS (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
+  # executables linked by Apple clang and Apple's ld from the program object
+  # and the precompiled runtime archive -- no rustc at link time -- and the executable and C test files linked by it, plainly
+  # and (the C ones) under GC stress.
+  system-linker:
+    name: system linker (macOS arm64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      BOTLISH_NATIVE_LINKER: system
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: What the system linker links with
+        run: |
+          native/target/release/botlish-native system-linker
+          tclsh9.0 native/runtime-archive/libraries.tcl
+
+      # A system-linked executable: the link command (BOTLISH_NATIVE_LINK_LOG),
+      # its run, the Mach-O as the host's tools see it.
+      - name: A system-linked executable
+        run: |
+          mkdir -p sl && cp examples/io/hello-darwin.bot sl/ 2>/dev/null || cp examples/io/hello.bot sl/
+          for f in sl/*.bot; do
+            BOTLISH_NATIVE_LINK_LOG=$PWD/link.log tclsh9.0 main.tcl -warnings off -emit-native-executable "$f"
+          done
+          cat link.log
+          for exe in sl/*; do [[ $exe == *.bot ]] && continue; file "$exe"; otool -L "$exe"; "$exe"; done
+
+      - name: The system linker's tests
+        run: tclsh9.0 tests/all.tcl -file system-linker.test
+
+      - name: Executable and C tests, system-linked
+        run: |
+          files=$(grep -l -e 'native::executable' -e 'emit-native-executable' -e 'extern c ' tests/*.test | xargs -n1 basename | tr '\n' ' ')
+          CORE_BACKEND=interp tclsh9.0 tests/all.tcl -file "$files"
+
+      - name: System linker and C tests under GC stress
+        env:
+          BOTLISH_NATIVE_GC_STRESS: "1"
+        run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test darwin-io.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
 
   acceptance:
     name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)

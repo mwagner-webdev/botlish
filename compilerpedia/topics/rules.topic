@@ -1472,7 +1472,7 @@ summary: An opaque struct's representation belongs to the module that declares i
 index: rules
 alias: opaque struct field access; construct an opaque struct; representation ownership
 keywords: opaque, struct, module, construction, projection, destructuring, authority, Bytes
-related: concept.opaque-structs concept.modules rule.struct-construction capability.visibility stdlib.std::abi::bytes::from_list error.opaque-construction error.opaque-representation
+related: concept.opaque-structs concept.modules rule.struct-construction concept.private stdlib.std::abi::bytes::from_list error.opaque-construction error.opaque-representation
 docs: OPAQUE-STRUCTS.md
 
 == THE RULE

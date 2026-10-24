@@ -827,7 +827,11 @@ proc lsp::server::Apply {root job outcome payload} {
             set record [dict get $roots $root]
             set old [list [dict get $record latest] [dict get $record good]]
             dict set roots $root latest $payload
-            if {[service::hir $payload] ne ""} {
+            if {[dict get [RevInfo $payload] semantics] eq "full"} {
+                # The latest revision of the program as written: what a
+                # query falls back to, stale, where the latest -- partial,
+                # through a syntax error (SYNTAX-RECOVERY-MILESTONE-1.md) --
+                # knows nothing.
                 dict set roots $root good $payload
             }
             set keep [list [dict get $roots $root latest] [dict get $roots $root good]]
@@ -901,7 +905,8 @@ proc lsp::server::Release {rev} {
 
 # What revision REV's snapshot holds: sources (normalized path -> {path P
 # exists E from F version V read R}), read (the normalized paths it read
-# text from), entry, hir (0|1).
+# text from), entry, hir (0|1), semantics (full, partial or none:
+# service::revision).
 proc lsp::server::RevInfo {rev} {
     variable revinfo
     if {![dict exists $revinfo $rev]} {
@@ -916,6 +921,7 @@ proc lsp::server::RevInfo {rev} {
             }
         }
         dict set revinfo $rev [dict create sources $sources read $read hir [dict get $revision hir] \
+            semantics [dict get $revision semantics] \
             entry [file normalize [dict get $revision entry]]]
     }
     return [dict get $revinfo $rev]
@@ -1369,14 +1375,19 @@ proc lsp::server::Resolve {key final} {
 # ...}: the position in the text TEXT the client had), or {wait} when it
 # should wait for a pending analysis (never when FINAL).
 #
-# The revisions that may answer are the owner's latest and latest with a HIR.
-# One interprets the position when the text it analyzed at PATH holds the
-# position's character unchanged (Mapping); its answer is fresh when that
-# text is TEXT and every other source is unchanged too (Fresh). A hover
-# from a stale revision answers at once, marked stale; a definition or
-# references from one waits for a pending analysis. With no revision able
-# to interpret the position, a pending analysis is waited for; otherwise
-# the answer is null (or no locations).
+# The revisions that may answer are the owner's latest -- with a HIR, of the
+# program as written or, through syntax errors, partial
+# (SYNTAX-RECOVERY-MILESTONE-1.md) -- and then its latest of the program as
+# written (`good`). One interprets the position when the text it analyzed at
+# PATH holds the position's character unchanged (Mapping); its answer is
+# fresh when that text is TEXT and every other source is unchanged too
+# (Fresh). A partial revision that interprets the position but has no fact
+# of the kind there (malformed source, or a value that depends on it) leaves
+# the question to the older one. A hover from a stale revision answers at
+# once, marked stale; a definition or references from one waits for a
+# pending analysis. With no revision able to interpret the position, a
+# pending analysis is waited for; otherwise the answer is null (or no
+# locations).
 proc lsp::server::Answer {kind where final} {
     variable roots
     variable encoding
@@ -1394,8 +1405,13 @@ proc lsp::server::Answer {kind where final} {
     }
     set pending [expr {!$final && [Pending $owner]}]
     set record [dict get $roots $owner]
-    foreach rev [lsort -unique [list [dict get $record latest] [dict get $record good]]] {
-        if {$rev eq "" || ![dict get [RevInfo $rev] hir]} continue
+    set candidates {}
+    foreach rev [list [dict get $record latest] [dict get $record good]] {
+        if {$rev ne "" && $rev ni $candidates && [dict get [RevInfo $rev] hir]} {
+            lappend candidates $rev
+        }
+    }
+    foreach rev $candidates {
         if {[catch {RevText $rev $path} old]} continue
         set mapping [Mapping "$rev,$path,[dict get $where version]" $old $text]
         set at [ToOld $mapping $offset]
@@ -1404,6 +1420,10 @@ proc lsp::server::Answer {kind where final} {
         set line [lsp::positions::lineOf $starts $at]
         set column [expr {$at - [lindex $starts $line] + 1}]
         if {[catch {service::at $rev [dict get [RevInfo $rev] sources $path path] [expr {$line + 1}] $column} facts]} continue
+        if {$rev ne [lindex $candidates end] && ![dict exists $facts [dict get {hover hover definition definition references binding} $kind]]} {
+            # (A partial revision without the fact: the older one may have it.)
+            continue
+        }
         set fresh [expr {$old eq $text && [Fresh $rev]}]
         if {!$fresh && $kind ne "hover" && $pending} {
             return wait

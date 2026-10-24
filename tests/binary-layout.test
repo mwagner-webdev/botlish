@@ -247,13 +247,13 @@ test bl-syntax-contextual-words {layout, size, align, field and at are contextua
     blRun "layout = 1\nsize = 2\nalign = 3\nfield = 4\nat = 5\nlayout L:\n    size 1\n    align 1\n    field size: std::binary::U8 at 0\n\nl = LayoutStruct\[L\] \{size: 9\}\n\[layout + size + align + field + at, l.size\]\n"
 } -result {same: [15, 9]}
 
-test bl-syntax-no-generic-struct-declarations {no generic struct declaration exists: `struct Foo[T]:`, `LayoutStruct Foo:` and `layout struct Foo:` are syntax errors, and struct, opaque struct and context struct declarations are unchanged} -body {
-    list [blSyntax "struct Foo\[T\]:\n    x: int\n"] \
+test bl-syntax-no-generic-struct-declarations {a layout has no struct declaration: `LayoutStruct Foo:` and `layout struct Foo:` are syntax errors; `struct Foo[T]:` is a parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), never a layout, and a context struct takes no type slots; struct, opaque struct and context struct declarations are unchanged} -body {
+    list [blSyntax "struct Foo\[T\]:\n    x: T\n"] \
         [blSyntax "LayoutStruct Foo:\n    x: int\n"] \
         [blSyntax "layout struct Foo:\n    x: int\n"] \
-        [blSyntax "context struct Foo\[T\]:\n    x: int\n"] \
+        [blErrorAt "context struct Foo\[T\]:\n    x: int\n\n1\n"] \
         [blRun "struct Plain:\n    x: int\n\nopaque struct Hidden:\n    x: int\n\ncontext struct Ctx:\n    x: int\n\n\[Plain \{x: 1\}, Hidden \{x: 2\}.x, Ctx \{x: 3\}.x\]\n"]
-} -result {{layout.bot:1:11: expected ":" after the struct name "Foo", found "["} {layout.bot:1:14: expected end of line, found name "Foo"} {layout.bot:1:8: expected end of line, found "struct"} {layout.bot:1:19: expected ":" after the struct name "Foo", found "["} {same: [Plain {x: 1}, 2, 3]}}
+} -result {{no error} {layout.bot:1:14: expected end of line, found name "Foo"} {layout.bot:1:8: expected end of line, found "struct"} {TYPE 1:16} {same: [Plain {x: 1}, 2, 3]}}
 
 # ---------------------------------------------------------------------------
 # Declaration validation (a layout declaration is top level only: its
@@ -380,10 +380,10 @@ test bl-construction-width {a field's type is its encoding's exact domain: a val
         [blRun "fn f(n: int) -> LayoutStruct\[Inner\]:\n    if n >= 0 and n <= 65535:\n        LayoutStruct\[Inner\] \{x: 0, y: n\}\n    else:\n        LayoutStruct\[Inner\] \{x: 0, y: 0\}\n\[f(65535), f(65536)\]\n"]
 } -result {{TYPE 63:32} {TYPE 63:32} {same: [LayoutStruct[Inner] {x: 0, y: 65535}, LayoutStruct[Inner] {x: 0, y: 0}]}}
 
-test bl-construction-only-layoutstruct {of the applied types only LayoutStruct[L] has a construction (UNKNOWN-STRUCT for another), and a layout's own name constructs nothing (it is not a struct)} -body {
+test bl-construction-only-layoutstruct {of the applied types only LayoutStruct[L] and the applications of parameterized structs have a construction (UNKNOWN-STRUCT for another), and a layout's own name constructs nothing (it is not a struct)} -body {
     list [blError "$::blPrelude${::blLayouts}List\[int\] \{value: 1\}\n"] \
         [blErrorAt "$::blPrelude${::blLayouts}Single \{value: 1\}\n"]
-} -result {{UNKNOWN-STRUCT 62:1: List[int] is not a struct type: of the applied types, only LayoutStruct[L] is constructed from field values} {UNKNOWN-STRUCT 62:1}}
+} -result {{UNKNOWN-STRUCT 62:1: List[int] is not a struct type: of the applied types, only LayoutStruct[L] and the applications of parameterized structs (struct NAME[SLOT, ...]:) are constructed from field values} {UNKNOWN-STRUCT 62:1}}
 
 # ---------------------------------------------------------------------------
 # Consumer-side struct behavior

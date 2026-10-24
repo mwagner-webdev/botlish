@@ -645,10 +645,32 @@ inspected (`native::clif`, `native::nir`), its C symbols bound to
 batch timing measure in-process JIT runs only and report a program that
 calls C `{NATIVE UNSUPPORTED foreign}`.
 
-**The stub linker** (`BOTLISH_NATIVE_LINKER=stub`, the single executable's)
-appends a program image to the prebuilt `botlish-aot-stub`; it links no
-native library, so it refuses a program that calls C, naming what it calls
-and the linker that can (`cf-stub-linker`).
+**The system linker** (`BOTLISH_NATIVE_LINKER=system`, and `auto`'s for a
+program that calls C: the single executable's;
+SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) passes the same plan to the same
+platform linker without rustc: the host's C compiler driver links the
+program object (which carries the program's startup record,
+`botlish_program`) and the precompiled runtime archive
+`libbotlish_runtime.a` (`botlish_runtime.lib`, with link.exe, on Windows):
+
+```
+cc -pie -Wl,--eh-frame-hdr -Wl,-z,relro,-z,now -Wl,--gc-sections -o EXECUTABLE
+   program.o
+   -L/DIR ... -Wl,--start-group -lcrypto -lstdc++ -Wl,--end-group      the plan, as above
+   .../libbotlish_runtime.a -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc  the runtime's own
+```
+
+The driver appends its default libraries after all of it, as for any C
+program, so the as-needed rule above holds the same way. Its failures are
+this section's (`NATIVE LINK` with the linker's own lines), and its own:
+no C compiler driver, no linker, an unusable runtime archive (`NATIVE LINK
+TOOLCHAIN`, `NATIVE LINK RUNTIME`). Every C test file passes with it on
+Linux (CI's system-linker jobs, x86-64 and AArch64).
+
+**The stub linker** (`BOTLISH_NATIVE_LINKER=stub`) appends a program image
+to the prebuilt `botlish-aot-stub`; it links no native library, so it
+refuses a program that calls C, naming what it calls and the linkers that
+can (`cf-stub-linker`).
 
 ## 12. Backends
 
@@ -658,6 +680,7 @@ and the linker that can (`cf-stub-linker`).
 | compile | runs | runs | `NATIVE-ONLY` at the call |
 | cranelift, cranelift-generic | runs (JIT, as ever) | linked with the plan, run as a process | linked with the plan, run as a process |
 | executable (rustc linker) | links | links the plan | links the plan; needs at run time only the libraries it linked dynamically |
+| executable (system linker) | links | links the plan | links the plan, the same way, without rustc (section 11) |
 | executable (stub linker) | links | `NATIVE LINK`: refused | `NATIVE LINK`: refused (section 11) |
 
 A library is linked whether or not a function of it is called: the plan is
@@ -787,22 +810,20 @@ The Botlish compiler executable is self-contained for ordinary Botlish
 programs. Native FFI programs additionally depend on the host native linker
 and the libraries they explicitly declare.
 
-Concretely: the single executable (SINGLE-EXECUTABLE.md) links standalone
-executables with the stub linker and carries no Rust runtime library. It
-compiles a program that calls C and runs it on the Tcl backends (to its
-first C call: `NATIVE-ONLY`), but the native link of one that calls C or
-declares a library -- `-backend cranelift` as much as
-`-emit-native-executable` -- is refused with the stub linker's message
-(section 11; checked with `single/build.sh`'s executable: `NATIVE LINK`, the
-program's symbols and libraries named). Linking one needs
-the rustc linker of a Botlish checkout with its native backend built --
-rustc, the runtime library and the system `cc`/`ld` -- and the declared
-libraries. A system-linker mode for the single executable would need it to
-ship the runtime as a linkable static archive (28 MB, measured: `cargo rustc
---crate-type staticlib`) and a second startup path; that is a packaging
-decision for a later milestone, not part of the call. The compiler bundles
-no Tcl, BoringSSL or system development library, and never will by this
-design: a library is the program's declaration and the host's file.
+Concretely (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): the single executable
+(SINGLE-EXECUTABLE.md) links standalone executables with `auto` -- the stub
+linker, which needs no toolchain, for a program that calls no C; the system
+linker for one that calls C or declares a library -- and carries the
+precompiled runtime archive the system linker links. So a program that
+calls C links and runs with `-emit-native-executable` and on the native
+backends (`-backend cranelift` links it to run it) wherever the host has a
+C compiler driver and the declared libraries: no rustc, no Rust library, no
+checkout (`single/ffi-smoke-test.sh`, in a stock container with only gcc
+installed). Without a C compiler driver such a program's link is refused
+(`NATIVE LINK TOOLCHAIN`, saying how to install one); the Tcl backends run
+it to its first C call, as anywhere. The compiler bundles no Tcl,
+BoringSSL or system development library, and never will by this design: a
+library is the program's declaration and the host's file.
 
 ## 16. Examples
 
@@ -1282,7 +1303,8 @@ writes exactly these declarations, which compile like hand-written ones.
   `Ptr` (who frees what), retained stable storage (C-POINTER-BORROWING.md
   section 15).
 * A Tcl-side FFI (libffi or otherwise) for the interp and compile backends.
-* Linking from the single executable (section 15).
+* A package manager, library downloads, or a way to pick a static or a
+  shared library beyond the linker's own search rules (section 11).
 
 ## 27. What to run when changing this
 

@@ -1,0 +1,2479 @@
+partition	id	label	outcome	errorcode	warnings	earlier
+b	aot-facts:1	aot-facts:program	ok		0	-
+b	aot-facts:2	aot-facts:coroutineProgram	ok		0	-
+b	aot-facts:3	aot-facts:downProgram	ok		0	-
+b	aot-facts:4	aot-facts:coroutineOverflowProgram	ok		0	-
+b	aot-facts:5	aot-facts:benchProgram	ok		0	-
+b	aot-facts:6	aot-facts:errorProgram	ok		0	-
+b	aot-facts:7	aot-facts:c-call	ok		0	-
+b	aot-facts:8	aot-facts:missing	ok		0	-
+b	aot-facts:9	aot-facts:undefined	ok		0	-
+b	c-abi-types:1	ca-host-target	error	NONE	0	-
+b	c-abi-types:1	c-abi-types:1:0	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:2	ca-scalar-matrix-lp64; ca-scalar-hir-text; ca-layout-target-encodings	ok		0	-
+b	c-abi-types:2	c-abi-types:1:1; c-abi-types:1:15	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:3	ca-scalar-matrix-llp64; ca-layout-target-encodings	ok		0	-
+b	c-abi-types:3	c-abi-types:1:2	ok		0	-
+b	c-abi-types:4	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:4	c-abi-types:1:3	ok		0	-
+b	c-abi-types:5	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:5	c-abi-types:1:4	ok		0	-
+b	c-abi-types:6	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:6	c-abi-types:1:5	ok		0	-
+b	c-abi-types:7	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:7	c-abi-types:1:6	ok		0	-
+b	c-abi-types:8	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:8	c-abi-types:1:7	ok		0	-
+b	c-abi-types:9	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:9	c-abi-types:1:8	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:10	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:10	c-abi-types:1:9	ok		0	-
+b	c-abi-types:11	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:11	c-abi-types:1:10	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:12	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:12	c-abi-types:1:11	ok		0	-
+b	c-abi-types:13	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:13	c-abi-types:1:12	ok		0	-
+b	c-abi-types:14	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:14	c-abi-types:1:13	ok		0	-
+b	c-abi-types:15	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:15	c-abi-types:1:14	ok		0	-
+b	c-abi-types:16	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:17	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:17	c-abi-types:1:16	ok		0	-
+b	c-abi-types:18	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:18	c-abi-types:1:17	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:19	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:19	c-abi-types:1:18	ok		0	-
+b	c-abi-types:20	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:20	c-abi-types:1:19	ok		0	-
+b	c-abi-types:21	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:21	c-abi-types:1:20	ok		0	-
+b	c-abi-types:22	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:22	c-abi-types:1:21	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:23	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:23	c-abi-types:1:22	ok		0	-
+b	c-abi-types:24	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:24	c-abi-types:1:23	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:25	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:25	c-abi-types:1:24	ok		0	-
+b	c-abi-types:26	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:26	c-abi-types:1:25	ok		0	-
+b	c-abi-types:27	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:27	c-abi-types:1:26	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:28	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:28	c-abi-types:1:27	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:29	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:29	c-abi-types:1:28	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:30	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:30	c-abi-types:1:29	ok		0	-
+b	c-abi-types:31	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:32	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:33	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:34	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:35	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:36	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:37	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:38	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:39	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:40	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:41	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:42	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:43	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:44	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:45	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:46	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:47	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:48	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:49	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:50	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:51	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:52	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:53	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:54	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:55	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:56	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:57	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:58	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:59	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:60	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:61	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:62	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:63	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:64	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:65	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:66	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:67	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:68	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:69	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:70	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:71	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:72	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:73	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:74	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:75	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:76	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:77	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:78	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:79	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:80	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:81	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:82	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:83	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:84	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:85	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:86	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:87	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:88	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:89	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:90	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:91	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:92	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:93	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:94	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:95	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:96	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:97	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:98	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:99	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:100	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:101	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:102	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:103	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:104	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:105	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:106	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:107	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:108	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:109	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:110	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:111	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:112	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:113	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:114	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:115	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:116	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:117	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:118	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:119	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:120	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:121	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:122	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:123	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:124	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:125	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:126	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:127	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:128	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:129	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:130	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:131	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:132	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:133	ca-scalar-boundaries	ok		0	-
+b	c-abi-types:134	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:135	ca-scalar-boundaries	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:136	ca-scalar-runs	ok		0	-
+b	c-abi-types:137	ca-scalar-arithmetic-is-botlish	ok		0	-
+b	c-abi-types:138	ca-scalar-arithmetic-is-botlish	ok		0	-
+b	c-abi-types:139	ca-scalar-no-silent-narrowing	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:140	ca-scalar-no-silent-narrowing	ok		0	-
+b	c-abi-types:141	ca-scalar-identity-distinct	ok		0	-
+b	c-abi-types:142	ca-scalar-printing	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:143	ca-scalar-hir-text	ok		0	-
+b	c-abi-types:145	ca-target-isolation	ok		0	-
+b	c-abi-types:146	ca-target-isolation	ok		0	-
+b	c-abi-types:147	ca-target-interchange	ok		0	-
+b	c-abi-types:148	ca-target-interchange; ca-layout-target-encodings	ok		0	-
+b	c-abi-types:149	ca-target-only-ffi	ok		0	-
+b	c-abi-types:150	ca-target-only-ffi	ok		0	-
+b	c-abi-types:151	ca-namespace-import	error	SURFACE MODULE MISSING-IMPORT	0	-
+b	c-abi-types:152	ca-namespace-import	ok		0	-
+b	c-abi-types:153	ca-namespace-import	error	SURFACE MODULE TYPE-IMPORT-COLLISION	0	-
+b	c-abi-types:154	ca-namespace-import	error	SURFACE MODULE NOT-A-TYPE	0	-
+b	c-abi-types:155	ca-namespace-members	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	c-abi-types:156	ca-namespace-members	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	c-abi-types:157	ca-void-no-values	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:158	ca-void-no-values	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:159	ca-void-no-values	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:160	ca-void-no-values	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:161	ca-void-no-values	error	CORE SEMANTIC LAYOUT-FIELD-TYPE	0	-
+b	c-abi-types:162	ca-void-no-values	error	SURFACE MODULE TYPE	0	-
+b	c-abi-types:163	ca-void-no-values	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:164	ca-ptr-formation	ok		0	-
+b	c-abi-types:165	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:166	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:167	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:168	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:169	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:170	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:171	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:172	ca-ptr-pointee-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:173	ca-ptr-bare-kind	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:174	ca-ptr-operations	ok		0	-
+b	c-abi-types:175	ca-ptr-bits-preserved	ok		0	-
+b	c-abi-types:176	ca-ptr-wide-address	ok		0	-
+b	c-abi-types:177	ca-ptr-fixture-range	ok		0	-
+b	c-abi-types:178	ca-ptr-fixture-range	ok		0	-
+b	c-abi-types:179	ca-ptr-null-test	ok		0	-
+b	c-abi-types:180	ca-ptr-null-types	ok		0	-
+b	c-abi-types:181	ca-ptr-null-types	ok		0	-
+b	c-abi-types:182	ca-ptr-null-types	ok		0	-
+b	c-abi-types:183	ca-ptr-null-types	ok		0	-
+b	c-abi-types:184	ca-ptr-null-types	ok		0	-
+b	c-abi-types:185	ca-ptr-clone-type	ok		0	-
+b	c-abi-types:186	ca-ptr-no-implicit-conversion	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:187	ca-ptr-no-implicit-conversion	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:188	ca-ptr-no-implicit-conversion	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:189	ca-ptr-join	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:190	ca-ptr-not-int	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:191	ca-ptr-not-int	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:192	ca-ptr-not-int	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:193	ca-ptr-not-int	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:194	ca-ptr-not-int-message	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:195	ca-ptr-from-int-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:196	ca-ptr-from-int-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:197	ca-affine-move	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	c-abi-types:198	ca-affine-clone	ok		0	-
+b	c-abi-types:199	ca-affine-clone	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	c-abi-types:200	ca-affine-clone	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	c-abi-types:201	ca-affine-no-equality	error	CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED	0	-
+b	c-abi-types:202	ca-affine-no-equality	error	CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED	0	-
+b	c-abi-types:203	ca-affine-no-equality	error	CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED	0	-
+b	c-abi-types:204	ca-affine-capture	error	CORE SEMANTIC AFFINE-CAPTURE-UNSUPPORTED	0	-
+b	c-abi-types:205	ca-affine-aggregates	ok		0	-
+b	c-abi-types:206	ca-affine-aggregates	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	c-abi-types:207	ca-affine-generic	ok		0	-
+b	c-abi-types:208	ca-affine-error-and-result	ok		0	-
+b	c-abi-types:209	ca-affine-payload	ok		0	-
+b	c-abi-types:210	ca-affine-coroutines [nativeCoroutines]	ok		0	-
+b	c-abi-types:211	ca-affine-coroutines [nativeCoroutines]	error	CORE SEMANTIC COROUTINE-CONTRACT	0	-
+b	c-abi-types:212	ca-affine-containers-contexts	ok		0	-
+b	c-abi-types:213	ca-affine-containers-contexts	error	CORE SEMANTIC AFFINE-ERASURE-UNSUPPORTED	0	-
+b	c-abi-types:214	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:215	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:216	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:217	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:218	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:219	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:220	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:221	ca-fnptr-specimens	ok		0	-
+b	c-abi-types:222	ca-fnptr-invalid	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:223	ca-fnptr-invalid	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:224	ca-fnptr-invalid	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:225	ca-fnptr-invalid	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:226	ca-fnptr-invalid	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:227	ca-fnptr-distinct	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:228	ca-fnptr-distinct	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:229	ca-fnptr-distinct	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:230	ca-fnptr-distinct	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:231	ca-fnptr-distinct	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:232	ca-fnptr-affine	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	c-abi-types:233	ca-fnptr-affine	ok		0	-
+b	c-abi-types:234	ca-layout-scalar-field	ok		0	-
+b	c-abi-types:238	ca-layout-pointer-field-native-only	ok		0	-
+b	c-abi-types:239	ca-layout-pointer-field-native-only	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	c-abi-types:240	ca-layout-pointer-field-native-only	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	c-abi-types:241	ca-layout-pointer-field-native-only	ok		0	-
+b	c-abi-types:242	ca-layout-pointer-field-native-only	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	c-abi-types:243	ca-layout-pointer-field-native-only	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	c-abi-types:244	ca-imprint-structured-input	ok		0	-
+b	c-abi-types:246	ca-imprint-result-contains	ok		0	-
+b	c-abi-types:247	ca-imprint-result-only	ok		0	-
+b	c-abi-types:248	ca-imprint-result-only	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:249	ca-imprint-bare-input-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:250	ca-imprint-bare-input-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:251	ca-imprint-bare-input-rejected	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:252	ca-imprint-established-constrains	ok		0	-
+b	c-abi-types:253	ca-imprint-established-constrains	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:254	ca-imprint-explicit-constrains	ok		0	-
+b	c-abi-types:255	ca-imprint-explicit-constrains	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:256	ca-imprint-order	ok		0	-
+b	c-abi-types:257	ca-imprint-order	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:258	ca-imprint-order	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:259	ca-imprint-conflict	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:260	ca-imprint-conflict	ok		0	-
+b	c-abi-types:261	ca-imprint-no-variables	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:262	ca-imprint-parametric-body	error	CORE SEMANTIC TYPE	0	-
+b	c-abi-types:263	ca-imprint-not-a-value	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:264	ca-imprint-not-a-value	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:265	ca-imprint-affine	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:266	ca-imprint-affine	ok		0	-
+b	c-abi-types:267	ca-imprint-same-path	ok		0	-
+b	c-abi-types:268	ca-imprint-same-path	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:269	ca-imprint-same-path	error	CORE SEMANTIC IMPRINT	0	-
+b	c-abi-types:270	ca-imprint-method	ok		0	-
+b	c-abi-types:271	ca-imprint-no-generic-declaration	error	SURFACE SYNTAX	0	-
+b	c-abi-types:272	ca-imprint-syntax	error	SURFACE SYNTAX	0	-
+b	c-abi-types:273	ca-imprint-syntax	error	SURFACE SYNTAX	0	-
+b	c-abi-types:274	ca-imprint-hir-text	ok		0	-
+b	c-abi-types:275	ca-native-code	ok		0	-
+b	c-ffi:1	cf-parse-contextual	ok		0	-
+b	c-ffi:1	c-ffi:1:0	ok		0	-
+b	c-ffi:2	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:2	c-ffi:1:1	ok		0	-
+b	c-ffi:3	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:3	c-ffi:1:2	ok		0	-
+b	c-ffi:4	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:4	c-ffi:1:3	ok		0	-
+b	c-ffi:5	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:5	c-ffi:1:4	ok		0	-
+b	c-ffi:6	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:6	c-ffi:1:5	ok		0	-
+b	c-ffi:7	cf-decl-types	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:7	c-ffi:1:6	ok		0	-
+b	c-ffi:8	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:8	c-ffi:1:7	ok		0	-
+b	c-ffi:9	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:9	c-ffi:1:8	ok		0	-
+b	c-ffi:10	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:10	c-ffi:1:9	ok		0	-
+b	c-ffi:11	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:11	c-ffi:1:10	ok		0	-
+b	c-ffi:12	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:12	c-ffi:1:11	ok		0	-
+b	c-ffi:13	cf-decl-facts	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:13	c-ffi:1:12	ok		0	-
+b	c-ffi:14	cf-decl-facts	error	CORE SEMANTIC DUPLICATE	0	-
+b	c-ffi:14	c-ffi:1:13	ok		0	-
+b	c-ffi:15	cf-decl-duplicate	ok		0	-
+b	c-ffi:15	c-ffi:1:14	ok		0	-
+b	c-ffi:16	cf-decl-duplicate	error	CORE SEMANTIC DUPLICATE	0	-
+b	c-ffi:16	c-ffi:1:15	ok		0	-
+b	c-ffi:17	cf-decl-duplicate	error	CORE SEMANTIC DUPLICATE	0	-
+b	c-ffi:17	c-ffi:1:16	ok		0	-
+b	c-ffi:18	cf-hir-foreign-table	ok		0	-
+b	c-ffi:18	c-ffi:1:17	ok		0	-
+b	c-ffi:19	cf-abi-classes-follow-the-target	ok		0	-
+b	c-ffi:19	c-ffi:1:18	ok		0	-
+b	c-ffi:20	cf-abi-classes-follow-the-target	ok		0	-
+b	c-ffi:20	c-ffi:1:19	ok		0	-
+b	c-ffi:21	cf-abi-classes-follow-the-target	ok		0	-
+b	c-ffi:21	c-ffi:1:20	ok		0	-
+b	c-ffi:22	cf-link-plan	ok		0	-
+b	c-ffi:22	c-ffi:1:21	ok		0	-
+b	c-ffi:23	cf-call-typing [cfFixture]	ok		0	-
+b	c-ffi:23	c-ffi:1:22	ok		0	-
+b	c-ffi:24	cf-call-typing [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:24	c-ffi:1:23	ok		0	-
+b	c-ffi:25	cf-call-typing [cfFixture]	error	CORE SEMANTIC ARITY	0	-
+b	c-ffi:25	c-ffi:1:24	ok		0	-
+b	c-ffi:26	cf-call-typing [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:26	c-ffi:1:25	ok		0	-
+b	c-ffi:27	cf-not-a-value [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:27	c-ffi:1:26	ok		0	-
+b	c-ffi:28	cf-not-a-value [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:28	c-ffi:1:27	ok		0	-
+b	c-ffi:29	cf-method-syntax [cfFixture]	ok		0	-
+b	c-ffi:29	c-ffi:1:28	ok		0	-
+b	c-ffi:30	cf-entry-program-declares [cfFixture]	ok		0	-
+b	c-ffi:30	c-ffi:1:29	ok		0	-
+b	c-ffi:31	cf-entry-program-declares [cfFixture]	error	CORE SEMANTIC UNBOUND	0	-
+b	c-ffi:32	cf-renamed-binding-native-name	ok		0	-
+b	c-ffi:33	cf-borrow-read [cfFixture]	ok		0	-
+b	c-ffi:34	cf-borrow-write [cfFixture]	ok		0	-
+b	c-ffi:35	cf-borrow-sha256-shape [cfFixture]	ok		0	-
+b	c-ffi:37	cf-borrow-refusals [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:38	cf-borrow-refusals [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:39	cf-borrow-refusals [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:40	cf-borrow-refusals [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:41	cf-result-provenance [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:42	cf-result-provenance [cfFixture]	ok		0	-
+b	c-ffi:43	cf-contract-violation [cfFixture]	ok		0	-
+b	c-ffi:44	cf-contract-violation [cfFixture]	ok		0	-
+b	c-ffi:45	cf-wild-address [cfFixture]	ok		0	-
+b	c-ffi:46	cf-scalar-transport [cfFixture]	ok		0	-
+b	c-ffi:47	cf-scalar-extension [cfFixture]	ok		0	-
+b	c-ffi:48	cf-stack-arguments [cfFixture]	ok		0	-
+b	c-ffi:49	cf-bool-type [cfFixture]	ok		0	-
+b	c-ffi:50	cf-bool-type [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:51	cf-bool-type [cfFixture]	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	c-ffi:52	cf-bool-type [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:53	cf-bool-transport [cfFixture]	ok		0	-
+b	c-ffi:54	cf-bool-register [cfFixture linuxX86_64]	ok		0	-
+b	c-ffi:55	cf-bool-invalid [cfFixture]	ok		0	-
+b	c-ffi:56	cf-bool-pointers [cfFixture]	ok		0	-
+b	c-ffi:57	cf-bool-lowering [cfFixture]	ok		0	-
+b	c-ffi:59	cf-void-and-unit [cfFixture]	ok		0	-
+b	c-ffi:60	cf-pointers [cfFixture]	ok		0	-
+b	c-ffi:61	cf-function-pointers [cfFixture]	ok		0	-
+b	c-ffi:62	cf-nir [cfFixture]	ok		0	-
+b	c-ffi:63	cf-clif [cfFixture]	ok		0	-
+b	c-ffi:64	cf-clif-stack-parameters [cfFixture]	ok		0	-
+b	c-ffi:65	cf-tcl-backends [cfFixture]	ok		0	-
+b	c-ffi:67	cf-tcl-backends [cfFixture]	ok		0	-
+b	c-ffi:68	cf-strict0-replay [cfFixture]	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:69	cf-missing-library [nativeBuilt rustcLinker nativeCCalls]	ok		0	-
+b	c-ffi:70	cf-undefined-symbol [cfFixture]	ok		0	-
+b	c-ffi:71	cf-undefined-symbol [cfFixture]	ok		0	-
+b	c-ffi:72	cf-named-symbol [cfFixture]	ok		0	-
+b	c-ffi:73	cf-named-symbol [cfFixture]	ok		0	-
+b	c-ffi:74	cf-named-symbol [cfFixture]	ok		0	-
+b	c-ffi:75	cf-link-order [cfFixture]; cf-link-directories [cfFixture]	ok		0	-
+b	c-ffi:76	cf-executable [cfFixture]	ok		0	-
+b	c-ffi:77	cf-stub-linker [cfFixture]; cf-main-tcl [cfFixture]; cf-cache [cfFixture]; cf-isolation [cfFixture]; cf-link-directories [cfFixture]; cf-link-failure-keeps-executable [cfFixture]	ok		0	-
+b	c-ffi:79	cf-argv [cfFixture]	ok		0	-
+b	c-ffi:80	cf-direct-noescape-ordinary [cfFixture]	ok		0	-
+b	c-ffi:81	cf-direct-retaining [cfFixture]	error	CORE SEMANTIC DIRECT	0	-
+b	c-ffi:82	cf-direct-retaining [cfFixture]	error	CORE SEMANTIC DIRECT	0	-
+b	c-ffi:83	cf-direct-contextualized [cfFixture]	ok		0	-
+b	c-ffi:85	cf-direct-declared [cfFixture]; cf-direct-summary [cfFixture]	ok		0	-
+b	c-ffi:87	cf-direct-not-predesignated [cfFixture]	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	c-ffi:88	cf-direct-not-predesignated [cfFixture]	error	CORE SEMANTIC DIRECT	0	-
+b	c-ffi:89	cf-direct-two-modules-one-library [cfFixture]	ok		0	-
+b	c-ffi:92	cf-static-compile [cfFixture]	ok		0	-
+b	c-ffi:93	cf-static-compile [cfFixture]	ok		0	-
+b	c-ffi:94	cf-static-compile [cfFixture]	ok		0	-
+b	c-ffi:95	cf-static-compile [cfFixture]	ok		0	-
+b	c-ffi:96	cf-static-compile [cfFixture]	ok		0	-
+b	c-ffi:97	cf-interchange [cfFixture]	ok		0	-
+b	c-ffi:100	cf-cache [cfFixture]	ok		0	-
+b	c-ffi:101	cf-cache [cfFixture]	ok		0	-
+b	c-ffi:102	cf-cache [cfFixture]	ok		0	-
+b	c-ffi:103	cf-cache [cfFixture]	ok		0	-
+b	c-ffi:105	cf-isolation [cfFixture]	ok		0	-
+b	c-ffi:106	cf-isolation [cfFixture]	ok		0	-
+b	c-ffi:110	cf-gc-stress [cfFixture]	ok		0	-
+b	c-ffi:112	cf-abi-register-extension [cfFixture]; cf-abi-stack-alignment [cfFixture]	ok		0	-
+b	c-ffi:113	cf-abi-doubles-before-integers [cfFixture]	ok		0	-
+b	c-ffi:114	cf-abi-mixed-positions [cfFixture]	ok		0	-
+b	c-ffi:116	cf-abi-stack-layout [cfFixture]	ok		0	-
+b	c-ffi:117	cf-abi-pick [cfFixture]	ok		0	-
+b	c-ffi:118	cf-abi-register-boundary [cfFixture]	ok		0	-
+b	c-ffi:119	cf-abi-stack-tail-frame [cfFixture]	ok		0	-
+b	c-ffi:121	cf-scalar-values [cfFixture]	ok		0	-
+b	c-ffi:122	cf-char-target [cfFixture]	ok		0	-
+b	c-ffi:123	cf-char-target [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:124	cf-pointer-mix [cfFixture]	ok		0	-
+b	c-ffi:125	cf-pointer-width [cfFixture]	ok		0	-
+b	c-ffi:126	cf-error-sentinel [cfFixture]	ok		0	-
+b	c-ffi:127	cf-system-library [nativeBuilt rustcLinker nativeCCalls]	ok		0	-
+b	c-ffi:128	cf-system-library [nativeBuilt rustcLinker nativeCCalls]	ok		0	-
+b	c-ffi:129	cf-system-symbol-resolved [nativeBuilt rustcLinker nativeCCalls nm dynamicSystemCLibrary]	ok		0	-
+b	c-ffi:130	cf-system-symbol-resolved-windows [nativeBuilt rustcLinker nativeCCalls windowsHost]	ok		0	-
+b	c-ffi:135	cf-wrong-architecture [cfFixture foreignArchive]	ok		0	-
+b	c-ffi:137	cf-link-failure-keeps-executable [cfFixture]	ok		0	-
+b	c-ffi:138	cf-availability-check [cfFixture appleAvailability]	ok		0	-
+b	c-ffi:139	cf-gc-calls [cfFixture]	ok		0	-
+b	c-ffi:141	cf-coroutine-calls [cfFixture nativeCoroutines]	ok		0	-
+b	c-ffi:143	cf-c-stack-overflow [cfFixture nativeStackGuard]	ok		0	-
+b	c-ffi:144	cf-c-stack-overflow [cfFixture nativeStackGuard]	ok		0	-
+b	c-ffi:145	cf-c-stack-overflow [cfFixture nativeStackGuard]	ok		0	-
+b	c-ffi:148	cf-va-hir	ok		0	-
+b	c-ffi:149	cf-va-promotions-follow-the-target	ok		0	-
+b	c-ffi:150	cf-va-promotions-follow-the-target	ok		0	-
+b	c-ffi:151	cf-va-promotions-follow-the-target	ok		0	-
+b	c-ffi:152	cf-va-promotions-follow-the-target	ok		0	-
+b	c-ffi:153	cf-va-type-refusals	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:154	cf-va-type-refusals	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:155	cf-va-type-refusals	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:156	cf-va-type-refusals	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:157	cf-va-type-refusals	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:158	cf-va-type-refusals	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-ffi:159	cf-va-type-refusals	error	CORE SEMANTIC ARITY	0	-
+b	c-ffi:160	cf-va-type-refusals	error	CORE SEMANTIC ARITY	0	-
+b	c-ffi:161	cf-va-ambiguous-type [cfFixture]	ok		0	-
+b	c-ffi:162	cf-va-strict0-replay [cfFixture]	error	CORE SEMANTIC TYPE	0	-
+b	c-ffi:163	cf-va-values [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:164	cf-va-arities [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:165	cf-va-position-types [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:166	cf-va-doubles [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:167	cf-va-sentinel [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:168	cf-va-tcl-backends [cfFixture]; cf-va-direct [cfFixture]	ok		0	-
+b	c-ffi:170	cf-va-nir [cfFixture]	ok		0	-
+b	c-ffi:171	cf-va-clif [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:172	cf-va-win64-refused [cfFixture windowsHost]; cf-va-cache [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:173	cf-va-abi-none [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:174	cf-va-abi-small [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:175	cf-va-abi-ints [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:176	cf-va-abi-mixed [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:177	cf-va-abi-fixedd [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:179	cf-va-direct [cfFixture]	error	CORE SEMANTIC DIRECT	0	-
+b	c-ffi:180	cf-va-static-compile [cfFixture]	ok		0	-
+b	c-ffi:181	cf-va-static-compile [cfFixture]	ok		0	-
+b	c-ffi:182	cf-va-interchange [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:183	cf-va-target-identity [cfFixture]	ok		0	-
+b	c-ffi:186	cf-va-cache [cfFixture nativeCVariadics]	ok		0	-
+b	c-ffi:187	cf-va-executable-gc-coroutine [cfFixture nativeCoroutines nativeCVariadics]	ok		0	-
+b	c-pointer-borrowing:1	cb-direct-hook	ok		0	-
+b	c-pointer-borrowing:2	cb-read-bytes	ok		0	-
+b	c-pointer-borrowing:3	cb-read-byte-pointees	ok		0	-
+b	c-pointer-borrowing:4	cb-read-larger	ok		0	-
+b	c-pointer-borrowing:5	cb-read-mutable	ok		0	-
+b	c-pointer-borrowing:6	cb-read-no-mutation	ok		0	-
+b	c-pointer-borrowing:7	cb-read-evidence-equivalent	ok		0	-
+b	c-pointer-borrowing:8	cb-read-prefix	ok		0	-
+b	c-pointer-borrowing:9	cb-read-raw-pointer	ok		0	-
+b	c-pointer-borrowing:10	cb-write-fill	ok		0	-
+b	c-pointer-borrowing:11	cb-write-value-semantics	ok		0	-
+b	c-pointer-borrowing:12	cb-write-owner-usable-again	ok		0	-
+b	c-pointer-borrowing:13	cb-write-sees-current-bytes	ok		0	-
+b	c-pointer-borrowing:14	cb-write-independent-exposures	ok		0	-
+b	c-pointer-borrowing:15	cb-write-byte-pointees	ok		0	-
+b	c-pointer-borrowing:16	cb-write-larger	ok		0	-
+b	c-pointer-borrowing:17	cb-write-empty	ok		0	-
+b	c-pointer-borrowing:18	cb-write-discarded	ok		0	-
+b	c-pointer-borrowing:19	cb-read-write-one-owner	ok		0	-
+b	c-pointer-borrowing:20	cb-copy-from-bytes	ok		0	-
+b	c-pointer-borrowing:21	cb-write-result-type	ok		0	-
+b	c-pointer-borrowing:22	cb-mixed-parameters	ok		0	-
+b	c-pointer-borrowing:23	cb-mixed-parameters	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:24	cb-mixed-parameters	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:25	cb-mixed-parameters	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:26	cb-mixed-borrows-recorded	ok		0	-
+b	c-pointer-borrowing:27	cb-refuse-bytes-write	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:28	cb-refuse-capturing; cb-refuse-const-is-not-noescape; cb-strict0-replay	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:29	cb-refuse-capturing	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:30	cb-refuse-capturing	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:31	cb-refuse-capturing	ok		0	-
+b	c-pointer-borrowing:32	cb-refuse-unknown-escape	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:33	cb-refuse-unknown-escape	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:34	cb-refuse-unknown-escape	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:36	cb-refuse-const-is-not-noescape	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:37	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:38	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:39	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:40	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:41	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:42	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:43	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:44	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:45	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:46	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:47	cb-refuse-wide-pointees	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:48	cb-refuse-order	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:49	cb-refuse-order	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:50	cb-refuse-order	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:51	cb-refuse-non-owner	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:52	cb-refuse-non-owner	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:53	cb-refuse-non-owner	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:54	cb-refuse-non-owner	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:55	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:56	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:57	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:58	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:59	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:60	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:61	cb-no-pointer-value	error	CORE SEMANTIC IMPRINT	0	-
+b	c-pointer-borrowing:62	cb-no-pointer-value	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:63	cb-foreign-operation-only-called	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:64	cb-foreign-operation-only-called	error	CORE SEMANTIC IMPRINT	0	-
+b	c-pointer-borrowing:65	cb-foreign-operation-only-called	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:66	cb-imprint-owner-establishes-nothing	error	CORE SEMANTIC IMPRINT	0	-
+b	c-pointer-borrowing:67	cb-raw-pointer-type-exact	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:68	cb-raw-pointer-type-exact	ok		0	-
+b	c-pointer-borrowing:69	cb-length-separate	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:70	cb-length-separate	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:71	cb-length-separate	ok		0	-
+b	c-pointer-borrowing:72	cb-length-separate	error	CORE SEMANTIC TYPE	0	-
+b	c-pointer-borrowing:73	cb-exposure-after-arguments [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:74	cb-exposure-after-arguments-nir	ok		0	-
+b	c-pointer-borrowing:75	cb-exposure-after-arguments-nir	ok		0	-
+b	c-pointer-borrowing:76	cb-tcl-exposure-ends	error	SURFACE MODULE UNKNOWN-NAMESPACE	0	-
+b	c-pointer-borrowing:77	cb-failure-publishes-nothing	ok		0	-
+b	c-pointer-borrowing:78	cb-failure-gc-stress [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:79	cb-liveness-reentrant; cb-liveness-mutant-detected	ok		0	-
+b	c-pointer-borrowing:82	cb-gc-stress-programs	ok		0	-
+b	c-pointer-borrowing:84	cb-nir-read	ok		0	-
+b	c-pointer-borrowing:85	cb-nir-read-mutable	ok		0	-
+b	c-pointer-borrowing:86	cb-nir-write	ok		0	-
+b	c-pointer-borrowing:87	cb-allocations [nativeCoroutines]; cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:88	cb-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:89	cb-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:90	cb-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:91	cb-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:92	cb-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:94	cb-allocations [nativeCoroutines]; cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:96	cb-allocations [nativeCoroutines]; cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:98	cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:104	cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:106	cb-write-back-allocations [nativeCoroutines]	ok		0	-
+b	c-pointer-borrowing:118	cb-namespace-separation	ok		0	-
+b	c-pointer-borrowing:120	cb-interchange	ok		0	-
+b	c-pointer-borrowing:121	cb-interchange	ok		0	-
+b	c-pointer-borrowing:122	cb-native-lowering-reads-the-node	ok		0	-
+b	c-pointer-borrowing:123	cb-strict0-replay	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:125	cb-strict0-replay	error	CORE SEMANTIC FOREIGN-BORROW	0	-
+b	c-pointer-borrowing:126	cb-executable [executableAot]	ok		0	-
+b	context-resource-escape:1	ce-r2-result; ce-message; ce-warnings-error; ce-warnings-off; ce-no-semantics	ok		1	-
+b	context-resource-escape:2	ce-r2-parameter	ok		1	-
+b	context-resource-escape:3	ce-r2-function-pointer	ok		1	-
+b	context-resource-escape:4	ce-r3-view	ok		1	-
+b	context-resource-escape:5	ce-r3-edit	ok		1	-
+b	context-resource-escape:6	ce-r2-nested	ok		1	-
+b	context-resource-escape:7	ce-r4-projection	ok		2	-
+b	context-resource-escape:8	ce-r4-construction; ce-struct-message	ok		1	-
+b	context-resource-escape:9	ce-opaque-stops	ok		0	-
+b	context-resource-escape:10	ce-opaque-accessor-warns	ok		1	-
+b	context-resource-escape:11	ce-private-stops	ok		0	-
+b	context-resource-escape:12	ce-private-stops-lenient	error	CORE SEMANTIC PRIVATE-ACCESS	0	-
+b	context-resource-escape:13	ce-private-view-helper	ok		0	-
+b	context-resource-escape:14	ce-private-alias-public	ok		1	-
+b	context-resource-escape:15	ce-unused-no-warning; ce-inside-airlock	ok		0	-
+b	context-resource-escape:16	ce-ordinary-module	ok		0	-
+b	context-resource-escape:17	ce-direct-module	ok		0	-
+b	context-resource-escape:19	ce-provenance-direct-caller	ok		1	-
+b	context-resource-escape:20	ce-values-only	ok		0	-
+b	context-resource-escape:21	ce-value-reference	ok		1	-
+b	context-resource-escape:22	ce-trait-operation	ok		0	-
+b	context-resource-escape:23	ce-trait-operation	ok		1	-
+b	context-resource-escape:24	ce-one-per-declaration	ok		1	-
+b	context-traits:1	ct-contextual	ok		0	-
+b	context-traits:1	context-traits:1:0	ok		0	-
+b	context-traits:2	ct-modifiers	error	SURFACE SYNTAX	0	-
+b	context-traits:2	context-traits:1:1	ok		0	-
+b	context-traits:3	ct-modifiers	error	SURFACE SYNTAX	0	-
+b	context-traits:3	context-traits:1:2	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:4	ct-modifiers	error	SURFACE SYNTAX	0	-
+b	context-traits:4	context-traits:1:3	ok		0	-
+b	context-traits:5	ct-modifiers	error	SURFACE SYNTAX	0	-
+b	context-traits:5	context-traits:1:4	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:6	ct-declaration-diagnostics	error	SURFACE SYNTAX	0	-
+b	context-traits:6	context-traits:1:5	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:7	ct-declaration-diagnostics	error	SURFACE SYNTAX	0	-
+b	context-traits:7	context-traits:1:6	ok		0	-
+b	context-traits:8	ct-declaration-diagnostics	error	SURFACE SYNTAX	0	-
+b	context-traits:8	context-traits:1:7	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:9	ct-declaration-diagnostics	error	SURFACE SYNTAX	0	-
+b	context-traits:9	context-traits:1:8	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:10	ct-declaration-diagnostics	error	CORE SEMANTIC TRAIT-OTHER-TRAIT	0	-
+b	context-traits:10	context-traits:1:9	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:11	ct-declaration-diagnostics	error	CORE SEMANTIC TRAIT-OTHER-TRAIT	0	-
+b	context-traits:11	context-traits:1:10	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:12	ct-declaration-diagnostics	error	CORE SEMANTIC TRAIT-OTHER-TRAIT	0	-
+b	context-traits:12	context-traits:1:11	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:13	ct-declaration-diagnostics	error	CORE SEMANTIC TRAIT-DUPLICATE-REQUIREMENT	0	-
+b	context-traits:13	context-traits:1:12	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:14	ct-declaration-diagnostics	error	CORE SEMANTIC TRAIT-NAME-COLLISION	0	-
+b	context-traits:14	context-traits:1:13	ok		0	-
+b	context-traits:15	ct-declaration-diagnostics	error	CORE SEMANTIC UNDECLARED-ERROR	0	-
+b	context-traits:15	context-traits:1:14	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:16	ct-requirements-no-receiver	ok		0	-
+b	context-traits:16	context-traits:1:15	ok		0	-
+b	context-traits:17	ct-satisfies-structural	ok		0	-
+b	context-traits:17	context-traits:1:16	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:18	ct-explain-mismatches	ok		0	-
+b	context-traits:18	context-traits:1:17	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:19	ct-explain-text	ok		0	-
+b	context-traits:19	context-traits:1:18	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:20	ct-owner-only	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:20	context-traits:1:19	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:21	ct-import-independence	ok		0	-
+b	context-traits:21	context-traits:1:20	ok		0	-
+b	context-traits:22	ct-import-independence	ok		0	-
+b	context-traits:22	context-traits:1:21	ok		0	-
+b	context-traits:23	ct-two-importers	ok		0	-
+b	context-traits:23	context-traits:1:22	ok		0	-
+b	context-traits:24	ct-two-importers	ok		0	-
+b	context-traits:24	context-traits:1:23	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:25	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:25	context-traits:1:24	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:26	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:26	context-traits:1:25	ok		0	-
+b	context-traits:27	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:27	context-traits:1:26	ok		0	-
+b	context-traits:28	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:28	context-traits:1:27	ok		0	-
+b	context-traits:29	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:29	context-traits:1:28	ok		0	-
+b	context-traits:30	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:30	context-traits:1:29	ok		0	-
+b	context-traits:31	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:32	ct-one-way	error	CORE SEMANTIC TRAIT-UNKNOWN-OPERATION	0	-
+b	context-traits:33	ct-one-way	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:34	ct-one-way-message	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:35	ct-one-way-message	error	CORE SEMANTIC TRAIT-UNKNOWN-OPERATION	0	-
+b	context-traits:36	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:37	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:38	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:39	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:40	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:41	ct-positions	error	CORE SEMANTIC CONTEXT-TRAIT-POSITION	0	-
+b	context-traits:42	ct-positions	error	CORE SEMANTIC REFINEMENT-CARRIER	0	-
+b	context-traits:43	ct-positions	error	CORE SEMANTIC TRAIT-OTHER-TRAIT	0	-
+b	context-traits:44	ct-orthogonal	error	CORE SEMANTIC NOT-A-CONTEXT	0	-
+b	context-traits:45	ct-orthogonal	error	CORE SEMANTIC CONTEXT-TYPE-NOT-EXACT	0	-
+b	context-traits:46	ct-orthogonal	error	CORE SEMANTIC CONTEXT-TRAIT-MISUSE	0	-
+b	context-traits:47	ct-duplicate-parameter	error	CORE SEMANTIC DUPLICATE-CONTEXT-PARAMETER	0	-
+b	context-traits:48	ct-duplicate-parameter	ok		0	-
+b	context-traits:49	ct-select-matrix; ct-transitive; ct-tooling	ok		0	-
+b	context-traits:50	ct-select-matrix; ct-selection-recorded; ct-mono-hir	ok		0	-
+b	context-traits:51	ct-select-matrix; ct-ambiguous-diagnostic	error	CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION	0	-
+b	context-traits:52	ct-select-matrix	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:54	ct-ambiguous-diagnostic	error	CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION	0	-
+b	context-traits:55	ct-missing-diagnostic	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:56	ct-source-position	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:57	ct-source-position	ok		0	-
+b	context-traits:59	ct-implementation-obligations	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:60	ct-implementation-obligations	ok		0	-
+b	context-traits:61	ct-implementation-order	error	CORE SEMANTIC TRAIT-IMPL-ORDER	0	-
+b	context-traits:63	ct-missing-chain	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:64	ct-unreachable-requires-nothing	ok		0	-
+b	context-traits:65	ct-flags	ok		0	-
+b	context-traits:66	ct-function-value-frontier	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	context-traits:67	ct-function-value-frontier	ok		0	-
+b	context-traits:68	ct-shapes	ok		0	-
+b	context-traits:69	ct-exact-contexts-unchanged	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	context-traits:70	ct-exact-contexts-unchanged	ok		0	-
+b	context-traits:72	ct-hir-text	ok		0	-
+b	context-traits:73	ct-nir-direct; ct-machine-code-direct [nativeLinux objdump posixShell rustcLinker]	ok		0	-
+b	context-traits:74	ct-native-context-area; ct-allocation-free [nativeLinux]	ok		0	-
+b	context-traits:78	ct-no-traits-unchanged	ok		0	-
+b	contexts:1	contexts-contextual-run	ok		0	-
+b	contexts:2	contexts-registry	ok		0	-
+b	contexts:3	contexts-registry-roundtrip	ok		0	-
+b	contexts:4	contexts-not-a-context-param	error	CORE SEMANTIC NOT-A-CONTEXT	0	-
+b	contexts:5	contexts-not-a-context-param	error	CORE SEMANTIC NOT-A-CONTEXT	0	-
+b	contexts:6	contexts-not-a-context-param	error	CORE SEMANTIC TYPE	0	-
+b	contexts:7	contexts-not-a-context-install	error	CORE SEMANTIC NOT-A-CONTEXT	0	-
+b	contexts:8	contexts-not-a-context-install	error	CORE SEMANTIC NOT-A-CONTEXT	0	-
+b	contexts:9	contexts-not-a-context-install	error	CORE SEMANTIC CONTEXT-TYPE-NOT-EXACT	0	-
+b	contexts:10	contexts-not-a-context-install	error	CORE SEMANTIC CONTEXT-TYPE-NOT-EXACT	0	-
+b	contexts:11	contexts-not-a-context-install	error	CORE SEMANTIC CONTEXT-TYPE-NOT-EXACT	0	-
+b	contexts:12	contexts-install-is-not-construction	ok		0	-
+b	contexts:13	contexts-install-is-not-construction	ok		0	-
+b	contexts:14	contexts-identity-is-the-type	ok		0	-
+b	contexts:15	contexts-source-order	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:16	contexts-source-order	ok		0	-
+b	contexts:17	contexts-duplicate-install	error	CORE SEMANTIC DUPLICATE-CONTEXT	0	-
+b	contexts:18	contexts-duplicate-install	error	CORE SEMANTIC DUPLICATE-CONTEXT	0	-
+b	contexts:19	contexts-constructor-order	ok		0	-
+b	contexts:20	contexts-constructor-order	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:21	contexts-constructor-order	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:22	contexts-multiple-types	ok		0	-
+b	contexts:23	contexts-multiple-types	ok		0	-
+b	contexts:24	contexts-placement	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:25	contexts-placement	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:26	contexts-placement	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:27	contexts-placement	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:28	contexts-placement	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:29	contexts-placement-module	error	SURFACE MODULE CONTEXT-INSTALLATION-UNSUPPORTED	0	-
+b	contexts:30	contexts-placement-module	ok		0	-
+b	contexts:31	contexts-placement-module	ok		0	-
+b	contexts:32	contexts-module-init-call	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:33	contexts-arity	ok		0	-
+b	contexts:34	contexts-arity	ok		0	-
+b	contexts:35	contexts-arity	ok		0	-
+b	contexts:36	contexts-binding-collision	error	CORE SEMANTIC CONTEXT-BINDING-COLLISION	0	-
+b	contexts:37	contexts-binding-collision	error	CORE SEMANTIC CONTEXT-BINDING-COLLISION	0	-
+b	contexts:38	contexts-binding-collision	error	CORE SEMANTIC CONTEXT-BINDING-COLLISION	0	-
+b	contexts:39	contexts-binding-collision	error	CORE SEMANTIC DUPLICATE	0	-
+b	contexts:40	contexts-binding-collision	ok		0	-
+b	contexts:41	contexts-duplicate-param-type	error	CORE SEMANTIC DUPLICATE-CONTEXT-PARAMETER	0	-
+b	contexts:42	contexts-param-is-ordinary-local	ok		0	-
+b	contexts:43	contexts-method-sugar	ok		0	-
+b	contexts:44	contexts-method-sugar	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:45	contexts-method-sugar	ok		0	-
+b	contexts:46	contexts-method-sugar	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:47	contexts-transitive-chain	ok		0	-
+b	contexts:48	contexts-missing-chain	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:49	contexts-unused-consumer	ok		0	-
+b	contexts:50	contexts-unused-consumer	ok		0	-
+b	contexts:51	contexts-unused-consumer	ok		0	-
+b	contexts:52	contexts-unreachable-call	ok		0	-
+b	contexts:53	contexts-recursion	ok		0	-
+b	contexts:54	contexts-recursion	ok		0	-
+b	contexts:55	contexts-recursion	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:56	contexts-explain	ok		0	-
+b	contexts:57	contexts-summary	ok		0	-
+b	contexts:58	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:59	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:60	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:61	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:62	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:63	contexts-function-value	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:64	contexts-function-value	ok		0	-
+b	contexts:65	contexts-function-value	ok		0	-
+b	contexts:66	contexts-alias-calls	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:67	contexts-alias-calls	ok		0	-
+b	contexts:68	contexts-alias-calls	ok		0	-
+b	contexts:69	contexts-function-value-last-statement	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	-
+b	contexts:70	contexts-function-value-last-statement	ok		0	-
+b	contexts:71	contexts-non-opaque-context	ok		0	-
+b	contexts:72	contexts-opacity-exact	error	CORE SEMANTIC OPAQUE-REPRESENTATION	0	-
+b	contexts:73	contexts-opacity-exact	error	CORE SEMANTIC OPAQUE-REPRESENTATION	0	-
+b	contexts:74	contexts-opacity-exact	error	CORE SEMANTIC OPAQUE-CONSTRUCTION	0	-
+b	contexts:75	contexts-opacity-exact	ok		0	-
+b	contexts:76	contexts-linux-io-surface	ok		0	-
+b	contexts:77	contexts-no-context-api	error	CORE SEMANTIC UNBOUND	0	-
+b	contexts:78	contexts-linux-io-tcl-backends	ok		0	-
+b	contexts:79	contexts-linux-io-create-descriptors	ok		0	-
+b	contexts:80	contexts-strict0-runtime	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	contexts:81	contexts-strict0-runtime	error	CORE SEMANTIC DUPLICATE-CONTEXT	0	-
+b	contexts:82	contexts-fresh-per-run	ok		0	-
+b	contexts:83	contexts-native-nir-hello	ok		0	-
+b	contexts:84	contexts-native-no-hidden-argument	ok		0	-
+b	contexts:85	contexts-native-clif [nativeLinux]	ok		0	-
+b	contexts:86	contexts-native-eligibility [nativeLinux]	ok		0	-
+b	contexts:87	contexts-native-allocations [nativeLinux]	ok		0	-
+b	contexts:88	contexts-native-gc-stress [nativeLinux]	ok		0	-
+b	contexts:89	contexts-native-gc-stress [nativeLinux]	ok		0	-
+b	contexts:90	contexts-native-executable-hello [nativeLinux posixShell]	ok		0	-
+b	contexts:91	contexts-native-executable-descriptors [nativeLinux posixShell]	ok		0	-
+b	contexts:92	contexts-native-machine-code [linuxX86_64 objdump posixShell rustcLinker]	ok		0	-
+b	contexts:93	contexts-native-machine-code [linuxX86_64 objdump posixShell rustcLinker]	ok		0	-
+b	contexts:94	contexts-native-object-relocation [linuxX86_64 objdump]	ok		0	-
+b	contexts:95	contexts-native-strace [linuxX86_64 strace posixShell rustcLinker]	ok		0	-
+b	contexts:96	contexts-native-jit-absolute [nativeLinux]	ok		0	-
+b	darwin-io:1	di-platform-rule; di-warning-clean	ok		0	-
+b	darwin-io:2	di-platform-rule	ok		0	-
+b	darwin-io:3	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:4	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:5	di-platform-rule; wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:6	di-platform-rule; di-warning-clean	ok		0	-
+b	darwin-io:7	di-platform-rule	ok		0	-
+b	darwin-io:8	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:9	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:10	di-platform-rule; wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:11	di-platform-rule; di-warning-clean	ok		0	-
+b	darwin-io:12	di-platform-rule	ok		0	-
+b	darwin-io:13	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:14	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:15	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:16	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:17	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:18	di-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:20	di-platform-no-way-around	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:21	di-platform-no-way-around; di-same-function-two-platforms; di-transitive-selection; di-tcl-backends; di-warning-clean; di-hello-executable [darwinIO posixShell]	ok		0	-
+b	darwin-io:22	di-c-declarations	ok		0	-
+b	darwin-io:23	di-errno-read-first	ok		0	-
+b	darwin-io:24	di-implements	ok		0	-
+b	darwin-io:26	di-same-function-two-platforms	ok		0	-
+b	darwin-io:28	di-selection-diagnostics	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	darwin-io:29	di-selection-diagnostics	error	CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION	0	-
+b	darwin-io:30	di-selection-diagnostics	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	darwin-io:31	di-authority	ok		0	-
+b	darwin-io:32	di-authority	error	CORE SEMANTIC DIRECT	0	-
+b	darwin-io:33	di-authority	ok		0	-
+b	darwin-io:34	di-authority	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	darwin-io:44	di-path-validity	ok		0	-
+b	darwin-io:45	di-path-validity	error	CORE SEMANTIC TYPE	0	-
+b	darwin-io:46	di-c-string	ok		0	-
+b	darwin-io:47	di-hello-executable [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:48	di-routing-utf8 [darwinIO posixShell]; di-stderr-failure [writeInject posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:49	di-text-edges [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:50	di-deep-and-modules [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:51	di-coroutines-gc-stress [darwinIO posixShell nativeCoroutines]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:52	di-native-backends [darwinIO]; di-short-write-completed [writeInject posixShell]; di-write-failures [writeInject posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:56	di-errno [darwinIO posixShell nativeCoroutines]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:57	di-errno-allocator [writeInject posixShell nativeCoroutines]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:58	di-stdin [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:59	di-files [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io:60	di-file-errors [darwinIO posixShell]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	darwin-io@macos:26	di-same-function-two-platforms	ok		0	-
+b	darwin-io@macos:48	di-routing-utf8 [darwinIO posixShell]; di-stderr-failure [writeInject posixShell]	ok		0	-
+b	darwin-io@macos:49	di-text-edges [darwinIO posixShell]	ok		0	-
+b	darwin-io@macos:50	di-deep-and-modules [darwinIO posixShell]	ok		0	-
+b	darwin-io@macos:51	di-coroutines-gc-stress [darwinIO posixShell nativeCoroutines]	ok		0	-
+b	darwin-io@macos:52	di-native-backends [darwinIO]; di-short-write-completed [writeInject posixShell]; di-write-failures [writeInject posixShell]	ok		0	-
+b	darwin-io@macos:57	di-errno [darwinIO posixShell nativeCoroutines]	ok		0	-
+b	darwin-io@macos:58	di-errno-allocator [writeInject posixShell nativeCoroutines]	ok		0	-
+b	darwin-io@macos:61	di-stdin [darwinIO posixShell]	ok		0	-
+b	darwin-io@macos:62	di-files [darwinIO posixShell]	ok		0	-
+b	darwin-io@macos:63	di-file-errors [darwinIO posixShell]	ok		0	-
+b	direct-modules:1	dm-parse-contextual	ok		0	-
+b	direct-modules:1	direct-modules:1:0	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:2	dm-intrinsic-metadata-participates	error	SURFACE MODULE UNKNOWN-NAMESPACE	0	-
+b	direct-modules:2	direct-modules:1:1	ok		0	-
+b	direct-modules:3	dm-intrinsic-metadata-participates	error	SURFACE MODULE UNKNOWN-NAMESPACE	0	-
+b	direct-modules:3	direct-modules:1:2	ok		0	-
+b	direct-modules:4	direct-modules:1:3	ok		0	-
+b	direct-modules:5	direct-modules:1:4	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:6	direct-modules:1:5	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:7	dm-no-name-heuristic	ok		0	-
+b	direct-modules:7	direct-modules:1:6	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:8	dm-syscall-unacknowledged	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:8	direct-modules:1:7	ok		0	-
+b	direct-modules:9	dm-syscall-declared [nativeBuilt linuxX86_64]	ok		0	-
+b	direct-modules:9	direct-modules:1:8	ok		0	-
+b	direct-modules:10	direct-modules:1:9	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:11	dm-syscall-contextualized [nativeBuilt linuxX86_64]	ok		0	-
+b	direct-modules:11	direct-modules:1:10	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:12	direct-modules:1:11	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:13	direct-modules:1:12	ok		0	-
+b	direct-modules:14	dm-syscall-raw-getpid	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:14	direct-modules:1:13	ok		0	-
+b	direct-modules:15	dm-stale-no-authority	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:15	direct-modules:1:14	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:16	dm-stale-no-authority	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:16	direct-modules:1:15	ok		0	-
+b	direct-modules:17	dm-stale-fully-mediated	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:17	direct-modules:1:16	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:18	dm-no-silent-promotion	ok		0	-
+b	direct-modules:18	direct-modules:1:17	ok		0	-
+b	direct-modules:19	dm-no-silent-promotion	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:19	direct-modules:1:18	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:20	dm-no-silent-promotion	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:20	direct-modules:1:19	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:21	dm-helper-not-laundered	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:21	direct-modules:1:20	ok		0	-
+b	direct-modules:22	dm-helper-carries-the-context [nativeBuilt linuxX86_64]	ok		0	-
+b	direct-modules:22	direct-modules:1:21	ok		0	-
+b	direct-modules:23	direct-modules:1:22	ok		0	-
+b	direct-modules:24	dm-nested-function-is-its-own	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:24	direct-modules:1:23	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:25	dm-nested-function-is-its-own	ok		0	-
+b	direct-modules:25	direct-modules:1:24	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:26	dm-foreign-context	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:26	direct-modules:1:25	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:27	dm-own-context	ok		0	-
+b	direct-modules:27	direct-modules:1:26	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:28	dm-context-identity-not-spelling	error	SURFACE MODULE NOT-A-TYPE	0	-
+b	direct-modules:28	direct-modules:1:27	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:29	dm-context-identity-not-spelling	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:29	direct-modules:1:28	ok		0	-
+b	direct-modules:30	dm-context-construction-chain	ok		0	-
+b	direct-modules:30	direct-modules:1:29	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:32	dm-context-construction-chain	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:33	dm-transitive-boundary; dm-transitive-runs [nativeBuilt linuxX86_64]; dm-tooling-explains [nativeBuilt]; dm-interchange-keeps-the-summary	ok		0	-
+b	direct-modules:36	dm-coarse-module	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:37	dm-coarse-module	ok		0	-
+b	direct-modules:38	dm-direct-module-internal	ok		0	-
+b	direct-modules:40	dm-direct-module-with-contexts	ok		0	-
+b	direct-modules:42	dm-import-is-not-authority	ok		0	-
+b	direct-modules:44	dm-callable-value-escapes; dm-callable-value-message	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:45	dm-callable-value-escapes	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:46	dm-callable-value-escapes	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:47	dm-callable-value-escapes	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:48	dm-callable-value-escapes	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:49	dm-callable-value-escapes	error	CORE SEMANTIC DIRECT-CALLABLE-VALUE	0	-
+b	direct-modules:51	dm-alias-calls-are-edges	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:52	dm-direct-module-hands-out	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:53	dm-direct-module-hands-out	ok		0	-
+b	direct-modules:54	dm-direct-module-may-pass	ok		0	-
+b	direct-modules:56	dm-context-trait-mediates	ok		0	-
+b	direct-modules:58	dm-foreign-context-trait	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:59	dm-value-trait-operation	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:60	dm-cycles-stay-forbidden	error	SURFACE MODULE CYCLE	0	-
+b	direct-modules:61	dm-root-not-special	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:62	dm-root-not-special	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:63	dm-diagnostics-recover	error	CORE SEMANTIC TYPE	0	-
+b	direct-modules:64	dm-unreachable-code-counts	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:65	dm-unreachable-code-counts	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:66	dm-method-sugar	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:67	dm-method-sugar-two-candidates	error	CORE SEMANTIC DIRECT	0	-
+b	direct-modules:68	dm-coroutine-thunk	ok		0	-
+b	direct-modules:70	dm-static-compile-direct	ok		0	-
+b	direct-modules:72	dm-static-compile-callable-value	ok		0	-
+b	direct-modules:73	dm-static-compile-accepted-in-direct-module	ok		0	-
+b	direct-modules:75	dm-static-compile-final-program	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	direct-modules:76	dm-isolation	ok		0	-
+b	direct-modules:77	dm-isolation	ok		0	-
+b	direct-modules:80	dm-deterministic	ok		0	-
+b	direct-modules:83	dm-deterministic	ok		0	-
+b	module-privacy:1	mp-parse-contextual	ok		0	-
+b	module-privacy:3	mp-own-module	ok		0	-
+b	module-privacy:5	mp-module-binding; mp-interchange; mp-no-runtime-representation; mp-hover-private	ok		0	-
+b	module-privacy:7	mp-access-call; mp-access-message	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:8	mp-access-rooted; mp-access-message	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:9	mp-access-value	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:10	mp-access-binding	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:11	mp-access-method; mp-method-private-only	error	CORE SEMANTIC PRIVATE-ACCESS	0	-
+b	module-privacy:14	mp-access-from-module	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:15	mp-type-access-construction	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:16	mp-type-access-annotation	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:17	mp-type-access-result-type	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:18	mp-type-access-import-type	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:19	mp-type-access-fail	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:20	mp-type-access-handler	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:21	mp-type-access-errors-clause	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:22	mp-type-access-enum-case	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:23	mp-type-access-trait-type	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:24	mp-type-access-fn-type	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:25	mp-type-access-list-type	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:26	mp-layout-access	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:27	mp-extern-access	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:28	mp-public-unaffected	ok		0	-
+b	module-privacy:30	mp-method-not-a-candidate	ok		0	-
+b	module-privacy:32	mp-method-field	ok		0	-
+b	module-privacy:35	mp-method-own-module	ok		0	-
+b	module-privacy:37	mp-method-generic	error	CORE SEMANTIC PRIVATE-ACCESS	0	-
+b	module-privacy:38	mp-method-no-import-hint	error	CORE SEMANTIC NOT-A-STRUCT	0	-
+b	module-privacy:39	mp-private-struct-fields	error	CORE SEMANTIC PRIVATE-ACCESS	0	-
+b	module-privacy:40	mp-opaque-not-private	ok		0	-
+b	module-privacy:42	mp-private-not-opaque	ok		0	-
+b	module-privacy:44	mp-private-opaque	ok		0	-
+b	module-privacy:46	mp-identity-same-short-name	ok		0	-
+b	module-privacy:48	mp-identity-parent-child	error	SURFACE MODULE PRIVATE-ACCESS	0	-
+b	module-privacy:49	mp-entry-program	ok		0	-
+b	module-privacy:51	mp-escape-parameter	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:52	mp-escape-result	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:53	mp-escape-inferred	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:54	mp-escape-list	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:55	mp-escape-fn-type	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:56	mp-escape-errors	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:57	mp-escape-context	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:58	mp-escape-struct-field	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:59	mp-escape-error-payload	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:60	mp-escape-trait	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:61	mp-escape-refinement	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:62	mp-escape-binding	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:63	mp-escape-inferred-context	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:64	mp-escape-message	error	CORE SEMANTIC PRIVATE-TYPE-ESCAPE	0	-
+b	module-privacy:65	mp-no-escape-opaque-holds	ok		0	-
+b	module-privacy:66	mp-no-escape-private-fn	ok		0	-
+b	module-privacy:67	mp-no-escape-private-struct	ok		0	-
+b	module-privacy:68	mp-no-escape-opaque-context	ok		0	-
+b	module-privacy:69	mp-escape-independent	error	CORE SEMANTIC UNBOUND	0	-
+b	module-privacy:70	mp-private-helper-pointer	ok		0	-
+b	module-privacy:72	mp-private-no-authority	error	CORE SEMANTIC DIRECT	0	-
+b	module-privacy:73	mp-trait-private-impl; mp-trait-private-reason	error	CORE SEMANTIC TRAIT-NOT-SATISFIED	0	-
+b	module-privacy:75	mp-trait-public-adapter	ok		0	-
+b	module-privacy:77	mp-trait-plan-clones	ok		0	-
+b	module-privacy:79	mp-context-trait-private-impl	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	module-privacy:80	mp-context-trait-public-adapter	ok		0	-
+b	module-privacy:82	mp-static-compile	ok		0	-
+b	module-privacy:86	mp-no-runtime-representation	ok		0	-
+b	module-privacy:87	mp-compile-backend; mp-native [nativeBuilt]	ok		0	-
+b	native-edit:1	ne-type-annotation	ok		0	-
+b	native-edit:1	native-edit:1:0	ok		0	-
+b	native-edit:2	ne-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-edit:2	native-edit:1:1	ok		0	-
+b	native-edit:3	ne-type-annotation; ne-type-messages	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-edit:3	native-edit:1:2	ok		0	-
+b	native-edit:4	ne-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-edit:4	native-edit:1:3	ok		0	-
+b	native-edit:5	ne-type-annotation; ne-type-messages	error	CORE SEMANTIC UNKNOWN-LAYOUT	0	-
+b	native-edit:5	native-edit:1:4	ok		0	-
+b	native-edit:6	ne-type-annotation	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:6	native-edit:1:5	ok		0	-
+b	native-edit:7	ne-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-edit:7	native-edit:1:6	ok		0	-
+b	native-edit:8	native-edit:1:7	ok		0	-
+b	native-edit:9	native-edit:1:8	ok		0	-
+b	native-edit:10	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:10	native-edit:1:9	ok		0	-
+b	native-edit:11	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:11	native-edit:1:10	ok		0	-
+b	native-edit:12	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:12	native-edit:1:11	ok		0	-
+b	native-edit:13	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:13	native-edit:1:12	ok		0	-
+b	native-edit:14	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:14	native-edit:1:13	ok		0	-
+b	native-edit:15	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:15	native-edit:1:14	ok		0	-
+b	native-edit:16	ne-type-distinct	error	CORE SEMANTIC UNKNOWN-STRUCT	0	-
+b	native-edit:16	native-edit:1:15	ok		0	-
+b	native-edit:17	ne-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:17	native-edit:1:16	ok		0	-
+b	native-edit:18	ne-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:18	native-edit:1:17	ok		0	-
+b	native-edit:19	ne-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:19	native-edit:1:18	ok		0	-
+b	native-edit:20	ne-not-a-pointer	error	CORE SEMANTIC IMPRINT	0	-
+b	native-edit:20	native-edit:1:19	ok		0	-
+b	native-edit:21	ne-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:21	native-edit:1:20	ok		0	-
+b	native-edit:22	ne-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:22	native-edit:1:21	ok		0	-
+b	native-edit:23	ne-not-a-pointer	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:23	native-edit:1:22	ok		0	-
+b	native-edit:24	ne-not-a-pointer	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:24	native-edit:1:23	ok		0	-
+b	native-edit:25	ne-edit-operands	error	CORE SEMANTIC UNKNOWN-LAYOUT	0	-
+b	native-edit:25	native-edit:1:24	ok		0	-
+b	native-edit:26	ne-edit-operands	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:26	native-edit:1:25	ok		0	-
+b	native-edit:27	ne-edit-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:27	native-edit:1:26	ok		0	-
+b	native-edit:28	ne-edit-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:28	native-edit:1:27	ok		0	-
+b	native-edit:29	ne-edit-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:29	native-edit:1:28	ok		0	-
+b	native-edit:30	ne-edit-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:30	native-edit:1:29	ok		0	-
+b	native-edit:31	ne-edit-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:32	ne-null-is-declared	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	native-edit:33	ne-null-is-declared	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	native-edit:34	ne-null-is-declared	ok		0	-
+b	native-edit:35	ne-null-is-declared	ok		0	-
+b	native-edit:36	ne-field-types	ok		0	-
+b	native-edit:37	ne-field-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:38	ne-field-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:39	ne-field-types	error	CORE SEMANTIC UNKNOWN-FIELD	0	-
+b	native-edit:40	ne-designator	ok		0	-
+b	native-edit:41	ne-designator-diagnostics	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:42	ne-designator-diagnostics	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:43	ne-designator-diagnostics	error	CORE SEMANTIC UNKNOWN-LAYOUT	0	-
+b	native-edit:44	ne-designator-diagnostics	error	CORE SEMANTIC UNKNOWN-FIELD	0	-
+b	native-edit:45	ne-designator-diagnostics	error	CORE SEMANTIC UNKNOWN-FIELD	0	-
+b	native-edit:46	ne-designator-diagnostics	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:47	ne-designator-diagnostics	error	CORE SEMANTIC UNKNOWN-FIELD	0	-
+b	native-edit:48	ne-designator-diagnostics	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:49	ne-designator-layout	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:50	ne-designator-layout	ok		0	-
+b	native-edit:51	ne-designator-layout	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-edit:52	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:53	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:54	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:55	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:56	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:57	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:58	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:59	ne-view-is-read-only	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:60	ne-store-value-types	ok		0	-
+b	native-edit:61	ne-store-value-types	ok		0	-
+b	native-edit:62	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:63	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:64	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:65	ne-store-value-types	ok		0	-
+b	native-edit:66	ne-store-value-types	ok		0	-
+b	native-edit:67	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:68	ne-store-value-types	ok		0	-
+b	native-edit:69	ne-store-value-types	ok		0	-
+b	native-edit:70	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:71	ne-store-value-types	ok		0	-
+b	native-edit:72	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:73	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:74	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:75	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:76	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:77	ne-store-value-types	ok		0	-
+b	native-edit:78	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:79	ne-store-value-types	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:80	ne-store-value-messages	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:81	ne-store-value-messages	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:82	ne-store-value-messages	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:83	ne-store-value-messages	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:84	ne-write-diagnostics	ok		0	-
+b	native-edit:85	ne-write-diagnostics	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:86	ne-write-diagnostics	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-edit:87	ne-write-diagnostics	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-edit:88	ne-write-diagnostics	error	CORE SEMANTIC LAYOUT-FOREIGN-WRITE	0	-
+b	native-edit:89	ne-write-diagnostics	error	CORE SEMANTIC LAYOUT-FOREIGN-WRITE	0	-
+b	native-edit:90	ne-write-diagnostics	ok		0	-
+b	native-edit:91	ne-write-diagnostics	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:92	ne-write-diagnostics	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:93	ne-write-diagnostics	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	native-edit:94	ne-store-declares-nothing	ok		0	-
+b	native-edit:95	ne-scalar-stores [nativeBuilt]; ne-scalar-stores-literal [nativeBuilt]	ok		0	-
+b	native-edit:97	ne-store-touches-only-its-bytes [nativeBuilt]	ok		0	-
+b	native-edit:98	ne-packed-stores [nativeBuilt]	ok		0	-
+b	native-edit:99	ne-nested-stores [nativeBuilt]	ok		0	-
+b	native-edit:100	ne-c-scalar-stores [nativeBuilt]	ok		0	-
+b	native-edit:101	ne-pointer-stores [nativeBuilt]	ok		0	-
+b	native-edit:102	ne-pointer-store-observes [nativeBuilt]	ok		0	-
+b	native-edit:103	ne-pointer-store-observes [nativeBuilt]	error	CORE SEMANTIC AFFINE-TEMPORARY-UNSUPPORTED	0	-
+b	native-edit:104	ne-pointer-store-observes [nativeBuilt]	ok		0	-
+b	native-edit:105	ne-pointer-store-observes [nativeBuilt]	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	native-edit:106	ne-edits-alias [nativeBuilt]	ok		0	-
+b	native-edit:107	ne-read-parity [nativeBuilt]	ok		0	-
+b	native-edit:108	ne-write-builds-a-record	ok		0	-
+b	native-edit:109	ne-write-every-encoding	ok		0	-
+b	native-edit:110	ne-write-every-encoding	ok		0	-
+b	native-edit:111	ne-write-every-encoding	ok		0	-
+b	native-edit:112	ne-write-value-semantics	ok		0	-
+b	native-edit:113	ne-write-length	ok		0	-
+b	native-edit:114	ne-write-length	ok		0	-
+b	native-edit:115	ne-write-length	ok		0	-
+b	native-edit:116	ne-write-foreign	ok		0	-
+b	native-edit:117	ne-write-foreign-observes	error	CORE SEMANTIC AFFINE-TEMPORARY-UNSUPPORTED	0	-
+b	native-edit:118	ne-write-foreign-observes	ok		0	-
+b	native-edit:119	ne-write-foreign-observes	error	CORE SEMANTIC USE-AFTER-MOVE	0	-
+b	native-edit:120	ne-foreign-encoding-asymmetry [nativeBuilt]	ok		0	-
+b	native-edit:121	ne-foreign-encoding-asymmetry [nativeBuilt]	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-edit:122	ne-native-memory-is-raw [nativeBuilt]	error	CORE SEMANTIC DIRECT	0	-
+b	native-edit:123	ne-native-memory-is-raw [nativeBuilt]	ok		0	-
+b	native-edit:124	ne-ordinary-serialization-unchanged	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-edit:125	ne-ordinary-serialization-unchanged	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-edit:126	ne-tcl-backends	ok		0	-
+b	native-edit:127	ne-tcl-backends	ok		0	-
+b	native-edit:128	ne-tcl-backends	ok		0	-
+b	native-edit:129	ne-tcl-backends	ok		0	-
+b	native-edit:130	ne-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC AFFINE-TEMPORARY-UNSUPPORTED	0	-
+b	native-edit:131	ne-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-edit:132	ne-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC LAYOUT-FOREIGN-WRITE	0	-
+b	native-edit:133	ne-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:134	ne-nir [nativeBuilt]	ok		0	-
+b	native-edit:141	ne-no-caching [nativeBuilt]	ok		0	-
+b	native-edit:142	ne-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-edit:143	ne-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-edit:144	ne-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-edit:145	ne-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-edit:146	ne-hir-text-roundtrip [nativeBuilt]	ok		0	-
+b	native-edit:147	ne-interchange [nativeBuilt]	ok		0	-
+b	native-edit:148	ne-interchange [nativeBuilt]	ok		0	-
+b	native-edit:149	ne-interchange-fresh-process	ok		0	-
+b	native-edit:150	ne-isolation [nativeBuilt]	ok		0	-
+b	native-edit:151	ne-isolation [nativeBuilt]	ok		0	-
+b	native-edit:152	ne-cache [nativeBuilt]	ok		0	-
+b	native-edit:154	ne-specialization [nativeBuilt]	ok		0	-
+b	native-edit:155	ne-specialization [nativeBuilt]	error	CORE SEMANTIC TYPE	0	-
+b	native-edit:156	ne-direct	error	CORE SEMANTIC DIRECT	0	-
+b	native-edit:157	ne-direct	ok		0	-
+b	native-edit:158	ne-direct	ok		0	-
+b	native-edit:159	ne-direct	ok		0	-
+b	native-edit:160	ne-direct	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	native-edit:162	ne-direct-modules	ok		0	-
+b	native-edit:163	ne-executable [executableAot]	ok		0	-
+b	native-edit:164	ne-gc-stress [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-edit:165	ne-c-oracle-edit [neCFixture]	ok		0	-
+b	native-edit:166	ne-c-oracle-edit-bytes [neCFixture]	ok		0	-
+b	native-edit:167	ne-c-oracle-built [neCFixture]	ok		0	-
+b	native-edit:168	ne-c-oracle-asymmetry [neCFixture]	ok		0	-
+b	native-view:1	nv-pointer-field-declaration	ok		0	-
+b	native-view:1	native-view:1:0	ok		0	-
+b	native-view:2	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-BOUNDS	0	-
+b	native-view:2	native-view:1:1	ok		0	-
+b	native-view:3	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-OVERLAP	0	-
+b	native-view:3	native-view:1:2	ok		0	-
+b	native-view:4	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-TYPE	0	-
+b	native-view:4	native-view:1:3	ok		0	-
+b	native-view:5	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-TYPE	0	-
+b	native-view:5	native-view:1:4	ok		0	-
+b	native-view:6	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-TYPE	0	-
+b	native-view:6	native-view:1:5	ok		0	-
+b	native-view:7	nv-pointer-field-rules	error	CORE SEMANTIC LAYOUT-FIELD-TYPE	0	-
+b	native-view:7	native-view:1:6	ok		0	-
+b	native-view:8	nv-pointer-field-rules	ok		0	-
+b	native-view:8	native-view:1:7	ok		0	-
+b	native-view:9	nv-pointer-width-is-the-targets	ok		0	-
+b	native-view:9	native-view:1:8	ok		0	-
+b	native-view:10	nv-pointer-width-is-the-targets	ok		0	-
+b	native-view:10	native-view:1:9	ok		0	-
+b	native-view:11	nv-pointer-width-is-the-targets	ok		0	-
+b	native-view:11	native-view:1:10	ok		0	-
+b	native-view:12	nv-pointer-width-is-the-targets	ok		0	-
+b	native-view:12	native-view:1:11	ok		0	-
+b	native-view:13	nv-pointer-width-is-the-targets	ok		0	-
+b	native-view:13	native-view:1:12	ok		0	-
+b	native-view:14	nv-native-only-layouts	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-view:14	native-view:1:13	ok		0	-
+b	native-view:15	nv-native-only-layouts	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-view:15	native-view:1:14	ok		0	-
+b	native-view:16	nv-native-only-layouts	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-view:16	native-view:1:15	ok		0	-
+b	native-view:17	nv-native-only-layouts	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	native-view:17	native-view:1:16	ok		0	-
+b	native-view:18	nv-native-only-layouts	ok		0	-
+b	native-view:18	native-view:1:17	ok		0	-
+b	native-view:19	nv-native-only-struct-view-is-affine	ok		0	-
+b	native-view:19	native-view:1:18	ok		0	-
+b	native-view:20	nv-native-only-struct-view-is-affine	error	CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED	0	-
+b	native-view:20	native-view:1:19	ok		0	-
+b	native-view:21	nv-native-only-struct-view-is-affine	error	CORE SEMANTIC AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE	0	-
+b	native-view:21	native-view:1:20	ok		0	-
+b	native-view:22	nv-type-annotation	ok		0	-
+b	native-view:22	native-view:1:21	ok		0	-
+b	native-view:23	nv-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-view:23	native-view:1:22	ok		0	-
+b	native-view:24	nv-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-view:24	native-view:1:23	ok		0	-
+b	native-view:25	nv-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-view:25	native-view:1:24	ok		0	-
+b	native-view:26	nv-type-annotation	error	CORE SEMANTIC UNKNOWN-LAYOUT	0	-
+b	native-view:26	native-view:1:25	ok		0	-
+b	native-view:27	nv-type-annotation	error	CORE SEMANTIC TYPE	0	-
+b	native-view:27	native-view:1:26	ok		0	-
+b	native-view:28	nv-type-annotation	error	CORE SEMANTIC LAYOUT-STRUCT-PARAMETER	0	-
+b	native-view:28	native-view:1:27	ok		0	-
+b	native-view:29	nv-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-view:29	native-view:1:28	ok		0	-
+b	native-view:30	nv-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-view:30	native-view:1:29	ok		0	-
+b	native-view:31	nv-type-distinct	error	CORE SEMANTIC TYPE	0	-
+b	native-view:32	nv-type-distinct	error	CORE SEMANTIC UNKNOWN-STRUCT	0	-
+b	native-view:33	nv-type-distinct	ok		0	-
+b	native-view:34	nv-type-distinct	error	CORE SEMANTIC UNKNOWN-FIELD	0	-
+b	native-view:35	nv-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-view:36	nv-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-view:37	nv-not-a-pointer	error	CORE SEMANTIC IMPRINT	0	-
+b	native-view:38	nv-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-view:39	nv-not-a-pointer	error	CORE SEMANTIC TYPE	0	-
+b	native-view:40	nv-view-operands	error	CORE SEMANTIC UNKNOWN-LAYOUT	0	-
+b	native-view:41	nv-view-operands	error	CORE SEMANTIC LAYOUT-OPERAND	0	-
+b	native-view:42	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:43	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:44	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:45	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:46	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:47	nv-view-operands	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:48	nv-load-operand	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:49	nv-load-operand	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:50	nv-load-operand	ok		0	-
+b	native-view:51	nv-load-operand	ok		0	-
+b	native-view:52	nv-untyped-receiver	error	CORE SEMANTIC TYPE	0	-
+b	native-view:53	nv-untyped-receiver	ok		0	-
+b	native-view:54	nv-null-is-declared	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	native-view:55	nv-null-is-declared	ok		0	-
+b	native-view:56	nv-scalar-reads [nativeBuilt]	ok		0	-
+b	native-view:57	nv-scalar-bytes-every-backend	ok		0	-
+b	native-view:58	nv-nested-views [nativeBuilt]	ok		0	-
+b	native-view:59	nv-padding-never-read [nativeBuilt]	ok		0	-
+b	native-view:60	nv-pointer-fields [nativeBuilt]	ok		0	-
+b	native-view:61	nv-pointer-bytes-stay-inert [nativeBuilt]	ok		0	-
+b	native-view:62	nv-load-pointer-layout [nativeBuilt]	ok		0	-
+b	native-view:63	nv-tcl-backends [nativeBuilt]	ok		0	-
+b	native-view:64	nv-tcl-backends [nativeBuilt]	ok		0	-
+b	native-view:65	nv-view-is-a-value [nativeBuilt]	ok		0	-
+b	native-view:66	nv-no-equality [nativeBuilt]	ok		0	-
+b	native-view:67	nv-nir [nativeBuilt]	ok		0	-
+b	native-view:72	nv-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-view:73	nv-allocations [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-view:74	nv-hir-text-roundtrip [nativeBuilt]	ok		0	-
+b	native-view:75	nv-interchange [nativeBuilt]	ok		0	-
+b	native-view:76	nv-interchange [nativeBuilt]	ok		0	-
+b	native-view:77	nv-isolation [nativeBuilt]	ok		0	-
+b	native-view:78	nv-isolation [nativeBuilt]	ok		0	-
+b	native-view:79	nv-cache [nativeBuilt]	ok		0	-
+b	native-view:81	nv-direct	error	CORE SEMANTIC DIRECT	0	-
+b	native-view:82	nv-direct	ok		0	-
+b	native-view:83	nv-direct	ok		0	-
+b	native-view:84	nv-direct	ok		0	-
+b	native-view:85	nv-direct	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	native-view:87	nv-direct-modules	ok		0	-
+b	native-view:88	nv-no-new-dependency [nativeBuilt]	ok		0	-
+b	native-view:89	nv-no-new-dependency [nativeBuilt]	ok		0	-
+b	native-view:90	nv-executable [executableAot]	ok		0	-
+b	native-view:91	nv-gc-stress [nativeBuilt nativeCoroutines]	ok		0	-
+b	native-view:92	nv-c-oracle-scalars [nvCFixture]	ok		0	-
+b	native-view:93	nv-c-oracle-pointers [nvCFixture]	ok		0	-
+b	native-view:94	nv-c-oracle-load [nvCFixture]	ok		0	-
+b	native-view:95	nv-pointer-field-ownership	error	CORE SEMANTIC AFFINE-TEMPORARY-UNSUPPORTED	0	-
+b	native-view:96	nv-pointer-field-ownership	error	CORE SEMANTIC AFFINE-EQUALITY-UNSUPPORTED	0	-
+b	native-view:97	nv-pointer-field-ownership	ok		0	-
+b	native-view:98	nv-pointer-field-ownership	ok		0	-
+b	native-view:99	nv-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC BINARY-OPERAND	0	-
+b	native-view:100	nv-unchecked-replay [nativeBuilt]	error	CORE SEMANTIC LAYOUT-NATIVE-ONLY	0	-
+b	stdlib-namespaces:1	ns-eq-call-is-an-unknown-name	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:2	ns-eq-infix-is-a-syntax-error	error	SURFACE SYNTAX	0	-
+b	stdlib-namespaces:3	ns-string-equality-is-double-equals	ok		0	-
+b	stdlib-namespaces:4	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:5	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:6	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:7	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:8	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:9	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:10	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:11	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:12	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:13	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:14	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:15	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:16	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:17	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:18	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:19	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:20	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:21	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:22	ns-historical-names-are-unknown	error	CORE SEMANTIC UNBOUND	0	-
+b	stdlib-namespaces:23	ns-char-scalar-value-is-canonical	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	stdlib-namespaces:24	ns-char-scalar-value-is-canonical	ok		0	-
+b	stdlib-namespaces:26	ns-char-scalar-value-is-canonical	ok		0	-
+b	stdlib-namespaces:27	ns-historical-module-is-gone	error	SURFACE MODULE UNKNOWN-NAMESPACE	0	-
+b	stdlib-namespaces:28	ns-historical-module-is-gone	ok		0	-
+b	stdlib-namespaces:29	ns-intrinsics-are-root-natives	ok		0	-
+b	stdlib-namespaces:31	ns-diagnostics-name-the-qualified-callable	ok		0	-
+b	stdlib-namespaces:32	ns-diagnostics-name-the-qualified-callable	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:34	ns-protect-module-member	error	SURFACE MODULE DUPLICATE-NATIVE	0	-
+b	stdlib-namespaces:35	ns-protect-module-binding	error	SURFACE MODULE DUPLICATE-NATIVE	0	-
+b	stdlib-namespaces:36	ns-unrelated-member-is-legal	ok		0	-
+b	stdlib-namespaces:37	ns-list-module-beside-intrinsics	ok		0	-
+b	stdlib-namespaces:38	ns-entry-program-is-in-no-namespace	ok		0	-
+b	stdlib-namespaces:39	ns-entry-program-is-in-no-namespace	ok		0	-
+b	stdlib-namespaces:40	ns-entry-program-is-in-no-namespace	ok		0	-
+b	stdlib-namespaces:41	ns-protect-is-not-overloading	error	SURFACE MODULE DUPLICATE-NATIVE	0	-
+b	stdlib-namespaces:42	ns-protect-is-not-overloading	error	SURFACE MODULE DUPLICATE-NATIVE	0	-
+b	stdlib-namespaces:43	ns-local-names-are-unrelated	ok		0	-
+b	stdlib-namespaces:44	ns-unknown-member-of-intrinsic-namespace	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	stdlib-namespaces:45	ns-unknown-member-lists-intrinsics-too	error	SURFACE MODULE UNKNOWN-SYMBOL	0	-
+b	stdlib-namespaces:46	ns-at-present-and-missing	ok		0	-
+b	stdlib-namespaces:47	ns-at-unhandled-is-the-declared-error	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:48	ns-at-other-failures-are-not-index-not-found	error	CORE SEMANTIC TYPE	0	-
+b	stdlib-namespaces:49	ns-at-other-failures-are-not-index-not-found	error	CORE SEMANTIC TYPE	0	-
+b	stdlib-namespaces:50	ns-mutable-array-at	ok		0	-
+b	stdlib-namespaces:51	ns-mutable-array-set-is-index-not-found	ok		0	-
+b	stdlib-namespaces:52	ns-proof-binding-minimum	ok		0	-
+b	stdlib-namespaces:53	ns-proof-binding-minimum	ok		0	-
+b	stdlib-namespaces:54	ns-proof-binding-minimum	ok		0	-
+b	stdlib-namespaces:55	ns-proof-binding-minimum	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:56	ns-proof-binding-minimum	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:57	ns-proof-binding-minimum	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:58	ns-slice-rule-substring	ok		0	-
+b	stdlib-namespaces:59	ns-slice-rule-freeze-and-copy	ok		0	-
+b	stdlib-namespaces:60	ns-slice-unhandled-is-the-declared-error	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:61	ns-slice-unhandled-is-the-declared-error	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:62	ns-slice-proofs; ns-method-str-substring	ok		0	-
+b	stdlib-namespaces:63	ns-slice-proofs	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:64	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:65	ns-slice-proofs	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:66	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:67	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:68	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:69	ns-slice-proofs	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:70	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:71	ns-slice-proofs	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:72	ns-slice-proofs	ok		0	-
+b	stdlib-namespaces:73	ns-slice-proofs	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:74	ns-index-proof-minimum-size	ok		0	-
+b	stdlib-namespaces:75	ns-index-proof-minimum-size	ok		0	-
+b	stdlib-namespaces:76	ns-index-proof-minimum-size	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:77	ns-at-element-type	ok		0	-
+b	stdlib-namespaces:78	ns-get-element-type	ok		0	-
+b	stdlib-namespaces:79	ns-proof-literal-in-range	ok		0	-
+b	stdlib-namespaces:80	ns-proof-literal-in-range	ok		0	-
+b	stdlib-namespaces:81	ns-proof-literal-out-of-range	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:82	ns-proof-literal-out-of-range	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:83	ns-proof-literal-out-of-range	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:84	ns-proof-counted-loop	ok		0	-
+b	stdlib-namespaces:85	ns-proof-counted-loop	ok		0	-
+b	stdlib-namespaces:86	ns-proof-counted-loop	ok		0	-
+b	stdlib-namespaces:87	ns-proof-counted-loop	ok		0	-
+b	stdlib-namespaces:88	ns-proof-counted-loop-negatives	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:89	ns-proof-counted-loop-negatives	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:90	ns-proof-counted-loop-negatives	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:91	ns-proof-counted-loop-negatives	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:92	ns-proof-capacity	ok		0	-
+b	stdlib-namespaces:93	ns-proof-capacity	ok		0	-
+b	stdlib-namespaces:94	ns-proof-capacity	ok		0	-
+b	stdlib-namespaces:95	ns-proof-capacity	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:96	ns-proof-branch-relations	ok		0	-
+b	stdlib-namespaces:97	ns-proof-branch-relations	ok		0	-
+b	stdlib-namespaces:98	ns-proof-branch-relations	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:99	ns-proof-and-or-conditions	ok		0	-
+b	stdlib-namespaces:100	ns-proof-and-or-conditions	ok		0	-
+b	stdlib-namespaces:101	ns-proof-and-or-conditions	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:102	ns-proof-and-or-conditions	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:103	ns-proof-relations-do-not-outlive-their-scope	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	stdlib-namespaces:104	ns-proof-relations-do-not-outlive-their-scope	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:105	ns-proof-relations-do-not-outlive-their-scope	ok		0	-
+b	stdlib-namespaces:106	ns-proof-relations-before-call-ranges	ok		0	-
+b	stdlib-namespaces:108	ns-proof-early-return-result	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:109	ns-proof-early-return-result	ok		0	-
+b	stdlib-namespaces:111	ns-proof-literal-loop-exits	error	CORE SEMANTIC UNHANDLED-ERROR	0	-
+b	stdlib-namespaces:112	ns-proof-literal-loop-exits	ok		0	-
+b	stdlib-namespaces:114	ns-proof-literal-loop-exits	ok		0	-
+b	stdlib-namespaces:116	ns-proof-lib-mutable-array-from-list	ok		0	-
+b	stdlib-namespaces:117	ns-get-values	ok		0	-
+b	stdlib-namespaces:118	ns-get-is-ordinary-botlish	ok		0	-
+b	stdlib-namespaces:119	ns-get-has-no-obligation	ok		0	-
+b	stdlib-namespaces:120	ns-get-nir-is-an-ordinary-call	ok		0	-
+b	stdlib-namespaces:121	ns-get-handles-only-index-not-found	error	CORE SEMANTIC TYPE	0	-
+b	stdlib-namespaces:122	ns-get-handles-only-index-not-found	error	CORE SEMANTIC TYPE	0	-
+b	stdlib-namespaces:123	ns-get-handles-only-index-not-found	error	CORE SEMANTIC TYPE	0	-
+b	stdlib-namespaces:124	ns-get-default-is-eager	ok		0	-
+b	stdlib-namespaces:125	ns-get-differential	ok		0	-
+b	stdlib-namespaces:126	ns-handle-type-in-an-instance	ok		0	-
+b	stdlib-namespaces:127	ns-handle-type-in-an-instance	ok		0	-
+b	stdlib-namespaces:128	ns-method-list-at	ok		0	-
+b	stdlib-namespaces:129	ns-method-list-at	ok		0	-
+b	stdlib-namespaces:132	ns-method-list-get	ok		0	-
+b	stdlib-namespaces:133	ns-method-list-get	ok		0	-
+b	stdlib-namespaces:136	ns-method-list-append	ok		0	-
+b	stdlib-namespaces:137	ns-method-list-append	ok		0	-
+b	stdlib-namespaces:140	ns-method-list-length	ok		0	-
+b	stdlib-namespaces:141	ns-method-list-length	ok		0	-
+b	stdlib-namespaces:144	ns-method-str-concat	ok		0	-
+b	stdlib-namespaces:145	ns-method-str-concat	ok		0	-
+b	stdlib-namespaces:148	ns-method-str-length	ok		0	-
+b	stdlib-namespaces:149	ns-method-str-length	ok		0	-
+b	stdlib-namespaces:152	ns-method-str-substring	ok		0	-
+b	stdlib-namespaces:156	ns-method-set-contains	ok		0	-
+b	stdlib-namespaces:157	ns-method-set-contains	ok		0	-
+b	stdlib-namespaces:160	ns-method-char-scalar-value	ok		0	-
+b	stdlib-namespaces:161	ns-method-char-scalar-value	ok		0	-
+b	stdlib-namespaces:164	ns-method-alias-list-at	ok		0	-
+b	stdlib-namespaces:165	ns-method-alias-list-at	ok		0	-
+b	stdlib-namespaces:168	ns-method-alias-list-length	ok		0	-
+b	stdlib-namespaces:169	ns-method-alias-list-length	ok		0	-
+b	stdlib-namespaces:172	ns-method-alias-str-concat	ok		0	-
+b	stdlib-namespaces:173	ns-method-alias-str-concat	ok		0	-
+b	stdlib-namespaces:176	ns-method-alias-list-get	ok		0	-
+b	stdlib-namespaces:177	ns-method-alias-list-get	ok		0	-
+b	stdlib-namespaces:180	ns-method-mutable-array	ok		0	-
+b	stdlib-namespaces:181	ns-method-mutable-array	ok		0	-
+b	stdlib-namespaces:182	ns-method-nir-identical	ok		0	-
+b	stdlib-namespaces:183	ns-method-nir-identical	ok		0	-
+b	stdlib-namespaces:184	ns-method-alias-nir-identical	ok		0	-
+b	stdlib-namespaces:185	ns-method-alias-nir-identical	ok		0	-
+b	stdlib-namespaces:186	ns-method-requires-an-import	error	CORE SEMANTIC MISSING-IMPORT	0	-
+b	stdlib-namespaces:187	ns-method-requires-an-import	error	CORE SEMANTIC MISSING-IMPORT	0	-
+b	stdlib-namespaces:188	ns-method-requires-an-import	ok		0	-
+b	stdlib-namespaces:189	ns-method-requires-an-import	error	SURFACE MODULE MISSING-IMPORT	0	-
+b	syntax-recovery:1	sr-holes-damage-past-statement	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:2	sr-holes-damage-past-statement	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:3	sr-holes-damage-past-statement	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:4	sr-holes-damage-past-statement	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:5	sr-experiments-oracle	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:6	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:7	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:8	sr-experiments-oracle	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:9	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:10	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:11	sr-experiments-oracle	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:12	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:13	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:14	sr-experiments-oracle	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:15	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:16	sr-experiments-oracle	error	CORE SEMANTIC TYPE	0	-
+b	syntax-recovery:17	sr-experiments-oracle	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:18	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:19	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:20	sr-experiments-oracle; sr-transitive-module	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:21	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:22	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:23	sr-experiments-oracle; sr-no-proof-from-incomplete-body	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:24	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:25	sr-experiments-oracle; sr-no-proof-from-incomplete-body	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	syntax-recovery:26	sr-experiments-oracle; sr-no-proof-from-incomplete-body	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:27	sr-experiments-oracle; sr-no-proof-from-incomplete-body	error	CORE SEMANTIC KNOWN-ERROR	0	-
+b	syntax-recovery:28	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:29	sr-experiments-oracle; sr-no-proof-from-incomplete-body	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:30	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:31	sr-experiments-oracle	ok		0	-
+b	syntax-recovery:32	sr-appended-hole-changes-nothing-before	ok		0	-
+b	syntax-recovery:33	sr-appended-hole-changes-nothing-before	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:34	sr-appended-hole-changes-nothing-before	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:35	sr-appended-hole-changes-nothing-before	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:36	sr-appended-hole-changes-nothing-before	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:37	sr-function-body-facts	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:38	sr-declared-contract	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:39	sr-module-recovery	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:46	sr-hole-is-poison-not-divergence	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:47	sr-analysis-claims-nothing	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:48	sr-method-candidates	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:49	sr-method-candidates	error	CORE SEMANTIC NOT-A-STRUCT	0	-
+b	syntax-recovery:50	sr-context-installation	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:51	sr-context-installation	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	syntax-recovery:52	sr-trait-conformance	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:53	sr-trait-conformance	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:54	sr-trait-conformance	error	CORE SEMANTIC TRAIT-NOT-SATISFIED	0	-
+b	syntax-recovery:55	sr-header-damage	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:56	sr-type-declaration-damage	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:57	sr-diagnostics-syntax-unchanged	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:59	sr-diagnostics-independent-and-dependent	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:60	sr-diagnostics-deterministic	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:61	sr-diagnostics-deterministic	ok		0	-
+b	syntax-recovery:99	sr-strict-unchanged	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:103	sr-backends-refuse	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:104	sr-main-never-runs	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:108	sr-cache-never-stores	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:109	sr-cache-never-stores	ok		0	-
+b	syntax-recovery:110	sr-service-outcomes	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:111	sr-service-outcomes	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:112	sr-service-outcomes	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:113	sr-service-hole-facts	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:114	sr-service-export-import	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:115	sr-service-isolation	error	SURFACE SYNTAX	0	-
+b	syntax-recovery:116	sr-service-isolation	ok		0	-
+b	syntax-recovery:117	sr-service-isolation	ok		0	-
+a	u0001	stdlib/abi.bot (import std::abi)	ok		0	ok
+a	u0002	stdlib/abi/aarch64.bot (import std::abi::aarch64)	ok		0	ok
+a	u0003	stdlib/abi/bytes.bot (import std::abi::bytes)	ok		0	ok
+a	u0004	stdlib/abi/x86_64.bot (import std::abi::x86_64)	ok		0	ok
+a	u0005	stdlib/ascii.bot (import std::ascii)	ok		0	ok
+a	u0006	stdlib/binary.bot (import std::binary)	ok		0	ok
+a	u0007	stdlib/byte.bot (import std::byte)	ok		0	ok
+a	u0008	stdlib/compiler.bot (import std::compiler)	ok		0	ok
+a	u0009	stdlib/darwin.bot (import std::darwin)	ok		0	ok
+a	u0010	stdlib/darwin/io.bot (import std::darwin::io)	ok		0	ok
+a	u0011	stdlib/darwin/path.bot (import std::darwin::path)	ok		0	ok
+a	u0012	stdlib/ffi/c.bot (import std::ffi::c)	ok		0	ok
+a	u0013	stdlib/float64.bot (import std::float64)	ok		0	ok
+a	u0014	stdlib/io.bot (import std::io)	ok		0	ok
+a	u0015	stdlib/io/path.bot (import std::io::path)	ok		0	ok
+a	u0016	stdlib/linux.bot (import std::linux)	ok		0	ok
+a	u0017	stdlib/linux/io.bot (import std::linux::io)	ok		0	ok
+a	u0018	stdlib/linux/path.bot (import std::linux::path)	ok		0	ok
+a	u0019	stdlib/linux/sys.aarch64.bot (import std::linux::sys)	ok		0	ok
+a	u0020	stdlib/linux/sys.x86_64.bot (import std::linux::sys)	ok		0	ok
+a	u0021	stdlib/list.bot (import std::list)	ok		0	ok
+a	u0022	stdlib/mathish.bot (import std::mathish)	ok		0	ok
+a	u0023	stdlib/mutable_array.bot (import std::mutable_array)	ok		0	ok
+a	u0024	stdlib/test.bot (import std::test)	ok		0	ok
+a	u0025	stdlib/web.bot (import std::web)	ok		0	ok
+a	u0026	stdlib/windows.bot (import std::windows)	ok		0	ok
+a	u0027	stdlib/windows/io.bot (import std::windows::io)	ok		0	ok
+a	u0028	examples/abi/numeric-domains.bot	ok		0	ok
+a	u0029	examples/binary/c-structs.bot	ok		0	ok
+a	u0030	examples/ffi/sha256/demo.bot	ok		0	ok
+a	u0031	examples/ffi/tcl/demo.bot	ok		0	ok
+a	u0032	examples/games/2048/bench.bot	ok		0	ok
+a	u0033	examples/games/2048/demo-darwin.bot	ok		0	ok
+a	u0034	examples/games/2048/demo-windows.bot	ok		0	ok
+a	u0035	examples/games/2048/demo.bot	ok		0	ok
+a	u0036	examples/games/2048/golden.bot	ok		0	ok
+a	u0037	examples/io/child-path.bot	ok		0	ok
+a	u0038	examples/io/hello-darwin.bot	ok		0	ok
+a	u0039	examples/io/hello-windows.bot	ok		0	ok
+a	u0040	examples/io/hello.bot	ok		0	ok
+a	u0041	examples/io/show-path.bot	ok		0	ok
+a	u0042	examples/linux/context-hello.bot	ok		0	ok
+a	u0043	examples/linux/getpid.bot	ok		0	ok
+a	u0044	examples/linux/read-stdin.bot	ok		0	ok
+a	u0045	examples/linux/write.bot	ok		0	ok
+a	u0046	examples/refinement/refined-strings.bot	ok		0	ok
+a	u0047	examples/stdlib/ai_text_clean.bot	ok		0	ok
+a	u0048	examples/stdlib/csv.bot	ok		0	ok
+a	u0049	examples/stdlib/csv_chunked.bot	ok		0	ok
+a	u0050	examples/stdlib/csv_geometric.bot	ok		0	ok
+a	u0051	examples/stdlib/csv_records.bot	ok		0	ok
+a	u0052	examples/stdlib/hashtable.bot	ok		0	ok
+a	u0053	examples/stdlib/matmul.bot	ok		0	ok
+a	u0054	examples/stdlib/string_replace.bot	ok		0	ok
+a	u0055	examples/stdlib/string_reverse.bot	ok		0	ok
+a	u0056	examples/surface/01-arithmetic.bot	ok		0	ok
+a	u0057	examples/surface/02-recursion.bot	ok		0	ok
+a	u0058	examples/surface/03-closure.bot	ok		0	ok
+a	u0059	examples/surface/04-branch-value.bot	ok		0	ok
+a	u0060	examples/surface/05-shadowing.bot	ok		0	ok
+a	u0061	examples/surface/06-list.bot	ok		0	ok
+a	u0062	examples/surface/07-loop-break.bot	ok		0	ok
+a	u0063	examples/surface/08-return.bot	ok		0	ok
+a	u0064	examples/surface/09-mutual-recursion.bot	error	CORE SEMANTIC UNBOUND	0	error
+a	u0065	examples/surface/10-duplicate-binding.bot	error	CORE SEMANTIC DUPLICATE	0	error
+a	u0066	examples/surface/11-boolean-operators.bot	ok		0	ok
+a	u0067	examples/surface/12-if-value.bot	ok		0	ok
+a	u0068	examples/surface/13-hygiene.bot	ok		0	ok
+a	u0069	examples/surface/14-modules.bot	ok		0	ok
+a	u0070	examples/surface/15-enums.bot	ok		0	ok
+a	u0071	examples/ffi/bindgen/sdl3/demo.bot (staged with generated/c/sdl3/linux-x86_64)	ok		0	ok
+a	u0072	examples/ffi/bindgen/sha256/demo.bot (staged with generated/c/boringssl/linux-x86_64)	ok		0	ok
+a	u0073	examples/ffi/bindgen/tcl/demo.bot (staged with generated/c/tcl/linux-x86_64)	ok		0	ok
+a	u0074	examples/games/icy-tower/main.bot (working tree, staged with sdl3)	ok		0	ok
+a	u0075	examples/games/icy-tower/golden.bot (working tree, staged with sdl3)	ok		0	ok
+a	u0076	examples/games/icy-tower/headless.bot (working tree, staged with sdl3)	ok		0	ok
+a	u0077	6df89a8e:examples/games/icy-tower/main.bot (baseline, staged with sdl3)	ok		12	ok
+a	u0078	6df89a8e:examples/games/icy-tower/golden.bot (baseline, staged with sdl3)	ok		0	ok
+a	u0079	6df89a8e:examples/games/icy-tower/headless.bot (baseline, staged with sdl3)	ok		0	ok
+a	u0080	bench/fib.bot	ok		0	ok
+a	u0081	bench/lex-strategy.bot	ok		0	ok
+a	u0082	bench/loop-count.bot	ok		0	ok
+a	u0083	bench/refined-checks.bot	ok		0	ok
+a	u0084	bench/source-checks.bot	ok		0	ok
+a	u0085	bench/sum-refined.bot	ok		0	ok
+a	u0086	bench/test-selection.bot	ok		0	ok
+a	u0087	bench/uri-steady.bot	ok		0	ok
+a	u0088	tests/golden/abi-bytes-native.bot	ok		0	ok
+a	u0089	tests/golden/abi-bytes.bot	ok		0	ok
+a	u0090	tests/golden/abi-numeric-native.bot	ok		0	ok
+a	u0091	tests/golden/abi-numeric.bot	ok		0	ok
+a	u0092	tests/golden/affinity.bot	ok		0	ok
+a	u0093	tests/golden/binary-layout.bot	ok		0	ok
+a	u0094	tests/golden/bits-bytes-hashing.bot	ok		0	ok
+a	u0095	tests/golden/branch-form-boolean.bot	ok		0	ok
+a	u0096	tests/golden/c-float-ffi.bot	ok		0	ok
+a	u0097	tests/golden/callable-contracts-contravariant-rejected.bot	ok		0	ok
+a	u0098	tests/golden/callable-contracts-contravariant.bot	ok		0	ok
+a	u0099	tests/golden/callable-contracts-fallback.bot	ok		0	ok
+a	u0100	tests/golden/callable-contracts-handle.bot	ok		0	ok
+a	u0101	tests/golden/callable-contracts-returned.bot	ok		0	ok
+a	u0102	tests/golden/callable-contracts-unerased.bot	ok		0	ok
+a	u0103	tests/golden/callable-contracts.bot	ok		0	ok
+a	u0104	tests/golden/callables.bot	ok		0	ok
+a	u0105	tests/golden/closure-escape-instances.bot	ok		0	ok
+a	u0106	tests/golden/closure-escape.bot	ok		0	ok
+a	u0107	tests/golden/collections.bot	ok		0	ok
+a	u0108	tests/golden/compiled-values-struct-transport.bot	ok		0	ok
+a	u0109	tests/golden/compiled-values.bot	ok		0	ok
+a	u0110	tests/golden/completion-regressions.bot	ok		0	ok
+a	u0111	tests/golden/contexts.bot	ok		0	ok
+a	u0112	tests/golden/core-semantics.bot	ok		0	ok
+a	u0113	tests/golden/coroutines.bot	ok		0	ok
+a	u0114	tests/golden/decimal-rounded.bot	ok		0	ok
+a	u0115	tests/golden/declared-errors-imports.bot	ok		0	ok
+a	u0116	tests/golden/declared-errors.bot	ok		0	ok
+a	u0117	tests/golden/destructuring-instances.bot	ok		0	ok
+a	u0118	tests/golden/destructuring.bot	ok		0	ok
+a	u0119	tests/golden/diagnostic-recovery-imported.bot	ok		0	ok
+a	u0120	tests/golden/diagnostic-recovery.bot	ok		0	ok
+a	u0121	tests/golden/diagnostics.bot	ok		0	ok
+a	u0122	tests/golden/errors.bot	ok		0	ok
+a	u0123	tests/golden/flags.bot	ok		0	ok
+a	u0124	tests/golden/float64.bot	ok		0	ok
+a	u0125	tests/golden/framework-semantics.bot	ok		0	ok
+a	u0126	tests/golden/gc-sensitive-values.bot	ok		0	ok
+a	u0127	tests/golden/harness.bot	ok		0	ok
+a	u0128	tests/golden/hashable-admission.bot	ok		0	ok
+a	u0129	tests/golden/hashable.bot	ok		0	ok
+a	u0130	tests/golden/hir-values.bot	ok		0	ok
+a	u0131	tests/golden/imports-abi-child.bot	ok		0	ok
+a	u0132	tests/golden/imports-abi-family.bot	ok		0	ok
+a	u0133	tests/golden/imports-library-modules.bot	ok		0	ok
+a	u0134	tests/golden/imports-unimported.bot	ok		0	ok
+a	u0135	tests/golden/imports.bot	ok		0	ok
+a	u0136	tests/golden/layout-arrays.bot	ok		0	ok
+a	u0137	tests/golden/layout-unions.bot	ok		0	ok
+a	u0138	tests/golden/linux-io-native.bot	ok		0	ok
+a	u0139	tests/golden/linux-io.bot	ok		0	ok
+a	u0140	tests/golden/linux-transports.bot	ok		0	ok
+a	u0141	tests/golden/lists-and-sets.bot	ok		0	ok
+a	u0142	tests/golden/loop-collecting-refined-checks.bot	ok		0	ok
+a	u0143	tests/golden/loop-collecting.bot	ok		0	ok
+a	u0144	tests/golden/loops.bot	ok		0	ok
+a	u0145	tests/golden/method-equivalence-imported.bot	ok		0	ok
+a	u0146	tests/golden/method-equivalence.bot	ok		0	ok
+a	u0147	tests/golden/methods-byte-without-list.bot	ok		0	ok
+a	u0148	tests/golden/methods-list-without-str.bot	ok		0	ok
+a	u0149	tests/golden/methods-struct-instances.bot	ok		0	ok
+a	u0150	tests/golden/methods-type-import-only.bot	ok		0	ok
+a	u0151	tests/golden/methods.bot	ok		0	ok
+a	u0152	tests/golden/modules.bot	ok		0	ok
+a	u0153	tests/golden/mutable-array.bot	ok		0	ok
+a	u0154	tests/golden/mutable-vector-str.bot	ok		0	ok
+a	u0155	tests/golden/mutable-vector.bot	ok		0	ok
+a	u0156	tests/golden/names-and-scoping.bot	ok		0	ok
+a	u0157	tests/golden/native-aggregates.bot	ok		0	ok
+a	u0158	tests/golden/native-values.bot	ok		0	ok
+a	u0159	tests/golden/numeric-looking-names.bot	ok		0	ok
+a	u0160	tests/golden/numeric-text.bot	ok		0	new
+a	u0161	tests/golden/opaque-instances.bot	ok		0	ok
+a	u0162	tests/golden/opaque.bot	ok		0	ok
+a	u0163	tests/golden/ownership.bot	ok		0	ok
+a	u0164	tests/golden/range-and-contract-values.bot	ok		0	ok
+a	u0165	tests/golden/raw-int-abi.bot	ok		0	ok
+a	u0166	tests/golden/recursive-types.bot	ok		0	ok
+a	u0167	tests/golden/refinements.bot	ok		0	ok
+a	u0168	tests/golden/representation.bot	ok		0	ok
+a	u0169	tests/golden/static-compile-erased-consumer.bot	ok		0	ok
+a	u0170	tests/golden/static-compile.bot	ok		0	ok
+a	u0171	tests/golden/stdlib-namespaces-entry-members.bot	ok		0	ok
+a	u0172	tests/golden/stdlib-namespaces-str-only.bot	ok		0	ok
+a	u0173	tests/golden/stdlib-namespaces-unimported.bot	ok		0	ok
+a	u0174	tests/golden/stdlib-namespaces.bot	ok		0	ok
+a	u0175	tests/golden/string-natives.bot	ok		0	ok
+a	u0176	tests/golden/string-representations.bot	ok		0	ok
+a	u0177	tests/golden/strings.bot	ok		0	ok
+a	u0178	tests/golden/struct-representation-instances.bot	ok		0	ok
+a	u0179	tests/golden/struct-representation.bot	ok		0	ok
+a	u0180	tests/golden/structs-and-enums-instances.bot	ok		0	ok
+a	u0181	tests/golden/structs-and-enums.bot	ok		0	ok
+a	u0182	tests/golden/trait-constrained-types.bot	ok		0	new
+a	u0183	tests/golden/traits-path.bot	ok		0	ok
+a	u0184	tests/golden/traits.bot	ok		0	ok
+a	u0185	tests/golden/type-predicates.bot	ok		0	ok
+a	u0186	tests/golden/types.bot	ok		0	ok
+a	u0187	tests/golden/unicode-strings.bot	ok		0	ok
+a	u0188	tests/golden/validators-and-proofs.bot	ok		0	ok
+a	u0189	tests/golden/values.bot	ok		0	ok
+a	u0190	tests/golden/variadics.bot	ok		0	ok
+a	u0191	tests/golden/warning-programs.bot	ok		0	ok
+a	u0192	generated/c/boringssl/linux-aarch64/boringssl/aead.bot (import boringssl::aead)	ok		0	ok
+a	u0193	generated/c/boringssl/linux-aarch64/boringssl/aes.bot (import boringssl::aes)	ok		0	ok
+a	u0194	generated/c/boringssl/linux-aarch64/boringssl/asn1.bot (import boringssl::asn1)	ok		0	ok
+a	u0195	generated/c/boringssl/linux-aarch64/boringssl/asn1t.bot (import boringssl::asn1t)	ok		0	ok
+a	u0196	generated/c/boringssl/linux-aarch64/boringssl/base.bot (import boringssl::base)	ok		0	ok
+a	u0197	generated/c/boringssl/linux-aarch64/boringssl/base64.bot (import boringssl::base64)	ok		0	ok
+a	u0198	generated/c/boringssl/linux-aarch64/boringssl/bio.bot (import boringssl::bio)	ok		0	ok
+a	u0199	generated/c/boringssl/linux-aarch64/boringssl/blake2.bot (import boringssl::blake2)	ok		0	ok
+a	u0200	generated/c/boringssl/linux-aarch64/boringssl/blowfish.bot (import boringssl::blowfish)	ok		0	ok
+a	u0201	generated/c/boringssl/linux-aarch64/boringssl/bn.bot (import boringssl::bn)	ok		0	ok
+a	u0202	generated/c/boringssl/linux-aarch64/boringssl/buf.bot (import boringssl::buf)	ok		0	ok
+a	u0203	generated/c/boringssl/linux-aarch64/boringssl/bytestring.bot (import boringssl::bytestring)	ok		0	ok
+a	u0204	generated/c/boringssl/linux-aarch64/boringssl/cast.bot (import boringssl::cast)	ok		0	ok
+a	u0205	generated/c/boringssl/linux-aarch64/boringssl/chacha.bot (import boringssl::chacha)	ok		0	ok
+a	u0206	generated/c/boringssl/linux-aarch64/boringssl/cipher.bot (import boringssl::cipher)	ok		0	ok
+a	u0207	generated/c/boringssl/linux-aarch64/boringssl/cmac.bot (import boringssl::cmac)	ok		0	ok
+a	u0208	generated/c/boringssl/linux-aarch64/boringssl/cms.bot (import boringssl::cms)	ok		0	ok
+a	u0209	generated/c/boringssl/linux-aarch64/boringssl/conf.bot (import boringssl::conf)	ok		0	ok
+a	u0210	generated/c/boringssl/linux-aarch64/boringssl/crypto.bot (import boringssl::crypto)	ok		0	ok
+a	u0211	generated/c/boringssl/linux-aarch64/boringssl/ctrdrbg.bot (import boringssl::ctrdrbg)	ok		0	ok
+a	u0212	generated/c/boringssl/linux-aarch64/boringssl/ctypes.bot (import boringssl::ctypes)	ok		0	ok
+a	u0213	generated/c/boringssl/linux-aarch64/boringssl/curve25519.bot (import boringssl::curve25519)	ok		0	ok
+a	u0214	generated/c/boringssl/linux-aarch64/boringssl/des.bot (import boringssl::des)	ok		0	ok
+a	u0215	generated/c/boringssl/linux-aarch64/boringssl/dh.bot (import boringssl::dh)	ok		0	ok
+a	u0216	generated/c/boringssl/linux-aarch64/boringssl/digest.bot (import boringssl::digest)	ok		0	ok
+a	u0217	generated/c/boringssl/linux-aarch64/boringssl/dsa.bot (import boringssl::dsa)	ok		0	ok
+a	u0218	generated/c/boringssl/linux-aarch64/boringssl/ec.bot (import boringssl::ec)	ok		0	ok
+a	u0219	generated/c/boringssl/linux-aarch64/boringssl/ec_key.bot (import boringssl::ec_key)	ok		0	ok
+a	u0220	generated/c/boringssl/linux-aarch64/boringssl/ecdh.bot (import boringssl::ecdh)	ok		0	ok
+a	u0221	generated/c/boringssl/linux-aarch64/boringssl/ecdsa.bot (import boringssl::ecdsa)	ok		0	ok
+a	u0222	generated/c/boringssl/linux-aarch64/boringssl/engine.bot (import boringssl::engine)	ok		0	ok
+a	u0223	generated/c/boringssl/linux-aarch64/boringssl/err.bot (import boringssl::err)	ok		0	ok
+a	u0224	generated/c/boringssl/linux-aarch64/boringssl/evp.bot (import boringssl::evp)	ok		0	ok
+a	u0225	generated/c/boringssl/linux-aarch64/boringssl/evp_errors.bot (import boringssl::evp_errors)	ok		0	ok
+a	u0226	generated/c/boringssl/linux-aarch64/boringssl/ex_data.bot (import boringssl::ex_data)	ok		0	ok
+a	u0227	generated/c/boringssl/linux-aarch64/boringssl/hkdf.bot (import boringssl::hkdf)	ok		0	ok
+a	u0228	generated/c/boringssl/linux-aarch64/boringssl/hmac.bot (import boringssl::hmac)	ok		0	ok
+a	u0229	generated/c/boringssl/linux-aarch64/boringssl/hpke.bot (import boringssl::hpke)	ok		0	ok
+a	u0230	generated/c/boringssl/linux-aarch64/boringssl/hrss.bot (import boringssl::hrss)	ok		0	ok
+a	u0231	generated/c/boringssl/linux-aarch64/boringssl/kdf.bot (import boringssl::kdf)	ok		0	ok
+a	u0232	generated/c/boringssl/linux-aarch64/boringssl/layouts.bot (import boringssl::layouts)	ok		0	ok
+a	u0233	generated/c/boringssl/linux-aarch64/boringssl/md4.bot (import boringssl::md4)	ok		0	ok
+a	u0234	generated/c/boringssl/linux-aarch64/boringssl/md5.bot (import boringssl::md5)	ok		0	ok
+a	u0235	generated/c/boringssl/linux-aarch64/boringssl/mem.bot (import boringssl::mem)	ok		0	ok
+a	u0236	generated/c/boringssl/linux-aarch64/boringssl/mldsa.bot (import boringssl::mldsa)	ok		0	ok
+a	u0237	generated/c/boringssl/linux-aarch64/boringssl/mlkem.bot (import boringssl::mlkem)	ok		0	ok
+a	u0238	generated/c/boringssl/linux-aarch64/boringssl/nid.bot (import boringssl::nid)	ok		0	ok
+a	u0239	generated/c/boringssl/linux-aarch64/boringssl/obj.bot (import boringssl::obj)	ok		0	ok
+a	u0240	generated/c/boringssl/linux-aarch64/boringssl/pem.bot (import boringssl::pem)	ok		0	ok
+a	u0241	generated/c/boringssl/linux-aarch64/boringssl/pkcs7.bot (import boringssl::pkcs7)	ok		0	ok
+a	u0242	generated/c/boringssl/linux-aarch64/boringssl/pkcs8.bot (import boringssl::pkcs8)	ok		0	ok
+a	u0243	generated/c/boringssl/linux-aarch64/boringssl/pool.bot (import boringssl::pool)	ok		0	ok
+a	u0244	generated/c/boringssl/linux-aarch64/boringssl/posix_time.bot (import boringssl::posix_time)	ok		0	ok
+a	u0245	generated/c/boringssl/linux-aarch64/boringssl/rand.bot (import boringssl::rand)	ok		0	ok
+a	u0246	generated/c/boringssl/linux-aarch64/boringssl/rc4.bot (import boringssl::rc4)	ok		0	ok
+a	u0247	generated/c/boringssl/linux-aarch64/boringssl/ripemd.bot (import boringssl::ripemd)	ok		0	ok
+a	u0248	generated/c/boringssl/linux-aarch64/boringssl/rsa.bot (import boringssl::rsa)	ok		0	ok
+a	u0249	generated/c/boringssl/linux-aarch64/boringssl/sha.bot (import boringssl::sha)	ok		0	ok
+a	u0250	generated/c/boringssl/linux-aarch64/boringssl/sha2.bot (import boringssl::sha2)	ok		0	ok
+a	u0251	generated/c/boringssl/linux-aarch64/boringssl/siphash.bot (import boringssl::siphash)	ok		0	ok
+a	u0252	generated/c/boringssl/linux-aarch64/boringssl/slhdsa.bot (import boringssl::slhdsa)	ok		0	ok
+a	u0253	generated/c/boringssl/linux-aarch64/boringssl/ssl.bot (import boringssl::ssl)	ok		0	ok
+a	u0254	generated/c/boringssl/linux-aarch64/boringssl/ssl3.bot (import boringssl::ssl3)	ok		0	ok
+a	u0255	generated/c/boringssl/linux-aarch64/boringssl/stack.bot (import boringssl::stack)	ok		0	ok
+a	u0256	generated/c/boringssl/linux-aarch64/boringssl/thread.bot (import boringssl::thread)	ok		0	ok
+a	u0257	generated/c/boringssl/linux-aarch64/boringssl/thunks/asn1.bot (import boringssl::thunks::asn1)	ok		0	ok
+a	u0258	generated/c/boringssl/linux-aarch64/boringssl/thunks/asn1t.bot (import boringssl::thunks::asn1t)	ok		0	ok
+a	u0259	generated/c/boringssl/linux-aarch64/boringssl/thunks/bio.bot (import boringssl::thunks::bio)	ok		0	ok
+a	u0260	generated/c/boringssl/linux-aarch64/boringssl/thunks/bytestring.bot (import boringssl::thunks::bytestring)	ok		0	ok
+a	u0261	generated/c/boringssl/linux-aarch64/boringssl/thunks/conf.bot (import boringssl::thunks::conf)	ok		0	ok
+a	u0262	generated/c/boringssl/linux-aarch64/boringssl/thunks/err.bot (import boringssl::thunks::err)	ok		0	ok
+a	u0263	generated/c/boringssl/linux-aarch64/boringssl/thunks/pool.bot (import boringssl::thunks::pool)	ok		0	ok
+a	u0264	generated/c/boringssl/linux-aarch64/boringssl/thunks/ssl.bot (import boringssl::thunks::ssl)	ok		0	ok
+a	u0265	generated/c/boringssl/linux-aarch64/boringssl/thunks/stack.bot (import boringssl::thunks::stack)	ok		0	ok
+a	u0266	generated/c/boringssl/linux-aarch64/boringssl/thunks/trust_token.bot (import boringssl::thunks::trust_token)	ok		0	ok
+a	u0267	generated/c/boringssl/linux-aarch64/boringssl/thunks/x509.bot (import boringssl::thunks::x509)	ok		0	ok
+a	u0268	generated/c/boringssl/linux-aarch64/boringssl/tls1.bot (import boringssl::tls1)	ok		0	ok
+a	u0269	generated/c/boringssl/linux-aarch64/boringssl/tls_prf.bot (import boringssl::tls_prf)	ok		0	ok
+a	u0270	generated/c/boringssl/linux-aarch64/boringssl/trust_token.bot (import boringssl::trust_token)	ok		0	ok
+a	u0271	generated/c/boringssl/linux-aarch64/boringssl/x509.bot (import boringssl::x509)	ok		0	ok
+a	u0272	generated/c/boringssl/linux-aarch64/boringssl/x509v3.bot (import boringssl::x509v3)	ok		0	ok
+a	u0273	generated/c/boringssl/linux-aarch64/boringssl/x509v3_errors.bot (import boringssl::x509v3_errors)	ok		0	ok
+a	u0274	generated/c/boringssl/linux-aarch64/boringssl/xwing.bot (import boringssl::xwing)	ok		0	ok
+a	u0275	generated/c/boringssl/linux-x86_64/boringssl/aead.bot (import boringssl::aead)	ok		0	ok
+a	u0276	generated/c/boringssl/linux-x86_64/boringssl/aes.bot (import boringssl::aes)	ok		0	ok
+a	u0277	generated/c/boringssl/linux-x86_64/boringssl/asn1.bot (import boringssl::asn1)	ok		0	ok
+a	u0278	generated/c/boringssl/linux-x86_64/boringssl/asn1t.bot (import boringssl::asn1t)	ok		0	ok
+a	u0279	generated/c/boringssl/linux-x86_64/boringssl/base.bot (import boringssl::base)	ok		0	ok
+a	u0280	generated/c/boringssl/linux-x86_64/boringssl/base64.bot (import boringssl::base64)	ok		0	ok
+a	u0281	generated/c/boringssl/linux-x86_64/boringssl/bio.bot (import boringssl::bio)	ok		0	ok
+a	u0282	generated/c/boringssl/linux-x86_64/boringssl/blake2.bot (import boringssl::blake2)	ok		0	ok
+a	u0283	generated/c/boringssl/linux-x86_64/boringssl/blowfish.bot (import boringssl::blowfish)	ok		0	ok
+a	u0284	generated/c/boringssl/linux-x86_64/boringssl/bn.bot (import boringssl::bn)	ok		0	ok
+a	u0285	generated/c/boringssl/linux-x86_64/boringssl/buf.bot (import boringssl::buf)	ok		0	ok
+a	u0286	generated/c/boringssl/linux-x86_64/boringssl/bytestring.bot (import boringssl::bytestring)	ok		0	ok
+a	u0287	generated/c/boringssl/linux-x86_64/boringssl/cast.bot (import boringssl::cast)	ok		0	ok
+a	u0288	generated/c/boringssl/linux-x86_64/boringssl/chacha.bot (import boringssl::chacha)	ok		0	ok
+a	u0289	generated/c/boringssl/linux-x86_64/boringssl/cipher.bot (import boringssl::cipher)	ok		0	ok
+a	u0290	generated/c/boringssl/linux-x86_64/boringssl/cmac.bot (import boringssl::cmac)	ok		0	ok
+a	u0291	generated/c/boringssl/linux-x86_64/boringssl/cms.bot (import boringssl::cms)	ok		0	ok
+a	u0292	generated/c/boringssl/linux-x86_64/boringssl/conf.bot (import boringssl::conf)	ok		0	ok
+a	u0293	generated/c/boringssl/linux-x86_64/boringssl/crypto.bot (import boringssl::crypto)	ok		0	ok
+a	u0294	generated/c/boringssl/linux-x86_64/boringssl/ctrdrbg.bot (import boringssl::ctrdrbg)	ok		0	ok
+a	u0295	generated/c/boringssl/linux-x86_64/boringssl/ctypes.bot (import boringssl::ctypes)	ok		0	ok
+a	u0296	generated/c/boringssl/linux-x86_64/boringssl/curve25519.bot (import boringssl::curve25519)	ok		0	ok
+a	u0297	generated/c/boringssl/linux-x86_64/boringssl/des.bot (import boringssl::des)	ok		0	ok
+a	u0298	generated/c/boringssl/linux-x86_64/boringssl/dh.bot (import boringssl::dh)	ok		0	ok
+a	u0299	generated/c/boringssl/linux-x86_64/boringssl/digest.bot (import boringssl::digest)	ok		0	ok
+a	u0300	generated/c/boringssl/linux-x86_64/boringssl/dsa.bot (import boringssl::dsa)	ok		0	ok
+a	u0301	generated/c/boringssl/linux-x86_64/boringssl/ec.bot (import boringssl::ec)	ok		0	ok
+a	u0302	generated/c/boringssl/linux-x86_64/boringssl/ec_key.bot (import boringssl::ec_key)	ok		0	ok
+a	u0303	generated/c/boringssl/linux-x86_64/boringssl/ecdh.bot (import boringssl::ecdh)	ok		0	ok
+a	u0304	generated/c/boringssl/linux-x86_64/boringssl/ecdsa.bot (import boringssl::ecdsa)	ok		0	ok
+a	u0305	generated/c/boringssl/linux-x86_64/boringssl/engine.bot (import boringssl::engine)	ok		0	ok
+a	u0306	generated/c/boringssl/linux-x86_64/boringssl/err.bot (import boringssl::err)	ok		0	ok
+a	u0307	generated/c/boringssl/linux-x86_64/boringssl/evp.bot (import boringssl::evp)	ok		0	ok
+a	u0308	generated/c/boringssl/linux-x86_64/boringssl/evp_errors.bot (import boringssl::evp_errors)	ok		0	ok
+a	u0309	generated/c/boringssl/linux-x86_64/boringssl/ex_data.bot (import boringssl::ex_data)	ok		0	ok
+a	u0310	generated/c/boringssl/linux-x86_64/boringssl/hkdf.bot (import boringssl::hkdf)	ok		0	ok
+a	u0311	generated/c/boringssl/linux-x86_64/boringssl/hmac.bot (import boringssl::hmac)	ok		0	ok
+a	u0312	generated/c/boringssl/linux-x86_64/boringssl/hpke.bot (import boringssl::hpke)	ok		0	ok
+a	u0313	generated/c/boringssl/linux-x86_64/boringssl/hrss.bot (import boringssl::hrss)	ok		0	ok
+a	u0314	generated/c/boringssl/linux-x86_64/boringssl/kdf.bot (import boringssl::kdf)	ok		0	ok
+a	u0315	generated/c/boringssl/linux-x86_64/boringssl/layouts.bot (import boringssl::layouts)	ok		0	ok
+a	u0316	generated/c/boringssl/linux-x86_64/boringssl/md4.bot (import boringssl::md4)	ok		0	ok
+a	u0317	generated/c/boringssl/linux-x86_64/boringssl/md5.bot (import boringssl::md5)	ok		0	ok
+a	u0318	generated/c/boringssl/linux-x86_64/boringssl/mem.bot (import boringssl::mem)	ok		0	ok
+a	u0319	generated/c/boringssl/linux-x86_64/boringssl/mldsa.bot (import boringssl::mldsa)	ok		0	ok
+a	u0320	generated/c/boringssl/linux-x86_64/boringssl/mlkem.bot (import boringssl::mlkem)	ok		0	ok
+a	u0321	generated/c/boringssl/linux-x86_64/boringssl/nid.bot (import boringssl::nid)	ok		0	ok
+a	u0322	generated/c/boringssl/linux-x86_64/boringssl/obj.bot (import boringssl::obj)	ok		0	ok
+a	u0323	generated/c/boringssl/linux-x86_64/boringssl/pem.bot (import boringssl::pem)	ok		0	ok
+a	u0324	generated/c/boringssl/linux-x86_64/boringssl/pkcs7.bot (import boringssl::pkcs7)	ok		0	ok
+a	u0325	generated/c/boringssl/linux-x86_64/boringssl/pkcs8.bot (import boringssl::pkcs8)	ok		0	ok
+a	u0326	generated/c/boringssl/linux-x86_64/boringssl/pool.bot (import boringssl::pool)	ok		0	ok
+a	u0327	generated/c/boringssl/linux-x86_64/boringssl/posix_time.bot (import boringssl::posix_time)	ok		0	ok
+a	u0328	generated/c/boringssl/linux-x86_64/boringssl/rand.bot (import boringssl::rand)	ok		0	ok
+a	u0329	generated/c/boringssl/linux-x86_64/boringssl/rc4.bot (import boringssl::rc4)	ok		0	ok
+a	u0330	generated/c/boringssl/linux-x86_64/boringssl/ripemd.bot (import boringssl::ripemd)	ok		0	ok
+a	u0331	generated/c/boringssl/linux-x86_64/boringssl/rsa.bot (import boringssl::rsa)	ok		0	ok
+a	u0332	generated/c/boringssl/linux-x86_64/boringssl/sha.bot (import boringssl::sha)	ok		0	ok
+a	u0333	generated/c/boringssl/linux-x86_64/boringssl/sha2.bot (import boringssl::sha2)	ok		0	ok
+a	u0334	generated/c/boringssl/linux-x86_64/boringssl/siphash.bot (import boringssl::siphash)	ok		0	ok
+a	u0335	generated/c/boringssl/linux-x86_64/boringssl/slhdsa.bot (import boringssl::slhdsa)	ok		0	ok
+a	u0336	generated/c/boringssl/linux-x86_64/boringssl/ssl.bot (import boringssl::ssl)	ok		0	ok
+a	u0337	generated/c/boringssl/linux-x86_64/boringssl/ssl3.bot (import boringssl::ssl3)	ok		0	ok
+a	u0338	generated/c/boringssl/linux-x86_64/boringssl/stack.bot (import boringssl::stack)	ok		0	ok
+a	u0339	generated/c/boringssl/linux-x86_64/boringssl/thread.bot (import boringssl::thread)	ok		0	ok
+a	u0340	generated/c/boringssl/linux-x86_64/boringssl/thunks/asn1.bot (import boringssl::thunks::asn1)	ok		0	ok
+a	u0341	generated/c/boringssl/linux-x86_64/boringssl/thunks/asn1t.bot (import boringssl::thunks::asn1t)	ok		0	ok
+a	u0342	generated/c/boringssl/linux-x86_64/boringssl/thunks/bio.bot (import boringssl::thunks::bio)	ok		0	ok
+a	u0343	generated/c/boringssl/linux-x86_64/boringssl/thunks/bytestring.bot (import boringssl::thunks::bytestring)	ok		0	ok
+a	u0344	generated/c/boringssl/linux-x86_64/boringssl/thunks/conf.bot (import boringssl::thunks::conf)	ok		0	ok
+a	u0345	generated/c/boringssl/linux-x86_64/boringssl/thunks/err.bot (import boringssl::thunks::err)	ok		0	ok
+a	u0346	generated/c/boringssl/linux-x86_64/boringssl/thunks/pool.bot (import boringssl::thunks::pool)	ok		0	ok
+a	u0347	generated/c/boringssl/linux-x86_64/boringssl/thunks/ssl.bot (import boringssl::thunks::ssl)	ok		0	ok
+a	u0348	generated/c/boringssl/linux-x86_64/boringssl/thunks/stack.bot (import boringssl::thunks::stack)	ok		0	ok
+a	u0349	generated/c/boringssl/linux-x86_64/boringssl/thunks/trust_token.bot (import boringssl::thunks::trust_token)	ok		0	ok
+a	u0350	generated/c/boringssl/linux-x86_64/boringssl/thunks/x509.bot (import boringssl::thunks::x509)	ok		0	ok
+a	u0351	generated/c/boringssl/linux-x86_64/boringssl/tls1.bot (import boringssl::tls1)	ok		0	ok
+a	u0352	generated/c/boringssl/linux-x86_64/boringssl/tls_prf.bot (import boringssl::tls_prf)	ok		0	ok
+a	u0353	generated/c/boringssl/linux-x86_64/boringssl/trust_token.bot (import boringssl::trust_token)	ok		0	ok
+a	u0354	generated/c/boringssl/linux-x86_64/boringssl/x509.bot (import boringssl::x509)	ok		0	ok
+a	u0355	generated/c/boringssl/linux-x86_64/boringssl/x509v3.bot (import boringssl::x509v3)	ok		0	ok
+a	u0356	generated/c/boringssl/linux-x86_64/boringssl/x509v3_errors.bot (import boringssl::x509v3_errors)	ok		0	ok
+a	u0357	generated/c/boringssl/linux-x86_64/boringssl/xwing.bot (import boringssl::xwing)	ok		0	ok
+a	u0358	generated/c/sdl3/linux-aarch64/sdl3/assert.bot (import sdl3::assert)	ok		0	ok
+a	u0359	generated/c/sdl3/linux-aarch64/sdl3/asyncio.bot (import sdl3::asyncio)	ok		0	ok
+a	u0360	generated/c/sdl3/linux-aarch64/sdl3/atomic.bot (import sdl3::atomic)	ok		0	ok
+a	u0361	generated/c/sdl3/linux-aarch64/sdl3/audio.bot (import sdl3::audio)	ok		0	ok
+a	u0362	generated/c/sdl3/linux-aarch64/sdl3/blendmode.bot (import sdl3::blendmode)	ok		0	ok
+a	u0363	generated/c/sdl3/linux-aarch64/sdl3/camera.bot (import sdl3::camera)	ok		0	ok
+a	u0364	generated/c/sdl3/linux-aarch64/sdl3/clipboard.bot (import sdl3::clipboard)	ok		0	ok
+a	u0365	generated/c/sdl3/linux-aarch64/sdl3/cpuinfo.bot (import sdl3::cpuinfo)	ok		0	ok
+a	u0366	generated/c/sdl3/linux-aarch64/sdl3/ctypes.bot (import sdl3::ctypes)	ok		0	ok
+a	u0367	generated/c/sdl3/linux-aarch64/sdl3/dialog.bot (import sdl3::dialog)	ok		0	ok
+a	u0368	generated/c/sdl3/linux-aarch64/sdl3/dlopennote.bot (import sdl3::dlopennote)	ok		0	ok
+a	u0369	generated/c/sdl3/linux-aarch64/sdl3/endian.bot (import sdl3::endian)	ok		0	ok
+a	u0370	generated/c/sdl3/linux-aarch64/sdl3/error_h.bot (import sdl3::error_h)	ok		0	ok
+a	u0371	generated/c/sdl3/linux-aarch64/sdl3/events.bot (import sdl3::events)	ok		0	ok
+a	u0372	generated/c/sdl3/linux-aarch64/sdl3/filesystem.bot (import sdl3::filesystem)	ok		0	ok
+a	u0373	generated/c/sdl3/linux-aarch64/sdl3/gamepad.bot (import sdl3::gamepad)	ok		0	ok
+a	u0374	generated/c/sdl3/linux-aarch64/sdl3/gpu.bot (import sdl3::gpu)	ok		0	ok
+a	u0375	generated/c/sdl3/linux-aarch64/sdl3/haptic.bot (import sdl3::haptic)	ok		0	ok
+a	u0376	generated/c/sdl3/linux-aarch64/sdl3/hidapi.bot (import sdl3::hidapi)	ok		0	ok
+a	u0377	generated/c/sdl3/linux-aarch64/sdl3/hints.bot (import sdl3::hints)	ok		0	ok
+a	u0378	generated/c/sdl3/linux-aarch64/sdl3/init.bot (import sdl3::init)	ok		0	ok
+a	u0379	generated/c/sdl3/linux-aarch64/sdl3/iostream.bot (import sdl3::iostream)	ok		0	ok
+a	u0380	generated/c/sdl3/linux-aarch64/sdl3/joystick.bot (import sdl3::joystick)	ok		0	ok
+a	u0381	generated/c/sdl3/linux-aarch64/sdl3/keyboard.bot (import sdl3::keyboard)	ok		0	ok
+a	u0382	generated/c/sdl3/linux-aarch64/sdl3/keycode.bot (import sdl3::keycode)	ok		0	ok
+a	u0383	generated/c/sdl3/linux-aarch64/sdl3/layouts.bot (import sdl3::layouts)	ok		0	ok
+a	u0384	generated/c/sdl3/linux-aarch64/sdl3/loadso.bot (import sdl3::loadso)	ok		0	ok
+a	u0385	generated/c/sdl3/linux-aarch64/sdl3/locale.bot (import sdl3::locale)	ok		0	ok
+a	u0386	generated/c/sdl3/linux-aarch64/sdl3/log.bot (import sdl3::log)	ok		0	ok
+a	u0387	generated/c/sdl3/linux-aarch64/sdl3/messagebox.bot (import sdl3::messagebox)	ok		0	ok
+a	u0388	generated/c/sdl3/linux-aarch64/sdl3/metal.bot (import sdl3::metal)	ok		0	ok
+a	u0389	generated/c/sdl3/linux-aarch64/sdl3/misc.bot (import sdl3::misc)	ok		0	ok
+a	u0390	generated/c/sdl3/linux-aarch64/sdl3/mouse.bot (import sdl3::mouse)	ok		0	ok
+a	u0391	generated/c/sdl3/linux-aarch64/sdl3/mutex.bot (import sdl3::mutex)	ok		0	ok
+a	u0392	generated/c/sdl3/linux-aarch64/sdl3/pen.bot (import sdl3::pen)	ok		0	ok
+a	u0393	generated/c/sdl3/linux-aarch64/sdl3/pixels.bot (import sdl3::pixels)	ok		0	ok
+a	u0394	generated/c/sdl3/linux-aarch64/sdl3/platform.bot (import sdl3::platform)	ok		0	ok
+a	u0395	generated/c/sdl3/linux-aarch64/sdl3/platform_defines.bot (import sdl3::platform_defines)	ok		0	ok
+a	u0396	generated/c/sdl3/linux-aarch64/sdl3/power.bot (import sdl3::power)	ok		0	ok
+a	u0397	generated/c/sdl3/linux-aarch64/sdl3/process.bot (import sdl3::process)	ok		0	ok
+a	u0398	generated/c/sdl3/linux-aarch64/sdl3/properties.bot (import sdl3::properties)	ok		0	ok
+a	u0399	generated/c/sdl3/linux-aarch64/sdl3/rect.bot (import sdl3::rect)	ok		0	ok
+a	u0400	generated/c/sdl3/linux-aarch64/sdl3/render.bot (import sdl3::render)	ok		0	ok
+a	u0401	generated/c/sdl3/linux-aarch64/sdl3/scancode.bot (import sdl3::scancode)	ok		0	ok
+a	u0402	generated/c/sdl3/linux-aarch64/sdl3/sensor.bot (import sdl3::sensor)	ok		0	ok
+a	u0403	generated/c/sdl3/linux-aarch64/sdl3/stdinc.bot (import sdl3::stdinc)	ok		0	ok
+a	u0404	generated/c/sdl3/linux-aarch64/sdl3/storage.bot (import sdl3::storage)	ok		0	ok
+a	u0405	generated/c/sdl3/linux-aarch64/sdl3/surface.bot (import sdl3::surface)	ok		0	ok
+a	u0406	generated/c/sdl3/linux-aarch64/sdl3/system.bot (import sdl3::system)	ok		0	ok
+a	u0407	generated/c/sdl3/linux-aarch64/sdl3/thread.bot (import sdl3::thread)	ok		0	ok
+a	u0408	generated/c/sdl3/linux-aarch64/sdl3/thunks/bits.bot (import sdl3::thunks::bits)	ok		0	ok
+a	u0409	generated/c/sdl3/linux-aarch64/sdl3/thunks/endian.bot (import sdl3::thunks::endian)	ok		0	ok
+a	u0410	generated/c/sdl3/linux-aarch64/sdl3/thunks/rect.bot (import sdl3::thunks::rect)	ok		0	ok
+a	u0411	generated/c/sdl3/linux-aarch64/sdl3/thunks/stdinc.bot (import sdl3::thunks::stdinc)	ok		0	ok
+a	u0412	generated/c/sdl3/linux-aarch64/sdl3/time.bot (import sdl3::time)	ok		0	ok
+a	u0413	generated/c/sdl3/linux-aarch64/sdl3/timer.bot (import sdl3::timer)	ok		0	ok
+a	u0414	generated/c/sdl3/linux-aarch64/sdl3/touch.bot (import sdl3::touch)	ok		0	ok
+a	u0415	generated/c/sdl3/linux-aarch64/sdl3/tray.bot (import sdl3::tray)	ok		0	ok
+a	u0416	generated/c/sdl3/linux-aarch64/sdl3/version.bot (import sdl3::version)	ok		0	ok
+a	u0417	generated/c/sdl3/linux-aarch64/sdl3/video.bot (import sdl3::video)	ok		0	ok
+a	u0418	generated/c/sdl3/linux-x86_64/sdl3/assert.bot (import sdl3::assert)	ok		0	ok
+a	u0419	generated/c/sdl3/linux-x86_64/sdl3/asyncio.bot (import sdl3::asyncio)	ok		0	ok
+a	u0420	generated/c/sdl3/linux-x86_64/sdl3/atomic.bot (import sdl3::atomic)	ok		0	ok
+a	u0421	generated/c/sdl3/linux-x86_64/sdl3/audio.bot (import sdl3::audio)	ok		0	ok
+a	u0422	generated/c/sdl3/linux-x86_64/sdl3/blendmode.bot (import sdl3::blendmode)	ok		0	ok
+a	u0423	generated/c/sdl3/linux-x86_64/sdl3/camera.bot (import sdl3::camera)	ok		0	ok
+a	u0424	generated/c/sdl3/linux-x86_64/sdl3/clipboard.bot (import sdl3::clipboard)	ok		0	ok
+a	u0425	generated/c/sdl3/linux-x86_64/sdl3/cpuinfo.bot (import sdl3::cpuinfo)	ok		0	ok
+a	u0426	generated/c/sdl3/linux-x86_64/sdl3/ctypes.bot (import sdl3::ctypes)	ok		0	ok
+a	u0427	generated/c/sdl3/linux-x86_64/sdl3/dialog.bot (import sdl3::dialog)	ok		0	ok
+a	u0428	generated/c/sdl3/linux-x86_64/sdl3/dlopennote.bot (import sdl3::dlopennote)	ok		0	ok
+a	u0429	generated/c/sdl3/linux-x86_64/sdl3/endian.bot (import sdl3::endian)	ok		0	ok
+a	u0430	generated/c/sdl3/linux-x86_64/sdl3/error_h.bot (import sdl3::error_h)	ok		0	ok
+a	u0431	generated/c/sdl3/linux-x86_64/sdl3/events.bot (import sdl3::events)	ok		0	ok
+a	u0432	generated/c/sdl3/linux-x86_64/sdl3/filesystem.bot (import sdl3::filesystem)	ok		0	ok
+a	u0433	generated/c/sdl3/linux-x86_64/sdl3/gamepad.bot (import sdl3::gamepad)	ok		0	ok
+a	u0434	generated/c/sdl3/linux-x86_64/sdl3/gpu.bot (import sdl3::gpu)	ok		0	ok
+a	u0435	generated/c/sdl3/linux-x86_64/sdl3/haptic.bot (import sdl3::haptic)	ok		0	ok
+a	u0436	generated/c/sdl3/linux-x86_64/sdl3/hidapi.bot (import sdl3::hidapi)	ok		0	ok
+a	u0437	generated/c/sdl3/linux-x86_64/sdl3/hints.bot (import sdl3::hints)	ok		0	ok
+a	u0438	generated/c/sdl3/linux-x86_64/sdl3/init.bot (import sdl3::init)	ok		0	ok
+a	u0439	generated/c/sdl3/linux-x86_64/sdl3/iostream.bot (import sdl3::iostream)	ok		0	ok
+a	u0440	generated/c/sdl3/linux-x86_64/sdl3/joystick.bot (import sdl3::joystick)	ok		0	ok
+a	u0441	generated/c/sdl3/linux-x86_64/sdl3/keyboard.bot (import sdl3::keyboard)	ok		0	ok
+a	u0442	generated/c/sdl3/linux-x86_64/sdl3/keycode.bot (import sdl3::keycode)	ok		0	ok
+a	u0443	generated/c/sdl3/linux-x86_64/sdl3/layouts.bot (import sdl3::layouts)	ok		0	ok
+a	u0444	generated/c/sdl3/linux-x86_64/sdl3/loadso.bot (import sdl3::loadso)	ok		0	ok
+a	u0445	generated/c/sdl3/linux-x86_64/sdl3/locale.bot (import sdl3::locale)	ok		0	ok
+a	u0446	generated/c/sdl3/linux-x86_64/sdl3/log.bot (import sdl3::log)	ok		0	ok
+a	u0447	generated/c/sdl3/linux-x86_64/sdl3/messagebox.bot (import sdl3::messagebox)	ok		0	ok
+a	u0448	generated/c/sdl3/linux-x86_64/sdl3/metal.bot (import sdl3::metal)	ok		0	ok
+a	u0449	generated/c/sdl3/linux-x86_64/sdl3/misc.bot (import sdl3::misc)	ok		0	ok
+a	u0450	generated/c/sdl3/linux-x86_64/sdl3/mouse.bot (import sdl3::mouse)	ok		0	ok
+a	u0451	generated/c/sdl3/linux-x86_64/sdl3/mutex.bot (import sdl3::mutex)	ok		0	ok
+a	u0452	generated/c/sdl3/linux-x86_64/sdl3/pen.bot (import sdl3::pen)	ok		0	ok
+a	u0453	generated/c/sdl3/linux-x86_64/sdl3/pixels.bot (import sdl3::pixels)	ok		0	ok
+a	u0454	generated/c/sdl3/linux-x86_64/sdl3/platform.bot (import sdl3::platform)	ok		0	ok
+a	u0455	generated/c/sdl3/linux-x86_64/sdl3/platform_defines.bot (import sdl3::platform_defines)	ok		0	ok
+a	u0456	generated/c/sdl3/linux-x86_64/sdl3/power.bot (import sdl3::power)	ok		0	ok
+a	u0457	generated/c/sdl3/linux-x86_64/sdl3/process.bot (import sdl3::process)	ok		0	ok
+a	u0458	generated/c/sdl3/linux-x86_64/sdl3/properties.bot (import sdl3::properties)	ok		0	ok
+a	u0459	generated/c/sdl3/linux-x86_64/sdl3/rect.bot (import sdl3::rect)	ok		0	ok
+a	u0460	generated/c/sdl3/linux-x86_64/sdl3/render.bot (import sdl3::render)	ok		0	ok
+a	u0461	generated/c/sdl3/linux-x86_64/sdl3/scancode.bot (import sdl3::scancode)	ok		0	ok
+a	u0462	generated/c/sdl3/linux-x86_64/sdl3/sensor.bot (import sdl3::sensor)	ok		0	ok
+a	u0463	generated/c/sdl3/linux-x86_64/sdl3/stdinc.bot (import sdl3::stdinc)	ok		0	ok
+a	u0464	generated/c/sdl3/linux-x86_64/sdl3/storage.bot (import sdl3::storage)	ok		0	ok
+a	u0465	generated/c/sdl3/linux-x86_64/sdl3/surface.bot (import sdl3::surface)	ok		0	ok
+a	u0466	generated/c/sdl3/linux-x86_64/sdl3/system.bot (import sdl3::system)	ok		0	ok
+a	u0467	generated/c/sdl3/linux-x86_64/sdl3/thread.bot (import sdl3::thread)	ok		0	ok
+a	u0468	generated/c/sdl3/linux-x86_64/sdl3/thunks/bits.bot (import sdl3::thunks::bits)	ok		0	ok
+a	u0469	generated/c/sdl3/linux-x86_64/sdl3/thunks/endian.bot (import sdl3::thunks::endian)	ok		0	ok
+a	u0470	generated/c/sdl3/linux-x86_64/sdl3/thunks/rect.bot (import sdl3::thunks::rect)	ok		0	ok
+a	u0471	generated/c/sdl3/linux-x86_64/sdl3/thunks/stdinc.bot (import sdl3::thunks::stdinc)	ok		0	ok
+a	u0472	generated/c/sdl3/linux-x86_64/sdl3/time.bot (import sdl3::time)	ok		0	ok
+a	u0473	generated/c/sdl3/linux-x86_64/sdl3/timer.bot (import sdl3::timer)	ok		0	ok
+a	u0474	generated/c/sdl3/linux-x86_64/sdl3/touch.bot (import sdl3::touch)	ok		0	ok
+a	u0475	generated/c/sdl3/linux-x86_64/sdl3/tray.bot (import sdl3::tray)	ok		0	ok
+a	u0476	generated/c/sdl3/linux-x86_64/sdl3/version.bot (import sdl3::version)	ok		0	ok
+a	u0477	generated/c/sdl3/linux-x86_64/sdl3/video.bot (import sdl3::video)	ok		0	ok
+a	u0478	generated/c/tcl/linux-aarch64/tcl/ctypes.bot (import tcl::ctypes)	ok		0	ok
+a	u0479	generated/c/tcl/linux-aarch64/tcl/decls.bot (import tcl::decls)	ok		0	ok
+a	u0480	generated/c/tcl/linux-aarch64/tcl/layouts.bot (import tcl::layouts)	ok		0	ok
+a	u0481	generated/c/tcl/linux-aarch64/tcl/oo.bot (import tcl::oo)	ok		0	ok
+a	u0482	generated/c/tcl/linux-aarch64/tcl/oodecls.bot (import tcl::oodecls)	ok		0	ok
+a	u0483	generated/c/tcl/linux-aarch64/tcl/platdecls.bot (import tcl::platdecls)	ok		0	ok
+a	u0484	generated/c/tcl/linux-aarch64/tcl/tcl.bot (import tcl::tcl)	ok		0	ok
+a	u0485	generated/c/tcl/linux-aarch64/tcl/thunks/decls.bot (import tcl::thunks::decls)	ok		0	ok
+a	u0486	generated/c/tcl/linux-aarch64/tcl/thunks/oo.bot (import tcl::thunks::oo)	ok		0	ok
+a	u0487	generated/c/tcl/linux-aarch64/tcl/thunks/tcl.bot (import tcl::thunks::tcl)	ok		0	ok
+a	u0488	generated/c/tcl/linux-aarch64/tcl/tommathdecls.bot (import tcl::tommathdecls)	ok		0	ok
+a	u0489	generated/c/tcl/linux-x86_64/tcl/ctypes.bot (import tcl::ctypes)	ok		0	ok
+a	u0490	generated/c/tcl/linux-x86_64/tcl/decls.bot (import tcl::decls)	ok		0	ok
+a	u0491	generated/c/tcl/linux-x86_64/tcl/layouts.bot (import tcl::layouts)	ok		0	ok
+a	u0492	generated/c/tcl/linux-x86_64/tcl/oo.bot (import tcl::oo)	ok		0	ok
+a	u0493	generated/c/tcl/linux-x86_64/tcl/oodecls.bot (import tcl::oodecls)	ok		0	ok
+a	u0494	generated/c/tcl/linux-x86_64/tcl/platdecls.bot (import tcl::platdecls)	ok		0	ok
+a	u0495	generated/c/tcl/linux-x86_64/tcl/tcl.bot (import tcl::tcl)	ok		0	ok
+a	u0496	generated/c/tcl/linux-x86_64/tcl/thunks/decls.bot (import tcl::thunks::decls)	ok		0	ok
+a	u0497	generated/c/tcl/linux-x86_64/tcl/thunks/oo.bot (import tcl::thunks::oo)	ok		0	ok
+a	u0498	generated/c/tcl/linux-x86_64/tcl/thunks/tcl.bot (import tcl::thunks::tcl)	ok		0	ok
+a	u0499	generated/c/tcl/linux-x86_64/tcl/tommathdecls.bot (import tcl::tommathdecls)	ok		0	ok
+a	u0500	generated/c/tclstubs/linux-x86_64/tclstubs/ctypes.bot (import tclstubs::ctypes)	ok		0	ok
+a	u0501	generated/c/tclstubs/linux-x86_64/tclstubs/decls.bot (import tclstubs::decls)	ok		0	ok
+a	u0502	generated/c/tclstubs/linux-x86_64/tclstubs/layouts.bot (import tclstubs::layouts)	ok		0	ok
+a	u0503	generated/c/tclstubs/linux-x86_64/tclstubs/oo.bot (import tclstubs::oo)	ok		0	ok
+a	u0504	generated/c/tclstubs/linux-x86_64/tclstubs/platdecls.bot (import tclstubs::platdecls)	ok		0	ok
+a	u0505	generated/c/tclstubs/linux-x86_64/tclstubs/tcl.bot (import tclstubs::tcl)	ok		0	ok
+a	u0506	generated/c/tclstubs/linux-x86_64/tclstubs/thunks/decls.bot (import tclstubs::thunks::decls)	ok		0	ok
+a	u0507	generated/c/tclstubs/linux-x86_64/tclstubs/thunks/oodecls.bot (import tclstubs::thunks::oodecls)	ok		0	ok
+a	u0508	generated/c/tclstubs/linux-x86_64/tclstubs/thunks/platdecls.bot (import tclstubs::thunks::platdecls)	ok		0	ok
+a	u0509	generated/c/tclstubs/linux-x86_64/tclstubs/thunks/tcl.bot (import tclstubs::thunks::tcl)	ok		0	ok
+a	u0510	generated/c/tclstubs/linux-x86_64/tclstubs/thunks/tommathdecls.bot (import tclstubs::thunks::tommathdecls)	ok		0	ok
+a	u0511	generated/c/tclstubs/linux-x86_64/tclstubs/tommathdecls.bot (import tclstubs::tommathdecls)	ok		0	ok
+a	u0512	generated/c/win32/windows-x86_64-gnu/win32/apiset.bot (import win32::apiset)	ok		0	ok
+a	u0513	generated/c/win32/windows-x86_64-gnu/win32/basetsd.bot (import win32::basetsd)	ok		0	ok
+a	u0514	generated/c/win32/windows-x86_64-gnu/win32/ctypes.bot (import win32::ctypes)	ok		0	ok
+a	u0515	generated/c/win32/windows-x86_64-gnu/win32/datetimeapi.bot (import win32::datetimeapi)	ok		0	ok
+a	u0516	generated/c/win32/windows-x86_64-gnu/win32/debugapi.bot (import win32::debugapi)	ok		0	ok
+a	u0517	generated/c/win32/windows-x86_64-gnu/win32/errhandlingapi.bot (import win32::errhandlingapi)	ok		0	ok
+a	u0518	generated/c/win32/windows-x86_64-gnu/win32/fibersapi.bot (import win32::fibersapi)	ok		0	ok
+a	u0519	generated/c/win32/windows-x86_64-gnu/win32/fileapi.bot (import win32::fileapi)	ok		0	ok
+a	u0520	generated/c/win32/windows-x86_64-gnu/win32/fltwinerror.bot (import win32::fltwinerror)	ok		0	ok
+a	u0521	generated/c/win32/windows-x86_64-gnu/win32/handleapi.bot (import win32::handleapi)	ok		0	ok
+a	u0522	generated/c/win32/windows-x86_64-gnu/win32/heapapi.bot (import win32::heapapi)	ok		0	ok
+a	u0523	generated/c/win32/windows-x86_64-gnu/win32/imm.bot (import win32::imm)	ok		0	ok
+a	u0524	generated/c/win32/windows-x86_64-gnu/win32/interlockedapi.bot (import win32::interlockedapi)	ok		0	ok
+a	u0525	generated/c/win32/windows-x86_64-gnu/win32/ioapiset.bot (import win32::ioapiset)	ok		0	ok
+a	u0526	generated/c/win32/windows-x86_64-gnu/win32/jobapi.bot (import win32::jobapi)	ok		0	ok
+a	u0527	generated/c/win32/windows-x86_64-gnu/win32/ktmtypes.bot (import win32::ktmtypes)	ok		0	ok
+a	u0528	generated/c/win32/windows-x86_64-gnu/win32/layouts.bot (import win32::layouts)	ok		0	ok
+a	u0529	generated/c/win32/windows-x86_64-gnu/win32/libloaderapi.bot (import win32::libloaderapi)	ok		0	ok
+a	u0530	generated/c/win32/windows-x86_64-gnu/win32/mcx.bot (import win32::mcx)	ok		0	ok
+a	u0531	generated/c/win32/windows-x86_64-gnu/win32/memoryapi.bot (import win32::memoryapi)	ok		0	ok
+a	u0532	generated/c/win32/windows-x86_64-gnu/win32/minwinbase.bot (import win32::minwinbase)	ok		0	ok
+a	u0533	generated/c/win32/windows-x86_64-gnu/win32/minwindef.bot (import win32::minwindef)	ok		0	ok
+a	u0534	generated/c/win32/windows-x86_64-gnu/win32/namedpipeapi.bot (import win32::namedpipeapi)	ok		0	ok
+a	u0535	generated/c/win32/windows-x86_64-gnu/win32/namespaceapi.bot (import win32::namespaceapi)	ok		0	ok
+a	u0536	generated/c/win32/windows-x86_64-gnu/win32/processenv.bot (import win32::processenv)	ok		0	ok
+a	u0537	generated/c/win32/windows-x86_64-gnu/win32/processthreadsapi.bot (import win32::processthreadsapi)	ok		0	ok
+a	u0538	generated/c/win32/windows-x86_64-gnu/win32/processtopologyapi.bot (import win32::processtopologyapi)	ok		0	ok
+a	u0539	generated/c/win32/windows-x86_64-gnu/win32/profileapi.bot (import win32::profileapi)	ok		0	ok
+a	u0540	generated/c/win32/windows-x86_64-gnu/win32/realtimeapiset.bot (import win32::realtimeapiset)	ok		0	ok
+a	u0541	generated/c/win32/windows-x86_64-gnu/win32/reason.bot (import win32::reason)	ok		0	ok
+a	u0542	generated/c/win32/windows-x86_64-gnu/win32/sdkddkver.bot (import win32::sdkddkver)	ok		0	ok
+a	u0543	generated/c/win32/windows-x86_64-gnu/win32/securityappcontainer.bot (import win32::securityappcontainer)	ok		0	ok
+a	u0544	generated/c/win32/windows-x86_64-gnu/win32/securitybaseapi.bot (import win32::securitybaseapi)	ok		0	ok
+a	u0545	generated/c/win32/windows-x86_64-gnu/win32/stralign.bot (import win32::stralign)	ok		0	ok
+a	u0546	generated/c/win32/windows-x86_64-gnu/win32/stringapiset.bot (import win32::stringapiset)	ok		0	ok
+a	u0547	generated/c/win32/windows-x86_64-gnu/win32/synchapi.bot (import win32::synchapi)	ok		0	ok
+a	u0548	generated/c/win32/windows-x86_64-gnu/win32/sysinfoapi.bot (import win32::sysinfoapi)	ok		0	ok
+a	u0549	generated/c/win32/windows-x86_64-gnu/win32/systemtopologyapi.bot (import win32::systemtopologyapi)	ok		0	ok
+a	u0550	generated/c/win32/windows-x86_64-gnu/win32/threadpoolapiset.bot (import win32::threadpoolapiset)	ok		0	ok
+a	u0551	generated/c/win32/windows-x86_64-gnu/win32/threadpoollegacyapiset.bot (import win32::threadpoollegacyapiset)	ok		0	ok
+a	u0552	generated/c/win32/windows-x86_64-gnu/win32/thunks/basetsd.bot (import win32::thunks::basetsd)	ok		0	ok
+a	u0553	generated/c/win32/windows-x86_64-gnu/win32/thunks/processthreadsapi.bot (import win32::thunks::processthreadsapi)	ok		0	ok
+a	u0554	generated/c/win32/windows-x86_64-gnu/win32/thunks/winbase.bot (import win32::thunks::winbase)	ok		0	ok
+a	u0555	generated/c/win32/windows-x86_64-gnu/win32/thunks/winnt.bot (import win32::thunks::winnt)	ok		0	ok
+a	u0556	generated/c/win32/windows-x86_64-gnu/win32/timezoneapi.bot (import win32::timezoneapi)	ok		0	ok
+a	u0557	generated/c/win32/windows-x86_64-gnu/win32/tvout.bot (import win32::tvout)	ok		0	ok
+a	u0558	generated/c/win32/windows-x86_64-gnu/win32/utilapiset.bot (import win32::utilapiset)	ok		0	ok
+a	u0559	generated/c/win32/windows-x86_64-gnu/win32/virtdisk.bot (import win32::virtdisk)	ok		0	ok
+a	u0560	generated/c/win32/windows-x86_64-gnu/win32/winapifamily.bot (import win32::winapifamily)	ok		0	ok
+a	u0561	generated/c/win32/windows-x86_64-gnu/win32/winbase.bot (import win32::winbase)	ok		0	ok
+a	u0562	generated/c/win32/windows-x86_64-gnu/win32/wincon.bot (import win32::wincon)	ok		0	ok
+a	u0563	generated/c/win32/windows-x86_64-gnu/win32/windef.bot (import win32::windef)	ok		0	ok
+a	u0564	generated/c/win32/windows-x86_64-gnu/win32/winerror.bot (import win32::winerror)	ok		0	ok
+a	u0565	generated/c/win32/windows-x86_64-gnu/win32/wingdi.bot (import win32::wingdi)	ok		0	ok
+a	u0566	generated/c/win32/windows-x86_64-gnu/win32/winnetwk.bot (import win32::winnetwk)	ok		0	ok
+a	u0567	generated/c/win32/windows-x86_64-gnu/win32/winnls.bot (import win32::winnls)	ok		0	ok
+a	u0568	generated/c/win32/windows-x86_64-gnu/win32/winnt.bot (import win32::winnt)	ok		0	ok
+a	u0569	generated/c/win32/windows-x86_64-gnu/win32/winreg.bot (import win32::winreg)	ok		0	ok
+a	u0570	generated/c/win32/windows-x86_64-gnu/win32/winsvc.bot (import win32::winsvc)	ok		0	ok
+a	u0571	generated/c/win32/windows-x86_64-gnu/win32/winuser.bot (import win32::winuser)	ok		0	ok
+a	u0572	generated/c/win32/windows-x86_64-gnu/win32/winver.bot (import win32::winver)	ok		0	ok
+a	u0573	generated/c/win32/windows-x86_64-gnu/win32/wnnc.bot (import win32::wnnc)	ok		0	ok
+a	u0574	generated/c/win32/windows-x86_64-gnu/win32/wow64apiset.bot (import win32::wow64apiset)	ok		0	ok
+a	u0575	audit/c-header/results/boringssl-prefix/layouts.bot	ok		0	ok
+a	u0576	audit/c-header/results/boringssl-shared/layouts.bot	ok		0	ok
+a	u0577	audit/c-header/results/boringssl-static/layouts.bot	ok		0	ok
+a	u0578	audit/c-header/results/tcl-embed/layouts.bot	ok		0	ok
+a	u0579	audit/c-header/results/tcl-notommath/layouts.bot	ok		0	ok
+a	u0580	audit/c-header/results/tcl-stubs/layouts.bot	ok		0	ok
+a	u0581	audit/compiler-service/probes/json/json_probe.bot	ok		0	ok
+a	u0582	audit/comprehensive-generated-code/bugs/handle-range-bigint.bot	ok		0	ok
+a	u0583	audit/comprehensive-generated-code/bugs/handle-range-entry.bot	ok		0	ok
+a	u0584	audit/comprehensive-generated-code/bugs/handle-return-result.bot	ok		0	ok
+a	u0585	audit/comprehensive-generated-code/bugs/module-closure-from-user-fn.bot	ok		0	ok
+a	u0586	audit/comprehensive-generated-code/probes/ascii-256.bot	ok		0	ok
+a	u0587	audit/comprehensive-generated-code/probes/byte-set-canonical.bot	ok		0	ok
+a	u0588	audit/comprehensive-generated-code/probes/byte-set-dynamic.bot	ok		0	ok
+a	u0589	audit/comprehensive-generated-code/probes/from-int-byte.bot	ok		0	ok
+a	u0590	audit/comprehensive-generated-code/probes/from-int-dynamic.bot	ok		0	ok
+a	u0591	audit/comprehensive-generated-code/probes/from-int-invalid.bot	error	CORE SEMANTIC KNOWN-ERROR	0	error
+a	u0592	audit/comprehensive-generated-code/probes/from-int-literal.bot	ok		0	ok
+a	u0593	audit/comprehensive-generated-code/probes/from-int-nonneg.bot	ok		0	ok
+a	u0594	audit/comprehensive-generated-code/probes/steady-ascii-capture.bot	ok		0	ok
+a	u0595	audit/comprehensive-generated-code/probes/steady-ascii-param.bot	ok		0	ok
+a	u0596	audit/comprehensive-generated-code/probes/steady-ascii.bot	ok		0	ok
+a	u0597	audit/comprehensive-generated-code/probes/web-unreserved-256.bot	ok		0	ok
+a	u0598	audit/comprehensive-generated-code/probes/web-unreserved-literals.bot	ok		0	ok
+a	u0599	audit/coroutine-fusion/programs/case-closure.bot	ok		0	new
+a	u0600	audit/coroutine-fusion/programs/case-context.bot	ok		0	new
+a	u0601	audit/coroutine-fusion/programs/case-eager.bot	ok		0	new
+a	u0602	audit/coroutine-fusion/programs/case-early.bot	ok		0	new
+a	u0603	audit/coroutine-fusion/programs/case-failure.bot	ok		0	new
+a	u0604	audit/coroutine-fusion/programs/case-gc.bot	ok		0	new
+a	u0605	audit/coroutine-fusion/programs/case-owners.bot	ok		0	new
+a	u0606	audit/coroutine-fusion/programs/case-plan.bot	ok		0	new
+a	u0607	audit/coroutine-fusion/programs/case-structure.bot	ok		0	new
+a	u0608	audit/coroutine-fusion/programs/case-tail.bot	ok		0	new
+a	u0609	audit/coroutine-fusion/programs/fallbacks.bot	ok		0	new
+a	u0610	audit/coroutine-fusion/programs/grid-procedural.bot	ok		0	new
+a	u0611	audit/coroutine-fusion/programs/grid.bot	ok		0	new
+a	u0612	audit/coroutine-fusion/programs/held-procedural.bot	ok		0	new
+a	u0613	audit/coroutine-fusion/programs/held.bot	ok		0	new
+a	u0614	audit/coroutine-fusion/programs/lcg-procedural.bot	ok		0	new
+a	u0615	audit/coroutine-fusion/programs/lcg-struct-procedural.bot	ok		0	new
+a	u0616	audit/coroutine-fusion/programs/lcg-struct.bot	ok		0	new
+a	u0617	audit/coroutine-fusion/programs/lcg.bot	ok		0	new
+a	u0618	audit/coroutine-fusion/programs/tokens-procedural.bot	ok		0	new
+a	u0619	audit/coroutine-fusion/programs/tokens.bot	ok		0	new
+a	u0620	audit/coroutine-fusion/programs/utf8-procedural.bot	ok		0	new
+a	u0621	audit/coroutine-fusion/programs/utf8.bot	ok		0	new
+a	u0622	audit/dfa/json/by_hand.bot	error	CORE SEMANTIC UNWRAPPED-YIELD	0	new
+a	u0623	audit/dfa/json/composition.bot	ok		0	new
+a	u0624	audit/dfa/json/conformance.bot	ok		0	new
+a	u0625	audit/dfa/json/example.bot	ok		0	new
+a	u0626	audit/dfa/json/recursive.bot	ok		0	new
+a	u0627	audit/dfa/json/variants.bot	ok		0	new
+a	u0628	audit/dfa/yaml/yaml_lex.bot	error	CORE SEMANTIC UNWRAPPED-YIELD	0	new
+a	u0629	audit/diagnostic-recovery/corpus/app-modules/program.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0630	audit/diagnostic-recovery/corpus/call-arguments/program.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0631	audit/diagnostic-recovery/corpus/functions-independent/program.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0632	audit/diagnostic-recovery/corpus/if-missing-colon/program.bot	error	SURFACE SYNTAX	0	error
+a	u0633	audit/diagnostic-recovery/corpus/loader-references/program.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0634	audit/diagnostic-recovery/corpus/mixed-phases/program.bot	error	CORE SEMANTIC UNBOUND	0	error
+a	u0635	audit/diagnostic-recovery/corpus/poisoned-binding/program.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0636	audit/diagnostic-recovery/corpus/resolution-taint/program.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0637	audit/diagnostic-recovery/corpus/s13-argument/program.bot	error	CORE SEMANTIC MISSING-IMPORT	0	error
+a	u0638	audit/diagnostic-recovery/corpus/s13-generic/program.bot	error	CORE SEMANTIC MISSING-IMPORT	0	error
+a	u0639	audit/diagnostic-recovery/corpus/s13-return/program.bot	error	CORE SEMANTIC MISSING-IMPORT	0	error
+a	u0640	audit/diagnostic-recovery/corpus/s17-if-operand/program.bot	error	SURFACE SYNTAX	0	error
+a	u0641	audit/diagnostic-recovery/corpus/s4-unhandled-set/program.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0642	audit/diagnostic-recovery/corpus/synthetic-closer/program.bot	error	SURFACE SYNTAX	0	error
+a	u0643	audit/direct-hir-native-path/probes/arg-cycle.bot	ok		0	ok
+a	u0644	audit/direct-hir-native-path/probes/closures.bot	ok		0	ok
+a	u0645	audit/direct-hir-native-path/probes/errors.bot	ok		0	ok
+a	u0646	audit/direct-hir-native-path/probes/exact-callables.bot	ok		0	ok
+a	u0647	audit/direct-hir-native-path/probes/loops.bot	ok		0	ok
+a	u0648	audit/direct-hir-native-path/probes/module-call.bot	ok		0	ok
+a	u0649	audit/direct-hir-native-path/probes/module-container.bot	ok		0	ok
+a	u0650	audit/direct-hir-native-path/probes/module-web.bot	error	NONE	0	error
+a	u0651	audit/direct-hir-native-path/probes/mutarray-typed.bot	ok		0	ok
+a	u0652	audit/direct-hir-native-path/probes/self-recursion.bot	ok		0	ok
+a	u0653	audit/direct-hir-native-path/probes/semantic-instances.bot	ok		0	ok
+a	u0654	audit/direct-hir-native-path/probes/shadow-early-late.bot	ok		0	ok
+a	u0655	audit/direct-hir-native-path/probes/shadow-param.bot	ok		0	ok
+a	u0656	audit/encode-utf8-allocation/programs/escape-parity.bot	ok		0	ok
+a	u0657	audit/encode-utf8-allocation/programs/query-value-steady.bot	ok		0	ok
+a	u0658	audit/exact-callable/probes/adv1.bot	ok		0	ok
+a	u0659	audit/exact-callable/probes/adv2.bot	ok		0	ok
+a	u0660	audit/exact-callable/probes/adv3.bot	ok		0	ok
+a	u0661	audit/exact-callable/probes/adv4.bot	ok		0	ok
+a	u0662	audit/exact-callable/probes/adv5.bot	ok		0	ok
+a	u0663	audit/exact-callable/probes/alias.bot	ok		0	ok
+a	u0664	audit/exact-callable/probes/capture-exact.bot	ok		0	ok
+a	u0665	audit/exact-callable/probes/dynamic.bot	ok		0	ok
+a	u0666	audit/exact-callable/probes/escapes.bot	ok		0	ok
+a	u0667	audit/exact-callable/probes/listheld.bot	ok		0	ok
+a	u0668	audit/exact-callable/probes/mixed.bot	ok		0	ok
+a	u0669	audit/exact-callable/probes/native-single.bot	ok		0	ok
+a	u0670	audit/exact-callable/probes/recursive.bot	ok		0	ok
+a	u0671	audit/exact-callable/probes/returned.bot	ok		0	ok
+a	u0672	audit/icy-tower/context-refactor/baseline/main.bot	error	SURFACE MODULE UNKNOWN-NAMESPACE	0	new
+a	u0673	audit/icy-tower/context-refactor/repro/a1-affine-pointer-in-context.bot	error	CORE SEMANTIC AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE	0	error
+a	u0674	audit/icy-tower/context-refactor/repro/a1b-destructured.bot	error	CORE SEMANTIC AFFINE-ERASURE-UNSUPPORTED	0	error
+a	u0675	audit/icy-tower/context-refactor/repro/a2-affine-aggregates-in-context.bot	error	CORE SEMANTIC AFFINE-ERASURE-UNSUPPORTED	0	error
+a	u0676	audit/icy-tower/context-refactor/repro/b1-mutable-context-state.bot	ok		0	ok
+a	u0677	audit/icy-tower/context-refactor/repro/b2-native-handle-table.bot	ok		0	ok
+a	u0678	audit/icy-tower/context-refactor/repro/b2b-bare-native-view-slot.bot	ok		0	ok
+a	u0679	audit/icy-tower/context-refactor/repro/c1-fallible-installation.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0680	audit/icy-tower/context-refactor/repro/c1b-installation-handler.bot	error	SURFACE SYNTAX	0	error
+a	u0681	audit/icy-tower/context-refactor/repro/c2-conditional-installation.bot	error	CORE SEMANTIC CONTEXT-INSTALLATION-UNSUPPORTED	0	error
+a	u0682	audit/icy-tower/context-refactor/repro/c3-affine-is-not-linear.bot	ok		0	ok
+a	u0683	audit/icy-tower/context-refactor/repro/e1-wrapper-context/main-both.bot	ok		0	ok
+a	u0684	audit/icy-tower/context-refactor/repro/e1-wrapper-context/main.bot	error	CORE SEMANTIC MISSING-CONTEXT	0	error
+a	u0685	audit/icy-tower/context-refactor/repro/f1-extern-rename-crash.bot	ok		0	ok
+a	u0686	audit/icy-tower/context-refactor/repro/g1-view-leak/main.bot	ok		1	ok
+a	u0687	audit/machine-code-proof-loss/probes/emailish-local-copy.bot	ok		0	ok
+a	u0688	audit/machine-code-proof-loss/probes/hof-capturing.bot	ok		0	ok
+a	u0689	audit/machine-code-proof-loss/probes/hof-single-exact.bot	ok		0	ok
+a	u0690	audit/machine-code-proof-loss/probes/hof-two-exact.bot	ok		0	ok
+a	u0691	audit/parameterized-mutablearray/tools/guard-elision.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0692	audit/post-native-stack/module-cases/main.bot	ok		0	ok
+a	u0693	audit/proof-census/probes/a-counted-loop-at.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0694	audit/proof-census/probes/b-mutarray-capacity.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0695	audit/proof-census/probes/c-slice.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0696	audit/proof-census/probes/d-early-return.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0697	audit/proof-census/probes/e-struct-domain-projection.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0698	audit/proof-census/probes/f-closed-abi-u64.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0699	audit/proof-census/probes/f2-closed-int-vs-struct.bot	ok		0	ok
+a	u0700	audit/proof-census/probes/g-induction-declared-param.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0701	audit/proof-census/probes/h-recursive-slice.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0702	audit/proof-census/probes/i-get-in-counted-loop.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0703	audit/proof-census/probes/k-method-spelling.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0704	audit/proof-census/probes/k2-bound-name-spelling.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0705	audit/proof-census/probes/l-loop-forms.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0706	audit/proof-census/probes/m-listloop-checked.bot	ok		0	ok
+a	u0707	audit/proof-census/probes/n-call-specific-transport.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0708	audit/proof-census/probes/o-lowercase-length.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0709	audit/proof-census/probes/p-param-inference-narrowing.bot	error	CORE SEMANTIC TYPE	0	error
+a	u0710	audit/proof-census/probes/q-countloop-interval.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0711	audit/proof-census/probes/r-return-facts.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0712	audit/proof-census/probes/s-struct-facts.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0713	audit/proof-census/probes/sound-a-open-induction-specialized.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0714	audit/proof-census/probes/sound-a-open-induction.bot	ok		0	ok
+a	u0715	audit/proof-census/probes/sound-b-control.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0716	audit/proof-census/probes/sound-b-return-range.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0717	audit/proof-census/probes/sound-c-listloop-break.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0718	audit/proof-census/probes/sound-c-listloop-continue.bot	ok		0	ok
+a	u0719	audit/proof-census/probes/t-relational-prover-pairs.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0720	audit/proof-census/probes/u-handler-exit.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0721	audit/proof-census/probes/v-allocate-size.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0722	audit/proof-census/probes/z-soundness-neighbours.bot	error	SURFACE MODULE MISSING-IMPORT	0	error
+a	u0723	audit/react-native/probe/rnprobe.bot	ok		0	ok
+a	u0724	audit/refactor/h1-attempt/ai_text_clean.bot	ok		0	ok
+a	u0725	audit/refactor/h1-attempt/variants/list-local.bot	ok		0	ok
+a	u0726	audit/refactor/h1-attempt/variants/list-program.bot	ok		0	ok
+a	u0727	audit/refactor/h1-attempt/variants/string-local.bot	ok		0	ok
+a	u0728	audit/refactor/kickoff-corpus/ai_text_clean.bot	ok		0	ok
+a	u0729	audit/refactor/kickoff-corpus/csv.bot	ok		0	ok
+a	u0730	audit/refactor/kickoff-corpus/csv_chunked.bot	ok		0	ok
+a	u0731	audit/refactor/kickoff-corpus/csv_geometric.bot	ok		0	ok
+a	u0732	audit/refactor/kickoff-corpus/csv_records.bot	ok		0	ok
+a	u0733	audit/refactor/kickoff-corpus/hashtable.bot	ok		0	ok
+a	u0734	audit/refactor/kickoff-corpus/lex-strategy.bot	ok		0	ok
+a	u0735	audit/refactor/kickoff-corpus/matmul.bot	ok		0	ok
+a	u0736	audit/refactor/kickoff-corpus/refined-strings.bot	ok		0	ok
+a	u0737	audit/refactor/kickoff-corpus/string_replace.bot	ok		0	ok
+a	u0738	audit/refactor/kickoff-corpus/string_reverse.bot	ok		0	ok
+a	u0739	audit/refactor/ripple/as-merged.bot	ok		0	ok
+a	u0740	audit/refactor/ripple/list-loop.bot	ok		0	ok
+a	u0741	audit/refactor/ripple/ripple.bot	ok		0	ok
+a	u0742	audit/refactor/ripple/set-per-call.bot	ok		0	ok
+a	u0743	audit/refactor/ripple/set-program.bot	ok		0	ok
+a	u0744	audit/strict-reference-determinism/experiment/csv_records-A-callee-first.bot	error	CORE SEMANTIC MUTABLE-PLACE-RECEIVER	0	error
+a	u0745	audit/strict-reference-determinism/experiment/csv_records-B-caller-first.bot	error	CORE SEMANTIC UNBOUND	0	error
+a	u0746	audit/strict-reference-determinism/experiment/csv_records-C-independent-order.bot	error	CORE SEMANTIC MUTABLE-PLACE-RECEIVER	0	error
+a	u0747	audit/string-allocation/programs/large-string.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0748	audit/syntax-recovery/experiments/a-expression/main.bot	error	SURFACE SYNTAX	0	new
+a	u0749	audit/syntax-recovery/experiments/a-expression/repair-1/main.bot	ok		0	new
+a	u0750	audit/syntax-recovery/experiments/a-expression/repair-2/main.bot	ok		0	new
+a	u0751	audit/syntax-recovery/experiments/a-undeclared/main.bot	error	SURFACE SYNTAX	0	new
+a	u0752	audit/syntax-recovery/experiments/a-undeclared/repair-1/main.bot	ok		0	new
+a	u0753	audit/syntax-recovery/experiments/a-undeclared/repair-2/main.bot	ok		0	new
+a	u0754	audit/syntax-recovery/experiments/b-toplevel/main.bot	error	SURFACE SYNTAX	0	new
+a	u0755	audit/syntax-recovery/experiments/b-toplevel/repair-1/main.bot	ok		0	new
+a	u0756	audit/syntax-recovery/experiments/b-toplevel/repair-2/main.bot	ok		0	new
+a	u0757	audit/syntax-recovery/experiments/c-declaration/main.bot	error	SURFACE SYNTAX	0	new
+a	u0758	audit/syntax-recovery/experiments/c-declaration/repair-1/main.bot	ok		0	new
+a	u0759	audit/syntax-recovery/experiments/c-declaration/repair-2/main.bot	error	CORE SEMANTIC TYPE	0	new
+a	u0760	audit/syntax-recovery/experiments/d-module/main.bot	error	SURFACE SYNTAX	0	new
+a	u0761	audit/syntax-recovery/experiments/d-module/repair-1/geom.bot	ok		0	new
+a	u0762	audit/syntax-recovery/experiments/d-module/repair-2/geom.bot	ok		0	new
+a	u0763	audit/syntax-recovery/experiments/e-transitive/main.bot	error	SURFACE SYNTAX	0	new
+a	u0764	audit/syntax-recovery/experiments/e-transitive/repair-1/low.bot	ok		0	new
+a	u0765	audit/syntax-recovery/experiments/e-transitive/repair-2/low.bot	ok		0	new
+a	u0766	audit/syntax-recovery/experiments/f-errors/main.bot	error	SURFACE SYNTAX	0	new
+a	u0767	audit/syntax-recovery/experiments/f-errors/repair-1/main.bot	ok		0	new
+a	u0768	audit/syntax-recovery/experiments/f-errors/repair-2/main.bot	error	CORE SEMANTIC KNOWN-ERROR	0	new
+a	u0769	audit/syntax-recovery/experiments/f-proofs/main.bot	error	SURFACE SYNTAX	0	new
+a	u0770	audit/syntax-recovery/experiments/f-proofs/repair-1/pick.bot	ok		0	new
+a	u0771	audit/syntax-recovery/experiments/f-proofs/repair-2/pick.bot	ok		0	new
+a	u0772	audit/syntax-recovery/experiments/f-static/main.bot	error	SURFACE SYNTAX	0	new
+a	u0773	audit/syntax-recovery/experiments/f-static/repair-1/main.bot	ok		0	new
+a	u0774	audit/syntax-recovery/experiments/f-static/repair-2/main.bot	ok		0	new
+a	u0775	audit/typed-mutarray-builder-refactor/out/experiments/join-gap-v0-early-return.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0776	audit/typed-mutarray-builder-refactor/out/experiments/join-gap-v1-fresh-only.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0777	audit/typed-mutarray-builder-refactor/out/experiments/join-gap-v2-raw-fresh.bot	error	CORE SEMANTIC UNHANDLED-ERROR	0	error
+a	u0778	audit/value-transport-materialization/programs/direction-arg.bot	ok		0	ok
+a	u0779	audit/value-transport-materialization/programs/direction-ret.bot	ok		0	ok
+a	u0780	audit/value-transport-materialization/programs/late-frontier.bot	ok		0	ok
+a	u0781	audit/value-transport-materialization/programs/mixed-branch.bot	ok		0	ok
+a	u0782	audit/value-transport-materialization/programs/narrow-long-arg.bot	ok		0	ok
+a	u0783	audit/value-transport-materialization/programs/nested-local.bot	ok		0	ok
+a	u0784	audit/value-transport-materialization/programs/nested-long-arg.bot	ok		0	ok
+a	u0785	audit/value-transport-materialization/programs/nested-short-return.bot	ok		0	ok
+a	u0786	audit/value-transport-materialization/programs/wide-long-arg.bot	ok		0	ok
+a	u0787	audit/value-transport-materialization/programs/wide-long-return.bot	ok		0	ok
+a	u0788	audit/value-transport-materialization/programs/wide-short-return.bot	ok		0	ok
+a	u0789	audit/vm-opcode-viability/botlish/fib30.bot	ok		0	ok
+a	u0790	audit/vm-opcode-viability/botlish/loop.bot	ok		0	ok
+a	u0791	audit/windows-toolchain/programs/ffi-probe.bot	ok		0	ok
+a	u0792	audit/windows-toolchain/programs/fib.bot	ok		0	ok
+a	u0793	audit/windows-toolchain/programs/win32.bot	ok		0	ok
+a	u0794	audit/hash-table/drivers/bench.bot + impl/cd.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0795	audit/hash-table/drivers/bench.bot + impl/chain.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0796	audit/hash-table/drivers/bench.bot + impl/chain0.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0797	audit/hash-table/drivers/bench.bot + impl/ht0.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0798	audit/hash-table/drivers/bench.bot + impl/listmap.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0799	audit/hash-table/drivers/bench.bot + impl/lp.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0800	audit/hash-table/drivers/bench.bot + impl/lpa.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0801	audit/hash-table/drivers/bench.bot + impl/lpc.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0802	audit/hash-table/drivers/bench.bot + impl/lpfact.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0803	audit/hash-table/drivers/bench.bot + impl/lpint.bot as table + drivers/keys_int.bot as keys (driver typed for int keys, as ht::typedDriver)	ok		0	ok
+a	u0804	audit/hash-table/drivers/bench.bot + impl/lpmask.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0805	audit/hash-table/drivers/bench.bot + impl/lpmono.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0806	audit/hash-table/drivers/bench.bot + impl/lpp.bot as table + drivers/keys_int.bot as keys	error	SURFACE MODULE UNKNOWN-SYMBOL	0	error
+a	u0807	audit/hash-table/drivers/bench.bot + impl/lpstr.bot as table + drivers/keys_str.bot as keys (driver typed for str keys, as ht::typedDriver)	ok		0	ok
+a	u0808	audit/hash-table/drivers/bench.bot + impl/rh.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0809	audit/hash-table/drivers/bench.bot + impl/sorted.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0810	audit/hash-table/drivers/bfs.bot + impl/lp.bot as table + drivers/keys_point.bot as keys	ok		0	ok
+a	u0811	audit/hash-table/drivers/freq.bot + impl/lp.bot as table + drivers/keys_str.bot as keys	ok		0	ok
+a	u0812	audit/hash-table/drivers/memo.bot + impl/lp.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0813	audit/hash-table/drivers/memo2.bot + impl/lp.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0814	audit/hash-table/drivers/trace.bot + impl/lp.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0815	audit/hash-table/drivers/hashes.bot + impl/listmap.bot as table + drivers/keys_int.bot as keys	ok		0	ok
+a	u0816	audit/hash-table/drivers/bench.bot + impl/lp.bot as table + drivers/keys_point.bot as keys	ok		0	ok
+a	u0817	audit/hash-table/drivers/bench.bot + impl/lp.bot as table + drivers/keys_str.bot as keys	ok		0	ok
+a	u0818	audit/traits/principal/program/principal.bot (lib/ as its application root)	ok		0	ok
+a	u0819	audit/compiler-service/probes/export/exports.bot (beside json/json_tokens.bot)	ok		0	ok
+a	u0820	audit/icy-tower/context-refactor/variants/ids: main.bot (over the working tree, staged with sdl3)	ok		0	ok
+a	u0821	audit/icy-tower/context-refactor/variants/opaque-values: main.bot (over the working tree, staged with sdl3)	error	SURFACE MODULE UNKNOWN-SYMBOL	0	ok
+a	u0822	audit/icy-tower/context-refactor/variants/canvas: main.bot (over the working tree, staged with sdl3)	error	SURFACE MODULE UNKNOWN-SYMBOL	0	ok
+a	u0823	audit/icy-tower/context-refactor/variants/canvas: canvas-test.bot (over the working tree, staged with sdl3)	error	SURFACE MODULE UNKNOWN-SYMBOL	0	ok
+a	u0824	audit/icy-tower/context-refactor/variants/canvas: golden-check-draws.bot (over the working tree, staged with sdl3)	error	SURFACE MODULE UNKNOWN-SYMBOL	0	error
+a	u0825	audit/icy-tower/context-refactor/variants/canvas: golden.bot (over the working tree, staged with sdl3)	error	SURFACE MODULE UNKNOWN-SYMBOL	0	ok
+a	u0826	audit/icy-tower/context-refactor/variants/opaque-values: main.bot (beside 4be79514's game, staged with sdl3)	ok		0	new
+a	u0827	audit/icy-tower/context-refactor/variants/canvas: main.bot (beside 4be79514's game, staged with sdl3)	ok		0	new
+a	u0828	audit/icy-tower/context-refactor/variants/canvas: canvas-test.bot (beside 4be79514's game, staged with sdl3)	ok		0	new
+a	u0829	audit/icy-tower/context-refactor/variants/canvas: golden.bot (beside 4be79514's game, staged with sdl3)	ok		0	new
+a	u0830	audit/icy-tower/context-refactor/variants/canvas: golden-check-draws.bot (beside 4be79514's game, staged with sdl3)	error	CORE SEMANTIC CONTEXT-FUNCTION-VALUE	0	new
+b	variadics:1	va-zero-one-many	ok		0	-
+b	variadics:2	va-fixed-then-variadic	ok		0	-
+b	variadics:3	va-the-list-itself	ok		0	-
+b	variadics:4	va-strings	ok		0	-
+b	variadics:5	va-float64	ok		0	-
+b	variadics:6	va-element-domain	ok		0	-
+b	variadics:7	va-nested	ok		0	-
+b	variadics:8	va-recursive	ok		0	-
+b	variadics:9	va-called-from-function	ok		0	-
+b	variadics:10	va-references-retained	ok		0	-
+b	variadics:11	va-imprinted-bare-list	ok		0	-
+b	variadics:12	va-imprinted-values	ok		0	-
+b	variadics:13	va-imprinted-heterogeneous	ok		0	-
+b	variadics:14	va-imprinted-heterogeneous	ok		0	-
+b	variadics:15	va-bare-list-fresh-variable	ok		0	-
+b	variadics:16	va-evaluation-order	ok		0	-
+b	variadics:17	va-evaluation-order	ok		0	-
+b	variadics:18	va-evaluation-order	ok		0	-
+b	variadics:19	va-evaluation-errors	ok		0	-
+b	variadics:20	va-method-syntax	ok		0	-
+b	variadics:21	va-method-equals-free	ok		0	-
+b	variadics:22	va-method-equals-free	ok		0	-
+b	variadics:23	va-alias	ok		0	-
+b	variadics:24	va-function-value	ok		0	-
+b	variadics:25	va-function-value	ok		0	-
+b	variadics:26	va-flags	ok		0	-
+b	variadics:27	va-coroutine [nativeCoroutines]	ok		0	-
+b	variadics:28	va-coroutine-calls [nativeCoroutines]	ok		0	-
+b	variadics:29	va-application-module	ok		0	-
+b	variadics:30	va-method-arity-filter	ok		0	-
+b	variadics:31	va-arity	error	CORE SEMANTIC ARITY	0	-
+b	variadics:32	va-arity-flags	error	CORE SEMANTIC ARITY	0	-
+b	variadics:33	va-element-type	error	CORE SEMANTIC TYPE	0	-
+b	variadics:34	va-element-domain-unproven	error	CORE SEMANTIC TYPE	0	-
+b	variadics:35	va-not-a-list	error	CORE SEMANTIC TYPE	0	-
+b	variadics:36	va-imprinted-not-a-value	error	CORE SEMANTIC IMPRINT	0	-
+b	variadics:37	va-explicit-imprint-count	error	CORE SEMANTIC IMPRINT	0	-
+b	variadics:38	va-trait-implementation	error	CORE SEMANTIC TRAIT-NOT-SATISFIED	0	-
+b	variadics:39	va-hir-facts	ok		0	-
+b	variadics:40	va-hir-text-roundtrip	ok		0	-
+b	variadics:41	va-interchange	ok		0	-
+b	variadics:42	va-no-warnings	ok		0	-
+b	variadics:43	va-method-eligible-silent	ok		0	-
+b	variadics:44	va-native-specialized	ok		0	-
+b	variadics:45	va-gc-stress [nativeCoroutines]	ok		0	-
+b	variadics:46	va-standalone-executable [executableAot]	ok		0	-
+b	windows-io:1	wi-platform-rule	ok		0	-
+b	windows-io:2	wi-platform-rule	ok		0	-
+b	windows-io:3	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:4	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:5	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:6	wi-platform-rule	ok		0	-
+b	windows-io:7	wi-platform-rule	ok		0	-
+b	windows-io:8	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:9	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:10	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:11	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:12	wi-platform-rule	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:16	wi-platform-no-way-around; wi-same-function-two-platforms; wi-execution-programs-compile	ok		0	-
+b	windows-io:17	wi-c-declarations; wi-last-error-read-first; wi-request-is-a-dword; wi-authority; wi-execution-programs-compile; wi-real-failures [windowsIO wiFixtures]	ok		0	-
+b	windows-io:20	wi-pure-parts	ok		0	-
+b	windows-io:21	wi-context-holds-devices	error	CORE SEMANTIC AFFINE-ERASURE-UNSUPPORTED	0	-
+b	windows-io:22	wi-context-holds-devices	error	CORE SEMANTIC OPAQUE-REPRESENTATION	0	-
+b	windows-io:24	wi-selection-diagnostics	error	CORE SEMANTIC MISSING-CONTEXT	0	-
+b	windows-io:25	wi-selection-diagnostics	error	CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION	0	-
+b	windows-io:27	wi-authority	error	CORE SEMANTIC STALE-DIRECT-MODULE	0	-
+b	windows-io:28	wi-tcl-backends; wi-execution-programs-compile; wi-pipes [windowsIO]; wi-native-backends [windowsIO]	ok		0	-
+b	windows-io:30	wi-execution-programs-compile; wi-routing-utf8 [windowsIO]; wi-gc-stress [windowsIO]	ok		0	-
+b	windows-io:32	wi-execution-programs-compile; wi-short-write-completed [windowsIO wiFixtures]; wi-write-failures [windowsIO wiFixtures]	ok		0	-
+b	windows-io:33	wi-execution-programs-compile; wi-stderr-short-and-failed [windowsIO wiFixtures]	ok		0	-
+b	windows-io:35	wi-execution-programs-compile; wi-raw-results [windowsIO wiFixtures]	ok		0	-
+b	windows-io:36	wi-execution-programs-compile	ok		0	-
+b	windows-io:37	wi-hello-executable [windowsIO]; wi-native-backends [windowsIO]	ok		0	-
+b	windows-io:38	wi-routing-utf8 [windowsIO]; wi-gc-stress [windowsIO]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:39	wi-text-edges [windowsIO]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:40	wi-pipes [windowsIO]; wi-native-backends [windowsIO]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:41	wi-large-write [windowsIO]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:42	wi-repeated-writes [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:43	wi-short-write-completed [windowsIO wiFixtures]; wi-write-failures [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:45	wi-stderr-short-and-failed [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:46	wi-raw-results [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:47	wi-steady-completion [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:48	wi-real-failures [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io:49	wi-borrowed-handles [windowsIO wiFixtures]	error	SURFACE MODULE UNSUPPORTED-PLATFORM	0	-
+b	windows-io@windows:39	wi-text-edges [windowsIO]	ok		0	-
+b	windows-io@windows:41	wi-large-write [windowsIO]	ok		0	-
+b	windows-io@windows:42	wi-repeated-writes [windowsIO wiFixtures]	ok		0	-
+b	windows-io@windows:47	wi-steady-completion [windowsIO wiFixtures]	ok		0	-
+b	windows-io@windows:49	wi-borrowed-handles [windowsIO wiFixtures]	ok		0	-
+b	windows-io@windows:53	wi-gc-stress [windowsIO]	ok		0	-

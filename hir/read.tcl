@@ -136,8 +136,14 @@ proc hir::read::TypeDecls {lines} {
         set final {}
         foreach entry $structEntries {
             set number [dict get $entry line]
+            # (A slot reference is the variable its declaration constrains:
+            # {imprint SLOT TRAITS}, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+            set constraints [dict create]
+            foreach pair [dict getdef $entry slots {}] {
+                dict set constraints {*}$pair
+            }
             set fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {
-                list $fname [ParseType $ftype $number]
+                list $fname [hir::imprint::ConstrainVariables [ParseType $ftype $number] $constraints]
             }]]
             dict unset entry names
             dict unset entry line
@@ -280,8 +286,22 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?fields (.*)$} $content -> id name ns opaqueWord contextWord fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(?:slots \[([^\]]*)\] )?fields (.*)$} $content -> id name ns opaqueWord contextWord slotsText fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] fields FIELD: TYPE, ...\""
+    }
+    # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
+    # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
+    set slots {}
+    if {$slotsText ne ""} {
+        foreach item [split [string map {", " \x01} $slotsText] \x01] {
+            if {[regexp {^([A-Z][0-9]*) satisfies (.+)$} $item -> slot traits]} {
+                lappend slots [list $slot [split $traits " "]]
+            } elseif {[regexp {^[A-Z][0-9]*$} $item]} {
+                lappend slots [list $item {}]
+            } else {
+                Fail $number "expected \"SLOT\" or \"SLOT satisfies TRAIT\" in a struct's slots, got \"$item\""
+            }
+        }
     }
     if {$ns eq "-"} {
         set ns ""
@@ -303,6 +323,9 @@ proc hir::read::StructDeclLine {content number} {
         fields $rawFields names $names line $number]
     if {$contextWord ne ""} {
         dict set decl context 1
+    }
+    if {$slots ne {}} {
+        dict set decl slots $slots
     }
     return $decl
 }
@@ -865,6 +888,11 @@ proc hir::read::ParseType {text number} {
         }
         return [hir::types::MakeStruct $fields 0]
     }
+    if {[regexp {^([^\[\]]+)\[(.+)\]$} $text -> ctor argsText] && [hir::structs::isParameterized $ctor]} {
+        # An application of a parameterized struct (TRAIT-CONSTRAINED-
+        # IMPRINTED-TYPES.md): hir::types::show's "Pair[int, str]".
+        return [hir::types::MakeApplied $ctor [lmap t [SplitTop $argsText ", "] {ParseType $t $number}]]
+    }
     if {[hir::structs::declared $text]} {
         return [list nstruct $text]
     }
@@ -1109,14 +1137,20 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?variadic N? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
             }
+            if {$exported ne ""} {
+                SetField hir $e exported $exported
+            }
             if {$variadic ne ""} {
                 SetField hir $e variadic $variadic
+            }
+            if {$places ne ""} {
+                SetField hir $e places $places
             }
             if {$contexts ne ""} {
                 SetField hir $e directContexts [lindex $contexts 0]
@@ -1146,6 +1180,15 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e resultType [hir::types::intern hir [lindex $type 3]]
             set declaredType {}
             if {$declared ne {}} { set declaredType [ParseType $declared $number] }
+            # Constrained variables (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) are
+            # printed by their names: their constraints are derived from the
+            # signature's applications, again, exactly as resolution derived
+            # them (and the body's types re-constrained so, ConstrainBodies).
+            lassign [hir::imprint::Constrain $declaredParamTypes $declaredType] constrainedParams declaredType
+            if {$constrainedParams ne $declaredParamTypes} {
+                set declaredParamTypes $constrainedParams
+                SetField hir $e declaredParamTypes $declaredParamTypes
+            }
             SetField hir $e declaredResult $declaredType
             # The proof contract (REFINEMENT-VALUES.md), as printed: one
             # "BINDING NAME: TYPE" clause naming one of the block's params.
@@ -1560,11 +1603,11 @@ proc hir::read::Expr {hirVar level s path block} {
 # Derives what the text implies: which bind declares each binding, binding
 # types, and id counters past every id in use.
 # Parses a block line's HEAD ("SCOPE (PARAMS) captures (BINDINGS)
-# ?staticRefs (BINDINGS)? ?nomethod? ?declares TYPE? ?errors E1, E2? ?binds ...?")
+# ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?declares TYPE? ?errors E1, E2? ?binds ...?")
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1588,12 +1631,30 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         set nomethod 1
         set rest $after
     }
+    # A C export's foreign ABI (NATIVE-LIBRARY-MILESTONE-1.md), as
+    # hir::format prints it.
+    if {$exportedVar ne ""} {
+        upvar 1 $exportedVar exported
+        set exported ""
+        if {[regexp {^ exported (c)(.*)$} $rest -> exported after]} {
+            set rest $after
+        }
+    }
     # A variadic function's fixed parameter count (VARIADICS-VERTICAL-
     # SLICE-1.md), as hir::format prints it.
     if {$variadicVar ne ""} {
         upvar 1 $variadicVar variadic
         set variadic ""
         if {[regexp {^ variadic ([0-9]+)(.*)$} $rest -> variadic after]} {
+            set rest $after
+        }
+    }
+    # The indices of a function's place parameters (PLACE-PARAMETERS.md), as
+    # hir::format prints them.
+    if {$placesVar ne ""} {
+        upvar 1 $placesVar places
+        set places ""
+        if {[regexp {^ places \(([0-9 ]+)\)(.*)$} $rest -> places after]} {
             set rest $after
         }
     }
@@ -1734,9 +1795,70 @@ proc hir::read::CanonicalBlockTypes {hirVar} {
     dict set hir typeIds $typeIds
 }
 
+# Gives every type in the body of each block whose signature constrains an
+# imprint variable that variable's constraints (TRAIT-CONSTRAINED-IMPRINTED-
+# TYPES.md): HIR text prints a variable by its name, as a source message
+# does, and the constraints are the signature's (read back by Constrain), so
+# a read HIR's types are the built one's. An enclosing block is visited
+# before the blocks inside it, so a nested function's own variable of the
+# same name is its own again.
+proc hir::read::ConstrainBodies {hirVar} {
+    upvar 1 $hirVar hir
+    if {[string first imprint [dict get $hir types]] < 0} {
+        return
+    }
+    # An exact block type's result is its own block's, constrained as that
+    # block's signature constrains it, wherever the type is.
+    dict for {x node} [dict get $hir exprs] {
+        set t [hir::typeOf $hir $x]
+        if {![hir::types::IsExactBlock $t] || [string first imprint [lindex $t 3]] < 0
+                || ![dict exists $hir exprs [lindex $t 1]]} {
+            continue
+        }
+        set sig [hir::imprint::BlockSignature $hir [lindex $t 1]]
+        if {$sig eq ""} {
+            continue
+        }
+        set constrained [lreplace $t 3 3 [hir::imprint::ConstrainVariables [lindex $t 3] [hir::imprint::ConstraintsOf $sig]]]
+        if {$constrained ne $t} {
+            dict set hir exprs $x type [hir::types::intern hir $constrained]
+        }
+    }
+    foreach e [hir::walk $hir] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] ne "block" || ![dict exists $node declaredParamTypes]} {
+            continue
+        }
+        set sig [hir::imprint::BlockSignature $hir $e]
+        if {$sig eq ""} {
+            continue
+        }
+        set known [hir::imprint::ConstraintsOf $sig]
+        set constraints [dict create]
+        foreach name [dict get $sig vars] {
+            dict set constraints $name [dict getdef $known $name {}]
+        }
+        set stack [hir::children $hir $e]
+        while {$stack ne {}} {
+            set x [lindex $stack end]
+            set stack [lrange $stack 0 end-1]
+            lappend stack {*}[hir::children $hir $x]
+            set t [hir::typeOf $hir $x]
+            if {[string first imprint $t] < 0 || [hir::types::IsExactBlock $t]} {
+                continue
+            }
+            set constrained [hir::imprint::ConstrainVariables $t $constraints]
+            if {$constrained ne $t} {
+                dict set hir exprs $x type [hir::types::intern hir $constrained]
+            }
+        }
+    }
+}
+
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
     CanonicalBlockTypes hir
+    ConstrainBodies hir
     foreach e [hir::walk $hir] {
         set node [dict get $hir exprs $e]
         if {[dict get $node kind] eq "handle" && [dict exists $node handlerPayloads]} {

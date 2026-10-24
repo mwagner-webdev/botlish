@@ -1,0 +1,1046 @@
+# Mutants of std::mutable_map and std::mutable_set
+# (audit/mutable-map/tools/mutate.tcl; ORDERED-MUTABLE-MAP-SET.md, "Mutation
+# testing"): the mutants the milestone brief names (item 51), each a
+# deliberate bug in the table engine (stdlib/ordered_table.bot), the
+# collections (stdlib/mutable_map.bot, stdlib/mutable_set.bot), the
+# runtimes they rely on or the compiler's lowering of them; then mutants of
+# the general compiler seams this milestone added (place parameters, the
+# loop protocol, MutableVector index proofs, opaque equality refusals).
+#
+#   @@ NAME DESCRIPTION
+#   %% tests FILE ...      (optional) test files run first for this mutant
+#   ## FILE
+#   <<<<                   (or `<<<< all`: replace every occurrence, at
+#   text to replace         least one; plain `<<<<` must occur exactly once)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it. Lines starting with # outside an edit are comments.
+#
+# Brief mutants with no non-equivalent mutant in this representation:
+#
+#   * "replacement changes stored key unexpectedly": no program can tell
+#     two equal Hashable values apart. A Hashable type's values have total
+#     equality and one representation each (Float64's negative zero is
+#     admitted as zero; a DecimalRounded is not Hashable; Strings compare by
+#     scalar values; structs, Lists and enums structurally), so replacing
+#     the stored key with the equal key of the replacing call is an
+#     equivalent program. The collection never does it (set's replacement
+#     branch writes the value only); `stored-key-replaced` below would be
+#     the mutant, and it survives every detector by construction.
+#   * "probe stops at tombstone": the index holds no tombstone (removal is
+#     a backward shift). The bug of that family here is a removal that
+#     empties its slot without shifting the entries after it back, which
+#     strands them behind an empty slot: no-backward-shift.
+#   * "load threshold off by one" is the insertion rule's: one more entry
+#     than 7/10 of the slots. No program observes it (the index never
+#     fills), so its detector is the representation's own invariant
+#     (tests/ordered-table.test's load bound).
+
+# ---------------------------------------------------------------------------
+# Hashing
+
+@@ public-hash placement uses the public hash instead of the keyed table hash
+## stdlib/mutable_map.bot
+<<<< all
+std::table_hash::of(
+====
+hash(
+>>>>
+## stdlib/mutable_set.bot
+<<<< all
+std::table_hash::of(
+====
+hash(
+>>>>
+
+@@ post-mix-public-hash placement post-mixes the public hash with the secret
+## stdlib/mutable_map.bot
+<<<< all
+std::table_hash::of(key)
+====
+bit_and(bit_xor(hash(key), std::table_hash::of(0)), 2305843009213693951)
+>>>>
+
+@@ no-stored-hash-check a probe compares the key at every occupied slot, never its stored hash first
+## stdlib/ordered_table.bot
+<<<<
+    stored == h and t.key_at(e) == key
+====
+    t.key_at(e) == key
+>>>>
+
+@@ trust-hash a probe trusts an equal stored hash without comparing the keys
+## stdlib/ordered_table.bot
+<<<<
+    stored == h and t.key_at(e) == key
+====
+    stored == h
+>>>>
+
+@@ identity-equality total structural equality (struct and List keys) compares identities natively
+## native/src/codegen/clif.rs
+<<<<
+                let r = self.call_helper("rt_value_eq", &[self.vm, a[0], a[1]]);
+                if op == VEq {
+====
+                let r = if op == VEqTotal {
+                    let same = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
+                    self.bool_of(same)
+                } else {
+                    self.call_helper("rt_value_eq", &[self.vm, a[0], a[1]])
+                };
+                if op == VEq {
+>>>>
+
+@@ erased-key-storage the keys are stored erased (MutableVector[any])
+## stdlib/ordered_table.bot
+<<<<
+    keys: MutableVector[K]
+====
+    keys: MutableVector[any]
+>>>>
+
+@@ untyped-key-equality the probe compares keys through an untyped helper (fallible veq unspecialized)
+## stdlib/ordered_table.bot
+<<<<
+# Whether position E (a position the index holds: a live entry) is the entry
+====
+fn same?(a, b) -> bool:
+    a == b
+
+# Whether position E (a position the index holds: a live entry) is the entry
+>>>>
+<<<<
+    stored == h and t.key_at(e) == key
+====
+    stored == h and same?(t.key_at(e), key)
+>>>>
+
+@@ untyped-string-equality native lowering stops choosing streq for two Strings
+## native/lower.tcl
+<<<<
+            } elseif {$ka eq $kb && $ka eq "str"} {
+                set op streq
+            } elseif {$ka eq $kb && $ka eq "UnicodeChar"} {
+====
+            } elseif {0} {
+                set op streq
+            } elseif {$ka eq $kb && $ka eq "UnicodeChar"} {
+>>>>
+
+@@ unconstrained-key the map's key slot drops `satisfies Hashable`
+## stdlib/mutable_map.bot
+<<<<
+opaque struct MutableMap[K satisfies Hashable, V]:
+====
+opaque struct MutableMap[K, V]:
+>>>>
+
+# ---------------------------------------------------------------------------
+# Probing
+
+@@ no-backward-shift removal empties its slot without shifting the entries after it back
+## stdlib/ordered_table.bot
+<<<<
+    t.shift(slot, slot)
+====
+    r = t.index.swap(slot, -1):
+        on IndexNotFound:
+            -1
+>>>>
+
+@@ probe-no-wraparound a probe stops at the index's end instead of wrapping to slot 0
+## stdlib/ordered_table.bot
+<<<<
+    t.probe(h, key, h)
+====
+    t.probe(h, key, bit_and(h, std::mutable_vector::length(t.index) - 1))
+>>>>
+<<<<
+    s = bit_and(slot, std::mutable_vector::length(t.index) - 1)
+    e = t.index.at(s):
+====
+    s = slot
+    e = t.index.at(s):
+>>>>
+
+@@ wrong-home-slot a lookup starts one slot past the key's home slot
+## stdlib/ordered_table.bot
+<<<<
+    t.probe(h, key, h)
+====
+    t.probe(h, key, h + 1)
+>>>>
+
+@@ wrong-probe-mask a probe reduces slots modulo the slot count minus one
+## stdlib/ordered_table.bot
+<<<<
+    s = bit_and(slot, std::mutable_vector::length(t.index) - 1)
+    e = t.index.at(s):
+====
+    s = slot.mod(std::mutable_vector::length(t.index) - 1)
+    e = t.index.at(s):
+>>>>
+
+@@ load-off-by-one an insertion rebuilds one entry past the 7/10 load
+## stdlib/ordered_table.bot
+<<<<
+    (t.length() + 1) * 10 > std::mutable_vector::length(t.index) * 7
+====
+    t.length() * 10 > std::mutable_vector::length(t.index) * 7
+>>>>
+
+@@ shift-before-home backward shift moves an entry into the hole even when that is before its home slot
+## stdlib/ordered_table.bot
+<<<<
+    if bit_and(h, mask).between?(hole, n):
+====
+    if h < -1:
+>>>>
+
+# ---------------------------------------------------------------------------
+# Growth and compaction
+
+@@ resize-drops-entry rebuilding the index leaves the last entry out
+## stdlib/ordered_table.bot
+<<<<
+    loop p from 0 to std::mutable_vector::length(t.hashes):
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        t.place_entry(p, h)
+====
+    loop p from 0 to std::mutable_vector::length(t.hashes) - 1:
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        t.place_entry(p, h)
+>>>>
+
+@@ resize-reverses-order every rebuild (growth included) moves the entries into reverse order, keys, hashes and values alike
+## stdlib/ordered_table.bot
+<<<<
+    if t.positions() != t.length():
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
+====
+    if true:
+        hs = loop q from 0 to std::mutable_vector::length(t.hashes):
+            p = std::mutable_vector::length(t.hashes) - 1 - q
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            h
+        ks = loop q from 0 to std::mutable_vector::length(t.hashes):
+            p = std::mutable_vector::length(t.hashes) - 1 - q
+            if not t.live_at?(p):
+                continue
+            t.key_at(p)
+        std::mutable_vector::clear(t.hashes)
+        loop h in hs:
+            t.hashes.push(h)
+        std::mutable_vector::clear(t.keys)
+        loop k in ks:
+            t.keys.push(k)
+>>>>
+<<<<
+    if t.positions() == t.length():
+        return unit
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
+====
+    vs = loop q from 0 to std::mutable_vector::length(values):
+        p = std::mutable_vector::length(values) - 1 - q
+        if not t.live_at?(p):
+            continue
+        values.at(p):
+            on IndexNotFound:
+                continue
+    std::mutable_vector::clear(values)
+    loop v in vs:
+        values.push(v)
+>>>>
+
+@@ resize-bucket-order every rebuild orders the entries by index slot (the hash's placement), keys, hashes and values alike
+## stdlib/ordered_table.bot
+<<<<
+    if t.positions() != t.length():
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
+====
+    if true:
+        hs = loop q from 0 to std::mutable_vector::length(t.index):
+            p = t.position(q)
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            h
+        ks = loop q from 0 to std::mutable_vector::length(t.index):
+            p = t.position(q)
+            if not t.live_at?(p):
+                continue
+            t.key_at(p)
+        std::mutable_vector::clear(t.hashes)
+        loop h in hs:
+            t.hashes.push(h)
+        std::mutable_vector::clear(t.keys)
+        loop k in ks:
+            t.keys.push(k)
+>>>>
+<<<<
+    if t.positions() == t.length():
+        return unit
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
+====
+    vs = loop q from 0 to std::mutable_vector::length(t.index):
+        p = t.position(q)
+        if not t.live_at?(p):
+            continue
+        values.at(p):
+            on IndexNotFound:
+                continue
+    std::mutable_vector::clear(values)
+    loop v in vs:
+        values.push(v)
+>>>>
+
+@@ compaction-fills-holes-from-end compaction fills each dead position with the last live entry (swap-remove: no copying, the order lost), keys, hashes and values alike
+## stdlib/ordered_table.bot
+<<<<
+# VALUES (a collection's per-entry payload, aligned with T's positions) with
+====
+fn fill_holes(place t: Table[K], hole: int, last: int) -> unit:
+    if hole < 0 or hole >= last:
+        return unit
+    if t.live_at?(hole):
+        return t.fill_holes(hole + 1, last)
+    if not t.live_at?(last):
+        return t.fill_holes(hole, last - 1)
+    h = t.hashes.at(last):
+        on IndexNotFound:
+            -1
+    k = t.key_at(last)
+    r = t.hashes.swap(hole, h):
+        on IndexNotFound:
+            -1
+    o = t.keys.swap(hole, k):
+        on IndexNotFound:
+            k
+    d = t.hashes.swap(last, -1):
+        on IndexNotFound:
+            -1
+    t.fill_holes(hole + 1, last - 1)
+
+fn fill_value_holes(t: Table[K], place values: MutableVector[V], hole: int, last: int) -> unit:
+    if hole < 0 or hole >= last:
+        return unit
+    if t.live_at?(hole):
+        return t.fill_value_holes(values, hole + 1, last)
+    if not t.live_at?(last):
+        return t.fill_value_holes(values, hole, last - 1)
+    v = values.at(last):
+        on IndexNotFound:
+            return unit
+    o = values.swap(hole, v):
+        on IndexNotFound:
+            v
+    t.fill_value_holes(values, hole + 1, last - 1)
+
+# VALUES (a collection's per-entry payload, aligned with T's positions) with
+>>>>
+<<<<
+    if t.positions() != t.length():
+        w = std::mutable_array::create(1, 0)
+        loop p from 0 to std::mutable_vector::length(t.hashes):
+            h = t.hashes.at(p):
+                on IndexNotFound:
+                    continue
+            if h < 0:
+                continue
+            i = w.at(0):
+                on IndexNotFound:
+                    0
+            if i != p:
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+                old = t.keys.swap(i, k):
+                    on IndexNotFound:
+                        k
+            w.set(0, i + 1):
+                on IndexNotFound:
+                    unit
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
+====
+    if t.positions() != t.length():
+        t.fill_holes(0, std::mutable_vector::length(t.hashes) - 1)
+        t.hashes.truncate(t.length())
+        t.keys.truncate(t.length())
+>>>>
+<<<<
+    if t.positions() == t.length():
+        return unit
+    w = std::mutable_array::create(1, 0)
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        i = w.at(0):
+            on IndexNotFound:
+                0
+        if i != p:
+            v = values.at(p):
+                on IndexNotFound:
+                    continue
+            old = values.swap(i, v):
+                on IndexNotFound:
+                    v
+        w.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    values.truncate(t.length())
+====
+    if t.positions() == t.length():
+        return unit
+    t.fill_value_holes(values, 0, std::mutable_vector::length(values) - 1)
+    values.truncate(t.length())
+>>>>
+
+@@ compaction-loses-value compacting a map's values truncates one value too many
+## stdlib/ordered_table.bot
+<<<<
+    values.truncate(t.length())
+====
+    values.truncate(t.length() - 1)
+>>>>
+
+@@ compaction-stale-index a rebuild that keeps the slot count keeps the old index (stale entry positions after compaction)
+## stdlib/ordered_table.bot
+<<<<
+    std::mutable_vector::clear(t.index)
+    loop s from 0 to slots_for(needed):
+====
+    if slots_for(needed) == std::mutable_vector::length(t.index):
+        return unit
+    std::mutable_vector::clear(t.index)
+    loop s from 0 to slots_for(needed):
+>>>>
+
+@@ hash-not-moved-with-key compaction moves the keys down but leaves the stored hashes where they were
+## stdlib/ordered_table.bot
+<<<<
+                r = t.hashes.swap(i, h):
+                    on IndexNotFound:
+                        -1
+                k = t.key_at(p)
+====
+                k = t.key_at(p)
+>>>>
+
+@@ map-values-misaligned a map's rebuild compacts the keys but not the values
+## stdlib/ordered_table.bot
+<<<<
+    t.compact_values(values)
+    t.rebuild(needed)
+====
+    t.rebuild(needed)
+>>>>
+
+@@ tombstones-never-compact the garbage rule never fires: dead entries are only dropped by growth
+## stdlib/ordered_table.bot
+<<<<
+    dead >= min_slots() and dead >= t.length()
+====
+    dead < 0
+>>>>
+
+# ---------------------------------------------------------------------------
+# Replacement, removal, reinsertion
+
+@@ replace-appends-duplicate setting a present key appends a second entry
+## stdlib/mutable_map.bot
+<<<<
+    if slot >= 0:
+        old = m.vals.swap(m.table.position(slot), value):
+====
+    if slot >= 0 and slot < 0:
+        old = m.vals.swap(m.table.position(slot), value):
+>>>>
+
+@@ replace-moves-to-end setting a present key removes its entry and appends a new one
+## stdlib/mutable_map.bot
+<<<<
+        old = m.vals.swap(m.table.position(slot), value):
+            on IndexNotFound:
+                value
+        return unit
+====
+        m.table.remove_slot(slot)
+>>>>
+
+@@ set-duplicate-moves adding a present element moves it to the end (and still answers false)
+## stdlib/mutable_set.bot
+<<<<
+    if s.table.slot_of(h, x) >= 0:
+        return false
+====
+    old = s.table.slot_of(h, x)
+    if old >= 0:
+        s.table.remove_slot(old)
+        s.table.append(h, x)
+        return false
+>>>>
+
+@@ remove-leaves-visible removal decrements the count but leaves the entry and its slot
+## stdlib/ordered_table.bot
+<<<<
+    t.shift(slot, slot)
+    t.hashes.swap(p, -1):
+        on IndexNotFound:
+            -1
+    t.add_live(-1)
+====
+    t.add_live(-1)
+>>>>
+
+@@ remove-decrements-twice removal decrements the live count by two
+## stdlib/ordered_table.bot
+<<<<
+    t.add_live(-1)
+====
+    t.add_live(-2)
+>>>>
+
+@@ reinsert-revives-entry inserting a key revives its own dead entry (keeping its old position) instead of appending
+## stdlib/ordered_table.bot
+<<<<
+# Appends the entry (H, KEY) -- KEY absent, the table not full -- and stores
+====
+fn dead_position(t: Table[K], key: K, p: int) -> int:
+    if p >= t.positions():
+        return -1
+    if not t.live_at?(p) and t.key_at(p) == key:
+        return p
+    t.dead_position(key, p + 1)
+
+# Appends the entry (H, KEY) -- KEY absent, the table not full -- and stores
+>>>>
+<<<<
+    p = std::mutable_vector::length(t.hashes)
+    t.place_entry(p, h)
+====
+    old = t.dead_position(key, 0)
+    if old >= 0:
+        r = t.hashes.swap(old, h):
+            on IndexNotFound:
+                -1
+        t.place_entry(old, h)
+        t.add_live(1)
+        return old
+    p = std::mutable_vector::length(t.hashes)
+    t.place_entry(p, h)
+>>>>
+## stdlib/mutable_map.bot
+<<<<
+    m.table.append(h, key)
+    m.vals.push(value)
+====
+    p = m.table.append(h, key)
+    if p < std::mutable_vector::length(m.vals):
+        old = m.vals.swap(p, value):
+            on IndexNotFound:
+                value
+        return unit
+    m.vals.push(value)
+>>>>
+
+@@ reinsert-reuses-dead-slot inserting a new key reuses the first dead position instead of appending
+## stdlib/ordered_table.bot
+<<<<
+# Appends the entry (H, KEY) -- KEY absent, the table not full -- and stores
+====
+fn first_dead(t: Table[K], p: int) -> int:
+    if p >= t.positions():
+        return -1
+    if not t.live_at?(p):
+        return p
+    t.first_dead(p + 1)
+
+# Appends the entry (H, KEY) -- KEY absent, the table not full -- and stores
+>>>>
+<<<<
+    p = std::mutable_vector::length(t.hashes)
+    t.place_entry(p, h)
+====
+    old = t.first_dead(0)
+    if old >= 0:
+        r = t.hashes.swap(old, h):
+            on IndexNotFound:
+                -1
+        k = t.keys.swap(old, key):
+            on IndexNotFound:
+                key
+        t.place_entry(old, h)
+        t.add_live(1)
+        return old
+    p = std::mutable_vector::length(t.hashes)
+    t.place_entry(p, h)
+>>>>
+## stdlib/mutable_map.bot
+<<<<
+    m.table.append(h, key)
+    m.vals.push(value)
+====
+    p = m.table.append(h, key)
+    if p < std::mutable_vector::length(m.vals):
+        old = m.vals.swap(p, value):
+            on IndexNotFound:
+                value
+        return unit
+    m.vals.push(value)
+>>>>
+
+@@ miss-returns-arbitrary a lookup of a missing key returns the last entry's value (when there is one)
+## stdlib/mutable_map.bot
+<<<<
+    p = m.table.position(slot)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
+====
+    p = bit_and(m.table.position(slot), std::mutable_vector::length(m.vals) - 1)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
+>>>>
+
+# ---------------------------------------------------------------------------
+# Clear
+
+@@ clear-leaves-membership clear only resets the count: index and entries stay
+## stdlib/ordered_table.bot
+<<<<
+    std::mutable_vector::clear(t.hashes)
+    std::mutable_vector::clear(t.keys)
+    std::mutable_vector::clear(t.index)
+    loop s from 0 to min_slots():
+        t.index.push(-1)
+    t.live.set(0, 0):
+====
+    t.live.set(0, 0):
+>>>>
+
+@@ clear-leaves-entries clear empties the index but leaves the entries
+## stdlib/ordered_table.bot
+<<<<
+    std::mutable_vector::clear(t.hashes)
+    std::mutable_vector::clear(t.keys)
+    std::mutable_vector::clear(t.index)
+====
+    std::mutable_vector::clear(t.index)
+>>>>
+
+# ---------------------------------------------------------------------------
+# Set representation
+
+@@ set-value-storage a set stores a value per element too
+## stdlib/mutable_set.bot
+<<<<
+import std::table_hash
+====
+import std::mutable_vector
+import std::table_hash
+>>>>
+<<<<
+    table: std::ordered_table::Table[T]
+
+fn create() -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](0)}
+
+fn with_capacity(count: int) -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](count)}
+====
+    table: std::ordered_table::Table[T]
+    vals: MutableVector[bool]
+
+fn create() -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](0), vals: std::mutable_vector::from_list([true])}
+
+fn with_capacity(count: int) -> MutableSet[T]:
+    MutableSet[T] {table: std::ordered_table::fresh[T](count), vals: std::mutable_vector::from_list([true])}
+>>>>
+<<<<
+    s.table.append(h, x)
+    true
+====
+    s.table.append(h, x)
+    s.vals.push(true)
+    true
+>>>>
+
+# ---------------------------------------------------------------------------
+# Iteration
+
+@@ iteration-exposes-dead the map's loop protocol calls every position live
+## stdlib/mutable_map.bot
+<<<<
+    m.table.live_at?(i)
+====
+    i >= 0
+>>>>
+
+@@ iteration-bucket-order the map's loop protocol walks the index slots (hash order)
+## stdlib/ordered_table.bot
+<<<<
+# The live entry count.
+====
+fn slots(t: Table[K]) -> int:
+    std::mutable_vector::length(t.index)
+
+# The live entry count.
+>>>>
+## stdlib/mutable_map.bot
+<<<<
+    std::ordered_table::positions(m.table)
+
+nomethod fn iteration_live?(m: MutableMap[K, V], i: int) -> bool:
+    m.table.live_at?(i)
+
+nomethod fn iteration_at(m: MutableMap[K, V], i: int) -> MutableMapEntry[K, V]:
+    MutableMapEntry[K, V] {key: m.table.key_at(i), value: std::mutable_vector::at(m.vals, i.mod(std::mutable_vector::length(m.vals)))}
+====
+    std::ordered_table::slots(m.table)
+
+nomethod fn iteration_live?(m: MutableMap[K, V], i: int) -> bool:
+    m.table.position(i) >= 0
+
+nomethod fn iteration_at(m: MutableMap[K, V], i: int) -> MutableMapEntry[K, V]:
+    p = m.table.position(i)
+    MutableMapEntry[K, V] {key: m.table.key_at(p), value: std::mutable_vector::at(m.vals, p.mod(std::mutable_vector::length(m.vals)))}
+>>>>
+
+@@ set-iteration-bucket-order the set's loop protocol walks the index slots: its order depends on the hidden key
+## stdlib/ordered_table.bot
+<<<<
+# The live entry count.
+====
+fn slots(t: Table[K]) -> int:
+    std::mutable_vector::length(t.index)
+
+# The live entry count.
+>>>>
+## stdlib/mutable_set.bot
+<<<<
+    std::ordered_table::positions(s.table)
+
+nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
+    s.table.live_at?(i)
+
+nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
+    s.table.key_at(i)
+====
+    std::ordered_table::slots(s.table)
+
+nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
+    s.table.position(i) >= 0
+
+nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
+    s.table.key_at(s.table.position(i))
+>>>>
+
+@@ iteration-materializes each loop over a map first collects every key into a List
+## stdlib/mutable_map.bot
+<<<<
+nomethod fn iteration_end(m: MutableMap[K, V]) -> int:
+    std::ordered_table::positions(m.table)
+====
+nomethod fn iteration_end(m: MutableMap[K, V]) -> int:
+    all = loop i from 0 to std::ordered_table::positions(m.table):
+        m.table.key_at(i)
+    std::list::length(all)
+>>>>
+<<<<
+import std::mutable_vector
+import std::table_hash
+====
+import std::list
+import std::mutable_vector
+import std::table_hash
+>>>>
+
+# ---------------------------------------------------------------------------
+# Allocation
+
+@@ lookup-allocates-list a probe step builds two one-element Lists to compare the stored hash
+## stdlib/ordered_table.bot
+<<<<
+    stored == h and t.key_at(e) == key
+====
+    [stored] == [h] and t.key_at(e) == key
+>>>>
+
+# ---------------------------------------------------------------------------
+# Copies (value semantics through growth, removal, compaction and clear)
+
+@@ local-copy-shares-header `b = a` of a collection-bearing local gives b a's own headers (no entry copy)
+%% tests tests/mutable-map.test tests/mutable-set.test
+## hir/mutvec.tcl
+<<<<
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
+                lappend wraps [list $value [ShareNative] $d]
+====
+            if {0} {
+                lappend wraps [list $value [ShareNative] $d]
+>>>>
+
+@@ push-after-sharing-aliases natively, push onto a shared vector backing appends in place (growth after a copy changes the copy)
+## native/src/runtime/mutvec.rs
+<<<<
+pub extern "C" fn rt_mv_push(p: *mut Vm, v: Value, x: Value) -> Value {
+    let items = writable(p, v);
+====
+pub extern "C" fn rt_mv_push(p: *mut Vm, v: Value, x: Value) -> Value {
+    let items = unsafe { &mut *(Rc::as_ptr(&mutvec_of_mut(v).backing) as *mut VecDeque<Value>) };
+>>>>
+
+@@ clear-after-sharing-aliases natively, clear of a shared vector backing empties it in place (compaction or clear after a copy changes the copy)
+## native/src/runtime/mutvec.rs
+<<<<
+        None => obj.backing = Rc::new(VecDeque::new()),
+====
+        None => unsafe { (*(Rc::as_ptr(&obj.backing) as *mut VecDeque<Value>)).clear() },
+>>>>
+
+# ---------------------------------------------------------------------------
+# Place parameters (PLACE-PARAMETERS.md)
+
+@@ place-param-entry-copy a place parameter gets an entry copy like a value parameter: the caller never sees the update
+%% tests tests/place-parameters.test
+## hir/mutvec.tcl
+<<<<
+        } elseif {![dict exists $convention consumed $b] && ![IsPlaceParam $hir $b]} {
+====
+        } elseif {![dict exists $convention consumed $b]} {
+>>>>
+
+@@ place-overlap-unchecked one call may give overlapping places to two place parameters
+%% tests tests/place-parameters.test
+## hir/mutvec.tcl
+<<<<
+                        if {[Overlap $path $q]} {
+                            set problem
+====
+                        if {0} {
+                            set problem
+>>>>
+
+@@ place-module-binding a module binding is accepted as a place argument
+%% tests tests/place-parameters.test
+## hir/mutvec.tcl
+<<<<
+    if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]} {
+        return "$what is `$shown`, which is not a local binding, a parameter or a context parameter of this function: only those are places a function can update
+====
+    if {[dict get $binding kind] ni {local param}} {
+        return "$what is `$shown`, which is not a local binding, a parameter or a context parameter of this function: only those are places a function can update
+>>>>
+
+@@ place-observer-uncopied an argument overlapping a place argument of the same call is read out uncopied (it observes the update)
+%% tests tests/place-parameters.test
+## hir/mutvec.tcl
+<<<<
+                    && ([PlaceArgument $hir $p $e] || (![WrittenLater $hir $p $e] && ![PlaceOverlap $hir $p $e]))} {
+====
+                    && ([PlaceArgument $hir $p $e] || ![WrittenLater $hir $p $e])} {
+>>>>
+
+@@ places-not-printed HIR text drops a block's place parameters
+%% tests tests/place-parameters.test
+## hir/format.tcl
+<<<<
+                append text " places ([dict get $node places])"
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The loop protocol (hir/iteration.tcl)
+
+@@ protocol-live-check-dropped the elaborated loop visits every position, live or not
+%% tests tests/collection-iteration.test
+## hir/iteration.tcl
+<<<<
+        thenScope $thenScope thenBody {} elseScope $elseScope elseBody [list $skip] \
+====
+        thenScope $thenScope thenBody {} elseScope $elseScope elseBody {} \
+>>>>
+
+@@ protocol-not-internal application code may name a loop protocol operation
+%% tests tests/collection-iteration.test
+## surface/modules.tcl
+<<<<
+    if {$member ne "" && [hir::iteration::IsOperation $ns $member]
+====
+    if {0 && $member ne "" && [hir::iteration::IsOperation $ns $member]
+>>>>
+
+@@ protocol-lockstep-accepted a lockstep loop over a collection is accepted (its element count is no proven count)
+%% tests tests/collection-iteration.test
+## hir/iteration.tcl
+<<<<
+                    if {[Protocol $hir [hir::typeOf $hir $it]] ne ""} {
+====
+                    if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# MutableVector index proofs (hir/cardinality.tcl's VectorLength)
+
+@@ vector-length-ignores-resizes a vector's length is taken as stable whatever resizes it
+%% tests tests/vector-bounds.test
+## hir/cardinality.tcl
+<<<<
+proc hir::cardinality::Mutated {hir place} {
+    if {[dict exists [Mutations $hir] $place]} {
+====
+proc hir::cardinality::Mutated {hir place} {
+    return 0
+    if {[dict exists [Mutations $hir] $place]} {
+>>>>
+
+@@ vector-length-ignores-place-calls a call giving the vector to a place parameter does not count as resizing it
+%% tests tests/vector-bounds.test
+## hir/cardinality.tcl
+<<<<
+    foreach index [hir::mutvec::PlaceIndices $hir $c] {
+        set arg [lindex $args $index]
+        if {$arg eq ""} continue
+====
+    foreach index {} {
+        set arg [lindex $args $index]
+        if {$arg eq ""} continue
+>>>>
+
+@@ vector-length-one-atom every vector place's length is the same form (one vector's guard proves another's read)
+%% tests tests/vector-bounds.test
+## hir/cardinality.tcl
+<<<<
+    if {$place ne "" && ![ContextRooted $hir [list b [lindex $place 0]]] && ![Mutated $hir $place]} {
+        return [FormAtom [list len [list pl {*}$place]]]
+====
+    if {$place ne "" && ![ContextRooted $hir [list b [lindex $place 0]]] && ![Mutated $hir $place]} {
+        return [FormAtom [list len [list pl vector]]]
+>>>>
+
+@@ vector-length-context-member a context member's vector length is taken as stable
+%% tests tests/vector-bounds.test
+## hir/cardinality.tcl
+<<<<
+    if {$place ne "" && ![ContextRooted $hir [list b [lindex $place 0]]] && ![Mutated $hir $place]} {
+====
+    if {$place ne "" && ![Mutated $hir $place]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Opaque equality refusals
+
+@@ opaque-refusal-leaks-tcl the Tcl runtimes' refusal of == inside an opaque struct names the representation
+## core/value.tcl
+<<<<
+            if {[isOpaqueStruct [lindex $a 1 0]]} {
+====
+            if {0} {
+>>>>
+
+@@ opaque-refusal-leaks-native the native refusal of == inside an opaque struct names the representation
+## native/src/runtime/ops.rs
+<<<<
+                        if opaque {
+                            let vm = vm(p);
+====
+                        if opaque && false {
+                            let vm = vm(p);
+>>>>

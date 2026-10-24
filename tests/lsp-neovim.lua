@@ -9,8 +9,12 @@
 -- through the real client: attaching, diagnostics as Neovim shows them,
 -- hover, go-to-definition into another file and into the standard library,
 -- references, unsaved edits (the client's own didChange), a syntax error and
--- its fix. What happened is written as JSON to $BOTLISH_NVIM_OUT, and Neovim
--- quits; every wait is bounded.
+-- its fix, and an editing session through syntax errors
+-- (SYNTAX-RECOVERY-MILESTONE-1.md): fresh answers around the malformed line,
+-- the last complete analysis answering (stale) inside it, a syntax error in
+-- the imported module (opened as a second buffer), and its repair. What
+-- happened is written as JSON to $BOTLISH_NVIM_OUT, and Neovim quits; every
+-- wait is bounded.
 
 local out = {}
 local function record(key, value) out[key] = value end
@@ -80,20 +84,48 @@ local ok, err = pcall(function()
   record('fixed_waited', vim.wait(30000, function() return errors() == 0 end))
   record('fixed', diagnostics())
 
-  -- A syntax error: reported; hover in unchanged text still answers, stale.
+  -- A syntax error: reported; the analysis goes on around it. Hover on a
+  -- declaration it cannot affect answers fresh from the current analysis;
+  -- inside the malformed line, where it knows nothing, the last complete
+  -- analysis answers, marked stale.
   vim.api.nvim_buf_set_lines(buf, 5, 6, false, { 'a + ' })
   record('syntax_waited', vim.wait(30000, function()
     local ds = vim.diagnostic.get(buf)
     return #ds > 0 and ds[1].code == 'SURFACE SYNTAX'
   end))
   record('syntax', diagnostics())
-  record('stale_hover', hover(3, 6))
+  record('syntax_hover', hover(3, 6))
+  record('syntax_hover_b', hover(4, 0))
+  record('stale_hover', hover(5, 0))
 
   -- Fixed again: fresh answers.
   vim.api.nvim_buf_set_lines(buf, 5, 6, false, { 'a + b' })
   record('recovered_waited', vim.wait(30000, function() return errors() == 0 end))
   record('recovered_hover', hover(3, 6))
+
+  -- A syntax error in the imported module, in its own buffer: reported
+  -- there; the importer's answers stay fresh, the malformed function's
+  -- declared signature included; repaired, its diagnostic goes.
+  local shapes = vim.fs.joinpath(vim.fs.dirname(vim.api.nvim_buf_get_name(buf)), 'shapes.bot')
+  vim.cmd('edit ' .. vim.fn.fnameescape(shapes))
+  local mbuf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_win_set_buf(win, buf)
+  assert(vim.wait(30000, function() return #vim.lsp.get_clients({ bufnr = mbuf }) > 0 end), 'no client attached to the module')
+  vim.api.nvim_buf_set_lines(mbuf, 1, 2, false, { '    w *' })
+  record('module_waited', vim.wait(30000, function()
+    local ds = vim.diagnostic.get(mbuf)
+    return #ds > 0 and ds[1].code == 'SURFACE SYNTAX'
+  end))
+  local mds = vim.diagnostic.get(mbuf)
+  record('module_syntax', mds[1] and (mds[1].lnum .. ':' .. mds[1].col .. ': ' .. mds[1].message) or vim.NIL)
+  record('module_main_errors', errors())
+  record('module_hover', hover(3, 6))
+  record('module_hover_b', hover(4, 0))
+  vim.api.nvim_buf_set_lines(mbuf, 1, 2, false, { '    w * h' })
+  record('module_repaired', vim.wait(30000, function() return #vim.diagnostic.get(mbuf) == 0 end))
+  record('module_repaired_hover', hover(3, 6))
   record('modified', vim.bo[buf].modified)
+  record('module_modified', vim.bo[mbuf].modified)
 end)
 record('ok', ok)
 record('error', ok and '' or tostring(err))

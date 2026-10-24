@@ -139,14 +139,14 @@ test mat-syn-3 {canonical rendering is source-legible and stable (a List literal
         [maLast "fn f(g: Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}) -> Fn{args: \[MutableArray\[str\]\], return: List\[int\], errors: \[\]}:\n    g\nfn h(m: MutableArray\[str\]) -> List\[int\]:\n    \[1\]\nf(h)"]
 } -result {{MutableArray[int]} {MutableArray[List[str]]} {List[MutableArray[int]]{length: 1}} {MutableArray[MutableArray[str]]} {block(e5)/1 -> List[int]} {Fn{args: [MutableArray[str]], return: List[int], errors: []}}}
 
-test mat-syn-4 {the type is a real constructor: arity errors, unknown constructors, hyphenated spellings} -body {
+test mat-syn-4 {the type is a real constructor: arity errors (two arguments are resolution's since the grammar is n-ary, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), unknown constructors, hyphenated spellings} -body {
     lmap src {
         "fn f(m: MutableArray):\n    0\nf(1)"
         "fn f(m: MutableArray\[int, str\]):\n    0\nf(1)"
         "fn f(m: mutable-array\[int\]):\n    0\nf(1)"
         "fn f(m: Array\[int\]):\n    0\nf(1)"
     } {lindex [maRejects $src *] 0}
-} -result {{CORE SEMANTIC TYPE} {SURFACE SYNTAX} {SURFACE SYNTAX} {CORE SEMANTIC TYPE}}
+} -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {SURFACE SYNTAX} {CORE SEMANTIC TYPE}}
 
 test mat-syn-5 {no source-level type variables or generic syntax were added} -body {
     lmap src {
@@ -976,7 +976,11 @@ test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], cop
 # of typed arrays when arrays became values (a builder's arrays must be
 # struct fields -- places -- to be mutated in place): hashtable.bot's
 # HashTable and csv_chunked.bot's ChunkedBuilder (its `filled` counter).
-test mat-fence-1 {no canonical program or stdlib module other than the two geometric-builder corpus programs, the HashTable and the ChunkedBuilder (structs of typed arrays since MUTABLE-ARRAY.md) uses the typed API} -body {
+#
+# ORDERED-MUTABLE-MAP-SET.md widened it by one standard-library module, the
+# map and set engine stdlib/ordered_table.bot: its table's live count is a
+# one-cell MutableArray[int] field, and compaction counts with another.
+test mat-fence-1 {no canonical program or stdlib module other than the two geometric-builder corpus programs, the HashTable, the ChunkedBuilder (structs of typed arrays since MUTABLE-ARRAY.md) and the ordered table engine (ORDERED-MUTABLE-MAP-SET.md) uses the typed API} -body {
     set hits {}
     foreach pattern {bench/*.bot examples/surface/*.bot examples/stdlib/*.bot stdlib/*.bot} {
         foreach file [glob -nocomplain -directory $::projectRoot {*}[list $pattern]] {
@@ -989,7 +993,7 @@ test mat-fence-1 {no canonical program or stdlib module other than the two geome
                 if {[string match "#*" [string trim $line]]} continue
                 set line
             }] \n]
-            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot hashtable.bot csv_chunked.bot}
+            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot hashtable.bot csv_chunked.bot ordered_table.bot}
                     && ([string first std::mutable_array::create $code] >= 0 || [string first "MutableArray\[" $code] >= 0)} {
                 lappend hits [file tail $file]
             }

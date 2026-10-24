@@ -1,0 +1,3 @@
+fused json::validate_bytes e2499 {inlined {{#20} json::bytes} yields 1 creates 1 starts 1 resumes 3 queries 0 releases 30 template 67 copied 317 unboxed 0}
+fused json::validate_bytes e2513 {inlined {{#21} json::structure} yields 1 creates 1 starts 1 resumes 2 queries 0 releases 30 template 335 copied 1040 unboxed 2}
+fused json::validate_bytes e2583 {inlined {{#22} json_lex::json_token_bytes json_lex::json_token_bytes#run json_lex::json_string_bytes#run json_lex::json_escape#run json_lex::utf8_char#run json_lex::json_number#run json_lex::json_literal#run} yields 5 creates 1 starts 1 resumes 1 queries 1 releases 11 template 543 copied 1123 unboxed 1}

@@ -106,15 +106,23 @@ if {[info exists ::env(CORE_BACKEND)]} {
 testConstraint coreScoping [expr {[core::useBackend] eq "interp"}]
 
 # Standalone executables (native::executable) are linked by
-# BOTLISH_NATIVE_LINKER (native/src/codegen/aot.rs, SINGLE-EXECUTABLE.md):
-# `rustc` (the default) or `stub`. A rustc-linked executable carries the
-# program's machine code as an ELF section with a botlish_fn_N symbol per
+# BOTLISH_NATIVE_LINKER (native/src/codegen/aot.rs, SINGLE-EXECUTABLE.md,
+# SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): `rustc` (the default), `stub`,
+# `system` or `auto` (the system linker for a program that calls C, the stub
+# for any other). A rustc- or system-linked executable carries the program's
+# machine code as an ordinary section with a botlish_fn_N symbol per
 # function, which tests disassemble (objdump) or find in stack traces
-# (strace -k); a stub-linked one maps that code at startup and has no such
-# symbols. Those tests, and tests of rustc's own invocation, need rustcLinker.
-# CI's stub-linker job runs every executable test with the stub linker.
-testConstraint rustcLinker [expr {![info exists ::env(BOTLISH_NATIVE_LINKER)] ||
-    $::env(BOTLISH_NATIVE_LINKER) in {"" rustc}}]
+# (strace -k): they need symbolLinker. A stub-linked one maps that code at
+# startup and has no such symbols. A program that calls C links with the
+# rustc and the system linker (and so with auto), never the stub: tests
+# that link one need cLinker. Tests of rustc's own invocation need
+# rustcLinker. CI's stub-linker and system-linker jobs run every executable
+# test with those linkers.
+set ::nativeLinker [expr {[info exists ::env(BOTLISH_NATIVE_LINKER)] && $::env(BOTLISH_NATIVE_LINKER) ne ""
+    ? $::env(BOTLISH_NATIVE_LINKER) : "rustc"}]
+testConstraint rustcLinker [expr {$::nativeLinker eq "rustc"}]
+testConstraint symbolLinker [expr {$::nativeLinker in {rustc system}}]
+testConstraint cLinker [expr {$::nativeLinker in {rustc system auto}}]
 
 # Native coroutines (runtime/coroutine.rs, MACOS-AARCH64-MILESTONE-3.md): the
 # native backend switches stacks on Linux x86-64 and AArch64 and on macOS
@@ -420,6 +428,12 @@ proc outcomeUnderHir {backend hir} {
     if {$backend eq "interp"} {
         return [outcomeUnder $backend [hir::lower $hir]]
     }
+    if {$backend eq "cranelift-unfused"} {
+        # The specialized native backend with coroutine fusion off: every
+        # coroutine on the general runtime (COROUTINE-FUSION-MILESTONE-1.md),
+        # the oracle fused code is compared with.
+        return [withoutCoroutineFusion {outcomeUnderHir cranelift $hir}]
+    }
     set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
     resetEffects
     if {[catch {
@@ -628,6 +642,28 @@ proc withImports {source} {
 # delete each other's module, and a run cut short leaves it behind. The copy
 # is a tcltest temporary directory, named per process so runs that share a
 # -tmpdir do not collide either.
+# Runs SCRIPT in the caller's frame with the native driver's coroutine
+# fusion off (BOTLISH_NATIVE_COROUTINE_FUSION=0; native/src/codegen/
+# fusion.rs, COROUTINE-FUSION-MILESTONE-1.md): every coroutine then runs on
+# the general runtime, as a test of that runtime's own objects, stacks and
+# releases needs, and as the oracle fused code is compared with.
+proc withoutCoroutineFusion {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_COROUTINE_FUSION)]
+    if {$had} {
+        set saved $::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+    }
+    set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
+    try {
+        uplevel 1 $script
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+        }
+    }
+}
+
 proc withPrivateLibrary {script} {
     set saved $::core::libraryDir
     set name private-lib-[pid]-[incr ::privateLibraryCounter]

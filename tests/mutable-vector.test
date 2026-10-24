@@ -213,12 +213,12 @@ test mv-type-affinity {items 2, 98: Affinity(MutableVector[T]) = Affinity(T): ve
     }
 } -cleanup {unset -nocomplain hir c} -result {unrestricted unrestricted unrestricted affine affine affine affine unrestricted unrestricted unrestricted affine}
 
-test mv-type-syntax {items 3, 74: MutableVector[T] is an applied type like List[T]: shown and read back as MutableVector[T]; no argument, two arguments, or a lowercase spelling are errors} -body {
+test mv-type-syntax {items 3, 74: MutableVector[T] is an applied type like List[T]: shown and read back as MutableVector[T]; no argument, two arguments (an arity error of resolution since the grammar is n-ary, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), or a lowercase spelling are errors} -body {
     list [hir::types::show {mutvec {list str}}] [hir::read::ParseType {MutableVector[List[str]]} 1] \
         [mvCode "import std::mutable_vector\nfn f(v: MutableVector) -> int:\n    1\nf(1)\n"] \
-        [lindex [mvCode "import std::mutable_vector\nfn f(v: MutableVector\[int, str\]) -> int:\n    1\nf(1)\n"] end] \
+        [mvMessage "import std::mutable_vector\nfn f(v: MutableVector\[int, str\]) -> int:\n    1\nf(1)\n"] \
         [mvCode "import std::mutable_vector\nfn f(v: mutable_vector\[int\]) -> int:\n    1\nf(1)\n"]
-} -result {{MutableVector[List[str]]} {mutvec {list str}} TYPE {expected "]" after the type argument, found ","} TYPE}
+} -result {{MutableVector[List[str]]} {mutvec {list str}} TYPE {unknown or invalid type MutableVector[int, str] for parameter "v": "MutableVector" takes 1 type argument(s), got 2} TYPE}
 
 test mv-construction {items 10-12: from_list(List[T]) is MutableVector[T]; the empty literal gives the proven-empty MutableVector[never], admissible as a declared MutableVector[T] (the typed empty vector) and into which nothing can be pushed; from_list leaves an unrestricted List usable and unchanged by later pushes} -constraints nativeCoroutines -body {
     list [mvAgree "import std::mutable_vector\nimport std::list\nxs = \[1, 2\]\nv = std::mutable_vector::from_list(xs)\nv.push(3)\n\[xs, v, std::list::length(xs)\]\n"] \

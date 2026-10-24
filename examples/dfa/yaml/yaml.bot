@@ -1,0 +1,234 @@
+# yaml.bot -- the tokens of a flow-style YAML text over the declared
+# recognizers of yaml_lex.bot (DFA-COROUTINE-MILESTONE-2.md, "The
+# workloads"). Ordinary Botlish.
+#
+# One driver, tokens(chunks), in the shape of json.bot's: a source
+# coroutine of the text's scalar values across its chunks, one recognizer
+# per token, and the driver's input buffer giving back what a token left
+# unread. A plain scalar can leave two symbols unread ("a: b" is the scalar
+# "a": the ':' and the blank after it belong to what follows), so the
+# buffer holds two (json.bot's one, the current symbol): its size is the
+# most any recognizer the driver runs leaves unread, yaml_token's lookahead
+# (yaml_plain_flow's `accept before 2`).
+#
+# The token after a quoted scalar is the one place the driver decides
+# itself: there a ':' is always the mapping indicator ({"a":1}: YAML's
+# ns-flow-map-adjacent-value, 7.4.2), which no recognizer of one token can
+# know.
+
+import std::dfa
+import yaml_lex
+import std::coroutine
+import std::mutable_array
+import std::mutable_vector
+import std::str
+import std::char
+import std::int
+
+# A symbol no token takes, or that continues a token wrongly, at offset AT:
+# the recognizer that rejected it, its state and the symbol.
+error Lexical:
+    at: int
+    recognizer: str
+    state: str
+    symbol: int
+
+# The end of the input, at offset AT, inside a token.
+error Truncated:
+    at: int
+    recognizer: str
+    state: str
+
+error TokenTooLong:
+    at: int
+    limit: int
+
+fn blank?(c: int) -> bool:
+    c == 32 or c == 9 or c == 10 or c == 13
+
+# What a token is, by its first symbol C and its length N.
+fn kind_of(c: int, n: int) -> str:
+    if c == 91:
+        return "begin-sequence"
+    if c == 93:
+        return "end-sequence"
+    if c == 123:
+        return "begin-mapping"
+    if c == 125:
+        return "end-mapping"
+    if c == 44:
+        return "entry-separator"
+    if c == 58 and n == 1:
+        return "value-indicator"
+    if c == 34:
+        return "double-quoted"
+    if c == 39:
+        return "single-quoted"
+    if c == 35:
+        return "comment"
+    "plain"
+
+# The scalar values of CHUNKS, one per resume, then -1.
+fn scalars(chunks: List[str]) -> int errors IndexNotFound:
+    loop chunk in chunks:
+        loop i from 0 to chunk.length():
+            yield std::char::scalar_value(chunk.char_at(i))
+        # (A collecting loop's last value is collected: without this, the
+        # inner loop's List of yields would be built, one element a symbol.)
+        continue
+    -1
+
+# "KIND START END" of a token.
+fn token_text(kind: str, start: int, end: int) -> str:
+    kind.append_char(' ').concat(std::int::to_string(start)).append_char(' ').concat(std::int::to_string(end))
+
+# The tokens of the flow-style YAML text that CHUNKS hold, split anywhere,
+# each "KIND START END" (offsets in symbols), blanks between them dropped;
+# or the first error. The input buffer holds the last two symbols read from
+# the source -- yaml_token's lookahead, two -- in a ring:
+#
+#   ring        the last two symbols read, symbol at offset P in slot P mod 2
+#   cursor[0]   pos, the offset of the next symbol to hand over
+#   cursor[1]   read, how many symbols the source has supplied
+#   cursor[2]   1 when the last token was a quoted scalar
+#   cursor[3]   the current token's count, then what it left unread
+#
+# The next symbol is ring[pos mod 2] while pos < read (a symbol given back),
+# else the source's, kept in the ring; the end of the input, -1, advances
+# nothing and is never kept. When a token completes leaving U unread, pos
+# goes back by U: a recognizer leaves unread at most what it was handed and
+# at most two, so they are still in the ring (pos <= read <= pos + 2). The
+# source advances monotonically; no symbol is lost, read twice from it or
+# part of two tokens.
+fn tokens(chunks: List[str], max_token: int) -> List[str] errors IndexNotFound, Lexical, Truncated, TokenTooLong:
+    coroutine {step: next_symbol, first: c0} = scalars(chunks)
+    out = std::mutable_vector::from_list([""])
+    out.pop()
+    ring = std::mutable_array::create(2, c0)
+    cursor = std::mutable_array::create(4, 0)
+    if c0 != -1:
+        cursor.set(1, 1)
+    loop:
+        start = cursor.at(0)
+        c = if start < cursor.at(1):
+            std::mutable_array::at(ring, start.mod(2))
+        else:
+            fresh = next_symbol()
+            if fresh != -1:
+                ring.set(start.mod(2), fresh)
+                cursor.set(1, start + 1)
+            fresh
+        if c == -1:
+            break
+        cursor.set(0, start + 1)
+        if blank?(c):
+            continue
+        if c == 58 and cursor.at(2) == 1:
+            cursor.set(2, 0)
+            out.push("value-indicator".token_text(start, start + 1))
+            continue
+        coroutine {step: feed, first: u0} = yaml_lex::yaml_token(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
+        loop:
+            if std::coroutine::done?(feed):
+                break
+            p = cursor.at(0)
+            if p - start >= max_token:
+                fail TokenTooLong {at: start, limit: max_token}
+            x = if p < cursor.at(1):
+                std::mutable_array::at(ring, p.mod(2))
+            else:
+                fresh = next_symbol()
+                if fresh != -1:
+                    ring.set(p.mod(2), fresh)
+                    cursor.set(1, p + 1)
+                fresh
+            if x != -1:
+                cursor.set(0, p + 1)
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        end = cursor.at(0) - cursor.at(3)
+        cursor.set(0, end)
+        quoted = if c == 34 or c == 39:
+            1
+        else:
+            0
+        cursor.set(2, quoted)
+        out.push(c.kind_of(end - start).token_text(start, end))
+    loop t in out:
+        t
+
+# The number of tokens of CHUNKS, as tokens finds them, without their
+# texts: the tokenizer the performance report measures (cursor[2] counts;
+# whether the last token was quoted is QUOTED's one slot).
+fn count_tokens(chunks: List[str], max_token: int) -> int errors IndexNotFound, Lexical, Truncated, TokenTooLong:
+    coroutine {step: next_symbol, first: c0} = scalars(chunks)
+    ring = std::mutable_array::create(2, c0)
+    cursor = std::mutable_array::create(4, 0)
+    quoted = std::mutable_array::create(1, 0)
+    if c0 != -1:
+        cursor.set(1, 1)
+    loop:
+        start = cursor.at(0)
+        c = if start < cursor.at(1):
+            std::mutable_array::at(ring, start.mod(2))
+        else:
+            fresh = next_symbol()
+            if fresh != -1:
+                ring.set(start.mod(2), fresh)
+                cursor.set(1, start + 1)
+            fresh
+        if c == -1:
+            break
+        cursor.set(0, start + 1)
+        if blank?(c):
+            continue
+        if c == 58 and quoted.at(0) == 1:
+            quoted.set(0, 0)
+            cursor.set(2, cursor.at(2) + 1)
+            continue
+        coroutine {step: feed, first: u0} = yaml_lex::yaml_token(c):
+            on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                fail Lexical {at: start, recognizer: recognizer, state: state, symbol: symbol}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Truncated {at: start, recognizer: recognizer, state: state}
+        cursor.set(3, u0)
+        loop:
+            if std::coroutine::done?(feed):
+                break
+            p = cursor.at(0)
+            if p - start >= max_token:
+                fail TokenTooLong {at: start, limit: max_token}
+            x = if p < cursor.at(1):
+                std::mutable_array::at(ring, p.mod(2))
+            else:
+                fresh = next_symbol()
+                if fresh != -1:
+                    ring.set(p.mod(2), fresh)
+                    cursor.set(1, p + 1)
+                fresh
+            if x != -1:
+                cursor.set(0, p + 1)
+            u = feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state, symbol}:
+                    fail Lexical {at: p, recognizer: recognizer, state: state, symbol: symbol}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail Truncated {at: p, recognizer: recognizer, state: state}
+            cursor.set(3, u)
+        end = cursor.at(0) - cursor.at(3)
+        cursor.set(0, end)
+        mark = if c == 34 or c == 39:
+            1
+        else:
+            0
+        quoted.set(0, mark)
+        cursor.set(2, cursor.at(2) + 1)
+    cursor.at(2)

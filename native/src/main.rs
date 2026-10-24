@@ -22,7 +22,33 @@
 //!                                        OUT without an extension;
 //!                                        BOTLISH_NATIVE_LINKER: rustc, the
 //!                                        default, or stub: codegen/aot.rs)
+//!   botlish-native library OUT NAME FILE.nir  write native library NAME's
+//!                                        program object (codegen::library,
+//!                                        NATIVE-LIBRARY-MILESTONE-1.md): the
+//!                                        program's code, descriptor and record
+//!                                        with local symbols, and the
+//!                                        library's public C functions;
+//!                                        native/native.tcl's native::library
+//!                                        links it with the runtime
 //!   botlish-native check FILE.nir        parse and validate only
+//!   botlish-native system-linker         what the system linker would link
+//!                                        with here: `flavor`, `tool` (the C
+//!                                        driver or link.exe), `runtime` (the
+//!                                        runtime archive and its machine),
+//!                                        `libraries` (the archive's system
+//!                                        libraries); exit status 1 when the
+//!                                        tool or the archive is unusable
+//!                                        (codegen/aot.rs)
+//!   botlish-native fusion FILE.nir       what coroutine fusion did with each
+//!                                        construction site (codegen::fusion,
+//!                                        COROUTINE-FUSION-MILESTONE-1.md):
+//!                                        one Tcl list per site, `fused` with
+//!                                        what was inlined and eliminated, or
+//!                                        `kept` with the reason; empty when
+//!                                        fusion is off
+//!   botlish-native fused FILE.nir        the NIR the program is after fusion
+//!                                        (codegen::nirtext), what every other
+//!                                        command compiles
 //!   botlish-native target TRIPLE         how this driver reads a target
 //!                                        triple: architecture, operating
 //!                                        system, pointer width, object format,
@@ -49,8 +75,8 @@
 //! one synthetic argument `botlish-runner` (runtime/vm.rs's DEFAULT_ARGV),
 //! never this driver's own arguments.
 //!
-//! `--link-dir DIR` (anywhere on the line, repeatable; main.tcl's `-L DIR`)
-//! adds DIR to the system linker's library search path (-LDIR) when a
+//! `--link-dir DIR` (anywhere on the line, repeatable, never empty; main.tcl's
+//! `-L DIR`) adds DIR to the system linker's library search path (-LDIR) when a
 //! program that calls C (C-FFI.md) is linked. Such a program -- one with
 //! `foreign` functions or `link` libraries -- is never JIT-run: `run` and
 //! `bench` link it as an executable (codegen/aot.rs, the same link
@@ -106,7 +132,7 @@ use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
-use runtime::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
+use runtime::vm::{ProgramInfo, Vm};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
@@ -188,6 +214,17 @@ fn extract_result(args: &[String]) -> Result<Vec<String>, String> {
 fn emit_error(code: &[&str], message: &str) {
     let code: Vec<String> = code.iter().map(|s| s.to_string()).collect();
     emit(&tcl_list(&["error".to_string(), tcl_list(&code), message.to_string()]));
+}
+
+/// A failed link's error line: `NATIVE CODE`, with the system linker's
+/// kind of failure after it when it has one (codegen::aot::LinkError):
+/// NATIVE LINK TOOLCHAIN, NATIVE AOT RUNTIME, ...
+fn emit_link_error(code: &str, error: &codegen::aot::LinkError) {
+    match error.detail {
+        Some("TOOLCHAIN") => emit_error(&["NATIVE", code, "TOOLCHAIN"], &error.message),
+        Some("RUNTIME") => emit_error(&["NATIVE", code, "RUNTIME"], &error.message),
+        _ => emit_error(&["NATIVE", code], &error.message),
+    }
 }
 
 fn read(path: &str) -> Result<String, String> {
@@ -288,30 +325,43 @@ fn extract_table_hash_key(args: &[String]) -> Option<Vec<String>> {
 }
 
 /// Pulls every "--link-dir DIR" out of ARGS (anywhere): the remaining
-/// arguments in order, and the directories. None if one has no value.
-fn extract_link_dirs(args: &[String]) -> Option<(Vec<String>, Vec<String>)> {
+/// arguments in order, and the directories. Err if one has no value or an
+/// empty one: an empty DIR would be a bare `-L`, which GNU's and Apple's
+/// linker drivers read as taking their next argument for the directory, or
+/// a bare `/LIBPATH:`, which link.exe refuses (LNK1146).
+fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let mut dirs = Vec::new();
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--link-dir" {
-            dirs.push(args.get(i + 1)?.clone());
+            let dir = args.get(i + 1).ok_or("--link-dir needs a directory")?;
+            if dir.is_empty() {
+                return Err("--link-dir needs a directory (found an empty one)".to_string());
+            }
+            dirs.push(dir.clone());
             i += 2;
             continue;
         }
         out.push(args[i].clone());
         i += 1;
     }
-    Some((out, dirs))
+    Ok((out, dirs))
 }
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | target TRIPLE | system-linker (each also [--result PATH])");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
-    let Some((args, link_dirs)) = extract_link_dirs(&args) else { return usage() };
+    let (args, link_dirs) = match extract_link_dirs(&args) {
+        Ok(split) => split,
+        Err(message) => {
+            eprintln!("botlish-native: {message}");
+            return usage();
+        }
+    };
     let Some((args, snapshot)) = extract_argv(&args) else { return usage() };
     let Some((args, alloc_mode)) = extract_alloc_mode(&args) else { return usage() };
     let args = &args[..];
@@ -319,6 +369,23 @@ fn cli(args: &[String]) -> i32 {
         Some((c, rest)) => (c.as_str(), rest),
         None => return usage(),
     };
+    if command == "system-linker" && rest.is_empty() {
+        // What the system linker would link with here (codegen::aot's
+        // `system_linker_facts`): inspectable discovery, and the runtime
+        // archive's system libraries for the build's comparison with rustc's
+        // `--print native-static-libs`.
+        let mut failed = false;
+        for (key, fact) in codegen::aot::system_linker_facts() {
+            match fact {
+                Ok(words) => emit(&tcl_list(&[vec![key.to_string()], words].concat())),
+                Err(e) => {
+                    failed = true;
+                    emit(&tcl_list(&[key.to_string(), "error".to_string(), e.message]));
+                }
+            }
+        }
+        return i32::from(failed);
+    }
     if command == "target" {
         // `target TRIPLE`: how this driver reads a target triple
         // (codegen::target::describe), for the front end's target table.
@@ -346,7 +413,8 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object" | "executable", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check", [file, ..]) => (1, file),
+        ("library", [_, _, file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -356,14 +424,28 @@ fn cli(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let program = match nir::parse(&text) {
+    let mut program = match nir::parse(&text) {
         Ok(p) => p,
         Err(e) => {
             emit_error(&["NATIVE", "INVALID-NIR"], &e.to_string());
             return 0;
         }
     };
-    if matches!(command, "run" | "bench" | "batch" | "object" | "executable") {
+    // Coroutine fusion (codegen::fusion, COROUTINE-FUSION-MILESTONE-1.md):
+    // every command sees the program code generation compiles.
+    let fusion = if codegen::fusion::enabled() { codegen::fusion::fuse(&mut program) } else { Vec::new() };
+    // BOTLISH_NATIVE_COROUTINE_FUSION_LOG=FILE appends the `fusion`
+    // command's report of every program the driver loads: a census of a
+    // whole test run (audit/coroutine-fusion/tools/census.tcl).
+    if let Ok(path) = std::env::var("BOTLISH_NATIVE_COROUTINE_FUSION_LOG") {
+        if !fusion.is_empty() {
+            if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                // One write: concurrent drivers append whole reports.
+                let _ = log.write_all(format!("{}\n", codegen::fusion::report(&fusion)).as_bytes());
+            }
+        }
+    }
+    if matches!(command, "run" | "bench" | "batch" | "object" | "executable" | "library") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -375,6 +457,14 @@ fn cli(args: &[String]) -> i32 {
     match command {
         "check" => {
             emit("ok");
+            0
+        }
+        "fusion" => {
+            emit(&codegen::fusion::report(&fusion));
+            0
+        }
+        "fused" => {
+            emit(codegen::nirtext::program_text(&text, &program).trim_end());
             0
         }
         "roots" => {
@@ -393,11 +483,36 @@ fn cli(args: &[String]) -> i32 {
                 Ok(_) => emit(&tcl_list(&["executable".to_string(), named.to_string_lossy().into_owned()])),
                 Err(e) => {
                     let code = if codegen::aot::calls_c(&program) { "LINK" } else { "AOT" };
-                    emit_error(&["NATIVE", code], &e);
+                    emit_link_error(code, &e);
                     return 1;
                 }
             }
             0
+        }
+        "library" => {
+            let (out, name) = (&rest[0], &rest[1]);
+            if !codegen::library::SUPPORTED {
+                emit_error(&["NATIVE", "UNSUPPORTED", "library"], "native libraries are made on Linux glibc (x86_64, aarch64) only (NATIVE-LIBRARY-MILESTONE-1.md)");
+                return 1;
+            }
+            if !nir::is_c_identifier(name) {
+                emit_error(&["NATIVE", "LIBRARY"], &format!("library name {name:?} is not a C identifier"));
+                return 1;
+            }
+            match codegen::emit_library_object(&program, name) {
+                Ok(object) => {
+                    if let Err(e) = std::fs::write(out, &object.bytes) {
+                        emit_error(&["NATIVE", "IO"], &e.to_string());
+                        return 2;
+                    }
+                    emit(&tcl_list(&["library".to_string(), out.clone(), object.bytes.len().to_string()]));
+                    0
+                }
+                Err(e) => {
+                    emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+                    1
+                }
+            }
         }
         "object" => {
             let out = &rest[0];
@@ -472,7 +587,7 @@ fn run_linked(
     let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs) {
         Ok(executable) => executable,
         Err(e) => {
-            emit_error(&["NATIVE", "LINK"], &e);
+            emit_link_error("LINK", &e);
             return 0;
         }
     };
@@ -603,29 +718,8 @@ fn call_effect_report(program: &nir::Program) -> String {
     lines.join("\n")
 }
 
-fn program_info(program: &nir::Program) -> ProgramInfo {
-    ProgramInfo {
-        functions: program
-            .functions
-            .iter()
-            .map(|f| FunctionInfo { arity: f.params as usize, pnames: f.pnames.clone() })
-            .collect(),
-        natives: program
-            .natives
-            .iter()
-            .map(|n| NativeInfo { name: n.name.clone(), arity: n.arity, params: n.params.clone(), op: n.op })
-            .collect(),
-        shapes: program
-            .shapes
-            .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
-            .collect(),
-        enums: program
-            .enums
-            .iter()
-            .map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() })
-            .collect(),
-    }
+pub fn program_info(program: &nir::Program) -> ProgramInfo {
+    runtime::program::program_info(program)
 }
 
 /// The "sites" entry of Metrics::to_tcl: SITES (codegen::clif's compile-time

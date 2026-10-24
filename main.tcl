@@ -17,6 +17,12 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
+#                          native library NAME (NATIVE-LIBRARY-MILESTONE-1.md:
+#                          libNAME.a, libNAME.so, NAME.h,
+#                          NAME.manifest.json) from the one input; its exports
+#                          are its `exported c fn`s, or the top-level
+#                          functions -export names
 #   -check                 analyze each .bot input, report its diagnostics,
 #                          run and build nothing (the compiler service)
 #   -lsp ?-lsp-scheduler worker|sync?    the language server, on stdin and
@@ -98,8 +104,11 @@
 # on Windows FILE.exe): ELF on Linux glibc (x86_64, aarch64), Mach-O on macOS
 # (aarch64), PE on Windows (x86_64, MSVC's toolchain), for the host's target only,
 # linked as BOTLISH_NATIVE_LINKER says (rustc, the default, everywhere; stub
-# needs no toolchain, is Linux x86_64's only, and is what the single-file
-# compiler uses: SINGLE-EXECUTABLE.md). It does not evaluate the program.
+# needs no toolchain and is Linux x86_64's only; system needs the host's C
+# compiler driver and the runtime archive, never rustc; auto, what the
+# single-file compiler uses, is system for a program that calls C and stub
+# for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+# It does not evaluate the program.
 # Running the executable prints its value.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
@@ -184,6 +193,9 @@ set cliOptions {
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
+    -emit-native-library NAME build {build native library NAME from the one input}
+    -export FUNCTION build {export a top-level function (default: exported c fns)}
+    -out DIR build {the library's directory (default: the input's)}
     -check {} check {report each .bot input's diagnostics; run nothing}
     -lsp {} lsp {run the language server on stdin and stdout}
     -lsp-scheduler NAME lsp {where -lsp analyzes: worker (default) or sync}
@@ -721,6 +733,41 @@ proc checkFile {path} {
     return 0
 }
 
+# Builds native library NAME from PATH into DIR (native::library): its
+# exports are the program's `exported c fn`s, or EXPORTS (top-level function
+# names) when given.
+proc emitLibrary {path name exports dir} {
+    global warnings target hintsShown
+    set hintsShown {}
+    if {[catch {
+        switch -- [file extension $path] {
+            .bot {
+                set hir [surface::readProgramFile $path -warnings $warnings -target $target]
+                warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
+            }
+            .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
+            default { throw {NATIVE LIBRARY INPUT} "expected a .bot or .hirx input file (a native library is built from source or its HIR interchange): $path" }
+        }
+        if {$dir eq ""} {
+            set dir [file dirname $path]
+        }
+        set options [list -name $name -out $dir]
+        if {[llength $exports]} {
+            lappend options -exports $exports
+        }
+        set built [native::library $hir {*}$options]
+    } message options]} {
+        printError stderr "$path: " $message $options
+        return 1
+    }
+    foreach artifact {static shared header manifest} {
+        if {[dict get $built $artifact] ne ""} {
+            puts "$artifact: [dict get $built $artifact]"
+        }
+    }
+    return 0
+}
+
 proc emitExecutable {path} {
     global warnings target hintsShown
     set hintsShown {}
@@ -758,6 +805,9 @@ set showAot ""
 set showNative ""
 set injectedArgv [core::process::defaultArgv]
 set injectedArgvGiven 0
+set libraryName ""
+set libraryExports {}
+set libraryDir ""
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -819,6 +869,15 @@ foreach option [dict get $commandLine options] {
         -emit-clif { set showNative clif }
         -emit-native-executable { set showNative executable }
         -emit-hir-interchange { set showNative interchange }
+        -emit-native-library {
+            if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $value]} {
+                usageError "-emit-native-library needs the library's name, a C identifier (it prefixes every public C name: NAME_create), found \"$value\""
+            }
+            set showNative library
+            set libraryName $value
+        }
+        -export { lappend libraryExports $value }
+        -out { set libraryDir $value }
         -argv - -argv-hex {
             if {!$injectedArgvGiven} { set injectedArgv {}; set injectedArgvGiven 1 }
             if {$arg eq "-argv"} {
@@ -832,12 +891,21 @@ foreach option [dict get $commandLine options] {
         }
         -argv-none { set injectedArgv {}; set injectedArgvGiven 1 }
         -L {
+            if {$value eq ""} {
+                usageError "-L needs a directory (found an empty one)"
+            }
             lappend native::linkDirs [file normalize $value]
         }
         -lsp-scheduler {
             usageError "-lsp-scheduler is an option of -lsp"
         }
     }
+}
+if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
+    usageError "-export and -out are options of -emit-native-library"
+}
+if {$showNative eq "library" && [llength $files] != 1} {
+    usageError "-emit-native-library builds one library from one input file (found [llength $files])"
 }
 set failures 0
 if {$check} {
@@ -849,6 +917,8 @@ foreach path $files {
         incr failures [checkFile $path]
     } elseif {$showNative eq "executable"} {
         incr failures [emitExecutable $path]
+    } elseif {$showNative eq "library"} {
+        incr failures [emitLibrary $path $libraryName $libraryExports $libraryDir]
     } elseif {$showNative eq "interchange"} {
         incr failures [emitInterchange $path]
     } else {

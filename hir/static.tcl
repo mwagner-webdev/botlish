@@ -250,6 +250,10 @@ namespace eval hir::static {
         DUPLICATE-FLAG                           DuplicateFlag
         DUPLICATE-FLAG-DECLARATION               DuplicateFlagDeclaration
         DUPLICATE-LOOP-VARIABLE                  DuplicateLoopVariable
+        EXPORT-ENVIRONMENT                       ExportEnvironment
+        EXPORT-NAME                              ExportName
+        EXPORT-PLACEMENT                         ExportPlacement
+        EXPORT-SIGNATURE                         ExportSignature
         FLAG-BINDING-COLLISION                   FlagBindingCollision
         FLAG-CALLEE-UNKNOWN                      FlagCalleeUnknown
         FLAG-FUNCTION-VALUE                      FlagFunctionValue
@@ -284,6 +288,7 @@ namespace eval hir::static {
         NOT-AN-ENUM                              NotAnEnum
         OPAQUE-CONSTRUCTION                      OpaqueConstruction
         OPAQUE-REPRESENTATION                    OpaqueRepresentation
+        PRIVATE-ACCESS                           PrivateAccess
         PROOF-CLAUSE                             ProofClause
         REFINEMENT-MINT-AUTHORITY                RefinementMintAuthority
         REFINEMENT-PARAMETER                     RefinementParameter
@@ -491,7 +496,7 @@ proc hir::static::CollectSites {nodes parent sitesVar} {
 
 # {NODES MODULES} with every static node replaced by its form under DECISIONS
 # (key -> {accepted} or {rejected DIAGNOSTIC}; an undecided site is its body, as
-# an accepted one is).
+# an accepted one is; `unknown`, a hole: surface/modules.tcl's Recovery).
 proc hir::static::Expand {nodes modules decisions} {
     set sections [lmap section $modules {
         dict set section nodes [Sequence [dict get $section nodes] $decisions]
@@ -592,6 +597,12 @@ proc hir::static::Node {node decisions} {
 # position (value: exactly one node).
 proc hir::static::Form {node decisions position} {
     set key [Key $node]
+    if {[dict exists $decisions $key] && [dict get $decisions $key] eq "unknown"} {
+        # A program with syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md):
+        # whether the block compiles is not known, nor what it is; it binds
+        # nothing either way (Accepted).
+        return [list [hir::syntax::holeNode [dict get $node origin] 0]]
+    }
     if {[dict exists $decisions $key] && [lindex [dict get $decisions $key] 0] eq "rejected"} {
         return [list [Reified $node [lindex [dict get $decisions $key] 1]]]
     }

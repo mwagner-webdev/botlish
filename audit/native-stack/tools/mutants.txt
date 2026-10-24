@@ -299,9 +299,9 @@
 @@ gc-walk-half-stack the frame walk of the thread's stack bounded at its middle
 ## native/src/runtime/vm.rs
 <<<<
-        let current = stack_of(self.co_current, self.native_stack);
+        let current = stack_of(self.co_current, main_stack);
 ====
-        let current = stack_of(self.co_current, self.native_stack.map(|s| NativeStack { high_bound: s.low_bound + (s.high_bound - s.low_bound) / 2, ..s }));
+        let current = stack_of(self.co_current, main_stack.map(|s| NativeStack { high_bound: s.low_bound + (s.high_bound - s.low_bound) / 2, ..s }));
 >>>>
 
 # ---------------------------------------------------------------------------

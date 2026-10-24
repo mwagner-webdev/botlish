@@ -482,6 +482,12 @@ variable that is a type of a struct field (no user generic types); passing an
 imprinted function as a value; imprinting an affine type where values of it
 exist; ordering imprints by name.
 
+> Since TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, a struct may declare type
+> slots (`struct Map[K satisfies Hashable, V]:`): a field's type may name a
+> slot, and matching an application `Map[K, V]` establishes K and V like
+> any applied type, with the slot's constraint as a fact about K. Functions
+> still declare no type parameters and no constraints.
+
 ## Representation
 
 **HIR.** The C types are semantic type facts, never strings a later pass

@@ -1,0 +1,3 @@
+fn index() -> int:
+    k = 1
+    k +

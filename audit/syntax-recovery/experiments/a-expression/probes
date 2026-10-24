@@ -1,0 +1,7 @@
+main.bot 2 5 known s: a binding before the malformed line
+main.bot 4 5 known s: its use after the malformed line (an expression hole binds nothing)
+main.bot 3 5 binding t: the binding the malformed line makes (its value is not known)
+main.bot 6 4 known other: an unrelated function
+main.bot 9 1 known y: an unrelated top-level binding
+main.bot 10 1 known z: the declared result of the function with the error
+main.bot 10 5 known total: its declared signature

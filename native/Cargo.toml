@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# The runtime library: an rlib for executables (the rustc linker's startup
+# crate links it) and a static archive for native libraries
+# (NATIVE-LIBRARY-MILESTONE-1.md: native::library partially links it with a
+# library's program object and keeps only the library's public symbols
+# global).
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 cranelift-codegen = { version = "0.135", features = ["trace-log"] }
 cranelift-frontend = "0.135"
@@ -37,6 +45,13 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_SystemServices",
     "Win32_System_Threading",
 ] }
+
+# The runtime archive (native/runtime-archive) is a member built with the
+# driver: one `cargo build` makes botlish-native, botlish-aot-stub and the
+# archive the system linker links (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+[workspace]
+members = [".", "runtime-archive"]
+default-members = [".", "runtime-archive"]
 
 # The native stack test's threads of CreateThread's own (tests/native_stack/
 # windows.rs): Rust's runtime set no stack guarantee for them.

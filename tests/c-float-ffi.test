@@ -32,7 +32,17 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstrai
         set ::cflFixtureDir ""
     }
 }
-testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint rustcLinker]}]
+testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint cLinker]}]
+
+# The link directories of a run, for native::withLinkDirs: the fixture's, or
+# none when it did not build (a program that calls no C, cfl-hir-text's, still
+# runs then; an empty directory is no directory).
+proc cflLinkDirs {} {
+    if {$::cflFixtureDir eq ""} {
+        return {}
+    }
+    return [list $::cflFixtureDir]
+}
 
 # The HIR of source TEXT (warnings off).
 proc cflHir {text args} {
@@ -57,9 +67,9 @@ proc cflReject {text args} {
 }
 
 # The outcome {value V} / {error KIND} of HIR on BACKEND, with the C
-# fixture's archive on the link path.
+# fixture's archive, if it built, on the link path.
 proc cflRun {hir backend} {
-    native::withLinkDirs [list $::cflFixtureDir] {
+    native::withLinkDirs [cflLinkDirs] {
         set outcome [outcomeUnderHir $backend $hir]
     }
     if {[lindex $outcome 0] eq "value"} {
@@ -775,7 +785,7 @@ test cfl-executable {a program that passes and receives C floats and doubles lin
         "go():\n    on NonFiniteFloat:\n        \[\]\n"]
     set hir [cflHir $source]
     set dir [makeDirectory cfl-exe-[pid]]
-    set exe [native::withLinkDirs [list $::cflFixtureDir] {native::executable $hir [file join $dir program]}]
+    set exe [native::withLinkDirs [cflLinkDirs] {native::executable $hir [file join $dir program]}]
     list [string trim [runBare $exe]] [lindex [cflRun $hir cranelift] 1]
 } -cleanup {file delete -force [file join [temporaryDirectory] cfl-exe-[pid]]} -result {{[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]} {[0.10000000149011612, 0.30000000000000004, 1266679808, 8.5, 1, 1]}}
 

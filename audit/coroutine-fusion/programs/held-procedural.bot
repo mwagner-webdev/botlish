@@ -1,0 +1,13 @@
+# held-procedural.bot -- held.bot written by hand without a coroutine: the
+# same recursion, each frame adding the same two values
+# (COROUTINE-FUSION-MILESTONE-1.md's procedural baseline).
+#
+# expect: 1000
+
+fn held(k: int) -> int:
+    if k == 0:
+        return 0
+    below = held(k - 1)
+    below + 0 + 1
+
+held(1000)

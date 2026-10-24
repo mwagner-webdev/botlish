@@ -404,6 +404,17 @@ pub enum OpCode {
     CoYield,
     CoDone,
     CoRelease,
+    /// `%f = op cofailed` (COROUTINE-FUSION-MILESTONE-1.md): a terminal,
+    /// failed coroutine object holding the pending error (taken from the
+    /// Vm exactly as a coroutine body's unhandled failure is: the error, its
+    /// declared id and its payload), which is cleared. Emitted only by the
+    /// coroutine fusion pass (codegen::fusion), where a fused coroutine's
+    /// segment fails: `coresume0 %f` then raises the cached failure again,
+    /// at the resume that ran the segment and at every later one, through
+    /// the general runtime's own stable-terminal-failure path
+    /// (runtime/coroutine.rs's `reraise`). Allocates (a safepoint), never
+    /// fails, never runs code and holds no stack.
+    CoFailed,
     /// C addresses (C-ABI-TYPES.md; runtime/value.rs's immediate C address
     /// word). `cptrnull`: the null pointer (a constant word). `cptrisnull
     /// %p`: Bool, %p is null (a word comparison; no memory is read).
@@ -640,6 +651,15 @@ pub enum OpCode {
     /// per-opcode split as SetContainsTotal's.
     RIMod,
     RIModTotal,
+    /// `rtabload8 %t %i` / `rtabload16 %t %i`: the unsigned byte (the
+    /// little-endian 16-bit word) at index %i (raw) of the static byte
+    /// storage %t (a `bytes` constant), as a raw Int. Unchecked: native
+    /// lowering emits it only for an index it has bounded by the table's own
+    /// shape -- a declared recognizer's state and symbol (native/lower.tcl's
+    /// DfaTable, DFA-COROUTINE-MILESTONE-2.md) -- so it has no error exit,
+    /// allocates nothing and is one load.
+    RTabLoad8,
+    RTabLoad16,
     /// C words (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): a 64-bit C integer
     /// result held as the machine word the C ABI returned, in a register of
     /// the `i64` or `u64` kind (`i64regs=`/`u64regs=`: the word read as
@@ -925,6 +945,7 @@ op_spellings! {
     "ffifixturecopy" => FfiFixtureCopy,
     "ffifixturemixed" => FfiFixtureMixed,
     "corelease" => CoRelease,
+    "cofailed" => CoFailed,
     "affinedrop" => AffineDrop,
     "mvfromlist" => MvFromList,
     "mvlen" => MvLen,
@@ -956,6 +977,8 @@ op_spellings! {
     "rbox" => RBox,
     "runbox" => RUnbox,
     "riadd" => RIAdd,
+    "rtabload8" => RTabLoad8,
+    "rtabload16" => RTabLoad16,
     "risub" => RISub,
     "rimul" => RIMul,
     "cwbox" => CWBox,
@@ -1042,7 +1065,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew => None,
-            Argv | CPtrNull => Some(0),
+            Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
@@ -1068,7 +1091,7 @@ impl OpCode {
     pub fn raw_result(self) -> bool {
         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
             | OpCode::RIShr | OpCode::RIShl | OpCode::RIAnd | OpCode::RIOr | OpCode::RIXor
-            | OpCode::RIMod | OpCode::RIModTotal
+            | OpCode::RIMod | OpCode::RIModTotal | OpCode::RTabLoad8 | OpCode::RTabLoad16
             | OpCode::ShortLen | OpCode::AsciiLen)
     }
 
@@ -1093,6 +1116,8 @@ impl OpCode {
         use OpCode::*;
         if self.word_op() {
             if i == 0 { RegKind::I64 } else { RegKind::Tagged }
+        } else if matches!(self, RTabLoad8 | RTabLoad16) {
+            if i == 0 { RegKind::Tagged } else { RegKind::Raw }
         } else if self.raw_operands() {
             RegKind::Raw
         } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
@@ -1240,6 +1265,15 @@ pub enum Inst {
     Tail { args: Vec<Reg> },
     TailEnv { closure: Reg, args: Vec<Reg> },
     Br { cond: Reg, then: Label, otherwise: Label },
+    /// `switch %v LDEFAULT LO:HI:L ...`: a multiway branch on the raw
+    /// (untagged) Int %v -- to the label L of the case whose closed interval
+    /// LO..HI holds it, else to LDEFAULT. The cases are sorted and disjoint
+    /// (validate). It is general control flow, not any construct's: native
+    /// lowering emits it for a declared recognizer's state and symbol
+    /// dispatch (native/lower.tcl's DfaTransition, DFA-COROUTINE-
+    /// MILESTONE-2.md), and codegen::clif chooses per switch between a jump
+    /// table and a balanced search of its intervals (Translator::switch).
+    Switch { value: Reg, default: Label, cases: Vec<(i64, i64, Label)> },
     Jump(Label),
     Ret(Reg),
     /// Returns several tagged Values at once: the terminator of a
@@ -1356,6 +1390,7 @@ impl Inst {
             Inst::Tail { .. }
                 | Inst::TailEnv { .. }
                 | Inst::Br { .. }
+                | Inst::Switch { .. }
                 | Inst::Jump(_)
                 | Inst::Ret(_)
                 | Inst::RetMulti(_)
@@ -1367,6 +1402,7 @@ impl Inst {
     }
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub id: FuncId,
     pub name: String,
@@ -1744,6 +1780,74 @@ impl CAbi {
     }
 }
 
+/// The C boundary type of an exported function's parameter or result
+/// (`export` declarations, NATIVE-LIBRARY-MILESTONE-1.md, "The C ABI"): what
+/// a library's C trampoline converts between a C value and a Botlish one.
+/// `Unit` is a result only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Boundary {
+    /// Botlish Int <-> C int64_t: every int64_t is an Int; an Int result
+    /// outside int64_t is a boundary error, never wrapped.
+    Int,
+    /// Botlish Bool <-> C bool.
+    Bool,
+    /// Botlish Float64 <-> C double: a NaN or an infinity argument is a
+    /// boundary error, -0.0 enters as 0.0 (Float64 has no negative zero).
+    Float64,
+    /// Botlish String <-> UTF-8 bytes (pointer and length): an argument is
+    /// validated and copied into the heap; a result is copied out into a
+    /// buffer the caller owns.
+    Str,
+    /// No result.
+    Unit,
+}
+
+impl Boundary {
+    pub fn parse(word: &str) -> Option<Boundary> {
+        Some(match word {
+            "int" => Boundary::Int,
+            "bool" => Boundary::Bool,
+            "float64" => Boundary::Float64,
+            "str" => Boundary::Str,
+            "unit" => Boundary::Unit,
+            _ => return None,
+        })
+    }
+
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Boundary::Int => "int",
+            Boundary::Bool => "bool",
+            Boundary::Float64 => "float64",
+            Boundary::Str => "str",
+            Boundary::Unit => "unit",
+        }
+    }
+
+    /// The number of C argument words a parameter of this type takes in a
+    /// trampoline's argument slots (a String: its pointer and its length).
+    pub fn words(self) -> usize {
+        match self {
+            Boundary::Str => 2,
+            Boundary::Unit => 0,
+            _ => 1,
+        }
+    }
+}
+
+/// An exported function (`export "SYMBOL" func=N params="T..." result=T`,
+/// NATIVE-LIBRARY-MILESTONE-1.md): the C symbol of its trampoline, the NIR
+/// function whose generic entry the trampoline calls (the export root: the
+/// function's generic instance, compiled under its declared contract only),
+/// and its boundary signature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportDecl {
+    pub symbol: String,
+    pub func: FuncId,
+    pub params: Vec<Boundary>,
+    pub result: Boundary,
+}
+
 /// A C function the program calls (`foreign N "SYMBOL" params="..."
 /// result=K [alias=I] name="KEY"`, C-FFI.md): the native link symbol the
 /// system linker resolves (never looked up at run time), the transport class
@@ -1804,6 +1908,18 @@ pub struct Program {
     /// bounds its Capture indices. Zero for a program with no module-static
     /// bindings.
     pub statics: u32,
+    /// The exported functions (`export` declarations, in order;
+    /// NATIVE-LIBRARY-MILESTONE-1.md): empty but for a library's program.
+    pub exports: Vec<ExportDecl>,
+    /// The canonical identity of every declared error the program may raise,
+    /// by its NIR id (`error ID "NAME"` declarations): what a library reports
+    /// as a declared error's identity. Empty but for a library's program.
+    pub errors: Vec<(u32, String)>,
+    /// The header's `call-effects` flag (default 1): whether call sites
+    /// take their callee's settled effect summary (`summarize_call_effects`).
+    /// Kept so a pass that rewrites functions (codegen::fusion) can settle
+    /// the summaries again (`resummarize`).
+    pub call_effects: bool,
 }
 
 #[derive(Debug)]
@@ -1956,6 +2072,9 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         statics: 0,
         context_bytes: 0,
         contexts: Vec::new(),
+        exports: Vec::new(),
+        errors: Vec::new(),
+        call_effects: true,
     };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
@@ -2041,6 +2160,19 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                     }
                     program.foreigns.push(decl.1);
                 }
+                "export" => program.exports.push(parse_export(&p, &tokens)?),
+                "error" => {
+                    let id = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok());
+                    match (id, tokens.get(2)) {
+                        (Some(id), Some(Token::Quoted(name))) if id > 0 && !name.is_empty() && tokens.len() == 3 => {
+                            if program.errors.iter().any(|(seen, _)| *seen == id) {
+                                return p.err(format!("error id {id} is declared twice"));
+                            }
+                            program.errors.push((id, name.clone()))
+                        }
+                        _ => return p.err("error needs a positive id and a quoted error name"),
+                    }
+                }
                 "func" => current = Some(parse_func_header(&p, &tokens)?),
                 _ => return p.err(format!("expected native or func, got {raw:?}")),
             }
@@ -2058,9 +2190,18 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
     if current.is_some() {
         return p.err("missing end");
     }
+    program.call_effects = call_effects;
     validate(&program)?;
     summarize_call_effects(&mut program, call_effects);
     Ok(program)
+}
+
+/// Settles every function's effect summary and every call site's effects
+/// again, from the bodies as they now are: after a pass rewrote functions
+/// (codegen::fusion), exactly as `parse` settled them.
+pub fn resummarize(program: &mut Program) {
+    let enabled = program.call_effects;
+    summarize_call_effects(program, enabled);
 }
 
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
@@ -2235,6 +2376,39 @@ fn parse_foreign(p: &Parser, tokens: &[Token]) -> Result<(u32, ForeignDecl), Nir
         Some(_) => return p.err("foreign variadic=1 needs at least one fixed parameter"),
     };
     Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic }))
+}
+
+fn parse_export(p: &Parser, tokens: &[Token]) -> Result<ExportDecl, NirError> {
+    let symbol = match tokens.get(1) {
+        Some(Token::Quoted(symbol)) if is_c_identifier(symbol) => symbol.clone(),
+        _ => return p.err("export needs its quoted C symbol (a C identifier)"),
+    };
+    let kv = pairs(tokens);
+    let Some(func) = kv.get("func").and_then(|f| f.parse::<FuncId>().ok()) else {
+        return p.err("export needs func=N");
+    };
+    let mut params = Vec::new();
+    for word in kv.get("params").map(String::as_str).unwrap_or("").split_whitespace() {
+        match Boundary::parse(word) {
+            Some(Boundary::Unit) | None => return p.err(format!("export {symbol}: unknown parameter type {word:?}")),
+            Some(t) => params.push(t),
+        }
+    }
+    let Some(result) = kv.get("result").and_then(|r| Boundary::parse(r)) else {
+        return p.err(format!("export {symbol} needs result=int|bool|float64|str|unit"));
+    };
+    if tokens.len() != 5 {
+        return p.err(format!("export {symbol}: expected \"SYMBOL\" func=N params=\"...\" result=T"));
+    }
+    Ok(ExportDecl { symbol, func, params, result })
+}
+
+/// Whether TEXT is a C identifier: a letter or `_`, then letters, digits and
+/// `_` (ASCII).
+pub fn is_c_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn parse_enum(p: &Parser, tokens: &[Token]) -> Result<(u32, EnumDecl), NirError> {
@@ -2747,6 +2921,24 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
         "tail" => Inst::Tail { args: regs_from(1)? },
         "tailenv" => Inst::TailEnv { closure: reg(1)?, args: regs_from(2)? },
         "br" => Inst::Br { cond: reg(1)?, then: label(2)?, otherwise: label(3)? },
+        "switch" => {
+            let mut cases = Vec::new();
+            for t in tokens.iter().skip(3) {
+                let parts: Vec<&str> = word(t).map(|w| w.split(':').collect()).unwrap_or_default();
+                let case = match parts.as_slice() {
+                    [lo, hi, l] => match (lo.parse::<i64>(), hi.parse::<i64>(), l.strip_prefix('L').and_then(|n| n.parse::<Label>().ok())) {
+                        (Ok(lo), Ok(hi), Some(l)) => Some((lo, hi, l)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                match case {
+                    Some(case) => cases.push(case),
+                    None => return p.err(format!("bad switch case {t:?}: expected LO:HI:LABEL")),
+                }
+            }
+            Inst::Switch { value: reg(1)?, default: label(2)?, cases }
+        }
         "jump" => Inst::Jump(label(1)?),
         "ret" => Inst::Ret(reg(1)?),
         "retmulti" => Inst::RetMulti(regs_from(1)?),
@@ -2782,8 +2974,19 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
     })
 }
 
-/// Structural checks, so code generation can assume well-formed input.
-fn validate(program: &Program) -> Result<(), NirError> {
+/// Structural checks, so code generation can assume well-formed input
+/// (`parse` runs them; a pass that rewrites a program runs them again).
+pub fn validate(program: &Program) -> Result<(), NirError> {
+    validate_selected(program, None)
+}
+
+/// `validate`'s checks of function INDEX alone (with the program-level
+/// ones): what a pass that rewrote that one function runs (codegen::fusion).
+pub fn validate_function(program: &Program, index: usize) -> Result<(), NirError> {
+    validate_selected(program, Some(index))
+}
+
+fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirError> {
     let fail = |message: String| Err(NirError { line: 0, message });
     for (i, f) in program.functions.iter().enumerate() {
         if f.id as usize != i {
@@ -2791,7 +2994,26 @@ fn validate(program: &Program) -> Result<(), NirError> {
         }
     }
     let func = |id: FuncId| program.functions.get(id as usize);
+    // An export's trampoline calls its function's generic entry with one
+    // tagged Value per parameter (NATIVE-LIBRARY-MILESTONE-1.md): a real,
+    // ordinary function of that arity -- never the program, never a
+    // companion -- whose symbol no other export has.
+    let mut symbols = HashSet::new();
+    for e in &program.exports {
+        let Some(f) = func(e.func) else {
+            return fail(format!("export {}: no function {}", e.symbol, e.func));
+        };
+        if e.func == 0 || f.results != 1 || f.env || f.params as usize != e.params.len() {
+            return fail(format!("export {}: function {} ({}) is not an environment-free function of {} parameters", e.symbol, f.id, f.name, e.params.len()));
+        }
+        if !symbols.insert(e.symbol.as_str()) {
+            return fail(format!("export {} is declared twice", e.symbol));
+        }
+    }
     for f in &program.functions {
+        if only.is_some_and(|i| i != f.id as usize) {
+            continue;
+        }
         let ctx = |m: String| format!("function {} ({}): {m}", f.id, f.name);
         if f.params > f.regs {
             return fail(ctx("params > regs".into()));
@@ -3040,6 +3262,22 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.push(*cond);
                     targets.extend([*then, *otherwise]);
                 }
+                Inst::Switch { value, default, cases } => {
+                    if f.kind_of(*value) != RegKind::Raw {
+                        return fail(ctx(format!("switch on %{value}, which is not a raw register")));
+                    }
+                    for (k, (lo, hi, l)) in cases.iter().enumerate() {
+                        if lo > hi {
+                            return fail(ctx(format!("switch case {lo}:{hi} is empty")));
+                        }
+                        if k > 0 && cases[k - 1].1 >= *lo {
+                            return fail(ctx(format!("switch cases are not sorted and disjoint at {lo}:{hi}")));
+                        }
+                        targets.push(*l);
+                    }
+                    used.push(*value);
+                    targets.push(*default);
+                }
                 Inst::Jump(l) => targets.push(*l),
                 Inst::Ret(r) => {
                     if f.results != 1 {
@@ -3203,6 +3441,8 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 // argument must already have it too. Every other rebound
                 // register (env=1's closure) stays ordinary tagged, like
                 // any operand in the catch-all below.
+                // A switch dispatches on a raw Int (checked above).
+                Inst::Switch { .. } => {}
                 Inst::Tail { args } | Inst::TailEnv { args, .. } => {
                     if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != kind(*i as Reg)) {
                         return fail(ctx(format!(
@@ -3235,7 +3475,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
             || program.functions[0].results != 1 {
         return fail("function 0 must be the program: no parameters, no environment, one result".into());
     }
-    validate_plans(program)
+    validate_plans(program, only)
 }
 
 /// The virtual-construction plan discipline (M8.a), checked structurally so
@@ -3267,9 +3507,12 @@ fn validate(program: &Program) -> Result<(), NirError> {
 /// span): every allowed use above consumes its register; a use of a
 /// register that may already have been consumed on some path reaching it
 /// is rejected; a (re)definition makes a register unconsumed again.
-fn validate_plans(program: &Program) -> Result<(), NirError> {
+fn validate_plans(program: &Program, only: Option<usize>) -> Result<(), NirError> {
     let fail = |message: String| Err(NirError { line: 0, message });
     for f in &program.functions {
+        if only.is_some_and(|i| i != f.id as usize) {
+            continue;
+        }
         let ctx = |m: String| format!("function {} ({}): {m}", f.id, f.name);
         let plan = &f.plan_regs;
         if f.id == 0 && f.plan_result {
@@ -3401,6 +3644,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                     }
                 }
                 Inst::Br { cond, .. } => used.push(*cond),
+                Inst::Switch { value, .. } => used.push(*value),
                 Inst::RetMulti(rs) => used.extend(rs),
             }
             if let Some(r) = used.iter().find(|r| plan[**r as usize]) {
@@ -3510,6 +3754,12 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
             match inst {
                 Inst::Br { then, otherwise, .. } => {
                     for l in [then, otherwise] {
+                        succs.push(block_of(label_index[l]));
+                    }
+                }
+                Inst::Switch { default, cases, .. } => {
+                    succs.push(block_of(label_index[default]));
+                    for (_, _, l) in cases {
                         succs.push(block_of(label_index[l]));
                     }
                 }

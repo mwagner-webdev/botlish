@@ -28,8 +28,37 @@
 #                     keyword: it starts an import only when immediately
 #                     followed by a name or by "type", which no other
 #                     construct allows, so `import` stays an ordinary name.
-#   topStatement = typeDecl | structDecl | enumDecl | layoutDecl | errorDecl
-#                | traitDecl | externDecl | statement
+#   topStatement = [ "private" ] declaration | classDecl | dfaDecl | statement
+#   declaration  = typeDecl | structDecl | enumDecl | layoutDecl | errorDecl
+#                | traitDecl | externDecl | function | binding
+#                  -- "private" (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-
+#                  1.md): the declaration is accessible only to code of the
+#                  module that declares it. Contextual, like every modifier
+#                  (AtPrivate): only directly before a declaration keyword
+#                  or a name; written first, at most once, on a named
+#                  top-level declaration only (PrivateDecl). A property of
+#                  the declaration's node (`private 1`, `privateSpan`),
+#                  independent of `opaque` (who may inspect a
+#                  representation): `private opaque struct` is both
+#   classDecl    = "class" IDENT "=" dfaItems [ "except" dfaItems ] NEWLINE
+#   dfaDecl      = "dfa" IDENT "over" IDENT ":" NEWLINE INDENT
+#                  { classDecl } dfaState { dfaState } DEDENT
+#   dfaState     = IDENT ":" NEWLINE INDENT dfaTransition { dfaTransition } DEDENT
+#   dfaTransition = dfaItems "->" ( IDENT | "accept" [ "before" [ INT ] ]
+#                  | "reject" | "call" path "then" IDENT ) NEWLINE
+#   dfaItems     = dfaItem { [ "," ] dfaItem }
+#   dfaItem      = symbol [ ".." symbol ] | path | STRING
+#   symbol       = CHAR | INT | HEX
+#                  -- DFA-COROUTINE-MILESTONE-2.md: a named symbol set and a
+#                  declared finite-state recognizer, lowered to ordinary
+#                  coroutine functions by surface/dfa.tcl. "class", "dfa" and
+#                  every word of their bodies (over, accept, before, reject,
+#                  call, then, end, any, except) are contextual: a
+#                  declaration only as the first word of a top-level
+#                  statement directly followed by a name, so each stays an
+#                  ordinary name everywhere else. HEX (`0xC2`) is a symbol
+#                  only here. Neither is a `declaration`: "private" before
+#                  one is refused (privateKinds)
 #   externDecl   = "extern" "c" "library" STRING NEWLINE
 #                | "extern" "c" "fn" IDENT [ "named" STRING ]
 #                  "(" [ externParam { "," externParam } [ "," ] ] ")"
@@ -107,6 +136,8 @@
 #                  construct allows a name, so `proves` stays an ordinary
 #                  name everywhere else
 #   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
+#                    | "exported" "c" -- NATIVE-LIBRARY-MILESTONE-1.md: a C
+#                                    export of a native library; contextual
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
 #   paramList    = [ param { "," param } ] [ "," flagSection ]
@@ -121,7 +152,13 @@
 #                  followed by a type (ResumeMarker); `resume`, `resume: T`
 #                  are an ordinary parameter named resume. At most one, and
 #                  always last
-#   param        = IDENT [ ":" typeExpr ]
+#   param        = [ "place" ] IDENT [ ":" typeExpr ]
+#                  -- "place" (PLACE-PARAMETERS.md): the argument is the
+#                  caller's place itself, which the function mutates in
+#                  place; the type is then required. "place" is contextual
+#                  exactly like "variadic": the marker only when directly
+#                  followed by a name; `place`, `place: T` are an ordinary
+#                  parameter named place
 #   flagSection  = "flags" flagDecl { "," flagDecl }   -- FLAGS.md; "flags" is
 #                  contextual: `flags :name` only (an ordinary name otherwise)
 #   flagDecl     = ":" IDENT                          -- the name glued to ":"
@@ -236,12 +273,21 @@
 #                  body only. The body is a layout's otherwise: a union
 #                  layout is a `layoutdecl` node with `union 1`, whose
 #                  `fields` are its alternatives, each at offset 0
-#   structDecl   = { structModifier } "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
+#   structDecl   = { structModifier } "struct" IDENT [ typeSlots ] ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
 #                  | "context"      -- CONTEXTS.md; contextual (below). The
 #                  modifiers are independent boolean properties, in any
 #                  order, each at most once; canonical spelling
 #                  `opaque context struct`
+#   typeSlots    = "[" typeSlot { "," typeSlot } [ "," ] "]"
+#   typeSlot     = IDENT [ "satisfies" typeName ]
+#                  -- TRAIT-CONSTRAINED-IMPRINTED-TYPES.md: the struct is a
+#                  type constructor, `struct Map[K satisfies Hashable, V]:`,
+#                  each slot a static imprinted type position its fields may
+#                  name; "satisfies" (contextual: a word of a slot list only)
+#                  constrains the slot by one trait, which every argument of
+#                  an application must satisfy. No predicate, no other
+#                  relation: a slot is a name, optionally one trait
 #   structField  = IDENT ":" typeExpr NEWLINE
 #
 # A structDecl (STRUCTS.md) declares a nominal struct type: like a typeDecl
@@ -335,13 +381,16 @@
 #                | IDENT { "::" IDENT } [ fieldInits ]
 #                  -- "a::b::c": member c of namespace a::b (every segment
 #                     but the last is the namespace path)
-#                | IDENT "[" typeExpr "]" fieldInits
+#                | IDENT { "::" IDENT } "[" typeExpr { "," typeExpr } "]" fieldInits
 #                  -- an applied type's construction (BINARY-LAYOUT.md):
 #                     `LayoutStruct[Pair] { ... }`, the explicit type the
 #                     imprinting design writes on an expression
-#                     (NATIVE-BOTLISH-LOWERING-IMPL.md, 6.3). The applied
+#                     (NATIVE-BOTLISH-LOWERING-IMPL.md, 6.3), or a
+#                     parameterized struct's, `Pair[int, str] { ... }`
+#                     (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md). The applied
 #                     type is the one TypeExpr grammar; which applied types
-#                     have a construction is HIR's (only LayoutStruct)
+#                     have a construction is HIR's (LayoutStruct and the
+#                     parameterized structs)
 #                | fieldInits
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #   fieldInits   = "{" [ fieldInit { "," fieldInit } [ "," ] ] "}"
@@ -389,12 +438,18 @@ namespace eval surface::parser {
     # entry here and one more property, nothing else.
     variable structModifiers {opaque context}
     # The contextual words that may precede `fn` in a function declaration
-    # (see the grammar above). Each names one boolean property of the
-    # `function` node (`nomethod` -> `nomethod 0|1`, `nomethodSpan`).
-    variable functionModifiers {nomethod}
+    # (see the grammar above). Each names one property of the `function`
+    # node: `nomethod` -> `nomethod 0|1`, `nomethodSpan`; `exported`, always
+    # followed by its foreign ABI (the one is `c`: `exported c fn`,
+    # NATIVE-LIBRARY-MILESTONE-1.md) -> `exported c`, `exportedSpan`.
+    variable functionModifiers {nomethod exported}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
+    # The declarations `private` may modify (PrivateDecl): every named
+    # top-level declaration -- a function, a module binding, a type, an
+    # error, a struct, an enum, a trait, a layout, an extern c fn.
+    variable privateKinds {function bind typedecl errordecl structdecl enumdecl traitdecl layoutdecl externfn}
     # The static intrinsics (STATIC-COMPILE.md): the operation names that
     # may follow `static` (see the grammar above). The vocabulary is the
     # compiler's, never a scope's: `static compile:` means the same whatever
@@ -422,12 +477,55 @@ proc surface::parse {source args} {
     # malformed construct and independent lexical problem, in source order).
     set program [surface::parseTokens [dict get $lexed tokens] -recover 1]
     set diagnostics [surface::parser::Independent $lexed $program]
-    dict unset program failed
     if {!$recover && $diagnostics ne ""} {
         surface::raiseSyntax $diagnostics
     }
+    if {$diagnostics ne ""} {
+        # Where the text is damaged -- every place recovery skipped, guessed
+        # or invented text, reported or not -- for syntax-error-tolerant
+        # analysis (surface/recover.tcl, SYNTAX-RECOVERY-MILESTONE-1.md).
+        # Never part of a program without syntax errors.
+        dict set program damage [surface::parser::Damage $lexed $program]
+    }
+    dict unset program failed
     dict set program diagnostics $diagnostics
     return [surface::ast::assignIds $program]
+}
+
+# The damage record of a recovering parse (LEXED the lexer's result, PROGRAM
+# the parser's): {lexical {OFFSET ...} indentation {OFFSET ...} failed {{start
+# S end E at A header H} ...} tokens T synthetic S} -- the start of every lexical diagnostic but
+# the layout ones (the end of a bracket never closed: its opener was written)
+# and of every closer the lexer inserted, the start of every
+# layout diagnostic (a tab, an inconsistent dedent), and every construct the
+# parser skipped: its region, the start of its diagnostic, and whether it was
+# part of the file header. Dependent diagnostics included: each says where
+# the text stopped being what the parser could read. It also keeps the
+# lexer's `tokens` and `synthetic` (the closers it inserted), which recovery
+# reads a malformed statement's prefix from, so the text is not lexed twice.
+proc surface::parser::Damage {lexed program} {
+    set lexical {}
+    set indentation {}
+    set index 0
+    foreach diagnostic [dict get $lexed diagnostics] {
+        if {$index in [dict get $lexed indentation]} {
+            lappend indentation [dict get $diagnostic start]
+        } elseif {$index in [dict get $lexed unclosed]} {
+            # The opener was written; where its bracket ends is the guess.
+            lappend lexical [dict get $diagnostic end]
+        } else {
+            lappend lexical [dict get $diagnostic start]
+        }
+        incr index
+    }
+    lappend lexical {*}[dict get $lexed synthetic]
+    set failed [lmap region [dict getdef $program failed {}] {
+        dict create start [dict get $region start] end [dict get $region end] \
+            at [dict get $region diagnostic start] header [dict get $region header]
+    }]
+    return [dict create lexical [lsort -integer -unique $lexical] \
+        indentation [lsort -integer -unique $indentation] failed $failed \
+        tokens [dict get $lexed tokens] synthetic [dict get $lexed synthetic]]
 }
 
 # The syntax DIAGNOSTICS (a parse's, in its order) as core::raiseDiagnostics
@@ -581,6 +679,7 @@ proc surface::parser::Describe {token} {
         EOF     { return "end of file" }
         IDENT   { return "name \"[dict get $token text]\"" }
         INT     { return "integer [dict get $token text]" }
+        HEX     { return "hexadecimal integer [dict get $token text] (written only in a dfa or class declaration)" }
         DECIMAL { return "decimal number [dict get $token text]" }
         STRING  { return "string [dict get $token text]" }
         CHAR    { return "character [dict get $token text]" }
@@ -667,7 +766,7 @@ proc surface::parser::Program {pVar} {
         }
         set direct [dict getdef $p directSpan ""]
         Synchronize p
-        Failed p $first [lindex [dict get $options -errorcode] 2]
+        Failed p $first [lindex [dict get $options -errorcode] 2] 1
     }
     set imports [Imports p]
     set body [Statements p {EOF}]
@@ -778,7 +877,7 @@ proc surface::parser::Imports {pVar} {
         if {[dict get $p pos] == $before} {
             Advance p
         }
-        Failed p $token [lindex [dict get $options -errorcode] 2]
+        Failed p $token [lindex [dict get $options -errorcode] 2] 1
     }
 }
 
@@ -1134,6 +1233,435 @@ proc surface::parser::LayoutDecl {pVar} {
     return $node
 }
 
+# ---------------------------------------------------------------------------
+# Declared recognizers (DFA-COROUTINE-MILESTONE-2.md): `class` and `dfa`.
+# The grammar of both is the parser's; what a declaration means -- its
+# symbol sets, its checks, its lowering to coroutine functions -- is
+# surface/dfa.tcl's.
+
+namespace eval surface::parser {
+    # The words of a dfa body that are never a state's or a class's name.
+    variable dfaReserved {accept before reject call then end any except class over}
+}
+
+# 1 if the next tokens start a symbol-class declaration: the contextual word
+# "class" directly followed by a name and "=". Two names in a row are never
+# a valid statement, so an ordinary variable called `class` (`class = 3`,
+# `class(x)`, `x.class`) is unaffected.
+proc surface::parser::AtClassDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "class"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# 1 if the next tokens start a recognizer declaration: the contextual word
+# "dfa" directly followed by a name (DfaDecl reports a missing `over`).
+proc surface::parser::AtDfaDecl {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "dfa"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# "class" IDENT "=" items [ "except" items ] NEWLINE -- a named symbol set:
+# a `classdecl` node {name nameSpan items except}. ITEMS and EXCEPT are
+# DfaItems lists; a class holds symbols, so neither may hold `end` or a
+# sequence.
+proc surface::parser::ClassDecl {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set start [dict get [Advance p] span]
+    set name [Peek p]
+    if {[dict get $name kind] ne "IDENT" || [dict get $name text] in $dfaReserved} {
+        Fail $name "expected a class name after \"class\", found [Describe $name] (a class is declared as \"class NAME = SYMBOLS\")"
+    }
+    Advance p
+    if {[Kind p] ne "="} {
+        Fail [Peek p] "expected \"=\" after the class name \"[dict get $name value]\", found [Describe [Peek p]] (a class is declared as \"class NAME = SYMBOLS\")"
+    }
+    Advance p
+    set items [DfaItems p {except} class]
+    set except {}
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "except"} {
+        Advance p
+        set except [DfaItems p {} class]
+        if {$except eq {}} {
+            Fail [Peek p] "expected the symbols \"except\" removes, found [Describe [Peek p]]"
+        }
+    }
+    if {$items eq {}} {
+        Fail [Peek p] "class \"[dict get $name value]\" holds no symbol: expected a symbol, a range or a class after \"=\", found [Describe [Peek p]]"
+    }
+    if {[Kind p] ni {NEWLINE EOF}} {
+        Fail [Peek p] "expected the end of the line after the class's symbols, found [Describe [Peek p]]"
+    }
+    set span [SpanFrom p $start]
+    if {[Kind p] eq "NEWLINE"} {
+        Advance p
+    }
+    return [surface::ast::node classdecl $span name [dict get $name value] nameSpan [dict get $name span] \
+        items $items except $except]
+}
+
+# One bound of a symbol range: a CHAR, INT or HEX token's {VALUE KIND TEXT},
+# KIND char, int or hex, TEXT as written; "" for anything else (nothing
+# consumed).
+proc surface::parser::DfaSymbol {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    switch -- [dict get $token kind] {
+        CHAR { set kind char }
+        INT { set kind int }
+        HEX { set kind hex }
+        default { return "" }
+    }
+    Advance p
+    return [list [dict get $token value] $kind [dict get $token text]]
+}
+
+# The items of a class or a transition, up to (not including) the end of the
+# line, "->", or one of the contextual words STOPWORDS. WHERE is class or
+# transition (a sequence is only a transition's). Each item is a dict:
+#
+#   {kind sym lo LO hi HI loKind K hiKind K text TEXT span SPAN}
+#        a symbol or a range LO..HI (decimal text; KIND char, int or hex: a
+#        character literal names a Unicode scalar value, which a bytes
+#        recognizer must not take for a byte)
+#   {kind class namespace NS name NAME rooted R span SPAN}
+#        a class, NS "" for the file's own (`digit`) or a namespace path
+#        (`ascii::digit`, `::lexing::digit`)
+#   {kind any span SPAN} / {kind end span SPAN}
+#        the alphabet; the end of the input (never a symbol)
+#   {kind seq symbols {CODE...} text TEXT span SPAN}
+#        a string: the sequence of its scalar values
+#
+# Items may be separated by commas.
+proc surface::parser::DfaItems {pVar stopWords where} {
+    variable dfaReserved
+    upvar 1 $pVar p
+    set items {}
+    while 1 {
+        set token [Peek p]
+        set kind [dict get $token kind]
+        if {$kind in {NEWLINE EOF -> DEDENT =}} {
+            break
+        }
+        # (A word of the declaration syntax names no class -- ClassDecl
+        # refuses one -- so the items end before it and the caller reports
+        # what it expected there: "'a' accept" lacks its "->".)
+        if {$kind eq "IDENT" && ([dict get $token text] in $stopWords
+                || ([dict get $token text] in $dfaReserved && [dict get $token text] ni {any end}))} {
+            break
+        }
+        if {$kind eq ","} {
+            if {$items eq {}} {
+                Fail $token "expected a symbol before \",\""
+            }
+            Advance p
+            if {[Kind p] in {NEWLINE EOF -> , DEDENT}} {
+                Fail [Peek p] "expected a symbol after \",\", found [Describe [Peek p]]"
+            }
+            continue
+        }
+        set start [dict get $token span]
+        set lo [DfaSymbol p]
+        if {$lo ne ""} {
+            set hi $lo
+            if {[Kind p] eq ".."} {
+                Advance p
+                set hi [DfaSymbol p]
+                if {$hi eq ""} {
+                    Fail [Peek p] "expected the symbol that ends the range after \"..\", found [Describe [Peek p]] (a range is written 'a'..'z' or 0x80..0xBF)"
+                }
+            }
+            set span [SpanFrom p $start]
+            lappend items [dict create kind sym lo [lindex $lo 0] hi [lindex $hi 0] \
+                loKind [lindex $lo 1] hiKind [lindex $hi 1] \
+                text [if {$hi eq $lo} {lindex $lo 2} else {string cat [lindex $lo 2] .. [lindex $hi 2]}] \
+                span $span]
+            continue
+        }
+        if {$kind eq "STRING"} {
+            if {$where ne "transition"} {
+                Fail $token "a class holds symbols, not a sequence: [Describe $token] is a transition's (\"\\\"...\\\" -> ACTION\")"
+            }
+            Advance p
+            set value [dict get $token value]
+            if {$value eq ""} {
+                Fail $token "an empty sequence: a sequence names the symbols it consumes, one at least"
+            }
+            lappend items [dict create kind seq symbols [lmap c [split $value ""] {scan $c %c}] \
+                text [dict get $token text] span [dict get $token span]]
+            continue
+        }
+        if {$kind eq "IDENT" || $kind eq "::"} {
+            set rooted 0
+            if {$kind eq "::"} {
+                Advance p
+                set rooted 1
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a namespace after \"::\", found [Describe [Peek p]]"
+                }
+            }
+            set segments [list [dict get [Advance p] value]]
+            while {[Kind p] eq "::"} {
+                Advance p
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a name after \"::\", found [Describe [Peek p]]"
+                }
+                lappend segments [dict get [Advance p] value]
+            }
+            set span [SpanFrom p $start]
+            if {[llength $segments] == 1 && !$rooted && [lindex $segments 0] in {any end}} {
+                if {[lindex $segments 0] eq "end" && $where ne "transition"} {
+                    Fail $token "`end` is the end of the input, not a symbol: a class cannot hold it"
+                }
+                lappend items [dict create kind [lindex $segments 0] span $span]
+                continue
+            }
+            if {$rooted && [llength $segments] < 2} {
+                Fail $token "a class written from the root names a namespace and a class (\"::NAMESPACE::NAME\")"
+            }
+            lappend items [dict create kind class \
+                namespace [join [lrange $segments 0 end-1] ::] name [lindex $segments end] \
+                rooted $rooted span $span]
+            continue
+        }
+        Fail $token "expected a symbol, a range, a class, `any`[expr {$where eq "transition" ? ", `end` or a sequence" : ""}], found [Describe $token]"
+    }
+    return $items
+}
+
+# "dfa" IDENT "over" IDENT ":" NEWLINE INDENT { classDecl } state { state } DEDENT
+# -- a declared recognizer: a `dfadecl` node {name nameSpan alphabet
+# alphabetSpan classes states}. CLASSES are its own classdecl nodes (written
+# before its states); STATES a list of {name nameSpan span transitions}, the
+# first the start state; a transition is
+#
+#   {items ITEMS action ACTION span SPAN arrowSpan SPAN actionSpan SPAN ...}
+#
+# with ITEMS as DfaItems's and ACTION one of
+#
+#   goto     target, targetSpan              "-> STATE": consume, continue
+#   accept   unread N, unreadSpan            "-> accept" (N 0), "-> accept
+#            before" (N 1), "-> accept before N": complete, the last N
+#            symbols supplied not part of the token
+#   reject                                   "end -> reject" (the end only:
+#            a symbol no transition takes is rejected already)
+#   call     callee {NS NAME ROOTED}, calleeSpan, then (a state or
+#            "accept"), thenSpan             "-> call DFA then STATE|accept"
+#
+# The alphabet is a contextual word (bytes, ascii, unicode), checked with
+# everything else by surface/dfa.tcl.
+proc surface::parser::DfaDecl {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set start [dict get [Advance p] span]
+    set name [Advance p]
+    if {[dict get $name value] in $dfaReserved} {
+        Fail $name "\"[dict get $name value]\" is a word of the dfa syntax and cannot name a recognizer"
+    }
+    set over [Peek p]
+    if {[dict get $over kind] ne "IDENT" || [dict get $over text] ne "over"} {
+        Fail $over "expected \"over\" and an alphabet after \"dfa [dict get $name value]\", found [Describe $over] (a recognizer is declared as \"dfa NAME over ALPHABET:\", the alphabet bytes, ascii or unicode)"
+    }
+    Advance p
+    set alphabet [Peek p]
+    if {[dict get $alphabet kind] ne "IDENT"} {
+        Fail $alphabet "expected an alphabet after \"over\" (bytes, ascii or unicode), found [Describe $alphabet]"
+    }
+    Advance p
+    if {[Kind p] ne ":"} {
+        Fail [Peek p] "expected \":\" after \"dfa [dict get $name value] over [dict get $alphabet text]\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "NEWLINE"} {
+        Fail [Peek p] "expected a new line and the recognizer's indented states after \":\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        Fail [Peek p] "dfa \"[dict get $name value]\" declares no state: its states are written on the indented lines after \"dfa [dict get $name value] over [dict get $alphabet text]:\""
+    }
+    Advance p
+    set classes {}
+    set states {}
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {[Kind p] in {DEDENT EOF}} {
+            break
+        }
+        set token [Peek p]
+        if {[AtClassDecl p]} {
+            if {$states ne {}} {
+                Fail $token "a recognizer's classes come before its states"
+            }
+            lappend classes [ClassDecl p]
+            continue
+        }
+        lappend states [DfaState p]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    if {$states eq {}} {
+        Fail $name "dfa \"[dict get $name value]\" declares no state"
+    }
+    return [surface::ast::node dfadecl [SpanFrom p $start] name [dict get $name value] \
+        nameSpan [dict get $name span] alphabet [dict get $alphabet text] \
+        alphabetSpan [dict get $alphabet span] classes $classes states $states]
+}
+
+# IDENT ":" NEWLINE INDENT transition { transition } DEDENT -- one state of a
+# dfa body (DfaDecl).
+proc surface::parser::DfaState {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set name [Peek p]
+    if {[dict get $name kind] ne "IDENT" || [Kind p 1] ne ":"} {
+        Fail $name "expected a state (\"NAME:\" and its indented transitions) or a class, found [Describe $name]"
+    }
+    if {[dict get $name value] in $dfaReserved} {
+        Fail $name "\"[dict get $name value]\" is a word of the dfa syntax and cannot name a state"
+    }
+    Advance p
+    Advance p
+    if {[Kind p] ne "NEWLINE"} {
+        Fail [Peek p] "expected a new line and the state's indented transitions after \"[dict get $name value]:\", found [Describe [Peek p]]"
+    }
+    Advance p
+    if {[Kind p] ne "INDENT"} {
+        Fail $name "state \"[dict get $name value]\" has no transition: its transitions are written on the indented lines after \"[dict get $name value]:\""
+    }
+    Advance p
+    set transitions {}
+    while 1 {
+        while {[Kind p] eq "NEWLINE"} {
+            Advance p
+        }
+        if {[Kind p] in {DEDENT EOF}} {
+            break
+        }
+        lappend transitions [DfaTransition p]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    return [dict create name [dict get $name value] nameSpan [dict get $name span] \
+        span [SpanFrom p [dict get $name span]] transitions $transitions]
+}
+
+# items "->" action NEWLINE -- one transition of a state (DfaDecl).
+proc surface::parser::DfaTransition {pVar} {
+    upvar 1 $pVar p
+    variable dfaReserved
+    set first [Peek p]
+    set start [dict get $first span]
+    if {[Kind p] eq "=" && [Kind p 1] eq ">"} {
+        Fail $first "\"=>\" (reconsider the symbol in another state) is not part of the dfa syntax: a transition consumes its symbol, completes, or calls a recognizer that consumes it"
+    }
+    set items [DfaItems p {} transition]
+    if {$items eq {}} {
+        Fail [Peek p] "expected a transition (\"SYMBOLS -> ACTION\"), found [Describe [Peek p]]"
+    }
+    if {[Kind p] eq "=" && [Kind p 1] eq ">"} {
+        Fail [Peek p] "\"=>\" (reconsider the symbol in another state) is not part of the dfa syntax: a transition consumes its symbol, completes, or calls a recognizer that consumes it"
+    }
+    if {[Kind p] ne "->"} {
+        Fail [Peek p] "expected \"->\" and an action after the transition's symbols, found [Describe [Peek p]]"
+    }
+    set arrowSpan [dict get [Advance p] span]
+    set token [Peek p]
+    if {[dict get $token kind] ne "IDENT"} {
+        Fail $token "expected an action after \"->\" (a state, `accept`, `accept before N`, `call DFA then ...`, or `reject` for `end`), found [Describe $token]"
+    }
+    Advance p
+    set word [dict get $token value]
+    set t [dict create items $items arrowSpan $arrowSpan actionSpan [dict get $token span]]
+    switch -- $word {
+        accept {
+            set unread 0
+            set unreadSpan ""
+            if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "before"} {
+                set unread 1
+                # (From the word "accept": the phrase says how many.)
+                set unreadSpan [surface::ast::cover [dict get $token span] [dict get [Advance p] span]]
+                if {[Kind p] eq "INT"} {
+                    set count [Advance p]
+                    set unread [dict get $count value]
+                    set unreadSpan [surface::ast::cover $unreadSpan [dict get $count span]]
+                } elseif {[Kind p] ni {NEWLINE EOF DEDENT}} {
+                    Fail [Peek p] "expected the number of symbols left unread after \"accept before\", found [Describe [Peek p]] (\"accept before\" leaves one; \"accept before N\" leaves N, a nonnegative integer)"
+                }
+            }
+            dict set t action accept
+            dict set t unread $unread
+            dict set t unreadSpan $unreadSpan
+        }
+        reject {
+            if {[llength $items] != 1 || [dict get [lindex $items 0] kind] ne "end"} {
+                Fail $token "only the end of the input is rejected explicitly (\"end -> reject\"): a symbol no transition of a state takes is rejected already, so write no transition for it"
+            }
+            dict set t action reject
+        }
+        call {
+            set callee [Peek p]
+            set rooted 0
+            if {[Kind p] eq "::"} {
+                Advance p
+                set rooted 1
+            }
+            if {[Kind p] ne "IDENT"} {
+                Fail [Peek p] "expected the recognizer to call after \"call\", found [Describe [Peek p]] (\"-> call DFA then STATE\" or \"-> call DFA then accept\")"
+            }
+            set calleeStart [dict get [Peek p] span]
+            set segments [list [dict get [Advance p] value]]
+            while {[Kind p] eq "::"} {
+                Advance p
+                if {[Kind p] ne "IDENT"} {
+                    Fail [Peek p] "expected a name after \"::\", found [Describe [Peek p]]"
+                }
+                lappend segments [dict get [Advance p] value]
+            }
+            set calleeSpan [SpanFrom p [dict get $callee span]]
+            if {[Kind p] ne "IDENT" || [dict get [Peek p] text] ne "then"} {
+                Fail [Peek p] "expected \"then\" after \"call [join $segments ::]\", found [Describe [Peek p]] (\"-> call DFA then STATE\" continues in STATE once it completes, \"-> call DFA then accept\" completes with it)"
+            }
+            Advance p
+            if {[Kind p] ne "IDENT"} {
+                Fail [Peek p] "expected a state or `accept` after \"then\", found [Describe [Peek p]]"
+            }
+            set then [Advance p]
+            if {[dict get $then value] ne "accept" && [dict get $then value] in $dfaReserved} {
+                Fail $then "expected a state or `accept` after \"then\", found [Describe $then]"
+            }
+            dict set t action call
+            dict set t callee [list [join [lrange $segments 0 end-1] ::] [lindex $segments end] $rooted]
+            dict set t calleeSpan $calleeSpan
+            dict set t then [dict get $then value]
+            dict set t thenSpan [dict get $then span]
+        }
+        default {
+            if {$word in $dfaReserved} {
+                Fail $token "\"$word\" is not an action: a transition goes to a state, `accept`s (`accept before N`), calls a recognizer (`call DFA then ...`) or, for `end`, `reject`s"
+            }
+            dict set t action goto
+            dict set t target $word
+            dict set t targetSpan [dict get $token span]
+        }
+    }
+    if {[Kind p] ni {NEWLINE EOF DEDENT}} {
+        Fail [Peek p] "expected the end of the line after the transition's action, found [Describe [Peek p]]"
+    }
+    dict set t span [SpanFrom p $start]
+    if {[Kind p] eq "NEWLINE"} {
+        Advance p
+    }
+    return $t
+}
+
 # 1 if the next tokens start a trait declaration (TRAITS.md): the contextual
 # word "trait" directly followed by a name, optionally after struct-style
 # modifier words (`context trait IO:`, CONTEXT-TRAITS.md; TraitDecl decides
@@ -1258,6 +1786,11 @@ proc surface::parser::TraitRequirement {pVar trait {context 0}} {
     set open [Expect p ( "\"(\" after the requirement name"]
     lassign [ParamSections p] params flags contexts resume variadic
     set paramsSpan [SpanFrom p [dict get $open span]]
+    foreach param $params {
+        if {[llength $param] > 4} {
+            Fail [dict create span [lindex $param 4]] "requirement \"[dict get $name value]\" of $what \"$trait\" declares a place parameter \"[lindex $param 0]\": a trait requirement takes values, and a place is no value (an implementation that mutates its argument in place is no implementation of a requirement)"
+        }
+    }
     if {$variadic ne ""} {
         FailCode [dict get $variadic span] MALFORMED-VARIADIC-SECTION \
             "requirement \"[dict get $name value]\" of $what \"$trait\" declares a variadic parameter: a trait requirement is a fixed signature (variadic trait operations are not supported)"
@@ -1359,6 +1892,10 @@ proc surface::parser::AtFunctionDecl {pVar} {
     upvar 1 $pVar p
     set i 0
     while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $functionModifiers} {
+        if {[dict get [Peek p $i] text] eq "exported" && [Kind p [expr {$i + 1}]] eq "IDENT"} {
+            # `exported` names its foreign ABI (`exported c fn`).
+            incr i
+        }
         incr i
     }
     return [expr {$i > 0 && [Kind p $i] eq "fn"}]
@@ -1373,6 +1910,56 @@ proc surface::parser::AtStrayFunctionModifier {pVar} {
     set token [Peek p]
     return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] in $functionModifiers
         && [Kind p 1] in {type struct error}}]
+}
+
+# 1 if the next tokens start a private declaration
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): the contextual word
+# "private" directly followed by a declaration keyword (`fn`, `struct`,
+# `type`, `error`) or by a name (a contextual declaration word, `enum`,
+# `opaque`, `extern`, ..., or a module binding's name). None of these is a
+# valid continuation of an expression, so an ordinary variable called
+# `private` (`private = 1`, `private(x)`, `x.private`) is unaffected.
+proc surface::parser::AtPrivate {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "private"
+        && [Kind p 1] in {IDENT fn struct type error}}]
+}
+
+# "private" declaration -- the access modifier of a top-level declaration:
+# the declaration is accessible only to code of the module that declares it.
+# Written first, before every other modifier (`private opaque struct`,
+# `private nomethod fn`, `private context trait`), once. A property of the
+# one declaration (the node's `private 1` and `privateSpan`, its span
+# widened to the modifier), never a declaration kind of its own: what the
+# declaration is, the parser of its kind decides. Only a named top-level
+# declaration may be private (privateKinds): nested in a function, loop or
+# branch -- privacy is module-local, never lexical -- and before anything
+# else (an `extern c library` line, which names no member; a statement) it
+# is a located syntax error.
+proc surface::parser::PrivateDecl {pVar} {
+    variable privateKinds
+    upvar 1 $pVar p
+    set word [Advance p]
+    set span [dict get $word span]
+    if {![dict get $p topLevel]} {
+        Fail $word "\"private\" is only allowed on a declaration at the top level of a module: privacy is module-local, so a function, loop or branch has no private declarations"
+    }
+    set next [Peek p]
+    if {[dict get $next kind] eq "IDENT" && [dict get $next text] eq "private"} {
+        Fail $next "duplicate modifier \"private\" in this declaration"
+    }
+    set node [Statement p]
+    if {[dict get $node kind] ni $privateKinds} {
+        if {[dict get $node kind] eq "externlib"} {
+            Fail $word "\"private\" modifies a named declaration: an `extern c library` line names no member of the module, so nothing about it can be private"
+        }
+        Fail $word "\"private\" modifies a declaration (fn, struct, type, error, enum, trait, layout, extern c fn, or a NAME = VALUE module binding), not a [dict get $node kind] statement"
+    }
+    dict set node private 1
+    dict set node privateSpan $span
+    dict set node span [surface::ast::cover $span [dict get $node span]]
+    return $node
 }
 
 # 1 if the next tokens start a `with` declaration: the contextual word "with"
@@ -1761,11 +2348,13 @@ proc surface::parser::Statements {pVar stop} {
 # and that recovery has just skipped: the diagnostic, and the construct's
 # region -- from TOKEN to the token the parser resumes at -- in which no other
 # diagnostic is independent of it (surface::parse, DIAGNOSTIC-RECOVERY.md).
-proc surface::parser::Failed {pVar token diagnostic} {
+# HEADER is 1 for a construct of the file header (an import, `direct
+# module`), which no statement node stands for (surface/recover.tcl).
+proc surface::parser::Failed {pVar token diagnostic {header 0}} {
     upvar 1 $pVar p
     dict lappend p diagnostics $diagnostic
     dict lappend p failed [dict create start [dict get $token span start] \
-        end [dict get [Peek p] span start] diagnostic $diagnostic]
+        end [dict get [Peek p] span start] diagnostic $diagnostic header $header]
 }
 
 # Skips to the start of the next statement: past the end of the current line
@@ -1814,6 +2403,9 @@ proc surface::parser::SkipBlock {pVar} {
 proc surface::parser::Statement {pVar} {
     upvar 1 $pVar p
     set token [Peek p]
+    if {[AtPrivate p]} {
+        return [PrivateDecl p]
+    }
     switch -- [dict get $token kind] {
         fn     { return [Function p] }
         if     { return [If p] }
@@ -1857,6 +2449,18 @@ proc surface::parser::Statement {pVar} {
             Fail $token "a [expr {[dict get $token text] eq "union" ? "union layout" : "layout"}] declaration is only allowed at the top level of a module, not nested in a function/if/loop"
         }
         return [LayoutDecl p]
+    }
+    if {[AtClassDecl p] || [AtDfaDecl p]} {
+        # `class NAME = SYMBOLS`, `dfa NAME over ALPHABET:`
+        # (DFA-COROUTINE-MILESTONE-2.md): contextual top-level declarations.
+        set word [dict get $token text]
+        if {![dict get $p topLevel]} {
+            Fail $token "a $word declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+        }
+        if {$word eq "class"} {
+            return [ClassDecl p]
+        }
+        return [DfaDecl p]
     }
     if {[AtTraitDecl p]} {
         # `trait NAME:` (TRAITS.md): a contextual top-level declaration.
@@ -2240,20 +2844,19 @@ proc surface::parser::Value {pVar} {
     return [Expression p]
 }
 
-# TypeName [ "[" TypeExpr "]" ] -- a possibly-applied type expression
-# (MINIMAL-APPLIED-LIST-TYPES.md). A bare name (no "[...]") is returned as
-# the plain name string, exactly as before this feature (so every existing
-# bare-type-name consumer -- surface::ast::showType, hir::resolve, and every
-# test that reads a param/result type as a plain string -- is unaffected);
-# an applied type is a {NAME ARG} pair, ARG itself a TypeExpr, recursively
-# representable ("List[List[Small]]" needs no separate grammar). The parser
-# is generic over the head name: it does not know "List" is special. Only
-# one type argument is ever parsed (no "A[X, Y]"): resolution (hir::resolve
-# ::ResolveTypeExpr) decides whether a name is a registered constructor and
-# checks its own arity against however many arguments this grammar can ever
-# produce (one), so "List[A, B]" is already a syntax error here, and a
-# constructor of higher arity would need no grammar change, only another
-# constructor-side arity number.
+# TypeName [ "[" TypeExpr { "," TypeExpr } "]" ] -- a possibly-applied type
+# expression (MINIMAL-APPLIED-LIST-TYPES.md). A bare name (no "[...]") is
+# returned as the plain name string, exactly as before this feature (so
+# every existing bare-type-name consumer -- surface::ast::showType,
+# hir::resolve, and every test that reads a param/result type as a plain
+# string -- is unaffected); an applied type of one argument is a {NAME ARG}
+# pair, ARG itself a TypeExpr, recursively representable ("List[List[Small]]"
+# needs no separate grammar), and one of several arguments ("Map[K, V]", a
+# parameterized struct's application, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+# is {apply NAME {ARG ...}}. The parser is generic over the head name: it
+# does not know "List" is special. Resolution (hir::resolve::ResolveTypeExpr)
+# decides whether a name is a registered constructor or a parameterized
+# struct and checks its arity, so "List[A, B]" is resolution's arity error.
 #
 # "Fn" is the one head name the parser does know: it introduces a
 # structural function type (STRUCTURAL-FUNCTION-TYPES.md), whose named
@@ -2330,15 +2933,30 @@ proc surface::parser::TypeExpr {pVar what} {
         return $name
     }
     Advance p
-    set arg [TypeExpr p "a type argument after \"\["]
+    set args [list [TypeExpr p "a type argument after \"\["]]
+    while {[Kind p] eq ","} {
+        # NAME[A, B, ...]: an application of a parameterized struct
+        # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), one argument per type slot.
+        Advance p
+        lappend args [TypeExpr p "a type argument after \",\""]
+    }
     Expect p \] "\"\]\" after the type argument"
+    if {[llength $args] == 1} {
+        set applied [list $name [lindex $args 0]]
+    } else {
+        # Three words whose first is "apply": like no applied type {NAME
+        # ARG}, no array {array N ELEMENT} and no refinement {refine NAME
+        # FIELDS} (a struct named `apply` applied to one argument is the
+        # two words {apply ARG}).
+        set applied [list apply $name $args]
+    }
     if {[Kind p] eq "\{"} {
         # NAME[ARG]{param: N ...}: a scalar refinement of an applied type
         # (LIST-CARDINALITY-REFINEMENTS.md), List[int]{length: 4} -- the
         # same refinement grammar, its base the applied type before it.
-        return [ScalarRefinement p $name [list $name $arg]]
+        return [ScalarRefinement p $name $applied]
     }
-    return [list $name $arg]
+    return $applied
 }
 
 # "{" [ field { separator field } [ "," ] ] "}" after the type name NAME:
@@ -2581,6 +3199,7 @@ proc surface::parser::Function {pVar} {
     dict set p allowFunctionResult 1
     set start [dict get [Peek p] span]
     set modifiers [dict create]
+    set abi ""
     while {[Kind p] eq "IDENT"} {
         set word [Advance p]
         set text [dict get $word text]
@@ -2590,7 +3209,19 @@ proc surface::parser::Function {pVar} {
         if {[dict exists $modifiers $text]} {
             Fail $word "duplicate modifier \"$text\" in this function declaration"
         }
-        dict set modifiers $text [dict get $word span]
+        set span [dict get $word span]
+        if {$text eq "exported"} {
+            # A C export (NATIVE-LIBRARY-MILESTONE-1.md): the modifier
+            # names the foreign ABI the function is exported to.
+            set what [Peek p]
+            if {[dict get $what kind] ne "IDENT" || [dict get $what text] ne "c"} {
+                Fail $what "an exported function names its foreign ABI: write \"exported c fn NAME(...) -> T:\" (the only foreign ABI is c), found [Describe $what]"
+            }
+            Advance p
+            set abi c
+            set span [SpanFrom p $span]
+        }
+        dict set modifiers $text $span
     }
     Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
@@ -2604,6 +3235,7 @@ proc surface::parser::Function {pVar} {
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
         errors [dict get $body errors] proves [dict get $body proves] body $body \
         nomethod $nomethod nomethodSpan [if {$nomethod} {dict get $modifiers nomethod} else {string cat ""}] \
+        exported $abi exportedSpan [if {$abi ne ""} {dict get $modifiers exported} else {string cat ""}] \
         resume $resume variadic $variadic]
 }
 
@@ -2612,7 +3244,7 @@ proc surface::parser::Function {pVar} {
 #   params       = [ ordinary ] [ flagSection ] [ contextSection ]
 #                                                     (see paramSectionOrder)
 #   ordinary     = param { "," param }
-#   param        = IDENT [ ":" typeExpr ]
+#   param        = [ "place" ] IDENT [ ":" typeExpr ]
 #   flagSection  = "flags" flagDecl { "," flagDecl }
 #   flagDecl     = ":" IDENT                          -- no space after ":"
 #   contextSection = "context" contextDecl { "," contextDecl }
@@ -2620,7 +3252,8 @@ proc surface::parser::Function {pVar} {
 #   variadicSection = "variadic" IDENT ":" typeExpr
 #
 # optionally followed by a trailing ",". Returns {PARAMS FLAGS CONTEXTS
-# RESUME VARIADIC}: PARAMS the ordinary parameters {NAME SPAN TYPE TYPESPAN},
+# RESUME VARIADIC}: PARAMS the ordinary parameters {NAME SPAN TYPE TYPESPAN}
+# (a place parameter's with its marker's span as a fifth element),
 # FLAGS the declared flags {NAME SPAN} in written order (SPAN covers
 # ":name"), CONTEXTS the declared context parameters {name nameSpan type
 # typeSpan} dicts in written order (CONTEXTS.md), VARIADIC the variadic
@@ -2712,6 +3345,10 @@ proc surface::parser::ParamSections {pVar} {
         } elseif {$section eq "context"} {
             lappend contexts [ContextEntry p]
         } else {
+            set place ""
+            if {[PlaceMarker p]} {
+                set place [dict get [Advance p] span]
+            }
             set param [Expect p IDENT "a parameter name"]
             if {$section ne "ordinary"} {
                 FailCode [dict get $param span] MALFORMED-FLAG-SECTION \
@@ -2724,8 +3361,15 @@ proc surface::parser::ParamSections {pVar} {
                 set typeStart [dict get [Peek p] span]
                 set type [TypeExpr p "a parameter type after \":\""]
                 set typeSpan [SpanFrom p $typeStart]
+            } elseif {$place ne ""} {
+                Fail $param \
+                    "place parameter \"[dict get $param value]\" needs its type: write \"place [dict get $param value]: T\" (a place is a collection or a struct holding collections, and its declaration says which)"
             }
-            lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
+            if {$place eq ""} {
+                lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
+            } else {
+                lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan $place]
+            }
         }
         if {[Kind p] eq ","} {
             Advance p
@@ -2735,6 +3379,18 @@ proc surface::parser::ParamSections {pVar} {
     }
     Advance p
     return [list $params $flags $contexts $resume $variadic]
+}
+
+# 1 if the next tokens are a place parameter's marker (PLACE-PARAMETERS.md):
+# the name `place` directly followed by another name -- `place m:
+# MutableMap[K, V]`. Never an ordinary parameter (a parameter name is
+# followed by ":", "," or ")"), so `fn f(place)` and `fn f(place: T)` keep
+# their meaning.
+proc surface::parser::PlaceMarker {pVar} {
+    upvar 1 $pVar p
+    set name [Peek p]
+    return [expr {[dict get $name kind] eq "IDENT" && [dict get $name value] eq "place"
+        && [Kind p 1] eq "IDENT"}]
 }
 
 # The canonical order of a declaration's parameter sections: the variadic
@@ -3666,6 +4322,18 @@ proc surface::parser::CallArguments {pVar} {
 # std::abi::x86_64). A qualified name, a qualified construction
 # NAMESPACE::Struct { ... } or a call's callee with explicit imprints.
 # ROOTED is recorded on the node, for the loader (surface/modules.tcl).
+# The fields of a `namedstruct` node for the explicit type arguments TYPES
+# (TypeExpr results) at SPANS of an applied type's construction: `typeArg`
+# and `typeArgSpan` for one (LayoutStruct[L] {...}, BINARY-LAYOUT.md, or a
+# one-slot parameterized struct), `typeArgs` and `typeArgSpans` for several
+# (Pair[int, str] {...}, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+proc surface::parser::TypeArgFields {types spans} {
+    if {[llength $types] == 1} {
+        return [list typeArg [lindex $types 0] typeArgSpan [lindex $spans 0]]
+    }
+    return [list typeArgs $types typeArgSpans $spans]
+}
+
 proc surface::parser::QualifiedPrimary {pVar first span rooted} {
     upvar 1 $pVar p
     set segments [list [dict get $first value]]
@@ -3700,6 +4368,17 @@ proc surface::parser::QualifiedPrimary {pVar first span rooted} {
             set spelled ::$spelled
         }
         lassign [Imprints p $spelled] types spans
+        if {[Kind p] eq "\{"} {
+            # NAMESPACE::Struct[TYPE, ...] { ... }: the construction of a
+            # module's parameterized struct, applied explicitly
+            # (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+            set nameSpan [SpanFrom p $span]
+            set init [FieldInits p]
+            return [surface::ast::node namedstruct [SpanFrom p $span] \
+                namespace $namespaceName \
+                name [dict get $member value] nameSpan $nameSpan init $init rooted $rooted \
+                {*}[TypeArgFields $types $spans]]
+        }
         if {[Kind p] ne "("} {
             Fail [Peek p] "explicit imprints $spelled\[...\] are written only before a call's argument list, found [Describe [Peek p]] after them"
         }
@@ -3718,6 +4397,9 @@ proc surface::parser::Primary {pVar} {
         INT {
             Advance p
             return [surface::ast::node int $span text [dict get $token value]]
+        }
+        HEX {
+            Fail $token "a hexadecimal integer ([dict get $token text]) is written only as a symbol of a dfa or class declaration (DFA-COROUTINE-MILESTONE-2.md); an Int is written in decimal ([dict get $token value])"
         }
         DECIMAL {
             # A decimal literal (FLOAT64-MILESTONE-1.md): the decimal
@@ -3787,13 +4469,10 @@ proc surface::parser::Primary {pVar} {
                 if {[Kind p] ne "\{"} {
                     Fail [Peek p] "an applied type [dict get $token value]\[...\] is not a value: in an expression it heads a construction, [dict get $token value]\[...\] \{field: value, ...\}, or [dict get $token value]\[TYPE, ...\](...) is a call with explicit imprints (found [Describe [Peek p]] after it)"
                 }
-                if {[llength $types] != 1} {
-                    Fail [Peek p] "an applied type's construction [dict get $token value]\[...\] \{...\} has one type argument, found [llength $types]"
-                }
                 set init [FieldInits p]
                 return [surface::ast::node namedstruct [SpanFrom p $span] \
                     namespace "" name [dict get $token value] nameSpan $nameSpan \
-                    typeArg [lindex $types 0] typeArgSpan [lindex $spans 0] init $init]
+                    {*}[TypeArgFields $types $spans] init $init]
             }
             return [surface::ast::node name $span name [dict get $token value]]
         }
@@ -4129,6 +4808,10 @@ proc surface::parser::StructDecl {pVar} {
     }
     Advance p
     set name [Expect p IDENT "a struct name after \"struct\""]
+    set slots {}
+    if {[Kind p] eq "\["} {
+        set slots [TypeSlots p [dict get $name value]]
+    }
     set token [Peek p]
     if {[dict get $token kind] ne ":"} {
         Fail $token "expected \":\" after the struct name \"[dict get $name value]\", found [Describe $token]"
@@ -4178,8 +4861,60 @@ proc surface::parser::StructDecl {pVar} {
     }
     set opaque [dict exists $modifiers opaque]
     set context [dict exists $modifiers context]
-    return [surface::ast::node structdecl [SpanFrom p $start] \
+    set node [surface::ast::node structdecl [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] fields $fields \
         opaque $opaque opaqueSpan [if {$opaque} {dict get $modifiers opaque} else {string cat ""}] \
         context $context contextSpan [if {$context} {dict get $modifiers context} else {string cat ""}]]
+    if {$slots ne {}} {
+        # A parameterized struct (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
+        # field is present only then, so an ordinary declaration's node is
+        # unchanged.
+        dict set node slots $slots
+    }
+    return $node
+}
+
+# "[" typeSlot { "," typeSlot } [ "," ] "]" after the name of struct NAME
+# (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): {name nameSpan trait traitSpan}
+# per slot in written order, TRAIT the spelled trait name ("" for an
+# unconstrained slot). Which names may be slots and what the trait names is
+# resolution's (hir/structs.tcl), never the parser's.
+proc surface::parser::TypeSlots {pVar name} {
+    upvar 1 $pVar p
+    Advance p
+    set slots {}
+    while 1 {
+        set slot [Expect p IDENT "a type slot name in struct $name\[...\]"]
+        set trait ""
+        set traitSpan ""
+        if {[Kind p] eq "IDENT" && [dict get [Peek p] value] eq "satisfies"} {
+            Advance p
+            set start [dict get [Peek p] span]
+            set token [Expect p IDENT "a trait name after \"satisfies\""]
+            set trait [dict get $token value]
+            while {[Kind p] eq "::"} {
+                Advance p
+                set member [Expect p IDENT "a trait name after \"::\""]
+                append trait "::[dict get $member value]"
+            }
+            set traitSpan [SpanFrom p $start]
+        } elseif {[Kind p] eq ":"} {
+            Fail [Peek p] "a type slot is constrained with \"satisfies\", not \":\" (struct $name\[[dict get $slot value] satisfies TRAIT\])"
+        }
+        lappend slots [dict create name [dict get $slot value] nameSpan [dict get $slot span] \
+            trait $trait traitSpan $traitSpan]
+        if {[Kind p] eq ","} {
+            Advance p
+            if {[Kind p] eq "\]"} {
+                break
+            }
+            continue
+        }
+        break
+    }
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] value] in {where requires implements extends}} {
+        Fail [Peek p] "a type slot's constraint is written \"satisfies TRAIT\" (one trait per slot): there is no \"[dict get [Peek p] value]\" clause"
+    }
+    Expect p \] "\",\" or \"\]\" after a type slot of struct $name"
+    return $slots
 }

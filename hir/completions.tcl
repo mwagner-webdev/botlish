@@ -1476,6 +1476,14 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
         }
         ref {
             set b [dict get $node binding]
+            if {[dict exists $node hole] || [dict exists $hir syntaxDependent $e]} {
+                # Source nobody could read, or a name depending on it
+                # (SYNTAX-RECOVERY-MILESTONE-1.md): it may complete with any
+                # value; nothing proves it fails or what it raises.
+                set r [hir::range::unknown]
+                dict set ctx exprs $e $r
+                return $r
+            }
             if {$b eq {}} {
                 return never
             }
@@ -3681,6 +3689,11 @@ proc hir::completions::IndexBounds {hir ctx family container index indexRange} {
         # A character index (std::str::char_at): checked against the String's
         # length in Unicode scalars, the size std::str::length's guards state.
         set size [hir::cardinality::StrLength $hir $container steps]
+    } elseif {$family eq "mutvec"} {
+        # A MutableVector element (std::mutable_vector::at): its length where
+        # nothing can change it (hir::cardinality::VectorLength), else a form
+        # of this read alone, which no fact names.
+        set size [hir::cardinality::VectorLength $hir $container steps]
     } else {
         set size [hir::cardinality::Capacity $hir $container steps]
     }

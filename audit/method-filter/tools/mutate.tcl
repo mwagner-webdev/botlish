@@ -35,6 +35,21 @@ set mutants [list \
     [list declared-contract-ignored hir/methodfilter.tcl \
         "foreach field \{declaredParamTypes inferredParamTypes checkedParamTypes\} \{" \
         "foreach field \{inferredParamTypes checkedParamTypes\} \{"] \
+    [list nominal-rule-dropped hir/methodfilter.tcl \
+        "    return \[NominalMismatch \[DeclaredParam \$hir \$ns \$cand\] \$R\]" \
+        "    return 0"] \
+    [list nominal-arguments-compared hir/methodfilter.tcl \
+        "        && \[lindex \$declared 1\] ne \[lindex \$R 1\]\}" \
+        "        && \$declared ne \$R\}"] \
+    [list nominal-same-declaration-excluded hir/methodfilter.tcl \
+        "        && \[lindex \$declared 1\] ne \[lindex \$R 1\]\}" \
+        "        && 1\}"] \
+    [list nominal-receiver-unchecked hir/methodfilter.tcl \
+        "    expr \{\[hir::types::IsNamedStruct \$declared\] && \[hir::types::IsNamedStruct \$R\]" \
+        "    expr \{\[hir::types::IsNamedStruct \$declared\] && 1"] \
+    [list nominal-inferred-compared hir/methodfilter.tcl \
+        "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n" \
+        "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n        if \{\$t eq \"\" && \[dict exists \$hir exprs \$v inferredParamTypes\]\} \{ set t \[lindex \[dict get \$hir exprs \$v inferredParamTypes\] 0\] \}\n"] \
     [list several-survivors-decided hir/methodfilter.tcl \
         "            if \{\[llength \$survivors\] == 1\} \{" \
         "            if \{\[llength \$survivors\] >= 1\} \{"] \

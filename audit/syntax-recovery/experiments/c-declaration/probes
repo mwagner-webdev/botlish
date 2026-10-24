@@ -1,0 +1,7 @@
+main.bot 1 4 known first: before the malformed declaration
+main.bot 7 4 known last: after it
+main.bot 8 9 known first: a reference to an earlier function after the malformed one
+main.bot 11 1 known q: an unrelated call
+main.bot 4 4 binding broken: the name of the malformed declaration (its value is not known)
+main.bot 10 1 unavailable r: the result of the malformed function
+main.bot 10 5 unavailable broken: its signature (the parameter list is incomplete)

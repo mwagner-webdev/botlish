@@ -435,7 +435,8 @@ that has completed is not this error: it returns the same final result
 again.
 
 One form is a resource limit instead, on the native backends only: "cannot
-map a N-byte coroutine stack: ...". Each live native coroutine has its own
+map a N-byte coroutine stack: ...". Each live native coroutine the compiler
+did not fuse into its consumer (COROUTINE-FUSION-MILESTONE-1.md) has its own
 stack, 8 MiB of address space by default
 (BOTLISH_NATIVE_COROUTINE_STACK_BYTES sets it, at least 64 KiB), and the
 system refused another one.
@@ -1062,7 +1063,9 @@ code: TCL LIMIT STACK
 Run time. Recursion depth is a resource limit, not semantics, so the
 backends stop at different depths:
   * native backends and executables: native code runs on a 1 GiB stack,
-    and a coroutine's body on an 8 MiB stack of its own; overflowing either
+    and a coroutine's body on an 8 MiB stack of its own (one the native
+    compiler fused into the function that drives it on that function's
+    stack: COROUTINE-FUSION-MILESTONE-1.md); overflowing either
     stops the run with "native stack exhausted: too many nested calls"
     (NATIVE LIMIT STACK), never a crash, on Linux x86-64 and AArch64,
     macOS AArch64 and Windows x86-64 -- in Botlish code, inside the
@@ -1099,12 +1102,12 @@ stack's.
 
 @topic error.native-link
 title: NATIVE LINK and NATIVE AOT: linking a native executable failed
-summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report that linking a native executable failed: a missing C library or symbol, no rustc, a refused linker.
+summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report a failed link: a missing C library or symbol, no rustc or C compiler, no runtime archive.
 index: errors backends
 alias: link failed; undefined symbol; cannot find library; executable link failed
-keywords: linker, rustc, cc, ld, -l, -L, extern c library, BOTLISH_NATIVE_LINKER, stub, libbotlish_native
+keywords: linker, rustc, cc, ld, -l, -L, extern c library, BOTLISH_NATIVE_LINKER, stub, system, auto, libbotlish_native, libbotlish_runtime, BOTLISH_NATIVE_RUNTIME, BOTLISH_NATIVE_SYSTEM_LINKER, BOTLISH_NATIVE_LINK_LOG, TOOLCHAIN, RUNTIME
+docs: C-FFI.md SINGLE-EXECUTABLE.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md
 related: concept.c-ffi backend.native-executable backend.single-executable error.native-aot-not-ready error.native-not-built
-docs: C-FFI.md SINGLE-EXECUTABLE.md
 code: NATIVE LINK
 code: NATIVE AOT
 
@@ -1121,8 +1124,8 @@ NATIVE LINK:
     the linker cannot find, or a symbol no library defines. A missing
     library is never a front-end error: it fails here, even in a
     program that calls nothing from it.
-  * the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's)
-    refuses any program that calls C or declares a library.
+  * the stub linker (BOTLISH_NATIVE_LINKER=stub) refuses any program that
+    calls C or declares a library.
   The linker's own lines are GNU ld's or lld's on Linux ("undefined
   reference to", "cannot find -lNAME", "unable to find library"), Apple
   ld's on macOS ("Undefined symbols for architecture arm64:" and a
@@ -1130,6 +1133,21 @@ NATIVE LINK:
   found", "found architecture 'x86_64', required architecture 'arm64'"),
   link.exe's on Windows ("error LNK2019: unresolved external symbol NAME",
   "fatal error LNK1181: cannot open input file 'NAME.lib'").
+The system linker (BOTLISH_NATIVE_LINKER=system or auto, the single
+executable's for a program that calls C) adds a third word for what is no
+error of the program's link plan, after NATIVE LINK or NATIVE AOT:
+  * TOOLCHAIN: "the system linker needs a C compiler driver to link an
+    executable for TARGET, and there is none: no cc on PATH" (Microsoft's
+    linker on Windows: link.exe from a Developer Command Prompt, and "... is
+    not Microsoft's link.exe" for a Unix toolset's), or "... could not run a
+    linker for TARGET:" with the driver's own lines (gcc's "cannot find
+    'ld'", clang's "unable to execute command", macOS's missing Command Line
+    Tools);
+  * RUNTIME: the runtime archive (libbotlish_runtime.a beside the driver,
+    or BOTLISH_NATIVE_RUNTIME) "is missing", "is unusable: not a static
+    library", "is for MACHINE, not this driver's TARGET", "defines no
+    main: it is no Botlish runtime archive", or "does not define the
+    runtime helper NAME this driver's code calls: it is another build's".
 NATIVE AOT:
   * "executable link failed (STATUS): ..." with rustc's output, the system
     linker's own lines among it;
@@ -1154,7 +1172,13 @@ says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
 C runtime"). The Tcl backends never call C. For NATIVE AOT:
 the default (rustc) linker needs rustc and a built native backend in the
 checkout, and on macOS the Xcode command line tools (the system linker);
-the stub linker needs neither but is Linux x86-64 only and links no C.
+the stub linker needs neither but is Linux x86-64 only and links no C; the
+system linker needs a C compiler driver (Debian, Ubuntu: apt install gcc;
+macOS: xcode-select --install; Windows: a Developer Command Prompt) or one
+named by BOTLISH_NATIVE_SYSTEM_LINKER, and the runtime archive built with
+the compiler (the single executable carries its own).
+BOTLISH_NATIVE_LINK_LOG=FILE appends each system link's command line and
+the linker's output to FILE.
 
 @topic error.native-not-built
 title: NATIVE NOT-BUILT: the native backend has not been built
@@ -1187,10 +1211,10 @@ run every program except the native-only operations.
 
 @topic error.native-startup
 title: NATIVE STARTUP: a standalone executable could not start
-summary: NATIVE STARTUP means a stub-linked executable could not load the program image appended to it, or the runtime could not start its worker thread; the file is damaged or was built for another runtime.
+summary: NATIVE STARTUP means an executable could not read its program image or record, or start its worker thread: the file is damaged or was built for another runtime.
 index: errors backends
 alias: no program image; bare botlish-aot-stub
-keywords: executable, stub linker, program image, botlish-aot-stub, startup, thread, format
+keywords: executable, stub linker, system linker, program image, program record, botlish-aot-stub, libbotlish_runtime, startup, thread, format
 related: backend.native-executable backend.single-executable error.native-io error.native-link
 docs: SINGLE-EXECUTABLE.md
 code: NATIVE STARTUP
@@ -1207,6 +1231,16 @@ file. The messages:
     FILE: truncated program image
     program image was compiled for a different native runtime build
     program image format N, this runtime reads format M
+
+Every executable's program object carries its program's record and
+descriptor as data the linker relocated (runtime::program); the rustc
+linker's startup and, in a system-linked executable (BOTLISH_NATIVE_LINKER
+=system, or auto for a program that calls C), its runtime archive's main
+read it:
+
+    not a Botlish program record
+    the program was compiled for a different native runtime build
+    the program record's code table does not match its descriptor
 
 It is also reported when the runtime cannot create its worker thread
 (for example a BOTLISH_NATIVE_STACK_BYTES the system refuses), and by
@@ -1332,20 +1366,24 @@ CONTEXT-NATIVE-LOWERING-UNSUPPORTED)". Declaring `type Depth = Int in
 
 @topic error.surface-syntax
 title: SURFACE SYNTAX: the source does not parse
-summary: SURFACE SYNTAX reports Botlish source that does not parse; every malformed construct is reported once, with its line and column, and a file with syntax errors is not checked further.
+summary: SURFACE SYNTAX reports source that does not parse, each malformed construct once; a run stops there, while -check and the language server also analyze the code around it.
 index: errors rules
 alias: syntax error; parse error; does not parse; unexpected token
-keywords: parser, lexer, expected, found, unterminated string, never closed, unexpected character, indentation, colon, recovery
-related: concept.syntax rule.if-placement rule.loop-placement rule.one-handler-per-error rule.comparison-chains rule.indentation rule.names rule.no-list-destructuring error.list-destructuring
-docs: DIAGNOSTIC-RECOVERY.md README.md
+keywords: parser, lexer, expected, found, unterminated string, never closed, unexpected character, indentation, colon, recovery, syntax recovery, -check, hole
+related: concept.syntax rule.if-placement rule.loop-placement rule.one-handler-per-error rule.comparison-chains rule.indentation rule.names rule.no-list-destructuring error.list-destructuring error.syntax-hole cli.options cli.lsp
+docs: DIAGNOSTIC-RECOVERY.md SYNTAX-RECOVERY-MILESTONE-1.md README.md
 code: SURFACE SYNTAX
 
 == MEANING
 At compile time, before any other check. The lexer and the parser read a
 .bot file into a syntax tree; text that does not fit the grammar is a
 syntax error, reported as FILE:LINE:COLUMN: MESSAGE (SURFACE SYNTAX).
-A file with syntax errors is not analyzed further: its semantic
-diagnostics (TYPE, UNBOUND, ...) appear once it parses.
+A program with a syntax error never runs and is never built: a run (and
+every -emit-... or inspecting option) reports its syntax errors and
+nothing else. -check and the language server report the same syntax
+errors, first and unchanged, and then the semantic diagnostics (TYPE,
+UNBOUND, ...) of the code the syntax errors cannot affect (below, "Checking
+around a syntax error").
 
 Some syntax errors carry a code of their own at the start of the message
 (LIST-DESTRUCTURING: ..., EXTERN-SYNTAX: ...); each has its own page.
@@ -1394,6 +1432,32 @@ behind the commonest errors have their own pages (listed below), and the
 help line printed under a syntax error names its rule's page when there is
 one.
 
+== CHECKING AROUND A SYNTAX ERROR
+-check and the language server analyze a program with syntax errors
+(SYNTAX-RECOVERY-MILESTONE-1.md). Each malformed statement or declaration
+becomes a hole: source that has no value, no type and never runs. Its
+first tokens, before the point where the text goes wrong, say what it is:
+`total = add(1, 2` binds total (to a value nobody knows), `fn area(` may
+declare area, a malformed `with context` may install a context, a
+malformed `struct` may declare a type. Everything else is analyzed as
+usual, so:
+  * a reference to a name a hole binds is known to exist, but its value
+    and type are not; a hover there says so;
+  * a diagnostic that could depend on a hole is not reported -- a name a
+    malformed statement in scope might have bound is not called unbound,
+    a call to a function whose body holds a hole is not checked against
+    the result that body would have had, a missing context is not
+    reported after a malformed installation -- and is reported once the
+    line parses, if it is still wrong;
+  * every other diagnostic is reported, and is the one a compilation of
+    the repaired program reports.
+A malformed line in an imported module keeps the module's other
+declarations. A hole never claims anything: no proof, no inferred result,
+no exhaustive handling is drawn from a function whose body holds one,
+except what its declaration states. A `static compile:` block of such a
+program is not decided. That is why -check can report more than a run of
+the same file: a run stops at the syntax errors.
+
 == HOW TO INVESTIGATE
 Read the first error first: the column points at the token where parsing
 went wrong, which may be after the real mistake (a missing ":" or ")" on
@@ -1411,3 +1475,98 @@ result
 @at 4:12
 @message "(" is never closed
 @end
+
+@topic error.syntax-hole
+title: SYNTAX-HOLE: malformed source, as -check and the language server see it
+summary: SYNTAX-HOLE is the analysis's record of a malformed statement or declaration (a hole) in a program with syntax errors; it is never reported: the syntax error is.
+index: errors
+alias: hole; malformed statement; no meaning is known
+keywords: syntax recovery, hole, malformed, -check, language server, hover, unknown, partial analysis
+related: error.surface-syntax error.hir-syntax-recovered cli.options cli.lsp
+docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
+code: CORE SEMANTIC SYNTAX-HOLE
+
+== MEANING
+Only in the analysis -check and the language server make of a program with
+a syntax error (error.surface-syntax, "Checking around a syntax error").
+Each malformed statement or declaration is a hole: it has no value, no
+type and no meaning, and whatever depends on it is analyzed as unknown. The
+analysis records it as a SYNTAX-HOLE diagnostic so that everything that
+depends on the hole is recognized as dependent; the diagnostic itself is
+never printed -- the syntax error that made the hole is. A hover on the
+malformed text answers
+
+    malformed source: no meaning is known for it (its syntax error says why)
+
+and a name a malformed statement may have bound, or may have changed the
+meaning of, has no type, definition or references until the line parses.
+
+== WHAT TO DO
+Fix the syntax error; the hole and everything that waited on it are then
+analyzed.
+
+@topic error.hir-syntax-recovered
+title: HIR SYNTAX-RECOVERED: a program with syntax errors given to a backend
+summary: HIR SYNTAX-RECOVERED is a backend's refusal of a HIR analyzed past syntax errors (as -check does): it is for diagnostics and queries only, never run or built.
+index: errors backends
+alias: recovered HIR; run a program with syntax errors
+keywords: syntax recovery, backend, runnable, hole, -check, language server, tool
+related: error.surface-syntax error.syntax-hole backend.hir-interchange cli.options
+docs: SYNTAX-RECOVERY-MILESTONE-1.md DIAGNOSTIC-RECOVERY.md
+code: HIR SYNTAX-RECOVERED
+
+== MEANING
+A tool error, never one of a program run from the command line. The
+analysis of a program with syntax errors (-check, the language server,
+surface::readProgramFile -recover-syntax 1) keeps a HIR whose malformed
+statements are holes: source with no meaning. Every backend entry point
+refuses it before it compiles anything:
+
+    this HIR analyzes a program with syntax errors (its malformed source
+    is holes): no backend compiles or runs it (HIR SYNTAX-RECOVERED)
+
+The front-end cache never stores such a HIR, and a strict compilation of
+the program reports its syntax errors (SURFACE SYNTAX) instead of making
+one.
+
+== WHAT TO DO
+Fix the program's syntax errors and compile it again; a tool that wants
+to run or build a program compiles it without -recover-syntax.
+
+@topic error.native-library
+title: NATIVE LIBRARY: a program cannot be built as a native library
+summary: NATIVE LIBRARY KIND refuses a native library build: entry statements, no export, a taken C symbol, a library name that is no C identifier, no -out, or a failed build tool.
+index: errors backends
+alias: library build failed; native library refused; declarations only
+keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc
+related: backend.native-library error.export-signature cli.options
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: NATIVE LIBRARY
+code: NATIVE LIBRARY LIBRARY-TOP-LEVEL
+code: NATIVE LIBRARY LIBRARY-NO-EXPORTS
+code: NATIVE LIBRARY LIBRARY-SYMBOL
+code: NATIVE LIBRARY NAME
+code: NATIVE LIBRARY OUT
+code: NATIVE LIBRARY TOOL
+
+== MEANING
+On -emit-native-library (native::library), after the program compiled:
+
+  * LIBRARY-TOP-LEVEL: the entry file has a top-level statement that is no
+    function declaration. Creating an instance runs the program's
+    initialization, and a library's is only its modules' static
+    initialization, so an entry script never runs by accident; each
+    statement is reported at its location.
+  * LIBRARY-NO-EXPORTS: no `exported c fn` (and no -export).
+  * LIBRARY-SYMBOL: two exports with one name (from different modules), or
+    an export named like the runtime API (create, destroy, abi_version,
+    bytes_release, error_*): each export is NAME_FUNCTION in C.
+  * NAME: the library name is not a C identifier (it prefixes every
+    public C name).
+  * OUT: native::library was called without -out.
+  * TOOL: ld, objcopy, ar or cc failed; the message has its output.
+
+== WHAT TO DO
+Move a top-level constant or computation into a function, or into an
+imported module (where a top-level binding is a module static); rename a
+clashing export; install binutils and a C compiler for TOOL.

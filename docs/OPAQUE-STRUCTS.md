@@ -19,6 +19,11 @@ abstraction as ordinary functions. The compiler, optimizer and runtime are not
 subject to the boundary: `opaque` is source-level authority and never an
 optimization barrier.
 
+(`private`, MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md, is the other,
+orthogonal boundary: who may *name* a declaration at all. A `private opaque
+struct` is both; an opaque struct is named anywhere, a private one only in
+its module.)
+
 It is the prerequisite for `opaque struct Bytes` (ABI views), `opaque context
 struct ...` and `opaque resource struct ...` (capability values, contexts,
 managed foreign resources). This milestone implements only the first property.

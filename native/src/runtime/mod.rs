@@ -16,6 +16,7 @@ pub mod framemap;
 pub mod framewalk;
 pub mod heap;
 pub mod inttext;
+pub mod library;
 pub mod metrics;
 pub mod mutvec;
 pub mod native_stack;
@@ -23,6 +24,7 @@ pub mod nview;
 #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 pub mod platform;
 pub mod ops;
+pub mod program;
 pub mod show;
 pub mod strobj;
 pub mod syscall;

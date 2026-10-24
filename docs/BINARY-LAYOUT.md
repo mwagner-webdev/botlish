@@ -192,6 +192,13 @@ There is no generic struct declaration of any kind: `struct Foo[T]:`,
 `LayoutStruct` is a built-in applied type whose one argument is a layout, not
 a type parameter.
 
+> Since TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, `struct Foo[T]:` declares a
+> parameterized struct: an ordinary struct type constructor whose slots are
+> imprint variables, which is no layout and has no representation of its
+> own. `LayoutStruct Foo:` and `layout struct Foo:` remain syntax errors,
+> `context struct Foo[T]:` is rejected (a context struct takes no type
+> slots), and `LayoutStruct` is still the built-in applied type of a layout.
+
 ### Imprinting: `std::binary::parse`
 
 ```botlish
@@ -483,7 +490,9 @@ F: T at O, ...`, read back by `hir/read.tcl`), so HIR interchange
     `LayoutStruct Foo:`, `layout struct Foo:` and `context struct Foo[T]:`
     are syntax errors (`bl-syntax-no-generic-struct-declarations`);
     `LayoutStruct` is a built-in applied type of arity one whose argument is
-    a layout, never a type parameter.
+    a layout, never a type parameter. (Later,
+    TRAIT-CONSTRAINED-IMPRINTED-TYPES.md made `struct Foo[T]:` a
+    parameterized struct, no layout's; the other three stay refused.)
 
 ### Binary semantics (13-25)
 

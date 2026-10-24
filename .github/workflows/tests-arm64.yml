@@ -129,6 +129,48 @@ jobs:
           BOTLISH_NATIVE_GC_STRESS: "1"
         run: cargo test --release --manifest-path native/Cargo.toml
 
+  # The system linker on Linux AArch64 (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
+  # every test file that builds an executable or links a program that calls
+  # C, linked by the host's cc with the precompiled runtime archive, as
+  # tests.yml's system-linker job does on x86-64 (no stub linker here); the
+  # system-linker and C tests again under GC stress.
+  system-linker:
+    name: arm64 tests (system-linked executables)
+    runs-on: ubuntu-24.04-arm
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+      CORE_BACKEND: compile
+      BOTLISH_NATIVE_LINKER: system
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: What the system linker links with
+        run: native/target/release/botlish-native system-linker
+
+      # The libraries the driver passes after the runtime archive, against
+      # rustc's account of them (relinks the archive: before any test runs).
+      - name: The runtime archive's system libraries
+        run: tclsh9.0 native/runtime-archive/libraries.tcl
+
+      - name: Executable and C tests, system-linked
+        shell: bash
+        run: |
+          files=$(grep -l -e 'native::executable' -e 'emit-native-executable' -e 'extern c ' tests/*.test | xargs -n1 basename | tr '\n' ' ')
+          tclsh9.0 tests/all.tcl -file "$files"
+
+      - name: System linker and C tests under GC stress
+        shell: bash
+        env:
+          BOTLISH_NATIVE_GC_STRESS: "1"
+        run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
+
   golden:
     name: arm64 golden suites (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04-arm

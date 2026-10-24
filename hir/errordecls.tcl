@@ -278,6 +278,18 @@ proc hir::errordecls::resolvePayloads {} {
     }
 }
 
+# {ERROR FIELDS TYPESPANS ...}: every payload-bearing error of the current
+# compilation, its resolved field types {F T ...} and each field type's span
+# {F SPAN ...} ("" for an error read back from HIR text).
+proc hir::errordecls::PayloadTypes {} {
+    variable payloads
+    set result {}
+    dict for {name entry} $payloads {
+        lappend result $name [dict getdef $entry types {}] [dict getdef $entry typeSpans {}]
+    }
+    return $result
+}
+
 # Re-registers the payload descriptors ENTRIES of a HIR's own
 # `errorPayloads` (CANONICAL -> {fields {F T ...} namespace NS}, resolved
 # types: hir/read.tcl, a serialized HIR), for the canonical identities NAMES.

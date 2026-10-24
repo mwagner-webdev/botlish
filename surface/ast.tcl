@@ -55,7 +55,9 @@
 #              typeArg (a surface::parser::TypeExpr result) and typeArgSpan,
 #              the construction of an applied type: NAME[TYPE] { ... }
 #              (BINARY-LAYOUT.md, `LayoutStruct[Pair] {...}`; NAME is then
-#              the bare constructor name)
+#              the bare constructor name); with typeArgs and typeArgSpans
+#              (lists) instead, one of several type arguments,
+#              Pair[int, str] { ... } (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
 #   fieldinits fields ({name nameSpan value} dicts in written order) -- the
 #              one shared field-initializer payload of anonstruct and
 #              namedstruct
@@ -104,7 +106,9 @@
 #              param NAME paramSpan SPAN type TYPE typeSpan SPAN span SPAN}
 #              dicts, at most one, empty if none; `normal` after `-> unit`, a
 #              validator), body (suite),
-#              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan
+#              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan,
+#              exported (the foreign ABI of `exported c fn NAME(...)`: c;
+#              "" for an ordinary function), exportedSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the
 #              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md),
@@ -157,7 +161,10 @@
 #              declared order; TYPE as surface::parser::TypeExpr returns it),
 #              opaque (1 for `opaque struct NAME:`, else 0), opaqueSpan (the
 #              modifier word's span, or ""), context (1 for `context struct
-#              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md)
+#              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md), and
+#              for a parameterized struct only, slots ({name nameSpan trait
+#              traitSpan} dicts in written order, TRAIT the spelled trait of
+#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
@@ -250,6 +257,16 @@
 #              "" -- ERROR-PAYLOADS.md) -- "CALL: on NAME: ... on NAME: ...".
 #              Only a bare call expression may be handled this way (item 9).
 #   error      a statement that could not be parsed (recovering parses only)
+#
+# Every named top-level declaration -- function, bind, typedecl, errordecl,
+# structdecl, enumdecl, traitdecl, layoutdecl, externfn -- may also carry
+# `private` (1 for `private DECLARATION`) and `privateSpan` (the modifier
+# word's span; the node's span then starts there): the declaration is
+# accessible only to code of its own module
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md). Absent on every other
+# node and on a public declaration. A property of the one declaration, like
+# `opaque` and `nomethod`, never a node kind of its own; the loader collects
+# it into the module's declaration record (surface/modules.tcl's ModuleDecl).
 #
 # Node ids
 # --------
@@ -368,6 +385,8 @@ proc surface::ast::Statements {statements parent} {
     foreach statement $statements {
         switch -- [dict get $statement kind] {
             function { set key "[dict get $statement name]()" }
+            classdecl { set key "class([dict get $statement name])" }
+            dfadecl  { set key "dfa([dict get $statement name])" }
             bind     { set key "[dict get $statement name]=" }
             coroutinebind { set key coroutine }
             default  { set key [dict get $statement kind] }
@@ -751,6 +770,9 @@ proc surface::ast::Expr {node show} {
             if {[dict exists $node typeArg]} {
                 append name "\[[showType [dict get $node typeArg]]\]"
             }
+            if {[dict exists $node typeArgs]} {
+                append name "\[[::join [lmap t [dict get $node typeArgs] {showType $t}] {, }]\]"
+            }
             return "([::join [concat struct $name [FieldsText $node $show]] { }])$at"
         }
         project {
@@ -873,6 +895,11 @@ proc surface::ast::showType {type} {
         }
         return "$head{[join [lmap field [lindex $type 2] {join $field {: }}] {, }]}"
     }
+    if {[llength $type] == 3 && [lindex $type 0] eq "apply"} {
+        # An application of several type arguments (surface::parser::
+        # TypeExpr, TRAIT-CONSTRAINED-IMPRINTED-TYPES.md).
+        return "[lindex $type 1]\[[join [lmap t [lindex $type 2] {showType $t}] {, }]\]"
+    }
     lassign $type name arg
     if {$name eq "fn"} {
         # A structural function type (surface::parser::FnType): its
@@ -886,6 +913,19 @@ proc surface::ast::showType {type} {
 }
 
 proc surface::ast::Statement {node indent show linesVar} {
+    upvar 1 $linesVar lines
+    set first [llength $lines]
+    StatementLines $node $indent $show lines
+    if {[dict getdef $node private 0] && [llength $lines] > $first} {
+        # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) is
+        # written first, before every other modifier of the declaration.
+        set pad [string repeat {    } $indent]
+        set line [lindex $lines $first]
+        lset lines $first "${pad}private [string range $line [string length $pad] end]"
+    }
+}
+
+proc surface::ast::StatementLines {node indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
     set at [At $node $show]
@@ -907,6 +947,23 @@ proc surface::ast::Statement {node indent show linesVar} {
                 return
             }
             lappend lines "${pad}error [dict get $node name]$at"
+            return
+        }
+        classdecl {
+            lappend lines "${pad}[DfaClassText $node]$at"
+            return
+        }
+        dfadecl {
+            lappend lines "${pad}dfa [dict get $node name] over [dict get $node alphabet]$at"
+            foreach c [dict get $node classes] {
+                lappend lines "${pad}    [DfaClassText $c]"
+            }
+            foreach state [dict get $node states] {
+                lappend lines "${pad}    [dict get $state name]:"
+                foreach t [dict get $state transitions] {
+                    lappend lines "${pad}        [DfaItemsText [dict get $t items]] -> [DfaActionText $t]"
+                }
+            }
             return
         }
         enumdecl {
@@ -986,7 +1043,17 @@ proc surface::ast::Statement {node indent show linesVar} {
             if {[dict exists $node context] && [dict get $node context]} {
                 append modifier "context "
             }
-            lappend lines "${pad}${modifier}struct [dict get $node name]$at"
+            set slots ""
+            if {[dict exists $node slots]} {
+                set slots "\[[join [lmap slot [dict get $node slots] {
+                    if {[dict get $slot trait] eq ""} {
+                        dict get $slot name
+                    } else {
+                        string cat [dict get $slot name] " satisfies " [dict get $slot trait]
+                    }
+                }] {, }]\]"
+            }
+            lappend lines "${pad}${modifier}struct [dict get $node name]$slots$at"
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
             }
@@ -1002,7 +1069,10 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         function {
             set params [lmap pair [dict get $node params] {
-                lassign $pair name _ type
+                lassign $pair name _ type _ place
+                if {$place ne ""} {
+                    set name "place $name"
+                }
                 if {$type eq ""} {set name} else {string cat "$name:[showType $type]"}
             }]
             # Explicit join, not a bare "($params)" interpolation: a typed
@@ -1026,6 +1096,9 @@ proc surface::ast::Statement {node indent show linesVar} {
                 lappend params resume [showType [dict get $node resume type]]
             }
             set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
+            if {[dict getdef $node exported ""] ne ""} {
+                append modifier "exported [dict get $node exported] "
+            }
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict exists $node resultType] && [dict get $node resultType] ne ""} {
                 append line " -> [showType [dict get $node resultType]]"
@@ -1093,6 +1166,51 @@ proc surface::ast::Statement {node indent show linesVar} {
 
 # Lines of the static intrinsic NODE ("static OPERATION" and its captured
 # block, STATIC-COMPILE.md), its first line starting with PREFIX.
+# The source text of a dfa or class declaration's items (surface/parser.tcl's
+# DfaItems), a class declaration, and a transition's action, as written.
+proc surface::ast::DfaItemsText {items} {
+    return [join [lmap item $items {
+        switch -- [dict get $item kind] {
+            sym - seq { dict get $item text }
+            any - end { dict get $item kind }
+            class {
+                set name [dict get $item name]
+                if {[dict get $item namespace] ne ""} {
+                    set name [dict get $item namespace]::$name
+                }
+                string cat [expr {[dict get $item rooted] ? "::" : ""}] $name
+            }
+        }
+    }] " "]
+}
+
+proc surface::ast::DfaClassText {node} {
+    set text "class [dict get $node name] = [DfaItemsText [dict get $node items]]"
+    if {[dict get $node except] ne {}} {
+        append text " except [DfaItemsText [dict get $node except]]"
+    }
+    return $text
+}
+
+proc surface::ast::DfaActionText {t} {
+    switch -- [dict get $t action] {
+        goto { return [dict get $t target] }
+        reject { return reject }
+        accept {
+            switch -- [dict get $t unread] {
+                0 { return accept }
+                1 { return "accept before" }
+                default { return "accept before [dict get $t unread]" }
+            }
+        }
+        call {
+            lassign [dict get $t callee] ns name rooted
+            set callee [if {$ns eq ""} {set name} else {string cat $ns :: $name}]
+            return "call [expr {$rooted ? "::" : ""}]$callee then [dict get $t then]"
+        }
+    }
+}
+
 proc surface::ast::StaticIntrinsic {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]

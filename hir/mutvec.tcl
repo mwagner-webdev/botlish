@@ -224,6 +224,83 @@ proc hir::mutvec::IsContextParam {hir b} {
 }
 
 # ---------------------------------------------------------------------------
+# Place parameters (PLACE-PARAMETERS.md)
+#
+# A function's parameter declared `place m: T` is the caller's place itself:
+# the caller passes a place path of its own (a receiver, exactly as a
+# collection operation's), no copy is made on either side, and every
+# mutation the function makes through `m` -- a collection operation on a
+# path of it, or a call passing it (or a path of it) on to another place
+# parameter -- is the caller's place's. To the caller the call is a
+# mutation of that place; to the function the parameter is a place it does
+# not own, like a context parameter's: never moved out, never copied on
+# entry, read out by copy, returned by copy. The type is statically a
+# collection or a struct whose fields hold collections (ShareDescriptor):
+# only a collection's header changes in place, so the mutations a place
+# parameter can make are exactly the headers its type holds. Nothing of
+# this exists at run time: a header was always passed by reference, and the
+# copies this file writes are what made a parameter the callee's own.
+
+# The indices of the place parameters of the function call E calls
+# directly (its target block's `places`), or {}.
+proc hir::mutvec::PlaceIndices {hir e} {
+    lassign [dict get $hir exprs $e target] kind block
+    if {$kind ne "block" || ![dict exists $hir exprs $block]} {
+        return {}
+    }
+    return [dict getdef $hir exprs $block places {}]
+}
+
+# 1 if binding B is a place parameter of its function.
+proc hir::mutvec::IsPlaceParam {hir b} {
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ne "param"} {
+        return 0
+    }
+    set f [dict get $hir scopes [dict get $binding scope] owner]
+    if {$f eq "" || ![dict exists $hir exprs $f] || [dict get $hir exprs $f kind] ne "block"} {
+        return 0
+    }
+    set places [dict getdef $hir exprs $f places {}]
+    return [expr {$places ne {} && [lsearch -exact [dict get $hir exprs $f params] $b] in $places}]
+}
+
+# The block with place parameters binding B names -- a function binding,
+# bound once to a block that declares some (PlaceIndices) -- or "".
+proc hir::mutvec::PlaceFunctionOf {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return ""
+    }
+    set by [dict get $hir bindings $b declaredBy]
+    if {$by eq "" || ![dict exists $hir exprs $by] || [dict get $hir exprs $by kind] ne "bind"} {
+        return ""
+    }
+    set value [dict get $hir exprs $by value]
+    if {[dict get $hir exprs $value kind] ne "block" || [dict getdef $hir exprs $value places {}] eq {}} {
+        return ""
+    }
+    return $value
+}
+
+# 1 if place paths P and Q ({BINDING {FIELD...}}) may hold one header: the
+# same binding, and one path a prefix of the other (a struct and a field of
+# it, or the same field).
+proc hir::mutvec::Overlap {p q} {
+    lassign $p a fa
+    lassign $q b fb
+    if {$a ne $b} {
+        return 0
+    }
+    set n [expr {min([llength $fa], [llength $fb])}]
+    return [expr {[lrange $fa 0 [expr {$n - 1}]] eq [lrange $fb 0 [expr {$n - 1}]]}]
+}
+
+# The source name of function block F, for diagnostics.
+proc hir::mutvec::FunctionName {hir f} {
+    return [hir::signatures::Name $hir $f]
+}
+
+# ---------------------------------------------------------------------------
 # Verification (hir::check): receivers and captures
 
 proc hir::mutvec::verify {hirVar} {
@@ -234,10 +311,54 @@ proc hir::mutvec::verify {hirVar} {
     }
     set roots [dict create]
     set callees [dict create]
+    # A place parameter's declared type holds what the function mutates: a
+    # collection, or a struct holding collections. Every one is a place root
+    # of its function.
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block" || [dict getdef $node places {}] eq {}} continue
+        foreach index [dict get $node places] {
+            set b [lindex [dict get $node params] $index]
+            set problem [PlaceParamProblem $hir $e $index]
+            if {$problem ne ""} {
+                hir::DiagnoseAt hir TYPE $problem $e [dict get $hir bindings $b origin]
+                continue
+            }
+            dict set roots $b place
+        }
+    }
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "call"} continue
         dict set callees [dict get $node callee] 1
-        if {![dict get $node reachable] || [OpKind $hir $e] ne "mutate"} continue
+        if {![dict get $node reachable]} continue
+        set places [PlaceIndices $hir $e]
+        if {$places ne {}} {
+            # A call of a function with place parameters mutates the place
+            # each one is given, which is a place path of this function's,
+            # given once.
+            set given {}
+            foreach index $places {
+                set arg [lindex [dict get $node args] $index]
+                if {$arg eq ""} continue
+                set problem [PlaceArgumentProblem $hir $e $index $arg]
+                if {$problem eq ""} {
+                    set path [Path $hir $arg]
+                    foreach {q other} $given {
+                        if {[Overlap $path $q]} {
+                            set problem "[PlaceArgumentWhat $hir $e $index] is `[PathText $hir $path]`, which the same call also gives [PlaceArgumentWhat $hir $e $other 0] as `[PathText $hir $q]`: one place can be updated through one parameter only (two parameters naming it would each see the other's updates, as if one were a reference)"
+                            break
+                        }
+                    }
+                }
+                if {$problem ne ""} {
+                    hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $arg
+                    continue
+                }
+                lappend given $path $index
+                dict set roots [lindex $path 0] place
+            }
+            continue
+        }
+        if {[OpKind $hir $e] ne "mutate"} continue
         set receiver [lindex [dict get $node args] 0]
         if {$receiver eq ""} continue
         set problem [ReceiverProblem $hir $e $receiver]
@@ -245,12 +366,16 @@ proc hir::mutvec::verify {hirVar} {
             hir::Diagnose hir MUTABLE-PLACE-RECEIVER $problem $receiver
             continue
         }
-        dict set roots [lindex [Path $hir $receiver] 0] [Kind [hir::typeOf $hir $receiver]]
+        set root [lindex [Path $hir $receiver] 0]
+        if {![dict exists $roots $root]} {
+            dict set roots $root [Kind [hir::typeOf $hir $receiver]]
+        }
     }
     # A mutating operation is only ever called: as a value, it would mutate
     # whatever header a call through the value passes it -- a place no
     # receiver check sees, whose copies and captures were never written out
-    # for it -- so a reference to one is a callee or nothing.
+    # for it -- so a reference to one is a callee or nothing. The same holds
+    # for a function with a place parameter.
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "ref" || ![dict get $node reachable] || [dict exists $callees $e]} continue
         set problem [OperationValueProblem $hir $e]
@@ -266,12 +391,95 @@ proc hir::mutvec::verify {hirVar} {
         set bindingScope [dict get $hir bindings $b scope]
         if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes $bindingScope invocation]} {
             set kind [dict get $roots $b]
+            if {$kind eq "place"} {
+                hir::Diagnose hir MUTABLE-PLACE-CAPTURE \
+                    "`[hir::semantic::RefName $hir $e]` is a place its function updates in place (a place parameter, or a place it gives to one), which a nested function cannot capture: the nested function would observe a binding that changes, and a collection is a value, not a shared reference (pass it as an argument: the callee gets its own logical copy)" $e
+                continue
+            }
             set what [KindName $kind]
             hir::Diagnose hir MUTABLE-PLACE-CAPTURE \
                 "`[hir::semantic::RefName $hir $e]` is a $what place (its function mutates it in place), which a nested function cannot capture: the nested function would observe a binding that changes, and a $kind is a value, not a shared reference (pass it as an argument: the callee gets its own logical copy)" $e
         }
     }
     dict set hir mutvec roots [lsort -dictionary [dict keys $roots]]
+}
+
+# The text of place path PATH ({BINDING {FIELD...}}) as written.
+proc hir::mutvec::PathText {hir path} {
+    lassign $path b fields
+    return [join [concat [list [hir::semantic::SourceName $hir $b]] $fields] .]
+}
+
+# "the argument for place parameter NAME of FUNCTION" (ARTICLE 1) or "place
+# parameter NAME" (0), of call E's argument INDEX.
+proc hir::mutvec::PlaceArgumentWhat {hir e index {article 1}} {
+    set f [lindex [dict get $hir exprs $e target] 1]
+    set b [lindex [dict get $hir exprs $f params] $index]
+    set name [hir::semantic::SourceName $hir $b]
+    if {!$article} {
+        return "place parameter \"$name\""
+    }
+    return "the argument for place parameter \"$name\" of [FunctionName $hir $f]"
+}
+
+# Why the place parameter at INDEX of function block F may not be one, or
+# "": its declared type must hold a mutable collection (a header a mutation
+# changes in place) and be unrestricted.
+proc hir::mutvec::PlaceParamProblem {hir f index} {
+    set b [lindex [dict get $hir exprs $f params] $index]
+    set name [hir::semantic::SourceName $hir $b]
+    set type [lindex [dict getdef $hir exprs $f declaredParamTypes {}] $index]
+    set what "place parameter \"$name\" of [FunctionName $hir $f]"
+    if {$type eq {}} {
+        return "$what needs a declared type: a place is a mutable collection, or a struct holding some, and its declaration says which"
+    }
+    if {[hir::types::IsAffine $type]} {
+        return "$what has the affine type [hir::types::show $type]: a place parameter of an affine type is not supported (its caller would keep owning a value the function could move out of it)"
+    }
+    if {[ShareDescriptor $type] eq ""} {
+        return "$what has the type [hir::types::show $type], which holds no mutable collection: only a MutableVector, a MutableArray or a struct whose fields hold one changes in place (pass the value as an ordinary parameter)"
+    }
+    return ""
+}
+
+# Why argument R (index INDEX) of call E, a call of a function whose
+# parameter INDEX is a place parameter, is not a place of this function,
+# or "": the same rules as a collection operation's receiver
+# (ReceiverProblem), for a value whose type holds collections.
+proc hir::mutvec::PlaceArgumentProblem {hir e index r} {
+    set what [PlaceArgumentWhat $hir $e $index]
+    set path [Path $hir $r]
+    if {$path eq ""} {
+        return "$what is not a place: it is a temporary value, so the update the function makes would be lost (bind the value to a name, pass the name, and use the name afterwards)"
+    }
+    lassign $path b fields
+    set binding [dict get $hir bindings $b]
+    set shown [hir::semantic::SourceName $hir $b]
+    if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]} {
+        return "$what is `$shown`, which is not a local binding, a parameter or a context parameter of this function: only those are places a function can update (a module binding is shared by every user of the module)"
+    }
+    set pathType [hir::affine::BindingType $hir $b]
+    foreach field $fields {
+        if {![hir::types::IsStructLike $pathType]} {
+            set pathType ""
+            break
+        }
+        set pathType [hir::types::StructField $pathType $field]
+    }
+    if {$pathType eq "" || [ShareDescriptor $pathType] eq ""} {
+        return "$what is `[PathText $hir $path]`, whose binding is not statically a place holding a mutable collection (its type is [hir::types::show [if {$pathType eq ""} {string cat "any"} else {set pathType}]]): only a binding of such a type owns the headers the function updates (bind the value to a name of its type first and pass that)"
+    }
+    if {[hir::affine::IsDestructureTemp $hir $b]} {
+        return "$what is not a place"
+    }
+    while {[dict get $hir exprs $r kind] eq "project"} {
+        set r [dict get $hir exprs $r receiver]
+    }
+    set refScope [dict get $hir exprs $r scope]
+    if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes [dict get $binding scope] invocation]} {
+        return "$what is `$shown`, a binding of an enclosing function: a nested function cannot update a place it captured (a collection is a value; pass it in and return the result)"
+    }
+    return ""
 }
 
 # Why reference E, used as a value (not a call's callee), may not be one, or
@@ -283,6 +491,12 @@ proc hir::mutvec::verify {hirVar} {
 # update is lost, or a place's own header behind its copies' back.
 proc hir::mutvec::OperationValueProblem {hir e} {
     set b [dict get $hir exprs $e binding]
+    set f [PlaceFunctionOf $hir $b]
+    if {$f ne ""} {
+        set name [FunctionName $hir $f]
+        set param [hir::semantic::SourceName $hir [lindex [dict get $hir exprs $f params] [lindex [dict get $hir exprs $f places] 0]]]
+        return "$name has a place parameter (\"$param\"), so it can only be called, never used as a value: a call through a function value has no argument this check can see as the caller's place, and would update whatever its caller passes -- a copy, whose update is lost, or a place's own header (call it with a place of yours, or wrap it in a function that takes the value and returns it)"
+    }
     if {$b eq "" || [dict get $hir bindings $b kind] ne "root"} {
         return ""
     }
@@ -563,7 +777,7 @@ proc hir::mutvec::Elaborate {hirVar} {
             set pnode [dict get $hir exprs $p]
             if {[dict get $pnode kind] eq "project"} continue
             if {[dict get $pnode kind] eq "call" && [ByReference $hir $p $e]
-                    && ([PlaceArgument $hir $p $e] || ![WrittenLater $hir $p $e])} {
+                    && ([PlaceArgument $hir $p $e] || (![WrittenLater $hir $p $e] && ![PlaceOverlap $hir $p $e]))} {
                 # The callee only reads it (or, a place, mutates it in
                 # place) when it runs, while this function waits -- and no
                 # later argument of the call writes it before that.
@@ -597,7 +811,8 @@ proc hir::mutvec::Elaborate {hirVar} {
             if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
                 lappend wraps [list $value [ShareNative] $d]
             }
-        } elseif {![dict exists $convention consumed $b]} {
+        } elseif {![dict exists $convention consumed $b] && ![IsPlaceParam $hir $b]} {
+            # (A place parameter is the caller's place itself: no entry copy.)
             EntryRename hir $b $d
         }
     }
@@ -847,7 +1062,8 @@ proc hir::mutvec::Eligible {hir b} {
     variable convention
     set binding [dict get $hir bindings $b]
     if {[dict get $binding kind] ni {local param} || [hir::isModuleBinding $hir $b]
-            || [IsContextParam $hir $b] || [hir::affine::IsDestructureTemp $hir $b]} {
+            || [IsContextParam $hir $b] || [hir::affine::IsDestructureTemp $hir $b]
+            || [IsPlaceParam $hir $b]} {
         return 0
     }
     if {[HeldDescriptor [hir::affine::BindingType $hir $b]] eq ""} {
@@ -1192,7 +1408,9 @@ proc hir::mutvec::Moved {hir parent e} {
         return 0
     }
     set b [lindex $path 0]
-    if {[IsContextParam $hir $b] || ![dict exists $convention held $b]} {
+    if {[IsContextParam $hir $b] || [IsPlaceParam $hir $b] || ![dict exists $convention held $b]} {
+        # (A context parameter or a place parameter is never moved: the
+        # installed context, the caller's place, outlives the function.)
         return 0
     }
     return [NoLaterUse $hir $parent $e $b]
@@ -1219,6 +1437,10 @@ proc hir::mutvec::ByReference {hir p a} {
     if {[OpKind $hir $p] ne "" && [lindex [dict get $hir exprs $p args] 0] eq $a} {
         return 1
     }
+    if {[PlaceArgument $hir $p $a]} {
+        # (The argument for a place parameter: the caller's place itself.)
+        return 1
+    }
     if {[Observed $hir $p $a]} {
         return 1
     }
@@ -1235,8 +1457,29 @@ proc hir::mutvec::PlaceArgument {hir p a} {
     if {$index == 0 && [OpKind $hir $p] eq "mutate"} {
         return 1
     }
+    if {$index >= 0 && $index in [PlaceIndices $hir $p]} {
+        return 1
+    }
     set name [hir::affine::NativeName $hir $p]
     return [expr {$name ne "" && $index >= 0 && [core::native::ownershipRole $name $index] eq "place"}]
+}
+
+# 1 if call P gives a place argument (PlaceArgument) other than A whose
+# path overlaps A's (Overlap): the call updates, while it runs, a header A
+# would be read by reference from -- so A must be its copy.
+proc hir::mutvec::PlaceOverlap {hir p a} {
+    set path [Path $hir $a]
+    if {$path eq ""} {
+        return 0
+    }
+    foreach arg [dict get $hir exprs $p args] {
+        if {$arg eq "" || $arg eq $a || ![PlaceArgument $hir $p $arg]} continue
+        set q [Path $hir $arg]
+        if {$q ne "" && [Overlap $q $path]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # 1 if a later argument of call P than place path A (its root B) may write
@@ -1262,7 +1505,10 @@ proc hir::mutvec::WrittenLater {hir p a} {
             foreach arg [dict get $hir exprs $x args] {
                 if {$arg eq "" || ![PlaceArgument $hir $x $arg]} continue
                 set q [Path $hir $arg]
-                if {$q ne "" && [lindex $q 0] eq $b && [lrange [lindex $q 1] 0 [expr {$n - 1}]] eq $fields} {
+                if {$q ne "" && [Overlap $q [list $b $fields]]} {
+                    # (A place A's path is a prefix of, or one the call
+                    # mutates a field of: a place parameter's update may
+                    # reach any header under its path.)
                     return 1
                 }
             }
@@ -1481,7 +1727,7 @@ proc hir::mutvec::Fresh {hir e} {
 # the call). Returning E then moves the place's header out of a place that
 # dies with the invocation.
 proc hir::mutvec::OwnResult {hir parent e root} {
-    if {[IsContextParam $hir $root] || ![IsResult $hir $parent $e]} {
+    if {[IsContextParam $hir $root] || [IsPlaceParam $hir $root] || ![IsResult $hir $parent $e]} {
         return 0
     }
     set bindingScope [dict get $hir bindings $root scope]
@@ -1591,12 +1837,13 @@ proc hir::mutvec::MayHoldVector {type {seen {}}} {
         return 0
     }
     if {[hir::types::IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$id in $seen} {
+        # (An application's fields, its slots replaced by the arguments:
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
+        if {$type in $seen} {
             return 0
         }
-        foreach {name t} [hir::structs::fieldTypes $id] {
-            if {[MayHoldVector $t [concat $seen [list $id]]]} {
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[MayHoldVector $t [concat $seen [list $type]]]} {
                 return 1
             }
         }

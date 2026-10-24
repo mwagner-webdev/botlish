@@ -83,11 +83,11 @@
 @@ recursive-struct-not-hashable a struct met again through its own fields is taken as not known, so a recursive Hashable struct is lost
 ## hir/types.tcl
 <<<<
-                if {$id in $seen} {
+                if {$type in $seen} {
                     return {total ""}
                 }
 ====
-                if {$id in $seen} {
+                if {$type in $seen} {
                     return [list unknown "recursive"]
                 }
 >>>>
@@ -337,7 +337,7 @@ core::native::register table_key -arity 0 -impl core::hashing::TableKeyValue -re
 @@ ordinary-code-can-fully-qualify ordinary code can name the private hash fully qualified (only the import is refused)
 ## surface/modules.tcl
 <<<<
-    CheckInternal $state $own $namespaceName $span
+    CheckInternal $state $own $namespaceName $span $symbolName
     if {$namespaceName ni $imported} {
 ====
     if {$namespaceName ni $imported} {

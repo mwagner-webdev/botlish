@@ -1397,6 +1397,138 @@ fn storage_of(data: std::abi::bytes::Bytes) -> any:
 @at 4:10
 @end
 
+@topic error.private-access
+title: PRIVATE-ACCESS: a private declaration used outside its module
+summary: Code of one module names, calls or method-calls a declaration another module declared `private`; only the declaring module may use it.
+index: errors
+alias: is private to module; private function; cannot be accessed from
+keywords: private, access, module, visibility, method syntax, helper
+related: concept.private concept.modules concept.opaque-structs error.private-type-escape error.missing-import
+docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md
+code: SURFACE MODULE PRIVATE-ACCESS
+code: CORE SEMANTIC PRIVATE-ACCESS
+
+== MEANING
+The declaration exists, and the file imports its namespace, but it is
+written `private` in its own module: no other module may name it, call it,
+take it as a value, use it as a type, construct it, read its fields, fail
+with it or handle it. The message names the declaring module:
+
+    gfx::scale is private to module "gfx" and cannot be accessed from the
+    entry program: a private function is accessible only to code of the
+    module that declares it
+
+A method-style call `x.scale()` whose only function of that name is a
+private one of an imported module is the same access.
+
+== WHY
+`private` is the module author's statement that the declaration is an
+implementation detail, so it can change or disappear without breaking
+any other module (concept.private).
+
+== LIKELY CAUSES
+  * Calling a helper of a module instead of its public operation.
+  * Copying code out of a module into its importer.
+  * A method call `x.f()` that used to find a public `f`.
+
+== HOW TO INVESTIGATE
+The related location is the private declaration. Look for the public
+operation the module offers for the same purpose.
+
+== WHAT TO DO
+Use the module's public interface. If the declaration is genuinely part of
+the interface, the module's author removes `private`.
+
+@example reject
+import gfx
+
+gfx::scale(2)
+@module gfx
+private fn scale(x: int) -> int:
+    x * 10
+
+fn draw(x: int) -> int:
+    scale(x) + 1
+@caption The helper is the module's own
+@error SURFACE MODULE PRIVATE-ACCESS
+@at 3:1
+@end
+
+@topic error.private-type-escape
+title: PRIVATE-TYPE-ESCAPE: a public declaration exposes a private type
+summary: A public function, struct, error, trait, layout, type or binding names a private type or error of its module in its interface (or infers one), which no other module could name or use.
+index: errors
+alias: exposes private type; private type in public signature
+keywords: private, public, signature, interface, opaque, inferred result, context requirement
+related: concept.private error.private-access concept.opaque-structs
+docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md
+code: CORE SEMANTIC PRIVATE-TYPE-ESCAPE
+
+== MEANING
+A public declaration's interface is what other modules use: a function's
+parameter types, its declared or inferred result, its context requirements
+(a caller must install them), its errors; a non-opaque struct's fields; an
+error's payload; a trait's requirements; a layout's fields. One of them
+holds a type or error the module declared `private`:
+
+    public function gfx::handles exposes private type gfx::Handles in its
+    result: every module may use gfx::handles, but only module "gfx" may
+    use gfx::Handles
+
+== WHY
+Another module could reach the function but never name, build or handle
+what it takes or returns: an interface no caller can use, or a private
+type smuggled out of its module.
+
+== LIKELY CAUSES
+  * A helper that returns an internal record was left public.
+  * A public struct holds an internal record in an open field.
+  * A public function requires a private context.
+
+== HOW TO INVESTIGATE
+The message names the declaration, the private type and where in the
+interface it appears.
+
+== WHAT TO DO
+Make the declaration private too, or keep the private type out of its
+interface: return values instead, or hold it in an opaque struct, whose
+representation is not interface.
+
+@example reject
+import gfx
+
+0
+@module gfx
+private struct Handles:
+    renderer: int
+
+fn handles() -> Handles:
+    Handles {renderer: 1}
+@caption A public function returning a private struct
+@error CORE SEMANTIC PRIVATE-TYPE-ESCAPE
+@at gfx.bot:4:1
+@end
+
+@example accept
+import gfx
+
+gfx::renderer(gfx::open())
+@module gfx
+private struct Handles:
+    renderer: int
+
+opaque struct Session:
+    handles: Handles
+
+fn open() -> Session:
+    Session {handles: Handles {renderer: 4}}
+
+fn renderer(s: Session) -> int:
+    s.handles.renderer
+@caption Hidden in an opaque struct, the private record is no interface
+@value 4
+@end
+
 @topic error.unknown-enum-case
 title: UNKNOWN-ENUM-CASE: Enum::Case naming a case the enum does not declare
 summary: A qualified case Enum::Case names a case the enum's declaration does not have; the message lists the declared cases and suggests near spellings.
@@ -3495,4 +3627,128 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
         0.00
 @caption Decay, compute, round back
 @value 0.75
+@end
+
+@topic error.export-signature
+title: EXPORT-SIGNATURE: an exported c fn's signature has no C form
+summary: An `exported c fn` declares every parameter as int, bool, Float64 or str and its result as one of those or unit; no flags, context parameters, variadic parameter or resume clause.
+index: errors
+alias: exported c fn parameter type; export signature; C export type
+keywords: exported c fn, int64_t, double, bool, str, unit, -> unit, flags, context, variadic
+related: backend.native-library error.export-environment error.export-placement error.export-name
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-SIGNATURE
+
+== MEANING
+A C export's C ABI is read from its declaration alone -- never from how
+Botlish code calls it -- so every boundary type must be declared, and must
+be one the C boundary converts: int (int64_t), bool, Float64 (double), str
+(text: a pointer and a length in, an owned buffer out) and, for the
+result, unit. A List, a struct, an undeclared parameter or an undeclared
+result has no C form.
+
+== WHAT TO DO
+Declare the types (`-> unit` for no result). For a richer value, export an
+adapter that converts it to a boundary type -- e.g. a table as a str -- and
+keep the rich function an ordinary one.
+
+@example reject
+exported c fn total(xs: List[int]) -> int:
+    0
+@caption A List has no C form
+@error CORE SEMANTIC EXPORT-SIGNATURE
+@at 1:20
+@end
+
+@example accept
+exported c fn twice(n: int) -> int:
+    n * 2
+
+twice(21)
+@caption Declared boundary types
+@end
+
+@topic error.export-placement
+title: EXPORT-PLACEMENT: a C export is a top-level function
+summary: An `exported c fn` is declared at the top level of a program or a module, never inside another function.
+index: errors
+alias: nested exported c fn; export inside a function
+keywords: exported c fn, top level, nested function, -export
+related: backend.native-library error.export-signature
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-PLACEMENT
+
+== MEANING
+A C export is a function the library's host calls directly, with no
+enclosing call: it is declared where the program's or a module's other
+functions are. The same kind refuses a name -export asks for that is no
+top-level function of the entry program.
+
+== WHAT TO DO
+Move the function to the top level of its file.
+
+@example reject
+fn outer() -> int:
+    exported c fn inner(n: int) -> int:
+        n
+    inner(2)
+
+outer()
+@caption Declared inside another function
+@error CORE SEMANTIC EXPORT-PLACEMENT
+@at 2:24
+@end
+
+@topic error.export-name
+title: EXPORT-NAME: a C export's name is a C identifier
+summary: An `exported c fn`'s name is the suffix of its C symbol (LIBRARY_NAME), so it is a C identifier: ASCII letters, digits and _, not starting with a digit.
+index: errors
+alias: exported c fn name; question mark in an export
+keywords: exported c fn, C identifier, symbol, predicate, ?
+related: backend.native-library error.export-signature
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-NAME
+
+== WHAT TO DO
+Rename the export (a predicate `ready?` can be exported as `is_ready`,
+calling the predicate).
+
+@example reject
+exported c fn ready?(n: int) -> bool:
+    n > 0
+@caption `?` is no C identifier character
+@error CORE SEMANTIC EXPORT-NAME
+@at 1:21
+@end
+
+@topic error.export-environment
+title: EXPORT-ENVIRONMENT: a C export is environment-free
+summary: An `exported c fn` captures no value, requires no context and never suspends: a C caller has no environment, no installed context and no coroutine to give it.
+index: errors
+alias: exported c fn captures; export requires a context; export yields
+keywords: exported c fn, capture, closure, context, yield, coroutine, module static
+related: backend.native-library error.export-signature concept.contexts
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: CORE SEMANTIC EXPORT-ENVIRONMENT
+
+== MEANING
+Calling other top-level functions is fine; reading a top-level value of
+the entry program is capturing it. A module's top-level value is a module
+static, which an export may read.
+
+== WHAT TO DO
+Move the value into an imported module, or into the function.
+
+@example reject
+limit = 3
+
+exported c fn capped(n: int) -> int:
+    if n > limit:
+        return limit
+    n
+
+capped(5)
+@caption Captures the entry program's `limit`
+@error CORE SEMANTIC EXPORT-ENVIRONMENT
+@at 3:21
 @end

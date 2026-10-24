@@ -1,0 +1,63 @@
+partition a: units 830, compiled 750, rejected 80 (PRIVATE-* 0); units with a warning 2; warnings 13 (distinct declarations at distinct locations); crossing locations 41
+  the instrument's sites (location and rules), by bucket: hit 49 no-context 10
+  warning airlock::record (R3) at audit/icy-tower/context-refactor/repro/g1-view-leak/airlock.bot:43:1: consumers entry:1; 1 unit(s)
+  warning sdl::Polled (R4) at 6df89a8e:examples/games/icy-tower/sdl.bot:227:8: consumers entry:1; 1 unit(s)
+  warning sdl::Video (R4) at 6df89a8e:examples/games/icy-tower/sdl.bot:71:8: consumers render:2; 1 unit(s)
+  warning sdl::clear (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:265:1: consumers render:1; 1 unit(s)
+  warning sdl::close (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:155:1: consumers entry:1; 1 unit(s)
+  warning sdl::color (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:262:1: consumers render:16; 1 unit(s)
+  warning sdl::fill (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:274:1: consumers render:9; 1 unit(s)
+  warning sdl::line (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:283:1: consumers render:2; 1 unit(s)
+  warning sdl::open (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:176:1: consumers entry:1; 1 unit(s)
+  warning sdl::poll (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:235:1: consumers entry:1; 1 unit(s)
+  warning sdl::present (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:268:1: consumers render:1; 1 unit(s)
+  warning sdl::scale (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:292:1: consumers render:2; 1 unit(s)
+  warning sdl::text (R2) at 6df89a8e:examples/games/icy-tower/sdl.bot:287:1: consumers render:3; 1 unit(s)
+  earlier SUSPICIOUS sites: 41, warned 41, not warned 0
+  earlier LEGITIMATE sites: 18, warned 0, not warned 18
+  units the earlier census did not have: 65; units whose outcome changed: 4
+    audit/icy-tower/context-refactor/variants/opaque-values: main.bot (over the working tree, staged with sdl3): ok -> error SURFACE MODULE UNKNOWN-SYMBOL
+    audit/icy-tower/context-refactor/variants/canvas: golden.bot (over the working tree, staged with sdl3): ok -> error SURFACE MODULE UNKNOWN-SYMBOL
+    audit/icy-tower/context-refactor/variants/canvas: main.bot (over the working tree, staged with sdl3): ok -> error SURFACE MODULE UNKNOWN-SYMBOL
+    audit/icy-tower/context-refactor/variants/canvas: canvas-test.bot (over the working tree, staged with sdl3): ok -> error SURFACE MODULE UNKNOWN-SYMBOL
+  crossing locations the earlier census did not classify: 0
+partition b: units 1648, compiled 889, rejected 759 (PRIVATE-* 37); units with a warning 14; warnings 15 (distinct declarations at distinct locations); crossing locations 17
+  the instrument's sites (location and rules), by bucket: hit 22 context-but-ordinary 1 designated-direct 4 no-context 7
+  warning gfx::Video (R4) at context-resource-escape:7/gfx.bot:24:8: consumers entry:1; 1 unit(s)
+  warning gfx::Video (R4) at context-resource-escape:8/gfx.bot:24:8: consumers entry:1; 1 unit(s)
+  warning gfx::address (R2) at context-resource-escape:23/gfx.bot:30:1: consumers entry:1; 1 unit(s)
+  warning gfx::callback (R2) at context-resource-escape:3/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::draw (R2) at context-resource-escape:2/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::exported (R2) at context-resource-escape:14/gfx.bot:27:1: consumers entry:1; 1 unit(s)
+  warning gfx::open (R2) at context-resource-escape:7/gfx.bot:28:1: consumers entry:1; 1 unit(s)
+  warning gfx::pairs (R2) at context-resource-escape:6/gfx.bot:28:1: consumers entry:1; 1 unit(s)
+  warning gfx::raw (R2) at context-resource-escape:21/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::record (R3) at context-resource-escape:4/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::record (R3) at context-resource-escape:5/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::renderer (R2) at context-resource-escape:1/gfx.bot:24:1: consumers entry:1; 1 unit(s)
+  warning gfx::renderer (R2) at context-resource-escape:19/gfx.bot:27:1: consumers entry:1; 1 unit(s)
+  warning gfx::renderer (R2) at context-resource-escape:24/gfx.bot:24:1: consumers entry:1,render:2; 1 unit(s)
+  warning gfx::renderer_of (R2) at context-resource-escape:10/gfx.bot:30:1: consumers entry:1; 1 unit(s)
+  earlier LEGITIMATE sites: 9, warned 0, not warned 9
+  per set, units (compiled) before -> now:
+    aot-facts: 9 (9) -> 9 (9)
+    c-abi-types: 299 (148) -> 299 (144)  *
+    c-ffi: 187 (162) -> 187 (142)  *
+    c-pointer-borrowing: 100 (52) -> 100 (52)
+    context-resource-escape: 0 (0) -> 23 (22)  *
+    context-traits: 101 (42) -> 101 (37)  *
+    contexts: 96 (53) -> 96 (53)
+    darwin-io: 45 (15) -> 45 (15)
+    darwin-io@macos: 11 (11) -> 11 (11)
+    direct-modules: 90 (39) -> 90 (38)  *
+    module-privacy: 0 (0) -> 64 (23)  *
+    native-edit: 187 (124) -> 187 (97)  *
+    native-view: 124 (98) -> 124 (78)  *
+    stdlib-namespaces: 155 (90) -> 155 (90)
+    syntax-recovery: 0 (0) -> 67 (20)  *
+    variadics: 46 (38) -> 46 (38)
+    windows-io: 38 (14) -> 38 (14)
+    windows-io@windows: 6 (6) -> 6 (6)
+  PRIVATE-* rejections by set: context-resource-escape 1 module-privacy 36
+  crossing locations the earlier census did not classify: 17
+scanner errors: 0

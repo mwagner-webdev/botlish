@@ -106,6 +106,12 @@ proc cpt::LibraryModules {} {
             set relative $base.bot
         }
         set ns std::[string map {/ ::} [file rootname $relative]]
+        if {[core::native::isInternalNamespace $ns]} {
+            # An internal module (core::native::declareInternalModule: the
+            # map and set engine, std::ordered_table): no program imports
+            # it, and no reference documents it as an API.
+            continue
+        }
         lappend modules [list $ns $path $note]
     }
     return $modules
@@ -484,7 +490,19 @@ proc cpt::Generate {} {
                 if {![dict exists $node name]} {
                     continue
                 }
+                if {[dict getdef $node private 0]} {
+                    # A private declaration is the module's implementation,
+                    # never API another module may use: not documented as
+                    # one (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
+                    continue
+                }
                 set name [dict get $node name]
+                if {[hir::iteration::IsOperation $ns $name]} {
+                    # A collection's loop protocol (hir/iteration.tcl): its
+                    # operations are internal to the standard library, and
+                    # a program iterates the collection with a loop.
+                    continue
+                }
                 set qualified "${ns}::$name"
                 set id stdlib.$qualified
                 set kind [DeclarationKind $node]
@@ -593,7 +611,7 @@ proc cpt::Generate {} {
 # its leading words), ORIGIN where it was found. Read from the source by
 # the patterns each reporting mechanism uses, never from a list kept by hand:
 #   * diagnostic kinds: the token scan of tests/static-compile.test's census
-#     (hir/*.tcl and surface/modules.tcl), less the warning codes, the
+#     (hir/*.tcl, surface/modules.tcl and surface/dfa.tcl), less the warning codes, the
 #     tokens that name a design document, and the regular-expression
 #     fragments; and every hir::static::codes kind
 #   * the module loader's kinds: `Error KIND` in surface/modules.tcl
@@ -606,7 +624,8 @@ proc cpt::Inventory {} {
     set inventory {}
     set warnings [dict keys $::hir::warnings::passes]
     set seen [dict create]
-    foreach path [concat [glob [file join $root hir *.tcl]] [list [file join $root surface modules.tcl]]] {
+    foreach path [concat [glob [file join $root hir *.tcl]] [list [file join $root surface modules.tcl] \
+            [file join $root surface dfa.tcl]]] {
         foreach line [split [ReadFile $path] \n] {
             if {[regexp {^\s*#} $line]} continue
             foreach token [regexp -all -inline {\m[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\M} $line] {
@@ -728,6 +747,10 @@ proc cpt::CheckExample {topic example backends scratch} {
     file mkdir $dir
     set path [file join $dir example.bot]
     WriteFile $path "[join [dict get $example lines] \n]\n"
+    # Its modules (@module NAME): application modules beside it.
+    dict for {name text} [dict getdef $example modules {}] {
+        WriteFile [file join $dir $name.bot] "[join $text \n]\n"
+    }
     # An example importing a namespace of another operating system's
     # platform (std::linux::io on a Mac) documents that system: it compiles for
     # its target, as the golden runner's suites do, and runs where a program
@@ -763,7 +786,9 @@ proc cpt::CheckExample {topic example backends scratch} {
             lappend problems "$id: rejected with ($code) $message -- the example states [dict get $example error]"
         }
         set at [dict get $example at]
-        if {$at ne "" && ![string match "*example.bot:$at: *" $message]} {
+        # (An @at of a module's diagnostic names its file: NAME.bot:L:C.)
+        set file [expr {[string match *.bot:* $at] ? "" : "example.bot:"}]
+        if {$at ne "" && ![string match "*/$file$at: *" $message]} {
             lappend problems "$id: the primary diagnostic is not at $at: $message"
         }
         regsub {^\S+:\d+:\d+: } $message {} text

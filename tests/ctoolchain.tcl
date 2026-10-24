@@ -38,16 +38,20 @@ namespace eval ctool {
     variable windows [expr {$::tcl_platform(platform) eq "windows"}]
 }
 
-# The environment vcvars64.bat makes, as a dict (empty when the current one
-# is already a developer environment), or "" when there is no MSVC.
+# The environment vcvars64.bat makes, as a dict: empty when the current one
+# is already a developer environment, and when there is no MSVC -- which
+# ctool::HaveMsvc tells apart (an empty dict is "").
 proc ctool::MsvcEnvironment {} {
     variable msvcEnvironment
+    variable msvcFound
     if {[info exists msvcEnvironment]} {
         return $msvcEnvironment
     }
     set msvcEnvironment ""
+    set msvcFound 0
     if {[info exists ::env(VCToolsInstallDir)] && [auto_execok cl] ne ""} {
         set msvcEnvironment [dict create]
+        set msvcFound 1
         return $msvcEnvironment
     }
     set programs [lindex [array get ::env {ProgramFiles(x86)}] 1]
@@ -88,7 +92,16 @@ proc ctool::MsvcEnvironment {} {
         return ""
     }
     set msvcEnvironment $environment
+    set msvcFound 1
     return $msvcEnvironment
+}
+
+# Whether there is an MSVC toolchain: this environment already a developer
+# one, or vcvars64.bat's.
+proc ctool::HaveMsvc {} {
+    variable msvcFound
+    MsvcEnvironment
+    return $msvcFound
 }
 
 # The name ::env spells NAME with, Windows' names being case-insensitive.
@@ -104,10 +117,10 @@ proc ctool::EnvName {name} {
 # Runs the MSVC tool COMMAND with ARGS in vcvars64's environment (this
 # process's own afterwards): exec's result.
 proc ctool::msvc {command args} {
-    set environment [MsvcEnvironment]
-    if {$environment eq ""} {
+    if {![HaveMsvc]} {
         error "no MSVC toolchain: vswhere found no Visual Studio with the x64 C tools"
     }
+    set environment [MsvcEnvironment]
     set saved [dict create]
     dict for {name value} $environment {
         set name [EnvName $name]
@@ -123,10 +136,35 @@ proc ctool::msvc {command args} {
     }
 }
 
+# Evaluates SCRIPT in the caller with the MSVC environment (Windows: the
+# vcvars64 environment MsvcEnvironment found, where link.exe and the
+# libraries are -- what a Developer Command Prompt has) set, restored
+# afterwards: for a command that runs Microsoft's tools through something
+# else, as the system linker runs link.exe (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+proc ctool::withMsvc {script} {
+    if {![HaveMsvc]} {
+        error "no MSVC toolchain: vswhere found no Visual Studio with the x64 C tools"
+    }
+    set environment [MsvcEnvironment]
+    set saved [dict create]
+    dict for {name value} $environment {
+        set name [EnvName $name]
+        dict set saved $name [array get ::env $name]
+        set ::env($name) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        dict for {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 1] }
+        }
+    }
+}
+
 proc ctool::available {} {
     variable windows
     if {$windows} {
-        return [expr {[MsvcEnvironment] ne ""}]
+        return [HaveMsvc]
     }
     return [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
 }

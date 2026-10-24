@@ -1,0 +1,83 @@
+# tokens-procedural.bot -- tokens.bot written by hand without coroutines
+# (COROUTINE-FUSION-MILESTONE-1.md's procedural baseline): the same tokens
+# and counts, the recognizers as functions over the input's positions, the
+# way json_tokens.bot scans.
+#
+# expect: [6, 4, 17, 29]
+
+import std::mutable_array
+import std::str
+import std::char
+
+fn digit?(c: int) -> bool:
+    c >= 48 and c <= 57
+
+# The code point at I, or -1 past the end (N the input's length).
+fn code(text: str, n: int, i: int) -> int errors IndexNotFound:
+    if i >= n:
+        return -1
+    std::char::scalar_value(text.char_at(i))
+
+fn digits_end(text: str, n: int, i: int) -> int errors IndexNotFound:
+    if digit?(text.code(n, i)):
+        return text.digits_end(n, i + 1)
+    i
+
+# The end of the number at START: -?digits(.digits)? (a "." not followed by
+# a digit ends it, taken).
+fn number_end(text: str, n: int, start: int) -> int errors IndexNotFound:
+    i = if text.code(n, start) == 45:
+        start + 1
+    else:
+        start
+    if not digit?(text.code(n, i)):
+        return i
+    whole = text.digits_end(n, i)
+    if text.code(n, whole) != 46:
+        return whole
+    if not digit?(text.code(n, whole + 1)):
+        return whole + 1
+    text.digits_end(n, whole + 1)
+
+# The end of the string whose contents start at I (after its closing quote;
+# at the end of the input if there is none).
+fn string_end(text: str, n: int, i: int) -> int errors IndexNotFound:
+    c = text.code(n, i)
+    if c == 34:
+        return i + 1
+    if c == -1:
+        return i
+    if c == 92:
+        if text.code(n, i + 1) == -1:
+            return i + 1
+        return text.string_end(n, i + 2)
+    text.string_end(n, i + 1)
+
+fn lex(text: str) -> List[int] errors IndexNotFound:
+    n = std::str::length(text)
+    position = std::mutable_array::create(1, 0)
+    counts = std::mutable_array::create(4, 0)
+    loop:
+        i = position.at(0)
+        c = text.code(n, i)
+        if c == -1:
+            break
+        if c == 45 or digit?(c):
+            e = text.number_end(n, i)
+            counts.set(0, counts.at(0) + 1)
+            counts.set(3, counts.at(3) + e - i)
+            position.set(0, e)
+        elif c == 34:
+            e = text.string_end(n, i + 1)
+            counts.set(1, counts.at(1) + 1)
+            counts.set(3, counts.at(3) + e - i)
+            position.set(0, e)
+        else:
+            if c == 123 or c == 125 or c == 91 or c == 93 or c == 58 or c == 44:
+                counts.set(2, counts.at(2) + 1)
+            position.set(0, i + 1)
+    [counts.at(0), counts.at(1), counts.at(2), counts.at(3)]
+
+lex("{\"a\": [1, -2.5, 30], \"b\\\"c\": {\"d\": 400}, \"e\": [6.0, 7]}"):
+    on IndexNotFound:
+        []

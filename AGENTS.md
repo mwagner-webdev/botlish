@@ -236,8 +236,9 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 ## The single-file compiler and the stub linker
 
 `single/build.sh` builds `single/out/botlish` (SINGLE-EXECUTABLE.md): a Tcl 9
-zipkit holding main.tcl, the compiler stack and both native executables,
-needing only glibc. The workflow `.github/workflows/single-executable.yml`
+zipkit holding main.tcl, the compiler stack, both native executables and the
+runtime archive, needing only glibc (and, to link a program that calls C,
+the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
 containers (`single/smoke-test.sh`), then publishes it as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
@@ -256,13 +257,17 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
-* Standalone executables have two linkers, chosen by `BOTLISH_NATIVE_LINKER`:
-  `rustc` (the default) and `stub` (no toolchain: `botlish-aot-stub` with the
-  program image appended, `native/src/runtime/aotimage.rs`; the single
-  executable uses it). The stub is Linux x86-64's only; macOS AArch64
-  executables are Mach-O, linked by rustc through Apple's ld
-  (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write a linker,
-  loader or signing step, for Mach-O. A program that calls C is linked on
+* Standalone executables have three linkers, chosen by
+  `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
+  `botlish-aot-stub` with the program image appended,
+  `native/src/runtime/aotimage.rs`) and `system` (the host's C compiler
+  driver, link.exe on Windows, linking the program object and the
+  precompiled runtime archive; next item); `auto`, the single
+  executable's, is `system` for a program that calls C and `stub` for any
+  other where the stub runs. The stub is Linux x86-64's only; macOS AArch64
+  executables are Mach-O, linked by rustc or the system linker through
+  Apple's ld (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write
+  a linker, loader or signing step, for Mach-O. A program that calls C is linked on
   the same hosts (`codegen/aot.rs`'s `C_CALLS`), with the platform linker's
   own link plan (`LinkerFlavor`: GNU ld's archive group on Linux, never on
   macOS, whose ld rejects it; MACOS-AARCH64-MILESTONE-6.md). If you change
@@ -270,20 +275,74 @@ the test suite, still install the `.deb`s.
   rustc link, the generated startup or `runtime::aot::run`, also run
   `tests/native-executable.test`, `tests/platform/aot-facts.tcl` and
   `audit/native-aot/tools/mutate.tcl` (every mutant in its `mutants.txt`
-  that applies to the host must still apply and be killed). A test that reads a rustc-linked executable's
-  `botlish_fn_N` symbols (objdump, `strace -k`) or tests rustc's invocation
-  carries the `rustcLinker` constraint (`tests/helpers.tcl`). CI's
-  `stub-linker` job runs every executable test file with the stub linker.
-* The two startups must build the Vm identically: the generated startup crate
-  (`codegen/aot.rs`'s `startup`) and `aotimage::Loaded::instantiate`. If you
-  change either, `runtime::aot::run`, `constants::install`, what
+  that applies to the host must still apply and be killed). A test that reads an
+  executable's `botlish_fn_N` symbols (objdump, `strace -k`: the rustc and
+  system linkers' executables have them) carries `symbolLinker`, one that
+  links a program that calls C `cLinker`, one of rustc's own invocation
+  `rustcLinker` (`tests/helpers.tcl`). CI's `stub-linker` and
+  `system-linker` jobs run every executable test file with those linkers.
+* The system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) never runs Rust
+  when an application is linked. Keep it so:
+  - The runtime archive is `native/runtime-archive` (the `botlish-runtime`
+    staticlib, a default member of `native/`'s workspace, so the standard
+    `cargo build` makes it beside the driver; features forwarded): the
+    runtime library plus the executable's C `main`, no code generator. Never
+    compile Rust, a C startup source or anything of the runtime's at link
+    time, and never link the compiler driver into an application.
+  - The program object is the link's only object: its `botlish_program`
+    record is the program's startup data, as for every linker
+    (`runtime::program`), and the archive's `main`
+    (`runtime::aot::linked_main`) starts it as the rustc startup crate
+    does. Never a startup object, a second metadata format, generated
+    machine code, fixed addresses or a patched executable.
+  - The link is the platform linker's, in the rustc linker's link plan
+    (`system_link_args`: `link_plan_args_for`'s plan unwrapped, the runtime
+    archive and `runtime_system_libraries`, which
+    `native/runtime-archive/libraries.tcl` checks against rustc's `--print
+    native-static-libs` in `single/build.sh` and every host's system-linker
+    CI job: when it fails, change the list, never the check); every path
+    and name one argument of a structured command, never a shell string.
+    The tool is `cc` (link.exe on Windows) found on PATH, never in the
+    working directory, or `BOTLISH_NATIVE_SYSTEM_LINKER`; on Windows from a
+    Developer environment: the system linker has no Visual Studio discovery
+    of its own. No rustc fallback: `auto` never chooses rustc.
+  - Failures carry a kind (`LinkError`: `NATIVE LINK|AOT TOOLCHAIN`,
+    `... RUNTIME`, an archive without a helper the program calls among
+    them: `undefined_helper`) when they are no error of the program's plan;
+    the plan's own stay the linker's words, as the rustc linker's.
+  - Nothing on a linked startup's path takes a runtime helper's address:
+    the ABI fingerprint `program::read_linked` checks reads
+    `ops::HELPER_SIGNATURES` (names and counts), never `helpers()`, whose
+    addresses would keep every helper in every executable and library
+    (`system-linker-keeps-only-reached-helpers`; the helper list is one
+    macro, so the two cannot disagree).
+* The three startups build the Vm identically because they share it: the
+  startup crate (`codegen/aot.rs`'s constant `STARTUP`),
+  `aotimage::Loaded::instantiate` (the stub's) and the runtime archive's
+  `main` (`runtime::aot::linked_main`, the system linker's) all read the
+  program object's `botlish_program` record with
+  `runtime::program::instantiate_linked`, the one place a Vm is built from
+  a program's descriptor (native libraries use it too:
+  NATIVE-LIBRARY-MILESTONE-1.md, next sections).
+  `BOTLISH_NATIVE_STARTUP_REPORT` shows what one installed;
+  `tests/system-linker.test` requires the three reports equal. Never
+  generate per-program startup code again. If you change the descriptor,
+  the record, `program::instantiate`, `runtime::aot::run`,
+  `rust_process_setup` or `linked_main`, `constants::install`, what
   `emit_object` emits (sections, relocation types: `codegen::aot::image`
   rejects any type it does not handle), the image format, or the ABI
   fingerprint's inputs, run `cargo test --release --manifest-path
-  native/Cargo.toml --lib aotimage`, `tests/aot-stub-linker.test`, and the
-  executable test files with the stub linker. The `stub-linker` job in
-  `.github/workflows/tests.yml` has the command. Run them once more under
-  `BOTLISH_NATIVE_GC_STRESS=1`.
+  native/Cargo.toml --lib -- aotimage program` and `--bin botlish-native
+  aot::`, `tests/aot-stub-linker.test`, `tests/system-linker.test`,
+  `tests/native-library.test`, and the executable test files with the stub
+  and with the system linker. The `stub-linker` and `system-linker` jobs in
+  `.github/workflows/tests.yml` have the commands. Run them once more under
+  `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
+  `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
+  single executable's packing or installation (`single/main.tcl`,
+  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
+  `single/build.sh`.
 
 ## Running the tests locally
 
@@ -783,6 +842,70 @@ audit/hashable/tools/oracle.py selftest` and `cargo test --release
 --manifest-path native/Cargo.toml --lib hash`. `audit/hashable/tools/census.tcl`
 regenerates the witness census; `bench/hashable.tcl` the performance report.
 
+## Parameterized structs and constrained slots
+
+A struct may declare type slots, `struct Pair[A, B]:`, each optionally
+constrained by one trait, `struct Map[K satisfies Hashable, V]:`
+(TRAIT-CONSTRAINED-IMPRINTED-TYPES.md). Its types are its applications
+`{nstruct ID ARGS}`; a constrained imprint variable is `{imprint K
+TRAITS}`. Functions stay imprinted: matching `Map[K, V]` establishes K and
+V as any applied type does, and gives the body the constructor's
+obligation, K itself known to satisfy Hashable -- never the trait view.
+Keep it so:
+
+* No function-side generics: never add `fn f[K, V]`, a `where` or
+  `requires` clause, a constraint on a function or on a bare imprint
+  variable, predicates, scalar constraints, higher-kinded or associated
+  types, parameterized traits, enums, errors, layouts or contexts. A
+  function's constraints are exactly what the applications of its own
+  signature give it (`hir::imprint::Constrain`); a body never adds one to
+  its contract.
+* A constraint validates an imprint, never establishes one: a variable no
+  argument or explicit imprint establishes is IMPRINT as before, and a
+  failed constraint is TRAIT-NOT-SATISFIED, checked after imprinting.
+* Satisfaction is the ordinary trait satisfaction (`hir::traits::satisfies`;
+  Hashable's witness predicate): never a second, structural check of a
+  slot, and `any` satisfies nothing. An application is checked wherever a
+  type is written and wherever a binding makes one
+  (`hir::structs::verifyApplications`, `VerifyDeclarations`,
+  `hir::imprint::Bind`); a field's nested application over a slot needs the
+  enclosing declaration to state the obligation.
+* An application's identity is its constructor and arguments: no witness,
+  trait set or constraint in it, and none in a specialization key (native
+  instances are keyed by the concrete application; the trait plan's
+  specializations per binding by the variables a source trait constrains,
+  `SelectingBinding`). Applications are invariant; no variance policy.
+* No runtime existence: every application shares its constructor's one
+  representation (one Tcl struct kind, one NIR shape), with no type
+  arguments, witness object or check at run time.
+* An argument is bounded at its application's own aggregate depth
+  (`hir::types::MakeApplied`; applications nest `appliedDepth` deep): cut a
+  level earlier than its fields' values, it would admit none of them.
+* The slots and constraints are part of the struct registry entry (a
+  declaration registry: isolation and interchange carry them); HIR text
+  prints them on the declaration and reading derives each variable's
+  constraints from it.
+
+If you change the slot grammar or n-ary applications (surface/parser.tcl's
+`TypeExpr`, `StructDecl`, `TypeSlots`), `hir/structs.tcl`'s slots,
+`AppliedFieldTypes` or `ApplicationProblem`, the application cases of
+`hir/types.tcl` (`MakeApplied`, `InferApplication`, `Totality` of a
+constrained variable), `hir/imprint.tcl`'s applications, `Obligations`,
+`Constrain` or `Bind`, `hir/resolve.tcl`'s `ResolveApplied`, the
+constrained-variable cases of `hir/traits.tcl` (`satisfies`,
+`TypeImprintCall`, `ImprintPolys`, `SelectingBinding`, the plan's imprint
+specializations) or the HIR text of slots, run
+`tests/trait-constrained-types.test`, its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/trait-constrained-types.bot`),
+`audit/trait-constrained-types/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/trait-constrained-types/tools/mutate.tcl` (every
+mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the trait, Hashable and C ABI type harnesses (above
+and below) for a change to code they share, and the static-decision
+harnesses for a change to the plan. `bench/trait-constrained-types.tcl`
+regenerates the performance report.
+
 ## Context traits
 
 Context traits (CONTEXT-TRAITS.md) are environment abstractions resolved
@@ -851,6 +974,59 @@ seeds) and `audit/direct-modules/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when you
 change the code it mutates, keeping it a mutant of the same rule).
 
+## Module privacy and CONTEXT-RESOURCE-ESCAPE
+
+`private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) makes a
+top-level declaration -- a function, module binding, type, refinement,
+error, struct, enum, trait, context trait, layout or extern c fn --
+accessible only to code of the module that declares it. One fact decides
+every check: the module declarations' `private` sets (`moduleDecls`, which
+the loader records, surface/modules.tcl's `ModuleDecl`), read through
+`hir::privacy::Entry` and `Denied` (hir/privacy.tcl). Keep it so:
+
+* Never add a second visibility fact, a runtime check, tag or wrapper, a
+  `public`, `internal`, `friend` or package level, or a per-call
+  exception. Declarations stay public by default; never mark library
+  declarations private by usage counts. Access is decided by the
+  canonical module identity (the namespace path): no import, parent,
+  child, entry program or name component grants it.
+* `private` and `opaque` are orthogonal: privacy is who may name a
+  declaration, opacity who may build and take apart a value. Never let one
+  imply the other.
+* A private member of an imported module is invisible to method syntax
+  (`hir::resolve::MethodCandidates`): the call means what it would mean
+  without it, and is PRIVATE-ACCESS only when nothing else applies. A
+  private function implements no trait or context-trait requirement
+  (`hir::traits::ImplInfo`'s `private`). Never let a name match make a
+  private declaration a candidate.
+* PRIVATE-TYPE-ESCAPE (`hir::privacy::verify`) judges every public
+  declaration of a module (never the entry program's) by its declared and
+  inferred interface: parameters, results, errors, proof clauses, context
+  requirements, a struct's fields unless it is opaque, a layout's fields,
+  a refinement's carrier, a trait's requirements, an extern's C signature.
+  An opaque struct's hidden fields are no interface.
+
+`CONTEXT-RESOURCE-ESCAPE` (hir/resourceescape.tcl) reads the direct-module
+analysis's `contextualized` status (`direct units`, its discharging
+contexts), the checked types of a crossing's call, arguments or value
+(`hir::typeOf`), the struct registry's opacity and owner, the module
+declarations' private sets and the trait-call marker, on the program as
+written (`traitSource`). It reports one warning per exposing declaration;
+never add an opt-out, a fixit, a level, a warning on a declaration no other
+unit uses, or a rule that reads a name. If you change the parser's
+modifier, the loader's records or checks, method candidates, trait or
+context-trait conformance, `hir/privacy.tcl`, `hir/resourceescape.tcl`, the
+direct-module statuses or what interchange keeps, run
+`tests/module-privacy.test`, `tests/context-resource-escape.test`,
+`tests/workload-icy-tower.test`, `audit/module-privacy/tools/fuzz.tcl`
+(several seeds) and `audit/module-privacy/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's
+text when you change the code it mutates, keeping it a mutant of the same
+rule), plus the direct-modules, traits, context-traits, opaque-struct and
+interchange harnesses for a change to code they share.
+`audit/module-privacy/tools/warning-census.tcl` re-runs the repository
+census of the warning (audit/module-privacy/census/).
+
 ## Coroutines
 
 Coroutines (COROUTINES.md) are eagerly started, affine resumable
@@ -917,6 +1093,65 @@ qemu-user) and on macOS (the macOS workflow's smoke job runs them), and
 never touch x18. A Tcl test that needs coroutines, the collector around
 them or native counters carries `nativeCoroutines` (tests/helpers.tcl), a
 capability of the host target, not `nativeLinux`.
+
+## Coroutine fusion
+
+The native driver fuses coroutines (COROUTINE-FUSION-MILESTONE-1.md,
+native/src/codegen/fusion.rs): a coroutine whose handle never leaves the
+function that constructs it, and whose yielding call chain is
+environment-free and non-recursive, is compiled into that function -- the
+chain inlined once as a template, a copy per start and resume over the same
+registers, a state register, no coroutine object, stack, switch or runtime
+coroutine operation. It is a NIR-to-NIR pass in the driver's load path
+(main.rs), so the JIT, objects, executables and every inspection command
+compile the fused program. Keep it so:
+
+* Fusion never changes what a program means. A site it cannot prove keeps
+  the general runtime (reported `kept` with its reason), never an error;
+  every rewritten function is validated (`nir::validate_function`) or
+  discarded. Never weaken a condition of `fuse_site` (a handle use it does
+  not follow, a recursive or capturing yielding function, more than one
+  live coroutine of a site) without the proof in the report.
+* The general runtime stays the oracle: `BOTLISH_NATIVE_COROUTINE_FUSION=0`
+  turns the pass off, `cranelift-unfused` (tests/helpers.tcl) runs a
+  program so, and tests/coroutines.test's `coAgree` and the coroutine
+  fuzzer compare fused code with it on every program. A test or audit tool
+  that reads the general runtime's own objects, stacks or release counters
+  (`native::allocationReport`'s `coroutines`) reads them inside
+  `withoutCoroutineFusion`; never make such a test pass by fusing. One that
+  inspects a producer's machine code finds it in the fused consumer, where
+  fusion copied it (tests/c-ffi-error-capture.test's `ecHolders`).
+* A copy per operation keeps the control flow graph exact (a segment
+  returns only to the operation that ran it): never share one copy between
+  operations through a run-time return address without the validator's and
+  the root plan's precision argument (the report, 4.3). The dispatch's
+  edges to every continuation are the one imprecision left: a plan register
+  is cleared where the template suspends at a yield whose continuation does
+  not read it, and where it completes or fails (`clear_plans`, 4.5, with
+  liveness that follows each yield into its own continuation); never drop
+  the clearing or stop its liveness at a yield.
+* The only runtime addition is `op cofailed` (`rt_co_failed`): a fused
+  coroutine's cached failure, raised again by `coresume0`. Fusion adds no
+  coroutine-specific code to the collector or codegen.
+* Fusion runs only where native coroutines exist
+  (`runtime::coroutine::STACK_SWITCHING`): it must not make a program run
+  where the general runtime refuses it.
+
+If you change fusion.rs, nirtext.rs, `cofailed`, `live_at_many`/`def_use`,
+or what NIR the coroutine operations lower to, run
+`tests/coroutine-fusion.test`, `tests/coroutines.test`,
+`audit/coroutines/tools/fuzz.tcl` (several seeds; its default backends
+include cranelift-unfused), `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native -- fusion nirtext` and
+`audit/coroutine-fusion/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), and
+take the census of a whole run (`audit/coroutine-fusion/tools/census.tcl
+-run tclsh9.0 tests/local.tcl -parts golden`): a site kept because its
+fused function "does not validate" is a fusion bug to fix, never a fallback
+to accept. `audit/coroutine-fusion/tools/evidence.tcl` regenerates the
+native evidence (commit it); `bench/coroutine-fusion.tcl` is the
+performance report.
 
 ## The native stack guard
 
@@ -1069,11 +1304,15 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   NATIVE TARGET). The startup crate is compiled with the driver's own
   `--target`, never whatever rustc's host is.
 * Code generation, the object writer and the link stay Cranelift's, the
-  `object` crate's and rustc's: no Windows assembler, object rewrite,
-  linker, CRT startup or Visual Studio discovery of Botlish's (rustc finds
-  link.exe and the SDK without a Developer Command Prompt). The object is
-  the same COFF for both Windows environments; never add a target-specific
-  object transformation.
+  `object` crate's and rustc's -- or, for the system linker, link.exe's,
+  the one a Developer environment puts on PATH: no Windows assembler,
+  object rewrite, linker, CRT startup or Visual Studio discovery of
+  Botlish's (rustc finds link.exe and the SDK without a Developer Command
+  Prompt; the system linker is told where it is). The system linker links
+  with rustc's CRT policy (below) and `/INCREMENTAL:NO` (an incremental
+  link's thunks would move a function's address off its code). The object
+  is the same COFF for both Windows environments; never add a
+  target-specific object transformation.
 * The link plan is `LinkerFlavor::Msvc`'s (`/LIBPATH:DIR`, `NAME.lib`, no
   group): never a GNU flag to link.exe. Every executable -- one that calls
   C too -- links the static release C runtime (`crt_args`, `+crt-static`)
@@ -1793,6 +2032,84 @@ any change they name. A change to native tracing or drops also needs a
 `BOTLISH_NATIVE_GC_STRESS=1` run of `tests/mutable-array.test`.
 `bench/mutable-array.tcl` regenerates the performance report.
 
+## MutableMap, MutableSet and place parameters
+
+`std::mutable_map::MutableMap[K satisfies Hashable, V]` and
+`std::mutable_set::MutableSet[T satisfies Hashable]`
+(ORDERED-MUTABLE-MAP-SET.md) are ordinary Botlish: opaque parameterized
+structs over MutableVectors, sharing the internal engine `std::ordered_table`
+(stdlib/ordered_table.bot, `core::native::declareInternalModule`: no program
+imports it). Iteration is insertion order; the private keyed hash
+(`std::table_hash::of`) decides where an entry lives in the index, never
+where it appears. Keep it so:
+
+* No runtime map or set: no native, NIR instruction, runtime object or Tcl
+  helper of either collection, and no compiler knowledge of them beyond the
+  loop protocol's table (`hir::iteration`'s `iterables`). A new collection
+  that needs a language seam gets a general one, with its own tests and
+  mutants, never a collection-specific rule.
+* Placement uses the keyed table hash only, computed once per operation and
+  stored per entry: never the public `hash`, a post-mix of it, an unkeyed
+  fast path or a recomputation in a helper. A probe compares a key only at
+  an entry whose stored hash is equal; equality decides identity. Nothing
+  observable may depend on the hidden key: no API exposes a slot, a stored
+  hash, a capacity, the load or the probe order.
+* Keys keep their type (MutableVector[K]): a probe of Int or String keys
+  lowers to `ieq`/`streq`, a structural key to `veqtotal`, never the
+  fallible `veq`. Neither collection is Hashable, and `==` of two refuses
+  them at run time naming the opaque values, never their representation
+  (core/value.tcl's and ops.rs's opaque-struct cases).
+* Replacement keeps a key's position and its stored key; removal leaves a
+  dead entry (hash -1) that compaction drops, in order, in place; removal
+  then insertion appends. The policy (7/10 load, power-of-two slots of at
+  least 8, the garbage rule) is the engine's and may change: never let a
+  test of a program's behavior depend on it -- tests/ordered-table.test is
+  the one white-box test of the representation.
+* The engine's own method calls are written so the kind filter decides them
+  (a qualified call where a lexical name would be a second candidate):
+  every program importing the collections compiles their modules.
+* A loop over a collection is the loop protocol (hir/iteration.tcl): the
+  owner module's `iteration_end`, `iteration_live?` and `iteration_at`,
+  `nomethod` and internal to the standard library (INTERNAL-NAMESPACE for a
+  program naming one), elaborated after the checks into a counted loop over
+  a logical copy (MutableVector's snapshot rule). Never materialize the
+  collection for a loop, and never let a lockstep loop iterate one.
+* A place parameter (`place m: T`, PLACE-PARAMETERS.md) is the caller's
+  place: no entry copy, never moved, read out by copy; its argument is a
+  place of the caller, never a temporary, a module binding, an enclosing
+  function's binding or a place another argument of the call overlaps.
+  Never give it a runtime existence, a reference type, a function-value
+  form or an affine type, and never let it implement a trait requirement.
+  A call giving a place to a place parameter resizes every vector under it
+  for `hir::cardinality`'s MutableVector length proofs (`VectorLength`,
+  `ResizedPlaces`, `Mutated`).
+
+If you change the collections or the engine (stdlib/mutable_map.bot,
+stdlib/mutable_set.bot, stdlib/ordered_table.bot), the loop protocol
+(hir/iteration.tcl, its uses in hir/types.tcl, hir/affine.tcl,
+hir/lockstep.tcl, surface/modules.tcl's `CheckInternal`), place parameters
+(surface/parser.tcl's `PlaceMarker`, hir/syntax.tcl's `withPlaces`, the
+places of hir/resolve.tcl, hir/format.tcl and hir/read.tcl, hir/mutvec.tcl's
+place section and its uses in `Elaborate`), the MutableVector index proofs
+(hir/cardinality.tcl's `VectorLength`, `ResizedPlaces`, `Mutated`; the
+`mutvec` bounds family) or the opaque equality refusals, run
+`tests/mutable-map.test`, `tests/mutable-set.test`,
+`tests/collection-iteration.test`, `tests/ordered-table.test`,
+`tests/place-parameters.test`, `tests/vector-bounds.test`, their golden
+suites (`tclsh9.0 tests/local.tcl tests/golden/mutable-map.bot
+tests/golden/mutable-set.bot tests/golden/collection-iteration.bot
+tests/golden/place-parameters.bot`), `python3 -I
+audit/mutable-map/tools/oracle.py selftest`,
+`audit/mutable-map/tools/fuzz.tcl` (several seeds; once with `-gc-stress 1`,
+once with `-profile large -backends "compile cranelift-generic cranelift"`)
+and `audit/mutable-map/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the vector and
+array harnesses (above) for a change to hir/mutvec.tcl or hir/cardinality.tcl,
+the Hashable and trait-constrained-type harnesses for a change to how keys
+are constrained or hashed, and the warning gate (the three modules are
+warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
+
 ## Fixed binary layouts
 
 A `layout` (BINARY-LAYOUT.md) is a compile-time schema of a fixed number of
@@ -1803,8 +2120,10 @@ integer domain is exactly one fixed-width encoding's, nested layouts by value
 consumes. `hir/layouts.tcl`'s registry is the one representation of a
 resolved layout: `LayoutStruct[L]` is the named struct `{nstruct
 LayoutStruct[L]}`, whose schema `hir/structs.tcl` reads from it, never a
-second registration. Never add a generic struct declaration (`struct
-Foo[T]:`, `LayoutStruct Foo:`), a runtime layout object or value, a layout
+second registration. Never add a layout struct declaration (`LayoutStruct
+Foo:`, `layout struct Foo:`) or make a layout a parameterized struct (`struct
+Foo[T]:` is an ordinary type constructor, no layout's:
+TRAIT-CONSTRAINED-IMPRINTED-TYPES.md), a runtime layout object or value, a layout
 read at run time by a compiled backend (the Tcl compiler and native lowering
 read the descriptor constant statically: one `binary scan`/`binary format`,
 one `binload`/`binstore` per scalar field), structural compatibility between
@@ -2100,7 +2419,12 @@ target is a front-end input, in `surface::cache::Key`. Imprinting
 functions (their declared types) and intrinsics (`-imprint`), variables
 established by applied types left to right, explicit imprints all or
 nothing in first-occurrence order. Never add declared type parameters
-(`fn f[T]`), constraints, or specialization keyed by a variable.
+(`fn f[T]`), a constraint written on a function or a variable (the only
+constraints are a struct slot's, which a signature's applications carry:
+Parameterized structs and constrained slots, above), or specialization
+keyed by a variable (the trait monomorphization's specializations per
+binding of a source-trait-constrained variable are a trait operation's
+witness selection, not imprinting's).
 
 If you change core/cabi.tcl, hir/cabi.tcl, hir/imprint.tcl, the `cptr`,
 `cfnptr` or `imprint` cases of hir/types.tcl, how the scalars are declared,
@@ -2214,6 +2538,66 @@ what they cover. The BoringSSL acceptance tests need the package-owned
 static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
+
+## Native libraries (exported c fn)
+
+`exported c fn NAME(PARAMS) -> T` declares a C export
+(NATIVE-LIBRARY-MILESTONE-1.md): an ordinary Botlish function to every
+backend and to its Botlish callers, which `native::library` (`main.tcl
+-emit-native-library NAME`) also gives a C entry point in a static archive,
+a shared library, a C header and a JSON manifest. Keep it so:
+
+* An export is a compilation root under its declaration only: its generic
+  instance, open (`hir::specialize::ProgramValues` materializes it), never
+  an instance its Botlish callers specialized. Never give an export a fact
+  of its call sites, never read its C ABI from them, and never disable
+  specialization of internal calls because a function is exported.
+  Export identity is the resolved block (`hir::exports::of`/`select`),
+  never a name searched for in NIR or symbols.
+* Exported, public and foreign are three things: a module's functions are
+  visible to importers unless `private` (which decides Botlish names only:
+  a `private exported c fn` is still a C export), `extern c fn` is a C
+  function Botlish calls, `exported c fn` a Botlish function C calls. No
+  attribute system, no export of anything but an environment-free
+  top-level function whose boundary types are declared (the EXPORT-*
+  checks run in every compilation, `hir::exports::verify`).
+* The C ABI is C types only: no `Value`, Vm, Rust type or GC pointer
+  crosses. An Int result outside `int64_t` is a BOUNDARY error, never
+  wrapped; a `str` result is a `malloc`ed copy the caller releases, never a
+  pointer into the heap; an error is an owned object whose identity and
+  scalar fields are data (the NIR error table), never parsed from its
+  message. Nothing unwinds across the boundary (`guarded`).
+* A library's every symbol but its public C names is local (`objcopy
+  --keep-global-symbols`): each library carries a private runtime, and a
+  call makes its own program the thread's current one and restores the
+  previous one (`ProgramScope`). Never let two libraries share a symbol,
+  a static or the active program, and never fix a collision with a global
+  lock or a singleton.
+* Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
+  one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
+  (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
+  and runs on its caller's stack: stack overflow is process-fatal there,
+  and no document may claim otherwise until a library-owned stack exists.
+  The walk of a call's stack ends at the call (`Vm::stack_ceiling`).
+* A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
+  creating an instance runs module static initialization, never a script.
+* Libraries are Linux glibc's (x86_64, aarch64: `codegen::library::
+  SUPPORTED`, `native/native.tcl`'s `libraries`). Never use `ld -r
+  --gc-sections` for the archive: GNU ld 2.42 makes the Rust standard
+  library's weak references strong there and consumers fail to link.
+
+If you change any of that (NATIVE-LIBRARY-MILESTONE-1.md, "What to run when
+changing this", lists the files), run `tests/native-library.test`,
+`tests/native-executable.test` and `tests/aot-stub-linker.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
+native/Cargo.toml --lib program` and `audit/native-library/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus `audit/native-aot/tools/mutate.tcl` for a change to
+the shared startup. `audit/compiler-service/probes/export/run.sh` (the Tcl
+extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
+foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
+no longer runs.
 
 ## C FFI error capture
 
@@ -2668,10 +3052,16 @@ outcome. Keep it so:
 * The filter *excludes*, it never *accepts*. A candidate is excluded only when
   the ordinary call is provably invalid by kind (a native's first parameter,
   a module function's declared or inferred first-parameter contract, the plain
-  value kinds only); that a survivor is valid is the certificate's job (a
-  build with no problem in the call), never an inference. Never exclude a
-  lexical name, never exclude by a domain, a refinement or a type's name, and
-  never decide a call with several survivors (no precedence, ever).
+  value kinds only) or by a named struct's declaration (a module function
+  whose *declared* first parameter is a named struct of another declaration
+  than the receiver's named struct: named structs are nominal,
+  `hir::types::subtype`; `NominalMismatch`); that a survivor is valid is the
+  certificate's job (a build with no problem in the call), never an
+  inference. Never exclude a lexical name, never exclude by a domain or a
+  refinement, by a struct's type arguments, by an inferred contract's struct
+  or by a type's spelling (a declaration identity is the type, never matched
+  as text), and never decide a call with several survivors (no precedence,
+  ever).
 * One statement of each rule. The native receiver rule is
   `hir::methodfilter::NativeMismatch`, which `hir::MethodCallProblems` also
   asks; a second copy of it, a restated admission rule, or a table of
@@ -2686,7 +3076,8 @@ outcome. Keep it so:
 
 If you change `hir/methodfilter.tcl`, `hir::DecideMethodCalls`,
 `hir::MethodCallProblems`, `hir::resolve::MethodCandidates`, the contracts
-`hir/signatures.tcl` records on a first parameter, or `hir::types::kindOf`, run
+`hir/signatures.tcl` records on a first parameter, `hir::types::kindOf`, or
+when a struct type is a subtype of a named one (`hir::types::subtype`), run
 `tests/method-filter.test`, `tests/static-economics.test`,
 `tests/static-compile.test`, `tests/method-sugar.test`,
 `audit/method-filter/tools/fuzz.tcl` (several seeds) and
@@ -2696,6 +3087,71 @@ it a mutant of the same rule), and run the golden suites that decide method
 calls (`bench/method-filter.tcl -suites -audit 1`) and the suites above under
 `BOTLISH_METHOD_FILTER_AUDIT=1`. A new test file's tests get census rows
 (`audit/golden/migration/census/method-filter.tsv`).
+
+## Declared recognizers (dfa and class)
+
+`class NAME = ITEMS` and `dfa NAME over bytes|ascii|unicode:`
+(DFA-COROUTINE-MILESTONE-2.md) declare finite-state recognizers in an
+ordinary module that imports `std::dfa`. surface/dfa.tcl checks each
+declaration where it is written (the loader calls `expand` once a file's
+imports are loaded) and lowers a recognizer before HIR to ordinary
+coroutine functions -- `NAME`, constructed with the token's first symbol,
+resumed with `std::dfa::Symbol`, yielding 0 and completing with how many
+symbols it left unread, and `NAME#run` -- whose transitions are one call of
+the internal root native `dfa#transition(state, c, TABLE)` over a constant
+table (core/dfa.tcl; natively a byte table, a NIR `switch` or nested
+comparisons: native/lower.tcl's `DfaTransition`). Keep it so:
+
+* No DFA runtime, scheduler, ownership model, coroutine operation or HIR
+  or Core IR node: a recognizer is its generated functions, failing
+  `std::dfa::UnrecognizedInput {recognizer, state, symbol}` and
+  `std::dfa::UnexpectedEnd {recognizer, state}`. Never add `=>`
+  (non-consuming moves), actions, priorities, longest match, backtracking,
+  regex syntax or an explicit rejection of an ordinary symbol.
+* `accept before N` is bounded statically (`Bounds`, `CallLookahead`): on a
+  symbol N is at most the fewest symbols any path to the state consumed,
+  at the end less than that (or 0); `call D then STATE` takes only a callee
+  that leaves at most the current symbol. A recognizer keeps no input: the
+  driver gives back what a token left unread from a buffer of the
+  recognizers' static lookahead (examples/dfa). Never let a recognizer hand
+  back a symbol before its first, or store symbols.
+* A declaration's diagnostics are reported at the declaration (a HIR hole
+  carrying its report, hir/resolve.tcl's `ResolveHole`) and taint its unit:
+  never a diagnostic from generated code, never a cascade. Every kind is
+  classified in tests/static-compile.test's census and has a Compilerpedia
+  topic (compilerpedia/topics/dfa.topic) with a rejected example.
+* Generated names hold a `#` (no source spells them) and are `nomethod`;
+  String constants the lowering writes are `synthesized` (no
+  ONE-CHAR-STRING-LITERAL). The compiler service's facts of a
+  declaration's names are the checker's (surface/dfa.tcl's `Fact`, the
+  HIR's `dfaNames`), never a resolution of the service's own.
+* The table is the transitions' one representation after checking: the
+  Tcl backends look it up (`core::dfa::Lookup`), native lowering expands it
+  at compile time; `switch` and `rtabload8/16` are general NIR, never a
+  DFA-only opcode. `dfa#transition`'s `-result-range nonneg` is what lets
+  the range analysis prove a state and native lowering drop its check.
+* `surface::dfa::lowering` (compact | tree) is a front-end input
+  (`surface::cache::Key`); `-dfa-dispatch` / BOTLISH_NATIVE_DFA_DISPATCH a
+  backend option. The exploration's preprocessor is retired: never add a
+  second DFA compiler (audit/dfa keeps its results as history).
+
+If you change the grammar (surface/parser.tcl's `ClassDecl`, `DfaDecl`,
+`DfaItems`, `DfaTransition`), surface/dfa.tcl, core/dfa.tcl, stdlib/dfa.bot,
+native/lower.tcl's `DfaTransition`/`DfaTable`/`DfaSearch`/`DfaRawIn`, NIR
+`switch` or `rtabload` (native/src/nir.rs, codegen/clif.rs), the service's
+`DfaNameIndex`, or examples/dfa, run `tests/dfa.test`,
+`tests/dfa-workloads.test`, `tests/static-compile.test`,
+`tests/compilerpedia.test`, `cargo test --release --manifest-path
+native/Cargo.toml --bin botlish-native switch_tests`,
+`audit/dfa/tools/differential.tcl -suite DIR -fuzz 2000 -seeds 1-12`
+(JSONTestSuite's test_parsing in DIR; 0 disagreements) and
+`audit/dfa/tools/mistakes.tcl` (every structural and lookahead mistake
+static, the grammar ones caught or recorded as surviving). The warning
+gate's corpus leaves examples/dfa out: tests/dfa-workloads.test's
+`dfa-workloads-warning-clean` compiles its modules under `-warnings error`
+instead (answer a warning in the code, as the gate asks). `bench/dfa.tcl`
+regenerates the
+performance report and `audit/dfa/tools/evidence.tcl` the native evidence.
 
 ## Workloads (examples/games/2048)
 
@@ -2749,11 +3205,23 @@ generated SDL3 binding. Keep its layering:
   return values only. Never give a function outside `sdl.bot` a C pointer,
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
-  the session's view or a pointer (a module has no private members:
-  anything it returns, every importer gets). A struct of `sdl.bot` that
-  holds a pointer, a view or an edit is opaque (an importer reads a view
-  it holds without any authority). `workload-icy-tower-sdl-airlock` and
+  the session's view or a pointer (anything a public function returns,
+  every importer gets). A struct of `sdl.bot` that holds a pointer, a view
+  or an edit is opaque (an importer reads a view it holds without any
+  authority). `workload-icy-tower-sdl-airlock` and
   `workload-icy-tower-sdl-records-opaque` check it.
+* Inside `sdl.bot`, every function whose parameter or result is a C
+  pointer, a native view or edit (or holds one, an opaque struct
+  excepted), every layout of native memory and the session record are
+  `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): helpers may
+  take and return pointers and views, and no importer can call them. The
+  session is looked up once, by the private `session`, `handles` and
+  `renderer`. Keep a new pointer-taking helper private; never make one
+  public to call it from another module (CONTEXT-RESOURCE-ESCAPE reports
+  that). `workload-icy-tower-sdl-helpers-private` and
+  `workload-icy-tower-no-resource-escape` check it, and
+  `workload-icy-tower-baseline-warnings` pins the twelve warnings the
+  original boundary (audit/icy-tower/context-refactor/baseline/) draws.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
   beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
   into the example directory or hand-write a parallel SDL declaration.
@@ -2801,7 +3269,7 @@ Three product rules (POST-2048-PRODUCT-FIXES.md):
   `native::evalHir ... -output inherit`: the program writes to main.tcl's own
   standard output and error, and `botlish-native --result PATH` carries the
   result lines (the overflow guard's report included:
-  `platform::linux::set_result_fd`). Never route a program's output through a
+  `runtime::platform::set_result_file`). Never route a program's output through a
   pipe of main.tcl, buffer it, or parse it for results. Everything else
   (`native::evalHir` with no `-output`, `native::Driver`) drops it, so tests
   stay quiet. `tests/native-program-output.test` pins the bytes and the order.
@@ -2936,7 +3404,11 @@ no semantics of its own. Keep it so:
 * The service reports the strict compilation's diagnostics -- the very
   entries it raises, in its order, `hir::recovery::reported` deciding what
   is dependent -- and the warnings the compilation attached: never filter,
-  merge, reword or add one. Every query reads its revision through
+  merge, reword or add one. Past a syntax error it reports the syntax
+  errors, first and unchanged, then what the recovered analysis reports
+  (next section but one): its outcome is `syntax` whenever there is one,
+  and its `semantics` (`full`, `partial`, `none`) says how much it
+  analyzed. Every query reads its revision through
   `service::Use`, which activates the revision's HIR (COMPILATION-ISOLATION.md);
   a revision never changes once made (derived indexes are computed from it
   on first use and released with it); no query runs or compiles code; no
@@ -3007,6 +3479,65 @@ mutates, keeping it a mutant of the same rule); for a scheduling change
 also `bench/lsp.tcl` (both schedulers, the census's workloads), and for
 packaging `single/smoke-test.sh` after `single/build.sh` (its `-lsp`
 session).
+
+## Syntax recovery
+
+`-check`, the compiler service and the language server analyze a program
+past its syntax errors (SYNTAX-RECOVERY-MILESTONE-1.md); a run, a build and
+every inspecting option still stop at them. surface/recover.tcl replaces
+each malformed statement -- the innermost statement holding a damaged
+position: a construct the parser failed on, a lexical guess (a bracket it
+closed, a string it ended, a character it skipped), the top-level region of
+a layout problem -- by a `hole` that keeps only what the tokens before the
+damage establish; lowering makes it HIR `syntax#hole` refs
+(`hir::syntax::holeNode`), each with a SYNTAX-HOLE diagnostic that taints
+its unit and is never reported. Keep it so:
+
+* A hole is no value: never `unit`, `never`, `any`, a default or a guessed
+  completion. It is poison to inference (no divergence:
+  `hir::types::Halts` is false for it), unknown to the range and completion
+  analyses, and its innermost function (`holeBlocks`) has no inferred
+  result, contract or semantic instance: only its declaration's types are
+  facts (a hover shows its signature only when it declares every type).
+* What a hole binds is read from its valid prefix alone
+  (`surface::recover::Hole`): `NAME =` and `fn NAME` bind NAME; a form the
+  prefix does not decide, a destructuring, a coroutine binding or a region
+  that swallowed the next line may bind any name (`binds`), and a reference
+  a binding hole may capture is `syntaxDependent`
+  (`hir::resolve::AfterBindingHole`): no binding, definition, references or
+  diagnostic. A top-level hole may declare a type, an extern or install a
+  context, and a module's may declare any member (the loader's
+  `DependentReference`). Never read meaning from the tokens after the
+  damage, and never find a binding by spelling.
+* Dependent diagnostics are suppressed by that dependency model
+  (`hir::recovery::Tainted`, `Recovered`), never by comparing messages or
+  positions; the syntax diagnostics are the parser's, first, unchanged.
+* A recovered HIR (`syntaxRecovery`) never runs and is never built or
+  cached: every backend refuses it (`hir::recovery::runnable`, `HIR
+  SYNTAX-RECOVERED`), the front-end cache never stores it, a strict
+  compilation raises the syntax errors, and a `static compile:` block of
+  such a program is a hole, never decided. Only `-recover-syntax 1`
+  (`surface::readProgramFile`) makes one: never pass it from a path that
+  runs or builds.
+
+If you change any of that (surface/recover.tcl, the damage record of
+surface/parser.tcl and surface/lexer.tcl, hole lowering in surface/lower.tcl,
+the loader's recovery in surface/modules.tcl, hir/recovery.tcl, the hole and
+`syntaxDependent` cases of hir/resolve.tcl, hir/types.tcl, hir/range.tcl,
+hir/completions.tcl, hir/signatures.tcl and hir/static.tcl, the service's
+partial revisions or the server's choice between a partial and a complete
+revision), run `tests/syntax-recovery.test`, `tests/compiler-service.test`,
+`tests/lsp.test`, `tests/lsp-neovim.test` (Neovim), `tests/main-cli.test`,
+`tests/diagnostic-recovery.test`, `audit/syntax-recovery/tools/fuzz.tcl`
+(several seeds) and `audit/syntax-recovery/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule),
+plus the compiler-service, diagnostic-recovery, LSP and hir-interchange
+mutation tools for a change to what they cover.
+`audit/syntax-recovery/tools/experiments.tcl` prints what the experiments'
+programs and their repairs establish; `bench/syntax-recovery.tcl` regenerates
+the performance report, and `bench/lsp.tcl -malformed 1` the language
+server's editing session through syntax errors.
 
 ## Compilerpedia (the built-in reference)
 

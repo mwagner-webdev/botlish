@@ -1,0 +1,106 @@
+# utf8.bot -- a streaming recognizer (COROUTINE-FUSION-MILESTONE-1.md,
+# "Streaming recognition"): a UTF-8 validator that is handed one byte per
+# resume, wherever the input happens to be split.
+#
+# utf8 answers 1 after a byte that ends a character (the input so far is
+# valid UTF-8), 0 after a byte inside one, and completes with -1 at the
+# first byte that makes the input invalid (RFC 3629: no overlong form, no
+# surrogate, nothing past U+10FFFF). Like a DFA it has no state but the
+# point it is suspended at; unlike a DFA's table it is ordinary code, with
+# the continuation bytes taken by a helper that yields itself.
+#
+# validate feeds it every byte of every chunk -- the chunks are an
+# arbitrary split of the input -- and returns the last answer, so a valid
+# input ends with 1, a truncated one with 0 and an invalid one with -1.
+#
+# expect: [1, 1, 0, -1, -1, -1]
+
+import std::coroutine
+import std::mutable_array
+
+struct Byte:
+    value: int
+
+# Takes one continuation byte in LO..HI; false if the byte is outside it.
+fn continuation(lo: int, hi: int, resume Byte) -> bool:
+    b = yield 0
+    b.value >= lo and b.value <= hi
+
+fn utf8(resume Byte) -> int:
+    loop:
+        lead = yield 1
+        v = lead.value
+        if v >= 128:
+            n = if v >= 194 and v <= 223:
+                1
+            elif v >= 224 and v <= 239:
+                2
+            elif v >= 240 and v <= 244:
+                3
+            else:
+                0
+            lo = if v == 224:
+                160
+            elif v == 240:
+                144
+            else:
+                128
+            hi = if v == 237:
+                159
+            elif v == 244:
+                143
+            else:
+                191
+            ok = n > 0 and lo.continuation(hi) and (n < 2 or continuation(128, 191)) and (n < 3 or continuation(128, 191))
+            if not ok:
+                return -1
+
+fn validate(chunks: List[List[int]]) -> int:
+    coroutine {step, first} = utf8()
+    last = std::mutable_array::create(1, first)
+    loop chunk in chunks:
+        loop b in chunk:
+            last.set(0, step(Byte {value: b}))
+    last.at(0)
+
+# The I-th byte of a repeating valid input of 1-, 2-, 3- and 4-byte
+# characters ("a\u00e9\u20ac\U0001f600"): what bench/coroutine-fusion.tcl
+# validates, N bytes of it (validate_pattern), without building a List.
+fn pattern(i: int) -> int:
+    k = i.mod(10)
+    if k == 0:
+        return 97
+    elif k == 1:
+        return 195
+    elif k == 2:
+        return 169
+    elif k == 3:
+        return 226
+    elif k == 4:
+        return 130
+    elif k == 5:
+        return 172
+    elif k == 6:
+        return 240
+    elif k == 7:
+        return 159
+    elif k == 8:
+        return 152
+    128
+
+fn validate_pattern(n: int) -> int:
+    coroutine {step, first} = utf8()
+    last = std::mutable_array::create(1, first)
+    loop i from 0 to n:
+        last.set(0, step(Byte {value: pattern(i)}))
+    last.at(0)
+
+# "hello"; "a\u00e9\u20ac\U0001f600" (1, 2, 3 and 4 bytes) split inside
+# its characters; a truncated euro sign; an overlong NUL; an encoded
+# surrogate; a bad continuation byte.
+[validate([[104, 101], [108], [108, 111]]),
+ validate([[97, 195], [169, 226, 130], [172, 240], [159, 152], [128]]),
+ validate([[226], [130]]),
+ validate([[192, 128]]),
+ validate([[237, 160], [128]]),
+ validate([[226, 40, 161]])]

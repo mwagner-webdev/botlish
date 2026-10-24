@@ -54,7 +54,7 @@ set argv {}
 source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
 
-# A private library: the standard one plus the module hashfix, which reaches
+# A private library: the standard one plus the module std::hashfix, which reaches
 # the table hash as the standard library's hash structures will.
 set ::fuzzLibrary [file tempdir botlish-hashable-fuzz]
 foreach entry [glob -nocomplain -directory $::core::libraryDir *] {
@@ -369,17 +369,17 @@ proc Program {number} {
     set kinds [concat $pool {anon anon}]
     for {set i 0} {$i < 8 + [Rand 9]} {incr i} {
         lassign [Value [Pick $kinds] $structs $enumCases] e j
-        lappend observations "\[hash($e), hashfix::keyed($e), fingerprint($e) == hash($e), $e == $e\]"
+        lappend observations "\[hash($e), std::hashfix::keyed($e), fingerprint($e) == hash($e), $e == $e\]"
         lappend expected [list value $j]
         lappend jsons $j
     }
     for {set i 0} {$i < 3 + [Rand 4]} {incr i} {
         lassign [EqualPair $structs $enumCases] a b j
-        lappend observations "\[$a == $b, hash($a) == hash($b), hashfix::keyed($a) == hashfix::keyed($b), hashfix::keyed($a)\]"
+        lappend observations "\[$a == $b, hash($a) == hash($b), std::hashfix::keyed($a) == std::hashfix::keyed($b), std::hashfix::keyed($a)\]"
         lappend expected [list pair $j]
         lappend jsons $j
     }
-    set text "import hashfix\nimport std::str\nimport std::immutable_set\nimport std::mutable_array\n\n$decls\[\n    [join $observations ",\n    "]\n\]\n"
+    set text "import std::hashfix\nimport std::str\nimport std::immutable_set\nimport std::mutable_array\n\n$decls\[\n    [join $observations ",\n    "]\n\]\n"
     # Admission probes.
     set probes [dict create]
     foreach k {1 2} {
@@ -437,8 +437,8 @@ proc Oracle {jsons key} {
 
 proc Probe {probes probeDecls site name} {
     set value [ProbeValue $name $probes]
-    set call [dict get {param "fingerprint(%s)" table "hashfix::keyed(%s)" public "hash(%s)"} $site]
-    set text "import hashfix\nimport std::mutable_array\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn twice(n: int) -> int:\n    n * 2\n\n$probeDecls[format $call $value]\n"
+    set call [dict get {param "fingerprint(%s)" table "std::hashfix::keyed(%s)" public "hash(%s)"} $site]
+    set text "import std::hashfix\nimport std::mutable_array\n\nfn fingerprint(x: Hashable) -> int:\n    hash(x)\n\nfn twice(n: int) -> int:\n    n * 2\n\n$probeDecls[format $call $value]\n"
     set class [dict get $probes $name class]
     set accept [expr {$site eq "public" ? $class ne "none" : $class eq "total"}]
     if {[catch {surface::compile $text t.bot -warnings off} hir options]} {
