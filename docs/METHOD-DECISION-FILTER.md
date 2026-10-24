@@ -342,6 +342,9 @@ The fuzzer leaves the trigger out (its modules define no `length`, `at` or
 changes the exact decision -- which diagnostics a call owns -- so it is a
 decision of its own: the outcome changes for programs the exact decision
 rejects today, and the static-decision harnesses would have to agree.
+EXACT-METHOD-DECISION-MISATTRIBUTION.md is the full report (open, not
+fixed): the reproduction, the variants, the mechanism step by step, when it
+occurs and what a fix would involve.
 
 ## What was tried and not done
 

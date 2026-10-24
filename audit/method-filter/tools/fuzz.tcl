@@ -79,8 +79,7 @@ while {[llength $args] >= 2} {
 # candidate in a trial, rejects the inner call's result at the inner call's
 # own node, which hir::MethodCallProblems counts as the inner call's problem
 # (a defect of the exact decision, not of the filter, which decides the
-# chain correctly: METHOD-DECISION-FILTER.md, "A defect of the exact
-# decision").
+# chain correctly: EXACT-METHOD-DECISION-MISATTRIBUTION.md).
 set library [file tempdir botlish-method-filter-fuzz]
 foreach entry [glob -nocomplain -directory $::core::libraryDir *] {
     file copy -force $entry $library

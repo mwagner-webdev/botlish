@@ -1046,8 +1046,8 @@ proofs", "Opaque equality refusals").
    struct), the method-filter fuzzer extended to named-struct, MutableMap
    and MutableSet receivers (60 seeds, 0 disagreements). Extending the
    fuzzer also found a defect of the exact decision that predates this
-   milestone (METHOD-DECISION-FILTER.md, "A defect of the exact decision"),
-   left as it is.
+   milestone (EXACT-METHOD-DECISION-MISATTRIBUTION.md), reported and left as
+   it is.
 
 ## Regression and CI
 
