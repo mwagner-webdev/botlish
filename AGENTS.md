@@ -236,8 +236,9 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 ## The single-file compiler and the stub linker
 
 `single/build.sh` builds `single/out/botlish` (SINGLE-EXECUTABLE.md): a Tcl 9
-zipkit holding main.tcl, the compiler stack and both native executables,
-needing only glibc. The workflow `.github/workflows/single-executable.yml`
+zipkit holding main.tcl, the compiler stack, both native executables and the
+runtime archive, needing only glibc (and, to link a program that calls C,
+the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
 containers (`single/smoke-test.sh`), then publishes it as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
@@ -256,13 +257,17 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
-* Standalone executables have two linkers, chosen by `BOTLISH_NATIVE_LINKER`:
-  `rustc` (the default) and `stub` (no toolchain: `botlish-aot-stub` with the
-  program image appended, `native/src/runtime/aotimage.rs`; the single
-  executable uses it). The stub is Linux x86-64's only; macOS AArch64
-  executables are Mach-O, linked by rustc through Apple's ld
-  (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write a linker,
-  loader or signing step, for Mach-O. A program that calls C is linked on
+* Standalone executables have three linkers, chosen by
+  `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
+  `botlish-aot-stub` with the program image appended,
+  `native/src/runtime/aotimage.rs`) and `system` (the host's C compiler
+  driver, link.exe on Windows, linking the program object and the
+  precompiled runtime archive; next item); `auto`, the single
+  executable's, is `system` for a program that calls C and `stub` for any
+  other where the stub runs. The stub is Linux x86-64's only; macOS AArch64
+  executables are Mach-O, linked by rustc or the system linker through
+  Apple's ld (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write
+  a linker, loader or signing step, for Mach-O. A program that calls C is linked on
   the same hosts (`codegen/aot.rs`'s `C_CALLS`), with the platform linker's
   own link plan (`LinkerFlavor`: GNU ld's archive group on Linux, never on
   macOS, whose ld rejects it; MACOS-AARCH64-MILESTONE-6.md). If you change
@@ -270,26 +275,74 @@ the test suite, still install the `.deb`s.
   rustc link, the generated startup or `runtime::aot::run`, also run
   `tests/native-executable.test`, `tests/platform/aot-facts.tcl` and
   `audit/native-aot/tools/mutate.tcl` (every mutant in its `mutants.txt`
-  that applies to the host must still apply and be killed). A test that reads a rustc-linked executable's
-  `botlish_fn_N` symbols (objdump, `strace -k`) or tests rustc's invocation
-  carries the `rustcLinker` constraint (`tests/helpers.tcl`). CI's
-  `stub-linker` job runs every executable test file with the stub linker.
-* The two startups build the Vm identically because they share it: the
-  startup crate (`codegen/aot.rs`'s constant `STARTUP`) and
-  `aotimage::Loaded::instantiate` both read the program object's
-  `botlish_program` record with `runtime::program::instantiate_linked`, the
-  one place a Vm is built from a program's descriptor (native libraries use
-  it too: NATIVE-LIBRARY-MILESTONE-1.md, next sections). Never generate
-  per-program startup code again. If you change the descriptor, the record,
-  `program::instantiate`, `runtime::aot::run`, `constants::install`, what
+  that applies to the host must still apply and be killed). A test that reads an
+  executable's `botlish_fn_N` symbols (objdump, `strace -k`: the rustc and
+  system linkers' executables have them) carries `symbolLinker`, one that
+  links a program that calls C `cLinker`, one of rustc's own invocation
+  `rustcLinker` (`tests/helpers.tcl`). CI's `stub-linker` and
+  `system-linker` jobs run every executable test file with those linkers.
+* The system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) never runs Rust
+  when an application is linked. Keep it so:
+  - The runtime archive is `native/runtime-archive` (the `botlish-runtime`
+    staticlib, a default member of `native/`'s workspace, so the standard
+    `cargo build` makes it beside the driver; features forwarded): the
+    runtime library plus the executable's C `main`, no code generator. Never
+    compile Rust, a C startup source or anything of the runtime's at link
+    time, and never link the compiler driver into an application.
+  - The program object is the link's only object: its `botlish_program`
+    record is the program's startup data, as for every linker
+    (`runtime::program`), and the archive's `main`
+    (`runtime::aot::linked_main`) starts it as the rustc startup crate
+    does. Never a startup object, a second metadata format, generated
+    machine code, fixed addresses or a patched executable.
+  - The link is the platform linker's, in the rustc linker's link plan
+    (`system_link_args`: `link_plan_args_for`'s plan unwrapped, the runtime
+    archive and `runtime_system_libraries`, which
+    `native/runtime-archive/libraries.tcl` checks against rustc's `--print
+    native-static-libs` in `single/build.sh` and every host's system-linker
+    CI job: when it fails, change the list, never the check); every path
+    and name one argument of a structured command, never a shell string.
+    The tool is `cc` (link.exe on Windows) found on PATH, never in the
+    working directory, or `BOTLISH_NATIVE_SYSTEM_LINKER`; on Windows from a
+    Developer environment: the system linker has no Visual Studio discovery
+    of its own. No rustc fallback: `auto` never chooses rustc.
+  - Failures carry a kind (`LinkError`: `NATIVE LINK|AOT TOOLCHAIN`,
+    `... RUNTIME`, an archive without a helper the program calls among
+    them: `undefined_helper`) when they are no error of the program's plan;
+    the plan's own stay the linker's words, as the rustc linker's.
+  - Nothing on a linked startup's path takes a runtime helper's address:
+    the ABI fingerprint `program::read_linked` checks reads
+    `ops::HELPER_SIGNATURES` (names and counts), never `helpers()`, whose
+    addresses would keep every helper in every executable and library
+    (`system-linker-keeps-only-reached-helpers`; the helper list is one
+    macro, so the two cannot disagree).
+* The three startups build the Vm identically because they share it: the
+  startup crate (`codegen/aot.rs`'s constant `STARTUP`),
+  `aotimage::Loaded::instantiate` (the stub's) and the runtime archive's
+  `main` (`runtime::aot::linked_main`, the system linker's) all read the
+  program object's `botlish_program` record with
+  `runtime::program::instantiate_linked`, the one place a Vm is built from
+  a program's descriptor (native libraries use it too:
+  NATIVE-LIBRARY-MILESTONE-1.md, next sections).
+  `BOTLISH_NATIVE_STARTUP_REPORT` shows what one installed;
+  `tests/system-linker.test` requires the three reports equal. Never
+  generate per-program startup code again. If you change the descriptor,
+  the record, `program::instantiate`, `runtime::aot::run`,
+  `rust_process_setup` or `linked_main`, `constants::install`, what
   `emit_object` emits (sections, relocation types: `codegen::aot::image`
   rejects any type it does not handle), the image format, or the ABI
   fingerprint's inputs, run `cargo test --release --manifest-path
-  native/Cargo.toml --lib -- aotimage program`, `tests/aot-stub-linker.test`,
+  native/Cargo.toml --lib -- aotimage program` and `--bin botlish-native
+  aot::`, `tests/aot-stub-linker.test`, `tests/system-linker.test`,
   `tests/native-library.test`, and the executable test files with the stub
-  linker. The `stub-linker` job in
-  `.github/workflows/tests.yml` has the command. Run them once more under
-  `BOTLISH_NATIVE_GC_STRESS=1`.
+  and with the system linker. The `stub-linker` and `system-linker` jobs in
+  `.github/workflows/tests.yml` have the commands. Run them once more under
+  `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
+  `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
+  single executable's packing or installation (`single/main.tcl`,
+  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
+  `single/build.sh`.
 
 ## Running the tests locally
 
@@ -1227,11 +1280,15 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   NATIVE TARGET). The startup crate is compiled with the driver's own
   `--target`, never whatever rustc's host is.
 * Code generation, the object writer and the link stay Cranelift's, the
-  `object` crate's and rustc's: no Windows assembler, object rewrite,
-  linker, CRT startup or Visual Studio discovery of Botlish's (rustc finds
-  link.exe and the SDK without a Developer Command Prompt). The object is
-  the same COFF for both Windows environments; never add a target-specific
-  object transformation.
+  `object` crate's and rustc's -- or, for the system linker, link.exe's,
+  the one a Developer environment puts on PATH: no Windows assembler,
+  object rewrite, linker, CRT startup or Visual Studio discovery of
+  Botlish's (rustc finds link.exe and the SDK without a Developer Command
+  Prompt; the system linker is told where it is). The system linker links
+  with rustc's CRT policy (below) and `/INCREMENTAL:NO` (an incremental
+  link's thunks would move a function's address off its code). The object
+  is the same COFF for both Windows environments; never add a
+  target-specific object transformation.
 * The link plan is `LinkerFlavor::Msvc`'s (`/LIBPATH:DIR`, `NAME.lib`, no
   group): never a GNU flag to link.exe. Every executable -- one that calls
   C too -- links the static release C runtime (`crt_args`, `+crt-static`)

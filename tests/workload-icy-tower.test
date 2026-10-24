@@ -45,7 +45,7 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 # backend, rustc-linked executables, and the package-owned libSDL3.so.
 testConstraint icyTowerExecutable [expr {$::tcl_platform(os) eq "Linux" &&
     $::tcl_platform(machine) in {x86_64 amd64} && [testConstraint nativeBuilt] &&
-    [testConstraint executableAot] && [testConstraint rustcLinker] && [cffi::sdl3Dir] ne ""}]
+    [testConstraint executableAot] && [testConstraint cLinker] && [cffi::sdl3Dir] ne ""}]
 testConstraint python3 [expr {[auto_execok python3] ne ""}]
 
 set gameDir [file join $::projectRoot examples games icy-tower]

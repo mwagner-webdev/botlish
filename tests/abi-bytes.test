@@ -931,7 +931,7 @@ proc machineCalls {exe function} {
     return $calls
 }
 
-test abi-bytes-machine-code-write-function {the machine code of std::linux::sys::write (std::linux::write's x86-64 transport) in a standalone executable: it calls the runtime helper that takes the payload address, then the one syscall helper, and no runtime helper after it (the keepalive is no machine code: the storage stays live across the syscall through its stack map, abi-bytes-clif-keepalive-and-stack-map); and there is no call to libc's write, send or syscall anywhere in it} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-bytes-machine-code-write-function {the machine code of std::linux::sys::write (std::linux::write's x86-64 transport) in a standalone executable: it calls the runtime helper that takes the payload address, then the one syscall helper, and no runtime helper after it (the keepalive is no machine code: the storage stays live across the syscall through its stack map, abi-bytes-clif-keepalive-and-stack-map); and there is no call to libc's write, send or syscall anywhere in it} -constraints {linuxX86_64 objdump symbolLinker} -body {
     set text "${::linuxPrelude}\nout(3, mk(\"hi\"))"
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] std::linux::sys::write]
@@ -953,7 +953,7 @@ proc straceOf {exe args} {
 }
 set straceCounter 0
 
-test abi-bytes-kernel-sees-the-write {strace of the standalone example: the kernel receives write(1, "Hello from Botlish!\n", 20) -- fd 1 in rdi, the payload's actual bytes at rsi, the exact count 20 in rdx -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function, with NO libc frame (no __write) in that call's stack; the only libc write in the process is the runner's own later "20" result line} -constraints {linuxX86_64 strace posixShell rustcLinker} -body {
+test abi-bytes-kernel-sees-the-write {strace of the standalone example: the kernel receives write(1, "Hello from Botlish!\n", 20) -- fd 1 in rdi, the payload's actual bytes at rsi, the exact count 20 in rdx -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function, with NO libc frame (no __write) in that call's stack; the only libc write in the process is the runner's own later "20" result line} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [file join $::executableDir example]
     if {![file exists $exe]} {
         native::executable [surface::readProgramFile [file join $::projectRoot examples linux write.bot]] $exe

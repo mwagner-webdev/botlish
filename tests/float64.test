@@ -568,7 +568,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstrai
         set ::floatFixtureDir ""
     }
 }
-testConstraint floatFixture [expr {$::floatFixtureDir ne "" && [testConstraint rustcLinker]}]
+testConstraint floatFixture [expr {$::floatFixtureDir ne "" && [testConstraint cLinker]}]
 
 set ::floatBindings [string cat \
     "import std::ffi::c\n" \

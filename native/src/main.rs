@@ -31,6 +31,14 @@
 //!                                        native/native.tcl's native::library
 //!                                        links it with the runtime
 //!   botlish-native check FILE.nir        parse and validate only
+//!   botlish-native system-linker         what the system linker would link
+//!                                        with here: `flavor`, `tool` (the C
+//!                                        driver or link.exe), `runtime` (the
+//!                                        runtime archive and its machine),
+//!                                        `libraries` (the archive's system
+//!                                        libraries); exit status 1 when the
+//!                                        tool or the archive is unusable
+//!                                        (codegen/aot.rs)
 //!   botlish-native fusion FILE.nir       what coroutine fusion did with each
 //!                                        construction site (codegen::fusion,
 //!                                        COROUTINE-FUSION-MILESTONE-1.md):
@@ -210,6 +218,17 @@ fn emit_error(code: &[&str], message: &str) {
     emit(&tcl_list(&["error".to_string(), tcl_list(&code), message.to_string()]));
 }
 
+/// A failed link's error line: `NATIVE CODE`, with the system linker's
+/// kind of failure after it when it has one (codegen::aot::LinkError):
+/// NATIVE LINK TOOLCHAIN, NATIVE AOT RUNTIME, ...
+fn emit_link_error(code: &str, error: &codegen::aot::LinkError) {
+    match error.detail {
+        Some("TOOLCHAIN") => emit_error(&["NATIVE", code, "TOOLCHAIN"], &error.message),
+        Some("RUNTIME") => emit_error(&["NATIVE", code, "RUNTIME"], &error.message),
+        _ => emit_error(&["NATIVE", code], &error.message),
+    }
+}
+
 fn read(path: &str) -> Result<String, String> {
     if path == "-" {
         let mut text = String::new();
@@ -334,7 +353,7 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, Vec<String>), Stri
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | target TRIPLE (each also [--result PATH])");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | target TRIPLE | system-linker (each also [--result PATH])");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -352,6 +371,23 @@ fn cli(args: &[String]) -> i32 {
         Some((c, rest)) => (c.as_str(), rest),
         None => return usage(),
     };
+    if command == "system-linker" && rest.is_empty() {
+        // What the system linker would link with here (codegen::aot's
+        // `system_linker_facts`): inspectable discovery, and the runtime
+        // archive's system libraries for the build's comparison with rustc's
+        // `--print native-static-libs`.
+        let mut failed = false;
+        for (key, fact) in codegen::aot::system_linker_facts() {
+            match fact {
+                Ok(words) => emit(&tcl_list(&[vec![key.to_string()], words].concat())),
+                Err(e) => {
+                    failed = true;
+                    emit(&tcl_list(&[key.to_string(), "error".to_string(), e.message]));
+                }
+            }
+        }
+        return i32::from(failed);
+    }
     if command == "target" {
         // `target TRIPLE`: how this driver reads a target triple
         // (codegen::target::describe), for the front end's target table.
@@ -449,7 +485,7 @@ fn cli(args: &[String]) -> i32 {
                 Ok(_) => emit(&tcl_list(&["executable".to_string(), named.to_string_lossy().into_owned()])),
                 Err(e) => {
                     let code = if codegen::aot::calls_c(&program) { "LINK" } else { "AOT" };
-                    emit_error(&["NATIVE", code], &e);
+                    emit_link_error(code, &e);
                     return 1;
                 }
             }
@@ -553,7 +589,7 @@ fn run_linked(
     let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs) {
         Ok(executable) => executable,
         Err(e) => {
-            emit_error(&["NATIVE", "LINK"], &e);
+            emit_link_error("LINK", &e);
             return 0;
         }
     };

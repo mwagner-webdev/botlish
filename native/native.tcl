@@ -46,15 +46,19 @@
 #   native::targetFacts TRIPLE          how the driver reads a target triple
 #   native::executable HIR PATH ?OPTIONS?  links a standalone executable: Linux
 #                                         glibc (x86_64; aarch64 with the
-#                                         rustc linker), macOS aarch64
-#                                         (Mach-O, the rustc linker) or
-#                                         Windows x86_64 (PE, MSVC, the rustc
-#                                         linker; PATH.exe for a PATH without
+#                                         rustc or system linker), macOS
+#                                         aarch64 (Mach-O, the rustc or system
+#                                         linker) or Windows x86_64 (PE, MSVC,
+#                                         the rustc or system linker;
+#                                         PATH.exe for a PATH without
 #                                         an extension); returns its path;
 #                                         rejects non-closed HIR.
 #                                         BOTLISH_NATIVE_LINKER picks the
-#                                         linker: rustc (default) or stub
-#                                         (no toolchain, SINGLE-EXECUTABLE.md)
+#                                         linker: rustc (default), stub (no
+#                                         toolchain, SINGLE-EXECUTABLE.md),
+#                                         system (the host's C driver and
+#                                         the runtime archive, no rustc) or
+#                                         auto (system for C, else stub)
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -406,7 +410,7 @@ proc native::evalHir {hir args} {
 }
 
 # Compile closed, specialized HIR to a standalone executable: a Linux glibc
-# ELF (x86_64, or aarch64 with the rustc linker), a macOS aarch64 Mach-O or a
+# ELF (x86_64, or aarch64 with the rustc or system linker), a macOS aarch64 Mach-O or a
 # Windows x86_64 PE (the rustc linker), for the host's own target. The
 # executable is the file PATH, except on Windows, where a PATH without an
 # extension gets .exe (the driver's codegen/aot.rs executable_path): returns

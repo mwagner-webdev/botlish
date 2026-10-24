@@ -1068,7 +1068,7 @@ test la-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every alloc
 # Botlish builds case 2 in byte storage and C checks the image (case 3).
 
 set ::laFixtureDir ""
-if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]} {
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt] && [testConstraint cLinker]} {
     set ::laFixtureDir [makeDirectory narray-fixture-[pid]]
     if {[catch {
         ctool::staticLibrary $::laFixtureDir botlish_narray_fixture [file join $::projectRoot tests cffi narray-fixture.c]

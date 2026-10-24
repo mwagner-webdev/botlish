@@ -32,7 +32,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstrai
         set ::cflFixtureDir ""
     }
 }
-testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint rustcLinker]}]
+testConstraint cfloatFixture [expr {$::cflFixtureDir ne "" && [testConstraint cLinker]}]
 
 # The link directories of a run, for native::withLinkDirs: the fixture's, or
 # none when it did not build (a program that calls no C, cfl-hir-text's, still

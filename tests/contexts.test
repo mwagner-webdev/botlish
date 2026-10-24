@@ -790,7 +790,7 @@ proc machineCode {exe function} {
     exec objdump -d --no-show-raw-insn --disassemble=$function $exe
 }
 
-test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is ONE load from the linker-local context area, addressed RIP-relatively (lea of botlish_context_area, then +8), with no GOT load, no helper call and no other call than std::linux::write; the area is a local 24-byte object in .bss} -constraints {linuxX86_64 objdump posixShell rustcLinker} -body {
+test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is ONE load from the linker-local context area, addressed RIP-relatively (lea of botlish_context_area, then +8), with no GOT load, no helper call and no other call than std::linux::write; the area is a local 24-byte object in .bss} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
     set exe [buildExecutable hello $::helloText]
     set id [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::io::write]
     set code [machineCode $exe botlish_fn_$id]
@@ -811,7 +811,7 @@ test contexts-native-object-relocation {the AOT object's reference to the contex
         [llength [regexp -all -inline {R_X86_64_GOTPCREL\s+botlish_context_area} $relocs]]
 } -result {2 0}
 
-test contexts-native-strace {the kernel receives write(1, "Hello, world!\n", 14) from the raw syscall boundary, called by the runtime helper, called by std::linux::write, called by std::linux::io::write, called by hello -- no libc write frame in that call's stack} -constraints {linuxX86_64 strace posixShell rustcLinker} -body {
+test contexts-native-strace {the kernel receives write(1, "Hello, world!\n", 14) from the raw syscall boundary, called by the runtime helper, called by std::linux::write, called by std::linux::io::write, called by hello -- no libc write frame in that call's stack} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [buildExecutable hello $::helloText]
     set log [file join $::outputDir strace.hello]
     exec strace -f -qq -k -e trace=write -o $log $exe >/dev/null 2>@1

@@ -108,8 +108,17 @@ pub fn abi_fingerprint() -> u64 {
         bytesobj::BYTES_PAYLOAD_OFFSET as u64,
         bytesobj::BYTES_LEN_OFFSET as u64,
         value::FLOAT_BITS_OFFSET as u64,
+        // The GC root plan the code was generated for (stack maps and the
+        // frame walk, or the shadow stack): a `fallback-roots` build's code
+        // never runs on a runtime of the other plan.
+        u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
     ];
-    for (name, params, _) in super::ops::helpers() {
+    // The helpers' names and parameter counts, never their addresses: an
+    // executable whose startup computes this (every executable's, through
+    // runtime::program::read_linked) would otherwise keep every helper
+    // linked, one that calls five of them too (ops.rs's
+    // HELPER_SIGNATURES).
+    for &(name, params) in super::ops::HELPER_SIGNATURES {
         words.extend(name.bytes().map(u64::from));
         words.push(params as u64);
     }

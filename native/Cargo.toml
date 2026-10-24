@@ -40,6 +40,13 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
 ] }
 
+# The runtime archive (native/runtime-archive) is a member built with the
+# driver: one `cargo build` makes botlish-native, botlish-aot-stub and the
+# archive the system linker links (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+[workspace]
+members = [".", "runtime-archive"]
+default-members = [".", "runtime-archive"]
+
 [profile.release]
 debug = 1
 
