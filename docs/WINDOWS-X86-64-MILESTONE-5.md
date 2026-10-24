@@ -947,7 +947,16 @@ The evidence:
     the warning gate, the method-call decision audit; its GC-stress job
     runs on main only;
   - tests-arm64.yml run 40123419578, green;
-  - macos-arm64.yml: PENDING-MACOS-CI.
+  - macos-arm64.yml run 40131658720 at fa711b43 (the code of a4d5d108
+    but for a Windows-only test file), every job green: the smoke tier
+    (the Rust tests, the native stack checks, native status, objects and
+    executables), both acceptance shards, the system linker and its C
+    tests under GC stress, and the Linux control;
+  - the same run's Tier C on macOS: audit/native-stack's mutants, 26 of
+    the 26 that apply there killed, among them
+    `effects-infallible-on-fallback` and `fallback-runs-coroutines` by
+    the fallback build's own tests (the other 24 are another host's
+    code), and none of audit/windows-unwind's 21, which are Windows'.
 
 ## 9. Performance
 
