@@ -316,14 +316,26 @@ AMBIGUOUS-METHOD-CALL for `length`.
 The cause is what "inside the call" means. A candidate is valid when its
 trial build has no diagnostic located in the call's subtree
 (`hir::MethodCallProblems`), and the subtree includes the call's own node.
-`at` has three candidates and `length` four, so one trial gives `at` a
-candidate it already tried (std::list::at) while `length` stands at
-`std::boxlen::length`. That candidate rejects its receiver -- the `at` call's
-List result -- and a rejected receiver is diagnosed at the receiver
-(METHOD-SUGAR.md, "Source locations and diagnostics"), which is the `at`
-call's node. So the outer call's problem is read as the inner call's, in a
-trial the inner call's valid candidate does not share with the others (an
-invalid candidate's result is poison, which the outer check skips).
+Candidates are ordered by name, and trial t gives every undecided call its
+t-th candidate, so `std::list::at` (the first of `at`'s three) is judged by
+trial 0, where `length` stands at its first candidate too:
+`std::boxlen::length`, whose name sorts before `std::list::length`. That
+candidate rejects its receiver -- the `at` call's List result -- and a
+rejected receiver is diagnosed at the receiver (METHOD-SUGAR.md, "Source
+locations and diagnostics"), which is the `at` call's node. So the outer
+call's problem is read as the inner call's, in the trial that judges the
+inner call's one valid candidate; the other two have problems of their own
+kind (and an invalid candidate's result is poison, which the outer check
+skips), so nothing is shared and std::list::at is found invalid.
+
+It needs an inner method call with several candidates (one with a single
+candidate is not decided) and an outer candidate that rejects the inner
+result and sorts first: a module whose name sorts after `std::list`
+(`std::zbox`) does not trigger it, and an application module does, since
+`bag::length` sorts before every `std::` name. The same program with
+`import bag` (a `struct Bag` and `fn length(b: Bag)`) compiles clean with the
+filter and fails with it off, or wherever the filter hands the program over
+because of some other call.
 
 The fuzzer leaves the trigger out (its modules define no `length`, `at` or
 `get`); the unit tests and the fuzzer test the filter, not this. Fixing it
