@@ -372,7 +372,9 @@ on the other three hosts, only together with native-frame roots
    - the usable size (8 MiB by default,
      `BOTLISH_NATIVE_COROUTINE_STACK_BYTES` as on every host) plus
      `GUARD_BYTES` (64 KiB) reserved;
-   - 64 KiB committed;
+   - one page committed, a thread's default: Windows commits the rest by
+     the guard page as the fiber grows (section 9 measures what a fiber
+     commits);
    - `FIBER_FLAG_FLOAT_SWITCH`;
    - the entry stub `bl_co_fiber_entry`, with a `Slot` (the fiber's own
      record) as its parameter.
@@ -382,7 +384,9 @@ on the other three hosts, only together with native-frame roots
    - asks the fiber's own guarantee, `SetThreadStackGuarantee(32 KiB)`,
      the guard's `GUARANTEE`;
    - records the stack Windows reports for the fiber
-     (`GetCurrentThreadStackLimits`);
+     (`GetCurrentThreadStackLimits`) in the Slot, where `CoStack::bounds`
+     reads it (a coroutine object holds the fiber, its Slot and its size,
+     not a copy of the bounds);
    - confirms the guard page, as the guard confirms the thread's
      (`confirmed_guard_page`: an uncommitted reservation from the low
      bound, PAGE_GUARD directly above), and that the recorded top is on

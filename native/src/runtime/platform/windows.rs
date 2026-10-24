@@ -157,6 +157,22 @@ pub fn confirmed_guard_page(stack: &NativeStack) -> bool {
     guard == base + size && guard < stack.high_bound && state == MEM_COMMIT && protect & PAGE_GUARD != 0
 }
 
+/// How many bytes of STACK's reservation are committed (VirtualQuery's
+/// regions within its bounds): what the stack charges against the system's
+/// commit limit, touched or not (tests, the report's memory measurement).
+pub fn committed_bytes(stack: &NativeStack) -> usize {
+    let (mut at, mut committed) = (stack.low_bound, 0);
+    while at < stack.high_bound {
+        let Some((base, size, state, _)) = region(at) else { break };
+        let end = (base + size).min(stack.high_bound);
+        if state == MEM_COMMIT {
+            committed += end - at.max(base);
+        }
+        at = end;
+    }
+    committed
+}
+
 /// The calling thread's stack guarantee: SetThreadStackGuarantee of 0 asks.
 pub fn stack_guarantee() -> u32 {
     let mut size = 0u32;

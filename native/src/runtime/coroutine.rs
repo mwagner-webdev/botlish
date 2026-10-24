@@ -1764,6 +1764,57 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(windows)]
+    #[inline(never)]
+    fn descend(depth: usize) -> usize {
+        let frame = std::hint::black_box([depth as u8; 1024]);
+        if depth == 0 { frame[0] as usize } else { descend(depth - 1) + frame[1] as usize }
+    }
+
+    /// A body 64 KiB of frames deep, which grows its fiber's stack.
+    #[cfg(windows)]
+    extern "C" fn deep_body(_p: *mut Vm, _closure: Value, _args: *const Value) -> Value {
+        std::hint::black_box(descend(64));
+        UNIT
+    }
+
+    /// What a fiber commits (WINDOWS-X86-64-MILESTONE-5.md, "Performance"):
+    /// fresh, after its setup, its first page and the guard region with the
+    /// setup's guarantee, none of the rest of its reservation; pooled after a
+    /// coroutine ran 64 KiB deep on it, what that coroutine grew it to.
+    #[cfg(windows)]
+    #[test]
+    fn a_fresh_fiber_commits_its_guarantee_and_a_page() {
+        use crate::runtime::platform::windows::{committed_bytes, GUARANTEE};
+        std::thread::spawn(|| {
+            let (stack, pooled) = CoStack::new().unwrap();
+            assert!(!pooled, "a fresh thread's pool is empty");
+            let bounds = stack.bounds();
+            let fresh = committed_bytes(&bounds);
+            drop(stack);
+            let mut vm = new_vm();
+            let t = thunk(&mut vm, deep_body);
+            vm.temp_roots.push(t);
+            let co = rt_co_create(&mut *vm, t);
+            vm.temp_roots.push(co);
+            assert_eq!(rt_co_start(&mut *vm, co), UNIT);
+            let (stack, pooled) = CoStack::new().unwrap();
+            assert!(pooled && stack.bounds().low_bound == bounds.low_bound, "the one fiber, pooled twice");
+            let grown = committed_bytes(&stack.bounds());
+            println!(
+                "a_fresh_fiber_commits_its_guarantee_and_a_page: of a {} KiB reservation, a fresh fiber commits {} KiB; after a coroutine 64 KiB deep, {} KiB",
+                (bounds.high_bound - bounds.low_bound) >> 10,
+                fresh >> 10,
+                grown >> 10
+            );
+            assert!(fresh >= GUARANTEE as usize, "a fresh fiber commits {fresh} bytes, less than its guarantee");
+            assert!(fresh <= GUARANTEE as usize + (32 << 10), "a fresh fiber commits {fresh} bytes");
+            assert!(grown >= fresh + (64 << 10), "a fiber that ran 64 KiB deep commits {grown} bytes");
+        })
+        .join()
+        .unwrap();
+    }
+
     /// A thread something else made a fiber stays one, its fiber unchanged:
     /// the runtime switches from it and back, converting nothing.
     #[cfg(windows)]

@@ -76,9 +76,13 @@ use windows_sys::Win32::System::Threading::{
 };
 use windows_sys::Win32::System::WindowsProgramming::FIBER_FLAG_FLOAT_SWITCH;
 
-/// What Windows commits of a fresh fiber's stack at once (it grows the rest
-/// by its guard page, as a thread's).
-const COMMIT_BYTES: usize = 64 << 10;
+/// What a fresh fiber's stack commits at once: one page, a thread's default
+/// (the linker's /STACK commit). Windows commits the rest by the guard page
+/// as the fiber grows, as it grows a thread's, and a pooled fiber keeps what
+/// it grew. Every page committed is charged to the system's commit limit
+/// whether or not it is touched: the setup's guarantee adds its 32 KiB
+/// below (the report's "Performance": what a fresh fiber commits).
+const COMMIT_BYTES: usize = 4 << 10;
 
 /// Where a context switched away: the fiber it runs on and the frame of its
 /// `bl_co_switch` -- for a suspended stack the start of the collector's walk
@@ -111,11 +115,11 @@ struct Slot {
 }
 
 /// One coroutine stack: a fiber, parked whenever no coroutine runs on it,
-/// with its Slot, its stack (`bounds`) and the usable size it was made for.
+/// with its Slot (which holds its stack, `bounds`) and the usable size it was
+/// made for.
 pub struct CoStack {
     fiber: usize,
     slot: *mut Slot,
-    stack: NativeStack,
     usable: usize,
 }
 
@@ -248,8 +252,15 @@ pub fn thread_converted() -> bool {
 }
 
 impl CoStack {
+    /// The fiber's stack, as Windows reported it to the fiber's setup
+    /// (`CoStack::new` returns no stack whose setup reported none).
     pub fn bounds(&self) -> NativeStack {
-        self.stack
+        // SAFETY: the Slot of this CoStack's fiber, which lives as long as
+        // the fiber and was written by its setup before `new` returned.
+        match unsafe { (*self.slot).stack } {
+            Some(stack) => stack,
+            None => unreachable!("a coroutine fiber without its recorded stack"),
+        }
     }
 
     /// A stack, and whether it came from the pool (rather than a fresh
@@ -294,7 +305,7 @@ impl CoStack {
         // SAFETY: written by the setup before it parked.
         let (stack, guarantee, guard_page) = unsafe { ((*slot).stack, (*slot).guarantee, (*slot).guard_page) };
         match stack {
-            Some(stack) if guarantee >= GUARANTEE && guard_page => Ok((CoStack { fiber, slot, stack, usable }, false)),
+            Some(_) if guarantee >= GUARANTEE && guard_page => Ok((CoStack { fiber, slot, usable }, false)),
             _ => {
                 // SAFETY: the fiber is parked; nothing else refers to it.
                 unsafe {
@@ -341,7 +352,7 @@ impl Drop for CoStack {
         let returned = POOL.try_with(|pool| {
             let mut pool = pool.borrow_mut();
             if pool.len() < POOL_LIMIT {
-                pool.push(CoStack { fiber: self.fiber, slot: self.slot, stack: self.stack, usable: self.usable });
+                pool.push(CoStack { fiber: self.fiber, slot: self.slot, usable: self.usable });
                 true
             } else {
                 false

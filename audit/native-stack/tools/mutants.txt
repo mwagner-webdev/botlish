@@ -551,11 +551,11 @@ pub fn set_active_stack(stack: &NativeStack) {
 ## native/src/runtime/coroutine/windows.rs
 <<<<
             if pool.len() < POOL_LIMIT {
-                pool.push(CoStack { fiber: self.fiber, slot: self.slot, stack: self.stack, usable: self.usable });
+                pool.push(CoStack { fiber: self.fiber, slot: self.slot, usable: self.usable });
                 true
 ====
             if pool.len() > POOL_LIMIT {
-                pool.push(CoStack { fiber: self.fiber, slot: self.slot, stack: self.stack, usable: self.usable });
+                pool.push(CoStack { fiber: self.fiber, slot: self.slot, usable: self.usable });
                 true
 >>>>
 

@@ -149,13 +149,16 @@ jobs:
       # (MSVC's among them), targets, stack probes, the program object's
       # format, the argument encoding.
       # Then the single-step unwind test again, for its own account (how many
-      # instructions it unwound, the frames it probed): a passing test's
+      # instructions it unwound, the frames it probed), and the coroutine
+      # fiber's commit test, for what a fiber commits
+      # (WINDOWS-X86-64-MILESTONE-5.md, "Performance"): a passing test's
       # output is otherwise not shown.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
           cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
+          cargo test --release --manifest-path native/Cargo.toml --lib a_fresh_fiber_commits_its_guarantee_and_a_page -- --nocapture 2>&1 | grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' | tee -a rust-tests.log
 
       # The stack-overflow guard (WINDOWS-X86-64-MILESTONE-4.md,
       # native/tests/native_stack/windows.rs): each kind of thread's stack and
@@ -409,6 +412,7 @@ jobs:
               grep -a 'test result' rust-tests.log
               grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::coroutine|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
               grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
+              grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' rust-tests.log
               echo '```'
             fi
           } > smoke-summary.md
