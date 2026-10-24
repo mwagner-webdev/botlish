@@ -656,12 +656,14 @@ const RUNTIME_ARCHIVE: &str = if cfg!(target_env = "msvc") { "botlish_runtime.li
 /// `botlish-native system-linker` prints it: on every single-executable
 /// build and in every host's system-linker CI job). On Windows the C
 /// runtime is `system_link_args`'s: the static one, `crt_args_for`'s
-/// policy.
+/// policy; `legacy_stdio_definitions.lib` is the libc crate's (the
+/// out-of-line printf family of its MSVC declarations), which
+/// runtime::library's `malloc` and `free` link on every host.
 fn runtime_system_libraries(flavor: LinkerFlavor) -> &'static [&'static str] {
     match flavor {
         LinkerFlavor::Gnu => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
         LinkerFlavor::Apple => &["-liconv", "-lSystem", "-lc", "-lm"],
-        LinkerFlavor::Msvc => &["kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib"],
+        LinkerFlavor::Msvc => &["legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib"],
     }
 }
 
@@ -1693,9 +1695,9 @@ mod tests {
         }
         let tail: Vec<&str> = args.iter().skip_while(|a| !a.ends_with("program.obj")).map(String::as_str).collect();
         assert_eq!(
-            &tail[..11],
+            &tail[..12],
             ["C:\\w\\program.obj", "/LIBPATH:C:\\opt lib", "first.lib", "second.lib", "C:\\rt\\botlish_runtime.lib",
-             "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "libcmt.lib"]
+             "legacy_stdio_definitions.lib", "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "libcmt.lib"]
         );
         let excluded: Vec<&str> = args.iter().filter_map(|a| a.strip_prefix("/NODEFAULTLIB:")).collect();
         assert_eq!(excluded, OTHER_MSVC_RUNTIMES);
