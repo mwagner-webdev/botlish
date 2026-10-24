@@ -1388,10 +1388,15 @@ test se-build-reuse-identical {a method-call decision build that would repeat th
 # different candidates (swap's first, at's second).
 set ::seMethodChain "import std::list\nimport std::mutable_array\nimport std::mutable_vector\n\nfn f() -> List\[int\] errors IndexNotFound:\n    arr = std::mutable_array::create(3, 0)\n    x = arr.at(0)\n    y = arr.at(1)\n    z = arr.at(2)\n    \[x, y, z\]\n\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
 set ::seMethodMixed "import std::list\nimport std::mutable_array\nimport std::mutable_vector\n\nfn f() -> List\[int\] errors IndexNotFound:\n    arr = std::mutable_array::create(3, 0)\n    old = arr.swap(0, 5)\n    x = arr.at(0)\n    y = arr.at(1)\n    \[old, x, y\]\n\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+# Two candidates that both fit a String receiver, a lexical `length` and
+# std::str::length: the trial round builds the call at the second, and the
+# certification's single deviation is that configuration again (a build
+# other than the one the decision started from, read from its record).
+set ::seMethodTwo "import std::str\n\nfn length(s: str) -> int:\n    1\n\nfn m(s: str) -> int:\n    s.length()\n\nm(\"ab\")\n"
 
-test se-method-memo {a method-call decision builds no configuration twice: a build whose configuration an earlier build of the decision had is read from what was recorded of that build (hir::methods::Config, hir::methods::Record) -- the decided program is the one building every build again gives, and the audit (every reused build made again) finds the same} -body {
+test se-method-memo {a method-call decision builds no configuration twice: a build whose configuration an earlier build of the decision had is read from what was recorded of that build (hir::methods::Config, hir::methods::Record) -- the build the decision started from and any later one (a trial round's configuration that a single deviation needs again) -- the decided program is the one building every build again gives, and the audit (every reused build made again) finds the same} -body {
     set results {}
-    foreach text [list $::seMethodChain $::seMethodMixed] {
+    foreach text [list $::seMethodChain $::seMethodMixed $::seMethodTwo] {
         set counts {}
         set records {}
         foreach {reuse audit} {1 0 0 0 1 1} {
@@ -1415,7 +1420,7 @@ test se-method-memo {a method-call decision builds no configuration twice: a bui
             [sdDiff [lindex $records 0] [lindex $records 2]] [dict get [lindex $records 0] diagnostics]
     }
     set results
-} -result {{8 9 8} {} {} {} {7 8 7} {} {} {}}
+} -result {{8 9 8} {} {} {} {7 8 7} {} {} {} {1 2 1} {} {} {{AMBIGUOUS-METHOD-CALL {method-style call "length" is ambiguous: more than one visible function accepts the receiver (length, std::str::length); there is no precedence between them: call the one you mean explicitly, e.g. length(receiver, ...)}}}}
 
 # The batched run itself (hir::static::Simulate), on a synthetic dependency
 # relation: sites a, u, f in post-order; u depends on a and on f, f on
