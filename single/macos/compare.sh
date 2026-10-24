@@ -22,6 +22,8 @@
 #     backends;
 #   * diagnostics: a syntax error, a type error, a missing module, the
 #     warnings a standard-library module reports in its own source, -check;
+#   * the census: a one-line program importing each standard-library module,
+#     checked (-check); Compilerpedia's every topic listed (-help all);
 #   * -emit-nir of three programs; -help (Compilerpedia: its indices and
 #     five pages) and the usage summary;
 #   * standalone executables of four programs, linked by each (the system
@@ -113,6 +115,23 @@ done
 grep -q '//zipfs:/app/botlish/stdlib/web.bot' "$work/a.out" "$work/a.err" ||
   fail "std::web's warnings are not located in the application's standard library"
 both 0 "-check of the samples" -check $samples
+# The census of the packed standard library: a one-line program importing
+# each of its modules (the file name says which), checked by each compiler;
+# a module of another platform, or one internal to the standard library, is
+# refused alike.
+modules=$(cd "$root/stdlib" && find . -name '*.bot' | sed -E -e 's|^\./||' -e 's|\.bot$||' -e 's/\.(x86_64|aarch64)$//' | LC_ALL=C sort -u)
+loaders=()
+for module in $modules; do
+  loader="load-std-${module//\//-}.bot"
+  printf 'import std::%s\n\n1\n' "${module//\//::}" >"$loader"
+  loaders+=("$loader")
+done
+both 0 "-check of every standard-library module" -check "${loaders[@]}"
+[[ $(grep -c '^== load-std-' "$work/a.out") == "${#loaders[@]}" ]] ||
+  fail "the application checked $(grep -c '^== load-std-' "$work/a.out") of the ${#loaders[@]} standard-library loaders"
+loaded=$(grep -A1 '^== load-std-' "$work/a.out" | grep -c '^   ok$' || true)
+(( loaded > 0 )) || fail "no standard-library module loads in the application"
+echo "   the standard library's ${#loaders[@]} modules: $loaded load, $(( ${#loaders[@]} - loaded )) refused alike (another platform's, or internal to the standard library)"
 for program in coroutine.bot context.bot hello-darwin.bot; do
   both 0 "-emit-nir of $program" -emit-nir -backend interp "$program"
 done
@@ -121,6 +140,11 @@ for query in "" warnings cli.options std::list::at KNOWN-ERROR "bounds proof"; d
   if [[ -z $query ]]; then both 0 "-help" -help; else both 0 "-help $query" -help "$query"; fi
 done
 both 0 "the usage summary"
+# Compilerpedia's census: every topic of the checkout's topic files, listed.
+both 0 "-help all" -help all
+topics=$(cat "$root"/compilerpedia/topics/*.topic "$root"/compilerpedia/generated/*.topic | grep -c '^@topic ')
+grep -q "^$topics topics\. " "$work/a.out" || fail "the application's Compilerpedia does not list the checkout's $topics topics: $(tail -n 2 "$work/a.out" | head -n 1)"
+echo "   Compilerpedia: $topics topics, the checkout's"
 reflowed=0
 echo "   diagnostics, -check, NIR, Compilerpedia and the usage: $compared runs alike"
 

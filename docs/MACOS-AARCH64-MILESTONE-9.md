@@ -117,7 +117,132 @@ signature, a cache under `~/Library/Caches`, and a bundled
 This milestone does each; no linker, startup path, runtime format or C ABI
 lowering changed.
 
-<<EV census>>
+## 3. Tcl framework build census
+
+`audit/macos-app/tools/census.sh` probes each fact this design relies on,
+on the runner, and prints every command with its output and status; the
+`app` job runs it after building the application. Observed on macos-15
+(Xcode 16.4, SDK 15.5), run 40129027396.
+
+**C1, the framework Tcl builds.** `single/macos/tcl-framework.sh` takes the
+version, sha256 and download URLs from `single/build.sh` (one pin for both
+distributions: Tcl 9.0.1, sha256
+`a72b1607d7a399c75148c80fcdead88ed3371a29884181f200f2200cdee33bbc`, the
+SourceForge release `tcl9.0.1-src.tar.gz`), checks the checksum with
+`shasum -a 256 -c` before unpacking, and runs Tcl's own macOS build:
+
+```
+configure --enable-framework --libdir=/Frameworks --prefix=/usr/local --disable-zipfs CFLAGS=-O2 -arch arm64
+make DYLIB_INSTALL_DIR=@rpath/Tcl.framework/Versions/9.0 binaries
+make DYLIB_INSTALL_DIR=... INSTALL_ROOT=STAGING install-binaries install-libraries install-msgs install-headers
+```
+
+with `MACOSX_DEPLOYMENT_TARGET=11.0` (rustc's for aarch64-apple-darwin, so
+the framework, the driver and the runtime archive agree). Nothing is
+installed outside the staging root. What it produced:
+
+```
+$ file .../Tcl.framework/Versions/9.0/Tcl
+Mach-O 64-bit dynamically linked shared library arm64
+$ otool -D .../Tcl.framework/Versions/9.0/Tcl
+@rpath/Tcl.framework/Versions/9.0/Tcl
+$ otool -L .../Tcl.framework/Versions/9.0/Tcl
+	@rpath/Tcl.framework/Versions/9.0/Tcl (compatibility version 9.0.0, current version 9.0.1)
+	/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+	/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (...)
+$ codesign -dv .../Tcl.framework/Versions/9.0/Tcl
+Identifier=Tcl  flags=0x20002(adhoc,linker-signed)  Info.plist=not bound  Sealed Resources=none
+$ du -sk Tcl.framework Versions/9.0/Tcl Versions/9.0/Resources/Scripts
+4744  1784  2608
+```
+
+* The framework links only the system's zlib, libSystem and CoreFoundation.
+  Tcl's own libtommath is compiled in (as on Linux); its zlib is the
+  system's here, which is what Tcl's macOS build chooses.
+* `--disable-zipfs` only stops `make` from attaching a zipfs image of the
+  script library to the binary (configure forces `ZIPFS_BUILD=0` with
+  `--enable-framework` anyway): `unzip -l` finds no archive in the binary
+  (status 9). The `zipfs` commands and `TclZipfs_Mount` are part of every
+  Tcl 9 library; the launcher uses them.
+* The script library is plain files, `Versions/9.0/Resources/Scripts`
+  (init.tcl, the encodings, msgs) and `Resources/tcl9` (Tcl's bundled
+  modules: http, msgcat, tcltest, platform); `Resources/Info.plist` names
+  the framework `com.tcltk.tcllibrary`, version 9.0.1.
+* The linker's signature of a freshly built framework binary is ad hoc and
+  `linker-signed`, binding no Info.plist and sealing no resources: it is
+  replaced by the framework's own signature in the application (section 28).
+* The build takes about 30 s on the runner. CI caches the output under
+  `~/Library/Caches/botlish-app`, as `single/macos/build.sh` does on a
+  developer's Mac: `tcl-framework-KEY`, KEY a hash of the recipe
+  (tcl-framework.sh, the pin, the deployment target), so a changed recipe
+  builds a new framework.
+
+**C2, how an executable linked to the framework finds Tcl's script
+library.** The framework's own `tclsh9.0` (rpath `@executable_path`, beside
+`Tcl.framework`), with no environment:
+
+```
+$ env -i .../tclsh9.0     (puts [info library] ...)
+info library: .../Tcl.framework/Versions/9.0/Resources/Scripts
+nameofexecutable: .../tclsh9.0
+encoding system: utf-8
+$ env -i TCL_LIBRARY=.../decoy .../tclsh9.0
+DECOY init.tcl sourced from .../decoy/init.tcl
+info library: .../decoy
+```
+
+Tcl's own search finds the framework's scripts (through CoreFoundation's
+bundle of identifier `com.tcltk.tcllibrary`), but tries `$TCL_LIBRARY`
+first: a stock framework Tcl runs whatever script library the environment
+names. So the launcher sets `tcl_library` itself, to the scripts beside the
+Tcl binary dyld loaded, before `Tcl_Init` (section 11); app-test's
+relocation group runs with a decoy `TCL_LIBRARY` and the
+`tcl-library-from-environment` mutant is killed.
+
+## 4. Tcl zipfs application-startup census
+
+**C3, a separate ZIP file.** `zipfs mkzip` writes an ordinary ZIP that
+`unzip -l` lists. Tcl 9.0.1's `TclZipfs_AppHook` (which `tclAppInit.c`
+calls) mounts only an archive appended to the executable; it never
+mounts a ZIP given on the command line
+(`SUPPORT_BUILTIN_ZIP_INSTALL` is not defined): the stock `tclsh9.0`
+reads such an argument as a script and fails (`couldn't read file
+".../app.zip": invalid or incomplete multibyte or wide character`, status
+1). `zipfs mount` of the separate file from a script:
+
+```
+mounts: //zipfs:/app /private/var/folders/.../app.zip
+glob: //zipfs:/app/botlish //zipfs:/app/main.tcl
+normalize: //zipfs:/app/botlish/file.txt
+dirname of main.tcl: //zipfs:/app
+read: inside
+writable: 1 wrmax: 2147483647
+write, default wrmax: 1 file "//zipfs:/app/botlish/new.txt" not created: operation not supported
+write, wrmax 0: 1 writes not permitted: permission denied
+the archive file unchanged: 316 bytes
+```
+
+Paths inside the mount normalize to themselves, `file dirname` of a mounted
+file is its directory in the mount -- what `main.tcl`'s `source` chain and
+`core::libraryDir` compute from -- and the archive file is never written.
+A file in a mount opens for writing by default (zipfs keeps the new
+contents in memory, up to `::tcl::zipfs::wrmax` bytes); with
+`::tcl::zipfs::wrmax 0` that is refused with EACCES ("writes not
+permitted"), and a new file is refused either way (ENOTSUP). Both
+startups now set `wrmax 0`: the compiler cannot modify its own files in
+memory and then read the modified ones (the `zip-writable` mutant).
+
+**The startup the launcher reproduces.** `TclZipfs_AppHook`, for a zipkit,
+mounts the executable's archive at `//zipfs:/app`, sets the startup script
+to `//zipfs:/app/main.tcl` (`Tcl_SetStartupScript`, so that the remaining
+arguments are `::argv`, `$argv0` the script) and the script library to
+`//zipfs:/app/tcl_library`. The launcher does the same with
+`TclZipfs_Mount` of `Contents/Resources/botlish.zip`, the framework's
+script library and the same startup script: `single/main.tcl` runs in
+both with the same `::argv` and `$argv0` (`//zipfs:/app/main.tcl`), and
+the checkout's `main.tcl` is sourced unchanged from `//zipfs:/app/botlish`
+in both.
 
 ## 5. Packaging designs considered
 
@@ -169,7 +294,24 @@ data inside a segment. Tcl's own build knows this: a zipfs-attached
 otherwise (unix/Makefile.in), and a framework build attaches nothing
 (`ZIPFS_BUILD=0` whenever `--enable-framework`, unix/configure.ac).
 
-<<EV signing-constraint>>
+The census measured it (C4) with the framework's `tclsh9.0` as base kit
+and a two-file archive:
+
+| file | `codesign --verify --strict` | runs |
+|---|---|---|
+| `zipfs mkimg` output (linker's ad-hoc signature, archive appended) | `main executable failed strict validation` | yes |
+| the same, re-signed `codesign --force --sign -` | signing itself reports `main executable failed strict validation`; verification fails | yes |
+| base signed first, archive appended with `cat` | `main executable failed strict validation` | yes |
+| the kit as an application bundle's main executable, bundle signed | `main executable failed strict validation`; `--deep` reports `invalid Info.plist (plist or signature have been modified)` | -- |
+
+and `install_name_tool` refuses to edit the kit at all ("the `__LINKEDIT`
+segment does not cover the end of the file"), so even its search path has
+to be set before the archive is appended. The kit runs -- the kernel
+enforces no signature on an ad-hoc binary that is only invalid in the
+appended bytes -- but nothing about it is a signed, verifiable program;
+Gatekeeper, notarization and any distribution channel that checks
+signatures reject it. The application therefore keeps the archive as a
+separate, sealed resource (section 7).
 
 ## 7. Chosen application-bundle design
 
@@ -200,7 +342,100 @@ otherwise (unix/Makefile.in), and a framework build attaches nothing
 
 ## 8. Exact bundle layout
 
-<<EV layout>>
+As built by `single/macos/build.sh` (run 40129027396; `find` without the
+script library's files; sizes from `ls -l`):
+
+```
+Botlish.app/
+  Contents/
+    Info.plist                                     821 bytes
+    MacOS/
+      botlish                                      70,272   the launcher
+      botlish-native                            6,084,288   the native driver
+    Frameworks/
+      Tcl.framework/
+        Resources -> Versions/Current/Resources
+        Tcl -> Versions/Current/Tcl
+        Versions/
+          Current -> 9.0
+          9.0/
+            Tcl                                 1.8 MB      libtcl9.0, install name @rpath/...
+            Resources/                                      Info.plist, license.terms,
+                                                            Scripts/ (Tcl's script library),
+                                                            tcl9/ (Tcl's modules)
+            _CodeSignature/CodeResources                    the framework's seal (238 files)
+    Resources/
+      botlish.zip                               1,957,243   190 files, 7,145,465 bytes unpacked
+      libbotlish_runtime.a                     14,406,808   the runtime archive
+    _CodeSignature/CodeResources                            the application's seal (4 files)
+```
+
+`Info.plist`: `CFBundleExecutable` botlish, `CFBundleIdentifier`
+io.github.mwagner-webdev.botlish, `CFBundlePackageType` APPL,
+`LSMinimumSystemVersion` 11.0, `LSBackgroundOnly` (no Dock icon, no menu
+bar: it is a command-line program), `BotlishSourceRevision` (the commit it
+was built from; `-version` prints the archive's `BUILD`, the same commit).
+No `CFBundleIconFile`, no document types, no URL schemes.
+
+`verify.sh`'s layout group checks this exactly: these names and nothing
+else in each directory, the three framework links as symbolic links with
+these targets, the executables executable, the two Info.plist keys. The
+compiler archive's contents are section 13.
+
+## 9. Tcl framework version and checksum
+
+| | |
+|---|---|
+| version | Tcl 9.0.1 (`info patchlevel` 9.0.1; `-version` prints `Tcl: 9.0.1`) |
+| source | `https://downloads.sourceforge.net/project/tcl/Tcl/9.0.1/tcl9.0.1-src.tar.gz` (mirror `prdownloads.sourceforge.net`), the official source release |
+| sha256 | `a72b1607d7a399c75148c80fcdead88ed3371a29884181f200f2200cdee33bbc`, checked by `shasum -a 256 -c` before the tarball is unpacked |
+| pin | `single/build.sh`'s `TCL_VERSION`, `TCL_SHA256`, `TCL_URLS`, which `tcl-framework.sh` reads: the Linux single executable's static Tcl and the macOS framework are the same release, and the canonical baseline of AGENTS.md ("Installing Tcl 9") |
+| build | Tcl's own `unix/configure --enable-framework`, `-O2 -arch arm64`, deployment target 11.0; Tcl's libtommath built in, the system's zlib |
+| recorded | the framework build's `BUILD` file (version, sha256, configure arguments, deployment target, install name) |
+
+The launcher checks the loaded Tcl's version against the one it was
+compiled against (`Tcl_GetVersion`, 9.0) and refuses another.
+
+## 10. Framework install names and runtime search paths
+
+```
+$ otool -L Contents/MacOS/botlish
+	@rpath/Tcl.framework/Versions/9.0/Tcl (compatibility version 9.0.0, current version 9.0.1, weak)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+$ otool -l Contents/MacOS/botlish | grep -A2 LC_RPATH
+          cmd LC_RPATH
+      cmdsize 48
+         path @executable_path/../Frameworks (offset 12)
+$ otool -D Contents/Frameworks/Tcl.framework/Versions/9.0/Tcl
+@rpath/Tcl.framework/Versions/9.0/Tcl
+$ otool -L Contents/MacOS/botlish-native
+	/usr/lib/libiconv.2.dylib (compatibility version 7.0.0, current version 7.0.0)
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+```
+
+* The framework's install name is `@rpath/Tcl.framework/Versions/9.0/Tcl`,
+  set when it is linked (`DYLIB_INSTALL_DIR`), never rewritten afterwards
+  with `install_name_tool`.
+* The launcher has exactly one `LC_RPATH`, `@executable_path/../Frameworks`:
+  dyld resolves Tcl relative to the launcher's own location, which is how
+  the application runs wherever it is moved. It loads Tcl weakly
+  (`LC_LOAD_WEAK_DYLIB`), so that a missing or damaged framework is the
+  launcher's diagnostic, not a dyld abort (section 11).
+* Nothing else in the bundle has a search path: the driver links only
+  libSystem and libiconv, the framework only libSystem, zlib and
+  CoreFoundation, all of them the system's. No path in any load command is
+  absolute outside `/usr/lib` and `/System/Library`: no build directory,
+  no `/Library/Frameworks`, no `/opt/homebrew`, no `/usr/local`
+  (`verify.sh`'s dependency group checks every load command of every
+  Mach-O in the bundle).
+* The census's `DYLD_PRINT_LIBRARIES` run of a copy moved to "moved
+  place/ü" lists exactly two images outside the system: the launcher and
+  `.../moved place/ü/Botlish.app/Contents/Frameworks/Tcl.framework/Versions/9.0/Tcl`.
+* `DYLD_FRAMEWORK_PATH` naming a directory with another `Tcl.framework`
+  makes dyld load that one (dyld searches it before the rpath, and an
+  ad-hoc application is not protected from DYLD variables); the launcher
+  then finds that the loaded Tcl is not its own and refuses (app-test's
+  relocation group: "loaded Tcl from ..., not this application's own").
 
 ## 11. Native launcher implementation
 
