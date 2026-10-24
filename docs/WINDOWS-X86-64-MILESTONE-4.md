@@ -817,6 +817,24 @@ Every run of this milestone on the branch, in order:
 
 Commits after 62ba9cd change only this report, except d38feb0, which
 the last three runs ran.
+
+The milestone reached main merged with main's 102 commits since 85753d9
+(227f343, and c823f5e for main's three after it). On the merged tree:
+- the full `tests/local.tcl` passed (7,298 and 7,293 Tcl tests, 108
+  golden suites on four backends);
+- Linux x86-64 (run 40091935268), Linux AArch64 (40091936924, GC stress
+  included) and macOS (40097417414) were green.
+
+On Windows (run 40097417381) smoke, `roots` and acceptance shards 2 and 3
+were green. Three jobs failed exactly as on main's own run of 81cda13
+(40093343678), for reasons outside this milestone:
+- the system linker's job, whose `native/runtime-archive/libraries.tcl`
+  finds rustc listing `legacy_stdio_definitions.lib` among the runtime
+  archive's system libraries, which the driver's list lacks;
+- acceptance shards 1 and 4, where `dfa.test` (20 tests) and
+  `dfa-workloads.test` (16) run coroutine programs on the native backends
+  with no `nativeCoroutines` constraint: Windows refuses each one as NATIVE
+  UNSUPPORTED.
 ## 8. Performance
 
 Real Windows: the roots job of run
