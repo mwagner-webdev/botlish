@@ -55,7 +55,83 @@ where every CI run below ran.
 
 ## 1. Result
 
-PENDING-RESULT
+Botlish coroutines run natively on Windows x86-64, with the semantics and
+the guarantees they have on Linux and macOS. `native/native.tcl`'s
+`coroutines` capability now names windows-x86_64, so `nativeCoroutines`
+holds there and every test that carries it runs on Windows. The row was
+set once those tests passed on real Windows, not when switching first
+worked.
+
+* **The architecture is Windows' fibers** (section 2). The comparison was
+  run on real Windows, with fibers on one side and a custom Win64 switch in
+  three TEB modes on the other:
+  - a switch that writes no TEB field, or only NT_TIB's documented
+    `StackBase` and `StackLimit`, fails: an access violation for stack
+    growth, C calls and panics, or the wrong guarantee and the wrong
+    limits when the stack runs out;
+  - a switch that also writes two undocumented TEB offsets is correct
+    and 35 ns cheaper per round trip than a fiber's. The brief rules
+    those offsets out without a compelling reason, and 35 ns is not one;
+  - fibers passed every probe, and no concrete incompatibility showed up.
+
+  Production has no custom switch: the probe keeps it as evidence.
+* **A coroutine's stack is a fiber** (section 3):
+  - created by `CreateFiberEx` with `FIBER_FLAG_FLOAT_SWITCH`;
+  - given its own 32 KiB stack guarantee and a confirmed guard page on
+    the fiber, before any Botlish code runs there;
+  - pooled (32 per thread) and restarted at its top for every start;
+  - switched by `SwitchToFiber`, under the runtime code every host shares.
+
+  The runtime converts a thread with `ConvertThreadToFiberEx` and converts
+  it back when the thread ends, and only a conversion of its own; a
+  host's fiber stays the host's. The running fiber is never deleted.
+  Production reads one TEB field (`FiberData`, as `GetCurrentFiber` does)
+  and writes none.
+* **Exhaustion of any stack is NATIVE LIMIT STACK** (section 5). That
+  holds for the thread's stack and every coroutine's, at a start, after
+  yields, nested, in Botlish code, the runtime or C. The stack running is
+  published to the guard on arrival, after every switch, double-buffered.
+  A fault that is not an overflow ends as it would without the guard.
+* **Roots survive on every stack** (section 6). The collector walks every
+  suspended coroutine's stack and every resumer's with Windows' unwinder,
+  from the frame the switch recorded, within that stack's own bounds.
+  Missed-root tests run under GC stress with heap poisoning and the
+  unwind check.
+* **The fallback root plan refuses native coroutines** (NATIVE
+  UNSUPPORTED, section 7.4). It was not made coroutine-aware.
+* **Everywhere native code runs** (section 8): both Cranelift backends,
+  the JIT, executables linked by rustc and by the system linker, and the
+  golden runner, which runs every golden suite on Windows' native backends
+  for the first time.
+* **Mutants** (section 8.4). There are 10 new mutants, of the fiber's
+  lifecycle, the Windows guard's reading of the published stack, the
+  walk of suspended stacks and the fallback refusal. Four publication
+  mutants that Linux and macOS already ran now run on Windows too. On real
+  Windows the native-stack and windows-unwind tools kill every mutant that
+  applies there. PENDING-RESULT-RUNS
+* **What it costs** (section 9; runner A):
+  - a resume is 192–211 ns at any depth, against 132–179 ns on Linux;
+    most of the difference is `SwitchToFiber`'s round trip (57.9 ns,
+    against 22.8 ns for a custom switch);
+  - a construction is about 566 ns;
+  - a fresh fiber costs about 15 µs, paid once per pooled stack;
+  - a collection pays about 0.7 µs per suspended coroutine.
+
+  Fused coroutines (the DFA and JSON workloads' default) never switch and
+  are as fast as on Linux. Programs without coroutines are unchanged:
+  equal code and unwind sizes and timings within noise on Windows, and
+  identical machine code on Linux.
+* **Linux and macOS are unchanged** (section 8.5). No code path of
+  theirs changed, and their CI passed: Linux x86-64, Linux AArch64, and
+  macOS with its full tier.
+
+What remains is in section 10:
+
+* the fibers' price per switch;
+* the stack a pooled fiber keeps committed;
+* a host's fiber made without the float flag.
+
+Section 11 recommends Win64 variadic C calls next.
 
 ## 2. Architecture comparison
 
@@ -516,6 +592,7 @@ What each switch keeps, and where each piece of state lives:
 | the stack guarantee | the fiber's own, asked once at setup and kept by every switch | the same |
 | Rust `thread_local!`s, `TlsAlloc` slots | the thread, shared by every fiber of it | probe |
 | FLS (`FlsAlloc`), the C runtime's `errno` | the fiber | probe |
+| the last-error code (`GetLastError`) | the thread (the TEB), shared by every fiber of it | code inspection: `SwitchToFiber` is documented to switch a fiber's context, not the thread's last-error code |
 | the guard's published stack | the runtime, on arrival (section 5) | `native_stack`'s publication check |
 
 The runtime keeps one piece of state per thread: the stack pool, the
@@ -528,7 +605,10 @@ the C runtime's `errno`. The C FFI reads it right after the call that set
 it, in the same function (C-FFI-ERROR-CAPTURE-MILESTONE-1.md), and no
 switch can come between them: a yield is a call of the runtime that
 switches. A binding therefore reads its own fiber's `errno`, as it reads
-its own thread's elsewhere.
+its own thread's elsewhere. The last-error code is the thread's, so a
+coroutine and its resumer share it, and the same rule makes that harmless:
+stdlib/windows.bot's `write_file` reads it right after WriteFile, with no
+switch between (`wi-last-error-read-first` pins the window).
 
 Production reads one TEB field, gs:0x20 (`FiberData`). That is what
 winnt.h's documented inline `GetCurrentFiber` reads; production writes no
@@ -590,18 +670,21 @@ checks compare each case with the guard installed and without it:
 | `RaiseException(STATUS_STACK_OVERFLOW)` on a coroutine's stack | 0xC00000FD | 0xC00000FD | no |
 
 The switch path itself was swept. A child descends to X bytes above where
-the stack it is on stops growing (X from 0 to 2 KiB in 16-byte steps), then
-switches. That covers the four directions:
+the stack it is on stops growing, then switches. That covers five cases,
+X from 0 to 2 KiB in 16-byte steps unless named:
 
 * a resume from the thread;
-* a fresh start from the thread;
+* a start from the thread on a pooled fiber, as every start but a
+  thread's first runs;
+* a thread's first start (`fresh-start-from-thread`), which converts the
+  thread and creates a fiber, X from 0 to 64 KiB in 512-byte steps;
 * a resume from inside a coroutine;
 * a yield back to it.
 
 Wherever the switch's own frames meet the end of the stack — the
-runtime's, `SwitchToFiber`'s, the arriving side's — the run either
-completes or ends in the overflow line, never a crash, and both outcomes
-occur in every direction (section 8).
+runtime's, `SwitchToFiber`'s, `CreateFiberEx`'s, the arriving side's —
+the run either completes or ends in the overflow line, never a crash
+(section 8.2).
 
 ## 6. GC correctness
 
@@ -911,8 +994,9 @@ native_stack failed without any mutant (the start sweep above). So
 "killed" by that sweep alone, and their own detectors never ran. They were
 run again on a4d5d108, with the sweep fixed: PENDING-WIN-RERUN.
 
-* **Linux:** `audit/native-stack/tools/mutate.tcl` (the six above with
-  `gc-walk-half-stack`): 6 mutants on linux-x86_64, 6 killed.
+* **Linux:** `audit/native-stack/tools/mutate.tcl`, the five mutants of
+  the table that apply on Linux with `gc-walk-half-stack`: 6 mutants on
+  linux-x86_64, 6 killed.
 * **Linux:** `audit/coroutines/tools/mutate.tcl`'s ten native mutants of
   the runtime and the collector's walks: 10 killed by coroutines.test, the
   fuzzer and the Rust tests:
@@ -1085,7 +1169,7 @@ controlled experiment.)
   ahead.
 * **The general runtime is 50 to 60 ns per item dearer on Windows**, where
   every item is one switch round trip (dfa-micro: 202 against 139). That is
-  the resume's difference of 9.1 again. The DFA workloads that matter run
+  the resume's difference in section 9.1 again. The DFA workloads that matter run
   fused, at 3.5 to 26 ns per item on Windows. The general runtime remains
   what runs the coroutines fusion cannot take (a handle that leaves its
   function, a recursive yielding chain), and the golden runner.
@@ -1097,16 +1181,18 @@ before this milestone (b5b17a39, built in the job) was compared with this
 branch's on `bench/root-plans.tcl`'s workloads, 20 runs × 7 rounds, under
 the JIT and as executables, plus collection cost under GC stress:
 
-| Workload | JIT, this / before | Executable, this / before | Code, `.pdata` + `.xdata` |
+| Workload | JIT, this / before | Executable, this / before | Sizes: code; `.pdata` + `.xdata` |
 |---|---:|---:|---|
-| fib | 1.005 | 1.000 | identical (208 B; 48 + 44 B) |
-| calls | 0.926 | 0.984 | identical (646 B) |
-| uri | 1.029 | 1.014 | identical (6313 B; 408 + 548 B) |
-| 2048 | 1.007 | 0.989 | identical (22344 B; 792 + 1196 B) |
-| strings | 1.000 | 0.996 | identical (367 B) |
-| lists | 1.015 | 1.040 | identical (734 B) |
+| fib | 1.005 | 1.000 | equal (208 B; 48 + 44 B) |
+| calls | 0.926 | 0.984 | equal (646 B) |
+| uri | 1.029 | 1.014 | equal (6313 B; 408 + 548 B) |
+| 2048 | 1.007 | 0.989 | equal (22344 B; 792 + 1196 B) |
+| strings | 1.000 | 0.996 | equal (367 B) |
+| lists | 1.015 | 1.040 | equal (734 B) |
 
-* The machine code and unwind information are byte-for-byte the same size.
+* The machine code and the unwind information have equal sizes before and
+  after. Sizes are what `root-plans.tcl` compares; the Linux comparison
+  below compares the code itself.
 * The checks (Botlish calls checked for an error, prologue depth checks)
   are identical.
 * Each ratio lies within its own rounds' spread.
@@ -1134,9 +1220,11 @@ runtime's Windows code is.
 * **A pooled fiber keeps its committed stack.** Windows commits stack
   pages as a fiber grows and never decommits them. A pooled fiber that
   once grew to 2 MiB keeps 2 MiB charged against the system's commit
-  limit (pagefile-backed) until it is deleted. Linux's untouched pages
-  cost nothing and touched ones stay resident too, but Windows counts
-  commitment up front. Nothing resets a pooled fiber's stack. The
+  limit (pagefile-backed) until it is deleted. A pooled POSIX stack
+  keeps the pages a coroutine touched too, resident until it is
+  unmapped; the difference is the accounting: Windows charges committed
+  pages against the commit limit whether or not they are resident.
+  Nothing resets a pooled fiber's stack. The
   reservation itself, 8 MiB + 64 KiB per fiber by default, is address
   space only.
 * **A host's conversion is the host's.** On a thread that something else
@@ -1186,8 +1274,8 @@ has `jit`, `executables`, `cCalls`, `coroutines`, `stackGuard` and
   `cf-va-*`, a Win64 row in the variadic table. Until then a variadic C
   function (the `printf` family, the C runtime's `_open`) cannot be called
   from Botlish on Windows: a codegen error (`nativeCVariadics`).
-* **`libraries`.** Native libraries are Linux glibc's only, on macOS as
-  well. A Windows DLL export is a larger design question:
+* **`libraries`.** Native libraries are Linux glibc's only: macOS lacks
+  them too. A Windows DLL export is a larger design question:
   - export tables;
   - the static C runtime policy across a DLL boundary (milestone 2's
     "never impose the executable's runtime");
