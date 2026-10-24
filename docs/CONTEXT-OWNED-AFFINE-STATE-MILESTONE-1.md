@@ -749,7 +749,7 @@ The harnesses AGENTS.md names for the files this milestone changed:
 | `audit/mutable-vector/tools/mutate.tcl`, the 46 mutants that edit hir/affine.tcl or hir/mutvec.tcl (`affine-move-cow-fork`'s text updated to the new ShareDescriptor) | 46 of 46 killed |
 | `audit/mutable-array/tools/mutate.tcl`, the 12 mutants that edit hir/affine.tcl, hir/mutvec.tcl or native/lower.tcl | 12 of 12 killed |
 | `audit/mutable-map/tools/mutate.tcl`, the 6 mutants that edit hir/mutvec.tcl or native/lower.tcl | 6 of 6 killed |
-| `audit/contexts/tools/mutate.tcl` (26 mutants; core/contexts.tcl changed) | [[TBD:contexts]] |
+| `audit/contexts/tools/mutate.tcl` (26 mutants; core/contexts.tcl changed; its fuzzer in the default, unowned mode) | 26 of 26 killed |
 | every mutant of every `audit/*/tools/mutants.txt` that edits a file this milestone changed (346 edits) | each still applies to its text exactly once |
 | `tclsh9.0 audit/refactor/tools/gate.tcl` (the warning gate) | passed: the observed warnings are exactly the manifest (75 corpus programs, 30 library loaders) |
 | `tclsh9.0 tools/compilerpedia.tcl check` | 848 topics (2 new, 2 generated notes), 633 examples run, 0 problems |
