@@ -786,7 +786,7 @@ concurrently, so only indicative): headless 27.5 us a frame before, 24.2
 after; dummy driver 477.8 us before, 444.6 after -- within the noise of a
 loaded machine, and SDL's software renderer dominates it. No specialized
 native instruction was added for any of it; AOT builds and runs as before
-(build.sh: about 53 s).
+(build.sh: about a minute).
 
 ## 6. Architectural conclusion
 
@@ -857,9 +857,11 @@ ownership boundary coincide.
 | `core/mutvec.tcl`, `core/mutarray.tcl` | `std::mutable_vector::element`, `std::mutable_array::element` |
 | `hir/affine.tcl` | context bindings own nothing; context places; `ContextConsumer`, AFFINE-CONTEXT-COPY-OUT, `LaterArgumentRunsCode`; the capture and naming fixes |
 | `hir/mutvec.tcl` | the element place's receiver check; affine structs' share descriptors |
-| `hir/static.tcl`, `stdlib/compiler.bot`, `hir/staticdeps.tcl` | the new kind's DiagnosticCode case and its ownership-verdict channel |
+| `hir/static.tcl`, `stdlib/compiler.bot`, `hir/staticdeps.tcl`, `stdlib/test.bot` | the new kind's DiagnosticCode case, its ownership-verdict channel and `std::test::code_name`'s spelling of it |
 | `native/lower.tcl` | C address words as context-slot leaves; the element places' ops |
 | `examples/games/icy-tower/sdl.bot` | the refactored airlock |
+| `audit/icy-tower/artifacts/icy-tower` | the committed executable, rebuilt from it |
+| `tests/c-abi-types.test`, `tests/mutable-array.test`, `tests/static-compile.test`, `tests/stdlib-namespaces.test`, `tests/workload-icy-tower.test`, `tests/windows-io.test`, `tests/golden-framework.test` | tests that pinned the old rule (a pointer in a context rejected), the roles and namespace inventories, the census and the airlock's private names |
 | `tests/context-affine.test` | the milestone's tests |
 | `audit/contexts/tools/fuzz.tcl`, `owned.tcl` | the context fuzzer's owned-state mode |
 | `audit/context-affine/tools/mutate.tcl`, `mutants.txt` | the mutation harness and its mutants |
