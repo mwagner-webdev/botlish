@@ -51,7 +51,7 @@ identifier=io.github.mwagner-webdev.botlish
 v=9.0
 fw="$c/Frameworks/Tcl.framework"
 fail() { echo "FAIL[$1]: $2" >&2; exit 1; }
-listing() { (cd "$1" && ls -A | tr '\n' ' ' | sed 's/ $//'); }
+listing() { (cd "$1" && ls -A | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'); }
 
 # --- layout -------------------------------------------------------------------
 for path in Info.plist MacOS/botlish MacOS/botlish-native Resources/botlish.zip Resources/libbotlish_runtime.a \

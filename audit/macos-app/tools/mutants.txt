@@ -1,0 +1,236 @@
+# Mutants of the macOS application's packaging (audit/macos-app/tools/mutate.tcl;
+# MACOS-AARCH64-MILESTONE-9.md, "Mutation testing"): the launcher, the
+# bundle's build and signing, single/main.tcl's application branch and
+# single/package.tcl's archive. The format of
+# audit/single-executable/tools/mutants.txt:
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# The driver's own share (its runtime archive in the bundle, the toolchain
+# remedy, an executable's search path) is mutated by
+# audit/native-aot/tools/mutants.txt (sys-runtime-bundle-*,
+# sys-apple-remedy-rust, sys-executable-rpath), which rebuilds the driver.
+
+@@ launcher-system-tcl the launcher's search path is the system's /Library/Frameworks, not the bundle's Frameworks
+## single/macos/build.sh
+<<<<
+  -Wl,-rpath,@executable_path/../Frameworks \
+====
+  -Wl,-rpath,/Library/Frameworks \
+>>>>
+
+@@ launcher-build-tcl the launcher finds Tcl in the framework's build directory (an absolute path of the build machine)
+## single/macos/build.sh
+<<<<
+  -Wl,-rpath,@executable_path/../Frameworks \
+====
+  -Wl,-rpath,"$tcl_framework" \
+>>>>
+
+@@ rpath-outside-bundle the launcher's search path points beside the bundle's Frameworks directory
+## single/macos/build.sh
+<<<<
+  -Wl,-rpath,@executable_path/../Frameworks \
+====
+  -Wl,-rpath,@executable_path/../Framework \
+>>>>
+
+@@ tcl-library-from-environment the launcher sets no tcl_library: Tcl's own search takes $TCL_LIBRARY first
+## single/macos/launcher.c
+<<<<
+    if (scripts != NULL) {
+        Tcl_SetVar2(interp, "tcl_library", NULL, scripts, TCL_GLOBAL_ONLY);
+    }
+====
+    (void)scripts;
+>>>>
+
+@@ zip-omitted the compiler archive is left out of the bundle
+## single/macos/build.sh
+<<<<
+chmod 644 "$contents/Resources/botlish.zip"
+====
+rm "$contents/Resources/botlish.zip"
+>>>>
+
+@@ zip-wrong-mount the launcher mounts the compiler archive elsewhere than //zipfs:/app
+## single/macos/launcher.c
+<<<<
+    if (TclZipfs_Mount(interp, archive, MOUNT, NULL) != TCL_OK) {
+====
+    if (TclZipfs_Mount(interp, archive, "//zipfs:/compiler", NULL) != TCL_OK) {
+>>>>
+
+@@ zip-writable the archive stays writable to the compiler: zipfs keeps writes to its files in memory
+## single/main.tcl
+<<<<
+set ::tcl::zipfs::wrmax 0
+====
+>>>>
+
+@@ source-from-checkout the compiler is sourced from the checkout that built it when that exists
+## single/main.tcl
+<<<<
+source [file join $::single::app botlish main.tcl]
+====
+if {[file isfile @CHECKOUT@/main.tcl]} {
+    source @CHECKOUT@/main.tcl
+} else {
+    source [file join $::single::app botlish main.tcl]
+}
+>>>>
+
+@@ stdlib-module-omitted one standard-library module (std::darwin) is left out of the archive
+## single/package.tcl
+<<<<
+    StageCompiler [file join $stage botlish]
+====
+    StageCompiler [file join $stage botlish]
+    file delete [file join $stage botlish stdlib darwin.bot]
+>>>>
+
+@@ compilerpedia-omitted Compilerpedia's topics are left out of the archive
+## single/package.tcl
+<<<<
+    foreach dir {topics generated} {
+        file copy [file join $root compilerpedia $dir] [file join $app compilerpedia $dir]
+    }
+====
+>>>>
+
+@@ backend-omitted the native backend is left out of the bundle
+## single/macos/build.sh
+<<<<
+codesign --force --sign - "$app"
+====
+rm "$contents/MacOS/botlish-native"
+codesign --force --sign - "$app"
+>>>>
+
+@@ backend-from-environment the application takes BOTLISH_NATIVE_BIN from the environment when it is set: another build's driver
+## single/main.tcl
+<<<<
+    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+====
+    if {![info exists ::env(BOTLISH_NATIVE_BIN)]} {
+        set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    }
+>>>>
+
+@@ runtime-omitted the runtime archive is left out of the bundle
+## single/macos/build.sh
+<<<<
+codesign --force --sign - "$app"
+====
+rm "$contents/Resources/libbotlish_runtime.a"
+codesign --force --sign - "$app"
+>>>>
+
+@@ runtime-relative the application names the runtime archive by a path relative to the working directory
+## single/main.tcl
+<<<<
+    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+====
+    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+    set ::env(BOTLISH_NATIVE_RUNTIME) Botlish.app/Contents/Resources/libbotlish_runtime.a
+>>>>
+
+@@ linker-rustc the application's linker is rustc, not auto (the system linker)
+## single/main.tcl
+<<<<
+    set ::env(BOTLISH_NATIVE_LINKER) auto
+====
+    set ::env(BOTLISH_NATIVE_LINKER) rustc
+>>>>
+
+@@ argument-dropped the launcher drops the first argument
+## single/macos/launcher.c
+<<<<
+    for (int i = 1; i < argc; i++) {
+        args[i] = argv[i];
+    }
+====
+    for (int i = 2; i < argc; i++) {
+        args[i - 1] = argv[i];
+    }
+    if (argc > 1) {
+        argc--;
+    }
+>>>>
+
+@@ startup-banner the launcher greets on standard output: the language server's protocol begins with it
+## single/macos/launcher.c
+<<<<
+    Tcl_FindExecutable(executable);
+====
+    printf("Botlish\n");
+    fflush(stdout);
+    Tcl_FindExecutable(executable);
+>>>>
+
+@@ cache-in-bundle the language server copies the standard library into the application bundle
+## single/main.tcl
+<<<<
+    if {$::tcl_platform(os) eq "Darwin"} {
+        if {[info exists ::env(HOME)] && $::env(HOME) ne ""} {
+====
+    if {$::tcl_platform(os) eq "Darwin"} {
+        if {[info exists ::single::bundle]} {
+            lappend roots [file join $::single::bundle Resources cache]
+        }
+        if {[info exists ::env(HOME)] && $::env(HOME) ne ""} {
+>>>>
+
+@@ modified-after-signing the launcher is changed after the application is signed
+## single/macos/build.sh
+<<<<
+codesign --force --sign - "$app"
+====
+codesign --force --sign - "$app"
+install_name_tool -add_rpath @executable_path/../Resources "$contents/MacOS/botlish" 2>/dev/null
+>>>>
+
+@@ framework-unsigned the framework is never signed (only its library's linker signature)
+## single/macos/build.sh
+<<<<
+codesign --force --sign - "$contents/Frameworks/Tcl.framework/Versions/$tcl_version"
+====
+>>>>
+
+@@ backend-unsigned the native backend is never signed with its identifier (its linker signature left)
+## single/macos/build.sh
+<<<<
+codesign --force --sign - --identifier "$identifier.native" "$contents/MacOS/botlish-native"
+====
+>>>>
+
+@@ zip-changed-after-signing the compiler archive is rewritten after the application is signed
+## single/macos/build.sh
+<<<<
+codesign --force --sign - "$app"
+====
+codesign --force --sign - "$app"
+printf 'x' >>"$contents/Resources/botlish.zip"
+>>>>
+
+@@ archive-without-links the download archive stores the framework's symbolic links as files
+## single/macos/build.sh
+<<<<
+(cd "$output" && ditto -c -k --norsrc --noextattr --noacl --keepParent Botlish.app "$(basename "$archive")")
+====
+(cd "$output" && zip -q -r "$(basename "$archive")" Botlish.app)
+>>>>
+
+@@ framework-from-system the launcher accepts whatever Tcl dyld loaded, the bundle's or not, and its scripts
+## single/macos/launcher.c
+<<<<
+    if (loaded == NULL || own == NULL || strcmp(loaded, own) != 0) {
+====
+    if (loaded == NULL) {
+>>>>

@@ -2,7 +2,7 @@
 # single/macos/build.sh -- builds the macOS distribution of the Botlish
 # compiler, Botlish.app (MACOS-AARCH64-MILESTONE-9.md).
 #
-#   single/macos/build.sh [-o DIR] [--tcl-framework DIR] [--native-dir DIR]
+#   single/macos/build.sh [-o DIR] [--tcl-framework DIR] [--native-dir DIR] [--no-verify]
 #
 # Runs on Apple Silicon macOS with Apple's command-line tools. DIR (default
 # single/out/macos) receives
@@ -56,7 +56,8 @@
 #   5. single/macos/verify.sh on the application (layout, architectures,
 #      dynamic dependencies and load paths, signatures, archive contents
 #      against this checkout), then the download archive, extracted again
-#      and verified.
+#      and verified -- unless --no-verify (audit/macos-app/tools/mutate.tcl
+#      runs the verification itself, as a detector).
 #
 # The deployment target is $MACOSX_DEPLOYMENT_TARGET, default 11.0: rustc's
 # for aarch64-apple-darwin, which the driver and the runtime archive are
@@ -68,11 +69,13 @@ here="$root/single/macos"
 output="$root/single/out/macos"
 tcl_framework=""
 native_dir=""
+verify=1
 while [[ $# -gt 0 ]]; do
   case $1 in
     -o) output=$2; shift 2 ;;
     --tcl-framework) tcl_framework=$2; shift 2 ;;
     --native-dir) native_dir=$2; shift 2 ;;
+    --no-verify) verify=0; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//;$d'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -185,12 +188,14 @@ chmod 644 "$contents/Resources/botlish.zip"
 codesign --force --sign - "$app"
 
 # --- 5. verification and the download -----------------------------------------
-"$here/verify.sh" --checkout "$root" "$app"
+(( verify )) && "$here/verify.sh" --checkout "$root" "$app"
 archive="$output/botlish-macos-aarch64.zip"
 rm -f "$archive" "$archive.sha256"
 (cd "$output" && ditto -c -k --norsrc --noextattr --noacl --keepParent Botlish.app "$(basename "$archive")")
 (cd "$output" && shasum -a 256 "$(basename "$archive")" >"$(basename "$archive").sha256")
-mkdir -p "$work/extracted"
-(cd "$work/extracted" && unzip -q "$archive")
-"$here/verify.sh" --checkout "$root" "$work/extracted/Botlish.app"
+if (( verify )); then
+  mkdir -p "$work/extracted"
+  (cd "$work/extracted" && unzip -q "$archive")
+  "$here/verify.sh" --checkout "$root" "$work/extracted/Botlish.app"
+fi
 echo "== $app ($(du -sk "$app" | cut -f1) KiB), $archive ($(wc -c <"$archive" | tr -d ' ') bytes): $(cut -d' ' -f1 "$archive.sha256")"

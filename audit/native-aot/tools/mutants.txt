@@ -317,6 +317,45 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
 >>>>
 
+@@ sys-runtime-bundle-ignored a driver in a macOS application bundle looks for the runtime archive beside itself, in Contents/MacOS, never in the bundle's Contents/Resources (MACOS-AARCH64-MILESTONE-9.md)
+%% macos-aarch64
+## native/src/codegen/aot.rs
+<<<<
+            packaged_runtime_archive(&driver, cfg!(target_os = "macos")).ok_or("cannot locate native runtime")?
+====
+            packaged_runtime_archive(&driver, false).ok_or("cannot locate native runtime")?
+>>>>
+
+@@ sys-runtime-bundle-relative a bundle's runtime archive is named relative to the working directory, not by the driver's own path
+## native/src/codegen/aot.rs
+<<<<
+        Some(contents) if bundled => Some(contents.join("Resources").join(RUNTIME_ARCHIVE)),
+====
+        Some(_) if bundled => Some(Path::new("Contents").join("Resources").join(RUNTIME_ARCHIVE)),
+>>>>
+
+@@ sys-apple-remedy-rust the remedy for a Mac without the developer tools is to install Rust (a packaged compiler's user needs only Apple's tools)
+## native/src/codegen/aot.rs
+<<<<
+        LinkerFlavor::Apple => "install Apple's Command Line Tools (xcode-select --install) or Xcode",
+====
+        LinkerFlavor::Apple => "install Rust (rustup, cargo) and Apple's Command Line Tools",
+>>>>
+
+@@ sys-executable-rpath a system-linked executable carries the runtime archive's directory as a library search path: the build's (or the compiler's) directory
+%% linux-x86_64 linux-aarch64 macos-aarch64
+## native/src/codegen/aot.rs
+<<<<
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+====
+    if let Some(dir) = runtime.parent() {
+        args.push(format!("-Wl,-rpath,{}", dir.display()).into());
+    }
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+>>>>
+
 @@ sys-runtime-machine-unchecked a runtime archive of another machine is linked (the linker's own failure, not the archive's)
 ## native/src/codegen/aot.rs
 <<<<

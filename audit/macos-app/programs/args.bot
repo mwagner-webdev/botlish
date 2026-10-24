@@ -1,0 +1,6 @@
+# argv(): the run's argument vector, as the program receives it (ARGV.md).
+# (MACOS-AARCH64-MILESTONE-9.md's acceptance programs.)
+
+argv():
+    on InvalidArgumentEncoding:
+        ["invalid"]
