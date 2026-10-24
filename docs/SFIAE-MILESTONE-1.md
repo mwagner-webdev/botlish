@@ -472,6 +472,19 @@ case clean once fixed -- as before.
   context-traits (40), diagnostic-recovery (52), compiler-service (54), all
   passing; `tools/compilerpedia.tcl check`: 845 topics, 629 examples, 0
   problems.
+* **CI on the branch** (commit `21f130de`). `static-decisions` run
+  40130448132, dispatched for `contexts.bot` and `modules.bot` (the golden
+  suites that report AMBIGUOUS-CONTEXT-IMPLEMENTATION): passed, both
+  schedulers agreeing. The Windows workflow (run 40130431297: smoke, root
+  plans, the four acceptance shards, the system linker) and the macOS
+  workflow (run 40130431314: Linux control, smoke, both acceptance shards,
+  the system linker) passed every job. `tests` run 40130445992 (dispatched):
+  the warning gate, the four golden shards, interp, cranelift coverage, the
+  native Rust tests and the stub- and system-linked executables passed, and
+  the method-call job's tests, oracle (500 seeds, and 300 with
+  `-contexts 1`) and fuzzer step passed; compile, cranelift-generic coverage
+  and the golden suites under the reference audit were still running when
+  this was written.
 
 ## 8. Documentation
 
