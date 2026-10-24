@@ -201,6 +201,51 @@ jobs:
           BOTLISH_NATIVE_GC_STRESS: "1"
         run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test darwin-io.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
 
+  # The macOS distribution of the compiler (MACOS-AARCH64-MILESTONE-9.md):
+  # Botlish.app -- the launcher, the bundled Tcl.framework, the compiler's
+  # ZIP archive, the native backend and the runtime archive -- built, signed
+  # ad hoc, verified, probed (the packaging census) and accepted outside the
+  # checkout; its download archive and checksum uploaded as the run's
+  # botlish-macos-aarch64 artifact.
+  app:
+    name: Botlish.app (macOS arm64 distribution)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      # single/macos/build.sh keys its framework build by the recipe:
+      # tcl-framework.sh and the Tcl pin in single/build.sh.
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - name: Build Botlish.app
+        run: single/macos/build.sh -o dist
+
+      - name: Packaging census
+        if: always()
+        run: audit/macos-app/tools/census.sh "$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)" dist/Botlish.app 2>&1 | tee census.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botlish-macos-aarch64
+          path: |
+            dist/botlish-macos-aarch64.zip
+            dist/botlish-macos-aarch64.zip.sha256
+            census.log
+          if-no-files-found: warn
+
   acceptance:
     name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
