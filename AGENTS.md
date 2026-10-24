@@ -2980,11 +2980,12 @@ regenerates the economics report.
 `audit/static-decisions/tools/compare.tcl` compiles each golden suite under
 the batched scheduler and the sequential reference and requires them to
 agree. The sequential order is one whole-program build per typed rejection:
-mutable-array.bot takes 69 rounds and 953 builds, destructuring.bot 205. On a
-GitHub runner that is 75 and 15 minutes; in an agent's container it is
-several times slower (mutable-array.bot did not finish in 2 h 37 min), beyond
-the 2-hour background-task limit, and it starves everything else on the
-machine. So:
+mutable-array.bot takes 69 rounds and 205 builds, destructuring.bot 69 rounds
+(953 and 205 builds before METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md). On a
+GitHub runner that is 24 and 9 minutes; in an agent's container it is several
+times slower (under the old method-call decision mutable-array.bot did not
+finish in 2 h 37 min), close to the 2-hour background-task limit, and it
+starves everything else on the machine. So:
 
 * **Never run it locally.** Don't run `compare.tcl` on a golden suite, all
   of them or one, and don't compile one under
@@ -3004,7 +3005,7 @@ machine. So:
     server's `actions_run_trigger`, method `run_workflow`, or `gh workflow
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
-* **Read its result.** A run takes about 80 minutes, mutable-array.bot's job
+* **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
   (the shards finish within it), and on main it may first wait for the run
   before it. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and

@@ -698,7 +698,13 @@ filter, 7 with it; now 7).
   fuzzer (`audit/static-decisions/tools/fuzz.tcl -n 10` on seeds 5, 17 and
   41: 30 programs, 796 static sites, 0 failures). The batched-against-
   sequential comparison of the golden suites runs in CI only (AGENTS.md):
-  pending (`static-decisions` run 40100447004 on the branch).
+  `static-decisions` run 40100447004 on the branch (at `e0f3def6`; the
+  later commits change no decision) passed, every suite of the four shards
+  and mutable-array.bot agreeing (`compare.tcl` fails on any `DISAGREE` or
+  `DOES NOT COMPILE`). The sequential reference itself got cheaper:
+  mutable-array.bot 69 rounds and 205 builds (AGENTS.md recorded 953 under
+  the old decision), 1,450 s on the runner; destructuring.bot 69 builds
+  (205 before).
 * **`subject` and the static-compile harnesses.** `hir::Diagnose` gained a
   field, so the static-compile fuzzer and mutants ran: 0 disagreements on
   seeds 1 and 2 (20 programs each) and on seed 3 under GC stress (10), and
@@ -729,7 +735,19 @@ filter, 7 with it; now 7).
   pass -- the latter only after it found a call of the removed
   `hir::MethodObligationKinds` in `hir/recovery.tcl` (a strict compilation
   reporting AFFINE-ERASURE-UNSUPPORTED failed with an internal error), which
-  the narrowed run had not exercised. CI on the branch: pending (`tests` dispatched at `f750a6ac`).
+  the narrowed run had not exercised. CI on the branch: `tests` run
+  40104445125 at `f750a6ac` passed, every job (interp, compile, cranelift
+  and cranelift-generic coverage, the four golden shards, the native Rust
+  tests, stub- and system-linked executables, the warning gate, and the
+  method-call job: tests, oracle on 500 seeds and fuzzer on 20 in 5.4
+  minutes, the 25 suites under the reference audit in 28.5 minutes); GC
+  stress runs on main only. The macOS workflow at `f750a6ac` passed. The
+  Windows workflow at `f750a6ac` (run 40104429667) failed three jobs:
+  acceptance shard 1 (`tests/dfa.test` on interp), shard 4
+  (`tests/dfa-workloads.test` on interp) and the system linker's job. These are not
+  this change's: main's Windows run at `81cda139` (run 40093343678), which
+  does not include it, fails the same three jobs on the same files. Its
+  smoke, root-plan and acceptance shards 2 and 3 passed.
 * **Tests and census.** New `tests/method-resolution.test`;
   `tests/method-filter.test` rewritten; census rows in
   `audit/golden/migration/census/method-resolution.tsv` and
