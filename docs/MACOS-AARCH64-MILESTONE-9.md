@@ -490,7 +490,53 @@ refused, EACCES).
 
 ## 12. ZIP resource mounting
 
-<<EV zip>>
+The archive is `Contents/Resources/botlish.zip`, written by `zipfs mkzip`
+(`single/package.tcl -archive`): an ordinary ZIP
+(deflated entries) that `unzip` reads. The launcher mounts it with
+`TclZipfs_Mount(interp, ARCHIVE, "//zipfs:/app", NULL)` -- no password,
+read through a read-only `mmap` of the file -- after `Tcl_Init`, before the
+startup script runs. What follows from that:
+
+* **The compiler's paths are archive paths.** `single/main.tcl` is
+  `//zipfs:/app/main.tcl`; it sources `//zipfs:/app/botlish/main.tcl`, and
+  everything the compiler computes from its own location --
+  `core::libraryDir` (`//zipfs:/app/botlish/stdlib`), Compilerpedia's
+  topics, `source` of `core/`, `hir/`, `surface/`, `service/`, `lsp/`,
+  `native/*.tcl` -- is inside the mount. Nothing reads the checkout,
+  the working directory or the environment for them (the
+  `source-from-checkout` mutant, which makes the launcher source a
+  checkout's main.tcl, is killed by the clean-environment job and by
+  app-test's tamper and relocation groups).
+* **Read-only.** The archive file is never opened for writing; with
+  `::tcl::zipfs::wrmax 0` a write to an archived file is refused (EACCES,
+  "writes not permitted") and a new file in the mount too (ENOTSUP), so the
+  compiler cannot change its own sources in memory (C3; app-test's
+  read-only group writes `-emit-hir-interchange` output into
+  `//zipfs:/app/botlish/stdlib/` and expects the refusal).
+* **Sealed.** The application's signature hashes the archive
+  (`_CodeSignature/CodeResources`): a changed byte makes `codesign
+  --verify` fail (section 29). The kernel does not check a resource when
+  the launcher reads it; verification does.
+* **Its identity.** The archive's `BUILD` is the source revision
+  (`-version`: `source revision: COMMIT, packaged`), its `native-bin/ID`
+  the CRC-32 and size of the bundle's driver and runtime archive
+  (`-version`: `native backend: packaged (ID)`), computed after the driver
+  is signed: `verify.sh` recomputes it from the bundle (`cksum -o 3`) and
+  requires it equal, so an archive from another build is detected.
+* **Failures are the launcher's.** A missing archive, one that is not a
+  ZIP (truncated), and one without `main.tcl` are each reported before the
+  compiler runs, with exit status 2 and the advice to reinstall (app-test's
+  damage group).
+* **What the mount does not hold.** No Tcl script library (the framework's
+  `Resources/Scripts` is `tcl_library`), no native executable, no stub, no
+  runtime archive, no tests, benchmarks or tools: `verify.sh` refuses an
+  archive with a `tcl_library/` or a `native-bin/` executable.
+* **Standard-library copies for editors.** The language server's
+  definition of a standard-library name is a file an editor can open, so
+  the compiler service copies the packed `stdlib/` once per build to a
+  cache directory (`~/Library/Caches/botlish/stdlib-ID` on macOS, section
+  26 has the cache's rules) and answers with that path; the copy is
+  compared file for file with the archive (app-test's cache group).
 
 ## 16. Native backend discovery
 
@@ -564,3 +610,116 @@ codesign --force --sign - Botlish.app
   build (section 41).
 
 <<EV rest>>
+
+## 40. Prerequisites for explicit static-library/framework declarations
+
+A program that calls C names its libraries with `extern c library "NAME"`,
+which the system linker passes as `-lNAME` (C-FFI.md): a library the
+linker finds on its default search path, a static archive or a dylib,
+chosen by the linker. What a distributed application of Botlish would add,
+none of it done here:
+
+* **A declared library path.** `-L DIR` and `-F DIR` come only from the
+  link plan's runtime libraries and a `BOTLISH_NATIVE_*` variable today; a
+  program cannot say where its own static archive is. A declaration
+  (`extern c library "NAME" at "PATH"`, or a `static` form naming an
+  archive) needs a rule for relative paths (the application root, as for
+  modules) and a front-end cache dependency on the file.
+* **Frameworks.** Apple's `-framework NAME` (and `-F`) is a different
+  linker argument from `-lNAME`; `LinkerFlavor::Apple` has no framework
+  entry. A framework declaration needs its own link-plan entry, never a
+  `-l` spelling of one.
+* **Static versus dynamic.** Apple's ld prefers a dylib to an archive of the
+  same name in one directory; a program that must link statically needs
+  the archive's path, not its name.
+* **The executable's own search paths.** Executables are linked without
+  `LC_RPATH` (section 20): a dylib a program links must be the system's or
+  found at its install name. Bundling a dylib beside an executable would
+  need an `@executable_path` rpath -- a link-plan decision per program,
+  which this milestone deliberately does not take.
+
+## 41. Prerequisites for Developer ID signing and notarization
+
+The application is signed ad hoc and not notarized: Gatekeeper rejects it
+(`spctl --assess`: `rejected`), so a copy downloaded with a browser carries
+the quarantine attribute and macOS refuses to open it until the user
+removes the attribute or allows it in System Settings. `curl`, `ditto`,
+`unzip` in a terminal and CI artifacts do not set the attribute. A
+Developer ID distribution needs, beyond this milestone:
+
+1. **A Developer ID Application certificate** of an Apple Developer
+   Program team, in CI as a secret, and `codesign --sign "Developer ID
+   Application: ..." --timestamp` in place of `--sign -`, in the same
+   order (framework version, driver, application). The identifiers
+   (`io.github.mwagner-webdev.botlish`, `.native`, `com.tcltk.tcllibrary`)
+   stay.
+2. **The hardened runtime** (`--options runtime`) on the launcher, the
+   driver and the framework, required for notarization. The launcher loads
+   only its own framework (library validation is compatible: every
+   library it loads is signed by the same team or is the system's). The
+   driver JITs: the census (C6) ran the native JIT with a hardened-runtime
+   driver with no entitlement, with `com.apple.security.cs.allow-jit` and
+   with `com.apple.security.cs.allow-unsigned-executable-memory` -- all
+   three ran -- on a runner whose SIP status the census records (section
+   3); that observation is the runner's and must be repeated on a
+   standard Mac with a Developer ID signature before the entitlement is
+   chosen. Executables the compiler links are signed by the linker ad hoc
+   (`linker-signed`), as any locally built program; a user distributing
+   one signs it themselves.
+3. **Notarization**: `xcrun notarytool submit botlish-macos-aarch64.zip
+   --wait` with an App Store Connect API key, then `xcrun stapler staple
+   Botlish.app` and the archive made again. Nothing in the bundle blocks
+   it today: no appended data (section 6), every Mach-O signed, no
+   unsigned code in Resources (the runtime archive is data: it is never
+   loaded, only read by the linker).
+4. **The deployment target** stays 11.0, the driver's and the runtime
+   archive's.
+
+## 42. Prerequisites for native Icy Tower distribution
+
+Icy Tower (`examples/games/icy-tower`) is Linux x86-64's (its SDL3 binding
+is generated for that target, ICY-TOWER-VERTICAL-SLICE-1.md). Distributing
+it as a macOS application of its own, compiled by this Botlish.app, needs:
+
+* the SDL3 binding generated for macos-aarch64 (`tools/c-bindgen.tcl
+  generate sdl3 -target macos-aarch64`, which needs the macOS SDK and
+  SDL3's headers) and its game modules made platform-neutral where they
+  name Linux;
+* SDL3 itself: a framework or dylib in the game's own bundle, which needs
+  section 40's framework declaration and an executable with an
+  `@executable_path/../Frameworks` search path -- the link-plan decision
+  this milestone does not take;
+* a game bundle (`Icy Tower.app`: Info.plist with a GUI executable, an
+  icon) assembled and signed like this one -- `single/macos/build.sh`'s
+  bundle and signing steps, generalized;
+* a window: Cocoa, which SDL3 uses on macOS, handles events and windows
+  on the process's main thread only; where a standalone executable runs
+  Botlish code (its thread and stack, NATIVE-STACK-OVERFLOW.md) has to be
+  checked against that before the game runs there.
+
+## 43. What to run when changing this
+
+If you change the launcher (`single/macos/launcher.c`), the framework build
+(`single/macos/tcl-framework.sh`), the bundle's assembly or signing
+(`single/macos/build.sh`), its verification (`single/macos/verify.sh`), the
+shared staging (`single/package.tcl`), the startup script
+(`single/main.tcl`) or the driver's runtime-archive discovery
+(`codegen::aot::packaged_runtime_archive`):
+
+* on Linux: `cargo test --release --manifest-path native/Cargo.toml --bin
+  botlish-native aot::`, `tests/system-linker.test`,
+  `audit/native-aot/tools/mutate.tcl -only 'sys-runtime-bundle-*'` (and the
+  other `sys-*` mutants this milestone added), `single/build.sh` then
+  `single/smoke-test.sh` and `single/ffi-smoke-test.sh` on its output, and
+  `audit/single-executable/tools/mutate.tcl` (the staging and the startup
+  script are shared);
+* on macOS (CI: a push, or `workflow_dispatch` of macos-arm64.yml with
+  `app_only`): the `app` job (build, verification, census, smoke, FFI
+  smoke, `single/macos/app-test.sh`, `single/macos/compare.sh`,
+  `bench/macos-app.tcl`) and the `app-clean` job, and with
+  `[ci-app-mutants]` in the head commit's message (or the `app_mutants`
+  input) `audit/macos-app/tools/mutate.tcl`: every mutant in its
+  `mutants.txt` must still apply and be killed (update a mutant's text when
+  you change the code it mutates, keeping it a mutant of the same rule);
+* for a change to the Tcl pin: also the single executable's workflow, and
+  the framework's cache key changes by itself.

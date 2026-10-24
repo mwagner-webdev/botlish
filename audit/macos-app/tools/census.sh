@@ -145,7 +145,11 @@ run "$app/Contents/MacOS/botlish" -backend cranelift "$work/jit.bot"
 echo "# The same driver signed with the hardened runtime and no entitlement (as a Developer ID build would be):"
 cp "$app/Contents/MacOS/botlish-native" "$work/hardened-native"
 run codesign --force --sign - --options runtime "$work/hardened-native"
+run codesign -dv "$work/hardened-native"
 shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' TCL_LIBRARY='$scripts' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
+echo "# (What the runner enforces: System Integrity Protection, and the kernel's boot arguments, which can relax AMFI.)"
+run csrutil status
+run sysctl -n kern.bootargs
 echo "# ... and with com.apple.security.cs.allow-jit (the entitlement for MAP_JIT memory):"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>\n' >"$work/jit.entitlements"
 run codesign --force --sign - --options runtime --entitlements "$work/jit.entitlements" "$work/hardened-native"

@@ -278,14 +278,14 @@ $XDG_CACHE_HOME/botlish or ~/.cache/botlish), and on its first run that may
 link (-emit-native-executable, a native backend) its runtime archive too;
 without a usable cache it uses a temporary one. Usage, -help and -version
 need no installation. It is built for Linux x86-64 (on macOS the packaged
-compiler is an application: backend.macos-application). A program that calls C
-needs a C compiler on the machine that builds it (Debian, Ubuntu: apt
-install gcc) and the libraries it declares; without one its link says so
-(NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
+compiler is an application: backend.macos-application). A program that
+calls C needs a C compiler on the machine that builds it (Debian, Ubuntu:
+apt install gcc) and the libraries it declares; without one its link says
+so (NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
 
 @topic backend.macos-application
 title: The macOS application (Botlish.app)
-summary: On Apple Silicon macOS the packaged compiler is Botlish.app: a launcher, Tcl as the bundle's own Tcl.framework, the compiler in a ZIP archive, the native backend and its runtime archive, signed ad hoc; its Contents/MacOS/botlish takes main.tcl's options.
+summary: On Apple Silicon macOS the packaged compiler is Botlish.app, a relocatable application bundling Tcl, the compiler, the native backend and its runtime archive, signed ad hoc.
 index: backends
 alias: Botlish.app; macOS application; mac app; app bundle; Tcl.framework
 keywords: macos, app, bundle, framework, zipfs, codesign, ad hoc, notarization, xcode-select, Library/Caches
