@@ -344,7 +344,8 @@ d=$(copy_app "$work/d6"); (cd "$d/Contents/Resources" && zip -q -d botlish.zip m
 d=$(copy_app "$work/d7"); rm "$d/Contents/MacOS/botlish-native"
 damaged "$d" "native backend is missing: $d/Contents/MacOS/botlish-native" "the driver missing" -backend cranelift 01-arithmetic.bot
 grep -q 'reinstall' "$work/d.out" "$work/d.err" || fail "the driver missing: no remedy"
-[[ $(bl "$d" -backend compile 01-arithmetic.bot) == *"value: 50" ]] || fail "without the driver the Tcl backends stop working"
+tcl_run=$(bl "$d" -backend compile 01-arithmetic.bot 2>&1) || true
+[[ $tcl_run == *"value: 50"* ]] || fail "without the driver the Tcl backends stop working: $tcl_run"
 d=$(copy_app "$work/d8"); chmod 644 "$d/Contents/MacOS/botlish-native"
 damaged "$d" 'error' "the driver not executable" -backend cranelift 01-arithmetic.bot
 d=$(copy_app "$work/d9"); printf 'int main(void) { return 0; }\n' >"$work/x86.c"
