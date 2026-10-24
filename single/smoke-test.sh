@@ -171,6 +171,18 @@ for backend in interp compile cranelift-generic cranelift; do
   (cd / && run -backend "$backend" "$work/app/value.bot") | grep -qx '   value: 3000' ||
     fail "an application module on $backend"
 done
+# Non-ASCII directory names and arguments with no locale at all: file names
+# and arguments are UTF-8 bytes whatever the locale says.
+mkdir -p "$work/ünï cödé"
+printf 'fn count(k: int) -> int:\n    if k == 0:\n        return 0\n    1 + count(k - 1)\n' >"$work/ünï cödé/counter.bot"
+printf 'import counter\n\ncounter::count(42)\n' >"$work/ünï cödé/answer.bot"
+for backend in interp cranelift; do
+  (cd / && run -backend "$backend" "$work/ünï cödé/answer.bot") | grep -qx '   value: 42' ||
+    fail "a program in a non-ASCII directory, with no locale, on $backend"
+done
+printf 'argv():\n    on InvalidArgumentEncoding:\n        ["invalid"]\n' >"$work/ünï cödé/args.bot"
+(cd "$work/ünï cödé" && run -argv 'ünï cödé' args.bot) | grep -qxF '   value: ["ünï cödé"]' ||
+  fail "a non-ASCII argument with no locale"
 printf 'import nosuch\n\n1\n' >"$work/app/missing.bot"
 if run "$work/app/missing.bot" >"$work/missing.out"; then fail "a missing module was accepted"; fi
 grep -qF "no such module file $work/app/nosuch.bot" "$work/missing.out" ||

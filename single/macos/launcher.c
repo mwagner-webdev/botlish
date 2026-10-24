@@ -22,7 +22,8 @@
  *      `info nameofexecutable` is this executable, however it was invoked)
  *      and the startup script //zipfs:/app/main.tcl (single/main.tcl): the
  *      remaining arguments are the compiler's, unchanged, as ::argv.
- *   4. Its Tcl_AppInitProc sets tcl_library to the loaded framework's own
+ *   4. Its Tcl_AppInitProc (every path given to Tcl converted from the
+ *      system encoding, as Tcl's strings are) sets tcl_library to the loaded framework's own
  *      script library (Versions/9.0/Resources/Scripts beside the Tcl binary:
  *      never $TCL_LIBRARY, which Tcl's own search would try first, or another
  *      installation's), runs Tcl_Init, mounts Contents/Resources/botlish.zip
@@ -165,11 +166,23 @@ TclScripts(void)
 }
 #endif
 
+/* PATH, a native (system-encoded) string, as Tcl's own string: Tcl
+ * converts it back to the same bytes whenever it opens it. */
+static const char *
+TclPath(const char *path)
+{
+    Tcl_DString *ds = malloc(sizeof *ds);
+    if (ds == NULL) {
+        Fail("out of memory");
+    }
+    return Tcl_ExternalToUtfDString(NULL, path, -1, ds);
+}
+
 static int
 AppInit(Tcl_Interp *interp)
 {
     if (scripts != NULL) {
-        Tcl_SetVar2(interp, "tcl_library", NULL, scripts, TCL_GLOBAL_ONLY);
+        Tcl_SetVar2(interp, "tcl_library", NULL, TclPath(scripts), TCL_GLOBAL_ONLY);
     }
     if (Tcl_Init(interp) != TCL_OK) {
         Fail("cannot initialize Tcl: %s", Tcl_GetStringResult(interp));
@@ -180,7 +193,7 @@ AppInit(Tcl_Interp *interp)
         Fail("the compiler archive %s is missing (%s): the application is incomplete: reinstall it",
              archive, strerror(errno));
     }
-    if (TclZipfs_Mount(interp, archive, MOUNT, NULL) != TCL_OK) {
+    if (TclZipfs_Mount(interp, TclPath(archive), MOUNT, NULL) != TCL_OK) {
         Fail("cannot mount the compiler archive %s: %s: the application is damaged: reinstall it",
              archive, Tcl_GetStringResult(interp));
     }
@@ -191,7 +204,7 @@ AppInit(Tcl_Interp *interp)
     }
     Tcl_DecrRefCount(main);
     if (Tcl_EvalEx(interp, "namespace eval ::single {}", -1, TCL_EVAL_GLOBAL) != TCL_OK ||
-            Tcl_SetVar2(interp, "::single::bundle", NULL, contents, TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
+            Tcl_SetVar2(interp, "::single::bundle", NULL, TclPath(contents), TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
         Fail("cannot start the compiler: %s", Tcl_GetStringResult(interp));
     }
     return TCL_OK;

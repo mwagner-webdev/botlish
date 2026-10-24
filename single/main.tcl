@@ -20,7 +20,9 @@
 #
 #   1. makes UTF-8 the system and standard-channel encoding (a checkout's
 #      canonical setup is LANG=C.utf8, AGENTS.md; a packaged compiler does not
-#      ask its user for a locale), and the archive read-only to the compiler
+#      ask its user for a locale) -- the arguments and the environment Tcl
+#      decoded with the locale's encoding re-decoded as UTF-8 -- and the
+#      archive read-only to the compiler
 #      (zipfs keeps writes in memory up to ::tcl::zipfs::wrmax; with 0 it
 #      refuses them),
 #   2. points the native backend at the packaged one -- BOTLISH_NATIVE_BIN
@@ -46,7 +48,32 @@
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
 
+# Tcl decoded the arguments and the environment (and the launcher the
+# bundle's path) with the locale's encoding,
+# which without a locale is iso8859-1 on Linux; file names and arguments are
+# UTF-8 bytes: re-decoded as UTF-8 here (a value that is no UTF-8 is kept as
+# it was). macOS's startup encoding is utf-8 already.
+namespace eval ::single {}
+set ::single::locale [encoding system]
+proc ::single::Recode {text} {
+    if {[catch {encoding convertfrom -profile strict utf-8 [encoding convertto -profile strict $::single::locale $text]} recoded]} {
+        return $text
+    }
+    return $recoded
+}
 encoding system utf-8
+if {$::single::locale ne "utf-8"} {
+    set ::argv [lmap arg $::argv {::single::Recode $arg}]
+    if {[info exists ::single::bundle]} {
+        set ::single::bundle [::single::Recode $::single::bundle]
+    }
+    foreach name [array names ::env] {
+        set value [::single::Recode $::env($name)]
+        if {$value ne $::env($name)} {
+            set ::env($name) $value
+        }
+    }
+}
 foreach channel {stdin stdout stderr} {
     fconfigure $channel -encoding utf-8
 }

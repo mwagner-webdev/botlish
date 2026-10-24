@@ -279,6 +279,34 @@ jobs:
           cat dist/botlish-macos-aarch64.zip.sha256
           "$app/Contents/MacOS/botlish" -version
 
+      # The launcher in a directory with non-ASCII characters, with and
+      # without a locale: a crash's report and lldb's backtrace, for the
+      # log. (Diagnostics; the acceptance below decides.)
+      - name: Diagnose the launcher in a non-ASCII path
+        if: always()
+        run: |
+          d="$RUNNER_TEMP/diagnose dü"
+          mkdir -p "$d"
+          cp -R dist/Botlish.app "$d/"
+          fw=$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)
+          L="$d/Botlish.app/Contents/MacOS/botlish"
+          attempt() { echo "\$ $*"; "$@" >"$RUNNER_TEMP/d.out" 2>&1; echo "[status $?]"; head -4 "$RUNNER_TEMP/d.out"; }
+          attempt env -i HOME="$HOME" "$L" -version
+          attempt env -i HOME="$HOME" LANG=en_US.UTF-8 "$L" -version
+          attempt env -i HOME="$HOME" LC_CTYPE=UTF-8 "$L" -version
+          attempt env -i HOME="$HOME" "$L" -help
+          attempt env -i HOME="$HOME" "$L"
+          cp -R "$d/Botlish.app" "$d/NoZip.app"; rm "$d/NoZip.app/Contents/Resources/botlish.zip"
+          attempt env -i HOME="$HOME" "$d/NoZip.app/Contents/MacOS/botlish" -version
+          cp "$fw/tclsh9.0" "$d/"; cp -R "$fw/Tcl.framework" "$d/"
+          echo 'puts "[info nameofexecutable] [encoding system] [info library]"' >"$d/probe.tcl"
+          attempt env -i "$d/tclsh9.0" "$d/probe.tcl"
+          attempt env -i TCL_LIBRARY="$d/Tcl.framework/Versions/9.0/Resources/Scripts" "$d/tclsh9.0" "$d/probe.tcl"
+          ls -t ~/Library/Logs/DiagnosticReports 2>/dev/null | head -5
+          report=$(ls -t ~/Library/Logs/DiagnosticReports/botlish* 2>/dev/null | head -n 1)
+          if [ -n "$report" ]; then head -c 12000 "$report"; echo; fi
+          env -i HOME="$HOME" PATH=/usr/bin:/bin lldb --batch -o run -k 'bt' -k 'quit' -- "$L" -version 2>&1 | tail -60 || true
+
       - name: Packaging census
         if: always()
         run: audit/macos-app/tools/census.sh "$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)" dist/Botlish.app 2>&1 | tee census.log

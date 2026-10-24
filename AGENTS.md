@@ -344,6 +344,59 @@ the test suite, still install the `.deb`s.
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
+## The macOS application (Botlish.app)
+
+On macOS the packaged compiler is an application bundle, not one file
+(MACOS-AARCH64-MILESTONE-9.md; SINGLE-EXECUTABLE.md, "The macOS
+application"): `single/macos/build.sh` makes `Botlish.app` -- the launcher
+`Contents/MacOS/botlish` (`single/macos/launcher.c`), the driver
+`Contents/MacOS/botlish-native`, `Contents/Frameworks/Tcl.framework`
+(`single/macos/tcl-framework.sh`: Tcl's own framework build of the pinned
+9.0.1, install name `@rpath/Tcl.framework/Versions/9.0/Tcl`), the compiler
+archive `Contents/Resources/botlish.zip` (`single/package.tcl -archive`)
+and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc, verifies
+it (`single/macos/verify.sh`) and archives it as
+`botlish-macos-aarch64.zip`. macos-arm64.yml's `app` and `app-clean` jobs
+build and accept it on every push (a manual run with `app_only` runs only
+them). Keep it so:
+
+* One staging procedure: both distributions pack what `single/package.tcl`'s
+  `StageCompiler` stages; never a second file list. The macOS archive holds
+  no Tcl library (the framework's) and no native executable (the bundle's).
+* Never append data to a signed Mach-O, change a file after it is signed,
+  or sign with `--deep`: sign inner code first (the framework's version,
+  the driver, then the application). Executable code lives in
+  `Contents/MacOS` and `Contents/Frameworks` only; nothing is extracted to
+  a cache to run, and nothing is ever written into the bundle (the
+  language server's copy of the standard library goes to
+  `~/Library/Caches/botlish` or `$BOTLISH_CACHE_DIR`).
+* The launcher only starts Tcl and the archive; it never implements the
+  command line, and never prints on standard output. It accepts only the
+  bundle's own Tcl (never one from `TCL_LIBRARY`, `DYLD_FRAMEWORK_PATH`,
+  /Library/Frameworks or Homebrew) and finds its bundle from its own real
+  path, never from argv[0], PATH or the working directory. The driver finds
+  its runtime archive from its own path (`packaged_runtime_archive`), and
+  single/main.tcl always runs the bundle's driver.
+* Ad hoc signing is not notarization: never describe the artifact as
+  notarized or Gatekeeper-approved, never add a JIT or other entitlement or
+  the hardened runtime without the Developer ID milestone's decision
+  (MACOS-AARCH64-MILESTONE-9.md, "Prerequisites for Developer ID signing
+  and notarization": the census measured what the JIT needs then).
+* A test or tool that runs the application uses a copy for anything that
+  damages or changes it, and checks the bundle untouched afterwards.
+
+If you change `single/macos/`, `single/main.tcl`, `single/package.tcl`,
+`audit/macos-app/` or the driver's `packaged_runtime_archive`, push and
+read the `app` and `app-clean` jobs (they run `single/macos/verify.sh`,
+`single/smoke-test.sh`, `single/ffi-smoke-test.sh`,
+`single/macos/app-test.sh`, `single/macos/compare.sh` and
+`bench/macos-app.tcl`), run `audit/macos-app/tools/mutate.tcl` (a push with
+`[ci-app-mutants]`: every mutant in its `mutants.txt` must still apply and
+be killed; update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), and the Linux single executable's
+checks (single/build.sh, both smoke tests,
+`audit/single-executable/tools/mutate.tcl`): the scripts are shared.
+
 ## Running the tests locally
 
 Run the tests locally with `tclsh9.0 tests/local.tcl`, not `tests/all.tcl`.

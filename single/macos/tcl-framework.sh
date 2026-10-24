@@ -29,7 +29,8 @@
 #   tclsh9.0        Tcl's own shell, linked to Tcl.framework above (its
 #                   LC_RPATH is @executable_path): the census's probes
 #                   (audit/macos-app/tools/census.sh) and a Tcl 9 to run
-#                   packaging scripts with; never bundled
+#                   packaging scripts with (TCL_LIBRARY naming the
+#                   framework's Scripts); never bundled
 #   BUILD           the recipe: version, sha256, configure arguments,
 #                   deployment target, the install name
 #
@@ -122,7 +123,7 @@ chmod 755 "$fw/Versions/$version/Tcl"
 cp -p "$work/build/tclsh" "$output/tclsh$version"
 install_name_tool -add_rpath @executable_path "$output/tclsh$version"
 codesign --force --sign - "$output/tclsh$version"
-probe=$(echo 'puts "[info patchlevel] [info library]"' | "$output/tclsh$version") ||
+probe=$(echo 'puts "[info patchlevel] [info library]"' | TCL_LIBRARY="$fw/Versions/$version/Resources/Scripts" "$output/tclsh$version") ||
   fail "the framework's tclsh does not run"
 [[ $probe == "$TCL_VERSION "* ]] || fail "the framework's tclsh reports $probe"
 

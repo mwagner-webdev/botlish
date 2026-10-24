@@ -102,7 +102,9 @@ if [[ -z $tcl_framework ]]; then
   fi
 fi
 [[ -f $tcl_framework/BUILD && -d $tcl_framework/Tcl.framework ]] || fail "no Tcl.framework build at $tcl_framework"
-tclsh="$tcl_framework/tclsh$tcl_version"
+# The framework's tclsh runs the packaging scripts, with its own script
+# library named (never another installation's).
+tclsh() { TCL_LIBRARY="$tcl_framework/Tcl.framework/Versions/$tcl_version/Resources/Scripts" "$tcl_framework/tclsh$tcl_version" "$@"; }
 echo "== Tcl.framework: $tcl_framework ($(tr '\n' ';' <"$tcl_framework/BUILD"))"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/botlish-app-build.XXXXXX")
@@ -112,7 +114,7 @@ trap 'rm -rf "$work"' EXIT
 if [[ -z $native_dir ]]; then
   echo "== building the native backend"
   (cd "$root" && cargo build --release --manifest-path native/Cargo.toml)
-  "$tclsh" "$root/native/runtime-archive/libraries.tcl"
+  tclsh "$root/native/runtime-archive/libraries.tcl"
   native_dir="$root/native/target/release"
 fi
 mkdir -p "$work/native"
@@ -183,7 +185,7 @@ codesign --force --sign - --identifier "$identifier.native" "$contents/MacOS/bot
 # bundle holds them (the driver signed).
 mkdir -p "$work/bundled-native"
 cp "$contents/MacOS/botlish-native" "$contents/Resources/libbotlish_runtime.a" "$work/bundled-native/"
-"$tclsh" "$root/single/package.tcl" -archive "$contents/Resources/botlish.zip" "$work/bundled-native"
+tclsh "$root/single/package.tcl" -archive "$contents/Resources/botlish.zip" "$work/bundled-native"
 chmod 644 "$contents/Resources/botlish.zip"
 codesign --force --sign - "$app"
 

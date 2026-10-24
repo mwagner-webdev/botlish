@@ -35,6 +35,9 @@ app=$(cd "$2" && pwd)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 v=9.0
 tclsh="$fwb/tclsh$v"
+# Probes past C2 name the framework's script library (C2 records how Tcl
+# finds it by itself).
+scripts="$fwb/Tcl.framework/Versions/$v/Resources/Scripts"
 work=$(mktemp -d "${TMPDIR:-/tmp}/botlish-census.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 probe() { echo; echo "######## $*"; }
@@ -66,9 +69,9 @@ probe C3 TclZipfs_AppHook and a separate ZIP file
 mkdir -p "$work/stage/botlish"
 printf 'puts "main.tcl of the archive: argv0=$argv0 argv=$argv nameofexecutable=[info nameofexecutable]"\n' >"$work/stage/main.tcl"
 echo "inside" >"$work/stage/botlish/file.txt"
-shell "cd '$work' && echo 'zipfs mkzip app.zip stage stage' | '$tclsh' && unzip -l app.zip"
+shell "cd '$work' && echo 'zipfs mkzip app.zip stage stage' | TCL_LIBRARY='$scripts' '$tclsh' && unzip -l app.zip"
 echo "# A stock tclsh (tclAppInit.c calls TclZipfs_AppHook): an archive argument is a script file, not mounted (SUPPORT_BUILTIN_ZIP_INSTALL is not defined)."
-run "$tclsh" "$work/app.zip" one two
+run env TCL_LIBRARY="$scripts" "$tclsh" "$work/app.zip" one two
 echo "# zipfs mount of a separate file, its paths, and writes (in memory up to ::tcl::zipfs::wrmax; refused with 0)."
 cat >"$work/mount.tcl" <<'EOF'
 zipfs mount [lindex $argv 0] //zipfs:/app
@@ -83,39 +86,43 @@ set ::tcl::zipfs::wrmax 0
 puts "write, wrmax 0: [catch {open //zipfs:/app/botlish/other.txt w} m] $m"
 puts "the archive file unchanged: [file size [lindex $argv 0]] bytes"
 EOF
-run "$tclsh" "$work/mount.tcl" "$work/app.zip"
+run env TCL_LIBRARY="$scripts" "$tclsh" "$work/mount.tcl" "$work/app.zip"
 run ls -l "$work/app.zip"
 
 probe C4 a zipkit: the ZIP appended to the Mach-O, and code signing
 cp "$work/stage/main.tcl" "$work/stage/main.tcl.keep"
 cp -R "$fwb/Tcl.framework" "$work/Tcl.framework"
-shell "cd '$work' && echo 'zipfs mkimg kit stage stage {} [info nameofexecutable]' | '$tclsh' && ls -l kit"
+shell "cd '$work' && echo 'zipfs mkimg kit stage stage {} [info nameofexecutable]' | TCL_LIBRARY='$scripts' '$tclsh' && ls -l kit"
 echo "# The base kit's signature (the linker's, ad hoc) after zipfs mkimg appended the archive:"
 run codesign -dv "$work/kit"
 run codesign --verify --strict --verbose=2 "$work/kit"
 echo "# Running it unsigned-again (the appended zip mounted by TclZipfs_AppHook):"
-run "$work/kit" a b
+run env TCL_LIBRARY="$scripts" "$work/kit" a b
 echo "# Signing after appending:"
 cp "$work/kit" "$work/kit-signed"
 run codesign --force --sign - "$work/kit-signed"
 run codesign --verify --strict --verbose=2 "$work/kit-signed"
-run "$work/kit-signed" a b
+run env TCL_LIBRARY="$scripts" "$work/kit-signed" a b
 echo "# Appending after signing: sign the base, then append the archive."
 cp "$tclsh" "$work/base"
 run codesign --force --sign - "$work/base"
 shell "cd '$work' && cat base app.zip >appended && chmod +x appended && ls -l base appended"
 run codesign --verify --strict --verbose=2 "$work/appended"
-run "$work/appended" a b
+run env TCL_LIBRARY="$scripts" "$work/appended" a b
 echo "# Inside an application bundle (the kit as its main executable), signed and strictly verified:"
+echo "# (install_name_tool cannot edit a Mach-O with data after its __LINKEDIT: the search path goes on the base first.)"
+run install_name_tool -add_rpath @executable_path/../Frameworks "$work/kit"
 mkdir -p "$work/Kit.app/Contents/MacOS" "$work/Kit.app/Contents/Frameworks"
-cp "$work/kit" "$work/Kit.app/Contents/MacOS/kit"
+cp "$tclsh" "$work/kitbase"
+install_name_tool -add_rpath @executable_path/../Frameworks "$work/kitbase" 2>&1
+codesign --force --sign - "$work/kitbase" 2>&1
+(cd "$work" && echo 'zipfs mkimg Kit.app/Contents/MacOS/kit stage stage {} kitbase' | TCL_LIBRARY="$scripts" "$tclsh")
 cp -R "$fwb/Tcl.framework" "$work/Kit.app/Contents/Frameworks/"
-install_name_tool -add_rpath @executable_path/../Frameworks "$work/Kit.app/Contents/MacOS/kit" 2>&1
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>kit</string><key>CFBundleIdentifier</key><string>census.kit</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>\n' >"$work/Kit.app/Contents/Info.plist"
 run codesign --force --sign - "$work/Kit.app/Contents/Frameworks/Tcl.framework/Versions/$v"
 run codesign --force --sign - "$work/Kit.app"
 run codesign --verify --deep --strict --verbose=2 "$work/Kit.app"
-run "$work/Kit.app/Contents/MacOS/kit" a b
+run env TCL_LIBRARY="$scripts" "$work/Kit.app/Contents/MacOS/kit" a b
 
 probe C5 the separate-resource application: relocation, symbolic links
 run codesign --verify --deep --strict --verbose=2 "$app"
@@ -138,15 +145,15 @@ run "$app/Contents/MacOS/botlish" -backend cranelift "$work/jit.bot"
 echo "# The same driver signed with the hardened runtime and no entitlement (as a Developer ID build would be):"
 cp "$app/Contents/MacOS/botlish-native" "$work/hardened-native"
 run codesign --force --sign - --options runtime "$work/hardened-native"
-shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
+shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' TCL_LIBRARY='$scripts' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
 echo "# ... and with com.apple.security.cs.allow-jit (the entitlement for MAP_JIT memory):"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>\n' >"$work/jit.entitlements"
 run codesign --force --sign - --options runtime --entitlements "$work/jit.entitlements" "$work/hardened-native"
-shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
+shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' TCL_LIBRARY='$scripts' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
 echo "# ... and with com.apple.security.cs.allow-unsigned-executable-memory:"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/></dict></plist>\n' >"$work/unsigned.entitlements"
 run codesign --force --sign - --options runtime --entitlements "$work/unsigned.entitlements" "$work/hardened-native"
-shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
+shell "cd '$root' && BOTLISH_NATIVE_BIN='$work/hardened-native' TCL_LIBRARY='$scripts' '$tclsh' main.tcl -backend cranelift '$work/jit.bot'"
 echo "# Gatekeeper's assessment of the ad-hoc signed application (not notarized):"
 run spctl --assess --type execute --verbose=4 "$app"
 echo
