@@ -515,14 +515,55 @@ over their structs beside the standard collections' -- the trigger it had
 to leave out while the exact decision misattributed it -- with indices that
 are themselves expressions. Each program is compiled under the reference
 audit, under the audit of build reuse and plainly; outcomes must be equal.
-*(Pending: measured at the end of the milestone.)*
+Seeds 1-100 (`tclsh9.0 audit/method-filter/tools/fuzz.tcl 100 1`, about 24
+minutes): 100 programs, 47 rejected (AMBIGUOUS-METHOD-CALL 29,
+NO-APPLICABLE-METHOD 26, TYPE 32, IMPRINT 5, KNOWN-ERROR 6 among their
+diagnostics), 120 single deviations, 541 builds plainly and 5,384 under the
+two audits, **0 disagreements**. CI runs 20 seeds.
 
 ### 7.3 Reference rule against kind proofs
 
 The reference rule judges every candidate by its own build, so it does not
 depend on the kind proofs being right. `bench/method-filter.tcl -audit 1`
 compiles a program under `hir::methodReferenceAudit` (both rules, decisions
-and HIR compared). *(Pending: measured at the end of the milestone.)*
+and HIR compared). Every golden suite that decides method calls (the 25 of
+`bench/method-filter.tcl -suites`) passes it (mutable-array: pending, below). Builds, trial builds,
+single deviations and final rebuilds with the kind proofs; builds and trial
+builds by the reference rule; the decisions each compilation audited (one
+per static round):
+
+| suite | builds | trials | deviations | finals | reference builds / trials | audited |
+|---|---:|---:|---:|---:|---:|---:|
+| callable-contracts | 6 | 1 | 0 | 0 | 8 / 2 | 4 |
+| collection-iteration | 5 | 1 | 0 | 0 | 37 / 32 | 2 |
+| collections | 5 | 1 | 0 | 0 | 27 / 22 | 3 |
+| declared-errors | 4 | 1 | 0 | 0 | 24 / 20 | 2 |
+| destructuring | 5 | 0 | 0 | 0 | 9 / 3 | 4 |
+| diagnostics | 6 | 1 | 0 | 1 | 6 / 1 | 2 |
+| float64 | 4 | 1 | 0 | 0 | 4 / 1 | 2 |
+| framework-semantics | 6 | 1 | 0 | 1 | 8 / 3 | 3 |
+| imports | 8 | 3 | 1 | 1 | 22 / 17 | 3 |
+| method-equivalence-imported | 5 | 1 | 0 | 1 | 5 / 1 | 2 |
+| methods | 5 | 1 | 0 | 0 | 16 / 11 | 3 |
+| mutable-map | 5 | 2 | 0 | 0 | 110 / 105 | 2 |
+| mutable-set | 6 | 1 | 0 | 0 | 57 / 51 | 4 |
+| mutable-vector | 7 | 2 | 0 | 0 | 69 / 63 | 3 |
+| numeric-text | 8 | 4 | 2 | 1 | 19 / 15 | 2 |
+| ownership | 5 | 1 | 0 | 0 | 11 / 6 | 2 |
+| place-parameters | 3 | 1 | 0 | 0 | 115 / 112 | 2 |
+| recursive-types | 2 | 1 | 0 | 0 | 17 / 15 | 1 |
+| refinements | 7 | 2 | 0 | 1 | 9 / 4 | 2 |
+| static-compile | 12 | 3 | 0 | 1 | 14 / 4 | 3 |
+| stdlib-namespaces | 4 | 1 | 0 | 0 | 17 / 13 | 2 |
+| structs-and-enums | 6 | 1 | 0 | 0 | 33 / 27 | 3 |
+| traits | 6 | 0 | 0 | 0 | 6 / 0 | 4 |
+| variadics | 3 | 0 | 0 | 0 | 15 / 11 | 2 |
+| mutable-array | *(pending: its audit still running)* | | | | | |
+
+Two things follow. The kind proofs agree with the reference rule on every
+suite (the audit is identity of decisions and HIR, not of counts). And they
+are what makes the rule affordable: the 24 suites above take 133 builds with
+them and 658 by the reference rule (place-parameters 3 against 115).
 
 ### 7.4 Mutation testing
 
@@ -552,7 +593,18 @@ and HIR compared). *(Pending: measured at the end of the milestone.)*
   to hir/methods.tcl (a seed applied by name, a build read whatever its
   configuration, records keyed by kind of build, the final program any
   build, reuse only of the initial build, the method-trial channel
-  ignored): *(Pending: measured at the end of the milestone.)*
+  ignored): all 6 killed. `method-memo-initial-only` survived the first run
+  -- `se-method-memo`'s programs reused only the initial build -- and
+  `se-method-memo` gained a program whose certification reads a trial
+  round's build (`{1 2 1}` builds with reuse, without, under the audit;
+  the mutant makes it `{2 2 2}`).
+* `audit/contexts/tools/mutate.tcl`'s `method-candidate-dropped` (a missing
+  context made evidence against a candidate): killed, once the harness
+  copied `tests/ctoolchain.tcl` into its scratch tree. Its unmutated
+  baseline had not run since `tests/helpers.tcl` began to source that file,
+  so the harness ran no mutant (fixed in this milestone).
+* `audit/static-compile/tools/mutate.tcl` (21 mutants; `hir::Diagnose`
+  gained a field): all 21 killed.
 
 ## 8. Economics
 
@@ -568,10 +620,14 @@ with other jobs running and are indicative only.
   certified again. `tests/static-economics.test` (its method-memo
   expectation now counts the reference rule's builds),
   `tests/static-compile.test`, the static-decisions mutants above and
-  fuzzer *(Pending: measured at the end of the milestone.)*. The batched-against-sequential comparison of the golden
-  suites runs in CI only (AGENTS.md): *(Pending: measured at the end of the milestone.)*.
+  fuzzer (`audit/static-decisions/tools/fuzz.tcl -n 10` on seeds 5, 17 and
+  41: 30 programs, 796 static sites, 0 failures). The batched-against-
+  sequential comparison of the golden suites runs in CI only (AGENTS.md):
+  pending (`static-decisions` run 40100447004 on the branch).
 * **`subject` and the static-compile harnesses.** `hir::Diagnose` gained a
-  field, so the static-compile fuzzer and mutants ran: *(Pending: measured at the end of the milestone.)*.
+  field, so the static-compile fuzzer and mutants ran: 0 disagreements on
+  seeds 1 and 2 (20 programs each) and on seed 3 under GC stress (10), and
+  21 of 21 mutants killed.
 * **Front-end cache, interchange, isolation.** No new registry or process
   state; the decision's switches are no front-end input. `subject` is part of
   the HIR's diagnostics and round-trips (`tests/hir-interchange.test`,
@@ -580,11 +636,24 @@ with other jobs running and are indicative only.
   compilation's diagnostics; the decision runs inside the front end they
   call. `tests/compiler-service.test`, `tests/lsp.test`,
   `tests/syntax-recovery.test` and `tests/diagnostic-recovery.test` pass
-  *(Pending: measured at the end of the milestone.)*; `mr-unrelated-syntax-error` decides a chain beside a malformed
+  on interp and compile (below); `mr-unrelated-syntax-error` decides a chain beside a malformed
   statement under `-recover-syntax 1` as in the clean program.
 * **Backends.** Downstream of the decision nothing changed: the decided call
-  is an ordinary call node. The golden suites run on all four backends
-  through `tests/local.tcl` *(Pending: measured at the end of the milestone.)*.
+  is an ordinary call node. `tclsh9.0 tests/local.tcl -jobs 2` over the 17
+  test files this change touches (method-resolution, method-filter,
+  method-sugar, method-eligible, static-economics, static-compile,
+  compiler-service, lsp, hir-interchange, hir-cache, syntax-recovery,
+  diagnostic-recovery, main-cli, imports, contexts, compilation-isolation,
+  golden): 812 tests passed on interp and 812 on compile, 0 failed; the 20
+  golden suites holding their ports passed on all four backends (678 tests
+  on interp, compile and cranelift, 670 on cranelift-generic). `main.tcl`
+  runs the reported chain on interp, compile and cranelift, and `-check`
+  reports the unrelated ambiguity of 6.1 alone. `tests/affine.test` and
+  `tools/compilerpedia.tcl check` (844 topics, 627 examples, 0 problems)
+  pass -- the latter only after it found a call of the removed
+  `hir::MethodObligationKinds` in `hir/recovery.tcl` (a strict compilation
+  reporting AFFINE-ERASURE-UNSUPPORTED failed with an internal error), which
+  the narrowed run had not exercised. CI on the branch: pending (`tests` dispatched at `f750a6ac`).
 * **Tests and census.** New `tests/method-resolution.test`;
   `tests/method-filter.test` rewritten; census rows in
   `audit/golden/migration/census/method-resolution.tsv` and
