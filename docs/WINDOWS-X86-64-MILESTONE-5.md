@@ -901,12 +901,17 @@ The evidence:
 ## 9. Performance
 
 Times are observations of one machine at one moment. The Windows figures
-come from a `windows-2025` runner (AMD EPYC 9V74); the Linux ones from this
-milestone's development container (Intel Xeon, 2.10 GHz, 4 cores, the same
-day). Read a ratio between the two hosts as an order of magnitude, never
-as a measurement of Windows alone. The fused rows below run the same
-machine code on both, with no switch, and they show the two machines to be
-about equally fast.
+come from two `windows-2025` runners:
+
+* run A, 40123395211 at 48056543, an AMD EPYC 9V74;
+* run B, 40131658659 at fa711b43, an AMD EPYC 7763, about a quarter
+  slower in every row, the fused and ordinary ones too.
+
+The Linux figures come from this milestone's development container (Intel
+Xeon, 2.10 GHz, 4 cores, the same day). Read a ratio between hosts as an
+order of magnitude, never as a measurement of Windows alone. The fused
+rows below run the same machine code on every host, with no switch; they
+show runner A and the container to be about equally fast.
 
 ### 9.1 Coroutine operations
 
@@ -914,23 +919,26 @@ about equally fast.
 (fusion off), 200,000 operations per program, best of 5. Each row is
 (program − baseline) / n, the whole program in parentheses.
 
-| Operation | Windows (real Windows, run 40123395211, 48056543) | Linux (controlled experiment) |
-|---|---:|---:|
-| construction (to the first yield) | 566 ns (567 ns) | 432 ns (433 ns) |
-| construction + resume to completion + one cached call | 758 ns (763 ns) | 493 ns (500 ns) |
-| resume (yield in the root) | 192 ns (194 ns) | 132 ns (132 ns) |
-| resume, yield 1 frame deep | 200 ns (207 ns) | 155 ns (165 ns) |
-| resume, yield 8 frames deep | 211 ns (232 ns) | 146 ns (184 ns) |
-| resume, yield 32 frames deep | 206 ns (308 ns) | 179 ns (280 ns) |
-| resume of a coroutine that resumes one nested in it | PENDING-WIN-NESTED | 211 ns (212 ns) |
-| construction, abandoned on an early return | 556 ns (560 ns) | 518 ns (520 ns) |
-| construction, abandoned on a fail | 605 ns (694 ns) | 396 ns (453 ns) |
-| construction, abandoned on a callee's propagated error | 599 ns (690 ns) | 408 ns (468 ns) |
-| construction, abandoned on a break | 568 ns (637 ns) | 432 ns (496 ns) |
+| Operation | Windows, run A | Windows, run B | Linux (controlled experiment) |
+|---|---:|---:|---:|
+| construction (to the first yield) | 566 ns (567 ns) | 690 ns (692 ns) | 432 ns (433 ns) |
+| construction + resume to completion + one cached call | 758 ns (763 ns) | 958 ns (965 ns) | 493 ns (500 ns) |
+| resume (yield in the root) | 192 ns (194 ns) | 236 ns (238 ns) | 132 ns (132 ns) |
+| resume, yield 1 frame deep | 200 ns (207 ns) | 249 ns (256 ns) | 155 ns (165 ns) |
+| resume, yield 8 frames deep | 211 ns (232 ns) | 254 ns (281 ns) | 146 ns (184 ns) |
+| resume, yield 32 frames deep | 206 ns (308 ns) | 261 ns (380 ns) | 179 ns (280 ns) |
+| resume of a coroutine that resumes one nested in it | -- (row added after run A) | 339 ns (341 ns) | 211 ns (212 ns) |
+| construction, abandoned on an early return | 556 ns (560 ns) | 711 ns (715 ns) | 518 ns (520 ns) |
+| construction, abandoned on a fail | 605 ns (694 ns) | 757 ns (870 ns) | 396 ns (453 ns) |
+| construction, abandoned on a callee's propagated error | 599 ns (690 ns) | 739 ns (856 ns) | 408 ns (468 ns) |
+| construction, abandoned on a break | 568 ns (637 ns) | 733 ns (818 ns) | 432 ns (496 ns) |
 
 * **A resume costs the same at any depth**, on Windows as elsewhere: 192
   to 211 ns from the root to 32 frames deep. Nothing is copied or unwound,
   and the fiber keeps its frames where they are.
+* **A nested level costs a resume more.** A coroutine that resumes one
+  nested in it pays 103 ns for the inner level on runner B (339 against
+  236), as on Linux (79 ns).
 * **A resume is about 60 ns dearer than on Linux.** A resume and its yield
   are one round trip. The probe's round trip of `SwitchToFiber` costs
   57.9 ns, against 22.8 ns for a custom switch on the same runner
@@ -947,10 +955,13 @@ about equally fast.
 
 | | Windows | Linux |
 |---|---:|---:|
-| the coroutine object (allocation report, per construction) | 200 B at 48056543; PENDING-WIN-OBJECT after ceff7aa3 | 96 B |
+| the coroutine object (allocation report, per construction) | 200 B at 48056543 (run A); 160 B from ceff7aa3 (run B) | 96 B |
 | the stack's reservation (address space) | 8256 KiB (8 MiB usable + 64 KiB) | 8256 KiB (8 MiB + the PROT_NONE guard) |
-| committed by a fresh fiber, after its setup | PENDING-WIN-COMMIT | -- (Linux commits nothing up front: 4.1 KiB resident per suspended coroutine, `bench/coroutines.tcl`'s resident table) |
-| committed after a coroutine ran 64 KiB deep on it | PENDING-WIN-GROWN | -- |
+| committed by a fresh fiber, after its setup | 40 KiB | -- (Linux commits nothing up front: 4.1 KiB resident per suspended coroutine, `bench/coroutines.tcl`'s resident table) |
+| committed after a coroutine ran 64 KiB deep on it | 108 KiB | -- |
+
+(Windows commit: real Windows, run 40131658659's smoke job, the line
+`a_fresh_fiber_commits_its_guarantee_and_a_page` prints.)
 
 * **The coroutine object** carried two `SwitchPoint`s (5 words each, the
   POSIX hosts' are one) and a copy of the fiber's bounds. Commit ceff7aa3
@@ -973,9 +984,19 @@ switch's record (section 6).
 
 | K suspended | Windows | Linux (controlled experiment) |
 |---:|---:|---:|
-| 0 | PENDING-WIN-GC0 per collection | 3.3 µs per collection |
-| 1000 | PENDING-WIN-GC1000 per collection | 386 µs per collection |
-| **per suspended coroutine, per collection** | **PENDING-WIN-GCEACH** | **383 ns** |
+| 0 | 6.3 µs per collection | 3.3 µs per collection |
+| 1000 | 711 µs per collection | 386 µs per collection |
+| **per suspended coroutine, per collection** | **705 ns** | **383 ns** |
+
+(Windows: run B. Linux: controlled experiment.)
+
+* **On Windows a suspended stack's walk climbs with Windows' unwinder.**
+  Each frame above the Botlish ones is a `RtlLookupFunctionEntry` and a
+  `RtlVirtualUnwind`, where Linux follows frame pointers; that and run B's
+  slower machine make the difference.
+* **The cost is per suspended coroutine per collection,** about 0.7 µs.
+  A program that holds a thousand coroutines suspended pays about 0.7 ms
+  per collection to keep their frames' roots.
 
 ### 9.4 The DFA and JSON workloads
 
