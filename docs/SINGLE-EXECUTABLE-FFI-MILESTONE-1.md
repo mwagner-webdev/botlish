@@ -1216,7 +1216,10 @@ Its first run found two problems, neither in the system linker:
   specified with option '/LIBPATH:'`. With the fixture unbuilt (the
   first problem), the test passes an empty fixture directory as a link
   directory. This is latent under every linker; with the fixture built it
-  cannot occur. It is recorded for a separate fix (section 35).
+  cannot occur. main fixed it separately (3e47b051, merged here):
+  c-ffi.test passes no directory when the fixture did not build, and an
+  empty directory is refused where one enters (`native::withLinkDirs`,
+  main.tcl's `-L`, the driver's `--link-dir`).
 
 The smoke job (rustc-linked, unchanged) **passed** on the merged head;
 before the merge, its one failure was `cf-renamed-binding-native-name`
@@ -1269,13 +1272,6 @@ on 3cc2a2b1.
   is warranted (section 7).
 * **Publishing the AArch64 build.** single-executable.yml builds and
   smoke-tests it (section 25) but publishes only x86-64's.
-* **An empty link directory.** c-ffi.test passes its fixture directory
-  as a link directory even when the fixture did not build and the
-  directory is `""`. link.exe then gets `/LIBPATH:` alone (LNK1146). gcc
-  gets `-L` alone, which takes the next argument as the directory. The
-  test should pass no directory then. Whether `--link-dir ""` should be
-  refused by the driver is a separate question. It predates this
-  milestone and affects every linker.
 
 ## 36. For the next macOS milestone
 
