@@ -22,6 +22,14 @@
 //!                                        OUT without an extension;
 //!                                        BOTLISH_NATIVE_LINKER: rustc, the
 //!                                        default, or stub: codegen/aot.rs)
+//!   botlish-native library OUT NAME FILE.nir  write native library NAME's
+//!                                        program object (codegen::library,
+//!                                        NATIVE-LIBRARY-MILESTONE-1.md): the
+//!                                        program's code, descriptor and record
+//!                                        with local symbols, and the
+//!                                        library's public C functions;
+//!                                        native/native.tcl's native::library
+//!                                        links it with the runtime
 //!   botlish-native check FILE.nir        parse and validate only
 //!   botlish-native fusion FILE.nir       what coroutine fusion did with each
 //!                                        construction site (codegen::fusion,
@@ -118,7 +126,7 @@ use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
-use runtime::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
+use runtime::vm::{ProgramInfo, Vm};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
@@ -326,7 +334,7 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, Vec<String>), Stri
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | target TRIPLE (each also [--result PATH])");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | target TRIPLE (each also [--result PATH])");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -371,6 +379,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object" | "executable", [_, file, ..]) => (1, file),
+        ("library", [_, _, file, ..]) => (1, file),
         ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused", [file, ..]) => (1, file),
         _ => return usage(),
     };
@@ -402,7 +411,7 @@ fn cli(args: &[String]) -> i32 {
             }
         }
     }
-    if matches!(command, "run" | "bench" | "batch" | "object" | "executable") {
+    if matches!(command, "run" | "bench" | "batch" | "object" | "executable" | "library") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -445,6 +454,31 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
             0
+        }
+        "library" => {
+            let (out, name) = (&rest[0], &rest[1]);
+            if !codegen::library::SUPPORTED {
+                emit_error(&["NATIVE", "UNSUPPORTED", "library"], "native libraries are made on Linux glibc (x86_64, aarch64) only (NATIVE-LIBRARY-MILESTONE-1.md)");
+                return 1;
+            }
+            if !nir::is_c_identifier(name) {
+                emit_error(&["NATIVE", "LIBRARY"], &format!("library name {name:?} is not a C identifier"));
+                return 1;
+            }
+            match codegen::emit_library_object(&program, name) {
+                Ok(object) => {
+                    if let Err(e) = std::fs::write(out, &object.bytes) {
+                        emit_error(&["NATIVE", "IO"], &e.to_string());
+                        return 2;
+                    }
+                    emit(&tcl_list(&["library".to_string(), out.clone(), object.bytes.len().to_string()]));
+                    0
+                }
+                Err(e) => {
+                    emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
+                    1
+                }
+            }
         }
         "object" => {
             let out = &rest[0];
@@ -650,29 +684,8 @@ fn call_effect_report(program: &nir::Program) -> String {
     lines.join("\n")
 }
 
-fn program_info(program: &nir::Program) -> ProgramInfo {
-    ProgramInfo {
-        functions: program
-            .functions
-            .iter()
-            .map(|f| FunctionInfo { arity: f.params as usize, pnames: f.pnames.clone() })
-            .collect(),
-        natives: program
-            .natives
-            .iter()
-            .map(|n| NativeInfo { name: n.name.clone(), arity: n.arity, params: n.params.clone(), op: n.op })
-            .collect(),
-        shapes: program
-            .shapes
-            .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
-            .collect(),
-        enums: program
-            .enums
-            .iter()
-            .map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() })
-            .collect(),
-    }
+pub fn program_info(program: &nir::Program) -> ProgramInfo {
+    runtime::program::program_info(program)
 }
 
 /// The "sites" entry of Metrics::to_tcl: SITES (codegen::clif's compile-time

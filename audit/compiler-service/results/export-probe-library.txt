@@ -1,0 +1,53 @@
+# sh audit/compiler-service/probes/export/run.sh TCL-INCLUDE TCL-STUB-LIB (20000 calls), 2026-10-23, x86-64 Linux:
+# the compiler's native library (main.tcl -emit-native-library bj), NATIVE-LIBRARY-MILESTONE-1.md
+token_count(message): 49
+token_count([1, 2]): 5
+token_count([1, 2, 3]): 7
+token_count([1, 2, 3, 4, 5, 6]): 13
+token_count("abcdefghij"): 1
+token_count([true, false, null]): 7
+token_count("ä😀"): 1
+token_count(long, 10000 characters): 3001
+token_count(malformed at 6): BOTLISH DECLARED json_tokens::Malformed {at 6} -- uncaught propagated error: <error json_tokens::Malformed {at: 6}>
+token_count(raw newline in a string): BOTLISH DECLARED json_tokens::Malformed {at 3} -- uncaught propagated error: <error json_tokens::Malformed {at: 3}>
+token_count(invalid UTF-8): BOTLISH BOUNDARY ARGUMENT-NOT-UTF8 {argument 0} -- argument 0 is not UTF-8
+token_table([true, "é"]): punct 0 1|true 1 5|punct 5 6|string 7 10|punct 10 11|
+shout(café): café!
+shout(empty): "!"
+shout(a NUL inside): 4 bytes
+checked(21): 42
+checked(-5): BOTLISH DECLARED Rejected {code -5} -- uncaught propagated error: <error Rejected {code: -5}>
+checked(2**62): BOTLISH BOUNDARY RESULT-OUT-OF-RANGE {} -- the result 9223372036854775808 is outside int64_t
+sample(): 7
+churn(100000): 100000
+20000 x token_count(193 bytes): 37.4 us per call; rss 14 -> 15 MiB
+200 x churn(10000): rss 15 -> 15 MiB
+a result kept across a collecting call: kept!
+an error kept across a collecting call: BOTLISH DECLARED Rejected {code -7} -- uncaught propagated error: <error Rejected {code: -7}>
+after destroy and create: token_count([1, 2]) = 5, checked(3) = 6
+--- under BOTLISH_NATIVE_GC_STRESS=1
+token_count(message): 49
+token_count([1, 2]): 5
+token_count([1, 2, 3]): 7
+token_count([1, 2, 3, 4, 5, 6]): 13
+token_count("abcdefghij"): 1
+token_count([true, false, null]): 7
+token_count("ä😀"): 1
+token_count(long, 10000 characters): 3001
+token_count(malformed at 6): BOTLISH DECLARED json_tokens::Malformed {at 6} -- uncaught propagated error: <error json_tokens::Malformed {at: 6}>
+token_count(raw newline in a string): BOTLISH DECLARED json_tokens::Malformed {at 3} -- uncaught propagated error: <error json_tokens::Malformed {at: 3}>
+token_count(invalid UTF-8): BOTLISH BOUNDARY ARGUMENT-NOT-UTF8 {argument 0} -- argument 0 is not UTF-8
+token_table([true, "é"]): punct 0 1|true 1 5|punct 5 6|string 7 10|punct 10 11|
+shout(café): café!
+shout(empty): "!"
+shout(a NUL inside): 4 bytes
+checked(21): 42
+checked(-5): BOTLISH DECLARED Rejected {code -5} -- uncaught propagated error: <error Rejected {code: -5}>
+checked(2**62): BOTLISH BOUNDARY RESULT-OUT-OF-RANGE {} -- the result 9223372036854775808 is outside int64_t
+sample(): 7
+churn(100000): 100000
+20000 x token_count(193 bytes): 85.0 us per call; rss 16 -> 16 MiB
+200 x churn(10000): rss 16 -> 14 MiB
+a result kept across a collecting call: kept!
+an error kept across a collecting call: BOTLISH DECLARED Rejected {code -7} -- uncaught propagated error: <error Rejected {code: -7}>
+after destroy and create: token_count([1, 2]) = 5, checked(3) = 6

@@ -232,7 +232,7 @@ fn on_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send + 'stat
 const OVERFLOW_LINE: &str = "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}";
 
 fn new_vm() -> Box<Vm> {
-    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
         AllocMode::Summary)
 }
 

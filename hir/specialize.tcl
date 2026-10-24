@@ -221,7 +221,7 @@ proc hir::specialize::analyze {hir args} {
     variable state
     set options [hir::Options hir::specialize::analyze \
         {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1 -exact-callable-opt 1
-         -exact-callable-limit {}} $args]
+         -exact-callable-limit {} -exports {}} $args]
     variable exactLimit
     set context [hir::aot::context $hir]
     set state [dict create hir $hir context $context \
@@ -231,6 +231,7 @@ proc hir::specialize::analyze {hir args} {
         instances [dict create] keys [dict create] byBlock [dict create] \
         seeds [dict create] deps [dict create] refs [dict create] \
         queue {} next 0 current "" building {} analyses 0 \
+        exports [lsort -unique [dict get $options -exports]] \
         refinementFacts [if {[dict get $options -specialize]} {RefinementFacts $hir} else {string cat {}}]]
     try {
         Instance program {}
@@ -871,8 +872,8 @@ proc hir::specialize::Analyze {id} {
         dict set instance overlay $overlay
         dict set instance reachable [dict keys $reachable]
         dict set instance seeds $seeds
-        dict set instance values [hir::aot::materializedBlocks $semantic [dict get $state context] \
-            $block [dict keys $reachable]]
+        dict set instance values [ProgramValues $block [hir::aot::materializedBlocks $semantic [dict get $state context] \
+            $block [dict keys $reachable]]]
         dict set state instances $id $instance
 
         # Edges from reachable code only.
@@ -1867,7 +1868,7 @@ proc hir::specialize::SemanticInstances {} {
                 }
             }
         }
-        set values [hir::aot::materializedBlocks $hir $context $region $reachable]
+        set values [ProgramValues $region [hir::aot::materializedBlocks $hir $context $region $reachable]]
         dict set state instances $id values $values
         dict set state instances $id reachable $reachable
         foreach block $values {
@@ -1876,6 +1877,28 @@ proc hir::specialize::SemanticInstances {} {
         dict set state instances $id edges [lsort -unique $edges]
     }
     dict set state queue {}
+}
+
+# VALUES (the Block values region REGION's reachable code materializes),
+# plus, for the program, the exported functions (-exports: the block
+# ExprIds of every `exported c fn`, NATIVE-LIBRARY-MILESTONE-1.md, "Export
+# roots"). A library's foreign host holds each exported function as a value
+# it may call at any time with any arguments the function's declared
+# contract admits -- exactly what a materialized Block value is to the code
+# that holds it. So the program "materializes" every export: the export's
+# GENERIC instance is used (an edge of the program, a root of lowering) and
+# OPEN (InstanceClosed: its block's value is materialized), so no analysis
+# gives it a fact only its Botlish callers prove -- no caller Range, no
+# closed-caller kind theorem, no raw or short ABI -- and its body is typed by
+# its declared parameter types alone (Analyze's declared-type seed). Calls
+# of the function from Botlish code still select their own specialized
+# instances, closed and optimized as before.
+proc hir::specialize::ProgramValues {region values} {
+    variable state
+    if {$region ne "program" || ![llength [dict get $state exports]]} {
+        return $values
+    }
+    return [lsort -unique [concat $values [dict get $state exports]]]
 }
 
 # InstanceIds reachable from the program through edges, in program order.

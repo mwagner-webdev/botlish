@@ -1129,7 +1129,7 @@ mod tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Off,
         );
         compiled.install_constants(&mut vm);

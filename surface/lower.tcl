@@ -62,6 +62,9 @@
 #                         is its result (Sequence splices the statements in; a
 #                         nested pattern binds a further temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
+#   exported c fn f(a: T):  the same block marked `exported c`: a C export
+#                         of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
+#                         hir/exports.tcl checks and lists them)
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
@@ -893,6 +896,9 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {[dict getdef $node exported ""] ne ""} {
+                set block [hir::syntax::withExported $block [dict get $node exported]]
             }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \

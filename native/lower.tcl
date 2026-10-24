@@ -1444,7 +1444,7 @@ proc native::lower::Program {hirProgram args} {
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
-            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault \
+            -virtual-construction-opt $constructionDefault -dfa-dispatch $dfaDispatchDefault -exports {} \
             -fault [if {[info exists ::env(BOTLISH_NATIVE_FAULT)]} {set ::env(BOTLISH_NATIVE_FAULT)} else {string cat ""}]] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1529,7 +1529,8 @@ proc native::lower::Program {hirProgram args} {
         -call-facts-opt [dict get $options -call-facts-opt] \
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
-        -exact-callable-limit [dict get $options -exact-callable-limit]]
+        -exact-callable-limit [dict get $options -exact-callable-limit] \
+        -exports [lmap export [dict get $options -exports] {dict get $export block}]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -1608,6 +1609,16 @@ proc native::lower::Program {hirProgram args} {
 
     set functions [dict create]
     set pending [list [list [dict get $spec keys program] canonical]]
+    # The export roots (NATIVE-LIBRARY-MILESTONE-1.md, "Export roots"): each
+    # exported function's generic instance, which hir::specialize made a
+    # used, open instance of a materialized block. Its canonical function and
+    # generic entry are what the library's C trampoline calls, whether or not
+    # any Botlish code calls the function (tiny-leaf inlining of its Botlish
+    # calls never removes it: nothing calls this instance but the host).
+    set exportLines {}
+    foreach export [dict get $options -exports] {
+        lappend exportLines "export [Quote [dict get $export symbol]] func=[GenericRef [dict get $export block]] params=[Quote [join [dict get $export params] { }]] result=[dict get $export result]"
+    }
     while {$pending ne ""} {
         set pending [lassign $pending item]
         lassign $item id mode
@@ -1661,6 +1672,19 @@ proc native::lower::Program {hirProgram args} {
     variable contextBytes
     set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
     lappend header {*}[ContextHeader]
+    lappend header {*}[lmap line $exportLines {string map $map $line}]
+    if {[llength $exportLines]} {
+        # A library's error table (NATIVE-LIBRARY-MILESTONE-1.md, "Errors"):
+        # the canonical identity of every declared error a call can end in,
+        # by its NIR id -- the program's own and the runtime's builtin ones
+        # -- so the library reports a declared error's identity as data.
+        dict for {name id} $errorIds {
+            lappend header "error $id [Quote $name]"
+        }
+        dict for {name index} [set ::core::native::builtinErrors] {
+            lappend header "error [ErrorId $name] [Quote $name]"
+        }
+    }
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {

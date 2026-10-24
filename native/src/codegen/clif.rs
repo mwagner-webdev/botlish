@@ -386,8 +386,11 @@ fn module_error(e: cranelift_module::ModuleError) -> BackendError {
     BackendError::Codegen(format!("{e:?}"))
 }
 
-/// Declares the runtime helpers and every function of PROGRAM.
-pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) -> Result<Symbols, BackendError> {
+/// Declares the runtime helpers and every function of PROGRAM: for the AOT
+/// object (EXPORT) with global symbols unless LOCAL (a native library's
+/// object, whose only global symbols are its public C functions:
+/// codegen::library), for the JIT with local ones.
+pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, local: bool) -> Result<Symbols, BackendError> {
     let direct_helpers = export && module.isa().name() == "x64";
     let mut symbols = Symbols {
         status_result: vec![],
@@ -456,7 +459,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
             }
         }
     }
-    let linkage = if export { Linkage::Export } else { Linkage::Local };
+    let linkage = if export && !local { Linkage::Export } else { Linkage::Local };
     for f in &program.functions {
         let params = 1 + f.env as usize + f.params as usize;
         let name = format!("botlish_fn_{}", f.id);

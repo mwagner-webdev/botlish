@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# library.sh RUST-TARGET OUT-DIR ?patch? -- the probe's Botlish library
+# library.sh RUST-TARGET OUT-DIR ?patch? -- HISTORY: the census's step,
+# run by .github/workflows/react-native-probe.yml from the census's tree
+# (its CENSUS_REF; libmode.tcl no longer runs against this one:
+# NATIVE-LIBRARY-MILESTONE-1.md). The probe's Botlish library
 # (audit/react-native/tools/libmode.tcl) for a mobile Rust target
 # (REACT-NATIVE-TARGET-CENSUS.md, "Empirical results"). Run from a checkout
 # whose host native backend is built. "patch" first applies

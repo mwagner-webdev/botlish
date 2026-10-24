@@ -1505,3 +1505,41 @@ one.
 == WHAT TO DO
 Fix the program's syntax errors and compile it again; a tool that wants
 to run or build a program compiles it without -recover-syntax.
+
+@topic error.native-library
+title: NATIVE LIBRARY: a program cannot be built as a native library
+summary: NATIVE LIBRARY KIND refuses a native library build: entry statements, no export, a taken C symbol, a library name that is no C identifier, no -out, or a failed build tool.
+index: errors backends
+alias: library build failed; native library refused; declarations only
+keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc
+related: backend.native-library error.export-signature cli.options
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: NATIVE LIBRARY
+code: NATIVE LIBRARY LIBRARY-TOP-LEVEL
+code: NATIVE LIBRARY LIBRARY-NO-EXPORTS
+code: NATIVE LIBRARY LIBRARY-SYMBOL
+code: NATIVE LIBRARY NAME
+code: NATIVE LIBRARY OUT
+code: NATIVE LIBRARY TOOL
+
+== MEANING
+On -emit-native-library (native::library), after the program compiled:
+
+  * LIBRARY-TOP-LEVEL: the entry file has a top-level statement that is no
+    function declaration. Creating an instance runs the program's
+    initialization, and a library's is only its modules' static
+    initialization, so an entry script never runs by accident; each
+    statement is reported at its location.
+  * LIBRARY-NO-EXPORTS: no `exported c fn` (and no -export).
+  * LIBRARY-SYMBOL: two exports with one name (from different modules), or
+    an export named like the runtime API (create, destroy, abi_version,
+    bytes_release, error_*): each export is NAME_FUNCTION in C.
+  * NAME: the library name is not a C identifier (it prefixes every
+    public C name).
+  * OUT: native::library was called without -out.
+  * TOOL: ld, objcopy, ar or cc failed; the message has its output.
+
+== WHAT TO DO
+Move a top-level constant or computation into a function, or into an
+imported module (where a top-level binding is a module static); rename a
+clashing export; install binutils and a C compiler for TOOL.

@@ -1780,6 +1780,74 @@ impl CAbi {
     }
 }
 
+/// The C boundary type of an exported function's parameter or result
+/// (`export` declarations, NATIVE-LIBRARY-MILESTONE-1.md, "The C ABI"): what
+/// a library's C trampoline converts between a C value and a Botlish one.
+/// `Unit` is a result only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Boundary {
+    /// Botlish Int <-> C int64_t: every int64_t is an Int; an Int result
+    /// outside int64_t is a boundary error, never wrapped.
+    Int,
+    /// Botlish Bool <-> C bool.
+    Bool,
+    /// Botlish Float64 <-> C double: a NaN or an infinity argument is a
+    /// boundary error, -0.0 enters as 0.0 (Float64 has no negative zero).
+    Float64,
+    /// Botlish String <-> UTF-8 bytes (pointer and length): an argument is
+    /// validated and copied into the heap; a result is copied out into a
+    /// buffer the caller owns.
+    Str,
+    /// No result.
+    Unit,
+}
+
+impl Boundary {
+    pub fn parse(word: &str) -> Option<Boundary> {
+        Some(match word {
+            "int" => Boundary::Int,
+            "bool" => Boundary::Bool,
+            "float64" => Boundary::Float64,
+            "str" => Boundary::Str,
+            "unit" => Boundary::Unit,
+            _ => return None,
+        })
+    }
+
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Boundary::Int => "int",
+            Boundary::Bool => "bool",
+            Boundary::Float64 => "float64",
+            Boundary::Str => "str",
+            Boundary::Unit => "unit",
+        }
+    }
+
+    /// The number of C argument words a parameter of this type takes in a
+    /// trampoline's argument slots (a String: its pointer and its length).
+    pub fn words(self) -> usize {
+        match self {
+            Boundary::Str => 2,
+            Boundary::Unit => 0,
+            _ => 1,
+        }
+    }
+}
+
+/// An exported function (`export "SYMBOL" func=N params="T..." result=T`,
+/// NATIVE-LIBRARY-MILESTONE-1.md): the C symbol of its trampoline, the NIR
+/// function whose generic entry the trampoline calls (the export root: the
+/// function's generic instance, compiled under its declared contract only),
+/// and its boundary signature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportDecl {
+    pub symbol: String,
+    pub func: FuncId,
+    pub params: Vec<Boundary>,
+    pub result: Boundary,
+}
+
 /// A C function the program calls (`foreign N "SYMBOL" params="..."
 /// result=K [alias=I] name="KEY"`, C-FFI.md): the native link symbol the
 /// system linker resolves (never looked up at run time), the transport class
@@ -1840,6 +1908,13 @@ pub struct Program {
     /// bounds its Capture indices. Zero for a program with no module-static
     /// bindings.
     pub statics: u32,
+    /// The exported functions (`export` declarations, in order;
+    /// NATIVE-LIBRARY-MILESTONE-1.md): empty but for a library's program.
+    pub exports: Vec<ExportDecl>,
+    /// The canonical identity of every declared error the program may raise,
+    /// by its NIR id (`error ID "NAME"` declarations): what a library reports
+    /// as a declared error's identity. Empty but for a library's program.
+    pub errors: Vec<(u32, String)>,
     /// The header's `call-effects` flag (default 1): whether call sites
     /// take their callee's settled effect summary (`summarize_call_effects`).
     /// Kept so a pass that rewrites functions (codegen::fusion) can settle
@@ -1997,6 +2072,8 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         statics: 0,
         context_bytes: 0,
         contexts: Vec::new(),
+        exports: Vec::new(),
+        errors: Vec::new(),
         call_effects: true,
     };
     let mut current: Option<Function> = None;
@@ -2082,6 +2159,19 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                         return p.err(format!("foreign numbers must be dense and in order, got {}", decl.0));
                     }
                     program.foreigns.push(decl.1);
+                }
+                "export" => program.exports.push(parse_export(&p, &tokens)?),
+                "error" => {
+                    let id = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok());
+                    match (id, tokens.get(2)) {
+                        (Some(id), Some(Token::Quoted(name))) if id > 0 && !name.is_empty() && tokens.len() == 3 => {
+                            if program.errors.iter().any(|(seen, _)| *seen == id) {
+                                return p.err(format!("error id {id} is declared twice"));
+                            }
+                            program.errors.push((id, name.clone()))
+                        }
+                        _ => return p.err("error needs a positive id and a quoted error name"),
+                    }
                 }
                 "func" => current = Some(parse_func_header(&p, &tokens)?),
                 _ => return p.err(format!("expected native or func, got {raw:?}")),
@@ -2285,6 +2375,39 @@ fn parse_foreign(p: &Parser, tokens: &[Token]) -> Result<(u32, ForeignDecl), Nir
         Some(_) => return p.err("foreign variadic=1 needs at least one fixed parameter"),
     };
     Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic }))
+}
+
+fn parse_export(p: &Parser, tokens: &[Token]) -> Result<ExportDecl, NirError> {
+    let symbol = match tokens.get(1) {
+        Some(Token::Quoted(symbol)) if is_c_identifier(symbol) => symbol.clone(),
+        _ => return p.err("export needs its quoted C symbol (a C identifier)"),
+    };
+    let kv = pairs(tokens);
+    let Some(func) = kv.get("func").and_then(|f| f.parse::<FuncId>().ok()) else {
+        return p.err("export needs func=N");
+    };
+    let mut params = Vec::new();
+    for word in kv.get("params").map(String::as_str).unwrap_or("").split_whitespace() {
+        match Boundary::parse(word) {
+            Some(Boundary::Unit) | None => return p.err(format!("export {symbol}: unknown parameter type {word:?}")),
+            Some(t) => params.push(t),
+        }
+    }
+    let Some(result) = kv.get("result").and_then(|r| Boundary::parse(r)) else {
+        return p.err(format!("export {symbol} needs result=int|bool|float64|str|unit"));
+    };
+    if tokens.len() != 5 {
+        return p.err(format!("export {symbol}: expected \"SYMBOL\" func=N params=\"...\" result=T"));
+    }
+    Ok(ExportDecl { symbol, func, params, result })
+}
+
+/// Whether TEXT is a C identifier: a letter or `_`, then letters, digits and
+/// `_` (ASCII).
+pub fn is_c_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn parse_enum(p: &Parser, tokens: &[Token]) -> Result<(u32, EnumDecl), NirError> {
@@ -2870,6 +2993,22 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
         }
     }
     let func = |id: FuncId| program.functions.get(id as usize);
+    // An export's trampoline calls its function's generic entry with one
+    // tagged Value per parameter (NATIVE-LIBRARY-MILESTONE-1.md): a real,
+    // ordinary function of that arity -- never the program, never a
+    // companion -- whose symbol no other export has.
+    let mut symbols = HashSet::new();
+    for e in &program.exports {
+        let Some(f) = func(e.func) else {
+            return fail(format!("export {}: no function {}", e.symbol, e.func));
+        };
+        if e.func == 0 || f.results != 1 || f.env || f.params as usize != e.params.len() {
+            return fail(format!("export {}: function {} ({}) is not an environment-free function of {} parameters", e.symbol, f.id, f.name, e.params.len()));
+        }
+        if !symbols.insert(e.symbol.as_str()) {
+            return fail(format!("export {} is declared twice", e.symbol));
+        }
+    }
     for f in &program.functions {
         if only.is_some_and(|i| i != f.id as usize) {
             continue;
