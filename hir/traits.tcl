@@ -550,6 +550,7 @@ proc hir::traits::index {hir} {
             dict set units $ns $scope
         }
     }
+    set decls [hir::privacy::Decls $hir]
     dict for {unit scope} $units {
         if {[dict get $hir scopes $scope kind] ne "program"} {
             continue
@@ -558,6 +559,12 @@ proc hir::traits::index {hir} {
             set binding [dict get $hir bindings $b]
             set d [dict get $binding declaredBy]
             set info [dict create kind value binding $b origin [dict get $binding origin]]
+            if {[hir::privacy::Entry $decls $unit values $name] ne ""} {
+                # A private function (hir/privacy.tcl) implements no
+                # requirement: a trait's operations are called from code of
+                # any module (Implementation).
+                dict set info private 1
+            }
             if {$d ne "" && [dict exists $hir exprs $d value]} {
                 set value [dict get $hir exprs $d value]
                 if {[dict get $hir exprs $value kind] eq "block"} {
@@ -568,13 +575,22 @@ proc hir::traits::index {hir} {
                         params [lrange [dict get $node declaredParamTypes] 0 [expr {$arity - 1}]] \
                         result [dict get $node declaredResult] errors [dict get $node declaredErrors] \
                         flags $flags contexts [dict getdef $node contextParams {}] \
-                        variadic [dict exists $node variadic] places [dict getdef $node places {}]]
+                        variadic [dict exists $node variadic] places [dict getdef $node places {}] \
+                        private [dict getdef $info private 0]]
                 }
             }
             dict set impls $unit $name $info
             dict set unitNames $b [list $unit $name]
         }
     }
+}
+
+# Why the private function QUALIFIED of unit OWNER implements no
+# requirement (hir/privacy.tcl): a trait operation runs its implementation
+# for code of any module, so an implementation is the module's interface,
+# never its private helper -- conformance by name never reaches one.
+proc hir::traits::PrivateImplementation {qualified owner} {
+    return "$qualified is private to [hir::privacy::UnitPhrase $owner]: a private function implements no requirement (a trait operation runs its implementation for code of any module, so an implementation must be public)"
 }
 
 # The implementation index entry of NAME in UNIT, or "".
@@ -705,6 +721,9 @@ proc hir::traits::Implementation {req witness owner kind} {
     }
     if {$info eq ""} {
         return [dict create ok 0 reason "no function $qualified exists: \"$name\" is not defined by [OwnerPhrase $owner $kind]" found ""]
+    }
+    if {[dict getdef $info private 0]} {
+        return [dict create ok 0 reason [PrivateImplementation $qualified $owner] found ""]
     }
     switch -- [dict get $info kind] {
         value {

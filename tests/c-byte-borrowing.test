@@ -58,7 +58,7 @@ if {[testConstraint cCompiler] && [testConstraint nativeCCalls]} {
         set ::fixtureDir ""
     }
 }
-testConstraint bbFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+testConstraint bbFixture [expr {$::fixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 
 # A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}).
 proc app {files} {

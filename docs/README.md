@@ -2069,6 +2069,21 @@ both ways (DIRECT without it, STALE-DIRECT-MODULE when nothing needs it); a
 module that makes every such call from functions requiring a context it
 declares itself is ordinary, and so is everything above it.
 
+A top-level declaration may be written `private` (`private fn`, `private
+struct`, `private opaque struct`, `private layout`, `private error`,
+`private x = ...`, ...; MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md):
+it is accessible only to code of the module that declares it, decided by the
+module's canonical identity -- no importer, parent, child, entry program,
+method-syntax call or trait conformance reaches it (`PRIVATE-ACCESS`), and no
+public declaration may name a private type or error in its interface
+(`PRIVATE-TYPE-ESCAPE`; an opaque struct's hidden fields are no interface).
+Declarations are public by default; `private` is a static access rule with
+no run-time representation, orthogonal to `opaque` (who may build and take
+apart a value). The warning `CONTEXT-RESOURCE-ESCAPE` reports a module the
+direct-module analysis proves contextualized -- an airlock of raw authority
+-- whose public member hands a raw C pointer, a native view or an open
+struct holding one to another module.
+
 ### Lowering
 
 `^name` is a root reference: it denotes the root binding whatever the
@@ -2559,12 +2574,24 @@ an executable (SINGLE-EXECUTABLE.md):
 * `stub` needs only `botlish-aot-stub` beside the driver (or
   `BOTLISH_NATIVE_AOT_STUB`): the prebuilt runtime with the program's image
   appended, which it maps and relocates at startup. The single-file compiler
-  links this way. Its executables have no ELF symbols for Botlish functions.
-  It is Linux x86-64's only: macOS executables are the system linker's.
+  links a program that calls no C this way. Its executables have no ELF
+  symbols for Botlish functions. It is Linux x86-64's only: macOS
+  executables are the system linker's.
+* `system` needs the host's C compiler driver (`cc`; Microsoft's link.exe
+  from a Developer environment on Windows; or `BOTLISH_NATIVE_SYSTEM_LINKER`)
+  and the precompiled runtime archive `libbotlish_runtime.a` beside the
+  driver (or `BOTLISH_NATIVE_RUNTIME`), built with it by the same `cargo
+  build`: it links the program object, which carries the program's
+  startup record (`botlish_program`), and the archive, whose `main` starts
+  that record as the rustc linker's startup does -- no rustc
+  (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+* `auto` is `system` for a program that calls C and `stub` for any other
+  where the stub runs: the single-file compiler's choice.
 
 A program that calls C (C-FFI.md) is linked with its declared libraries by
-the platform linker on both: GNU ld's link plan on Linux, Apple's ld's on
-macOS (MACOS-AARCH64-MILESTONE-6.md). The stub linker refuses it.
+the platform linker with the rustc and the system linker: GNU ld's link plan
+on Linux, Apple's ld's on macOS (MACOS-AARCH64-MILESTONE-6.md), link.exe's
+on Windows. The stub linker refuses it.
 
 The executable uses the target's baseline instructions and the system's own
 libraries (glibc, libm and libgcc on Linux; libSystem on macOS); it needs no
@@ -3457,7 +3484,7 @@ annotation or comment suppresses a warning. This is intentional, not forgotten
 CLI work: every warning is on for everyone, so a warning must be trustworthy
 enough to be, and uncertainty means no warning. Codes (`SAME-RETURN-VALUE`,
 `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
-`ONE-CHAR-STRING-LITERAL`, `MANY-BOOLEAN-ARGUMENTS`) are stable for tests,
+`ONE-CHAR-STRING-LITERAL`, `MANY-BOOLEAN-ARGUMENTS`, `CONTEXT-RESOURCE-ESCAPE`) are stable for tests,
 tooling and documentation, but they are not switches. Adding
 `METHOD-ELIGIBLE`, `FIXED-ARITY-LIST-RETURN`, `SAME-FAILURE`, `PROVES-NAMING`,
 `ONE-CHAR-STRING-LITERAL` and `MANY-BOOLEAN-ARGUMENTS` gave `BOTLISH_WARNINGS`
@@ -3756,3 +3783,63 @@ WARNINGS-MANY-BOOLEAN-ARGUMENTS.md for the theorem, the gate, the conversion
 law, the corpus census and known limitations; the tests are
 `tests/many-boolean-arguments.test` and
 `audit/many-boolean-arguments/tools/fuzz.tcl`.
+
+`CONTEXT-RESOURCE-ESCAPE`: a contextualized module -- one the direct-module
+analysis proves an airlock of raw authority (it makes direct calls, and a
+context it declares mediates every one) -- hands raw foreign representation
+to code of another module.
+
+```
+# gfx.bot
+import std::ffi::c
+
+extern c fn handle() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn keep(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
+
+opaque context struct Gfx:
+    ready: bool
+
+fn create() -> Gfx:
+    Gfx {ready: true}
+
+fn renderer(context g: Gfx) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    p = handle()
+    q = std::ffi::c::clone(p)
+    keep(q)
+    p
+```
+```
+# main.bot
+import gfx
+
+with context gfx::create()
+
+r = gfx::renderer()
+0
+```
+```
+gfx.bot:12:1: warning: gfx::renderer exposes a raw C pointer (its result: std::ffi::c::Ptr[std::ffi::c::Void]) across the boundary of module "gfx", which mediates its raw authority through its context gfx::Gfx: the entry program receives one (1 call; first at main.bot:5:5). Keep the resource behind the context and give module "gfx" an operation that takes and returns values, or seal the resource in an opaque struct (CONTEXT-RESOURCE-ESCAPE)
+main.bot:5:5: note: a crossing of this resource
+```
+
+(`keep`, a C call that may retain its pointer, is a direct edge `Gfx`
+mediates: that is what makes `gfx` an airlock.)
+
+Its fact is a crossing the checker types: another unit references a public
+member of the airlock, and the result it receives, an argument it passes or
+the member's value holds a C address (`Ptr`, `FnPtr`; R2) or a native view
+or edit (R3), directly or inside a List, vector, array, anonymous struct or
+struct whose representation that unit may read; or that unit builds or takes
+apart a struct of the airlock holding one (R4). An opaque or private struct
+of another module stops the search (an opaque resource value crosses
+freely), a private member is never a crossing, a pointer passed in by a unit
+with raw authority of its own (direct, or an airlock itself) is its own,
+trait operations are the trait's contract, and ordinary and designated direct
+modules are never airlocks. Evidence-based: a public pointer-returning
+function nobody outside uses is silent. One warning per exposing declaration,
+at the declaration, with each consuming unit's number of crossing sites and
+its first one. No opt-out: the responses are an operation that takes and
+returns values, an opaque struct, or `private`. See
+MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md for the rule, its
+stopping rules, the census and known limitations; the tests are
+`tests/context-resource-escape.test` and `audit/module-privacy/tools/fuzz.tcl`.

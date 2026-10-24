@@ -923,10 +923,10 @@ test mb-no-fine-grained-options {there is no per-warning option: -Wno-many-boole
     surface::compile $::mbSource t.bot -Wno-many-boolean-arguments 1
 } -returnCodes error -match glob -result {*unknown option "-Wno-many-boolean-arguments"*}
 
-test mb-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code, seven codes} -body {
+test mb-no-new-modes-or-options {the policy surface is still exactly default, off, error; the registry is static, one line per code, eight codes (CONTEXT-RESOURCE-ESCAPE came after this one: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md)} -body {
     list $hir::warnings::modes [dict keys $hir::warnings::passes] [dict get $hir::warnings::passes MANY-BOOLEAN-ARGUMENTS] \
         [expr {[llength [info commands hir::warnings::enable]] + [llength [info commands hir::warnings::disable]]}]
-} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS} hir::warnings::ManyBooleanArguments 0}
+} -result {{default off error} {SAME-RETURN-VALUE METHOD-ELIGIBLE FIXED-ARITY-LIST-RETURN SAME-FAILURE PROVES-NAMING ONE-CHAR-STRING-LITERAL MANY-BOOLEAN-ARGUMENTS CONTEXT-RESOURCE-ESCAPE} hir::warnings::ManyBooleanArguments 0}
 
 test mb-error-promotion-identity {the promoted error keeps the code and the message the warning has} -body {
     set w [lindex [manyOf [compileWith $::mbSource default]] 0]

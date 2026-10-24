@@ -93,8 +93,14 @@ namespace eval hir::resolve {}
 # binding a namespace's own section scope declares to its qualified
 # spelling afterward, so no two modules' definitions ever share a lowered
 # core IR name either.
-proc hir::resolve::program {nodes mode origin {modules {}} {choices {}} {externs 0}} {
+proc hir::resolve::program {nodes mode origin {modules {}} {choices {}} {externs 0} {decls ""}} {
     set hir [hir::Empty $mode]
+    if {$decls ne ""} {
+        # The units' module declarations (hir/privacy.tcl): which of their
+        # members are private, for method candidates and qualified
+        # references.
+        dict set hir moduleDecls $decls
+    }
     dict set hir laterIndex [dict create]
     dict set hir methodChoices $choices
     dict set hir methodCalls [dict create]
@@ -410,14 +416,27 @@ proc hir::resolve::NoMethodIdentity {hirVar identity} {
 # it. HIDDENVAR, if given, names a caller variable that receives the displays
 # of the nomethod functions that were left out, so the caller can tell "no
 # function of that name is visible" from "only nomethod functions are".
-proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""}} {
+#
+# A private member of an imported module (hir/privacy.tcl) is not visible
+# from code of another module, so it is no candidate either, and it competes
+# with nothing: the call means what it would mean without it (one of the
+# accessible candidates, or the call of a field value). PRIVATEVAR, if
+# given, receives the qualified names of the private functions left out, so
+# a call that then finds nothing can say why (hir::structs::ProjectionProblem:
+# PRIVATE-ACCESS).
+proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""} {privateVar ""}} {
     upvar 1 $hirVar hir
     if {$hiddenVar ne ""} {
         upvar 1 $hiddenVar hidden
     }
+    if {$privateVar ne ""} {
+        upvar 1 $privateVar private
+    }
     set hidden {}
+    set private {}
     set found [dict create]
     set arities [dict create]
+    set decls [hir::privacy::Decls $hir]
     foreach ns [hir::imports::namespaces [CtxNamespace $ctx]] {
         set qualified "${ns}::$name"
         if {[core::native::isQualifiedNative $qualified]} {
@@ -428,7 +447,10 @@ proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""}} 
             }
         } elseif {[dict exists $hir modules $ns]} {
             set scope [dict get $hir modules $ns]
-            if {[dict exists $hir scopes $scope names $name]} {
+            if {[dict exists $hir scopes $scope names $name]
+                    && [hir::privacy::Denied $decls $ns values $name [CtxNamespace $ctx]]} {
+                lappend private $qualified
+            } elseif {[dict exists $hir scopes $scope names $name]} {
                 set b [dict get $hir scopes $scope names $name]
                 set identity [CandidateIdentity hir $b]
                 if {![dict exists $found $identity]} {
@@ -1216,6 +1238,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set written [dict get $node callee]
             set candidates {}
             set hidden {}
+            set private {}
             set planned [hir::traits::CallAction $ctx $node]
             if {$planned ne "" && $planned ne "field"} {
                 # A call the trait plan rewrites (TRAITS.md): a trait
@@ -1245,7 +1268,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             }
             if {[dict exists $node method] && $planned ne "field"} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
-                    [expr {[llength [dict get $node args]] + 1}] hidden]
+                    [expr {[llength [dict get $node args]] + 1}] hidden private]
                 if {[AfterBindingHole hir $scope ""]} {
                     # A malformed statement before it may bind the method's
                     # name: which function it applies is not known (Holes,
@@ -1340,8 +1363,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 } elseif {[dict exists $node method]} {
                     # No function `name` is visible: this is the call of a
                     # field value it has always been. Only diagnostics need
-                    # to know it was written as a method call.
+                    # to know it was written as a method call -- and which
+                    # private functions of that name are not visible here
+                    # (hir/privacy.tcl).
                     SetField hir [dict get $hir exprs $e callee] methodCallee 1
+                    if {$private ne ""} {
+                        SetField hir [dict get $hir exprs $e callee] privateCandidates $private
+                    }
                 }
             }
             if {[dict exists $node imprint]} {
@@ -2216,6 +2244,14 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     set b [dict get $hir scopes $bodyScope names $name]
     SetField hir $e binding $b
     SetField hir $e init yes
+    set decls [hir::privacy::Decls $hir]
+    if {[hir::privacy::Denied $decls $ns values $name [CtxNamespace $ctx]]} {
+        # A private member of another module (hir/privacy.tcl): the loader
+        # rejects every qualified reference a source file writes; this is
+        # the same rule for one the build itself makes.
+        hir::Diagnose hir PRIVATE-ACCESS [hir::privacy::AccessMessage $ns $name \
+            [dict get [hir::privacy::Entry $decls $ns values $name] kind] [CtxNamespace $ctx]] $e
+    }
     hir::flags::NoteRef hir $e
     # The module section scope is never within any enclosing block's own
     # body scope (it is always a sibling of the program's top scope), so

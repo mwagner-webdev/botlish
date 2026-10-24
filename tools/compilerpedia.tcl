@@ -490,6 +490,12 @@ proc cpt::Generate {} {
                 if {![dict exists $node name]} {
                     continue
                 }
+                if {[dict getdef $node private 0]} {
+                    # A private declaration is the module's implementation,
+                    # never API another module may use: not documented as
+                    # one (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
+                    continue
+                }
                 set name [dict get $node name]
                 if {[hir::iteration::IsOperation $ns $name]} {
                     # A collection's loop protocol (hir/iteration.tcl): its
@@ -741,6 +747,10 @@ proc cpt::CheckExample {topic example backends scratch} {
     file mkdir $dir
     set path [file join $dir example.bot]
     WriteFile $path "[join [dict get $example lines] \n]\n"
+    # Its modules (@module NAME): application modules beside it.
+    dict for {name text} [dict getdef $example modules {}] {
+        WriteFile [file join $dir $name.bot] "[join $text \n]\n"
+    }
     # An example importing a namespace of another operating system's
     # platform (std::linux::io on a Mac) documents that system: it compiles for
     # its target, as the golden runner's suites do, and runs where a program
@@ -776,7 +786,9 @@ proc cpt::CheckExample {topic example backends scratch} {
             lappend problems "$id: rejected with ($code) $message -- the example states [dict get $example error]"
         }
         set at [dict get $example at]
-        if {$at ne "" && ![string match "*example.bot:$at: *" $message]} {
+        # (An @at of a module's diagnostic names its file: NAME.bot:L:C.)
+        set file [expr {[string match *.bot:* $at] ? "" : "example.bot:"}]
+        if {$at ne "" && ![string match "*/$file$at: *" $message]} {
             lappend problems "$id: the primary diagnostic is not at $at: $message"
         }
         regsub {^\S+:\d+:\d+: } $message {} text

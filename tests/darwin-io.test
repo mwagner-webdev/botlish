@@ -44,7 +44,7 @@ testConstraint posixShell [expr {[auto_execok sh] ne ""}]
 set ::hostTarget [core::cabi::hostTarget]
 # Darwin I/O runs (tests/helpers.tcl's darwinIO), with the native backend
 # built and its executables linked by rustc.
-testConstraint darwinIO [expr {[testConstraint darwinIO] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+testConstraint darwinIO [expr {[testConstraint darwinIO] && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 # The interposer library, where the darwin platform runs and a C compiler
 # builds dynamic libraries.
 testConstraint writeInject [expr {[testConstraint darwinIO] && [testConstraint cCompiler]}]

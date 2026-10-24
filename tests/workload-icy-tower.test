@@ -45,7 +45,7 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 # backend, rustc-linked executables, and the package-owned libSDL3.so.
 testConstraint icyTowerExecutable [expr {$::tcl_platform(os) eq "Linux" &&
     $::tcl_platform(machine) in {x86_64 amd64} && [testConstraint nativeBuilt] &&
-    [testConstraint executableAot] && [testConstraint rustcLinker] && [cffi::sdl3Dir] ne ""}]
+    [testConstraint executableAot] && [testConstraint cLinker] && [cffi::sdl3Dir] ne ""}]
 testConstraint python3 [expr {[auto_execok python3] ne ""}]
 
 set gameDir [file join $::projectRoot examples games icy-tower]
@@ -206,6 +206,86 @@ test workload-icy-tower-sdl-records-opaque {every struct sdl.bot declares that h
     }
     set found
 } -result {}
+
+# 1 if TYPE exposes a C pointer, a native view or a native edit to code of
+# another module: icyHoldsRaw, stopping at an opaque struct, whose
+# representation no other module reads.
+proc icyExposesRaw {hir type {seen {}}} {
+    if {[llength $type] < 2} { return 0 }
+    set head [lindex $type 0]
+    if {$head in {cptr cfnptr nview nedit}} { return 1 }
+    if {$head eq "nstruct"} {
+        set id [lindex $type 1]
+        if {$id in $seen} { return 0 }
+        foreach entry [hir::sourceTypes $hir] {
+            if {[dict exists $entry kind] && [dict get $entry kind] eq "struct" && [dict get $entry id] eq $id} {
+                if {[dict get $entry opaque]} { return 0 }
+                foreach {field fieldType} [dict get $entry fields] {
+                    if {[icyExposesRaw $hir $fieldType [concat $seen [list $id]]]} { return 1 }
+                }
+            }
+        }
+        return 0
+    }
+    foreach part [lrange $type 1 end] {
+        if {[icyExposesRaw $hir $part $seen]} { return 1 }
+    }
+    return 0
+}
+
+# The declarations of sdl.bot that are private (hir/privacy.tcl's record of
+# the module), by category: {values {NAME ...} types {NAME ...}}.
+proc icyPrivate {hir} {
+    set result {}
+    dict for {category names} [dict get $hir moduleDecls sdl private] {
+        lappend result $category [lsort [dict keys $names]]
+    }
+    return $result
+}
+
+test workload-icy-tower-sdl-helpers-private {every function of sdl.bot whose parameter or result exposes a C pointer, a native view or a native edit (an opaque struct hides one) is private, and so is every layout of native memory and the session (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): no importer can call a pointer-taking helper or name the session's record} -body {
+    set hir [icyStagedHir]
+    set found {}
+    set decls [dict get $hir moduleDecls]
+    dict for {e node} [dict get $hir exprs] {
+        if {[icyModuleOf $hir $e] ne "sdl" || [dict get $node kind] ne "bind"} continue
+        set value [dict get $node value]
+        if {[dict get $hir exprs $value kind] ne "block" || ![hir::isModuleBinding $hir [dict get $node binding]]} continue
+        set name [namespace tail [hir::semantic::SourceName $hir [dict get $node binding]]]
+        set signature [hir::signatures::of $hir $value]
+        set raw 0
+        foreach type [concat [lmap p [dict get $signature params] {dict get $p trusted}] [list [dict get $signature result]]] {
+            if {$type ne "" && [icyExposesRaw $hir $type]} { set raw 1 }
+        }
+        if {$raw && [hir::privacy::Entry $decls sdl values $name] eq ""} {
+            lappend found "public $name holds a pointer, a view or an edit"
+        }
+    }
+    list [lsort $found] [icyPrivate $hir]
+} -result {{} {types {EventType Handles KeyState Session TextBuffer} values {cstring down? free_text handles log_failure nul quit_requested? release remember renderer session write_text write_text_unchecked}}}
+
+test workload-icy-tower-no-resource-escape {the refactored airlock hands nothing raw across its boundary: no CONTEXT-RESOURCE-ESCAPE (the warning-clean test above compiles it under -warnings error; this asks the pass itself)} -body {
+    set hir [icyStagedHir]
+    hir::resourceescape::findings [dict getdef $hir traitSource $hir]
+} -result {}
+
+test workload-icy-tower-baseline-warnings {the original Icy Tower boundary (audit/icy-tower/context-refactor/baseline/, commit 6df89a8e) draws exactly the twelve CONTEXT-RESOURCE-ESCAPE warnings the census predicted: seven drawing functions taking the renderer, open, poll and close carrying the Video, and the open structs Video and Polled taken apart outside sdl.bot} -body {
+    set stage [file join [tcltest::temporaryDirectory] icy-tower-baseline-stage]
+    file delete -force $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 \
+        -app [file join $::projectRoot audit icy-tower context-refactor baseline] -into $stage
+    try {
+        set hir [surface::readProgramFile [file join $stage main.bot] -warnings default -warning-channel "" -target linux-x86_64 -cache ""]
+    } finally {
+        file delete -force $stage
+    }
+    lsort [lmap w [hir::warnings::of $hir] {
+        if {[dict get $w code] ne "CONTEXT-RESOURCE-ESCAPE"} continue
+        list [dict get $w data declaration] [dict get $w data rules] [lmap pair [dict get $w data consumers] {
+            expr {[lindex $pair 0] eq "" ? "main" : [lindex $pair 0]}
+        }]
+    }]
+} -result {{sdl::Polled R4 main} {sdl::Video R4 render} {sdl::clear R2 render} {sdl::close R2 main} {sdl::color R2 render} {sdl::fill R2 render} {sdl::line R2 render} {sdl::open R2 main} {sdl::poll R2 main} {sdl::present R2 render} {sdl::scale R2 render} {sdl::text R2 render}}
 
 test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
     set text [core::ReadFile [file join $gameDir golden.bot]]

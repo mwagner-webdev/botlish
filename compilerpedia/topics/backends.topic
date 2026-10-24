@@ -154,15 +154,19 @@ no Visual C++ runtime either).
 Every function instance the program uses must be closed (fully known to the
 ahead-of-time compiler); otherwise NATIVE AOT NOT-READY names the cause
 (-aot-spec explains). A .ir file is rejected (NATIVE AOT INPUT): executables
-are built from .bot, .hir or .hirx. Linking: in a checkout the default
-linker uses rustc and the system C linker (BOTLISH_NATIVE_LINKER=rustc),
-on Linux x86-64 and AArch64, on macOS AArch64 and on Windows x86-64
-(MSVC's toolchain: Visual Studio's C++ build tools and the Windows SDK,
-which rustc finds itself); the `stub` linker (BOTLISH_NATIVE_LINKER=stub,
-what the single executable uses) needs no toolchain and is Linux x86-64
-only. A program that calls C links with the rustc linker on Linux and
-macOS, its declared libraries passed to the platform linker; on Windows
-not yet, and the stub linker never (NATIVE LINK). The
+are built from .bot, .hir or .hirx. Linking (BOTLISH_NATIVE_LINKER): in a
+checkout the default linker uses rustc and the system C linker (rustc), on
+Linux x86-64 and AArch64, on macOS AArch64 and on Windows x86-64 (MSVC's
+toolchain: Visual Studio's C++ build tools and the Windows SDK, which rustc
+finds itself); the `system` linker needs no rustc -- the host's C compiler
+driver (cc; on Windows link.exe from a Developer Command Prompt) links the
+program with the precompiled runtime archive (libbotlish_runtime.a, beside
+the driver or BOTLISH_NATIVE_RUNTIME), on the same hosts; the `stub` linker
+needs no toolchain and is Linux x86-64 only; `auto` (what the single
+executable uses) is the system linker for a program that calls C and the
+stub for any other. A program that calls C links with the rustc and the
+system linker, its declared libraries passed to the platform linker, and
+the stub linker never (NATIVE LINK). The
 executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
@@ -228,10 +232,11 @@ library's entry file holds declarations only (NATIVE LIBRARY
 LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created.
 
 == THREE DIFFERENT THINGS
-  * A module's top-level functions are visible to every importer: Botlish
-    has no visibility modifiers or export lists (capability.visibility).
+  * A module's top-level functions are visible to every importer unless
+    declared `private` (concept.private); there are no export lists.
     That is Botlish-to-Botlish reach, through the Botlish calling
-    convention, and it makes no C symbol.
+    convention, and it makes no C symbol. `private` decides Botlish names
+    only: a `private exported c fn` is still a C export.
   * `extern c fn` declares a C function Botlish calls (concept.c-ffi): a
     foreign import, with no body.
   * `exported c fn` gives a Botlish function a C entry point a host calls:
@@ -259,15 +264,23 @@ docs: SINGLE-EXECUTABLE.md
 == WHAT IT IS
 A Tcl 9 zipkit (single/build.sh in a checkout): a static tclsh with the
 compiler and main.tcl in an attached archive. It takes main.tcl's options,
-runs every backend, builds standalone executables with the stub linker, and
-answers -help from the packed Compilerpedia, with no source tree present.
+runs every backend, builds standalone executables, and answers -help from
+the packed Compilerpedia, with no source tree present. It links a program
+that calls no C with the stub linker, which needs no toolchain, and one that
+calls C (or declares a C library) with the system linker: the host's C
+compiler driver (cc, with its linker) and the runtime archive the compiler
+carries -- never Rust or a checkout (BOTLISH_NATIVE_LINKER=auto).
 
 == THINGS TO KNOW
 On its first run that needs a native backend it copies its two native
 executables into a cache directory ($BOTLISH_CACHE_DIR,
-$XDG_CACHE_HOME/botlish or ~/.cache/botlish); without a usable cache it uses
-a temporary one. Usage, -help and -version need no installation. It is
-built for Linux x86-64.
+$XDG_CACHE_HOME/botlish or ~/.cache/botlish), and on its first run that may
+link (-emit-native-executable, a native backend) its runtime archive too;
+without a usable cache it uses a temporary one. Usage, -help and -version
+need no installation. It is built for Linux x86-64. A program that calls C
+needs a C compiler on the machine that builds it (Debian, Ubuntu: apt
+install gcc) and the libraries it declares; without one its link says so
+(NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
 
 @topic backend.native-only
 title: Native-only operations

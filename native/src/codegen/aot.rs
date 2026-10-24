@@ -7,21 +7,36 @@
 //! Tcl, rustc, the source nor this checkout: only the system's own libraries
 //! (on Windows the C runtime is linked statically for it: `crt_args`).
 //!
-//! Two linkers, chosen by `BOTLISH_NATIVE_LINKER` (SINGLE-EXECUTABLE.md):
+//! Three linkers, chosen by `BOTLISH_NATIVE_LINKER` (SINGLE-EXECUTABLE.md,
+//! SINGLE-EXECUTABLE-FFI-MILESTONE-1.md; `chosen_linker`):
 //!
-//!   * `rustc` (the default): rustc compiles a small data initializer and
-//!     statically links our runtime (`libbotlish_native.rlib` beside the
-//!     driver), through the system linker.
+//!   * `rustc` (the default): rustc compiles the fixed startup crate
+//!     (`STARTUP`) and statically links our runtime
+//!     (`libbotlish_native.rlib` beside the driver), through the system
+//!     linker.
 //!   * `stub`: no toolchain at all. The prebuilt `botlish-aot-stub` (this
 //!     runtime and a loader, beside the driver or `BOTLISH_NATIVE_AOT_STUB`)
 //!     is copied and the program's image appended to it: the object's
 //!     sections laid out and relocated here, by `image` below, into a
 //!     `runtime::aotimage::Image` the stub maps at startup. This is how the
-//!     single-file compiler (single/) emits executables.
+//!     single-file compiler (single/) emits executables of programs that
+//!     call no C.
+//!   * `system`: the host's own C compiler driver (or link.exe) and nothing
+//!     of Rust's. It links the program object -- whose `botlish_program`
+//!     record is the program's startup data, as for every linker
+//!     (runtime::program) -- and the precompiled runtime archive built with
+//!     the compiler (native/runtime-archive: `libbotlish_runtime.a` beside
+//!     the driver or `BOTLISH_NATIVE_RUNTIME`), whose `main` starts that
+//!     record as the rustc startup crate does (`runtime::aot::linked_main`),
+//!     with the program's link plan (`system_link_args`). This is how the
+//!     single-file compiler links a program that calls C.
 //!
-//! Both link the same machine code (`emit_object`) and start it the same way
-//! (`runtime::aot::run`); `tests/aot-stub-linker.test` runs programs linked
-//! both ways side by side.
+//! `auto` is the single-file compiler's choice: the system linker for a
+//! program that calls C, the stub linker for any other where the stub runs.
+//!
+//! All link the same machine code (`emit_object`) and start it the same way
+//! (`runtime::aot::run`); `tests/aot-stub-linker.test` and
+//! `tests/system-linker.test` run programs linked each way side by side.
 //!
 //! A program that calls C (C-FFI.md: `foreign` functions, `link` libraries)
 //! needs the system linker to resolve its foreign symbols: the `rustc`
@@ -31,7 +46,8 @@
 //! terms (`LinkerFlavor`): GNU ld's archive group on Linux, so the order of
 //! the declarations never decides a static link; nothing of the kind on
 //! macOS, whose ld searches every archive until nothing more resolves
-//! (MACOS-AARCH64-MILESTONE-6.md). The `stub` linker links no native library
+//! (MACOS-AARCH64-MILESTONE-6.md). The `system` linker passes the same plan
+//! to the same linker directly. The `stub` linker links no native library
 //! and refuses such a program. An ordinary program's link is unchanged.
 //!
 //! On macOS nothing in the link is Mach-O-specific code of ours: rustc drives
@@ -52,8 +68,43 @@ use super::{ObjectProgram, emit_object};
 use crate::nir::Program;
 use botlish_native::runtime::aotimage::{self, Fixup, Image, Target};
 use std::collections::HashMap;
+use std::ffi::OsString;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Why an executable was not linked: the message, and for the system
+/// linker the failure's kind when it is no error of the program's link
+/// plan -- `TOOLCHAIN` (no C compiler driver, no linker, not Microsoft's
+/// link.exe) or `RUNTIME` (the runtime archive missing, damaged, of another
+/// platform, or without the runtime this driver's code calls) -- the third
+/// word of its error code
+/// (`NATIVE LINK TOOLCHAIN`, `NATIVE AOT RUNTIME`; main.rs).
+#[derive(Debug)]
+pub struct LinkError {
+    pub detail: Option<&'static str>,
+    pub message: String,
+}
+
+impl From<String> for LinkError {
+    fn from(message: String) -> LinkError {
+        LinkError { detail: None, message }
+    }
+}
+
+impl From<&str> for LinkError {
+    fn from(message: &str) -> LinkError {
+        LinkError { detail: None, message: message.to_string() }
+    }
+}
+
+fn toolchain_error(message: String) -> LinkError {
+    LinkError { detail: Some("TOOLCHAIN"), message }
+}
+
+fn runtime_error(message: String) -> LinkError {
+    LinkError { detail: Some("RUNTIME"), message }
+}
 
 struct WorkDir(PathBuf);
 
@@ -154,9 +205,45 @@ pub fn executable_path(destination: &Path) -> PathBuf {
     }
 }
 
+/// The linker `BOTLISH_NATIVE_LINKER` names (the module doc).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Linker {
+    Rustc,
+    Stub,
+    System,
+}
+
+/// Whether this host has the stub linker (`link_stub`).
+const STUB_LINKER: bool = cfg!(all(target_os = "linux", target_arch = "x86_64"));
+
+/// The linker that links PROGRAM: `BOTLISH_NATIVE_LINKER`'s, rustc's when
+/// it is unset or empty. `auto` decides by the program's link plan, never
+/// by its source: the system linker for a program that calls C or declares
+/// a library (`calls_c`), the stub for any other on a host that has it, the
+/// system linker elsewhere. It never chooses rustc.
+pub fn chosen_linker(program: &Program) -> Result<Linker, String> {
+    match std::env::var("BOTLISH_NATIVE_LINKER") {
+        Ok(name) => linker_named(Some(&name), program, STUB_LINKER),
+        Err(std::env::VarError::NotPresent) => linker_named(None, program, STUB_LINKER),
+        Err(e) => Err(format!("BOTLISH_NATIVE_LINKER: {e}")),
+    }
+}
+
+/// The linker NAME (BOTLISH_NATIVE_LINKER's value; None when unset) means
+/// for PROGRAM on a host that has the stub linker or not (STUB).
+fn linker_named(name: Option<&str>, program: &Program, stub: bool) -> Result<Linker, String> {
+    match name {
+        None | Some("" | "rustc") => Ok(Linker::Rustc),
+        Some("stub") => Ok(Linker::Stub),
+        Some("system") => Ok(Linker::System),
+        Some("auto") => Ok(if calls_c(program) || !stub { Linker::System } else { Linker::Stub }),
+        Some(other) => Err(format!("unknown BOTLISH_NATIVE_LINKER {other:?} (known: rustc stub system auto)")),
+    }
+}
+
 /// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`
 /// and returns that path (absolute).
-pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<PathBuf, String> {
+pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<PathBuf, LinkError> {
     if !EXECUTABLES {
         return Err("executable emission requires Linux glibc on x86_64 or aarch64, macOS on aarch64, or Windows on x86_64 with the MSVC toolchain".into());
     }
@@ -164,20 +251,23 @@ pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[Strin
         return Err(format!(
             "native link failed: this program calls C or declares a C library ({}), and C calls are linked on Linux glibc (x86_64, aarch64), macOS (aarch64) and Windows (x86_64, MSVC) only: on this host executables of programs that call no C are supported, C calls not yet (C-FFI.md)",
             describe_link_plan(program)
-        ));
+        )
+        .into());
     }
     let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
-    let linked = match std::env::var("BOTLISH_NATIVE_LINKER").as_deref() {
-        Err(std::env::VarError::NotPresent) | Ok("" | "rustc") => link_rustc(program, &destination, link_dirs),
-        Ok("stub") if calls_c(program) => Err(format!(
-            "native link failed: this program calls C or declares a C library ({}), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's) links no native library: link it with the rustc linker of a Botlish checkout whose native backend is built (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)",
-            describe_link_plan(program)
-        )),
-        Ok("stub") => link_stub(program, &destination),
-        Ok(other) => Err(format!("unknown BOTLISH_NATIVE_LINKER {other:?} (known: rustc stub)")),
-        Err(e) => Err(format!("BOTLISH_NATIVE_LINKER: {e}")),
-    };
-    linked.map(|()| destination)
+    match chosen_linker(program)? {
+        Linker::Rustc => link_rustc(program, &destination, link_dirs)?,
+        Linker::Stub if calls_c(program) => {
+            return Err(format!(
+                "native link failed: this program calls C or declares a C library ({}), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library: link it with the system linker (BOTLISH_NATIVE_LINKER=system or auto, the single executable's: a C compiler driver and the runtime archive) or the rustc linker of a Botlish checkout (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)",
+                describe_link_plan(program)
+            )
+            .into());
+        }
+        Linker::Stub => link_stub(program, &destination)?,
+        Linker::System => link_system(program, &destination, link_dirs)?,
+    }
+    Ok(destination)
 }
 
 /// The C functions and libraries PROGRAM names, for messages: each library
@@ -535,6 +625,468 @@ fn link_stub(program: &Program, destination: &Path) -> Result<(), String> {
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
     }
     // Publish only a complete file, on the same filesystem, as link_rustc.
+    std::fs::rename(&executable, destination).map_err(|e| format!("{}: {e}", destination.display()))?;
+    Ok(())
+}
+
+// ------------------------------------------------------------ the system linker
+
+/// The host's name in messages: the compilation target table's
+/// (core/cabi.tcl).
+const HOST_TARGET: &str = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "linux-x86_64"
+} else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+    "linux-aarch64"
+} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    "macos-aarch64"
+} else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+    "windows-x86_64"
+} else {
+    "this host"
+};
+
+/// The runtime archive's file name beside the driver: Cargo's name for the
+/// staticlib of native/runtime-archive on the host.
+const RUNTIME_ARCHIVE: &str = if cfg!(target_env = "msvc") { "botlish_runtime.lib" } else { "libbotlish_runtime.a" };
+
+/// The system libraries the runtime archive needs, after it, in the
+/// FLAVOR linker's spelling: Rust's standard library's and the runtime's
+/// own (rustc's `--print native-static-libs` for native/runtime-archive,
+/// which native/runtime-archive/libraries.tcl compares with this list, as
+/// `botlish-native system-linker` prints it: on every single-executable
+/// build and in every host's system-linker CI job). On Windows the C
+/// runtime is `system_link_args`'s: the static one, `crt_args_for`'s
+/// policy.
+fn runtime_system_libraries(flavor: LinkerFlavor) -> &'static [&'static str] {
+    match flavor {
+        LinkerFlavor::Gnu => &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"],
+        LinkerFlavor::Apple => &["-liconv", "-lSystem", "-lc", "-lm"],
+        LinkerFlavor::Msvc => &["kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib"],
+    }
+}
+
+/// The program the system linker runs: `cc` (the C compiler driver: GCC's
+/// or Clang's on Linux, Apple clang through /usr/bin/cc on macOS) or
+/// Microsoft's `link.exe` on Windows.
+fn default_system_linker(flavor: LinkerFlavor) -> &'static str {
+    if flavor == LinkerFlavor::Msvc { "link.exe" } else { "cc" }
+}
+
+/// FILE found the way this module looks for a tool: a name with a path
+/// separator as it is, otherwise in PATH's directories in order, never in
+/// the working directory (unless PATH names it); on Windows a name without
+/// an extension with `.exe` too.
+fn find_tool(file: &str) -> Option<PathBuf> {
+    let named = Path::new(file);
+    if named.components().count() > 1 || named.is_absolute() {
+        return named.is_file().then(|| std::path::absolute(named).unwrap_or_else(|_| named.to_path_buf()));
+    }
+    let candidates: Vec<String> = if cfg!(windows) && named.extension().is_none() {
+        vec![format!("{file}.exe"), file.to_string()]
+    } else {
+        vec![file.to_string()]
+    };
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for candidate in &candidates {
+            let found = dir.join(candidate);
+            if found.is_file() {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// How the host's packages provide a C toolchain, for the message that says
+/// it is missing.
+fn toolchain_remedy(flavor: LinkerFlavor) -> &'static str {
+    match flavor {
+        LinkerFlavor::Gnu => "install a C toolchain (Debian, Ubuntu: apt install gcc; Fedora: dnf install gcc)",
+        LinkerFlavor::Apple => "install Apple's Command Line Tools (xcode-select --install) or Xcode",
+        LinkerFlavor::Msvc => "run from a Visual Studio Developer Command Prompt (or after vcvars64.bat), whose environment puts Microsoft's link.exe on PATH and its libraries and the Windows SDK's in LIB",
+    }
+}
+
+/// The system linker's program, resolved: `BOTLISH_NATIVE_SYSTEM_LINKER`
+/// when set (a path, or a name searched for on PATH), else the flavor's
+/// default. On Windows it must be Microsoft's link.exe (or LLVM's
+/// lld-link): a Unix toolset on PATH has a `link` of its own.
+fn system_linker(flavor: LinkerFlavor) -> Result<PathBuf, LinkError> {
+    let (name, chosen) = match std::env::var("BOTLISH_NATIVE_SYSTEM_LINKER") {
+        Ok(name) if !name.is_empty() => (name, " (BOTLISH_NATIVE_SYSTEM_LINKER)"),
+        _ => (default_system_linker(flavor).to_string(), ""),
+    };
+    let what = if flavor == LinkerFlavor::Msvc { "Microsoft's linker" } else { "a C compiler driver" };
+    let Some(tool) = find_tool(&name) else {
+        return Err(toolchain_error(format!(
+            "native link failed: the system linker needs {what} to link an executable for {HOST_TARGET}, and there is none: no {name}{chosen} {}. To link: {}, or name one with BOTLISH_NATIVE_SYSTEM_LINKER",
+            if Path::new(&name).components().count() > 1 { "file" } else { "on PATH" },
+            toolchain_remedy(flavor)
+        )));
+    };
+    if flavor == LinkerFlavor::Msvc {
+        // link.exe with no input prints its banner (lld-link its own name);
+        // Git's or MSYS2's coreutils `link` neither.
+        let probe = Command::new(&tool).output();
+        let banner = probe.map(|o| format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))).unwrap_or_default();
+        if !banner.contains("Microsoft (R)") && !banner.contains("lld-link") {
+            return Err(toolchain_error(format!(
+                "native link failed: {} is not Microsoft's link.exe (a Unix toolset's `link`?), which the system linker needs to link an executable for {HOST_TARGET}: {}, or name it with BOTLISH_NATIVE_SYSTEM_LINKER",
+                tool.display(),
+                toolchain_remedy(flavor)
+            )));
+        }
+    }
+    Ok(tool)
+}
+
+/// The runtime archive the system linker links: `BOTLISH_NATIVE_RUNTIME`
+/// when set, else `RUNTIME_ARCHIVE` beside the driver. Checked before
+/// anything is linked: a file, a static archive, of this host's object
+/// format and architecture (`archive_machine`). That it holds the helpers
+/// the program's code calls is the linker's to find (`undefined_helper`),
+/// and the ABI it was built for the executable's own, when it starts (the
+/// program record's fingerprint, `runtime::program::read_linked`).
+fn runtime_archive() -> Result<PathBuf, LinkError> {
+    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let driver = std::env::current_exe().map_err(|e| e.to_string())?;
+            driver.parent().ok_or("cannot locate native runtime")?.join(RUNTIME_ARCHIVE)
+        }
+    };
+    let built = "the runtime archive is built with the compiler (cargo build --release --manifest-path native/Cargo.toml in a checkout; the single executable carries its own)";
+    if !path.is_file() {
+        return Err(runtime_error(format!(
+            "native link failed: the runtime archive is missing: {}: the system linker links every executable with Botlish's precompiled runtime, and {built}",
+            path.display()
+        )));
+    }
+    match archive_machine(&path) {
+        Ok(machine) if machine == HOST_MACHINE => Ok(path),
+        Ok(machine) => Err(runtime_error(format!(
+            "native link failed: the runtime archive {} is for {machine}, not this driver's {HOST_TARGET} ({HOST_MACHINE}): {built}",
+            path.display()
+        ))),
+        Err(why) => Err(runtime_error(format!("native link failed: the runtime archive {} is unusable: {why}: {built}", path.display()))),
+    }
+}
+
+/// This host's object format and architecture, as `archive_machine` names
+/// an archive's.
+const HOST_MACHINE: &str = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+    "ELF x86-64"
+} else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+    "ELF AArch64"
+} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    "Mach-O arm64"
+} else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+    "COFF x86-64"
+} else {
+    "unsupported"
+};
+
+/// The object format and architecture of the first object file in the
+/// static archive at PATH (`ar`'s format, which GNU, BSD/Apple and
+/// Microsoft archives share: an `!<arch>` magic and 60-byte member
+/// headers), its symbol tables, name tables and import members skipped.
+fn archive_machine(path: &Path) -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let length = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut magic = [0u8; 8];
+    if file.read_exact(&mut magic).is_err() || &magic != b"!<arch>\n" {
+        return Err("not a static library (no !<arch> header)".to_string());
+    }
+    let mut at = 8u64;
+    for _ in 0..64 {
+        if at + 60 > length {
+            break;
+        }
+        let mut header = [0u8; 60];
+        file.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
+        file.read_exact(&mut header).map_err(|e| e.to_string())?;
+        if &header[58..60] != b"`\n" {
+            return Err("damaged static library (bad member header)".to_string());
+        }
+        let name = String::from_utf8_lossy(&header[..16]).trim_end().to_string();
+        let size: u64 = String::from_utf8_lossy(&header[48..58])
+            .trim()
+            .parse()
+            .map_err(|_| "damaged static library (bad member size)".to_string())?;
+        let mut data_at = at + 60;
+        let mut data_size = size;
+        // BSD's long names: "#1/N", the name the member's first N bytes.
+        if let Some(n) = name.strip_prefix("#1/").and_then(|n| n.parse::<u64>().ok()) {
+            data_at += n;
+            data_size = data_size.saturating_sub(n);
+        }
+        let special = name == "/" || name == "//" || name.starts_with("/SYM64/") || name.starts_with("__.SYMDEF");
+        if !special && data_size >= 20 {
+            let mut head = [0u8; 20];
+            file.seek(SeekFrom::Start(data_at)).map_err(|e| e.to_string())?;
+            file.read_exact(&mut head).map_err(|e| e.to_string())?;
+            let u16_at = |i: usize| u16::from_le_bytes([head[i], head[i + 1]]);
+            let u32_at = |i: usize| u32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+            if &head[..4] == b"\x7fELF" {
+                let machine = u16_at(18);
+                return Ok(match (head[4], machine) {
+                    (2, 62) => "ELF x86-64".to_string(),
+                    (2, 183) => "ELF AArch64".to_string(),
+                    (class, machine) => format!("ELF (class {class}, machine {machine})"),
+                });
+            }
+            if u32_at(0) == 0xfeed_facf {
+                return Ok(match u32_at(4) {
+                    0x0100_000c => "Mach-O arm64".to_string(),
+                    0x0100_0007 => "Mach-O x86-64".to_string(),
+                    cpu => format!("Mach-O (cpu type {cpu:#x})"),
+                });
+            }
+            if u16_at(0) == 0 && u16_at(2) == 0xffff {
+                // A Microsoft import member (an import library's): no code.
+            } else if let m @ (0x8664 | 0xaa64 | 0x14c) = u16_at(0) {
+                return Ok(match m {
+                    0x8664 => "COFF x86-64".to_string(),
+                    0xaa64 => "COFF AArch64".to_string(),
+                    _ => "COFF x86".to_string(),
+                });
+            }
+        }
+        at = (at + 60 + size).next_multiple_of(2);
+    }
+    Err("damaged static library (no object file found)".to_string())
+}
+
+/// The arguments of the FLAVOR system linker linking OBJECTS (the program
+/// object), PROGRAM's link plan and the runtime archive
+/// RUNTIME into OUTPUT: what rustc's own link of an executable passes the
+/// platform linker, in the order the platform's static linking needs, as
+/// separate arguments (never one shell string):
+///
+///   * GNU (gcc or clang driving ld): a position-independent executable
+///     (`-pie`) with `--eh-frame-hdr` (Rust's unwinder reads it), full RELRO
+///     and unused sections dropped (`--gc-sections`), as rustc links one;
+///     the objects; the plan as `link_plan_args_for` gives it -- the `-L`
+///     directories, the libraries in one archive group --; the runtime
+///     archive; its system libraries. The driver appends its own default
+///     libraries (libc, libgcc, the dynamic loader) after all of it, as for
+///     any C program.
+///   * Apple (clang driving Apple's ld): arm64, rustc's deployment target
+///     (11.0) unless MACOSX_DEPLOYMENT_TARGET names one, `-dead_strip`; the
+///     objects; `-L` and `-l` without a group; the runtime archive and its
+///     system libraries.
+///   * Microsoft (link.exe): a console executable, no incremental linking
+///     (whose jump thunks would make a function's address another than its
+///     code's, which the stack maps are keyed by), unreferenced code
+///     dropped; the objects; `/LIBPATH:` and `NAME.lib`; the runtime
+///     archive and its system libraries; the static release C runtime, every
+///     other Microsoft runtime excluded (`crt_args_for`'s policy).
+fn system_link_args(
+    flavor: LinkerFlavor,
+    objects: &[&Path],
+    runtime: &Path,
+    output: &Path,
+    program: &Program,
+    link_dirs: &[String],
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = Vec::new();
+    let mut push = |a: &str| args.push(a.into());
+    match flavor {
+        LinkerFlavor::Gnu => {
+            for flag in ["-pie", "-Wl,--eh-frame-hdr", "-Wl,-z,relro,-z,now", "-Wl,--gc-sections"] {
+                push(flag);
+            }
+        }
+        LinkerFlavor::Apple => {
+            push("-arch");
+            push("arm64");
+            if std::env::var_os("MACOSX_DEPLOYMENT_TARGET").is_none_or(|v| v.is_empty()) {
+                push("-mmacosx-version-min=11.0");
+            }
+            push("-Wl,-dead_strip");
+        }
+        LinkerFlavor::Msvc => {
+            for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/NXCOMPAT", "/DYNAMICBASE"] {
+                push(flag);
+            }
+        }
+    }
+    if flavor == LinkerFlavor::Msvc {
+        let mut out = OsString::from("/OUT:");
+        out.push(output);
+        args.push(out);
+    } else {
+        args.push("-o".into());
+        args.push(output.into());
+    }
+    args.extend(objects.iter().map(|o| o.as_os_str().to_owned()));
+    // The plan exactly as the rustc linker passes it to the same linker,
+    // rustc's own wrapping (`-C link-arg=`) taken off.
+    let plan = link_plan_args_for(flavor, program, link_dirs);
+    args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
+    args.push(runtime.into());
+    args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
+    if flavor == LinkerFlavor::Msvc {
+        for library in ["libcmt.lib", "libvcruntime.lib", "libucrt.lib"] {
+            args.push(library.into());
+        }
+        for library in OTHER_MSVC_RUNTIMES {
+            args.push(format!("/NODEFAULTLIB:{library}").into());
+        }
+    }
+    args
+}
+
+/// Lines of a failed system link that say the driver has no linker to run
+/// (rather than that the link failed): GCC's collect2, Clang's driver, and
+/// macOS's tool shims without the Command Line Tools.
+fn missing_linker_lines(output: &str) -> Option<String> {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.contains("collect2: fatal error: cannot find")
+                || (line.contains("unable to execute command") && line.contains("ld"))
+                || line.contains("invalid linker name")
+                || line.contains("xcrun: error: invalid active developer path")
+                || line.contains("No developer tools were found")
+                || line.contains("error: unable to find utility")
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// What the system linker would link with on this host, by name: its
+/// `flavor`, its `tool` (`system_linker`), the `runtime` archive
+/// (`runtime_archive`: its path and machine) and the archive's system
+/// `libraries` -- each a list of words, or why it is unusable.
+pub fn system_linker_facts() -> Vec<(&'static str, Result<Vec<String>, LinkError>)> {
+    let flavor = match LINKER {
+        LinkerFlavor::Gnu => "gnu",
+        LinkerFlavor::Apple => "apple",
+        LinkerFlavor::Msvc => "msvc",
+    };
+    vec![
+        ("flavor", Ok(vec![flavor.to_string(), HOST_TARGET.to_string()])),
+        ("tool", system_linker(LINKER).map(|tool| vec![tool.display().to_string()])),
+        ("runtime", runtime_archive().map(|path| vec![path.display().to_string(), HOST_MACHINE.to_string()])),
+        ("libraries", Ok(runtime_system_libraries(LINKER).iter().map(|l| l.to_string()).collect())),
+    ]
+}
+
+/// The link's account for `BOTLISH_NATIVE_LINK_LOG=FILE`, the system
+/// linker's verbose mode: every link appends its command line -- the tool
+/// and each argument, quoted where it holds a space -- its status and
+/// everything the linker wrote to FILE. Messages never carry it: a failed
+/// link's says what failed in the linker's own lines.
+fn log_link(tool: &Path, args: &[OsString], status: &std::process::ExitStatus, text: &str) {
+    let Some(log) = std::env::var_os("BOTLISH_NATIVE_LINK_LOG").filter(|p| !p.is_empty()) else { return };
+    let quoted = |a: &std::ffi::OsStr| {
+        let a = a.to_string_lossy();
+        if a.contains(' ') || a.is_empty() { format!("'{a}'") } else { a.into_owned() }
+    };
+    let mut line = quoted(tool.as_os_str());
+    for arg in args {
+        line.push(' ');
+        line.push_str(&quoted(arg));
+    }
+    let entry = format!("system linker: {line}\nstatus: {status}\n{text}");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = std::io::Write::write_all(&mut file, entry.as_bytes());
+    }
+}
+
+/// The first runtime helper (ops.rs's `HELPER_SIGNATURES`) a failed link's
+/// output OUTPUT names as undefined, in GNU ld's, lld's, Apple ld's or
+/// link.exe's words: the runtime archive then lacks what the program
+/// object calls, so it is another build's (or no Botlish runtime at all).
+fn undefined_helper(output: &str) -> Option<&'static str> {
+    botlish_native::runtime::ops::HELPER_SIGNATURES.iter().map(|&(name, _)| name).find(|name| {
+        output.contains(&format!("undefined reference to `{name}'"))
+            || output.lines().any(|line| line.trim_end().ends_with(&format!("undefined symbol: {name}")))
+            || output.contains(&format!("\"_{name}\", referenced from"))
+            || output.contains(&format!("unresolved external symbol {name} "))
+    })
+}
+
+/// The `system` linker: the program object (its startup data, the
+/// `botlish_program` record, inside it) and the runtime archive, linked by
+/// the host's own toolchain with the program's
+/// link plan (the module doc; SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). Needs
+/// no rustc, no Rust library and no checkout: only `system_linker`, the
+/// runtime archive (`runtime_archive`) and the libraries the program
+/// declares.
+fn link_system(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<(), LinkError> {
+    let runtime = runtime_archive()?;
+    let tool = system_linker(LINKER)?;
+    let work = WorkDir::beside(destination)
+        .map_err(|e| format!("native link failed: cannot write the executable {}: {e}", destination.display()))?;
+    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object_path = work.0.join(if LINKER == LinkerFlavor::Msvc { "program.obj" } else { "program.o" });
+    let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, link_dirs);
+    let output = Command::new(&tool)
+        .args(&args)
+        .output()
+        .map_err(|e| toolchain_error(format!("native link failed: cannot run the system linker {}: {e}", tool.display())))?;
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    log_link(&tool, &args, &output.status, &text);
+    if !output.status.success() {
+        if let Some(lines) = missing_linker_lines(&text) {
+            return Err(toolchain_error(format!(
+                "native link failed: the system linker {} could not run a linker for {HOST_TARGET}:\n{lines}\nTo link: {}",
+                tool.display(),
+                toolchain_remedy(LINKER)
+            )));
+        }
+        // No `main` at all: the C runtime's startup found none, so the
+        // archive is no Botlish runtime archive (GNU ld's, Apple ld's,
+        // link.exe's words).
+        if text.contains("undefined reference to `main'")
+            || text.contains("\"_main\", referenced from")
+            || text.contains("unresolved external symbol main ")
+            || text.contains("unresolved external symbol _main ")
+        {
+            return Err(runtime_error(format!(
+                "native link failed: the runtime archive {} defines no main: it is no Botlish runtime archive: {}",
+                runtime.display(),
+                linker_diagnostics(&text)
+            )));
+        }
+        if let Some(helper) = undefined_helper(&text) {
+            return Err(runtime_error(format!(
+                "native link failed: the runtime archive {} does not define the runtime helper {helper} this driver's code calls: it is another build's: {}",
+                runtime.display(),
+                linker_diagnostics(&text)
+            )));
+        }
+        if calls_c(program) {
+            let diagnostics = linker_diagnostics(&text);
+            let mut hint = link_hint(LINKER, &diagnostics).map(|hint| format!("\n{hint}")).unwrap_or_default();
+            // A link directory that is none is no error of the plan's (the
+            // linker searches the others), but said after a failed link,
+            // where it may be why a library was not found.
+            for dir in link_dirs.iter().filter(|dir| !Path::new(dir).is_dir()) {
+                write!(hint, "\nthe link directory {dir} (-L) is not a directory").unwrap();
+            }
+            return Err(format!(
+                "native link failed: the system linker could not link this program with the C functions and libraries it declares ({}):\n{}{}",
+                describe_link_plan(program),
+                diagnostics,
+                hint
+            )
+            .into());
+        }
+        return Err(format!("executable link failed ({}, system linker {}):\n{}", output.status, tool.display(), linker_diagnostics(&text)).into());
+    }
+    // Publish only a successfully linked file, on the same filesystem, as
+    // link_rustc: a failed link leaves any previous executable intact.
     std::fs::rename(&executable, destination).map_err(|e| format!("{}: {e}", destination.display()))?;
     Ok(())
 }
@@ -1048,6 +1600,201 @@ mod tests {
             assert!(kept.lines().any(|l| l.ends_with(line)), "{line:?} not in {kept:?}");
         }
         assert!(!kept.contains("/NOLOGO"), "{kept:?}");
+    }
+
+    fn plain_program() -> Program {
+        let text = FFI_PROGRAM.replace("link \"first\"\n", "").replace("link \"second\"\n", "")
+            .replace("foreign 0 \"c_add\" params=\"i32 i32\" result=i32 name=\"m::add\"\n", "")
+            .replace("%2 = foreigncall 0 %0 %1", "%2 = int 42");
+        crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message))
+    }
+
+    fn texts(args: &[OsString]) -> Vec<String> {
+        args.iter().map(|a| a.to_string_lossy().into_owned()).collect()
+    }
+
+    /// BOTLISH_NATIVE_LINKER's linkers: rustc when unset or empty; `auto`
+    /// the system linker for a program that calls C (or declares a library
+    /// only) and the stub for any other where there is one -- never rustc.
+    #[test]
+    fn linker_selection_auto_follows_the_link_plan() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let declares = crate::nir::parse(&FFI_PROGRAM.replace("link \"second\"\n", "")
+            .replace("foreign 0 \"c_add\" params=\"i32 i32\" result=i32 name=\"m::add\"\n", "")
+            .replace("%2 = foreigncall 0 %0 %1", "%2 = int 42")).unwrap_or_else(|e| panic!("{}", e.message));
+        let plain = plain_program();
+        assert!(calls_c(&declares) && !calls_c(&plain));
+        for stub in [true, false] {
+            for (name, linker) in [(None, Linker::Rustc), (Some(""), Linker::Rustc), (Some("rustc"), Linker::Rustc),
+                (Some("stub"), Linker::Stub), (Some("system"), Linker::System)] {
+                for program in [&ffi, &plain] {
+                    assert_eq!(linker_named(name, program, stub), Ok(linker), "{name:?}");
+                }
+            }
+            assert_eq!(linker_named(Some("auto"), &ffi, stub), Ok(Linker::System));
+            assert_eq!(linker_named(Some("auto"), &declares, stub), Ok(Linker::System));
+            assert_eq!(linker_named(Some("auto"), &plain, stub), Ok(if stub { Linker::Stub } else { Linker::System }));
+        }
+        assert_eq!(linker_named(Some("lld"), &plain, true), Err("unknown BOTLISH_NATIVE_LINKER \"lld\" (known: rustc stub system auto)".to_string()));
+    }
+
+    /// GNU's system link, argument by argument: rustc's executable flags, the
+    /// program object, the plan exactly as the rustc linker hands it to the same
+    /// linker (the -L directories, one group, the plan's order), the runtime
+    /// archive and its system libraries -- each a separate argument, a path
+    /// with a space one of them.
+    #[test]
+    fn system_link_args_gnu() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let objects = [Path::new("/w d/program.o")];
+        let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &["/opt/my lib".to_string()]);
+        assert_eq!(
+            texts(&args),
+            [
+                "-pie", "-Wl,--eh-frame-hdr", "-Wl,-z,relro,-z,now", "-Wl,--gc-sections", "-o", "/w d/executable",
+                "/w d/program.o", "-L/opt/my lib", "-Wl,--start-group", "-lfirst", "-lsecond",
+                "-Wl,--end-group", "/rt/libbotlish_runtime.a", "-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc",
+            ]
+        );
+        // The plan is the rustc linker's, unwrapped.
+        let plan: Vec<String> = link_plan_args_for(LinkerFlavor::Gnu, &ffi, &["/opt/my lib".to_string()])
+            .into_iter().filter_map(|a| a.strip_prefix("link-arg=").map(String::from)).collect();
+        assert!(texts(&args).windows(plan.len()).any(|w| w == plan.as_slice()));
+        // A program that calls no C: no plan, the rest as it was.
+        let plain = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &plain_program(), &["/opt/my lib".to_string()]);
+        assert!(texts(&plain).iter().all(|a| !a.starts_with("-L") && !a.contains("group") && a != "-lfirst"));
+        assert_eq!(texts(&plain).len(), texts(&args).len() - 5);
+    }
+
+    /// Apple's: arm64 and the deployment target, -dead_strip, no GNU flag.
+    #[test]
+    fn system_link_args_apple_has_no_gnu_flags() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let objects = [Path::new("/w/program.o")];
+        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &["/opt/lib".to_string()]));
+        assert_eq!(&args[..2], ["-arch", "arm64"]);
+        assert!(args.contains(&"-Wl,-dead_strip".to_string()));
+        let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
+        assert_eq!(tail, ["/w/program.o", "-L/opt/lib", "-lfirst", "-lsecond", "/rt/libbotlish_runtime.a", "-liconv", "-lSystem", "-lc", "-lm"]);
+        assert!(args.iter().all(|a| !a.contains("group") && !a.contains("-pie") && !a.contains("--")));
+    }
+
+    /// Microsoft's: link.exe's own spelling, no incremental linking (its
+    /// thunks would move a function's address off its code), the static
+    /// release C runtime and every other one excluded, as for the rustc
+    /// linker's executables (`crt_args_for`).
+    #[test]
+    fn system_link_args_msvc() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let objects = [Path::new("C:\\w\\program.obj")];
+        let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &["C:\\opt lib".to_string()]));
+        for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OUT:C:\\w d\\executable.exe"] {
+            assert!(args.contains(&flag.to_string()), "{flag} not in {args:?}");
+        }
+        let tail: Vec<&str> = args.iter().skip_while(|a| !a.ends_with("program.obj")).map(String::as_str).collect();
+        assert_eq!(
+            &tail[..11],
+            ["C:\\w\\program.obj", "/LIBPATH:C:\\opt lib", "first.lib", "second.lib", "C:\\rt\\botlish_runtime.lib",
+             "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "libcmt.lib"]
+        );
+        let excluded: Vec<&str> = args.iter().filter_map(|a| a.strip_prefix("/NODEFAULTLIB:")).collect();
+        assert_eq!(excluded, OTHER_MSVC_RUNTIMES);
+        assert!(args.iter().all(|a| !a.starts_with("-l") && !a.starts_with("-L") && !a.contains("-Wl,")));
+    }
+
+    /// One member of an `ar` archive: its 60-byte header and data, padded to
+    /// an even length.
+    fn member(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut m = format!("{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n", 0, 0, 0, 644, data.len()).into_bytes();
+        m.extend_from_slice(data);
+        if m.len() % 2 == 1 {
+            m.push(b'\n');
+        }
+        m
+    }
+
+    fn archive_file(members: &[Vec<u8>]) -> PathBuf {
+        let mut bytes = b"!<arch>\n".to_vec();
+        for m in members {
+            bytes.extend_from_slice(m);
+        }
+        let path = std::env::temp_dir().join(format!("botlish-archive-test-{}-{}.a", std::process::id(), members.len() * 7 + bytes.len()));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// The runtime archive's first object names its format and
+    /// architecture, whatever symbol and name tables (GNU's, BSD's, Microsoft's
+    /// import members) come before it; anything else is damaged.
+    #[test]
+    fn runtime_archive_machine_is_its_first_objects() {
+        let mut elf = vec![0u8; 64];
+        elf[..4].copy_from_slice(b"\x7fELF");
+        elf[4] = 2;
+        let with = |e: &mut Vec<u8>, machine: u16| e[18..20].copy_from_slice(&machine.to_le_bytes());
+        let mut x86 = elf.clone();
+        with(&mut x86, 62);
+        let mut arm = elf.clone();
+        with(&mut arm, 183);
+        let mut macho = vec![0u8; 32];
+        macho[..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
+        macho[4..8].copy_from_slice(&0x0100_000cu32.to_le_bytes());
+        let mut import = vec![0u8; 32];
+        import[2..4].copy_from_slice(&0xffffu16.to_le_bytes());
+        let mut coff = vec![0u8; 32];
+        coff[..2].copy_from_slice(&0x8664u16.to_le_bytes());
+        let cases = [
+            (vec![member("/", &[0; 12]), member("//", b"a_long_member_name.o/\n"), member("/0", &x86)], Ok("ELF x86-64")),
+            (vec![member("/", &[0; 12]), member("x.o/", &arm)], Ok("ELF AArch64")),
+            (vec![member("__.SYMDEF SORTED", &[0; 8]), member("#1/12", &[b"name.o\0\0\0\0\0\0".as_slice(), &macho].concat())], Ok("Mach-O arm64")),
+            (vec![member("/", &[0; 8]), member("/", &[0; 8]), member("//", b"x\0"), member("k.dll/", &import), member("a.o/", &coff)], Ok("COFF x86-64")),
+            (vec![member("/", &[0; 8])], Err("damaged static library (no object file found)")),
+        ];
+        for (members, expected) in cases {
+            let path = archive_file(&members);
+            let got = archive_machine(&path);
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(got.as_deref().map_err(String::as_str), expected);
+        }
+        let path = std::env::temp_dir().join(format!("botlish-archive-test-{}-text", std::process::id()));
+        std::fs::write(&path, b"not an archive at all").unwrap();
+        assert_eq!(archive_machine(&path), Err("not a static library (no !<arch> header)".to_string()));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A failed link's undefined runtime helper, in each linker's words, is
+    /// the runtime archive's fault; an undefined symbol of the program's own
+    /// plan, or a helper's name inside another, is not.
+    #[test]
+    fn undefined_helper_names_the_runtime_helper() {
+        for output in [
+            "/usr/bin/ld: program.o: in function `botlish_fn_0':\n(.text+0x1c): undefined reference to `rt_int_add'",
+            "ld.lld: error: undefined symbol: rt_int_add\n>>> referenced by program.o",
+            "Undefined symbols for architecture arm64:\n  \"_rt_int_add\", referenced from:\n      _botlish_fn_0 in program.o",
+            "program.obj : error LNK2019: unresolved external symbol rt_int_add referenced in function botlish_fn_0",
+        ] {
+            assert_eq!(undefined_helper(output), Some("rt_int_add"), "{output}");
+        }
+        assert_eq!(undefined_helper("undefined reference to `botlish_no_such_symbol'"), None);
+        assert_eq!(undefined_helper("undefined reference to `rt_int_add_twice'"), None);
+        // One helper's name is another's prefix (rt_co_resume, rt_co_resume0).
+        assert_eq!(undefined_helper("ld.lld: error: undefined symbol: rt_co_resume0\n>>> referenced by program.o"), Some("rt_co_resume0"));
+    }
+
+    /// The linker's words that mean no linker could run, not a failed link.
+    #[test]
+    fn missing_linker_is_a_toolchain_failure() {
+        for line in [
+            "collect2: fatal error: cannot find 'ld'",
+            "clang: error: unable to execute command: Executable \"ld\" doesn't exist!",
+            "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun at: /Library/Developer/CommandLineTools/usr/bin/xcrun",
+            "xcode-select: note: No developer tools were found, requesting install.",
+            "xcrun: error: unable to find utility \"ld\", not a developer tool or in PATH",
+            "clang: error: invalid linker name in argument '-fuse-ld=lld'",
+        ] {
+            assert_eq!(missing_linker_lines(&format!("noise\n  {line}\n")), Some(line.to_string()));
+        }
+        assert_eq!(missing_linker_lines("/usr/bin/ld: cannot find -lnope: No such file or directory\ncollect2: error: ld returned 1 exit status"), None);
     }
 
     /// An ordinary program passes the linker nothing.

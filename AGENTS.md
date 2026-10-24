@@ -236,8 +236,9 @@ and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
 ## The single-file compiler and the stub linker
 
 `single/build.sh` builds `single/out/botlish` (SINGLE-EXECUTABLE.md): a Tcl 9
-zipkit holding main.tcl, the compiler stack and both native executables,
-needing only glibc. The workflow `.github/workflows/single-executable.yml`
+zipkit holding main.tcl, the compiler stack, both native executables and the
+runtime archive, needing only glibc (and, to link a program that calls C,
+the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
 containers (`single/smoke-test.sh`), then publishes it as the
 `botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
@@ -256,13 +257,17 @@ the test suite, still install the `.deb`s.
   it there. Never make main.tcl or the compiler depend on the single
   executable: `single/main.tcl` only sets the environment and sources
   main.tcl unchanged.
-* Standalone executables have two linkers, chosen by `BOTLISH_NATIVE_LINKER`:
-  `rustc` (the default) and `stub` (no toolchain: `botlish-aot-stub` with the
-  program image appended, `native/src/runtime/aotimage.rs`; the single
-  executable uses it). The stub is Linux x86-64's only; macOS AArch64
-  executables are Mach-O, linked by rustc through Apple's ld
-  (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write a linker,
-  loader or signing step, for Mach-O. A program that calls C is linked on
+* Standalone executables have three linkers, chosen by
+  `BOTLISH_NATIVE_LINKER`: `rustc` (the default), `stub` (no toolchain:
+  `botlish-aot-stub` with the program image appended,
+  `native/src/runtime/aotimage.rs`) and `system` (the host's C compiler
+  driver, link.exe on Windows, linking the program object and the
+  precompiled runtime archive; next item); `auto`, the single
+  executable's, is `system` for a program that calls C and `stub` for any
+  other where the stub runs. The stub is Linux x86-64's only; macOS AArch64
+  executables are Mach-O, linked by rustc or the system linker through
+  Apple's ld (MACOS-AARCH64-MILESTONE-5.md): never extend the stub, or write
+  a linker, loader or signing step, for Mach-O. A program that calls C is linked on
   the same hosts (`codegen/aot.rs`'s `C_CALLS`), with the platform linker's
   own link plan (`LinkerFlavor`: GNU ld's archive group on Linux, never on
   macOS, whose ld rejects it; MACOS-AARCH64-MILESTONE-6.md). If you change
@@ -270,26 +275,74 @@ the test suite, still install the `.deb`s.
   rustc link, the generated startup or `runtime::aot::run`, also run
   `tests/native-executable.test`, `tests/platform/aot-facts.tcl` and
   `audit/native-aot/tools/mutate.tcl` (every mutant in its `mutants.txt`
-  that applies to the host must still apply and be killed). A test that reads a rustc-linked executable's
-  `botlish_fn_N` symbols (objdump, `strace -k`) or tests rustc's invocation
-  carries the `rustcLinker` constraint (`tests/helpers.tcl`). CI's
-  `stub-linker` job runs every executable test file with the stub linker.
-* The two startups build the Vm identically because they share it: the
-  startup crate (`codegen/aot.rs`'s constant `STARTUP`) and
-  `aotimage::Loaded::instantiate` both read the program object's
-  `botlish_program` record with `runtime::program::instantiate_linked`, the
-  one place a Vm is built from a program's descriptor (native libraries use
-  it too: NATIVE-LIBRARY-MILESTONE-1.md, next sections). Never generate
-  per-program startup code again. If you change the descriptor, the record,
-  `program::instantiate`, `runtime::aot::run`, `constants::install`, what
+  that applies to the host must still apply and be killed). A test that reads an
+  executable's `botlish_fn_N` symbols (objdump, `strace -k`: the rustc and
+  system linkers' executables have them) carries `symbolLinker`, one that
+  links a program that calls C `cLinker`, one of rustc's own invocation
+  `rustcLinker` (`tests/helpers.tcl`). CI's `stub-linker` and
+  `system-linker` jobs run every executable test file with those linkers.
+* The system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) never runs Rust
+  when an application is linked. Keep it so:
+  - The runtime archive is `native/runtime-archive` (the `botlish-runtime`
+    staticlib, a default member of `native/`'s workspace, so the standard
+    `cargo build` makes it beside the driver; features forwarded): the
+    runtime library plus the executable's C `main`, no code generator. Never
+    compile Rust, a C startup source or anything of the runtime's at link
+    time, and never link the compiler driver into an application.
+  - The program object is the link's only object: its `botlish_program`
+    record is the program's startup data, as for every linker
+    (`runtime::program`), and the archive's `main`
+    (`runtime::aot::linked_main`) starts it as the rustc startup crate
+    does. Never a startup object, a second metadata format, generated
+    machine code, fixed addresses or a patched executable.
+  - The link is the platform linker's, in the rustc linker's link plan
+    (`system_link_args`: `link_plan_args_for`'s plan unwrapped, the runtime
+    archive and `runtime_system_libraries`, which
+    `native/runtime-archive/libraries.tcl` checks against rustc's `--print
+    native-static-libs` in `single/build.sh` and every host's system-linker
+    CI job: when it fails, change the list, never the check); every path
+    and name one argument of a structured command, never a shell string.
+    The tool is `cc` (link.exe on Windows) found on PATH, never in the
+    working directory, or `BOTLISH_NATIVE_SYSTEM_LINKER`; on Windows from a
+    Developer environment: the system linker has no Visual Studio discovery
+    of its own. No rustc fallback: `auto` never chooses rustc.
+  - Failures carry a kind (`LinkError`: `NATIVE LINK|AOT TOOLCHAIN`,
+    `... RUNTIME`, an archive without a helper the program calls among
+    them: `undefined_helper`) when they are no error of the program's plan;
+    the plan's own stay the linker's words, as the rustc linker's.
+  - Nothing on a linked startup's path takes a runtime helper's address:
+    the ABI fingerprint `program::read_linked` checks reads
+    `ops::HELPER_SIGNATURES` (names and counts), never `helpers()`, whose
+    addresses would keep every helper in every executable and library
+    (`system-linker-keeps-only-reached-helpers`; the helper list is one
+    macro, so the two cannot disagree).
+* The three startups build the Vm identically because they share it: the
+  startup crate (`codegen/aot.rs`'s constant `STARTUP`),
+  `aotimage::Loaded::instantiate` (the stub's) and the runtime archive's
+  `main` (`runtime::aot::linked_main`, the system linker's) all read the
+  program object's `botlish_program` record with
+  `runtime::program::instantiate_linked`, the one place a Vm is built from
+  a program's descriptor (native libraries use it too:
+  NATIVE-LIBRARY-MILESTONE-1.md, next sections).
+  `BOTLISH_NATIVE_STARTUP_REPORT` shows what one installed;
+  `tests/system-linker.test` requires the three reports equal. Never
+  generate per-program startup code again. If you change the descriptor,
+  the record, `program::instantiate`, `runtime::aot::run`,
+  `rust_process_setup` or `linked_main`, `constants::install`, what
   `emit_object` emits (sections, relocation types: `codegen::aot::image`
   rejects any type it does not handle), the image format, or the ABI
   fingerprint's inputs, run `cargo test --release --manifest-path
-  native/Cargo.toml --lib -- aotimage program`, `tests/aot-stub-linker.test`,
+  native/Cargo.toml --lib -- aotimage program` and `--bin botlish-native
+  aot::`, `tests/aot-stub-linker.test`, `tests/system-linker.test`,
   `tests/native-library.test`, and the executable test files with the stub
-  linker. The `stub-linker` job in
-  `.github/workflows/tests.yml` has the command. Run them once more under
-  `BOTLISH_NATIVE_GC_STRESS=1`.
+  and with the system linker. The `stub-linker` and `system-linker` jobs in
+  `.github/workflows/tests.yml` have the commands. Run them once more under
+  `BOTLISH_NATIVE_GC_STRESS=1`. A change to the system linker also runs
+  `audit/native-aot/tools/mutate.tcl` (its `sys-*` mutants), and one to the
+  single executable's packing or installation (`single/main.tcl`,
+  `single/package.tcl`) `audit/single-executable/tools/mutate.tcl` and both
+  `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
+  `single/build.sh`.
 
 ## Running the tests locally
 
@@ -921,6 +974,59 @@ seeds) and `audit/direct-modules/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when you
 change the code it mutates, keeping it a mutant of the same rule).
 
+## Module privacy and CONTEXT-RESOURCE-ESCAPE
+
+`private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) makes a
+top-level declaration -- a function, module binding, type, refinement,
+error, struct, enum, trait, context trait, layout or extern c fn --
+accessible only to code of the module that declares it. One fact decides
+every check: the module declarations' `private` sets (`moduleDecls`, which
+the loader records, surface/modules.tcl's `ModuleDecl`), read through
+`hir::privacy::Entry` and `Denied` (hir/privacy.tcl). Keep it so:
+
+* Never add a second visibility fact, a runtime check, tag or wrapper, a
+  `public`, `internal`, `friend` or package level, or a per-call
+  exception. Declarations stay public by default; never mark library
+  declarations private by usage counts. Access is decided by the
+  canonical module identity (the namespace path): no import, parent,
+  child, entry program or name component grants it.
+* `private` and `opaque` are orthogonal: privacy is who may name a
+  declaration, opacity who may build and take apart a value. Never let one
+  imply the other.
+* A private member of an imported module is invisible to method syntax
+  (`hir::resolve::MethodCandidates`): the call means what it would mean
+  without it, and is PRIVATE-ACCESS only when nothing else applies. A
+  private function implements no trait or context-trait requirement
+  (`hir::traits::ImplInfo`'s `private`). Never let a name match make a
+  private declaration a candidate.
+* PRIVATE-TYPE-ESCAPE (`hir::privacy::verify`) judges every public
+  declaration of a module (never the entry program's) by its declared and
+  inferred interface: parameters, results, errors, proof clauses, context
+  requirements, a struct's fields unless it is opaque, a layout's fields,
+  a refinement's carrier, a trait's requirements, an extern's C signature.
+  An opaque struct's hidden fields are no interface.
+
+`CONTEXT-RESOURCE-ESCAPE` (hir/resourceescape.tcl) reads the direct-module
+analysis's `contextualized` status (`direct units`, its discharging
+contexts), the checked types of a crossing's call, arguments or value
+(`hir::typeOf`), the struct registry's opacity and owner, the module
+declarations' private sets and the trait-call marker, on the program as
+written (`traitSource`). It reports one warning per exposing declaration;
+never add an opt-out, a fixit, a level, a warning on a declaration no other
+unit uses, or a rule that reads a name. If you change the parser's
+modifier, the loader's records or checks, method candidates, trait or
+context-trait conformance, `hir/privacy.tcl`, `hir/resourceescape.tcl`, the
+direct-module statuses or what interchange keeps, run
+`tests/module-privacy.test`, `tests/context-resource-escape.test`,
+`tests/workload-icy-tower.test`, `audit/module-privacy/tools/fuzz.tcl`
+(several seeds) and `audit/module-privacy/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's
+text when you change the code it mutates, keeping it a mutant of the same
+rule), plus the direct-modules, traits, context-traits, opaque-struct and
+interchange harnesses for a change to code they share.
+`audit/module-privacy/tools/warning-census.tcl` re-runs the repository
+census of the warning (audit/module-privacy/census/).
+
 ## Coroutines
 
 Coroutines (COROUTINES.md) are eagerly started, affine resumable
@@ -1174,11 +1280,15 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   NATIVE TARGET). The startup crate is compiled with the driver's own
   `--target`, never whatever rustc's host is.
 * Code generation, the object writer and the link stay Cranelift's, the
-  `object` crate's and rustc's: no Windows assembler, object rewrite,
-  linker, CRT startup or Visual Studio discovery of Botlish's (rustc finds
-  link.exe and the SDK without a Developer Command Prompt). The object is
-  the same COFF for both Windows environments; never add a target-specific
-  object transformation.
+  `object` crate's and rustc's -- or, for the system linker, link.exe's,
+  the one a Developer environment puts on PATH: no Windows assembler,
+  object rewrite, linker, CRT startup or Visual Studio discovery of
+  Botlish's (rustc finds link.exe and the SDK without a Developer Command
+  Prompt; the system linker is told where it is). The system linker links
+  with rustc's CRT policy (below) and `/INCREMENTAL:NO` (an incremental
+  link's thunks would move a function's address off its code). The object
+  is the same COFF for both Windows environments; never add a
+  target-specific object transformation.
 * The link plan is `LinkerFlavor::Msvc`'s (`/LIBPATH:DIR`, `NAME.lib`, no
   group): never a GNU flag to link.exe. Every executable -- one that calls
   C too -- links the static release C runtime (`crt_args`, `+crt-static`)
@@ -2419,7 +2529,8 @@ a shared library, a C header and a JSON manifest. Keep it so:
   Export identity is the resolved block (`hir::exports::of`/`select`),
   never a name searched for in NIR or symbols.
 * Exported, public and foreign are three things: a module's functions are
-  visible to importers (no visibility modifiers), `extern c fn` is a C
+  visible to importers unless `private` (which decides Botlish names only:
+  a `private exported c fn` is still a C export), `extern c fn` is a C
   function Botlish calls, `exported c fn` a Botlish function C calls. No
   attribute system, no export of anything but an environment-free
   top-level function whose boundary types are declared (the EXPORT-*
@@ -3068,11 +3179,23 @@ generated SDL3 binding. Keep its layering:
   return values only. Never give a function outside `sdl.bot` a C pointer,
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
-  the session's view or a pointer (a module has no private members:
-  anything it returns, every importer gets). A struct of `sdl.bot` that
-  holds a pointer, a view or an edit is opaque (an importer reads a view
-  it holds without any authority). `workload-icy-tower-sdl-airlock` and
+  the session's view or a pointer (anything a public function returns,
+  every importer gets). A struct of `sdl.bot` that holds a pointer, a view
+  or an edit is opaque (an importer reads a view it holds without any
+  authority). `workload-icy-tower-sdl-airlock` and
   `workload-icy-tower-sdl-records-opaque` check it.
+* Inside `sdl.bot`, every function whose parameter or result is a C
+  pointer, a native view or edit (or holds one, an opaque struct
+  excepted), every layout of native memory and the session record are
+  `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): helpers may
+  take and return pointers and views, and no importer can call them. The
+  session is looked up once, by the private `session`, `handles` and
+  `renderer`. Keep a new pointer-taking helper private; never make one
+  public to call it from another module (CONTEXT-RESOURCE-ESCAPE reports
+  that). `workload-icy-tower-sdl-helpers-private` and
+  `workload-icy-tower-no-resource-escape` check it, and
+  `workload-icy-tower-baseline-warnings` pins the twelve warnings the
+  original boundary (audit/icy-tower/context-refactor/baseline/) draws.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
   beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
   into the example directory or hand-write a parallel SDL declaration.

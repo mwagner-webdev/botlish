@@ -373,9 +373,12 @@ so both forms reach lowering identically (`nl-library-export-list`).
 These were documented in `hir/exports.tcl`'s header and Compilerpedia's
 `backend.native-library` ("THREE DIFFERENT THINGS"):
 
-* A module's top-level functions are visible to every importer. Botlish has
-  no visibility modifiers or export lists (capability.visibility). That
-  reach is Botlish-to-Botlish and makes no C symbol.
+* A module's top-level functions are visible to every importer (unless
+  declared `private`, which came later:
+  MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md, Compilerpedia's
+  `concept.private`; there are no export lists). That reach is
+  Botlish-to-Botlish and makes no C symbol: a `private exported c fn` is
+  still a C export.
 * `extern c fn` declares a C function Botlish calls: a foreign *import*
   (C-FFI.md).
 * `exported c fn` gives a Botlish function a C entry point: a foreign
@@ -1059,6 +1062,21 @@ Dispatched or triggered on `ccr-2d88975d-17ru75`, at its first commit
 | `tests-arm64.yml` (40026035898), Linux AArch64 | every job success (section 1) |
 | `macos-arm64.yml` (40026023595) | success: the driver and runtime with this milestone's code build, and their tests pass, on macOS AArch64 (where libraries are not offered) |
 | `windows-x86_64.yml` (40026023638) | smoke, root plans and acceptance shards 1, 3 and 4: success. Shard 2 failed in `tests/coroutine-fusion.test` (`cf-executable` and the fusion-site tests), which expect native coroutines Windows lacks; main's own run 40009251881 fails identically, so it is not this milestone's |
+
+### CI on main
+
+The milestone merged with main (the collections, place parameters, the
+method filter and the coroutine-fusion constraints) reached main as
+5cc188e4. Every workflow the push started passed:
+
+| Workflow (run) | Result |
+|---|---|
+| `tests.yml` (40078033458), Linux x86-64 | every job success, the GC-stress job (pushes to main only: the Rust tests and the whole suite with `BOTLISH_NATIVE_GC_STRESS=1`, `tests/native-library.test` among them) included |
+| `tests-arm64.yml` (40078033418), Linux AArch64 | every job success, its GC-stress job included |
+| `macos-arm64.yml` (40078033514) | success |
+| `windows-x86_64.yml` (40078033431) | success: with main's constraints `tests/coroutine-fusion.test` passes, so the shard that failed on the branch passes |
+| `static-decisions.yml` (40078033539) | every job success: batched and sequential agree on every golden suite (`compare.tcl` exits 1 on a DISAGREE or a DOES NOT COMPILE) |
+| `single-executable.yml`, `icy-tower.yml`, `c-bindgen.yml`, `bench.yml`, `scalar-asm-audit.yml` | success |
 
 ### Probes
 

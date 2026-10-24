@@ -7,9 +7,9 @@
 # BASEKIT is a zipfs-capable Tcl 9 executable with Tcl statically linked (a
 # "zipkit" base: the static tclsh single/build.sh builds, or a prebuilt one);
 # it runs this script and becomes the non-archive part of OUTPUT. NATIVE-DIR
-# holds the native backend's botlish-native and botlish-aot-stub
-# (native/target/release, or stripped copies of them). OUTPUT is BASEKIT with
-# a zip archive attached, holding:
+# holds the native backend's botlish-native and botlish-aot-stub and the
+# runtime archive libbotlish_runtime.a (native/target/release, or stripped
+# copies of them). OUTPUT is BASEKIT with a zip archive attached, holding:
 #
 #   main.tcl              single/main.tcl, run at startup with the arguments
 #   tcl_library/          BASEKIT's own Tcl script library
@@ -19,8 +19,10 @@
 #                         topics/ and generated/: -help) -- the compiler
 #                         stack, at its checkout-relative paths -- and
 #                         BUILD, the source revision -version prints
-#   native-bin/           botlish-native, botlish-aot-stub, and ID (their
-#                         digest, naming the directory single/main.tcl
+#   native-bin/           botlish-native, botlish-aot-stub, the runtime
+#                         archive libbotlish_runtime.a (the system linker's,
+#                         SINGLE-EXECUTABLE-FFI-MILESTONE-1.md), and ID
+#                         (their digest, naming the directory single/main.tcl
 #                         installs them in)
 #
 # Nothing else of the checkout goes in: no tests, benchmarks or tools.
@@ -73,7 +75,7 @@ try {
     set bin [file join $stage native-bin]
     file mkdir $bin
     set digest {}
-    foreach name {botlish-native botlish-aot-stub} {
+    foreach name {botlish-native botlish-aot-stub libbotlish_runtime.a} {
         set path [file join $nativeDir $name]
         if {![file isfile $path]} {
             throw {SINGLE PACKAGE} "missing $path: build the native backend first (cargo build --release --manifest-path native/Cargo.toml)"

@@ -1106,12 +1106,12 @@ stack's.
 
 @topic error.native-link
 title: NATIVE LINK and NATIVE AOT: linking a native executable failed
-summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report that linking a native executable failed: a missing C library or symbol, no rustc, a refused linker.
+summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report a failed link: a missing C library or symbol, no rustc or C compiler, no runtime archive.
 index: errors backends
 alias: link failed; undefined symbol; cannot find library; executable link failed
-keywords: linker, rustc, cc, ld, -l, -L, extern c library, BOTLISH_NATIVE_LINKER, stub, libbotlish_native
+keywords: linker, rustc, cc, ld, -l, -L, extern c library, BOTLISH_NATIVE_LINKER, stub, system, auto, libbotlish_native, libbotlish_runtime, BOTLISH_NATIVE_RUNTIME, BOTLISH_NATIVE_SYSTEM_LINKER, BOTLISH_NATIVE_LINK_LOG, TOOLCHAIN, RUNTIME
+docs: C-FFI.md SINGLE-EXECUTABLE.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md
 related: concept.c-ffi backend.native-executable backend.single-executable error.native-aot-not-ready error.native-not-built
-docs: C-FFI.md SINGLE-EXECUTABLE.md
 code: NATIVE LINK
 code: NATIVE AOT
 
@@ -1128,8 +1128,8 @@ NATIVE LINK:
     the linker cannot find, or a symbol no library defines. A missing
     library is never a front-end error: it fails here, even in a
     program that calls nothing from it.
-  * the stub linker (BOTLISH_NATIVE_LINKER=stub, the single executable's)
-    refuses any program that calls C or declares a library.
+  * the stub linker (BOTLISH_NATIVE_LINKER=stub) refuses any program that
+    calls C or declares a library.
   The linker's own lines are GNU ld's or lld's on Linux ("undefined
   reference to", "cannot find -lNAME", "unable to find library"), Apple
   ld's on macOS ("Undefined symbols for architecture arm64:" and a
@@ -1137,6 +1137,21 @@ NATIVE LINK:
   found", "found architecture 'x86_64', required architecture 'arm64'"),
   link.exe's on Windows ("error LNK2019: unresolved external symbol NAME",
   "fatal error LNK1181: cannot open input file 'NAME.lib'").
+The system linker (BOTLISH_NATIVE_LINKER=system or auto, the single
+executable's for a program that calls C) adds a third word for what is no
+error of the program's link plan, after NATIVE LINK or NATIVE AOT:
+  * TOOLCHAIN: "the system linker needs a C compiler driver to link an
+    executable for TARGET, and there is none: no cc on PATH" (Microsoft's
+    linker on Windows: link.exe from a Developer Command Prompt, and "... is
+    not Microsoft's link.exe" for a Unix toolset's), or "... could not run a
+    linker for TARGET:" with the driver's own lines (gcc's "cannot find
+    'ld'", clang's "unable to execute command", macOS's missing Command Line
+    Tools);
+  * RUNTIME: the runtime archive (libbotlish_runtime.a beside the driver,
+    or BOTLISH_NATIVE_RUNTIME) "is missing", "is unusable: not a static
+    library", "is for MACHINE, not this driver's TARGET", "defines no
+    main: it is no Botlish runtime archive", or "does not define the
+    runtime helper NAME this driver's code calls: it is another build's".
 NATIVE AOT:
   * "executable link failed (STATUS): ..." with rustc's output, the system
     linker's own lines among it;
@@ -1161,7 +1176,13 @@ says so). A DLL may use either runtime (WINDOWS-X86-64-MILESTONE-2.md, "The
 C runtime"). The Tcl backends never call C. For NATIVE AOT:
 the default (rustc) linker needs rustc and a built native backend in the
 checkout, and on macOS the Xcode command line tools (the system linker);
-the stub linker needs neither but is Linux x86-64 only and links no C.
+the stub linker needs neither but is Linux x86-64 only and links no C; the
+system linker needs a C compiler driver (Debian, Ubuntu: apt install gcc;
+macOS: xcode-select --install; Windows: a Developer Command Prompt) or one
+named by BOTLISH_NATIVE_SYSTEM_LINKER, and the runtime archive built with
+the compiler (the single executable carries its own).
+BOTLISH_NATIVE_LINK_LOG=FILE appends each system link's command line and
+the linker's output to FILE.
 
 @topic error.native-not-built
 title: NATIVE NOT-BUILT: the native backend has not been built
@@ -1194,10 +1215,10 @@ run every program except the native-only operations.
 
 @topic error.native-startup
 title: NATIVE STARTUP: a standalone executable could not start
-summary: NATIVE STARTUP means a stub-linked executable could not load the program image appended to it, or the runtime could not start its worker thread; the file is damaged or was built for another runtime.
+summary: NATIVE STARTUP means an executable could not read its program image or record, or start its worker thread: the file is damaged or was built for another runtime.
 index: errors backends
 alias: no program image; bare botlish-aot-stub
-keywords: executable, stub linker, program image, botlish-aot-stub, startup, thread, format
+keywords: executable, stub linker, system linker, program image, program record, botlish-aot-stub, libbotlish_runtime, startup, thread, format
 related: backend.native-executable backend.single-executable error.native-io error.native-link
 docs: SINGLE-EXECUTABLE.md
 code: NATIVE STARTUP
@@ -1214,6 +1235,16 @@ file. The messages:
     FILE: truncated program image
     program image was compiled for a different native runtime build
     program image format N, this runtime reads format M
+
+Every executable's program object carries its program's record and
+descriptor as data the linker relocated (runtime::program); the rustc
+linker's startup and, in a system-linked executable (BOTLISH_NATIVE_LINKER
+=system, or auto for a program that calls C), its runtime archive's main
+read it:
+
+    not a Botlish program record
+    the program was compiled for a different native runtime build
+    the program record's code table does not match its descriptor
 
 It is also reported when the runtime cannot create its worker thread
 (for example a BOTLISH_NATIVE_STACK_BYTES the system refuses), and by

@@ -50,7 +50,7 @@ test cp-every-warning-documented {every registered warning code has exactly one 
         list $code [llength $ids] [expr {"warnings" in [dict get $topic index] && "lint" in [dict get $topic index]}] \
             [expr {[compilerpedia::codeTopics "CORE SEMANTIC $code"] eq $ids}]
     }
-} -match glob -result {{SAME-RETURN-VALUE 1 1 1} {METHOD-ELIGIBLE 1 1 1} {FIXED-ARITY-LIST-RETURN 1 1 1} {SAME-FAILURE 1 1 1} {PROVES-NAMING 1 1 1} {ONE-CHAR-STRING-LITERAL 1 1 1} {MANY-BOOLEAN-ARGUMENTS 1 1 1}}
+} -match glob -result {{SAME-RETURN-VALUE 1 1 1} {METHOD-ELIGIBLE 1 1 1} {FIXED-ARITY-LIST-RETURN 1 1 1} {SAME-FAILURE 1 1 1} {PROVES-NAMING 1 1 1} {ONE-CHAR-STRING-LITERAL 1 1 1} {MANY-BOOLEAN-ARGUMENTS 1 1 1} {CONTEXT-RESOURCE-ESCAPE 1 1 1}}
 
 test cp-every-recoverable-kind-documented {every diagnostic kind a static compile block can reify (hir::static::codes) has a topic, under the code it is printed with (CORE SEMANTIC KIND, or SURFACE MODULE KIND for the loader's)} -body {
     lmap kind [dict keys [hir::static::codes]] {

@@ -611,10 +611,11 @@ proc surface::modules::ModuleFile {name target usedAtSpan} {
 # is "", for callers with no source span -- e.g. the native backend's
 # module-native bridge, native/native.tcl), as one diagnostic of
 # core::raiseDiagnostics whose `location` is SPAN itself: the span the text
-# names, as data (COMPILER-SERVICE-MILESTONE-1.md).
-proc surface::modules::Error {kind span message} {
+# names, as data (COMPILER-SERVICE-MILESTONE-1.md). RELATED, if given, is
+# the span of the one further place the diagnostic is about.
+proc surface::modules::Error {kind span message {related ""}} {
     set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
-        summary $message location $span related {}]
+        summary $message location $span related [if {$related eq ""} {list} else {list $related}]]
     if {$span ne ""} {
         dict set entry message "[surface::ast::location $span]: $message"
     }
@@ -1196,12 +1197,69 @@ proc surface::modules::DependentReference {state key ref kind} {
 # starts with `direct module` (ORIGIN the marker's), {direct 0 origin ""}
 # otherwise. A namespace's directness is its declaration's: never its name,
 # path or library.
+#
+# It also records the file's `private` declarations
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md): `private {CATEGORY
+# {NAME {kind KIND origin ORIGIN} ...} ...}` (hir/privacy.tcl: the one fact
+# every access check reads, CATEGORY its member namespace, ORIGIN its
+# name's), and `declarations {CATEGORY {NAME ORIGIN ...}}`, where each of
+# its type-level declarations and errors is named (what a declaration's
+# PRIVATE-TYPE-ESCAPE is located at).
 proc surface::modules::ModuleDecl {ast fileId} {
     set span [dict getdef $ast direct ""]
     if {$span eq ""} {
-        return [dict create direct 0 origin ""]
+        set decl [dict create direct 0 origin ""]
+    } else {
+        set decl [dict create direct 1 origin [RemapOrigin [surface::lower::Origin $span "direct-module"] $fileId]]
     }
-    return [dict create direct 1 origin [RemapOrigin [surface::lower::Origin $span "direct-module"] $fileId]]
+    set private [dict create]
+    set declarations [dict create]
+    foreach statement [dict get $ast body] {
+        set kind [dict get $statement kind]
+        if {$kind ni {function bind externfn hole typedecl structdecl enumdecl traitdecl layoutdecl errordecl}
+                || [dict get $statement name] eq ""} {
+            continue
+        }
+        set category [hir::privacy::Category $kind]
+        set name [dict get $statement name]
+        set origin [RemapOrigin [surface::lower::Origin [dict get $statement nameSpan] "declaration"] $fileId]
+        if {$category ne "values" && ![dict exists $declarations $category $name]} {
+            dict set declarations $category $name $origin
+        }
+        if {[dict getdef $statement private 0]} {
+            dict set private $category $name [dict create kind $kind origin $origin]
+        }
+    }
+    dict set decl private $private
+    dict set decl declarations $declarations
+    return $decl
+}
+
+# Raises PRIVATE-ACCESS at SPAN when code of unit OWN ("" for the entry
+# program), the file of STATE's module KEY, may not access member NAME of
+# CATEGORY of namespace NS: it is private there (hir/privacy.tcl's Denied).
+# The private declaration is the diagnostic's related location.
+proc surface::modules::CheckPrivate {state own ns name category span} {
+    set decls [dict get $state moduleDecls]
+    if {![hir::privacy::Denied $decls $ns $category $name $own]} {
+        return
+    }
+    set entry [hir::privacy::Entry $decls $ns $category $name]
+    Error PRIVATE-ACCESS $span [hir::privacy::AccessMessage $ns $name [dict get $entry kind] $own] \
+        [OriginSpan $state [dict get $entry origin]]
+}
+
+# The source span of ORIGIN ({file FILEID ...}) of a file STATE loaded, or "".
+proc surface::modules::OriginSpan {state origin} {
+    if {[lindex $origin 0] ne "file" || ![dict exists $state files [lindex $origin 1]]} {
+        return ""
+    }
+    set fields [lrange $origin 2 end]
+    set span [dict create file [dict get $state files [lindex $origin 1]]]
+    foreach key {start end line column endLine endColumn} {
+        dict set span $key [dict get $fields $key]
+    }
+    return $span
 }
 
 # Raises DUPLICATE-NATIVE if the module AST (the file of namespace NAME) defines
@@ -1388,6 +1446,7 @@ proc surface::modules::CheckImports {stateVar ast own} {
             }
             Error UNKNOWN-SYMBOL $nameSpan "namespace \"$ns\" has no type \"$name\" (its types: [if {$typeNames eq ""} {string cat "none"} else {join [lsort $typeNames] {, }}])"
         }
+        CheckPrivate $state $own $ns $name types $nameSpan
         if {[dict exists $local $name]} {
             Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which this file also declares itself (at [surface::ast::location [dict get $local $name]]); an imported type never shadows or is shadowed by a local one: drop the import and spell the imported type $canonical (after `import $ns`)"
         }
@@ -1575,6 +1634,8 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
                 Error AMBIGUOUS-QUALIFIER $span \
                     "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both a namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
             }
+            # (A private enum of another module is no case qualifier there.)
+            CheckPrivate $state $own {*}[hir::privacy::Member $enum] types $span
             return
         }
     }
@@ -1659,6 +1720,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no error \"$symbolName\" (it declares: [if {$errorNames eq ""} {string cat "no errors"} else {join [lsort $errorNames] {, }}])"
         }
+        CheckPrivate $state $own $namespaceName $symbolName errors $span
         return
     }
     if {$symbolName in [hir::cabi::IntrinsicTypeNames $namespaceName]} {
@@ -1693,12 +1755,14 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no [expr {$refKind eq "type" ? "type" : "struct"}] \"$symbolName\" (it declares: [if {$declared eq ""} {string cat "no types"} else {join $declared {, }}])"
         }
+        CheckPrivate $state $own $namespaceName $symbolName types $span
         return
     }
     if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
         # A layout of the module (BINARY-LAYOUT.md), written where a value
         # would be: legal only as a binary operation's layout operand,
         # which HIR resolution decides (LAYOUT-NOT-A-VALUE elsewhere).
+        CheckPrivate $state $own $namespaceName $symbolName types $span
         return
     }
     set functionNames [dict get $state loaded $namespaceName]
@@ -1706,6 +1770,9 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         Error UNKNOWN-SYMBOL $span \
             "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort [concat $functionNames $natives]] {, }])"
     }
+    # The member exists; whether this code may name it is the module's
+    # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
+    CheckPrivate $state $own $namespaceName $symbolName values $span
 }
 
 # The static intrinsics of AST (STATIC-COMPILE.md), outermost first in source

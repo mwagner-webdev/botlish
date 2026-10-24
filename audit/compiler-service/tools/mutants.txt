@@ -95,10 +95,10 @@
 ## surface/modules.tcl
 <<<<
     set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
-        summary $message location $span related {}]
+        summary $message location $span related [if {$related eq ""} {list} else {list $related}]]
 ====
     set entry [dict create errorcode [list SURFACE MODULE $kind] message $message \
-        summary $message location "" related {}]
+        summary $message location "" related [if {$related eq ""} {list} else {list $related}]]
 >>>>
 
 @@ syntax-no-end a syntax diagnostic's end is its start: the range does not reach the end of what is wrong
@@ -146,12 +146,10 @@
 >>>>
 <<<<
     if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
-        return [hir::signatures::text $hir [lindex $type 1]]
-    }
+        # (A private function says so: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
 ====
     if {0} {
-        return [hir::signatures::text $hir [lindex $type 1]]
-    }
+        # (A private function says so: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
 >>>>
 
 @@ expansion-not-written among expressions with equal ranges the query answers with the innermost, an expansion the front end made, not the written construct

@@ -4022,8 +4022,10 @@ proc hir::types::Project {hirVar ctxVar e} {
     # restates it -- never the `any` that made a missing import surface as a
     # type error elsewhere. Unreachable code keeps `any`: nothing is reported
     # there, and poison exists only where its diagnostic does.
-    if {[hir::structs::projectionDenied $receiver $node]} {
-        # No authority over an opaque receiver's representation
+    if {[hir::structs::projectionDenied $receiver $node]
+            || [hir::structs::PrivateRepresentation $hir $receiver $node] ne ""} {
+        # No authority over an opaque receiver's representation, or over a
+        # private declaration of another module (hir/privacy.tcl)
         # (OPAQUE-STRUCTS.md; hir::structs::ProjectionProblem rejects it): the
         # access is typed as if no such field were known, never with the
         # hidden field's declared type, so the representation cannot leak

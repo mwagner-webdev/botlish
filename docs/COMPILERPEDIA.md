@@ -166,6 +166,7 @@ Directives:
 | `@message GLOB` | reject | the first diagnostic's message, without its location |
 | `@caption TEXT` | both | the line shown above the code |
 | `@target TARGET` | both | compile for TARGET (a `core::cabi` target name), on the Tcl backends when it is not the host's |
+| `@module NAME` | both | the lines up to the next directive are the text of `NAME.bot`, an application module beside the program (repeatable), for an example about modules (`private`, opaque structs, airlocks: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md); the page shows it under `-- NAME.bot`, and an `@at` in it is written `NAME.bot:LINE:COL` |
 
 A rejected example is checked against the compiler's structured diagnostics
 (the error code and the first entry of `-diagnostics`), never against

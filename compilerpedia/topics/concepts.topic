@@ -1351,8 +1351,8 @@ title: Opaque structs: representation owned by one module
 summary: `opaque struct T:` is an ordinary struct whose fields only the declaring module may construct or inspect; everywhere else a T is a whole value to pass, store, compare and hash.
 index: concepts
 alias: opaque struct; opaque type; abstract data type; encapsulation
-keywords: opaque, representation, module, construct, inspect, authority, OPAQUE-CONSTRUCTION, OPAQUE-REPRESENTATION, private, Bytes
-related: concept.structs concept.modules concept.contexts rule.opaque-authority capability.visibility error.opaque-construction error.opaque-representation
+keywords: opaque, representation, module, construct, inspect, authority, OPAQUE-CONSTRUCTION, OPAQUE-REPRESENTATION, Bytes
+related: concept.structs concept.modules concept.contexts concept.private rule.opaque-authority error.opaque-construction error.opaque-representation
 docs: OPAQUE-STRUCTS.md
 
 == WHAT IT IS
@@ -1373,8 +1373,9 @@ std::linux::io::LinuxIO are opaque structs.
   * `==`, `!=` and `hash` work on whole values everywhere; an opaque value
     prints as `<opaque NS::T>`.
   * `opaque` combines with `context` (`opaque context struct`).
-  * Opacity is per struct; functions and other declarations have no
-    visibility modifiers (capability.visibility).
+  * Opacity is per struct and says who may inspect a representation;
+    who may name a declaration at all is `private` (concept.private), an
+    independent modifier: `private opaque struct` is both.
 
 == WHY
 It is representation ownership, not object-oriented privacy: the module
@@ -1407,6 +1408,128 @@ b.storage
 
 == MORE
 OPAQUE-STRUCTS.md.
+
+@topic concept.private
+title: Private declarations: `private` makes a declaration module-local
+summary: `private fn`, `private struct`, ... -- a top-level declaration only its own module may name or use; `private` decides who may access a declaration, `opaque` who may inspect a representation.
+index: concepts
+alias: private; public; visibility; export; hide function; module privacy; private helper
+keywords: private, public, module, access, visibility, helper, opaque, PRIVATE-ACCESS, PRIVATE-TYPE-ESCAPE, airlock
+related: concept.opaque-structs concept.modules concept.contexts concept.direct-modules error.private-access error.private-type-escape warning.context-resource-escape
+docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md OPAQUE-STRUCTS.md IMPORTS.md
+
+== WHAT IT IS
+    private fn renderer(context sdl: Sdl) -> std::ffi::c::Ptr[SDL_Renderer]:
+        ...
+
+`private` before a top-level declaration -- a function, a module binding,
+a type, an error, a struct, an enum, a trait, a layout, an extern c fn --
+makes it accessible only to code of the module that declares it. Every
+other declaration is public, as before; there is no `public` keyword.
+
+== RULES
+  * Written first, once, on a top-level declaration only: `private opaque
+    struct`, `private nomethod fn`, `private context trait`. Nested in a
+    function it is a syntax error: privacy is module-local, never lexical.
+  * Another module naming a private declaration -- qualified, rooted,
+    with `import type`, as a value, a type, a construction, an error or an
+    enum's case -- is PRIVATE-ACCESS. So is method syntax `x.f()` that
+    finds only a private `f` of an imported module: a private function is
+    no method candidate there, and competes with nothing.
+  * A private function implements no trait or context-trait requirement:
+    an implementation is public interface.
+  * A public declaration may not expose a private type or error in its
+    interface (parameters, declared or inferred result, context
+    requirements, errors, a non-opaque struct's fields, a trait's
+    requirements): PRIVATE-TYPE-ESCAPE. An opaque struct may hold one as
+    hidden representation.
+  * Access is decided by the module's identity, its file's namespace, never
+    by a spelling. The entry program is imported by nothing, so `private`
+    there changes nothing.
+  * Nothing at run time: a private function is compiled, called and linked
+    like any other.
+
+== WHY
+`private` determines who may access a declaration; `opaque` who may
+inspect a representation (concept.opaque-structs). A module that wraps raw
+foreign authority behind a context -- an airlock -- needs helpers that take
+and return pointers or native views; private, they are implementation, not
+API, and the compiler can tell (warning.context-resource-escape).
+
+== EXAMPLES
+@example accept
+import gfx
+
+gfx::ready()
+@module gfx
+import std::ffi::c
+
+private fn renderer() -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    std::ffi::c::null[std::ffi::c::Void]()
+
+fn ready() -> bool:
+    r = renderer()
+    not std::ffi::c::null?(r)
+@caption A private helper may return a raw pointer: only gfx can call it
+@value false
+@end
+
+@example accept
+import gfx
+
+s = gfx::open(7)
+gfx::area(s)
+@module gfx
+opaque struct Surface:
+    width: int
+
+fn open(width: int) -> Surface:
+    Surface {width: width}
+
+fn area(s: Surface) -> int:
+    s.width * s.width
+@caption A public opaque value: every module may hold one, only gfx looks inside
+@value 49
+@end
+
+@example accept
+import gfx
+
+with context gfx::create()
+gfx::draw(3)
+@module gfx
+private struct State:
+    scale: int
+
+opaque context struct Gfx:
+    state: State
+
+fn create() -> Gfx:
+    Gfx {state: State {scale: 10}}
+
+private fn scale(context g: Gfx) -> int:
+    g.state.scale
+
+fn draw(x: int, context g: Gfx) -> int:
+    x * scale()
+@caption A public contextual operation; its state and helper stay private
+@value 30
+@end
+
+@example reject
+import gfx
+
+gfx::scale(2)
+@module gfx
+private fn scale(x: int) -> int:
+    x * 10
+@caption Another module may not call a private function
+@error SURFACE MODULE PRIVATE-ACCESS
+@at 3:1
+@end
+
+== MORE
+MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md.
 
 @topic concept.destructuring
 title: Struct destructuring: `{a, b: c} = value`

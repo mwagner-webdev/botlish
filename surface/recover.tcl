@@ -20,7 +20,8 @@
 #          a struct, type, error, enum, layout or trait), externs (1 if it
 #          may declare an `extern c fn`, whose name its whole file sees),
 #          installs (1 if it may install a context: `with context`, at the
-#          top level)
+#          top level), and private 1 when its prefix starts with the
+#          `private` modifier (its NAME is then a private member)
 #
 # What a hole keeps is what its *valid prefix* establishes: the tokens before
 # its first damaged position, which the parser read as written. Every
@@ -378,6 +379,16 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     set installs 0
     # ANY: the prefix does not decide the statement's form at all.
     set any 0
+    # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) modifies
+    # the declaration after it: the form is the rest's, and what the hole
+    # declares is private.
+    set private 0
+    if {[llength $prefix] > 1 && [dict get [lindex $prefix 0] kind] eq "IDENT"
+            && [dict get [lindex $prefix 0] text] eq "private"
+            && [dict get [lindex $prefix 1] kind] in {IDENT fn type struct error}} {
+        set prefix [lrange $prefix 1 end]
+        set private 1
+    }
     set kinds [lmap t $prefix {dict get $t kind}]
     set texts [lmap t $prefix {dict get $t text}]
     set i 0
@@ -463,9 +474,13 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
         dict set state externs [expr {[dict get $state externs] || $externs}]
         dict set state installs [expr {[dict get $state installs] || $installs}]
     }
-    return [dict create kind hole id [dict get $statement id] span $span at $at \
+    set hole [dict create kind hole id [dict get $statement id] span $span at $at \
         name $name nameSpan $nameSpan valueSpan $valueSpan binds $binds types $types \
         externs $externs installs $installs]
+    if {$private} {
+        dict set hole private 1
+    }
+    return $hole
 }
 
 # The index of the first of TOKENS (in source order) that starts at or after

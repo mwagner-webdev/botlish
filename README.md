@@ -112,13 +112,15 @@ chmod +x botlish
 ./botlish -help                                          # Compilerpedia, the built-in reference
 ```
 
-**No C calls yet.** A program that calls C (`extern c fn`,
-[C-FFI.md](docs/C-FFI.md)) compiles, but its native link is refused
-(`NATIVE LINK`): the single-file compiler links with its own stub linker,
-which links no C library. FFI support is coming to it soon; until then such a
-program needs a checkout with the native backend built
-([Getting started](#getting-started)). How the single file is built and what
-it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
+**C calls.** A program that calls C (`extern c fn`,
+[C-FFI.md](docs/C-FFI.md)) links with the single-file compiler too, through
+the host's C compiler driver: install one (`apt install gcc`) and the C
+libraries the program declares, and pass their directory with `-L DIR`.
+Neither Rust nor a checkout is needed: the compiler carries its precompiled
+runtime and links it into the executable, which then runs without the
+compiler ([SINGLE-EXECUTABLE-FFI-MILESTONE-1.md](docs/SINGLE-EXECUTABLE-FFI-MILESTONE-1.md)).
+Every other program still links with no toolchain at all. How the single
+file is built and what it runs: [SINGLE-EXECUTABLE.md](docs/SINGLE-EXECUTABLE.md).
 
 ## Icy Tower, a game in Botlish
 
@@ -145,8 +147,8 @@ chmod +x icy-tower
 ```
 
 It needs SDL 3 (`libSDL3.so.0`, from your distribution's SDL 3 package) and
-glibc 2.34 or newer. The game calls C, so the single-file compiler cannot
-link it yet; `examples/games/icy-tower/build.sh` builds it from a checkout.
+glibc 2.34 or newer. `examples/games/icy-tower/build.sh` builds it from a
+checkout, where the generated SDL3 binding is.
 Its rules run headless on all four backends, the executable agrees with an
 independent oracle, and valgrind finds no leaks
 ([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).

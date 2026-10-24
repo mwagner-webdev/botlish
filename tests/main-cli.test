@@ -96,7 +96,7 @@ test cli-help-index {-help warnings prints the warnings index: its introduction 
     set out [dict get [runMain -help warnings] out]
     list [string match "WARNINGS -- Compilerpedia index*" $out] \
         [llength [regexp -all -inline {warning\.[a-z-]+} $out]]
-} -cleanup {unset -nocomplain out} -result {1 7}
+} -cleanup {unset -nocomplain out} -result {1 8}
 
 test cli-help-code {-help METHOD-ELIGIBLE prints the warning's page} -body {
     set r [runMain -help METHOD-ELIGIBLE]

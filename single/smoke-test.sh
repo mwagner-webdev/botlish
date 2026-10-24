@@ -14,7 +14,9 @@
 # no-argument usage summary (no program runs); -help (the packed Compilerpedia)
 # and -version; the inspection options; a rejected program fails;
 # -emit-native-executable produces executables that run without anything
-# else; an application of two files (a module beside its entry file) with a
+# else; a program that calls C refused (NATIVE LINK TOOLCHAIN: no C compiler
+# here; single/ffi-smoke-test.sh links them where there is one); an
+# application of two files (a module beside its entry file) with a
 # recursion deeper than tclsh's default limit allows on the interpreter; a
 # native run shows what the program prints; the native backend still
 # works with no cache directory at all (no HOME); and the language server
@@ -42,6 +44,24 @@ echo "== $botlish"
 for tool in tclsh tclsh9.0 rustc cargo cc ld; do
   echo "   host $tool: $(command -v "$tool" || echo no)"
 done
+
+# A run that cannot link installs the native executables and not the runtime
+# archive, which only a run that may link gets (SINGLE-EXECUTABLE-FFI-
+# MILESTONE-1.md); the cache directory is named by all three, the archive's
+# size among them.
+env -i HOME="$work/home-nolink" "$botlish" -backend compile -warnings off samples/01-arithmetic.bot >/dev/null ||
+  fail "a compile run"
+installed=$(ls -d "$work/home-nolink"/.cache/botlish/native-* 2>/dev/null) || fail "a compile run installed nothing"
+[[ -x $installed/botlish-native && ! -e $installed/libbotlish_runtime.a ]] ||
+  fail "a run that links nothing installed the runtime archive (or no driver): $(ls "$installed")"
+env -i HOME="$work/home-nolink" "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || fail "emit hello"
+archive_size=$(wc -c <"$installed/libbotlish_runtime.a") || fail "-emit-native-executable installed no runtime archive"
+# Exact modes (a test run as root reads and runs files whatever their mode).
+modes=$(stat -c %a "$installed/botlish-native" "$installed/botlish-aot-stub" "$installed/libbotlish_runtime.a" | tr '\n' ' ')
+[[ $modes == "755 755 644 " ]] || fail "installed with modes $modes (want 755 755 644)"
+[[ $(basename "$installed") == *-"$archive_size" || $(basename "$installed") == *-"$archive_size"-* ]] ||
+  fail "the cache directory $(basename "$installed") is not named by the runtime archive ($archive_size bytes)"
+echo "   installed: the driver and the stub for any run, the runtime archive for one that may link"
 
 for backend in interp compile cranelift; do
   run -backend "$backend" -warnings off samples/* >"$work/$backend.out" ||
@@ -125,6 +145,17 @@ env -i "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || 
 [[ $(env -i ./hello) == $'Hello, world!\nunit' ]] || fail "executable built without HOME"
 env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
 grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"
+
+# A program that calls C needs the host's C compiler driver (the system
+# linker, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): without one -- this
+# environment's -- its native link says so, and links nothing.
+# single/ffi-smoke-test.sh checks the link where there is one.
+printf 'import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 5)\n' >labs.bot
+if run -warnings off -emit-native-executable labs.bot >"$work/labs.out" 2>&1; then fail "a C program linked without a C compiler"; fi
+grep -q 'needs a C compiler driver to link an executable for linux-x86_64, and there is none: no cc on PATH.*(NATIVE LINK TOOLCHAIN)' "$work/labs.out" ||
+  { cat "$work/labs.out" >&2; fail "a C program's link without a C compiler said no NATIVE LINK TOOLCHAIN"; }
+[[ ! -e labs ]] || fail "a refused link left an executable"
+echo "   a C program without a C compiler: NATIVE LINK TOOLCHAIN"
 
 # The language server: an editor's session, framed by hand. The hover and
 # the definition are asked before the analysis is done and answered when it

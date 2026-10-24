@@ -25,7 +25,7 @@ testConstraint linuxNative [expr {$::tcl_platform(os) eq "Linux"
     && $::tcl_platform(machine) in {x86_64 amd64 aarch64 arm64}}]
 set ::hostTarget [core::cabi::hostTarget]
 testConstraint nativeRun [expr {[testConstraint clang] && [testConstraint nativeBuilt]
-    && [testConstraint rustcLinker] && [testConstraint nativeCCalls] && $::hostTarget ne ""}]
+    && [testConstraint cLinker] && [testConstraint nativeCCalls] && $::hostTarget ne ""}]
 
 set ::fixture [::cbind::profile::load fixture]
 set ::fixtureDir [file join $::projectRoot tools c-bindgen fixture]

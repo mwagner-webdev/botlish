@@ -588,7 +588,10 @@ function types with capabilities, not path-sensitive authority analysis,
 context-field dataflow, whole-program aliasing or a proof that a context's
 policy is adequate. Not private members, private functions or friend
 modules (name visibility is not the security boundary; capability
-availability is). No C: no `extern c fn`, no C calls, linking, capture,
+availability is). (Private members came later,
+MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md, and changed nothing
+here: a private helper's direct call is an edge of its module like any
+other, mediated or not by the same rule.) No C: no `extern c fn`, no C calls, linking, capture,
 ownership or alias analysis.
 
 ## 9. The future C binding architecture (future)

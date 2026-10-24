@@ -1,0 +1,432 @@
+# module-privacy.test -- `private`: module-local declarations
+# (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
+#
+# A top-level declaration written `private` is accessible only to code of
+# the module that declares it: no importer, parent or child namespace,
+# entry program, method-syntax call or trait conformance reaches it, and no
+# public declaration may expose a private type or error in its interface
+# (PRIVATE-TYPE-ESCAPE). One fact -- the module declaration's `private`
+# set (hir/privacy.tcl) -- decides every check; nothing exists at run time.
+#
+# Every application here is a fresh directory of the tcltest temporary
+# directory, compiled by surface::readProgramFile (main.tcl's front end).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot service service.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::mpCounter 0
+
+# A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}).
+proc mpApp {files} {
+    set dir [makeDirectory mp-app-[pid]-[incr ::mpCounter]]
+    foreach {relative text} $files {
+        set path [file join $dir {*}[file split $relative]]
+        file mkdir [file dirname $path]
+        set channel [open $path w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+proc mpRemoveApps {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] mp-app-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc mpHir {dir {strict 1}} {
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -strict $strict]
+}
+
+# "KIND: MESSAGE" of the first diagnostic compiling FILES, the directory
+# spelled away, or "accepted VALUE" (the program's value on interp).
+proc mpOutcome {files} {
+    set dir [mpApp $files]
+    if {[catch {mpHir $dir} message options]} {
+        set kind [lindex [dict get $options -errorcode] end]
+        return "$kind: [string map [list $dir/ ""] [lindex [split $message \n] 0]]"
+    }
+    return "accepted [core::value::show [core::evalProgram [hir::lower [mpHir $dir]]]]"
+}
+
+# The kind of the first diagnostic compiling FILES, or accepted.
+proc mpKind {files} {
+    set dir [mpApp $files]
+    if {[catch {mpHir $dir} message options]} {
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return accepted
+}
+
+# Every diagnostic kind of the -strict 0 compilation of FILES, in order.
+proc mpKinds {files} {
+    set dir [mpApp $files]
+    if {[catch {mpHir $dir 0} hir options]} {
+        return [lmap d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode]]]] {
+            lindex [dict get $d errorcode] end
+        }]
+    }
+    return [lmap d [hir::recovery::reported $hir] {dict get $d kind}]
+}
+
+# The module gfx: a private helper, a public operation, a private struct.
+set ::gfx {private fn scale(x: int) -> int:
+    x * 10
+
+private base = 2
+
+fn draw(x: int) -> int:
+    scale(x) + base
+}
+
+# ---------------------------------------------------------------------------
+# Grammar
+
+test mp-parse-every-declaration {`private` modifies every named top-level declaration: the node's private 1 and privateSpan, its span widened to the modifier} -body {
+    set ast [surface::parse "import std::ffi::c\n\nprivate fn f():\n    1\n\nprivate x = 5\n\nprivate opaque struct S:\n    a: int\n\nprivate type D = Int in 0..3\n\nprivate refined type R = str\n\nprivate error E\n\nprivate enum C:\n    A, B\n\nprivate context trait T:\n    fn op() -> int\n\nprivate union layout U:\n    size 4\n    align 4\n    alternative a: std::ffi::c::Int\n\nprivate extern c fn abs(x: std::ffi::c::Int) -> std::ffi::c::Int\n\nprivate nomethod fn g(a):\n    a\n"]
+    lmap s [dict get $ast body] {
+        list [dict get $s kind] [dict get $s private] [dict get $s privateSpan start] [dict get $s span start]
+    }
+} -result {{function 1 20 20} {bind 1 43 43} {structdecl 1 58 58} {typedecl 1 95 95} {typedecl 1 125 125} {errordecl 1 155 155} {enumdecl 1 172 172} {traitdecl 1 198 198} {layoutdecl 1 243 243} {externfn 1 327 327} {function 1 393 393}}
+
+test mp-parse-contextual {`private` stays an ordinary name everywhere a modifier cannot be: a binding, a call, a field, a parameter} -body {
+    mpOutcome [list main.bot "private = 3\nfn f(private):\n    private + 1\n\nr = \{private: f(private)\}\nr.private\n"]
+} -result {accepted 4}
+
+test mp-parse-nested {a private declaration nested in a function is a syntax error: privacy is module-local, never lexical} -body {
+    catch {surface::parse "fn f():\n    private fn g():\n        1\n    g()\n"} message
+    set message
+} -result {<input>:2:5: "private" is only allowed on a declaration at the top level of a module: privacy is module-local, so a function, loop or branch has no private declarations}
+
+test mp-parse-misuse {a duplicate modifier, a private library line, a private statement: located syntax errors} -body {
+    lmap source [list "private private fn f():\n    1\n" "private extern c library \"m\"\n" "private x(1)\n"] {
+        catch {surface::parse $source} message
+        set message
+    }
+} -result {{<input>:1:9: duplicate modifier "private" in this declaration} {<input>:1:1: "private" modifies a named declaration: an `extern c library` line names no member of the module, so nothing about it can be private} {<input>:1:1: "private" modifies a declaration (fn, struct, type, error, enum, trait, layout, extern c fn, or a NAME = VALUE module binding), not a call statement}}
+
+test mp-parse-print {the AST printer writes the modifier first} -body {
+    surface::formatAst [surface::parse "private opaque struct S:\n    a: int\n\nprivate nomethod fn g(a):\n    a\n"]
+} -match glob -result "private opaque struct S*\n    a: int\nprivate nomethod fn g (a)*"
+
+# ---------------------------------------------------------------------------
+# The declaring module may use it
+
+test mp-own-module {inside its module a private declaration is used as any: bare, own-qualified, as a value} -body {
+    mpOutcome [list gfx.bot "private fn scale(x: int) -> int:\n    x * 10\n\nfn draw(x: int) -> int:\n    f = gfx::scale\n    scale(x) + f(1) + ::gfx::scale(1)\n" \
+        main.bot "import gfx\ngfx::draw(2)\n"]
+} -result {accepted 40}
+
+test mp-module-binding {a private module binding is the module's own value} -body {
+    mpOutcome [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(1)\n"]
+} -result {accepted 12}
+
+# ---------------------------------------------------------------------------
+# No other module may access it
+
+foreach {name main kind} {
+    call        "import gfx\ngfx::scale(1)\n"                PRIVATE-ACCESS
+    rooted      "import gfx\n::gfx::scale(1)\n"              PRIVATE-ACCESS
+    value       "import gfx\nf = gfx::scale\nf(1)\n"         PRIVATE-ACCESS
+    binding     "import gfx\ngfx::base\n"                    PRIVATE-ACCESS
+    method      "import gfx\n5.scale()\n"                    PRIVATE-ACCESS
+} {
+    test mp-access-$name "a private function or binding of another module ($name) is PRIVATE-ACCESS" -body {
+        mpKind [list gfx.bot $::gfx main.bot $main]
+    } -result $kind
+}
+
+test mp-access-message {the message names the declaration, its module, the accessing unit and the kind; the related location is the declaration -- for a rooted reference too, which the loader checks like any} -body {
+    lmap main {"import gfx\ngfx::scale(1)\n" "import gfx\n::gfx::scale(1)\n"} {
+        set dir [mpApp [list gfx.bot $::gfx main.bot $main]]
+        catch {mpHir $dir} message options
+        set d [lindex [dict get $options -diagnostics] 0]
+        list [string map [list $dir/ ""] $message] [dict get [lindex [dict get $d related] 0] line] [dict get [lindex [dict get $d related] 0] column]
+    }
+} -result {{{main.bot:2:1: gfx::scale is private to module "gfx" and cannot be accessed from the entry program: a private function is accessible only to code of the module that declares it} 1 12} {{main.bot:2:1: gfx::scale is private to module "gfx" and cannot be accessed from the entry program: a private function is accessible only to code of the module that declares it} 1 12}}
+
+test mp-access-from-module {the accessing unit is a module: named in the message} -body {
+    mpOutcome [list gfx.bot $::gfx render.bot "import gfx\nfn r() -> int:\n    gfx::scale(1)\n" main.bot "import render\nrender::r()\n"]
+} -result {PRIVATE-ACCESS: render.bot:3:5: gfx::scale is private to module "gfx" and cannot be accessed from module "render": a private function is accessible only to code of the module that declares it}
+
+set ::types {private struct S:
+    a: int
+
+private type D = Int in 0..3
+
+private error Boom
+
+private enum C:
+    A, B
+
+private trait Shown:
+    fn shown(self: Shown) -> int
+
+fn n() -> int:
+    S {a: 1}.a
+}
+
+foreach {name main} {
+    construction  "import t\nt::S \{a: 1\}\n"
+    annotation    "import t\nfn f(x: t::S) -> int:\n    1\n0\n"
+    result-type   "import t\nfn f() -> t::D:\n    1\n0\n"
+    import-type   "import type t::D\n0\n"
+    fail          "import t\nfn f() errors t::Boom:\n    fail t::Boom\n0\n"
+    handler       "import t\nfn f():\n    t::n():\n        on t::Boom:\n            0\n0\n"
+    errors-clause "import t\nfn f() -> int errors t::Boom:\n    1\n0\n"
+    enum-case     "import t\nt::C::A\n"
+    trait-type    "import t\nfn f(x: t::Shown) -> int:\n    1\n0\n"
+    fn-type       "import t\nfn f(g: Fn\{args: \[t::S\], return: int\}) -> int:\n    1\n0\n"
+    list-type     "import t\nfn f(xs: List\[t::S\]) -> int:\n    1\n0\n"
+} {
+    test mp-type-access-$name "a private type, error, enum or trait of another module ($name) is PRIVATE-ACCESS" -body {
+        mpKind [list t.bot $::types main.bot $main]
+    } -result PRIVATE-ACCESS
+}
+
+test mp-layout-access {a private layout is no other module's layout operand} -body {
+    mpKind [list l.bot "import std::ffi::c\n\nprivate layout L:\n    size 4\n    align 4\n    field a: std::ffi::c::Int at 0\n\nfn n() -> int:\n    1\n" \
+        main.bot "import std::binary\nimport l\nstd::binary::layout_length(l::L)\n"]
+} -result PRIVATE-ACCESS
+
+test mp-extern-access {a private extern c fn is the module's own} -body {
+    mpKind [list c.bot "import std::ffi::c\n\nprivate extern c fn abs(x: std::ffi::c::Int) -> std::ffi::c::Int\n\nfn one() -> int:\n    1\n" \
+        main.bot "import std::ffi::c\nimport c\nfn f(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    c::abs(x)\n0\n"]
+} -result PRIVATE-ACCESS
+
+test mp-public-unaffected {the module's public declarations stay accessible beside the private ones} -body {
+    mpOutcome [list t.bot $::types main.bot "import t\nt::n()\n"]
+} -result {accepted 1}
+
+# ---------------------------------------------------------------------------
+# Method syntax
+
+test mp-method-not-a-candidate {a private function of an imported module is no method candidate: with an accessible one of another module, the call is that one, never ambiguous} -body {
+    mpOutcome [list gfx.bot $::gfx other.bot "fn scale(x: int) -> int:\n    x + 100\n" \
+        main.bot "import gfx\nimport other\n5.scale()\n"]
+} -result {accepted 105}
+
+test mp-method-field {with no accessible function, a receiver's field of the name is called, exactly as without the private function: a private declaration changes nothing an importer means} -body {
+    mpOutcome [list gfx.bot $::gfx main.bot "import gfx\nfn twice(x):\n    x * 2\n\n\{scale: twice\}.scale(4)\n"]
+} -result {accepted 8}
+
+test mp-method-private-only {with no accessible function and no field, the call is a private access: PRIVATE-ACCESS at the method name} -body {
+    mpOutcome [list gfx.bot $::gfx main.bot "import gfx\n5.scale()\n"]
+} -result {PRIVATE-ACCESS: main.bot:2:3: gfx::scale is private to module "gfx" and cannot be accessed from the entry program: a private function is accessible only to code of the module that declares it (the method-style call ".scale(...)" applies only a function visible by that name)}
+
+test mp-method-own-module {inside its module method syntax reaches a private function as any} -body {
+    mpOutcome [list gfx.bot "private fn scale(x: int) -> int:\n    x * 10\n\nfn draw(x: int) -> int:\n    x.scale()\n" main.bot "import gfx\ngfx::draw(3)\n"]
+} -result {accepted 30}
+
+test mp-method-generic {a generic function's method call reaches no private function through an instance: PRIVATE-ACCESS at the call that makes it} -body {
+    mpKind [list gfx.bot $::gfx main.bot "import gfx\nfn g(x):\n    x.scale()\ng(5)\n"]
+} -result PRIVATE-ACCESS
+
+test mp-method-no-import-hint {a private function is never suggested as an import} -body {
+    mpOutcome [list gfx.bot $::gfx other.bot "import gfx\nfn z() -> int:\n    gfx::draw(1)\n" main.bot "import other\n5.scale()\n"]
+} -match glob -result {NOT-A-STRUCT: *}
+
+# ---------------------------------------------------------------------------
+# Field access through a private declaration
+
+test mp-private-struct-fields {a value of another module's private struct has no field another module may read: the escape and the access are both reported (a valid program has no such value outside its module)} -body {
+    lsort [mpKinds [list m.bot "private struct P:\n    secret: int\n\nfn make() -> P:\n    P \{secret: 7\}\n" \
+        main.bot "import m\nm::make().secret\n"]]
+} -result {PRIVATE-ACCESS PRIVATE-TYPE-ESCAPE}
+
+test mp-opaque-not-private {opaque does not imply private: an opaque struct is named, held and passed anywhere} -body {
+    mpOutcome [list m.bot "opaque struct O:\n    v: int\n\nfn make() -> O:\n    O \{v: 3\}\n\nfn value(o: O) -> int:\n    o.v\n" \
+        main.bot "import m\nfn keep(o: m::O) -> m::O:\n    o\nm::value(keep(m::make()))\n"]
+} -result {accepted 3}
+
+test mp-private-not-opaque {private does not imply opaque: inside its module a private struct's representation is the module's to use} -body {
+    mpOutcome [list m.bot "private struct P:\n    v: int\n\nfn n() -> int:\n    p = P \{v: 4\}\n    \{v\} = p\n    p.v + v\n" main.bot "import m\nm::n()\n"]
+} -result {accepted 8}
+
+test mp-private-opaque {private and opaque combine} -body {
+    mpOutcome [list m.bot "private opaque struct P:\n    v: int\n\nfn n() -> int:\n    P \{v: 5\}.v\n" main.bot "import m\nm::n()\n"]
+} -result {accepted 5}
+
+# ---------------------------------------------------------------------------
+# Module identity
+
+test mp-identity-same-short-name {a local module `list` and std::list are two modules: privacy is decided by the canonical identity, never a name component} -body {
+    mpOutcome [list list.bot "private fn length(xs) -> int:\n    0\n\nfn size(xs) -> int:\n    length(xs)\n" \
+        main.bot "import list\nimport std::list\n\[list::size(\[1, 2\]), std::list::length(\[1, 2\])\]\n"]
+} -result {accepted [0, 2]}
+
+test mp-identity-parent-child {a child namespace is no part of its parent: a::b's private member is not a's to use} -body {
+    mpKind [list a.bot "import a::b\nfn n() -> int:\n    a::b::s()\n" a/b.bot "private fn s() -> int:\n    1\n" main.bot "import a\na::n()\n"]
+} -result PRIVATE-ACCESS
+
+test mp-entry-program {the entry program may declare private declarations; nothing imports it, so they change nothing} -body {
+    mpOutcome [list main.bot "private struct S:\n    a: int\n\nprivate fn f() -> S:\n    S \{a: 9\}\n\nfn g() -> S:\n    f()\n\ng().a\n"]
+} -result {accepted 9}
+
+# ---------------------------------------------------------------------------
+# Public signatures: PRIVATE-TYPE-ESCAPE
+
+foreach {name module} {
+    parameter      "private struct H:\n    a: int\n\nfn use(h: H) -> int:\n    h.a\n"
+    result         "private struct H:\n    a: int\n\nfn make() -> H:\n    H \{a: 1\}\n"
+    inferred       "private struct H:\n    a: int\n\nfn make():\n    H \{a: 1\}\n"
+    list           "private struct H:\n    a: int\n\nfn make() -> List\[H\]:\n    \[H \{a: 1\}\]\n"
+    fn-type        "private struct H:\n    a: int\n\nfn take(f: Fn\{args: \[H\], return: int\}) -> int:\n    1\n"
+    errors         "private error Boom\n\nfn f() -> int errors Boom:\n    fail Boom\n"
+    context        "private opaque context struct C:\n    a: int\n\nfn get(context c: C) -> int:\n    c.a\n"
+    struct-field   "private struct H:\n    a: int\n\nstruct Pub:\n    h: H\n"
+    error-payload  "private struct H:\n    a: int\n\nerror Boom:\n    h: H\n"
+    trait          "private struct H:\n    a: int\n\ntrait T:\n    fn op(self: T) -> H\n"
+    refinement     "private refined type R = str\n\nrefined type Q = R\n"
+    binding        "private struct H:\n    a: int\n\nh = H \{a: 1\}\n"
+} {
+    test mp-escape-$name "a public declaration exposing a private type or error ($name) is PRIVATE-TYPE-ESCAPE" -body {
+        mpKind [list m.bot $module main.bot "import m\n0\n"]
+    } -result PRIVATE-TYPE-ESCAPE
+}
+
+test mp-escape-inferred-context {a public function whose inferred context requirement is a private context: callers would have to install what they cannot name} -body {
+    mpOutcome [list m.bot "private opaque context struct C:\n    a: int\n\nprivate fn get(context c: C) -> int:\n    c.a\n\nfn twice() -> int:\n    get() * 2\n" main.bot "import m\n0\n"]
+} -result {PRIVATE-TYPE-ESCAPE: m.bot:7:1: public function m::twice exposes private type m::C in its context requirement: every module may use m::twice, but only module "m" may use m::C (make m::twice private too, or keep m::C out of its public interface -- an opaque struct may hold it as hidden representation)}
+
+test mp-escape-message {the message names the declaration, the private type and where} -body {
+    mpOutcome [list m.bot "private struct Handles:\n    renderer: int\n\nfn handles() -> Handles:\n    Handles \{renderer: 1\}\n" main.bot "import m\n0\n"]
+} -result {PRIVATE-TYPE-ESCAPE: m.bot:4:1: public function m::handles exposes private type m::Handles in its result: every module may use m::handles, but only module "m" may use m::Handles (make m::handles private too, or keep m::Handles out of its public interface -- an opaque struct may hold it as hidden representation)}
+
+foreach {name module} {
+    opaque-holds   "private struct H:\n    a: int\n\nopaque struct Session:\n    h: H\n\nfn open() -> Session:\n    Session \{h: H \{a: 1\}\}\n"
+    private-fn     "private struct H:\n    a: int\n\nprivate fn make() -> H:\n    H \{a: 1\}\n\nfn n() -> int:\n    make().a\n"
+    private-struct "private struct H:\n    a: int\n\nprivate struct K:\n    h: H\n\nfn n() -> int:\n    K \{h: H \{a: 2\}\}.h.a\n"
+    opaque-context "private struct H:\n    a: int\n\nopaque context struct C:\n    h: H\n\nfn create() -> C:\n    C \{h: H \{a: 1\}\}\n\nprivate fn get(context c: C) -> int:\n    c.h.a\n\nfn twice() -> int:\n    get() * 2\n"
+} {
+    test mp-no-escape-$name "hidden representation and private declarations expose nothing ($name)" -body {
+        mpKind [list m.bot $module main.bot "import m\n0\n"]
+    } -result accepted
+}
+
+test mp-escape-independent {PRIVATE-TYPE-ESCAPE does not suppress an unrelated diagnostic, nor PRIVATE-ACCESS another} -body {
+    mpKinds [list m.bot "private struct H:\n    a: int\n\nfn make() -> H:\n    H \{a: 1\}\n" main.bot "import m\nx = missing\nx\n"]
+} -result {UNBOUND PRIVATE-TYPE-ESCAPE}
+
+# ---------------------------------------------------------------------------
+# Raw authority: private grants nothing
+
+test mp-private-helper-pointer {a private helper may return a C pointer; a public operation that takes values hides it} -body {
+    mpOutcome [list gfx.bot "import std::ffi::c\n\nprivate fn renderer() -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    std::ffi::c::null\[std::ffi::c::Void\]()\n\nfn ready() -> bool:\n    r = renderer()\n    not std::ffi::c::null?(r)\n" \
+        main.bot "import gfx\ngfx::ready()\n"]
+} -result {accepted false}
+
+test mp-private-no-authority {private does not mediate direct authority: a private helper's unmediated direct call still makes its module DIRECT} -body {
+    mpKind [list gfx.bot "import std::binary\nimport std::binary::native\nimport std::ffi::c\n\nlayout L:\n    size 4\n    align 4\n    field a: std::ffi::c::Int at 0\n\nprivate fn peek(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int errors NativeViewNull:\n    std::binary::native::view(L, p).a\n\nfn n() -> int:\n    1\n" \
+        main.bot "import gfx\ngfx::n()\n"]
+} -result DIRECT
+
+# ---------------------------------------------------------------------------
+# Traits and context traits
+
+set ::describe {trait Describe:
+    fn describe(self: Describe) -> str
+
+fn show(x: Describe) -> str:
+    x.describe()
+}
+
+test mp-trait-private-impl {a private function of the witness's module implements no requirement of a foreign trait: TRAIT-NOT-SATISFIED saying why} -body {
+    mpOutcome [list t.bot $::describe m.bot "struct P:\n    a: int\n\nprivate fn describe(p: P) -> str:\n    \"pp\"\n\nfn mk() -> P:\n    P \{a: 1\}\n" \
+        main.bot "import t\nimport m\nt::show(m::mk())\n"]
+} -match glob -result {TRAIT-NOT-SATISFIED: *}
+
+test mp-trait-private-reason {the reason the conformance report gives} -body {
+    set dir [mpApp [list t.bot $::describe m.bot "struct P:\n    a: int\n\nprivate fn describe(p: P) -> str:\n    \"pp\"\n\nfn mk() -> P:\n    P \{a: 1\}\n" \
+        main.bot "import t\nimport m\nt::show(m::mk())\n"]]
+    catch {mpHir $dir} message
+    expr {[string first {m::describe is private to module "m": a private function implements no requirement} $message] >= 0}
+} -result 1
+
+test mp-trait-public-adapter {the same witness with a public implementation satisfies the trait; a private helper beside it is the module's own} -body {
+    mpOutcome [list t.bot $::describe m.bot "struct P:\n    a: int\n\nprivate fn label(p: P) -> str:\n    \"pp\"\n\nfn describe(p: P) -> str:\n    label(p)\n\nfn mk() -> P:\n    P \{a: 1\}\n" \
+        main.bot "import t\nimport m\nt::show(m::mk())\n"]
+} -result {accepted "pp"}
+
+test mp-trait-plan-clones {a private trait-polymorphic function, cloned by the trait plan for its own module's calls, stays the module's} -body {
+    mpOutcome [list t.bot $::describe m.bot "import std::str\nimport t\n\nstruct P:\n    a: int\n\nfn describe(p: P) -> str:\n    \"pp\"\n\nprivate fn twice(x: t::Describe) -> str:\n    x.describe().concat(x.describe())\n\nfn run() -> str:\n    twice(P \{a: 1\})\n" \
+        main.bot "import m\nm::run()\n"]
+} -result {accepted "pppp"}
+
+set ::canvas {context trait Canvas:
+    fn draw(x: int) -> int
+
+fn paint(context c: Canvas) -> int:
+    c.draw(2)
+}
+
+test mp-context-trait-private-impl {a private function implements no context-trait operation} -body {
+    mpKind [list r.bot $::canvas s.bot "opaque context struct Screen:\n    k: int\n\nfn create() -> Screen:\n    Screen \{k: 5\}\n\nprivate fn draw(x: int, context s: Screen) -> int:\n    x * s.k\n" \
+        main.bot "import r\nimport s\nwith context s::create()\nr::paint()\n"]
+} -result MISSING-CONTEXT
+
+test mp-context-trait-public-adapter {a public adapter implements the context trait over a private helper} -body {
+    mpOutcome [list r.bot $::canvas s.bot "opaque context struct Screen:\n    k: int\n\nfn create() -> Screen:\n    Screen \{k: 5\}\n\nprivate fn scaled(x: int, context s: Screen) -> int:\n    x * s.k\n\nfn draw(x: int, context s: Screen) -> int:\n    scaled(x)\n" \
+        main.bot "import r\nimport s\nwith context s::create()\nr::paint()\n"]
+} -result {accepted 10}
+
+# ---------------------------------------------------------------------------
+# Static intrinsics, interchange, isolation, run time
+
+test mp-static-compile {a static compile block that accesses a private declaration is rejected with DiagnosticCode::PrivateAccess} -body {
+    mpOutcome [list gfx.bot $::gfx main.bot "import gfx\nimport std::compiler\n\nfn f() -> int errors std::compiler::CompilerError:\n    static compile:\n        gfx::scale(1)\n\nf():\n    on std::compiler::CompilerError e:\n        if e.code == std::compiler::DiagnosticCode::PrivateAccess:\n            1\n        else:\n            2\n"]
+} -result {accepted 1}
+
+test mp-interchange {HIR interchange keeps the module declarations' private sets: a read-back HIR is the one built} -body {
+    set dir [mpApp [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(1)\n"]]
+    set hir [mpHir $dir]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {[dict get $back moduleDecls] eq [dict get $hir moduleDecls]}] \
+        [dict keys [dict get $hir moduleDecls gfx private values]]
+} -result {1 {scale base}}
+
+test mp-no-runtime-representation {a private declaration lowers to exactly the program the public one does: no access check, tag or wrapper at run time} -body {
+    set a [mpHir [mpApp [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(1)\n"]]]
+    set b [mpHir [mpApp [list gfx.bot [string map {"private " ""} $::gfx] main.bot "import gfx\ngfx::draw(1)\n"]]]
+    expr {[hir::lower $a] eq [hir::lower $b]}
+} -result 1
+
+test mp-compile-backend {the Tcl compiler runs a program of private helpers} -body {
+    core::value::show [core::compiler::evalHir [mpHir [mpApp [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(4)\n"]]]]
+} -result 42
+
+test mp-native {the native backend calls a private function like any other} -constraints nativeBuilt -body {
+    core::value::show [native::evalHir [mpHir [mpApp [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(4)\n"]]]]
+} -result 42
+
+test mp-hover-private {the compiler service's hover of a private function says so, a public one's is unchanged, and navigation finds a private declaration from its module's code as any (navigation is no access)} -body {
+    set dir [mpApp [list gfx.bot $::gfx main.bot "import gfx\ngfx::draw(1)\n"]]
+    set ws [service::workspace -warnings off -cache ""]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set use [service::at $rev [file join $dir gfx.bot] 7 5]
+    list [dict get [service::at $rev [file join $dir gfx.bot] 1 12] hover] \
+        [dict get [service::at $rev [file join $dir gfx.bot] 6 4] hover] \
+        [dict get [service::at $rev [file join $dir main.bot] 2 7] hover] \
+        [dict get $use hover] [dict get $use definition line] [llength [dict get $use references]]
+} -cleanup {service::closeWorkspace $ws; unset -nocomplain dir ws rev use} -result {{private fn gfx::scale(x: int) -> int} {fn gfx::draw(x: int) -> int} {fn gfx::draw(x: int) -> int} {private fn gfx::scale(x: int) -> int} 1 1}
+
+test mp-no-registry {privacy lives in the HIR's module declarations only: no backend or lowering source reads it} -body {
+    set found {}
+    foreach dir {core compiler native} {
+        foreach path [glob -directory [file join $::projectRoot $dir] *.tcl] {
+            if {[regexp {hir::privacy::|privateCandidates} [core::ReadFile $path]]} {
+                lappend found [file tail $path]
+            }
+        }
+    }
+    set found
+} -result {}
+
+mpRemoveApps
+cleanupTests

@@ -855,7 +855,7 @@ proc machineCalls {exe function} {
     return $calls
 }
 
-test abi-mutable-bytes-machine-code-read-function {the machine code of std::linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then to_int, and the result struct built after it (the keepalive is no machine code: the detached storage stays live across the syscall through its stack map, abi-mutable-bytes-clif-keepalive-and-stack-map); and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-mutable-bytes-machine-code-read-function {the machine code of std::linux::read in a standalone executable: a call to the detach function, the runtime helper taking the WRITABLE payload address, the one syscall helper, then to_int, and the result struct built after it (the keepalive is no machine code: the detached storage stays live across the syscall through its stack map, abi-mutable-bytes-clif-keepalive-and-stack-map); and there is no call to libc's read, recv, pread or syscall(3) anywhere in it -- libc exists elsewhere in the executable (the runner's own machinery), the Botlish read path never reaches it} -constraints {linuxX86_64 objdump symbolLinker} -body {
     set text [readProgram 8]
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] std::linux::sys::read]
@@ -867,7 +867,7 @@ test abi-mutable-bytes-machine-code-read-function {the machine code of std::linu
         [expr {[lsearch -regexp $targets {^botlish_fn_[0-9]+$}] >= 0}]
 } -result {{rt_mbytes_addr rt_linux_x86_64_syscall rt_struct_new} 0 1}
 
-test abi-mutable-bytes-detach-function-machine-code {the detach (std::abi::bytes::detach) is the runtime's clone helper and nothing else: one call, to rt_mbytes_clone} -constraints {linuxX86_64 objdump rustcLinker} -body {
+test abi-mutable-bytes-detach-function-machine-code {the detach (std::abi::bytes::detach) is the runtime's clone helper and nothing else: one call, to rt_mbytes_clone} -constraints {linuxX86_64 objdump symbolLinker} -body {
     set text [readProgram 8]
     set exe [buildExecutable machine $text]
     set id [nirFunctionId [native::nir [bytesHir $text]] std::abi::bytes::detach]
@@ -903,7 +903,7 @@ proc recordsOf {records prefix} {
     lsearch -all -inline -glob -index 0 $records "$prefix*"
 }
 
-test abi-mutable-bytes-kernel-sees-the-stdin-read {strace of the standalone stdin example: the kernel receives read(0, "hello from stdin\n", 4096) = 17 -- fd 0 in rdi, a 4096-byte capacity in rdx, and the 17 bytes it wrote visible at rsi -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function (std::linux::read), with NO libc frame (no __read) in that call's stack; the write that follows is the already implemented raw write, also from the raw boundary} -constraints {linuxX86_64 strace posixShell rustcLinker} -body {
+test abi-mutable-bytes-kernel-sees-the-stdin-read {strace of the standalone stdin example: the kernel receives read(0, "hello from stdin\n", 4096) = 17 -- fd 0 in rdi, a 4096-byte capacity in rdx, and the 17 bytes it wrote visible at rsi -- issued from the raw boundary function botlish_linux_x86_64_syscall, called by the runtime helper, called by the Botlish function (std::linux::read), with NO libc frame (no __read) in that call's stack; the write that follows is the already implemented raw write, also from the raw boundary} -constraints {linuxX86_64 strace posixShell symbolLinker} -body {
     set exe [file join $::executableDir read-stdin]
     if {![file exists $exe]} {
         native::executable [surface::readProgramFile [file join $::projectRoot examples linux read-stdin.bot]] $exe

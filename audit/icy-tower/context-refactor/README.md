@@ -17,6 +17,7 @@ them.
 | `variants/ids/` | the same `sdl.bot` API retaining SDL through SDL's own window IDs, scratch memory per call |
 | `variants/opaque-values/` | Design A: an opaque affine resource value instead of context state |
 | `variants/canvas/` | a `context trait Canvas` between render.bot and SDL, and a recording canvas drawing frames on all four backends |
+| `baseline/` | the original boundary's modules (commit 6df89a8e, verbatim): the regression fixture of the CONTEXT-RESOURCE-ESCAPE warning (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md), which draws on it exactly the census's twelve warnings |
 | `warning-census/` | the repository census of the warning candidate (`partition-a.*`: libraries, examples, benches, golden suites, bindings; `partition-b.*`: the Tcl tests' embedded programs and the fuzzers' programs) |
 
 Every tool keeps its scratch files in a private temporary directory and

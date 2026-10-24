@@ -1,0 +1,97 @@
+# Mutants of the single-file compiler's packaging of the system linker
+# (audit/single-executable/tools/mutate.tcl; SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
+# single/package.tcl's archive contents and build id, single/main.tcl's
+# installation and linker choice. The same format as
+# audit/native-aot/tools/mutants.txt:
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Not here: a partial archive installed under its final name (the write is
+# not atomic): no smoke test can race a first run reliably.
+
+@@ runtime-not-packed the runtime archive is left out of the single executable
+## single/package.tcl
+<<<<
+    foreach name {botlish-native botlish-aot-stub libbotlish_runtime.a} {
+====
+    foreach name {botlish-native botlish-aot-stub} {
+>>>>
+
+@@ runtime-never-installed the runtime archive is never installed beside the driver, even for a run that links
+## single/main.tcl
+<<<<
+    if {$linking} {
+        lappend files $runtime
+    }
+====
+    if {0} {
+        lappend files $runtime
+    }
+>>>>
+
+@@ runtime-always-installed every run installs the runtime archive, one that links nothing too
+## single/main.tcl
+<<<<
+proc ::single::MayLink {argv} {
+====
+proc ::single::MayLink {argv} {
+    return 1
+>>>>
+
+@@ backend-run-not-linking a native backend's run is not taken for one that may link: a program that calls C finds no runtime archive
+## single/main.tcl
+<<<<
+            -backend { set backend [lindex $argv [incr i]] }
+====
+            -backend { incr i }
+>>>>
+
+@@ id-without-runtime the build id names the executables only: a changed runtime archive reuses another build's cache directory
+## single/package.tcl
+<<<<
+        lappend digest [format %08x [zlib crc32 [read $channel]]] [file size $path]
+====
+        if {$name ne "libbotlish_runtime.a"} { lappend digest [format %08x [zlib crc32 [read $channel]]] [file size $path] }
+>>>>
+
+@@ linker-stub the single executable links every program with the stub, as before the milestone: C is refused
+## single/main.tcl
+<<<<
+        set ::env(BOTLISH_NATIVE_LINKER) auto
+====
+        set ::env(BOTLISH_NATIVE_LINKER) stub
+>>>>
+
+@@ linker-system the single executable links every program with the system linker: one that calls no C needs a C compiler
+## single/main.tcl
+<<<<
+        set ::env(BOTLISH_NATIVE_LINKER) auto
+====
+        set ::env(BOTLISH_NATIVE_LINKER) system
+>>>>
+
+@@ linker-choice-overridden an explicit BOTLISH_NATIVE_LINKER is replaced by auto
+## single/main.tcl
+<<<<
+    if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
+====
+    if {1} {
+>>>>
+
+@@ installed-modes-decimal the installed files' modes computed by expr, which reads 0755 as the decimal 755 (no owner read)
+## single/main.tcl
+<<<<
+            if {$name eq $runtime} {
+                file attributes $partial -permissions 0644
+            } else {
+                file attributes $partial -permissions 0755
+            }
+====
+            file attributes $partial -permissions [expr {$name eq $runtime ? 0644 : 0755}]
+>>>>

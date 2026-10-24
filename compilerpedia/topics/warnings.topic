@@ -793,3 +793,203 @@ open_file("log.txt", :append)
 @nowarn MANY-BOOLEAN-ARGUMENTS
 @value "log.txt"
 @end
+
+@topic warning.context-resource-escape
+title: CONTEXT-RESOURCE-ESCAPE: an airlock hands out its raw foreign resource
+summary: An airlock -- a module mediating raw authority through its own context -- passes a C pointer, a native view or edit, or an open struct holding one, to another module.
+index: warnings lint
+code: CONTEXT-RESOURCE-ESCAPE
+code: CORE SEMANTIC CONTEXT-RESOURCE-ESCAPE
+alias: context resource escape; airlock leak; raw pointer escape; resource escape; leaked handle
+keywords: airlock, context, pointer, Ptr, FnPtr, NativeView, NativeEdit, opaque, private, raw, foreign, resource, contextualized, SDL
+related: concept.private concept.contexts concept.direct-modules concept.opaque-structs concept.c-ffi warning.many-boolean-arguments
+docs: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md DIRECT-MODULES.md
+
+== WHAT IT DETECTS
+A module is an *airlock* when the compiler proves it contextualized
+(concept.direct-modules): it makes raw calls -- a retaining C call, a
+native view or edit -- and a context the module declares mediates every
+one. The warning fires when code of another module takes the airlock's raw
+representation across that boundary:
+  * R2: calling a public function of the airlock (or taking it as a value)
+    passes in or receives a C address (`Ptr`, `FnPtr`), alone or inside a
+    List, vector, array or struct whose fields the caller may read;
+  * R3: the same with a `NativeView` or `NativeEdit`;
+  * R4: the caller constructs, destructures or reads the fields of a
+    non-opaque struct of the airlock that holds one.
+One warning per exposing declaration -- the function or the struct, where
+the fix is -- naming each consuming module, its number of crossings and its
+first one:
+    gfx.bot:7:1: warning: gfx::renderer exposes a raw C pointer (its
+        result: std::ffi::c::Ptr[std::ffi::c::Void]) across the boundary of
+        module "gfx", which mediates its raw authority through its context
+        gfx::Gfx: the entry program receives one (1 call; first at
+        main.bot:5:9). ... (CONTEXT-RESOURCE-ESCAPE)
+
+== WHY IT MATTERS
+An airlock exists to keep raw authority behind a capability. A raw pointer
+or a native view it hands out carries that authority past the context: an
+importer can pass the pointer to C, read every pointer a view's memory
+holds, or keep it after the airlock closed it -- none of which needs
+authority of its own, and none of which the module statuses show
+(directness tracks who makes raw calls, not who holds raw handles). Icy
+Tower's first SDL wrapper did exactly this: 38 calls carried renderer
+pointers through the game, with 56 clones and every frame loop exit
+threading the window back to close it.
+
+== RECOMMENDED PRACTICE
+The airlock principle: raw foreign authority belongs in inspectable
+architectural boundaries, and a context ordinarily exposes what callers
+are allowed to do, not the raw representation with which it does it.
+  * Keep the resource behind the context and give the module operations
+    that take and return values (`gfx::fill(x, y, w, h)`).
+  * Inside the airlock, make the helpers that take or return pointers and
+    views `private` (concept.private): they stay implementation.
+  * Or seal the resource in an opaque struct: a public opaque handle is an
+    intentional abstraction, and carrying it is no escape.
+
+== EVIDENCE
+The direct-module analysis's contextualized status of the declaring module;
+the checked types at each crossing (arguments, result, value) and of each
+construction, projection or destructuring; opacity and privacy as declared.
+A crossing is a reference from another unit to a public member of the
+airlock: a private member never is one. A struct opaque or private to
+another module stops the search for raw representation.
+
+== LEGITIMATE EXCEPTIONS
+Silent by construction: calls inside the airlock; private helpers; public
+opaque resource values; modules that are not contextualized -- a designated
+`direct module` is a raw layer by declaration, and an ordinary module
+mediates nothing; values without raw representation. A pointer passed *in*
+by a module that has raw authority of its own (direct, or an airlock
+itself) is taken to be that module's own resource and is not reported. Not
+recognized: an airlock that deliberately lends a caller-owned buffer to an
+ordinary module and takes it back; a trait operation's crossing (its types
+are the trait's contract).
+
+== EXAMPLES
+@example accept
+import gfx
+
+with context gfx::create()
+
+fn frame():
+    r = gfx::renderer()
+    r.fill(3)
+
+0
+@module gfx
+import std::ffi::c
+
+extern c fn gfx_open() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn gfx_fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> std::ffi::c::Int
+
+opaque context struct Gfx:
+    ready: bool
+
+fn create() -> Gfx:
+    Gfx {ready: true}
+
+fn renderer(context g: Gfx) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    gfx_open()
+
+fn fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int, context g: Gfx) -> std::ffi::c::Int:
+    renderer.gfx_fill(x)
+@caption The airlock's renderer pointer crosses into the application
+@warn CONTEXT-RESOURCE-ESCAPE
+@value 0
+@end
+
+@example accept
+import gfx
+
+with context gfx::create()
+
+fn frame():
+    gfx::fill(3)
+
+0
+@module gfx
+import std::ffi::c
+
+extern c fn gfx_open() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn gfx_fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> std::ffi::c::Int
+
+opaque context struct Gfx:
+    ready: bool
+
+fn create() -> Gfx:
+    Gfx {ready: true}
+
+private fn renderer(context g: Gfx) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    gfx_open()
+
+fn fill(x: std::ffi::c::Int, context g: Gfx) -> std::ffi::c::Int:
+    r = renderer()
+    r.gfx_fill(x)
+@caption A private helper returns the pointer; the public operation takes values
+@nowarn CONTEXT-RESOURCE-ESCAPE
+@value 0
+@end
+
+@example accept
+import gfx
+
+with context gfx::create()
+
+fn frame():
+    s = gfx::open()
+    s.fill(3)
+
+0
+@module gfx
+import std::ffi::c
+
+extern c fn gfx_open() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn gfx_fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> std::ffi::c::Int
+
+opaque context struct Gfx:
+    ready: bool
+
+opaque struct Surface:
+    renderer: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn create() -> Gfx:
+    Gfx {ready: true}
+
+fn open(context g: Gfx) -> Surface:
+    Surface {renderer: gfx_open()}
+
+fn fill(s: Surface, x: std::ffi::c::Int, context g: Gfx) -> std::ffi::c::Int:
+    {renderer} = s
+    renderer.gfx_fill(x)
+@caption A public opaque resource value carries the pointer sealed
+@nowarn CONTEXT-RESOURCE-ESCAPE
+@value 0
+@end
+
+@example accept
+direct module
+import gfx
+
+fn frame():
+    r = gfx::renderer()
+    r.fill(3)
+
+0
+@module gfx
+direct module
+import std::ffi::c
+
+extern c fn gfx_open() -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn gfx_fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> std::ffi::c::Int
+
+fn renderer() -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    gfx_open()
+
+fn fill(renderer: std::ffi::c::Ptr[std::ffi::c::Void], x: std::ffi::c::Int) -> std::ffi::c::Int:
+    renderer.gfx_fill(x)
+@caption A raw binding layer, declared direct, is no airlock
+@nowarn CONTEXT-RESOURCE-ESCAPE
+@value 0
+@end

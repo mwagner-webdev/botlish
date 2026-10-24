@@ -30,7 +30,9 @@
 #     installed context and no coroutine to give it.
 #
 # Exported, public and foreign are three different things: a module's
-# functions are public to the modules that import it (IMPORTS.md), an
+# functions are public to the modules that import it (IMPORTS.md) unless
+# declared `private` (hir/privacy.tcl, which decides Botlish names only: a
+# private exported function is still a C export), an
 # `extern c fn` is a C function Botlish calls (C-FFI.md), and an `exported
 # c fn` is a Botlish function C calls. Only the last makes a C symbol, and
 # only in a native library: a program run or linked as an executable treats

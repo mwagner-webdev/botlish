@@ -1,0 +1,29 @@
+# The precompiled runtime of a system-linked executable
+# (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): botlish-native's runtime library as a
+# static archive -- libbotlish_runtime.a, botlish_runtime.lib on Windows --
+# with the C `main` of every executable the system linker links. Built by the
+# same `cargo build --release --manifest-path native/Cargo.toml` as the driver
+# (a default member of native/'s workspace), so the driver and the archive
+# beside it are one build.
+[package]
+name = "botlish-runtime"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "botlish_runtime"
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+# It has no tests of its own (`main` is left out of a test build, which has
+# its harness's): the runtime's are botlish-native's.
+test = false
+doctest = false
+
+[dependencies]
+botlish-native = { path = ".." }
+
+[features]
+# The driver's root plan, never another (runtime::framewalk; the ABI
+# fingerprint refuses a mix).
+fallback-roots = ["botlish-native/fallback-roots"]

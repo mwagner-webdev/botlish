@@ -44,7 +44,7 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 set ::hostTarget [core::cabi::hostTarget]
 # Windows I/O runs (tests/helpers.tcl's windowsIO), with the native backend
 # built and its executables linked by rustc.
-testConstraint windowsIO [expr {[testConstraint windowsIO] && [testConstraint nativeBuilt] && [testConstraint rustcLinker]}]
+testConstraint windowsIO [expr {[testConstraint windowsIO] && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
 
 # The fixtures, built once with MSVC where Windows I/O runs.
 set ::wiFixtureDir ""
