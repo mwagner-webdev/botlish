@@ -11,8 +11,9 @@ order of their candidates (EXACT-METHOD-DECISION-MISATTRIBUTION.md, and
 section 6). Both are replaced by one decision whose verdicts are a call's
 own checks, certified relative to the program as decided.
 
-The base of every "before" below is `d88b5fef`; the implementation's first
-commit is `0e89f694`, the milestone's last the commit that adds this report.
+The base of every "before" below is `d88b5fef`. The implementation is
+commit `0e89f694` and the commits after it on the branch
+`ccr-16f6a693-1k90it`.
 
 ## Contents
 
@@ -66,13 +67,16 @@ commit is `0e89f694`, the milestone's last the commit that adds this report.
   golden corpus contain -- the decision is unique and so independent of the
   search; for a cycle it is a certified decision, not shown unique (section
   10).
-* **Observed.** The reported chain compiles in every configuration; four
-  further defects of the old decision found by this milestone are fixed
-  (section 6); an independent declarative oracle agrees with the new
-  decision on all 1,000 generated programs (2,670 method calls, every
-  program checked again with its modules renamed) and disagrees with the
-  old one on 70 of the first 200; every golden suite decides and builds the same program as before;
-  every mutant of the new harnesses is killed.
+* **Observed.** The reported chain compiles in every configuration, and so
+  does its variant with an unrelated ambiguous call; three further defects
+  of the old decision found by this milestone are fixed (sections 6.2-6.4);
+  an independent declarative oracle agrees with the new decision on all
+  1,000 generated programs (2,670 method calls, every program checked again
+  with its modules renamed) and disagrees with the old one on 70 of the
+  first 200; every golden suite decides, diagnoses and builds the same
+  program as before; every mutant of the method harnesses, and of the
+  static-compile, static-decisions and contexts harnesses this change
+  touches, is killed.
 
 ## 2. Architecture census
 
@@ -369,8 +373,8 @@ C's native kind mismatch. K is applicable to C relative to S iff
    else first candidate), also fixed; so the next calls' arguments are
    fixed, and so on. Hence every certified configuration is this one,
    whatever the waves, the trial rounds or the order of certification
-   proposed -- and an unrelated call (one outside a call's dataflow) changes
-   nothing a call's verdict reads. The canonical stand-in uses candidate
+   proposed -- and an unrelated call (one whose decision reaches none of a
+   call's arguments) changes nothing that call's verdict reads. The canonical stand-in uses candidate
    order, but only for calls that are rejected anyway; it can change the
    diagnostics of the calls depending on a rejected call, never an accepted
    decision in a program that compiles.
@@ -421,7 +425,7 @@ the inner `at` returns.
 | filter on / kind proofs on | compiles (2 builds) | compiles |
 | filter off / reference rule | NO-APPLICABLE-METHOD for `at`, AMBIGUOUS-METHOD-CALL for `length` (5 builds) | compiles |
 | outer candidate sorting before std (application module), after std (`std::zbox`), between (`std::boxlen`) | -- | compiles in all three (`mr-reported-chain-any-sort-order`) |
-| with an unrelated ambiguous `x.length()` on an untyped parameter | NO-APPLICABLE-METHOD for `at`, two AMBIGUOUS-METHOD-CALL (the chain's `length` and the unrelated one), a TYPE: the chain rejected | the unrelated call AMBIGUOUS-METHOD-CALL; the chain decided `std::list::at`, `std::list::length` (`mr-unrelated-ambiguous-call`) |
+| with an unrelated ambiguous `x.length()` on an untyped parameter | NO-APPLICABLE-METHOD for `at`, two AMBIGUOUS-METHOD-CALL (the chain's `length` and the unrelated one), a TYPE: the chain rejected | the unrelated call AMBIGUOUS-METHOD-CALL (and its placeholder's TYPE, 10.2); the chain decided `std::list::at`, `std::list::length` (`mr-unrelated-ambiguous-call`) |
 | qualified spelling | compiles | compiles, same value (`mr-reported-chain-compiles`) |
 
 ### 6.2 An inner call in an argument position decided an ambiguous outer call
@@ -527,7 +531,7 @@ The reference rule judges every candidate by its own build, so it does not
 depend on the kind proofs being right. `bench/method-filter.tcl -audit 1`
 compiles a program under `hir::methodReferenceAudit` (both rules, decisions
 and HIR compared). Every golden suite that decides method calls (the 25 of
-`bench/method-filter.tcl -suites`) passes it (mutable-array: pending, below). Builds, trial builds,
+`bench/method-filter.tcl -suites`) passes it. Builds, trial builds,
 single deviations and final rebuilds with the kind proofs; builds and trial
 builds by the reference rule; the decisions each compilation audited (one
 per static round):
@@ -558,12 +562,13 @@ per static round):
 | structs-and-enums | 6 | 1 | 0 | 0 | 33 / 27 | 3 |
 | traits | 6 | 0 | 0 | 0 | 6 / 0 | 4 |
 | variadics | 3 | 0 | 0 | 0 | 15 / 11 | 2 |
-| mutable-array | *(pending: its audit still running)* | | | | | |
+| mutable-array | 7 | 2 | 0 | 0 | 145 / 139 | 4 |
 
 Two things follow. The kind proofs agree with the reference rule on every
 suite (the audit is identity of decisions and HIR, not of counts). And they
-are what makes the rule affordable: the 24 suites above take 133 builds with
-them and 658 by the reference rule (place-parameters 3 against 115).
+are what makes the rule affordable: the 25 suites take 140 builds with
+them and 803 by the reference rule (place-parameters 3 against 115,
+mutable-array 7 against 145).
 
 ### 7.4 Mutation testing
 
@@ -611,14 +616,84 @@ them and 658 by the reference rule (place-parameters 3 against 115).
 All build counts are exact; times were measured on the sandbox's four cores
 with other jobs running and are indicative only.
 
-*(Pending: measured at the end of the milestone.)*
+### 8.1 The golden corpus, before and after
+
+Every golden suite (108) compiled by the base's front end and by this
+milestone's, side by side under the same load (`-strict 0`, no cache), each
+recording its builds, method trial builds, final rebuilds, decisions,
+diagnostics, static-site outcomes and the formatted HIR:
+
+| | base `d88b5fef` | this milestone |
+|---|---:|---:|
+| whole-program builds | 334 | 319 |
+| method trial builds among them | 48 | 33 |
+| final programs built again | 7 | 7 |
+| front-end time, summed | 940 s | 902 s |
+| suites with the same decisions, diagnostics, sites and HIR | | 108 of 108 |
+
+(The formatted HIR of `traits.bot` differs only in the absolute path of the
+standard library inside two messages -- the base's checkout is elsewhere --
+and is identical once both roots are normalized.)
+
+101 suites build exactly as before: 83 decide no method call (no trial
+build and no decided call in either tree), and the other 18 decide their
+calls with the same builds as before. The seven that changed:
+
+| suite | builds | trial builds | time | why |
+|---|---:|---:|---:|---|
+| mutable-vector | 12 -> 7 | 6 -> 2 | 35 -> 21 s | the base filter handed over (`abandoned 1`): the exact decision started again |
+| place-parameters | 8 -> 3 | 6 -> 1 | 17 -> 7 s | the same hand-over |
+| imports | 11 -> 8 | 7 -> 3 | 23 -> 16 s | exact decision's trials per candidate index; now one single deviation |
+| traits | 10 -> 6 | 3 -> 0 | 29 -> 18 s | trait operations are fixed before any build is judged |
+| framework-semantics | 7 -> 6 | 2 -> 1 | 21 -> 17 s | one trial fewer |
+| refinements | 7 -> 7 | 3 -> 2 | 22 -> 22 s | one trial fewer, one final rebuild more |
+| numeric-text | 5 -> 8 | 1 -> 4 | 12 -> 21 s | see below |
+
+`numeric-text.bot` is the cost of the rule. Its two `x.round()` calls on a
+Float64 each have two survivors, `std::float64::round` and
+`std::decimal_rounded::round` (whose call without an imprint is a TYPE
+problem of the call's own). The base judged both calls' second candidates
+in one coordinated build -- sound here only because the calls happen to be
+independent, which nothing checked. The new decision judges each in a
+single deviation of the decided program (2 builds), and the final program,
+no longer the last build made, is built again (1). Measured by the base's
+own `bench/method-filter.tcl`, its filter certified none of the decisions of
+numeric-text, imports, framework-semantics, refinements and traits (the
+exact decision made them) and handed over mutable-vector's and
+place-parameters'; mutable-array's it certified (18 builds without the
+filter, 7 with it; now 7).
+
+### 8.2 The workloads the milestone names
+
+* **Few or no competing methods**: 83 of the 108 suites decide no method
+  call; no method-call build in either tree.
+* **Many imports and competing names**: imports.bot (11 -> 8 builds),
+  stdlib-namespaces.bot (4 -> 4), methods.bot (5 -> 5).
+* **Nested chains**: mutable-array.bot (7 -> 7; 75 decided calls, receiver
+  chains on MutableArray bindings), mutable-vector.bot (12 -> 7), the
+  oracle's and the tests' chains (section 6).
+* **Inference and static-decision dependencies**: static-compile.bot (12 ->
+  12), the static-decisions fuzzer (section 9), `mr-static-blocks`.
+* **Former filter fallback**: mutable-vector.bot and place-parameters.bot,
+  above.
+
+### 8.3 The reference rule, the oracle, the fuzzer
+
+* The reference rule (every candidate by its own build) costs 803 builds on
+  the 25 method-deciding suites against 140 with the kind proofs (7.3);
+  mutable-array.bot alone 145 builds (1,595 s) against 7. It is a test and CI
+  instrument, never the default.
+* The oracle: 200 programs in about 80 s on a quiet machine.
+* The fuzzer: 100 programs in 24 minutes (each compiled three times, two of
+  them under audits that rebuild).
 
 ## 9. Integration
 
 * **Static decisions.** The seeds (`hir::static::MethodSeeds`), cones and
   the method-trial channel are unchanged; seeded calls are fixed and not
-  certified again. `tests/static-economics.test` (its method-memo
-  expectation now counts the reference rule's builds),
+  certified again. `tests/static-economics.test` (`se-method-memo` counts
+  the reference rule's builds, and now also reuses a build other than the
+  first),
   `tests/static-compile.test`, the static-decisions mutants above and
   fuzzer (`audit/static-decisions/tools/fuzz.tcl -n 10` on seeds 5, 17 and
   41: 30 programs, 796 static sites, 0 failures). The batched-against-
@@ -647,8 +722,9 @@ with other jobs running and are indicative only.
   golden): 812 tests passed on interp and 812 on compile, 0 failed; the 20
   golden suites holding their ports passed on all four backends (678 tests
   on interp, compile and cranelift, 670 on cranelift-generic). `main.tcl`
-  runs the reported chain on interp, compile and cranelift, and `-check`
-  reports the unrelated ambiguity of 6.1 alone. `tests/affine.test` and
+  runs the reported chain on interp, compile and cranelift, and `-check` on
+  6.1's variant reports the unrelated ambiguity (and its placeholder's TYPE)
+  and nothing on the chain. `tests/affine.test` and
   `tools/compilerpedia.tcl check` (844 topics, 627 examples, 0 problems)
   pass -- the latter only after it found a call of the removed
   `hir::MethodObligationKinds` in `hir/recovery.tcl` (a strict compilation
@@ -693,8 +769,8 @@ with other jobs running and are indicative only.
 * **Trait programs.** The trait monomorphization rebuilds the program and
   keeps the decisions as `methodChoices`, not `methodDecided` (as before).
 * **Context obligations, an inherited inconsistency.** A missing context is
-  an obligation of a valid call (METHOD-SUGAR.md, CONTEXTS.md: it never makes
-  a candidate inapplicable), but two installed contexts implementing a
+  an obligation of a valid call (CONTEXTS.md, "Method syntax": it never
+  makes a candidate inapplicable), but two installed contexts implementing a
   required context trait (AMBIGUOUS-CONTEXT-IMPLEMENTATION) count against
   the candidate, as the location rule counted them. The same reasoning --
   the environment, not the call's arguments -- suggests it is an obligation
@@ -719,8 +795,20 @@ with other jobs running and are indicative only.
 
 ### 10.3 Economics
 
-The decision costs a single deviation per candidate the kind proofs leave,
-where a coordinated trial could test one candidate of every call at once;
-programs with many calls of several survivors pay more builds (section 8).
-The reference rule is several times slower than the kind proofs and is a
-test and CI tool only.
+* The decision costs a single deviation per candidate the kind proofs
+  leave, where a coordinated trial could test one candidate of every call
+  at once; programs with many independent calls of several survivors pay
+  more builds (numeric-text.bot, 5 -> 8). Fewer would need an argument that
+  two calls cannot affect each other's checks -- the locality theorem
+  section 2.2 says the checker does not give -- or a cheaper re-check of a
+  single deviation; neither is in this milestone.
+* When the last build made is a deviation, the final program is built
+  again (its process state must be the final configuration's: the reuse
+  of an older build stays unaudited, as before).
+* The reference rule takes from as many builds as the kind proofs (float64,
+  traits, diagnostics) to 38 times as many (place-parameters, 115 against
+  3; mutable-array 145 against 7); it is a test and CI instrument only.
+  CI's `method-filter` job runs every method-deciding suite under the
+  reference audit (both rules each time), so it lasts at least as long as
+  the reference rule on mutable-array.bot (1,595 s here, under load) plus
+  the rest.
