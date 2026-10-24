@@ -569,6 +569,23 @@ proc core::value::equal {a b} {
             if {[lindex $a 1] ne [lindex $b 1]} {
                 return 0
             }
+            if {[isOpaqueStruct [lindex $a 1 0]]} {
+                # An opaque struct's equality is its representation's, which
+                # no message may show (OPAQUE-STRUCTS.md): a refusal inside
+                # it is the opaque values' (ORDERED-MUTABLE-MAP-SET.md: a
+                # MutableMap's index would show the hidden hash's placement).
+                try {
+                    foreach x [lindex $a 2] y [lindex $b 2] {
+                        if {![equal $x $y]} {
+                            return 0
+                        }
+                    }
+                } trap {CORE SEMANTIC EQUALITY} {} {
+                    core::semanticError EQUALITY \
+                        "== is not defined for callables: [show $a] == [show $b]"
+                }
+                return 1
+            }
             foreach x [lindex $a 2] y [lindex $b 2] {
                 if {![equal $x $y]} {
                     return 0

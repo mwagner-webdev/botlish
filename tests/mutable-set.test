@@ -1,0 +1,100 @@
+# mutable-set.test -- std::mutable_set::MutableSet[T satisfies Hashable]
+# (ORDERED-MUTABLE-MAP-SET.md).
+#
+# A MutableSet is a mutable value of distinct Hashable elements iterated in
+# insertion order: adding an element already present changes nothing (not
+# its place), removing one and adding it again adds it last. Membership is
+# Botlish equality, exactly a MutableMap key's; the engine is the map's
+# (std::ordered_table) without a value per element.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set msDecls {import std::list
+import std::mutable_set
+import std::mutable_array
+
+fn elems(s: std::mutable_set::MutableSet[int]) -> List[int]:
+    loop x in s:
+        x
+
+fn int_set() -> std::mutable_set::MutableSet[int]:
+    std::mutable_set::create[int]()
+
+}
+
+proc msRun {body {backends {interp compile cranelift-generic cranelift}}} {
+    return [sourceAgree "$::msDecls$body" $backends]
+}
+
+proc msDiagnostics {body} {
+    if {![catch {surface::compile "$::msDecls$body" -warnings off} message options]} {
+        return {}
+    }
+    return [lmap d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode]]]] {
+        lindex [dict get $d errorcode] end
+    }]
+}
+
+test ms-basics {create, length, empty?, contains, add (true when it added), remove (true when it removed) and clear} -body {
+    msRun "s = int_set()\ne0 = s.empty?()\na = \[s.add(3), s.add(1), s.add(3)\]\nc = \[s.contains(1), s.contains(2)\]\nr = \[s.remove(3), s.remove(3), s.remove(9)\]\nn = s.length()\ns.clear()\n\[e0, a, c, r, n, s.length(), s.empty?(), elems(s)\]\n"
+} -result {value {[true, [true, true, false], [true, false], [true, false, false], 1, 0, true, []]}}
+
+test ms-order {iteration is insertion order; adding a present element does not move it; removing and adding again adds it last} -body {
+    msRun "s = int_set()\nloop x in \[5, 2, 8, 2, 5, 1\]:\n    s.add(x)\na = elems(s)\ns.remove(2)\ns.add(2)\ns.add(8)\n\[a, elems(s)\]\n"
+} -result {value {[[5, 2, 8, 1], [5, 8, 1, 2]]}}
+
+test ms-growth-compaction {growth and compaction keep the order: 400 elements, three in four removed, some added again} -body {
+    msRun "s = int_set()\nloop i from 0 to 400:\n    s.add(i * 3)\nloop i from 0 to 400:\n    if i.mod(4) != 0:\n        s.remove(i * 3)\nloop i from 0 to 5:\n    s.add(i * 3)\nxs = elems(s)\nfirst = std::list::at(xs, 0):\n    on IndexNotFound:\n        -1\nlast = std::list::at(xs, std::list::length(xs) - 1):\n    on IndexNotFound:\n        -1\n\[s.length(), first, last, std::list::length(xs)\]\n" {compile cranelift-generic cranelift}
+} -result {value {[103, 0, 9, 103]}}
+
+test ms-copies-independent {a copy of a set never observes the original's later adds, removals and clear, nor the original the copy's} -body {
+    msRun "a = int_set()\nloop i from 0 to 10:\n    a.add(i)\nb = a\nloop i from 10 to 50:\n    a.add(i)\nb.remove(0)\nc = b\nb.clear()\nc.add(99)\n\[a.length(), b.length(), elems(c)\]\n"
+} -result {value {[50, 0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 99]]}}
+
+test ms-membership-is-equality {membership is Botlish equality: equal Strings, structs and nested Lists built independently are one element} -body {
+    msRun "struct P:\n    a: int\n    b: List\[str\]\ns = std::mutable_set::create\[P\]()\ns.add(P {a: 1, b: \[\"x\"\]})\nadded = s.add(P {a: 1, b: \[std::str::concat(\"\", \"x\")\]})\nt = std::mutable_set::create\[str\]()\nt.add(\"ab\")\nt.add(std::str::concat(\"a\", \"b\"))\n\[s.length(), added, t.length()\]\n"
+} -setup {set ::msDecls [string map [list "import std::list\n" "import std::list\nimport std::str\n"] $::msDecls]} -cleanup {set ::msDecls [string map [list "import std::str\n" ""] $::msDecls]} -result {value {[1, false, 1]}}
+
+test ms-collision-corpus {the collision corpus's 512 keys are ordinary elements: membership, order and removal are right} -body {
+    set keys [lrange [string trim [core::ReadFile [file join $::projectRoot audit hashable data int-collide-1024.txt]]] 0 511]
+    set list [join $keys {, }]
+    set result [msRun "ks = \[$list\]\ns = int_set()\nloop k in ks:\n    s.add(k)\nloop k in ks:\n    if k.mod(2) == 1:\n        s.remove(k)\nmissing = loop k in ks:\n    if s.contains(k) == (k.mod(2) == 0):\n        continue\n    k\n\[std::list::length(missing), elems(s)\]\n" {compile cranelift-generic cranelift}]
+    expr {$result eq "value {\[0, \[[join [lmap k $keys {if {$k % 2} continue; set k}] {, }]\]\]}"}
+} -cleanup {unset -nocomplain keys list result} -result 1
+
+test ms-element-must-be-hashable {an element type must satisfy Hashable: a function or a MutableVector element is TRAIT-NOT-SATISFIED} -body {
+    list [msDiagnostics "s = std::mutable_set::create\[Fn{args: \[int\], return: int}\]()\n1\n"] \
+        [msDiagnostics "fn f(s: std::mutable_set::MutableSet\[MutableArray\[int\]\]) -> int:\n    0\n1\n"]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+test ms-not-hashable-no-equality {a MutableSet is not Hashable (hash refuses it statically) and `==` of two is refused at run time naming the opaque values} -body {
+    set outcome [msRun "a = int_set()\nb = int_set()\na == b\n"]
+    list [msDiagnostics "hash(int_set())\n"] [lindex $outcome 2]
+} -cleanup {unset -nocomplain outcome} -result {TRAIT-NOT-SATISFIED {== is not defined for callables: <opaque std::mutable_set::MutableSet> == <opaque std::mutable_set::MutableSet>}}
+
+test ms-content-comparison {order-independent content equality is ordinary Botlish over the public API} -body {
+    msRun "fn same(a: std::mutable_set::MutableSet\[int\], b: std::mutable_set::MutableSet\[int\]) -> bool:\n    if a.length() != b.length():\n        return false\n    out = loop x in a:\n        if b.contains(x):\n            continue\n        x\n    std::list::length(out) == 0\na = int_set()\nb = int_set()\nloop x in \[1, 2, 3\]:\n    a.add(x)\nloop x in \[3, 1, 2\]:\n    b.add(x)\nc = b\nc.remove(2)\nc.add(4)\n\[same(a, b), same(a, c)\]\n"
+} -result {value {[true, false]}}
+
+test ms-no-value-storage {a set stores no value per element: its representation is the engine's table alone, a map's the table and the values} -body {
+    set hir [surface::compile "${::msDecls}s = int_set()\ns.add(1)\ns.length()\n" -warnings off]
+    hir::activate $hir
+    list [hir::structs::names std::mutable_set::MutableSet] [hir::structs::names std::mutable_map::MutableMap]
+} -setup {set ::msDecls [string map [list "import std::mutable_set\n" "import std::mutable_set\nimport std::mutable_map\n"] $::msDecls]} -cleanup {set ::msDecls [string map [list "import std::mutable_map\n" ""] $::msDecls]; unset -nocomplain hir} -result {table {table vals}}
+
+test ms-typed-probe {natively a MutableSet[str]'s probe compares elements with streq, never veq} -constraints nativeBuilt -body {
+    set nir [native::nir [surface::compile "${::msDecls}s = std::mutable_set::create\[str\]()\ns.add(\"a\")\ns.contains(\"a\")\n" -warnings off]]
+    list [regexp {op streq } $nir] [regexp -all {op veq } $nir]
+} -cleanup {unset -nocomplain nir} -result {1 0}
+
+test ms-operations-allocate-nothing {natively, contains, add of a present element and iteration of a built set allocate nothing} -constraints nativeBuilt -body {
+    set rows [lmap n {0 1500} {
+        set hir [surface::compile "${::msDecls}fn work(place s: std::mutable_set::MutableSet\[int\], acc: MutableArray\[int\], i: int, n: int) -> unit:\n    if i >= n:\n        return unit\n    if s.contains(i.mod(500)):\n        s.add(i.mod(250))\n    work(s, acc, i + 1, n)\ns = int_set()\nloop i from 0 to 250:\n    s.add(i)\nacc = std::mutable_array::create(1, 0)\nwork(s, acc, 0, $n)\nloop x in s:\n    acc.set(0, x):\n        on IndexNotFound:\n            unit\ns.length()\n" -warnings off]
+        dict get [native::allocationReport $hir summary] total allocations
+    }]
+    expr {[lindex $rows 0] == [lindex $rows 1]}
+} -cleanup {unset -nocomplain rows hir n} -result 1
+
+cleanupTests

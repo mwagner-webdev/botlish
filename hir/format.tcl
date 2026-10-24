@@ -21,6 +21,8 @@
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
 #                                        omitted when empty; then ?nomethod?,
+#                                        ?variadic N?, ?places (N ...)?
+#                                        (PLACE-PARAMETERS.md),
 #                                        ?declares TYPE?, ?proves BINDING
 #                                        NAME: TYPE? (a proof contract,
 #                                        REFINEMENT-VALUES.md), ?errors ...?
@@ -525,6 +527,11 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 # first N parameters are the fixed ones, parameter N the List
                 # its calls collect their trailing arguments into.
                 append text " variadic [dict get $node variadic]"
+            }
+            if {[dict exists $node places]} {
+                # Place parameters (PLACE-PARAMETERS.md): the indices of the
+                # parameters its calls pass a place of the caller's for.
+                append text " places ([dict get $node places])"
             }
             if {[dict exists $node traitClone]} {
                 # A trait clone (TRAITS.md): each trait parameter's source

@@ -590,6 +590,11 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # already says all of this, and it has lost the static types (an
         # affine element type, a declared vector type) the elaboration reads.
         if {[lindex [dict get $options -origin] 0] ne "ir"} {
+            # Loops over the standard library's collection structs
+            # (hir/iteration.tcl), written out as counted loops over their
+            # loop protocol -- before the copies, which then give the loop
+            # its snapshot.
+            hir::iteration::Elaborate hir
             hir::mutvec::Elaborate hir
         }
         # The layout a std::binary::emit reads from its value's static type
@@ -1377,6 +1382,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::coroutines::verify hir
     hir::affine::verify hir
     hir::mutvec::verify hir
+    hir::iteration::verify hir
     hir::syscall::verify hir
     hir::internal::verify hir
     hir::borrow::verify hir
@@ -1720,7 +1726,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methodfilter declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methodfilter declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

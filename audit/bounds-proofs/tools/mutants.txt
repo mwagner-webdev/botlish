@@ -148,8 +148,14 @@
 @@ vector-length-keyed a loop over a MutableVector has its binding's, path's or definition's length, like a List's, so two loops around a push, pop or clear (or a callee's push to a context member) are one size
 ## hir/cardinality.tcl
 <<<<
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
     if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
 ====
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
     if {$key ne ""} {
         return [FormAtom [list len $key]]
     }
@@ -162,25 +168,47 @@
         if {!$resized} {
             return [FormAtom [list len $key]]
         }
+    }
+    set place [hir::mutvec::Path $hir $e]
+    if {$place eq ""} {
 ====
         if {1} {
             return [FormAtom [list len $key]]
         }
+    }
+    set place [hir::mutvec::Path $hir $e]
+    if {$place eq ""} {
 >>>>
 
 @@ vector-chain-own-place only the evaluation's own place is checked for resizes, not the places its value was copied through, so two copies taken around a push of the original (c1 = v, v pushed, c2 = v) keep one key's length
 ## hir/cardinality.tcl
 <<<<
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
+    if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
+        set resized 0
         foreach place $chain {
 ====
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
+    if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
+        set resized 0
         foreach place [lrange $chain 0 0] {
 >>>>
 
 @@ vector-context-key-unrooted a context member keeps its key's length when nothing in its own function resizes it, so a callee's push through its own context parameter between two loops goes unseen
 ## hir/cardinality.tcl
 <<<<
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
     if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
 ====
+        return [ListLength $hir $e steps]
+    }
+    set key [CompleteKey $hir $e]
     if {$key ne "" && [KeyPlaces $hir $e chain]} {
 >>>>
 
@@ -265,7 +293,7 @@
 @@ vector-place-unmutated-unchecked a place is taken to keep one length whether or not a mutation has it as its receiver, so two loops over a local, a parameter or a field around a push, pop or clear are one size
 ## hir/cardinality.tcl
 <<<<
-    if {!$context && ![dict exists [Mutations $hir] $place]} {
+    if {!$context && ![Mutated $hir $place]} {
 ====
     if {!$context} {
 >>>>
@@ -273,7 +301,7 @@
 @@ vector-place-unmutated-unused a place no mutation has as its receiver has the length of each evaluation's class, not one length (precision: a vector read twice, once in a nested function, while only a copy of it is pushed, is unrelated)
 ## hir/cardinality.tcl
 <<<<
-    if {!$context && ![dict exists [Mutations $hir] $place]} {
+    if {!$context && ![Mutated $hir $place]} {
 ====
     if {0} {
 >>>>
@@ -297,17 +325,21 @@
 @@ vector-sites-ignored a mutation of the place is no site, so two loops over a local, a parameter or a field around a push, pop or clear are one class
 ## hir/cardinality.tcl
 <<<<
-                if {$receiver ne "" && [hir::mutvec::Path $hir $receiver] eq $place} {
+                if {[hir::mutvec::Overlap $q $place]} {
+                    set site 1
 ====
                 if {0} {
+                    set site 1
 >>>>
 
 @@ vector-sites-by-key a mutation of any place keyed like the vector is a site (precision: the original read twice around a copy's push, w = v then w pushed, is unrelated)
 ## hir/cardinality.tcl
 <<<<
-                if {$receiver ne "" && [hir::mutvec::Path $hir $receiver] eq $place} {
+                if {[hir::mutvec::Overlap $q $place]} {
+                    set site 1
 ====
-                if {$receiver ne "" && [CompleteKey $hir $receiver] eq [CompleteKey $hir $e]} {
+                if {[Resizes $hir $c] && [CompleteKey $hir [lindex [dict get $hir exprs $c args] 0]] eq [CompleteKey $hir $e]} {
+                    set site 1
 >>>>
 
 @@ vector-classes-by-key the evaluations of every place keyed like the vector are one class's candidates, so two copies of a vector taken around a push (c1 = v, v pushed, c2 = v) are one length
@@ -416,10 +448,16 @@
         if {!$resized} {
             return [FormAtom [list len $key]]
         }
+    }
+    set place [hir::mutvec::Path $hir $e]
+    if {$place eq ""} {
 ====
         if {0} {
             return [FormAtom [list len $key]]
         }
+    }
+    set place [hir::mutvec::Path $hir $e]
+    if {$place eq ""} {
 >>>>
 
 @@ vector-occurrence-keyed-by-value a loop over a MutableVector is keyed by the vector's value key rather than by its class of evaluations, so every loop over one binding or field path shares a length

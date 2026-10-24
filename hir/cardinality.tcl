@@ -353,6 +353,9 @@ proc hir::cardinality::IntForm {hir e stepsVar} {
     if {$name eq "std::mutable_array::capacity" && [llength $args] == 1} {
         return [Capacity $hir [lindex $args 0] steps]
     }
+    if {$name eq "std::mutable_vector::length" && [llength $args] == 1} {
+        return [VectorLength $hir [lindex $args 0] steps]
+    }
     if {$name eq "std::str::length" && [llength $args] == 1} {
         return [StrLength $hir [lindex $args 0] steps]
     }
@@ -590,7 +593,7 @@ proc hir::cardinality::IterationLength {hir e stepsVar} {
     if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
         set resized 0
         foreach place $chain {
-            if {[dict exists [Mutations $hir] $place]} {
+            if {[Mutated $hir $place]} {
                 set resized 1
                 break
             }
@@ -605,7 +608,7 @@ proc hir::cardinality::IterationLength {hir e stepsVar} {
     }
     set root [lindex $place 0]
     set context [ContextRooted $hir [list b $root]]
-    if {!$context && ![dict exists [Mutations $hir] $place]} {
+    if {!$context && ![Mutated $hir $place]} {
         return [FormAtom [list len [list pl {*}$place]]]
     }
     if {$context} {
@@ -618,6 +621,45 @@ proc hir::cardinality::IterationLength {hir e stepsVar} {
         set first $e
     }
     return [FormAtom [list len [list o $first]]]
+}
+
+# The length of the MutableVector value of expression E, as a form, where a
+# length read (std::mutable_vector::length) and an element read
+# (std::mutable_vector::at) must agree on it: IterationLength's stable
+# lengths, and only those -- the length of the vector its key defines when
+# no place it was copied through is resized anywhere in the program, or of
+# its place when nothing resizes that place (Mutated: neither a resizing
+# operation on it nor a call giving a place parameter a place whose path
+# overlaps it), its root never a context parameter. Every other evaluation
+# is an atom of its own, {vlen {o E}}, equal to no other form: two reads of
+# a vector something may push into between them prove nothing about each
+# other (an epoch of a loop's iterable, IterationLength's {len {o R}}, is
+# not claimed here). A vector is a value: an alias, a struct field or a
+# callee's parameter given it holds a logical copy no mutation of the
+# original changes (hir/mutvec.tcl), a callee given it by reference only
+# reads it while its caller waits, and a nested function cannot mutate a
+# place it captured -- so a place nothing resizes has one length wherever
+# it is read.
+proc hir::cardinality::VectorLength {hir e stepsVar} {
+    upvar 1 $stepsVar steps
+    set key [CompleteKey $hir $e]
+    if {$key ne "" && ![ContextRooted $hir $key] && [KeyPlaces $hir $e chain]} {
+        set resized 0
+        foreach place $chain {
+            if {[Mutated $hir $place]} {
+                set resized 1
+                break
+            }
+        }
+        if {!$resized} {
+            return [FormAtom [list len $key]]
+        }
+    }
+    set place [hir::mutvec::Path $hir $e]
+    if {$place ne "" && ![ContextRooted $hir [list b [lindex $place 0]]] && ![Mutated $hir $place]} {
+        return [FormAtom [list len [list pl {*}$place]]]
+    }
+    return [FormAtom [list vlen [list o $e]]]
 }
 
 # The key of expression E (ValueKey), followed to the end of its alias
@@ -703,28 +745,70 @@ proc hir::cardinality::Resizes {hir c} {
     return [expr {![dict get [core::native::metadata [hir::affine::NativeName $hir $c]] keepsLength]}]
 }
 
-# The operations of HIR that may change a collection's length (Resizes),
-# grouped by their receiver's place: {PLACE {CALL ...} ...}, PLACE a
-# hir::mutvec::Path (a receiver that is no place, a temporary, changes no
-# place's length). Reachable or not: a mutation counts wherever it is
-# written.
+# The places call C may change a collection's length in: the receiver of a
+# collection operation that Resizes, and every place a call of a function
+# with place parameters gives one (PLACE-PARAMETERS.md: the function may
+# push into or clear any collection under the place's path), as
+# hir::mutvec::Path paths (a receiver that is no place, a temporary,
+# changes no place's length).
+proc hir::cardinality::ResizedPlaces {hir c} {
+    set args [dict get $hir exprs $c args]
+    set result {}
+    if {[Resizes $hir $c]} {
+        set receiver [lindex $args 0]
+        if {$receiver ne ""} {
+            set place [hir::mutvec::Path $hir $receiver]
+            if {$place ne ""} {
+                lappend result $place
+            }
+        }
+        return $result
+    }
+    foreach index [hir::mutvec::PlaceIndices $hir $c] {
+        set arg [lindex $args $index]
+        if {$arg eq ""} continue
+        set place [hir::mutvec::Path $hir $arg]
+        if {$place ne ""} {
+            lappend result $place
+        }
+    }
+    return $result
+}
+
+# The operations of HIR that may change a collection's length
+# (ResizedPlaces), grouped by the place they change: {PLACE {CALL ...}
+# ...}, PLACE a hir::mutvec::Path. Reachable or not: a mutation counts
+# wherever it is written.
 proc hir::cardinality::Mutations {hir} {
     variable cache
     Memo $hir
     if {![dict exists $cache mutations]} {
         set mutations [dict create]
         dict for {c node} [dict get $hir exprs] {
-            if {[dict get $node kind] ne "call" || ![Resizes $hir $c]} continue
-            set receiver [lindex [dict get $node args] 0]
-            if {$receiver eq ""} continue
-            set place [hir::mutvec::Path $hir $receiver]
-            if {$place ne ""} {
+            if {[dict get $node kind] ne "call"} continue
+            foreach place [ResizedPlaces $hir $c] {
                 dict lappend mutations $place $c
             }
         }
         dict set cache mutations $mutations
     }
     return [dict get $cache mutations]
+}
+
+# 1 if some operation of HIR may change the length of the collection at
+# place PLACE (Mutations): one changing PLACE itself, or a place whose path
+# overlaps it -- a struct holding it given to a place parameter
+# (hir::mutvec::Overlap).
+proc hir::cardinality::Mutated {hir place} {
+    if {[dict exists [Mutations $hir] $place]} {
+        return 1
+    }
+    foreach q [dict keys [Mutations $hir]] {
+        if {[hir::mutvec::Overlap $q $place]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # The first evaluation (an iterable expression) of the MutableVector place
@@ -767,12 +851,16 @@ proc hir::cardinality::Evaluation {hir e place context} {
         set layout [Layout $hir $inv]
         set sites {}
         foreach c [dict get $layout calls] {
-            if {[Resizes $hir $c]} {
-                set receiver [lindex [dict get $hir exprs $c args] 0]
-                if {$receiver ne "" && [hir::mutvec::Path $hir $receiver] eq $place} {
-                    lappend sites $c
-                    continue
+            set site 0
+            foreach q [ResizedPlaces $hir $c] {
+                if {[hir::mutvec::Overlap $q $place]} {
+                    set site 1
+                    break
                 }
+            }
+            if {$site} {
+                lappend sites $c
+                continue
             }
             if {$context ne {} && [ContextSite $hir $c [lindex $context 0]]} {
                 lappend sites $c

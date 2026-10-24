@@ -1137,14 +1137,17 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?variadic N? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
             }
             if {$variadic ne ""} {
                 SetField hir $e variadic $variadic
+            }
+            if {$places ne ""} {
+                SetField hir $e places $places
             }
             if {$contexts ne ""} {
                 SetField hir $e directContexts [lindex $contexts 0]
@@ -1601,7 +1604,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1631,6 +1634,15 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         upvar 1 $variadicVar variadic
         set variadic ""
         if {[regexp {^ variadic ([0-9]+)(.*)$} $rest -> variadic after]} {
+            set rest $after
+        }
+    }
+    # The indices of a function's place parameters (PLACE-PARAMETERS.md), as
+    # hir::format prints them.
+    if {$placesVar ne ""} {
+        upvar 1 $placesVar places
+        set places ""
+        if {[regexp {^ places \(([0-9 ]+)\)(.*)$} $rest -> places after]} {
             set rest $after
         }
     }

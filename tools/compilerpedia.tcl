@@ -106,6 +106,12 @@ proc cpt::LibraryModules {} {
             set relative $base.bot
         }
         set ns std::[string map {/ ::} [file rootname $relative]]
+        if {[core::native::isInternalNamespace $ns]} {
+            # An internal module (core::native::declareInternalModule: the
+            # map and set engine, std::ordered_table): no program imports
+            # it, and no reference documents it as an API.
+            continue
+        }
         lappend modules [list $ns $path $note]
     }
     return $modules
@@ -491,6 +497,12 @@ proc cpt::Generate {} {
                     continue
                 }
                 set name [dict get $node name]
+                if {[hir::iteration::IsOperation $ns $name]} {
+                    # A collection's loop protocol (hir/iteration.tcl): its
+                    # operations are internal to the standard library, and
+                    # a program iterates the collection with a loop.
+                    continue
+                }
                 set qualified "${ns}::$name"
                 set id stdlib.$qualified
                 set kind [DeclarationKind $node]

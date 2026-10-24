@@ -675,8 +675,24 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
                 return Ok(false);
             }
             for (u, w) in x.fields().iter().zip(y.fields().iter()) {
-                if !equal(p, *u, *w)? {
-                    return Ok(false);
+                match equal(p, *u, *w) {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(false),
+                    Err(()) => {
+                        // An opaque struct's equality is its
+                        // representation's, which no message may show
+                        // (OPAQUE-STRUCTS.md): a refusal inside it is the
+                        // opaque values' (core::value::equal's struct case;
+                        // ORDERED-MUTABLE-MAP-SET.md).
+                        let opaque = current_program(|prog| prog.shapes[x.shape as usize].opaque);
+                        if opaque {
+                            let vm = vm(p);
+                            if matches!(vm.error, Some(RtError::Equality { .. })) {
+                                vm.error = Some(RtError::Equality { a, b });
+                            }
+                        }
+                        return Err(());
+                    }
                 }
             }
             true

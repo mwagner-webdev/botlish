@@ -68,6 +68,13 @@ proc refactor::sweep::modules {root} {
             [glob -nocomplain -directory [file join $root stdlib] */*.bot]]] {
         # stdlib/NAME.bot is the standard namespace std::NAME (STD-NAMESPACE.md).
         set module std/[string range [file rootname [Rel $root $path]] 7 end]
+        if {[info commands ::core::native::isInternalNamespace] ne ""
+                && [core::native::isInternalNamespace [string map {/ ::} $module]]} {
+            # An internal module (core::native::declareInternalModule): no
+            # program may import it, so it has no loader; the loaders of the
+            # modules that import it compile it.
+            continue
+        }
         if {[regexp {^(.*)\.([A-Za-z0-9_]+)$} $module -> base arch]} {
             # An architecture-specific module's file (stdlib/linux/sys.x86_64.bot,
             # surface/modules.tcl's ModuleFile): loaded by its namespace
