@@ -911,7 +911,8 @@ regenerates the performance report.
 Context traits (CONTEXT-TRAITS.md) are environment abstractions resolved
 entirely before any backend runs: a `context trait` has no value, slot, tag,
 table or runtime representation; the one installed context implementing it
-is selected statically at each top-level call (exactly one, never ranked);
+is selected statically at each top-level call (exactly one, never ranked,
+never by whether its implementation's own requirements are met: SFIAE);
 every function whose requirement includes a context trait is cloned for the
 selection by the trait monomorphization (`hir::traits::Plan`), and every
 operation becomes a direct call of the selected context's implementation.
@@ -3091,6 +3092,17 @@ candidate whose ordinary call is valid. Keep it so:
   (`methodDeviations` among them), `methodFinals` and `methodReused`.
 * The seeds across static rounds (`hir::static::MethodSeeds`) fix a call's
   decision as made; a seeded call is not certified again.
+* **Obligations never select** (SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md;
+  SFIAE-MILESTONE-1.md). What a selected function needs of the environment
+  it is called in -- an error handled, a context installed (MISSING-CONTEXT),
+  exactly one installed implementation of a required context trait
+  (AMBIGUOUS-CONTEXT-IMPLEMENTATION), mediated authority (DIRECT) -- is an
+  obligation of the call, one of `hir::methods::ObligationKinds`, never a
+  candidate's problem: never take a kind out of that list or count context
+  availability against a candidate. A new diagnostic of that nature joins
+  the list; a feature that would choose another operation because one fails
+  an obligation is a language-design decision, never an implementation
+  detail.
 
 If you change `hir/methods.tcl`, `hir::DecideMethodCalls`,
 `hir::CheckingCall` or any check that uses it, `hir::Diagnose`'s fields,
@@ -3100,7 +3112,8 @@ subtype of a named one (`hir::types::subtype`), run
 `tests/method-resolution.test`, `tests/method-filter.test`,
 `tests/static-economics.test`, `tests/static-compile.test`,
 `tests/method-sugar.test`, `audit/method-resolution/tools/oracle.tcl` (the
-independent oracle; 200 seeds), `audit/method-filter/tools/fuzz.tcl`
+independent oracle; 200 seeds, and 200 with `-contexts 1`),
+`audit/method-filter/tools/fuzz.tcl`
 (several seeds), `audit/method-resolution/tools/mutate.tcl` and
 `audit/method-filter/tools/mutate.tcl` (every mutant in each must still
 apply and be killed: update a mutant's text when you change the code it

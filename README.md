@@ -516,8 +516,10 @@ Structs with [destructuring](docs/STRUCT-DESTRUCTURING.md) and
 [modules and explicit imports](docs/IMPORTS.md) with the standard library
 under [one root, `std`](docs/STD-NAMESPACE.md),
 [`mutual:` recursion groups](docs/MUTUAL-RECURSION.md), and
-[compiler warnings](docs/WARNINGS-SAME-RETURN.md) backed by proofs.
-[docs/INDEX.md](docs/INDEX.md) lists every design document.
+[compiler warnings](docs/WARNINGS-SAME-RETURN.md) backed by proofs. Every
+feature keeps the [language design principles](docs/LANGUAGE-DESIGN-PRINCIPLES.md)
+-- SFIAE: an operation's unmet obligations are an error, never a reason to
+choose another. [docs/INDEX.md](docs/INDEX.md) lists every design document.
 
 ## Getting started
 

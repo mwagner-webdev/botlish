@@ -1056,6 +1056,7 @@ tests/context-traits.test ct-flags pass
 tests/context-traits.test ct-function-value-frontier pass
 tests/context-traits.test ct-hir-text pass
 tests/context-traits.test ct-implementation-obligations pass
+tests/context-traits.test ct-implementation-obligations-select-nothing pass
 tests/context-traits.test ct-implementation-order pass
 tests/context-traits.test ct-import-independence pass
 tests/context-traits.test ct-machine-code-direct pass
@@ -1433,6 +1434,7 @@ tests/diagnostic-recovery.test dr-order-deterministic pass
 tests/diagnostic-recovery.test dr-unhandled-set-complete pass
 tests/diagnostic-recovery.test dr-unhandled-set-remaining pass
 tests/diagnostic-recovery.test dr-unhandled-native-set pass
+tests/diagnostic-recovery.test dr-obligations-reject-no-argument pass
 tests/diagnostic-recovery.test dr-syntax-if-operand-s17 pass
 tests/diagnostic-recovery.test dr-syntax-if-header-clauses pass
 tests/diagnostic-recovery.test dr-syntax-paren-condition pass
@@ -3902,6 +3904,10 @@ tests/method-resolution.test mr-added-inapplicable-candidate pass
 tests/method-resolution.test mr-unrelated-invalid-expression pass
 tests/method-resolution.test mr-unrelated-syntax-error pass
 tests/method-resolution.test mr-switches-change-no-decision pass
+tests/method-resolution.test mr-sfiae-unique-candidate pass
+tests/method-resolution.test mr-sfiae-competing-candidates pass
+tests/method-resolution.test mr-sfiae-qualified-obligations pass
+tests/method-resolution.test mr-sfiae-installation-changes-no-decision pass
 tests/method-resolution.test mr-static-blocks pass
 tests/method-resolution.test mr-oscillation-is-ambiguous pass
 tests/method-sugar.test method-alias-does-not-import pass

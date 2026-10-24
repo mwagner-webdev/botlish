@@ -177,3 +177,24 @@
 ====
     if {$methodBuildReuse} {
 >>>>
+
+# ---------------------------------------------------------------------------
+# Obligations do not select (SFIAE: LANGUAGE-DESIGN-PRINCIPLES.md,
+# SFIAE-MILESTONE-1.md): a context the environment cannot provide is an
+# obligation of the selected call, never a candidate's problem
+
+@@ ambiguous-context-is-a-problem the previous behavior: an ambiguous implementation of a required context trait (AMBIGUOUS-CONTEXT-IMPLEMENTATION) counts against a candidate, so a call whose one applicable candidate needs it has none, and a competing candidate that needs no context is decided by elimination
+## hir/methods.tcl
+<<<<
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+====
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT DIRECT}
+>>>>
+
+@@ missing-context-is-a-problem a context the call's environment does not provide (MISSING-CONTEXT) counts against a candidate, so a competing candidate that needs no context is decided by elimination
+## hir/methods.tcl
+<<<<
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+====
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+>>>>

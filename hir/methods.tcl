@@ -24,7 +24,8 @@
 #   admission by the callee's parameters, its flags and imprints, the
 #   validity of the callee's semantic instance for it, its places and the
 #   ownership roles of its arguments) -- minus the obligations a valid call
-#   may still carry (an error nobody handled, a missing context, ...), plus
+#   may still carry (an error nobody handled, a context its environment does
+#   not provide, ...: ObligationKinds), plus
 #   the kind mismatch of a native's first parameter (NativeMismatch), which
 #   is the native's run-time TYPE error and is not diagnosed. Nothing else:
 #   not a diagnostic merely located in the call (an outer call's check of
@@ -146,15 +147,21 @@ proc hir::methods::ResetCache {} {
 # Diagnostic kinds that say a call is unfit for its callee the way no other
 # candidate is: everything except the obligations a *fit* call may still
 # carry (an error it declares that nobody handled yet, or that provably
-# always fails) and the ambiguity checks themselves.
+# always fails) and the ambiguity checks themselves. Failing an obligation
+# makes the selected call invalid; it never selects another candidate
+# (SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md).
 proc hir::methods::ObligationKinds {} {
-    # MISSING-CONTEXT: a context the selected function needs is an obligation
-    # of the call (CONTEXTS.md), never evidence that the candidate does not
-    # fit -- exactly like a declared error nobody handled yet.
+    # MISSING-CONTEXT and AMBIGUOUS-CONTEXT-IMPLEMENTATION: whether the
+    # environment where the call runs provides the contexts the selected
+    # function needs -- one installed, or exactly one installed context
+    # implementing a required context trait -- is an obligation of the call
+    # (CONTEXTS.md, CONTEXT-TRAITS.md), never evidence that the candidate
+    # does not fit its arguments: exactly like a declared error nobody
+    # handled yet.
     # DIRECT likewise: the selected function's module is direct, which the
     # calling function must mediate (DIRECT-MODULES.md) -- an obligation of
     # the call, never a reason another candidate fits better.
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT DIRECT}
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
 }
 
 # The own problems (header) of method call KEY in HIR (a typed build), as

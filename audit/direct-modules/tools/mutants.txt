@@ -160,12 +160,27 @@
         }
 >>>>
 
+# (A candidate's problems are the diagnostics its call's own checks report,
+# minus the obligations, METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md: DIRECT
+# is reported at the call by the module analysis, no check of the call, so
+# making it unfit takes both edits -- the diagnostic the call's own and the
+# kind no obligation. SFIAE-MILESTONE-1.md, section 4.6.)
 @@ method-obligation-dropped a direct call through method syntax makes its candidate unfit
-## hir/hir.tcl
+## hir/direct.tcl
 <<<<
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT DIRECT}
+        hir::Diagnose hir DIRECT [UnacknowledgedMessage $unit $first [llength $related]] \
+            [dict get $first call] $related
 ====
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT}
+        hir::CheckingCall [dict get $first call] {
+            hir::Diagnose hir DIRECT [UnacknowledgedMessage $unit $first [llength $related]] \
+                [dict get $first call] $related
+        }
+>>>>
+## hir/methods.tcl
+<<<<
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+====
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION}
 >>>>
 
 @@ marker-not-loaded a module file's `direct module` never reaches the analysis

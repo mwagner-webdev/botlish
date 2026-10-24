@@ -252,7 +252,9 @@ jobs:
     # METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) judges a candidate by the
     # call's own checks, certified relative to the decided program; its kind
     # proofs (METHOD-DECISION-FILTER.md) save builds and must change no
-    # decision. The job runs the unit tests, the independent oracle, the
+    # decision. The job runs the unit tests, the independent oracle (also
+    # with candidates that require contexts the installations may not
+    # provide, which must decide nothing: SFIAE-MILESTONE-1.md), the
     # fuzzer (every program under the reference audit, the audit of build
     # reuse and plainly) and every golden suite that decides method calls
     # under hir::methodReferenceAudit, which decides by the reference rule
@@ -275,6 +277,7 @@ jobs:
           tclsh9.0 tests/method-resolution.test -tmpdir "$(mktemp -d)"
           tclsh9.0 tests/method-filter.test -tmpdir "$(mktemp -d)"
           tclsh9.0 audit/method-resolution/tools/oracle.tcl 500 1
+          tclsh9.0 audit/method-resolution/tools/oracle.tcl 300 1 -contexts 1
           tclsh9.0 audit/method-filter/tools/fuzz.tcl 20 1
 
       - name: Golden suites under the reference audit

@@ -78,7 +78,11 @@ A check of the call's result by the construct that uses it (an outer call's
 parameter, an operator, a declared result) is that construct's, never the
 call's, so how a result is used never selects a candidate. A declared error nobody handled is not
 evidence against a candidate either (it is the obligation of a call that
-fits). Validity is judged in the program as decided: with every other call
+fits), nor is a context the call's environment does not provide -- none
+installed, or several installed contexts implementing a required context
+trait: failing an obligation makes the selected call invalid and never
+selects another candidate (SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md).
+Validity is judged in the program as decided: with every other call
 at its decided candidate, the call at the candidate (the decided build, or a
 build with only this call moved). Calls with a single candidate -- almost
 all -- cost nothing extra. Where the receiver's kind rules a candidate out

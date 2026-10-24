@@ -647,7 +647,7 @@ summary: When several visible functions share a method name, each is tried as th
 index: rules
 alias: method candidates; which function does x.f() call; method overload
 keywords: method, candidate, ambiguous, no applicable, field, callable field, precedence, overload, nomethod
-related: concept.method-sugar concept.nomethod rule.method-requires-import rule.typed-parameters error.ambiguous-method-call error.no-applicable-method error.nomethod-call
+related: concept.method-sugar concept.nomethod rule.method-requires-import rule.typed-parameters rule.sfiae error.ambiguous-method-call error.no-applicable-method error.nomethod-call
 docs: METHOD-SUGAR.md WARNINGS-METHOD-ELIGIBLE.md
 
 == THE RULE
@@ -664,7 +664,10 @@ imported namespace. Each is tried as the ordinary call `f(x, args)`:
 A candidate is valid when its call has no diagnostic of its own (a
 declared parameter type or an inferred contract the receiver cannot
 prove, an invalid flag); a declared error nobody handles is not evidence
-against it. A function of another arity, and a `nomethod fn`, are no
+against it, nor is a context the environment does not provide (none
+installed, or two installed implementations of a context trait): those
+are obligations of the call, never reasons to choose another candidate
+(rule.sfiae). A function of another arity, and a `nomethod fn`, are no
 candidates at all.
 
 A struct field interferes only when it may hold a function: if the
@@ -720,6 +723,130 @@ xs = [1, 2, 3]
 xs.length()
 @caption Only std::list::length accepts a List
 @value 3
+@end
+
+@topic rule.sfiae
+title: SFIAE: a selected function's unmet obligations never choose another
+summary: A call's arguments and the visible declarations decide which function it denotes; an obligation of that function the program does not meet is an error of the call, never a reason to pick another.
+index: rules
+alias: SFIAE; substitution failure is an error; obligations do not select; SFINAE; does a missing context change which method is called
+keywords: SFIAE, SFINAE, obligation, applicability, method, candidate, context, context trait, installed context, unhandled error, fallback, overload
+related: rule.method-resolution concept.method-sugar concept.contexts concept.context-traits error.ambiguous-method-call error.missing-context error.ambiguous-context-implementation error.unhandled-error
+docs: LANGUAGE-DESIGN-PRINCIPLES.md SFIAE-MILESTONE-1.md METHOD-SUGAR.md CONTEXTS.md CONTEXT-TRAITS.md
+
+== THE RULE
+Two questions are answered apart. Applicability -- which operation does
+the call denote? -- is answered by the call's arguments and the visible
+declarations (for `x.f(args)`, the one visible `f` whose ordinary call
+`f(x, args)` is valid: rule.method-resolution). Obligations -- can the
+chosen operation be used here? -- are what it requires of the place it is
+called from:
+
+  * its declared errors are handled or declared there (UNHANDLED-ERROR);
+  * the contexts it requires are installed where the call runs
+    (MISSING-CONTEXT), and each context trait it requires has exactly one
+    installed implementation (MISSING-CONTEXT for none,
+    AMBIGUOUS-CONTEXT-IMPLEMENTATION for several);
+  * the direct authority it uses is mediated by its caller (DIRECT).
+
+An unmet obligation is a diagnostic of the chosen call. It never removes
+a candidate, never prefers one, never resolves an ambiguity, and never
+makes what installations, handlers or mediation exist change which
+function a call runs. The same holds for the provider of a context trait:
+a provider whose own implementation needs a missing context is still a
+provider, so two providers stay ambiguous.
+
+The name contrasts with C++'s SFINAE ("substitution failure is not an
+error"); Botlish has no templates and no overloading, and the name is a
+mnemonic only.
+
+== WHY
+A call should mean what its arguments and the visible declarations say.
+If unmet obligations chose operations, installing a second context or
+removing a handler would silently change which function runs, and the
+diagnostic would describe a function the programmer did not mean. Under
+SFIAE the error is reported about the operation the call denotes, and the
+remedies are explicit: meet the obligation, or name the operation.
+
+== WHAT IS REPORTED
+The obligation's own diagnostic at the call (MISSING-CONTEXT,
+AMBIGUOUS-CONTEXT-IMPLEMENTATION, UNHANDLED-ERROR, DIRECT) when one
+candidate applies; AMBIGUOUS-METHOD-CALL when several apply, whatever
+their obligations.
+
+@example reject
+import env
+import ca
+import cb
+import beta
+
+fn f(x: int, context e: env::Env) -> int:
+    e.tick(x)
+
+with context ca::CA {k: 1}
+with context cb::CB {k: 100}
+7.f()
+@module env
+context trait Env:
+    fn tick(n: int) -> int
+@module ca
+context struct CA:
+    k: int
+
+fn tick(n: int, context c: CA) -> int:
+    n + c.k
+@module cb
+context struct CB:
+    k: int
+
+fn tick(n: int, context c: CB) -> int:
+    n * c.k
+@module beta
+fn f(x: int) -> int:
+    x + 1000
+@caption Both f accept an Int: the call is ambiguous, although f's Env has two providers and beta::f needs none
+@error CORE SEMANTIC AMBIGUOUS-METHOD-CALL
+@at 11:3
+@end
+
+== WHAT TO DO
+Name the operation you mean in its ordinary spelling (`beta::f(7)`, or
+`f(7)` with exactly one context implementing env::Env installed), or meet
+the chosen operation's obligation: install the context, handle or declare
+the error.
+
+@example accept
+import env
+import ca
+import cb
+import beta
+
+fn f(x: int, context e: env::Env) -> int:
+    e.tick(x)
+
+with context ca::CA {k: 1}
+with context cb::CB {k: 100}
+beta::f(7)
+@module env
+context trait Env:
+    fn tick(n: int) -> int
+@module ca
+context struct CA:
+    k: int
+
+fn tick(n: int, context c: CA) -> int:
+    n + c.k
+@module cb
+context struct CB:
+    k: int
+
+fn tick(n: int, context c: CB) -> int:
+    n * c.k
+@module beta
+fn f(x: int) -> int:
+    x + 1000
+@caption The qualified spelling names beta::f, which needs no context
+@value 1007
 @end
 
 @topic rule.immutable-bindings
