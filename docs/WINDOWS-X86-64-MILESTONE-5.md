@@ -727,11 +727,318 @@ coroutine-aware. So:
 
 ## 8. Tests
 
-PENDING-TESTS
+### 8.1 Rust tests of the coroutine runtime
+
+`runtime::coroutine`'s tests are host-independent; they were Linux and
+macOS only and now run on Windows too:
+
+* `yields_resumes_and_keeps_its_final_result`;
+* `a_failure_is_terminal_and_raised_again`;
+* `error_payload_of_a_failed_coroutine_is_cached_and_raised_again`;
+* `return_before_any_yield_completes_at_the_start`;
+* `collections_inside_and_between_segments_keep_live_values`;
+* `nested_coroutines_run_on_their_own_stacks`;
+* `an_abandoned_suspended_coroutine_is_collected_and_its_stack_pooled`;
+* `repeated_lifecycles_map_one_stack_and_reuse_it`;
+* `yield_outside_a_coroutine_is_an_error`;
+* `the_stack_pointer_is_aligned_and_on_the_coroutines_stack`;
+* `callee_saved_registers_survive_every_switch`. On Windows, a naked Win64
+  `pattern_call` loads distinct patterns into RBX, RBP, RDI, RSI, R12–R15
+  and both halves of XMM6–XMM15 around each operation, and checks every
+  one after it.
+
+Windows' own tests:
+
+| Test | What it holds |
+|---|---|
+| `a_suspended_stack_unwinds_to_its_fibers_start` | Windows' unwinder, from a suspended coroutine's switch record, climbs only inside that coroutine's stack, always upward, to a zero return address there |
+| `a_coroutine_runs_on_a_fiber_of_its_own_with_the_guards_guarantee` | while the body runs, `GetCurrentThreadStackLimits` is the coroutine's own reservation, its guarantee is at least 32 KiB and the thread is a fiber; the resumer's limits and guarantee are its own again afterwards; the two stacks do not overlap |
+| `mxcsr_is_part_of_the_context` | a body's rounding mode and the resumer's survive each other's segments |
+| `a_pooled_fiber_starts_again_at_its_top` | four lifecycles (released while suspended twice, swept by the collector twice) on one fiber, every body at the same stack pointer |
+| `a_fresh_fiber_commits_its_guarantee_and_a_page` | what a fresh fiber commits, and what it keeps after a coroutine ran 64 KiB deep on it (section 9.2) |
+| `a_thread_made_a_fiber_by_its_host_stays_the_hosts` | a thread converted by its host stays the host's fiber; the runtime records no conversion of its own |
+
+Every host, including Linux:
+
+* `suspended_root_tests` (codegen/mod.rs): a suspended coroutine's root
+  survives other stacks' collections under GC stress with heap poisoning
+  (section 6). On Windows it also forces the unwind check.
+* `fallback_tests::the_fallback_plan_refuses_native_coroutines`, in a
+  `fallback-roots` build.
+
+Results:
+
+* **Other hosts (Linux x86-64):**
+  - `cargo test --release --lib --bins`: 299 and 93 passed;
+  - the fallback build's refusal test passed;
+  - `cargo test --test native_stack`: every check passed.
+* **Real Windows:**
+  - run 40123395211's `roots` job (48056543): the fallback plan's Rust
+    tests, 278 + 96 passed, the refusal among them;
+  - the smoke job's Rust tests: PENDING-WIN-RUST.
+* **Cross build:** `cargo check --all-targets` for `x86_64-pc-windows-msvc`,
+  with and without `fallback-roots`: clean, no warnings.
+
+### 8.2 Exhaustion and faults on coroutine stacks
+
+`native/tests/native_stack/windows.rs` runs every faulting check in a
+child process. The coroutine checks:
+
+* **Exhaustion:** a coroutine's own stack exhausted at its start, after
+  yields, at the bottom of three nested coroutines, by 64 KiB frames and by
+  Cranelift's probe loop. Each case runs in the driver's mode (the line on
+  the result file or standard output, status 0); the nested case also runs
+  in an executable's mode (the line on standard error, status 1).
+* **Faults that are no overflow,** each the same with and without the
+  guard (section 5's table).
+* **Publication:** at every point of a nested lifecycle, the stack the
+  guard reads is the one Windows reports as running.
+* **The switch-edge sweep** (section 5): each of the four directions, at
+  129 offsets.
+
+Results:
+
+* **Real Windows:** PENDING-WIN-NATIVE-STACK.
+* **Other hosts (Linux):** the POSIX checks of the same file pass. The
+  sweeps there gave 12/85, 48/49, 12/85 and 6/91 completed/overflowed.
+
+### 8.3 The capability tables and the test files
+
+* **The capability table.** `native/native.tcl`'s `coroutines` row now
+  names windows-x86_64. That makes `nativeCoroutines` true on Windows, and
+  every Tcl test that carries it runs there:
+  - coroutines.test's native and fused comparisons (`coAgree`, the GC
+    evidence);
+  - coroutine-fusion.test;
+  - dfa.test's and dfa-workloads.test's native backends;
+  - native-stack-overflow.test's coroutine cases.
+* **The golden runner** (a coroutine) now runs every suite on the native
+  backends on Windows too.
+* **`tests/platform/native-status.tcl`:**
+  - the probes `coroutine-general` and `coroutine-stack-overflow-general`
+    are new, with fusion off, so that a coroutine object exists;
+  - the Windows row expects the general runtime's value and NATIVE LIMIT
+    STACK, where it recorded NATIVE UNSUPPORTED.
+* **`tests/platform/aot-facts.tcl`:**
+  - `standalone-coroutine-refused` is replaced by `standalone-coroutine`
+    and `standalone-coroutine-gc`;
+  - with fusion off: `standalone-coroutine-general`,
+    `standalone-coroutine-unwind-check` (GC stress and the unwind check in
+    an executable) and `standalone-co-overflow`.
+* **`tests/platform/gc-workloads.tcl`** gains three coroutine workloads
+  (`coroutine-roots`, `coroutine-nested`, `coroutine-many`, the programs of
+  coroutines.test's GC tests, fusion off). They run under GC stress and
+  under the unwind check.
+* **The smoke tier** adds coroutines.test, coroutine-fusion.test,
+  native-stack-overflow.test and coroutines.bot. `tier.tcl`'s Windows
+  `notYet` stays empty.
+
+Results:
+
+* **Real Windows** (smoke, the acceptance tier's four shards,
+  system-linker): PENDING-WIN-ACCEPTANCE.
+* **Other hosts (Linux):**
+  - `tclsh9.0 tests/local.tcl`, the whole local suite: Tcl tests on interp
+    7320 passed and on compile 7315 passed, 0 failed; golden suites 108
+    run, 0 failed (interp 5180/5180, compile 5180/5180, cranelift-generic
+    5088/5088, cranelift 5190/5190);
+  - `BOTLISH_NATIVE_GC_STRESS=1 tests/coroutines.test`: 81 passed;
+  - `audit/coroutines/tools/fuzz.tcl` (seeds 3, 17, 41, 40 programs
+    each): 0 disagreements;
+  - gc-workloads.tcl's coroutine workloads pass.
+
+### 8.4 Mutants
+
+| Mutation tool | Mutant | Breaks | Killed on |
+|---|---|---|---|
+| audit/native-stack | `publish-before-switch` | the stack about to run published before the switch | Linux (native_stack sweeps); Windows PENDING-WIN-MUTANTS |
+| audit/native-stack | `start-publishes-thread-stack` | a first segment publishes the thread's stack | Linux; Windows pending |
+| audit/native-stack | `resume-not-published` | a resumed coroutine does not publish its stack | Linux; Windows pending |
+| audit/native-stack | `yield-not-restored` | the resumer does not publish its stack when a segment returns | Linux; Windows pending |
+| audit/native-stack | `fallback-runs-coroutines` | the fallback plan starts native coroutines | Linux (the fallback build's refusal test) |
+| audit/native-stack | `win-published-stack-ignored` | the Windows guard reads the stack it was installed with | Windows pending |
+| audit/native-stack | `win-fiber-without-guarantee` | a fiber gets no stack guarantee, and none is checked | Windows pending |
+| audit/native-stack | `win-fiber-never-pooled` | a fiber is deleted, never pooled | Windows pending |
+| audit/native-stack | `win-fiber-not-restarted` | a pooled fiber continues where it parked | Windows pending |
+| audit/native-stack | `win-host-fiber-converted-back` | a host's conversion taken for the runtime's | Windows pending |
+| audit/windows-unwind | `walk-suspended-stacks-skipped` | the collector never walks a suspended stack | Windows pending |
+| audit/windows-unwind | `walk-suspended-with-the-running-bounds` | a suspended stack walked within the running stack's bounds | Windows pending |
+| audit/windows-unwind | `switch-records-its-callers-stack-pointer` | the switch's record off by its return address | Windows pending |
+| audit/windows-unwind | `switch-records-no-frame-register` | the switch's record without RBP | Windows pending |
+
+* **Linux:** `audit/native-stack/tools/mutate.tcl` (the six above with
+  `gc-walk-half-stack`): 6 mutants on linux-x86_64, 6 killed.
+* **Linux:** `audit/coroutines/tools/mutate.tcl`'s ten native mutants of
+  the runtime and the collector's walks: 10 killed by coroutines.test, the
+  fuzzer and the Rust tests:
+  - `native-construction-lazy`, `native-first-yield-discarded`,
+    `native-completed-raises-exhaustion`, `native-completed-reruns-body`;
+  - `native-failed-loses-error`, `native-message-wrong-yield`,
+    `native-deep-stack-not-preserved`, `native-release-keeps-stack`;
+  - `gc-suspended-frames-untraced`, `gc-resumer-frames-untraced`.
+* **Every mutant text** of the native-stack, windows-unwind, coroutines,
+  error-payloads, affine and coroutine-fusion mutation tools still applies
+  (211 checked).
+
+### 8.5 Linux, Linux AArch64 and macOS
+
+This milestone changes no Linux or macOS code path. On those hosts the
+POSIX switch, stack and walk are the code they were, behind `cfg`s. Two
+shared changes reach them:
+
+* `STACK_SWITCHING` is now conditioned on native-frame roots, which is
+  true there;
+* the fallback refusal in `rt_co_start`, a constant check there.
+
+The evidence:
+
+* machine code identical before and after on 31 programs (section 9.5);
+* the local suite and the GC-stress, fuzz and mutant runs above (other
+  hosts, Linux x86-64);
+* CI: tests.yml PENDING-LINUX-CI, tests-arm64.yml PENDING-ARM64-CI,
+  macos-arm64.yml PENDING-MACOS-CI.
 
 ## 9. Performance
 
-PENDING-PERFORMANCE
+Times are observations of one machine at one moment. The Windows figures
+come from a `windows-2025` runner (AMD EPYC 9V74); the Linux ones from this
+milestone's development container (Intel Xeon, 2.10 GHz, 4 cores, the same
+day). Read a ratio between the two hosts as an order of magnitude, never
+as a measurement of Windows alone. The fused rows below run the same
+machine code on both, with no switch, and they show the two machines to be
+about equally fast.
+
+### 9.1 Coroutine operations
+
+`bench/coroutines.tcl -backends native -runs 5`: the general runtime
+(fusion off), 200,000 operations per program, best of 5. Each row is
+(program − baseline) / n, the whole program in parentheses.
+
+| Operation | Windows (real Windows, run 40123395211, 48056543) | Linux (controlled experiment) |
+|---|---:|---:|
+| construction (to the first yield) | 566 ns (567 ns) | 432 ns (433 ns) |
+| construction + resume to completion + one cached call | 758 ns (763 ns) | 493 ns (500 ns) |
+| resume (yield in the root) | 192 ns (194 ns) | 132 ns (132 ns) |
+| resume, yield 1 frame deep | 200 ns (207 ns) | 155 ns (165 ns) |
+| resume, yield 8 frames deep | 211 ns (232 ns) | 146 ns (184 ns) |
+| resume, yield 32 frames deep | 206 ns (308 ns) | 179 ns (280 ns) |
+| resume of a coroutine that resumes one nested in it | PENDING-WIN-NESTED | 211 ns (212 ns) |
+| construction, abandoned on an early return | 556 ns (560 ns) | 518 ns (520 ns) |
+| construction, abandoned on a fail | 605 ns (694 ns) | 396 ns (453 ns) |
+| construction, abandoned on a callee's propagated error | 599 ns (690 ns) | 408 ns (468 ns) |
+| construction, abandoned on a break | 568 ns (637 ns) | 432 ns (496 ns) |
+
+* **A resume costs the same at any depth**, on Windows as elsewhere: 192
+  to 211 ns from the root to 32 frames deep. Nothing is copied or unwound,
+  and the fiber keeps its frames where they are.
+* **A resume is about 60 ns dearer than on Linux.** A resume and its yield
+  are one round trip. The probe's round trip of `SwitchToFiber` costs
+  57.9 ns, against 22.8 ns for a custom switch on the same runner
+  (section 2.5). The difference is in that range, and it is the fibers'
+  price.
+* **A construction is a pooled fiber's start** (56.5 ns in the probe, a
+  switch and a restart), plus the runtime's object, thunk and first
+  segment. A fresh fiber is about 15 µs (section 2.5); the pool makes that
+  once per pooled stack.
+* **Destruction** (the abandoned rows) is a release: the coroutine's fiber
+  goes back to the pool without running anything on it (section 3.3).
+
+### 9.2 What a coroutine holds
+
+| | Windows | Linux |
+|---|---:|---:|
+| the coroutine object (allocation report, per construction) | 200 B at 48056543; PENDING-WIN-OBJECT after ceff7aa3 | 96 B |
+| the stack's reservation (address space) | 8256 KiB (8 MiB usable + 64 KiB) | 8256 KiB (8 MiB + the PROT_NONE guard) |
+| committed by a fresh fiber, after its setup | PENDING-WIN-COMMIT | -- (Linux commits nothing up front: 4.1 KiB resident per suspended coroutine, `bench/coroutines.tcl`'s resident table) |
+| committed after a coroutine ran 64 KiB deep on it | PENDING-WIN-GROWN | -- |
+
+* **The coroutine object** carried two `SwitchPoint`s (5 words each, the
+  POSIX hosts' are one) and a copy of the fiber's bounds. Commit ceff7aa3
+  moved the bounds into the fiber's Slot, which the object points to.
+* **The commit** is what Windows charges against the system's commit
+  limit, touched or not (section 10). A fresh fiber commits one page, its
+  guard page and the guard region the setup's 32 KiB guarantee asks.
+  `a_fresh_fiber_commits_its_guarantee_and_a_page` measures it on every
+  smoke run and fails above 64 KiB. Before ceff7aa3 a fiber also committed
+  its first 64 KiB up front (`CreateFiberEx`'s commit size).
+
+### 9.3 Collections with suspended coroutines
+
+`bench/coroutines.tcl`'s collection rows, under `BOTLISH_NATIVE_GC_STRESS=1`
+(a collection at every allocation site). The workload makes 200
+constructions while K coroutines are held suspended, and each run is
+measured against the same recursion without the constructions. Every one
+of the 600 collections walks the K suspended stacks, each from its
+switch's record (section 6).
+
+| K suspended | Windows | Linux (controlled experiment) |
+|---:|---:|---:|
+| 0 | PENDING-WIN-GC0 per collection | 3.3 µs per collection |
+| 1000 | PENDING-WIN-GC1000 per collection | 386 µs per collection |
+| **per suspended coroutine, per collection** | **PENDING-WIN-GCEACH** | **383 ns** |
+
+### 9.4 The DFA and JSON workloads
+
+`bench/dfa.tcl -runs 3 -rounds 3`, in ns per item (a character, or a byte
+for utf8-*), at 200,000 items. "General" is the coroutine runtime
+(`BOTLISH_NATIVE_COROUTINE_FUSION=0`), "fused" the default, which compiles
+these coroutines into their consumer (COROUTINE-FUSION-MILESTONE-1.md).
+Each figure is the median of three driver processes.
+
+| Workload | Windows general | Windows fused | Linux general | Linux fused |
+|---|---:|---:|---:|---:|
+| coroutine (hand-written JSON-like lexer) | 354.0 | 9.4 | 268.2 | 11.2 |
+| dfa-lex (json_lex.bot, RFC 8259's lexical grammar) | 430.8 | 11.8 | 328.3 | 13.0 |
+| dfa-validate (the same with the structural layer) | 539.0 | 26.0 | 411.1 | 23.0 |
+| yaml-tokens | 426.2 | 17.7 | 327.9 | 20.2 |
+| utf8-coroutine | 205.7 | 7.2 | 143.5 | 9.0 |
+| utf8-dfa | 203.7 | 6.4 | 151.4 | 7.4 |
+| dfa-micro (one recognizer, per symbol) | 202.4 | 3.5 | 139.0 | 4.1 |
+| hand-micro (the same by hand) | 209.3 | 2.7 | 155.1 | 4.6 |
+
+(Windows: real Windows, run 40123395211's `roots` job, 48056543. Linux:
+controlled experiment.)
+
+* **Fused code is equally fast on both.** It is the same machine code with
+  no switch: 9.4 against 11.2 ns per character, the Windows runner slightly
+  ahead.
+* **The general runtime is 50 to 60 ns per item dearer on Windows**, where
+  every item is one switch round trip (dfa-micro: 202 against 139). That is
+  the resume's difference of 9.1 again. The DFA workloads that matter run
+  fused, at 3.5 to 26 ns per item on Windows. The general runtime remains
+  what runs the coroutines fusion cannot take (a handle that leaves its
+  function, a recursive yielding chain), and the golden runner.
+
+### 9.5 Programs without coroutines, before and after
+
+**On Windows** (real Windows, run 40123395211's `roots` job): main's driver
+before this milestone (b5b17a39, built in the job) was compared with this
+branch's on `bench/root-plans.tcl`'s workloads, 20 runs × 7 rounds, under
+the JIT and as executables, plus collection cost under GC stress:
+
+| Workload | JIT, this / before | Executable, this / before | Code, `.pdata` + `.xdata` |
+|---|---:|---:|---|
+| fib | 1.005 | 1.000 | identical (208 B; 48 + 44 B) |
+| calls | 0.926 | 0.984 | identical (646 B) |
+| uri | 1.029 | 1.014 | identical (6313 B; 408 + 548 B) |
+| 2048 | 1.007 | 0.989 | identical (22344 B; 792 + 1196 B) |
+| strings | 1.000 | 0.996 | identical (367 B) |
+| lists | 1.015 | 1.040 | identical (734 B) |
+
+* The machine code and unwind information are byte-for-byte the same size.
+* The checks (Botlish calls checked for an error, prologue depth checks)
+  are identical.
+* Each ratio lies within its own rounds' spread.
+* Collections cost the same: 1.36 against 1.39 µs, 0.84 against 0.86 µs.
+
+**On Linux** (controlled experiment): the same NIR was compiled by main's
+driver before this milestone and by this branch's, for 31 programs: the
+benchmark programs, the coroutine GC workloads, 2048's benchmark and demo,
+the DFA JSON and YAML workloads, the surface examples and the coroutine
+golden suite. The machine code (`botlish-native vcode`), the fused NIR
+(`fused`) and the stack maps (`roots`) are identical for every one. On
+Linux the milestone changes no code a program compiles to, only where the
+runtime's Windows code is.
 
 ## 10. Remaining limitations
 
