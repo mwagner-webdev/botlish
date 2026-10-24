@@ -45,10 +45,28 @@
 ## single/macos/launcher.c
 <<<<
     if (scripts != NULL) {
-        Tcl_SetVar2(interp, "tcl_library", NULL, scripts, TCL_GLOBAL_ONLY);
+        Tcl_SetVar2(interp, "tcl_library", NULL, TclPath(scripts), TCL_GLOBAL_ONLY);
     }
 ====
     (void)scripts;
+>>>>
+
+@@ launcher-locale-kept Tcl starts in the environment's locale: without a UTF-8 locale Tcl 9.0.1 crashes when the bundle's path is not ASCII
+## single/macos/launcher.c
+<<<<
+    Utf8WhileTclStarts();
+#endif
+====
+#endif
+>>>>
+
+@@ launcher-locale-leaked the UTF-8 locale Tcl starts in is never put back: the compiler's children see LC_ALL=UTF-8 the user never set
+## single/macos/launcher.c
+<<<<
+    RestoreLocale(interp);
+    if (scripts != NULL) {
+====
+    if (scripts != NULL) {
 >>>>
 
 @@ zip-omitted the compiler archive is left out of the bundle
@@ -62,9 +80,9 @@ rm "$contents/Resources/botlish.zip"
 @@ zip-wrong-mount the launcher mounts the compiler archive elsewhere than //zipfs:/app
 ## single/macos/launcher.c
 <<<<
-    if (TclZipfs_Mount(interp, archive, MOUNT, NULL) != TCL_OK) {
+    if (TclZipfs_Mount(interp, TclPath(archive), MOUNT, NULL) != TCL_OK) {
 ====
-    if (TclZipfs_Mount(interp, archive, "//zipfs:/compiler", NULL) != TCL_OK) {
+    if (TclZipfs_Mount(interp, TclPath(archive), "//zipfs:/compiler", NULL) != TCL_OK) {
 >>>>
 
 @@ zip-writable the archive stays writable to the compiler: zipfs keeps writes to its files in memory

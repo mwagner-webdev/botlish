@@ -376,7 +376,11 @@ them). Keep it so:
   /Library/Frameworks or Homebrew) and finds its bundle from its own real
   path, never from argv[0], PATH or the working directory. The driver finds
   its runtime archive from its own path (`packaged_runtime_archive`), and
-  single/main.tcl always runs the bundle's driver.
+  single/main.tcl always runs the bundle's driver. Tcl starts in a UTF-8
+  locale (`LC_ALL=UTF-8` while it initializes: Tcl 9.0.1 crashes in a
+  non-ASCII path otherwise) and the user's `LC_ALL` is put back, exactly,
+  before anything runs: never let the compiler's children see a locale
+  the user did not set.
 * Ad hoc signing is not notarization: never describe the artifact as
   notarized or Gatekeeper-approved, never add a JIT or other entitlement or
   the hardened runtime without the Developer ID milestone's decision

@@ -25,7 +25,9 @@
 #                 other directories; non-ASCII arguments through -argv and
 #                 to an executable
 #   processes     exit statuses; the native backend's path with spaces and
-#                 non-ASCII characters passed as one argument; an interrupt
+#                 non-ASCII characters passed as one argument; the
+#                 environment the system linker's cc sees (LC_ALL as the
+#                 user gave it, whatever Tcl started in); an interrupt
 #                 (SIGINT to the process group, as a terminal's) of the
 #                 language server leaves no process behind
 #   concurrency   concurrent runs, links and language servers in one HOME
@@ -74,6 +76,10 @@ cd "$work/p"
 section relocation
 copied=$(copy_app "$work/A dir with spaces/Ünïcödé")
 [[ $(bl "$copied" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] || fail "the copy in a non-ASCII path does not run"
+# (Without a locale, as above, and in the C locale: the launcher starts Tcl
+# in a UTF-8 locale, which Tcl 9.0.1 needs in a non-ASCII path.)
+[[ $(env -i HOME="$home" PATH=/usr/bin:/bin LC_ALL=C "$copied/Contents/MacOS/botlish" -backend cranelift 01-arithmetic.bot) == *"value: 50" ]] ||
+  fail "the copy in a non-ASCII path does not run with LC_ALL=C"
 verify "$copied"
 mkdir -p "$work/moved"
 mv "$copied" "$work/moved/"
@@ -156,6 +162,21 @@ status=0; bl "$app" -backend cranelift overflow.bot >"$work/overflow.out" 2>&1 |
 [[ $status == 1 ]] && grep -q 'NATIVE LIMIT STACK' "$work/overflow.out" || fail "a native stack overflow: status $status, $(cat "$work/overflow.out")"
 # The driver's path (the bundle's) with spaces and non-ASCII characters: one argument.
 [[ $(bl "$work/moved/Botlish.app" -backend cranelift coroutine.bot) == *'value: [0, 1, 4, -1]' ]] || fail "the driver's path as one argument"
+# The environment reaches what the compiler runs as the user gave it (the
+# UTF-8 locale Tcl starts in is put back): a C compiler driver first on PATH
+# that records its environment, then links with Apple's.
+mkdir -p "$work/ccshim"
+printf '#!/bin/sh\nenv >"$CC_ENV_LOG"\nexec /usr/bin/cc "$@"\n' >"$work/ccshim/cc"
+chmod +x "$work/ccshim/cc"
+for locale in "" C en_US.UTF-8; do
+  rm -f "$work/cc.env"
+  env -i HOME="$home" PATH="$work/ccshim:/usr/bin:/bin" CC_ENV_LOG="$work/cc.env" ${locale:+LC_ALL=$locale} \
+    "$app/Contents/MacOS/botlish" -warnings off -emit-native-executable hello-darwin.bot >/dev/null 2>"$work/cc.err" ||
+    fail "a link through a recording cc (LC_ALL ${locale:-unset}): $(cat "$work/cc.err")"
+  [[ -s $work/cc.env ]] || fail "the system linker did not run the cc on PATH (LC_ALL ${locale:-unset})"
+  seen=$(sed -n 's/^LC_ALL=//p' "$work/cc.env")
+  [[ $seen == "$locale" ]] || fail "the linker ran with LC_ALL '$seen'; the environment gave '${locale}'"
+done
 # An interrupt of the language server and its analysis worker, as a
 # terminal sends it: to the process group.
 mkfifo "$work/lsp.in"
@@ -178,7 +199,7 @@ sleep 1
 for pid in $server $worker; do
   if kill -0 "$pid" 2>/dev/null; then fail "process $pid outlived the interrupt"; fi
 done
-echo "   statuses 0/1/2, an overflow, an interrupted language server (worker $worker): ok"
+echo "   statuses 0/1/2, an overflow, the environment passed on (LC_ALL unset, C, en_US.UTF-8), an interrupted language server (worker $worker): ok"
 
 # --- concurrency ----------------------------------------------------------------
 section concurrency

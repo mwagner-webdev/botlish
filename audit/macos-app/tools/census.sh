@@ -15,7 +15,9 @@
 #   C1  the framework Tcl's own macOS build makes: layout, install name,
 #       architectures, dependencies, whether a zipfs library is attached
 #   C2  how an executable linked to it finds Tcl's script library, and that
-#       $TCL_LIBRARY comes first in Tcl's own search
+#       $TCL_LIBRARY comes first in Tcl's own search; Tcl's startup in a
+#       non-ASCII directory without a UTF-8 locale (Tcl 9.0.1 crashes), and
+#       the application's there
 #   C3  TclZipfs_AppHook and a separate ZIP file: what a stock tclsh does
 #       with one, `zipfs mount` of one, its paths, and its writes
 #   C4  a Linux-style zipkit (`zipfs mkimg`: the ZIP appended to the Mach-O)
@@ -64,6 +66,22 @@ mkdir -p "$work/decoy"
 echo 'puts stderr "DECOY init.tcl sourced from [info script]"' >"$work/decoy/init.tcl"
 echo "# The same, with TCL_LIBRARY naming another script library: Tcl's search tries it first."
 shell "echo 'puts \"info library: [info library]\"' | env -i TCL_LIBRARY='$work/decoy' '$tclsh'"
+
+echo "# Tcl 9.0.1's startup in a directory whose name is not ASCII: the framework and its tclsh copied to one, run"
+echo "# without a locale (the C locale: codeset US-ASCII, a name Tcl has no encoding for), with LC_ALL=C, and with a UTF-8 locale."
+mkdir -p "$work/non ascii dü"
+cp -R "$fwb/Tcl.framework" "$tclsh" "$work/non ascii dü/"
+echo 'puts "[encoding system] [info library]"' >"$work/probe.tcl"
+run env -i "$work/non ascii dü/tclsh$v" "$work/probe.tcl"
+run env -i LC_ALL=C "$work/non ascii dü/tclsh$v" "$work/probe.tcl"
+run env -i LC_CTYPE=UTF-8 "$work/non ascii dü/tclsh$v" "$work/probe.tcl"
+run env -i LANG=en_US.UTF-8 "$work/non ascii dü/tclsh$v" "$work/probe.tcl"
+echo "# The same Tcl in this ASCII directory, without a locale:"
+run env -i "$tclsh" "$work/probe.tcl"
+echo "# The application in the non-ASCII directory, without a locale and with LC_ALL=C (its launcher starts Tcl in UTF-8):"
+cp -R "$app" "$work/non ascii dü/"
+run env -i HOME="$work" "$work/non ascii dü/Botlish.app/Contents/MacOS/botlish" -version
+run env -i HOME="$work" LC_ALL=C "$work/non ascii dü/Botlish.app/Contents/MacOS/botlish" -version
 
 probe C3 TclZipfs_AppHook and a separate ZIP file
 mkdir -p "$work/stage/botlish"

@@ -469,7 +469,36 @@ the application's own parts, and nothing of the compiler's:
    `TclZipfs_Mount(interp, Contents/Resources/botlish.zip, //zipfs:/app)`;
    then a check that the archive holds `main.tcl`; then
    `::single::bundle`, the `Contents` directory, for `single/main.tcl`.
-5. **Failures** before the compiler runs are "botlish: ..." on standard
+5. **A UTF-8 locale while Tcl starts.** When the environment's locale is
+   not UTF-8 -- no locale at all is the C locale, whose codeset is
+   US-ASCII -- the launcher sets `LC_ALL=UTF-8` before Tcl initializes and
+   puts it back in AppInit, exactly as it was (unset, or its value, in the
+   process's environment and in Tcl's `env` array) before anything else
+   runs. Tcl 9.0.1 crashes otherwise when its framework's path is not
+   ASCII: the census (C2) runs the framework's own stock `tclsh9.0` copied
+   into "non ascii dü" and it ends in SIGSEGV without a locale and with
+   `LC_ALL=C`, and runs with `LC_CTYPE=UTF-8` or `LANG=en_US.UTF-8`, and in
+   an ASCII directory. The crash report and lldb (run 40131369183) put it
+   in `Tcl_GetEncoding` (`EXC_BAD_ACCESS` at 0x5, reading the search path's
+   directory array) from `Tcl_GetEncodingNameFromEnvironment`, from the
+   *second* `TclpSetInitialEncodings`, the one `Tcl_MainEx` makes: Tcl
+   looks for an encoding file named after the codeset ("us-ascii", which
+   its table does not know), once while its system encoding is still the
+   bootstrap ISO 8859-1 and again after it became UTF-8, and the second
+   search reads a directory array that is not one -- by all appearances
+   the encoding search path, a process-wide value Tcl converts between
+   those two encodings, mangled where the path is not ASCII (not traced
+   further: the cure is not to search). Tcl's 9.0 branch has since made the
+   second `TclpSetInitialEncodings` a no-op (unix/tclUnixInit.c,
+   `initialEncodingSet`), which avoids it. With a UTF-8 codeset Tcl finds
+   its encoding in its table and searches no file. Nothing observable
+   changes: `single/main.tcl` makes UTF-8 the system encoding anyway, a
+   macOS path is UTF-8 whatever the locale, and the compiler's children
+   see the user's `LC_ALL` (app-test's processes group links through a
+   `cc` on PATH that records its environment, with `LC_ALL` unset, `C`
+   and `en_US.UTF-8`: mutants `launcher-locale-kept` and
+   `launcher-locale-leaked`).
+6. **Failures** before the compiler runs are "botlish: ..." on standard
    error, exit status 2, each naming the missing or damaged part and saying
    to reinstall the application -- never to install Tcl, Rust or Cargo.
    Standard output is never written: it is the compiler's, and the

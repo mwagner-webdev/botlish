@@ -23,12 +23,24 @@
  *      and the startup script //zipfs:/app/main.tcl (single/main.tcl): the
  *      remaining arguments are the compiler's, unchanged, as ::argv.
  *   4. Its Tcl_AppInitProc (every path given to Tcl converted from the
- *      system encoding, as Tcl's strings are) sets tcl_library to the loaded framework's own
+ *      system encoding, as Tcl's strings are) puts back the locale the
+ *      environment named (step 5), sets tcl_library to the loaded framework's own
  *      script library (Versions/9.0/Resources/Scripts beside the Tcl binary:
  *      never $TCL_LIBRARY, which Tcl's own search would try first, or another
  *      installation's), runs Tcl_Init, mounts Contents/Resources/botlish.zip
  *      at //zipfs:/app, and tells single/main.tcl where the bundle is:
  *      ::single::bundle, the Contents directory.
+ *   5. (macOS) Tcl initializes in a UTF-8 locale: when the environment's
+ *      codeset is another -- no locale at all is the C locale's US-ASCII --
+ *      LC_ALL is UTF-8 while Tcl starts and is put back, exactly as it was
+ *      or unset, before anything runs. Tcl 9.0.1 crashes in that case when
+ *      its framework's path is not ASCII: its startup looks for an
+ *      encoding file of the codeset ("us-ascii", which it has no name for)
+ *      twice, and the second search, after the system encoding became
+ *      UTF-8, reads a search path it converted wrongly (Tcl_GetEncoding,
+ *      from Tcl_MainEx's TclpSetInitialEncodings: MACOS-AARCH64-MILESTONE-9.md,
+ *      "Native launcher implementation"). single/main.tcl makes UTF-8 the
+ *      system encoding anyway; a macOS path is UTF-8 whatever the locale.
  *
  * Every failure before the compiler runs is reported on standard error as
  * "botlish: ..." with exit status 2, saying which part of the application is
@@ -52,6 +64,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef __APPLE__
+#include <langinfo.h>
+#include <locale.h>
 #include <mach-o/dyld.h>
 #endif
 
@@ -67,6 +81,8 @@ extern const char *Tcl_InitSubsystems(void) __attribute__((weak_import));
 
 static char *contents;  /* the bundle's Contents directory, real path */
 static char *scripts;   /* the loaded Tcl's script library (macOS) */
+static int localeReplaced;  /* LC_ALL is UTF-8 while Tcl starts (macOS) */
+static char *savedLocale;   /* LC_ALL as the environment had it, or NULL */
 
 static void Fail(const char *format, ...) __attribute__((noreturn, format(printf, 1, 2)));
 
@@ -166,6 +182,44 @@ TclScripts(void)
 }
 #endif
 
+#ifdef __APPLE__
+/* Tcl starts in a UTF-8 locale (step 5 above): LC_ALL=UTF-8 unless the
+ * environment's locale is UTF-8 already; RestoreLocale puts it back. */
+static void
+Utf8WhileTclStarts(void)
+{
+    if (setlocale(LC_CTYPE, "") != NULL && strcmp(nl_langinfo(CODESET), "UTF-8") == 0) {
+        return;
+    }
+    const char *old = getenv("LC_ALL");
+    savedLocale = old ? strdup(old) : NULL;
+    if ((old && savedLocale == NULL) || setenv("LC_ALL", "UTF-8", 1) != 0) {
+        Fail("cannot start Tcl in a UTF-8 locale: %s", strerror(errno));
+    }
+    localeReplaced = 1;
+}
+#endif
+
+/* LC_ALL as the environment had it, in the process's environment and in
+ * Tcl's env array (which Tcl copied when it created the interpreter). */
+static void
+RestoreLocale(Tcl_Interp *interp)
+{
+    if (!localeReplaced) {
+        return;
+    }
+    if (savedLocale == NULL) {
+        Tcl_UnsetVar2(interp, "env", "LC_ALL", TCL_GLOBAL_ONLY);
+        unsetenv("LC_ALL");
+    } else {
+        Tcl_DString value;
+        Tcl_SetVar2(interp, "env", "LC_ALL", Tcl_ExternalToUtfDString(NULL, savedLocale, -1, &value), TCL_GLOBAL_ONLY);
+        Tcl_DStringFree(&value);
+        setenv("LC_ALL", savedLocale, 1);
+    }
+    localeReplaced = 0;
+}
+
 /* PATH, a native (system-encoded) string, as Tcl's own string: Tcl
  * converts it back to the same bytes whenever it opens it. */
 static const char *
@@ -181,6 +235,7 @@ TclPath(const char *path)
 static int
 AppInit(Tcl_Interp *interp)
 {
+    RestoreLocale(interp);
     if (scripts != NULL) {
         Tcl_SetVar2(interp, "tcl_library", NULL, TclPath(scripts), TCL_GLOBAL_ONLY);
     }
@@ -217,6 +272,7 @@ main(int argc, char **argv)
     contents = Parent(Parent(executable));
 #ifdef __APPLE__
     scripts = TclScripts();  /* fails here, before Tcl runs, when Tcl is not the bundle's */
+    Utf8WhileTclStarts();
 #endif
     int major, minor;
     Tcl_GetVersion(&major, &minor, NULL, NULL);
