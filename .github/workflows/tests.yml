@@ -247,14 +247,19 @@ jobs:
         run: tclsh9.0 audit/refactor/tools/gate.tcl
 
   method-filter:
-    name: method-call kind filter (audit)
-    # The kind filter decides method-style calls with fewer builds than the
-    # exact decision and must reach the same decisions and the same programs
-    # (METHOD-DECISION-FILTER.md). The job runs its tests, the fuzzer, and every
-    # golden suite that decides method calls by trial builds under
-    # hir::methodFilterAudit, which makes the exact decision as well and fails on
-    # any difference. The front end only: no native build is needed. (The
-    # mutation harness, audit/method-filter/tools/mutate.tcl, is run by hand.)
+    name: method-call decision (oracle, reference audit)
+    # The method-call decision (hir/methods.tcl,
+    # METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) judges a candidate by the
+    # call's own checks, certified relative to the decided program; its kind
+    # proofs (METHOD-DECISION-FILTER.md) save builds and must change no
+    # decision. The job runs the unit tests, the independent oracle, the
+    # fuzzer (every program under the reference audit, the audit of build
+    # reuse and plainly) and every golden suite that decides method calls
+    # under hir::methodReferenceAudit, which decides by the reference rule
+    # (every candidate judged by its own build) as well and fails on any
+    # difference. The front end only: no native build is needed. (The
+    # mutation harnesses, audit/method-resolution/tools/mutate.tcl and
+    # audit/method-filter/tools/mutate.tcl, are run by hand.)
     runs-on: ubuntu-latest
     env:
       LANG: C.utf8
@@ -265,13 +270,15 @@ jobs:
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
 
-      - name: Tests and fuzzer
+      - name: Tests, oracle and fuzzer
         run: |
+          tclsh9.0 tests/method-resolution.test -tmpdir "$(mktemp -d)"
           tclsh9.0 tests/method-filter.test -tmpdir "$(mktemp -d)"
-          tclsh9.0 audit/method-filter/tools/fuzz.tcl 200 1
+          tclsh9.0 audit/method-resolution/tools/oracle.tcl 500 1
+          tclsh9.0 audit/method-filter/tools/fuzz.tcl 20 1
 
-      - name: Golden suites under the audit
-        run: tclsh9.0 bench/method-filter.tcl -suites -audit 1
+      - name: Golden suites under the reference audit
+        run: tclsh9.0 bench/method-filter.tcl -audit 1 -suites
 
   golden:
     name: golden suites (Botlish-native tests, shard ${{ matrix.shard }}/4)

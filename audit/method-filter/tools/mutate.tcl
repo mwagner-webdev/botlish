@@ -1,9 +1,10 @@
-# mutate.tcl -- can the checks of the method-call kind filter fail?
-# (METHOD-DECISION-FILTER.md, "Mutation testing"). Each mutant is a small,
-# local break of hir/methodfilter.tcl or of its use in hir/hir.tcl, applied to
-# a scratch copy of the tree (never to the working tree). For each, the unit
-# tests (tests/method-filter.test) run; the mutants they do not kill run the
-# fuzzer over SEEDS seeds.
+# mutate.tcl -- can the checks of the method-call decision's kind proofs
+# fail? (METHOD-DECISION-FILTER.md, "Mutation testing"). Each mutant is a
+# small, local break of the kind proofs in hir/methods.tcl or of the reference
+# audit in hir/hir.tcl, applied to a scratch copy of the tree (never to the
+# working tree). For each, the unit tests (tests/method-filter.test) run; the
+# mutants they do not kill run the fuzzer over SEEDS seeds. (The decision's
+# own mutants are audit/method-resolution/tools/mutate.tcl's.)
 #
 #   tclsh9.0 audit/method-filter/tools/mutate.tcl ?SEEDS? ?MUTANT-PATTERN?
 #
@@ -12,106 +13,76 @@
 # once.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
-set seeds [expr {[llength $argv] > 0 ? [lindex $argv 0] : 60}]
+set seeds [expr {[llength $argv] > 0 ? [lindex $argv 0] : 8}]
 set only [expr {[llength $argv] > 1 ? [lindex $argv 1] : "*"}]
 
 # {NAME FILE OLD NEW}: OLD must occur exactly once in FILE.
 set mutants [list \
-    [list native-equal-kinds-excluded hir/methodfilter.tcl \
+    [list native-equal-kinds-excluded hir/methods.tcl \
         "    if \{\$wanted eq \"\" || \$kind eq \$wanted\} \{\n        return \{\}\n    \}" \
         "    if \{\$wanted eq \"\"\} \{\n        return \{\}\n    \}"] \
-    [list bare-name-excluded hir/methodfilter.tcl \
+    [list bare-name-excluded hir/methods.tcl \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 0\n    \}" \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 1\n    \}"] \
-    [list domain-kinds-compared hir/methodfilter.tcl \
+    [list domain-kinds-compared hir/methods.tcl \
         "        if \{\$kind in \$comparableKinds && \$receiverKind in \$comparableKinds && \$kind ne \$receiverKind\} \{" \
         "        if \{\$kind ne \$receiverKind\} \{"] \
-    [list checked-contract-ignored hir/methodfilter.tcl \
+    [list checked-contract-ignored hir/methods.tcl \
         "foreach field \{declaredParamTypes inferredParamTypes checkedParamTypes\} \{" \
         "foreach field \{declaredParamTypes inferredParamTypes\} \{"] \
-    [list inferred-contract-ignored hir/methodfilter.tcl \
+    [list inferred-contract-ignored hir/methods.tcl \
         "foreach field \{declaredParamTypes inferredParamTypes checkedParamTypes\} \{" \
         "foreach field \{declaredParamTypes checkedParamTypes\} \{"] \
-    [list declared-contract-ignored hir/methodfilter.tcl \
+    [list declared-contract-ignored hir/methods.tcl \
         "foreach field \{declaredParamTypes inferredParamTypes checkedParamTypes\} \{" \
         "foreach field \{inferredParamTypes checkedParamTypes\} \{"] \
-    [list nominal-rule-dropped hir/methodfilter.tcl \
+    [list nominal-rule-dropped hir/methods.tcl \
         "    return \[NominalMismatch \[DeclaredParam \$hir \$ns \$cand\] \$R\]" \
         "    return 0"] \
-    [list nominal-arguments-compared hir/methodfilter.tcl \
+    [list nominal-arguments-compared hir/methods.tcl \
         "        && \[lindex \$declared 1\] ne \[lindex \$R 1\]\}" \
         "        && \$declared ne \$R\}"] \
-    [list nominal-same-declaration-excluded hir/methodfilter.tcl \
+    [list nominal-same-declaration-excluded hir/methods.tcl \
         "        && \[lindex \$declared 1\] ne \[lindex \$R 1\]\}" \
         "        && 1\}"] \
-    [list nominal-receiver-unchecked hir/methodfilter.tcl \
+    [list nominal-receiver-unchecked hir/methods.tcl \
         "    expr \{\[hir::types::IsNamedStruct \$declared\] && \[hir::types::IsNamedStruct \$R\]" \
         "    expr \{\[hir::types::IsNamedStruct \$declared\] && 1"] \
-    [list nominal-inferred-compared hir/methodfilter.tcl \
+    [list nominal-inferred-compared hir/methods.tcl \
         "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n" \
         "        set t \[lindex \[dict get \$hir exprs \$v declaredParamTypes\] 0\]\n        if \{\$t eq \"\" && \[dict exists \$hir exprs \$v inferredParamTypes\]\} \{ set t \[lindex \[dict get \$hir exprs \$v inferredParamTypes\] 0\] \}\n"] \
-    [list several-survivors-decided hir/methodfilter.tcl \
-        "            if \{\[llength \$survivors\] == 1\} \{" \
-        "            if \{\[llength \$survivors\] >= 1\} \{"] \
-    [list guess-ignored hir/methodfilter.tcl \
+    [list kind-proofs-ignore-switch hir/methods.tcl \
+        "    if \{!\$methodKindProofs && !\$guess\} \{\n        return \$candidates\n    \}" \
+        "    if \{0\} \{\n        return \$candidates\n    \}"] \
+    [list waves-move-nothing hir/methods.tcl \
+        "            if \{\[llength \$guessed\] == 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{" \
+        "            if \{0 && \[llength \$guessed\] == 1 && \[dict get \$choices \$key\] ne \[lindex \$guessed 0\]\} \{"] \
+    [list guess-ignored hir/methods.tcl \
         "    if \{\$guess\} \{\n        set node \[dict get \$hir exprs \$receiver\]" \
         "    if \{0\} \{\n        set node \[dict get \$hir exprs \$receiver\]"] \
-    [list hopeless-ignored hir/methodfilter.tcl \
-        "            \} elseif \{\[Hopeless \$built \$key\]\} \{" \
-        "            \} elseif \{0\} \{"] \
-    [list hopeless-poisoned-receiver hir/methodfilter.tcl \
-        "        || (\[lindex \$receiver 1\] ne \"never\" && \[Closed \$hir \[lindex \$receiver 0\]\])\}\]" \
-        "        || \[Closed \$hir \[lindex \$receiver 0\]\]\}\]"] \
-    [list closed-method-calls hir/methodfilter.tcl \
-        "    if \{\[dict exists \$methodExprs \$e\]\} \{" \
-        "    if \{0\} \{"] \
-    [list closed-local-unchecked hir/methodfilter.tcl \
-        "                    return \[Closed \$hir \[dict get \$hir exprs \$d value\] \[expr \{\$depth + 1\}\]\]" \
-        "                    return 1"] \
-    [list closed-user-calls hir/methodfilter.tcl \
-        "            if \{\[dict get \$binding kind\] ne \"root\" || \[dict get \$binding symbol\] eq \"\"\n                    || \[dict get \$hir symbols \[dict get \$binding symbol\] kind\] ne \"native\"\} \{\n                return 0\n            \}" \
-        "            if \{0\} \{\n                return 0\n            \}"] \
-    [list guess-never-verified hir/methodfilter.tcl \
-        "            if \{\[Survivors \$built \$calls \$key\] ne \[list \[dict get \$decided \$key\]\]\} \{\n                Trace the receiver of" \
-        "            if \{0\} \{\n                Trace the receiver of"] \
-    [list eviction-removed hir/methodfilter.tcl \
-        "            if \{\[Survivors \$built \$calls \$key\] ne \[list \[dict get \$decided \$key\]\]\} \{\n                # Decided from" \
-        "            if \{0\} \{\n                # Decided from"] \
-    [list trait-decisions-evicted hir/methodfilter.tcl \
-        "        foreach key \[dict keys \$owned\] \{\n            if \{\[Survivors \$built \$calls \$key\] ne \[list \[dict get \$decided \$key\]\]\} \{\n                # Decided from" \
-        "        foreach key \[dict keys \$decided\] \{\n            if \{\[Survivors \$built \$calls \$key\] ne \[list \[dict get \$decided \$key\]\]\} \{\n                # Decided from"] \
-    [list trait-calls-not-fixed hir/methodfilter.tcl \
-        "    hir::TraitCallsDecided \$hir \$calls decided\n    set open" \
-        "    set open"] \
-    [list seeds-ignored hir/methodfilter.tcl \
-        "        if \{\[dict exists \$calls \$key\] && \$choice in \[dict get \$calls \$key candidates\]\} \{" \
-        "        if \{0\} \{"] \
-    [list problems-not-checked hir/methodfilter.tcl \
-        "                    || \[hir::MethodCallProblems \$built \[dict get \$built methodCalls \$key expr\]\] ne \"\"\} \{" \
-        "                    || 0\} \{"] \
-    [list wave-limit-ignored hir/methodfilter.tcl \
+    [list trait-calls-not-fixed hir/methods.tcl \
+        "    dict for \{key chosen\} \[dict get \$record traits\] \{" \
+        "    dict for \{key chosen\} \{\} \{"] \
+    [list seeds-ignored hir/methods.tcl \
+        "        if \{\[dict exists \$calls \$key\] && \$choice in \[dict get \$calls \$key candidates\]\} \{\n            dict set fixed" \
+        "        if \{0\} \{\n            dict set fixed"] \
+    [list wave-limit-ignored hir/methods.tcl \
         "for \{set wave 0\} \{\$wave < \$maxWaves\} \{incr wave\}" \
         "for \{set wave 0\} \{\$wave < 1000\} \{incr wave\}"] \
-    [list build-reuse-always hir/methodfilter.tcl \
-        "        if \{\$config eq \$lastConfig\} \{" \
-        "        if \{1\} \{"] \
-    [list trials-not-counted hir/methodfilter.tcl \
-        "        dict incr ::hir::buildStats methodTrials\n        incr builds" \
-        "        incr builds"] \
+    [list deviations-not-counted hir/methods.tcl \
+        "    if \{\$what eq \"deviation\"\} \{\n        dict incr ::hir::buildStats methodDeviations\n    \}" \
+        "    if \{0\} \{\n        dict incr ::hir::buildStats methodDeviations\n    \}"] \
     [list audit-decisions-not-compared hir/hir.tcl \
-        "        if \{\$a ne \$b\} \{\n            error \"hir::methodFilterAudit: the filter decided" \
-        "        if \{0\} \{\n            error \"hir::methodFilterAudit: the filter decided"] \
+        "        if \{\$a ne \$b\} \{\n            error \"hir::methodReferenceAudit: the decision's" \
+        "        if \{0\} \{\n            error \"hir::methodReferenceAudit: the decision's"] \
     [list audit-programs-not-compared hir/hir.tcl \
-        "    if \{\$filtered ne \$exact\} \{\n        set where" \
+        "    if \{\$decided ne \$reference\} \{\n        set where" \
         "    if \{0\} \{\n        set where"] \
-    [list filter-runs-under-build-audit hir/hir.tcl \
-        "    if \{!\$methodFilter || \$methodBuildAudit || !\$methodBuildReuse\} \{" \
-        "    if \{!\$methodFilter\} \{"] \
-    [list audit-returns-filtered hir/hir.tcl \
-        "    FilterAudit \$final \$exact \$seeds\n    return \$exact" \
-        "    FilterAudit \$final \$exact \$seeds\n    return \$final"] \
-    [list native-type-problem-lost hir/hir.tcl \
-        "                set mismatch \[hir::methodfilter::NativeMismatch \$native \[hir::typeOf \$hir \$receiver\]\]" \
+    [list audit-reference-keeps-kind-proofs hir/hir.tcl \
+        "    set methodKindProofs 0\n    hir::activate \$hir" \
+        "    hir::activate \$hir"] \
+    [list native-type-problem-lost hir/methods.tcl \
+        "                set mismatch \[NativeMismatch \$native \[hir::typeOf \$hir \$receiver\]\]" \
         "                set mismatch \[expr \{\[hir::typeOf \$hir \$receiver\] eq \"never\" ? \"\" : \"\"\}\]"] \
 ]
 

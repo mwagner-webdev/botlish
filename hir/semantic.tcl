@@ -872,7 +872,11 @@ proc hir::semantic::verify {hirVar} {
                 continue
             }
         }
-        hir::Diagnose hir [DerivedKind $own $callee] [Derived $hir $callee $e $own] $e
+        # The call's own problem with its callee: no instance of the callee
+        # is valid for these arguments (hir::CheckingCall).
+        hir::CheckingCall $e {
+            hir::Diagnose hir [DerivedKind $own $callee] [Derived $hir $callee $e $own] $e
+        }
     }
 }
 

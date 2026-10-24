@@ -141,7 +141,8 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [STATIC-COMPILE.md](STATIC-COMPILE.md) -- `static compile:`: compiler diagnostics as recoverable values
 - [STATIC-DECISION-ECONOMICS.md](STATIC-DECISION-ECONOMICS.md) -- how many builds deciding static blocks takes
-- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- deciding method-style calls by receiver kind and named-struct declaration: fewer trial builds, the same decisions
+- [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- kind proofs in the method-call decision: candidates the receiver's kind or a named struct's declaration rules out need no build of their own
+- [METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md](METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) -- method-style calls decided by each call's own checks, certified relative to the decided program: the semantic rule, its procedure, an independent oracle and the economics
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals
@@ -291,6 +292,6 @@ Botlish to find what the language, library, compiler and tools need.
 - [POST-M8A-COMMON-INEFFICIENCY-CENSUS.md](POST-M8A-COMMON-INEFFICIENCY-CENSUS.md) -- post-M8.a cross-workload inefficiency census
 - [POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md](POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- post-module-statics exact-target census
 - [POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md](POST-STRUCTURAL-FN-DYNAMIC-CENSUS.md) -- dynamic callable census after structural function types
-- [EXACT-METHOD-DECISION-MISATTRIBUTION.md](EXACT-METHOD-DECISION-MISATTRIBUTION.md) -- an open defect of the exact method-call decision: an outer call's rejected receiver charged to the inner call, so a valid `xs.at(i).length()` chain is rejected when the exact decision decides it
+- [EXACT-METHOD-DECISION-MISATTRIBUTION.md](EXACT-METHOD-DECISION-MISATTRIBUTION.md) -- a defect of the former exact method-call decision, fixed by METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md: an outer call's rejected receiver charged to the inner call, so a valid `xs.at(i).length()` chain was rejected
 - [FUZZING-EXAMPLES-AOT.md](FUZZING-EXAMPLES-AOT.md) -- fuzzing the example applications as executables
 - [FUZZING-ARGV-PROGRAMS.md](FUZZING-ARGV-PROGRAMS.md) -- fuzzing argv-driven programs

@@ -1357,7 +1357,7 @@ test se-method-invalidated {a call whose receiver a rejected block changes is de
     list [sdDiff $a $b] [seSame $text 0] [lsort -unique [lmap d [dict get $a diagnostics] {lindex $d 0}]]
 } -result {{} {} AMBIGUOUS-METHOD-CALL}
 
-test se-build-reuse-identical {a method-call decision build that would repeat the build it started from is not made again (hir::MethodConfig) -- with or without static blocks, the program is the one building it again gives} -body {
+test se-build-reuse-identical {a method-call decision build that would repeat the build it started from is not made again (hir::methods::Config) -- with or without static blocks, the program is the one building it again gives} -body {
     set programs [list \
         [seSuite 10 type 1] \
         "$::seErased[seSite a $::seContributor][seSite b $::seConsumer][seSite c [seTypeFail 0]]0\n" \
@@ -1380,35 +1380,39 @@ test se-build-reuse-identical {a method-call decision build that would repeat th
 } -result {{} {} {} {} {} {}}
 
 # A chain of method-style calls on one receiver: each `arr.at(i)` narrows
-# `arr` for the statements after it, so the receiver of the next is stable
-# only once the call before is decided -- one link per pass. Every link
-# chooses its second candidate (std::mutable_array::at), so each pass's trial 1
-# has the configuration the pass before built (hir::MethodConfig). And a
-# chain whose links choose different candidates (swap's first, at's
-# second): its second pass's trial 0 is the build the decision started
-# from, its third pass's trial 1 the second pass's.
+# `arr` for the statements after it. Under the reference rule (no kind
+# proof) the kind wave still chooses the stand-ins, a trial round tries every
+# call at its other candidates, and certification judges each by its single
+# deviations; a deviation whose configuration an earlier build had is read
+# from its record (hir::methods::Config). And a chain whose links choose
+# different candidates (swap's first, at's second).
 set ::seMethodChain "import std::list\nimport std::mutable_array\nimport std::mutable_vector\n\nfn f() -> List\[int\] errors IndexNotFound:\n    arr = std::mutable_array::create(3, 0)\n    x = arr.at(0)\n    y = arr.at(1)\n    z = arr.at(2)\n    \[x, y, z\]\n\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
 set ::seMethodMixed "import std::list\nimport std::mutable_array\nimport std::mutable_vector\n\nfn f() -> List\[int\] errors IndexNotFound:\n    arr = std::mutable_array::create(3, 0)\n    old = arr.swap(0, 5)\n    x = arr.at(0)\n    y = arr.at(1)\n    \[old, x, y\]\n\nr = f():\n    on IndexNotFound:\n        \[\]\nr\n"
+# Two candidates that both fit a String receiver, a lexical `length` and
+# std::str::length: the trial round builds the call at the second, and the
+# certification's single deviation is that configuration again (a build
+# other than the one the decision started from, read from its record).
+set ::seMethodTwo "import std::str\n\nfn length(s: str) -> int:\n    1\n\nfn m(s: str) -> int:\n    s.length()\n\nm(\"ab\")\n"
 
-test se-method-memo {a method-call decision builds no configuration twice: a trial whose configuration an earlier build of the decision had is read from what was recorded of that build (hir::MethodConfig, hir::MethodTrialRecord) -- the decided program is the one building every trial gives, and the audit (every reused build made again) finds the same} -body {
+test se-method-memo {a method-call decision builds no configuration twice: a build whose configuration an earlier build of the decision had is read from what was recorded of that build (hir::methods::Config, hir::methods::Record) -- the build the decision started from and any later one (a trial round's configuration that a single deviation needs again) -- the decided program is the one building every build again gives, and the audit (every reused build made again) finds the same} -body {
     set results {}
-    foreach text [list $::seMethodChain $::seMethodMixed] {
+    foreach text [list $::seMethodChain $::seMethodMixed $::seMethodTwo] {
         set counts {}
         set records {}
         foreach {reuse audit} {1 0 0 0 1 1} {
-            # (The exact decision only: the kind filter, hir/methodfilter.tcl,
-            # decides before it and takes other builds; tests/method-filter.test
-            # owns it.)
-            set saved [list $hir::methodBuildReuse $hir::methodBuildAudit $hir::methodFilter]
+            # (The reference rule: every candidate judged by its own build,
+            # no kind proof -- with kind proofs the chain is settled by the
+            # kind waves, tests/method-filter.test.)
+            set saved [list $hir::methodBuildReuse $hir::methodBuildAudit $hir::methodKindProofs]
             set hir::methodBuildReuse $reuse
             set hir::methodBuildAudit $audit
-            set hir::methodFilter 0
+            set hir::methodKindProofs 0
             try {
                 set before [hir::BuildStats]
                 lappend records [sdCompile batched $text]
                 set after [hir::BuildStats]
             } finally {
-                lassign $saved hir::methodBuildReuse hir::methodBuildAudit hir::methodFilter
+                lassign $saved hir::methodBuildReuse hir::methodBuildAudit hir::methodKindProofs
             }
             lappend counts [expr {[dict get $after methodTrials] - [dict get $before methodTrials]}]
         }
@@ -1416,7 +1420,7 @@ test se-method-memo {a method-call decision builds no configuration twice: a tri
             [sdDiff [lindex $records 0] [lindex $records 2]] [dict get [lindex $records 0] diagnostics]
     }
     set results
-} -result {{6 9 6} {} {} {} {6 9 6} {} {} {}}
+} -result {{8 9 8} {} {} {} {7 8 7} {} {} {} {1 2 1} {} {} {{AMBIGUOUS-METHOD-CALL {method-style call "length" is ambiguous: more than one visible function accepts the receiver (length, std::str::length); there is no precedence between them: call the one you mean explicitly, e.g. length(receiver, ...)}}}}
 
 # The batched run itself (hir::static::Simulate), on a synthetic dependency
 # relation: sites a, u, f in post-order; u depends on a and on f, f on
@@ -1517,7 +1521,7 @@ test se-property-subsume-local {the contract-boundary check of what an uncontrac
     regexp {if \{!\$diagnose \|\| \$value eq "" \|\| \[ErasedErrors \$hir\] eq \{\}\} \{\s*return} $body
 } -result 1
 
-test se-property-subsume-positions {what the contract-boundary edges rely on (hir/staticdeps.tcl, Z:site): the check skips exactly the coroutine operations the analysis lists, checks a handle only when its construction is in the body, and reports only in the completion walk -- before which hir::CheckOnce records the diagnostics so far (beforeCompletions), shifted past the method-style call rejections hir::DecideMethodCalls prepends} -body {
+test se-property-subsume-positions {what the contract-boundary edges rely on (hir/staticdeps.tcl, Z:site): the check skips exactly the coroutine operations the analysis lists, checks a handle only when its construction is in the body, and reports only in the completion walk -- before which hir::CheckOnce records the diagnostics so far (beforeCompletions), shifted past the method-style call rejections hir::methods::Reject prepends} -body {
     set skipped [lsort [regexp -all -inline {core::coroutines::[a-z]+Native} [info body hir::completions::SubsumeCall]]]
     set listed [lsort [regexp -all -inline {core::coroutines::[a-z]+Native} [info body hir::staticdeps::CoroutineOperations]]]
     set reporters {}
@@ -1537,7 +1541,7 @@ test se-property-subsume-positions {what the contract-boundary edges rely on (hi
         [regexp {set thunk \[hir::coroutines::thunkOfHandle \$hir \$value\]\s*if \{\$thunk eq ""\} \{\s*return} [info body hir::completions::SubsumeHandle]] \
         $reporters $walkers \
         [regexp {dict set hir beforeCompletions \[list 0 \[llength \[dict get \$hir diagnostics\]\]\]\s*hir::errorsets::verify hir\n} [info body hir::CheckOnce]] \
-        [regexp {dict set final diagnostics \[concat \[list \$added\] \$diagnostics\]\s*if \{\[dict exists \$final beforeCompletions\]\}} [info body hir::DecideMethodCallsExact]]
+        [regexp {dict set final diagnostics \[concat \[list \$added\] \$diagnostics\]\s*if \{\[dict exists \$final beforeCompletions\]\}} [info body hir::methods::Reject]]
 } -result {1 1 completions.tcl errorsets.tcl 1 1}
 
 test se-property-ownership-verdict {release scopes, and so AFFINE-PATH-RELEASE-UNSUPPORTED, are computed only for a program the ownership analysis accepts as a whole, whose diagnostics are exactly the kinds hir/staticdeps.tcl's C:verdict lists; a semantic instance's carried to its call reads "call to" -- the facts the verdict's edges rely on} -body {

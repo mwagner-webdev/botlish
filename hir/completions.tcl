@@ -1106,8 +1106,12 @@ proc hir::completions::SubsumeCall {hirVar ctxVar diagnose guard e node} {
             [core::coroutines::doneNative] [core::coroutines::releaseNative]]} {
         return
     }
-    foreach arg [dict get $node args] final [hir::callables::ArgContexts $hir $e] {
-        Subsume hir ctx $diagnose $guard $arg $final
+    # The contract boundary at the arguments is the call's own check: the
+    # structural types they acquire are its callee's (hir::CheckingCall).
+    hir::CheckingCall $e {
+        foreach arg [dict get $node args] final [hir::callables::ArgContexts $hir $e] {
+            Subsume hir ctx $diagnose $guard $arg $final
+        }
     }
     set finals [YieldFinals $hir]
     if {[dict exists $finals $e]} {

@@ -471,7 +471,9 @@ proc hir::callables::WalkExpr {hirVar e} {
             # makes with it.
             WalkExpr hir [dict get $node callee]
             foreach arg [dict get $node args] context [ArgContexts $hir $e] {
-                CheckPreserved hir $arg $context {passed as an ordinary call argument}
+                # (The argument's preservation is the call's own check: its
+                # context is the callee's parameter, hir::CheckingCall.)
+                hir::CheckingCall $e {CheckPreserved hir $arg $context {passed as an ordinary call argument}}
                 WalkExpr hir $arg
             }
         }
