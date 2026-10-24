@@ -131,7 +131,8 @@ both 0 "-check of every standard-library module" -check "${loaders[@]}"
   fail "the application checked $(grep -c '^== load-std-' "$work/a.out") of the ${#loaders[@]} standard-library loaders"
 loaded=$(grep -A1 '^== load-std-' "$work/a.out" | grep -c '^   ok$' || true)
 (( loaded > 0 )) || fail "no standard-library module loads in the application"
-echo "   the standard library's ${#loaders[@]} modules: $loaded load, $(( ${#loaders[@]} - loaded )) refused alike (another platform's, or internal to the standard library)"
+refused=$(awk '/^== load-std-/ {name=$2} /^   error: / && name != "" {sub(/^.*\(/, "", $0); sub(/\)$/, "", $0); print name " (" $0 ")"; name=""} /^   ok$/ {name=""}' "$work/a.out" | sed -e 's/^load-std-//' -e 's/\.bot / /' | tr '\n' ' ')
+echo "   the standard library's ${#loaders[@]} modules: $loaded load; refused alike: ${refused:-none}"
 for program in coroutine.bot context.bot hello-darwin.bot; do
   both 0 "-emit-nir of $program" -emit-nir -backend interp "$program"
 done

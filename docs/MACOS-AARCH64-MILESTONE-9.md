@@ -611,6 +611,40 @@ codesign --force --sign - Botlish.app
 
 <<EV rest>>
 
+## 39. Known limitations
+
+* **Not notarized; Gatekeeper rejects it.** Ad-hoc signatures only
+  (`spctl --assess`: `rejected`). A copy downloaded by a browser is
+  quarantined and needs the user's explicit permission to open (section
+  41); `curl`, `unzip` and CI artifacts are not quarantined.
+* **Apple Silicon only.** One architecture, arm64, deployment target 11.0:
+  no universal binary, no Intel Mac (the native backend's macOS port is
+  AArch64's, MACOS-AARCH64-PORT-AUDIT.md).
+* **Executables need Apple's Command Line Tools**, the system linker's C
+  compiler driver: without them `-emit-native-executable` and the native
+  run of a program that calls C report `NATIVE LINK TOOLCHAIN` with
+  `xcode-select --install` (section 19). There is no stub linker on macOS.
+* **Not a GUI application.** `LSBackgroundOnly`: it has no window, Dock
+  icon or menu, and opening it from Finder is not a supported use (not
+  tested). It is used from a terminal, through `Contents/MacOS/botlish` or
+  a symbolic link on PATH; nothing creates the link for the user.
+* **No automatic update, no version scheme.** `CFBundleShortVersionString`
+  0.0; `-version` and `BotlishSourceRevision` name the commit.
+* **Built in CI only.** The download is CI's artifact; there is no release
+  workflow that publishes it beside the Linux single executable's
+  `single-latest` prerelease.
+* **The Linux single executable, in a directory whose name is not ASCII,
+  without a UTF-8 locale** (a pre-existing limitation, found by this
+  milestone's tests and not changed by it): Tcl decodes its own path with
+  the C locale's ISO 8859-1 before `single/main.tcl` runs, so `info
+  nameofexecutable` is mis-decoded and the language server cannot start
+  its analysis worker (`single/smoke-test.sh` on such a copy: `FAIL: -lsp
+  hover`; every other check passes). The arguments, the environment and
+  the paths `single/main.tcl` computes are re-decoded (section 11); the
+  worker's command line is `lsp/server.tcl`'s, from `info
+  nameofexecutable`. The macOS application is not affected: Tcl's startup
+  encoding on macOS without a locale is UTF-8.
+
 ## 40. Prerequisites for explicit static-library/framework declarations
 
 A program that calls C names its libraries with `extern c library "NAME"`,
