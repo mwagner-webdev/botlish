@@ -16,7 +16,10 @@
 #   mount       + mounting the archive: a copy whose archive has no main.tcl
 #   -version    + single/main.tcl and main.tcl answering -version
 #   -help       Compilerpedia's overview
-#   check       -check of a small program (the front end)
+#   check       -check of a small program (the front end, through the
+#               compiler service)
+#   interp      a run of the same program on the interpreter: the front end
+#               and a Tcl run
 #   service     the language server: initialize, a document's diagnostics,
 #               shutdown (one session, its analysis worker started)
 #   driver      the native driver's own start (botlish-native target ...)
@@ -28,8 +31,10 @@
 #
 # The phases are differences of these: Tcl's load and initialization is
 # tcl - process, the archive's mount mount - tcl, the compiler's startup
-# -version - mount, the native compilation jit - check, the object and the
-# host's link executable - jit. Needs Apple's developer tools (the link).
+# -version - mount, the native compilation and run jit - interp (less
+# the interpreter's run of a program that does almost nothing), the object
+# and the host's link executable - jit. Needs Apple's developer tools (the
+# link).
 
 set runs 7
 set args $argv
@@ -113,6 +118,7 @@ dict set times mount [best [list [file join $noMain Contents MacOS botlish] -ver
 dict set times -version [best [list $launcher -version]]
 dict set times -help [best [list $launcher -help]]
 dict set times check [best [list $launcher -check $program]]
+dict set times interp [best [list $launcher -backend interp $program]]
 set session [file join $work session.sh]
 set f [open $session w]
 puts $f {frame() { printf 'Content-Length: %d\r\n\r\n%s' "$(printf %s "$1" | LC_ALL=C wc -c | tr -d ' ')" "$1"; }
@@ -134,7 +140,7 @@ foreach {name ms} $times {
 puts [format "   %-12s %8.1f   (tcl - process: loading Tcl.framework, Tcl_Init)" "  tcl" [expr {[dict get $times tcl] - [dict get $times process]}]]
 puts [format "   %-12s %8.1f   (mount - tcl: mounting the compiler archive)" "  mount" [expr {[dict get $times mount] - [dict get $times tcl]}]]
 puts [format "   %-12s %8.1f   (-version - mount: single/main.tcl, main.tcl)" "  compiler" [expr {[dict get $times -version] - [dict get $times mount]}]]
-puts [format "   %-12s %8.1f   (jit - check: lowering, the driver, Cranelift, the run)" "  native" [expr {[dict get $times jit] - [dict get $times check]}]]
+puts [format "   %-12s %8.1f   (jit - interp: lowering, the driver, Cranelift, the run)" "  native" [expr {[dict get $times jit] - [dict get $times interp]}]]
 puts [format "   %-12s %8.1f   (executable - jit: the object and the host's link, less the run)" "  link" [expr {[dict get $times executable] - [dict get $times jit]}]]
 
 puts "== a moved application's first and second -version (ms)"

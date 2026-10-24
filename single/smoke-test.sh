@@ -77,6 +77,7 @@ for tool in tclsh tclsh9.0 rustc cargo cc ld; do
   echo "   host $tool: $(command -v "$tool" || echo no)"
 done
 
+mkdir -p "$work/home-nolink"
 if (( macos )); then
   # The application installs nothing: it runs and links its files where they
   # are, in the bundle.
