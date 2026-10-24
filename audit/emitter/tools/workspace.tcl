@@ -15,7 +15,12 @@
 
 namespace eval emitws {
     variable root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
-    variable scratches {}
+    # (Kept when the file is sourced again -- tests/emitter.test sources
+    # property.tcl, which sources it -- so no earlier directory is lost.)
+    variable scratches
+    if {![info exists scratches]} {
+        set scratches {}
+    }
 }
 
 proc emitws::make {dir args} {
