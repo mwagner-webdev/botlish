@@ -19,13 +19,22 @@
 #   deep-D    as resume, every yield D frames below the coroutine's root
 #             (D = 1, 8, 32); baseline: the same D-deep recursion with no
 #             coroutine: what a deep suspension costs per resume
+#   nested    one coroutine resumed N times, each resume resuming a
+#             coroutine nested in it (constructed in its body) and yielding
+#             what that yielded: two levels of switches per resume;
+#             baseline as resume
 #   exit-K    N constructions each abandoned suspended on an early exit of
 #             kind K: a return, a fail, a callee's propagated error, a break
 #             (released there, COROUTINES.md "Release on every early exit");
 #             baseline: the same function building the struct instead
 #
 # then, natively, the allocations per construction (the runtime's
-# allocation report) and the memory of suspended and terminal coroutines:
+# allocation report); what a collection costs per suspended coroutine
+# (under BOTLISH_NATIVE_GC_STRESS=1, a collection at every allocation site:
+# M constructions at the bottom of a recursion holding K coroutines
+# suspended, against the same recursion with M = 0, so that each of the M
+# constructions' collections walks the K suspended stacks; K = 0 and 1000);
+# and the memory of suspended and terminal coroutines:
 # the peak resident set of a process holding K suspended (or completed)
 # coroutines at once (each suspended D frames deep) against one holding none,
 # per coroutine (K = -hold on the Tcl backends, -native-hold natively);
@@ -114,6 +123,11 @@ proc programText {kind n {depth 1}} {
         resume-base {
             append p "fn make(i: int) -> V:\n    V {n: i}\n"
             append p [Repeat $n {make(i).n}]
+        }
+        nested {
+            append p "fn counter(m: int) -> V:\n    loop i from 0 to m:\n        yield V {n: i}\n    return V {n: m}\n"
+            append p "fn relay(m: int) -> V:\n    coroutine {step: inner, first} = counter(m)\n    loop i from 0 to m:\n        yield inner()\n    return first\n"
+            append p "coroutine {step, first} = relay($n)\n" [Repeat $n {step().n}]
         }
         deep {
             append p "fn down(d: int, i: int) -> int:\n    if d == 0:\n        yield V {n: i}\n        return 0\n    down(d - 1, i) + 1\n"
@@ -236,6 +250,7 @@ foreach {label kind base depth} {
     "resume, yield 1 frame deep" deep deep-base 1
     "resume, yield 8 frames deep" deep deep-base 8
     "resume, yield 32 frames deep" deep deep-base 32
+    "resume of a coroutine that resumes one nested in it" nested resume-base 1
     "construction, abandoned on an early return" exit-return exit-return-base 1
     "construction, abandoned on a fail" exit-fail exit-fail-base 1
     "construction, abandoned on a callee's propagated error" exit-error exit-error-base 1
@@ -263,6 +278,35 @@ dict for {kind info} [dict get $report byKind] {
     set bytes [dict get $info allocatedBytes]
     puts "| $kind | $count | $bytes | [format %.2f [expr {double($count) / $n}]] objects, [format %.0f [expr {double($bytes) / $n}]] B |"
 }
+
+# Collections with suspended coroutines, natively, under GC stress: K
+# coroutines held suspended by a recursion, then M constructions at its
+# bottom (each allocating, so collecting); the M constructions' share is
+# the run with M against the run with M = 0.
+proc gcHeldText {k m} {
+    set p $::prelude
+    append p "fn w(k: int) -> V:\n    yield V {n: k}\n    return V {n: k + 1}\n"
+    append p "fn spin(i: int, m: int) -> int:\n    if i == m:\n        return 0\n    coroutine {first} = w(i)\n    first.n + spin(i + 1, m)\n"
+    append p "fn hold(k: int, m: int) -> int:\n    if k == 0:\n        return spin(0, m)\n    coroutine {step, first} = w(k)\n    x = hold(k - 1, m)\n    if std::coroutine::done?(step):\n        return x\n    x + first.n\n"
+    append p "hold($k, $m)\n"
+    return $p
+}
+set gcM 200
+puts "\nCollections with K coroutines suspended (GC stress: a collection at every allocation site; the collections of $gcM constructions made while K are held, best of $runs runs):\n"
+puts "| K suspended | collections | time per collection |"
+puts "|---:|---:|---:|"
+set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+set perCollection {}
+foreach k {0 1000} {
+    lassign [native::measure [surface::compile [gcHeldText $k $gcM] -warnings off] $runs] _ _ with withCollections
+    lassign [native::measure [surface::compile [gcHeldText $k 0] -warnings off] $runs] _ _ without withoutCollections
+    set collections [expr {$withCollections - $withoutCollections}]
+    set each [expr {($with - $without) * 1000.0 / max(1, $collections)}]
+    dict set perCollection $k $each
+    puts "| $k | $collections | [ns $each] |"
+}
+unset ::env(BOTLISH_NATIVE_GC_STRESS)
+puts "\nPer suspended coroutine, per collection: [ns [expr {([dict get $perCollection 1000] - [dict get $perCollection 0]) / 1000.0}]] (its stack walked from its switch's record)."
 
 # Peak resident memory: through Linux's /proc and Python's resource module,
 # which Windows has neither of (WINDOWS-X86-64-MILESTONE-5.md measures a
