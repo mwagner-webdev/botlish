@@ -1,7 +1,8 @@
 # dfa-workloads.test -- the JSON and YAML workloads of declared recognizers
 # (examples/dfa/json, examples/dfa/yaml; DFA-COROUTINE-MILESTONE-2.md, "The
 # workloads"), on every backend (the interpreter, the Tcl compiler,
-# cranelift-generic, cranelift with coroutine fusion and without):
+# cranelift-generic, cranelift with coroutine fusion and without; the native
+# ones where the host has native coroutines, nativeCoroutines):
 #
 # * the recognizers against the reference interpreter of
 #   tests/dfa-support.tcl;
@@ -534,7 +535,7 @@ test dfa-json-by-hand {the same number recognizer written by hand as an ordinary
     list [expr {[llength $cases] > 150}] [lrange $bad 0 3]
 } -result {1 {}}
 
-test dfa-json-composition {one driver for any recognizer, through a factory that starts it and returns its handle (composition.bot): the same tokens as lex_text, and its recognizers kept on the general runtime by fusion -- the optimizer's interprocedural limit, the probe's point} -body {
+test dfa-json-composition {one driver for any recognizer, through a factory that starts it and returns its handle (composition.bot): the same tokens as lex_text, and its recognizers kept on the general runtime by fusion -- the optimizer's interprocedural limit, the probe's point} -constraints nativeCoroutines -body {
     set dir [workloads main.bot {import composition
 import json
 
