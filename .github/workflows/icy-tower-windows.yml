@@ -108,7 +108,8 @@ jobs:
         run: |
           out=dist/icy-tower-windows-x86_64
           cp LICENSE "$out/LICENSE-Botlish.txt"
-          cp ~/.cache/botlish/c-header-src/sdl3/LICENSE.txt "$out/LICENSE-SDL3.txt"
+          sdlsrc=$(tclsh9.0 tools/c-bindgen.tcl fetch sdl3 | tail -n 1)
+          cp "$sdlsrc/LICENSE.txt" "$out/LICENSE-SDL3.txt"
           cat > "$out/README.txt" <<EOF
           Icy Tower, a game written in Botlish -- Windows x86-64
           =========================================================
