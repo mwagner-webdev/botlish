@@ -13,7 +13,7 @@
 //! guard reads at every point of a nested lifecycle; the faults on and around
 //! coroutine stacks that are not an overflow; and a switch made at every
 //! offset near the end of the stack it leaves.
-use botlish_native::runtime::coroutine::{rt_co_create, rt_co_resume, rt_co_start, rt_co_yield, CoroutineObj};
+use botlish_native::runtime::coroutine::{rt_co_create, rt_co_release, rt_co_resume, rt_co_start, rt_co_yield, CoroutineObj};
 use botlish_native::runtime::metrics::AllocMode;
 use botlish_native::runtime::native_stack::NativeStack;
 use botlish_native::runtime::ops::GenericEntry;
@@ -592,6 +592,19 @@ fn coroutine_child(parts: &[&str]) {
                         descend_then(edge(&stack) + offset, resume_handle);
                     }
                     "start-from-thread" => {
+                        // A start on a pooled fiber: the thread is already a
+                        // fiber and the pool holds one, as for every start but
+                        // a thread's first.
+                        let warm = coroutine(p, yield_forever);
+                        rt_co_start(p, warm);
+                        rt_co_release(p, warm);
+                        HANDLE.store(coroutine(p, yield_forever) as usize, Ordering::Relaxed);
+                        descend_then(edge(&stack) + offset, start_handle);
+                    }
+                    "fresh-start-from-thread" => {
+                        // A thread's first start: its conversion to a fiber,
+                        // CreateFiberEx and the fiber's setup, all near the
+                        // edge.
                         HANDLE.store(coroutine(p, yield_forever) as usize, Ordering::Relaxed);
                         descend_then(edge(&stack) + offset, start_handle);
                     }
@@ -665,11 +678,15 @@ fn coroutine_fault_checks(report: &mut Report) {
 /// X from 0 to 2 KiB in 16-byte steps: wherever the switch path (the
 /// helper's frames, SwitchToFiber's own, the arriving side) meets the end of
 /// the stack, the run either completes or ends in the overflow line -- never
-/// a crash. Both must occur, or the sweep missed the edge.
+/// a crash. Both must occur, or the sweep missed the edge. A thread's first
+/// start -- its conversion, CreateFiberEx and the fiber's setup, which take
+/// more of the stack than a switch -- is swept the same way from 0 to 64 KiB
+/// in 512-byte steps.
 fn coroutine_sweep_checks(report: &mut Report) {
-    for direction in ["resume-from-thread", "start-from-thread", "resume-from-coroutine", "yield-from-coroutine"] {
+    for (direction, step) in [("resume-from-thread", 16), ("start-from-thread", 16), ("fresh-start-from-thread", 512),
+        ("resume-from-coroutine", 16), ("yield-from-coroutine", 16)] {
         let (mut completed, mut overflowed, mut failures) = (0, 0, Vec::new());
-        for offset in (0..=2048).step_by(16) {
+        for offset in (0..=128 * step).step_by(step) {
             let outcome = run_child_with(&format!("co-sweep:{direction}:{offset}"), &[("BOTLISH_NATIVE_COROUTINE_STACK_BYTES", "262144")]);
             if outcome.code == 0 && outcome.stdout.trim() == "completed" {
                 completed += 1;
