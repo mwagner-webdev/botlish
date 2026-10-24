@@ -13,34 +13,28 @@
 //!   [botlish-aot-stub ELF][image payload][payload length: u64 LE]["BOTLIMG1"]
 //! ```
 //!
-//! The image holds exactly what the `rustc` linker's generated startup crate
-//! compiles in -- the program metadata (`ProgramInfo`), the constant pool,
-//! the module-static count, every function's code range and stack-map table
-//! -- plus the machine code itself: the Cranelift object's allocated
-//! sections, laid out by `codegen::aot` with every reference inside the
-//! image already resolved and the references that need a load address left
-//! as [`Fixup`]s. At startup the stub reads the image back from its own file
-//! (`/proc/self/exe`), maps the code into fresh memory next to its own text
-//! (so a call to a runtime helper stays a direct `call rel32`), applies the
-//! fixups, makes the code executable, and builds the Vm exactly as the
-//! generated startup crate does: `Vm::new`, `constants::install`, the
-//! frame map, `aot::run`. Nothing is compiled or interpreted at startup and
-//! the machine code is the same Cranelift output either linker links.
+//! The image is the Cranelift object's allocated sections -- the machine
+//! code and the program's data, its descriptor among them
+//! (runtime::program) -- laid out by `codegen::aot` with every reference
+//! inside the image already resolved and the references that need a load
+//! address left as [`Fixup`]s, plus where the program's `botlish_program`
+//! record lies in it. At startup the stub reads the image back from its own
+//! file (`/proc/self/exe`), maps the code into fresh memory next to its own
+//! text (so a call to a runtime helper stays a direct `call rel32`), applies
+//! the fixups, makes the code executable, and builds the Vm from the record
+//! exactly as the rustc linker's startup does (`program::instantiate_linked`),
+//! then `aot::run`. Nothing is compiled or interpreted at startup and the
+//! machine code is the same Cranelift output either linker links.
 
 use super::aot::ProgramEntry;
-use super::constants::{self, Const};
-use super::framemap::{FunctionMap, ProgramMap};
-use super::metrics::AllocMode;
-use super::value::{FloatType, Kind};
-use super::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
-use crate::nir::OpCode;
+use super::program::{LinkedProgram, Reader, Writer};
+use super::vm::Vm;
 use std::io::{Read, Seek, SeekFrom};
-use std::rc::Rc;
 
 /// The last 8 bytes of a stub-linked executable.
 pub const MAGIC: &[u8; 8] = b"BOTLIMG1";
 /// The payload's own format revision, its first word.
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 /// What a load-time reference points at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,21 +59,7 @@ pub enum Fixup {
     Call32 { at: u64, import: u32, addend: i64, trampoline: u64 },
 }
 
-/// One function's code in the image: its direct entry (with its stack maps)
-/// and its generic entry, as image offsets and sizes in bytes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FunctionCode {
-    pub direct: u64,
-    pub direct_size: u32,
-    pub entry: u64,
-    pub entry_size: u32,
-    pub safepoints: Vec<(u32, Vec<u32>)>,
-}
-
 pub struct Image {
-    pub info: ProgramInfo,
-    pub constants: Vec<Const>,
-    pub statics: u32,
     /// The runtime helpers the code references, by name.
     pub imports: Vec<String>,
     /// The image's initialized bytes; it is `size` bytes long in memory, the
@@ -87,11 +67,14 @@ pub struct Image {
     pub code: Vec<u8>,
     pub size: u64,
     /// `[0, executable)` is machine code (and trampolines), page-aligned;
-    /// everything after it is writable data (the GOT, the context area).
+    /// everything after it is writable data (the GOT, the program's data,
+    /// the context area).
     pub executable: u64,
     pub fixups: Vec<Fixup>,
-    /// Indexed by NIR function id; function 0 is the program's entry.
-    pub functions: Vec<FunctionCode>,
+    /// The image offset of the program's `botlish_program` record
+    /// (runtime::program's LinkedProgram), whose pointers the fixups
+    /// relocate.
+    pub program: u64,
 }
 
 /// A digest of the runtime ABI the generated code is compiled against: the
@@ -99,8 +82,7 @@ pub struct Image {
 /// calls. The driver records its own in the image; the stub refuses an image
 /// recorded by a driver whose runtime differs from its own (a stub and a
 /// driver from different builds), since that code would address fields that
-/// are not there; so does a system-linked executable's runtime archive
-/// (`read_linked`).
+/// are not there.
 pub fn abi_fingerprint() -> u64 {
     use super::{bytesobj, strobj, value, vm};
     let mut words: Vec<u64> = vec![
@@ -131,8 +113,10 @@ pub fn abi_fingerprint() -> u64 {
         // never runs on a runtime of the other plan.
         u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
     ];
-    // The helpers' names, not their addresses: an address would keep the
-    // helper's code in every system-linked executable (ops.rs's
+    // The helpers' names and parameter counts, never their addresses: an
+    // executable whose startup computes this (every executable's, through
+    // runtime::program::read_linked) would otherwise keep every helper
+    // linked, one that calls five of them too (ops.rs's
     // HELPER_SIGNATURES).
     for &(name, params) in super::ops::HELPER_SIGNATURES {
         words.extend(name.bytes().map(u64::from));
@@ -148,100 +132,24 @@ pub fn abi_fingerprint() -> u64 {
 
 // ---------------------------------------------------------------- encoding
 
-struct Writer(Vec<u8>);
-
-impl Writer {
-    fn u32(&mut self, v: u32) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn u64(&mut self, v: u64) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn i64(&mut self, v: i64) {
-        self.0.extend_from_slice(&v.to_le_bytes());
-    }
-    fn len(&mut self, n: usize) {
-        self.u64(n as u64);
-    }
-    fn bytes(&mut self, b: &[u8]) {
-        self.len(b.len());
-        self.0.extend_from_slice(b);
-    }
-    fn str(&mut self, s: &str) {
-        self.bytes(s.as_bytes());
-    }
-    fn opt_str(&mut self, s: Option<&str>) {
-        match s {
-            Some(s) => {
-                self.u32(1);
-                self.str(s);
-            }
-            None => self.u32(0),
+fn write_target(w: &mut Writer, t: Target) {
+    match t {
+        Target::Local(offset) => {
+            w.u32(0);
+            w.u64(offset);
         }
-    }
-    fn target(&mut self, t: Target) {
-        match t {
-            Target::Local(offset) => {
-                self.u32(0);
-                self.u64(offset);
-            }
-            Target::Import(index) => {
-                self.u32(1);
-                self.u64(u64::from(index));
-            }
+        Target::Import(index) => {
+            w.u32(1);
+            w.u64(u64::from(index));
         }
     }
 }
 
-struct Reader<'a> {
-    data: &'a [u8],
-    at: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
-        let end = self.at.checked_add(n).filter(|&end| end <= self.data.len()).ok_or("truncated program image")?;
-        let slice = &self.data[self.at..end];
-        self.at = end;
-        Ok(slice)
-    }
-    fn u32(&mut self) -> Result<u32, String> {
-        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
-    }
-    fn u64(&mut self) -> Result<u64, String> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-    fn i64(&mut self) -> Result<i64, String> {
-        Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
-    }
-    fn len(&mut self) -> Result<usize, String> {
-        usize::try_from(self.u64()?).map_err(|e| e.to_string())
-    }
-    fn bytes(&mut self) -> Result<Vec<u8>, String> {
-        let n = self.len()?;
-        Ok(self.take(n)?.to_vec())
-    }
-    fn str(&mut self) -> Result<String, String> {
-        String::from_utf8(self.bytes()?).map_err(|e| e.to_string())
-    }
-    fn opt_str(&mut self) -> Result<Option<String>, String> {
-        Ok(match self.u32()? {
-            0 => None,
-            _ => Some(self.str()?),
-        })
-    }
-    fn kind(&mut self) -> Result<Option<Kind>, String> {
-        match self.opt_str()? {
-            None => Ok(None),
-            Some(name) => Kind::parse(&name).map(Some).ok_or_else(|| format!("unknown kind {name:?}")),
-        }
-    }
-    fn target(&mut self) -> Result<Target, String> {
-        Ok(match self.u32()? {
-            0 => Target::Local(self.u64()?),
-            _ => Target::Import(u32::try_from(self.u64()?).map_err(|e| e.to_string())?),
-        })
-    }
+fn read_target(r: &mut Reader) -> Result<Target, String> {
+    Ok(match r.u32()? {
+        0 => Target::Local(r.u64()?),
+        _ => Target::Import(u32::try_from(r.u64()?).map_err(|e| e.to_string())?),
+    })
 }
 
 impl Image {
@@ -250,76 +158,6 @@ impl Image {
         let mut w = Writer(Vec::new());
         w.u32(FORMAT);
         w.u64(abi_fingerprint());
-        let info = &self.info;
-        w.len(info.functions.len());
-        for f in &info.functions {
-            w.len(f.arity);
-            w.str(&f.pnames);
-        }
-        w.len(info.natives.len());
-        for n in &info.natives {
-            w.str(&n.name);
-            match n.arity {
-                Some(arity) => {
-                    w.u32(1);
-                    w.len(arity);
-                }
-                None => w.u32(0),
-            }
-            w.len(n.params.len());
-            for kind in &n.params {
-                w.opt_str(kind.map(Kind::name));
-            }
-            w.str(n.op.spelling());
-        }
-        w.len(info.shapes.len());
-        for s in &info.shapes {
-            w.opt_str(s.name.as_deref());
-            w.len(s.fields.len());
-            for field in &s.fields {
-                w.str(field);
-            }
-            w.u32(u32::from(s.opaque));
-        }
-        w.len(info.enums.len());
-        for e in &info.enums {
-            w.str(&e.name);
-            w.len(e.cases.len());
-            for case in &e.cases {
-                w.str(case);
-            }
-        }
-        w.len(self.constants.len());
-        for c in &self.constants {
-            match c {
-                Const::Str(text) => {
-                    w.u32(0);
-                    w.str(text);
-                }
-                Const::Bytes(bytes) => {
-                    w.u32(1);
-                    w.bytes(bytes);
-                }
-                Const::BigInt(digits) => {
-                    w.u32(2);
-                    w.str(digits);
-                }
-                Const::Native(index) => {
-                    w.u32(3);
-                    w.u32(*index);
-                }
-                Const::FnValue(func) => {
-                    w.u32(4);
-                    w.u32(*func);
-                }
-                Const::Float(ty, bits) => {
-                    w.u32(5);
-                    w.str(ty.prefix());
-                    w.u64(*bits);
-                }
-            }
-        }
-        w.u32(self.statics);
         w.len(self.imports.len());
         for name in &self.imports {
             w.str(name);
@@ -333,7 +171,7 @@ impl Image {
                 Fixup::Abs64 { at, target, addend } => {
                     w.u32(0);
                     w.u64(at);
-                    w.target(target);
+                    write_target(&mut w, target);
                     w.i64(addend);
                 }
                 Fixup::Call32 { at, import, addend, trampoline } => {
@@ -345,21 +183,7 @@ impl Image {
                 }
             }
         }
-        w.len(self.functions.len());
-        for f in &self.functions {
-            w.u64(f.direct);
-            w.u32(f.direct_size);
-            w.u64(f.entry);
-            w.u32(f.entry_size);
-            w.len(f.safepoints.len());
-            for (pc, roots) in &f.safepoints {
-                w.u32(*pc);
-                w.len(roots.len());
-                for root in roots {
-                    w.u32(*root);
-                }
-            }
-        }
+        w.u64(self.program);
         w.0
     }
 
@@ -372,50 +196,6 @@ impl Image {
         if r.u64()? != abi_fingerprint() {
             return Err("program image was compiled for a different native runtime build".to_string());
         }
-        let mut info = ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() };
-        for _ in 0..r.len()? {
-            let arity = r.len()?;
-            info.functions.push(FunctionInfo { arity, pnames: r.str()? });
-        }
-        for _ in 0..r.len()? {
-            let name = r.str()?;
-            let arity = match r.u32()? {
-                0 => None,
-                _ => Some(r.len()?),
-            };
-            let params = (0..r.len()?).map(|_| r.kind()).collect::<Result<Vec<_>, _>>()?;
-            let spelling = r.str()?;
-            let op = OpCode::parse(&spelling).ok_or_else(|| format!("unknown native operation {spelling:?}"))?;
-            info.natives.push(NativeInfo { name, arity, params, op });
-        }
-        for _ in 0..r.len()? {
-            let name = r.opt_str()?;
-            let fields = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
-            let opaque = r.u32()? != 0;
-            info.shapes.push(ShapeInfo { name, fields, opaque });
-        }
-        for _ in 0..r.len()? {
-            let name = r.str()?;
-            let cases = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
-            info.enums.push(EnumInfo { name, cases });
-        }
-        let mut constants = Vec::new();
-        for _ in 0..r.len()? {
-            constants.push(match r.u32()? {
-                0 => Const::Str(r.str()?),
-                1 => Const::Bytes(r.bytes()?),
-                2 => Const::BigInt(r.str()?),
-                3 => Const::Native(r.u32()?),
-                4 => Const::FnValue(r.u32()?),
-                5 => {
-                    let prefix = r.str()?;
-                    let ty = FloatType::of_prefix(&prefix).ok_or_else(|| format!("unknown float type {prefix}"))?;
-                    Const::Float(ty, r.u64()?)
-                }
-                tag => return Err(format!("unknown constant tag {tag}")),
-            });
-        }
-        let statics = r.u32()?;
         let imports = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
         let code = r.bytes()?;
         let size = r.u64()?;
@@ -423,32 +203,22 @@ impl Image {
         let mut fixups = Vec::new();
         for _ in 0..r.len()? {
             fixups.push(match r.u32()? {
-                0 => Fixup::Abs64 { at: r.u64()?, target: r.target()?, addend: r.i64()? },
+                0 => Fixup::Abs64 { at: r.u64()?, target: read_target(&mut r)?, addend: r.i64()? },
                 1 => Fixup::Call32 { at: r.u64()?, import: r.u32()?, addend: r.i64()?, trampoline: r.u64()? },
                 tag => return Err(format!("unknown fixup tag {tag}")),
             });
         }
-        let mut functions = Vec::new();
-        for _ in 0..r.len()? {
-            let direct = r.u64()?;
-            let direct_size = r.u32()?;
-            let entry = r.u64()?;
-            let entry_size = r.u32()?;
-            let mut safepoints = Vec::new();
-            for _ in 0..r.len()? {
-                let pc = r.u32()?;
-                let roots = (0..r.len()?).map(|_| r.u32()).collect::<Result<Vec<_>, _>>()?;
-                safepoints.push((pc, roots));
-            }
-            functions.push(FunctionCode { direct, direct_size, entry, entry_size, safepoints });
-        }
+        let program = r.u64()?;
         if r.at != data.len() {
             return Err("trailing bytes after the program image".to_string());
         }
-        if code.len() as u64 > size || executable > size || functions.is_empty() {
+        if code.len() as u64 > size
+            || executable > size
+            || program.checked_add(std::mem::size_of::<LinkedProgram>() as u64).is_none_or(|end| end > size)
+        {
             return Err("malformed program image".to_string());
         }
-        Ok(Image { info, constants, statics, imports, code, size, executable, fixups, functions })
+        Ok(Image { imports, code, size, executable, fixups, program })
     }
 
     /// The image appended to the executable at PATH (`/proc/self/exe` for a
@@ -484,154 +254,13 @@ pub fn trailer(payload_len: usize) -> [u8; 16] {
     t
 }
 
-// ------------------------------------------------- system-linked executables
-
-/// The first 8 bytes of a system-linked executable's program description
-/// (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): the data object
-/// `botlish_program_description` that `codegen::aot`'s startup object
-/// defines and the runtime archive's `main` reads. Its revision is the last
-/// byte, as the stub image's trailer's.
-pub const LINKED_MAGIC: &[u8; 8] = b"BOTLSYS1";
-
-/// The startup interface's symbol: the runtime archive defines it (one byte,
-/// its revision) and every startup object refers to it, so a startup object
-/// and an archive of different interface revisions fail to *link* (an
-/// undefined `botlish_runtime_startup_v1`), before anything runs. Its name
-/// changes with `LINKED_MAGIC`'s revision.
-pub const LINKED_INTERFACE_SYMBOL: &str = "botlish_runtime_startup_v1";
-
-/// The description's fixed header: the magic, the function count N, the
-/// metadata length, the interface symbol's address. Then 2N addresses (each
-/// function's direct entry `botlish_fn_I` and its generic entry
-/// `botlish_entry_I`, by NIR id: the linker's relocations), then the
-/// metadata: an [`Image`] with no machine code, no imports and no fixups
-/// (the code is the executable's own, already linked), whose functions'
-/// sizes and stack maps the addresses complete.
-pub const LINKED_HEADER: usize = 32;
-
-/// Bounds of a description's counts, far above any program: a description
-/// that claims more is damaged, and is never read.
-const LINKED_MAX_FUNCTIONS: u64 = 1 << 24;
-const LINKED_MAX_METADATA: u64 = 1 << 36;
-
-impl Image {
-    /// The image of a program the system linker links: its metadata alone.
-    /// FUNCTIONS carry sizes and stack maps; their offsets are unused (the
-    /// description's addresses replace them).
-    pub fn linked(info: ProgramInfo, constants: Vec<Const>, statics: u32, functions: Vec<FunctionCode>) -> Image {
-        Image { info, constants, statics, imports: Vec::new(), code: Vec::new(), size: 0, executable: 0, fixups: Vec::new(), functions }
-    }
-
-    /// The bytes of `botlish_program_description` before the linker fills
-    /// in its addresses (all zero here: each is a relocation's), and the
-    /// offsets of the slots to relocate: the interface symbol's, then every
-    /// function's direct and generic entry, by NIR id.
-    pub fn linked_description(&self) -> (Vec<u8>, usize, Vec<(usize, usize)>) {
-        let metadata = self.encode();
-        let n = self.functions.len();
-        let mut bytes = Vec::with_capacity(LINKED_HEADER + 16 * n + metadata.len());
-        bytes.extend_from_slice(LINKED_MAGIC);
-        bytes.extend_from_slice(&(n as u64).to_le_bytes());
-        bytes.extend_from_slice(&(metadata.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(&0u64.to_le_bytes());
-        let slots = (0..n).map(|i| (LINKED_HEADER + 16 * i, LINKED_HEADER + 16 * i + 8)).collect();
-        bytes.resize(LINKED_HEADER + 16 * n, 0);
-        bytes.extend_from_slice(&metadata);
-        (bytes, LINKED_HEADER - 8, slots)
-    }
-}
-
-/// Reads the program description at DESCRIPTION, linked into this
-/// executable, whose interface slot must hold INTERFACE (the archive's own
-/// `botlish_runtime_startup_v1`): the program, ready to instantiate. Every
-/// count is checked before it is used, the metadata is decoded with the
-/// stub image's checks (`Image::decode`: format, ABI fingerprint, bounds),
-/// and it must hold no machine code of its own.
-///
-/// # Safety
-/// DESCRIPTION is the address of a `botlish_program_description` the
-/// system linker linked (LINKED_HEADER bytes at least; the header's counts
-/// say how many more are there).
-pub unsafe fn read_linked(description: *const u8, interface: *const u8) -> Result<Loaded, String> {
-    let word = |at: usize| -> u64 { unsafe { std::ptr::read_unaligned(description.add(at).cast::<u64>()) } };
-    let magic = unsafe { std::slice::from_raw_parts(description, 8) };
-    if magic != LINKED_MAGIC {
-        return Err(if magic[..7] == LINKED_MAGIC[..7] {
-            format!("program description revision {:?}, this runtime reads revision {:?}", magic[7] as char, LINKED_MAGIC[7] as char)
-        } else {
-            "no program description (damaged executable)".to_string()
-        });
-    }
-    let (n, length) = (word(8), word(16));
-    if n == 0 || n > LINKED_MAX_FUNCTIONS || length > LINKED_MAX_METADATA {
-        return Err("malformed program description".to_string());
-    }
-    if word(24) != interface as u64 {
-        return Err("program description is linked against another runtime's startup interface".to_string());
-    }
-    let (n, length) = (n as usize, length as usize);
-    let addresses: Vec<u64> = (0..2 * n).map(|i| word(LINKED_HEADER + 8 * i)).collect();
-    let metadata = unsafe { std::slice::from_raw_parts(description.add(LINKED_HEADER + 16 * n), length) };
-    let image = Image::decode(metadata)?;
-    if !image.code.is_empty() || !image.imports.is_empty() || !image.fixups.is_empty() || image.size != 0 {
-        return Err("program description carries machine code: a stub image, not a linked program".to_string());
-    }
-    if image.functions.len() != n || image.info.functions.len() != n {
-        return Err("program description's function table does not match its program".to_string());
-    }
-    let mut functions = image.functions;
-    for (i, f) in functions.iter_mut().enumerate() {
-        (f.direct, f.entry) = (addresses[2 * i], addresses[2 * i + 1]);
-        if f.direct == 0 || f.entry == 0 {
-            return Err("program description has an unlinked function address".to_string());
-        }
-    }
-    Ok(Loaded { base: 0, info: image.info, constants: image.constants, statics: image.statics, functions })
-}
-
-/// The runtime archive's `main` (native/runtime-archive): what Rust's own
-/// startup does to the process (`aot::rust_process_setup`), then the
-/// program linked beside it, read from DESCRIPTION and run with the
-/// process's own arguments by `aot::run`, as the rustc linker's generated
-/// `main` and the stub's run theirs, and the process ends as theirs do
-/// (`std::process::exit`, which flushes Rust's standard output). A
-/// description it cannot read (`read_linked`) is reported as NATIVE STARTUP,
-/// status 1; a panic outside the program's own thread is status 101, as a
-/// Rust `main`'s.
-///
-/// # Safety
-/// As `read_linked`.
-pub unsafe fn linked_main(description: *const u8, interface: *const u8) -> i32 {
-    let status = std::panic::catch_unwind(|| -> i32 {
-        super::aot::rust_process_setup();
-        let argv = super::aot::process_argv();
-        match unsafe { read_linked(description, interface) } {
-            Ok(loaded) => super::aot::run(argv, move || loaded.instantiate()),
-            Err(error) => {
-                eprintln!("{error} (NATIVE STARTUP)");
-                1
-            }
-        }
-    });
-    match status {
-        Ok(status) => std::process::exit(status),
-        Err(_) => {
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-            101
-        }
-    }
-}
-
 // ------------------------------------------------------------------ loading
 
 /// An image mapped and relocated in this process: plain addresses and data,
 /// so it can move to the thread `aot::run` starts.
 pub struct Loaded {
     base: usize,
-    info: ProgramInfo,
-    constants: Vec<Const>,
-    statics: u32,
-    functions: Vec<FunctionCode>,
+    program: usize,
 }
 
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -694,7 +323,7 @@ impl Image {
         {
             return Err(format!("cannot make program code executable: {}", std::io::Error::last_os_error()));
         }
-        Ok(Loaded { base, info: self.info, constants: self.constants, statics: self.statics, functions: self.functions })
+        Ok(Loaded { base, program: usize::try_from(self.program).map_err(|e| e.to_string())? })
     }
 }
 
@@ -729,29 +358,13 @@ fn map_near(anchor: usize, size: usize) -> Result<usize, String> {
 }
 
 impl Loaded {
-    /// The program's Vm and entry, built as the `rustc` linker's generated
-    /// startup builds them (codegen/aot.rs's `startup`). Runs on the thread
-    /// that runs the program.
-    pub fn instantiate(self) -> (Box<Vm>, ProgramEntry) {
-        let base = self.base;
-        let mut vm = Vm::new(Rc::new(self.info), AllocMode::Off);
-        let entries: Vec<usize> = self.functions.iter().map(|f| base + f.entry as usize).collect();
-        constants::install(&mut vm, &self.constants, &entries, self.statics);
-        let mut map = ProgramMap::new();
-        for f in &self.functions {
-            let start = base + f.direct as usize;
-            map.push(FunctionMap {
-                code_start: start,
-                code_end: start + f.direct_size as usize,
-                safepoints: f.safepoints.clone(),
-            });
-            let start = base + f.entry as usize;
-            map.push(FunctionMap { code_start: start, code_end: start + f.entry_size as usize, safepoints: vec![] });
-        }
-        map.finish();
-        vm.set_framemap(Rc::new(map));
-        let entry: ProgramEntry = unsafe { std::mem::transmute(base + self.functions[0].direct as usize) };
-        (vm, entry)
+    /// The program's Vm and entry, built from its relocated record exactly as
+    /// the `rustc` linker's startup builds them (`program::instantiate_linked`).
+    /// Runs on the thread that runs the program.
+    pub fn instantiate(self) -> Result<(Box<Vm>, ProgramEntry), String> {
+        // SAFETY: the record lies in the mapped image (decode checked its
+        // bounds), and load applied every fixup of its pointers.
+        unsafe { super::program::instantiate_linked(&*((self.base + self.program) as *const LinkedProgram)) }
     }
 }
 
@@ -767,7 +380,13 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    super::aot::run(argv, move || loaded.instantiate())
+    super::aot::run(argv, move || match loaded.instantiate() {
+        Ok(started) => started,
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            std::process::exit(1);
+        }
+    })
 }
 
 #[cfg(test)]
@@ -776,27 +395,6 @@ mod tests {
 
     fn sample() -> Image {
         Image {
-            info: ProgramInfo {
-                functions: vec![FunctionInfo { arity: 0, pnames: String::new() }, FunctionInfo { arity: 2, pnames: "a b".into() }],
-                natives: vec![
-                    NativeInfo { name: "std::str::length".into(), arity: Some(1), params: vec![Some(Kind::Str)], op: OpCode::StrLen },
-                    NativeInfo { name: "list".into(), arity: None, params: vec![None], op: OpCode::ListNew },
-                ],
-                shapes: vec![
-                    ShapeInfo { name: None, fields: vec!["a".into(), "b".into()], opaque: false },
-                    ShapeInfo { name: Some("m::Point".into()), fields: vec!["x".into()], opaque: true },
-                ],
-                enums: vec![EnumInfo { name: "Color".into(), cases: vec!["Red".into(), "Green".into()] }],
-            },
-            constants: vec![
-                Const::Str("h\u{e9}llo \u{1f600}".into()),
-                Const::Bytes(vec![0, 255, 10]),
-                Const::BigInt("-123456789012345678901234567890".into()),
-                Const::Float(FloatType::Float64, 1.5f64.to_bits()),
-                Const::Native(1),
-                Const::FnValue(1),
-            ],
-            statics: 3,
             imports: vec!["rt_int_add".into(), "rt_raise".into()],
             code: vec![0xc3, 0x90, 0x90],
             size: 8192,
@@ -806,10 +404,7 @@ mod tests {
                 Fixup::Abs64 { at: 4104, target: Target::Import(1), addend: 0 },
                 Fixup::Call32 { at: 1, import: 0, addend: -4, trampoline: 64 },
             ],
-            functions: vec![
-                FunctionCode { direct: 0, direct_size: 16, entry: 16, entry_size: 8, safepoints: vec![(5, vec![0, 8])] },
-                FunctionCode { direct: 32, direct_size: 4, entry: 40, entry_size: 4, safepoints: vec![] },
-            ],
+            program: 4112,
         }
     }
 
@@ -818,13 +413,9 @@ mod tests {
         let image = sample();
         let decoded = Image::decode(&image.encode()).expect("decode");
         assert_eq!(decoded.encode(), image.encode());
-        assert_eq!(decoded.constants, image.constants);
         assert_eq!(decoded.fixups, image.fixups);
-        assert_eq!(decoded.functions, image.functions);
-        assert_eq!(decoded.info.natives[0].op, OpCode::StrLen);
-        assert_eq!(decoded.info.natives[1].arity, None);
-        assert_eq!(decoded.info.shapes[1].name.as_deref(), Some("m::Point"));
-        assert!(decoded.info.shapes[1].opaque);
+        assert_eq!(decoded.imports, image.imports);
+        assert_eq!(decoded.program, image.program);
     }
 
     #[test]
@@ -837,87 +428,9 @@ mod tests {
         let mut other_abi = bytes.clone();
         other_abi[4] ^= 1;
         assert!(matches!(Image::decode(&other_abi), Err(e) if e.contains("different native runtime build")));
+        let mut outside = sample();
+        outside.program = outside.size;
+        assert!(Image::decode(&outside.encode()).is_err());
     }
 
-    /// A linked description (the system linker's startup object's data)
-    /// with the addresses the linker would have filled in.
-    fn linked_bytes(interface: *const u8) -> Vec<u8> {
-        let mut image = sample();
-        image.code.clear();
-        image.imports.clear();
-        image.fixups.clear();
-        let image = Image::linked(image.info, image.constants, image.statics, image.functions);
-        let (mut bytes, interface_slot, slots) = image.linked_description();
-        bytes[interface_slot..interface_slot + 8].copy_from_slice(&(interface as u64).to_le_bytes());
-        for (i, (direct, entry)) in slots.into_iter().enumerate() {
-            bytes[direct..direct + 8].copy_from_slice(&(0x1000 * (i as u64 + 1)).to_le_bytes());
-            bytes[entry..entry + 8].copy_from_slice(&(0x1000 * (i as u64 + 1) + 0x800).to_le_bytes());
-        }
-        bytes
-    }
-
-    #[test]
-    fn linked_description_round_trips() {
-        static INTERFACE: u8 = 1;
-        let bytes = linked_bytes(&INTERFACE);
-        let loaded = unsafe { read_linked(bytes.as_ptr(), &INTERFACE) }.expect("read");
-        assert_eq!(loaded.base, 0);
-        assert_eq!(loaded.statics, 3);
-        assert_eq!(loaded.info.functions[1].pnames, "a b");
-        assert_eq!(loaded.constants, sample().constants);
-        let addresses: Vec<(u64, u32, u64, u32)> = loaded.functions.iter().map(|f| (f.direct, f.direct_size, f.entry, f.entry_size)).collect();
-        assert_eq!(addresses, [(0x1000, 16, 0x1800, 8), (0x2000, 4, 0x2800, 4)]);
-        assert_eq!(loaded.functions[0].safepoints, vec![(5, vec![0, 8])]);
-    }
-
-    /// Every damage a description can have is refused before anything of it
-    /// is used: another revision, no magic, counts out of bounds, another
-    /// runtime's interface, an unlinked address, another runtime build's
-    /// fingerprint, a stub image (with code) in its place, a function table
-    /// that does not match.
-    #[test]
-    fn linked_description_rejects_damage() {
-        static INTERFACE: u8 = 1;
-        static OTHER: u8 = 1;
-        let good = linked_bytes(&INTERFACE);
-        let refused = |bytes: &[u8]| unsafe { read_linked(bytes.as_ptr(), &INTERFACE) }.err().expect("refused");
-        let mut revision = good.clone();
-        revision[7] = b'2';
-        assert!(refused(&revision).contains("revision '2'"), "{}", refused(&revision));
-        let mut magic = good.clone();
-        magic[0] = b'X';
-        assert_eq!(refused(&magic), "no program description (damaged executable)");
-        let mut count = good.clone();
-        count[8..16].copy_from_slice(&0u64.to_le_bytes());
-        assert_eq!(refused(&count), "malformed program description");
-        assert!(unsafe { read_linked(good.as_ptr(), &OTHER) }.err().unwrap().contains("another runtime's startup interface"));
-        let mut unlinked = good.clone();
-        unlinked[LINKED_HEADER..LINKED_HEADER + 8].copy_from_slice(&0u64.to_le_bytes());
-        assert_eq!(refused(&unlinked), "program description has an unlinked function address");
-        let mut fingerprint = good.clone();
-        fingerprint[LINKED_HEADER + 32 + 4] ^= 1;
-        assert!(refused(&fingerprint).contains("different native runtime build"));
-        // A stub image's payload (machine code, fixups) in a description.
-        let payload = sample().encode();
-        let mut stub = good[..LINKED_HEADER + 32].to_vec();
-        stub[16..24].copy_from_slice(&(payload.len() as u64).to_le_bytes());
-        stub.extend_from_slice(&payload);
-        assert!(refused(&stub).contains("carries machine code"));
-        // A header that claims a function the metadata does not have: the
-        // address table then overlaps the metadata, which no longer decodes
-        // or no longer matches.
-        let mut table = good.clone();
-        table[8..16].copy_from_slice(&3u64.to_le_bytes());
-        table.extend_from_slice(&[0; 16]);
-        assert!(unsafe { read_linked(table.as_ptr(), &INTERFACE) }.is_err());
-    }
-
-    #[test]
-    fn aot_image_op_spellings_round_trip() {
-        // Every operation a NIR native can name survives the image's encoding
-        // by spelling (nir.rs's op_spellings!).
-        for op in [OpCode::IAdd, OpCode::StrIsTclAlpha, OpCode::SyscallLinuxX86_64, OpCode::AsciiShortEq] {
-            assert_eq!(OpCode::parse(op.spelling()), Some(op));
-        }
-    }
 }

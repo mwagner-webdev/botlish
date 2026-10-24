@@ -12,8 +12,9 @@
 # the detectors run against it:
 #
 #   * cargo test --bin botlish-native aot (the link plans' unit tests, the
-#     system linker's among them) and --lib aotimage (the stub image's and
-#     the system-linked description's encoding and checks);
+#     system linker's among them) and --lib aotimage program (the stub
+#     image's encoding and checks, and the program record's and
+#     descriptor's, which every startup reads);
 #   * tests/native-executable.test (formats, parity, paths, diagnostics,
 #     stack overflows, coroutines);
 #   * tests/argv.test's standalone tests (argv-standalone-*);
@@ -238,8 +239,8 @@ try {
             continue
         }
         set killers {}
-        foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib aotimage} {
-            lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target $filter] status output
+        foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib {-- aotimage program}} {
+            lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target {*}$filter] status output
             if {$status != 0} {
                 set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
                 lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"

@@ -600,6 +600,16 @@ there. Instead:
 
 ### The host spike: JS to Botlish through React Native's C++ layer
 
+> **Since the census:** NATIVE-LIBRARY-MILESTONE-1.md replaced `libmode.tcl`
+> with the compiler's own native libraries. The host spike now builds
+> `librnprobe.a` with `main.tcl -emit-native-library rnprobe` (the probe's
+> functions are `exported c fn`s), `rnpackage.tcl` reads the library's
+> manifest and header, and the adapter owns one library instance. It prints
+> the twenty lines below unchanged (the 100,000 calls in 94 ms), under GC
+> stress too, and `host/host_async.cpp`'s worker owns its own instance.
+> The stack-depth table below is unchanged. The record of the run is that
+> milestone's report, section 11.
+
 `tclsh9.0 audit/react-native/tools/host-spike.tcl` (section 16) does, from
 the committed tree:
 
@@ -704,6 +714,11 @@ runtime, module and Botlish worker torn down
 * All of it holds under GC stress.
 
 ### Two Botlish libraries in one binary
+
+> **Since the census:** compiler-built libraries keep every symbol but their
+> C API local, each with a private runtime copy, and their calls are scoped
+> to their own program (NATIVE-LIBRARY-MILESTONE-1.md, section 6;
+> `tests/native-library.test`'s `nl-two-libraries`, `nl-nested-libraries`).
 
 The probe library (`rnprobe_*`) and a second one from a different module
 (`other_twice`) were linked into one C program:
@@ -1219,6 +1234,13 @@ Foo.podspec
   toolchain adapter does.
 
 ## 16. Reproducing the probes
+
+> **Since the census:** `tools/libmode.tcl`, `probe/standin.c` and `ci/` are
+> history: `libmode.tcl` no longer runs against the tree, and
+> `react-native-probe.yml` runs by hand from the census's own commit (its
+> `CENSUS_REF`). The host spike runs the compiler's library
+> (NATIVE-LIBRARY-MILESTONE-1.md); `audit/react-native/README.md` says
+> which file is which.
 
 The probe material:
 

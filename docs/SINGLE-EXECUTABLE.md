@@ -140,13 +140,15 @@ besides, and still no rustc.
 | needs at compile time | rustc, a system linker, `libbotlish_native.rlib` and `deps/` | `botlish-aot-stub` | the host's C compiler driver (link.exe on Windows) and the runtime archive `libbotlish_runtime.a` |
 | links C | yes | no: refused | yes |
 | hosts | Linux x86-64, AArch64; macOS AArch64; Windows x86-64 | Linux x86-64 | the same as rustc |
-| startup | generated Rust, compiled | the image appended to the stub | the description in a startup object, read by the archive's `main` |
+| startup | the fixed startup crate, compiled | the image appended to the stub | the archive's `main` |
 
 `auto` -- what the single executable sets -- is the system linker for a
 program that calls C or declares a library (the NIR's `foreign` and `link`
 entries, never its source text) and the stub for any other on a host that
 has it, the system linker elsewhere. It never chooses rustc. All three link
-the same program object and start it the same way (`runtime::aot::run`);
+the same program object, whose `botlish_program` record is the program's
+startup data (`runtime::program`, NATIVE-LIBRARY-MILESTONE-1.md), and start
+it the same way (`program::instantiate_linked`, `runtime::aot::run`);
 `tests/system-linker.test` checks that their startups install exactly the
 same program state (`BOTLISH_NATIVE_STARTUP_REPORT`).
 
@@ -161,14 +163,12 @@ short:
   Windows), built by the same `cargo build --release --manifest-path
   native/Cargo.toml` as the driver. It holds the runtime and Rust's standard
   library, no code generator, and the executable's C `main`.
-* **The startup object** is data only: `botlish_program_description`, the
-  stub image's own metadata (`runtime::aotimage::Image`: program information,
-  constant pool, module statics, every function's code sizes and stack maps,
-  the ABI fingerprint) with no machine code, then the addresses of the
-  startup interface and of every function's two entries, which the linker's
-  relocations fill in. The driver makes it with Cranelift's object writer,
-  for the program object's target.
-* **The link** is the host's: `cc -pie ... program.o startup.o -L... -Wl,--start-group
+* **No startup object.** The program object is the link's only object: its
+  `botlish_program` record -- the program's descriptor (program
+  information, constant pool, module statics, every function's code sizes
+  and stack maps) and its code table, whose addresses the linker's
+  relocations fill in -- is the startup data of every linker's executable.
+* **The link** is the host's: `cc -pie ... program.o -L... -Wl,--start-group
   -l... -Wl,--end-group libbotlish_runtime.a -lgcc_s -lutil -lrt -lpthread -lm
   -ldl -lc` on Linux (Apple clang with `-dead_strip` and no group on macOS,
   link.exe with the static C runtime on Windows), the program's link plan in
@@ -176,17 +176,19 @@ short:
   compiler driver is `cc` on PATH (link.exe on Windows, from a Developer
   environment), or `BOTLISH_NATIVE_SYSTEM_LINKER`; the archive is the one
   beside the driver, or `BOTLISH_NATIVE_RUNTIME`.
-* **At startup** the archive's `main` does what Rust's own startup does to
-  the process (SIGPIPE ignored, missing standard descriptors opened on
-  /dev/null), reads the description -- its revision, bounds, the ABI
-  fingerprint, that it carries no code -- and runs the program with
-  `aot::run`, as the other two startups do.
+* **At startup** the archive's `main` (`runtime::aot::linked_main`) does
+  what Rust's own startup does to the process (SIGPIPE ignored, missing
+  standard descriptors opened on /dev/null), then exactly what the rustc
+  linker's startup crate does: it reads the record --
+  `program::instantiate_linked` checks its magic and the ABI fingerprint --
+  and runs the program with `aot::run`.
 * **Failures** say what failed: `NATIVE LINK TOOLCHAIN` / `NATIVE AOT
   TOOLCHAIN` (no C compiler driver, no linker, a `link.exe` that is not
   Microsoft's), `... RUNTIME` (the archive missing, not an archive, of
-  another platform or startup interface), `NATIVE LINK` with the linker's
-  own lines (a missing library or symbol), `NATIVE STARTUP` from the
-  executable (a description of another runtime build). A failed link
+  another platform, or without a runtime helper the program calls),
+  `NATIVE LINK` with the linker's own lines (a missing library or symbol),
+  `NATIVE STARTUP` from the executable (a record of another runtime
+  build). A failed link
   publishes nothing. `BOTLISH_NATIVE_LINK_LOG=FILE` appends every system
   link's command line and the linker's output to FILE.
 * **The executable** is an ordinary one of the platform: its Botlish

@@ -474,7 +474,7 @@ pub(crate) mod tests {
     }
 
     fn vm(compiled: &CompiledProgram, stress: bool) -> Box<Vm> {
-        let info = ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() };
+        let info = ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() };
         let mut vm = Vm::new(Rc::new(info), AllocMode::Off);
         compiled.install_constants(&mut vm);
         vm.set_framemap(compiled.framemap.clone());

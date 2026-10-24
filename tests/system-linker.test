@@ -1,10 +1,10 @@
 # The `system` linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md,
-# native/src/codegen/aot.rs's link_system, native/src/runtime/aotimage.rs's
-# linked description, native/runtime-archive): standalone executables linked
-# by the host's own C compiler driver (link.exe on Windows) from the program
-# object, a startup object the driver makes (the program's description) and
-# the precompiled runtime archive built with the compiler -- no rustc, no
-# Rust library, no checkout.
+# native/src/codegen/aot.rs's link_system, native/runtime-archive,
+# runtime::aot::linked_main): standalone executables linked by the host's own
+# C compiler driver (link.exe on Windows) from the program object -- which
+# carries the program's startup record, `botlish_program`, as for every
+# linker (runtime::program) -- and the precompiled runtime archive built with
+# the compiler -- no rustc, no Rust library, no checkout.
 #
 #   * Its startup builds the same Vm as the rustc linker's and the stub's
 #     (BOTLISH_NATIVE_STARTUP_REPORT, Vm::startup_report): the same report,
@@ -19,7 +19,7 @@
 #     with nothing but the C driver (and its linker) on PATH.
 #   * auto picks it for a program that calls C and the stub for any other.
 #   * Every failure says what failed: no C driver, no linker, no runtime
-#     archive, one of another platform, a damaged description at startup,
+#     archive, one of another platform or build, a damaged record at startup,
 #     a missing library or symbol -- and leaves an earlier executable as it
 #     was.
 #
@@ -122,6 +122,11 @@ proc startupReport {executable} {
     set channel [open $report rb]; set text [read $channel]; close $channel
     removeFile startup-report
     return $text
+}
+
+proc readFile {path} {
+    set channel [open $path rb]
+    try { return [read $channel] } finally { close $channel }
 }
 
 proc writeFile {path text} {
@@ -527,7 +532,7 @@ test system-linker-static-incorporation {static libraries and the runtime archiv
     list $run $foreign [expr {[lindex $expected 0] in $needed}]
 } -result {{0 42 {}} {} 1}
 
-test system-linker-ordinary-executable {a system-linked executable is the platform's own kind of executable: its format and architecture, its Botlish functions and the program description as symbols, the runtime archive's main, nothing appended} -constraints {systemLinker linuxHost} -body {
+test system-linker-ordinary-executable {a system-linked executable is the platform's own kind of executable: its format and architecture, its Botlish functions and the program record as symbols, the runtime archive's main, nothing appended} -constraints {systemLinker linuxHost} -body {
     set dir [makeDirectory system-linker-ordinary]
     set exe [linkWith system [surface::compile "1 + 2" one.bot] [file join $dir program]]
     set header [exec readelf -h $exe]
@@ -537,9 +542,9 @@ test system-linker-ordinary-executable {a system-linked executable is the platfo
     list [regexp {Type:\s+DYN} $header] \
         [regexp [expr {$::hostTarget eq "linux-x86_64" ? {Machine:\s+Advanced Micro Devices X86-64} : {Machine:\s+AArch64}}] $header] \
         [regexp -line {^[0-9a-f]+ T botlish_fn_0$} $symbols] [regexp -line {^[0-9a-f]+ T botlish_entry_0$} $symbols] \
-        [regexp -line {^[0-9a-f]+ [RDd] botlish_program_description$} $symbols] [regexp -line {^[0-9a-f]+ T main$} $symbols] \
-        [regexp -line {^[0-9a-f]+ R botlish_runtime_startup_v1$} $symbols] [expr {[string range $bytes end-7 end] ne "BOTLIMG1"}]
-} -result {1 1 1 1 1 1 1 1}
+        [regexp -line {^[0-9a-f]+ [RDd] botlish_program$} $symbols] [regexp -line {^[0-9a-f]+ T main$} $symbols] \
+        [expr {[string range $bytes end-7 end] ne "BOTLIMG1"}]
+} -result {1 1 1 1 1 1 1}
 
 # The runtime helpers (rt_*) an executable defines, by its symbol table.
 proc runtimeHelpers {executable} {
@@ -588,28 +593,23 @@ test system-linker-no-rust-toolchain {the system linker links with nothing but t
     list $run [lsearch -all -inline -regexp $traced {rustc|cargo}] [expr {$traced eq "" || "cc" in $traced}]
 } -result {{0 7 {}} {} 1}
 
-# The offset in BYTES (an executable's) of its program description
-# (aotimage::LINKED_HEADER): the magic followed by a header whose metadata,
-# after the address table, starts with the image format word (1) -- not the
-# runtime's own copy of the magic, which its code compares with. -1 if none.
-proc descriptionAt {bytes} {
+# The offset in BYTES (an executable's) of its program record
+# (runtime::program::LinkedProgram: the magic, the fingerprint, the
+# descriptor's address and length, the code table's address and function
+# count, six words) -- not the runtime's own copy of the magic, which its
+# code compares with: the record's length and count words are plausible
+# (the addresses are the linker's, and may be anything in the file). -1 if
+# none.
+proc recordAt {bytes} {
     set at -1
-    while {[set at [string first BOTLSYS1 $bytes [expr {$at + 1}]]] >= 0} {
-        if {[binary scan [string range $bytes $at+8 $at+23] ww n length] != 2 || $n <= 0 || $n > 1 << 24} continue
-        set metadata [expr {$at + 32 + 16 * $n}]
-        if {$length > 0 && $metadata + $length <= [string length $bytes]
-                && [binary scan [string range $bytes $metadata $metadata+3] i format] == 1 && $format == 1} {
+    while {[set at [string first BOTLPRG1 $bytes [expr {$at + 1}]]] >= 0} {
+        if {[binary scan [string range $bytes $at+24 $at+31] w length] == 1
+                && [binary scan [string range $bytes $at+40 $at+47] w n] == 1
+                && $length > 0 && $length < 1 << 32 && $n > 0 && $n < 1 << 24} {
             return $at
         }
     }
     return -1
-}
-
-# The offset of the description's metadata.
-proc descriptionMetadata {bytes} {
-    set at [descriptionAt $bytes]
-    binary scan [string range $bytes $at+8 $at+15] w n
-    return [expr {$at + 32 + 16 * $n}]
 }
 
 test system-linker-auto {auto, the single executable's choice, links a program that calls C or declares a library with the system linker and any other with the stub, where there is one: never with rustc} -constraints {systemLinker} -body {
@@ -623,10 +623,15 @@ test system-linker-auto {auto, the single executable's choice, links a program t
         declares "extern c library \"$library\"\n1 + 2" \
         calls "import std::ffi::c\n\nextern c fn labs(x: std::ffi::c::Long) -> std::ffi::c::Long\n\nlabs(0 - 3)" \
     ] {
-        set exe [linkWith auto [surface::compile $text $name.bot] [file join $dir $name]]
+        # Which linker linked it: the stub's image trailer, or the system
+        # linker's own account of its link (BOTLISH_NATIVE_LINK_LOG).
+        set log [file join $dir $name.log]
+        set exe [withEnv [list BOTLISH_NATIVE_LINK_LOG $log] {
+            linkWith auto [surface::compile $text $name.bot] [file join $dir $name]
+        }]
         set channel [open $exe rb]; set bytes [read $channel]; close $channel
         set stub [expr {[string range $bytes end-7 end] eq "BOTLIMG1"}]
-        set system [expr {[descriptionAt $bytes] >= 0}]
+        set system [expr {[file exists $log] && [string match "system linker: *" [readFile $log]]}]
         lappend results $name [lindex [runCaptured $exe ""] 1] [expr {$stub ? "stub" : $system ? "system" : "?"}]
     }
     removeDirectory system-linker-auto
@@ -636,7 +641,7 @@ test system-linker-auto {auto, the single executable's choice, links a program t
 # ---------------------------------------------------------------------------
 # Failures
 
-test system-linker-runtime-failures {a missing runtime archive, a file that is no archive, an archive of another platform, one of another startup interface and a library that is no runtime archive are NATIVE ... RUNTIME errors that say so, before or at the link, and leave nothing behind} -constraints {systemLinker} -body {
+test system-linker-runtime-failures {a missing runtime archive, a file that is no archive, an archive of another platform, one without the runtime helpers the program calls and a library that is no runtime archive are NATIVE ... RUNTIME errors that say so, before or at the link, and leave nothing behind} -constraints {systemLinker} -body {
     set dir [makeDirectory system-linker-runtime]
     set hir [surface::compile "1 + 2" one.bot]
     set results {}
@@ -656,30 +661,32 @@ test system-linker-runtime-failures {a missing runtime archive, a file that is n
                 [dict get $options -errorcode] [string match $pattern $message]
         }
     }
-    # An archive of this platform whose main reads the description but that
-    # implements another startup interface (no botlish_runtime_startup_v1):
-    # the linker's undefined symbol, said as the archive's. And a static
-    # library of this platform with no main at all.
+    # An archive of this platform whose main reads the program's record but
+    # that has none of the runtime's helpers (another build's runtime, or
+    # none): the linker's undefined helper -- a list program calls
+    # rt_list_new -- said as the archive's. And a static library of this
+    # platform with no main at all.
     if {[testConstraint cToolchain]} {
-        writeFile [file join $dir main.c] "extern const char botlish_program_description;\nint main(void) { return botlish_program_description; }\n"
-        set old [ctool::staticLibrary $dir old [file join $dir main.c]]
+        writeFile [file join $dir main.c] "extern const char botlish_program;\nint main(void) { return botlish_program; }\n"
+        set helperless [ctool::staticLibrary $dir helperless [file join $dir main.c]]
         writeFile [file join $dir other.c] "int other(void) { return 0; }\n"
         set other [ctool::staticLibrary $dir other [file join $dir other.c]]
+        set list [surface::compile "\[1, 2\]" list.bot]
         foreach {case archive pattern} [list \
-                interface $old {*does not implement this driver's startup interface (botlish_runtime_startup_v1)*} \
+                helpers $helperless {*does not define the runtime helper rt_* this driver's code calls: it is another build's*} \
                 main $other {*defines no main: it is no Botlish runtime archive*}] {
             withEnv [list BOTLISH_NATIVE_RUNTIME $archive] {
-                lappend results $case [catch {linkWith system $hir [file join $dir out]} message options] \
+                lappend results $case [catch {linkWith system $list [file join $dir out]} message options] \
                     [dict get $options -errorcode] [string match $pattern $message]
             }
         }
     } else {
-        lappend results interface 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1
+        lappend results helpers 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1
     }
     lappend results [glob -nocomplain -tails -directory $dir out*] [glob -nocomplain -tails -types hidden -directory $dir .botlish-aot-*]
     removeDirectory system-linker-runtime
     set results
-} -result {missing 1 {NATIVE AOT RUNTIME} 1 text 1 {NATIVE AOT RUNTIME} 1 foreign 1 {NATIVE AOT RUNTIME} 1 interface 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1 {} {}}
+} -result {missing 1 {NATIVE AOT RUNTIME} 1 text 1 {NATIVE AOT RUNTIME} 1 foreign 1 {NATIVE AOT RUNTIME} 1 helpers 1 {NATIVE AOT RUNTIME} 1 main 1 {NATIVE AOT RUNTIME} 1 {} {}}
 
 test system-linker-toolchain-failures {no C compiler driver, and a driver that finds no linker, are NATIVE ... TOOLCHAIN errors naming what is missing and how to install it; a C program's is NATIVE LINK TOOLCHAIN} -constraints {systemLinker unixShell} -body {
     set dir [makeDirectory system-linker-toolchain]
@@ -737,16 +744,16 @@ test system-linker-link-failures {a library the linker cannot find and a symbol 
     set results
 } -result {{NATIVE LINK} 1 1 1 {NATIVE LINK} 1 previous {} {NATIVE AOT} 1}
 
-test system-linker-damaged-description {an executable whose description was altered -- another startup revision, a runtime build's fingerprint that is not the archive's -- refuses to start (NATIVE STARTUP) before any program code runs} -constraints {systemLinker} -body {
+test system-linker-damaged-description {an executable whose program record was altered -- another record revision, a runtime build's fingerprint that is not the archive's -- refuses to start (NATIVE STARTUP) before any program code runs} -constraints {systemLinker} -body {
     set dir [makeDirectory system-linker-damaged]
     set exe [linkWith system [surface::compile "1 + 2" one.bot] [file join $dir program]]
     set channel [open $exe rb]; set bytes [read $channel]; close $channel
-    set magic [descriptionAt $bytes]
-    set fingerprint [expr {[descriptionMetadata $bytes] + 4}]
+    set magic [recordAt $bytes]
+    set fingerprint [expr {$magic + 8}]
     set flipped [binary format c [expr {([scan [string index $bytes $fingerprint] %c] ^ 1) & 0xff}]]
     set results {}
     foreach {case damaged pattern} [list \
-            revision [string replace $bytes $magic+7 $magic+7 9] {*program description revision '9', this runtime reads revision '1' (NATIVE STARTUP)*} \
+            revision [string replace $bytes $magic+7 $magic+7 9] {*not a Botlish program record (NATIVE STARTUP)*} \
             fingerprint [string replace $bytes $fingerprint $fingerprint $flipped] {*compiled for a different native runtime build (NATIVE STARTUP)*}] {
         set channel [open $exe wb]; puts -nonewline $channel $damaged; close $channel
         lassign [runCaptured $exe ""] status stdout stderr

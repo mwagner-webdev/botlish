@@ -3545,7 +3545,7 @@ mod tests {
 
     fn vm() -> Box<Vm> {
         Vm::new(
-            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new() }),
+            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         )
     }
@@ -3566,6 +3566,7 @@ mod tests {
                     })
                     .collect(),
                 enums: Vec::new(),
+                errors: Vec::new(),
             }),
             AllocMode::Summary,
         )
@@ -3586,6 +3587,7 @@ mod tests {
                         cases: cases.iter().map(|c| c.to_string()).collect(),
                     })
                     .collect(),
+                errors: Vec::new(),
             }),
             AllocMode::Summary,
         )
@@ -3902,6 +3904,7 @@ mod tests {
                 natives: Vec::new(),
                 shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false }],
                 enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
+                errors: Vec::new(),
             }),
             AllocMode::Summary,
         );
@@ -3994,6 +3997,7 @@ mod tests {
                 natives: Vec::new(),
                 shapes: vec![shape(Some("P"), &["x", "y"]), shape(Some("m::Q"), &["a", "b", "c"]), shape(None, &["p", "q", "e"])],
                 enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
+                errors: Vec::new(),
             }),
             AllocMode::Summary,
         );
@@ -4029,6 +4033,7 @@ mod tests {
                     ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false },
                 ],
                 enums: Vec::new(),
+                errors: Vec::new(),
             }),
             AllocMode::Summary,
         );

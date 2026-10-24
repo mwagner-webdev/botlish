@@ -6,7 +6,7 @@
 #
 # 1. Link, ms (best of RUNS): the driver's `object` (the program object
 #    alone, from NIR: Cranelift) and `native::executable` from the HIR (NIR
-#    lowering in Tcl, the object, the startup and the link) of a program
+#    lowering in Tcl, the object and the link) of a program
 #    that calls no C and of one that calls libc and a static library, with
 #    each linker that links it here; the system link's command line; the
 #    program objects' sizes. The stub's column is nearly all lowering and

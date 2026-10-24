@@ -10,9 +10,10 @@
 //! Three linkers, chosen by `BOTLISH_NATIVE_LINKER` (SINGLE-EXECUTABLE.md,
 //! SINGLE-EXECUTABLE-FFI-MILESTONE-1.md; `chosen_linker`):
 //!
-//!   * `rustc` (the default): rustc compiles a small data initializer and
-//!     statically links our runtime (`libbotlish_native.rlib` beside the
-//!     driver), through the system linker.
+//!   * `rustc` (the default): rustc compiles the fixed startup crate
+//!     (`STARTUP`) and statically links our runtime
+//!     (`libbotlish_native.rlib` beside the driver), through the system
+//!     linker.
 //!   * `stub`: no toolchain at all. The prebuilt `botlish-aot-stub` (this
 //!     runtime and a loader, beside the driver or `BOTLISH_NATIVE_AOT_STUB`)
 //!     is copied and the program's image appended to it: the object's
@@ -21,15 +22,14 @@
 //!     single-file compiler (single/) emits executables of programs that
 //!     call no C.
 //!   * `system`: the host's own C compiler driver (or link.exe) and nothing
-//!     of Rust's. It links the program object, a startup object made here
-//!     (`startup_object`: the program's description, the stub image's
-//!     metadata without its code, and the addresses of its functions as the
-//!     linker's relocations) and the precompiled runtime archive built with
+//!     of Rust's. It links the program object -- whose `botlish_program`
+//!     record is the program's startup data, as for every linker
+//!     (runtime::program) -- and the precompiled runtime archive built with
 //!     the compiler (native/runtime-archive: `libbotlish_runtime.a` beside
-//!     the driver or `BOTLISH_NATIVE_RUNTIME`), whose `main` reads the
-//!     description (`aotimage::linked_main`), with the program's link plan
-//!     (`system_link_args`). This is how the single-file compiler links a
-//!     program that calls C.
+//!     the driver or `BOTLISH_NATIVE_RUNTIME`), whose `main` starts that
+//!     record as the rustc startup crate does (`runtime::aot::linked_main`),
+//!     with the program's link plan (`system_link_args`). This is how the
+//!     single-file compiler links a program that calls C.
 //!
 //! `auto` is the single-file compiler's choice: the system linker for a
 //! program that calls C, the stub linker for any other where the stub runs.
@@ -64,9 +64,9 @@
 //! Windows SDK's import libraries -- by itself, without a Developer Command
 //! Prompt, and the C runtime's startup (`mainCRTStartup`) is rustc's. An
 //! executable's file name ends in `.exe` (`executable_path`).
-use super::{Const, ObjectProgram, emit_object};
+use super::{ObjectProgram, emit_object};
 use crate::nir::Program;
-use botlish_native::runtime::aotimage::{self, Fixup, FunctionCode, Image, Target};
+use botlish_native::runtime::aotimage::{self, Fixup, Image, Target};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -77,7 +77,8 @@ use std::process::Command;
 /// linker the failure's kind when it is no error of the program's link
 /// plan -- `TOOLCHAIN` (no C compiler driver, no linker, not Microsoft's
 /// link.exe) or `RUNTIME` (the runtime archive missing, damaged, of another
-/// platform or startup interface) -- the third word of its error code
+/// platform, or without the runtime this driver's code calls) -- the third
+/// word of its error code
 /// (`NATIVE LINK TOOLCHAIN`, `NATIVE AOT RUNTIME`; main.rs).
 #[derive(Debug)]
 pub struct LinkError {
@@ -130,123 +131,30 @@ impl Drop for WorkDir {
     }
 }
 
-fn startup(program: &Program, object: &ObjectProgram) -> String {
-    let mut s = String::from(
-        "#![allow(unused_imports)]\n\
-         use botlish_native::{nir::OpCode, runtime::{aot, constants::{self, Const},\n\
-         framemap::{FunctionMap, ProgramMap}, metrics::AllocMode, value::{FloatType, Kind, Value},\n\
-         vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm}}};\n\
-         use std::rc::Rc;\n\
-         unsafe extern \"C\" {\n",
-    );
-    for f in &program.functions {
-        writeln!(s, "fn botlish_fn_{}(); fn botlish_entry_{}();", f.id, f.id).unwrap();
-    }
-    s.push_str(
-        "}\nextern \"C\" fn entry(vm: *mut Vm) -> Value {\n\
-        let f: aot::ProgramEntry = unsafe { std::mem::transmute(botlish_fn_0 as *const ()) };\n\
-        f(vm)\n}\nfn main() {\n\
-        std::process::exit(aot::run(aot::process_argv(), || {\n\
-        let info = ProgramInfo { functions: vec![\n",
-    );
-    for f in &program.functions {
-        writeln!(
-            s,
-            "FunctionInfo {{ arity: {}, pnames: {:?}.into() }},",
-            f.params, f.pnames
-        )
-        .unwrap();
-    }
-    s.push_str("], natives: vec![\n");
-    for n in &program.natives {
-        let params: Vec<String> = n
-            .params
-            .iter()
-            .map(|kind| match kind {
-                Some(k) => format!("Some(Kind::{k:?})"),
-                None => "None".to_string(),
-            })
-            .collect();
-        writeln!(
-            s,
-            "NativeInfo {{ name: {:?}.into(), arity: {:?}, params: vec![{}], op: OpCode::{:?} }},",
-            n.name,
-            n.arity,
-            params.join(","),
-            n.op
-        )
-        .unwrap();
-    }
-    s.push_str("], shapes: vec![\n");
-    for shape in &program.shapes {
-        let name = match &shape.name {
-            Some(n) => format!("Some({n:?}.to_string())"),
-            None => "None".to_string(),
-        };
-        writeln!(
-            s,
-            "ShapeInfo {{ name: {name}, fields: <Vec<&str>>::into_iter(vec!{:?}).map(String::from).collect(), opaque: {} }},",
-            shape.fields, shape.opaque
-        )
-        .unwrap();
-    }
-    s.push_str("], enums: vec![\n");
-    for e in &program.enums {
-        writeln!(
-            s,
-            "EnumInfo {{ name: {:?}.to_string(), cases: vec!{:?}.into_iter().map(String::from).collect() }},",
-            e.name, e.cases
-        )
-        .unwrap();
-    }
-    s.push_str("] };\nlet mut vm = Vm::new(Rc::new(info), AllocMode::Off);\nlet entries = vec![\n");
-    for f in &program.functions {
-        writeln!(s, "botlish_entry_{} as *const () as usize,", f.id).unwrap();
-    }
-    s.push_str("];\nconstants::install(&mut vm, &[\n");
-    for c in &object.pool.entries {
-        match c {
-            Const::Str(text) => writeln!(s, "Const::Str({text:?}.into()),"),
-            Const::Bytes(bytes) => {
-                // A byte-string literal of \xNN escapes: compact however large
-                // the static storage is, and exact for every byte (NUL, 0xff).
-                let literal: String = bytes.iter().map(|b| format!("\\x{b:02x}")).collect();
-                writeln!(s, "Const::Bytes(b\"{literal}\".to_vec()),")
-            }
-            Const::BigInt(text) => writeln!(s, "Const::BigInt({text:?}.into()),"),
-            Const::Native(id) => writeln!(s, "Const::Native({id}),"),
-            Const::FnValue(id) => writeln!(s, "Const::FnValue({id}),"),
-            Const::Float(ty, bits) => writeln!(s, "Const::Float(FloatType::{ty:?}, {bits:#x}),"),
-        }
-        .unwrap();
-    }
-    writeln!(
-        s,
-        "], &entries, {});\nlet mut map = ProgramMap::new();",
-        program.statics
-    )
-    .unwrap();
-    for (id, f) in object.functions.iter().enumerate() {
-        let points: Vec<String> = f
-            .safepoints
-            .iter()
-            .map(|(pc, roots)| format!("({pc}, vec!{roots:?})"))
-            .collect();
-        writeln!(
-            s,
-            "let start = botlish_fn_{id} as *const () as usize;\n\
-            map.push(FunctionMap {{ code_start: start, code_end: start + {}, safepoints: vec![{}] }});\n\
-            let start = entries[{id}];\n\
-            map.push(FunctionMap {{ code_start: start, code_end: start + {}, safepoints: vec![] }});",
-            f.direct_size,
-            points.join(","),
-            f.entry_size
-        )
-        .unwrap();
-    }
-    s.push_str("map.finish();\nvm.set_framemap(Rc::new(map));\n(vm, entry as aot::ProgramEntry)\n})); }\n");
-    s
+/// The `rustc` linker's startup crate: the same text for every program. The
+/// program object carries its own startup data -- its descriptor, code table
+/// and `botlish_program` record (runtime::program,
+/// NATIVE-LIBRARY-MILESTONE-1.md, "One startup") -- so the crate only names
+/// the record and hands it to `program::instantiate_linked` on the thread
+/// `aot::run` starts, as the stub linker's loader and a native library do.
+const STARTUP: &str = "\
+use botlish_native::runtime::{aot, program};
+unsafe extern \"C\" {
+    static botlish_program: program::LinkedProgram;
 }
+fn main() {
+    std::process::exit(aot::run(aot::process_argv(), || {
+        // SAFETY: the record the program object defines, relocated by this link.
+        match unsafe { program::instantiate_linked(&*std::ptr::addr_of!(botlish_program)) } {
+            Ok(started) => started,
+            Err(error) => {
+                eprintln!(\"{error} (NATIVE STARTUP)\");
+                std::process::exit(1);
+            }
+        }
+    }));
+}
+";
 
 /// Whether PROGRAM calls C or names a native library (C-FFI.md): it is then
 /// linked by the system linker, and run as an executable.
@@ -465,7 +373,7 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
     // to a name without one (link.exe keeps a name as given).
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
-    std::fs::write(&source_path, startup(program, &object)).map_err(|e| e.to_string())?;
+    std::fs::write(&source_path, STARTUP).map_err(|e| e.to_string())?;
     // rustc compiles the startup crate for the driver's own target, the one
     // the runtime library was built for, whatever rustc's own host is: a
     // Windows machine commonly has both Rust Windows host toolchains, and a
@@ -839,10 +747,10 @@ fn system_linker(flavor: LinkerFlavor) -> Result<PathBuf, LinkError> {
 /// The runtime archive the system linker links: `BOTLISH_NATIVE_RUNTIME`
 /// when set, else `RUNTIME_ARCHIVE` beside the driver. Checked before
 /// anything is linked: a file, a static archive, of this host's object
-/// format and architecture (`archive_machine`). The ABI it was built for
-/// is checked by the executable itself when it starts (the description's
-/// fingerprint, `aotimage::read_linked`), and its startup interface by the
-/// linker (`aotimage::LINKED_INTERFACE_SYMBOL`).
+/// format and architecture (`archive_machine`). That it holds the helpers
+/// the program's code calls is the linker's to find (`undefined_helper`),
+/// and the ABI it was built for the executable's own, when it starts (the
+/// program record's fingerprint, `runtime::program::read_linked`).
 fn runtime_archive() -> Result<PathBuf, LinkError> {
     let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
         Some(path) => PathBuf::from(path),
@@ -954,62 +862,8 @@ fn archive_machine(path: &Path) -> Result<String, String> {
     Err("damaged static library (no object file found)".to_string())
 }
 
-/// The startup object of a system-linked executable: one data object,
-/// `botlish_program_description` (`aotimage::LINKED_HEADER`), the
-/// program's metadata as the stub's image encodes it -- program
-/// information, constant pool, module statics, every function's code sizes
-/// and stack maps, the ABI fingerprint -- with no machine code, and the
-/// addresses of the startup interface and of every function's two entries,
-/// which the linker fills in (absolute relocations: `R_X86_64_64`,
-/// `R_AARCH64_ABS64`, `ARM64_RELOC_UNSIGNED`, `IMAGE_REL_AMD64_ADDR64`, in
-/// a read-only-after-relocation section). Made by Cranelift's object
-/// writer for the same target and flags as the program object, so its
-/// format, symbol spelling (Mach-O's `_`) and relocations are the
-/// platform's.
-fn startup_object(program: &Program, object: &ObjectProgram) -> Result<Vec<u8>, String> {
-    use cranelift_module::{DataDescription, Linkage, Module};
-    let functions = program
-        .functions
-        .iter()
-        .zip(&object.functions)
-        .map(|(_, compiled)| FunctionCode {
-            direct: 0,
-            direct_size: compiled.direct_size,
-            entry: 0,
-            entry_size: compiled.entry_size,
-            safepoints: compiled.safepoints.clone(),
-        })
-        .collect();
-    let image = Image::linked(crate::program_info(program), object.pool.entries.clone(), program.statics, functions);
-    let (bytes, interface_slot, slots) = image.linked_description();
-    let isa = super::isa(true).map_err(|e| e.message().to_string())?;
-    let builder = cranelift_object::ObjectBuilder::new(isa, "botlish-startup", cranelift_module::default_libcall_names())
-        .map_err(|e| format!("startup object: {e:?}"))?;
-    let mut module = cranelift_object::ObjectModule::new(builder);
-    let failed = |e: cranelift_module::ModuleError| format!("startup object: {e}");
-    let signature = module.make_signature();
-    let interface = module
-        .declare_data(aotimage::LINKED_INTERFACE_SYMBOL, Linkage::Import, false, false)
-        .map_err(failed)?;
-    let description = module.declare_data("botlish_program_description", Linkage::Export, false, false).map_err(failed)?;
-    let mut data = DataDescription::new();
-    data.define(bytes.into_boxed_slice());
-    data.set_align(8);
-    let interface = module.declare_data_in_data(interface, &mut data);
-    data.write_data_addr(interface_slot as u32, interface, 0);
-    for (f, (direct, entry)) in program.functions.iter().zip(slots) {
-        for (name, at) in [(format!("botlish_fn_{}", f.id), direct), (format!("botlish_entry_{}", f.id), entry)] {
-            let id = module.declare_function(&name, Linkage::Import, &signature).map_err(failed)?;
-            let function = module.declare_func_in_data(id, &mut data);
-            data.write_function_addr(at as u32, function);
-        }
-    }
-    module.define_data(description, &data).map_err(failed)?;
-    module.finish().emit().map_err(|e| format!("startup object: {e}"))
-}
-
 /// The arguments of the FLAVOR system linker linking OBJECTS (the program
-/// object, the startup object), PROGRAM's link plan and the runtime archive
+/// object), PROGRAM's link plan and the runtime archive
 /// RUNTIME into OUTPUT: what rustc's own link of an executable passes the
 /// platform linker, in the order the platform's static linking needs, as
 /// separate arguments (never one shell string):
@@ -1147,8 +1001,22 @@ fn log_link(tool: &Path, args: &[OsString], status: &std::process::ExitStatus, t
     }
 }
 
-/// The `system` linker: the program object, its startup object and the
-/// runtime archive, linked by the host's own toolchain with the program's
+/// The first runtime helper (ops.rs's `HELPER_SIGNATURES`) a failed link's
+/// output OUTPUT names as undefined, in GNU ld's, lld's, Apple ld's or
+/// link.exe's words: the runtime archive then lacks what the program
+/// object calls, so it is another build's (or no Botlish runtime at all).
+fn undefined_helper(output: &str) -> Option<&'static str> {
+    botlish_native::runtime::ops::HELPER_SIGNATURES.iter().map(|&(name, _)| name).find(|name| {
+        output.contains(&format!("undefined reference to `{name}'"))
+            || output.lines().any(|line| line.trim_end().ends_with(&format!("undefined symbol: {name}")))
+            || output.contains(&format!("\"_{name}\", referenced from"))
+            || output.contains(&format!("unresolved external symbol {name} "))
+    })
+}
+
+/// The `system` linker: the program object (its startup data, the
+/// `botlish_program` record, inside it) and the runtime archive, linked by
+/// the host's own toolchain with the program's
 /// link plan (the module doc; SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). Needs
 /// no rustc, no Rust library and no checkout: only `system_linker`, the
 /// runtime archive (`runtime_archive`) and the libraries the program
@@ -1159,14 +1027,10 @@ fn link_system(program: &Program, destination: &Path, link_dirs: &[String]) -> R
     let work = WorkDir::beside(destination)
         .map_err(|e| format!("native link failed: cannot write the executable {}: {e}", destination.display()))?;
     let object = emit_object(program).map_err(|e| e.message().to_string())?;
-    let startup = startup_object(program, &object)
-        .map_err(|e| format!("native link failed: making the program's startup object: {e}"))?;
     let object_path = work.0.join(if LINKER == LinkerFlavor::Msvc { "program.obj" } else { "program.o" });
-    let startup_path = work.0.join(if LINKER == LinkerFlavor::Msvc { "startup.obj" } else { "startup.o" });
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
-    std::fs::write(&startup_path, &startup).map_err(|e| e.to_string())?;
-    let args = system_link_args(LINKER, &[&object_path, &startup_path], &runtime, &executable, program, link_dirs);
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, link_dirs);
     let output = Command::new(&tool)
         .args(&args)
         .output()
@@ -1195,11 +1059,10 @@ fn link_system(program: &Program, destination: &Path, link_dirs: &[String]) -> R
                 linker_diagnostics(&text)
             )));
         }
-        if text.contains(aotimage::LINKED_INTERFACE_SYMBOL) {
+        if let Some(helper) = undefined_helper(&text) {
             return Err(runtime_error(format!(
-                "native link failed: the runtime archive {} does not implement this driver's startup interface ({}): it is another build's: {}",
+                "native link failed: the runtime archive {} does not define the runtime helper {helper} this driver's code calls: it is another build's: {}",
                 runtime.display(),
-                aotimage::LINKED_INTERFACE_SYMBOL,
                 linker_diagnostics(&text)
             )));
         }
@@ -1501,28 +1364,9 @@ fn image(program: &Program, object: &ObjectProgram) -> Result<Image, String> {
         .filter(|s| s.section != SHN_UNDEF && s.section < SHN_LORESERVE)
         .filter_map(|s| Some((s.name.as_str(), place.get(s.section as usize).copied().flatten()? + s.value)))
         .collect();
-    let mut functions = Vec::with_capacity(program.functions.len());
-    for (f, compiled) in program.functions.iter().zip(&object.functions) {
-        let find = |name: String| defined.get(name.as_str()).copied().ok_or(format!("program object lacks {name}"));
-        functions.push(FunctionCode {
-            direct: find(format!("botlish_fn_{}", f.id))?,
-            direct_size: compiled.direct_size,
-            entry: find(format!("botlish_entry_{}", f.id))?,
-            entry_size: compiled.entry_size,
-            safepoints: compiled.safepoints.clone(),
-        });
-    }
-    Ok(Image {
-        info: crate::program_info(program),
-        constants: object.pool.entries.clone(),
-        statics: program.statics,
-        imports,
-        code,
-        size,
-        executable,
-        fixups,
-        functions,
-    })
+    let _ = (program, &object.functions);
+    let record = defined.get("botlish_program").copied().ok_or("program object lacks botlish_program")?;
+    Ok(Image { imports, code, size, executable, fixups, program: record })
 }
 
 #[cfg(test)]
@@ -1795,20 +1639,20 @@ mod tests {
     }
 
     /// GNU's system link, argument by argument: rustc's executable flags, the
-    /// two objects, the plan exactly as the rustc linker hands it to the same
+    /// program object, the plan exactly as the rustc linker hands it to the same
     /// linker (the -L directories, one group, the plan's order), the runtime
     /// archive and its system libraries -- each a separate argument, a path
     /// with a space one of them.
     #[test]
     fn system_link_args_gnu() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        let objects = [Path::new("/w d/program.o"), Path::new("/w d/startup.o")];
+        let objects = [Path::new("/w d/program.o")];
         let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &["/opt/my lib".to_string()]);
         assert_eq!(
             texts(&args),
             [
                 "-pie", "-Wl,--eh-frame-hdr", "-Wl,-z,relro,-z,now", "-Wl,--gc-sections", "-o", "/w d/executable",
-                "/w d/program.o", "/w d/startup.o", "-L/opt/my lib", "-Wl,--start-group", "-lfirst", "-lsecond",
+                "/w d/program.o", "-L/opt/my lib", "-Wl,--start-group", "-lfirst", "-lsecond",
                 "-Wl,--end-group", "/rt/libbotlish_runtime.a", "-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc",
             ]
         );
@@ -1826,12 +1670,12 @@ mod tests {
     #[test]
     fn system_link_args_apple_has_no_gnu_flags() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        let objects = [Path::new("/w/program.o"), Path::new("/w/startup.o")];
+        let objects = [Path::new("/w/program.o")];
         let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &["/opt/lib".to_string()]));
         assert_eq!(&args[..2], ["-arch", "arm64"]);
         assert!(args.contains(&"-Wl,-dead_strip".to_string()));
         let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
-        assert_eq!(tail, ["/w/program.o", "/w/startup.o", "-L/opt/lib", "-lfirst", "-lsecond", "/rt/libbotlish_runtime.a", "-liconv", "-lSystem", "-lc", "-lm"]);
+        assert_eq!(tail, ["/w/program.o", "-L/opt/lib", "-lfirst", "-lsecond", "/rt/libbotlish_runtime.a", "-liconv", "-lSystem", "-lc", "-lm"]);
         assert!(args.iter().all(|a| !a.contains("group") && !a.contains("-pie") && !a.contains("--")));
     }
 
@@ -1842,15 +1686,15 @@ mod tests {
     #[test]
     fn system_link_args_msvc() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        let objects = [Path::new("C:\\w\\program.obj"), Path::new("C:\\w\\startup.obj")];
+        let objects = [Path::new("C:\\w\\program.obj")];
         let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &["C:\\opt lib".to_string()]));
         for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OUT:C:\\w d\\executable.exe"] {
             assert!(args.contains(&flag.to_string()), "{flag} not in {args:?}");
         }
         let tail: Vec<&str> = args.iter().skip_while(|a| !a.ends_with("program.obj")).map(String::as_str).collect();
         assert_eq!(
-            &tail[..12],
-            ["C:\\w\\program.obj", "C:\\w\\startup.obj", "/LIBPATH:C:\\opt lib", "first.lib", "second.lib", "C:\\rt\\botlish_runtime.lib",
+            &tail[..11],
+            ["C:\\w\\program.obj", "/LIBPATH:C:\\opt lib", "first.lib", "second.lib", "C:\\rt\\botlish_runtime.lib",
              "kernel32.lib", "ntdll.lib", "userenv.lib", "ws2_32.lib", "dbghelp.lib", "libcmt.lib"]
         );
         let excluded: Vec<&str> = args.iter().filter_map(|a| a.strip_prefix("/NODEFAULTLIB:")).collect();
@@ -1918,57 +1762,23 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The startup object (Linux x86-64's, read with this file's own ELF
-    /// reader): one exported description, the stub image's metadata after
-    /// the header and the address table, an absolute relocation of every
-    /// slot -- the startup interface's and each function's two entries, by
-    /// NIR id -- and nothing else: no machine code.
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    /// A failed link's undefined runtime helper, in each linker's words, is
+    /// the runtime archive's fault; an undefined symbol of the program's own
+    /// plan, or a helper's name inside another, is not.
     #[test]
-    fn startup_object_relocates_every_address() {
-        let program = crate::nir::parse(concat!(
-            "nir 1 call-effects=1 statics=2\n",
-            "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n",
-            "    %0 = int 1\n    ret %0\nend\n",
-            "func 1 \"f\" params=1 env=0 regs=1 pnames=\"x\" captures=0\n",
-            "    ret %0\nend\n",
-        ))
-        .unwrap_or_else(|e| panic!("{}", e.message));
-        let object = emit_object(&program).unwrap_or_else(|e| panic!("{}", e.message()));
-        let startup = startup_object(&program, &object).unwrap();
-        let (sections, symbols, relas) = read_object(&startup).unwrap();
-        assert!(sections.iter().all(|s| s.flags & SHF_EXECINSTR == 0 || s.size == 0), "machine code in the startup object");
-        let description = symbols.iter().find(|s| s.name == "botlish_program_description").expect("the description");
-        assert_ne!(description.section, SHN_UNDEF);
-        let section = &sections[description.section as usize];
-        let bytes = &startup[section.offset + description.value as usize..];
-        assert_eq!(&bytes[..8], aotimage::LINKED_MAGIC);
-        assert_eq!(u64::from_le_bytes(bytes[8..16].try_into().unwrap()), 2);
-        let length = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
-        let metadata = &bytes[aotimage::LINKED_HEADER + 32..aotimage::LINKED_HEADER + 32 + length];
-        let image = Image::decode(metadata).unwrap();
-        assert_eq!(image.statics, 2);
-        assert!(image.code.is_empty() && image.fixups.is_empty() && image.imports.is_empty());
-        assert_eq!(image.functions[0].direct_size, object.functions[0].direct_size);
-        assert_eq!(image.functions[1].entry_size, object.functions[1].entry_size);
-        let mut relocated: Vec<(u64, &str, u32)> = relas
-            .iter()
-            .map(|r| (r.offset - description.value, symbols[r.symbol].name.as_str(), r.kind))
-            .collect();
-        relocated.sort();
-        assert_eq!(
-            relocated,
-            [
-                (24, aotimage::LINKED_INTERFACE_SYMBOL, R_X86_64_64),
-                (32, "botlish_fn_0", R_X86_64_64),
-                (40, "botlish_entry_0", R_X86_64_64),
-                (48, "botlish_fn_1", R_X86_64_64),
-                (56, "botlish_entry_1", R_X86_64_64),
-            ]
-        );
-        for name in ["botlish_fn_0", "botlish_entry_1", aotimage::LINKED_INTERFACE_SYMBOL] {
-            assert_eq!(symbols.iter().find(|s| s.name == name).map(|s| s.section), Some(SHN_UNDEF), "{name}");
+    fn undefined_helper_names_the_runtime_helper() {
+        for output in [
+            "/usr/bin/ld: program.o: in function `botlish_fn_0':\n(.text+0x1c): undefined reference to `rt_int_add'",
+            "ld.lld: error: undefined symbol: rt_int_add\n>>> referenced by program.o",
+            "Undefined symbols for architecture arm64:\n  \"_rt_int_add\", referenced from:\n      _botlish_fn_0 in program.o",
+            "program.obj : error LNK2019: unresolved external symbol rt_int_add referenced in function botlish_fn_0",
+        ] {
+            assert_eq!(undefined_helper(output), Some("rt_int_add"), "{output}");
         }
+        assert_eq!(undefined_helper("undefined reference to `botlish_no_such_symbol'"), None);
+        assert_eq!(undefined_helper("undefined reference to `rt_int_add_twice'"), None);
+        // One helper's name is another's prefix (rt_co_resume, rt_co_resume0).
+        assert_eq!(undefined_helper("ld.lld: error: undefined symbol: rt_co_resume0\n>>> referenced by program.o"), Some("rt_co_resume0"));
     }
 
     /// The linker's words that mean no linker could run, not a failed link.

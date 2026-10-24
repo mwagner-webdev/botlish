@@ -2,10 +2,10 @@
 
 The single-file Botlish compiler now compiles, links and runs native
 programs that call C. A third executable linker, the **system linker**
-(`BOTLISH_NATIVE_LINKER=system`), links the program's Cranelift object, a
-startup object the driver writes and a **precompiled runtime archive** built
-with the compiler, using the host's own C compiler driver (link.exe on
-Windows). Rust is not involved when an application is linked. The single
+(`BOTLISH_NATIVE_LINKER=system`), links the program's Cranelift object --
+which carries the program's startup record, as for every linker -- and a
+**precompiled runtime archive** built with the compiler, using the host's own
+C compiler driver (link.exe on Windows). Rust is not involved when an application is linked. The single
 executable carries the archive and chooses the system linker for a program
 that calls C, and the toolchain-free stub linker for every other program
 where the stub runs, Linux x86-64; elsewhere the system linker
@@ -29,7 +29,7 @@ by this milestone's CI or locally), **inspected** (compiled or read only) or
 6. [The design](#6-the-design)
 7. [The runtime archive](#7-the-runtime-archive)
 8. [The runtime's startup boundary](#8-the-runtimes-startup-boundary)
-9. [The startup object](#9-the-startup-object)
+9. [The program record (formerly the startup object)](#9-the-program-record-formerly-the-startup-object)
 10. [Program metadata and stack maps](#10-program-metadata-and-stack-maps)
 11. [Compatibility checks](#11-compatibility-checks)
 12. [Packaging the runtime in the zipkit](#12-packaging-the-runtime-in-the-zipkit)
@@ -180,28 +180,45 @@ address table that the linker relocates. The shim is the runtime archive's
 own `main`. No machine code is generated for startup, no Rust struct layout
 crosses the boundary, and no metadata format is added.
 
+**Superseded by the merge with NATIVE-LIBRARY-MILESTONE-1.md.** That
+milestone, developed on main beside this one, put the same two ideas into
+the program object itself for every linker: the object carries its
+descriptor and a relocated code table (`botlish_program`,
+runtime::program), and the rustc startup, the stub and native libraries
+all read it with `program::instantiate_linked`. Kept beside it, this
+milestone's startup object would have been a second encoding of the same
+data. Merging, the startup object was removed, and the system linker
+became the third reader of the one record (section 6).
+
 ## 6. The design
 
 ```
             driver (botlish-native)                       host toolchain
-  NIR ──► emit_object ─► program.o  (botlish_fn_N, botlish_entry_N, ...)  ┐
-      └─► startup_object ─► startup.o  (botlish_program_description)     ├─► cc / link.exe ─► executable
-                         libbotlish_runtime.a  (main, rt_*, std)          ┘     + the program's -L, -l
+  NIR ──► emit_object ─► program.o  (botlish_fn_N, botlish_entry_N,       ┐
+                                     botlish_program, botlish_descriptor, ├─► cc / link.exe ─► executable
+                                     botlish_code)                         │     + the program's -L, -l
+                         libbotlish_runtime.a  (main, rt_*, std)          ┘
 ```
 
 * `program.o` is byte for byte the rustc and stub linkers' object
-  (`emit_object`).
-* `startup.o` defines one read-only-after-relocation data object,
-  `botlish_program_description` (section 9).
+  (`emit_object`), and it carries the program's startup data: the
+  `botlish_program` record, the encoded descriptor and the code table,
+  whose addresses the linker relocates (section 9; runtime::program).
 * The archive's `main` (native/runtime-archive/src/lib.rs) calls
-  `aotimage::linked_main(&botlish_program_description,
-  &botlish_runtime_startup_v1)`. That function sets up the process the way
-  Rust's startup does, reads the description, builds a `Loaded` and runs
-  `aot::run(process_argv(), || loaded.instantiate())`, the stub's
-  `instantiate`.
+  `aot::linked_main(&botlish_program)`. That function sets up the process
+  the way Rust's startup does (section 8), then does exactly what the
+  rustc linker's fixed startup crate (`codegen::aot`'s `STARTUP`) does:
+  `aot::run(process_argv(), || program::instantiate_linked(record))`.
 * `codegen::aot::link_system` locates the archive and the tool, writes the
-  two objects into a private directory beside the destination, runs the
+  program object into a private directory beside the destination, runs the
   linker with `system_link_args`, and renames the result into place.
+
+Before the merge (section 5) the driver also wrote a startup object,
+`startup.o`, defining `botlish_program_description`: the stub image's
+metadata with no code and the relocated function addresses, read by an
+`aotimage::linked_main` that checked an interface symbol,
+`botlish_runtime_startup_v1`, which the archive defined. The executed
+results of sections 15 to 31 that predate the merge say so.
 
 ## 7. The runtime archive
 
@@ -210,7 +227,7 @@ workspace rooted at `native/Cargo.toml`. It is a default member, so the
 usual `cargo build --release --manifest-path native/Cargo.toml` builds it
 beside the driver and the stub. It is a `staticlib` that depends on
 `botlish-native`'s library and forwards its `fallback-roots` feature. Its
-source is 40 lines: `main` and the interface symbol.
+source is 35 lines: `main`, which names the program record.
 
 | fact (linux-x86_64, executed) | value |
 |---|---|
@@ -235,17 +252,19 @@ address.
 
 ## 8. The runtime's startup boundary
 
-The boundary between the two halves is three symbols. No Rust type crosses
-it:
+The boundary between the two halves is two symbols, besides the runtime
+helpers the program's code calls. No Rust object is built anywhere but by
+the runtime:
 
 | symbol | defined by | what |
 |---|---|---|
 | `main` | the archive | the executable's C entry, called by the C runtime's startup (crt1's `_start`, libSystem's, `mainCRTStartup`) |
-| `botlish_runtime_startup_v1` | the archive | one byte, the interface revision; the startup object refers to it |
-| `botlish_program_description` | the startup object | the description (section 9); the archive's `main` refers to it |
+| `botlish_program` | the program object | the program's record (section 9); the archive's `main` refers to it, as the rustc startup crate does |
 
 The runtime builds every Rust object itself, from bytes it checks
-(`aotimage::read_linked`).
+(`program::read_linked`). The record's layout, six machine words, is the
+one contract between codegen and the runtime, and it is main's, shared by
+every linker and native libraries.
 
 **What Rust's startup does, the archive's `main` does too.** A Rust `main`
 runs `std::rt::lang_start`, which a staticlib's C `main` does not. Reading
@@ -259,8 +278,8 @@ program:
   program handles, never a kill.
 * On macOS, the main thread is named `main`.
 * A panic outside the program's thread is exit status 101.
-* `std::process::exit` flushes Rust's standard output, as the generated
-  `main` does.
+* `std::process::exit` flushes Rust's standard output, as the rustc
+  startup crate's `main` does.
 
 The arguments are `std::env::args_os`'s on every host. In a staticlib that
 works on glibc (std reads them from `.init_array`), macOS (`_NSGetArgv`)
@@ -273,33 +292,39 @@ than by Rust's message and abort. `system-linker-process-setup` checks the
 first two points against the rustc and stub linkers' executables, and the
 `sys-sigpipe-default` and `sys-fds-not-sanitized` mutants are killed by it.
 
-## 9. The startup object
+## 9. The program record (formerly the startup object)
 
-`codegen::aot::startup_object` uses Cranelift's object writer
-(`cranelift_object::ObjectModule`) with the program object's own ISA and
-flags, so the format, symbol spelling (Mach-O's `_` prefix) and relocations
-are the target's. It holds one exported data object:
+Since the merge (section 5) there is no startup object. The program object
+defines, as data (`emit_object`; NATIVE-LIBRARY-MILESTONE-1.md, "One
+startup"):
 
 ```
-offset 0    "BOTLSYS1"                 magic; the last byte is the revision
-       8    N                          functions (u64)
-      16    L                          metadata bytes (u64)
-      24    &botlish_runtime_startup_v1         relocated
-      32    &botlish_fn_0, &botlish_entry_0, ... relocated, 2N addresses
-32+16N      metadata                   Image::encode() of an image with no code
+botlish_program      LinkedProgram: magic "BOTLPRG1", the runtime ABI
+                     fingerprint, the descriptor's address and length, the
+                     code table's address and function count (six words)
+botlish_descriptor   the encoded ProgramDescriptor: program information,
+                     constant pool, module statics, every function's code
+                     sizes and stack maps
+botlish_code         one (direct, generic entry) address pair per function,
+                     relocated by the link
 ```
 
-The metadata is `Image::linked(program_info, constants, statics,
-functions)`: the stub's encoding, with empty `code`, `imports` and
-`fixups`, and each function's sizes and safepoints. The addresses are
-`write_function_addr`/`write_data_addr` relocations against imported
-symbols: `R_X86_64_64` and `R_AARCH64_ABS64` in `.data.rel.ro` on ELF (a
-PIE gets `R_*_RELATIVE` dynamic relocations), `ARM64_RELOC_UNSIGNED` in
-`__DATA_CONST,__const` on Mach-O (rebased by dyld), and
-`IMAGE_REL_AMD64_ADDR64` in `.rdata` on COFF (base relocations).
-`startup_object_relocates_every_address` reads a startup object back and
-checks the exported description, the metadata, that there is no code, and a
-relocation of each slot against the right symbol.
+**Executed** (Linux x86-64, the merged tree): a system-linked executable of
+a program that calls a static library's function has `botlish_program`
+(`D`), `botlish_descriptor` (`r`), `botlish_code` (`d`), `botlish_fn_0`,
+`botlish_entry_0` and the archive's `main` among its symbols (`nm`), and
+prints the function's result.
+
+The startup object this section described before the merge, kept here as
+the record of what was built and measured: `codegen::aot::startup_object`
+wrote, with Cranelift's object writer, one exported data object
+`botlish_program_description` -- the magic `BOTLSYS1`, the function count,
+the metadata length, the relocated address of the archive's
+`botlish_runtime_startup_v1`, 2N relocated function addresses, then
+`Image::encode()` of an image with no code (`Image::linked`). It went with
+its reader (`aotimage::read_linked`, `linked_main`) and its tests
+(`startup_object_relocates_every_address`,
+`linked_description_round_trips`, `linked_description_rejects_damage`).
 
 ## 10. Program metadata and stack maps
 
@@ -333,8 +358,12 @@ stub and system linkers' reports are byte for byte equal, and so are their
 standard output, standard error and exit status, plain and under
 `BOTLISH_NATIVE_GC_STRESS=1`. The C acceptance program
 (`system-linker-c-acceptance`) has equal reports for rustc and system.
-Mutants that drop a constant, swap two entries, drop the stack maps or one
-root per safepoint are each killed by this comparison (section 28).
+Before the merge, mutants of the startup object that dropped a constant,
+swapped two entries, or dropped the stack maps or one root per safepoint
+were each killed by this comparison. The descriptor is now every linker's,
+and its mutants are main's (section 28). **Re-executed on the merged tree**
+(Linux x86-64): `system-linker-startup-parity` passes, and the three
+linkers' reports of examples/io/hello.bot are byte for byte equal.
 
 ## 11. Compatibility checks
 
@@ -351,23 +380,28 @@ Another architecture or operating system is therefore refused with "is for
 ELF AArch64, not this driver's linux-x86_64 (ELF x86-64)" instead of a
 linker's "file in wrong format".
 
-**While linking**, the linker checks the startup interface: the startup
-object refers to `botlish_runtime_startup_v1`, so an archive of another
-interface revision fails to link. That failure is reported as the
-archive's: "does not implement this driver's startup interface". An archive
-with no `main` is "no Botlish runtime archive".
+**While linking**, the linker finds an archive that lacks a helper the
+program's code calls: the link fails with that helper undefined, and
+`undefined_helper` reports it as the archive's -- "does not define the
+runtime helper NAME this driver's code calls: it is another build's" -- in
+GNU ld's, lld's, Apple ld's and link.exe's words. An archive with no
+`main` is "no Botlish runtime archive". (Before the merge an interface
+symbol, `botlish_runtime_startup_v1`, made an archive of another startup
+revision fail to link; the record's layout is now main's, shared by every
+startup.) An archive whose `main` never reads the record links: the
+linker's dead-code removal then drops the whole program object. That is
+no runtime archive of Botlish's, and no check here tells it from one.
 
-**At startup**, `read_linked` checks the magic and revision, that every
-count is within bounds, that the interface slot holds the archive's own
-symbol, the metadata's format word and **ABI fingerprint**
-(`Image::decode`, as the stub does), that no code, imports or fixups are
-present, that the table matches the program, and that no address is null.
-Each failure is `... (NATIVE STARTUP)` with status 1, before any program
-code runs (`system-linker-damaged-description` alters the revision and the
-fingerprint in a linked file). The fingerprint now also covers the GC root
+**At startup**, `program::read_linked` checks the record's magic, the
+**ABI fingerprint**, and that the code table matches the descriptor;
+decoding the descriptor checks its format and bounds. Each failure is
+`... (NATIVE STARTUP)` with status 1, before any program code runs
+(`system-linker-damaged-description` alters the magic's last byte and the
+fingerprint in a linked file: "not a Botlish program record", "compiled
+for a different native runtime build"). The fingerprint covers the GC root
 plan (`framewalk::NATIVE_FRAME_ROOTS`), so a `fallback-roots` driver's code
-never runs on a native-frame runtime or the other way round. This applies
-to the stub as well.
+never runs on a native-frame runtime or the other way round; the merge
+ported that word into main's fingerprint, which every startup checks.
 
 **Why the fingerprint is not checked before linking.** The fingerprint is
 computed by the runtime from its own layout and helper table
@@ -439,17 +473,21 @@ checkout's tests and tools behave as they did.
 
 ## 15. GNU ld
 
-**Executed** (Linux x86-64; the paths shortened):
+**Executed** (Linux x86-64, the merged tree; `BOTLISH_NATIVE_LINK_LOG`, the
+paths shortened):
 
 ```
 /usr/bin/cc -pie -Wl,--eh-frame-hdr -Wl,-z,relro,-z,now -Wl,--gc-sections
     -o WORK/.botlish-aot-PID-NONCE/executable
-    WORK/.botlish-aot-PID-NONCE/program.o WORK/.botlish-aot-PID-NONCE/startup.o
+    WORK/.botlish-aot-PID-NONCE/program.o
     -LWORK/lib -Wl,--start-group -lbotlish_cffi_fixture -Wl,--end-group
     RELEASE/libbotlish_runtime.a -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc
 ```
 
-* The flags are the ones rustc passes for an executable: a PIE (all three
+Before the merge the startup object, `startup.o`, followed `program.o`;
+everything else is as it was.
+
+* The flags are the ones rustc passes for an executable: a PIE (both
   inputs are PIC), `--eh-frame-hdr` for Rust's unwinder, full RELRO, and
   unused sections dropped.
 * The program's link plan is `link_plan_args_for`'s, the rustc linker's,
@@ -489,6 +527,10 @@ job; the paths shortened):
     WORK/sl/.botlish-aot-PID-NONCE/program.o WORK/sl/.botlish-aot-PID-NONCE/startup.o
     RELEASE/libbotlish_runtime.a -liconv -lSystem -lc -lm
 ```
+
+(Executed before the merge. Since the merge the command is the same
+without `startup.o`: `system_link_args`'s Apple case, inspected; the
+`system_link_args_apple_has_no_gnu_flags` unit test pins it.)
 
 * `/usr/bin/cc` is the xcrun shim to Apple clang, which runs Apple's ld.
 * The flags are rustc's for aarch64-apple-darwin: the architecture, the
@@ -536,6 +578,7 @@ environment so that link.exe is on PATH; the paths shortened):
 link.exe /NOLOGO /SUBSYSTEM:CONSOLE /INCREMENTAL:NO /OPT:REF /OPT:ICF /NXCOMPAT /DYNAMICBASE
     /OUT:WORK\sl\.botlish-aot-PID-NONCE\executable.exe
     WORK\sl\.botlish-aot-PID-NONCE\program.obj WORK\sl\.botlish-aot-PID-NONCE\startup.obj
+                                        (startup.obj: before the merge only)
     kernel32.lib
     RELEASE\botlish_runtime.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib
     libcmt.lib libvcruntime.lib libucrt.lib
@@ -619,8 +662,10 @@ runtime or fixture library among them. The runtime archive is linked in,
 so the executable never refers to the compiler's cache. The file is an
 ordinary PIE (`readelf -h`: `Type: DYN`, `Machine: Advanced Micro Devices
 X86-64`). Its symbols include `botlish_fn_0`, `botlish_entry_0`,
-`botlish_program_description`, `main` and `botlish_runtime_startup_v1`, and
-nothing is appended to it (`system-linker-ordinary-executable`).
+`botlish_program` (the record) and `main`, and nothing is appended to it
+(`system-linker-ordinary-executable`; before the merge the record was the
+startup object's `botlish_program_description`, beside the archive's
+`botlish_runtime_startup_v1`).
 
 ## 20. Linked runs
 
@@ -1051,10 +1096,16 @@ single/out/botlish`):
 * As linked, almost all of an executable is the runtime's line tables
   (`debug = 1`). The single executable's archive is `--strip-debug`'d, so
   the executables it makes are 0.88 to 0.95 MB (section 24).
-* Stripped, a system-linked executable is 40 to 42 KB (6%) larger than the
-  rustc linker's: the description's decoder, its checks and their messages
-  (`aotimage::read_linked`), which the rustc linker's generated startup
-  does not need.
+* Stripped, a system-linked executable was 40 to 42 KB (6%) larger than
+  the rustc linker's before the merge: its own description's decoder, its
+  checks and their messages (`aotimage::read_linked`), which the rustc
+  linker's generated startup did not need. **After the merge** (executed,
+  Linux x86-64, the same toolchain) both startups read the one record with
+  the one decoder, and the difference is gone: the program that prints a
+  line is 717,664 bytes stripped system-linked against 722,096
+  rustc-linked, a program that calls a static library's function 672,608
+  against 682,320 (`strip`; 9,971,048 and 10,068,736, 9,918,704 and
+  10,021,848 as linked).
 
 **A size defect this measurement found.** The first measurement had the
 system-linked executables at 996,216 bytes stripped against rustc's
@@ -1087,7 +1138,8 @@ cost:
 | calls libc and a static library | 5.6 | 225.0 | 465.4 | refused |
 
 The system linker adds about 200 ms to the stub's time here: `cc` and
-GNU ld over the program object, the startup object and the 16 MB archive.
+GNU ld over the program object, the startup object (before the merge) and
+the 16 MB archive.
 The rustc linker adds about 460 ms, compiling the startup crate with rustc
 and then linking.
 
@@ -1312,14 +1364,14 @@ What a macOS single-file compiler needs from this one, and what it must add:
 ## 37. What to run when changing this
 
 * The system linker (`codegen/aot.rs`'s `chosen_linker`,
-  `startup_object`, `system_link_args`, `link_system`, `runtime_archive`,
-  `archive_machine`), the linked description (`aotimage.rs`'s
-  `Image::linked`, `linked_description`, `read_linked`, `linked_main`),
-  `aot::rust_process_setup`, `Vm::startup_report`, the ABI fingerprint or
-  ops.rs's helper list (`runtime_helpers!`) or native/runtime-archive:
-  * `cargo test --release --manifest-path native/Cargo.toml --lib
-    aotimage` and `--bin botlish-native aot::`;
-  * `tests/system-linker.test`;
+  `system_link_args`, `link_system`, `undefined_helper`, `runtime_archive`,
+  `archive_machine`), `aot::linked_main` and `aot::rust_process_setup`,
+  `Vm::startup_report`, the program record (runtime/program.rs, main's),
+  the ABI fingerprint or ops.rs's helper list (`runtime_helpers!`) or
+  native/runtime-archive:
+  * `cargo test --release --manifest-path native/Cargo.toml --lib --
+    aotimage program` and `--bin botlish-native aot::`;
+  * `tests/system-linker.test` and `tests/native-library.test`;
   * the executable and C test files with `BOTLISH_NATIVE_LINKER=system`
     (tests.yml's `system-linker` job has the command), and the same under
     `BOTLISH_NATIVE_GC_STRESS=1` for the C ones;

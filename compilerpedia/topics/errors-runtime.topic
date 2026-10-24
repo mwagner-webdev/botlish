@@ -1150,8 +1150,8 @@ error of the program's link plan, after NATIVE LINK or NATIVE AOT:
   * RUNTIME: the runtime archive (libbotlish_runtime.a beside the driver,
     or BOTLISH_NATIVE_RUNTIME) "is missing", "is unusable: not a static
     library", "is for MACHINE, not this driver's TARGET", "defines no
-    main: it is no Botlish runtime archive", or "does not implement this
-    driver's startup interface" (another build's).
+    main: it is no Botlish runtime archive", or "does not define the
+    runtime helper NAME this driver's code calls: it is another build's".
 NATIVE AOT:
   * "executable link failed (STATUS): ..." with rustc's output, the system
     linker's own lines among it;
@@ -1215,10 +1215,10 @@ run every program except the native-only operations.
 
 @topic error.native-startup
 title: NATIVE STARTUP: a standalone executable could not start
-summary: NATIVE STARTUP means an executable could not read its program image or description, or start its worker thread: the file is damaged or was built for another runtime.
+summary: NATIVE STARTUP means an executable could not read its program image or record, or start its worker thread: the file is damaged or was built for another runtime.
 index: errors backends
 alias: no program image; bare botlish-aot-stub
-keywords: executable, stub linker, system linker, program image, program description, botlish-aot-stub, libbotlish_runtime, startup, thread, format
+keywords: executable, stub linker, system linker, program image, program record, botlish-aot-stub, libbotlish_runtime, startup, thread, format
 related: backend.native-executable backend.single-executable error.native-io error.native-link
 docs: SINGLE-EXECUTABLE.md
 code: NATIVE STARTUP
@@ -1236,14 +1236,15 @@ file. The messages:
     program image was compiled for a different native runtime build
     program image format N, this runtime reads format M
 
-A system-linked executable (BOTLISH_NATIVE_LINKER=system, or auto for a
-program that calls C) carries its program's description as data the
-linker relocated; its runtime archive's main reads it:
+Every executable's program object carries its program's record and
+descriptor as data the linker relocated (runtime::program); the rustc
+linker's startup and, in a system-linked executable (BOTLISH_NATIVE_LINKER
+=system, or auto for a program that calls C), its runtime archive's main
+read it:
 
-    program description revision 'R', this runtime reads revision '1'
-    program image was compiled for a different native runtime build
-    no program description (damaged executable)
-    malformed program description
+    not a Botlish program record
+    the program was compiled for a different native runtime build
+    the program record's code table does not match its descriptor
 
 It is also reported when the runtime cannot create its worker thread
 (for example a BOTLISH_NATIVE_STACK_BYTES the system refuses), and by
@@ -1535,3 +1536,41 @@ one.
 == WHAT TO DO
 Fix the program's syntax errors and compile it again; a tool that wants
 to run or build a program compiles it without -recover-syntax.
+
+@topic error.native-library
+title: NATIVE LIBRARY: a program cannot be built as a native library
+summary: NATIVE LIBRARY KIND refuses a native library build: entry statements, no export, a taken C symbol, a library name that is no C identifier, no -out, or a failed build tool.
+index: errors backends
+alias: library build failed; native library refused; declarations only
+keywords: -emit-native-library, native::library, exported c fn, top-level statement, ld, objcopy, ar, cc
+related: backend.native-library error.export-signature cli.options
+docs: NATIVE-LIBRARY-MILESTONE-1.md
+code: NATIVE LIBRARY
+code: NATIVE LIBRARY LIBRARY-TOP-LEVEL
+code: NATIVE LIBRARY LIBRARY-NO-EXPORTS
+code: NATIVE LIBRARY LIBRARY-SYMBOL
+code: NATIVE LIBRARY NAME
+code: NATIVE LIBRARY OUT
+code: NATIVE LIBRARY TOOL
+
+== MEANING
+On -emit-native-library (native::library), after the program compiled:
+
+  * LIBRARY-TOP-LEVEL: the entry file has a top-level statement that is no
+    function declaration. Creating an instance runs the program's
+    initialization, and a library's is only its modules' static
+    initialization, so an entry script never runs by accident; each
+    statement is reported at its location.
+  * LIBRARY-NO-EXPORTS: no `exported c fn` (and no -export).
+  * LIBRARY-SYMBOL: two exports with one name (from different modules), or
+    an export named like the runtime API (create, destroy, abi_version,
+    bytes_release, error_*): each export is NAME_FUNCTION in C.
+  * NAME: the library name is not a C identifier (it prefixes every
+    public C name).
+  * OUT: native::library was called without -out.
+  * TOOL: ld, objcopy, ar or cc failed; the message has its output.
+
+== WHAT TO DO
+Move a top-level constant or computation into a function, or into an
+imported module (where a top-level binding is a module static); rename a
+clashing export; install binutils and a C compiler for TOOL.

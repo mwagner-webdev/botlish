@@ -157,12 +157,14 @@ const C_CALLS: bool = cfg!(any(
 # ---------------------------------------------------------------------------
 # The generated startup and the standalone runtime
 
-@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame)
-## native/src/codegen/aot.rs
+@@ startup-no-stack-maps the startup installs no stack maps (the collector finds no Botlish frame): the one instantiation both startups and native libraries share (NATIVE-LIBRARY-MILESTONE-1.md)
+## native/src/runtime/program.rs
 <<<<
-    s.push_str("map.finish();\nvm.set_framemap(Rc::new(map));\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    vm.set_framemap(Rc::new(map));
 ====
-    s.push_str("map.finish();\nlet _ = map;\n(vm, entry as aot::ProgramEntry)\n})); }\n");
+    map.finish();
+    let _ = map;
 >>>>
 
 @@ startup-no-guard a standalone executable runs without the stack-overflow guard
@@ -259,10 +261,12 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 
 # ---------------------------------------------------------------------------
 # The system linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): codegen/aot.rs's
-# linker selection, startup object, link plan and failure messages;
-# runtime/aotimage.rs's linked description; runtime/aot.rs's process setup.
-# Their detectors are tests/system-linker.test and the lib's aotimage tests,
-# with the ones above. Not here: the static-or-dynamic choice of a library
+# linker selection, link plan and failure messages; the runtime archive's
+# main and runtime/aot.rs's linked_main and process setup. Their detectors
+# are tests/system-linker.test and the driver's aot tests, with the ones
+# above. The program record they start is every linker's
+# (runtime/program.rs): its mutants are startup-no-stack-maps above and
+# audit/native-library's (fingerprint-unchecked, descriptor-errors-dropped). Not here: the static-or-dynamic choice of a library
 # (the platform linker's search rules decide it, as for the rustc linker;
 # system-linker-static-incorporation checks the result), and a link that
 # leaves the executable depending on the compiler's cache (nothing of the
@@ -321,64 +325,37 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
         Ok(_) => Ok(path),
 >>>>
 
-@@ sys-description-local the program description is a local symbol: the runtime archive's main finds none
-## native/src/codegen/aot.rs
+@@ sys-archive-main-runs-nothing the runtime archive's main returns without starting the program record
+## native/runtime-archive/src/lib.rs
 <<<<
-    let description = module.declare_data("botlish_program_description", Linkage::Export, false, false).map_err(failed)?;
+    unsafe { aot::linked_main(&*std::ptr::addr_of!(botlish_program)) }
 ====
-    let description = module.declare_data("botlish_program_description", Linkage::Local, false, false).map_err(failed)?;
+    let _ = std::ptr::addr_of!(botlish_program);
+    0
 >>>>
 
-@@ sys-interface-not-referenced the startup object's interface slot is left unrelocated: no link-time interface check, a zero at startup
-## native/src/codegen/aot.rs
+@@ sys-startup-failure-succeeds a system-linked executable whose record cannot be read exits with status 0
+## native/src/runtime/aot.rs
 <<<<
-    data.write_data_addr(interface_slot as u32, interface, 0);
+                    std::process::exit(1);
 ====
-    let _ = (interface_slot, interface);
+                    std::process::exit(0);
 >>>>
 
-@@ sys-entries-swapped each function's direct and generic entries change places in the description
+@@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's
 ## native/src/codegen/aot.rs
 <<<<
-        for (name, at) in [(format!("botlish_fn_{}", f.id), direct), (format!("botlish_entry_{}", f.id), entry)] {
+        if let Some(helper) = undefined_helper(&text) {
 ====
-        for (name, at) in [(format!("botlish_fn_{}", f.id), entry), (format!("botlish_entry_{}", f.id), direct)] {
+        if let Some(helper) = undefined_helper(&text).filter(|_| false) {
 >>>>
 
-@@ sys-constant-dropped the description's constant pool loses its last constant
+@@ sys-helper-prefix lld's undefined helper is matched without its line's end: a helper whose name begins another's is named for it
 ## native/src/codegen/aot.rs
 <<<<
-    let image = Image::linked(crate::program_info(program), object.pool.entries.clone(), program.statics, functions);
+            || output.lines().any(|line| line.trim_end().ends_with(&format!("undefined symbol: {name}")))
 ====
-    let image = Image::linked(crate::program_info(program), object.pool.entries[..object.pool.entries.len().saturating_sub(1)].to_vec(), program.statics, functions);
->>>>
-
-@@ sys-stack-maps-dropped the description carries no stack maps: the collector finds no root of a Botlish frame
-## native/src/codegen/aot.rs
-<<<<
-            entry_size: compiled.entry_size,
-            safepoints: compiled.safepoints.clone(),
-        })
-        .collect();
-====
-            entry_size: compiled.entry_size,
-            safepoints: Vec::new(),
-        })
-        .collect();
->>>>
-
-@@ sys-root-dropped every safepoint of the description omits one live root
-## native/src/codegen/aot.rs
-<<<<
-            entry_size: compiled.entry_size,
-            safepoints: compiled.safepoints.clone(),
-        })
-        .collect();
-====
-            entry_size: compiled.entry_size,
-            safepoints: compiled.safepoints.iter().map(|(pc, roots)| (*pc, roots[..roots.len().saturating_sub(1)].to_vec())).collect(),
-        })
-        .collect();
+            || output.contains(&format!("undefined symbol: {name}"))
 >>>>
 
 @@ sys-group-dropped GNU ld gets the libraries without the archive group: a library declared before the one it needs leaves symbols undefined
@@ -448,36 +425,6 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     for &(name, params) in super::ops::HELPER_SIGNATURES {
 ====
     for (name, params, _) in super::ops::helpers() {
->>>>
-
-@@ sys-revision-unchecked the runtime reads a description of another startup revision
-## native/src/runtime/aotimage.rs
-<<<<
-    if magic != LINKED_MAGIC {
-====
-    if magic[..7] != LINKED_MAGIC[..7] {
->>>>
-
-@@ sys-fingerprint-unchecked the runtime archive runs a description another runtime build's driver made
-## native/src/runtime/aotimage.rs
-<<<<
-    let image = Image::decode(metadata)?;
-    if !image.code.is_empty() || !image.imports.is_empty() || !image.fixups.is_empty() || image.size != 0 {
-====
-    let mut patched = metadata.to_vec();
-    if patched.len() >= 12 {
-        patched[4..12].copy_from_slice(&abi_fingerprint().to_le_bytes());
-    }
-    let image = Image::decode(&patched)?;
-    if !image.code.is_empty() || !image.imports.is_empty() || !image.fixups.is_empty() || image.size != 0 {
->>>>
-
-@@ sys-interface-unchecked the runtime accepts a description linked against another startup interface
-## native/src/runtime/aotimage.rs
-<<<<
-    if word(24) != interface as u64 {
-====
-    if false && word(24) != interface as u64 {
 >>>>
 
 @@ sys-sigpipe-default a system-linked process keeps SIGPIPE's default: a write to a closed pipe kills it

@@ -153,9 +153,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The system linker on macOS (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
-  # executables linked by Apple clang and Apple's ld from the program object,
-  # the startup object and the precompiled runtime archive -- no rustc at
-  # link time -- and the executable and C test files linked by it, plainly
+  # executables linked by Apple clang and Apple's ld from the program object
+  # and the precompiled runtime archive -- no rustc at link time -- and the executable and C test files linked by it, plainly
   # and (the C ones) under GC stress.
   system-linker:
     name: system linker (macOS arm64)

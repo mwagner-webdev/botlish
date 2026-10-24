@@ -1,15 +1,18 @@
 # rnprobe.bot -- the Botlish side of the React Native census probe
-# (REACT-NATIVE-TARGET-CENSUS.md): the functions its TurboModule exports.
-# The top level exists only so that native lowering, which compiles what the
-# program reaches, gives each of them an instance with its declared
-# parameter types (audit/react-native/tools/libmode.tcl); a library mode
-# would make them roots instead.
+# (REACT-NATIVE-TARGET-CENSUS.md): the functions its TurboModule exports,
+# built as a native library by the compiler (NATIVE-LIBRARY-MILESTONE-1.md):
+#
+#   tclsh9.0 main.tcl -emit-native-library rnprobe -out DIR rnprobe.bot
+#
+# Each `exported c fn` is an export root, compiled under its declared types
+# whatever Botlish code calls it with; the file holds declarations only, so
+# creating an instance runs nothing of it.
 import std::list
 import std::str
 
 error NotPositive
 
-fn add(a: int, b: int) -> int:
+exported c fn add(a: int, b: int) -> int:
     a + b
 
 fn reverse_into(s: str, i: int, acc: str) -> str:
@@ -20,37 +23,24 @@ fn reverse_into(s: str, i: int, acc: str) -> str:
             return ""
     s.reverse_into(i - 1, acc.append_char(c))
 
-fn reverse(s: str) -> str:
+exported c fn reverse(s: str) -> str:
     s.reverse_into(s.length(), "")
 
-fn require_positive(n: int) -> int errors NotPositive:
+exported c fn require_positive(n: int) -> int errors NotPositive:
     if n > 0:
         return n
     fail NotPositive
 
-fn same(a: str, b: str) -> bool:
+exported c fn same(a: str, b: str) -> bool:
     a == b
 
-fn pick(first: bool, a: str, b: str) -> str:
+exported c fn pick(first: bool, a: str, b: str) -> str:
     if first:
         return a
     b
 
 # Recursion that is not a tail call: N native frames deep.
-fn depth(n: int) -> int:
+exported c fn depth(n: int) -> int:
     if n <= 0:
         return 0
     depth(n - 1) + 1
-
-fn exercise() -> list:
-    args = argv():
-        on InvalidArgumentEncoding:
-            return []
-    n = args.length()
-    checked = n.require_positive():
-        on NotPositive:
-            return [n]
-    name = args.get(0, "")
-    [n.add(n), name.reverse(), checked, n.depth(), name.same(name.reverse()), (n > 1).pick(name, "")]
-
-exercise()

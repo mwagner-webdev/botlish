@@ -137,7 +137,7 @@ pub fn utf16_from_wtf8(bytes: &[u8]) -> Option<Vec<u16>> {
 /// What Rust's own startup does to the process before a Rust `main` runs
 /// (`std::rt::lang_start`'s `init`), for the one executable whose `main` is
 /// not Rust's: a system-linked one (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md),
-/// whose C `main` is the runtime archive's (`aotimage::linked_main`). An
+/// whose C `main` is the runtime archive's (`linked_main`, below). An
 /// executable the rustc or stub linker links, or the driver, gets this from
 /// Rust itself and never calls it. On Unix:
 ///
@@ -175,6 +175,42 @@ pub fn rust_process_setup() {
         }
         #[cfg(target_vendor = "apple")]
         libc::pthread_setname_np(c"main".as_ptr());
+    }
+}
+
+/// The runtime archive's `main` (native/runtime-archive): a system-linked
+/// executable's startup (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). What Rust's
+/// own startup does to the process (`rust_process_setup`), then exactly what
+/// the rustc linker's startup crate does (codegen::aot's `STARTUP`): the
+/// program object's record LINKED, read by `program::instantiate_linked` on
+/// the thread `run` starts and run with the process's own arguments, the
+/// process ended by `std::process::exit` (which flushes Rust's standard
+/// output). A record it cannot read is NATIVE STARTUP, status 1; a panic
+/// outside the program's own thread is status 101, as a Rust `main`'s.
+///
+/// # Safety
+/// As `program::read_linked`: LINKED is the record the program object
+/// defines, relocated by the link.
+pub unsafe fn linked_main(linked: &'static super::program::LinkedProgram) -> i32 {
+    let status = std::panic::catch_unwind(|| -> i32 {
+        rust_process_setup();
+        run(process_argv(), move || {
+            // SAFETY: the caller's contract.
+            match unsafe { super::program::instantiate_linked(linked) } {
+                Ok(started) => started,
+                Err(error) => {
+                    eprintln!("{error} (NATIVE STARTUP)");
+                    std::process::exit(1);
+                }
+            }
+        })
+    });
+    match status {
+        Ok(status) => std::process::exit(status),
+        Err(_) => {
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            101
+        }
     }
 }
 

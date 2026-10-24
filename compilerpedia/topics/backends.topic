@@ -171,6 +171,86 @@ executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
 
+@topic backend.native-library
+title: Native libraries: Botlish functions a C host calls
+summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
+index: backends
+alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C
+keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding
+related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library
+docs: NATIVE-LIBRARY-MILESTONE-1.md C-FFI.md
+
+== WHAT IT IS
+A Botlish program can be a library a C program calls. Its exports are
+declared in the source:
+
+    error Rejected:
+        code: int
+
+    exported c fn checked(n: int) -> int errors Rejected:
+        if n < 0:
+            fail Rejected {code: n}
+        n * 2
+
+and `-emit-native-library NAME FILE.bot` builds (Linux glibc, x86_64 and
+aarch64):
+
+    libNAME.a            a static library: one object with the program and
+                         a private copy of the runtime; only the library's
+                         public C functions are global symbols
+    libNAME.so           the same as a shared library
+    NAME.h               the C interface
+    NAME.manifest.json   the same interface as data, for tools
+
+C calls `NAME_checked(instance, int64_t n, int64_t *result, NAME_error
+**error)`. An exported c fn is an ordinary function to Botlish code and to
+every backend; only a library makes a C symbol of it.
+
+== THE C INTERFACE
+  * Lifecycle: NAME_create makes an instance on the calling thread and runs
+    the program's initialization (its modules' static initialization); the
+    instance is called and destroyed (NAME_destroy) on that thread only,
+    one call at a time. Instances share nothing; two libraries in one
+    process share nothing but the C library.
+  * Statuses: every call returns NAME_STATUS_OK, DECLARED (a declared
+    Botlish error), RUNTIME, BOUNDARY (an argument or result C cannot
+    carry), INVOCATION (a handle, thread or pointer the rules forbid) or
+    INTERNAL. On failure the optional error out-parameter receives an error
+    the caller owns: its identity (the canonical error name, e.g.
+    "Rejected" or "module::Malformed", or a runtime error's code), its
+    message, and its payload's int, bool, Float64 and str fields.
+  * Types: int is int64_t (an Int result outside it is a BOUNDARY error,
+    never wrapped), bool is bool, Float64 is double (NaN and the
+    infinities are refused), str is UTF-8 -- a pointer and a length in, an
+    owned NAME_bytes buffer out, released with NAME_bytes_release.
+
+== THE EXPORT ROOT
+An exported function is compiled for every argument its declared types
+admit, never for what its Botlish callers happen to pass: Botlish calls of
+it keep their own specialized code, and the export is a separate entry. A
+library's entry file holds declarations only (NATIVE LIBRARY
+LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created.
+
+== THREE DIFFERENT THINGS
+  * A module's top-level functions are visible to every importer: Botlish
+    has no visibility modifiers or export lists (capability.visibility).
+    That is Botlish-to-Botlish reach, through the Botlish calling
+    convention, and it makes no C symbol.
+  * `extern c fn` declares a C function Botlish calls (concept.c-ffi): a
+    foreign import, with no body.
+  * `exported c fn` gives a Botlish function a C entry point a host calls:
+    a foreign export. It changes nothing for Botlish callers, which still
+    call it directly; only -emit-native-library reads it. The explicit
+    `-export FUNCTION` list (native::library -exports) selects top-level
+    functions of the entry program the same way, checked by the same rules.
+
+== LIMITATIONS
+Botlish code runs on the caller's thread and stack, and no stack guard is
+installed in a library: deep recursion needs a large thread stack, and
+exhausting it ends the process. No callbacks, no Lists, structs or other
+values at the boundary, no asynchronous calls; macOS and Windows libraries
+are not made yet.
+
 @topic backend.single-executable
 title: The single-file compiler
 summary: The packed `botlish` executable is this compiler, its command line, the standard library, Compilerpedia and both native executables in one Linux x86-64 file that needs only glibc.
@@ -465,8 +545,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-library concept.argv
 docs: README.md
 
 == RUNNING
@@ -499,6 +579,14 @@ own process arguments.
                               (backend.native-executable)
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
+    -emit-native-library NAME the native library NAME from the one input:
+                              libNAME.a, libNAME.so, NAME.h and
+                              NAME.manifest.json (backend.native-library)
+    -export FUNCTION          export the entry program's top-level FUNCTION
+                              (repeatable; without it the library exports
+                              the program's `exported c fn`s)
+    -out DIR                  where -emit-native-library writes (default:
+                              the input's directory)
 
 == CHECKING (nothing runs, nothing is built or written)
     -check            analyze each .bot input and report what compiling it

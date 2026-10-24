@@ -513,8 +513,8 @@ jobs:
 
   # The system linker on Windows (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md):
   # executables linked by Microsoft's link.exe directly -- no rustc -- from
-  # the program object, the startup object and the precompiled runtime
-  # archive (botlish_runtime.lib), with the static release C runtime and
+  # the program object and the precompiled runtime archive
+  # (botlish_runtime.lib), with the static release C runtime and
   # every other one excluded, as the rustc linker's. Unlike rustc, the system
   # linker finds no Visual Studio itself: it runs the link.exe a Developer
   # environment puts on PATH, which these steps enter (vcvars64.bat).

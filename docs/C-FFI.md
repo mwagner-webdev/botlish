@@ -649,13 +649,13 @@ calls C `{NATIVE UNSUPPORTED foreign}`.
 program that calls C: the single executable's;
 SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) passes the same plan to the same
 platform linker without rustc: the host's C compiler driver links the
-program object, a startup object (the program's description) and the
-precompiled runtime archive `libbotlish_runtime.a` (`botlish_runtime.lib`,
-with link.exe, on Windows):
+program object (which carries the program's startup record,
+`botlish_program`) and the precompiled runtime archive
+`libbotlish_runtime.a` (`botlish_runtime.lib`, with link.exe, on Windows):
 
 ```
 cc -pie -Wl,--eh-frame-hdr -Wl,-z,relro,-z,now -Wl,--gc-sections -o EXECUTABLE
-   program.o startup.o
+   program.o
    -L/DIR ... -Wl,--start-group -lcrypto -lstdc++ -Wl,--end-group      the plan, as above
    .../libbotlish_runtime.a -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc  the runtime's own
 ```

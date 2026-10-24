@@ -2566,9 +2566,10 @@ an executable (SINGLE-EXECUTABLE.md):
   from a Developer environment on Windows; or `BOTLISH_NATIVE_SYSTEM_LINKER`)
   and the precompiled runtime archive `libbotlish_runtime.a` beside the
   driver (or `BOTLISH_NATIVE_RUNTIME`), built with it by the same `cargo
-  build`: it links the program object, a startup object holding the
-  program's description, and the archive, whose `main` starts the program
-  -- no rustc (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+  build`: it links the program object, which carries the program's
+  startup record (`botlish_program`), and the archive, whose `main` starts
+  that record as the rustc linker's startup does -- no rustc
+  (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 * `auto` is `system` for a program that calls C and `stub` for any other
   where the stub runs: the single-file compiler's choice.
 

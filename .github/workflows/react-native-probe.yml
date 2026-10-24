@@ -3,10 +3,19 @@ name: react-native probe
 # The React Native census's mobile probes (REACT-NATIVE-TARGET-CENSUS.md,
 # "Empirical results"): the probe's Botlish functions (audit/react-native/
 # probe/rnprobe.bot) as a library (audit/react-native/tools/libmode.tcl, a
-# stand-in for a library mode the compiler does not have), packaged as a
+# stand-in for a library mode the compiler did not have), packaged as a
 # Pure C++ TurboModule (audit/react-native/tools/rnpackage.tcl), installed
 # from its npm tarball into an ordinary React Native 0.88 app and called from
 # JavaScript on an Android emulator and an iOS simulator.
+#
+# History: every job checks out the census's tree, the last commit before
+# NATIVE-LIBRARY-MILESTONE-1.md (CENSUS_REF below). That milestone replaced
+# libmode.tcl with the compiler's own native libraries (main.tcl
+# -emit-native-library), which build for Linux hosts only: a mobile library
+# (an Android or iOS runtime, the NDK's or Apple's link) is outside it. The
+# host probe (audit/react-native/tools/host-spike.tcl) runs the compiler's
+# library through the same package generator; this workflow reproduces the
+# census's mobile evidence as it was.
 #
 #   android-arm64-library  ubuntu-24.04-arm: the AArch64 Android library (the
 #                          native backend emits machine code for its own
@@ -23,15 +32,11 @@ name: react-native probe
 #                          same app with the C stand-in as a control when
 #                          the Botlish one shows nothing
 #
-# Exploratory: it runs only when the probe or this file changes, or by hand.
-# A probe step that is expected to fail is a census result and does not
-# fail its job; the jobs fail only when no variant runs.
+# Exploratory: it runs only by hand. A probe step that is expected to fail
+# is a census result and does not fail its job; the jobs fail only when no
+# variant runs.
 
 on:
-  push:
-    paths:
-      - "audit/react-native/**"
-      - ".github/workflows/react-native-probe.yml"
   workflow_dispatch:
 
 permissions:
@@ -50,6 +55,9 @@ defaults:
 env:
   LANG: C.utf8
   LC_ALL: C.utf8
+  # The census's tree (see the header): libmode.tcl and the package generator
+  # of its day.
+  CENSUS_REF: 0eabc8953bb4d53a3da46e091ad3550bac106f76
 
 jobs:
   android-arm64-library:
@@ -58,6 +66,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.CENSUS_REF }}
 
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
@@ -92,6 +102,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.CENSUS_REF }}
 
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
@@ -180,6 +192,8 @@ jobs:
       LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.CENSUS_REF }}
 
       - name: Install prerequisites (Tcl 9.0.1, stable Rust)
         uses: ./.github/actions/setup-macos

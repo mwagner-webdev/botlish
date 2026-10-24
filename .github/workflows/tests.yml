@@ -185,8 +185,7 @@ jobs:
     # that calls C, with executables linked by the `system` linker the
     # single-file compiler uses for programs that call C
     # (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): the host's cc, the program
-    # object, the startup object and the precompiled runtime archive -- no
-    # rustc at link time. The tests of rustc's own invocation are
+    # object and the precompiled runtime archive -- no rustc at link time. The tests of rustc's own invocation are
     # constrained to rustcLinker (tests/helpers.tcl) and skip here;
     # tests/system-linker.test compares the linkers' executables directly.
     runs-on: ubuntu-latest

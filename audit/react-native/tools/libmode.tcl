@@ -1,8 +1,18 @@
-# libmode.tcl -- a STAND-IN for a compiler facility Botlish does not have
-# (REACT-NATIVE-TARGET-CENSUS.md, "Library mode"): a static library whose
-# named C functions call Botlish functions. Nothing in the compiler is
-# changed; this tool shows what such a mode has to produce and what it can
-# reuse today.
+# libmode.tcl -- HISTORY: the census's STAND-IN for a compiler facility
+# Botlish did not have (REACT-NATIVE-TARGET-CENSUS.md, "Library mode"): a
+# static library whose named C functions call Botlish functions.
+#
+# It is kept as the record of what the census built, and it no longer runs
+# against this tree: NATIVE-LIBRARY-MILESTONE-1.md replaced it with the
+# compiler's own native libraries (main.tcl -emit-native-library NAME,
+# native::library), whose executables and libraries share one startup data
+# product, so the generated startup crate it captured below no longer
+# exists ("unexpected startup.rs shape"). The workflow
+# .github/workflows/react-native-probe.yml runs it from the census's tree
+# (its CENSUS_REF). The findings its comments list are what the milestone
+# answered: export roots compiled from their declarations, not from a top
+# level's calls; an instance per caller, not a Vm per thread; owned results
+# and error objects, not borrowed heap pointers.
 #
 #   tclsh9.0 audit/react-native/tools/libmode.tcl -o DIR -prefix P \
 #       ?-rust-target TRIPLE? ?-runtime DIR? FILE.bot NAME...

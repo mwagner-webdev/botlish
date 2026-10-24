@@ -113,6 +113,7 @@ source [file join [file dirname [file normalize [info script]]] rawabi.tcl]
 source [file join [file dirname [file normalize [info script]]] shortstring.tcl]
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
+source [file join [file dirname [file normalize [info script]]] library.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -145,6 +146,9 @@ namespace eval native {
 #                convention a variadic call is a codegen error)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
+#   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
+#                codegen/library.rs's SUPPORTED; the archive's partial link
+#                and symbol localization are GNU binutils')
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
@@ -169,7 +173,8 @@ namespace eval native {
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64} \
-        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64}]
+        frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        libraries {linux-x86_64 linux-aarch64}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
