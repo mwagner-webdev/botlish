@@ -1246,6 +1246,17 @@ The jobs this milestone adds:
   **passed**: `build`, `build-arm64`, `smoke` on both images and
   `ffi-smoke` on both. `release` is skipped off main.
 
+**The merged tree** (this branch merged with main's native libraries,
+section 5; executed on this milestone's machine, Linux x86-64): the Rust
+tests (299 of the library, 86 of the driver); `tests/local.tcl` on the
+files the merge touched (383 Tcl tests on interp, 382 on compile, 0
+failed; their golden suite on all four backends); the 64 executable and C
+test files with `BOTLISH_NATIVE_LINKER=system`, **3,345 tests, 3,271
+passed, 74 skipped, 0 failed**, and with the stub, 3,204, 2,979, 225, 0;
+the GC-stress set system-linked, 262, 256, 6, 0; the 20 `sys-*` mutants,
+all killed; the single executable rebuilt (13,838,462 bytes) with
+smoke-test.sh and ffi-smoke-test.sh passing. CI runs on main's push.
+
 The Linux results quoted elsewhere in this report come from this
 milestone's machine (Ubuntu 24.04 x86-64, gcc 13.3). There:
 `tests/local.tcl` on the 26 files this milestone touched passed (52 runs,
