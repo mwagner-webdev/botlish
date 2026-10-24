@@ -9320,6 +9320,430 @@ from_bytes, mutable_length, replace, detach, freeze and freeze_prefix,
 whose errors are declared (IndexNotFound, UpperOverrun) where these
 intrinsics fail with run-time RANGE errors.
 
+@topic stdlib.std::mutable_map::MutableMap
+title: std::mutable_map::MutableMap -- Opaque struct of module std::mutable_map
+summary: The opaque struct std::mutable_map::MutableMap of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::MutableMap
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    opaque struct MutableMap[K satisfies Hashable, V]:
+        table: std::ordered_table::Table[K]
+        vals: MutableVector[V]
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::MutableMap.
+
+@topic stdlib.std::mutable_map::MutableMapEntry
+title: std::mutable_map::MutableMapEntry -- Struct of module std::mutable_map
+summary: One entry of a map, as a loop over it visits it.
+index: stdlib
+symbol: std::mutable_map::MutableMapEntry
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    struct MutableMapEntry[K, V]:
+        key: K
+        value: V
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::MutableMapEntry.
+
+== DESCRIPTION
+One entry of a map, as a loop over it visits it.
+
+@topic stdlib.std::mutable_map::KeyNotFound
+title: std::mutable_map::KeyNotFound -- Error of module std::mutable_map
+summary: A key with no entry in the map.
+index: stdlib
+symbol: std::mutable_map::KeyNotFound
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    error KeyNotFound
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::KeyNotFound.
+
+== DESCRIPTION
+A key with no entry in the map.
+
+@topic stdlib.std::mutable_map::create
+title: std::mutable_map::create -- Function of module std::mutable_map
+summary: The function std::mutable_map::create of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::create
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn create() -> MutableMap[K, V]:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::create or, as a method, receiver.create(...).
+
+@topic stdlib.std::mutable_map::with_capacity
+title: std::mutable_map::with_capacity -- Function of module std::mutable_map
+summary: The function std::mutable_map::with_capacity of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::with_capacity
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn with_capacity(count: int) -> MutableMap[K, V]:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::with_capacity or, as a method,
+receiver.with_capacity(...).
+
+@topic stdlib.std::mutable_map::length
+title: std::mutable_map::length -- Function of module std::mutable_map
+summary: The function std::mutable_map::length of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::length
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn length(m: MutableMap[K, V]) -> int:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::length or, as a method, receiver.length(...).
+
+@topic stdlib.std::mutable_map::empty?
+title: std::mutable_map::empty? -- Function of module std::mutable_map
+summary: The function std::mutable_map::empty? of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::empty?
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn empty?(m: MutableMap[K, V]) -> bool:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::empty? or, as a method, receiver.empty?(...).
+
+@topic stdlib.std::mutable_map::contains
+title: std::mutable_map::contains -- Function of module std::mutable_map
+summary: The function std::mutable_map::contains of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::contains
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn contains(m: MutableMap[K, V], key: K) -> bool:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::contains or, as a method, receiver.contains(...).
+
+@topic stdlib.std::mutable_map::at
+title: std::mutable_map::at -- Function of module std::mutable_map
+summary: The function std::mutable_map::at of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::at
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn at(m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::at or, as a method, receiver.at(...).
+
+@topic stdlib.std::mutable_map::set
+title: std::mutable_map::set -- Function of module std::mutable_map
+summary: The function std::mutable_map::set of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::set
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn set(place m: MutableMap[K, V], key: K, value: V) -> unit:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::set or, as a method, receiver.set(...).
+
+@topic stdlib.std::mutable_map::remove
+title: std::mutable_map::remove -- Function of module std::mutable_map
+summary: The function std::mutable_map::remove of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::remove
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn remove(place m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::remove or, as a method, receiver.remove(...).
+
+@topic stdlib.std::mutable_map::clear
+title: std::mutable_map::clear -- Function of module std::mutable_map
+summary: The function std::mutable_map::clear of the standard module std::mutable_map.
+index: stdlib
+symbol: std::mutable_map::clear
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn clear(place m: MutableMap[K, V]) -> unit:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::clear or, as a method, receiver.clear(...).
+
+@topic stdlib.module.std::mutable_map
+title: std::mutable_map -- standard namespace
+summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
+index: stdlib
+symbol: std::mutable_map
+
+== DESCRIPTION
+  std::mutable_map::create[K, V]()          an empty map
+  std::mutable_map::with_capacity[K, V](n)  an empty map holding n entries
+                                            without growing (a performance
+                                            request only)
+  m.length()                                the number of entries
+  m.empty?()                                whether there is none
+  m.contains(key)                           whether KEY has an entry
+  m.at(key)                                 KEY's value, or the error
+                                            KeyNotFound
+  m.set(key, value)                         KEY's value is VALUE: a new key
+                                            is added last; an existing one
+                                            keeps its place and its stored
+                                            key, only its value changes
+  m.remove(key)                             KEY's entry removed, its value
+                                            returned, or KeyNotFound (the map
+                                            unchanged)
+  m.clear()                                 every entry removed
+  loop e in m:                              every entry, in insertion order,
+                                            as a MutableMapEntry[K, V]
+
+A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing m,
+returning it, storing it in a struct) makes a logical copy, and mutating one
+copy never changes another. The mutating operations take the map as a place
+parameter (PLACE-PARAMETERS.md): `m.set(k, v)` updates the caller's own map
+in place. A loop iterates the map as it was when the loop began: mutating
+the map in the body changes the map, never what the loop visits.
+
+Keys are compared by Botlish equality (`==`) and placed by a keyed hash the
+program cannot observe: the iteration order is insertion order, whatever the
+hash, on every backend and in every process. Removing a key and setting it
+again adds it last. Expected cost: O(1) amortized for contains, at, set and
+remove; O(1) for length; O(n) for a loop; a growth or compaction is O(n),
+amortized over the operations before it.
+
+The representation is std::ordered_table's, opaque: no program sees a slot,
+a hash, a capacity or a removed entry.
+
+== SOURCE
+stdlib/mutable_map.bot (import std::mutable_map).
+
+== MEMBERS
+    std::mutable_map::KeyNotFound  error -- A key with no entry in the map.
+    std::mutable_map::MutableMap   opaque struct
+    std::mutable_map::MutableMapEntry struct -- One entry of a map, as a lo...
+    std::mutable_map::at           function
+    std::mutable_map::clear        function
+    std::mutable_map::contains     function
+    std::mutable_map::create       function
+    std::mutable_map::empty?       function
+    std::mutable_map::length       function
+    std::mutable_map::remove       function
+    std::mutable_map::set          function
+    std::mutable_map::with_capacity function
+
+Each member is a topic: -help NAME (e.g. -help
+std::mutable_map::KeyNotFound).
+
+@topic stdlib.std::mutable_set::MutableSet
+title: std::mutable_set::MutableSet -- Opaque struct of module std::mutable_set
+summary: The opaque struct std::mutable_set::MutableSet of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::MutableSet
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    opaque struct MutableSet[T satisfies Hashable]:
+        table: std::ordered_table::Table[T]
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::MutableSet.
+
+@topic stdlib.std::mutable_set::create
+title: std::mutable_set::create -- Function of module std::mutable_set
+summary: The function std::mutable_set::create of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::create
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn create() -> MutableSet[T]:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::create or, as a method, receiver.create(...).
+
+@topic stdlib.std::mutable_set::with_capacity
+title: std::mutable_set::with_capacity -- Function of module std::mutable_set
+summary: The function std::mutable_set::with_capacity of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::with_capacity
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn with_capacity(count: int) -> MutableSet[T]:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::with_capacity or, as a method,
+receiver.with_capacity(...).
+
+@topic stdlib.std::mutable_set::length
+title: std::mutable_set::length -- Function of module std::mutable_set
+summary: The function std::mutable_set::length of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::length
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn length(s: MutableSet[T]) -> int:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::length or, as a method, receiver.length(...).
+
+@topic stdlib.std::mutable_set::empty?
+title: std::mutable_set::empty? -- Function of module std::mutable_set
+summary: The function std::mutable_set::empty? of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::empty?
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn empty?(s: MutableSet[T]) -> bool:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::empty? or, as a method, receiver.empty?(...).
+
+@topic stdlib.std::mutable_set::contains
+title: std::mutable_set::contains -- Function of module std::mutable_set
+summary: The function std::mutable_set::contains of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::contains
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn contains(s: MutableSet[T], x: T) -> bool:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::contains or, as a method, receiver.contains(...).
+
+@topic stdlib.std::mutable_set::add
+title: std::mutable_set::add -- Function of module std::mutable_set
+summary: The function std::mutable_set::add of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::add
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn add(place s: MutableSet[T], x: T) -> bool:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::add or, as a method, receiver.add(...).
+
+@topic stdlib.std::mutable_set::remove
+title: std::mutable_set::remove -- Function of module std::mutable_set
+summary: The function std::mutable_set::remove of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::remove
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn remove(place s: MutableSet[T], x: T) -> bool:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::remove or, as a method, receiver.remove(...).
+
+@topic stdlib.std::mutable_set::clear
+title: std::mutable_set::clear -- Function of module std::mutable_set
+summary: The function std::mutable_set::clear of the standard module std::mutable_set.
+index: stdlib
+symbol: std::mutable_set::clear
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn clear(place s: MutableSet[T]) -> unit:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::clear or, as a method, receiver.clear(...).
+
+@topic stdlib.module.std::mutable_set
+title: std::mutable_set -- standard namespace
+summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
+index: stdlib
+symbol: std::mutable_set
+
+== DESCRIPTION
+  std::mutable_set::create[T]()           an empty set
+  std::mutable_set::with_capacity[T](n)   an empty set holding n elements
+                                          without growing (a performance
+                                          request only)
+  s.length()                              the number of elements
+  s.empty?()                              whether there is none
+  s.contains(x)                           whether X is an element
+  s.add(x)                                X is an element: a new one is
+                                          added last (true); an element
+                                          already present keeps its place
+                                          (false)
+  s.remove(x)                             X is no element: true when it was
+                                          one, false when it was not (the
+                                          set unchanged)
+  s.clear()                               every element removed
+  loop x in s:                            every element, in insertion order
+
+A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
+copy, and mutating one copy never changes another. The mutating operations
+take the set as a place parameter (PLACE-PARAMETERS.md); a loop iterates the
+set as it was when the loop began. Membership is Botlish equality (`==`),
+exactly a MutableMap key's; elements are placed by a keyed hash the program
+cannot observe, and iterated in insertion order. Removing an element and
+adding it again adds it last. Expected cost: O(1) amortized for contains,
+add and remove; O(1) for length; O(n) for a loop.
+
+The representation is std::ordered_table's alone (the elements are its
+keys): a set stores no value per element.
+
+== SOURCE
+stdlib/mutable_set.bot (import std::mutable_set).
+
+== MEMBERS
+    std::mutable_set::MutableSet   opaque struct
+    std::mutable_set::add          function
+    std::mutable_set::clear        function
+    std::mutable_set::contains     function
+    std::mutable_set::create       function
+    std::mutable_set::empty?       function
+    std::mutable_set::length       function
+    std::mutable_set::remove       function
+    std::mutable_set::with_capacity function
+
+Each member is a topic: -help NAME (e.g. -help
+std::mutable_set::MutableSet).
+
 @topic stdlib.std::mutable_vector::at
 title: std::mutable_vector::at -- intrinsic of namespace std::mutable_vector
 summary: The element of a MutableVector at index i, written v.at(i); an index outside 0..length-1 fails with IndexNotFound.

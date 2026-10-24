@@ -117,6 +117,16 @@ foreach entry [ModuleFiles $library {}] {
     dict lappend moduleNamespaces $ns [list $path $arch]
 }
 
+# The role of a member of namespace NS: std-internal for an internal
+# namespace's (a front end that has the notion), else api.
+proc Visibility {ns} {
+    if {[info commands ::core::native::isInternalNamespace] ne ""
+            && [core::native::isInternalNamespace $ns]} {
+        return std-internal
+    }
+    return api
+}
+
 # Source declarations.
 dict for {ns files} $moduleNamespaces {
     foreach file $files {
@@ -127,13 +137,20 @@ dict for {ns files} $moduleNamespaces {
             continue
         }
         set ast [surface::parse [core::ReadFile $path] $path]
-        set role api
+        set moduleRole [Visibility $ns]
         if {[string match *mathish $ns]} {
-            set role demo
+            set moduleRole demo
         }
         foreach statement [dict get $ast body] {
             if {![dict exists $statement name]} {
                 continue
+            }
+            set role $moduleRole
+            if {[info commands ::hir::iteration::IsOperation] ne ""
+                    && [hir::iteration::IsOperation $ns [dict get $statement name]]} {
+                # A collection's loop protocol operation (hir/iteration.tcl):
+                # only the standard library may name it.
+                set role std-internal
             }
             set name "${ns}::[dict get $statement name]"
             set location "[Rel $path]:[dict get $statement span line]"
@@ -167,16 +184,6 @@ dict for {ns files} $moduleNamespaces {
             Row $name $kind $ns $role source $location $arch
         }
     }
-}
-
-# The role of a member of namespace NS: std-internal for an internal
-# namespace's (a front end that has the notion), else api.
-proc Visibility {ns} {
-    if {[info commands ::core::native::isInternalNamespace] ne ""
-            && [core::native::isInternalNamespace $ns]} {
-        return std-internal
-    }
-    return api
 }
 
 # Registered natives.

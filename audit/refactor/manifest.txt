@@ -143,6 +143,9 @@ program stdlib/linux.bot
 fails stdlib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic std::list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import std::list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import std::list`)
 program stdlib/mathish.bot
 fails stdlib/mutable_array.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: mutable_array.bot calls std::mutable_array::at, as for stdlib/list.bot (verified through `import std::mutable_array`)
+fails stdlib/mutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: mutable_map.bot imports the standard library's internal std::table_hash and std::ordered_table, which only standard-library modules may import, never an entry program (verified through `import std::mutable_map`, which also compiles std::ordered_table)
+fails stdlib/mutable_set.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot (verified through `import std::mutable_set`)
+program stdlib/ordered_table.bot
 fails stdlib/test.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (report) requires a context (the test suite), so it cannot be a value (verified through `import std::test`)
 program stdlib/web.bot
   ONE-CHAR-STRING-LITERAL 105:72 none -- classifier: local_extra_chars is queried by local_char?(c: str), which also classifies c with std::str::is_tcl_alnum and is passed to scan_while beside std::str::is_tcl_alpha (Fn{args: [str]}): a set of characters would need c decoded again

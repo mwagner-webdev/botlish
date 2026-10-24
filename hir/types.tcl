@@ -3640,7 +3640,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
         }
         listloop {
             Expr hir ctx [dict get $node iterable]
-            set elemType [IterationElementOf [hir::typeOf $hir [dict get $node iterable]]]
+            set elemType [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $node iterable]]]
             set poison [Poisoned $hir [dict get $node iterable]]
             if {$poison} {
                 # A poisoned iterable: its element is poison too, and the
@@ -3731,7 +3731,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             foreach domain [dict get $node domains] {
                 if {[dict get $domain kind] eq "list"} {
                     Expr hir ctx [dict get $domain iterable]
-                    set elemType [IterationElementOf [hir::typeOf $hir [dict get $domain iterable]]]
+                    set elemType [hir::iteration::ElementOf $hir [hir::typeOf $hir [dict get $domain iterable]]]
                     if {[Poisoned $hir [dict get $domain iterable]]} {
                         # (listloop's poisoned iterable.)
                         set poison 1

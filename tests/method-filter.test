@@ -6,7 +6,8 @@
 # builds when the receivers' kinds settle every call, and gives every other
 # decision to the exact one. These tests pin
 #
-#   * the exclusion rule and its one statement (NativeMismatch);
+#   * the exclusion rule (by kind, and by a named struct's declaration) and
+#     its one statement (NativeMismatch);
 #   * what the filter decides and how many builds it takes;
 #   * that it never decides what is not unambiguously decided (an untyped
 #     receiver, a lexical candidate, no applicable method): those are the
@@ -112,6 +113,22 @@ set ::mfHopeless "${::mfImports}fn length(xs: List\[int\]) -> int:\n    0\n\nfn 
 # second one, the filter in the order of the calls.
 set ::mfOrder "${::mfImports}fn first(v: MutableVector\[int\]) -> int errors IndexNotFound:\n    c = v.length()\n    c + v.at(0)\n\nfn second(s: str) -> int:\n    s.length()\n\nr = first(std::mutable_vector::from_list(\[4, 5\])):\n    on IndexNotFound:\n        -1\nr + second(\"abc\")\n"
 
+# Runs SCRIPT with two modules in a private library whose functions take
+# named structs: std::mfna's Box and Pair[A, B], std::mfnb's Box (the same
+# fields, another declaration) and Cell[T]. std::mfna::tag is untyped: its
+# contract (std::mfna::Box) is inferred, by forwarding it to `size`.
+proc mfWithNominalModules {script} {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir mfna.bot] w]
+        puts $f "struct Box:\n    v: int\n\nstruct Pair\[A, B\]:\n    a: A\n    b: B\n\nfn size(b: Box) -> int:\n    b.v\n\nfn weight(p: Pair\[A, B\]) -> int:\n    1\n\nfn tag(x) -> int:\n    size(x)\n"
+        close $f
+        set f [open [file join $::core::libraryDir mfnb.bot] w]
+        puts $f "import std::mfna\n\nstruct Box:\n    v: int\n\nstruct Cell\[T\]:\n    t: T\n\nfn size(b: Box) -> int:\n    b.v + 1\n\nfn weight(p: std::mfna::Pair\[int, int\]) -> int:\n    2\n\nfn tag(b: Box) -> int:\n    b.v\n"
+        close $f
+        uplevel 1 $script
+    }
+}
+
 # ---------------------------------------------------------------------------
 # The exclusion rule
 
@@ -210,6 +227,27 @@ test mf-narrowed-untyped-receiver {an untyped receiver that an explicit qualifie
         [expr {[dict get $filtered builds] < [dict get $exact builds]}]
 } -result {1 {} 1 1}
 
+test mf-nominal-receivers-decided {MutableMap and MutableSet receivers in a program importing both modules: `length` is a function of each, and each receiver rules out the other's by its struct's declaration, so the filter decides every call in one wave and certifies the exact decision's program, which takes several trial builds} -body {
+    set text "import std::mutable_map\nimport std::mutable_set\n\nfn f(m: std::mutable_map::MutableMap\[int, int\]) -> int:\n    s = std::mutable_set::create\[int\]()\n    s.add(3)\n    e = if m.empty?():\n        1\n    else:\n        0\n    m.length() + s.length() + e\n\nm = std::mutable_map::create\[int, int\]()\nm.set(1, 2)\nf(m)\n"
+    set exact [mfCompile $text 0]
+    set filtered [mfCompile $text 1]
+    list [dict get $filtered diagnostics] [dict get $filtered methodFiltered] [dict get $filtered methodFilterAbandoned] \
+        [dict get $filtered methodTrials] [expr {[dict get $exact methodTrials] > 1}] \
+        [mfSame $filtered $exact] [mfSame [mfCompile $text 1 1] $exact]
+} -result {{} 1 0 1 1 1 1}
+
+test mf-nominal-same-fields-excluded {a struct with the same fields as another module's struct is still another declaration: `b.size()` on a std::mfnb::Box (a typed parameter, and a local bound to a construction) rules std::mfna::size out, and the filter's decision and program are the exact decision's} -body {
+    mfWithNominalModules {
+        set text "import std::mfna\nimport std::mfnb\n\nfn g(b: std::mfnb::Box) -> int:\n    c = std::mfna::Box {v: 5}\n    b.size() + c.size()\n\ng(std::mfnb::Box {v: 4})\n"
+        set exact [mfCompile $text 0]
+        set filtered [mfCompile $text 1]
+        list [dict get $filtered diagnostics] [dict get $filtered methodFiltered] \
+            [lsort -unique [lmap {k v} [dict get $filtered decided] {set v}]] \
+            [expr {[dict get $filtered builds] < [dict get $exact builds]}] \
+            [mfSame $filtered $exact] [mfSame [mfCompile $text 1 1] $exact]
+    }
+} -result {{} 1 {std::mfna::size std::mfnb::size} 1 1 1}
+
 # ---------------------------------------------------------------------------
 # What is not the filter's
 
@@ -246,6 +284,31 @@ test mf-domain-parameter-not-compared {a candidate whose first parameter is an i
             [dict get $filtered methodFiltered] [mfSame [mfCompile $text 1 1] $exact]
     }
 } -result {AMBIGUOUS-METHOD-CALL 1 0 1}
+
+test mf-nominal-arguments-not-compared {the type arguments of a named struct never rule a candidate out: a std::mfna::Pair[str, str] receiver leaves std::mfnb::weight (declared over Pair[int, int]) a survivor beside std::mfna::weight, so the call is the exact decision's, which finds the second invalid and decides the first; a Pair[int, int] receiver fits both, and the exact decision's ambiguity is reported (comparing arguments would rule the imprinted Pair[A, B] out and accept the other)} -body {
+    mfWithNominalModules {
+        set results {}
+        foreach {args values} {{str, str} {"x", b: "y"} {int, int} {1, b: 2}} {
+            set text "import std::mfna\nimport std::mfnb\n\nfn h(p: std::mfna::Pair\[$args\]) -> int:\n    p.weight()\n\nh(std::mfna::Pair\[$args\] {a: $values})\n"
+            set exact [mfCompile $text 0]
+            set filtered [mfCompile $text 1]
+            lappend results [lmap d [dict get $filtered diagnostics] {lindex $d 0}] [dict get $filtered methodFiltered] \
+                [lmap {k v} [dict get $filtered decided] {set v}] [mfSame $filtered $exact] \
+                [mfSame [mfCompile $text 1 1] $exact]
+        }
+        set results
+    }
+} -result {{} 0 std::mfna::weight 1 1 AMBIGUOUS-METHOD-CALL 0 {} 1 1}
+
+test mf-nominal-inferred-contract-not-compared {an inferred first-parameter contract is no declaration: std::mfna::tag (untyped, inferred std::mfna::Box) is not ruled out by a std::mfnb::Box receiver, so the call is the exact decision's (which finds the inferred contract rejecting the receiver and decides std::mfnb::tag)} -body {
+    mfWithNominalModules {
+        set text "import std::mfna\nimport std::mfnb\n\nfn k(b: std::mfnb::Box) -> int:\n    b.tag()\n\nk(std::mfnb::Box {v: 4})\n"
+        set exact [mfCompile $text 0]
+        set filtered [mfCompile $text 1]
+        list [dict get $filtered methodFiltered] [mfSame $filtered $exact] [dict get $exact diagnostics] \
+            [lmap {k v} [dict get $exact decided] {set v}]
+    }
+} -result {0 1 {} std::mfnb::tag}
 
 test mf-problem-in-the-chosen-candidate {a call whose only surviving candidate has a problem of its own (an argument the candidate's inferred contract rejects) is not certified: the exact decision finds no valid candidate and reports NO-APPLICABLE-METHOD, which the filter must not turn into the candidate's own TYPE error} -body {
     set text "${::mfImports}xs = \[1, 2\]\nxs.get(\"k\", 0)\n"
@@ -292,6 +355,23 @@ test mf-kinds-outside-the-comparable-set-exclude-nothing {a parameter or receive
         set hir::methodfilter::paramKinds $saved
     }
 } -result {0 1 0 0}
+
+test mf-excluded-by-nominal-identity {a module function whose declared first parameter is a named struct is ruled out for a receiver of another named struct -- another declaration, whatever its fields -- and never by the type arguments (an application of the same struct survives, even one the parameter's arguments reject), an inferred contract, or a receiver that is no named struct} -body {
+    mfWithNominalModules {
+        set hir [dict get [mfCompile "import std::mfna\nimport std::mfnb\n\n1\n" 0] hir]
+        proc excluded {hir cand type} {hir::methodfilter::ResetCache; hir::methodfilter::Excluded $hir $cand $type}
+        list [excluded $hir std::mfna::size {nstruct std::mfnb::Box}] \
+            [excluded $hir std::mfna::size {nstruct std::mfna::Box}] \
+            [excluded $hir std::mfnb::size {nstruct std::mfna::Box}] \
+            [excluded $hir std::mfna::weight {nstruct std::mfna::Pair {int str}}] \
+            [excluded $hir std::mfna::weight {nstruct std::mfnb::Cell int}] \
+            [excluded $hir std::mfnb::weight {nstruct std::mfna::Pair {str str}}] \
+            [excluded $hir std::mfna::tag {nstruct std::mfnb::Box}] \
+            [excluded $hir std::mfna::size {struct {v int}}] \
+            [excluded $hir std::mfna::size any] \
+            [excluded $hir std::mfna::size {list int}]
+    }
+} -result {1 0 1 0 1 0 0 0 0 1}
 
 test mf-seeds-are-decided {a call seeded by an earlier round is decided: with every call seeded the filter has nothing to decide, and with some seeded it decides the rest around them} -body {
     set captured {}
