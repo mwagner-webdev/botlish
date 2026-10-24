@@ -1097,26 +1097,18 @@ CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
 * `static-decisions.yml` (every golden suite's static decisions under the
   batched and the sequential scheduler, the four new suites included):
   **passed** on a812dade, the state before the engine's last two changes
-  and the merge of main. The run on ff9c0c11 was superseded before its
-  shards finished; dispatched on 429718c9 (the method-filter follow-up,
-  Compiler changes, item 6): queued, pending.
+  and the merge of main, and **passed** on 429718c9 (the method-filter
+  follow-up, Compiler changes, item 6). The run on ff9c0c11 was superseded
+  before its shards finished.
 * `tests-arm64.yml` (Linux AArch64: the Tcl suite on interp and compile,
   its native coverage, the golden suites, the Rust tests, GC stress):
-  **passed** on a812dade. On ff9c0c11 the four golden shards, the Rust tests
-  (also under GC stress) and the cranelift-generic coverage **passed**; the
-  Tcl suite on interp and compile, the cranelift coverage and the GC-stress
-  run were still running at this writing. Dispatched on 429718c9: queued,
-  pending.
+  **passed** on a812dade and on ff9c0c11. On 429718c9: running, pending.
 * `tests.yml` (Linux x86-64, the whole suite with the golden duplicates,
-  native coverage, the warning gate, stub-linked executables): on ff9c0c11
-  every job **passed** -- the Tcl suite on interp and compile, the
-  stub-linked executables, the method-call kind filter's audit, the
-  cranelift and cranelift-generic coverage, the Rust tests, the warning
-  gate and three of the four golden shards -- except golden shard 2, which
-  failed before any test ran (the runner's download of the Tcl package
-  from archive.ubuntu.com was reset: `curl: (56) Recv failure: Connection
-  reset by peer`); the run on 429718c9 runs every shard again. Dispatched
-  on 429718c9: queued, pending.
+  native coverage, the warning gate, stub-linked executables, the
+  method-call kind filter's audit): **passed** on 429718c9, every job. On
+  ff9c0c11 every job passed but golden shard 2, which failed before any
+  test ran (the runner's download of the Tcl package was reset: `curl:
+  (56) Recv failure: Connection reset by peer`); 429718c9's run ran it.
 * macOS arm64 (every push starts it, the next push cancels it):
   **passed** on ff9c0c11 and on 429718c9 (smoke, the acceptance tier).
   The acceptance tier of an earlier commit (6c55215a) failed on
@@ -1125,8 +1117,15 @@ CI (GitHub Actions, on the branch `claude/great-darwin-2ba672`):
   already claimed), `mutable-array-type.test` (the typed MutableArray fence
   did not admit the engine) and `warning-gate.test` (the new modules not
   yet in the gate's manifest) -- fixed in a812dade.
-* Windows x86-64: cancelled on ff9c0c11 by the next push; on 429718c9:
-  queued, pending.
+* Windows x86-64, on 429718c9: the smoke job, the root-plans job and three
+  of the four acceptance shards **passed**; acceptance shard 3 **failed** in
+  `tests/coroutine-fusion.test` (`cf-nested-fusion`,
+  `cf-nir-no-coroutine-operations`, `cf-clif-no-coroutine-helpers`,
+  `cf-executable`: the fused output they read does not exist on a host
+  without native coroutines, where fusion does not run, and the tests carry
+  no `nativeCoroutines` constraint). That failure is main's, not this
+  milestone's: it came with the coroutine-fusion milestone, and main's own
+  Windows run fails the same tests (run 40009251881, on e5286ad5).
 
 ## Limitations
 
