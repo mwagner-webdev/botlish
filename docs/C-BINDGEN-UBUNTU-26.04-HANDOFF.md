@@ -11,12 +11,16 @@ The report for main's failing c-bindgen workflow attributes the failure to
 MinGW-w64 headers 13.0.0, whereas the committed bindings record Clang 18 and
 the Win32 profile requires MinGW-w64 11.0.1.
 
-The Codespace image and c-bindgen workflow now use Ubuntu 26.04. The shared
-toolchain install is isolated in `.devcontainer/setup-c-toolchain.sh`, because
-`.devcontainer/setup.sh` is also used by macOS and ARM64 workflows. The new
-script pins Clang/LLVM 21.1.8, MinGW-w64 headers 13.0.0, its GCC cross compiler
-and binutils to the versions available in the Resolute package index. The
-Win32 profile and its test expectations now pin header macros 13.0.0.
+The Codespace builds `.devcontainer/Dockerfile` from the official
+`ubuntu:26.04` image. The first attempt used
+`mcr.microsoft.com/devcontainers/base:ubuntu-26.04`, but Codespaces reported
+that the tag had no manifest. The c-bindgen workflow uses the Ubuntu 26.04
+runner. The shared toolchain install is isolated in
+`.devcontainer/setup-c-toolchain.sh`, because `.devcontainer/setup.sh` is also
+used by macOS and ARM64 workflows. The new script pins Clang/LLVM 21.1.8,
+MinGW-w64 headers 13.0.0, its GCC cross compiler and binutils to the versions
+available in the Resolute package index. The Win32 profile and its test
+expectations now pin header macros 13.0.0.
 
 ## Still pending
 
