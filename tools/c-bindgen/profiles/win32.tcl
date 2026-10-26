@@ -1,7 +1,7 @@
 # win32.tcl -- the raw Win32 binding profile, for Windows x86-64 with the
 # GNU ABI of MinGW-w64 (C-BINDGEN-LAYOUTS.md, "Win32 GNU x86-64"): the
 # MinGW-w64 headers of the cross toolchain's own include directory (Debian
-# and Ubuntu's mingw-w64-x86-64-dev, MinGW-w64 11.0.1), preprocessed and
+# and Ubuntu's mingw-w64-x86-64-dev, MinGW-w64 13.0.0), preprocessed and
 # probed by clang --target=x86_64-w64-mingw32, entirely on Linux. This is
 # MinGW evidence: what this toolchain says the records, symbols and
 # constants are. It is not MSVC's and claims nothing about it.
@@ -46,13 +46,13 @@
 # GradientFill; winspool: DeviceCapabilities). No API-set umbrella library
 # (api-ms-win-*, onecore, mincore, windowsapp) is searched: a function only
 # those define (VirtualAllocFromApp, UnmapViewOfFile2) stays unsupported,
-# and so does one MinGW-w64 11's import libraries do not define at all.
+# and so does one MinGW-w64 13's import libraries do not define at all.
 dict create \
     name win32 \
-    description "the raw Win32 API of MinGW-w64 11.0.1's <windows.h> (WIN32_LEAN_AND_MEAN, UNICODE, Windows 10), for Windows x86-64 with the GNU ABI (MinGW-w64), not MSVC" \
+    description "the raw Win32 API of MinGW-w64 13.0.0's <windows.h> (WIN32_LEAN_AND_MEAN, UNICODE, Windows 10), for Windows x86-64 with the GNU ABI (MinGW-w64), not MSVC" \
     headers {
         library mingw-w64
-        source {toolchain windows.h version {__MINGW64_VERSION_MAJOR 11 __MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 1}}
+        source {toolchain windows.h version {__MINGW64_VERSION_MAJOR 13 __MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 0}}
         defines {WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00 NTDDI_VERSION=0x0A000000 STRICT NOMINMAX}
         public {*.h}
         private {_mingw*.h corecrt*.h crtdefs.h ctype.h errno.h excpt.h limits.h malloc.h stdarg.h
