@@ -20,9 +20,23 @@ RUN apt-get update \
         xz-utils \
         zsh \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid "${USER_GID}" "${USERNAME}" \
-    && useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home \
-        --shell /usr/bin/zsh "${USERNAME}" \
+    && if ! getent group "${USER_GID}" >/dev/null; then \
+        groupadd --gid "${USER_GID}" "${USERNAME}"; \
+    fi \
+    && existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" \
+    && if getent passwd "${USERNAME}" >/dev/null; then \
+        usermod --gid "${USER_GID}" --shell /usr/bin/zsh "${USERNAME}"; \
+    elif [ -n "${existing_user}" ]; then \
+        usermod --login "${USERNAME}" "${existing_user}"; \
+        usermod --gid "${USER_GID}" --shell /usr/bin/zsh "${USERNAME}"; \
+        existing_home="$(getent passwd "${USERNAME}" | cut -d: -f6)"; \
+        if [ "${existing_home}" != "/home/${USERNAME}" ]; then \
+            usermod --home "/home/${USERNAME}" --move-home "${USERNAME}"; \
+        fi; \
+    else \
+        useradd --uid "${USER_UID}" --gid "${USER_GID}" --create-home \
+            --shell /usr/bin/zsh "${USERNAME}"; \
+    fi \
     && printf '%s ALL=(ALL) NOPASSWD:ALL\n' "${USERNAME}" \
         > "/etc/sudoers.d/${USERNAME}" \
     && chmod 0440 "/etc/sudoers.d/${USERNAME}"

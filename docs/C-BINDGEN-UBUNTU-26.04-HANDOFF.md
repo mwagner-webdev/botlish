@@ -22,6 +22,11 @@ MinGW-w64 headers 13.0.0, its GCC cross compiler and binutils to the versions
 available in the Resolute package index. The Win32 profile and its test
 expectations now pin header macros 13.0.0.
 
+The first Dockerfile build then failed because Ubuntu 26.04 already has a
+group with GID 1000. The Dockerfile now reuses an existing group ID and
+reuses/renames an existing UID 1000 account when present, creating the
+`vscode` user only when needed.
+
 ## Still pending
 
 The committed outputs under `generated/c/` still contain Clang 18 evidence
