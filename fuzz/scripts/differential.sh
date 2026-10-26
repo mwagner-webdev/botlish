@@ -55,10 +55,12 @@ compare_one() {  # compare_one TARGET SEEDNAME SEEDPATH VERTICAL...
             continue
         fi
         # Documented per-vertical baseline, not a finding: a native-only
-        # program (its own header documents the NATIVE-ONLY refusal, e.g.
-        # examples/linux/getpid.bot) refuses on the Tcl backends by design.
-        if [[ "$normalized" == *"NATIVE-ONLY"* ]] && \
-           grep -q 'NATIVE-ONLY' "$ROOT"/fuzz/build/aot/"$target".* 2>/dev/null; then
+        # program refuses on the Tcl backends by design (the diagnostic is
+        # the refusal itself: examples/linux/getpid.bot documents it for
+        # its own syscall; a program's own module files can be the trigger,
+        # so the target's source text alone does not decide it).
+        if [[ "$vertical" == interp || "$vertical" == compile ]] && \
+           [[ "$normalized" == *"CORE SEMANTIC NATIVE-ONLY"* ]]; then
             printf '%s\t%s\t%s\t%s\tnative-only-refusal\n' "$target" "$seedname" "$vertical" "$normalized" >> "$REPORT"
             continue
         fi

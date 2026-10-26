@@ -102,6 +102,16 @@ if {[file exists $writeList]} {
     close $channel
 }
 set writeMode [expr {$target in $writeTargets}]
+set linesTargets {}
+set linesList [file join $root fuzz lines-targets]
+if {[file exists $linesList]} {
+    set channel [open $linesList r]
+    foreach line [split [read $channel] \n] {
+        if {[string trim $line] ne ""} { lappend linesTargets [string trim $line] }
+    }
+    close $channel
+}
+set linesMode [expr {$target in $linesTargets}]
 
 # Runs CMD with extra env vars. Returns {code signal stdout stderr} where
 # signal is a name like SIGSEGV (empty if none).
@@ -254,7 +264,24 @@ if {$raw} {
 # framing).
 set result ""
 set panic ""
-if {$stdinMode && $vertical in {aot aot-asan} && $signal eq ""} {
+if {$linesMode && $signal eq "" && $vertical in {aot aot-asan cranelift cranelift-generic}} {
+    # Multi-line report target: the whole stdout (minus the in-process
+    # runner's framing lines) is the oracle, joined into one normalized
+    # string.
+    set kept {}
+    foreach line [split $stdout \n] {
+        set line [string trimright $line \r]
+        if {$line eq ""} continue
+        if {$inProcess && [regexp {^(== |   value: |   error: |   help: |   type: |   block )} $line]} continue
+        lappend kept $line
+    }
+    # The aot executable's runtime prints the program's value as the last
+    # line (always "unit" here); the in-process framing carries it in the
+    # stripped "   value:" line. Drop it from the aot side so both sides
+    # hold exactly the report.
+    if {!$inProcess} { set kept [lrange $kept 0 end-1] }
+    set result "report|[join $kept { / }]"
+} elseif {$stdinMode && $vertical in {aot aot-asan} && $signal eq ""} {
     set text [string trimright $stdout \n]
     set expectedEcho ""
     if {[string length $bytes] > 0} {

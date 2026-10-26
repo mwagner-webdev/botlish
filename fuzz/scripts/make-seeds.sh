@@ -148,6 +148,76 @@ rawhex() { local target="$1" name="$2" hex="$3"
     mkdir -p "$SRC/$target"
     printf '%s' "$hex" | xxd -r -p > "$SRC/$target/$name"
 }
+
+# conformance.bot: one JSON document per argument (RFC 8259 shapes, valid
+# and invalid, from the grammar the json/json_lex recognizers implement).
+# Provenance: RFC 8259's grammar and the classic malformations; the verdict
+# text is the program's own ("lexical/structure ..." with offset).
+JSON_VALID=(
+    '{}'
+    '[]'
+    'null'
+    'true'
+    'false'
+    '0'
+    '-0'
+    '0.5'
+    '-1.5e-3'
+    '1e999'
+    '1E+5'
+    '"x"'
+    '""'
+    '"\\u0041"'
+    '"\\uD834\\uDD1E"'
+    '"\\\\"'
+    '"\\/"'
+    '"\\t"'
+    '"😀"'
+    '[1, 2, 3]'
+    '{"a": null, "b": [true, false]}'
+    '{"a": {"b": {"c": []}}}'
+    ' { "spaced" : [ 1 ] } '
+)
+JSON_INVALID=(
+    'not json'
+    '{'
+    '['
+    '{"a":}'
+    '{"a": 1,}'
+    "[1, 2,]"
+    "{'a': 1}"
+    'NaN'
+    'Infinity'
+    '// comment'
+    '/* comment */'
+    '01'
+    '+1'
+    '.5'
+    '1.'
+    '0x1'
+    '"unterminated'
+    '"\\uD800"'
+    '"a
+b"'
+    '{"a" 1}'
+    '[1 2]'
+    '"\\x41"'
+)
+i=0; for s in "${JSON_VALID[@]}"; do i=$((i+1)); seed conformance "valid-$i" "$s"; done
+i=0; for s in "${JSON_INVALID[@]}"; do i=$((i+1)); seed conformance "invalid-$i" "$s"; done
+# Boundary shapes the program's own limits define (TooDeep, MAX_TOKEN):
+python3 - <<'EOF'
+import os
+d = 'fuzz/seeds-src/conformance'
+open(f'{d}/valid-deep-16', 'w').write('[' * 16 + ']' * 16)
+open(f'{d}/valid-deep-64', 'w').write('[' * 64 + ']' * 64)
+open(f'{d}/invalid-deep-500', 'w').write('[' * 500)
+open(f'{d}/valid-longtoken-5000', 'w').write('"' + 'a' * 5000 + '"')
+open(f'{d}/invalid-longtoken-90000', 'w').write('"' + 'b' * 90000 + '"')
+EOF
+# Multiple documents as separate arguments (the driver's per-argument loop):
+seedhex conformance "two-docs" "$(printf '{}\0[1]' | xxd -p | tr -d '\n')"
+seedhex conformance "good-bad-mix" "$(printf '[1]\0nope\0"ok"' | xxd -p | tr -d '\n')"
 raw read-stdin "hello" 'hello from stdin\n'
 : > "$SRC/read-stdin/empty-only"
 head -c 4096 /dev/zero | tr '\0' 'a' > "$SRC/read-stdin/exactly-4096"

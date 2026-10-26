@@ -47,6 +47,7 @@ mkdir -p "$OUT" "$SNAP"
 dict_for() {
     case "$1" in
         csv|csv_chunked|csv_geometric|csv_records) printf '%s\n' "$ROOT/fuzz/dictionaries/csv.dict";;
+        conformance)                               printf '%s\n' "$ROOT/fuzz/dictionaries/json.dict";;
         ai_text_clean)                             printf '%s\n' "$ROOT/fuzz/dictionaries/text.dict";;
         matmul|0[1-9]-*|1[1-4]-*)                  printf '%s\n' "$ROOT/fuzz/dictionaries/numeric.dict";;
         *)                                         return 1;;
@@ -137,6 +138,11 @@ run_batch() {  # run_batch target...
 }
 
 mapfile -t targets < <(ls "$ROOT"/fuzz/seeds/)
+# CAMPAIGN_TARGETS: focus the run on a subset (space-separated); unset
+# runs every target with seeds.
+if [[ -n "${CAMPAIGN_TARGETS:-}" ]]; then
+    mapfile -t targets < <(printf '%s\n' $CAMPAIGN_TARGETS)
+fi
 cores="$(nproc)"
 batch1=("${targets[@]:0:cores}")
 batch2=("${targets[@]:cores}")
