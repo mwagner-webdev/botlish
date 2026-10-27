@@ -148,4 +148,6 @@ All of this ran in the Ubuntu 26.04 chroot, with the workflow's toolchain:
 On GitHub, the c-bindgen workflow, dispatched on the branch that made these
 changes, passed every step on an `ubuntu-26.04` runner: the check, the
 BoringSSL and SDL3 build, the generator's tests with no skip, and both
-fuzzers.
+fuzzers. On the same commit, the Windows workflow passed (its acceptance
+tier skips `cb-win32-current` and runs the other Win32 tests), and so did
+the macOS and Icy Tower Windows workflows.
