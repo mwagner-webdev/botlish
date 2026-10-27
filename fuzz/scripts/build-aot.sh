@@ -45,13 +45,25 @@ find "$OUT" -maxdepth 1 -name '*.ir' -delete
 # example logic re-driven from argv()). The classifier (inventory.tcl,
 # FUZZING-EXAMPLES-AOT.md) explains what each row is; here we only record
 # what the emitter does with it.
-SOURCES="$(ls examples/stdlib/*.bot examples/abi/*.bot examples/linux/*.bot examples/surface/*.bot examples/hir/*.hir examples/*.ir fuzz/programs/*.bot 2>/dev/null | sort)"
+# Example programs, in a stable order, plus the campaign's own
+# argv-driven programs (fuzz/programs/*.bot). The dfa group's module
+# programs are copied too (an application module's importers need it
+# beside them: flat copies keep the group siblings adjacent). The games
+# and ffi groups are out of this campaign's scope (SDL and C fixtures).
+SOURCES="$(ls examples/stdlib/*.bot examples/abi/*.bot examples/linux/*.bot examples/io/*.bot examples/surface/*.bot examples/hir/*.hir examples/*.ir examples/dfa/json/*.bot examples/dfa/yaml/*.bot fuzz/programs/*.bot 2>/dev/null | sort)"
 
+# Two phases: copy every source first (an application module's importers
+# need its module files beside them, whatever the alphabetical order --
+# conformance.bot imports json.bot, which sorts after it), then emit.
+for src in $SOURCES; do
+    name="$(basename "$src")"
+    case "$name" in corpus.tcl|main.tcl) continue;; esac
+    cp "$src" "$OUT/$name"
+done
 for src in $SOURCES; do
     name="$(basename "$src")"
     base="${name%.*}"
     case "$name" in corpus.tcl|main.tcl) continue;; esac
-    cp "$src" "$OUT/$name"
     if log="$(tclsh9.0 main.tcl -emit-native-executable "$OUT/$name" 2>&1)"; then
         printf '%s\t%s\tok\t\n' "$base" "$src" >> "$MANIFEST"
     else

@@ -1,0 +1,7 @@
+# fuzz/lines-targets -- targets whose observable behavior is a MULTI-LINE
+# stdout report (conformance.bot prints one verdict line per argument and
+# ends with its value). The replay oracle compares the whole report: the
+# aot vertical uses the full stdout; in-process verticals use the same
+# lines minus the runner's framing ("== ..." headers, "   value:"/"   error:"/
+# "   help:" lines). See FUZZING-JSON.md.
+conformance

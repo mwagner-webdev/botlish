@@ -1,0 +1,39 @@
+# json.dict -- the hex-text grammar of the conformance driver's input:
+# conformance.bot takes each case as its HEX TEXT (str.unhex), so the
+# mutation tokens are the hex encodings of RFC 8259's grammar bytes --
+# structural pairs, literals, string/escape machinery, number pieces,
+# whitespace -- plus the driver's own "+" continuation marker. Attached to
+# the conformance target. (Hand-derived from RFC 8259 and the driver's
+# unhex contract; AFL's bundled json.dict tokens do not apply to a
+# hex-encoded surface.)
+hex_object_open="5b"
+hex_object_close="5d"
+hex_array_open="7b"
+hex_array_close="7d"
+hex_colon="3a"
+hex_comma="2c"
+hex_null="6e756c6c"
+hex_true="74727565"
+hex_false="66616c7365"
+hex_quote="22"
+hex_backslash="5c"
+hex_escaped_quote="225c22"
+hex_escaped_backslash="225c5c"
+hex_u_escape="5c75"
+hex_surrogate_hi="5c7564383030"
+hex_surrogate_lo="5c7564633030"
+hex_zero="30"
+hex_minus="2d"
+hex_plus_arg="2b"
+hex_dot="2e"
+hex_exp="65"
+hex_exp_E="45"
+hex_digits="313233343536373839"
+hex_af="616263646566"
+hex_uppercase_af="414243444546"
+hex_space="20"
+hex_tab="09"
+hex_newline="0a"
+hex_cr="0d"
+hex_bom="efbbbf"
+continuation="+"

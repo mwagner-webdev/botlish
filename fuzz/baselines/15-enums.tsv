@@ -1,8 +1,8 @@
 seed	exit	wall_ms	stdout	stderr-first-line
-plain	0	3	[Light::Green, Light::Yellow, true, false, false]	
+plain	0	4	[Light::Green, Light::Yellow, true, false, false]	
 enum-sample-2	0	3	[Light::Green, Light::Yellow, true, false, false]	
-invalid-utf8	0	3	[Light::Green, Light::Yellow, true, false, false]	
-many-args	0	3	[Light::Green, Light::Yellow, true, false, false]	
+invalid-utf8	0	4	[Light::Green, Light::Yellow, true, false, false]	
+many-args	0	4	[Light::Green, Light::Yellow, true, false, false]	
 max-arg	0	4	[Light::Green, Light::Yellow, true, false, false]	
 nul-inside-arg	0	3	[Light::Green, Light::Yellow, true, false, false]	
 one-empty-arg	0	4	[Light::Green, Light::Yellow, true, false, false]	
