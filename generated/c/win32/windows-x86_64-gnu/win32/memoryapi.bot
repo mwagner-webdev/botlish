@@ -34,6 +34,23 @@ extern c fn VirtualFree(
     dwFreeType: std::ffi::c::ULong
 ) -> std::ffi::c::Int
 
+# C: LPVOID VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
+extern c fn VirtualAlloc(
+    lpAddress: std::ffi::c::Ptr[std::ffi::c::Void],
+    dwSize: std::ffi::c::ULongLong,
+    flAllocationType: std::ffi::c::ULong,
+    flProtect: std::ffi::c::ULong
+) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
+# C: LPVOID VirtualAllocEx(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
+extern c fn VirtualAllocEx(
+    hProcess: std::ffi::c::Ptr[std::ffi::c::Void],
+    lpAddress: std::ffi::c::Ptr[std::ffi::c::Void],
+    dwSize: std::ffi::c::ULongLong,
+    flAllocationType: std::ffi::c::ULong,
+    flProtect: std::ffi::c::ULong
+) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
 # C: SIZE_T VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength)
 extern c fn VirtualQuery(
     lpAddress: std::ffi::c::Ptr[std::ffi::c::Void],
@@ -76,23 +93,6 @@ extern c fn VirtualProtect(
     flNewProtect: std::ffi::c::ULong,
     lpflOldProtect: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Int
-
-# C: LPVOID VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
-extern c fn VirtualAlloc(
-    lpAddress: std::ffi::c::Ptr[std::ffi::c::Void],
-    dwSize: std::ffi::c::ULongLong,
-    flAllocationType: std::ffi::c::ULong,
-    flProtect: std::ffi::c::ULong
-) -> std::ffi::c::Ptr[std::ffi::c::Void]
-
-# C: LPVOID VirtualAllocEx(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
-extern c fn VirtualAllocEx(
-    hProcess: std::ffi::c::Ptr[std::ffi::c::Void],
-    lpAddress: std::ffi::c::Ptr[std::ffi::c::Void],
-    dwSize: std::ffi::c::ULongLong,
-    flAllocationType: std::ffi::c::ULong,
-    flProtect: std::ffi::c::ULong
-) -> std::ffi::c::Ptr[std::ffi::c::Void]
 
 # C: WINBOOL VirtualProtectEx(HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect)
 extern c fn VirtualProtectEx(

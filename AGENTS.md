@@ -1084,9 +1084,11 @@ checkout's). A change to native stack switching or its GC walk also needs a
 `bench/coroutines.tcl` regenerates the performance report.
 
 Native coroutines switch stacks with hand-written x86-64 and AArch64
-assembly and exist on Linux x86-64, Linux AArch64 and macOS AArch64
-(MACOS-AARCH64-MILESTONE-3.md); elsewhere the native backend reports them
-unsupported (the Tcl backends run them everywhere). The AArch64 switch is
+assembly on Linux x86-64, Linux AArch64 and macOS AArch64
+(MACOS-AARCH64-MILESTONE-3.md), and with Windows fibers on Windows x86-64
+(WINDOWS-X86-64-MILESTONE-5.md; "Windows x86-64 (MSVC)", below); elsewhere,
+and on the fallback root plan, the native backend reports them unsupported
+(the Tcl backends run them everywhere). The AArch64 switch is
 one text (`aarch64_switch!`, `aarch64_trampoline!` in
 runtime/coroutine.rs) in ELF and Mach-O spelling: change it for both, run
 the coroutine Rust tests on Linux AArch64 (CI's arm64 workflow, or
@@ -1175,8 +1177,8 @@ guarantee). Keep it so:
 
 * The handler only classifies and reports: an address in the guard of the
   stack *published* as running, on the guarded thread (POSIX), or
-  STATUS_STACK_OVERFLOW on the guarded thread at an address of its stack
-  (Windows), writes the result line and ends the process (`_exit`;
+  STATUS_STACK_OVERFLOW on the guarded thread at an address of the stack
+  published as running (Windows), writes the result line and ends the process (`_exit`;
   TerminateProcess). It never resumes, unwinds, allocates or touches the
   runtime, and it uses nothing but lock-free atomics stored before the
   fault and calls that take no lock (async-signal-safe ones; WriteFile and
@@ -1195,8 +1197,11 @@ guarantee). Keep it so:
   measuring the handler's path again), and refuses otherwise.
 * Every coroutine switch publishes the stack it *arrives* on, after the
   switch (runtime/coroutine.rs's `segment`, `co_body`, `rt_co_yield`), never
-  the one it is about to switch to: bl_co_switch's pushes land on the stack
-  it leaves. Publication stays inlined atomic stores (no frame of its own).
+  the one it is about to switch to: bl_co_switch's pushes (on Windows,
+  SwitchToFiber's) land on the stack it leaves. Publication stays inlined
+  atomic stores (no frame of its own), double-buffered on every host; the
+  Windows guard claims STATUS_STACK_OVERFLOW at an address of the
+  published stack's reservation (a coroutine fiber's, or the thread's).
 * NATIVE LIMIT STACK is terminal: no in-process recovery, no Botlish
   handler, no new error, and no call effect for it where native frames
   hold the roots (only the fallback plan's shadow stack can fail a call).
@@ -1398,9 +1403,42 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   `fallback-roots` cargo feature builds it on any host, to run the suite
   with it (a test build, never shipped; CI's Windows `roots` job runs its
   Rust tests and the GC workloads). It does not support coroutines (a
-  suspended coroutine's shadow slots break the shadow stack's order): never
-  make it coroutine-aware; a host with native coroutines needs native-frame
+  suspended coroutine's shadow slots break the shadow stack's order) and
+  refuses them (`rt_co_start`: NATIVE UNSUPPORTED; `STACK_SWITCHING` is
+  false, so nothing fuses one either): never make it coroutine-aware, and
+  never let it run one; a host with native coroutines needs native-frame
   roots.
+* Coroutines (WINDOWS-X86-64-MILESTONE-5.md, runtime/coroutine/windows.rs):
+  a coroutine stack is a Windows fiber -- CreateFiberEx with
+  FIBER_FLAG_FLOAT_SWITCH, the thread made a fiber once by
+  ConvertThreadToFiberEx (converted back when it ends; a thread something
+  else made a fiber is left as it is, never converted back) -- and the
+  switch is SwitchToFiber, under the code every host shares
+  (runtime/coroutine.rs). Keep it so:
+  - Never write a TEB field (NT_TIB's StackBase or StackLimit, the
+    DeallocationStack, the GuaranteedStackBytes) or switch a stack pointer
+    across stacks yourself: Windows reads them to grow a stack, to raise
+    STATUS_STACK_OVERFLOW and to unwind, and only the fiber switch keeps
+    them (the report's experiments: a custom switch fails growth, C calls
+    and panics without them, and needs two undocumented offsets with them).
+  - A fiber gets its own stack guarantee (`GUARANTEE`, the guard's) and its
+    guard page is confirmed in its setup, on the fiber, before any Botlish
+    code runs there; a fiber that fails either is deleted and the start
+    refused. A fiber starts with no guarantee: never assume the thread's.
+  - `bl_co_switch` records its own frame (RIP, RSP, RBP), which is where the
+    collector's walk of the stack it leaves starts (framewalk's Windows
+    `walk_from`, Windows' unwinder from there, within that stack's bounds):
+    keep it never inlined, and record nothing but what it holds at the call
+    of SwitchToFiber.
+  - Every fiber is pooled as a POSIX stack is: a start of a parked fiber
+    restarts it at its entry's top (`bl_co_fiber_restart`), whatever it
+    parked in, with the entry's return address under the body, so its
+    frames unwind into Windows' fiber start. Never resume a parked fiber
+    any other way, never pool a running one, and never DeleteFiber the
+    running fiber (it would end the thread).
+  - TLS is the thread's and FLS the fiber's: keep runtime state in
+    thread-locals (shared by every fiber of the thread); never move it to
+    FLS without a reason the report records.
 * Stack probes are on on Windows (`codegen::stack_probes`): Windows
   commits a thread's stack a page at a time, and a frame that skipped the
   system's guard page would fault in the uncommitted reservation (an
@@ -1440,6 +1478,20 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   the GC-stress tier.
   Neither Wine nor WSL is an authority for Windows; a `-gnu` cross build
   under Wine is a development aid only.
+
+If you change Windows coroutines (runtime/coroutine/windows.rs, the
+Windows `walk_from`, the Windows guard's publication), run the Rust tests
+on Windows (`cargo test --lib coroutine`, `--bins suspended_root`), `cargo
+test --test native_stack` there (its coroutine exhaustion, publication,
+fault and sweep checks), `tests/coroutines.test`,
+`tests/native-stack-overflow.test`, `tests/platform/native-status.tcl`,
+`tests/platform/aot-facts.tcl` and `tests/platform/gc-workloads.tcl
+-unwind-check 1` (its coroutine workloads) on Windows, the probe
+(`.github/workflows/windows-coroutines-probe.yml`, for a change to what
+it measured), and `audit/native-stack/tools/mutate.tcl` and
+`audit/windows-unwind/tools/mutate.tcl` (their `win-*`, `walk-suspended-*`
+and `switch-*` mutants on Windows: the tier items `native-stack-mutants`
+and `windows-unwind-mutants`), plus the coroutine harnesses above.
 
 If you change Windows unwind information (`codegen::unwind`,
 `add_windows_unwind`, `codegen::jitunwind`), the Windows walk
@@ -2975,11 +3027,15 @@ needs the arm64 cross C library where clang finds it (`gcc-aarch64-linux-gnu`,
 which brings `libc6-dev-arm64-cross`; the headers package alone is not
 enough, and generation then stops rather than read the host's headers). The
 Win32 binding and the fixture's windows-x86_64-gnu target need MinGW-w64's
-cross headers and import libraries (`mingw-w64-x86-64-dev`, version 11.0.1:
+cross headers and import libraries (`mingw-w64-x86-64-dev`, version 13.0.0:
 the profile pins its version macros), `llvm-nm` and, for the second
 compiler, `gcc-mingw-w64-x86-64`. The
 `c-bindgen` workflow
-(`.github/workflows/c-bindgen.yml`) runs all of it. macOS bindings of real
+(`.github/workflows/c-bindgen.yml`) runs all of it, on Ubuntu 26.04 with the
+toolchain `.devcontainer/setup-c-toolchain.sh` pins (clang 21.1.8): every
+committed binding records the clang that generated it, so regenerate and
+check with that toolchain (an Ubuntu 26.04 container or chroot running the
+script), never with another clang. macOS bindings of real
 libraries need the macOS SDK (`BOTLISH_C_SYSROOT_macos_aarch64`, or a Mac).
 
 ## Static intrinsics

@@ -37,9 +37,10 @@
 # only, its native backends excluded with the reason (golden::target).
 #
 # The golden runner (stdlib/test.bot) is a coroutine: on a host where the native
-# backend runs no coroutines (native::hostSupports coroutines: Windows, for
-# now) every suite's native backends are excluded, with the reason
-# (golden::suite), never run to a NATIVE UNSUPPORTED abort.
+# backend runs no coroutines (native::hostSupports coroutines: every host the
+# native backend runs on has them since WINDOWS-X86-64-MILESTONE-5.md) every
+# suite's native backends are excluded, with the reason (golden::suite), never
+# run to a NATIVE UNSUPPORTED abort.
 #
 # -lib DIR compiles against the library directory DIR instead of stdlib/ (a
 # private, mutated copy: audit/golden/tools/). -names prints only the test

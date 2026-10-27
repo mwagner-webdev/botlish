@@ -1,0 +1,64 @@
+# Nested coroutines, a declared error crossing a resume, and heap values (a
+# List, a struct holding one, Strings) held only by suspended frames of both
+# while the main program, the outer and the inner coroutine all allocate
+# (tests/coroutines.test's co-gc-nested-suspended-roots): the running
+# chain's resumer stacks and the suspended stacks walked by every
+# collection. A workload of tests/platform/gc-workloads.tcl.
+import std::coroutine
+import std::str
+import std::list
+
+error Boom
+
+struct Ev:
+    text: str
+
+struct Box:
+    head: str
+    items: list
+
+fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        std::str::concat("x", std::str::concat("y", "z"))
+    std::list::length(xs)
+
+fn inner(label: str) -> Ev errors Boom:
+    local = [label, std::str::concat(label, "?"), [1, 2, 3]]
+    held = Box {head: std::str::concat(label, "!"), items: local}
+    yield Ev {text: std::str::concat("in1:", std::list::at(local, 0))}
+    churn(40)
+    yield Ev {text: std::str::concat("in2:", std::list::at(local, 1))}
+    churn(40)
+    if std::list::length(held.items) == 3:
+        fail Boom
+    return Ev {text: held.head}
+
+fn outer(label: str) -> Ev:
+    box = Box {head: std::str::concat(label, "#"), items: [label]}
+    coroutine {step: next, first: f} = inner(std::str::concat(label, "i")):
+        on Boom:
+            Ev {text: "early"}
+    yield Ev {text: std::str::concat("out1:", f.text)}
+    churn(40)
+    second = next():
+        on Boom:
+            Ev {text: "second"}
+    yield Ev {text: std::str::concat("out2:", second.text)}
+    third = next():
+        on Boom:
+            Ev {text: std::str::concat("handled:", box.head)}
+    return Ev {text: std::str::concat("end:", third.text)}
+
+fn run() -> list:
+    coroutine {step: a, first: fa} = outer("A")
+    coroutine {step: b, first: fb} = outer("B")
+    churn(60)
+    a2 = a()
+    churn(60)
+    b2 = b()
+    churn(60)
+    a3 = a()
+    b3 = b()
+    [fa.text, fb.text, a2.text, b2.text, a3.text, b3.text, std::coroutine::done?(a), std::coroutine::done?(b)]
+
+run()

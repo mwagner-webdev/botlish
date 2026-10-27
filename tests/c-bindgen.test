@@ -169,9 +169,12 @@ proc generation {profile target} {
     return [dict get $::generations $key]
 }
 
-# The files RESULT generated that differ from DIR's committed ones.
+# The files RESULT generated that differ from DIR's committed ones, but for
+# the generating clang's provenance (asRecordedToolchain): byte for byte
+# with the clang that generated them, every other byte with another clang
+# (the arm64 runners' Ubuntu 24.04 clang, say).
 proc staleFiles {result dir ns} {
-    return [lmap d [::cbind::generate::compare [dict get $result files] $dir $ns] {lrange $d 0 1}]
+    return [lmap d [::cbind::generate::compare [asRecordedToolchain [dict get $result files] $dir] $dir $ns] {lrange $d 0 1}]
 }
 
 # The value of manifest FIELD (the rest of its line, one Tcl word or more)
@@ -1403,10 +1406,13 @@ test cb-layout-gcc-bindings {GCC agrees with clang on every layout of the Tcl, T
 # Win32: MinGW-w64's headers for Windows x86-64 with the GNU ABI, from Linux
 
 # 1 when clang can preprocess for windows-x86_64-gnu with MinGW-w64's headers
-# of the version the profile pins (its version macros). Other MinGW-w64
-# headers -- a Windows runner's own, say -- are not the profile's source, and
-# generation refuses them (cb-win32-version-pinned), so the Win32 tests do
-# not run there; the c-bindgen workflow installs the pinned ones.
+# of the version the profile pins (its version macros). Headers of another
+# version are not the profile's source, and generation refuses them
+# (cb-win32-version-pinned), so the Win32 tests do not run with them; the
+# c-bindgen workflow installs the pinned ones. A Windows runner's own
+# MinGW-w64 headers are the pinned version too (13.0.0), with LLVM's own
+# clang, so the Win32 tests run there, except cb-win32-current
+# (win32Toolchain, below).
 proc mingwReady {} {
     if {[auto_execok clang] eq ""} { return 0 }
     set profile [::cbind::profile::load win32]
@@ -1430,8 +1436,18 @@ proc mingwReady {} {
 testConstraint mingw [mingwReady]
 testConstraint mingwGcc [expr {[testConstraint mingw] && [auto_execok x86_64-w64-mingw32-gcc] ne ""}]
 set ::win32 [::cbind::profile::load win32]
+# 1 when this host's clang for windows-x86_64-gnu is the clang that generated
+# the committed Win32 binding (its manifest's toolchain_version). The binding
+# is byte for byte the generation of that clang only: a clang that knows
+# another set of builtins gives another blocker to an unsupported name
+# (PrefetchForWrite's _m_prefetchw is a builtin to clang 21, a missing
+# import to clang 20), which changes the reports and the manifest, never a
+# module. The c-bindgen workflow has that clang and allows no skip.
+testConstraint win32Toolchain [expr {[testConstraint mingw]
+    && [dict get [::chdr::toolchain::configFor windows-x86_64-gnu] version]
+        eq [lindex [toolchainProvenance [::chdr::readFile [file join [::cbind::profile::outputDir $::win32 windows-x86_64-gnu] manifest.txt]]] 0]}]
 
-test cb-win32-current {the committed Win32 binding (windows-x86_64-gnu) is what generation produces from the installed MinGW-w64 headers and import libraries, byte for byte} -constraints mingw -body {
+test cb-win32-current {the committed Win32 binding (windows-x86_64-gnu) is what generation produces from the installed MinGW-w64 headers and import libraries, byte for byte} -constraints win32Toolchain -body {
     staleBindings {win32 windows-x86_64-gnu}
 } -result {}
 

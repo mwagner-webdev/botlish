@@ -303,7 +303,8 @@ fn library_argument(flavor: LinkerFlavor, library: &str) -> String {
 /// the lines of rustc's STDERR the system linker wrote (its diagnostics,
 /// never rustc's echo of the whole command line), else all of it. GNU ld,
 /// lld and collect2 on Linux (`undefined reference to`, `cannot find -lNAME`,
-/// `ld:` lines); Apple's ld and clang on macOS (`Undefined symbols for
+/// `ld:` lines, and `ld.bfd:` ones where GCC runs GNU ld by that name, as
+/// Ubuntu 26.04's does); Apple's ld and clang on macOS (`Undefined symbols for
 /// architecture arm64:` and the `"_SYMBOL", referenced from:` line of each
 /// symbol, `ld: library 'NAME' not found`, `ld: warning: ignoring file ...,
 /// found architecture ...`, `clang: error: linker command failed`);
@@ -319,6 +320,7 @@ fn linker_diagnostics(stderr: &str) -> String {
             line.contains("undefined reference")
                 || line.contains("cannot find")
                 || line.contains("ld:")
+                || line.contains("ld.bfd:")
                 || line.contains("ld.lld:")
                 || line.starts_with("collect2")
                 || line.contains("error: linking with")
@@ -1574,10 +1576,12 @@ mod tests {
             "  = note: rust-lld: error: unable to find library -lmissing\n",
             "          /usr/bin/ld: program.o: in function `botlish_fn_0':\n",
             "          program.o:(.text+0x10): undefined reference to `botlish_no_such_symbol'\n",
+            "          /usr/bin/x86_64-linux-gnu-ld.bfd: skipping incompatible /w/libforeign.a when searching for -lforeign\n",
             "          collect2: error: ld returned 1 exit status\n",
         );
         let kept = linker_diagnostics(gnu);
         assert!(kept.contains("undefined reference to `botlish_no_such_symbol'"), "{kept:?}");
+        assert!(kept.contains("ld.bfd: skipping incompatible /w/libforeign.a when searching for -lforeign"), "{kept:?}");
         assert!(kept.contains("collect2: error: ld returned 1 exit status"), "{kept:?}");
         assert!(!kept.contains("\"-m64\""), "{kept:?}");
         // Microsoft's link.exe, as rustc reports it, and LLVM's lld-link.

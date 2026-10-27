@@ -32,7 +32,8 @@ name: tests (windows x86-64)
 #                smoke tier and the Windows-relevant test files
 #                (argv, targets, executables, the command line, the C FFI
 #                and its Win64 ABI checks against MSVC-built fixtures,
-#                Windows I/O)
+#                Windows I/O, native coroutines and the stack guard on
+#                their fibers: WINDOWS-X86-64-MILESTONE-5.md)
 #   roots        every push: the fallback root plan (a `fallback-roots`
 #                driver: its Rust tests, the GC workloads) and native-frame
 #                roots against it on the same runner (bench/root-plans.tcl)
@@ -43,10 +44,10 @@ name: tests (windows x86-64)
 #                under GC stress
 #   acceptance   every push, four shards: tests/platform/tier.tcl's
 #                acceptance tier -- every Tcl test file on interp and every
-#                golden suite (native backends excluded by the golden
-#                runner: no native coroutines on Windows yet) -- minus the
-#                files its notYet table lists for windows-x86_64, each with
-#                its cause
+#                golden suite on all four backends (the golden runner is a
+#                coroutine, which the native backends run on Windows since
+#                WINDOWS-X86-64-MILESTONE-5.md) -- minus the files its notYet
+#                table lists for windows-x86_64, each with its cause
 #   full         opt-in: "[ci-full]" in the pushed head commit's message, or
 #                a manual run with tier "full": the acceptance tier under
 #                BOTLISH_NATIVE_GC_STRESS=1 in four shards, or exactly the
@@ -148,13 +149,16 @@ jobs:
       # (MSVC's among them), targets, stack probes, the program object's
       # format, the argument encoding.
       # Then the single-step unwind test again, for its own account (how many
-      # instructions it unwound, the frames it probed): a passing test's
+      # instructions it unwound, the frames it probed), and the coroutine
+      # fiber's commit test, for what a fiber commits
+      # (WINDOWS-X86-64-MILESTONE-5.md, "Performance"): a passing test's
       # output is otherwise not shown.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
           cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
+          cargo test --release --manifest-path native/Cargo.toml --lib a_fresh_fiber_commits_its_guarantee_and_a_page -- --nocapture 2>&1 | grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' | tee -a rust-tests.log
 
       # The stack-overflow guard (WINDOWS-X86-64-MILESTONE-4.md,
       # native/tests/native_stack/windows.rs): each kind of thread's stack and
@@ -162,7 +166,12 @@ jobs:
       # frames, 64 KiB frames, Cranelift's probe pattern -- in the driver's,
       # an executable's and the result file's modes; the faults that are not
       # the guarded stack's overflow, each ending as it does without the
-      # guard. Every check that faults runs in a child process.
+      # guard. And coroutine stacks, fibers (WINDOWS-X86-64-MILESTONE-5.md):
+      # each exhausted at its start, after yields and nested three deep; the
+      # stack published to the guard at every switch of a nested lifecycle;
+      # the faults on and around them that are not an overflow; a switch at
+      # every offset near the end of the stack it leaves. Every check that
+      # faults runs in a child process.
       - name: Native stack guard checks
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: cargo test --release --manifest-path native/Cargo.toml --test native_stack 2>&1 | tee native-stack.log
@@ -193,7 +202,10 @@ jobs:
         run: tclsh9.0 tests/platform/aot-facts.tcl -verbose 1 2>&1 | tee aot-facts.log
 
       # The census's allocation-heavy workloads and more, on both native
-      # backends and as executables, five times under GC stress.
+      # backends and as executables, five times under GC stress -- the
+      # coroutine workloads among them, every coroutine on a fiber of its
+      # own (fusion off): suspended stacks holding the only roots of values
+      # while other coroutines collect.
       - name: GC workloads (cranelift, cranelift-generic, executables; GC stress)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/gc-workloads.tcl -repeat 5 2>&1 | tee gc-workloads.log
@@ -333,13 +345,17 @@ jobs:
       # the test files the port changes most: argv (the Windows argument
       # tests, linked runs among them), targets, executables, the command
       # line, applications, the 2048 workload, the C FFI (the Win64 ABI
-      # against MSVC-built fixtures), byte exposure, C floats, Windows I/O.
+      # against MSVC-built fixtures), byte exposure, C floats, Windows I/O,
+      # native coroutines (fused and on the general runtime, their stacks'
+      # exhaustion, C recursion on a coroutine stack among c-ffi.test's) and
+      # the coroutine golden suite on all four backends.
       - name: Smoke tier and the Windows-relevant test files
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
-            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test 2>&1 | tee tier.log
+            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test \
+            coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
 
       - name: Publish summary
         if: always()
@@ -394,8 +410,9 @@ jobs:
               echo '### Rust tests'
               echo '```'
               grep -a 'test result' rust-tests.log
-              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
+              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::coroutine|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
               grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
+              grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' rust-tests.log
               echo '```'
             fi
           } > smoke-summary.md
@@ -467,6 +484,29 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fallback.outcome == 'success' }}
         run: tclsh9.0 bench/root-plans.tcl -fallback native/target-fallback/release/botlish-native.exe -runs 20 -rounds 7 -stress-runs 3 2>&1 | tee root-plans.log
 
+      # What coroutines cost on Windows (WINDOWS-X86-64-MILESTONE-5.md,
+      # "Performance"): the general runtime's operations natively -- a fiber
+      # per coroutine, fusion off (bench/coroutines.tcl) -- and the declared
+      # recognizers' workloads, fused and on the general runtime
+      # (bench/dfa.tcl).
+      - name: Coroutine costs
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          tclsh9.0 bench/coroutines.tcl -backends native -runs 5 2>&1 | tee coroutine-costs.log
+          tclsh9.0 bench/dfa.tcl -runs 3 -rounds 3 2>&1 | tee dfa-costs.log
+
+      # Programs without coroutines before and after the coroutine milestone
+      # (WINDOWS-X86-64-MILESTONE-5.md): the driver of main before it built
+      # here, against this checkout's, on bench/root-plans.tcl's workloads.
+      # On demand, with the other probes.
+      - name: "Probe: programs without coroutines, before and after native coroutines"
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && (contains(github.event.head_commit.message, '[ci-probes]') || inputs.probes) }}
+        run: |
+          git fetch --quiet --depth 1 origin b5b17a398698931f3e7172bdd379174f7cbb6b4d
+          git worktree add --quiet --detach "$RUNNER_TEMP/before-coroutines" FETCH_HEAD
+          cargo build --release --manifest-path "$RUNNER_TEMP/before-coroutines/native/Cargo.toml" --target-dir native/target-before-coroutines
+          tclsh9.0 bench/root-plans.tcl -fallback native/target-before-coroutines/release/botlish-native.exe -name before-coroutines -runs 20 -rounds 7 -stress-runs 1 2>&1 | tee before-coroutines.log
+
       # Strategy B's per-call cost, measured (WINDOWS-X86-64-MILESTONE-3.md,
       # section 3): a driver built with audit/windows-unwind/tools/anchors.patch
       # stores the stack pointer to the Vm before every runtime call at a GC
@@ -513,6 +553,9 @@ jobs:
             [ -f anchors.log ] && cat anchors.log
             [ -f before-after.log ] && cat before-after.log
             [ -f checks.log ] && cat checks.log
+            [ -f before-coroutines.log ] && cat before-coroutines.log
+            [ -f coroutine-costs.log ] && cat coroutine-costs.log
+            [ -f dfa-costs.log ] && cat dfa-costs.log
             echo '```'
             if [ -f fallback-rust-tests.log ] && grep -aq 'test result: FAILED' fallback-rust-tests.log; then
               echo '```'

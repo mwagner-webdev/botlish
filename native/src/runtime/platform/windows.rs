@@ -24,7 +24,10 @@
 //!   * it is `STATUS_STACK_OVERFLOW`,
 //!   * on the guarded thread (`GUARDED`, its thread id), while installed,
 //!   * at an address (the record's second parameter: the access that could
-//!     not grow the stack) inside the guarded thread's stack reservation,
+//!     not grow the stack) inside the reservation of the stack published as
+//!     running -- the thread's own, or the coroutine fiber it switched to
+//!     (WINDOWS-X86-64-MILESTONE-5.md; runtime/coroutine.rs publishes the
+//!     stack it arrives on, after each switch, as on the POSIX hosts),
 //!   * and raised by Windows' memory manager, not by software: the record's
 //!     flags lack `EXCEPTION_SOFTWARE_ORIGINATE`, which RaiseException sets
 //!     (WINDOWS-X86-64-MILESTONE-4.md, "Experiments": 0 for every real
@@ -41,6 +44,16 @@
 //! address of the guarded stack or that software raised (RaiseException's)
 //! -- continues the search as if the guard did not exist: never
 //! relabelled.
+//!
+//! Which stack runs is published by the runtime, never inferred by the
+//! handler (`set_active_stack`): a double buffer, as the POSIX guard's -- the
+//! new bounds go to the slot not in use, then one release store selects it --
+//! so an exception at any instruction, a publication's own included, reads
+//! one consistent reservation. Every stack it can name has the guarantee the
+//! handler needs: the thread's (installation asks it) and every coroutine
+//! fiber's (runtime/coroutine/windows.rs asks it on the fiber, before any
+//! Botlish code runs there: a fiber starts with none, and its guarantee is
+//! its own).
 //!
 //! Why that is a valid recovery: NATIVE LIMIT STACK is terminal for a native
 //! invocation, so nothing of the run is resumed. The handler never returns
@@ -144,6 +157,22 @@ pub fn confirmed_guard_page(stack: &NativeStack) -> bool {
     guard == base + size && guard < stack.high_bound && state == MEM_COMMIT && protect & PAGE_GUARD != 0
 }
 
+/// How many bytes of STACK's reservation are committed (VirtualQuery's
+/// regions within its bounds): what the stack charges against the system's
+/// commit limit, touched or not (tests, the report's memory measurement).
+pub fn committed_bytes(stack: &NativeStack) -> usize {
+    let (mut at, mut committed) = (stack.low_bound, 0);
+    while at < stack.high_bound {
+        let Some((base, size, state, _)) = region(at) else { break };
+        let end = (base + size).min(stack.high_bound);
+        if state == MEM_COMMIT {
+            committed += end - at.max(base);
+        }
+        at = end;
+    }
+    committed
+}
+
 /// The calling thread's stack guarantee: SetThreadStackGuarantee of 0 asks.
 pub fn stack_guarantee() -> u32 {
     let mut size = 0u32;
@@ -159,9 +188,10 @@ const UNGUARDED: usize = 0;
 const BUSY: usize = usize::MAX;
 /// The guarded thread's id, or UNGUARDED or BUSY.
 static GUARDED: AtomicUsize = AtomicUsize::new(UNGUARDED);
-/// The guarded stack's reservation, `[STACK_LOW, STACK_HIGH)`.
-static STACK_LOW: AtomicUsize = AtomicUsize::new(0);
-static STACK_HIGH: AtomicUsize = AtomicUsize::new(0);
+/// Two slots of the running stack's reservation, `[low, high)`, and the one
+/// in use.
+static SLOTS: [[AtomicUsize; 2]; 2] = [[AtomicUsize::new(0), AtomicUsize::new(0)], [AtomicUsize::new(0), AtomicUsize::new(0)]];
+static SLOT: AtomicUsize = AtomicUsize::new(0);
 /// A standalone executable reports to standard error and exits 1.
 static EXECUTABLE: AtomicBool = AtomicBool::new(false);
 /// The `--result` file's handle (set_result_file), 0 for none.
@@ -178,9 +208,41 @@ pub fn set_result_file(file: &std::fs::File) {
     RESULT.store(file.as_raw_handle() as usize, Ordering::Relaxed);
 }
 
+/// Makes STACK the stack whose reservation the handler reports an overflow
+/// of: the stack this thread runs on from now (runtime/coroutine.rs calls it
+/// on arriving on a stack). A no-op while no guard is installed. Inlined, and
+/// only atomic stores: it adds no frame to the stack it is called on.
+#[inline(always)]
+pub fn set_active_stack(stack: &NativeStack) {
+    if GUARDED.load(Ordering::Relaxed) == UNGUARDED {
+        return;
+    }
+    publish(stack);
+}
+
+#[inline(always)]
+fn publish(stack: &NativeStack) {
+    let next = SLOT.load(Ordering::Relaxed) ^ 1;
+    SLOTS[next][0].store(stack.low_bound, Ordering::Relaxed);
+    SLOTS[next][1].store(stack.high_bound, Ordering::Relaxed);
+    SLOT.store(next, Ordering::Release);
+}
+
+/// The reservation `[low, high)` the handler would read now, while a guard
+/// is installed: what the runtime last published (tests).
+pub fn published_stack() -> Option<(usize, usize)> {
+    match GUARDED.load(Ordering::Acquire) {
+        UNGUARDED | BUSY => None,
+        _ => {
+            let slot = SLOT.load(Ordering::Acquire);
+            Some((SLOTS[slot][0].load(Ordering::Relaxed), SLOTS[slot][1].load(Ordering::Relaxed)))
+        }
+    }
+}
+
 /// Whether an exception with CODE and FLAGS, whose record holds
-/// PARAMETERS, raised on the thread THREAD, is the exhaustion of the guarded
-/// stack.
+/// PARAMETERS, raised on the thread THREAD, is the exhaustion of the stack
+/// published as running on the guarded thread.
 #[inline(always)]
 fn is_overflow(code: i32, flags: u32, parameters: &[usize], thread: usize) -> bool {
     if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
@@ -190,7 +252,8 @@ fn is_overflow(code: i32, flags: u32, parameters: &[usize], thread: usize) -> bo
     if guarded == UNGUARDED || guarded == BUSY || guarded != thread {
         return false;
     }
-    let (low, high) = (STACK_LOW.load(Ordering::Relaxed), STACK_HIGH.load(Ordering::Relaxed));
+    let slot = SLOT.load(Ordering::Acquire);
+    let (low, high) = (SLOTS[slot][0].load(Ordering::Relaxed), SLOTS[slot][1].load(Ordering::Relaxed));
     parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high
 }
 
@@ -246,7 +309,7 @@ impl OverflowGuard {
     /// Installs the guard for the driver (botlish-native and the driver
     /// protocol of an executable, runtime/aot.rs): the overflow line goes to
     /// the result file (or standard output) and the process exits 0. STACK
-    /// is the calling thread's own stack.
+    /// is the calling thread's own stack, the one published first.
     pub fn install(stack: &NativeStack) -> io::Result<Self> {
         Self::install_mode(stack, false)
     }
@@ -297,8 +360,7 @@ impl OverflowGuard {
         };
         DESTINATION.store(destination, Ordering::Relaxed);
         EXECUTABLE.store(executable, Ordering::Relaxed);
-        STACK_LOW.store(stack.low_bound, Ordering::Relaxed);
-        STACK_HIGH.store(stack.high_bound, Ordering::Relaxed);
+        publish(stack);
         // SAFETY: a handler with the vectored handler's ABI, first in the
         // chain; removed by Drop.
         let handler = unsafe { AddVectoredExceptionHandler(1, Some(handler)) };

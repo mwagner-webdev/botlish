@@ -40,9 +40,8 @@
 #   acceptance  smoke, every Tcl test file except the ones `notYet` lists
 #               below for this host, and every golden suite on
 #               -golden-backends (all four: native coroutines run on macOS
-#               since milestone 3; on Windows the golden runner excludes the
-#               native backends, which run no coroutines there yet): what
-#               passes on a macOS arm64 or Windows x86-64 host today
+#               since its milestone 3 and on Windows since its milestone 5):
+#               what passes on a macOS arm64 or Windows x86-64 host today
 #   all         every Tcl test file and every golden suite (on
 #               -golden-backends), and rust: the census, which on macOS
 #               fails as notYet says until the port is done
@@ -54,7 +53,8 @@
 #   golden suites   tests/golden/run.tcl -quiet -backends B, B the
 #                   -golden-backends (default all four; the golden runner,
 #                   stdlib/test.bot, is a coroutine, which the native backends
-#                   run on macOS since milestone 3)
+#                   run on macOS since its milestone 3 and on Windows since
+#                   its milestone 5)
 #   examples        main.tcl -backend B on the sample programs CI runs, for
 #                   every B of -example-backends (default all four)
 #   cabi            tests/platform/cabi-facts.tcl

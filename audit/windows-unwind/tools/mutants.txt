@@ -252,3 +252,50 @@
             WALKS.fetch_add(1, Ordering::Relaxed);
         }
 >>>>
+
+# ---------------------------------------------------------------------------
+# The walk of a suspended coroutine's stack and of a running one's resumer
+# (WINDOWS-X86-64-MILESTONE-5.md: a coroutine stack is a fiber; the walk
+# starts from the frame its switch recorded, runtime/coroutine/windows.rs,
+# and climbs with Windows' unwinder, runtime/framewalk.rs's walk_from)
+
+@@ walk-suspended-stacks-skipped no suspended or resumer stack is walked: their frames' roots are missed
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+    let mut context = windows::Context::at(start);
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+====
+    let _ = (map, start, stack, &mut visit);
+>>>>
+
+@@ walk-suspended-with-the-running-bounds a suspended stack walked within the running stack's bounds, not its own: the walk ends at once
+%% windows-x86_64
+## native/src/runtime/framewalk.rs
+<<<<
+    let mut context = windows::Context::at(start);
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+====
+    let mut context = windows::Context::at(start);
+    let _ = stack;
+    windows::walk_context(map, &mut context, None, windows::unwind_check(), &mut visit);
+>>>>
+
+@@ switch-records-its-callers-stack-pointer the switch records a stack pointer a word off its own: Windows' unwinder climbs from a wrong place
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+        *save = SwitchPoint { fiber: current_fiber(), frame: Frame { rip, rsp, rbp }, start: 0 };
+====
+        *save = SwitchPoint { fiber: current_fiber(), frame: Frame { rip, rsp: rsp + 8, rbp }, start: 0 };
+>>>>
+
+@@ switch-records-no-frame-register the switch records RBP as zero: a frame whose unwind reads its frame register climbs from nowhere
+%% windows-x86_64
+## native/src/runtime/coroutine/windows.rs
+<<<<
+        *save = SwitchPoint { fiber: current_fiber(), frame: Frame { rip, rsp, rbp }, start: 0 };
+====
+        let _ = rbp;
+        *save = SwitchPoint { fiber: current_fiber(), frame: Frame { rip, rsp, rbp: 0 }, start: 0 };
+>>>>

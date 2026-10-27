@@ -53,9 +53,11 @@
 # none of the Visual C++ runtime or the UCRT's (the C runtime is linked
 # statically); its name (NAME.exe); and the standalone runs, from another
 # directory with only the system directory on PATH, where the outcomes
-# differ from Unix's exactly as recorded: native coroutines are refused; an
-# exhausted stack is the stack guard's line, as on Unix
-# (WINDOWS-X86-64-MILESTONE-4.md). The object's unwind
+# differ from Unix's exactly as recorded: none since native coroutines run
+# (WINDOWS-X86-64-MILESTONE-5.md: a coroutine program's value, also on the
+# general runtime under GC stress and Windows' unwind check, and a coroutine
+# stack's exhaustion); an exhausted stack is the stack guard's line, as on
+# Unix (WINDOWS-X86-64-MILESTONE-4.md). The object's unwind
 # information (.pdata, .xdata) is read too, and the executable is run with
 # BOTLISH_NATIVE_UNWIND_CHECK=1 under GC stress: Windows' unwinder against
 # every Botlish function and frame (WINDOWS-X86-64-MILESTONE-3.md). C calls
@@ -659,6 +661,7 @@ if {$::tcl_platform(platform) eq "windows"} {
 }
 proc windowsChecks {} {
     global work facts program programValue coroutineProgram downProgram errorProgram overflowLine root runtimeOverflowProgram
+    global coroutineOverflowProgram
     set sourceDir [file join $work "source dir"]
     set buildDir [file join $work "build dir"]
     set runDir [file join $work "run dir"]
@@ -784,9 +787,34 @@ proc windowsChecks {} {
     # then the process died in Rust's own report (STATUS_STACK_OVERFLOW).
     set outcome [{*}$standalone $runDir $cwdDir runtime-overflow $runtimeOverflowProgram {BOTLISH_NATIVE_STACK_BYTES 16777216}]
     check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
+    # Coroutines (WINDOWS-X86-64-MILESTONE-5.md: a fiber per coroutine stack),
+    # as on Unix: the program's value, also under GC stress; then the same
+    # program and a coroutine's stack overflow emitted with coroutine fusion
+    # off, so that every coroutine runs on a fiber of its own -- the value,
+    # under GC stress with Windows' unwinder checking every Botlish frame of
+    # the suspended and running stacks the collector walks, and the stack
+    # guard's line for the coroutine stack's exhaustion. Until then a
+    # coroutine was refused (NATIVE UNSUPPORTED, "native coroutines need
+    # stack switching").
     set outcome [{*}$standalone $runDir $cwdDir coroutine $coroutineProgram {}]
-    check standalone-coroutine-refused [expr {[lindex $outcome 0] eq "1" && [lindex $outcome 1] eq ""
-        && [string match "native coroutines need stack switching*(NATIVE UNSUPPORTED value)\n" [lindex $outcome 2]]}] [shown $outcome]
+    check standalone-coroutine [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
+    set outcome [windowsRun $cwdDir [file join $runDir coroutine.exe] {BOTLISH_NATIVE_GC_STRESS 1}]
+    check standalone-coroutine-gc [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] [shown $outcome]
+    set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
+    try {
+        set general [native::executable [surface::compile $coroutineProgram coroutine-general.bot -warnings off] [file join $runDir coroutine-general]]
+        set overflowing [native::executable [surface::compile $coroutineOverflowProgram co-overflow.bot -warnings off] [file join $runDir co-overflow]]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+    }
+    set outcome [windowsRun $cwdDir $general {}]
+    check standalone-coroutine-general [expr {$outcome eq [list 0 "\[10, 7\]\n" ""]}] "fusion off: [shown $outcome]"
+    set outcome [windowsRun $cwdDir $general {BOTLISH_NATIVE_GC_STRESS 1 BOTLISH_NATIVE_UNWIND_CHECK 1}]
+    set checked [regexp {^native unwind check: (\d+) functions, (\d+) Botlish frames, every one as Windows unwinds it; \d+ walks unwound \d+ other frames\n$} [lindex $outcome 2] - - framesChecked]
+    check standalone-coroutine-unwind-check [expr {[lrange $outcome 0 1] eq [list 0 "\[10, 7\]\n"] && $checked && $framesChecked > 0}] \
+        "fusion off, GC stress, unwind check: [shown $outcome]"
+    set outcome [windowsRun $cwdDir $overflowing {}]
+    check standalone-co-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "fusion off: [shown $outcome]"
     windowsCCalls $runDir $cwdDir
 
     # ---- Observations, not limits (as checks' own).

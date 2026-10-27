@@ -28,9 +28,17 @@
 # one line) must name every one of its functions.
 #
 # The workloads are the census's two (bench/uri-steady.bot and the 2048
-# engine's benchmark) and the standard-library examples that run on both
+# engine's benchmark), the standard-library examples that run on both
 # native backends and as executables (closed: -aot-spec) and print nothing
-# (programs that print need platform IO, which Windows has not yet).
+# (programs that print need platform IO), and three coroutine programs
+# (tests/platform/programs/coroutine-*.bot: values held only by suspended
+# frames while other coroutines allocate, nested coroutines with an error
+# crossing a resume, thousands of short coroutines; WINDOWS-X86-64-
+# MILESTONE-5.md). The coroutine workloads are compiled with coroutine
+# fusion off (BOTLISH_NATIVE_COROUTINE_FUSION=0), so that every coroutine
+# runs on a stack of its own, the stacks the collector walks; a driver
+# without native coroutines (no host support, or the fallback plan of a
+# `fallback-roots` driver, which runs none) skips them, saying so.
 #
 # Prints one line per run and a summary; exits 1 on any difference. Needs
 # the native backend built.
@@ -46,7 +54,10 @@ set workloads [dict create \
     csv_geometric [list [file join $root examples stdlib csv_geometric.bot] ""] \
     ai_text_clean [list [file join $root examples stdlib ai_text_clean.bot] ""] \
     string_replace [list [file join $root examples stdlib string_replace.bot] ""] \
-    matmul [list [file join $root examples stdlib matmul.bot] ""]]
+    matmul [list [file join $root examples stdlib matmul.bot] ""] \
+    coroutine-roots [list [file join $here programs coroutine-roots.bot] "" coroutines] \
+    coroutine-nested [list [file join $here programs coroutine-nested.bot] "" coroutines] \
+    coroutine-many [list [file join $here programs coroutine-many.bot] 7997 coroutines]]
 
 set options [dict create -repeat 5 -executables 1 -workloads [join [dict keys $workloads] ,] -unwind-check 0]
 foreach {option value} $argv {
@@ -125,11 +136,27 @@ proc record {name label expected observed seconds} {
 
 # The root plan this driver compiles a function with a Botlish call to: its
 # roots in its native frame (walked) or on the shadow stack (the fallback).
-set plan [expr {[string match "*storage: native frame*" [native::roots [surface::compile "fn f(n):\n    if n <= 1:\n        return n\n\n    f(n - 1) + f(n - 2)\n\nf(3)\n" -warnings off]]] ? "native frames, walked" : "the shadow stack (the fallback plan: no frame walk)"}]
+set nativeFrames [string match "*storage: native frame*" [native::roots [surface::compile "fn f(n):\n    if n <= 1:\n        return n\n\n    f(n - 1) + f(n - 2)\n\nf(3)\n" -warnings off]]]
+set plan [expr {$nativeFrames ? "native frames, walked" : "the shadow stack (the fallback plan: no frame walk)"}]
+# The caller's coroutine fusion setting, which every other workload keeps.
+set fusion [array get ::env BOTLISH_NATIVE_COROUTINE_FUSION]
+# Whether this driver runs native coroutines: the host's, on native frames.
+set coroutines [expr {$nativeFrames && [native::hostSupports coroutines]}]
 puts "gc workloads on [core::cabi::hostTarget] ($::tcl_platform(os) $::tcl_platform(machine)), driver [native::binary]; roots of a calling function: $plan[expr {$unwindCheck ? "; every run's unwinding checked against Windows'" : ""}]"
 try {
     foreach name $names {
-        lassign [dict get $workloads $name] path recorded
+        lassign [dict get $workloads $name] path recorded needs
+        if {$needs eq "coroutines"} {
+            if {!$coroutines} {
+                puts [format "%-4s %-14s %s" skip $name "this driver runs no native coroutines ([expr {$nativeFrames ? "the host has none" : "the fallback plan"}])"]
+                continue
+            }
+            set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) 0
+        } elseif {$fusion eq {}} {
+            unset -nocomplain ::env(BOTLISH_NATIVE_COROUTINE_FUSION)
+        } else {
+            set ::env(BOTLISH_NATIVE_COROUTINE_FUSION) [lindex $fusion 1]
+        }
         set hir [surface::readProgramFile $path -warnings off]
         set started [clock milliseconds]
         set oracle [outcome 0 {core::formatValue [core::compiler::evalHir $hir]}]

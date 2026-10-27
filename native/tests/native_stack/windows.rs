@@ -5,10 +5,25 @@
 //! Cranelift's -- in each reporting mode, and the faults that are not an
 //! overflow of the guarded stack, each of which must end exactly as it does
 //! without the guard. Every check that faults runs in a child process.
+//!
+//! And coroutine stacks (WINDOWS-X86-64-MILESTONE-5.md: a coroutine's stack is
+//! a fiber, runtime/coroutine/windows.rs): each one exhausted -- at its start,
+//! after yields, at the bottom of main -> a -> b -> c, by 64 KiB frames and by
+//! the probe loop -- in the driver's and an executable's mode; the stack the
+//! guard reads at every point of a nested lifecycle; the faults on and around
+//! coroutine stacks that are not an overflow; and a switch made at every
+//! offset near the end of the stack it leaves.
+use botlish_native::runtime::coroutine::{rt_co_create, rt_co_release, rt_co_resume, rt_co_start, rt_co_yield, CoroutineObj};
+use botlish_native::runtime::metrics::AllocMode;
 use botlish_native::runtime::native_stack::NativeStack;
+use botlish_native::runtime::ops::GenericEntry;
 use botlish_native::runtime::platform::{self, OverflowGuard};
 use botlish_native::runtime::platform::windows::{confirmed_guard_page, stack_guarantee, GUARANTEE};
+use botlish_native::runtime::value::*;
+use botlish_native::runtime::vm::{ProgramInfo, Vm};
 use std::process::Command;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::{CloseHandle, EXCEPTION_STACK_OVERFLOW, GetLastError};
 use windows_sys::Win32::System::Diagnostics::Debug::RaiseException;
 use windows_sys::Win32::System::Threading::{
@@ -233,12 +248,465 @@ fn child(scenario: &str) -> ! {
                 println!("survived");
             });
         }
+        _ => coroutine_child(&parts),
+    }
+    std::process::exit(0)
+}
+
+// ---------------------------------------------------------------------------
+// Coroutine stacks
+
+fn new_vm() -> Box<Vm> {
+    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+        AllocMode::Summary)
+}
+
+/// A zero-argument Block whose code is the Rust function CODE (the generic
+/// entry ABI), standing in for a compiled coroutine body.
+fn thunk(vm: &mut Vm, code: GenericEntry) -> Value {
+    let caps: Box<[Value]> = Vec::new().into_boxed_slice();
+    vm.alloc(
+        ClosureObj {
+            hdr: Header::new(KIND_CLOSURE, false),
+            func: 0,
+            arity: 0,
+            code: code as *const () as usize,
+            ncaps: 0,
+            caps: Box::into_raw(caps) as *mut Value,
+        },
+        0,
+    )
+}
+
+/// A coroutine of BODY, rooted for the rest of the run.
+fn coroutine(p: *mut Vm, body: GenericEntry) -> Value {
+    // SAFETY: P is the Vm of this thread's run.
+    unsafe {
+        let block = thunk(&mut *p, body);
+        (*p).temp_roots.push(block);
+        let handle = rt_co_create(p, block);
+        (*p).temp_roots.push(handle);
+        handle
+    }
+}
+
+/// The bounds of the coroutine running now on P's thread.
+fn running_bounds(p: *mut Vm) -> NativeStack {
+    // SAFETY: called from a coroutine body, so co_current is that coroutine.
+    unsafe { (*(*p).co_current).stack.as_ref().expect("a running coroutine has a stack").bounds() }
+}
+
+/// What one child scenario shares with the coroutine bodies it runs.
+static VM: AtomicUsize = AtomicUsize::new(0);
+static HANDLE: AtomicUsize = AtomicUsize::new(0);
+static OFFSET: AtomicUsize = AtomicUsize::new(0);
+static ADDRESS: AtomicUsize = AtomicUsize::new(0);
+
+fn vm_ptr() -> *mut Vm {
+    VM.load(Ordering::Relaxed) as *mut Vm
+}
+
+/// Runs F on a std thread of STACK bytes with a Vm and the guard installed
+/// in MODE (`driver`, `executable`; `none`: no guard), as main.rs and
+/// runtime/aot.rs install it.
+fn guarded(mode: &str, stack_bytes: usize, f: impl FnOnce(*mut Vm, NativeStack) + Send + 'static) {
+    let mode = mode.to_string();
+    std::thread::Builder::new()
+        .stack_size(stack_bytes)
+        .spawn(move || {
+            let mut vm = new_vm();
+            let p: *mut Vm = &mut *vm;
+            VM.store(p as usize, Ordering::Relaxed);
+            let stack = NativeStack::current().expect("the thread's stack");
+            let _guard = match mode.as_str() {
+                "none" => None,
+                "executable" => Some(OverflowGuard::install_executable(&stack).expect("the guard installs")),
+                _ => Some(OverflowGuard::install(&stack).expect("the guard installs")),
+            };
+            f(p, stack);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// Where accesses stop growing STACK: below it Windows raises
+/// STATUS_STACK_OVERFLOW (WINDOWS-X86-64-MILESTONE-4.md, "Experiments": the
+/// guarantee and two pages above the reservation's bottom).
+fn edge(stack: &NativeStack) -> usize {
+    stack.low_bound + stack_guarantee() as usize + 2 * 4096
+}
+
+extern "C" fn yield_forever(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    loop {
+        rt_co_yield(p, UNIT);
+    }
+}
+
+extern "C" fn exhaust_at_start(_: *mut Vm, _: Value, _: *const Value) -> Value {
+    make_small(exhaust(0) as i64)
+}
+
+extern "C" fn exhaust_after_yield(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    rt_co_yield(p, make_small(1));
+    rt_co_yield(p, make_small(2));
+    make_small(exhaust(0) as i64)
+}
+
+extern "C" fn exhaust_wide_at_start(_: *mut Vm, _: Value, _: *const Value) -> Value {
+    make_small(exhaust_wide(0) as i64)
+}
+
+extern "C" fn probe_loop_after_yield(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    rt_co_yield(p, make_small(1));
+    probe_loop()
+}
+
+/// main -> a -> b -> c: each starts the next and yields; each resume goes on
+/// down to c, which exhausts its stack on its first resume.
+extern "C" fn nested_c(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    rt_co_yield(p, make_small(3));
+    make_small(exhaust(0) as i64)
+}
+
+extern "C" fn nested_b(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    let c = coroutine(p, nested_c);
+    rt_co_start(p, c);
+    rt_co_yield(p, make_small(2));
+    rt_co_resume(p, c, UNIT)
+}
+
+extern "C" fn nested_a(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    let b = coroutine(p, nested_b);
+    rt_co_start(p, b);
+    rt_co_yield(p, make_small(1));
+    rt_co_resume(p, b, UNIT)
+}
+
+/// Reads ADDRESS while running on a coroutine stack.
+extern "C" fn touch_address(_: *mut Vm, _: Value, _: *const Value) -> Value {
+    touch(ADDRESS.load(Ordering::Relaxed));
+    UNIT
+}
+
+/// Reads this coroutine stack's own uncommitted reservation, far below its
+/// committed part: an access violation in the running stack, never its
+/// exhaustion (only a frame that skipped the guard page gets there).
+extern "C" fn touch_own_reservation(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    touch(running_bounds(p).low_bound + (64 << 10));
+    UNIT
+}
+
+/// STATUS_STACK_OVERFLOW raised by software on a coroutine stack, its record
+/// naming that stack: exactly a real exhaustion's record but for
+/// EXCEPTION_SOFTWARE_ORIGINATE.
+extern "C" fn raise_on_own_stack(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    let arguments = [1usize, running_bounds(p).low_bound + 4096];
+    // SAFETY: deliberately raises the code.
+    unsafe { RaiseException(EXCEPTION_STACK_OVERFLOW as u32, 0, 2, arguments.as_ptr()) };
+    UNIT
+}
+
+/// Calls F(ARG) with the stack pointer at SP (16-byte aligned, on the
+/// running stack, below every live frame and at most a page below what is
+/// committed) and restores it after.
+///
+/// # Safety
+/// SP must lie in the running stack, below every live frame, within reach of
+/// its guard page.
+unsafe fn call_at(sp: usize, f: extern "C" fn(usize), arg: usize) {
+    // SAFETY: the caller's contract; r12 is callee-saved, so it holds the
+    // old stack pointer across the call (whose shadow space is the 32 bytes
+    // above SP, below every live frame).
+    unsafe {
+        std::arch::asm!(
+            "mov r12, rsp",
+            "mov rsp, {sp}",
+            "call {f}",
+            "mov rsp, r12",
+            sp = in(reg) sp,
+            f = in(reg) f,
+            in("rcx") arg,
+            out("r12") _,
+            clobber_abi("C"),
+        );
+    }
+}
+
+/// Recurses with 512-byte frames -- each one written, so the stack grows by
+/// its guard page as it goes -- until the stack pointer is within 1 KiB of
+/// TARGET, then calls F with the stack pointer at TARGET.
+#[inline(never)]
+fn descend_then(target: usize, f: extern "C" fn(usize)) {
+    let frame = std::hint::black_box([target as u8; 512]);
+    if current_sp() > target + 1024 {
+        descend_then(target, f);
+    } else {
+        // SAFETY: TARGET is below this frame, within a page of it.
+        unsafe { call_at(target & !15, f, 0) };
+    }
+    std::hint::black_box(&frame);
+}
+
+extern "C" fn resume_handle(_: usize) {
+    rt_co_resume(vm_ptr(), HANDLE.load(Ordering::Relaxed) as Value, UNIT);
+}
+
+extern "C" fn start_handle(_: usize) {
+    rt_co_start(vm_ptr(), HANDLE.load(Ordering::Relaxed) as Value);
+}
+
+extern "C" fn yield_unit(_: usize) {
+    rt_co_yield(vm_ptr(), UNIT);
+}
+
+/// Resumes HANDLE from OFFSET bytes above where this coroutine's stack stops
+/// growing.
+extern "C" fn resume_near_edge(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    descend_then(edge(&running_bounds(p)) + OFFSET.load(Ordering::Relaxed), resume_handle);
+    UNIT
+}
+
+/// Yields from OFFSET bytes above where this coroutine's stack stops growing.
+extern "C" fn yield_near_edge(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    descend_then(edge(&running_bounds(p)) + OFFSET.load(Ordering::Relaxed), yield_unit);
+    UNIT
+}
+
+/// The publication check: what the guard reads at each point of a nested
+/// lifecycle, against the stack that runs there.
+static PUBLISHED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn expect_published(at: &str, stack: &NativeStack) {
+    let published = platform::published_stack();
+    let wanted = Some((stack.low_bound, stack.high_bound));
+    if published != wanted {
+        PUBLISHED.lock().unwrap().push(format!("{at}: published {published:x?}, running {wanted:x?}"));
+    }
+    // And Windows' own account of the running stack is the same one.
+    let windows = NativeStack::current().expect("the running stack");
+    if (windows.low_bound, windows.high_bound) != (stack.low_bound, stack.high_bound) {
+        PUBLISHED.lock().unwrap().push(format!("{at}: Windows reports [{:#x}, {:#x}), running {wanted:x?}", windows.low_bound, windows.high_bound));
+    }
+}
+
+extern "C" fn publication_b(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    expect_published("b started", &running_bounds(p));
+    rt_co_yield(p, UNIT);
+    expect_published("b resumed", &running_bounds(p));
+    UNIT
+}
+
+extern "C" fn publication_a(p: *mut Vm, _: Value, _: *const Value) -> Value {
+    expect_published("a started", &running_bounds(p));
+    let b = coroutine(p, publication_b);
+    rt_co_start(p, b);
+    expect_published("a after starting b", &running_bounds(p));
+    rt_co_yield(p, UNIT);
+    expect_published("a resumed", &running_bounds(p));
+    rt_co_resume(p, b, UNIT);
+    expect_published("a after b completed", &running_bounds(p));
+    // A released suspended coroutine's fiber is pooled and started again.
+    let c = coroutine(p, yield_forever);
+    rt_co_start(p, c);
+    expect_published("a after starting c", &running_bounds(p));
+    UNIT
+}
+
+/// The coroutine scenarios (`coroutine_child`'s names):
+///
+///   co:SHAPE:MODE         a coroutine's stack exhausted -- `fresh`, `after-
+///                         yields`, `nested` (main -> a -> b -> c), `wide`
+///                         (64 KiB frames at its start), `probe-loop` (after
+///                         a yield) -- the guard in MODE (`driver`,
+///                         `executable`); prints `returned` if it ever
+///                         returns
+///   co-fault:KIND         a fault that is not an overflow, guard installed:
+///                         `own-reservation` (a running coroutine's
+///                         uncommitted reservation), `suspended-reservation`
+///                         (a suspended one's, from the thread),
+///                         `thread-reservation-from-coroutine` (the thread's,
+///                         from a running coroutine), `raised-in-coroutine`
+///                         (STATUS_STACK_OVERFLOW raised by software on a
+///                         coroutine stack, naming it)
+///   co-fault:KIND:unguarded  the same without the guard
+///   co-sweep:DIRECTION:X  a switch made X bytes above where the stack it
+///                         leaves stops growing; prints `completed`
+///   co-publication        the published stack along a nested lifecycle
+fn coroutine_child(parts: &[&str]) {
+    match parts {
+        ["co", shape, mode] => {
+            let shape = shape.to_string();
+            guarded(mode, 64 << 20, move |p, _| {
+                let body: GenericEntry = match shape.as_str() {
+                    "fresh" => exhaust_at_start,
+                    "after-yields" => exhaust_after_yield,
+                    "nested" => nested_a,
+                    "wide" => exhaust_wide_at_start,
+                    "probe-loop" => probe_loop_after_yield,
+                    other => panic!("no shape {other}"),
+                };
+                let handle = coroutine(p, body);
+                rt_co_start(p, handle);
+                rt_co_resume(p, handle, UNIT);
+                rt_co_resume(p, handle, UNIT);
+                println!("returned");
+            });
+        }
+        ["co-fault", kind] | ["co-fault", kind, _] => {
+            let kind = kind.to_string();
+            let mode = if parts.len() == 3 { "none" } else { "driver" };
+            guarded(mode, 64 << 20, move |p, stack| {
+                match kind.as_str() {
+                    "own-reservation" => {
+                        rt_co_start(p, coroutine(p, touch_own_reservation));
+                    }
+                    "suspended-reservation" => {
+                        let handle = coroutine(p, yield_forever);
+                        rt_co_start(p, handle);
+                        // SAFETY: a live suspended coroutine with a stack.
+                        touch(unsafe { (*(handle as *mut CoroutineObj)).stack.as_ref().unwrap().bounds().low_bound } + (64 << 10));
+                    }
+                    "thread-reservation-from-coroutine" => {
+                        ADDRESS.store(stack.low_bound + (64 << 10), Ordering::Relaxed);
+                        rt_co_start(p, coroutine(p, touch_address));
+                    }
+                    "raised-in-coroutine" => {
+                        rt_co_start(p, coroutine(p, raise_on_own_stack));
+                    }
+                    other => panic!("no fault {other}"),
+                }
+                println!("survived");
+            });
+        }
+        ["co-sweep", direction, offset] => {
+            let direction = direction.to_string();
+            let offset: usize = offset.parse().expect("an offset");
+            OFFSET.store(offset, Ordering::Relaxed);
+            guarded("driver", 4 << 20, move |p, stack| {
+                match direction.as_str() {
+                    "resume-from-thread" => {
+                        let handle = coroutine(p, yield_forever);
+                        rt_co_start(p, handle);
+                        HANDLE.store(handle as usize, Ordering::Relaxed);
+                        descend_then(edge(&stack) + offset, resume_handle);
+                    }
+                    "start-from-thread" => {
+                        // A start on a pooled fiber: the thread is already a
+                        // fiber and the pool holds one, as for every start but
+                        // a thread's first.
+                        let warm = coroutine(p, yield_forever);
+                        rt_co_start(p, warm);
+                        rt_co_release(p, warm);
+                        HANDLE.store(coroutine(p, yield_forever) as usize, Ordering::Relaxed);
+                        descend_then(edge(&stack) + offset, start_handle);
+                    }
+                    "fresh-start-from-thread" => {
+                        // A thread's first start: its conversion to a fiber,
+                        // CreateFiberEx and the fiber's setup, all near the
+                        // edge.
+                        HANDLE.store(coroutine(p, yield_forever) as usize, Ordering::Relaxed);
+                        descend_then(edge(&stack) + offset, start_handle);
+                    }
+                    "resume-from-coroutine" => {
+                        let inner = coroutine(p, yield_forever);
+                        rt_co_start(p, inner);
+                        HANDLE.store(inner as usize, Ordering::Relaxed);
+                        rt_co_start(p, coroutine(p, resume_near_edge));
+                    }
+                    "yield-from-coroutine" => {
+                        let handle = coroutine(p, yield_near_edge);
+                        rt_co_start(p, handle);
+                        rt_co_resume(p, handle, UNIT);
+                    }
+                    other => panic!("no direction {other}"),
+                }
+                println!("completed");
+            });
+        }
+        ["co-publication"] => {
+            guarded("driver", 64 << 20, |p, stack| {
+                expect_published("thread", &stack);
+                let a = coroutine(p, publication_a);
+                rt_co_start(p, a);
+                expect_published("thread after a yielded", &stack);
+                rt_co_resume(p, a, UNIT);
+                expect_published("thread after a completed", &stack);
+                let mismatches = PUBLISHED.lock().unwrap();
+                if mismatches.is_empty() {
+                    println!("publication ok");
+                } else {
+                    println!("{}", mismatches.join("; "));
+                }
+            });
+        }
         _ => {
-            eprintln!("no child scenario {scenario}");
+            eprintln!("no child scenario {}", parts.join(":"));
             std::process::exit(2)
         }
     }
-    std::process::exit(0)
+}
+
+/// A coroutine's own stack exhausted: at its start, after yields, at the
+/// bottom of main -> a -> b -> c, by 64 KiB frames and by the probe loop, in
+/// the driver's mode; and once in an executable's.
+fn coroutine_checks(report: &mut Report) {
+    for shape in ["fresh", "after-yields", "nested", "wide", "probe-loop"] {
+        let outcome = run_child(&format!("co:{shape}:driver"));
+        report.check(&format!("coroutine {shape}"), outcome.is_overflow_line(), outcome.brief());
+    }
+    let outcome = run_child("co:nested:executable");
+    report.check("coroutine nested executable", outcome.code == 1 && outcome.stdout.is_empty() && outcome.stderr.trim_end() == OVERFLOW_LINE,
+        outcome.brief());
+}
+
+/// Faults on and around coroutine stacks that are not the running stack's
+/// exhaustion, with the guard installed: never the overflow line, and each
+/// ends exactly as it does without the guard.
+fn coroutine_fault_checks(report: &mut Report) {
+    for (kind, expected) in [("own-reservation", ACCESS_VIOLATION), ("suspended-reservation", ACCESS_VIOLATION),
+        ("thread-reservation-from-coroutine", ACCESS_VIOLATION), ("raised-in-coroutine", STACK_OVERFLOW)] {
+        let with = run_child(&format!("co-fault:{kind}"));
+        let without = run_child(&format!("co-fault:{kind}:unguarded"));
+        let same = with.code == without.code && with.stdout == without.stdout;
+        report.check(&format!("coroutine fault {kind}"), !with.relabelled() && same && with.code == expected,
+            format!("{}; without the guard: {}", with.brief(), without.brief()));
+    }
+}
+
+/// A switch made X bytes above where the stack it leaves stops growing, for
+/// X from 0 to 2 KiB in 16-byte steps: wherever the switch path (the
+/// helper's frames, SwitchToFiber's own, the arriving side) meets the end of
+/// the stack, the run either completes or ends in the overflow line -- never
+/// a crash. Both must occur, or the sweep missed the edge. A start on a
+/// pooled fiber -- the helper's frames and the pool's, more than a resume's
+/// -- is swept from 0 to 4 KiB in 16-byte steps, and a thread's first start
+/// -- its conversion, CreateFiberEx and the fiber's setup, which take more of
+/// the stack than a switch -- from 0 to 64 KiB in 512-byte steps.
+fn coroutine_sweep_checks(report: &mut Report) {
+    for (direction, step, steps) in [("resume-from-thread", 16, 128), ("start-from-thread", 16, 256),
+        ("fresh-start-from-thread", 512, 128), ("resume-from-coroutine", 16, 128), ("yield-from-coroutine", 16, 128)] {
+        let (mut completed, mut overflowed, mut failures) = (0, 0, Vec::new());
+        for offset in (0..=steps * step).step_by(step) {
+            let outcome = run_child_with(&format!("co-sweep:{direction}:{offset}"), &[("BOTLISH_NATIVE_COROUTINE_STACK_BYTES", "262144")]);
+            if outcome.code == 0 && outcome.stdout.trim() == "completed" {
+                completed += 1;
+            } else if outcome.is_overflow_line() {
+                overflowed += 1;
+            } else {
+                failures.push(format!("{offset}: {}", outcome.brief()));
+            }
+        }
+        report.check(&format!("coroutine sweep {direction}"), failures.is_empty() && completed > 0 && overflowed > 0,
+            format!("{overflowed} overflowed, {completed} completed{}", if failures.is_empty() { String::new() } else { format!(", failed at {}", failures.join(", ")) }));
+    }
+}
+
+/// The stack the guard reads -- and the one Windows reports -- is the one
+/// that runs, at every point of a nested lifecycle.
+fn coroutine_publication_check(report: &mut Report) {
+    let outcome = run_child("co-publication");
+    report.check("coroutine publication", outcome.code == 0 && outcome.stdout.trim() == "publication ok", outcome.brief());
 }
 
 /// Whether the page at ADDRESS is committed without a guard (VirtualQuery):
@@ -390,6 +858,10 @@ pub fn main() {
     facts(&mut report);
     guard_checks(&mut report);
     fault_checks(&mut report);
+    coroutine_checks(&mut report);
+    coroutine_fault_checks(&mut report);
+    coroutine_publication_check(&mut report);
+    coroutine_sweep_checks(&mut report);
     if report.failures > 0 {
         println!("{} native stack checks failed", report.failures);
         std::process::exit(1);

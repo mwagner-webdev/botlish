@@ -8,7 +8,9 @@
 # once: the UNWIND_INFO encoder (codegen/unwind.rs), the object's .pdata and
 # .xdata (codegen/mod.rs), the JIT's function table and its lifetime
 # (codegen/jitunwind.rs), the collector's walk across Rust and Botlish
-# frames (runtime/framewalk.rs). (The stack-limit check's mutants went with
+# frames (runtime/framewalk.rs), and its walk of suspended coroutine stacks
+# from the frame their switch recorded (runtime/coroutine/windows.rs:
+# WINDOWS-X86-64-MILESTONE-5.md). (The stack-limit check's mutants went with
 # it: WINDOWS-X86-64-MILESTONE-4.md; the stack guard's are
 # audit/native-stack's.) For each mutant that
 # applies to this host (its %% line), a private copy of the checkout gets the
@@ -22,9 +24,10 @@
 #     to their callers, the collector's walk checked against Windows';
 #   * on Windows, tests/platform/native-status.tcl (the frame walk under GC
 #     stress, the stack overflows);
-#   * tests/platform/gc-workloads.tcl on the URI and 2048 workloads, once
-#     plainly and once under GC stress, with BOTLISH_NATIVE_UNWIND_CHECK on
-#     Windows (-unwind-check 1);
+#   * tests/platform/gc-workloads.tcl on the URI and 2048 workloads and the
+#     coroutine workloads (suspended stacks holding roots while others
+#     collect: WINDOWS-X86-64-MILESTONE-5.md), once plainly and once under GC
+#     stress, with BOTLISH_NATIVE_UNWIND_CHECK on Windows (-unwind-check 1);
 #   * on Windows, tests/platform/aot-facts.tcl (the object's .pdata, the
 #     executable's unwind check, the standalone stack overflows).
 #
@@ -167,7 +170,7 @@ set detectors [list \
         set failing [lmap {- n} [regexp -all -inline -line {^FAIL\s+(\S+)} $output] {set n}]
         expr {$failing eq {} ? [lastLine $output] : [join $failing {, }]}
     } \
-    gc-workloads 0 [list $tclsh tests/platform/gc-workloads.tcl -repeat 1 -workloads uri,2048 -unwind-check $windows] {
+    gc-workloads 0 [list $tclsh tests/platform/gc-workloads.tcl -repeat 1 -workloads uri,2048,coroutine-roots,coroutine-nested,coroutine-many -unwind-check $windows] {
         if {$status == 0} { return "" }
         set failing [lmap {- n} [regexp -all -inline -line {^FAILED: (.{0,80})} $output] {set n}]
         expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 3] {; }]}

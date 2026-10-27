@@ -1,0 +1,74 @@
+name: windows coroutines probe
+
+# The Win64 coroutine milestone's experiments (WINDOWS-X86-64-MILESTONE-5.md,
+# "Architecture comparison"): audit/windows-coroutines/probe, a program
+# independent of botlish-native, run on a real Windows Server 2025 runner
+# with MSVC's toolchain -- Windows fibers against a stack switch of our own
+# (with three ways of treating the TEB): the registers each keeps, TLS, FLS
+# and errno, the stack bounds Windows reports, guard-page growth, stack
+# guarantees, genuine exhaustion and the room a handler has then, Rust's
+# panics and Windows' virtual unwind across the stacks, a fiber's lifetime,
+# and the cost of each. Evidence, not a test tier: nothing here gates
+# anything, and the step records what happens rather than require it.
+#
+# It runs on pushes that change it or audit/windows-coroutines/, and, once
+# it is on the default branch, on demand (workflow_dispatch) for any branch.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/windows-coroutines-probe.yml"
+      - "audit/windows-coroutines/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-coroutines-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Stable Rust for x86_64-pc-windows-msvc
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -vV
+
+      - name: The probe
+        run: cargo run --release --manifest-path audit/windows-coroutines/probe/Cargo.toml 2>&1 | tee probe.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Windows coroutines probe"
+            echo '### Results'
+            echo '```'
+            grep -a 'RESULT' probe.log 2>/dev/null | sed 's/^ *//' | head -n 400
+            echo '```'
+            echo '### Everything'
+            echo '```'
+            cat probe.log 2>/dev/null | grep -av '^   Compiling\|^    Finished\|^     Running' | head -n 2500
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-coroutines-probe
+          path: probe.log
+          if-no-files-found: ignore

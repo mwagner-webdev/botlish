@@ -58,8 +58,8 @@ opaque struct XSAVE_AREA:
 opaque struct RUNTIME_FUNCTION:
     tag: unit
 
-# struct _UNWIND_HISTORY_TABLE (winnt.h), a complete C type: its layout is win32::layouts::UNWIND_HISTORY_TABLE
-opaque struct UNWIND_HISTORY_TABLE:
+# struct _ARM64_NT_CONTEXT (winnt.h), a complete C type: its layout is win32::layouts::ARM64_NT_CONTEXT
+opaque struct ARM64_NT_CONTEXT:
     tag: unit
 
 # struct _KNONVOLATILE_CONTEXT_POINTERS (winnt.h), a complete C type: its layout is win32::layouts::KNONVOLATILE_CONTEXT_POINTERS
@@ -166,6 +166,10 @@ opaque struct SYSTEM_LOGICAL_PROCESSOR_INFORMATION:
 opaque struct SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX:
     tag: unit
 
+# struct _SYSTEM_CPU_SET_INFORMATION (winnt.h), a complete C type whose layout is blocked (layouts.tsv)
+opaque struct SYSTEM_CPU_SET_INFORMATION:
+    tag: unit
+
 # struct _SYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION (winnt.h), a complete C type: its layout is win32::layouts::SYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION
 opaque struct SYSTEM_PROCESSOR_CYCLE_TIME_INFORMATION:
     tag: unit
@@ -176,6 +180,14 @@ opaque struct MEMORY_BASIC_INFORMATION:
 
 # union _FILE_SEGMENT_ELEMENT (winnt.h), a complete C type: its layout is win32::layouts::FILE_SEGMENT_ELEMENT
 opaque struct FILE_SEGMENT_ELEMENT:
+    tag: unit
+
+# struct _IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY (winnt.h), a complete C type whose layout is blocked (layouts.tsv)
+opaque struct ARM64_RUNTIME_FUNCTION:
+    tag: unit
+
+# struct _UNWIND_HISTORY_TABLE (winnt.h), a complete C type: its layout is win32::layouts::UNWIND_HISTORY_TABLE
+opaque struct UNWIND_HISTORY_TABLE:
     tag: unit
 
 # struct _SLIST_ENTRY (winnt.h), a complete C type: its layout is win32::layouts::SLIST_ENTRY
@@ -416,6 +428,10 @@ opaque struct BY_HANDLE_FILE_INFORMATION:
 
 # struct _CREATEFILE2_EXTENDED_PARAMETERS (fileapi.h), a complete C type: its layout is win32::layouts::CREATEFILE2_EXTENDED_PARAMETERS
 opaque struct CREATEFILE2_EXTENDED_PARAMETERS:
+    tag: unit
+
+# struct DISK_SPACE_INFORMATION (fileapi.h), a complete C type: its layout is win32::layouts::DISK_SPACE_INFORMATION
+opaque struct DISK_SPACE_INFORMATION:
     tag: unit
 
 # struct _HEAP_SUMMARY (heapapi.h), a complete C type: its layout is win32::layouts::HEAP_SUMMARY
@@ -1030,44 +1046,48 @@ opaque struct NLSVERSIONINFOEX:
 opaque struct FILEMUIINFO:
     tag: unit
 
-# struct _COORD (wincon.h), a complete C type: its layout is win32::layouts::COORD
+# struct _COORD (wincontypes.h), a complete C type: its layout is win32::layouts::COORD
 opaque struct COORD:
     tag: unit
 
-# struct _SMALL_RECT (wincon.h), a complete C type: its layout is win32::layouts::SMALL_RECT
+# struct _SMALL_RECT (wincontypes.h), a complete C type: its layout is win32::layouts::SMALL_RECT
 opaque struct SMALL_RECT:
     tag: unit
 
-# struct _INPUT_RECORD (wincon.h), a complete C type: its layout is win32::layouts::INPUT_RECORD
+# struct _INPUT_RECORD (wincontypes.h), a complete C type: its layout is win32::layouts::INPUT_RECORD
 opaque struct INPUT_RECORD:
     tag: unit
 
-# struct _CONSOLE_SCREEN_BUFFER_INFO (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_SCREEN_BUFFER_INFO
-opaque struct CONSOLE_SCREEN_BUFFER_INFO:
-    tag: unit
-
-# struct _CONSOLE_CURSOR_INFO (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_CURSOR_INFO
-opaque struct CONSOLE_CURSOR_INFO:
-    tag: unit
-
-# struct _CONSOLE_FONT_INFO (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_FONT_INFO
+# struct _CONSOLE_FONT_INFO (wincontypes.h), a complete C type: its layout is win32::layouts::CONSOLE_FONT_INFO
 opaque struct CONSOLE_FONT_INFO:
     tag: unit
 
-# struct _CONSOLE_SELECTION_INFO (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_SELECTION_INFO
-opaque struct CONSOLE_SELECTION_INFO:
+# struct _CONSOLE_READCONSOLE_CONTROL (consoleapi.h), a complete C type: its layout is win32::layouts::CONSOLE_READCONSOLE_CONTROL
+opaque struct CONSOLE_READCONSOLE_CONTROL:
     tag: unit
 
-# struct _CONSOLE_FONT_INFOEX (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_FONT_INFOEX
+# struct _CONSOLE_CURSOR_INFO (consoleapi2.h), a complete C type: its layout is win32::layouts::CONSOLE_CURSOR_INFO
+opaque struct CONSOLE_CURSOR_INFO:
+    tag: unit
+
+# struct _CONSOLE_SCREEN_BUFFER_INFO (consoleapi2.h), a complete C type: its layout is win32::layouts::CONSOLE_SCREEN_BUFFER_INFO
+opaque struct CONSOLE_SCREEN_BUFFER_INFO:
+    tag: unit
+
+# struct _CONSOLE_SCREEN_BUFFER_INFOEX (consoleapi2.h), a complete C type: its layout is win32::layouts::CONSOLE_SCREEN_BUFFER_INFOEX
+opaque struct CONSOLE_SCREEN_BUFFER_INFOEX:
+    tag: unit
+
+# struct _CONSOLE_FONT_INFOEX (consoleapi3.h), a complete C type: its layout is win32::layouts::CONSOLE_FONT_INFOEX
 opaque struct CONSOLE_FONT_INFOEX:
     tag: unit
 
-# struct _CONSOLE_HISTORY_INFO (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_HISTORY_INFO
-opaque struct CONSOLE_HISTORY_INFO:
+# struct _CONSOLE_SELECTION_INFO (consoleapi3.h), a complete C type: its layout is win32::layouts::CONSOLE_SELECTION_INFO
+opaque struct CONSOLE_SELECTION_INFO:
     tag: unit
 
-# struct _CONSOLE_SCREEN_BUFFER_INFOEX (wincon.h), a complete C type: its layout is win32::layouts::CONSOLE_SCREEN_BUFFER_INFOEX
-opaque struct CONSOLE_SCREEN_BUFFER_INFOEX:
+# struct _CONSOLE_HISTORY_INFO (consoleapi3.h), a complete C type: its layout is win32::layouts::CONSOLE_HISTORY_INFO
+opaque struct CONSOLE_HISTORY_INFO:
     tag: unit
 
 # struct val_context (winreg.h), a complete C type: its layout is win32::layouts::val_context

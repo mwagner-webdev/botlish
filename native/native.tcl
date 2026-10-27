@@ -144,7 +144,9 @@ namespace eval native {
 #                codegen/clif.rs's c_call_signature lowers them for System V
 #                x86-64 and AArch64 and for Apple AArch64; on another C
 #                convention a variadic call is a codegen error)
-#   coroutines   native coroutines (stack switching, runtime/coroutine.rs)
+#   coroutines   native coroutines (stack switching, runtime/coroutine.rs;
+#                on Windows a fiber per coroutine stack,
+#                runtime/coroutine/windows.rs)
 #   stackGuard   NATIVE LIMIT STACK for any exhausted native stack
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
@@ -164,14 +166,16 @@ namespace eval native {
 # Botlish code, Windows' unwinder across Rust frames) and has the stack
 # guard since WINDOWS-X86-64-MILESTONE-4.md (a vectored handler of
 # STATUS_STACK_OVERFLOW: no Botlish call can fail for the stack, as on the
-# other hosts); its variadic C calls and coroutines are later milestones'.
+# other hosts) and native coroutines since WINDOWS-X86-64-MILESTONE-5.md (a
+# Windows fiber per coroutine stack, each with its own stack guarantee); its
+# variadic C calls are a later milestone's.
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
-        coroutines {linux-x86_64 linux-aarch64 macos-aarch64} \
+        coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         libraries {linux-x86_64 linux-aarch64}]

@@ -1,0 +1,27 @@
+# Thousands of short coroutines, each finished or abandoned while suspended
+# (tests/coroutines.test's co-gc-many-coroutines): finished stacks go back
+# to the pool at once, abandoned ones when a collection sweeps them, and
+# every later coroutine starts on a pooled stack (on Windows a pooled fiber,
+# restarted at its top: WINDOWS-X86-64-MILESTONE-5.md). A workload of
+# tests/platform/gc-workloads.tcl.
+import std::list
+
+struct V:
+    n: int
+
+fn w(k: int) -> V:
+    yield V {n: k}
+    return V {n: k * 2}
+
+fn one(k: int) -> int:
+    coroutine {step, first} = w(k)
+    coroutine {step: abandoned} = w(k + 1)
+    last = step()
+    first.n + last.n
+
+xs = loop i from 0 to 2000:
+    one(i)
+last = std::list::at(xs, 1999):
+    on IndexNotFound:
+        0
+std::list::length(xs) + last

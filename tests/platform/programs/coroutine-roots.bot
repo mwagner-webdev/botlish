@@ -1,0 +1,47 @@
+# Values held only by suspended coroutine frames, at several depths, while
+# other coroutines and the main program allocate (tests/coroutines.test's
+# co-gc-suspended-stacks): every collection the churn runs must find them on
+# the suspended stacks -- natively, by the frame walk of each suspended
+# coroutine's stack from where its switch left (on Windows a fiber's, by
+# Windows' unwinder: WINDOWS-X86-64-MILESTONE-5.md). A missed root shows as
+# a wrong value or a crash. A workload of tests/platform/gc-workloads.tcl.
+import std::str
+import std::list
+
+struct Ev:
+    text: str
+
+fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        std::str::concat("x", std::str::concat("y", "z"))
+    std::list::length(xs)
+
+fn deep(k: int, label: str) -> int:
+    held = [label, std::str::concat(label, "!"), [k, k + 1]]
+    if k == 0:
+        yield Ev {text: std::str::concat("bottom:", label)}
+        churn(50)
+        yield Ev {text: std::str::concat("after:", std::list::at(held, 1))}
+        return 1
+    mine = std::str::concat(label, "-")
+    r = deep(k - 1, mine)
+    yield Ev {text: std::str::concat(mine, std::list::at(held, 0))}
+    r + 1
+
+fn worker(k: int, label: str) -> Ev:
+    n = deep(k, label)
+    return Ev {text: std::str::concat("done ", label)}
+
+fn run(k: int, label: str) -> list:
+    coroutine {step: a, first: fa} = worker(k, label)
+    coroutine {step: b, first: fb} = worker(k + 2, std::str::concat(label, "B"))
+    coroutine {step: dropped} = worker(3, "dropped")
+    churn(100)
+    out = loop i from 0 to k + 4:
+        x = a()
+        churn(20)
+        y = b()
+        [x.text, y.text]
+    [fa.text, fb.text, out]
+
+run(2, "L")

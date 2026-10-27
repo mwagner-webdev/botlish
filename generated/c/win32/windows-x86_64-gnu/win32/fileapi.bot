@@ -209,18 +209,12 @@ extern c fn GetFullPathNameW(
 # C: DWORD GetLogicalDrives(void)
 extern c fn GetLogicalDrives() -> std::ffi::c::ULong
 
-# C: DWORD GetLogicalDriveStringsW(DWORD nBufferLength, LPWSTR lpBuffer)
-extern c fn GetLogicalDriveStringsW(
-    nBufferLength: std::ffi::c::ULong,
-    lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::ULong
-
-# C: DWORD GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer)
-extern c fn GetShortPathNameW(
-    lpszLongPath: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpszShortPath: std::ffi::c::Ptr[std::ffi::c::UShort],
-    cchBuffer: std::ffi::c::ULong
-) -> std::ffi::c::ULong
+# C: WINBOOL GetVolumeNameForVolumeMountPointW(LPCWSTR lpszVolumeMountPoint, LPWSTR lpszVolumeName, DWORD cchBufferLength)
+extern c fn GetVolumeNameForVolumeMountPointW(
+    lpszVolumeMountPoint: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpszVolumeName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    cchBufferLength: std::ffi::c::ULong
+) -> std::ffi::c::Int
 
 # C: WINBOOL GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength)
 extern c fn GetVolumePathNameW(
@@ -228,13 +222,6 @@ extern c fn GetVolumePathNameW(
     lpszVolumePathName: std::ffi::c::Ptr[std::ffi::c::UShort],
     cchBufferLength: std::ffi::c::ULong
 ) -> std::ffi::c::Int
-
-# C: DWORD QueryDosDeviceW(LPCWSTR lpDeviceName, LPWSTR lpTargetPath, DWORD ucchMax)
-extern c fn QueryDosDeviceW(
-    lpDeviceName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpTargetPath: std::ffi::c::Ptr[std::ffi::c::UShort],
-    ucchMax: std::ffi::c::ULong
-) -> std::ffi::c::ULong
 
 # C: WINBOOL ReadFileScatter(HANDLE hFile, FILE_SEGMENT_ELEMENT aSegmentArray[], DWORD nNumberOfBytesToRead, LPDWORD lpReserved, LPOVERLAPPED lpOverlapped)
 extern c fn ReadFileScatter(
@@ -260,12 +247,25 @@ extern c fn WriteFileGather(
     lpOverlapped: std::ffi::c::Ptr[win32::ctypes::OVERLAPPED]
 ) -> std::ffi::c::Int
 
-# C: WINBOOL GetVolumeNameForVolumeMountPointW(LPCWSTR lpszVolumeMountPoint, LPWSTR lpszVolumeName, DWORD cchBufferLength)
-extern c fn GetVolumeNameForVolumeMountPointW(
-    lpszVolumeMountPoint: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpszVolumeName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    cchBufferLength: std::ffi::c::ULong
-) -> std::ffi::c::Int
+# C: DWORD GetLogicalDriveStringsW(DWORD nBufferLength, LPWSTR lpBuffer)
+extern c fn GetLogicalDriveStringsW(
+    nBufferLength: std::ffi::c::ULong,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::ULong
+
+# C: DWORD GetShortPathNameW(LPCWSTR lpszLongPath, LPWSTR lpszShortPath, DWORD cchBuffer)
+extern c fn GetShortPathNameW(
+    lpszLongPath: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpszShortPath: std::ffi::c::Ptr[std::ffi::c::UShort],
+    cchBuffer: std::ffi::c::ULong
+) -> std::ffi::c::ULong
+
+# C: DWORD QueryDosDeviceW(LPCWSTR lpDeviceName, LPWSTR lpTargetPath, DWORD ucchMax)
+extern c fn QueryDosDeviceW(
+    lpDeviceName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpTargetPath: std::ffi::c::Ptr[std::ffi::c::UShort],
+    ucchMax: std::ffi::c::ULong
+) -> std::ffi::c::ULong
 
 # C: WINBOOL GetVolumePathNamesForVolumeNameW(LPCWSTR lpszVolumeName, LPWCH lpszVolumePathNames, DWORD cchBufferLength, PDWORD lpcchReturnLength)
 extern c fn GetVolumePathNamesForVolumeNameW(
@@ -555,6 +555,18 @@ extern c fn GetTempPathW(
     lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::ULong
 
+# C: HRESULT GetDiskSpaceInformationA(LPCSTR rootPath, DISK_SPACE_INFORMATION *diskSpaceInfo)
+extern c fn GetDiskSpaceInformationA(
+    rootPath: std::ffi::c::Ptr[std::ffi::c::Char],
+    diskSpaceInfo: std::ffi::c::Ptr[win32::ctypes::DISK_SPACE_INFORMATION]
+) -> std::ffi::c::Long
+
+# C: HRESULT GetDiskSpaceInformationW(LPCWSTR rootPath, DISK_SPACE_INFORMATION *diskSpaceInfo)
+extern c fn GetDiskSpaceInformationW(
+    rootPath: std::ffi::c::Ptr[std::ffi::c::UShort],
+    diskSpaceInfo: std::ffi::c::Ptr[win32::ctypes::DISK_SPACE_INFORMATION]
+) -> std::ffi::c::Long
+
 # C: WINBOOL SetFileInformationByHandle(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize)
 extern c fn SetFileInformationByHandle(
     hFile: std::ffi::c::Ptr[std::ffi::c::Void],
@@ -616,6 +628,20 @@ extern c fn GetFullPathName named "GetFullPathNameW"(
     lpFilePart: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UShort]]
 ) -> std::ffi::c::ULong
 
+# C: GetVolumePathName: an alias of GetVolumePathNameW, WINBOOL GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength)
+extern c fn GetVolumePathName named "GetVolumePathNameW"(
+    lpszFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpszVolumePathName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    cchBufferLength: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: GetVolumeNameForVolumeMountPoint: an alias of GetVolumeNameForVolumeMountPointW, WINBOOL GetVolumeNameForVolumeMountPointW(LPCWSTR lpszVolumeMountPoint, LPWSTR lpszVolumeName, DWORD cchBufferLength)
+extern c fn GetVolumeNameForVolumeMountPoint named "GetVolumeNameForVolumeMountPointW"(
+    lpszVolumeMountPoint: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpszVolumeName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    cchBufferLength: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
 # C: DefineDosDevice: an alias of DefineDosDeviceW, WINBOOL DefineDosDeviceW(DWORD dwFlags, LPCWSTR lpDeviceName, LPCWSTR lpTargetPath)
 extern c fn DefineDosDevice named "DefineDosDeviceW"(
     dwFlags: std::ffi::c::ULong,
@@ -666,26 +692,12 @@ extern c fn GetVolumeInformation named "GetVolumeInformationW"(
     nFileSystemNameSize: std::ffi::c::ULong
 ) -> std::ffi::c::Int
 
-# C: GetVolumePathName: an alias of GetVolumePathNameW, WINBOOL GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength)
-extern c fn GetVolumePathName named "GetVolumePathNameW"(
-    lpszFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpszVolumePathName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    cchBufferLength: std::ffi::c::ULong
-) -> std::ffi::c::Int
-
 # C: QueryDosDevice: an alias of QueryDosDeviceW, DWORD QueryDosDeviceW(LPCWSTR lpDeviceName, LPWSTR lpTargetPath, DWORD ucchMax)
 extern c fn QueryDosDevice named "QueryDosDeviceW"(
     lpDeviceName: std::ffi::c::Ptr[std::ffi::c::UShort],
     lpTargetPath: std::ffi::c::Ptr[std::ffi::c::UShort],
     ucchMax: std::ffi::c::ULong
 ) -> std::ffi::c::ULong
-
-# C: GetVolumeNameForVolumeMountPoint: an alias of GetVolumeNameForVolumeMountPointW, WINBOOL GetVolumeNameForVolumeMountPointW(LPCWSTR lpszVolumeMountPoint, LPWSTR lpszVolumeName, DWORD cchBufferLength)
-extern c fn GetVolumeNameForVolumeMountPoint named "GetVolumeNameForVolumeMountPointW"(
-    lpszVolumeMountPoint: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpszVolumeName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    cchBufferLength: std::ffi::c::ULong
-) -> std::ffi::c::Int
 
 # C: GetVolumePathNamesForVolumeName: an alias of GetVolumePathNamesForVolumeNameW, WINBOOL GetVolumePathNamesForVolumeNameW(LPCWSTR lpszVolumeName, LPWCH lpszVolumePathNames, DWORD cchBufferLength, PDWORD lpcchReturnLength)
 extern c fn GetVolumePathNamesForVolumeName named "GetVolumePathNamesForVolumeNameW"(
@@ -783,3 +795,9 @@ extern c fn GetTempPath named "GetTempPathW"(
     nBufferLength: std::ffi::c::ULong,
     lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::ULong
+
+# C: GetDiskSpaceInformation: an alias of GetDiskSpaceInformationW, HRESULT GetDiskSpaceInformationW(LPCWSTR rootPath, DISK_SPACE_INFORMATION *diskSpaceInfo)
+extern c fn GetDiskSpaceInformation named "GetDiskSpaceInformationW"(
+    rootPath: std::ffi::c::Ptr[std::ffi::c::UShort],
+    diskSpaceInfo: std::ffi::c::Ptr[win32::ctypes::DISK_SPACE_INFORMATION]
+) -> std::ffi::c::Long

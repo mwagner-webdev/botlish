@@ -124,9 +124,10 @@ testConstraint rustcLinker [expr {$::nativeLinker eq "rustc"}]
 testConstraint symbolLinker [expr {$::nativeLinker in {rustc system}}]
 testConstraint cLinker [expr {$::nativeLinker in {rustc system auto}}]
 
-# Native coroutines (runtime/coroutine.rs, MACOS-AARCH64-MILESTONE-3.md): the
-# native backend switches stacks on Linux x86-64 and AArch64 and on macOS
-# AArch64. A capability, not an operating system: a test that needs coroutines
+# Native coroutines (runtime/coroutine.rs, MACOS-AARCH64-MILESTONE-3.md,
+# WINDOWS-X86-64-MILESTONE-5.md): the native backend switches stacks on Linux
+# x86-64 and AArch64, on macOS AArch64 and on Windows x86-64 (a fiber per
+# coroutine stack). A capability, not an operating system: a test that needs coroutines
 # or the native collector and runtime evidence around them carries this one;
 # a test that needs Linux syscalls keeps nativeLinux.
 testConstraint nativeCoroutines [native::hostSupports coroutines]
@@ -137,8 +138,8 @@ testConstraint nativeCoroutines [native::hostSupports coroutines]
 # exhausts one -- the thread's or a coroutine's, in Botlish code, the
 # runtime or C -- ends in NATIVE LIMIT STACK, with stack probes and no
 # shadow-stack depth token. A capability, not an operating system: Linux
-# x86-64 and AArch64, macOS AArch64 and Windows x86-64 (a coroutine's stack
-# only where nativeCoroutines is true too).
+# x86-64 and AArch64, macOS AArch64 and Windows x86-64, a coroutine's stack
+# wherever nativeCoroutines is true too.
 testConstraint nativeStackGuard [native::hostSupports stackGuard]
 
 # GC roots in native frames (runtime/framewalk.rs's NATIVE_FRAME_ROOTS,

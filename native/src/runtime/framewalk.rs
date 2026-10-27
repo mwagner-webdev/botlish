@@ -329,15 +329,24 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut
     windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
 }
 
-/// A stack that is not running now has no machine context to start from on
-/// Windows, and none exists: Windows runs no native coroutine (NATIVE
-/// UNSUPPORTED value), whose suspended and resumer stacks are what this is
-/// for elsewhere. Win64 coroutines need a context-based start first.
+/// `walk` of a stack that is not running now -- a suspended coroutine's, or
+/// a running coroutine's resumer's (COROUTINES.md, runtime/coroutine.rs) --
+/// from START, the frame its switch left (runtime/coroutine/windows.rs's
+/// `bl_co_switch` records its own RIP, RSP and RBP before SwitchToFiber):
+/// the same climb as `walk`'s from a captured context, Windows' unwinder
+/// across that Rust frame and every other one, within STACK, that stack's
+/// own bounds (WINDOWS-X86-64-MILESTONE-5.md, "GC correctness"). The other
+/// registers are no frame's to read (`walk`'s doc): the context starts
+/// with them zero.
+///
+/// Without `NATIVE_FRAME_ROOTS` it walks nothing, as elsewhere.
 #[cfg(all(target_arch = "x86_64", windows))]
-pub fn walk_from(_map: &ProgramMap, _start: usize, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {
-    if NATIVE_FRAME_ROOTS {
-        unreachable!("a frame-record walk on Windows: no native coroutine runs there");
+pub fn walk_from(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
+    if !NATIVE_FRAME_ROOTS {
+        return;
     }
+    let mut context = windows::Context::at(start);
+    windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
 }
 
 #[cfg(all(target_arch = "x86_64", windows))]
@@ -355,7 +364,27 @@ pub mod windows {
     #[derive(Clone, Copy)]
     pub struct Context(pub CONTEXT);
 
+    /// One frame's place, as a coroutine switch records it (runtime/
+    /// coroutine/windows.rs): the instruction pointer, the stack pointer and
+    /// the frame register Windows' unwinder needs to climb from there.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Frame {
+        pub rip: u64,
+        pub rsp: u64,
+        pub rbp: u64,
+    }
+
     impl Context {
+        /// A context at FRAME, every other register zero.
+        pub fn at(frame: Frame) -> Context {
+            // SAFETY: CONTEXT is plain data.
+            let mut context: Context = unsafe { std::mem::zeroed() };
+            context.0.Rip = frame.rip;
+            context.0.Rsp = frame.rsp;
+            context.0.Rbp = frame.rbp;
+            context
+        }
+
         /// The context of the caller of this function, inlined into it.
         #[inline(always)]
         pub fn captured() -> Context {
@@ -457,8 +486,9 @@ pub mod windows {
     /// Returns whether the frame had a function entry (false: a leaf).
     ///
     /// # Safety
-    /// CONTEXT is a frame of this thread's stack, exact in RIP, RSP and in
-    /// every register the frame's unwind reads.
+    /// CONTEXT is a frame of a stack of this thread (the running one, or one
+    /// a coroutine switch left), exact in RIP, RSP and in every register the
+    /// frame's unwind reads.
     pub unsafe fn unwind_one(context: &mut Context, pointers: Option<&mut KNONVOLATILE_CONTEXT_POINTERS>) -> bool {
         let pc = context.0.Rip;
         let mut image_base = 0u64;
@@ -614,7 +644,11 @@ mod tests {
         assert_eq!(count, 0);
         if !NATIVE_FRAME_ROOTS {
             // A start record that would fault if dereferenced.
-            walk_from(&map, 8, None, |_| panic!("walked a frame without the capability"));
+            #[cfg(not(windows))]
+            let start = 8;
+            #[cfg(windows)]
+            let start = windows::Frame { rip: 8, rsp: 8, rbp: 8 };
+            walk_from(&map, start, None, |_| panic!("walked a frame without the capability"));
         }
     }
 
