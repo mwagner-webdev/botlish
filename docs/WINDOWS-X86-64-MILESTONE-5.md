@@ -1119,9 +1119,12 @@ The evidence:
       decision audit. The five red jobs fail in two files outside this
       milestone, the same ways on main's own run 40456912638 (f11ac77f).
       Both are differences of the runner image's newer toolchains:
-      - c-bindgen.test's `cb-policy-conflict` and two other tests expect
-        clang's IR attributes `nocapture readonly`, and the image's clang
-        prints `readonly nocapture`;
+      - c-bindgen.test, three tests. The image's clang is 21.1.8, where
+        the fixture's committed bindings were generated with 18.1.3, and
+        21 prints a parameter's IR attributes `readonly nocapture` where
+        18 printed `nocapture readonly`. That changes the committed
+        manifest's evidence (`cb-fixture-current`) and the two tests that
+        spell it (`cb-fixture-contracts`, `cb-policy-conflict`);
       - c-ffi.test's `cf-wrong-architecture` finds none of the linker
         wordings it knows on the line naming the foreign library.
 
