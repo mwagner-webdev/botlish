@@ -130,16 +130,31 @@ comparing each full report against the Linux AOT expectations
 has: Tcl 9.0 (`%LOCALAPPDATA%\Apps\Tcl90`), cargo, and the Windows SDK
 link that rustc finds by itself; it builds nothing of the compiler.
 
-Result: **Windows support is insufficient for this target -- skipped,
-per the campaign's own rule** (do not implement anything to close the
-gap). The replay script runs end to end (toolchain checks, driver
-build, emission) and the Windows executable reports the platform's own
-clean refusal: *native coroutines need stack switching, implemented for
-Linux x86-64 and AArch64 and macOS AArch64 only* (`NATIVE UNSUPPORTED
-value`) -- the JSON recognizer stack is coroutine-built throughout, and
-the coroutines milestone has not reached windows-x86_64. The script and
-expectations stay committed and ready: the moment native coroutines
-land on Windows, `fuzz\windows\replay-json.ps1` is the cross-OS oracle.
+Result: **the campaign's first cross-operating-system agreement -- and
+its two divergences, recorded.** After main gained Windows coroutines
+(WINDOWS-X86-64-MILESTONE-5, Windows fibers -- the gap that had blocked
+this half at campaign start), the replay ran: **8 of 10 seeds agree
+byte-for-byte** (every real JSON document, the depth-64 case, the
+long-token case, the continuation form). Two drift:
+
+* `invalid-utf8` (raw bytes `ff fe 80` as an argument): Linux's argv()
+  refuses the invalid UTF-8 and the fallback yields no case (empty
+  report); Windows' process argv is UTF-16/WTF-8 end to end, so invalid
+  UTF-8 cannot cross the CreateProcessW boundary as itself -- the bytes
+  arrive replaced, the case runs, and the report differs. Architectural
+  (ARGV.md's Windows encoding), not a validator bug; a corpus of
+  invalid-UTF-8 argv bytes is simply not expressible on Windows.
+* `one-empty-arg` (the empty argument as its own case): Linux reports
+  `structure 0 a value` twice (empty case, chunked and whole); the
+  Windows executable reports two `unit` lines instead -- the verdict
+  text itself differs. **Unexplained; filed as a cross-OS divergence
+  observation** for the follow-up milestone (suspects: the Windows I/O
+  context's print_line path vs the Linux one, or an empty-argument
+  encoding difference). Reproduce:
+  `fuzz\windows\replay-json.ps1` prints both sides.
+
+Both are recorded, not fixed (campaign policy); the script and the
+expectations stay committed as the standing cross-OS oracle.
 
 ## 6. Required questions
 
@@ -179,10 +194,9 @@ land on Windows, `fuzz\windows\replay-json.ps1` is the cross-OS oracle.
 
 * No JSON emitter exists; emission fuzzing waits for one (a product
   decision, not recorded here as a gap of the campaign).
-* The Windows side is replay-only **and currently refused by the
-  platform** (no native coroutines on windows-x86_64 yet); the script
-  stands ready for when they land. A coverage-feedback Windows fuzzer
-  would additionally need an instrumentation story there (out of scope).
+* The Windows side is replay-only (no coverage-feedback fuzzer exists
+  there); it now runs (Windows coroutines landed mid-campaign) and holds
+  8/10 seeds, with two recorded divergences (§5).
 * by_hand/composition recognizers are reachable only through their own
   golden suites; argv drivers for them would be new fuzz programs
   (future work, same pattern as fuzz/programs/).
