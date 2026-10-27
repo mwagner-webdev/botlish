@@ -678,15 +678,16 @@ fn coroutine_fault_checks(report: &mut Report) {
 /// X from 0 to 2 KiB in 16-byte steps: wherever the switch path (the
 /// helper's frames, SwitchToFiber's own, the arriving side) meets the end of
 /// the stack, the run either completes or ends in the overflow line -- never
-/// a crash. Both must occur, or the sweep missed the edge. A thread's first
-/// start -- its conversion, CreateFiberEx and the fiber's setup, which take
-/// more of the stack than a switch -- is swept the same way from 0 to 64 KiB
-/// in 512-byte steps.
+/// a crash. Both must occur, or the sweep missed the edge. A start on a
+/// pooled fiber -- the helper's frames and the pool's, more than a resume's
+/// -- is swept from 0 to 4 KiB in 16-byte steps, and a thread's first start
+/// -- its conversion, CreateFiberEx and the fiber's setup, which take more of
+/// the stack than a switch -- from 0 to 64 KiB in 512-byte steps.
 fn coroutine_sweep_checks(report: &mut Report) {
-    for (direction, step) in [("resume-from-thread", 16), ("start-from-thread", 16), ("fresh-start-from-thread", 512),
-        ("resume-from-coroutine", 16), ("yield-from-coroutine", 16)] {
+    for (direction, step, steps) in [("resume-from-thread", 16, 128), ("start-from-thread", 16, 256),
+        ("fresh-start-from-thread", 512, 128), ("resume-from-coroutine", 16, 128), ("yield-from-coroutine", 16, 128)] {
         let (mut completed, mut overflowed, mut failures) = (0, 0, Vec::new());
-        for offset in (0..=128 * step).step_by(step) {
+        for offset in (0..=steps * step).step_by(step) {
             let outcome = run_child_with(&format!("co-sweep:{direction}:{offset}"), &[("BOTLISH_NATIVE_COROUTINE_STACK_BYTES", "262144")]);
             if outcome.code == 0 && outcome.stdout.trim() == "completed" {
                 completed += 1;

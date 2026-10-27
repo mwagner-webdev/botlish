@@ -229,14 +229,24 @@ thread_local! {
 /// The usable size of every coroutine stack: BOTLISH_NATIVE_COROUTINE_STACK_BYTES
 /// (at least 64 KiB, rounded up to a page) or 8 MiB. Address space only: pages are committed as
 /// they are touched.
+///
+/// Read once per process, not at every start (a pooled one's included):
+/// reading the environment takes the standard library's environment lock
+/// and, on Windows, GetEnvironmentVariableW and a 1 KiB buffer on the stack
+/// that starts the coroutine, which made a pooled start need more than 2 KiB
+/// of it where a resume needs 350 bytes (WINDOWS-X86-64-MILESTONE-5.md,
+/// section 8.2).
 #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
 fn stack_bytes() -> usize {
-    std::env::var("BOTLISH_NATIVE_COROUTINE_STACK_BYTES")
-        .ok()
-        .and_then(|text| text.parse::<usize>().ok())
-        .filter(|&size| size >= 64 * 1024)
-        .map(round_to_page)
-        .unwrap_or(DEFAULT_STACK_BYTES)
+    static BYTES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *BYTES.get_or_init(|| {
+        std::env::var("BOTLISH_NATIVE_COROUTINE_STACK_BYTES")
+            .ok()
+            .and_then(|text| text.parse::<usize>().ok())
+            .filter(|&size| size >= 64 * 1024)
+            .map(round_to_page)
+            .unwrap_or(DEFAULT_STACK_BYTES)
+    })
 }
 
 /// SIZE rounded up to a multiple of the host's page size, which is not 4 KiB
