@@ -118,4 +118,14 @@ All of this ran in the Ubuntu 26.04 chroot, with the workflow's toolchain:
 * `audit/c-bindgen/tools/layout-fuzz.tcl -n 4 -records 24` (seeds 1-2) on
   linux-x86_64, linux-aarch64, windows-x86_64-gnu and macos-aarch64 found 0
   disagreements.
-* `audit/c-bindgen/tools/mutate.tcl` ran every mutant in its `mutants.txt`.
+* `audit/c-bindgen/tools/mutate.tcl` (in shards, `-only`) applied and
+  killed all 91 mutants of its `mutants.txt`. Each was killed by a test of
+  behavior or by a fuzzer, never by the pinned comparison alone.
+* On Ubuntu 24.04 with Clang 18, `cb-fixture-current` and
+  `cb-policy-conflict` still pass, because the recorded evidence no longer
+  depends on the LLVM spelling.
+
+On GitHub, the c-bindgen workflow, dispatched on the branch that made these
+changes, passed every step on an `ubuntu-26.04` runner: the check, the
+BoringSSL and SDL3 build, the generator's tests with no skip, and both
+fuzzers.
