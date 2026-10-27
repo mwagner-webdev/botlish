@@ -195,7 +195,56 @@ proc native::library::TopLevelProblems {hir} {
 @@ stack-ceiling-unset the collector's walk of a call climbs into the host's frames
 ## native/src/runtime/library.rs
 <<<<
-    vm.stack_ceiling = super::framewalk::frame_record();
+    vm.stack_ceiling = frame;
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# Stack safety: a library's Botlish code checks its stack pointer against
+# the limit of the stack it runs on (no guard of ours runs in the host)
+
+@@ stack-limit-never-set an instance's code checks against a zero limit: deep recursion exhausts the host's stack
+## native/src/runtime/library.rs
+<<<<
+        vm.check_stack_limit();
+====
+>>>>
+
+@@ stack-check-not-emitted the driver emits a library without the prologue check: deep recursion exhausts the host's stack
+## native/src/main.rs
+<<<<
+            nir::check_stack_limit(&mut program);
+====
+>>>>
+
+@@ stack-check-callers-unchecked a library call that can fail for the stack is proven infallible: its callers go on past the failure
+## native/src/nir.rs
+<<<<
+        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
+====
+        local[i].0 = depth_checked && f.has_botlish_call();
+>>>>
+
+@@ stack-limit-not-followed a coroutine's code is checked against the limit of the thread's stack, not of the stack it runs on
+## native/src/runtime/vm.rs
+<<<<
+            if self.stack_limit_checked {
+                self.stack_limit = stack.map_or(0, |s| s.stack_limit());
+            }
+====
+>>>>
+
+@@ stack-limit-foreign-stack a call made on a stack the instance did not make is checked against the thread's limit (a false NATIVE LIMIT STACK)
+## native/src/runtime/library.rs
+<<<<
+    vm.stack_limit = vm.stack_limit_at(frame);
+====
+>>>>
+
+@@ export-dropped-by-fusion coroutine fusion drops a library export no other function calls (NATIVE BUG: unreachable)
+## native/src/codegen/fusion.rs
+<<<<
+    work.extend(program.exports.iter().map(|e| e.func as usize));
 ====
 >>>>
 

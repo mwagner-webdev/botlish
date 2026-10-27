@@ -31,6 +31,18 @@ impl NativeStack {
     #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
     pub fn current() -> std::io::Result<Self> { super::platform::current_stack() }
 
+    /// The lowest stack pointer a library's checked frame may run at on this
+    /// stack (codegen::clif's `prologue_stack_limit`; NATIVE-LIBRARY-
+    /// MILESTONE-1.md, "Stack safety"): its low bound plus a reserve of an
+    /// eighth of its size, at least 64 KiB and at most 1 MiB. Below a checked
+    /// frame there may run one more Botlish frame (allocated and probed
+    /// before it checks), frames that make no Botlish call, the runtime's
+    /// helpers (the collector's marking is iterative) and, when the check
+    /// fails, the way back to the host.
+    pub fn stack_limit(&self) -> usize {
+        let size = self.high_bound.saturating_sub(self.low_bound);
+        self.low_bound + (size / 8).clamp(64 << 10, 1 << 20)
+    }
 }
 
 /// The hosts whose stack-overflow guard turns an exhausted native stack into

@@ -177,7 +177,7 @@ summary: `exported c fn` declares a C export; -emit-native-library NAME builds l
 index: backends
 alias: native library; library mode; exported c fn; emit-native-library; static library; shared library; C export; call Botlish from C
 keywords: exported, export, library, .a, .so, header, manifest, instance, create, destroy, thread, C ABI, int64_t, owned buffer, Tcl extension, embedding
-related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library
+related: backend.native-executable concept.c-ffi cli.options error.export-signature error.export-placement error.export-name error.export-environment error.native-library error.native-limit-stack
 docs: NATIVE-LIBRARY-MILESTONE-1.md C-FFI.md
 
 == WHAT IT IS
@@ -246,9 +246,12 @@ LIBRARY-TOP-LEVEL), so no entry script runs when an instance is created.
     functions of the entry program the same way, checked by the same rules.
 
 == LIMITATIONS
-Botlish code runs on the caller's thread and stack, and no stack guard is
-installed in a library: deep recursion needs a large thread stack, and
-exhausting it ends the process. No callbacks, no Lists, structs or other
+Botlish code runs on the caller's thread and stack. A library's Botlish
+functions check their stack pointer, so recursion that would exhaust that
+stack (or a coroutine's) fails the call with NATIVE LIMIT STACK
+(error.native-limit-stack) and the instance answers the next call. No stack
+guard is installed in a library: a C function or the runtime exhausting the
+stack still ends the process. No callbacks, no Lists, structs or other
 values at the boundary, no asynchronous calls; macOS and Windows libraries
 are not made yet.
 

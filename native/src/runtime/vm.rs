@@ -145,6 +145,18 @@ pub struct Vm {
     /// the same I64 op it already uses for `native_roots_ptr`, without a
     /// second width.
     pub native_roots_len: u64,
+    /// The lowest stack pointer a frame that checks its stack may run at
+    /// (codegen::clif's `prologue_stack_limit`): set only in a native
+    /// library's instance (`check_stack_limit`), whose code checks it in
+    /// every function that makes a Botlish call, since a library installs no
+    /// stack guard in its host (NATIVE-LIBRARY-MILESTONE-1.md, "Stack
+    /// safety"). The running stack's `NativeStack::stack_limit`: the
+    /// thread's while it runs, a coroutine's while that runs
+    /// (`publish_active_stack` keeps it so), 0 (no bound) where the running
+    /// stack is not known. Read by generated code at VM_STACK_LIMIT_OFFSET.
+    pub stack_limit: usize,
+    /// Whether this Vm's code checks `stack_limit` (a library instance's).
+    stack_limit_checked: bool,
     /// Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): the base
     /// address of `statics_table` below, read by generated code
     /// (codegen::clif's StaticGet/StaticSet, at VM_STATICS_OFFSET) exactly
@@ -262,6 +274,7 @@ pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
+pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
@@ -287,6 +300,8 @@ impl Vm {
             alloc_site: 0,
             native_roots_ptr: std::ptr::null_mut(),
             native_roots_len: 0,
+            stack_limit: 0,
+            stack_limit_checked: false,
             statics_ptr: std::ptr::null_mut(),
             statics_table: Vec::new(),
             ss_base: base,
@@ -317,8 +332,9 @@ impl Vm {
     /// Publishes STACK (None: the thread's own stack) as the one native stack
     /// running now, for the overflow handler: a fault in its guard is a stack
     /// overflow. runtime/coroutine.rs calls it on arriving on a stack, never
-    /// before leaving one. Inlined, and only atomic stores: it adds no frame
-    /// to the stack it runs on (runtime::platform's guard).
+    /// before leaving one. Inlined, and only stores (atomic ones for the
+    /// guard; for a library's instance, the stack limit its code checks): it
+    /// adds no frame to the stack it runs on (runtime::platform's guard).
     #[inline(always)]
     pub fn publish_active_stack(&mut self, stack: Option<NativeStack>) {
         #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
@@ -327,9 +343,33 @@ impl Vm {
             if let Some(stack) = stack {
                 super::platform::set_active_stack(&stack);
             }
+            if self.stack_limit_checked {
+                self.stack_limit = stack.map_or(0, |s| s.stack_limit());
+            }
         }
         #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         let _ = stack;
+    }
+
+    /// Makes this Vm's code bound its recursion by the running stack's
+    /// `stack_limit` (a native library's instance, made on the thread that
+    /// owns it: runtime::library's `create`). From now on
+    /// `publish_active_stack` keeps the limit the running stack's.
+    pub fn check_stack_limit(&mut self) {
+        self.stack_limit_checked = true;
+        self.stack_limit = self.native_stack.map_or(0, |s| s.stack_limit());
+    }
+
+    /// The stack limit for code entered at stack pointer SP on this Vm's own
+    /// thread: the thread's stack's when SP is on it, else 0 -- no bound,
+    /// rather than a wrong one, on a stack this Vm did not make (a C
+    /// function's callback run on another runtime's coroutine stack:
+    /// runtime::library's `enter`).
+    pub fn stack_limit_at(&self, sp: usize) -> usize {
+        match self.native_stack {
+            Some(stack) if self.stack_limit_checked && sp > stack.low_bound && sp <= stack.high_bound => stack.stack_limit(),
+            _ => 0,
+        }
     }
 
     /// Replaces the argument snapshot with ARGV (raw bytes, one Vec per

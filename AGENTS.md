@@ -1453,8 +1453,9 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   native frames hold the roots), and no shadow stack is allocated.
   Native-frame roots need the guard (`native_stack.rs`'s assertion): never
   bring back a stack-pointer check, a depth token or a call effect for the
-  stack on a host that has native-frame roots; a host without the guard
-  starts on the fallback plan.
+  stack on a host that has native-frame roots (a native library's code,
+  which runs where no guard of ours does, is the one exception: Native
+  libraries, below); a host without the guard starts on the fallback plan.
 * The fallback plan (shadow-stack roots and depth, leaf frames published,
   no walk) remains the bootstrap of a host without native-frame roots: the
   `fallback-roots` cargo feature builds it on any host, to run the suite
@@ -2748,9 +2749,23 @@ a shared library, a C header and a JSON manifest. Keep it so:
 * Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
   one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
   (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
-  and runs on its caller's stack: stack overflow is process-fatal there,
-  and no document may claim otherwise until a library-owned stack exists.
-  The walk of a call's stack ends at the call (`Vm::stack_ceiling`).
+  and runs on its caller's stack. The walk of a call's stack ends at the
+  call (`Vm::stack_ceiling`).
+* A library bounds its own Botlish recursion (NATIVE-LIBRARY-MILESTONE-1.md,
+  "Stack safety"): the driver emits its program through
+  `nir::check_stack_limit`, so every function with a Botlish call checks
+  its stack pointer against `Vm::stack_limit` in its prologue and fails
+  with NATIVE LIMIT STACK, a fallible call its callers check. The limit is
+  the running stack's (`NativeStack::stack_limit`: an eighth in reserve):
+  a call takes its entry stack's (`Vm::stack_limit_at`, none on a stack
+  the instance did not make, never another's), a coroutine switch the
+  arrival stack's (`publish_active_stack`). Keep the check a library's
+  only: never give an executable or the JIT the check or its call
+  effects (the guard bounds them). An overflow in C or the runtime, or on
+  a host's own stack, is still process-fatal, and no document may claim
+  otherwise until a library-owned stack exists.
+* Fusion's `drop_unreferenced` keeps what the exports reach, not only
+  what the program function reaches: a library export is called from C.
 * A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
   creating an instance runs module static initialization, never a script.
 * Libraries are Linux glibc's (x86_64, aarch64: `codegen::library::
@@ -2762,7 +2777,9 @@ If you change any of that (NATIVE-LIBRARY-MILESTONE-1.md, "What to run when
 changing this", lists the files), run `tests/native-library.test`,
 `tests/native-executable.test` and `tests/aot-stub-linker.test` (also under
 `BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
-native/Cargo.toml --lib program` and `audit/native-library/tools/mutate.tcl`
+native/Cargo.toml --lib program`, for the stack check also
+`tests/native-stack-overflow.test` and `audit/native-stack/tools/mutate.tcl`
+(its `effects-*` mutants), and `audit/native-library/tools/mutate.tcl`
 (every mutant in its `mutants.txt` must still apply and be killed: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule), plus `audit/native-aot/tools/mutate.tcl` for a change to
