@@ -610,9 +610,13 @@ tests (the AAPCS64 placement tests among them; the Win64 ones are x86-64's
 and not built there), the system-linked executables and the GC-stress run.
 
 **Linux x86-64**, run [40572434563](https://github.com/mwagner-webdev/botlish/actions/runs/40572434563)
-(`tests.yml` dispatched on `68c2d46`): every job that finished succeeded
-[[interp, cranelift-generic]] but for one test of one job,
-`cf-wrong-architecture` in the system-linked executables -- a
+(`tests.yml` dispatched on `68c2d46`): every job succeeded -- the Tcl
+suite on interp and compile, its cranelift and cranelift-generic coverage
+(c-ffi.test's `cf-va-*` on both native backends), the four golden shards,
+the native Rust unit tests (`win64_variadic_tests` among them), the
+stub-linked executables, the warning gate and the method-call oracle --
+but for one test of one job, `cf-wrong-architecture` in the system-linked
+executables: a
 fixed-arity test of the linker's refusal of another architecture's
 library, which failed the same way on main (runs 40526876902 and
 40558777965): the `ubuntu-latest` image had become Ubuntu 26.04, whose GCC
