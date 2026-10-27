@@ -7,10 +7,18 @@
 # only: if installation were allowed, every load would mint another owner of
 # the one pointer. The wall is the installation, not the read.
 #
-# expect interp: AFFINE-ERASURE-UNSUPPORTED
-# expect compile: AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift-generic: AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift: AFFINE-ERASURE-UNSUPPORTED
+# Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md the installation is valid
+# and the wall is exactly that mint: a context parameter names the
+# installed context, which owns the pointer, so destructuring `h` -- a move
+# of the whole context into a destructuring -- would copy the context's
+# affine state out while it keeps owning it: AFFINE-CONTEXT-COPY-OUT, at the
+# destructuring (was AFFINE-ERASURE-UNSUPPORTED at the installation). A1
+# shows the form that is valid: observe `h.p` where it is stored.
+#
+# expect interp: AFFINE-CONTEXT-COPY-OUT
+# expect compile: AFFINE-CONTEXT-COPY-OUT
+# expect cranelift-generic: AFFINE-CONTEXT-COPY-OUT
+# expect cranelift: AFFINE-CONTEXT-COPY-OUT
 import std::ffi::c
 
 opaque context struct Holder:

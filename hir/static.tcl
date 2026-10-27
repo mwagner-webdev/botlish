@@ -209,6 +209,7 @@ namespace eval hir::static {
     variable codes {
         AFFINE-CAPTURE-UNSUPPORTED               AffineCaptureUnsupported
         AFFINE-CONTAINER-UNSUPPORTED             AffineContainerUnsupported
+        AFFINE-CONTEXT-COPY-OUT                  AffineContextCopyOut
         AFFINE-DUPLICATION-UNSUPPORTED           AffineDuplicationUnsupported
         AFFINE-ELEMENT-COPY-OUT                  AffineElementCopyOut
         AFFINE-EQUALITY-UNSUPPORTED              AffineEqualityUnsupported

@@ -3003,8 +3003,8 @@ summary: A `context struct` value installed with `with context EXPR` reaches eve
 index: concepts
 alias: context struct; with context; context parameter; dependency injection; environment value
 keywords: context, with, installed, requirement, MISSING-CONTEXT, DUPLICATE-CONTEXT, CONTEXT-FUNCTION-VALUE, global, singleton, LinuxIO, suite
-related: concept.context-traits concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
-docs: CONTEXTS.md CONTEXT-TRAITS.md
+related: concept.context-traits concept.context-owned-state concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
+docs: CONTEXTS.md CONTEXT-TRAITS.md CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md
 
 == WHAT IT IS
     context struct Config:
@@ -3033,6 +3033,9 @@ it: every caller's requirement is derived from the call graph.
     or stored as a value (CONTEXT-FUNCTION-VALUE).
   * The context value is immutable; a MutableVector field inside it is a
     place the functions may mutate (stdlib/test.bot's suite does this).
+  * The installed context owns what it holds, affine members included (C
+    pointers, coroutines, vectors of them): a function reaches them as
+    places, never as copies (concept.context-owned-state).
 
 == WHY
 Contexts replace global variables and hidden singletons: dependencies on
@@ -3079,6 +3082,121 @@ x
 
 == MORE
 CONTEXTS.md; concept.context-traits for contexts named by what they do.
+
+@topic concept.context-owned-state
+title: Context-owned state: an installed context owns its affine members
+summary: The installed context owns its affine members; a function requiring it reaches them as places, observed where they are stored and moved only by a collection's take, pop or swap.
+index: concepts
+alias: context holding a pointer; context owns a resource; airlock; acquire a resource after installation; element place
+keywords: context, affine, owned, place, element, observe, pointer, resource, open, close, airlock, push, pop, take, swap
+related: concept.contexts concept.affine concept.mutable-vector error.affine-context-copy-out stdlib.std::mutable_vector::element stdlib.std::mutable_array::element concept.private concept.opaque-structs
+docs: CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md CONTEXTS.md AFFINE-VALUES.md
+
+== WHAT IT IS
+Three things are distinct:
+
+  * a *context requirement* -- `fn draw(context sdl: Sdl)` -- says what
+    environment a function needs;
+  * the *installation* -- `with context sdl::create()` in the entry
+    program -- moves a value into the installed context, which owns its
+    state for the rest of the run;
+  * *context-member place access*: inside a function requiring the
+    context, `sdl`, `sdl.renderer` and `sdl.sessions.element(0).window`
+    are places of that installed state, not copies of it.
+
+An affine value at such a place (a C pointer, a coroutine, a struct or
+vector holding one) is observed where it is stored -- a C call, `null?`,
+`clone`'s receiver, a field read -- and never copied out
+(AFFINE-CONTEXT-COPY-OUT). A collection member is mutated in place: push
+moves a value into the context, take, pop and swap move one out again,
+leaving no stale copy behind. `std::mutable_vector::element(v, i)` (and
+`std::mutable_array::element`) is the place of an element the context
+owns, for observing it where it is.
+
+== RULES
+  * Installation consumes its value (a later use of the binding is
+    USE-AFTER-MOVE); the installed context is never released: contexts
+    live as long as the program, and affinity is at most once -- release
+    what you acquired with an explicit operation (a `close`).
+  * A direct member is owned for the program's lifetime: it can be
+    observed and cloned explicitly, not moved out. State acquired and
+    released after installation lives in a collection member.
+  * An element place is no value: it is used where it is written, fails
+    with IndexNotFound when the element is missing, and a function using one
+    declares that error for its caller to handle.
+  * The whole context is never copied while it holds affine state: no
+    binding, argument, result or destructuring of it, and no closure
+    capturing it (a nested function declares the context itself).
+  * Unrestricted contexts are unchanged: copied, passed and compared freely.
+
+== WHY
+A context is an authority boundary: the module that declares it can keep
+the raw resources it protects -- a library's handles -- inside it, behind
+ordinary value-taking operations, while affine tracking still guarantees
+that nothing duplicates them implicitly. It is not a destructor or a borrow
+scope: nothing is released when the program ends, and no reference to a
+member ever leaves the expression that reaches it.
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+import std::mutable_vector
+
+struct Session:
+    window: std::ffi::c::Ptr[std::ffi::c::Void]
+    id: int
+
+opaque context struct Video:
+    sessions: MutableVector[Session]
+
+fn open(id: int, context v: Video):
+    v.sessions.push(Session {window: std::ffi::c::null[std::ffi::c::Void](), id: id})
+
+fn window_null?(context v: Video) -> bool errors IndexNotFound:
+    v.sessions.element(0).window.null?()
+
+fn opened?() -> bool:
+    seen = window_null?():
+        on IndexNotFound:
+            return false
+    seen
+
+fn close(context v: Video) -> int:
+    s = v.sessions.pop():
+        on IndexNotFound:
+            return 0
+    {window, id} = s
+    id
+
+with context Video {sessions: std::mutable_vector::from_list([])}
+before = opened?()
+open(7)
+during = opened?()
+closed = close()
+[before, during, closed, opened?()]
+@caption Installed closed, acquired by push, observed in place, released by pop
+@value [false, true, 7, false]
+@end
+
+@example reject
+import std::ffi::c
+
+opaque context struct Device:
+    root: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn root(context d: Device) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    d.root
+
+with context Device {root: std::ffi::c::null[std::ffi::c::Void]()}
+0
+@caption Returning the context's pointer would give the caller a second owner
+@error CORE SEMANTIC AFFINE-CONTEXT-COPY-OUT
+@at 7:5
+@end
+
+== MORE
+CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md; examples/games/icy-tower/sdl.bot
+keeps SDL's window and renderer this way.
 
 @topic concept.context-traits
 title: Context traits: environments named by their operations (std::io::IO)

@@ -593,7 +593,7 @@ summary: The called function (or one it calls) declares a context parameter, and
 index: errors
 alias: is required by this call but is not installed here; no installed context implements it; context not installed
 keywords: with context, context parameter, context struct, context trait, std::io::IO, installation, chain, requirement, order
-related: concept.contexts concept.context-traits proof.contexts rule.context-installation error.not-a-context error.context-function-value error.context-installation-unsupported stdlib.module.std::io
+related: concept.contexts concept.context-traits proof.contexts rule.context-installation rule.sfiae error.not-a-context error.context-function-value error.context-installation-unsupported stdlib.module.std::io
 docs: CONTEXTS.md CONTEXT-TRAITS.md
 code: CORE SEMANTIC MISSING-CONTEXT
 

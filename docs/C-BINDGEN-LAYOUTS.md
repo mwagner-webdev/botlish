@@ -428,7 +428,10 @@ one is refused for the other (interchange, the cache, NATIVE TARGET), and
 the C convention is Cranelift's Windows fastcall for both. The toolchain
 adapter maps it to clang `--target=x86_64-w64-mingw32`; windows-x86_64 has no
 toolchain configuration (no MSVC tool exists to generate for it), and
-`layout-windows-gnu-as-msvc` is a mutant.
+`layout-windows-gnu-as-msvc` is a mutant. (Since ICY-TOWER-WINDOWS.md,
+windows-x86_64 is clang's `x86_64-pc-windows-msvc`, generated only on
+Windows, where clang finds MSVC's and the Windows SDK's headers: the Icy
+Tower build generates its SDL3 binding there; none is committed.)
 
 **Explicit configuration.** The translation unit is `<windows.h>` with
 exactly the profile's defines -- nothing comes from the shell (the

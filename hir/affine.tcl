@@ -141,7 +141,9 @@ proc hir::affine::Used {hir} {
     return 0
 }
 
-# 1 if B is an affine binding: a local or parameter of affine type.
+# 1 if B is an affine binding: a local or parameter of affine type that
+# owns its value. A context parameter's binding owns nothing: it names the
+# installed context, whose installation owns the state (IsContextBinding).
 proc hir::affine::IsAffineBinding {hir b} {
     if {$b eq "" || ![dict exists $hir bindings $b]} {
         return 0
@@ -149,7 +151,211 @@ proc hir::affine::IsAffineBinding {hir b} {
     if {[dict get $hir bindings $b kind] ni {local param}} {
         return 0
     }
+    if {[IsContextBinding $hir $b]} {
+        return 0
+    }
     return [hir::types::IsAffine [BindingType $hir $b]]
+}
+
+# ---------------------------------------------------------------------------
+# Context places (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md)
+#
+# `with context EXPR` moves the value into the installed context slot (the
+# install native's `move` role), which owns it -- its affine members
+# included -- for the rest of the run. A context parameter `context c: T`
+# is no second owner: its binding names that installed storage, and is
+# never moved, copied or released (IsAffineBinding is 0 for it). Every
+# expression reaching into it is a *context place*: the binding itself, a
+# field projection of a context place, or an element place
+# (std::mutable_vector::element, std::mutable_array::element: a native
+# registered -element-place) of a collection at a context place. An affine
+# value at a context place is reached only where it is stored:
+#
+#   observed   an argument of an operation that only observes it (an
+#              `observe` ownership role: a C call's pointer, null?, clone's
+#              receiver), a step continuing the place (a projection, an
+#              element place), a collection operation's receiver (the
+#              collection member mutated in place: push moves a value in,
+#              pop, take and swap move one out -- the explicit moves), a
+#              discarded statement;
+#   rejected   everything that would make it a value somewhere else -- a
+#              binding, an argument a function owns, a result, a field or
+#              element of a new aggregate, a join, a capture -- is
+#              AFFINE-CONTEXT-COPY-OUT: the context would still own it,
+#              so that would be a second owner (ContextConsumer).
+#
+# Nothing of this exists at run time: a context place is the load of the
+# installed context's word or member it names (CONTEXTS.md, "Loads").
+
+# 1 if binding B is a context parameter's: a local bound to the installed
+# context's load (hir::mutvec::IsContextParam).
+proc hir::affine::IsContextBinding {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b] || [dict get $hir bindings $b kind] ne "local"} {
+        return 0
+    }
+    return [hir::mutvec::IsContextParam $hir $b]
+}
+
+# 1 if call E is an element place: a call of a native registered
+# -element-place (core/native.tcl), read from its registration.
+proc hir::affine::ElementPlace {hir e} {
+    set name [NativeName $hir $e]
+    return [expr {$name ne "" && [dict getdef [core::native::metadata $name] elementPlace 0]}]
+}
+
+# 1 if expression E is a context place (above).
+proc hir::affine::ContextPlace {hir e} {
+    for {set i 0} {$i < 4096} {incr i} {
+        if {![dict exists $hir exprs $e]} {
+            return 0
+        }
+        set node [dict get $hir exprs $e]
+        switch -- [dict get $node kind] {
+            ref {
+                return [IsContextBinding $hir [dict get $node binding]]
+            }
+            project {
+                set e [dict get $node receiver]
+            }
+            call {
+                # (An element place whose receiver is no context place is
+                # MUTABLE-PLACE-RECEIVER, hir::mutvec::verify: still a place
+                # here, so nothing else restates that.)
+                return [ElementPlace $hir $e]
+            }
+            default {
+                return 0
+            }
+        }
+    }
+    return 0
+}
+
+# 1 if context place E reaches through an element place: what it names can
+# leave the context (its collection's take, pop or swap moves it out).
+proc hir::affine::ThroughElement {hir e} {
+    for {set i 0} {$i < 4096} {incr i} {
+        set node [dict get $hir exprs $e]
+        switch -- [dict get $node kind] {
+            project { set e [dict get $node receiver] }
+            call { return [ElementPlace $hir $e] }
+            default { return 0 }
+        }
+    }
+    return 0
+}
+
+# 1 if an argument of call P after E holds a call that may run Botlish code
+# (hir::mutvec::MayRunCode: a function, a callable, a resume, a yield).
+proc hir::affine::LaterArgumentRunsCode {hir p e} {
+    set args [dict get $hir exprs $p args]
+    set work [lrange $args [expr {[lsearch -exact $args $e] + 1}] end]
+    while {$work ne {}} {
+        set x [lindex $work end]
+        set work [lrange $work 0 end-1]
+        if {$x eq "" || ![dict exists $hir exprs $x]} continue
+        set kind [dict get $hir exprs $x kind]
+        if {$kind eq "block"} continue
+        if {$kind eq "call" && [hir::mutvec::MayRunCode $hir $x]} {
+            return 1
+        }
+        lappend work {*}[hir::children $hir $x]
+    }
+    return 0
+}
+
+# The context binding at the root of context place E, or "".
+proc hir::affine::ContextRoot {hir e} {
+    for {set i 0} {$i < 4096} {incr i} {
+        set node [dict get $hir exprs $e]
+        switch -- [dict get $node kind] {
+            ref { return [dict get $node binding] }
+            project { set e [dict get $node receiver] }
+            call {
+                set e [lindex [dict get $node args] 0]
+                if {$e eq ""} {
+                    return ""
+                }
+            }
+            default { return "" }
+        }
+    }
+    return ""
+}
+
+# Context place E as written: `sdl.sessions.element(...).renderer`.
+proc hir::affine::ContextPlaceText {hir e} {
+    set node [dict get $hir exprs $e]
+    switch -- [dict get $node kind] {
+        ref {
+            return [hir::semantic::RefName $hir $e]
+        }
+        project {
+            return "[ContextPlaceText $hir [dict get $node receiver]].[dict get $node name]"
+        }
+        call {
+            return "[ContextPlaceText $hir [lindex [dict get $node args] 0]].[namespace tail [NativeName $hir $e]](...)"
+        }
+    }
+    return "this value"
+}
+
+# The consumer of context place E, whose consumer by the ordinary rules is
+# CONSUMER: a move (or erasure) of it would copy it out of the installed
+# context, which keeps owning it; a discarded one is a use.
+proc hir::affine::ContextConsumer {hir e consumer} {
+    switch -- [lindex $consumer 0] {
+        discard {
+            return {use place}
+        }
+        move {
+            return [list reject AFFINE-CONTEXT-COPY-OUT [ContextCopyOutMessage $hir $e [lindex $consumer 1] [lindex $consumer 2]]]
+        }
+        reject {
+            if {[lindex $consumer 1] eq "AFFINE-ERASURE-UNSUPPORTED"} {
+                return [list reject AFFINE-CONTEXT-COPY-OUT [ContextCopyOutMessage $hir $e erase]]
+            }
+        }
+    }
+    return $consumer
+}
+
+# The AFFINE-CONTEXT-COPY-OUT text of context place E moved by a move to
+# WHERE (Consumer's: bind, arg, ...; erase for a position that does not carry
+# ownership) in parent P.
+proc hir::affine::ContextCopyOutMessage {hir e where {p ""}} {
+    set root [ContextRoot $hir $e]
+    set context [hir::types::show [BindingType $hir $root]]
+    switch -- $where {
+        bind - value {
+            set doing "binding it to a name"
+            if {$p ne "" && [dict get $hir exprs $p kind] eq "bind"
+                    && [IsDestructureTemp $hir [dict get $hir exprs $p binding]]} {
+                set doing "destructuring it"
+            }
+        }
+        arg - message { set doing "passing it to a parameter (which owns its argument)" }
+        return - result { set doing "returning it" }
+        field { set doing "storing it in a struct field" }
+        element - vector - array { set doing "storing it in a collection" }
+        join { set doing "making it the value of an if or of a handled call" }
+        break { set doing "making it a loop's value" }
+        loop { set doing "consuming it in a loop" }
+        error { set doing "raising it with an error" }
+        capture { set doing "capturing it" }
+        erase { set doing "giving it to a position that does not carry ownership" }
+        default { set doing "using it as a value" }
+    }
+    if {[dict get $hir exprs $e kind] eq "ref"} {
+        set what "`[ContextPlaceText $hir $e]` is the installed context $context, which owns affine state"
+    } else {
+        set what "`[ContextPlaceText $hir $e]` is an affine [TypeText $hir $e] that the installed context $context owns"
+    }
+    set hint ""
+    if {[dict get $hir exprs $e kind] eq "call" && [ElementPlace $hir $e]} {
+        set hint " (an element place is no value: it is used where it is written, and a function using it declares IndexNotFound for its caller to handle)"
+    }
+    return "$what: $doing would copy it out while the context keeps owning it, making a second owner. Reach it where it is stored -- observe it (a C call, null?, clone), or keep it in a collection member and move it out with take, pop or swap$hint"
 }
 
 # The static type of binding B: its inferred type, or a parameter's entry
@@ -234,6 +440,12 @@ proc hir::affine::Where {hir e} {
 # How expression E is named in a diagnostic.
 proc hir::affine::Named {hir e} {
     if {[dict get $hir exprs $e kind] eq "ref"} {
+        set b [dict get $hir exprs $e binding]
+        if {$b ne "" && [string match context#* [dict get $hir bindings $b name]]} {
+            # The hygienic temporary of `with context EXPR` (surface/
+            # lower.tcl): never named, it is the installed value.
+            return "the value `with context` installs"
+        }
         return "`[hir::semantic::RefName $hir $e]`"
     }
     return "this value"
@@ -294,6 +506,12 @@ proc hir::affine::Consumer {hir parent e} {
                 # A step of a MutableVector operation's receiver place
                 # (`state.queue.push(x)`, MUTABLE-VECTOR.md): the operation
                 # updates the field in place; nothing moves out of it.
+                return {use place}
+            }
+            if {[ContextPlace $hir $e]} {
+                # A step of a context place: the projection reaches the
+                # installed context's storage where it is (ContextConsumer
+                # judges what it is used for).
                 return {use place}
             }
             set name [dict get $node name]
@@ -455,8 +673,10 @@ proc hir::affine::NativeConsumer {hir p e index native type} {
     switch -- $role {
         observe - release {
             # A non-consuming observation (a length, a coroutine's done?, a
-            # start): the value needs an owner, which keeps owning it.
-            if {$kind ne "ref" && !($collection && $kind eq "project")} {
+            # start): the value needs an owner, which keeps owning it -- a
+            # binding, a collection operation's receiver path, or a context
+            # place (the installed context owns it).
+            if {$kind ne "ref" && !($collection && $kind eq "project") && ![ContextPlace $hir $e]} {
                 return [Temporary $hir $e "observe"]
             }
             return {use observe}
@@ -529,6 +749,11 @@ proc hir::affine::CopyOutMessage {hir e native kind} {
     } else {
         set alternatives "`take(i)` removes it, `pop()` removes the last one, `swap(i, replacement)` exchanges it for another"
         set what "the vector"
+    }
+    if {[ContextPlace $hir $e]} {
+        # A collection the installed context owns: its element can also be
+        # reached where it is stored.
+        return "$native would copy an affine element out of `[ContextPlaceText $hir $e]` ([TypeText $hir $e]) while $what, which the installed context owns, still owns it, making a second owner: reach it where it is stored -- `[ContextPlaceText $hir $e].element(i)` is the element's place, which can be observed or projected -- or move it out: $alternatives"
     }
     return "$native would copy an affine element out of [Named $hir $e] ([TypeText $hir $e]) while $what still owns it, making a second owner: move it out instead -- $alternatives (there are no references to elements)"
 }
@@ -680,6 +905,19 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
         if {$kind eq "block"} continue
         if {![hir::types::IsAffine [hir::typeOf $hir $e]]} continue
         set consumer [Consumer $hir $parent $e]
+        if {[ContextPlace $hir $e]} {
+            set consumer [ContextConsumer $hir $e $consumer]
+            set call [ArgumentOf $hir $parent $e]
+            if {[lindex $consumer 0] eq "use" && $call ne "" && [ThroughElement $hir $e]
+                    && [LaterArgumentRunsCode $hir $call $e]} {
+                # The observation reads the word now and the call uses it
+                # once its later arguments ran: code they run may take the
+                # element out of its collection first. (A direct member, and
+                # a collection member's header, never leave the context.)
+                set consumer [list reject AFFINE-CONTEXT-COPY-OUT \
+                    "`[ContextPlaceText $hir $e]` is an affine [TypeText $hir $e] that the installed context owns, observed by this call -- but a later argument of the call runs code, which may take it out of the context (and release it) before the call uses it: the observation would hold a copy across that code (compute the later arguments into names before the call)"]
+            }
+        }
         dict set consumers $e $consumer
         if {[lindex $consumer 0] eq "reject" && !($kind eq "project" && [AffineProjection $hir $e])} {
             # (A projection of an affine field outside a destructuring is
@@ -690,6 +928,19 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
         }
         if {$kind ne "ref"} continue
         set b [dict get $node binding]
+        if {[IsContextBinding $hir $b]} {
+            # A nested function reaching its enclosing function's context
+            # parameter: it would carry the installed context's affine state
+            # in a function value (a nested function declares the context
+            # itself instead).
+            set refScope [dict get $node scope]
+            set bindingScope [dict get $hir bindings $b scope]
+            if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes $bindingScope invocation]} {
+                dict set diagnostics $e [list AFFINE-CAPTURE-UNSUPPORTED \
+                    "`[hir::semantic::RefName $hir $e]` is the installed context [hir::types::show [BindingType $hir $b]], which owns affine state and cannot be captured by a closure (a nested function): the closure would carry that state as a value (declare the context in the nested function instead: `context [hir::semantic::RefName $hir $e]: [hir::types::show [BindingType $hir $b]]`)" $e]
+            }
+            continue
+        }
         if {![IsAffineBinding $hir $b]} continue
         if {[lindex $consumer 0] eq "move"} {
             dict set moveRefs $e [lindex $consumer 1]
@@ -742,6 +993,10 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
 proc hir::affine::AffineProjection {hir e} {
     variable parent
     if {[hir::mutvec::InReceiverPath $hir $parent $e]} {
+        return 0
+    }
+    if {[ContextPlace $hir $e]} {
+        # A context place: judged (and diagnosed) by its own consumer.
         return 0
     }
     set receiver [dict get $hir exprs $e receiver]

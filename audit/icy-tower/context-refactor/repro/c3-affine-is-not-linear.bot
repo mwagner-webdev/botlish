@@ -11,6 +11,12 @@
 # but its close needs no value, so a single handler can close on every way
 # out (the refactored main.bot does, in `main`'s NonFiniteFloat handler).
 #
+# Unchanged by CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md: a context may now
+# own affine values, and affinity is still at-most-once -- nothing destroys
+# what an installed context owns when the program ends, and nothing forces a
+# value out of it to be released (a3-late-acquisition.bot's close is an
+# explicit operation).
+#
 # expect interp: value: [1, 0]
 # expect compile: value: [1, 0]
 # expect cranelift-generic: value: [1, 0]

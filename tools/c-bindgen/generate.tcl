@@ -67,6 +67,18 @@ proc ::cbind::generate::LabelPrefix {text} {
 # another architecture's bits/, or, where they happen to compile, the
 # host's declarations under the target's name.
 proc ::cbind::generate::CheckCrossHeaders {target config tool hprofile} {
+    if {$target eq "windows-x86_64" && "-nostdlibinc" ni [dict get $hprofile flags]
+            && "-nostdinc" ni [dict get $hprofile flags]} {
+        # MSVC's headers, which clang finds for its MSVC target by itself on
+        # a Windows host with Visual Studio's C++ tools: the Windows SDK's
+        # Universal CRT (Windows Kits\10\Include\VERSION\ucrt) among the
+        # directories it searches. Elsewhere it has none, and no other C
+        # library's headers stand in for MSVC's.
+        set triple [dict get $config target]
+        lassign [::chdr::toolchain::searchDirs $config $tool] ok dirs stderr
+        if {$ok && [lsearch -glob -nocase $dirs */ucrt] >= 0} { return }
+        error "c-bindgen: [lindex [dict get $config cc] 0] --target=$triple searches no directory of MSVC's C headers ([join $dirs {, }]): windows-x86_64 is MSVC's ABI and toolchain, generated on Windows with Visual Studio's C++ tools and the Windows SDK installed (clang finds their headers itself)"
+    }
     if {[string match windows-* $target] && "-nostdlibinc" ni [dict get $hprofile flags]
             && "-nostdinc" ni [dict get $hprofile flags] && [dict get $config sysroot] eq ""} {
         # MinGW-w64's headers, where clang finds them for its mingw32 target

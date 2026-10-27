@@ -412,10 +412,12 @@ test ca-affine-coroutines {a coroutine may own a pointer it was given, but no co
         [lindex [caError "import std::ffi::c\n${::caOpaque}fn gen() -> std::ffi::c::Ptr\[SSL\]:\n    yield std::ffi::c::null\[SSL\]()\n    std::ffi::c::null\[SSL\]()\n\nfn f() -> bool:\n    coroutine {step} = gen()\n    true\n\nf()\n"] 0]
 } -result {{value 4} COROUTINE-CONTRACT}
 
-test ca-affine-containers-contexts {a MutableVector owns pointers (moved in and out), a context struct may not hold one (installation would erase it)} -body {
+test ca-affine-containers-contexts {a MutableVector owns pointers (moved in and out); a context struct may hold one -- installation moves it into the installed context (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md), a contextual function observes it where it is stored, and copying it out is AFFINE-CONTEXT-COPY-OUT} -body {
     list [caAgree "import std::ffi::c\nimport ffi_fixture\nimport std::mutable_vector\nfn f() -> int:\n    v = std::mutable_vector::from_list(\[ffi_fixture::address\[std::ffi::c::Int\](16)\])\n    v.push(std::ffi::c::null\[std::ffi::c::Int\]())\n    p = v.pop():\n        on IndexNotFound:\n            std::ffi::c::null\[std::ffi::c::Int\]()\n    q = v.pop():\n        on IndexNotFound:\n            std::ffi::c::null\[std::ffi::c::Int\]()\n    ffi_fixture::address_of(p) + ffi_fixture::address_of(q) + std::mutable_vector::length(v)\n\nf()\n"] \
-        [lindex [caError "import std::ffi::c\n${::caOpaque}context struct Tls:\n    ssl: std::ffi::c::Ptr\[SSL\]\n\nwith context Tls {ssl: std::ffi::c::null\[SSL\]()}\n\nfn f(context tls: Tls) -> int:\n    1\n\nf()\n"] 0]
-} -result {{value 16} AFFINE-ERASURE-UNSUPPORTED}
+        [lindex [caError "import std::ffi::c\n${::caOpaque}context struct Tls:\n    ssl: std::ffi::c::Ptr\[SSL\]\n\nwith context Tls {ssl: std::ffi::c::null\[SSL\]()}\n\nfn f(context tls: Tls) -> int:\n    1\n\nf()\n"] 0] \
+        [caAgree "import std::ffi::c\n${::caOpaque}context struct Tls:\n    ssl: std::ffi::c::Ptr\[SSL\]\n\nwith context Tls {ssl: std::ffi::c::null\[SSL\]()}\n\nfn f(context tls: Tls) -> bool:\n    tls.ssl.null?()\n\nf()\n"] \
+        [lindex [caError "import std::ffi::c\n${::caOpaque}context struct Tls:\n    ssl: std::ffi::c::Ptr\[SSL\]\n\nwith context Tls {ssl: std::ffi::c::null\[SSL\]()}\n\nfn f(context tls: Tls) -> bool:\n    p = tls.ssl\n    p.null?()\n\nf()\n"] 0]
+} -result {{value 16} ok {value true} AFFINE-CONTEXT-COPY-OUT}
 
 # ---------------------------------------------------------------------------
 # Function pointers

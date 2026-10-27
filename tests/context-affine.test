@@ -1,0 +1,404 @@
+# context-affine.test -- context-owned affine state
+# (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md):
+#
+#   opaque context struct Device:            the installed context owns its
+#       root: std::ffi::c::Ptr[...]          affine members -- a pointer, an
+#       sessions: MutableVector[Session]     aggregate, a vector of them
+#   with context create()                    installation moves the value in
+#   fn f(context d: Device):                 a context parameter is no owner:
+#       d.root.null?()                       its places are observed in place,
+#       d.sessions.element(0).window ...     an element's place included,
+#       d.sessions.push(s) / pop() / take    and moved only by the
+#                                            collection's explicit moves
+#
+# * installation consumes the installed value (a later use is USE-AFTER-MOVE);
+# * direct affine members, nested aggregates, vectors and arrays of affine
+#   values: installed, observed where they are stored, explicitly cloned,
+#   acquired after installation (push), released by an explicit close (pop,
+#   take, swap), reopened -- the same values on every backend;
+# * every way to copy affine state out of the installed context is
+#   AFFINE-CONTEXT-COPY-OUT (a binding, an argument, a result, a field, a
+#   List, a join, a loop, a destructuring of the whole context, an erasing
+#   native), and so is an observation a later argument could invalidate; a
+#   capture is AFFINE-CAPTURE-UNSUPPORTED; `at` of an affine element names
+#   the element place; an element place of a collection no context owns is
+#   MUTABLE-PLACE-RECEIVER;
+# * error paths: an observation that fails leaves the state owned; an
+#   explicit move out stays a move (the moved value is released on the error
+#   path, never the context's);
+# * private helpers, public wrappers and a context-trait implementation reach
+#   the same installed state;
+# * unrestricted members beside affine ones keep value semantics (an affine
+#   struct's unrestricted collection slots are copied, hir::mutvec::
+#   ShareDescriptor), and unrestricted contexts are unchanged;
+# * native evidence: pointer and view words are context-slot leaves, an
+#   observation is a contextload with no allocation, GC stress, HIR
+#   interchange.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+core::cabi::installTestFixture
+
+set allBackends {interp compile cranelift-generic cranelift}
+
+# Linux on x86-64 or AArch64: the native context area and its slots.
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+
+# The outcome every backend agrees on for SOURCE (sourceAgree).
+proc caoAgree {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    return [sourceAgree $text $backends]
+}
+
+# The kinds of the diagnostics strict compilation of TEXT reports, in order,
+# or "ok".
+proc caoKinds {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# The message of the first diagnostic of TEXT (no location), or "ok".
+proc caoMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+        }
+        regsub {^.*?:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# The Tcl coroutines alive (a probe of the Tcl runtime, as tests/affine.test's).
+proc caoLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_cao_live" ni [core::native::names]} {
+    core::registerNative test_cao_live -arity 0 -impl caoLiveCoroutines
+}
+
+# The NIR text of function NAME.
+proc nirOf {nir name} {
+    set lines [split $nir \n]
+    set start [lsearch -regexp $lines "^func \[0-9\]+ \"$name\""]
+    if {$start < 0} {
+        return ""
+    }
+    set end [lsearch -start $start -exact $lines end]
+    return [join [lrange $lines $start $end] \n]
+}
+
+# Shared declarations: a device context owning a root pointer and a vector
+# of sessions (each two pointers and an id), and the constructors.
+set caoDecls {import std::ffi::c
+import std::mutable_vector
+import ffi_fixture
+
+error Busy:
+    code: int
+
+struct Session:
+    window: std::ffi::c::Ptr[std::ffi::c::Void]
+    renderer: std::ffi::c::Ptr[std::ffi::c::Int]
+    id: int
+
+opaque context struct Device:
+    root: std::ffi::c::Ptr[std::ffi::c::Int]
+    sessions: MutableVector[Session]
+
+fn create() -> Device:
+    Device {root: ffi_fixture::address[std::ffi::c::Int](64), sessions: std::mutable_vector::from_list([])}
+
+fn session(id: int) -> Session:
+    Session {window: std::ffi::c::null[std::ffi::c::Void](), renderer: ffi_fixture::address[std::ffi::c::Int](id * 16), id: id}
+
+fn keep(p: std::ffi::c::Ptr[std::ffi::c::Int]) -> int:
+    1
+}
+
+# ---------------------------------------------------------------------------
+# Installation and direct members
+
+test cao-installation-moves {with context EXPR moves the value into the installed context (context#install's ownership role is move): an affine value installed from a binding is moved, and a later use of the binding is USE-AFTER-MOVE} -body {
+    list [core::native::ownershipRole context#install 0] \
+        [caoKinds "${::caoDecls}d = create()\nwith context d\ne = d\n0\n"] \
+        [caoAgree "${::caoDecls}d = create()\nwith context d\nfn f(context x: Device) -> int:\n    ffi_fixture::address_of(x.root)\nf()\n"]
+} -result {move USE-AFTER-MOVE {value 64}}
+
+test cao-direct-member-observed {a1: a direct affine pointer member is observed where the installed context stores it -- null?, address_of, a C pointer word -- by every function requiring the context, on every backend} -body {
+    caoAgree "${::caoDecls}fn null_root?(context d: Device) -> bool:\n    d.root.null?()\nfn root(context d: Device) -> int:\n    ffi_fixture::address_of(d.root)\nwith context create()\n\[null_root?(), root(), root()\]\n"
+} -result {value {[false, 64, 64]}}
+
+test cao-direct-member-explicit-clone {an explicit clone of a context-owned pointer is a new affine value of its own (C-ABI-TYPES.md): it may be moved anywhere, and the installed member stays where it is} -body {
+    caoAgree "${::caoDecls}fn cloned(context d: Device) -> int:\n    c = d.root.clone()\n    keep(c) + ffi_fixture::address_of(d.root)\nwith context create()\n\[cloned(), cloned()\]\n"
+} -result {value {[65, 65]}}
+
+test cao-nested-aggregate {a2: a context member that is an affine struct of pointers, nested in another struct: installed, its leaves observed through field paths} -body {
+    caoAgree "import std::ffi::c\nimport ffi_fixture\nstruct Pair:\n    window: std::ffi::c::Ptr\[std::ffi::c::Void\]\n    renderer: std::ffi::c::Ptr\[std::ffi::c::Int\]\nstruct Inner:\n    pair: Pair\n    count: std::ffi::c::Int\nopaque context struct Video:\n    inner: Inner\nfn video() -> Video:\n    Video {inner: Inner {pair: Pair {window: std::ffi::c::null\[std::ffi::c::Void\](), renderer: ffi_fixture::address\[std::ffi::c::Int\](32)}, count: 2}}\nfn probe(context v: Video) -> List\[int\]:\n    \[ffi_fixture::address_of(v.inner.pair.renderer), ffi_fixture::address_of(v.inner.pair.window), v.inner.count\]\nwith context video()\nprobe()\n"
+} -result {value {[32, 0, 2]}}
+
+test cao-unrestricted-context-unchanged {a context of unrestricted members is what it always was: copied whole, passed, destructured, compared (no ownership rule applies)} -body {
+    caoAgree "type Tick = Int in 0..1000\nstruct Clock:\n    ticks: Tick\ncontext struct Env:\n    clock: Clock\n    ready: bool\nfn passed(e: Env) -> int:\n    e.clock.ticks\nfn f(context e: Env) -> List\[int\]:\n    copy = e\n    {clock, ready} = e\n    same = if copy == e:\n        1\n    else:\n        0\n    \[passed(e), copy.clock.ticks + clock.ticks, same\]\nwith context Env {clock: Clock {ticks: 4}, ready: true}\nf()\n"
+} -result {value {[4, 8, 1]}}
+
+# ---------------------------------------------------------------------------
+# Late acquisition: a vector of affine sessions
+
+set caoLifecycle {
+fn open(id: int, context d: Device):
+    d.sessions.push(session(id))
+
+fn renderer_of(context d: Device) -> int errors IndexNotFound:
+    ffi_fixture::address_of(d.sessions.element(0).renderer)
+
+fn window_null?(context d: Device) -> bool errors IndexNotFound:
+    d.sessions.element(0).window.null?()
+
+fn report() -> List[int]:
+    r = renderer_of():
+        on IndexNotFound:
+            return [-1]
+    w = window_null?():
+        on IndexNotFound:
+            return [-2]
+    flag = if w:
+        1
+    else:
+        0
+    [r, flag]
+
+fn close(context d: Device) -> int:
+    s = d.sessions.pop():
+        on IndexNotFound:
+            return -1
+    {window, renderer, id} = s
+    id + ffi_fixture::address_of(renderer)
+}
+
+test cao-late-acquisition {installed closed, a session acquired after installation (push moves it in), observed through its element place, released by an explicit close (pop moves it out), closed again (a stale pointer is no longer reachable), closed twice, reopened: the same values on every backend} -body {
+    caoAgree "${::caoDecls}${::caoLifecycle}with context create()\na = report()\nopen(3)\nb = report()\nc = report()\nx = close()\nd = report()\ny = close()\nopen(5)\ne = report()\n\[a, b, c, \[x\], d, \[y\], e\]\n"
+} -result {value {[[-1], [48, 1], [48, 1], [51], [-1], [-1], [80, 1]]}}
+
+test cao-element-place-registration {the element places are registered -element-place (core/native.tcl's elementPlace) with an observed receiver: read by registration, never by name} -body {
+    lmap n {std::mutable_vector::element std::mutable_array::element std::mutable_vector::at} {
+        list $n [dict get [core::native::metadata $n] elementPlace] [dict get [core::native::metadata $n] ownership]
+    }
+} -result {{std::mutable_vector::element 1 {observe observe}} {std::mutable_array::element 1 {observe observe}} {std::mutable_vector::at 0 {copy-out observe}}}
+
+test cao-element-unrestricted-field {an element place's unrestricted field is read out as a value, like any place's (the id of the stored session)} -body {
+    caoAgree "${::caoDecls}fn id_of(i: int, context d: Device) -> int errors IndexNotFound:\n    d.sessions.element(i).id\nfn f() -> int:\n    n = id_of(1):\n        on IndexNotFound:\n            return -1\n    n\nwith context create()\nfn fill(context d: Device):\n    d.sessions.push(session(1))\n    d.sessions.push(session(2))\nfill()\nf()\n"
+} -result {value 2}
+
+test cao-explicit-swap-take {the collection's explicit moves on a context-owned vector: take moves an element out (the rest keep their order), swap exchanges one for another and moves the old one out} -body {
+    caoAgree "${::caoDecls}fn fill(context d: Device):\n    d.sessions.push(session(1))\n    d.sessions.push(session(2))\n    d.sessions.push(session(3))\nfn moved(context d: Device) -> List\[int\] errors IndexNotFound:\n    t = d.sessions.take(0)\n    {window, renderer, id} = t\n    old = d.sessions.swap(0, session(9))\n    {window: w2, renderer: r2, id: i2} = old\n    \[id, i2, d.sessions.element(0).id, d.sessions.element(1).id, d.sessions.length()\]\nwith context create()\nfill()\nr = moved():\n    on IndexNotFound:\n        \[\]\nr\n"
+} -result {value {[1, 2, 9, 3, 2]}}
+
+test cao-array-element-place {a MutableArray of affine values the context owns: its element places are observed, swap exchanges an element} -body {
+    caoAgree "import std::ffi::c\nimport std::mutable_array\nimport ffi_fixture\nopaque context struct Slots:\n    slots: MutableArray\[std::ffi::c::Ptr\[std::ffi::c::Int\]\]\nfn make(i: int) -> std::ffi::c::Ptr\[std::ffi::c::Int\]:\n    ffi_fixture::address\[std::ffi::c::Int\](16 * (i + 1))\nfn slots() -> Slots:\n    Slots {slots: std::mutable_array::generate(2, make)}\nfn at(i: int, context s: Slots) -> int errors IndexNotFound:\n    ffi_fixture::address_of(s.slots.element(i))\nfn exchange(context s: Slots) -> int errors IndexNotFound:\n    old = s.slots.swap(0, ffi_fixture::address\[std::ffi::c::Int\](128))\n    ffi_fixture::address_of(old)\nfn all() -> List\[int\] errors IndexNotFound:\n    a = at(0)\n    b = at(1)\n    c = exchange()\n    \[a, b, c, at(0)\]\nwith context slots()\nr = all():\n    on IndexNotFound:\n        \[\]\nr\n"
+} -result {value {[16, 32, 16, 128]}}
+
+# ---------------------------------------------------------------------------
+# Coroutines: an affine root with a real release
+
+set caoJobs {import std::coroutine
+import std::mutable_vector
+
+error Late:
+    at: int
+
+struct Command:
+    value: int
+
+struct Event:
+    value: int
+
+fn worker(seed: int, resume Command) -> Event:
+    command = yield Event {value: seed}
+    return Event {value: command.value + seed}
+
+struct Job:
+    name: str
+    step: Coroutine{args: [Command], return: Event}
+
+opaque context struct Scheduler:
+    jobs: MutableVector[Job]
+
+fn create() -> Scheduler:
+    Scheduler {jobs: std::mutable_vector::from_list([])}
+
+fn spawn(name: str, seed: int, context s: Scheduler):
+    coroutine {step} = worker(seed)
+    s.jobs.push(Job {name: name, step: step})
+
+fn done_of?(i: int, context s: Scheduler) -> bool errors IndexNotFound:
+    std::coroutine::done?(s.jobs.element(i).step)
+
+fn run_first(v: int, context s: Scheduler) -> int errors IndexNotFound:
+    job = s.jobs.take(0)
+    {name, step} = job
+    e = step(Command {value: v})
+    e.value
+}
+
+test cao-coroutines-in-context {the installed context owns suspended coroutines in a vector: observed in place (done?), taken out and resumed, the rest still owned; the same values on every backend} -constraints nativeCoroutines -body {
+    caoAgree "${::caoJobs}with context create()\nspawn(\"a\", 1)\nspawn(\"b\", 2)\nd = done_of?(1):\n    on IndexNotFound:\n        true\nr = run_first(10):\n    on IndexNotFound:\n        -1\nn = done_of?(0):\n    on IndexNotFound:\n        true\n\[d, r, n\]\n"
+} -result {value {[false, 11, false]}}
+
+test cao-error-paths {an observation that fails leaves the state owned (the job is still there afterwards); an explicit move out stays a move: a job taken and then abandoned by a declared error is released on that error path, once, while the job left in the context is never released (the installation owns it for the program's lifetime; affinity is at most once)} -constraints nativeCoroutines -body {
+    set text "${::caoJobs}fn observe_then_fail(context s: Scheduler) -> int errors IndexNotFound, Late:\n    if not std::coroutine::done?(s.jobs.element(0).step):\n        fail Late {at: 1}\n    0\nfn take_then_fail(context s: Scheduler) -> int errors IndexNotFound, Late:\n    job = s.jobs.take(0)\n    if s.jobs.element(0).name == \"b\":\n        fail Late {at: s.jobs.length()}\n    0\nwith context create()\nspawn(\"a\", 1)\nspawn(\"b\", 2)\nx = observe_then_fail():\n    on IndexNotFound:\n        -1\n    on Late {at}:\n        at\ny = take_then_fail():\n    on IndexNotFound:\n        -1\n    on Late {at}:\n        at\nz = done_of?(0):\n    on IndexNotFound:\n        true\nzf = if z:\n    1\nelse:\n    0\n\[x, y, zf, test_cao_live()\]\n"
+    list [caoAgree $text {interp compile}] \
+        [caoAgree [string map {test_cao_live() 0} $text]] \
+        [dict get [native::allocationReport [surface::compile [string map {test_cao_live() 0} $text] -warnings off] summary] coroutines]
+} -result {{value {[1, 1, 0, 1]}} {value {[1, 1, 0, 0]}} {stacksMapped 2 stacksReused 0 released 1 releasedSuspended 1 sweptSuspended 0}}
+
+test cao-loops-recursion-partial {loops, recursion and partial construction over context-owned coroutines: a counted loop and a recursive contextual function observe every stored job in place; a job built for the context whose construction fails after its coroutine was made (a later struct field raises) never reaches the context and is released on that error path, the context unchanged} -constraints nativeCoroutines -body {
+    set text "${::caoJobs}fn failing(k: int) -> str errors Late:\n    if k > 1:\n        fail Late {at: k}\n    \"ok\"\nfn count(context s: Scheduler) -> int:\n    s.jobs.length()\nfn spawn_checked(k: int, context s: Scheduler) -> int errors Late:\n    coroutine {step} = worker(k)\n    s.jobs.push(Job {step: step, name: failing(k)})\n    s.jobs.length()\nfn suspended(context s: Scheduler) -> int errors IndexNotFound:\n    n = s.jobs.length()\n    total = loop i from 0 to n:\n        d = std::coroutine::done?(s.jobs.element(i).step)\n        if d:\n            0\n        else:\n            1\n    std::list::length(total)\nfn names_from(i: int, context s: Scheduler) -> str errors IndexNotFound:\n    if i >= s.jobs.length():\n        return \"\"\n    s.jobs.element(i).name.concat(names_from(i + 1))\nwith context create()\nspawn(\"a\", 1)\nspawn(\"b\", 2)\nx = spawn_checked(count()):\n    on Late {at}:\n        at * 100\ny = spawn_checked(count() - 2):\n    on Late {at}:\n        at * 100\nn = suspended():\n    on IndexNotFound:\n        -1\nm = names_from(0):\n    on IndexNotFound:\n        \"?\"\n\[x, y, n, std::str::length(m), test_cao_live()\]\n"
+    set text [string map [list "import std::mutable_vector\n" "import std::mutable_vector\nimport std::list\nimport std::str\n"] $text]
+    list [caoAgree $text {interp compile}] [caoAgree [string map {test_cao_live() 3} $text]]
+} -result {{value {[200, 3, 3, 4, 3]}} {value {[200, 3, 3, 4, 3]}}}
+
+# ---------------------------------------------------------------------------
+# Every way out of the installed context
+
+set caoCopyOut [list \
+    bind      "fn f(context d: Device) -> int:\n    q = d.root\n    1\n" \
+    argument  "fn f(context d: Device) -> int:\n    keep(d.root)\n" \
+    result    "fn f(context d: Device) -> std::ffi::c::Ptr\[std::ffi::c::Int\]:\n    d.root\n" \
+    return    "fn f(context d: Device) -> std::ffi::c::Ptr\[std::ffi::c::Int\]:\n    return d.root\n" \
+    field     "struct Box:\n    p: std::ffi::c::Ptr\[std::ffi::c::Int\]\nfn f(context d: Device) -> int:\n    b = Box {p: d.root}\n    1\n" \
+    list      "fn f(context d: Device) -> int:\n    xs = \[d.root\]\n    1\n" \
+    join      "fn f(c: bool, context d: Device) -> int:\n    p = if c:\n        d.root\n    else:\n        std::ffi::c::null\[std::ffi::c::Int\]()\n    1\n" \
+    whole     "fn f(context d: Device) -> int:\n    copy = d\n    1\n" \
+    destructure "fn f(context d: Device) -> int:\n    {root} = d\n    1\n" \
+    whole-arg "fn g(x: Device) -> int:\n    1\nfn f(context d: Device) -> int:\n    g(d)\n" \
+    member    "fn f(context d: Device) -> int:\n    v = d.sessions\n    1\n" \
+    element   "fn f(context d: Device) -> int errors IndexNotFound:\n    s = d.sessions.element(0)\n    1\n" \
+    loop      "fn f(context d: Device) -> int:\n    loop s in d.sessions:\n        s.id\n    1\n" \
+    push-twice "fn f(context d: Device) -> int errors IndexNotFound:\n    d.sessions.push(d.sessions.element(0))\n    1\n" \
+    erase     "fn f(context d: Device) -> int:\n    v = std::ffi::c::erase(d.root)\n    1\n" \
+    any-parameter "fn hold(x: any) -> int:\n    1\nfn f(context d: Device) -> int:\n    hold(d.root)\n" \
+    later-argument "fn closing(context d: Device) -> std::ffi::c::Int:\n    s = d.sessions.pop():\n        on IndexNotFound:\n            return 0\n    1\nextern c fn two(a: std::ffi::c::Ptr\[std::ffi::c::Int\], b: std::ffi::c::Int) -> std::ffi::c::Int\nfn f(context d: Device) -> int errors IndexNotFound:\n    two(d.sessions.element(0).renderer, closing())\n" \
+]
+
+test cao-copy-out-rejected {every value position that would copy affine state out of the installed context -- a binding, a parameter's argument, a result, a return, a struct field, a List element, an if's value, the whole context bound or destructured or passed, a vector member, an element place bound, a consuming loop, an element pushed into its own vector, an erasing native, a parameter declared `any` -- is AFFINE-CONTEXT-COPY-OUT, the one diagnostic, at the place; and so is an observation a later argument of the same call could invalidate by running code} -body {
+    lmap {name body} $::caoCopyOut {
+        list $name [caoKinds "${::caoDecls}${body}with context create()\n0\n"]
+    }
+} -result {{bind AFFINE-CONTEXT-COPY-OUT} {argument AFFINE-CONTEXT-COPY-OUT} {result AFFINE-CONTEXT-COPY-OUT} {return AFFINE-CONTEXT-COPY-OUT} {field AFFINE-CONTEXT-COPY-OUT} {list AFFINE-CONTEXT-COPY-OUT} {join AFFINE-CONTEXT-COPY-OUT} {whole AFFINE-CONTEXT-COPY-OUT} {destructure AFFINE-CONTEXT-COPY-OUT} {whole-arg AFFINE-CONTEXT-COPY-OUT} {member AFFINE-CONTEXT-COPY-OUT} {element AFFINE-CONTEXT-COPY-OUT} {loop AFFINE-CONTEXT-COPY-OUT} {push-twice AFFINE-CONTEXT-COPY-OUT} {erase AFFINE-CONTEXT-COPY-OUT} {any-parameter AFFINE-CONTEXT-COPY-OUT} {later-argument AFFINE-CONTEXT-COPY-OUT}}
+
+test cao-copy-out-message {the diagnostic says what owns the value, what the use would do and what to do instead, and names the place as written -- never a hygienic temporary} -body {
+    list [caoMessage "${::caoDecls}fn f(context d: Device) -> int:\n    keep(d.root)\nwith context create()\n0\n"] \
+        [caoMessage "${::caoDecls}fn f(context d: Device) -> int:\n    {root} = d\n    1\nwith context create()\n0\n"] \
+        [string match "*element place is no value*IndexNotFound*" [caoMessage "${::caoDecls}fn f(context d: Device) -> int errors IndexNotFound:\n    s = d.sessions.element(0)\n    1\nwith context create()\n0\n"]]
+} -result {{`d.root` is an affine std::ffi::c::Ptr[std::ffi::c::Int] that the installed context Device owns: passing it to a parameter (which owns its argument) would copy it out while the context keeps owning it, making a second owner. Reach it where it is stored -- observe it (a C call, null?, clone), or keep it in a collection member and move it out with take, pop or swap} {`d` is the installed context Device, which owns affine state: destructuring it would copy it out while the context keeps owning it, making a second owner. Reach it where it is stored -- observe it (a C call, null?, clone), or keep it in a collection member and move it out with take, pop or swap} 1}
+
+test cao-other-diagnostics {the ordinary affine diagnostics where the rule is the ordinary one: comparing context-owned values is AFFINE-EQUALITY-UNSUPPORTED, a closure capturing the context is AFFINE-CAPTURE-UNSUPPORTED (naming the remedy: the nested function declares the context), `at` of an affine element is AFFINE-ELEMENT-COPY-OUT naming the element place; an element place of a collection of the function's own is MUTABLE-PLACE-RECEIVER} -body {
+    list [caoKinds "${::caoDecls}fn f(context d: Device) -> bool:\n    d.root == d.root\nwith context create()\n0\n"] \
+        [caoKinds "${::caoDecls}fn f(context d: Device) -> int:\n    fn g() -> bool:\n        d.root.null?()\n    1\nwith context create()\n0\n"] \
+        [string match "*declare the context in the nested function instead: `context d: Device`*" [caoMessage "${::caoDecls}fn f(context d: Device) -> int:\n    fn g() -> bool:\n        d.root.null?()\n    1\nwith context create()\n0\n"]] \
+        [caoKinds "${::caoDecls}fn f(context d: Device) -> int errors IndexNotFound:\n    s = d.sessions.at(0)\n    1\nwith context create()\n0\n"] \
+        [string match "*`d.sessions.element(i)` is the element's place*" [caoMessage "${::caoDecls}fn f(context d: Device) -> int errors IndexNotFound:\n    s = d.sessions.at(0)\n    1\nwith context create()\n0\n"]] \
+        [caoKinds "${::caoDecls}fn f() -> bool errors IndexNotFound:\n    v = std::mutable_vector::from_list(\[session(1)\])\n    v.element(0).window.null?()\nwith context create()\n0\n"]
+} -result {{AFFINE-EQUALITY-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED} AFFINE-CAPTURE-UNSUPPORTED 1 AFFINE-ELEMENT-COPY-OUT 1 MUTABLE-PLACE-RECEIVER}
+
+test cao-recovery {an illegal access is one diagnostic and the rest of the program is still checked: an unrelated error after it is reported too} -body {
+    caoKinds "${::caoDecls}fn f(context d: Device) -> int:\n    q = d.root\n    1\nfn g() -> int:\n    missing\nwith context create()\n0\n"
+} -result {UNBOUND AFFINE-CONTEXT-COPY-OUT}
+
+test cao-observation-later-plain-arguments {an observation whose later arguments run no code is valid: they are values (a reference, a constant, an element place of the same context)} -body {
+    caoKinds "${::caoDecls}extern c fn two(a: std::ffi::c::Ptr\[std::ffi::c::Int\], b: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int\nfn f(context d: Device) -> int errors IndexNotFound:\n    two(d.sessions.element(0).renderer, d.sessions.element(0).window)\nwith context create()\n0\n"
+} -result ok
+
+# ---------------------------------------------------------------------------
+# Helpers, wrappers, context traits
+
+test cao-helpers-wrappers-traits {a private helper, a public wrapper and a context-trait operation's implementation all reach the same installed state (the trait plan clones functions for the selected context, never its state): the same values on every backend} -body {
+    caoAgree "${::caoDecls}context trait Probe:\n    fn count() -> int errors Busy\n    fn open?() -> bool\nprivate fn first_renderer(context d: Device) -> int errors IndexNotFound:\n    ffi_fixture::address_of(d.sessions.element(0).renderer)\nfn renderer(context d: Device) -> int:\n    r = first_renderer():\n        on IndexNotFound:\n            return -1\n    r\nfn count(context d: Device) -> int errors Busy:\n    if d.sessions.length() > 1:\n        fail Busy {code: d.sessions.length()}\n    d.sessions.length()\nfn open?(context d: Device) -> bool:\n    not d.sessions.empty?()\nfn open(context d: Device):\n    d.sessions.push(session(2))\nfn probe(context p: Probe) -> List\[int\]:\n    n = p.count():\n        on Busy {code}:\n            return \[code\]\n    o = if p.open?():\n        1\n    else:\n        0\n    \[n, o\]\nwith context create()\na = probe()\nopen()\nb = probe()\nopen()\nc = probe()\n\[a, b, c, \[renderer()\]\]\n"
+} -result {value {[[0, 0], [1, 1], [2], [32]]}}
+
+test cao-trait-plan-no-state-copy {the context-trait plan clones the function that requires Probe for the installed Device and calls Device's implementations directly: the monomorphized program binds no value for the trait (no copy of the installed state), only each implementation's own context parameter, which owns nothing} -body {
+    set hir [surface::compile "${::caoDecls}context trait Probe:\n    fn open?() -> bool\nfn open?(context d: Device) -> bool:\n    not d.sessions.empty?()\nfn probe(context p: Probe) -> bool:\n    p.open?()\nwith context create()\nprobe()\n" -warnings off]
+    set contexts {}
+    dict for {b binding} [dict get $hir bindings] {
+        if {[hir::mutvec::IsContextParam $hir $b]} {
+            lappend contexts [list [dict get $binding name] [hir::types::show [hir::affine::BindingType $hir $b]] [hir::affine::IsAffineBinding $hir $b]]
+        }
+        if {[dict get $binding kind] in {local param} && [dict get $binding type] ne ""
+                && [hir::types::IsTrait [hir::bindingType $hir $b]]} {
+            lappend contexts [list [dict get $binding name] trait binding]
+        }
+    }
+    list [lsort $contexts] [lrange [outcomeUnderHir cranelift $hir] 0 1]
+} -cleanup {unset -nocomplain hir contexts b binding} -result {{{d Device 0}} {value false}}
+
+test cao-mixed-members-value-semantics {an unrestricted vector beside an affine member stays a value: the installed vector is the context's own (installing does not alias the vector it was built from), a read-out of it is a copy, and the context member alone is mutated in place} -body {
+    caoAgree "import std::ffi::c\nimport std::mutable_vector\nopaque context struct Mixed:\n    names: MutableVector\[str\]\n    p: std::ffi::c::Ptr\[std::ffi::c::Void\]\nfn add(x: str, context m: Mixed):\n    m.names.push(x)\nfn copy_then_push(context m: Mixed) -> int:\n    l = m.names\n    l.push(\"local\")\n    l.length()\nfn count(context m: Mixed) -> int:\n    m.names.length()\nv = std::mutable_vector::from_list(\[\"init\"\])\nwith context Mixed {names: v, p: std::ffi::c::null\[std::ffi::c::Void\]()}\nadd(\"a\")\na = copy_then_push()\nb = count()\nadd(\"b\")\n\[a, b, count(), v.length()\]\n"
+} -result {value {[3, 2, 3, 1]}}
+
+test cao-affine-struct-vector-value {the same rule outside contexts (found while building them): an affine struct holding an unrestricted vector does not alias the vector it was built from (its share descriptor lists the unrestricted slot)} -body {
+    list [caoAgree "import std::ffi::c\nimport std::mutable_vector\nstruct State:\n    log: MutableVector\[int\]\n    p: std::ffi::c::Ptr\[std::ffi::c::Void\]\nfn f() -> List\[int\]:\n    v = std::mutable_vector::from_list(\[1\])\n    s = State {log: v, p: std::ffi::c::null\[std::ffi::c::Void\]()}\n    s.log.push(2)\n    n = s.log.length()\n    \[v.length(), n\]\nf()\n"] \
+        [hir::mutvec::ShareDescriptor [list nstruct State]]
+} -result {{value {[1, 2]}} s1.0.h}
+
+# ---------------------------------------------------------------------------
+# Native evidence
+
+test cao-native-slot-leaves {natively a pointer member is one immediate word of the context slot and a vector of affine sessions its header (rooted by ctxroot); the bare native view of b2b is a leaf too} -constraints nativeLinux -body {
+    set nir [native::nir [surface::compile "${::caoDecls}fn f(context d: Device) -> bool:\n    d.root.null?()\nwith context create()\nf()\n" -warnings off]]
+    list [lsearch -all -inline -regexp [split $nir \n] {^context }] \
+        [regexp {op ctxroot} $nir] \
+        [lindex [native::lower::ContextLeaves Device] 0]
+} -result {{{context 0 "Device" offset=0 words=2 fields="root sessions"}} 1 ok}
+
+test cao-native-slot-eligibility {the eligibility rule is unchanged for what may be a heap pointer: a context holding a String is still CONTEXT-NATIVE-LOWERING-UNSUPPORTED natively, while a bare native view (b2b), a C function pointer and an enum are immediate leaves} -constraints nativeLinux -body {
+    list [lindex [native::lower::ContextLeaves Named] 0] [lindex [native::lower::ContextLeaves Viewed] 0] [lindex [native::lower::ContextLeaves Viewed] 1]
+} -setup {
+    surface::compile "import std::ffi::c\nimport std::binary\nenum Mode:\n    On,\n    Off\nlayout Cell:\n    size 8\n    align 8\n    field value: std::ffi::c::Long at 0\ncontext struct Named:\n    name: str\ncontext struct Viewed:\n    cell: NativeView\[Cell\]\n    callback: std::ffi::c::FnPtr\[Fn{args: \[\], return: std::ffi::c::Int}\]\n    mode: Mode\n0\n" -warnings off
+} -result {no ok {{cell {nview Cell}} {callback {cfnptr {fn {args {} return {refined int std::ffi::c::Int} errors {}}}}} {mode {enum Mode}}}}
+
+test cao-native-observation-no-allocation {observing a context-owned pointer loads its word and allocates nothing: no context object is materialized, nothing is copied} -constraints nativeLinux -body {
+    set program "${::caoDecls}fn f(context d: Device) -> int:\n    ffi_fixture::address_of(d.root)\nfn many(n: int) -> int:\n    loop i from 0 to n:\n        f()\n    f()\nwith context Device {root: ffi_fixture::address\[std::ffi::c::Int\](64), sessions: std::mutable_vector::from_list(\[\])}\nmany(N)\n"
+    set once [surface::compile [string map {N 1} $program] -warnings off]
+    set hir [surface::compile [string map {N 100} $program] -warnings off]
+    set nir [native::nir $hir]
+    list [regexp {contextload} $nir] [regexp {structnew} [nirOf $nir f]] \
+        [expr {[dict get [native::allocationReport $hir summary] total allocations] == [dict get [native::allocationReport $once summary] total allocations]}] \
+        [lrange [outcomeUnderHir cranelift $hir] 0 1]
+} -cleanup {unset -nocomplain program once hir nir} -result {1 0 1 {value 64}}
+
+test cao-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation) the context-owned sessions and coroutines stay alive and reachable: the same values} -constraints nativeCoroutines -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [lrange [outcomeUnderHir cranelift [surface::compile "${::caoDecls}${::caoLifecycle}with context create()\nopen(3)\nb = report()\nx = close()\nopen(5)\n\[b, \[x\], report()\]\n" -warnings off]] 0 1] \
+            [lrange [outcomeUnderHir cranelift [surface::compile "${::caoJobs}with context create()\nspawn(\"a\", 1)\nspawn(\"b\", 2)\nr = run_first(10):\n    on IndexNotFound:\n        -1\nr\n" -warnings off]] 0 1]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{value {[[48, 1], [51], [80, 1]]}} {value 11}}
+
+test cao-hir-text-manipulation {a second owner made by editing HIR text -- the observed pointer handed to an owning parameter instead -- is not caught by reading the text (hir::parse checks form, not analysis: HIR text is the front end's output, trusted like compiled code), but the ownership analysis run on the edited HIR (hir::check) reports it: AFFINE-CONTEXT-COPY-OUT} -body {
+    set hir [surface::compile "import std::ffi::c\nopaque context struct Holder:\n    p: std::ffi::c::Ptr\[std::ffi::c::Void\]\nfn keep(q: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> bool:\n    q.null?()\nfn f(context h: Holder) -> bool:\n    h.p.null?()\nwith context Holder {p: std::ffi::c::null\[std::ffi::c::Void\]()}\nf()\n" -warnings off]
+    set text [hir::format $hir]
+    set edited [string map [list "        e12 call native(std::ffi::c::null?) : bool\n            e13 ref b3 std::ffi::c::null? : native std::ffi::c::null?" "        e12 call block(e2) : bool\n            e13 ref b1 keep : block(e2)/1 -> bool"] $text]
+    set h [hir::parse $edited]
+    set before [llength [hir::diagnostics $h]]
+    hir::check h
+    list [expr {$edited ne $text}] $before [lmap d [hir::diagnostics $h] {dict get $d kind}]
+} -cleanup {unset -nocomplain hir text edited h before} -result {1 0 AFFINE-CONTEXT-COPY-OUT}
+
+test cao-interchange {a HIR with context-owned state written as HIR interchange text and read back runs the same (HIR-INTERCHANGE.md): context places are HIR as it was, nothing new to carry} -body {
+    set hir [surface::compile "${::caoDecls}${::caoLifecycle}with context create()\nopen(3)\nb = report()\nx = close()\n\[b, \[x\], report()\]\n" -warnings off]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [lrange [outcomeUnderHir compile $back] 0 1] [lrange [outcomeUnderHir cranelift $back] 0 1]
+} -cleanup {unset -nocomplain hir back} -result {{value {[[48, 1], [51], [-1]]}} {value {[[48, 1], [51], [-1]]}}}
+
+cleanupTests

@@ -563,6 +563,87 @@ step
 @at 8:1
 @end
 
+@topic error.affine-context-copy-out
+title: AFFINE-CONTEXT-COPY-OUT: affine state copied out of an installed context
+summary: A context parameter names the installed context, which owns its affine state: binding, passing, returning or storing a member (or the whole context) would make a second owner.
+index: errors
+alias: move a pointer out of a context; read a context field into a binding; pass a context-owned pointer; destructure a context; element place as a value
+keywords: affine, context, installed, place, element place, observe, pointer, take, pop, swap, second owner
+related: concept.context-owned-state concept.contexts concept.affine error.affine-element-copy-out error.affine-field-move-requires-destructure stdlib.std::mutable_vector::element
+docs: CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md CONTEXTS.md AFFINE-VALUES.md
+code: CORE SEMANTIC AFFINE-CONTEXT-COPY-OUT
+
+== MEANING
+`with context EXPR` moves the value into the installed context, which owns
+it -- an affine member (a C pointer, a coroutine, a struct or vector holding
+one) included -- for the rest of the run. A context parameter is not a
+second owner: `context d: Device` names that installed storage. So every
+expression reaching into it (`d`, `d.root`, `d.sessions.element(0).window`)
+is a *place*, and an affine value at a place stays there: it may be
+observed where it is stored, never copied out. Binding it to a name,
+passing it to a function's parameter, returning it, storing it in a struct
+or List, making it an `if`'s value, consuming it in a loop, destructuring
+the whole context, or giving it to a native that does not carry ownership
+would each leave two owners: the context and the new one. The same holds
+for an observation through an element place whose call runs code in a
+later argument: that code could take the element out of its collection
+first.
+
+== LIKELY CAUSES
+  * `r = d.renderer` before a C call, as with an ordinary local;
+  * passing a context-owned pointer to a helper function
+    (`helper(d.renderer)`) -- a parameter owns its argument;
+  * `{root} = d` or `copy = d` on a context holding affine state;
+  * `s = d.sessions.element(0)`: an element place is no value;
+  * returning a context-owned pointer from a contextual function.
+
+== WHAT TO DO
+Use the value where it is stored: hand `d.renderer` to the C call
+directly (a C call only observes its pointer arguments), test it with
+`null?`, or read an unrestricted field (`d.sessions.element(0).id`). Let
+the helper declare the context itself (`context d: Device`) instead of
+taking the pointer. Where another owner is genuinely needed, clone it
+explicitly (`d.root.clone()`, C-ABI-TYPES.md). To acquire and release a
+resource after installation, keep it in a collection member and move it in
+with push and out with take, pop or swap -- those clear the place it
+leaves. An element place fails with IndexNotFound when the element is
+missing: a function using one declares IndexNotFound, and its caller
+handles it.
+
+@example reject
+import std::ffi::c
+
+opaque context struct Device:
+    root: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn keep(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> bool:
+    p.null?()
+
+fn check(context d: Device) -> bool:
+    keep(d.root)
+
+with context Device {root: std::ffi::c::null[std::ffi::c::Void]()}
+check()
+@caption Passing the pointer to keep's parameter would make a second owner
+@error CORE SEMANTIC AFFINE-CONTEXT-COPY-OUT
+@at 10:10
+@end
+
+@example accept
+import std::ffi::c
+
+opaque context struct Device:
+    root: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn check(context d: Device) -> bool:
+    d.root.null?()
+
+with context Device {root: std::ffi::c::null[std::ffi::c::Void]()}
+check()
+@caption null? observes the pointer where the context stores it
+@value true
+@end
+
 @topic error.affine-field-move-requires-destructure
 title: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE: an affine field projected
 summary: s.field of an affine field would make a second owner of what the struct owns; an affine field leaves a struct only through a destructuring that consumes it.
@@ -2759,7 +2840,7 @@ summary: A call needs a context trait (such as std::io::IO) and more than one in
 index: errors
 alias: two contexts implement the same context trait; ambiguous io provider
 keywords: context trait, installed context, provider, selection, with context, std::io::IO, LinuxIO, ranking
-related: concept.context-traits concept.contexts rule.context-installation error.missing-context stdlib.module.std::io stdlib.module.std::linux::io
+related: concept.context-traits concept.contexts rule.context-installation error.missing-context rule.sfiae stdlib.module.std::io stdlib.module.std::linux::io
 docs: CONTEXT-TRAITS.md CONTEXTS.md
 code: CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION
 

@@ -21,6 +21,10 @@
 #   * metamorphic invariants: qualified spelling, renamed modules, an added
 #     inapplicable candidate, an unrelated ambiguous call, an unrelated invalid
 #     expression or syntax error, kind proofs on or off, build reuse on or off;
+#   * obligations do not select (SFIAE): a context the installations do not
+#     provide -- none, or several implementations of a required context
+#     trait -- is an obligation of the selected call, never evidence against
+#     a candidate, and installations change no decision;
 #   * static rounds and the oscillation bound.
 #
 # Every decision here is also made under hir::methodReferenceAudit (the
@@ -365,6 +369,105 @@ test mr-switches-change-no-decision {the kind proofs and the build reuse change 
     }
     set results
 } -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Obligations do not select (SFIAE: LANGUAGE-DESIGN-PRINCIPLES.md,
+# SFIAE-MILESTONE-1.md)
+#
+# A context the selected function needs -- an installed context struct, or
+# exactly one installed context implementing a required context trait -- is
+# an obligation of the call, like a declared error nobody handled: failing it
+# makes the selected call invalid and never selects another candidate.
+
+# The application of these tests: a context trait env::Env; two contexts
+# implementing it, ca::CA (adds its k) and cb::CB (multiplies by it); an
+# exact context cx::CX; and four functions `f`: alpha::f (an Int, requires
+# Env), delta::f (an Int, requires CX), beta::f (an Int, requires nothing)
+# and gamma::f (a String).
+set ::mrEnvModules [dict create \
+    env.bot "context trait Env:\n    fn tick(n: int) -> int\n" \
+    ca.bot "context struct CA:\n    k: int\n\nfn tick(n: int, context c: CA) -> int:\n    n + c.k\n" \
+    cb.bot "context struct CB:\n    k: int\n\nfn tick(n: int, context c: CB) -> int:\n    n * c.k\n" \
+    cx.bot "context struct CX:\n    k: int\n" \
+    alpha.bot "import env\n\nfn f(x: int, context e: env::Env) -> int:\n    e.tick(x)\n" \
+    delta.bot "import cx\n\nfn f(x: int, context c: cx::CX) -> int:\n    x + c.k\n" \
+    beta.bot "fn f(x: int) -> int:\n    x + 1000\n" \
+    gamma.bot "fn f(x: str) -> int:\n    0\n"]
+
+# The installations the tests vary, by name: none, CA, CB, both, the exact
+# CX, all three.
+set ::mrInstalls [dict create \
+    none "" \
+    A "with context ca::CA {k: 1}\n" \
+    B "with context cb::CB {k: 100}\n" \
+    AB "with context ca::CA {k: 1}\nwith context cb::CB {k: 100}\n" \
+    X "with context cx::CX {k: 5}\n" \
+    ABX "with context ca::CA {k: 1}\nwith context cb::CB {k: 100}\nwith context cx::CX {k: 5}\n"]
+
+# mrCompile of the program BODY after the installations INSTALL (a name of
+# ::mrInstalls), the application modules IMPORTS imported.
+proc mrEnv {imports install body} {
+    set head "import ca\nimport cb\nimport cx\n"
+    foreach m $imports {
+        append head "import $m\n"
+    }
+    mrCompile [dict merge $::mrEnvModules [dict create main.bot "$head\n[dict get $::mrInstalls $install]$body"]]
+}
+
+# The candidates an AMBIGUOUS-METHOD-CALL of the compilation R names, "" when
+# it reports none.
+proc mrAmbiguousBetween {r} {
+    foreach d [dict get $r diagnostics] {
+        if {[lindex $d 0] eq "AMBIGUOUS-METHOD-CALL"
+                && [regexp {accepts the receiver \(([^)]*)\)} [lindex $d 1] -> between]} {
+            return $between
+        }
+    }
+    return ""
+}
+
+test mr-sfiae-unique-candidate {one candidate accepts the receiver and requires a context, beside one that takes a String: the call is that candidate's whatever is installed, and the context is its obligation -- alpha::f (Env) is MISSING-CONTEXT with no context implementing Env, runs with one (CA), and is AMBIGUOUS-CONTEXT-IMPLEMENTATION with two (where the old rule counted the ambiguous implementation against alpha::f and reported NO-APPLICABLE-METHOD); delta::f (the exact CX) is MISSING-CONTEXT without CX and runs with it; never gamma::f, never a method-call diagnostic} -body {
+    set results {}
+    foreach {imports install} {{alpha gamma} none {alpha gamma} A {alpha gamma} AB {delta gamma} none {delta gamma} X} {
+        set r [mrEnv $imports $install "7.f()\n"]
+        lappend results [list $install [mrDecidedIn $r main.bot] [mrKinds $r] \
+            [if {[mrKinds $r] eq {}} {mrValue $r} else {list -}]]
+    }
+    set results
+} -result {{none alpha::f MISSING-CONTEXT -} {A alpha::f {} 8} {AB alpha::f AMBIGUOUS-CONTEXT-IMPLEMENTATION -} {none delta::f MISSING-CONTEXT -} {X delta::f {} 12}}
+
+test mr-sfiae-competing-candidates {two candidates accept the receiver, and context availability never decides between them: alpha::f (requires Env) and beta::f (requires nothing) are AMBIGUOUS-METHOD-CALL with Env provided by no context, by one, and by two (where the old rule counted the ambiguous implementation against alpha::f and decided beta::f); so are delta::f with CX missing beside beta::f, and alpha::f with Env ambiguous beside delta::f with CX missing} -body {
+    set results {}
+    foreach {imports install} {{alpha beta} none {alpha beta} A {alpha beta} AB {delta beta} none {alpha delta} AB} {
+        set r [mrEnv $imports $install "7.f()\n"]
+        lappend results [list $install [mrDecidedIn $r main.bot] [lindex [mrKinds $r] 0] [mrAmbiguousBetween $r]]
+    }
+    set results
+} -result {{none {} AMBIGUOUS-METHOD-CALL {alpha::f, beta::f}} {A {} AMBIGUOUS-METHOD-CALL {alpha::f, beta::f}} {AB {} AMBIGUOUS-METHOD-CALL {alpha::f, beta::f}} {none {} AMBIGUOUS-METHOD-CALL {beta::f, delta::f}} {AB {} AMBIGUOUS-METHOD-CALL {alpha::f, delta::f}}}
+
+test mr-sfiae-qualified-obligations {a method-style call carries exactly the obligations of the ordinary call it is: `7.f()`, decided to alpha::f, and the qualified `alpha::f(7)` report the same diagnostics (kind and message) and run to the same value, under every installation} -body {
+    set results {}
+    foreach install {none A AB} {
+        set method [mrEnv {alpha gamma} $install "7.f()\n"]
+        set qualified [mrEnv {alpha gamma} $install "alpha::f(7)\n"]
+        lappend results [list $install [expr {[dict get $method diagnostics] eq [dict get $qualified diagnostics]}] \
+            [mrKinds $qualified] [if {[mrKinds $method] eq {}} {list [mrValue $method] [mrValue $qualified]} else {list -}]]
+    }
+    set results
+} -result {{none 1 MISSING-CONTEXT -} {A 1 {} {8 8}} {AB 1 AMBIGUOUS-CONTEXT-IMPLEMENTATION -}}
+
+test mr-sfiae-installation-changes-no-decision {installations that change no argument's applicability change no decision: under no installation, CA, CB, both, the exact CX and all three, `7.f()` is alpha::f, `"s".f()` gamma::f and the call in h's body alpha::f (its obligation h's top-level call's), and with delta::f also visible both `7.f()` calls stay ambiguous -- whichever obligations fail} -body {
+    set results {}
+    foreach imports {{alpha gamma} {alpha delta gamma}} {
+        set seen {}
+        foreach install {none A B AB X ABX} {
+            set r [mrEnv $imports $install "fn h() -> int:\n    7.f()\n\n\[7.f(), \"s\".f(), h()\]\n"]
+            lappend seen [list [mrDecidedIn $r main.bot] [lsearch -all -inline [mrKinds $r] *-METHOD*]]
+        }
+        lappend results [lsort -unique $seen]
+    }
+    set results
+} -result {{{{alpha::f alpha::f gamma::f} {}}} {{gamma::f {AMBIGUOUS-METHOD-CALL AMBIGUOUS-METHOD-CALL}}}}
 
 # ---------------------------------------------------------------------------
 # Static rounds and the oscillation bound

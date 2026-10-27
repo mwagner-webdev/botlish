@@ -336,7 +336,7 @@ namespace eval hir::staticdeps {
         AFFINE-ERASURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED
         AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE
         AFFINE-TEMPORARY-UNSUPPORTED AFFINE-DUPLICATION-UNSUPPORTED
-        AFFINE-ELEMENT-COPY-OUT
+        AFFINE-ELEMENT-COPY-OUT AFFINE-CONTEXT-COPY-OUT
     }
     # The kinds of the diagnostics the trait monomorphization's plan reports
     # (hir::traits::Plan), which it computes only for a program with no other

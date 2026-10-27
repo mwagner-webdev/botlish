@@ -151,6 +151,7 @@ namespace eval native::lower {
         std::mutable_array::allocate {op mutarrayallocate} \
         std::mutable_array::capacity {op mutarraycapacity} \
         std::mutable_array::at       {op mutarrayget} \
+        std::mutable_array::element  {op mutarrayget} \
         std::mutable_array::set      {op mutarrayset} \
         std::mutable_array::copy     {op mutarraycopy} \
         std::mutable_array::freeze   {op mutarrayfreeze} \
@@ -206,6 +207,7 @@ namespace eval native::lower {
         std::mutable_vector::length    {op mvlen} \
         std::mutable_vector::empty?    {op mvempty} \
         std::mutable_vector::at        {op mvat} \
+        std::mutable_vector::element   {op mvat} \
         std::mutable_vector::push      {op mvpush} \
         std::mutable_vector::pop       {op mvpop} \
         std::mutable_vector::take      {op mvtake} \
@@ -4436,7 +4438,8 @@ proc native::lower::Project {fnVar e node {want tagged}} {
 #
 # Eligibility (StaticContextEligible, ContextLeaves): a leaf must be a value
 # whose tagged word is never a heap pointer -- an Int whose declared domain
-# fits the small-Int representation, a Bool, Unit or a UnicodeChar -- so the
+# fits the small-Int representation, a Bool, Unit, a UnicodeChar, an enum
+# case or a C address word (a pointer, a native view or edit) -- so the
 # area needs no GC root, no tracing and no dynamic layout -- or a MutableVector
 # or MutableArray header, which installation registers as a permanent root. Any other context
 # type is CONTEXT-NATIVE-LOWERING-UNSUPPORTED (native compilation fails,
@@ -4475,9 +4478,14 @@ proc native::lower::ContextLeaves {id {seen {}}} {
         }
         set kind [hir::types::kindOf $type]
         switch -- $kind {
-            bool - unit - UnicodeChar - enum {
+            bool - unit - UnicodeChar - enum - cptr {
                 # (An enum case, ENUMS.md, is an immediate word: never a
-                # heap pointer.)
+                # heap pointer. So is a C address word -- a C data or
+                # function pointer, C-ABI-TYPES.md, and a native view or
+                # edit, which is its pointer's address word,
+                # NATIVE-LAYOUT-VIEWS.md -- `(address << 4) | 0b1110`: an
+                # affine pointer member is held by the slot, which owns it,
+                # CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md.)
                 lappend leaves [list [list $field] $type]
             }
             mutvec - mutarray {

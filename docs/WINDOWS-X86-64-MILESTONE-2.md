@@ -438,7 +438,10 @@ when a write needs it, and a C pointer cannot live in a context anyway (an
 installed context is erased: AFFINE-ERASURE-UNSUPPORTED, which
 `wi-context-holds-devices` pins). So every write uses the handle the
 process has at that moment -- a console, a file or a pipe -- and nothing is
-opened, duplicated or closed.
+opened, duplicated or closed. (Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-
+1.md a context may own a C pointer; the design is unchanged for its first
+reason -- a cached standard handle would outlive the process replacing it --
+and the test now checks WindowsIO's fields hold none.)
 
 * `write(data)`, `write_error(data)`: one WriteFile, the raw result.
 * `write_text`, `write_error_text`: std::io::IO's operations, by structural

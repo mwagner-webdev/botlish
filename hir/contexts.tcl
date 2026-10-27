@@ -754,9 +754,10 @@ proc hir::contexts::verify {hirVar} {
             set target [Callee $hir $c]
             if {$target eq "" || ![dict exists $required $target]} continue
             # (The context requirements of the call's callee are a check of
-            # the call: hir::CheckingCall. A missing context is an obligation
+            # the call: hir::CheckingCall. A missing context, and an
+            # ambiguous implementation of a context trait, are obligations
             # of a valid call, never a method candidate's problem:
-            # hir::methods::ObligationKinds.)
+            # hir::methods::ObligationKinds, SFIAE.)
             set selection [hir::CheckingCall $c {Obligations hir $c $target $installed $required $reasons}]
             if {[dict size $selection] > 0} {
                 dict set selections $c $selection

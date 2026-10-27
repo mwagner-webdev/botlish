@@ -257,6 +257,16 @@ MISSING-CONTEXT: ct::clock::Clock is required by this call but is not installed 
         directly requires ct::clock::Clock
 ```
 
+**Obligations select nothing** (SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md). A
+provider is a provider by satisfaction alone: one whose implementation's own
+requirements are not installed is still one, so beside another provider the
+call is ambiguous, never the other's
+(`ct-implementation-obligations-select-nothing`). And whether a required
+context trait has a provider -- none, or several -- is an obligation of the
+call that requires it, never evidence against a method-syntax candidate:
+`AMBIGUOUS-CONTEXT-IMPLEMENTATION` is one of `hir::methods::ObligationKinds`,
+like `MISSING-CONTEXT` (CONTEXTS.md, "Method syntax"; SFIAE-MILESTONE-1.md).
+
 **Exact contexts are unchanged.** `context x: LinuxIO` still requires exactly
 `LinuxIO`; a context implementing a trait never satisfies an exact
 requirement of another type, and exact requirements are checked exactly as

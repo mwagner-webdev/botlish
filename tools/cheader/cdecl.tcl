@@ -67,7 +67,7 @@ namespace eval ::cdecl {
     variable seedTypedefs {}
 
     variable storageWords {typedef extern static auto register _Thread_local __thread thread_local constexpr}
-    variable fnspecWords {inline __inline __inline__ _Noreturn __noreturn__}
+    variable fnspecWords {inline __inline __inline__ __forceinline _Noreturn __noreturn__}
     variable qualWords {
         const const __const const __const__ const
         volatile volatile __volatile volatile __volatile__ volatile
@@ -77,8 +77,12 @@ namespace eval ::cdecl {
         __ptr32 __ptr32 __ptr64 __ptr64 __unaligned __unaligned __w64 __w64
         __sptr __sptr __uptr __uptr
     }
+    # (MSVC's sized integer keywords, __int8 to __int64, which its own
+    # headers spell size_t and intptr_t with, are its char, short, int and
+    # long long: BaseType spells them so.)
     variable typeWords {void char short int long float double signed __signed
-        __signed__ unsigned _Bool _Complex __complex__ __complex _Imaginary __int128}
+        __signed__ unsigned _Bool _Complex __complex__ __complex _Imaginary __int128
+        __int8 __int16 __int32 __int64}
     # Type names that are keywords of some compilers and typedefs of others
     # (glibc typedefs _Float32 for clang): a type only where no type
     # specifier was seen yet, like a typedef name.
@@ -653,6 +657,12 @@ proc ::cdecl::BaseType {words} {
     foreach w $words {
         if {$w in {__signed __signed__}} { set w signed }
         if {$w in {__complex__ __complex}} { set w _Complex }
+        switch -- $w {
+            __int8 { set w char }
+            __int16 { set w short }
+            __int32 { set w int }
+            __int64 { dict incr count long 2; continue }
+        }
         dict incr count $w
     }
     set n [lambda {count w} { expr {[dict exists $count $w] ? [dict get $count $w] : 0} }]

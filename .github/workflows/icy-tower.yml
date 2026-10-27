@@ -3,11 +3,12 @@ name: icy-tower
 # The Icy Tower vertical slice (ICY-TOWER-VERTICAL-SLICE-1.md, "CI"): the
 # game's Linux executable built from source with the generated SDL3 binding,
 # its tests with the package-owned libSDL3.so present (so none of
-# tests/workload-icy-tower.test's executable tests is skipped: the ordinary
-# test jobs, tests.yml, run the same file without SDL, where only the pure
-# game's tests run), the independent oracle, the mutants, and a real X11
-# window under Xvfb (keyboard input injected with XTest, screenshots). The
-# executable and the screenshots are uploaded as the run's artifact.
+# tests/workload-icy-tower.test's Linux executable tests is skipped: the
+# ordinary test jobs, tests.yml, run the same file without SDL, where only
+# the pure game's tests run; its Windows tests run in icy-tower-windows.yml),
+# the independent oracle, the mutants, and a real X11 window under Xvfb
+# (keyboard input injected with XTest, screenshots). The executable and the
+# screenshots are uploaded as the run's artifact.
 
 on:
   push:
@@ -63,12 +64,20 @@ jobs:
           BOTLISH_SDL3_CMAKE_FLAGS="-DSDL_WAYLAND=OFF -DSDL_X11_XCURSOR=OFF -DSDL_X11_XINPUT=OFF -DSDL_X11_XRANDR=OFF -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XSHAPE=OFF -DSDL_X11_XFIXES=OFF -DSDL_X11_XDBE=OFF -DSDL_X11_XTEST=OFF -DSDL_X11_XSYNC=OFF" \
             tclsh9.0 tests/cffi/sdl3.tcl
 
-      - name: Run the slice's tests (none skipped)
+      # None skipped but the Windows executable's tests
+      # (icyTowerWindowsExecutable), which need Windows and run in
+      # icy-tower-windows.yml: every skip must be one of theirs.
+      - name: Run the slice's tests (none skipped but the Windows ones)
         run: |
           tmp=$(mktemp -d)
           tclsh9.0 tests/workload-icy-tower.test -tmpdir "$tmp" | tee "$tmp/log"
           grep -qP 'Failed\t0$' "$tmp/log"
-          ! grep -qP 'Skipped\t[1-9]' "$tmp/log"
+          skipped=$(grep -oP 'Skipped\t\K[0-9]+' "$tmp/log")
+          windows=$(grep -oP '^\t\K[0-9]+(?=\ticyTowerWindowsExecutable$)' "$tmp/log" || true)
+          [ "$skipped" = "${windows:-0}" ] || {
+            echo "::error::$skipped tests skipped, ${windows:-0} of them the Windows executable's"
+            exit 1
+          }
 
       - name: Build the executable
         run: examples/games/icy-tower/build.sh "$PWD/icy-tower-out/icy-tower"
