@@ -630,14 +630,38 @@ unchanged checkout.
 * `audit/bot-modules/tools/fuzz.tcl` (new: random application trees of
   modules, packages, nested packages, collisions, `.bot_modules/std` and
   rooted imports, against an independent model of section B's table and
-  of the loader's depth-first order): FUZZ-PLACEHOLDER.
+  of the loader's depth-first order): 0 failures in every run on the final code:
+  `-n 300 -seed 1` (CYCLE 47, MODULE-COLLISION 9, RESERVED-NAMESPACE 21,
+  SELF-IMPORT 13, UNKNOWN-NAMESPACE 101, a value 109 times, 20 of them read
+  through two same-named instances), `-n 300 -seed 20000` (CYCLE 38,
+  MODULE-COLLISION 14, RESERVED-NAMESPACE 14, SELF-IMPORT 20,
+  UNKNOWN-NAMESPACE 103, value 111, 18 through same-named instances), both
+  on interp and compile, and `-n 60 -seed 40000 -backends "interp
+  cranelift-generic cranelift"` (value 21, 3 through same-named instances;
+  each rejection kind present). Earlier runs during development (seeds
+  1-80, 1000-1199 and 5000-5099) found generator and oracle mistakes, never
+  a compiler disagreement.
 * `audit/imports/tools/fuzz.tcl -n 60 -seed S -backends "interp
   compile"` for seeds 1, 2 and 3: 60 programs, 60 negatives each, 0
   differential, oracle, negative-escape or backend disagreements.
 
 ### Interchange and isolation over the corpus (executed)
 
-ROUNDTRIP-PLACEHOLDER
+Over each tool's default set of twelve golden suites, on the final front
+end:
+
+* `audit/hir-interchange/tools/roundtrip.tcl -via cache`: 12 suites, 120
+  artifacts and outcomes compared, 0 differ (every HIR written to a cache
+  entry and read by a fresh process that runs no build). A first run was
+  stopped and restarted because a front-end file was edited during it (the
+  fingerprint its children check).
+* `audit/hir-interchange/tools/roundtrip.tcl -via interchange`: 12 suites,
+  108 artifacts and outcomes compared, 0 differ.
+* `audit/compilation-isolation/tools/interleave.tcl`: 12 suites, 96
+  artifacts and outcomes compared, 0 differ.
+
+Programs of packages are no golden suite (a suite is one file); their
+interchange and isolation are `bm-interchange` and `bm-isolation`.
 
 ### Compilerpedia and the census (executed)
 

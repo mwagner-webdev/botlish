@@ -364,7 +364,12 @@ proc Compiled {dir backends} {
     }
     return [lmap backend $backends {
         lassign [outcomeUnderHir $backend $hir] tag value
-        expr {$tag eq "value" ? $value : "$tag: $value"}
+        # (Never expr's ?: over a value: `nan` and `inf` read as numbers.)
+        if {$tag eq "value"} {
+            set value
+        } else {
+            string cat "$tag: " $value
+        }
     }]
 }
 
@@ -395,7 +400,11 @@ try {
         set oracle [Oracle $case]
         set expected [Expected $case $oracle $backends]
         set got [Compiled $dir $backends]
-        dict incr outcomes [expr {[lindex $oracle 0] eq "value" ? "value" : [lindex $oracle 1]}]
+        if {[lindex $oracle 0] eq "value"} {
+            dict incr outcomes value
+        } else {
+            dict incr outcomes [lindex $oracle 1]
+        }
         if {[lindex $oracle 0] eq "value" && [SameNamedInstances]} {
             # (A value read through two instances of one package name.)
             dict incr outcomes "value with same-named instances"
