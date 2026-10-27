@@ -54,6 +54,26 @@ refuses the option. The diagnostic stays visible, and every other warning
 stays an error. `tests.yml` and `tests-arm64.yml` build BoringSSL with the
 same script. Their cache keys hash it, so they rebuild once.
 
+## The Windows workflow's cb-win32-current
+
+`tests/c-bindgen.test`'s Win32 tests run wherever clang finds MinGW-w64
+headers of the pinned version. With the pin at 11.0.1 that excluded the
+Windows runner, whose MinGW-w64 is 13. With the pin at 13.0.0 they ran
+there too, and `cb-win32-current` failed on main's Windows acceptance tier.
+The runner's clang is LLVM's 20.1.8, and the committed binding is byte for
+byte the generation of the c-bindgen workflow's Clang 21.1.8. Generating
+with Ubuntu's clang 20.1.8 reproduces the difference exactly: the modules
+and `layouts-check.c` are identical. Only `layouts.tsv`, `manifest.txt`,
+`report.tsv` and `report.txt` differ, in the version string and token
+count, and because clang 20 does not know `_m_prefetchw` as a builtin, so
+`PrefetchForWrite` is `no-import-library` there instead of
+`no-link-symbol`.
+
+`cb-win32-current` now carries `win32Toolchain`: `mingw` and a clang whose
+version string is the committed manifest's `toolchain_version`. The c-bindgen
+workflow has that clang and allows no skip. The other Win32 tests keep
+running with any clang, the Windows runner's included.
+
 ## Regenerated bindings
 
 Every committed profile and target was regenerated with the pinned toolchain
