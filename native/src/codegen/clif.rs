@@ -69,7 +69,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
+    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STACK_LIMIT_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -85,6 +85,10 @@ use std::collections::HashMap;
 const I64: ir::Type = types::I64;
 
 pub struct Symbols {
+    /// Whether every function with a Botlish call checks its stack pointer
+    /// (nir::Program's `stack_limit_checked`: a native library's program;
+    /// codegen::roots's `stack_check`).
+    pub stack_limit: bool,
     /// Per function: whether its direct function returns a raw Int result
     /// together with a status word (`raw_result` and `may_error`: see
     /// `physical_results`), so a call site checks the status word, not the
@@ -489,6 +493,7 @@ fn module_error(e: cranelift_module::ModuleError) -> BackendError {
 pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, local: bool) -> Result<Symbols, BackendError> {
     let direct_helpers = export && module.isa().name() == "x64";
     let mut symbols = Symbols {
+        stack_limit: program.stack_limit_checked,
         status_result: vec![],
         direct: vec![],
         entry: vec![],
@@ -946,7 +951,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             !stack_maps || matches!(module.isa().name(), "x64" | "aarch64"),
             "native-frame roots on an ISA the frame walk does not know"
         );
-        let plan = roots::plan(f, stack_maps);
+        let plan = roots::plan_with_stack_check(f, stack_maps, symbols.stack_limit);
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         let mutarray_inline = std::env::var("BOTLISH_NATIVE_MUTARRAY_INLINE_OPT").ok().as_deref() != Some("0");
         let root_init_opt = std::env::var("BOTLISH_NATIVE_ROOT_INIT_OPT").ok().as_deref() != Some("0");
@@ -1061,6 +1066,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// nothing anywhere else, its recursion bounded by the stack guard
     /// (runtime::native_stack's `depth_checked`).
     fn prologue_root_frame(&mut self) {
+        if self.plan.stack_check {
+            self.prologue_stack_limit();
+        }
         match self.plan.storage {
             RootStorage::RuntimeStack => self.prologue_runtime_stack(),
             RootStorage::NativeFrame if self.plan.num_slots == 0 => {
@@ -1074,6 +1082,31 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             RootStorage::NativeFrame => self.prologue_native_frame(),
         }
+    }
+
+    /// `RootPlan::stack_check` (a native library's function with a Botlish
+    /// call, NATIVE-LIBRARY-MILESTONE-1.md, "Stack safety"): the frame,
+    /// already allocated and probed, fails with NATIVE LIMIT STACK
+    /// (`rt_stack_overflow`) when the stack pointer is below `vm.stack_limit`
+    /// -- the running stack's bound plus a reserve for what may run below a
+    /// checked frame (runtime::native_stack's `stack_limit`). A library's
+    /// host runs no stack guard of ours, so this check is what bounds its
+    /// recursion. Nothing to undo on the way out; the failure is an error
+    /// every caller checks (nir's call effects, `check_stack_limit`).
+    fn prologue_stack_limit(&mut self) {
+        let sp = self.b.ins().get_stack_pointer(I64);
+        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STACK_LIMIT_OFFSET);
+        let over = self.b.ins().icmp(IntCC::UnsignedLessThan, sp, limit);
+        let overflow = self.b.create_block();
+        let setup = self.b.create_block();
+        self.b.ins().brif(over, overflow, &[], setup, &[]);
+        self.b.set_cold_block(overflow);
+
+        self.b.switch_to_block(overflow);
+        self.call_helper("rt_stack_overflow", &[self.vm]);
+        self.return_zeros();
+
+        self.b.switch_to_block(setup);
     }
 
     /// `RootStorage::RuntimeStack`'s prologue: reserve and clear this

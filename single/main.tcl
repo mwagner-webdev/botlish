@@ -1,39 +1,83 @@
-# single/main.tcl -- the entry script of the single-file Botlish compiler
-# (SINGLE-EXECUTABLE.md).
+# single/main.tcl -- the entry script of the packaged Botlish compiler: the
+# single-file compiler (SINGLE-EXECUTABLE.md) and the macOS application
+# (MACOS-AARCH64-MILESTONE-9.md).
 #
-# single/build.sh packs this file as the zipkit's main.tcl
-# (//zipfs:/app/main.tcl), which Tcl 9's startup (TclZipfs_AppHook) runs with
-# the executable's own arguments. The archive holds this repository's compiler
+# single/package.tcl packs this file as the archive's main.tcl
+# (//zipfs:/app/main.tcl), and the archive holds this repository's compiler
 # stack under //zipfs:/app/botlish -- main.tcl, core/, compiler/, hir/,
-# surface/, native/*.tcl, stdlib/ and compilerpedia/, at the same relative paths
-# as in a checkout -- and the native backend's two Rust executables and its
-# runtime archive under //zipfs:/app/native-bin. This script
+# surface/, native/*.tcl, stdlib/ and compilerpedia/, at the same relative
+# paths as in a checkout. Two startups run it with the compiler's arguments:
+#
+#   * the single executable's: Tcl 9's (TclZipfs_AppHook) mounts the zip
+#     archive attached to the executable at //zipfs:/app, whose native-bin/
+#     holds the native backend's two Rust executables and its runtime archive;
+#   * the macOS application's: its launcher (single/macos/launcher.c) mounts
+#     Contents/Resources/botlish.zip at //zipfs:/app and sets
+#     ::single::bundle, the bundle's Contents directory, whose MacOS/ holds
+#     the native backend (botlish-native) and Resources/ the runtime archive.
+#
+# This script
 #
 #   1. makes UTF-8 the system and standard-channel encoding (a checkout's
-#      canonical setup is LANG=C.utf8, AGENTS.md; a single executable does not
-#      ask its user for a locale),
-#   2. unless the invocation is only the usage summary (no arguments), -help,
-#      -version or the language server (-lsp, -lsp-worker: they analyze and
-#      never reach a backend), installs the native executables, which the kernel cannot
-#      run from inside the archive, into a per-build cache directory (once
-#      per build: later runs find them there) -- and, for a run that may link
-#      a native executable (-emit-native-executable, a native backend), the
-#      runtime archive, which the host's linker cannot read from inside the
-#      archive either -- and points the native backend at them:
-#      BOTLISH_NATIVE_BIN (native::binary) for the driver, and the `auto`
-#      linker (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) unless
-#      BOTLISH_NATIVE_LINKER names one: the toolchain-free `stub`, with
-#      BOTLISH_NATIVE_AOT_STUB, for a program that calls no C -- no rustc,
-#      linker or runtime library -- and the `system` linker for one that
-#      calls C, which needs the host's C compiler driver and the program's
-#      libraries, never Rust: the runtime archive beside the driver,
+#      canonical setup is LANG=C.utf8, AGENTS.md; a packaged compiler does not
+#      ask its user for a locale) -- the arguments and the environment Tcl
+#      decoded with the locale's encoding re-decoded as UTF-8 -- and the
+#      archive read-only to the compiler
+#      (zipfs keeps writes in memory up to ::tcl::zipfs::wrmax; with 0 it
+#      refuses them),
+#   2. points the native backend at the packaged one -- BOTLISH_NATIVE_BIN
+#      (native::binary) for the driver, and the `auto` linker
+#      (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md) unless BOTLISH_NATIVE_LINKER
+#      names one: the toolchain-free `stub`, with BOTLISH_NATIVE_AOT_STUB,
+#      for a program that calls no C where the stub runs (Linux x86-64), and
+#      the `system` linker otherwise, which needs the host's C compiler
+#      driver and the program's libraries, never Rust: the runtime archive
+#      beside the driver (or, in the application, in its Contents/Resources,
+#      where the driver looks for it from Contents/MacOS);
+#
+#      the single executable must first install them: the kernel cannot run
+#      the native executables from inside the archive, nor can the host's
+#      linker read the runtime archive there. Unless the invocation is only
+#      the usage summary (no arguments), -help, -version or the language
+#      server (-lsp, -lsp-worker: they analyze and never reach a backend), it
+#      copies the executables into a per-build cache directory (once per
+#      build: later runs find them there), and the runtime archive too for a
+#      run that may link a native executable (-emit-native-executable, a
+#      native backend). The application installs nothing: its files are run
+#      and linked where they are, signed, in the bundle,
 #   3. runs the checkout's own main.tcl, unchanged, with the same arguments:
 #      every option main.tcl documents works the same way.
 
+# Tcl decoded the arguments and the environment (and the launcher the
+# bundle's path) with the locale's encoding,
+# which without a locale is iso8859-1 on Linux; file names and arguments are
+# UTF-8 bytes: re-decoded as UTF-8 here (a value that is no UTF-8 is kept as
+# it was). macOS's startup encoding is utf-8 already.
+namespace eval ::single {}
+set ::single::locale [encoding system]
+proc ::single::Recode {text} {
+    if {[catch {encoding convertfrom -profile strict utf-8 [encoding convertto -profile strict $::single::locale $text]} recoded]} {
+        return $text
+    }
+    return $recoded
+}
 encoding system utf-8
+if {$::single::locale ne "utf-8"} {
+    set ::argv [lmap arg $::argv {::single::Recode $arg}]
+    if {[info exists ::single::bundle]} {
+        set ::single::bundle [::single::Recode $::single::bundle]
+    }
+    foreach name [array names ::env] {
+        set value [::single::Recode $::env($name)]
+        if {$value ne $::env($name)} {
+            set ::env($name) $value
+        }
+    }
+}
 foreach channel {stdin stdout stderr} {
     fconfigure $channel -encoding utf-8
 }
+set ::tcl::zipfs::wrmax 0
 
 namespace eval ::single {
     variable app [file dirname [file normalize [info script]]]
@@ -43,12 +87,22 @@ namespace eval ::single {
     variable runtime libbotlish_runtime.a
 }
 
-# The directories the native executables may be installed in, best first:
-# $BOTLISH_CACHE_DIR, then $XDG_CACHE_HOME/botlish, then ~/.cache/botlish.
+# The directories a packaged compiler may keep files in (the single
+# executable's native executables, the language server's copy of the
+# standard library), best first: $BOTLISH_CACHE_DIR, then on macOS
+# ~/Library/Caches/botlish, the user's cache directory there, and elsewhere
+# $XDG_CACHE_HOME/botlish, then ~/.cache/botlish. Never the application
+# bundle, whose files are signed.
 proc ::single::CacheRoots {} {
     set roots {}
     if {[info exists ::env(BOTLISH_CACHE_DIR)] && $::env(BOTLISH_CACHE_DIR) ne ""} {
         lappend roots $::env(BOTLISH_CACHE_DIR)
+    }
+    if {$::tcl_platform(os) eq "Darwin"} {
+        if {[info exists ::env(HOME)] && $::env(HOME) ne ""} {
+            lappend roots [file join $::env(HOME) Library Caches botlish]
+        }
+        return $roots
     }
     if {[info exists ::env(XDG_CACHE_HOME)] && [file pathtype $::env(XDG_CACHE_HOME)] eq "absolute"} {
         lappend roots [file join $::env(XDG_CACHE_HOME) botlish]
@@ -134,23 +188,30 @@ proc ::single::NativeDir {linking} {
     return $dir
 }
 
-# The usage summary, -help and -version run no program: they install
-# nothing (main.tcl answers them before it loads the compiler). Nor does
-# the language server or its worker (which starts as this executable, with
-# -lsp-worker, whenever it is replaced), which never reach a backend.
-if {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
+if {[info exists ::single::bundle]} {
+    # The macOS application: the bundle's own driver, whatever the
+    # environment names (never another build's), run where it is. The driver
+    # finds the runtime archive in Contents/Resources (codegen::aot's
+    # runtime_archive), and there is no stub: `auto` is the system linker.
+    set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
+} elseif {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
+    # The usage summary, -help and -version run no program: they install
+    # nothing (main.tcl answers them before it loads the compiler). Nor does
+    # the language server or its worker (which starts as this executable,
+    # with -lsp-worker, whenever it is replaced), which never reach a
+    # backend.
     if {[catch {::single::NativeDir [::single::MayLink $::argv]} ::single::nativeDir]} {
         puts stderr "botlish: cannot install the native backend: $::single::nativeDir"
         exit 2
     }
     set ::env(BOTLISH_NATIVE_BIN) [file join $::single::nativeDir botlish-native]
     set ::env(BOTLISH_NATIVE_AOT_STUB) [file join $::single::nativeDir botlish-aot-stub]
-    # An explicit choice (BOTLISH_NATIVE_LINKER=stub, system) is kept: for
-    # diagnostics and tests.
-    if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
-        set ::env(BOTLISH_NATIVE_LINKER) auto
-    }
+}
+# The packaged compiler's linker. An explicit choice (BOTLISH_NATIVE_LINKER=
+# stub, system) is kept: for diagnostics and tests.
+if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
+    set ::env(BOTLISH_NATIVE_LINKER) auto
 }
 
 set ::argv0 [info nameofexecutable]

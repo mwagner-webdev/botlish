@@ -11,6 +11,12 @@ program that calls C (C-FFI.md) needs, besides, the host's C compiler driver
 checkout: the compiler carries its precompiled runtime
 (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md, "The system linker" below).
 
+On macOS (Apple Silicon) the same compiler is an application,
+`Botlish.app`, built by `single/macos/build.sh`: Tcl as the bundle's own
+`Tcl.framework`, the compiler in a ZIP archive inside it, the native backend
+and runtime archive beside them, signed ad hoc (MACOS-AARCH64-MILESTONE-9.md;
+"The macOS application" below).
+
 ```sh
 single/build.sh                     # -> single/out/botlish
 single/out/botlish -backend cranelift examples/surface/01-arithmetic.bot
@@ -294,6 +300,75 @@ that builds an executable with `BOTLISH_NATIVE_LINKER=stub`: 2,183 tests, all
 passing except the 10 that read rustc-linked symbols, which now skip.
 `single/smoke-test.sh` checks the packed compiler as a user would run it.
 
+## The macOS application
+
+MACOS-AARCH64-MILESTONE-9.md has the design, its census and its evidence.
+A signed Mach-O cannot carry a ZIP archive appended to it (code signing
+seals a Mach-O up to its signature; anything after it fails strict
+verification), so the macOS distribution is not one file but one
+application, downloaded as one archive (`botlish-macos-aarch64.zip`):
+
+```text
+Botlish.app/Contents/
+  Info.plist
+  MacOS/botlish                    the launcher (single/macos/launcher.c)
+  MacOS/botlish-native             the native backend's driver
+  Frameworks/Tcl.framework/        Tcl 9.0.1, built by Tcl's own macOS build
+  Resources/botlish.zip            the compiler: single/package.tcl -archive
+  Resources/libbotlish_runtime.a   the runtime archive the system linker links
+  _CodeSignature/CodeResources     the seal of all of it
+```
+
+```sh
+single/macos/build.sh                          # -> single/out/macos/Botlish.app and the .zip
+Botlish.app/Contents/MacOS/botlish -version    # (or a symbolic link to it on PATH)
+```
+
+* **The same compiler.** `botlish.zip` is staged by the procedure that
+  stages the single executable's archive (`single/package.tcl`'s
+  `StageCompiler`): `main.tcl` (single/main.tcl), `botlish/` (the compiler
+  stack, stdlib/, compilerpedia/, BUILD) and `native-bin/ID`, the bundled
+  driver's and archive's identity -- but no `tcl_library` (the framework's)
+  and no native executable (the bundle's).
+* **The launcher** initializes Tcl the way a Tcl application does
+  (`Tcl_Main` with an application initialization procedure) and does three
+  things of its own: it checks that the Tcl dyld loaded (weakly linked,
+  through `LC_RPATH @executable_path/../Frameworks`) is the bundle's own
+  framework; it sets `tcl_library` to that framework's script library
+  (never `$TCL_LIBRARY`); it mounts `Contents/Resources/botlish.zip` at
+  `//zipfs:/app` and runs `//zipfs:/app/main.tcl` with every argument,
+  `argv[0]` being its own real path. A missing or damaged part of the
+  application is the launcher's diagnostic ("botlish: ...", status 2).
+* **single/main.tcl** runs the bundle's driver where it is
+  (`BOTLISH_NATIVE_BIN`, whatever the environment names) and sets
+  `BOTLISH_NATIVE_LINKER=auto`, which is the system linker on macOS: there
+  is no stub. The driver finds the runtime archive in `Contents/Resources`
+  from its own path in `Contents/MacOS` (codegen::aot's
+  `packaged_runtime_archive`). The application installs nothing; the
+  language server's copy of the standard library (for an editor's
+  go-to-definition) goes to `~/Library/Caches/botlish`, or
+  `$BOTLISH_CACHE_DIR`, never into the bundle. Both distributions make the
+  archive read-only to the compiler (`::tcl::zipfs::wrmax 0`).
+* **What it needs.** Nothing to analyze, check, run on the Tcl backends or
+  the native JIT, answer -help or serve an editor: no Tcl, Rust, Cargo or
+  checkout. Every executable it builds is linked by the system linker, so
+  `-emit-native-executable` (and a native run of a program that calls C,
+  Darwin IO included) needs Apple's Command Line Tools or Xcode; without
+  them the link says so (`NATIVE LINK TOOLCHAIN`, "xcode-select
+  --install").
+* **Signing.** Ad hoc, inner code first: the framework's version, the
+  driver, then the application (its launcher and the seal of its
+  resources). `codesign --verify --deep --strict` passes, after moving the
+  application too; it is not notarized, and Gatekeeper rejects a
+  downloaded copy until it is (MACOS-AARCH64-MILESTONE-9.md, "Developer ID
+  signing and notarization").
+
+CI's `app` jobs (`.github/workflows/macos-arm64.yml`) build, verify, accept
+(single/smoke-test.sh, single/ffi-smoke-test.sh, single/macos/app-test.sh,
+single/macos/compare.sh) and measure it on every push, run it once more on
+a runner whose developer tools, Rust and checkout were moved away, and
+upload `botlish-macos-aarch64.zip` with its checksum as the run's artifact.
+
 ## Limits
 
 * x86-64 Linux with glibc. The compiler needs the glibc it was built
@@ -307,10 +382,10 @@ passing except the 10 that read rustc-linked symbols, which now skip.
   host's C compiler driver and linker (`apt install gcc` on Debian and
   Ubuntu) and the program's C libraries; without a driver its link is
   refused (`NATIVE LINK TOOLCHAIN`), and every other program still links
-  with no toolchain at all. Only Linux x86-64 has a single executable;
-  the system linker itself runs on Linux AArch64, macOS AArch64 and Windows
-  x86-64 too (from a checkout's build), where a single-file distribution
-  is a later milestone's.
+  with no toolchain at all. Only Linux x86-64 has a single executable, and
+  macOS AArch64 the application above; the system linker itself runs on
+  Linux AArch64 and Windows x86-64 too (from a checkout's build), where a
+  packaged distribution is a later milestone's.
 * The single executable runs the checkout's code as of its build. It reports
   library diagnostics at `//zipfs:/app/...` paths, and it has no tests or
   tools. Its standard library is the packed one: an application adds modules

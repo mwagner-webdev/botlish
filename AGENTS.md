@@ -344,6 +344,63 @@ the test suite, still install the `.deb`s.
   `single/smoke-test.sh` and `single/ffi-smoke-test.sh` after
   `single/build.sh`.
 
+## The macOS application (Botlish.app)
+
+On macOS the packaged compiler is an application bundle, not one file
+(MACOS-AARCH64-MILESTONE-9.md; SINGLE-EXECUTABLE.md, "The macOS
+application"): `single/macos/build.sh` makes `Botlish.app` -- the launcher
+`Contents/MacOS/botlish` (`single/macos/launcher.c`), the driver
+`Contents/MacOS/botlish-native`, `Contents/Frameworks/Tcl.framework`
+(`single/macos/tcl-framework.sh`: Tcl's own framework build of the pinned
+9.0.1, install name `@rpath/Tcl.framework/Versions/9.0/Tcl`), the compiler
+archive `Contents/Resources/botlish.zip` (`single/package.tcl -archive`)
+and `Contents/Resources/libbotlish_runtime.a` -- signs it ad hoc, verifies
+it (`single/macos/verify.sh`) and archives it as
+`botlish-macos-aarch64.zip`. macos-arm64.yml's `app` and `app-clean` jobs
+build and accept it on every push (a manual run with `app_only` runs only
+them). Keep it so:
+
+* One staging procedure: both distributions pack what `single/package.tcl`'s
+  `StageCompiler` stages; never a second file list. The macOS archive holds
+  no Tcl library (the framework's) and no native executable (the bundle's).
+* Never append data to a signed Mach-O, change a file after it is signed,
+  or sign with `--deep`: sign inner code first (the framework's version,
+  the driver, then the application). Executable code lives in
+  `Contents/MacOS` and `Contents/Frameworks` only; nothing is extracted to
+  a cache to run, and nothing is ever written into the bundle (the
+  language server's copy of the standard library goes to
+  `~/Library/Caches/botlish` or `$BOTLISH_CACHE_DIR`).
+* The launcher only starts Tcl and the archive; it never implements the
+  command line, and never prints on standard output. It accepts only the
+  bundle's own Tcl (never one from `TCL_LIBRARY`, `DYLD_FRAMEWORK_PATH`,
+  /Library/Frameworks or Homebrew) and finds its bundle from its own real
+  path, never from argv[0], PATH or the working directory. The driver finds
+  its runtime archive from its own path (`packaged_runtime_archive`), and
+  single/main.tcl always runs the bundle's driver. Tcl starts in a UTF-8
+  locale (`LC_ALL=UTF-8` while it initializes: Tcl 9.0.1 crashes in a
+  non-ASCII path otherwise) and the user's `LC_ALL` is put back, exactly,
+  before anything runs: never let the compiler's children see a locale
+  the user did not set.
+* Ad hoc signing is not notarization: never describe the artifact as
+  notarized or Gatekeeper-approved, never add a JIT or other entitlement or
+  the hardened runtime without the Developer ID milestone's decision
+  (MACOS-AARCH64-MILESTONE-9.md, "Prerequisites for Developer ID signing
+  and notarization": the census measured what the JIT needs then).
+* A test or tool that runs the application uses a copy for anything that
+  damages or changes it, and checks the bundle untouched afterwards.
+
+If you change `single/macos/`, `single/main.tcl`, `single/package.tcl`,
+`audit/macos-app/` or the driver's `packaged_runtime_archive`, push and
+read the `app` and `app-clean` jobs (they run `single/macos/verify.sh`,
+`single/smoke-test.sh`, `single/ffi-smoke-test.sh`,
+`single/macos/app-test.sh`, `single/macos/compare.sh` and
+`bench/macos-app.tcl`), run `audit/macos-app/tools/mutate.tcl` (a push with
+`[ci-app-mutants]`: every mutant in its `mutants.txt` must still apply and
+be killed; update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), and the Linux single executable's
+checks (single/build.sh, both smoke tests,
+`audit/single-executable/tools/mutate.tcl`): the scripts are shared.
+
 ## Running the tests locally
 
 Run the tests locally with `tclsh9.0 tests/local.tcl`, not `tests/all.tcl`.
@@ -1403,8 +1460,9 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   native frames hold the roots), and no shadow stack is allocated.
   Native-frame roots need the guard (`native_stack.rs`'s assertion): never
   bring back a stack-pointer check, a depth token or a call effect for the
-  stack on a host that has native-frame roots; a host without the guard
-  starts on the fallback plan.
+  stack on a host that has native-frame roots (a native library's code,
+  which runs where no guard of ours does, is the one exception: Native
+  libraries, below); a host without the guard starts on the fallback plan.
 * The fallback plan (shadow-stack roots and depth, leaf frames published,
   no walk) remains the bootstrap of a host without native-frame roots: the
   `fallback-roots` cargo feature builds it on any host, to run the suite
@@ -2705,9 +2763,23 @@ a shared library, a C header and a JSON manifest. Keep it so:
 * Instances are explicit (`NAME_create`/`NAME_destroy`), thread-affine,
   one call at a time (WRONG-THREAD, REENTRANT-CALL), looked up by ticket
   (INVALID-INSTANCE). A library installs no signal handler, never `_exit`s
-  and runs on its caller's stack: stack overflow is process-fatal there,
-  and no document may claim otherwise until a library-owned stack exists.
-  The walk of a call's stack ends at the call (`Vm::stack_ceiling`).
+  and runs on its caller's stack. The walk of a call's stack ends at the
+  call (`Vm::stack_ceiling`).
+* A library bounds its own Botlish recursion (NATIVE-LIBRARY-MILESTONE-1.md,
+  "Stack safety"): the driver emits its program through
+  `nir::check_stack_limit`, so every function with a Botlish call checks
+  its stack pointer against `Vm::stack_limit` in its prologue and fails
+  with NATIVE LIMIT STACK, a fallible call its callers check. The limit is
+  the running stack's (`NativeStack::stack_limit`: an eighth in reserve):
+  a call takes its entry stack's (`Vm::stack_limit_at`, none on a stack
+  the instance did not make, never another's), a coroutine switch the
+  arrival stack's (`publish_active_stack`). Keep the check a library's
+  only: never give an executable or the JIT the check or its call
+  effects (the guard bounds them). An overflow in C or the runtime, or on
+  a host's own stack, is still process-fatal, and no document may claim
+  otherwise until a library-owned stack exists.
+* Fusion's `drop_unreferenced` keeps what the exports reach, not only
+  what the program function reaches: a library export is called from C.
 * A library's entry file holds declarations only (LIBRARY-TOP-LEVEL):
   creating an instance runs module static initialization, never a script.
 * Libraries are Linux glibc's (x86_64, aarch64: `codegen::library::
@@ -2719,7 +2791,9 @@ If you change any of that (NATIVE-LIBRARY-MILESTONE-1.md, "What to run when
 changing this", lists the files), run `tests/native-library.test`,
 `tests/native-executable.test` and `tests/aot-stub-linker.test` (also under
 `BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
-native/Cargo.toml --lib program` and `audit/native-library/tools/mutate.tcl`
+native/Cargo.toml --lib program`, for the stack check also
+`tests/native-stack-overflow.test` and `audit/native-stack/tools/mutate.tcl`
+(its `effects-*` mutants), and `audit/native-library/tools/mutate.tcl`
 (every mutant in its `mutants.txt` must still apply and be killed: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule), plus `audit/native-aot/tools/mutate.tcl` for a change to

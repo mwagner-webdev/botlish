@@ -7837,6 +7837,7 @@ tests/symbolic-type-identity.test symbolic-type-identity-structural-equality-not
 tests/symbolic-type-identity.test symbolic-type-identity-web-regression-clean-compile pass
 tests/symbolic-type-identity.test symbolic-type-identity-wide-superset-byte pass
 tests/system-linker.test system-linker-auto pass
+tests/system-linker.test system-linker-bundle-runtime pass
 tests/system-linker.test system-linker-c-acceptance pass
 tests/system-linker.test system-linker-damaged-description pass
 tests/system-linker.test system-linker-keeps-only-reached-helpers pass
@@ -9640,6 +9641,9 @@ tests/native-library.test nl-main-cli pass
 tests/native-library.test nl-manifest pass
 tests/native-library.test nl-nested-libraries pass
 tests/native-library.test nl-reentrant pass
+tests/native-library.test nl-stack-safety pass
+tests/native-library.test nl-stack-safety-coroutine pass
+tests/native-library.test nl-stack-safety-foreign-stack pass
 tests/native-library.test nl-symbols pass
 tests/native-library.test nl-threads pass
 tests/native-library.test nl-two-instances pass

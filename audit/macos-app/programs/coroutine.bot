@@ -1,0 +1,20 @@
+# A coroutine (COROUTINES.md): constructed, resumed three times, its
+# values collected. MACOS-AARCH64-MILESTONE-9.md's acceptance programs:
+# single/macos/compare.sh runs them on the checkout and the application.
+
+struct Ev:
+    n: int
+
+fn counting(limit: int) -> Ev:
+    loop i from 0 to limit:
+        yield Ev {n: i * i}
+    return Ev {n: -1}
+
+fn drive() -> List[int]:
+    coroutine {step, first} = counting(3)
+    a = step()
+    b = step()
+    c = step()
+    [first.n, a.n, b.n, c.n]
+
+drive()

@@ -226,7 +226,7 @@ object format from the ISA. The macOS run confirms the JIT half.
 | codegen/aot.rs `linker_diagnostics` (:224-239) | filters GNU ld/lld/collect2 wording ("undefined reference", "cannot find") | linux | **resolved (milestone 6)**: Apple ld's `Undefined symbols for architecture arm64:` and each symbol's `referenced from:` line, `ld: library 'NAME' not found`, the wrong-architecture warning, clang's `linker command failed` | low | 7 (done) | M (done) |
 | main.rs `run_linked` (:352-432) | a program that calls C runs as a linked executable in a temp directory | posix | **verified (milestone 6)**: unchanged; a program that calls C runs this way on macOS on both native backends | low | 7 (done) | M (done) |
 | codegen/aot.rs `link_stub` (:333-370), runtime/aotimage.rs `Image::load`/`map_near`/`main` (:477-612), codegen/aot.rs `image`/`read_object` (:372-667), bin/botlish-aot-stub.rs | the toolchain-free stub linker: an ELF64 x86-64 reader, x86 trampolines, 4 KiB pages, `MAP_FIXED_NOREPLACE`, `/proc/self/exe` | elf + arch + linux | none: macOS executables use the rustc linker (milestone 5), and the stub's refusal names Linux x86-64. A Mach-O arm64 stub would need a Mach-O reader, arm64 branch relocations and veneers, an icache flush, 16 KiB pages and code signing -- a Darwin toolchain inside Botlish, which the doctrine rules out | -- | -- | -- |
-| single/build.sh, single/main.tcl :101-103, single/package.tcl | one Linux x86-64 glibc executable; forces the stub linker; static zipfs tclsh from source | linux + elf | out of scope (no macOS single executable in this port); package.tcl itself is portable Tcl | -- | 10 | -- |
+| single/build.sh, single/main.tcl :101-103, single/package.tcl | one Linux x86-64 glibc executable; forces the stub linker; static zipfs tclsh from source | linux + elf | **resolved (milestone 9, MACOS-AARCH64-MILESTONE-9.md)**: not one file on macOS -- a signed Mach-O cannot carry an appended archive -- but `Botlish.app` (single/macos/build.sh): a launcher linked to the bundled `Tcl.framework`, the compiler in `Contents/Resources/botlish.zip` (package.tcl `-archive`, the same staging), the driver and the runtime archive run and linked where they are, `auto` the system linker; signed ad hoc, verified, not notarized | medium | 9 (done) | M (done) |
 | main.rs :99-103, runtime/aot.rs :38-45 | Botlish runs on a spawned thread with a 1 GiB stack (`BOTLISH_NATIVE_STACK_BYTES`, at least 1 MiB) | posix | accepted on macOS; **its bounds and guard are found since milestone 4** (libpthread's bounds, the guard confirmed below them) | low | 4 (done) | M (done) |
 | main.rs :136-153 (`--result`), :143-144 `#[cfg(target_os = "linux")] set_result_fd` | the overflow report goes to the `--result` file through a Linux-only call; the gate is looser than the platform module's (Linux riscv64 would not compile) | linux | **resolved (milestone 4)**: `runtime::platform::set_result_fd`, under the platform module's own cfg (the three hosts with a guard) | low | 4 (done) | M (done) |
 | main.rs exit statuses, `emit` (:104-131), runtime/aot.rs `driver_protocol` (:93-152) | none: driver protocol, result lines, exit status 0/1/2/3 | posix | none | low | -- | M (done) |
@@ -985,7 +985,22 @@ entry below is the plan it was carried out from; the report is numbered 8.
 - **Linux risks:** `std::io::IO` selection must keep choosing LinuxIO on Linux
   (context-traits tests).
 
-### 10. Applications, regression breadth, optional libraries, documentation
+### 10. The macOS compiler distribution
+
+**Done (milestone 9, MACOS-AARCH64-MILESTONE-9.md)**: `Botlish.app`, the
+canonical macOS compiler: Tcl 9.0.1 as the bundle's own `Tcl.framework`
+(Tcl's framework build, `@rpath` install name), the compiler, standard
+library, compiler service and Compilerpedia in `Contents/Resources/
+botlish.zip` (mounted read-only at `//zipfs:/app` by a small launcher), the
+native driver in `Contents/MacOS` and the runtime archive in
+`Contents/Resources`, which the driver finds from its own path; signed ad
+hoc inner to outer, `codesign --verify --deep --strict` after relocation and
+after the download archive's extraction; accepted from outside the checkout
+with and without Apple's developer tools (macos-arm64.yml's `app`,
+`app-clean`); mutants (`app-mutants`). Developer ID signing and
+notarization are not done: the report's section 41 lists what they need.
+
+### 11. Applications, regression breadth, optional libraries, documentation
 
 - **Files:** examples/games/2048, tests/application-modules.test,
   examples/ffi/{tcl,sha256}, tests/cffi/boringssl.tcl, tests/local.tcl
