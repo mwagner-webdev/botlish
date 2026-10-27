@@ -124,9 +124,14 @@ worked.
   are as fast as on Linux. Programs without coroutines are unchanged:
   equal code and unwind sizes and timings within noise on Windows, and
   identical machine code on Linux.
-* **Linux and macOS are unchanged** (section 8.5). No code path of
-  theirs changed, and their CI passed: Linux x86-64, Linux AArch64, and
-  macOS with its full tier.
+* **Linux and macOS keep their code paths** (section 8.5). Their switch,
+  stacks and walk are untouched. The runtime they share with Windows
+  changed in three small ways. One of them is 3a71734b's once-per-process
+  read of the stack size, which makes their constructions cheaper too.
+  Their CI passed:
+  - macOS, its full tier included, at fa711b43 and at 3a71734b;
+  - Linux x86-64 and Linux AArch64 at 48056543, and at 3a71734b:
+    PENDING-LINUX-CI.
 
 What remains is in section 10:
 
@@ -1082,22 +1087,25 @@ were, behind `cfg`s. Three shared changes reach them:
   true there;
 * the fallback refusal in `rt_co_start`, a constant check there;
 * a coroutine stack's size is read from the environment once per
-  process, not at every start (3a71734b, section 8.2). This makes every
-  host's construction about 190 ns cheaper on Linux and changes nothing
-  else: nothing sets the variable while a process runs.
+  process, not at every start (3a71734b, section 8.2). Constructions get
+  cheaper on every host, by about 190 ns on Linux and 220 ns on Windows.
+  Nothing else changes, because nothing sets the variable while a process
+  runs.
 
 The evidence:
 
 * machine code identical before and after on 31 programs (section 9.5);
 * the local suite and the GC-stress, fuzz and mutant runs above (other
   hosts, Linux x86-64);
-* CI on 48056543 (other hosts):
-  - tests.yml run 40123417447, every job green: interp, compile, the
+* CI (other hosts):
+  - tests.yml run 40123417447 at 48056543, every job green: interp, compile, the
     cranelift and cranelift-generic coverage, the four golden shards,
     the native Rust unit tests, the stub- and system-linked executables,
     the warning gate, the method-call decision audit; its GC-stress job
     runs on main only;
-  - tests-arm64.yml run 40123419578, green;
+  - tests-arm64.yml run 40123419578 at 48056543, green;
+  - at 5b09455b (3a71734b's code with report edits), tests.yml run
+    40458887386 and tests-arm64.yml run 40458891165: PENDING-LINUX-CI;
   - macos-arm64.yml run 40131658720 at fa711b43 (the code of a4d5d108
     but for a Windows-only test file), every job green: the smoke tier
     (the Rust tests, the native stack checks, native status, objects and
