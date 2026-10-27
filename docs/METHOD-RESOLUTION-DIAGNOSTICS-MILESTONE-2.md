@@ -635,7 +635,8 @@ or reads, run on this branch:
 | `audit/compiler-service/tools/mutate.tcl` | 21 of 21 killed |
 | `audit/lsp/tools/mutate.tcl` | 30 of 30 killed |
 | `audit/syntax-recovery/tools/mutate.tcl` | 37 of 37 killed |
-| `audit/hir-interchange/tools/mutate.tcl` | @@HIRX@@ |
+| `audit/hir-interchange/tools/mutate.tcl` | 28 of 28 killed |
+| `audit/hir-interchange/tools/roundtrip.tcl -via interchange`, `-via cache` | 12 suites; 108 and 120 artifacts and outcomes compared, 0 differ |
 | `audit/static-decisions/tools/fuzz.tcl -n 10`, seeds 17, 41 and 5 | 240, 304 and 252 sites (116, 184 and 180 rejected), 0 failures |
 | `audit/static-compile/tools/fuzz.tcl`, seeds 1 and 2 | 0 disagreements (110 transparent valid sites each; 66 and 68 exact diagnostics) |
 | `audit/syntax-recovery/tools/fuzz.tcl`, seeds 1, 2 and 3 | seeds 2 and 3: 46 and 52 damaged programs, 0 failures; seed 1: two failures of one case, identical on the base (pre-existing: 10.5) |
