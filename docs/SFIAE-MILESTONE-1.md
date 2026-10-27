@@ -479,12 +479,18 @@ case clean once fixed -- as before.
   plans, the four acceptance shards, the system linker) and the macOS
   workflow (run 40130431314: Linux control, smoke, both acceptance shards,
   the system linker) passed every job. `tests` run 40130445992 (dispatched):
-  the warning gate, the four golden shards, interp, cranelift coverage, the
-  native Rust tests and the stub- and system-linked executables passed, and
-  the method-call job's tests, oracle (500 seeds, and 300 with
-  `-contexts 1`) and fuzzer step passed; compile, cranelift-generic coverage
-  and the golden suites under the reference audit were still running when
-  this was written.
+  passed every job -- the warning gate, the four golden shards, interp,
+  compile, cranelift and cranelift-generic coverage, the native Rust tests,
+  the stub- and system-linked executables, and the method-call job:
+  method-resolution (26) and method-filter (35), the oracle on 500 seeds
+  (2,682 calls, 0 disagreements) and on 300 with `-contexts 1` (1,714 calls,
+  159 accepted / 441 rejected, 21 of them by an obligation, 0
+  disagreements), the fuzzer on 20 seeds (0 disagreements), and the 25
+  method-deciding golden suites under the reference audit, which make 140
+  builds, 33 trial builds, 3 single deviations and 7 final rebuilds:
+  exactly METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md's totals (its 7.3),
+  so no golden suite's decision or build count moved. (GC stress runs on
+  pushes to main only.)
 
 ## 8. Documentation
 
