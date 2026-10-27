@@ -941,8 +941,10 @@ Cranelift IR (shown by -emit-clif); when Cranelift's verifier or its code
 generation fails, or its ISA builder rejects the host, the message is
 Cranelift's own, usually naming the function. One refusal is the native
 backend's own: "variadic C call of NAME: no variadic call lowering for the
-windows_fastcall convention" -- a variadic C call (concept.variadics) on
-Windows x86-64, which has none yet.
+CONVENTION convention" -- a variadic C call (concept.variadics) compiled
+for a C convention without a variadic lowering (System V, Apple AArch64
+and Win64 have one; Windows on AArch64, which shares the name
+windows_fastcall, has none).
 
 == WHAT TO DO
 Check that the host is a supported platform (backend.platforms). Otherwise

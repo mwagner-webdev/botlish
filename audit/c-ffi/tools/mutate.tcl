@@ -8,8 +8,8 @@
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
 # once. A mutant of code one host compiles differently (a `%% TARGET ...`
-# line after its header: linux-x86_64, linux-aarch64, macos-aarch64) runs
-# only on those hosts and is SKIPPED elsewhere. For each, a private copy of
+# line after its header: linux-x86_64, linux-aarch64, macos-aarch64,
+# windows-x86_64) runs only on those hosts and is SKIPPED elsewhere. For each, a private copy of
 # the compiler, library and native backend (a temporary directory) gets the
 # replacements, and the detectors run against it:
 #
@@ -43,8 +43,8 @@ foreach {option value} $argv {
 }
 
 # This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64).
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
+# linux-aarch64, macos-aarch64, windows-x86_64).
+set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : $::tcl_platform(platform) eq "windows" ? "windows" : [string tolower $::tcl_platform(os)]}] - \
     [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
 
 # The mutants of mutants.txt (its header has the format), as

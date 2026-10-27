@@ -16,6 +16,7 @@
 ; 16-byte aligned at a call.
 
 EXTERN bcf_capture_record_win64:PROC
+EXTERN bcf_vcapture_record:PROC
 
 .code
 
@@ -94,5 +95,52 @@ bcf_capture PROC FRAME
     add rsp, 104
     ret
 bcf_capture ENDP
+
+; What a variadic call of bcf_vcapture (or bcf_vcapture_d) arrived in, saved
+; before any compiled code runs (WINDOWS-X86-64-MILESTONE-6.md): fixture.c's
+; bcf_vcapture_record(regs, stack) layout -- eight integer registers (rcx,
+; rdx, r8, r9, then four zeros: Win64 has four argument positions), rax, eight
+; floating-point registers (the low 64 bits of xmm0-xmm3, then four zeros) --
+; and the caller's stack pointer at its call (entry rsp plus the return
+; address: its 32-byte shadow space, then its stack arguments). A variadic
+; call passes every float or double of the first four positions in both of
+; its position's registers, which is why both are kept. 168 bytes of frame:
+; 32 of shadow space, 136 of save area (17 words), which also aligns the
+; stack.
+bcf_vcapture PROC FRAME
+    sub rsp, 168
+    .allocstack 168
+    .endprolog
+    mov [rsp+32], rcx
+    mov [rsp+40], rdx
+    mov [rsp+48], r8
+    mov [rsp+56], r9
+    mov QWORD PTR [rsp+64], 0
+    mov QWORD PTR [rsp+72], 0
+    mov QWORD PTR [rsp+80], 0
+    mov QWORD PTR [rsp+88], 0
+    mov [rsp+96], rax
+    movsd QWORD PTR [rsp+104], xmm0
+    movsd QWORD PTR [rsp+112], xmm1
+    movsd QWORD PTR [rsp+120], xmm2
+    movsd QWORD PTR [rsp+128], xmm3
+    mov QWORD PTR [rsp+136], 0
+    mov QWORD PTR [rsp+144], 0
+    mov QWORD PTR [rsp+152], 0
+    mov QWORD PTR [rsp+160], 0
+    lea rcx, [rsp+32]
+    lea rdx, [rsp+176]
+    call bcf_vcapture_record
+    add rsp, 168
+    ret
+bcf_vcapture ENDP
+
+; bcf_vcapture under the prototype of a fixed double first: the same code
+; (fixture.c's alias on Unix), reached by a jump that leaves every register
+; and the stack as the call left them -- a leaf of no stack effect, so no
+; unwind data.
+bcf_vcapture_d PROC
+    jmp bcf_vcapture
+bcf_vcapture_d ENDP
 
 END

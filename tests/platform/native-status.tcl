@@ -297,10 +297,13 @@ fn c_int(x: std::ffi::c::Int) -> std::ffi::c::Int:
     x
 
 # A variadic C call's machine signature (VARIADICS-VERTICAL-SLICE-1.md): its
-# convention where variadic calls are lowered, the codegen refusal where they
-# are not (Windows x86-64). Compiled to CLIF only: nothing runs.
+# convention where variadic calls are lowered -- every host since Windows
+# x86-64's (WINDOWS-X86-64-MILESTONE-6.md) -- the codegen refusal where they
+# are not. The double is the third argument: on x86-64 the call goes through
+# its convention's stub (System V's %al, Win64's copy of xmm2 into r8).
+# Compiled to CLIF only: nothing runs.
 format = std::ffi::c::null[std::ffi::c::Char]()
-printf(format, c_int(1))
+printf(format, c_int(1), 2.5)
 } {}] \
     object [list object {fn fib(n):
     if n <= 1:
@@ -384,9 +387,10 @@ f(1)
 # (stdlib/windows.bot, stdlib/windows/io.bot: kernel32's GetStdHandle, WriteFile
 # and GetLastError; the portable std::io::IO through WindowsIO; a PE executable
 # printing through it) runs, refused everywhere else (`windows` is the
-# Windows platform's namespace: UNSUPPORTED-PLATFORM). A variadic C call is
-# still a codegen error on Windows (no Win64 variadic lowering), and until
-# milestone 5 (WINDOWS-X86-64-MILESTONE-5.md) coroutines were NATIVE
+# Windows platform's namespace: UNSUPPORTED-PLATFORM). Until milestone 6
+# (WINDOWS-X86-64-MILESTONE-6.md) a variadic C call was a codegen error on
+# Windows ("no variadic call lowering for the windows_fastcall convention");
+# since then it has Win64's lowering (c-variadic). Until milestone 5 (WINDOWS-X86-64-MILESTONE-5.md) coroutines were NATIVE
 # UNSUPPORTED ("native coroutines need stack switching"): since then each
 # coroutine stack is a Windows fiber, a coroutine yields and completes
 # (coroutine, and coroutine-general on the general runtime, coroutine
@@ -503,7 +507,7 @@ unit}}} \
         executable {value {{pe x86_64 executable} 6765}} \
         target {value {format coff c-call-conv windows_fastcall runs 1}} \
         c-convention {value {labs windows_fastcall abs windows_fastcall}} \
-        c-variadic {error {NATIVE CODEGEN} {*variadic C call of printf: no variadic call lowering for the windows_fastcall convention*}} \
+        c-variadic {value {printf windows_fastcall}} \
         other-target {error {NATIVE TARGET} {this program was built for target linux-x86_64 (x86_64-unknown-linux-gnu)*Both are x86_64, but a matching architecture is not a matching target*}} \
         other-environment {error {NATIVE TARGET} {this program was built for target windows-x86_64-gnu (x86_64-pc-windows-gnu)*Both are x86_64 windows, but the C toolchain environment is part of the target: gnu for this program, msvc here*}}]]
 
@@ -598,12 +602,12 @@ proc observe {name} {
 
 # {SYMBOL CONVENTION ...}: the calling convention of every foreign C
 # function's signature in the CLIF text CLIF (`; u0:N = NAME (C SYMBOL)`, or
-# a variadic call's `; u0:N = NAME (%al=K stub of C SYMBOL)` on x86-64
-# System V, then a function's `fnK = u0:N sigM` and its `sigM = (...) -> ...
-# CONV`).
+# a variadic call's stub's `; u0:N = NAME (WHAT stub of C SYMBOL)` on x86-64:
+# System V's `%al=K`, Win64's `r8=xmm2`; then a function's `fnK = u0:N sigM`
+# and its `sigM = (...) -> ... CONV`).
 proc foreignConventions {clif} {
     set symbols [dict create]
-    foreach {- ref symbol} [regexp -all -inline -line {^; (u0:[0-9]+) = \S+ \((?:%al=[0-9]+ stub of )?C (\S+)\)$} $clif] {
+    foreach {- ref symbol} [regexp -all -inline -line {^; (u0:[0-9]+) = \S+ \((?:\S+ stub of )?C (\S+)\)$} $clif] {
         dict set symbols $ref $symbol
     }
     set result [dict create]

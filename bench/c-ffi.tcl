@@ -26,11 +26,20 @@
 #                -- expected linear in S
 #      va 2      bcf_vsum(2, a, b): a variadic call of two trailing ints
 #                (VARIADICS-VERTICAL-SLICE-1.md), beside `add` -- on x86-64
-#                through the %al stub, on Apple AArch64 on the stack
+#                System V through the %al stub, on Apple AArch64 on the
+#                stack, on Win64 directly (no floating-point argument: no
+#                stub)
 #      va 11     bcf_vsum(11, ...): eleven trailing ints, the later ones on
 #                the stack everywhere, beside `stack 12`
 #      va 4.0    bcf_vscale(1.0, 4, ...): four trailing doubles after a
-#                fixed double (%al = 5 on x86-64)
+#                fixed double (%al = 5 on x86-64; on Win64 the doubles of the
+#                first, third and fourth positions copied into rcx, r8 and r9
+#                by its stub, WINDOWS-X86-64-MILESTONE-6.md)
+#      va 1.0    bcf_vrecord1(7, 0.5): one trailing double, at the second
+#                position (%al = 1; Win64's stub copies xmm1 into rdx)
+#      va mixed  bcf_vrecord1(K, 0.5, a, 1.5, a, 2.5, a, 3.5): doubles and
+#                ints alternating, past every Win64 register (the stub copies
+#                xmm1 and xmm3)
 #
 # 2. SHA-256 through the package-owned static BoringSSL
 #    (tests/cffi/boringssl.tcl; skipped when it is not built): sha256::digest
@@ -73,8 +82,11 @@ foreach {option value} $args {
 }
 
 set scratch [file tempdir botlish-bench-cffi-]
-exec cc -c -O2 -fPIC [file join $root tests cffi fixture.c] -o [file join $scratch fixture.o]
-exec ar rcs [file join $scratch libbotlish_cffi_fixture.a] [file join $scratch fixture.o]
+# The fixture, built as c-ffi.test builds it: the host's own C toolchain
+# (tests/ctoolchain.tcl: cc and ar, or MSVC's cl, ml64 and lib on Windows,
+# with fixture-win64.asm's assembly).
+ctool::staticLibrary $scratch botlish_cffi_fixture [file join $root tests cffi fixture.c] \
+    {*}[expr {$::tcl_platform(platform) eq "windows" ? [list [file join $root tests cffi fixture-win64.asm]] : {}}]
 set boringssl [cffi::boringsslDir]
 set linkDirs [concat [list $scratch] [expr {$boringssl eq "" ? {} : [list $boringssl]}]]
 
@@ -99,6 +111,7 @@ extern c fn sum named "bcf_sum"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read 
 extern c fn fill named "bcf_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit
 extern c fn vsum named "bcf_vsum"(count: std::ffi::c::Int, variadic) -> std::ffi::c::LongLong
 extern c fn vscale named "bcf_vscale"(factor: std::ffi::c::Double, count: std::ffi::c::Int, variadic) -> std::ffi::c::Double
+extern c fn vrecord1 named "bcf_vrecord1"(kinds: std::ffi::c::ULongLong, variadic) -> std::ffi::c::Int
 
 fn c_int(n: std::ffi::c::Int) -> std::ffi::c::Int:
     n
@@ -165,6 +178,8 @@ try {
     puts [format "  %-14s %s" "va 2" [perCall {a = bcf::c_int(1)} {bcf::vsum(2, a, a)} 0]]
     puts [format "  %-14s %s" "va 11" [perCall {a = bcf::c_int(1)} {bcf::vsum(11, a, a, a, a, a, a, a, a, a, a, a)} 0]]
     puts [format "  %-14s %s" "va 4.0" [perCall {x = 0} "y = bcf::vscale(1.0, 4, 0.5, 1.5, 2.5, 3.5):\n            on NonFiniteFloat:\n                0.0" 1]]
+    puts [format "  %-14s %s" "va 1.0" [perCall {x = 0} {bcf::vrecord1(7, 0.5)} 0]]
+    puts [format "  %-14s %s" "va mixed" [perCall {a = bcf::c_int(1)} {bcf::vrecord1(118953751, 0.5, a, 1.5, a, 2.5, a, 3.5)} 0]]
     puts ""
     if {$boringssl eq ""} {
         puts "2. SHA-256: skipped (the package-owned BoringSSL is not built: tclsh9.0 tests/cffi/boringssl.tcl)"

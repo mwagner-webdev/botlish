@@ -142,7 +142,8 @@ namespace eval native {
 #   cCalls       programs that call C (C_CALLS)
 #   cVariadics   calls of variadic C functions (VARIADICS-VERTICAL-SLICE-1.md:
 #                codegen/clif.rs's c_call_signature lowers them for System V
-#                x86-64 and AArch64 and for Apple AArch64; on another C
+#                x86-64 and AArch64, for Apple AArch64 and, since
+#                WINDOWS-X86-64-MILESTONE-6.md, for Win64; on another C
 #                convention a variadic call is a codegen error)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs;
 #                on Windows a fiber per coroutine stack,
@@ -167,14 +168,16 @@ namespace eval native {
 # guard since WINDOWS-X86-64-MILESTONE-4.md (a vectored handler of
 # STATUS_STACK_OVERFLOW: no Botlish call can fail for the stack, as on the
 # other hosts) and native coroutines since WINDOWS-X86-64-MILESTONE-5.md (a
-# Windows fiber per coroutine stack, each with its own stack guarantee); its
-# variadic C calls are a later milestone's.
+# Windows fiber per coroutine stack, each with its own stack guarantee) and
+# variadic C calls since WINDOWS-X86-64-MILESTONE-6.md (Win64's variadic
+# rules: a float or a double of the first four positions in both of its
+# position's registers).
 namespace eval native {
     variable capabilities [dict create \
         jit {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        cVariadics {linux-x86_64 linux-aarch64 macos-aarch64} \
+        cVariadics {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
