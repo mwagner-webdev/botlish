@@ -3,6 +3,7 @@
 # (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, "Independent validation").
 #
 #   tclsh9.0 audit/method-resolution/tools/oracle.tcl ?SEEDS? ?FIRST-SEED? ?-dump 1? ?-seed-only S?
+#       ?-contexts 1?
 #
 # Every program this tool generates lives in a small universe where the
 # applicability of a candidate is decidable by a few declarative rules, which
@@ -48,6 +49,22 @@
 #   * the same program with its application modules renamed (so they sort the
 #     other way) to be predicted and decided alike.
 #
+# -contexts 1 adds the environment (SFIAE-MILESTONE-1.md): a module function
+# may require a context -- the context trait env::Env, which two installable
+# contexts implement (ca::CA, cb::CB), or the exact context cx::CX -- and
+# about half of a program's statements are top-level code (no `at`, so no
+# error to handle), where a call's context requirement is checked against the
+# installations before it. Each check installs a random set of the three
+# contexts. The rules gain one, stated here too:
+#
+#   * a context requirement is an obligation of the decided call, never a
+#     condition of applicability: decisions are predicted exactly as without
+#     contexts, whatever is installed, and a program whose calls are all
+#     decided is rejected exactly when a decided callee's requirement (that of
+#     a call in a function body is its top-level caller's) has no provider
+#     (MISSING-CONTEXT) or Env has two (AMBIGUOUS-CONTEXT-IMPLEMENTATION) --
+#     with exactly those diagnostic kinds.
+#
 # The summary line is
 #
 #   method-resolution-oracle seeds N programs P calls C accepted A
@@ -66,6 +83,7 @@ set seeds 50
 set first 1
 set dump 0
 set only ""
+set contexts 0
 if {[llength $args] > 0 && [string is integer -strict [lindex $args 0]]} {
     set seeds [lindex $args 0]
     set args [lrange $args 1 end]
@@ -78,6 +96,7 @@ while {[llength $args] >= 2} {
     switch -- [lindex $args 0] {
         -dump { set dump [lindex $args 1] }
         -seed-only { set only [lindex $args 1] }
+        -contexts { set contexts [lindex $args 1] }
         default { puts stderr "unknown option [lindex $args 0]"; exit 2 }
     }
     set args [lrange $args 2 end]
@@ -132,6 +151,49 @@ set natives {
     std::list::length {list int}
     std::list::at {list element}
     std::str::length {str int}
+}
+
+# -contexts 1: the context modules, the installations a check chooses from
+# (ca, cb: the two contexts implementing env::Env; cx: the exact context) and
+# the requirements a module function may have ("" none, env, cx).
+set contextFiles {
+    env.bot "context trait Env:\n    fn tick(n: int) -> int\n"
+    ca.bot "context struct CA:\n    z: int\n\nfn tick(n: int, context c: CA) -> int:\n    n + c.z\n"
+    cb.bot "context struct CB:\n    z: int\n\nfn tick(n: int, context c: CB) -> int:\n    n * (c.z + 1)\n"
+    cx.bot "context struct CX:\n    z: int\n"
+}
+set environments {{} {ca} {cb} {ca cb} {cx} {ca cx} {ca cb cx}}
+set requirementParam {env {context e: env::Env} cx {context c: cx::CX}}
+
+# The obligation kind a requirement REQUIREMENT ("" none, env, cx) of a
+# top-level call fails with under the installations ENVIRONMENT, "" when it
+# is met.
+proc obligation {requirement environment} {
+    switch -- $requirement {
+        env {
+            set providers [llength [lmap c {ca cb} {expr {$c in $environment ? $c : [continue]}}]]
+            if {$providers == 0} { return MISSING-CONTEXT }
+            if {$providers > 1} { return AMBIGUOUS-CONTEXT-IMPLEMENTATION }
+        }
+        cx {
+            if {"cx" ni $environment} { return MISSING-CONTEXT }
+        }
+    }
+    return ""
+}
+
+# The requirement of the candidate DISPLAY under MODULES ("" for a native).
+proc requirementOf {display modules} {
+    set module [namespace qualifiers $display]
+    if {![dict exists $modules $module]} {
+        return ""
+    }
+    foreach t [dict get $modules $module] {
+        if {[lindex $t 0] eq [namespace tail $display]} {
+            return [lindex $t 4]
+        }
+    }
+    return ""
 }
 
 proc kindOf {type} {
@@ -214,6 +276,11 @@ proc gen {type depth} {
         return [list lit [literal $type] $type]
     }
     set options [producers $type]
+    if {$::noAt} {
+        # (A top-level statement: no `at`, whose IndexNotFound the top level
+        # could not handle.)
+        set options [lmap o $options {expr {[lindex $o 0] eq "at" ? [continue] : [list {*}$o]}}]
+    }
     if {$options eq "" } {
         return [list lit [literal $type] $type]
     }
@@ -328,8 +395,10 @@ proc qualified {tree outcomes counterVar} {
 # ---------------------------------------------------------------------------
 # Programs
 
-# A random program: {files MODULES STATEMENTS}, STATEMENTS a list of trees of
-# type int.
+# A random program: {MODULES STATEMENTS PLACES}, STATEMENTS a list of trees
+# of type int, PLACES each one's place: fn (a function's body) or top (with
+# -contexts 1, top-level code).
+set noAt 0
 proc program {} {
     set names [pick {{aa zz} {zz aa} {aa mm} {bb zz} {app zzz}}]
     set modules [dict create]
@@ -340,27 +409,43 @@ proc program {} {
         set taken {}
         foreach t $::templates {
             if {[lindex $t 0] in $taken || ![chance 0.45]} continue
+            if {$::contexts} {
+                # Its context requirement, the template's fifth element.
+                set r [expr {rand()}]
+                lappend t [expr {$r < 0.5 ? "" : $r < 0.85 ? "env" : "cx"}]
+            }
             lappend fns $t
             lappend taken [lindex $t 0]
         }
         dict set modules $m $fns
     }
     set statements {}
+    set places {}
     foreach i [lrepeat [expr {1 + int(rand() * 3)}] x] {
+        set place [expr {$::contexts && [chance 0.5] ? "top" : "fn"}]
+        set ::noAt [expr {$place eq "top"}]
         lappend statements [gen int 4]
+        set ::noAt 0
+        lappend places $place
     }
-    return [list $modules $statements]
+    return [list $modules $statements $places]
 }
 
 proc moduleText {fns} {
     set text "import types\n\n"
+    if {$::contexts} {
+        set text "import types\nimport env\nimport cx\n\n"
+    }
     foreach t $fns {
-        lassign $t name params result body
+        lassign $t name params result body requirement
         set ps {}
         set i 0
         foreach p $params {
             lappend ps "p$i: [dict get $::typeText $p]"
             incr i
+        }
+        if {$requirement ne ""} {
+            lappend ps [dict get $::requirementParam $requirement]
         }
         append text "fn ${name}([join $ps {, }]) -> [dict get $::typeText $result]:\n    $body\n\n"
     }
@@ -370,32 +455,56 @@ proc moduleText {fns} {
 set typesText "struct Bag:\n    n: int\n\nstruct Box:\n    v: int\n"
 
 # The files of a program whose statements are TEXTS (int expressions), each
-# its own function's body.
-proc programFiles {modules texts} {
+# its own function's body or, at PLACES' top (-contexts 1), top-level code
+# after the installations ENVIRONMENT: {FILES ANCHORS}, ANCHORS each text's
+# {LINE COLUMN} in main.bot (1-based, the column of its first character).
+proc programFiles {modules texts {places {}} {environment {}}} {
     set files [dict create types.bot $::typesText]
     set head "import std::list\nimport std::str\nimport types\n"
+    if {$::contexts} {
+        set files [dict merge $files $::contextFiles]
+        append head "import ca\nimport cb\nimport cx\n"
+    }
     dict for {m fns} $modules {
         dict set files $m.bot [moduleText $fns]
         append head "import $m\n"
     }
-    set body ""
+    set lines [split "$head" \n]
+    if {$::contexts} {
+        lappend lines "fn as_int(n: int) -> int:" "    n" ""
+    }
+    set anchors {}
     set tail {}
     set sum {}
     set i 0
     foreach text $texts {
-        append body "fn t${i}() -> int errors IndexNotFound:\n    $text\n\n"
-        lappend tail "r$i = t${i}():\n    on IndexNotFound:\n        -1"
+        set place [expr {$places eq {} ? "fn" : [lindex $places $i]}]
+        if {$place eq "fn"} {
+            lappend lines "fn t${i}() -> int errors IndexNotFound:"
+            lappend anchors [list [expr {[llength $lines] + 1}] 5]
+            lappend lines "    $text" ""
+            lappend tail [list "r$i = t${i}():" "    on IndexNotFound:" "        -1"]
+        } else {
+            lappend tail [list "r$i = as_int($text)"]
+            lappend anchors [list top [string length "r$i = as_int("]]
+        }
         lappend sum r$i
         incr i
     }
-    dict set files main.bot "$head\n$body[join $tail \n]\n[join $sum { + }]\n"
-    return $files
-}
-
-# The 1-based line of the first statement's text in main.bot (header lines
-# and blank line before the first function, then the `fn` line).
-proc firstLine {modules} {
-    expr {3 + [dict size $modules] + 1 + 2}
+    foreach c $environment {
+        lappend lines "with context ${c}::[string toupper $c] {z: 0}"
+    }
+    set i 0
+    foreach t $tail {
+        if {[lindex $anchors $i 0] eq "top"} {
+            lset anchors $i [list [expr {[llength $lines] + 1}] [expr {[lindex $anchors $i 1] + 1}]]
+        }
+        lappend lines {*}$t
+        incr i
+    }
+    lappend lines [join $sum { + }] ""
+    dict set files main.bot [join $lines \n]
+    return [list $files $anchors]
 }
 
 proc compileFiles {files} {
@@ -419,6 +528,12 @@ proc compileFiles {files} {
 # What the compiler did with each multi-candidate method call of HIR: a dict
 # {line column} -> {decided DISPLAY} | {rejected KIND} | {stand-in DISPLAY}.
 proc compiled {hir} {
+    if {[dict exists $hir traitSource]} {
+        # (A trait program -- with -contexts 1, one requiring env::Env -- is
+        # the monomorphized build; its method calls and decisions are those
+        # of the checked source.)
+        set hir [dict get $hir traitSource]
+    }
     set out [dict create]
     set decided [if {[dict exists $hir methodDecided]} {dict get $hir methodDecided} else {dict get $hir methodChoices}]
     set rejections [dict create]
@@ -441,13 +556,13 @@ proc compiled {hir} {
     return $out
 }
 
-# Checks one program: {ok} or {bad REASON}; updates the counters.
-proc check {modules statements tag} {
+# Checks one program, its statements at PLACES, under the installations
+# ENVIRONMENT: {ok "" FILES} or {bad REASON FILES} (FILES the program's, which
+# -dump prints); updates the counters.
+proc check {modules statements places environment tag} {
     set predictions {}
     set texts {}
-    set positions {}
-    set line [firstLine $modules]
-    set rejectedProgram 0
+    set namesOf {}
     set accepted 1
     foreach tree $statements {
         set counter 0
@@ -455,10 +570,7 @@ proc check {modules statements tag} {
         set counter 0
         lassign [render $tree counter] text names
         lappend texts $text
-        foreach n $names {
-            lassign $n id offset
-            dict set positions [list $line [expr {4 + $offset + 1}]] [list [llength $predictions] $id]
-        }
+        lappend namesOf $names
         set outcomes [dict create]
         if {[dict get $p type] ne "int"} {
             # (A statement whose calls give it another type than its
@@ -473,9 +585,39 @@ proc check {modules statements tag} {
             }
         }
         lappend predictions $outcomes
-        incr line 3
     }
-    set files [programFiles $modules $texts]
+    lassign [programFiles $modules $texts $places $environment] files anchors
+    set positions {}
+    set s 0
+    foreach names $namesOf anchor $anchors {
+        lassign $anchor line column
+        foreach n $names {
+            lassign $n id offset
+            dict set positions [list $line [expr {$column + $offset}]] [list $s $id]
+        }
+        incr s
+    }
+    # The obligations (-contexts 1): when every call is decided, each decided
+    # callee's context requirement is checked at its top-level call against
+    # the installations; the program is rejected exactly when one fails, with
+    # exactly the failed obligations' kinds. The decisions above do not read
+    # them.
+    set obligations {}
+    if {$::contexts && $accepted} {
+        foreach tree $statements outcomes $predictions {
+            dict for {id outcome} [SingleDisplays $tree $modules [FullOutcomes $outcomes]] {
+                set kind [obligation [requirementOf [lindex $outcome 1] $modules] $environment]
+                if {$kind ne ""} {
+                    lappend obligations $kind
+                }
+            }
+        }
+        set obligations [lsort -unique $obligations]
+        if {$obligations ne {}} {
+            set accepted 0
+            incr ::obligationPrograms
+        }
+    }
     lassign [compileFiles $files] status hir
     if {$status eq "error"} {
         return [list bad "$tag: the compilation raised: [string range $hir 0 200]" $files]
@@ -508,23 +650,20 @@ proc check {modules statements tag} {
     if {!$accepted && $diagnostics eq ""} {
         return [list bad "$tag: predicted rejected, compiler accepted" $files]
     }
+    if {$obligations ne {}} {
+        set kinds [lsort -unique [lmap d $diagnostics {dict get $d kind}]]
+        if {$kinds ne $obligations} {
+            return [list bad "$tag: predicted the obligations $obligations under {$environment}, compiler: $kinds" $files]
+        }
+    }
     if {$accepted} {
         incr ::acceptedPrograms
         set qtexts {}
         foreach tree $statements outcomes $predictions {
             set counter 0
-            set full [dict create]
-            dict for {id outcome} $outcomes {
-                if {$outcome eq {single ok}} {
-                    # The one candidate: recompute its display.
-                    dict set full $id [list decided ""]
-                } else {
-                    dict set full $id $outcome
-                }
-            }
-            lappend qtexts [qualified $tree [SingleDisplays $tree $modules $full] counter]
+            lappend qtexts [qualified $tree [SingleDisplays $tree $modules [FullOutcomes $outcomes]] counter]
         }
-        lassign [compileFiles [programFiles $modules $qtexts]] qstatus qhir
+        lassign [compileFiles [lindex [programFiles $modules $qtexts $places $environment] 0]] qstatus qhir
         if {$qstatus eq "error" || [dict get $qhir diagnostics] ne ""} {
             return [list bad "$tag: the qualified spelling does not compile" $files]
         }
@@ -536,7 +675,22 @@ proc check {modules statements tag} {
     } else {
         incr ::rejectedPrograms
     }
-    return [list ok]
+    return [list ok "" $files]
+}
+
+# OUTCOMES (a statement's predictions, every call decided or single ok) with
+# each single-candidate call's display left to fill in (SingleDisplays).
+proc FullOutcomes {outcomes} {
+    set full [dict create]
+    dict for {id outcome} $outcomes {
+        if {$outcome eq {single ok}} {
+            # The one candidate: recompute its display.
+            dict set full $id [list decided ""]
+        } else {
+            dict set full $id $outcome
+        }
+    }
+    return $full
 }
 
 # OUTCOMES with every single-candidate call's display filled in (the one
@@ -584,6 +738,7 @@ set programs 0
 set ::calls 0
 set ::acceptedPrograms 0
 set ::rejectedPrograms 0
+set ::obligationPrograms 0
 set disagreements 0
 if {$only ne ""} {
     set first $only
@@ -591,10 +746,13 @@ if {$only ne ""} {
 }
 for {set seed $first} {$seed < $first + $seeds} {incr seed} {
     expr {srand($seed)}
-    lassign [program] modules statements
+    lassign [program] modules statements places
     incr programs
     foreach {tag mods} [list as-written $modules renamed [renamed $modules]] {
-        set result [check $mods $statements "seed $seed ($tag)"]
+        # (-contexts 1: each check under installations of its own, which
+        # change no decision.)
+        set environment [expr {$contexts ? [pick $::environments] : {}}]
+        set result [check $mods $statements $places $environment "seed $seed ($tag[expr {$contexts ? ", installed {$environment}" : ""}])"]
         if {$dump} {
             puts "---- seed $seed $tag: [lindex $result 0]"
             if {[llength $result] > 2} {
@@ -611,5 +769,5 @@ for {set seed $first} {$seed < $first + $seeds} {incr seed} {
         }
     }
 }
-puts "method-resolution-oracle seeds $seeds programs $programs calls $::calls accepted $::acceptedPrograms rejected $::rejectedPrograms disagreements $disagreements"
+puts "method-resolution-oracle seeds $seeds programs $programs calls $::calls accepted $::acceptedPrograms rejected $::rejectedPrograms[expr {$contexts ? " (by an obligation $::obligationPrograms)" : ""}] disagreements $disagreements"
 exit [expr {$disagreements > 0}]

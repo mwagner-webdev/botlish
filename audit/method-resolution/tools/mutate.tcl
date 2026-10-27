@@ -11,8 +11,10 @@
 #
 #   * tests/method-resolution.test and tests/method-filter.test (each with a
 #     private -tmpdir): killed if a test fails or a file does not complete;
-#   * audit/method-resolution/tools/oracle.tcl over N seeds (default 40):
-#     killed if it reports a disagreement or does not complete.
+#   * audit/method-resolution/tools/oracle.tcl over N seeds (default 40),
+#     then over N seeds with -contexts 1 (candidates requiring contexts the
+#     installations may not provide, SFIAE-MILESTONE-1.md): killed if it
+#     reports a disagreement or does not complete.
 #
 # Output: one line per mutant, killed by what, or SURVIVED, or that its text
 # does not apply exactly once. Exits 1 unless every mutant applies and is
@@ -158,11 +160,12 @@ try {
                     break
                 }
             }
-            if {$status eq "SURVIVED"} {
-                lassign [run $timeout $tclsh [file join $tree audit method-resolution tools oracle.tcl] [dict get $options -oracle-seeds] 1] code output
+            foreach oracleArgs {{} {-contexts 1}} {
+                if {$status ne "SURVIVED"} break
+                lassign [run $timeout $tclsh [file join $tree audit method-resolution tools oracle.tcl] [dict get $options -oracle-seeds] 1 {*}$oracleArgs] code output
                 set summary [lindex [split [string trim $output] \n] end]
                 if {$code != 0 || ![regexp {disagreements 0$} $summary]} {
-                    set status "killed by the oracle ([string range $summary 0 120])"
+                    set status "killed by the oracle[expr {$oracleArgs eq {} ? "" : " $oracleArgs"}] ([string range $summary 0 120])"
                 }
             }
             if {$status eq "SURVIVED"} {

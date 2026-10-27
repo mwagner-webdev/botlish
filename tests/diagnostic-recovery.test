@@ -336,6 +336,31 @@ test dr-unhandled-native-set {a native's unhandled errors are one diagnostic too
     drSites "import std::list\n\nfn f(xs: List\[int\], i: int) -> int:\n    std::list::at(xs, i)\n\nf(\[1\], 0)\n"
 } -result {{UNHANDLED-ERROR 4:5}}
 
+test dr-obligations-reject-no-argument {a failed context obligation of a call (MISSING-CONTEXT, AMBIGUOUS-CONTEXT-IMPLEMENTATION) rejects no argument of it, as an unhandled error does not: the ownership analysis's erasure of a coroutine passed to the callee's untyped parameter is reported beside either failure, as with the context provided (hir::methods::ObligationKinds, SFIAE; old: suppressed beside the ambiguous implementation only)} -body {
+    set modules {
+        out.bot "context trait Out:\n    fn emit(n: int) -> int\n"
+        a.bot "context struct A:\n    k: int\n\nfn emit(n: int, context c: A) -> int:\n    n + c.k\n"
+        b.bot "context struct B:\n    k: int\n\nfn emit(n: int, context c: B) -> int:\n    n * c.k\n"
+        keep.bot "import out\n\nfn keep(v: any, context o: out::Out) -> int:\n    o.emit(1)\n"
+    }
+    set results {}
+    foreach installs {{} {a::A} {a::A b::B}} {
+        set lines [lmap c $installs {string cat "with context $c {k: 1}"}]
+        set source "import a\nimport b\nimport keep\n\nfn producer():\n    yield 1\n    2\n\n[join [concat $lines [list "coroutine {step: h} = producer()" "keep::keep(h)"]] \n]\n"
+        foreach {name text} $modules {
+            makeFile $text $name
+        }
+        try {
+            lappend results [lmap d [drSites $source] {lindex $d 0}]
+        } finally {
+            foreach {name text} $modules {
+                removeFile $name
+            }
+        }
+    }
+    set results
+} -result {{MISSING-CONTEXT AFFINE-ERASURE-UNSUPPORTED} AFFINE-ERASURE-UNSUPPORTED {AMBIGUOUS-CONTEXT-IMPLEMENTATION AFFINE-ERASURE-UNSUPPORTED}}
+
 # ---------------------------------------------------------------------------
 # Part C (syntax): one malformed construct, one error
 

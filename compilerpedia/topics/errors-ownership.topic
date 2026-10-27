@@ -2840,7 +2840,7 @@ summary: A call needs a context trait (such as std::io::IO) and more than one in
 index: errors
 alias: two contexts implement the same context trait; ambiguous io provider
 keywords: context trait, installed context, provider, selection, with context, std::io::IO, LinuxIO, ranking
-related: concept.context-traits concept.contexts rule.context-installation error.missing-context stdlib.module.std::io stdlib.module.std::linux::io
+related: concept.context-traits concept.contexts rule.context-installation error.missing-context rule.sfiae stdlib.module.std::io stdlib.module.std::linux::io
 docs: CONTEXT-TRAITS.md CONTEXTS.md
 code: CORE SEMANTIC AMBIGUOUS-CONTEXT-IMPLEMENTATION
 
