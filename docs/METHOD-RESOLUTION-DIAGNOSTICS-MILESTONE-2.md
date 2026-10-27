@@ -628,7 +628,7 @@ or reads, run on this branch:
 | harness | result |
 |---|---|
 | `audit/static-decisions/tools/mutate.tcl -only` its eight method-call mutants (`stale-method-reuse`, `method-key-alias`, `same-choices-unchecked`, `method-memo-by-index`, `method-final-any-build`, `method-trial-ignored`, `method-memo-initial-only`, `never-reuse-methods`) | 8 killed |
-| `audit/method-filter/tools/mutate.tcl` (the kind proofs) | @@MF@@ |
+| `audit/method-filter/tools/mutate.tcl` (the kind proofs) | 21 of 22 killed by the unit tests; `wave-limit-ignored` (the wave limit raised to 1,000) survives the tests and the fuzzer, identically on the base (10.5) |
 | `audit/contexts/tools/mutate.tcl -only method-candidate-dropped` | killed |
 | `audit/direct-modules/tools/mutate.tcl -only method-obligation-dropped` | killed (`dm-method-sugar-two-candidates`) |
 | `audit/diagnostic-recovery/tools/mutate.tcl` | 25 of 25 killed |
