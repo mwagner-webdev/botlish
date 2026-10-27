@@ -459,8 +459,9 @@ backend compiles the same program as before; every rejected one decides the
 same calls at the same candidates. Reproduce: `tclsh9.0
 audit/method-resolution/tools/invariance.tcl -root BASE -out before.txt`,
 the same with `-root .` and `-out after.txt`, then `-compare before.txt
-after.txt` (about 15 minutes each on a quiet four-core machine, 40 here
-under load).
+after.txt` (the front end's time summed over the corpus is about 13
+minutes per tree, section 10.1; here, beside other jobs, each run took over
+an hour).
 
 ### 8.2 Independent checks of the decision
 
@@ -702,7 +703,7 @@ reasons for kind-proof candidates were built before, and still are).
   (83) pass; the static-decision fuzzer over seeds 17, 41 and 5 (10
   programs each, 240 sites a seed) and the static-compile fuzzer report no
   failure (section 9.4); the batched-against-sequential comparison of the
-  golden suites is CI's (10.5).
+  golden suites is CI's (10.4).
 * **The front-end cache and HIR interchange** hold the HIR dict, so the
   `methodRejected` side table, the projection's `methodRejected` field and
   a diagnostic's `notes` travel with it; nothing reads them from process
@@ -715,7 +716,53 @@ reasons for kind-proof candidates were built before, and still are).
 * **Backends** compile accepted programs, whose HIR is identical (8.1); a
   lenient run of a rejected program raises at the rejected call (5.5).
 
-@@LOCAL@@
+### 10.4 Test runs
+
+**Locally**, on the branch with main merged (`fa43b82`, the native backend
+rebuilt for it), `tclsh9.0 tests/local.tcl`, with an empty front-end cache:
+
+| layer | result |
+|---|---|
+| Tcl tests on interp | 7,374 passed, 0 failed, 96 skipped, 2,250 golden duplicates skipped |
+| Tcl tests on compile | 7,369 passed, 0 failed, 101 skipped, 2,250 golden duplicates skipped |
+| golden suites | 108 run, 0 failed: interp 5,180/5,180, compile 5,180/5,180, cranelift-generic 5,088/5,088, cranelift 5,190/5,190 |
+
+(4,187 s wall with 4 jobs, beside the interchange audits.) Main's 24
+commits since `b29787c` change no file of the front end, the Tcl
+compiler, the service or the language server (`core/`, `hir/`, `surface/`,
+`stdlib/`, `compiler/`, `service/`, `lsp/`, `main.tcl`), so the harnesses of
+9.3 and 9.4, run on `cf4f5aa` or on the merge, hold for both; what main
+changed (the native driver's linking, the single executable, the macOS
+application) is tested by its own jobs.
+
+**CI**, dispatched on the branch at `fa43b82`:
+
+@@CI@@
+
+### 10.5 Pre-existing failures, not this milestone's
+
+Each reproduces identically on the base `b29787c` (a worktree of it, run
+the same way):
+
+* **The syntax-recovery fuzzer, seed 1, case 61** (two failures of one
+  case). Deleting the newline after `y: Float64` in
+  `examples/games/icy-tower/tower.bot`'s `struct Player:` (offset 2734)
+  makes the line `    y: Float64    vx: Float64`. A strict parse reports
+  the syntax error at 80:19; the compiler service analyzing
+  `headless.bot` with that text reports outcome `failure`, semantics
+  `none`, and only a TYPE at 106:13 (`unknown or invalid type Player for
+  field "player" of struct "World"`) -- the syntax error is lost, and a
+  field of a type the hole may declare is not treated as dependent
+  (SYNTAX-RECOVERY-MILESTONE-1.md). Seeds 2 and 3 pass. Not touched here.
+* **`wave-limit-ignored`** (`audit/method-filter/tools/mutate.tcl`)
+  survives on the base too: it raises the waves' bound, which decides how
+  a decision is searched, never its outcome (`mf-wave-limit` checks the
+  outcome at a bound of 0); only a test of the wave or build count at the
+  bound would kill it.
+* **The kind proof deciding a self-dependent call** (section 11) is the
+  base's behavior.
+* **Main's Ubuntu 26.04 failures** (`cf-wrong-architecture`,
+  `cb-boringssl-current`; fixed on main by `411ee25`) are in the merge.
 
 ## 11. Remaining limitations
 
