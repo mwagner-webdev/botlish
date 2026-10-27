@@ -1006,6 +1006,11 @@ Results:
     golden suites run on Windows' native backends for the first time,
     the golden runner being a coroutine;
   - the system linker's job, ok.
+* **Real Windows** (run 40458676354, 3a71734b): every job green. That
+  covers the smoke job and its tier, the four acceptance shards, the
+  system linker, the `roots` job and the mutant tier. It is the first
+  run of this milestone with nothing red (section 8.2's start sweep had
+  failed the two before it).
 * **Other hosts (Linux):**
   - `tclsh9.0 tests/local.tcl`, the whole local suite: Tcl tests on interp
     7320 passed and on compile 7315 passed, 0 failed; golden suites 108
