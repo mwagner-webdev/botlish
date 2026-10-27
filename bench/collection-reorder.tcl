@@ -14,7 +14,8 @@
 # cancels the build and the process's start. The repetition counts are
 # -reps (default {2 6}) times a scale that keeps every run's work about W
 # entries (-work, default 65536): max(1, W / N) for the O(N) modes, W for
-# `order` (O(1)), so the difference is never lost in the start's noise:
+# `order` and `copy-base` (O(1)), so the difference is never lost in the
+# start's noise:
 #
 #   order            m.order(): a MutableSet sharing m's table, O(1)
 #   validate         m.validate_order(c) of a valid candidate (the keys
@@ -328,7 +329,7 @@ proc row {fields} {
 # The repetition scale of MODE at size N (the header).
 proc scale {mode n} {
     set work [dict get $::options -work]
-    if {$mode eq "order"} {
+    if {$mode in {order copy-base}} {
         return $work
     }
     return [expr {max(1, $work / $n)}]
