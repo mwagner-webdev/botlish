@@ -763,12 +763,26 @@ none of these five.
 
 ### 5.6 Targets
 
+Beside this container's runs, the branch ran in CI on every host the
+native backend supports: the macOS and Windows workflows on the commit
+that holds the whole change (7bc86bb7), and tests, tests-arm64,
+static-decisions and icy-tower dispatched on 3b770910 (every commit after
+7bc86bb7 changes only this report). Every job passed.
+
 | target | shared semantics | native context slots, element places |
 |---|---|---|
-| Linux x86-64 | executed (this container: every test above, both Tcl backends and both native ones) | executed |
-| Linux AArch64 | not executed here (no arm64 host or qemu run); nothing of the change is architecture-specific (the slot lowering is NIR, the same on both) | not executed; CI's tests-arm64 workflow covers it |
-| macOS AArch64 | not executed here | not executed (CI's macOS workflow) |
-| Windows x86-64 | not executed here | not executed (CI's Windows workflow) |
+| Linux x86-64 | executed: every test above in this container; in CI (`tests`) the whole Tcl suite on interp and compile, its cranelift and cranelift-generic coverage, the golden suites in four shards, the stub- and system-linked executables (the system-linked also under GC stress), the warning gate and the method-call oracle | executed (both native backends; `cao-native-*` and `cao-gc-stress` here and in CI) |
+| Linux AArch64 | executed in CI (`tests-arm64`, ubuntu-24.04-arm): the Tcl suite on interp and compile, its cranelift and cranelift-generic coverage, the golden suites, the Rust unit tests (also under GC stress), the system-linked executables (also under GC stress) and the whole suite under GC stress | executed in CI (the same jobs; tests/context-affine.test's `nativeLinux` and `nativeCoroutines` tests run there) |
+| macOS AArch64 | executed in CI (`tests (macos arm64)`): smoke, the acceptance tier in two shards (tests/context-affine.test among its 117 files) and the system linker's tests, also under GC stress | executed in CI except the three `nativeLinux` tests (slot leaves, eligibility, the no-allocation observation), which skip off Linux; the four `nativeCoroutines` tests run |
+| Windows x86-64 | executed in CI (`tests (windows x86-64)`): smoke, the root plans, the system linker and the acceptance tier in four shards (Windows excludes no test file) | executed in CI except the three `nativeLinux` tests and the four `nativeCoroutines` tests (Windows has no native coroutines) |
+
+`static-decisions` compared the batched and the sequential scheduler on
+every golden suite (mutable-array.bot's job and four shards): no
+disagreement. `icy-tower` built SDL3, ran the workload's tests with none
+skipped, compared the executable with the independent oracle, killed the
+mutants and played the game under Xvfb. The `tests` workflow's GC-stress
+job runs on pushes to main only and so did not run on the branch; the
+arm64 workflow's GC-stress run of the whole suite did.
 
 No claim of target execution rests on cross-target compilation. The SDL
 acceptance workload is Linux x86-64 only, as before.
