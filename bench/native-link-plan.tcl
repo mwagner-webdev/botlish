@@ -15,8 +15,9 @@
 #     found only in the toolchain's own directories (asking the C driver and
 #     GNU ld for them), and none at all (the refusal);
 #   * the link, per linker: the program linked with the shared library
-#     (`extern c library`) and with the archive (`static at`): wall time and
-#     the executable's size and dynamic libraries.
+#     (`extern c library`) and with the archive (`static at`): wall time,
+#     the executable's size and dynamic libraries, and its run's wall time
+#     (startup, the shared library's loading included).
 #
 # Prints a Markdown table per part. Linux and macOS (ldd / otool -L).
 
@@ -122,8 +123,8 @@ try {
 
     foreach linker [dict get $options -linkers] {
         puts "\n## The link, $linker linker (median of $runs)\n"
-        puts "| declaration | link ms | executable bytes | dynamic libraries |"
-        puts "|---|---:|---:|---:|"
+        puts "| declaration | link ms | executable bytes | dynamic libraries | startup ms |"
+        puts "|---|---:|---:|---:|---:|"
         foreach {case declaration dirs} [list \
                 "extern c library (shared)" "extern c library \"nlp\"" [list [file dirname $shared]] \
                 "static at (archive)" "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\"" {}] {
@@ -137,7 +138,11 @@ try {
                 }
             }]
             unset ::env(BOTLISH_NATIVE_LINKER)
-            puts "| $case | $ms | [file size $exe] | [dynamic $exe] |"
+            # The executable's whole run (it adds two numbers): its start,
+            # the shared library's loading included.
+            set libraryPath [list LD_LIBRARY_PATH [file dirname $shared] DYLD_LIBRARY_PATH [file dirname $shared]]
+            set startup [timed {exec env {*}[lmap {k v} $libraryPath {string cat $k=$v}] $exe}]
+            puts "| $case | $ms | [file size $exe] | [dynamic $exe] | $startup |"
         }
     }
 } finally {

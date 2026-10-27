@@ -359,6 +359,19 @@ test nlp-isolation {a link plan is compilation-local: compiling another program 
     list [expr {[nlpNirLinks $a] eq $before}] [nlpNirLinks $b]
 } -cleanup {removeDirectory [file tail $dir]} -result {1 {{link "other"}}}
 
+test nlp-check {main.tcl -check (the compiler service's analysis) takes static and archive declarations as source facts: it reads no archive, and reports the program's other diagnostics as ever; a malformed declaration is one syntax diagnostic beside them} -body {
+    set dir [nlpApp [nlpDir] {
+        good.bot "extern c library \"z\" static\nextern c library \"q\" static at \"native/missing.a\"\nfn f(a: int) -> bool:\n    a\nf(1)\n"
+        bad.bot "extern c library \"q\" at \"native/missing.a\"\nfn f(a: int) -> bool:\n    a\nf(1)\n"
+    }]
+    set results {}
+    foreach file {good.bot bad.bot} {
+        catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -check [file join $dir $file] 2>@1} out
+        lappend results [lsort -unique [regexp -all -inline {EXTERN-SYNTAX|TYPE|NATIVE[A-Z -]*|ARCHIVE} $out]]
+    }
+    set results
+} -cleanup {removeDirectory [file tail $dir]} -result {TYPE {EXTERN-SYNTAX TYPE}}
+
 # ---------------------------------------------------------------------------
 # Linking: the fixture
 
