@@ -547,7 +547,8 @@ nothing else.)
 **The remaining clones (5) and native memory.** All five are in the open
 and release paths, where the pointer is a local of `open` or `release`, not
 the context's: `text.clone().log_failure(...)` four times (log the failure,
-then free the buffer) and once in `release`. The native memory left is the
+then free the buffer) and once in `release` (after the merge below, the same
+five clones read SDL's error: four in `open`, one in `close`). The native memory left is the
 memory SDL's C ABI needs -- the `SDL_FRect` that `SDL_RenderFillRect` reads,
 the 128-byte text buffer `SDL_RenderDebugText` reads, the 128-byte event
 buffer `SDL_PollEvent` writes, all `SDL_malloc`'d by `open` and freed by
@@ -555,14 +556,35 @@ buffer `SDL_PollEvent` writes, all `SDL_malloc`'d by `open` and freed by
 (`EventType`, `KeyState`, `TextBuffer`, `SDL_FRect`). Nothing native
 remains that exists only to retain a pointer.
 
-**The airlock is intact.** The public API is unchanged and render.bot and
-main.bot did not change. `workload-icy-tower-sdl-airlock` (no pointer, view,
+**The airlock is intact.** This milestone changed neither the public API
+nor render.bot and main.bot (the Windows port's changes to the API and
+to main.bot, described below, are main's). `workload-icy-tower-sdl-airlock` (no pointer, view,
 edit or SDL call outside sdl.bot, its only exception now the installation
 of the opaque Sdl), `-sdl-records-opaque` (Session is opaque),
 `-sdl-helpers-private` (every pointer helper, the session and every layout
 private: its pinned list updated to the new names), `-no-resource-escape`
 and `-baseline-warnings` pass; sdl.bot stays `contextualized` and every
 other module ordinary.
+
+**Merged with main's Windows port.** While this milestone was in progress,
+main ported Icy Tower to Windows (ICY-TOWER-WINDOWS.md) on the record
+design: the game moved into game.bot beside two entries (main.bot,
+main-windows.bot), and sdl.bot stopped making the variadic `SDL_Log` call,
+which Windows' native backend does not lower. SDL's error is now copied out
+of SDL (`SDL_strlcpy` into the text buffer) and read through its layout
+(`error_text`, `text_of`, `read_text`, `printable`), SdlFailed carries it
+as `reason`, `close` returns it, and `poll` takes the scancodes as ints.
+The merge carries all of it onto the Session design unchanged in behavior:
+the error is read with `text.clone().error_text()` where `log_failure` was
+(four times in `open`, once in `close`, from the popped session's buffer,
+before anything is released), so the clone count stays five and the
+private pointer helpers are `write_text`, `error_text`, `text_of`,
+`free_text` and `release`. The table above measures the milestone before
+the merge. Against main's committed executable, the merged one's SDL trace
+of the same 2400-frame run is again identical but for the record's
+`SDL_malloc(56)` and its `SDL_free`, and both failure traces
+(`SDL_VIDEO_DRIVER=nosuch`, `SDL_RENDER_DRIVER=nosuch`, which read SDL's
+error) are identical.
 
 ## 5. Evidence
 

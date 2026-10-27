@@ -1,0 +1,1 @@
+kept bench_work::documents_recursive e8045 {its yielding function value_emit::value is recursive}

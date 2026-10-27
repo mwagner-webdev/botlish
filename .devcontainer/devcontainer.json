@@ -1,11 +1,15 @@
 {
   "name": "botlish",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
   "containerEnv": {
     "LANG": "C.utf8",
     "LC_ALL": "C.utf8"
   },
-  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postCreateCommand": "bash .devcontainer/setup.sh && bash .devcontainer/setup-c-toolchain.sh",
   "customizations": {
     "vscode": {
       "settings": {

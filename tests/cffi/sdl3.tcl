@@ -18,6 +18,15 @@
 # `extern c library "SDL3"` and -L; the executable finds it at run time by
 # LD_LIBRARY_PATH (Botlish adds no rpath).
 #
+# On Windows (ICY-TOWER-WINDOWS.md) it is SDL3.dll and its import library
+# SDL3.lib, built with CMake's Visual Studio generator for x64 -- MSVC, the
+# one native Windows toolchain -- with every video driver SDL has there (the
+# windows driver, and dummy and offscreen for headless runs) and SDL_LIBC
+# off: SDL's own C runtime functions, so the DLL needs no C runtime DLL
+# beside it (an executable links the static C runtime,
+# WINDOWS-X86-64-MILESTONE-2.md, and a DLL keeps its own). BOTLISH_SDL3_CMAKE_FLAGS
+# adds flags there. An executable finds the DLL in its own directory.
+#
 # The directory is $BOTLISH_SDL3_DIR when set, else sdl3/COMMIT under
 # Botlish's cache directory; never the repository. Test and example
 # infrastructure only: Botlish's compiler and runtime never build or need it.
@@ -58,10 +67,41 @@ proc cffi::SdlBuildDir {} {
     return [file join [SdlCacheDir] sdl3 [dict get [SdlSource] commit]]
 }
 
-# The directory holding the built libSDL3.so, or "" when it is not built.
+# The files a build leaves in its directory: the shared library (and, on
+# Windows, its import library).
+proc cffi::SdlFiles {} {
+    if {$::tcl_platform(platform) eq "windows"} { return {SDL3.dll SDL3.lib} }
+    return {libSDL3.so*}
+}
+
+# The directory holding the built libSDL3.so (SDL3.dll and SDL3.lib), or ""
+# when it is not built.
 proc cffi::sdl3Dir {} {
     set dir [SdlBuildDir]
-    return [expr {[llength [glob -nocomplain -directory $dir libSDL3.so*]] ? $dir : ""}]
+    foreach pattern [SdlFiles] {
+        if {![llength [glob -nocomplain -directory $dir $pattern]]} { return "" }
+    }
+    return $dir
+}
+
+# Windows: SDL3.dll and SDL3.lib built from SOURCE under DIR/build, copied
+# into DIR.
+proc cffi::SdlBuildWindows {source dir} {
+    set build [file join $dir build]
+    set flags {}
+    if {[info exists ::env(BOTLISH_SDL3_CMAKE_FLAGS)]} {
+        set flags [regexp -all -inline {\S+} $::env(BOTLISH_SDL3_CMAKE_FLAGS)]
+    }
+    exec cmake -S $source -B $build -A x64 -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_LIBC=OFF \
+        -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL=OFF {*}$flags >@stdout 2>@stderr
+    exec cmake --build $build --config Release --target SDL3-shared >@stdout 2>@stderr
+    foreach name {SDL3.dll SDL3.lib} {
+        set built [file join $build Release $name]
+        if {![file exists $built]} {
+            error "sdl3: the build produced no $built"
+        }
+        file copy -force $built [file join $dir $name]
+    }
 }
 
 proc cffi::SdlBuild {} {
@@ -75,6 +115,11 @@ proc cffi::SdlBuild {} {
     set fetched [exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] fetch sdl3]
     set source [lindex [split [string trim $fetched] \n] end]
     file mkdir $dir
+    if {$::tcl_platform(platform) eq "windows"} {
+        puts "sdl3: building SDL3.dll in $dir"
+        SdlBuildWindows $source $dir
+        return $dir
+    }
     puts "sdl3: building libSDL3.so in $dir"
     set flags {-DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF}
     if {[info exists ::env(BOTLISH_SDL3_CMAKE_FLAGS)]} {

@@ -1,0 +1,62 @@
+# check_all.bot -- the program the emitter claims are checked in
+# (EMITTER-COROUTINE-EXPLORATION.md): it calls every emitter, through the
+# sinks, so the compiler's facts cover every one of them (a function no
+# program calls has no analyzed instance, and the checker says so:
+# EMIT-UNUSED). Its value is every probe's output, which the census and the
+# tests read.
+#
+#   tclsh9.0 audit/emitter/tools/emitcheck.tcl WORKSPACE/check_all.bot
+
+import sinks
+import number_emit
+import string_emit
+import value_emit
+import std::coroutine
+
+fn no_keys() -> List[str]:
+    []
+
+fn doc() -> value_emit::Value:
+    inner = [value_emit::boolean(true), value_emit::boolean(false), value_emit::null_value(), value_emit::string("x\n"), value_emit::array([]), value_emit::number(0), value_emit::number(5)]
+    keys = ["ab", "b\"", "", "cd"]
+    keys.object([value_emit::number(-12), value_emit::array(inner), value_emit::array([value_emit::string("yy"), value_emit::string("zz")]), no_keys().object([])])
+
+fn drained(n: int) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = number_emit::integer_source(n)
+    step.drain(first)
+
+fn probes() -> List[List[int]] errors IndexNotFound, sinks::Invalid, number_emit::NotCanonical, string_emit::NotAScalar:
+    d = sinks::digest_stacked(doc())
+    e = sinks::chunked_stacked(doc())
+    f = sinks::digest_text(doc())
+    [
+        sinks::collect_integer(0),
+        sinks::collect_integer(-120),
+        sinks::collect_integer(98765432109876543210),
+        sinks::collect_integer_text(0),
+        sinks::collect_integer_text(-77),
+        sinks::collect_integer_trusted(5),
+        sinks::collect_string("a\"\\\n\t/é😀"),
+        sinks::collect_string_ascii("aé😀퟿"),
+        sinks::collect_string_bytes("aé😀\""),
+        sinks::collect_string_codes([97, 0, 128512]),
+        sinks::collect_text(doc()),
+        sinks::collect_stacked(doc()),
+        [d.digest, d.symbols, e.digest, e.symbols, f.digest, f.symbols],
+        doc().prefix_text(3),
+        sinks::after_end(5, 3),
+        sinks::validated_integer(-1234567),
+        sinks::buffered_integer(90),
+        drained(42),
+        sinks::collect_flat(doc()),
+    ]
+
+probes():
+    on IndexNotFound:
+        [[-2]]
+    on sinks::Invalid:
+        [[-3]]
+    on number_emit::NotCanonical:
+        [[-4]]
+    on string_emit::NotAScalar:
+        [[-5]]

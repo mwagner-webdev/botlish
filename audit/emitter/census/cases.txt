@@ -1,0 +1,507 @@
+# Emitter mistakes (audit/emitter/tools/census.tcl;
+# EMITTER-COROUTINE-EXPLORATION.md, "Correctness"): each applied alone to
+# the emitter modules (audit/emitter/json), then checked by the emission
+# checker in check_all.bot, and check_all.bot run on the interpreter with
+# its outputs held to the oracle (tools/oracle.py) and to the unmutated
+# program's outputs.
+#
+#   @@ NAME FILE EXPECT DESCRIPTION
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# EXPECT is the checker's expected verdict: the diagnostic kinds it must
+# report (EMIT-..., comma-separated; it may report more: a mistake in a
+# token emitter also breaks the claims of the emitters that call it), or
+# `accepted` (none). The census fails when
+# the checker's verdict differs, or a replacement does not apply.
+#
+# Most cases are mistakes. Some are not: an emitter whose output is correct
+# but whose correctness the checker cannot prove (`imprecise`, the report's
+# limits), or a mistake outside the guarantee (`semantic`: valid syntax, a
+# wrong value; `structure`: a JSON text's nesting, which no regular
+# language states), or an emitter that never completes (`vacuous`: it
+# claims nothing). An accepted case's description starts with its category
+# (census.tcl): `dynamic` (a run-time check the claim relies on fails),
+# `failure` (the mistake, or bad data, makes the emitter fail), or one of
+# the three above.
+
+@@ plus-sign number_emit.bot EMIT-REJECTED a positive number written with a '+' sign
+<<<<
+    else:
+        magnitude(n)
+    unit
+====
+    else:
+        yield 43
+        magnitude(n)
+    unit
+>>>>
+
+@@ minus-only number_emit.bot EMIT-INCOMPLETE a negative number's sign, then a return before its digits
+<<<<
+    elif n < 0:
+        yield 45
+        magnitude(0 - n)
+====
+    elif n < 0:
+        yield 45
+        return unit
+>>>>
+
+@@ exponent-sign-end number_emit.bot EMIT-INCOMPLETE an exponent's sign as the token's last symbol (1e+)
+<<<<
+        yield 48 + d
+        rest.set(0, r - d * p)
+    unit
+====
+        yield 48 + d
+        rest.set(0, r - d * p)
+    yield 101
+    yield 43
+    unit
+>>>>
+
+@@ leading-zero number_emit.bot EMIT-REJECTED the leading digit found as any other digit, so it may be 0 (and is: one power of ten too many)
+<<<<
+        if top * 10 > m:
+            break
+        powers.push(top * 10)
+    p0 = powers.pop()
+    d0 = m.leading_digit_at(p0)
+====
+        if top > m:
+            break
+        powers.push(top * 10)
+    p0 = powers.pop()
+    d0 = m.digit_at(p0)
+>>>>
+
+@@ leading-digit-latent number_emit.bot EMIT-REJECTED the leading digit found as any other digit: correct arithmetic never makes it 0, but nothing proves it
+<<<<
+    d0 = m.leading_digit_at(p0)
+====
+    d0 = m.digit_at(p0)
+>>>>
+
+@@ digit-overflow number_emit.bot EMIT-REJECTED a tenth comparison returning 10: never reached (R < 10P), but the digit's set is then 0..10, so ':' could be emitted as far as the compiler knows
+<<<<
+            if r >= 9 * p:
+                return 9
+            if r >= 8 * p:
+                return 8
+            return 7
+        if r >= 6 * p:
+            return 6
+        return 5
+    if r >= 3 * p:
+        if r >= 4 * p:
+            return 4
+        return 3
+    if r >= 2 * p:
+        return 2
+    if r >= p:
+        return 1
+    0
+====
+            if r >= 10 * p:
+                return 10
+            if r >= 9 * p:
+                return 9
+            if r >= 8 * p:
+                return 8
+            return 7
+        if r >= 6 * p:
+            return 6
+        return 5
+    if r >= 3 * p:
+        if r >= 4 * p:
+            return 4
+        return 3
+    if r >= 2 * p:
+        return 2
+    if r >= p:
+        return 1
+    0
+>>>>
+
+@@ wrong-digit-value number_emit.bot accepted semantic: 9 written as 8 -- a valid token of the wrong value (the round trip catches it, never the grammar)
+<<<<
+            if r >= 9 * p:
+                return 9
+            if r >= 8 * p:
+                return 8
+            return 7
+        if r >= 6 * p:
+            return 6
+        return 5
+    if r >= 3 * p:
+        if r >= 4 * p:
+            return 4
+        return 3
+    if r >= 2 * p:
+        return 2
+    if r >= p:
+        return 1
+    0
+====
+            if r >= 9 * p:
+                return 8
+            if r >= 8 * p:
+                return 8
+            return 7
+        if r >= 6 * p:
+            return 6
+        return 5
+    if r >= 3 * p:
+        if r >= 4 * p:
+            return 4
+        return 3
+    if r >= 2 * p:
+        return 2
+    if r >= p:
+        return 1
+    0
+>>>>
+
+@@ unguarded-text number_emit.bot EMIT-REJECTED std::int::to_string's characters emitted without the grammar's guards: the checker has no contract for the text
+<<<<
+    first = std::char::scalar_value(text.char_at(lead))
+    json_grammar::nonzero_symbol(first):
+        on std::dfa::UnrecognizedInput:
+            fail NotCanonical {at: lead}
+        on std::dfa::UnexpectedEnd:
+            fail NotCanonical {at: lead}
+    yield first
+====
+    first = std::char::scalar_value(text.char_at(lead))
+    yield first
+>>>>
+
+@@ weak-guard number_emit.bot EMIT-REJECTED the first digit guarded by digit_symbol, which admits '0'
+<<<<
+    json_grammar::nonzero_symbol(first):
+====
+    json_grammar::digit_symbol(first):
+>>>>
+
+@@ terminal-value number_emit.bot EMIT-TERMINAL-VALUE a coroutine root completing with 0, which a symbol source reads as a symbol
+<<<<
+fn integer_source(n: int) -> int errors IndexNotFound:
+    integer(n)
+    -1
+====
+fn integer_source(n: int) -> int errors IndexNotFound:
+    integer(n)
+    0
+>>>>
+
+@@ end-as-symbol number_emit.bot EMIT-END-SYMBOL the end of the input (-1) yielded as if it were a symbol
+<<<<
+    if n == 0:
+        yield 48
+    elif n < 0:
+====
+    if n == 0:
+        yield 48
+        yield -1
+    elif n < 0:
+>>>>
+
+@@ unclosed-string string_emit.bot EMIT-INCOMPLETE a string without its closing quotation mark
+<<<<
+fn string(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+====
+fn string(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character(std::char::scalar_value(text.char_at(i)))
+        continue
+    unit
+>>>>
+
+@@ after-token string_emit.bot EMIT-AFTER-TOKEN a space after the closing quotation mark: part of no string token
+<<<<
+        character(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+====
+        character(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    yield 32
+    unit
+>>>>
+
+@@ raw-controls string_emit.bot EMIT-REJECTED control characters written raw (no escape branch)
+<<<<
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        yield c
+    unit
+====
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    else:
+        yield c
+    unit
+>>>>
+
+@@ raw-backslash string_emit.bot EMIT-REJECTED the reverse solidus not escaped: it begins an escape the next symbol must continue
+<<<<
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        yield c
+    unit
+====
+    if c == 34:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        yield c
+    unit
+>>>>
+
+@@ short-unicode-escape string_emit.bot EMIT-REJECTED a \u escape of three hexadecimal digits
+<<<<
+        yield 117
+        yield 48
+        yield 48
+        hex_digit(c.shift_right(4))
+====
+        yield 117
+        yield 48
+        hex_digit(c.shift_right(4))
+>>>>
+
+@@ hex-digit-off-by-one string_emit.bot EMIT-REJECTED the letters of a hexadecimal digit one too low ('`' for 10)
+<<<<
+        yield 87 + n
+====
+        yield 86 + n
+>>>>
+
+@@ surrogate-scalar string_emit.bot EMIT-REJECTED code points checked for range but not for surrogates: a surrogate is no Unicode scalar value
+<<<<
+        if c < 0 or c > 1114111 or (c >= 55296 and c <= 57343):
+====
+        if c < 0 or c > 1114111:
+>>>>
+
+@@ unchecked-codes string_emit.bot EMIT-REJECTED code points not checked at all: any Int could be emitted
+<<<<
+        if c < 0 or c > 1114111 or (c >= 55296 and c <= 57343):
+            fail NotAScalar {at: i, value: c}
+        character(c)
+====
+        character(c)
+>>>>
+
+@@ bytes-unencoded string_emit.bot EMIT-BYTE-CHARACTER,EMIT-REJECTED characters sent to the bytes grammar as their scalar values, not their UTF-8 bytes
+<<<<
+fn character_bytes(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        utf8(c)
+    unit
+
+#: emits json_lex::json_string_bytes
+fn string_bytes(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character_bytes(std::char::scalar_value(text.char_at(i)))
+        continue
+====
+fn character_bytes(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        utf8(c)
+    unit
+
+#: emits json_lex::json_string_bytes
+fn string_bytes(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        c = std::char::scalar_value(text.char_at(i))
+        if c == 34 or c == 92 or c < 32:
+            character_bytes(c)
+        else:
+            yield c
+        continue
+>>>>
+
+@@ byte-out-of-range string_emit.bot EMIT-REJECTED a two-byte character's value sent whole: values past 255 are no byte
+<<<<
+    elif v < 2048:
+        yield 192 + v.shift_right(6)
+        yield 128 + v.mod(64)
+====
+    elif v < 2048:
+        yield v
+>>>>
+
+@@ utf8-by-length string_emit.bot EMIT-REJECTED imprecise: UTF-8 encoded by length alone (correct), but the second byte after E0, ED, F0 and F4 is constrained by the first, a relation the checker's per-symbol sets cannot carry
+<<<<
+    elif v < 4096:
+        yield 224
+        yield 128 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 53248:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 57344:
+        yield 237
+        yield 128 + (v - 53248).shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 65536:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 262144:
+        yield 240
+        yield 128 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 1048576:
+        yield 240 + v.shift_right(18)
+        yield 128 + v.shift_right(12).mod(64)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    else:
+        yield 244
+        yield 128 + (v - 1048576).shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+====
+    elif v < 65536:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    else:
+        yield 240 + v.shift_right(18)
+        yield 128 + v.shift_right(12).mod(64)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+>>>>
+
+@@ strict-escape-unsplit string_emit.bot EMIT-REJECTED imprecise: U+D000..U+D7FF escaped like any BMP character (correct: no surrogate), but json_escape_strict's d2 state constrains the digit after "\ud" by the character's range, which the checker sees only as a branch
+<<<<
+    elif c >= 53248 and c < 55296:
+        # U+D000..U+D7FF: "\ud" and a second digit below 8 (no surrogate).
+        yield 92
+        yield 117
+        yield 100
+        hex_digit((c - 53248).shift_right(8))
+        hex_digit(c.shift_right(4).mod(16))
+        hex_digit(c.mod(16))
+    elif c < 65536:
+====
+    elif c < 65536:
+>>>>
+
+@@ missing-separator value_emit.bot EMIT-BOUNDARY no separator between array elements: two numbers would lex as one
+<<<<
+        loop item in v.items and i from 0 to std::list::length(v.items):
+            if i > 0:
+                yield 44
+            value(item)
+====
+        loop item in v.items and i from 0 to std::list::length(v.items):
+            value(item)
+>>>>
+
+@@ missing-colon value_emit.bot accepted structure: no name separator after a key -- lexically valid (two adjacent strings), structurally wrong: no regular language states it
+<<<<
+            string_emit::string(std::list::at(v.keys, i))
+            yield 58
+            value(std::list::at(v.items, i))
+====
+            string_emit::string(std::list::at(v.keys, i))
+            value(std::list::at(v.items, i))
+>>>>
+
+@@ unbalanced value_emit.bot accepted structure: an array's closing bracket written as an object's
+<<<<
+            value(item)
+            continue
+        yield 93
+====
+            value(item)
+            continue
+        yield 125
+>>>>
+
+@@ flat-serializer value_emit.bot EMIT-REJECTED imprecise: value_flat claimed (correct output): its grammar position is the frame it pops, data the checker cannot follow, so a value may start right after a number as far as it knows
+<<<<
+fn flat_source(v: Value) -> int errors IndexNotFound:
+====
+#: emits json_grammar::json_text
+fn flat_source(v: Value) -> int errors IndexNotFound:
+>>>>
+
+@@ never-completes number_emit.bot accepted vacuous: an emitter that writes 1 and then ones forever -- every prefix it yields is a valid one, it never completes, so it claims nothing (and the program never terminates: the census does not run it)
+<<<<
+    if n == 0:
+        yield 48
+    elif n < 0:
+====
+    if n == 0:
+        yield 49
+        loop:
+            yield 49
+    elif n < 0:
+>>>>
+
+@@ corrupted-text number_emit.bot accepted dynamic: the integer's text corrupted after std::int::to_string (a letter appended) -- the claim still holds, because the guards check every character: the emitter fails NotCanonical at the letter instead of emitting it
+<<<<
+fn integer_text(n: int) -> unit errors IndexNotFound, NotCanonical:
+    text = std::int::to_string(n)
+====
+fn integer_text(n: int) -> unit errors IndexNotFound, NotCanonical:
+    text = std::int::to_string(n).concat("x")
+>>>>
+
+@@ surrogate-input check_all.bot accepted failure: a surrogate among string_codes' input values -- the emitter fails NotAScalar after its prefix and never completes with the surrogate in the token
+<<<<
+        sinks::collect_string_codes([97, 0, 128512]),
+====
+        sinks::collect_string_codes([97, 55296, 128512]),
+>>>>
+
+@@ member-out-of-range value_emit.bot accepted failure: an object member's value read one index too far -- the serializer fails IndexNotFound mid-text, after the key and its colon: a viable prefix, never a malformed completion
+<<<<
+            yield 58
+            value(std::list::at(v.items, i))
+====
+            yield 58
+            value(std::list::at(v.items, i + 1))
+>>>>

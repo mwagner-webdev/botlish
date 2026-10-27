@@ -1,0 +1,1 @@
+fused bench_work::ints_text e6997 {inlined {{#9} number_emit::integer_text_source number_emit::integer_text} yields 4 creates 1 starts 1 resumes 1 queries 1 releases 12 template 149 copied 331 unboxed 0}

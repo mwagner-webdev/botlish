@@ -2945,10 +2945,15 @@ fixture's `tools/c-bindgen/fixture/expected/TARGET/`. Keep it so:
   generation compares every synthetic layout's size and alignment with a
   fresh record layout dump.
 * A generated layout is its target's and its toolchain's: windows-x86_64-gnu
-  is MinGW-w64's (Windows x86-64, the GNU ABI), the Win32 profile's target.
-  Never generate, label or check it as MSVC's windows-x86_64, and add no
-  MSVC header, tool or comparison (a separate milestone); nothing runs a
-  Windows binary.
+  is MinGW-w64's (Windows x86-64, the GNU ABI), the Win32 profile's target;
+  windows-x86_64 is MSVC's, clang's `x86_64-pc-windows-msvc` with MSVC's
+  and the Windows SDK's own headers, which exist only on a Windows host with
+  Visual Studio (ICY-TOWER-WINDOWS.md: `CheckCrossHeaders` refuses it
+  wherever clang searches no Universal CRT). Never generate, label or check
+  one as the other, never let another C library's headers stand in for
+  MSVC's, and add no MSVC tool beyond clang's MSVC target and no GNU-vs-MSVC
+  comparison. No MSVC binding is committed (no Linux job could check one):
+  the Icy Tower Windows build generates SDL3's where it builds the game.
 
 If you change `tools/c-bindgen/`, `tools/cheader/`, a profile or the
 fixture, run `tclsh9.0 tests/c-bindgen.test`, `tools/c-bindgen.tcl check
@@ -3270,16 +3275,23 @@ empty vector, List length facts, ...): they are its evidence
 ## Workloads (examples/games/icy-tower)
 
 `examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
-SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 over the
-generated SDL3 binding. Keep its layering:
+SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 and Windows
+x86-64 (ICY-TOWER-WINDOWS.md) over the generated SDL3 binding. Keep its
+layering:
 
 * `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
   (text) and `options.bot` (the command line) are pure: no SDL, no clock,
   no input device. They run, and `golden.bot` and `headless.bot` test them,
   on every backend. Never import SDL or `sdl` into them.
+* `game.bot` is the program (the frame loop, play, failure reports,
+  `main`), one source for every platform; an entry program only installs
+  the contexts -- `main.bot` std::linux::io's, `main-windows.bot`
+  std::windows::io's, both `sdl::create()` -- and runs `game::main`. Keep
+  everything else out of the entries, and every platform name out of the
+  other modules.
 * `sdl.bot` is the one module with raw authority: every function of it
   that makes a retaining C call or a native view or edit requires its own
-  `Sdl` context, so `render.bot` and `main.bot` stay ordinary modules
+  `Sdl` context, so `render.bot`, `game.bot` and the entries stay ordinary modules
   (`workload-icy-tower-sdl-modules-warning-clean` checks
   `hir::direct::summary`). Do not mark a game module `direct module`.
 * SDL's objects stay behind that context (ICY-TOWER-CONTEXT-REFACTOR-
@@ -3287,9 +3299,9 @@ generated SDL3 binding. Keep its layering:
   the renderer and the scratch memory as affine pointers in a private
   Session it keeps in its vector (CONTEXT-OWNED-AFFINE-STATE-
   MILESTONE-1.md: no native-memory record holds them) -- and `render.bot`
-  and `main.bot` call operations that take and return values only. The
+  and `game.bot` call operations that take and return values only. The
   opaque `Sdl` itself is the one affine value outside `sdl.bot`: the entry
-  program installs it. Never give a function outside `sdl.bot` a C pointer,
+  programs install it. Never give a function outside `sdl.bot` a C pointer,
   a native view or edit, or a struct holding one, never call SDL from
   another module, and never add a public `sdl.bot` function that returns
   the session's view or a pointer (anything a public function returns,
@@ -3313,8 +3325,17 @@ generated SDL3 binding. Keep its layering:
   `workload-icy-tower-baseline-warnings` pins the twelve warnings the
   original boundary (audit/icy-tower/context-refactor/baseline/) draws.
 * The SDL binding is the committed generated one (generated/c/sdl3/), staged
-  beside the game by `build.sh` (tools/c-bindgen.tcl stage): never copy it
-  into the example directory or hand-write a parallel SDL declaration.
+  beside the game by `build.sh` (tools/c-bindgen.tcl stage); on Windows,
+  `build-windows.sh` generates the windows-x86_64 (MSVC) binding from the
+  same pinned headers on the Windows host and stages it the same way (none
+  is committed: C binding generator, above). Never copy a binding into the
+  example directory or hand-write a parallel SDL declaration.
+* The game makes no variadic C call: Windows' native backend refuses them
+  (`cVariadics`). SDL's error text is copied out of SDL (`SDL_strlcpy`
+  into the session's text buffer, read through its layout) and reported by
+  `game.bot` through `std::io`, never by `SDL_Log`. An SDL enumeration
+  constant's C type is the target's (`unsigned int` on Linux, `int` with
+  MSVC): never write a game type that holds one as one C scalar.
 * `build.sh` builds the stripped executable at
   `audit/icy-tower/artifacts/icy-tower`, which is committed: rebuild and
   commit it in the same change as anything it is built from.
@@ -3329,7 +3350,7 @@ without it), `audit/icy-tower/mutate.tcl` (every mutant in
 `audit/icy-tower/mutants.txt` must still apply and be killed: update a
 mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule) and `python3 audit/icy-tower/oracle.py compare EXECUTABLE`;
-for a change to `sdl.bot`, `render.bot` or `main.bot`, also compare the SDL
+for a change to `sdl.bot`, `render.bot`, `game.bot` or an entry, also compare the SDL
 call trace of the old and new executables
 (`audit/icy-tower/context-refactor/tools/trace-compare.sh OLD NEW`: every
 draw, poll and release with its arguments must be the same);
@@ -3337,6 +3358,22 @@ draw, poll and release with its arguments must be the same);
 window (an SDL3 built with the x11 driver: build.sh says how) and
 `audit/icy-tower/tools/perf.tcl` is the performance report. CI's
 `icy-tower` workflow (`.github/workflows/icy-tower.yml`) runs all of it.
+The Windows executable (`build-windows.sh`, the Windows section of
+tests/workload-icy-tower.test, which needs SDL3.dll built by
+`tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
+`icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
+every push to any branch), which also publishes main's build as the
+`icy-tower-windows-latest` release the README's Windows button links to:
+run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
+the generator's MSVC target or `tools/cheader/`.
+Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
+only that job, on main or a manual run, in the `windows-signing`
+environment, sees signing credentials -- never give them to the build job,
+a pull request or another workflow, never store a signing key or password
+in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
+release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
+build's signing dry run must keep passing: the executable must run with a
+signature appended.
 
 ## Application modules, native program output, the recursion limit
 

@@ -1,0 +1,1 @@
+fused bench_work::strings_static e7441 {inlined {{#8} string_emit::string_source string_emit::string string_emit::character string_emit::control string_emit::hex_digit string_emit::hex_digit} yields 18 creates 1 starts 1 resumes 1 queries 1 releases 10 template 315 copied 719 unboxed 0}

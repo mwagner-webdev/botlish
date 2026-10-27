@@ -1,0 +1,1 @@
+fused bench_work::ints_static e6917 {inlined {{#8} number_emit::integer_source number_emit::integer number_emit::magnitude number_emit::magnitude} yields 6 creates 1 starts 1 resumes 1 queries 1 releases 10 template 245 copied 531 unboxed 0}

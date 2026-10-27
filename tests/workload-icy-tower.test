@@ -7,12 +7,16 @@
 # workflow) -- the Linux executable: built by build.sh, run headless, run
 # through the real SDL loop on SDL's dummy video driver (also under GC
 # stress), its failure and usage paths, its link, and the independent
-# oracle (audit/icy-tower/oracle.py) over a grid of seeds.
+# oracle (audit/icy-tower/oracle.py) over a grid of seeds. Where SDL3.dll is
+# built on Windows, the Windows executable (ICY-TOWER-WINDOWS.md): built by
+# build-windows.sh against the MSVC binding it generates, its imports, and
+# its headless, dummy-driver, failure and usage runs.
 #
 # The pure modules (tower.bot, hud.bot, options.bot) and their programs
-# (headless.bot, golden.bot) need no SDL and run on every backend; main.bot,
-# sdl.bot and render.bot import the generated binding, which build.sh (and
-# the warning test here) stage beside them.
+# (headless.bot, golden.bot) need no SDL and run on every backend; game.bot,
+# sdl.bot, render.bot and the entry programs (main.bot on Linux,
+# main-windows.bot on Windows) import the generated binding, which build.sh,
+# build-windows.sh and the warning test here stage beside them.
 #
 # Backends, as tests/workload-2048.test's: the outer pass's own (CORE_BACKEND
 # interp or compile) plus cranelift in the interp pass and
@@ -22,6 +26,7 @@ source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot examples games icy-tower run.tcl]
 source [file join $::projectRoot tests cffi sdl3.tcl]
+source [file join $::projectRoot tests binary-header.tcl]
 
 interp recursionlimit {} 100000
 
@@ -119,17 +124,17 @@ proc icyStagedHir {} {
     return $::icyStagedHir
 }
 
-test workload-icy-tower-sdl-modules-warning-clean {main.bot, sdl.bot and render.bot, staged with the committed generated SDL3 binding (tools/c-bindgen.tcl stage), compile under -warnings error for linux-x86_64: no warning of the game's own, none of the binding's -- and no module of the game is direct: sdl.bot's raw calls (retaining C calls, native views and edits) are all mediated by its own Sdl context (DIRECT-MODULES.md), so render.bot and the entry program stay ordinary} -body {
+test workload-icy-tower-sdl-modules-warning-clean {main.bot, game.bot, sdl.bot and render.bot, staged with the committed generated SDL3 binding (tools/c-bindgen.tcl stage), compile under -warnings error for linux-x86_64: no warning of the game's own, none of the binding's -- and no module of the game is direct: sdl.bot's raw calls (retaining C calls, native views and edits) are all mediated by its own Sdl context (DIRECT-MODULES.md), so render.bot, game.bot and the entry program stay ordinary} -body {
     set hir [icyStagedHir]
     set statuses {}
     foreach line [split [hir::direct::summary $hir] \n] {
-        if {[regexp {^module (tower|hud|options|sdl|render): (\S+)} $line -> module status]
+        if {[regexp {^module (tower|hud|options|sdl|render|game): (\S+)} $line -> module status]
                 || [regexp {^(entry program): (\S+)} $line -> module status]} {
             lappend statuses $module $status
         }
     }
     list ok [lsort -stride 2 $statuses]
-} -result {ok {{entry program} ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
+} -result {ok {{entry program} ordinary game ordinary hud ordinary options ordinary render ordinary sdl contextualized tower ordinary}}
 
 # The game module of expression E (its file's name), "" outside the game: a
 # file of the stage's root, never of a subdirectory (the staged binding has
@@ -140,7 +145,7 @@ proc icyModuleOf {hir e} {
     set path [lindex [split [hir::originLocation $hir $origin] :] 0]
     if {[file normalize [file dirname $path]] ne [file normalize [file join [tcltest::temporaryDirectory] icy-tower-stage]]} { return "" }
     set file [file rootname [file tail $path]]
-    return [expr {$file in {main sdl render tower hud options} ? $file : ""}]
+    return [expr {$file in {main game sdl render tower hud options} ? $file : ""}]
 }
 
 # 1 if call E is a context installation (`with context EXPR`: the call of
@@ -157,7 +162,7 @@ proc icyInstallation {hir e} {
     return 0
 }
 
-test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md): outside sdl.bot no function's parameter or result holds a C pointer, no call passes or returns one, no SDL function is called, and no native view or edit is made -- every SDL object lives in the installed context's session, and render.bot and main.bot use operations only. The one affine value outside sdl.bot is the opaque Sdl itself, which the entry program's installation moves into the installed context (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): sdl::create()'s result and context#install's argument, its pointers sealed inside it} -body {
+test workload-icy-tower-sdl-airlock {SDL stays behind the sdl::Sdl context (ICY-TOWER-CONTEXT-REFACTOR-CENSUS.md): outside sdl.bot no function's parameter or result holds a C pointer, no call passes or returns one, no SDL function is called, and no native view or edit is made -- every SDL object lives in the installed context's session, and render.bot, game.bot and main.bot use operations only. The one affine value outside sdl.bot is the opaque Sdl itself, which the entry program's installation moves into the installed context (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): sdl::create()'s result and context#install's argument, its pointers sealed inside it} -body {
     set hir [icyStagedHir]
     set found {}
     dict for {e node} [dict get $hir exprs] {
@@ -277,7 +282,7 @@ test workload-icy-tower-sdl-helpers-private {every function of sdl.bot whose par
         }
     }
     list [lsort $found] [icyPrivate $hir]
-} -result {{} {types {EventType KeyState Session TextBuffer} values {cstring down? free_text log_failure nul quit_requested? release session_clear session_color session_fill session_line session_present session_scale session_synced? session_text write_chars write_text write_text_unchecked}}}
+} -result {{} {types {EventType KeyState Session TextBuffer} values {cstring down? error_text free_text nul printable quit_requested? read_text release session_clear session_color session_fill session_line session_present session_scale session_synced? session_text text_of write_chars write_text write_text_unchecked}}}
 
 test workload-icy-tower-no-resource-escape {the refactored airlock hands nothing raw across its boundary: no CONTEXT-RESOURCE-ESCAPE (the warning-clean test above compiles it under -warnings error; this asks the pass itself)} -body {
     set hir [icyStagedHir]
@@ -330,16 +335,15 @@ proc withEnv {env script} {
     }
 }
 
-# Runs the executable with ARGS, on SDL's dummy video driver and the
-# package-owned libSDL3.so, with the environment variables of ENV (a dict)
-# added: {exit-status stdout stderr}.
-proc icyRun {env args} {
+# Runs the executable EXE with ARGS, on SDL's dummy video driver, with the
+# environment variables of ENV (a dict) added: {exit-status stdout stderr}.
+proc icyExec {exe env args} {
     set out [file join [tcltest::temporaryDirectory] icy-tower-out]
     set err [file join [tcltest::temporaryDirectory] icy-tower-err]
-    set env [dict merge [dict create LD_LIBRARY_PATH [cffi::sdl3Dir] SDL_VIDEO_DRIVER dummy] $env]
+    set env [dict merge [dict create SDL_VIDEO_DRIVER dummy] $env]
     try {
         withEnv $env {
-            set status [catch {exec $::executable {*}$args >$out 2>$err}]
+            set status [catch {exec $exe {*}$args >$out 2>$err}]
         }
         set code 0
         if {$status} {
@@ -350,6 +354,13 @@ proc icyRun {env args} {
     } finally {
         file delete -force $out $err
     }
+}
+
+# Runs the Linux executable with ARGS, on SDL's dummy video driver and the
+# package-owned libSDL3.so, with the environment variables of ENV (a dict)
+# added: {exit-status stdout stderr}.
+proc icyRun {env args} {
+    icyExec $::executable [dict merge [dict create LD_LIBRARY_PATH [cffi::sdl3Dir]] $env] {*}$args
 }
 
 test workload-icy-tower-executable-builds {build.sh stages the game with the generated SDL3 binding, compiles it under -warnings error and links it with -lSDL3: a stripped PIE x86-64 executable that needs libSDL3.so.0 and nothing beyond glibc and libgcc} -constraints icyTowerExecutable -body {
@@ -379,11 +390,11 @@ test workload-icy-tower-executable-restarts {a long autopilot run on the dummy d
     list $code [regexp {round=([2-9]|\d\d)} $out] $err
 } -result {0 1 {}}
 
-test workload-icy-tower-executable-sdl-failure {when SDL cannot start (an unknown video driver), the run logs SDL's own error through the variadic SDL_Log, releases what it made and exits 1} -constraints icyTowerExecutable -body {
+test workload-icy-tower-executable-sdl-failure {when SDL cannot start (an unknown video driver), the run releases what it made, reports SDL's own error (SDL_GetError's text, copied out with SDL_strlcpy) on standard error and exits 1} -constraints icyTowerExecutable -body {
     icyRun {SDL_VIDEO_DRIVER nosuch} --frames 10
 } -result {1 {} {Icy Tower: SDL_Init failed: nosuch not available}}
 
-test workload-icy-tower-executable-renderer-failure {when the renderer cannot be made (an unknown render driver), the window and SDL made before it are released again, SDL's error is logged and the run exits 1} -constraints icyTowerExecutable -body {
+test workload-icy-tower-executable-renderer-failure {when the renderer cannot be made (an unknown render driver), the window and SDL made before it are released again, SDL's error is reported and the run exits 1} -constraints icyTowerExecutable -body {
     icyRun {SDL_RENDER_DRIVER nosuch} --frames 10
 } -result {1 {} {Icy Tower: SDL_CreateRenderer failed: nosuch not available}}
 
@@ -414,5 +425,68 @@ test workload-icy-tower-oracle {the executable's headless summaries equal the in
 } -result {0 {0 differences}}
 
 file delete -force [file dirname $executable]
+
+# ---------------------------------------------------------------------------
+# The Windows executable (ICY-TOWER-WINDOWS.md)
+
+# Windows, a built native backend, executables, the package-owned SDL3.dll
+# and SDL3.lib (tests/cffi/sdl3.tcl), clang for the MSVC SDL3 binding
+# build-windows.sh generates, and Git for Windows' sh to run it. (Not
+# `bash`: the first one on a Windows PATH can be System32's, WSL's
+# launcher.)
+testConstraint icyTowerWindowsExecutable [expr {$::tcl_platform(platform) eq "windows" &&
+    [testConstraint nativeBuilt] && [testConstraint executableAot] && [cffi::sdl3Dir] ne "" &&
+    [auto_execok clang] ne "" && [auto_execok sh] ne ""}]
+
+set windowsGame [file join [tcltest::temporaryDirectory] icy-tower-windows]
+
+# Runs the Windows executable with ARGS, as icyRun runs the Linux one: it
+# loads SDL3.dll from its own directory.
+proc icyRunWindows {env args} {
+    icyExec [file join $::windowsGame icy-tower.exe] $env {*}$args
+}
+
+# The DLLs of the PE image PATH that are a C runtime's: the Visual C++
+# runtime's (vcruntime, msvcp, concrt) or the UCRT's (ucrtbase,
+# api-ms-win-crt-*), none of which the game may need beside it.
+proc icyRuntimeDlls {path} {
+    lsearch -all -inline -regexp -nocase [dict get [peFacts $path] imports] {^(vcruntime|msvcp|concrt|ucrtbase|api-ms-win-crt-)}
+}
+
+test workload-icy-tower-windows-builds {build-windows.sh generates the MSVC SDL3 binding (windows-x86_64), stages the game with it, compiles main-windows.bot under -warnings error and links it with SDL3.lib: icy-tower.exe, a console x86-64 PE beside SDL3.dll, importing SDL3.dll; neither needs a C runtime DLL (the executable's C runtime is static, SDL3.dll is built without one)} -constraints icyTowerWindowsExecutable -body {
+    file delete -force $windowsGame
+    exec sh [file join $gameDir build-windows.sh] $windowsGame 2>@1
+    set exe [file join $windowsGame icy-tower.exe]
+    set dll [file join $windowsGame SDL3.dll]
+    set pe [peFacts $exe]
+    list [binaryHeader $exe] [dict get $pe subsystem] [expr {"SDL3.dll" in [dict get $pe imports]}] \
+        [file exists $dll] [icyRuntimeDlls $exe] [icyRuntimeDlls $dll]
+} -result {{pe x86_64 executable} 3 1 1 {} {}}
+
+test workload-icy-tower-windows-headless {the Windows executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerWindowsExecutable -body {
+    icyRunWindows {} --headless --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-windows-dummy-driver {the real SDL loop on Windows, on SDL's dummy video driver -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn (rectangles, lines, debug text through C floats) and presented, then everything released -- plays the same 600 frames as the headless run} -constraints icyTowerWindowsExecutable -body {
+    icyRunWindows {} --autopilot --fixed-step --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-windows-gc-stress {the Windows dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1: 120 frames, the same state as without} -constraints icyTowerWindowsExecutable -body {
+    set plain [icyRunWindows {} --autopilot --fixed-step --frames 120 --seed 11]
+    set stressed [icyRunWindows {BOTLISH_NATIVE_GC_STRESS 1} --autopilot --fixed-step --frames 120 --seed 11]
+    list [lindex $plain 0] [expr {$plain eq $stressed}]
+} -result {0 1}
+
+test workload-icy-tower-windows-sdl-failure {on Windows too, when SDL cannot start (an unknown video driver), the run releases what it made, reports SDL's own error on standard error and exits 1} -constraints icyTowerWindowsExecutable -body {
+    icyRunWindows {SDL_VIDEO_DRIVER nosuch} --frames 10
+} -result {1 {} {Icy Tower: SDL_Init failed: nosuch not available}}
+
+test workload-icy-tower-windows-usage {the Windows executable's usage error is status 2; --help prints the usage, status 0} -constraints icyTowerWindowsExecutable -body {
+    lassign [icyRunWindows {} --fly] code1 out1 err1
+    lassign [icyRunWindows {} --help] code2 out2 err2
+    list $code1 [lindex [split $err1 \n] 0] $code2 [lindex [split $out2 \n] 0]
+} -result {2 {icy-tower: unknown option: --fly} 0 {usage: icy-tower [--seed N] [--frames N] [--headless] [--autopilot] [--fixed-step] [--help]}}
+
+file delete -force $windowsGame
 
 cleanupTests

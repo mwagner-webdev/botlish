@@ -1,0 +1,2 @@
+fused bench_work::ints_validated e7157 {inlined {{#8} number_emit::integer_trusted_source number_emit::integer_trusted} yields 1 creates 1 starts 1 resumes 1 queries 1 releases 15 template 54 copied 129 unboxed 0}
+fused bench_work::ints_validated e7171 {inlined {{#9} json_lex::json_number json_lex::json_number#run} yields 1 creates 1 starts 1 resumes 2 queries 1 releases 16 template 106 copied 353 unboxed 2}
