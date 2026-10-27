@@ -130,8 +130,10 @@ worked.
   read of the stack size, which makes their constructions cheaper too.
   Their CI passed:
   - macOS, its full tier included, at fa711b43 and at 3a71734b;
-  - Linux x86-64 and Linux AArch64 at 48056543, and at 3a71734b:
-    PENDING-LINUX-CI.
+  - Linux x86-64 and Linux AArch64 at 48056543;
+  - Linux AArch64 again at 3a71734b's code. Linux x86-64 there was green
+    but for two test files outside this milestone, which fail the same
+    ways on main (the runner image's newer clang and linker).
 
 What remains is in section 10:
 
@@ -1109,8 +1111,24 @@ The evidence:
     the warning gate, the method-call decision audit; its GC-stress job
     runs on main only;
   - tests-arm64.yml run 40123419578 at 48056543, green;
-  - at 5b09455b (3a71734b's code with report edits), tests.yml run
-    40458887386 and tests-arm64.yml run 40458891165: PENDING-LINUX-CI;
+  - at 5b09455b (3a71734b's code with report edits):
+    - tests-arm64.yml run 40458891165: green;
+    - tests.yml run 40458887386: nine jobs green, five red. The green
+      ones are the four golden shards, the native Rust unit tests, the
+      stub-linked executables, the warning gate and the method-call
+      decision audit. The five red jobs fail in two files outside this
+      milestone, the same ways on main's own run 40456912638 (f11ac77f).
+      Both are differences of the runner image's newer toolchains:
+      - c-bindgen.test's `cb-policy-conflict` and two other tests expect
+        clang's IR attributes `nocapture readonly`, and the image's clang
+        prints `readonly nocapture`;
+      - c-ffi.test's `cf-wrong-architecture` finds none of the linker
+        wordings it knows on the line naming the foreign library.
+
+      The same tree passed both files in the local suite (section 8.3).
+      No fix exists on main yet, and this milestone does not make one: it
+      would widen the change to the binding generator and the C FFI's
+      tests;
   - macos-arm64.yml run 40131658720 at fa711b43 (the code of a4d5d108
     but for a Windows-only test file), every job green: the smoke tier
     (the Rust tests, the native stack checks, native status, objects and
