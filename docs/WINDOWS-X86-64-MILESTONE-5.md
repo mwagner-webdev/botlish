@@ -1177,8 +1177,20 @@ gained:
 of section 2 (audit/windows-coroutines/probe, no botlish-native code), on
 pushes that change them or on demand. It gates nothing.
 
-The GC-stress tier at 3a71734b (real Windows, a manual run with tier
-`full`): PENDING-WIN-GC-STRESS.
+The GC-stress tier at 3a71734b's code (real Windows: run 40485310608 at
+f9a96719, a manual run with tier `full`) passed, every job of the run
+green. The four full shards ran the acceptance tier under
+`BOTLISH_NATIVE_GC_STRESS=1`:
+
+* every Tcl test file on interp and on compile, 59 + 58 + 58 + 58 = 233
+  files;
+* every golden suite on interp, compile, cranelift-generic and
+  cranelift, 4 × 27 = 108 suites. Under GC stress that means a
+  collection at every allocation site of the golden runner, a
+  coroutine, on every suspended fiber;
+* the examples on every backend, and the C ABI facts.
+
+Each shard took 32 to 40 minutes.
 
 ## 9. Performance
 
