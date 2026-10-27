@@ -596,6 +596,9 @@ the compiler's admission decisions.
 
 | run | programs | sites (admitted) | observations | disagreements | unsound |
 |---|---:|---:|---:|---:|---:|
+| `-seed 21 -n 40` | 40 | 159 (36) | 1,434 | 0 | 0 |
+| `-seed 22 -n 40` | 40 | 152 (30) | 1,361 | 0 | 0 |
+| `-seed 23 -n 40` | 40 | 177 (53) | 1,544 | 0 | 0 |
 @@PROOFS@@
 
 ## Mutation testing
@@ -660,7 +663,120 @@ detaches per operation come from `native::allocationReport`
 (`-allocations 1`), and keyed-hash computations per operation are counted
 on the Tcl compiler's backend (`-hash-calls 1`).
 
-@@PERF@@
+**Instructions per operation.** These come from callgrind and are exact
+up to placement: the hidden key changes probe lengths by a few percent.
+Validation and reorder are linear, so the cost per entry is shown in
+parentheses.
+
+| keys | n | `order()` | `validate_order`, valid | invalid | map reorder | set reorder | reorder, n/2 dead entries | reorder, `with_capacity(8n)` | reorder of a fresh copy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Int | 16 | 781 | 9,354 (585) | 17,907 (1,119) | 37,255 (2,328) | 28,807 (1,800) | 34,911 (2,182) | 54,135 (3,383) | 43,458 (2,716) |
+| Int | 1,024 | 784 | 593,390 (579) | 610,830 (597) | 1,671,647 (1,632) | 1,479,916 (1,445) | 1,607,818 (1,570) | 2,920,072 (2,852) | 1,724,057 (1,684) |
+| Int | 65,536 | 1,194 | 37,822,629 (577) | 36,755,409 (561) | 106,616,140 (1,627) | 95,019,986 (1,450) | 110,735,375 (1,690) | 195,438,655 (2,982) | 111,744,216 (1,705) |
+| Int | 262,144 | 1,161 | 151,134,890 (577) | 150,940,525 (576) | 421,122,362 (1,606) | 377,499,149 (1,440) | 436,366,221 (1,665) | 778,444,612 (2,970) | 440,275,853 (1,680) |
+| String | 16 | 781 | 10,030 (627) | 21,146 (1,322) | 34,194 (2,137) | 30,518 (1,907) | 42,946 (2,684) | 55,336 (3,458) | 43,850 (2,741) |
+| String | 1,024 | 786 | 638,179 (623) | 620,178 (606) | 1,703,588 (1,664) | 1,519,842 (1,484) | 2,001,358 (1,954) | 2,962,998 (2,894) | 1,754,597 (1,713) |
+| String | 65,536 | 1,196 | 40,202,210 (613) | 39,792,548 (607) | 107,587,691 (1,642) | 97,514,880 (1,488) | 107,185,927 (1,636) | 187,865,019 (2,867) | 111,027,767 (1,694) |
+| String | 262,144 | 1,145 | 159,154,316 (607) | 158,963,260 (606) | 430,523,949 (1,642) | 411,345,131 (1,569) | 444,816,446 (1,697) | 749,269,715 (2,858) | 450,608,452 (1,719) |
+
+The cost is O(n), with no O(n²) path:
+
+* **The cost per entry is flat.** From 1,024 to 262,144 keys, a map
+  reorder costs 1,606 to 1,664 instructions per entry, and validation 576
+  to 623. At 16 entries the fixed part of each operation shows (the
+  arrangement's arrays, the vector shares).
+* **What a reorder costs per entry:**
+  - the arrangement's probe;
+  - three or two pushes onto the rewritten vectors;
+  - the index refill;
+  - for a map, the value's move (a set reorder is 10% cheaper).
+
+  A reorder costs about one insertion into a presized map per entry
+  (1,480 to 1,520 instructions in the hot-path runs below).
+* **An invalid candidate costs as much as a valid one.** The check counts
+  every member before it fails. The difference at 16 entries is the error
+  raised and the empty set the handler builds.
+* **Dead entries add no work per entry.** The test removes and re-adds the
+  last half of the keys, leaving n/2 dead entries, which the order shares.
+  At 65,536 and 262,144 keys the reorder's net cost is then within 4% of a
+  clean map's. The smaller sizes' net figures range from −6% to +26%;
+  each is the difference of two runs whose removals and re-insertions
+  cost several times the reorder (and, for String keys, their allocations
+  and collections).
+* **A reserved index costs O(slots).** A map made `with_capacity(8n)`
+  keeps its slots (the power of two above 8n/0.7) through the reorder,
+  and the refill costs about 97 instructions per extra slot: 2,970
+  instead of 1,606 per entry at 262,144 Int keys. This is the
+  price of keeping the reservation (Dead entries and capacity).
+* **A shared map's first write costs no copy.** Reordering a fresh copy
+  costs the same as reordering an unshared map (1,680 against 1,606 per
+  entry). The reorder replaces each vector it rewrites, and the
+  copy-on-write rule never copies one that is about to be replaced.
+
+**Allocations, shares and detaches per operation.** These come from
+`native::allocationReport`, with Int keys. The figures are the same for
+String keys, apart from the keys the dead-entry mode builds.
+
+| operation | managed objects | vector shares | detaches | backing growths, n = 16 / 1,024 / 65,536 / 262,144 |
+|---|---:|---:|---:|---|
+| `order()` | 1 | 0 | 0 | 0 |
+| `validate_order`, valid | 1 | 0 | 0 | 0 |
+| `validate_order`, invalid (error handled, empty set built) | 11 | 0 | 0 | 0 |
+| map reorder | 5 | 3 | 0 | 9 / 27 / 45 / 51 |
+| set reorder | 4 | 2 | 0 | 6 / 18 / 30 / 34 |
+| map reorder by `m.order()` after removals (the order shares the map's table) | 13 | 7 | 0 | 13 / 37 / 61 / 69 |
+| reorder of a fresh copy (`c = m`, then `c.reorder(c.order())`) | 13 | 7 | 0 | 13 / 37 / 61 / 69 |
+
+* **The managed objects are constant in n.** For a map reorder they are
+  the permutation array, its rank counter, and the logical copies of the
+  hash, key and value vectors that the rewrite reads from. There is never
+  a List of entries, keys or values (`cr-allocations-constant`).
+* **No detaches.** A reorder never copies a vector.
+* **Growths.** The vectors it rewrites start empty and grow by doubling,
+  which gives about log₂ n reallocations each. MutableVector has no
+  reserve, the same limitation as `with_capacity` (ORDERED-MUTABLE-MAP-SET.md,
+  Limitations).
+
+**Keyed-hash computations per operation.** These are counted as
+`core::hashing::tableHash` calls on the Tcl compiler's backend, at 16 keys
+of each kind, and are exact:
+
+| `order()` | `validate_order` | reorder (map, set, reserved, shared) | reorder after removals |
+|---:|---:|---:|---:|
+| 0 | 0 | 0 | 0 beyond the 16 of the removals and re-insertions themselves (the same in its base) |
+
+**Time.** Nanoseconds per operation, natively, the best of five runs:
+
+@@TIMES@@
+
+**The existing operations did not regress.** `bench/mutable-map.tcl
+-instructions 1` was run twice with the same compiler, once against this
+standard library and once against the base revision's (`-stdlib`, the
+standard library of the commit before this work):
+
+* Int and String keys, 1,024 and 4,096 entries.
+* Every hot path: build (growing and presized), hit, miss, contains hit
+  and miss, replace, remove, iterate, and the set's add, hit and miss.
+
+Over the 48 rows, the change in instructions per operation has a mean of
+−0.31% and a median of −0.05%, and ranges from −5.2% to +7.4% in both
+directions. That scatter is placement noise: each run draws its own hidden
+hash key, which changes probe lengths. Iteration, which never probes, is
+identical (280 against 280).
+
+The native code shows that nothing else changed. A program using every
+operation was compiled against both standard libraries and its NIR was
+compared function by function:
+
+* 35 of the 41 functions the hot paths use are identical.
+* `at`, `remove` and `iteration_at` differ only in the numeric id of
+  `KeyNotFound` (1 became 2: the new `OrderMismatch` is numbered first).
+* `rebuild` calls the extracted `reindex` instead of inlining the same
+  loop. That is one call per growth step.
+
+The relation is compile-time knowledge: no proven or unproven program's
+NIR holds any trace of it.
+
 
 ## Regression and CI
 
