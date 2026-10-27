@@ -747,7 +747,40 @@ of each kind, and are exact:
 
 **Time.** Nanoseconds per operation, natively, the best of five runs:
 
-@@TIMES@@
+| keys | n | `order()` | `validate_order`, valid | invalid | map reorder | set reorder | reorder, n/2 dead entries | reorder, `with_capacity(8n)` | reorder of a fresh copy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Int | 16 | 88 | 662 (41) | 1,842 (115) | 3,169 (198) | 2,487 (155) | 4,862 (304) | 4,204 (263) | 4,311 (269) |
+| Int | 1,024 | 93 | 61,293 (60) | 58,605 (57) | 162,538 (159) | 142,952 (140) | 247,638 (242) | 214,600 (210) | 157,840 (154) |
+| Int | 65,536 | 99 | 4,896,091 (75) | 3,835,978 (59) | 14,215,044 (217) | 7,244,564 (111) | 13,398,777 (204) | 19,028,235 (290) | 12,368,516 (189) |
+| Int | 262,144 | 66 | 21,616,223 (82) | 16,698,348 (64) | 62,137,556 (237) | 56,719,813 (216) | 50,349,252 (192) | 108,881,484 (415) | 50,142,138 (191) |
+| String | 16 | 78 | 1,090 (68) | 2,070 (129) | 3,088 (193) | 2,796 (175) | 3,587 (224) | 4,158 (260) | 4,044 (253) |
+| String | 1,024 | 80 | 50,700 (50) | 63,432 (62) | 148,350 (145) | 129,112 (126) | 262,704 (257) | 240,043 (234) | 151,014 (147) |
+| String | 65,536 | 134 | 6,014,596 (92) | 4,350,502 (66) | 11,544,152 (176) | 11,291,070 (172) | 9,156,212 (140) | 17,634,375 (269) | 12,939,551 (197) |
+| String | 262,144 | 106 | 25,259,145 (96) | 26,903,560 (103) | 64,678,145 (247) | 74,787,864 (285) | 54,013,853 (206) | 86,988,876 (332) | 60,847,800 (232) |
+
+* **`order()`** takes 66 to 134 ns at every size. It allocates one
+  struct.
+* **Validation and reorder are linear.** The time per entry is shown in
+  parentheses:
+
+  | | 1,024 keys | 262,144 keys |
+  |---|---:|---:|
+  | validation | 50–62 ns | 64–103 ns |
+  | map or set reorder | 126–159 ns | 216–285 ns |
+
+  The instruction count per entry is flat over the same range (above),
+  so the rise is memory traffic: the arrangement's probes, and the
+  validation's, land at random slots of an index that no longer fits in
+  cache.
+* **Nothing grows faster than n.** From 65,536 to 262,144 keys, four
+  times the entries, every mode costs between 3.8 and 6.6 times as much.
+  The one exception is the Int set reorder at 7.8 times, because its
+  65,536-key figure is the low outlier: 110 ns per entry, against 217 for
+  the map.
+* **Run-to-run noise.** The figures are the best of five runs on a shared
+  4-core container. Differences of 20% between neighbouring cells are
+  noise; the instruction counts above are the exact comparison.
+
 
 **The existing operations did not regress.** `bench/mutable-map.tcl
 -instructions 1` was run twice with the same compiler, once against this
