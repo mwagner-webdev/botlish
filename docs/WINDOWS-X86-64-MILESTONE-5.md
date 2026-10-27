@@ -109,13 +109,16 @@ worked.
   mutants that Linux and macOS already ran now run on Windows too. On real
   Windows the native-stack and windows-unwind tools kill every mutant that
   applies there. PENDING-RESULT-RUNS
-* **What it costs** (section 9; runner A):
+* **What it costs** (section 9; Windows runners A and C):
   - a resume is 192–211 ns at any depth, against 132–179 ns on Linux;
     most of the difference is `SwitchToFiber`'s round trip (57.9 ns,
     against 22.8 ns for a custom switch);
-  - a construction is about 566 ns;
+  - a construction is about 343 ns. Commit 3a71734b took about 220 ns
+    off it on Windows and 190 ns on Linux: every start used to read
+    the stack size from the environment, which a sweep of starts near
+    the end of the thread's stack found (section 8.2);
   - a fresh fiber costs about 15 µs, paid once per pooled stack;
-  - a collection pays about 0.7 µs per suspended coroutine.
+  - a collection pays about 0.5–0.7 µs per suspended coroutine.
 
   Fused coroutines (the DFA and JSON workloads' default) never switch and
   are as fast as on Linux. Programs without coroutines are unchanged:
@@ -1088,11 +1091,13 @@ The evidence:
 ## 9. Performance
 
 Times are observations of one machine at one moment. The Windows figures
-come from two `windows-2025` runners:
+come from three `windows-2025` runners:
 
 * run A, 40123395211 at 48056543, an AMD EPYC 9V74;
 * run B, 40131658659 at fa711b43, an AMD EPYC 7763, about a quarter
-  slower in every row, the fused and ordinary ones too.
+  slower in every row, the fused and ordinary ones too;
+* run C, 40458676354 at 3a71734b, an AMD EPYC 9V74 again, after the
+  stack size was made a once-per-process read (section 8.2).
 
 The Linux figures come from this milestone's development container (Intel
 Xeon, 2.10 GHz, 4 cores, the same day). Read a ratio between hosts as an
@@ -1140,26 +1145,34 @@ show runner A and the container to be about equally fast.
 
 **The stack size read once (3a71734b).** Every figure above was measured
 before commit 3a71734b, when every start read the stack size from the
-environment (section 8.2). On Linux the same container ran this
-checkout's driver before and after that commit three times, alternating
-(controlled experiment; best of 5 within each run, the three runs'
-range):
+environment (section 8.2). After it:
 
-| Operation | Before 3a71734b | After |
-|---|---:|---:|
-| construction (to the first yield) | 429–451 ns | 241–248 ns |
-| construction + resume to completion + one cached call | 465–594 ns | 315–392 ns |
-| resume (yield in the root) | 111–135 ns | 135–140 ns |
-| construction, abandoned on an early return | 349–442 ns | 201–260 ns |
-| construction, abandoned on a fail | 466–475 ns | 277–287 ns |
-| construction, abandoned on a callee's propagated error | 350–508 ns | 271–278 ns |
-| construction, abandoned on a break | 418–446 ns | 196–256 ns |
+* **On Windows:** run C, 40458676354 at 3a71734b, landed on the same
+  processor as run A, an AMD EPYC 9V74 (real Windows).
+* **On Linux:** this checkout's driver before and after that commit, run
+  three times, alternating, on one container. Each figure is the best of
+  5 within a run; the table gives the three runs' range (controlled
+  experiment).
 
-* **A construction is about 190 ns cheaper; a resume is unchanged.** The
-  environment read was about 40 % of what a construction cost. It was a
-  cost on every host, not a Windows one.
-* **On Windows,** run C's roots job (3a71734b) measured the same rows:
-  PENDING-WIN-COSTS.
+| Operation | Windows, run A (before) | Windows, run C (after) | Linux, before | Linux, after |
+|---|---:|---:|---:|---:|
+| construction (to the first yield) | 566 ns | 343 ns | 429–451 ns | 241–248 ns |
+| construction + resume to completion + one cached call | 758 ns | 536 ns | 465–594 ns | 315–392 ns |
+| resume (yield in the root) | 192 ns | 193 ns | 111–135 ns | 135–140 ns |
+| resume, yield 32 frames deep | 206 ns | 206 ns | -- | -- |
+| resume of a coroutine that resumes one nested in it | -- | 280 ns | -- | -- |
+| construction, abandoned on an early return | 556 ns | 352 ns | 349–442 ns | 201–260 ns |
+| construction, abandoned on a fail | 605 ns | 362 ns | 466–475 ns | 277–287 ns |
+| construction, abandoned on a callee's propagated error | 599 ns | 357 ns | 350–508 ns | 271–278 ns |
+| construction, abandoned on a break | 568 ns | 359 ns | 418–446 ns | 196–256 ns |
+
+* **A construction is about 220 ns cheaper on Windows and 190 ns on
+  Linux; a resume is unchanged on both.** The environment read was about
+  40 % of a construction's cost, on every host, not only on Windows.
+* **What remains of Windows' difference is the switch.** A construction
+  costs about 100 ns more than on Linux (343 against 241–248), a resume
+  about 60 ns more (section 9.1's first table), and a nested resume adds
+  87 ns for its inner level (280 against 193).
 
 ### 9.2 What a coroutine holds
 
@@ -1192,20 +1205,23 @@ measured against the same recursion without the constructions. Every one
 of the 600 collections walks the K suspended stacks, each from its
 switch's record (section 6).
 
-| K suspended | Windows | Linux (controlled experiment) |
-|---:|---:|---:|
-| 0 | 6.3 µs per collection | 3.3 µs per collection |
-| 1000 | 711 µs per collection | 386 µs per collection |
-| **per suspended coroutine, per collection** | **705 ns** | **383 ns** |
+| K suspended | Windows, run B | Windows, run C | Linux (controlled experiment) |
+|---:|---:|---:|---:|
+| 0 | 6.3 µs per collection | 4.6 µs per collection | 3.3 µs per collection |
+| 1000 | 711 µs per collection | 533 µs per collection | 386 µs per collection |
+| **per suspended coroutine, per collection** | **705 ns** | **529 ns** | **383 ns** |
 
-(Windows: run B. Linux: controlled experiment.)
+(Windows: real Windows, runs B and C; run C is run A's processor, and
+3a71734b changes nothing a collection does. Linux: controlled
+experiment.)
 
 * **On Windows a suspended stack's walk climbs with Windows' unwinder.**
   Each frame above the Botlish ones is a `RtlLookupFunctionEntry` and a
-  `RtlVirtualUnwind`, where Linux follows frame pointers; that and run B's
-  slower machine make the difference.
-* **The cost is per suspended coroutine per collection,** about 0.7 µs.
-  A program that holds a thousand coroutines suspended pays about 0.7 ms
+  `RtlVirtualUnwind`, where Linux follows frame pointers. Run B's slower
+  machine accounts for the rest of the difference between the two Windows
+  columns.
+* **The cost is per suspended coroutine per collection,** 0.5 to 0.7 µs.
+  A program that holds a thousand coroutines suspended pays 0.5 to 0.7 ms
   per collection to keep their frames' roots.
 
 ### 9.4 The DFA and JSON workloads
