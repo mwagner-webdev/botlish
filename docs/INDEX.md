@@ -102,6 +102,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [MINIMAL-IMMUTABLE-SET.md](MINIMAL-IMMUTABLE-SET.md) -- `ImmutableSet[T]`
 - [ORDERED-MUTABLE-MAP-SET.md](ORDERED-MUTABLE-MAP-SET.md) -- `MutableMap[K satisfies Hashable, V]` and `MutableSet[T satisfies Hashable]`: insertion-ordered tables written in Botlish over MutableVectors, placed by the keyed table hash; the loop protocol, MutableVector index proofs, the oracle, fuzzer, mutants and benchmarks (completion report)
 - [PLACE-PARAMETERS.md](PLACE-PARAMETERS.md) -- `place m: T`: a parameter that is the caller's place, so a Botlish function can mutate its caller's collection in place
+- [PROVEN-COLLECTION-REORDERING.md](PROVEN-COLLECTION-REORDERING.md) -- `m.reorder(order)`, `m.order()`, `m.validate_order(candidate)` for MutableMap and MutableSet: iteration order under the program's control, admitted only where the compiler knows the relational fact SameMembers(order, m) (hir/relations.tcl, REORDER-NOT-PROVEN); the engine's O(n) permutation by stored hashes, the oracle, both fuzzers, mutants and benchmarks (completion report)
 
 ### Strings, bytes and text
 

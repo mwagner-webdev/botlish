@@ -823,9 +823,10 @@ m.length()
 Any change to either value's members loses the fact -- also a set of a
 key already present, a place call that may change nothing, and, for a
 context member, any call that may run code changing the installed
-context. A join keeps it only when every completing path gives it; a
-loop that changes either value anywhere in its body loses it in the body
-and after it. Nothing crosses a function boundary: a parameter, or a
+context. A join keeps it exactly when every completing path proves it
+(each path may prove it its own way, as a handler that changes m and
+then takes m.order()); a loop that changes either value anywhere in its
+body loses it in the body and after it. Nothing crosses a function boundary: a parameter, or a
 helper's result, is unrelated to everything.
 
 @example reject

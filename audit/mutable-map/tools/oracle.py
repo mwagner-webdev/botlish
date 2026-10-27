@@ -65,6 +65,9 @@ CANDIDATE(L, MODE, B, ABSENT), n = len(L):
     3  L without its last key
     4  L, then ABSENT
     5  ABSENT, then L without its first key
+    6  L shuffled: for i from n - 1 down to 1, positions i and
+       (B * 7919 + i * 104729) mod (i + 1) swapped (Fisher-Yates, seeded
+       by B)
 
 Order is not content: the map's dict and the set's membership are what
 they were; only the sequence a reorder installs changes. The model never
@@ -123,6 +126,12 @@ def candidate(order, mode, b, absent):
         c = order + [absent]
     elif mode == 5:
         c = [absent] + order[1:]
+    elif mode == 6:
+        c = list(order)
+        for k in range(1, n):
+            i = n - k
+            j = (b * 7919 + i * 104729) % (i + 1)
+            c[i], c[j] = c[j], c[i]
     else:
         raise ValueError("unknown reorder mode %r" % (mode,))
     seen = []
@@ -261,10 +270,12 @@ def selftest():
            ["reorder", "m", 0, 1, -1], ["iterate", "m"], ["set", "m", 4, 40], ["remove", "m", 3],
            ["set", "m", 3, 33], ["iterate", "m"], ["reorder-via-order", "m", 2], ["iterate", "m"],
            ["new", "s", "set"], ["add", "s", 5], ["add", "s", 6], ["add", "s", 7], ["reorder", "s", 2, 0, 5],
-           ["iterate", "s"], ["reorder", "s", 4, 0, 6], ["reloop", "s"], ["iterate", "s"], ["reorder-same", "s"]]
+           ["iterate", "s"], ["reorder", "s", 4, 0, 6], ["reloop", "s"], ["iterate", "s"], ["reorder-same", "s"],
+           ["add", "s", 8], ["reorder", "s", 6, 3, 0], ["iterate", "s"]]
     expect = [3, -9, 1, 10, 3, 30, 2, 20, -9, 1, 10, 2, 20, 3, 30, -7, 3, -7, 3, -7, 3, 3,
               -9, 3, 30, 2, 20, 1, 10, 30, -9, 2, 20, 1, 10, 4, 40, 3, 33, 4, -9, 4, 40, 3, 33, 2, 20, 1, 10,
-              1, 1, 1, 3, -9, 5, 7, 6, 3, 5, 7, 6, -9, 5, 6, 7, 3]
+              1, 1, 1, 3, -9, 5, 7, 6, 3, 5, 7, 6, -9, 5, 6, 7, 3,
+              1, 4, -9, 7, 8, 6, 5]
     got = run(ops)
     if got != expect:
         print("selftest FAILED (reorder): %r != %r" % (got, expect))

@@ -1,0 +1,1097 @@
+# collection-reorder.bot -- proven reordering of std::mutable_map::MutableMap
+# and std::mutable_set::MutableSet (PROVEN-COLLECTION-REORDERING.md), ported
+# from tests/collection-reorder.test.
+#
+# * `m.reorder(order)` changes the iteration order and nothing else: every
+#   key keeps its stored key and its value, length and lookups are
+#   unchanged; ORDER is a MutableSet holding exactly the collection's
+#   members. `m.order()` is the current order, `m.validate_order(c)` checks
+#   a candidate once (the declared error OrderMismatch otherwise) and
+#   reorders nothing. Copies reorder independently; a loop iterates the
+#   collection as it was when it began.
+# * The compiler admits a reorder only where it knows the order's members
+#   are the collection's (REORDER-NOT-PROVEN, ReorderNotProven here): from
+#   order(), validate_order or a copy; a change to either value's members
+#   loses it, reads and reorders keep it, a join keeps it only when every
+#   completing path does, and nothing crosses a function boundary. Each
+#   proof case is a block of its own: a rejection pins the first unproven
+#   reorder of its block (rejects_at); an admitted program compiles and runs.
+#
+# What a Botlish program cannot observe stays in tests/collection-reorder.test
+# and tests/ordered-table.test: the hidden hash key's independence across
+# fixed keys, injected collisions of the stored hash (a private library),
+# the native facts (no keyed hash, allocations), the HIR facts (which
+# function a method call is, what a reorder can reach), the absence of a
+# cascade after a type error, and the representation's invariants.
+
+import std::compiler
+import std::list
+import std::str
+import std::mutable_map
+import std::mutable_set
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only).
+
+# crDecls: reading a collection out as Lists, building one, reordering one
+# by a validated List.
+fn pairs(m: std::mutable_map::MutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn names(m: std::mutable_map::MutableMap[str, int]) -> List[str]:
+    loop e in m:
+        e.key
+
+fn elems(s: std::mutable_set::MutableSet[int]) -> List[int]:
+    loop x in s:
+        x
+
+fn set_of(xs: List[int]) -> std::mutable_set::MutableSet[int]:
+    s = std::mutable_set::create[int]()
+    loop x in xs:
+        s.add(x)
+    s
+
+fn str_set(xs: List[str]) -> std::mutable_set::MutableSet[str]:
+    s = std::mutable_set::create[str]()
+    loop x in xs:
+        s.add(x)
+    s
+
+fn int_map(xs: List[int]) -> std::mutable_map::MutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop x in xs:
+        m.set(x, x * 10)
+    m
+
+fn reorder_to(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> bool:
+    o = m.validate_order(set_of(xs)):
+        on std::mutable_map::OrderMismatch:
+            return false
+    m.reorder(o)
+    true
+
+fn reorder_set_to(place s: std::mutable_set::MutableSet[int], xs: List[int]) -> bool:
+    o = s.validate_order(set_of(xs)):
+        on std::mutable_set::OrderMismatch:
+            return false
+    s.reorder(o)
+    true
+
+# cr-proof-membership-changes/struct-place-call: a struct holding a map (Box
+# in the Tcl program).
+struct ReorderMapBox:
+    m: std::mutable_map::MutableMap[int, int]
+
+# cr-proof-copies/struct-copy: a map and an order in one struct (Box).
+struct ReorderPair:
+    m: std::mutable_map::MutableMap[int, int]
+    o: std::mutable_set::MutableSet[int]
+
+# cr-copies-independent: a struct holding a map (Box).
+struct ReorderCopyBox:
+    m: std::mutable_map::MutableMap[int, int]
+
+# cr-observer-overlap: a struct holding a set (W).
+struct ReorderSetBox:
+    s: std::mutable_set::MutableSet[int]
+
+# cr-proof-membership-changes/context and context-reader,
+# cr-proof-order-only-and-reads-preserve/context-member: a context holding
+# a map (Store).
+context struct ReorderStore:
+    m: std::mutable_map::MutableMap[int, int]
+
+# ---------------------------------------------------------------------------
+# Semantics and validation
+
+fn register_reorder_semantics_tests():
+    # a map reordered iterates in the order's order; every key keeps its value, and the length, membership and lookups are unchanged
+    fn b_cr_map_reorder() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2, 3, 4, 5])
+            ok = reorder_to(m, [3, 1, 5, 2, 4])
+            v = m.at(5):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            [ok, pairs(m), m.length(), m.contains(2), m.contains(9), v]
+    std::test::value("cr-map-reorder", [true, [[3, 30], [1, 10], [5, 50], [2, 20], [4, 40]], 5, true, false, 50], b_cr_map_reorder)
+
+    # values move with their keys through a reorder after replacement, removal and reinsertion (dead entries)
+    fn b_cr_map_values_aligned() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([10, 11, 12, 13, 14, 15, 16])
+            m.set(12, -12)
+            r = m.remove(11):
+                on std::mutable_map::KeyNotFound:
+                    0
+            r2 = m.remove(14):
+                on std::mutable_map::KeyNotFound:
+                    0
+            m.set(11, -11)
+            ok = reorder_to(m, [16, 11, 10, 15, 13, 12])
+            found = loop k in [10, 11, 12, 13, 15, 16]:
+                m.at(k):
+                    on std::mutable_map::KeyNotFound:
+                        0
+            [ok, pairs(m), found]
+    std::test::value("cr-map-values-aligned", [true, [[16, 160], [11, -11], [10, 100], [15, 150], [13, 130], [12, -12]], [100, -11, -12, 130, 150, 160]], b_cr_map_values_aligned)
+
+    # String keys: reordered by a candidate built independently (equal Strings), each value still found by its key
+    fn b_cr_map_string_keys() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[str, int]()
+            loop k in ["pear", "fig", "kiwi", "date"]:
+                m.set(k, std::str::length(k))
+            o = m.validate_order(str_set([std::str::concat("da", "te"), "kiwi", "pear", "fig"])):
+                on std::mutable_map::OrderMismatch:
+                    m.order()
+            m.reorder(o)
+            lens = loop k in names(m):
+                m.at(k):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+            [names(m), lens]
+    std::test::value("cr-map-string-keys", [["date", "kiwi", "pear", "fig"], [4, 4, 4, 3]], b_cr_map_string_keys)
+
+    # a set reordered iterates in the order's order with the same members
+    fn b_cr_set_reorder() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([4, 8, 15, 16, 23, 42])
+            ok = reorder_set_to(s, [42, 4, 23, 8, 16, 15])
+            [ok, elems(s), s.length(), s.contains(15), s.contains(7)]
+    std::test::value("cr-set-reorder", [true, [42, 4, 23, 8, 16, 15], 6, true, false], b_cr_set_reorder)
+
+    # empty by empty and singleton by itself; an empty candidate for a non-empty collection and a non-empty one for an empty collection are mismatches
+    fn b_cr_empty_and_singleton() errors std::compiler::CompilerError:
+        static compile:
+            e = int_map([])
+            one = int_map([7])
+            s = set_of([])
+            a = [reorder_to(e, []), pairs(e)]
+            b = [reorder_to(one, [7]), pairs(one)]
+            c = [reorder_set_to(s, []), elems(s)]
+            d = [reorder_to(one, []), reorder_to(e, [7]), reorder_set_to(s, [1]), pairs(one), pairs(e)]
+            [a, b, c, d]
+    std::test::value("cr-empty-and-singleton", [[true, []], [true, [[7, 70]]], [true, []], [false, false, false, [[7, 70]], []]], b_cr_empty_and_singleton)
+
+    # reordering to the current order changes nothing observable, also after removals and reinsertions
+    fn b_cr_current_order() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([5, 3, 9, 1])
+            o = m.order()
+            m.reorder(o)
+            a = pairs(m)
+            m.reorder(m.order())
+            loop k in [2, 4, 6, 8, 10, 12, 14, 16, 18]:
+                m.set(k, k)
+            loop k in [3, 4, 8, 12, 16]:
+                r = m.remove(k):
+                    on std::mutable_map::KeyNotFound:
+                        0
+            m.set(3, 33)
+            b = pairs(m)
+            m.reorder(m.order())
+            s = set_of([7, 1, 4, 9, 2])
+            r2 = s.remove(1)
+            r3 = s.remove(9)
+            s.add(1)
+            s.reorder(s.order())
+            [a, pairs(m), b == pairs(m), elems(s)]
+    std::test::value("cr-current-order", [[[5, 50], [3, 30], [9, 90], [1, 10]], [[5, 50], [9, 90], [1, 10], [2, 2], [6, 6], [10, 10], [14, 14], [18, 18], [3, 33]], true, [7, 4, 2, 1]], b_cr_current_order)
+
+    # 300 keys grown, a third removed, reversed by an order built in any way: exactly the survivors, reversed, their values kept
+    fn b_cr_reverse_after_churn() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([])
+            loop i from 0 to 300:
+                m.set(i * 7, i)
+            loop i from 0 to 300:
+                if i.mod(3) == 1:
+                    r = m.remove(i * 7):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            ks = loop e in m:
+                e.key
+            rev = loop i from 0 to std::list::length(ks):
+                std::list::at(ks, std::list::length(ks) - 1 - i):
+                    on IndexNotFound:
+                        -1
+            ok = reorder_to(m, rev)
+            after = loop e in m:
+                e.key
+            vals = loop e in m:
+                if e.value * 7 != e.key:
+                    continue
+                e.value
+            [ok, after == rev, std::list::length(vals), m.length()]
+    std::test::value("cr-reverse-after-churn", [true, true, 200, 200], b_cr_reverse_after_churn)
+
+    # m.order() is a MutableSet of exactly m's keys in m's order and a value of its own; s.order() is a copy of s
+    fn b_cr_order_snapshot() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([3, 1, 2])
+            r = m.remove(1):
+                on std::mutable_map::KeyNotFound:
+                    0
+            m.set(1, 0)
+            o = m.order()
+            s = set_of([9, 8])
+            p = s.order()
+            a = [elems(o), o.length(), o.contains(3), o.contains(4), elems(p)]
+            loop k from 10 to 30:
+                m.set(k, k)
+            r2 = m.remove(3):
+                on std::mutable_map::KeyNotFound:
+                    0
+            q = m.order()
+            q.add(99)
+            q.clear()
+            s.add(7)
+            [a, elems(o), m.length(), m.contains(99), elems(p)]
+    std::test::value("cr-order-snapshot", [[[3, 2, 1], 3, true, false, [9, 8]], [3, 2, 1], 22, false, [9, 8]], b_cr_order_snapshot)
+
+    # after a reorder the ordinary rules hold in the new order
+    fn b_cr_later_operations() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2, 3, 4])
+            ok = reorder_to(m, [4, 2, 3, 1])
+            m.set(9, 90)
+            m.set(2, 22)
+            r = m.remove(3):
+                on std::mutable_map::KeyNotFound:
+                    0
+            m.set(3, 33)
+            a = pairs(m)
+            loop i from 100 to 140:
+                m.set(i, i)
+            loop i from 100 to 140:
+                r2 = m.remove(i):
+                    on std::mutable_map::KeyNotFound:
+                        0
+            b = pairs(m)
+            s = set_of([1, 2, 3])
+            ok2 = reorder_set_to(s, [3, 1, 2])
+            dup = s.add(1)
+            s.add(5)
+            c = elems(s)
+            s.clear()
+            s.add(7)
+            [ok, a, b == a, dup, c, elems(s)]
+    std::test::value("cr-later-operations", [true, [[4, 40], [2, 22], [1, 10], [9, 90], [3, 33]], true, false, [3, 1, 2, 5], [7]], b_cr_later_operations)
+
+    # against keys a b c, candidates a b, a b d, a b c d, none, d e f are OrderMismatch; every permutation of a b c is accepted
+    fn b_cr_validate_mismatch() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[str, int]()
+            m.set("a", 1)
+            m.set("b", 2)
+            m.set("c", 3)
+            fn verdict(m: std::mutable_map::MutableMap[str, int], xs: List[str]) -> bool:
+                o = m.validate_order(str_set(xs)):
+                    on std::mutable_map::OrderMismatch:
+                        return false
+                true
+            bad = loop xs in [["a", "b"], ["a", "b", "d"], ["a", "b", "c", "d"], [], ["d", "e", "f"]]:
+                verdict(m, xs)
+            good = loop xs in [["a", "b", "c"], ["a", "c", "b"], ["b", "a", "c"], ["b", "c", "a"], ["c", "a", "b"], ["c", "b", "a"]]:
+                verdict(m, xs)
+            [bad, good]
+    std::test::value("cr-validate-mismatch", [[false, false, false, false, false], [true, true, true, true, true, true]], b_cr_validate_mismatch)
+
+    # validation reorders nothing and returns the candidate; a failed validation leaves both inputs unchanged
+    fn b_cr_validate_changes_nothing() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2, 3])
+            c = set_of([3, 2, 1])
+            o = m.validate_order(c):
+                on std::mutable_map::OrderMismatch:
+                    m.order()
+            bad = set_of([2, 1])
+            failed = m.validate_order(bad):
+                on std::mutable_map::OrderMismatch:
+                    set_of([0])
+            s = set_of([5, 6])
+            sbad = set_of([6, 7])
+            sfailed = s.validate_order(sbad):
+                on std::mutable_set::OrderMismatch:
+                    set_of([0])
+            [pairs(m), elems(o), elems(c), elems(failed), elems(bad), elems(s), elems(sbad), elems(sfailed)]
+    std::test::value("cr-validate-changes-nothing", [[[1, 10], [2, 20], [3, 30]], [3, 2, 1], [3, 2, 1], [0], [2, 1], [5, 6], [6, 7], [0]], b_cr_validate_changes_nothing)
+
+    # unhandled, OrderMismatch is UNHANDLED-ERROR
+    fn b_cr_validate_propagates_unhandled() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.validate_order(set_of([2]))  # reject cr-validate-propagates/unhandled col=17
+            m.reorder(o)
+    std::test::rejects_at("cr-validate-propagates/unhandled", std::compiler::DiagnosticCode::UnhandledError, 328, 17, b_cr_validate_propagates_unhandled)
+
+    # declared, OrderMismatch propagates to the caller's handler
+    fn b_cr_validate_propagates_declared() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::mutable_map::OrderMismatch:
+                o = m.validate_order(set_of([2]))
+                m.reorder(o)
+                1
+            m = int_map([1])
+            r = f(m):
+                on std::mutable_map::OrderMismatch:
+                    -1
+            r
+    std::test::value("cr-validate-propagates/declared", -1, b_cr_validate_propagates_declared)
+
+    # reorder itself declares no error
+    fn b_cr_validate_propagates_reorder_no_error() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                m.reorder(m.order())
+            m = int_map([1])
+            f(m)
+            m.length()
+    std::test::value("cr-validate-propagates/reorder-no-error", 1, b_cr_validate_propagates_reorder_no_error)
+
+# ---------------------------------------------------------------------------
+# The proof
+
+fn register_reorder_proof_tests():
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_snapshot() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/snapshot", unit, b_cr_proof_established_snapshot)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_inline() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            m.reorder(m.order())
+            std::mutable_map::reorder(m, std::mutable_map::order(m))
+            unit
+    std::test::value("cr-proof-established/inline", unit, b_cr_proof_established_inline)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_validated() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.validate_order(set_of([2, 1])):
+                on std::mutable_map::OrderMismatch:
+                    m.order()
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/validated", unit, b_cr_proof_established_validated)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_validated_exit() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                o = m.validate_order(set_of([2, 1])):
+                    on std::mutable_map::OrderMismatch:
+                        return unit
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/validated-exit", unit, b_cr_proof_established_validated_exit)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_propagated() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit errors std::mutable_map::OrderMismatch:
+                o = m.validate_order(set_of([2, 1]))
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/propagated", unit, b_cr_proof_established_propagated)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_order_copy() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            c = o
+            m.reorder(c)
+            unit
+    std::test::value("cr-proof-established/order-copy", unit, b_cr_proof_established_order_copy)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_map_copy() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            m2 = m
+            m2.reorder(o)
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/map-copy", unit, b_cr_proof_established_map_copy)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_set_forms() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([1, 2])
+            s.reorder(s.order())
+            t = s
+            s.reorder(t)
+            s.reorder(s)
+            o = s.validate_order(set_of([2, 1])):
+                on std::mutable_set::OrderMismatch:
+                    s
+            s.reorder(o)
+            unit
+    std::test::value("cr-proof-established/set-forms", unit, b_cr_proof_established_set_forms)
+
+    # order(), validate_order, a copy of a proven order or of the collection are proven
+    fn b_cr_proof_established_generic() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[K, V]) -> unit:
+                o = m.order()
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-established/generic", unit, b_cr_proof_established_generic)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_arbitrary() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            c = set_of([2, 1])
+            m.reorder(c)  # reject cr-proof-type-is-not-enough/arbitrary
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/arbitrary", std::compiler::DiagnosticCode::ReorderNotProven, 459, 13, b_cr_proof_type_is_not_enough_arbitrary)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_parameters() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], o: std::mutable_set::MutableSet[int]) -> unit:
+                m.reorder(o)  # reject cr-proof-type-is-not-enough/parameters
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/parameters", std::compiler::DiagnosticCode::ReorderNotProven, 467, 17, b_cr_proof_type_is_not_enough_parameters)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_helper() errors std::compiler::CompilerError:
+        static compile:
+            fn order_of(m: std::mutable_map::MutableMap[int, int]) -> std::mutable_set::MutableSet[int]:
+                m.order()
+            m = int_map([1, 2])
+            m.reorder(order_of(m))  # reject cr-proof-type-is-not-enough/helper
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/helper", std::compiler::DiagnosticCode::ReorderNotProven, 477, 13, b_cr_proof_type_is_not_enough_helper)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_other_map() errors std::compiler::CompilerError:
+        static compile:
+            a = int_map([1, 2])
+            b = int_map([1, 2])
+            o = a.order()
+            a.reorder(o)
+            b.reorder(o)  # reject cr-proof-type-is-not-enough/other-map
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/other-map", std::compiler::DiagnosticCode::ReorderNotProven, 488, 13, b_cr_proof_type_is_not_enough_other_map)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_element() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            xs = [m.order()]
+            y = std::list::at(xs, 0):
+                on IndexNotFound:
+                    m.order()
+            m.reorder(y)  # reject cr-proof-type-is-not-enough/element
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/element", std::compiler::DiagnosticCode::ReorderNotProven, 500, 13, b_cr_proof_type_is_not_enough_element)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_validator_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit errors std::mutable_map::OrderMismatch:
+                o = m.validate_order(c)
+                m.reorder(c)  # reject cr-proof-type-is-not-enough/validator-argument
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/validator-argument", std::compiler::DiagnosticCode::ReorderNotProven, 509, 17, b_cr_proof_type_is_not_enough_validator_argument)
+
+    # a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element, the validator's argument: REORDER-NOT-PROVEN
+    fn b_cr_proof_type_is_not_enough_set_arbitrary() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([1, 2])
+            s.reorder(set_of([2, 1]))  # reject cr-proof-type-is-not-enough/set-arbitrary
+            unit
+    std::test::rejects_at("cr-proof-type-is-not-enough/set-arbitrary", std::compiler::DiagnosticCode::ReorderNotProven, 517, 13, b_cr_proof_type_is_not_enough_set_arbitrary)
+
+    # equal lengths, and every candidate element being a key, are tested and prove nothing
+    fn b_cr_proof_equal_length_is_not_equal_members_equal_length() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            c = set_of([1, 3])
+            if c.length() == m.length():
+                m.reorder(c)  # reject cr-proof-equal-length-is-not-equal-members/equal-length
+            unit
+    std::test::rejects_at("cr-proof-equal-length-is-not-equal-members/equal-length", std::compiler::DiagnosticCode::ReorderNotProven, 527, 17, b_cr_proof_equal_length_is_not_equal_members_equal_length)
+
+    # equal lengths, and every candidate element being a key, are tested and prove nothing
+    fn b_cr_proof_equal_length_is_not_equal_members_subset() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2, 3])
+            c = set_of([1, 3])
+            missing = loop x in c:
+                if m.contains(x):
+                    continue
+                x
+            if std::list::length(missing) == 0:
+                m.reorder(c)  # reject cr-proof-equal-length-is-not-equal-members/subset
+            unit
+    std::test::rejects_at("cr-proof-equal-length-is-not-equal-members/subset", std::compiler::DiagnosticCode::ReorderNotProven, 541, 17, b_cr_proof_equal_length_is_not_equal_members_subset)
+
+    # equal lengths, and every candidate element being a key, are tested and prove nothing
+    fn b_cr_proof_equal_length_is_not_equal_members_both() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            c = set_of([2, 1])
+            missing = loop x in c:
+                if m.contains(x):
+                    continue
+                x
+            if std::list::length(missing) == 0 and c.length() == m.length():
+                m.reorder(c)  # reject cr-proof-equal-length-is-not-equal-members/both
+            unit
+    std::test::rejects_at("cr-proof-equal-length-is-not-equal-members/both", std::compiler::DiagnosticCode::ReorderNotProven, 555, 17, b_cr_proof_equal_length_is_not_equal_members_both)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_map_set() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            m.set(1, 5)
+            m.reorder(o)  # reject cr-proof-membership-changes/map-set
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/map-set", std::compiler::DiagnosticCode::ReorderNotProven, 565, 13, b_cr_proof_membership_changes_map_set)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_map_remove() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            r = m.remove(1):
+                on std::mutable_map::KeyNotFound:
+                    0
+            m.reorder(o)  # reject cr-proof-membership-changes/map-remove
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/map-remove", std::compiler::DiagnosticCode::ReorderNotProven, 577, 13, b_cr_proof_membership_changes_map_remove)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_map_clear() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            m.clear()
+            m.reorder(o)  # reject cr-proof-membership-changes/map-clear
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/map-clear", std::compiler::DiagnosticCode::ReorderNotProven, 587, 13, b_cr_proof_membership_changes_map_clear)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_order_add() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            o.add(1)
+            m.reorder(o)  # reject cr-proof-membership-changes/order-add
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/order-add", std::compiler::DiagnosticCode::ReorderNotProven, 597, 13, b_cr_proof_membership_changes_order_add)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_order_remove() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            r = o.remove(5)
+            m.reorder(o)  # reject cr-proof-membership-changes/order-remove
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/order-remove", std::compiler::DiagnosticCode::ReorderNotProven, 607, 13, b_cr_proof_membership_changes_order_remove)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_order_clear() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            o.clear()
+            m.reorder(o)  # reject cr-proof-membership-changes/order-clear
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/order-clear", std::compiler::DiagnosticCode::ReorderNotProven, 617, 13, b_cr_proof_membership_changes_order_clear)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_place_call() errors std::compiler::CompilerError:
+        static compile:
+            fn touch(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                unit
+            m = int_map([1])
+            o = m.order()
+            touch(m)
+            m.reorder(o)  # reject cr-proof-membership-changes/place-call
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/place-call", std::compiler::DiagnosticCode::ReorderNotProven, 629, 13, b_cr_proof_membership_changes_place_call)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_struct_place_call() errors std::compiler::CompilerError:
+        static compile:
+            fn touch(place b: ReorderMapBox) -> unit:
+                unit
+            b = ReorderMapBox {m: int_map([1])}
+            o = b.m.order()
+            touch(b)
+            b.m.reorder(o)  # reject cr-proof-membership-changes/struct-place-call
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/struct-place-call", std::compiler::DiagnosticCode::ReorderNotProven, 641, 13, b_cr_proof_membership_changes_struct_place_call)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_context() errors std::compiler::CompilerError:
+        static compile:
+            fn grow(context s: ReorderStore) -> unit:
+                s.m.set(3, 3)
+            fn f(context s: ReorderStore) -> unit:
+                o = s.m.order()
+                grow()
+                s.m.reorder(o)  # reject cr-proof-membership-changes/context
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/context", std::compiler::DiagnosticCode::ReorderNotProven, 653, 17, b_cr_proof_membership_changes_context)
+
+    # membership changes of the map or of the order, a place call over either, a context call over a context member lose the relation
+    fn b_cr_proof_membership_changes_context_reader() errors std::compiler::CompilerError:
+        static compile:
+            fn read(context s: ReorderStore) -> int:
+                s.m.length()
+            fn f(context s: ReorderStore) -> unit:
+                o = s.m.order()
+                n = read()
+                s.m.reorder(o)  # reject cr-proof-membership-changes/context-reader
+            unit
+    std::test::rejects_at("cr-proof-membership-changes/context-reader", std::compiler::DiagnosticCode::ReorderNotProven, 665, 17, b_cr_proof_membership_changes_context_reader)
+
+    # reads of either value, a value call, a context-free call and a reorder keep the relation
+    fn b_cr_proof_order_only_and_reads_preserve_reads() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            a = [m.length(), m.contains(2), m.empty?(), o.length(), o.contains(1)]
+            v = m.at(1):
+                on std::mutable_map::KeyNotFound:
+                    0
+            ks = loop e in m:
+                e.key
+            os = loop x in o:
+                x
+            fn look(m: std::mutable_map::MutableMap[int, int]) -> int:
+                m.length()
+            n = look(m)
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-order-only-and-reads-preserve/reads", unit, b_cr_proof_order_only_and_reads_preserve_reads)
+
+    # reads of either value, a value call, a context-free call and a reorder keep the relation
+    fn b_cr_proof_order_only_and_reads_preserve_reorders() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            m.reorder(o)
+            m.reorder(o)
+            m.reorder(m.order())
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-order-only-and-reads-preserve/reorders", unit, b_cr_proof_order_only_and_reads_preserve_reorders)
+
+    # reads of either value, a value call, a context-free call and a reorder keep the relation
+    fn b_cr_proof_order_only_and_reads_preserve_order_reordered() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2])
+            o = m.order()
+            o.reorder(o.order())
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-order-only-and-reads-preserve/order-reordered", unit, b_cr_proof_order_only_and_reads_preserve_order_reordered)
+
+    # reads of either value, a value call, a context-free call and a reorder keep the relation
+    fn b_cr_proof_order_only_and_reads_preserve_in_loop() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+                o = m.order()
+                loop x in xs:
+                    m.reorder(o)
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-order-only-and-reads-preserve/in-loop", unit, b_cr_proof_order_only_and_reads_preserve_in_loop)
+
+    # reads of either value, a value call, a context-free call and a reorder keep the relation
+    fn b_cr_proof_order_only_and_reads_preserve_context_member() errors std::compiler::CompilerError:
+        static compile:
+            fn plain() -> int:
+                3
+            fn f(context s: ReorderStore) -> unit:
+                o = s.m.order()
+                n = plain()
+                s.m.reorder(o)
+            unit
+    std::test::value("cr-proof-order-only-and-reads-preserve/context-member", unit, b_cr_proof_order_only_and_reads_preserve_context_member)
+
+    # relations follow value versions
+    fn b_cr_proof_copies_copy_changed() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            m2 = m
+            m2.set(2, 2)
+            m.reorder(o)
+            m2.reorder(o)  # reject cr-proof-copies/copy-changed
+            unit
+    std::test::rejects_at("cr-proof-copies/copy-changed", std::compiler::DiagnosticCode::ReorderNotProven, 742, 13, b_cr_proof_copies_copy_changed)
+
+    # relations follow value versions
+    fn b_cr_proof_copies_original_changed() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            m2 = m
+            m.set(2, 2)
+            m2.reorder(o)
+            m.reorder(o)  # reject cr-proof-copies/original-changed
+            unit
+    std::test::rejects_at("cr-proof-copies/original-changed", std::compiler::DiagnosticCode::ReorderNotProven, 754, 13, b_cr_proof_copies_original_changed)
+
+    # relations follow value versions
+    fn b_cr_proof_copies_struct_copy() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            b = ReorderPair {m: m, o: m.order()}
+            b.m.reorder(b.o)
+            c = b
+            c.m.reorder(b.o)
+            b.m.set(4, 4)
+            c.m.reorder(c.o)
+            b.m.reorder(b.o)  # reject cr-proof-copies/struct-copy
+            unit
+    std::test::rejects_at("cr-proof-copies/struct-copy", std::compiler::DiagnosticCode::ReorderNotProven, 768, 13, b_cr_proof_copies_struct_copy)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_both() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = if b:
+                    m.order()
+                else:
+                    m.validate_order(set_of([1])):
+                        on std::mutable_map::OrderMismatch:
+                            m.order()
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-joins/both", unit, b_cr_proof_joins_both)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_two_forms() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = if b:
+                    m.set(5, 5)
+                    m.order()
+                else:
+                    m.order()
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-joins/two-forms", unit, b_cr_proof_joins_two_forms)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_crossed() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], place n: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = if b:
+                    m.order()
+                else:
+                    n.order()
+                m.reorder(o)  # reject cr-proof-joins/crossed
+            unit
+    std::test::rejects_at("cr-proof-joins/crossed", std::compiler::DiagnosticCode::ReorderNotProven, 807, 17, b_cr_proof_joins_crossed)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_crossed_after_change() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], place n: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = if b:
+                    m.set(5, 5)
+                    m.order()
+                else:
+                    n.order()
+                m.reorder(o)  # reject cr-proof-joins/crossed-after-change
+            unit
+    std::test::rejects_at("cr-proof-joins/crossed-after-change", std::compiler::DiagnosticCode::ReorderNotProven, 820, 17, b_cr_proof_joins_crossed_after_change)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_one_arbitrary() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = if b:
+                    m.order()
+                else:
+                    set_of([1])
+                m.reorder(o)  # reject cr-proof-joins/one-arbitrary
+            unit
+    std::test::rejects_at("cr-proof-joins/one-arbitrary", std::compiler::DiagnosticCode::ReorderNotProven, 832, 17, b_cr_proof_joins_one_arbitrary)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_one_changes() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = m.order()
+                if b:
+                    m.set(5, 5)
+                m.reorder(o)  # reject cr-proof-joins/one-changes
+            unit
+    std::test::rejects_at("cr-proof-joins/one-changes", std::compiler::DiagnosticCode::ReorderNotProven, 843, 17, b_cr_proof_joins_one_changes)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_early_return() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = m.order()
+                if b:
+                    m.set(5, 5)
+                    return unit
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-joins/early-return", unit, b_cr_proof_joins_early_return)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_decided() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                o = m.order()
+                if false:
+                    m.set(5, 5)
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-joins/decided", unit, b_cr_proof_joins_decided)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_handler_candidate() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit:
+                o = m.validate_order(c):
+                    on std::mutable_map::OrderMismatch:
+                        c
+                m.reorder(o)  # reject cr-proof-joins/handler-candidate
+            unit
+    std::test::rejects_at("cr-proof-joins/handler-candidate", std::compiler::DiagnosticCode::ReorderNotProven, 877, 17, b_cr_proof_joins_handler_candidate)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_handler_changes() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit:
+                o = m.validate_order(c):
+                    on std::mutable_map::OrderMismatch:
+                        m.set(5, 5)
+                        m.order()
+                m.reorder(o)
+            unit
+    std::test::value("cr-proof-joins/handler-changes", unit, b_cr_proof_joins_handler_changes)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_both_change() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+                o = m.order()
+                if b:
+                    m.set(5, 5)
+                else:
+                    m.set(6, 6)
+                m.reorder(o)  # reject cr-proof-joins/both-change
+            unit
+    std::test::rejects_at("cr-proof-joins/both-change", std::compiler::DiagnosticCode::ReorderNotProven, 902, 17, b_cr_proof_joins_both_change)
+
+    # a join keeps the relation exactly when every completing path gives it
+    fn b_cr_proof_joins_handled_call_changes() errors std::compiler::CompilerError:
+        static compile:
+            fn take(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::mutable_map::KeyNotFound:
+                m.remove(1)
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                o = m.order()
+                r = take(m):
+                    on std::mutable_map::KeyNotFound:
+                        0
+                m.reorder(o)  # reject cr-proof-joins/handled-call-changes
+            unit
+    std::test::rejects_at("cr-proof-joins/handled-call-changes", std::compiler::DiagnosticCode::ReorderNotProven, 916, 17, b_cr_proof_joins_handled_call_changes)
+
+    # a loop that changes the map anywhere in its body loses the relation in it and after it
+    fn b_cr_proof_loops_changes_after() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+                o = m.order()
+                loop x in xs:
+                    m.reorder(o)  # reject cr-proof-loops/changes-after
+                    m.set(x, x)
+                unit
+            unit
+    std::test::rejects_at("cr-proof-loops/changes-after", std::compiler::DiagnosticCode::ReorderNotProven, 926, 21, b_cr_proof_loops_changes_after)
+
+    # a loop that changes the map anywhere in its body loses the relation in it and after it
+    fn b_cr_proof_loops_changes_before() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+                o = m.order()
+                loop i from 0 to 3:
+                    m.set(i, i)
+                m.reorder(o)  # reject cr-proof-loops/changes-before
+            unit
+    std::test::rejects_at("cr-proof-loops/changes-before", std::compiler::DiagnosticCode::ReorderNotProven, 939, 17, b_cr_proof_loops_changes_before)
+
+    # a loop that changes the map anywhere in its body loses the relation in it and after it
+    fn b_cr_proof_loops_inner_order() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+                loop x in xs:
+                    m.set(x, x)
+                    o = m.order()
+                    m.reorder(o)
+                unit
+            unit
+    std::test::value("cr-proof-loops/inner-order", unit, b_cr_proof_loops_inner_order)
+
+    # a loop that changes the map anywhere in its body loses the relation in it and after it
+    fn b_cr_proof_loops_order_changes() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+                o = m.order()
+                loop x in xs:
+                    m.reorder(o)  # reject cr-proof-loops/order-changes
+                    o.add(x)
+                unit
+            unit
+    std::test::rejects_at("cr-proof-loops/order-changes", std::compiler::DiagnosticCode::ReorderNotProven, 961, 21, b_cr_proof_loops_order_changes)
+
+    # no relation crosses a function boundary but by a contract
+    fn b_cr_proof_function_boundary_callee() errors std::compiler::CompilerError:
+        static compile:
+            fn f(place m: std::mutable_map::MutableMap[int, int], o: std::mutable_set::MutableSet[int]) -> unit:
+                m.reorder(o)  # reject cr-proof-function-boundary/callee
+            unit
+    std::test::rejects_at("cr-proof-function-boundary/callee", std::compiler::DiagnosticCode::ReorderNotProven, 971, 17, b_cr_proof_function_boundary_callee)
+
+    # no relation crosses a function boundary but by a contract
+    fn b_cr_proof_function_boundary_nested() errors std::compiler::CompilerError:
+        static compile:
+            fn outer(o: std::mutable_set::MutableSet[int]) -> unit:
+                fn inner(m: std::mutable_map::MutableMap[int, int]) -> unit:
+                    n = m
+                    n.reorder(o)  # reject cr-proof-function-boundary/nested
+                unit
+            unit
+    std::test::rejects_at("cr-proof-function-boundary/nested", std::compiler::DiagnosticCode::ReorderNotProven, 981, 21, b_cr_proof_function_boundary_nested)
+
+    # no relation crosses a function boundary but by a contract
+    fn b_cr_proof_function_boundary_observer() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            o = m.order()
+            fn look() -> int:
+                o.length()
+            x = look()
+            m.reorder(o)
+            unit
+    std::test::value("cr-proof-function-boundary/observer", unit, b_cr_proof_function_boundary_observer)
+
+    # the diagnostic names the order, the collection, its members, and how to establish the proof
+    fn b_cr_proof_message() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1])
+            c = set_of([1])
+            m.reorder(c)
+    std::test::rejects_containing("cr-proof-message", std::compiler::DiagnosticCode::ReorderNotProven, "`c` is not known to hold exactly the current keys of `m`, which std::mutable_map::reorder requires of its order", b_cr_proof_message)
+
+    # std::mutable_set's representation access is internal to the standard library
+    fn b_cr_internal_members_qualified() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([1])
+            t = std::mutable_set::table_of(s)
+    std::test::rejects("cr-internal-members/qualified", std::compiler::DiagnosticCode::InternalNamespace, b_cr_internal_members_qualified)
+
+    # method syntax to an internal member is NOMETHOD-CALL
+    fn b_cr_internal_members_method() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([1])
+            t = s.table_of()
+    std::test::rejects("cr-internal-members/method", std::compiler::DiagnosticCode::NomethodCall, b_cr_internal_members_method)
+
+# ---------------------------------------------------------------------------
+# Value semantics
+
+fn register_reorder_value_tests():
+    # a copy reorders independently: a binding, a chain of copies, a struct field, a List element, a function argument and result
+    fn b_cr_copies_independent() errors std::compiler::CompilerError:
+        static compile:
+            fn rev(m: std::mutable_map::MutableMap[int, int]) -> std::mutable_map::MutableMap[int, int]:
+                n = m
+                ok = reorder_to(n, [3, 2, 1])
+                n
+            a = int_map([1, 2, 3])
+            b = a
+            c = b
+            ok1 = reorder_to(b, [2, 3, 1])
+            box = ReorderCopyBox {m: a}
+            xs = [a]
+            r = rev(a)
+            ok2 = reorder_to(c, [3, 1, 2])
+            ok3 = reorder_to(a, [1, 3, 2])
+            x0 = std::list::at(xs, 0):
+                on IndexNotFound:
+                    int_map([])
+            [pairs(a), pairs(b), pairs(c), pairs(box.m), pairs(x0), pairs(r)]
+    std::test::value("cr-copies-independent", [[[1, 10], [3, 30], [2, 20]], [[2, 20], [3, 30], [1, 10]], [[3, 30], [1, 10], [2, 20]], [[1, 10], [2, 20], [3, 30]], [[1, 10], [2, 20], [3, 30]], [[3, 30], [2, 20], [1, 10]]], b_cr_copies_independent)
+
+    # a reordered copy and its original stay separate through later growth, removal and clear of either
+    fn b_cr_copy_then_reorder_then_mutate() errors std::compiler::CompilerError:
+        static compile:
+            a = int_map([1, 2, 3, 4])
+            b = a
+            ok = reorder_to(b, [4, 3, 2, 1])
+            loop i from 10 to 40:
+                a.set(i, i)
+            r = b.remove(3):
+                on std::mutable_map::KeyNotFound:
+                    0
+            c = b
+            b.clear()
+            [a.length(), pairs(c), b.length()]
+    std::test::value("cr-copy-then-reorder-then-mutate", [34, [[4, 40], [2, 20], [1, 10]], 0], b_cr_copy_then_reorder_then_mutate)
+
+    # s.reorder(s) is a no-op reorder, and so are the forms through a struct field
+    fn b_cr_observer_overlap() errors std::compiler::CompilerError:
+        static compile:
+            s = set_of([3, 1, 2])
+            s.reorder(s)
+            w = ReorderSetBox {s: set_of([5, 4])}
+            w.s.reorder(w.s)
+            w.s.reorder(w.s.order())
+            [elems(s), elems(w.s)]
+    std::test::value("cr-observer-overlap", [[3, 1, 2], [5, 4]], b_cr_observer_overlap)
+
+    # a loop over a collection it reorders iterates the collection as it was when the loop began
+    fn b_cr_iteration_snapshot() errors std::compiler::CompilerError:
+        static compile:
+            m = int_map([1, 2, 3])
+            seen = loop e in m:
+                if e.key == 1:
+                    ok = reorder_to(m, [3, 2, 1])
+                e.key
+            s = set_of([1, 2, 3])
+            seen2 = loop x in s:
+                ok = reorder_set_to(s, [2, 3, 1])
+                x
+            [seen, pairs(m), seen2, elems(s)]
+    std::test::value("cr-iteration-snapshot", [[1, 2, 3], [[3, 30], [2, 20], [1, 10]], [1, 2, 3], [2, 3, 1]], b_cr_iteration_snapshot)
+
+# ---------------------------------------------------------------------------
+
+fn register_collection_reorder_tests():
+    register_reorder_semantics_tests()
+    register_reorder_proof_tests()
+    register_reorder_value_tests()
+
+with context std::test::suite()
+register_collection_reorder_tests()
+std::test::report()

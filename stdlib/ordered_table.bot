@@ -382,13 +382,45 @@ fn count_shared(t: Table[K], c: Table[K]) -> int:
 fn same_members?(t: Table[K], c: Table[K]) -> bool:
     t.length() == c.length() and t.count_shared(c) == c.length()
 
-# T's entry positions in the order of C's live entries: at rank I, the
-# position of T's entry whose key equals C's live entry of rank I (-1 when T
-# has none, which an order of T never leaves). Locating an entry is a probe
-# with C's stored hash; nothing is validated (an order's members are T's by
-# the proof that admitted it).
+# PERM's ranks from N on: T's live positions that its first N ranks do not
+# hold, in position order (arrangement's totality).
+fn complete(t: Table[K], place perm: MutableArray[int], n: int) -> unit:
+    taken = std::mutable_array::create(t.positions(), false)
+    loop i from 0 to n:
+        p = perm.at(i):
+            on IndexNotFound:
+                continue
+        taken.set(p, true):
+            on IndexNotFound:
+                unit
+    rank = std::mutable_array::create(1, n)
+    loop p from 0 to t.positions():
+        held = taken.at(p):
+            on IndexNotFound:
+                true
+        if held or not t.live_at?(p):
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(i, p):
+            on IndexNotFound:
+                unit
+        rank.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    unit
+
+# T's live entry positions in the order of C's live entries: at rank I, the
+# position of T's entry whose key equals C's live entry of rank I. Locating
+# an entry is a probe with C's stored hash; nothing is validated (an
+# order's members are T's by the proof that admitted it). The arrangement
+# is total all the same: a key of C that T lacks is skipped, and T's
+# entries C does not name follow in their own order (complete). When C
+# holds exactly T's keys there are neither; when it does not (a program
+# run despite its REORDER-NOT-PROVEN), a reorder still changes no content.
 fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
-    perm = std::mutable_array::create(c.length(), -1)
+    perm = std::mutable_array::create(t.length(), -1)
     rank = std::mutable_array::create(1, 0)
     loop q from 0 to std::mutable_vector::length(c.hashes):
         h = c.hashes.at(q):
@@ -396,15 +428,23 @@ fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
                 continue
         if h < 0:
             continue
+        p = t.position(t.slot_of(h, c.key_at(q)))
+        if p < 0:
+            continue
         i = rank.at(0):
             on IndexNotFound:
                 0
-        perm.set(i, t.position(t.slot_of(h, c.key_at(q)))):
+        perm.set(i, p):
             on IndexNotFound:
                 unit
         rank.set(0, i + 1):
             on IndexNotFound:
                 unit
+    n = rank.at(0):
+        on IndexNotFound:
+            0
+    if n < t.length():
+        t.complete(perm, n)
     perm
 
 # T's entries in the order PERM (arrangement's) gives: the live entry at

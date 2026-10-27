@@ -228,7 +228,7 @@ std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestor
 std::char	namespace		api	intrinsic				
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:29			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:166			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:167			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -316,6 +316,7 @@ std::compiler::DiagnosticCode::PrivateAccess	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::ProofClause	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::RefinementMintAuthority	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::RefinementParameter	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ReorderNotProven	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ReturnOutsideCallable	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::TraitImplOrder	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::TraitInstanceBudget	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -343,7 +344,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:160			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:161			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:332			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -519,34 +520,44 @@ std::mutable_byte_store::from_storage	intrinsic	std::mutable_byte_store	api	intr
 std::mutable_byte_store::replace	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:292			
 std::mutable_byte_store::zeroed	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:286			
 std::mutable_map	namespace		api	source	stdlib/mutable_map.bot			
-std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:55			
-std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:45			
-std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:50			
-std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:72			
-std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:102			
-std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:69			
-std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:57			
-std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:66			
-std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:115			
-std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:109			
-std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:112			
-std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:63			
-std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:92			
-std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:79			
-std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:60			
+std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:73			
+std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:63			
+std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:68			
+std::mutable_map::OrderMismatch	error	std::mutable_map	api	source	stdlib/mutable_map.bot:76			
+std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:93			
+std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:123			
+std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:90			
+std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:78			
+std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:87			
+std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:163			
+std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:157			
+std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:160			
+std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:84			
+std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:134			
+std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:113			
+std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:149			
+std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:100			
+std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:140			
+std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:81			
 std::mutable_set	namespace		api	source	stdlib/mutable_set.bot			
-std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:35			
-std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:53			
-std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:71			
-std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:50			
-std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:38			
-std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:47			
-std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:83			
-std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:77			
-std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:80			
-std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:44			
-std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:62			
-std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:41			
+std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:52			
+std::mutable_set::OrderMismatch	error	std::mutable_set	api	source	stdlib/mutable_set.bot:56			
+std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:73			
+std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:91			
+std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:70			
+std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:58			
+std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:67			
+std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:139			
+std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:133			
+std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:136			
+std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:64			
+std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:127			
+std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:101			
+std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:82			
+std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:116			
+std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:124			
+std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:107			
+std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:61			
 std::mutable_vector	namespace		api	intrinsic				
 std::mutable_vector::at	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:345			
 std::mutable_vector::clear	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:365			
@@ -562,9 +573,11 @@ std::ordered_table	namespace		std-internal	source	stdlib/ordered_table.bot
 std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:57			
 std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:164			
 std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:192			
+std::ordered_table::arrangement	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:390			
 std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:204			
-std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:332			
+std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:338			
 std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:262			
+std::ordered_table::count_shared	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:360			
 std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:171			
 std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:84			
 std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:155			
@@ -574,13 +587,17 @@ std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdli
 std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:91			
 std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:102			
 std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:66			
+std::ordered_table::permute	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:414			
+std::ordered_table::permute_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:438			
 std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:181			
 std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:146			
 std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:98			
 std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:128			
-std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:287			
-std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:327			
+std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:301			
+std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:333			
+std::ordered_table::reindex	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:287			
 std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:238			
+std::ordered_table::same_members?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:382			
 std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:212			
 std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:142			
 std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:71			
@@ -609,35 +626,35 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:572			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:539			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:556			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:576			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:543			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:560			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:596			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:600			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:552			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:677			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:556			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:681			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:546			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:550			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:605			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:627			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:615			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:653			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:640			
-std::test::report	function	std::test	api	source	stdlib/test.bot:738			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:706			
-std::test::results	function	std::test	api	source	stdlib/test.bot:681			
-std::test::run	function	std::test	api	source	stdlib/test.bot:671			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:564			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:609			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:631			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:619			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:657			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:644			
+std::test::report	function	std::test	api	source	stdlib/test.bot:742			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:710			
+std::test::results	function	std::test	api	source	stdlib/test.bot:685			
+std::test::run	function	std::test	api	source	stdlib/test.bot:675			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:568			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:696			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:729			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:700			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:733			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:587			
+std::test::value	function	std::test	api	source	stdlib/test.bot:591			
 std::web	namespace		api	source	stdlib/web.bot			
 std::web::Emailish	refined-type	std::web	api	source	stdlib/web.bot:71			
 std::web::UriQueryValue	refined-type	std::web	api	source	stdlib/web.bot:226			
@@ -659,15 +676,15 @@ std::windows::c_get_last_error	extern-fn	std::windows	api	source	stdlib/windows.
 std::windows::c_get_std_handle	extern-fn	std::windows	api	source	stdlib/windows.bot:69	windows		
 std::windows::c_write_file	extern-fn	std::windows	api	source	stdlib/windows.bot:78	windows		
 std::windows::io	namespace		api	source	stdlib/windows/io.bot	windows		
-std::windows::io::WindowsIO	context-struct	std::windows::io	api	source	stdlib/windows/io.bot:65	windows		
-std::windows::io::create	function	std::windows::io	api	source	stdlib/windows/io.bot:71	windows		
-std::windows::io::progress	function	std::windows::io	api	source	stdlib/windows/io.bot:88	windows		
-std::windows::io::write	function	std::windows::io	api	source	stdlib/windows/io.bot:77	windows		
-std::windows::io::write_all	function	std::windows::io	api	source	stdlib/windows/io.bot:108	windows		
-std::windows::io::write_error	function	std::windows::io	api	source	stdlib/windows/io.bot:81	windows		
-std::windows::io::write_error_text	function	std::windows::io	api	source	stdlib/windows/io.bot:130	windows		
-std::windows::io::write_some	function	std::windows::io	api	source	stdlib/windows/io.bot:96	windows		
-std::windows::io::write_text	function	std::windows::io	api	source	stdlib/windows/io.bot:126	windows		
+std::windows::io::WindowsIO	context-struct	std::windows::io	api	source	stdlib/windows/io.bot:66	windows		
+std::windows::io::create	function	std::windows::io	api	source	stdlib/windows/io.bot:72	windows		
+std::windows::io::progress	function	std::windows::io	api	source	stdlib/windows/io.bot:89	windows		
+std::windows::io::write	function	std::windows::io	api	source	stdlib/windows/io.bot:78	windows		
+std::windows::io::write_all	function	std::windows::io	api	source	stdlib/windows/io.bot:109	windows		
+std::windows::io::write_error	function	std::windows::io	api	source	stdlib/windows/io.bot:82	windows		
+std::windows::io::write_error_text	function	std::windows::io	api	source	stdlib/windows/io.bot:131	windows		
+std::windows::io::write_some	function	std::windows::io	api	source	stdlib/windows/io.bot:97	windows		
+std::windows::io::write_text	function	std::windows::io	api	source	stdlib/windows/io.bot:127	windows		
 std::windows::last_error	function	std::windows	api	source	stdlib/windows.bot:122	windows		
 std::windows::request	function	std::windows	api	source	stdlib/windows.bot:127	windows		
 std::windows::selector	function	std::windows	api	source	stdlib/windows.bot:106	windows		

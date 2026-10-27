@@ -1,0 +1,560 @@
+# Mutants of proven collection reordering (PROVEN-COLLECTION-REORDERING.md,
+# "Mutation testing"), in audit/mutable-map/tools/mutants.txt's format, run
+# by audit/collection-reorder/tools/mutate.tcl (the collections' harness,
+# audit/mutable-map/tools/mutate.tcl, with this file, the reorder tests
+# first, the collection fuzzer and the proof fuzzer).
+#
+#   @@ NAME DESCRIPTION
+#   %% tests FILE ...      (optional) test files run first for this mutant
+#   ## FILE
+#   <<<<                   (or `<<<< all`: replace every occurrence, at
+#   text to replace         least one; plain `<<<<` must occur exactly once)
+#   ====
+#   replacement
+#   >>>>
+#
+# Three families: the semantics of the reorder (std::ordered_table,
+# std::mutable_map, std::mutable_set), the soundness of the relational
+# proof (hir/relations.tcl, the recovery rule in hir/recovery.tcl), and the
+# value semantics a reorder relies on (copies, observers, the loop
+# snapshot: compiler and runtime mutants of the seams the collections
+# already use).
+#
+# Brief mutants with no non-equivalent mutant here (the report explains
+# each):
+#
+#   * "reorder replaces stored key with candidate's equal key": two equal
+#     Hashable keys are indistinguishable (audit/mutable-map/tools/
+#     mutants.txt's header: the same for replacement); permute moves the
+#     table's own keys and never reads the order's.
+#   * "same length implies SameMembers", "subset implies SameMembers": the
+#     static proof reads no length or membership fact (a relation is
+#     minted only by a contract), so the mutants of that family are the
+#     validator's: validate-length-only, validate-subset-only; and the
+#     proof that admits whatever is well typed: any-order-admitted.
+#   * "failed validation changes an input": validate_order takes both
+#     values as ordinary parameters (copies): no code in it can change the
+#     caller's collection or candidate.
+#   * "relation lost after read-only operation" by a read's own contract:
+#     reads have none; reads-lose-relation is the analysis's version.
+#   * "the order's dead entries ranked": an order's dead entry (h = -1,
+#     m.order() after removals shares the map's) is skipped by the
+#     arrangement's `h < 0` test, and without it by the probe, which never
+#     matches -1 (the index holds live positions only: removal is a
+#     backward shift), whose -1 the totality's `p < 0` then skips. The
+#     test is a shortcut, its removal equivalent.
+#   * a handler entered without the handled call's changes: the handled
+#     call's own completion carries them into every join, so in a program
+#     the walk can see, the entry's kills never decide (the report).
+
+# ---------------------------------------------------------------------------
+# Semantics
+
+@@ reorder-value-changed reorder gives every entry the first old entry's value (a value is changed)
+## stdlib/ordered_table.bot
+<<<<
+        v = old.at(p):
+            on IndexNotFound:
+                continue
+        values.push(v)
+====
+        v = old.at(0):
+            on IndexNotFound:
+                continue
+        values.push(v)
+>>>>
+
+@@ reorder-values-misaligned a map's values follow the permutation shifted by one position: values paired with other keys
+## stdlib/ordered_table.bot
+<<<<
+    old = values
+    std::mutable_vector::clear(values)
+    loop i from 0 to perm.capacity():
+        p = perm.at(i):
+====
+    old = values
+    std::mutable_vector::clear(values)
+    loop i from 0 to perm.capacity():
+        p = perm.at((i + 1).mod(perm.capacity())):
+>>>>
+
+@@ reorder-drops-key the permutation skips its first entry (keys and values alike): a key is dropped
+## stdlib/ordered_table.bot
+<<<< all
+    loop i from 0 to perm.capacity():
+====
+    loop i from 1 to perm.capacity():
+>>>>
+
+@@ reorder-duplicates-key each odd rank takes the entry of the rank before it (keys and values alike): keys are duplicated, others lost
+## stdlib/ordered_table.bot
+<<<< all
+        p = perm.at(i):
+====
+        p = perm.at(i - bit_and(i, 1)):
+>>>>
+
+@@ reorder-keeps-old-position the entry at old position 0 stays first whatever the order says
+## stdlib/ordered_table.bot
+<<<<
+fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
+====
+fn first_or(i: int, p: int) -> int:
+    if i == 0:
+        return 0
+    p
+
+fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
+>>>>
+<<<<
+        p = t.position(t.slot_of(h, c.key_at(q)))
+        if p < 0:
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(i, p):
+====
+        p = t.position(t.slot_of(h, c.key_at(q)))
+        if p < 0:
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(i, first_or(i, p)):
+>>>>
+
+@@ reorder-reverses-order the arrangement installs the order reversed
+## stdlib/ordered_table.bot
+<<<<
+        p = t.position(t.slot_of(h, c.key_at(q)))
+        if p < 0:
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(i, p):
+====
+        p = t.position(t.slot_of(h, c.key_at(q)))
+        if p < 0:
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(c.length() - 1 - i, p):
+>>>>
+
+@@ reorder-bucket-order the arrangement walks the collection's index slots (the hidden hash's placement) instead of the order
+## stdlib/ordered_table.bot
+<<<<
+    loop q from 0 to std::mutable_vector::length(c.hashes):
+        h = c.hashes.at(q):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        p = t.position(t.slot_of(h, c.key_at(q)))
+====
+    loop q from 0 to std::mutable_vector::length(t.index):
+        p = t.position(q)
+>>>>
+
+@@ reorder-rehashes the permutation computes every entry's keyed hash again instead of moving its stored hash
+## stdlib/ordered_table.bot
+<<<<
+import std::mutable_vector
+import std::mutable_array
+====
+import std::mutable_vector
+import std::mutable_array
+import std::table_hash
+>>>>
+<<<<
+        t.hashes.push(h)
+        t.keys.push(keys.at(p.mod(std::mutable_vector::length(keys))))
+====
+        k = keys.at(p.mod(std::mutable_vector::length(keys)))
+        t.hashes.push(std::table_hash::of(k))
+        t.keys.push(k)
+>>>>
+
+@@ reorder-index-stale the permutation moves the entries but keeps the old index (positions in the slots are stale)
+## stdlib/ordered_table.bot
+<<<<
+    t.reindex(std::mutable_vector::length(t.index))
+====
+    unit
+>>>>
+
+@@ reorder-shrinks-index the permutation sizes the index for the live entries instead of keeping its slot count (a reservation is lost)
+## stdlib/ordered_table.bot
+<<<<
+    t.reindex(std::mutable_vector::length(t.index))
+====
+    t.reindex(slots_for(std::mutable_vector::length(t.hashes)))
+>>>>
+
+@@ reorder-length-changes the permutation sets the live count one too high
+## stdlib/ordered_table.bot
+<<<<
+    t.live.set(0, std::mutable_vector::length(t.hashes)):
+====
+    t.live.set(0, std::mutable_vector::length(t.hashes) + 1):
+>>>>
+
+@@ reorder-revives-dead-entry an entry is located by a scan from the first position that ignores liveness, and a dead entry found so is moved as live: a key removed and set again comes back with its old value
+## stdlib/ordered_table.bot
+<<<<
+fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
+====
+fn first_position_of(t: Table[K], key: K, p: int) -> int:
+    if p >= std::mutable_vector::length(t.keys):
+        return -1
+    if t.key_at(p) == key:
+        return p
+    t.first_position_of(key, p + 1)
+
+fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
+>>>>
+<<<<
+        p = t.position(t.slot_of(h, c.key_at(q)))
+====
+        p = t.first_position_of(c.key_at(q), 0)
+>>>>
+<<<<
+        if h < 0:
+            continue
+        t.hashes.push(h)
+====
+        t.hashes.push(bit_and(h, 2305843009213693951))
+>>>>
+<<<<
+        if not t.live_at?(p):
+            continue
+        v = old.at(p):
+====
+        v = old.at(p):
+>>>>
+
+@@ reorder-incomplete the arrangement is not completed: a reorder run despite its REORDER-NOT-PROVEN (a lenient build) drops the entries the order does not name
+## stdlib/ordered_table.bot
+<<<<
+    if n < t.length():
+        t.complete(perm, n)
+    perm
+====
+    perm
+>>>>
+
+@@ complete-reversed the entries an order does not name follow in reverse position order
+## stdlib/ordered_table.bot
+<<<<
+    rank = std::mutable_array::create(1, n)
+    loop p from 0 to t.positions():
+        held = taken.at(p):
+====
+    rank = std::mutable_array::create(1, n)
+    loop r from 0 to t.positions():
+        p = t.positions() - 1 - r
+        held = taken.at(p):
+>>>>
+
+@@ complete-ignores-named the completion appends every live entry, also those the order named (an entry twice, another lost)
+## stdlib/ordered_table.bot
+<<<<
+        if held or not t.live_at?(p):
+====
+        if not t.live_at?(p):
+>>>>
+
+@@ validate-length-only validation accepts a candidate of the collection's length whatever its members (equal cardinality taken for equal membership)
+## stdlib/ordered_table.bot
+<<<<
+    t.length() == c.length() and t.count_shared(c) == c.length()
+====
+    t.length() == c.length()
+>>>>
+
+@@ validate-subset-only validation accepts a candidate whose every member is the collection's, whatever its length (a subset taken for equal membership)
+## stdlib/ordered_table.bot
+<<<<
+    t.length() == c.length() and t.count_shared(c) == c.length()
+====
+    t.count_shared(c) == c.length()
+>>>>
+
+@@ set-reorder-own-positions a set's reorder arranges the order by its own positions and applies them to the set (the set's membership changes when the two tables' layouts differ)
+## stdlib/mutable_set.bot
+<<<<
+    perm = s.table.arrangement(order.table)
+====
+    perm = order.table.arrangement(order.table)
+>>>>
+
+# ---------------------------------------------------------------------------
+# The relational proof: hir/relations.tcl
+
+@@ set-preserves-members a map's set is taken for an order-only operation: the relation survives it
+## hir/relations.tcl
+<<<<
+        std::mutable_map::order {mints 0}
+====
+        std::mutable_map::order {mints 0}
+        std::mutable_map::set {preserves 0}
+>>>>
+
+@@ remove-preserves-members a map's remove is taken for an order-only operation
+## hir/relations.tcl
+<<<<
+        std::mutable_map::order {mints 0}
+====
+        std::mutable_map::order {mints 0}
+        std::mutable_map::remove {preserves 0}
+>>>>
+
+@@ clear-preserves-members a map's clear is taken for an order-only operation
+## hir/relations.tcl
+<<<<
+        std::mutable_map::order {mints 0}
+====
+        std::mutable_map::order {mints 0}
+        std::mutable_map::clear {preserves 0}
+>>>>
+
+@@ order-add-preserves-members a set's add (the order's) is taken for an order-only operation
+## hir/relations.tcl
+<<<<
+        std::mutable_set::order {mints 0}
+====
+        std::mutable_set::order {mints 0}
+        std::mutable_set::add {preserves 0}
+>>>>
+
+@@ order-remove-preserves-members a set's remove (the order's) is taken for an order-only operation
+## hir/relations.tcl
+<<<<
+        std::mutable_set::order {mints 0}
+====
+        std::mutable_set::order {mints 0}
+        std::mutable_set::remove {preserves 0}
+>>>>
+
+@@ order-clear-preserves-members a set's clear (the order's) is taken for an order-only operation
+## hir/relations.tcl
+<<<<
+        std::mutable_set::order {mints 0}
+====
+        std::mutable_set::order {mints 0}
+        std::mutable_set::clear {preserves 0}
+>>>>
+
+@@ reorder-loses-relation a map's reorder is taken for a membership change: the relation is lost after it
+## hir/relations.tcl
+<<<<
+        std::mutable_map::reorder {requires {1 0} preserves 0 members keys
+====
+        std::mutable_map::reorder {requires {1 0} members keys
+>>>>
+
+@@ reads-lose-relation every argument of a call is taken as changed, reads included
+## hir/relations.tcl
+<<<<
+        if {$arg ne "" && $index ni $preserved && [hir::mutvec::PlaceArgument $hir $e $arg]} {
+====
+        if {$arg ne "" && $index ni $preserved} {
+>>>>
+
+@@ any-order-admitted the requirement is met by any order of the right type (the static type taken for the relation)
+## hir/relations.tcl
+<<<<
+            if {$given ne "" && $given eq $have} {
+====
+            if {1} {
+>>>>
+
+@@ unchanged-values-related two values nothing has changed (parameters, unrelated locals) are taken as related
+## hir/relations.tcl
+<<<<
+            if {$given ne "" && $given eq $have} {
+====
+            if {$given ne "" && ($given eq $have || ([lindex $given 0] eq "v" && [lindex $have 0] eq "v"))} {
+>>>>
+
+@@ copies-lose-relation a binding never takes its value's members (the relation tied to the variable that was minted, not to the value: a copy carries nothing)
+## hir/relations.tcl
+<<<<
+                    if {[dict exists $value $leaf]} {
+                        set token [dict get $value $leaf]
+====
+                    if {0} {
+                        set token [dict get $value $leaf]
+>>>>
+
+@@ places-conflated a place's members token ignores its root binding: two independent maps (or an order taken from one) are related
+## hir/relations.tcl
+<<<<
+    return [list v $path $stamp]
+====
+    return [list v [lrange $path 1 end] $stamp]
+>>>>
+
+@@ join-first-path-wins a join keeps the first completing path's values and state: a relation true on one branch only survives the join
+## hir/relations.tcl
+<<<<
+        set pairs [dict create]
+        set state [JoinState $state $s pairs]
+        set result [list [JoinValue $value $v pairs] $state]
+====
+        set result [list $value $state]
+>>>>
+
+@@ join-pairs-one-sided a join relates what agreed on the first path only (its tokens keyed by one side): a relation true on one branch survives when the other branch relates the order elsewhere
+## hir/relations.tcl
+<<<<
+    set pair [list $x $y]
+    if {![dict exists $pairs $pair]} {
+====
+    set pair $x
+    if {![dict exists $pairs $pair]} {
+>>>>
+<<<<
+        set pair [list [Read $a $k] [Read $b $k]]
+====
+        set pair [Read $a $k]
+>>>>
+
+@@ validator-mints-on-failure a handled validation's value is the validator's whatever its handler gives (the relation minted on the failure path too)
+## hir/relations.tcl
+<<<<
+            foreach body [dict get $node handlerBodies] {
+                lappend outcomes [Outcome hir $contracts $entry $body]
+            }
+====
+            foreach body [dict get $node handlerBodies] {
+                set h [Outcome hir $contracts $entry $body]
+                if {$h ne "never" && $handled ne "never"} {
+                    set h [list [lindex $handled 0] [lindex $h 1]]
+                }
+                lappend outcomes $h
+            }
+>>>>
+
+@@ validator-relates-candidate validate_order's result is related to its candidate argument instead of the collection
+## hir/relations.tcl
+<<<<
+        std::mutable_map::validate_order {mints 0}
+====
+        std::mutable_map::validate_order {mints 1}
+>>>>
+
+@@ copy-change-kills-original a membership change of one place changes every place (a copy's change loses the unrelated original's relation)
+## hir/relations.tcl
+<<<<
+    dict for {k t} [dict get $state tokens] {
+        if {[Overlap $k $path]} {
+            dict unset state tokens $k
+        }
+    }
+    dict set state kills $path [incr next]
+====
+    dict for {k t} [dict get $state tokens] {
+        dict unset state tokens $k
+    }
+    dict set state kills {} [incr next]
+>>>>
+
+@@ loop-entry-optimistic a loop's body is entered with the state before the loop: a change later in the body (an earlier iteration's) is ignored
+## hir/relations.tcl
+<<<<
+    KillWritten hir $contracts entry $body
+====
+>>>>
+
+@@ loop-exit-optimistic the state after a loop is the state before it: the body's changes are ignored
+## hir/relations.tcl
+<<<<
+    KillWritten hir $contracts state $body
+====
+>>>>
+
+@@ context-calls-ignored a call that may change the installed context leaves a context member's relation
+## hir/relations.tcl
+<<<<
+        if {[hir::cardinality::ContextSite $hir $e [hir::cardinality::ContextIdOf $hir $root]]} {
+====
+        if {0} {
+>>>>
+
+@@ leaves-shared-across-compilations the struct leaves of a type are remembered across compilations (another program's struct of the same name)
+## hir/relations.tcl
+<<<<
+    set provenCalls {}
+    set leaves [dict create]
+====
+    set provenCalls {}
+>>>>
+
+@@ struct-fields-untracked a struct's collection fields are no places of the relation (a box's map and order are never related)
+## hir/relations.tcl
+<<<<
+    } elseif {$depth < $maxDepth && [hir::types::IsStructLike $type]} {
+====
+    } elseif {0} {
+>>>>
+
+@@ decided-condition-ignored an `if` on a decided condition joins its dead branch too
+## hir/relations.tcl
+<<<<
+            set known [hir::types::KnownOutcome $hir [dict get $node condition]]
+====
+            set known ""
+>>>>
+
+@@ unproven-cascade an order of the wrong type is reported unproven too, restating the type error
+## hir/recovery.tcl
+<<<<
+        if {[dict get $d kind] eq "REORDER-NOT-PROVEN" && [dict exists $hir exprs $e]
+====
+        if {0 && [dict get $d kind] eq "REORDER-NOT-PROVEN" && [dict exists $hir exprs $e]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Value semantics (the seams the collections already use, against the
+# reorder's own tests)
+
+@@ snapshot-follows-reorder `b = a` of a collection-bearing local gives b a's own headers: a loop's domain is the collection itself, and a reorder in the body changes what the loop visits
+## hir/mutvec.tcl
+<<<<
+            if {![Fresh $hir $value] && ![Moved $hir $parent $value]} {
+                lappend wraps [list $value [ShareNative] $d]
+====
+            if {0} {
+                lappend wraps [list $value [ShareNative] $d]
+>>>>
+
+@@ observer-overlap-uncopied an argument overlapping a place argument of the same call is read out uncopied (the general place-parameter rule: a reorder reads its order before it writes, so its own tests cannot see it)
+%% tests tests/place-parameters.test
+## hir/mutvec.tcl
+<<<<
+                    && ([PlaceArgument $hir $p $e] || (![WrittenLater $hir $p $e] && ![PlaceOverlap $hir $p $e]))} {
+====
+                    && ([PlaceArgument $hir $p $e] || ![WrittenLater $hir $p $e])} {
+>>>>
+
+@@ reorder-skips-detach natively, clear of a shared vector backing empties it in place: a reorder of a copy (or of a map whose order() shares its table) changes the other
+## native/src/runtime/mutvec.rs
+<<<<
+        None => obj.backing = Rc::new(VecDeque::new()),
+====
+        None => unsafe { (*(Rc::as_ptr(&obj.backing) as *mut VecDeque<Value>)).clear() },
+>>>>
+
+@@ order-shares-engine-state natively, push onto a shared vector backing appends in place: a map and the order() taken from it share their table (a key set later appears in the order)
+## native/src/runtime/mutvec.rs
+<<<<
+pub extern "C" fn rt_mv_push(p: *mut Vm, v: Value, x: Value) -> Value {
+    let items = writable(p, v);
+====
+pub extern "C" fn rt_mv_push(p: *mut Vm, v: Value, x: Value) -> Value {
+    let items = unsafe { &mut *(Rc::as_ptr(&mutvec_of_mut(v).backing) as *mut VecDeque<Value>) };
+>>>>

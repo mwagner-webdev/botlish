@@ -82,6 +82,7 @@ costs of the first engine (Performance, "Where the instructions go").
 | `set(place m, key, value) -> unit` | a new key appended, a present key's value replaced in place (its stored key kept) |
 | `remove(place m, key) -> V errors KeyNotFound` | the entry removed, its value returned; the map unchanged on KeyNotFound |
 | `clear(place m) -> unit` | every entry removed |
+| `order(m)`, `validate_order(m, c)`, `reorder(place m, order)` | the current order, a candidate checked once, the order replaced (PROVEN-COLLECTION-REORDERING.md, a later milestone) |
 | `loop e in m:` | every entry, in insertion order, as a `MutableMapEntry[K, V]` |
 
 `std::mutable_set` (stdlib/mutable_set.bot):
@@ -94,6 +95,7 @@ costs of the first engine (Performance, "Where the instructions go").
 | `add(place s, x) -> bool` | true when X was added (last), false when present (unmoved) |
 | `remove(place s, x) -> bool` | true when X was removed, false when absent |
 | `clear(place s) -> unit` | every element removed |
+| `order(s)`, `validate_order(s, c)`, `reorder(place s, order)` | as for a map (PROVEN-COLLECTION-REORDERING.md) |
 | `loop x in s:` | every element, in insertion order |
 
 Construction states its types (`create[str, int]()`): an empty collection

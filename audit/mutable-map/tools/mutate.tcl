@@ -3,10 +3,12 @@
 #
 #   tclsh9.0 audit/mutable-map/tools/mutate.tcl ?-only NAME,...? ?-jobs N?
 #       ?-tests FILES? ?-fuzz-count N? ?-fuzz-seed S? ?-fuzz-ops N?
-#       ?-all-detectors 0|1? ?-timeout SECONDS?
+#       ?-all-detectors 0|1? ?-timeout SECONDS? ?-mutants FILE?
+#       ?-proof-fuzz-count N? ?-proof-fuzz-seed S?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
-# script) as source replacements. For each, a private copy of the compiler,
+# script; -mutants another file in its format: audit/collection-reorder's)
+# as source replacements. For each, a private copy of the compiler,
 # library and native backend (a temporary directory) gets the replacements,
 # and the detectors run against it, in order, until one kills it (every one
 # with -all-detectors 1):
@@ -18,6 +20,10 @@
 #   * audit/mutable-map/tools/fuzz.tcl -n N -seed S -ops OPS on the compiled
 #     backends (every key kind, the independent model, no interpreter
 #     runs): killed if it reports a disagreement or does not complete;
+#   * with -proof-fuzz-count N > 0, audit/collection-reorder/tools/
+#     proofs.tcl -n N -seed S (the relational proof against its model and
+#     against the programs' runs: PROVEN-COLLECTION-REORDERING.md): killed
+#     if it reports a disagreement, an unsound site or a failure;
 #   * for a native mutant (one that edits native/src/ or the crate's
 #     manifest), first a release build of the copy's native backend (a mutant
 #     that does not build is reported NOT-BUILT, never counted as killed).
@@ -37,7 +43,8 @@ set root [file dirname [file dirname [file dirname [file dirname $script]]]]
 
 set options [dict create -only "" -jobs 1 -shard "" \
     -tests {tests/ordered-table.test tests/mutable-map.test tests/mutable-set.test tests/collection-iteration.test} \
-    -fuzz-count 8 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 600]
+    -fuzz-count 8 -fuzz-seed 13 -fuzz-ops 50 -all-detectors 0 -timeout 600 \
+    -mutants "" -proof-fuzz-count 0 -proof-fuzz-seed 7]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -132,7 +139,11 @@ proc lastLine {output} {
     return [string range [lindex [split [string trim $output] \n] end] 0 160]
 }
 
-set all [readMutants [file join [file dirname $script] mutants.txt]]
+set mutantsFile [dict get $options -mutants]
+if {$mutantsFile eq ""} {
+    set mutantsFile [file join [file dirname $script] mutants.txt]
+}
+set all [readMutants [file normalize $mutantsFile]]
 set only [split [dict get $options -only] ,]
 set selected {}
 foreach {name description tests edits} $all {
@@ -203,7 +214,7 @@ if {[dict get $options -jobs] > 1 && [dict get $options -shard] eq ""} {
     set selected [concat $ordered $natives]
 
     set tree [file tempdir botlish-mm-mutants]
-    foreach dir {compiler core hir surface stdlib tests examples audit/mutable-map audit/hashable/data .cargo} {
+    foreach dir {compiler core hir surface stdlib tests examples audit/mutable-map audit/collection-reorder audit/hashable/data .cargo} {
         if {![file exists [file join $root $dir]]} continue
         file mkdir [file dirname [file join $tree $dir]]
         file copy [file join $root $dir] [file join $tree $dir]
@@ -301,6 +312,23 @@ if {[dict get $options -jobs] > 1 && [dict get $options -shard] eq ""} {
                             }
                         } else {
                             lappend killers "fuzz did not complete: [lastLine $output]"
+                        }
+                    }
+                    if {[dict get $options -proof-fuzz-count] > 0 && ($killers eq {} || [dict get $options -all-detectors])} {
+                        set scratch [file tempdir botlish-mm-mutant-proofs]
+                        set here [pwd]
+                        cd $scratch
+                        lassign [run $timeout tclsh9.0 [file join $tree audit collection-reorder tools proofs.tcl] \
+                            -n [dict get $options -proof-fuzz-count] -seed [dict get $options -proof-fuzz-seed]] status output
+                        cd $here
+                        file delete -force $scratch
+                        set summary [lsearch -inline -regexp [split $output \n] {programs, .* sites}]
+                        if {[regexp {(\d+) programs, .* (\d+) disagreements, (\d+) unsound, (\d+) failures} $summary -> programs d u f]} {
+                            if {$d + $u + $f > 0} {
+                                lappend killers "proof fuzz: $d disagreements, $u unsound, $f failures in $programs programs"
+                            }
+                        } else {
+                            lappend killers "proof fuzz did not complete: [lastLine $output]"
                         }
                     }
                     set verdict [expr {$killers eq {} ? "SURVIVED" : "KILLED"}]

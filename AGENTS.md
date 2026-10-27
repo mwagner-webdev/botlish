@@ -2225,6 +2225,64 @@ the Hashable and trait-constrained-type harnesses for a change to how keys
 are constrained or hashed, and the warning gate (the three modules are
 warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
 
+## Collection order and relational facts
+
+`m.reorder(order)` and `s.reorder(order)` (PROVEN-COLLECTION-REORDERING.md)
+replace a MutableMap's or MutableSet's iteration order and nothing else;
+the order is a MutableSet holding exactly the collection's members, and
+the compiler must know it at the call: the relational fact
+SameMembers(order, m), proven by `hir/relations.tcl` (REORDER-NOT-PROVEN
+otherwise). Keep it so:
+
+* Order is not content: a reorder keeps every association (a map's stored
+  key, its value, its stored hash), the length and the membership, and
+  never adds content equality or a content hash to either collection.
+  The arrangement is total (`complete`): a reorder run despite its
+  diagnostic (a lenient build) still changes no content.
+* The reorder trusts its proof: no run-time membership check in it, no
+  OrderMismatch from it, no keyed hash computed again (it moves the stored
+  hashes; the index keeps its slot count and is rebuilt from them). The
+  permutation is ordinary Botlish in std::ordered_table, shared by both
+  collections: no native, NIR instruction or runtime operation of it.
+* The fact is relational, never a type: no scalar refinement, dependent
+  type (`OrderOf[m]`), source-level `ensures`/`requires`, theorem
+  language or runtime tag carries it. It comes only from the operations'
+  contracts in `hir::relations`'s table (by declaration identity: `mints`,
+  `requires`, `preserves`), never from a function's body, a name or a
+  length; nothing crosses a function boundary but by a contract.
+* The analysis is conservative and flow-sensitive: a membership change of
+  either value -- a place argument of any call but a contract's
+  `preserves`, a context member at any call that may change the installed
+  context (`hir::cardinality::ContextSite`) -- loses the fact; a join
+  keeps it exactly when every completing path proves it (places that
+  shared a token on every path share one after: `JoinState`), a loop
+  kills what its body may change on entry and after it. Never add an
+  optimistic join, a length rule or a subset rule.
+* REORDER-NOT-PROVEN has no call `subject` (it never steers a method
+  decision) and is owned by an earlier rejection of its call or an
+  argument (`hir::recovery::OwnedPositions`: no cascade after a type
+  error).
+* `std::mutable_set::table_of` and `of_table` are internal members
+  (`core::native::declareInternalMember`, `nomethod`): std::mutable_map's
+  access to a set's table, never API.
+
+If you change `hir/relations.tcl`, its contracts, the order operations or
+the engine's `count_shared`/`same_members?`/`arrangement`/`complete`/
+`permute`/`permute_values`/`reindex`, run `tests/collection-reorder.test`,
+`tests/ordered-table.test`, `tests/mutable-map.test`,
+`tests/mutable-set.test`, the golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/collection-reorder.bot`), `python3 -I
+audit/mutable-map/tools/oracle.py selftest`,
+`audit/mutable-map/tools/fuzz.tcl` (several seeds; reorders are on by
+default, `-reorders PERCENT`), `audit/collection-reorder/tools/proofs.tcl`
+(several seeds: the compiler against an independent model of the rules
+and against the programs' runs) and `audit/collection-reorder/tools/
+mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
+killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule), plus the collections' harnesses
+(above) for a change to the engine. `bench/collection-reorder.tcl`
+regenerates the performance report.
+
 ## Fixed binary layouts
 
 A `layout` (BINARY-LAYOUT.md) is a compile-time schema of a fixed number of

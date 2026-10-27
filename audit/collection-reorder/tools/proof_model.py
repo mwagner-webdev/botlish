@@ -15,10 +15,11 @@ the compiler's HIR, and applies the documented rules:
     over it or over a box holding it) gives the place a fresh token;
   * `m.reorder(o)` (and `s.reorder(o)` of a set) is admitted exactly when
     o's token is m's, and changes no token;
-  * an `if` joins its branches: a place keeps its token when both give it
-    the same one (a branch that returns gives nothing), an `if` value
-    likewise; a handled validation joins its result with the handler's
-    value;
+  * an `if` joins its branches (a branch that returns gives nothing): two
+    places share a token after it exactly when they shared one on each
+    branch -- a relation true on every completing path, and no other; an
+    `if` value likewise, against the places; a handled validation joins
+    its result with the handler's value the same way;
   * a loop gives every place it may change (anywhere in its body) a fresh
     token on entry, walks its body once, and gives them fresh tokens again
     after it.
@@ -57,16 +58,25 @@ class Model:
             return self.read(state, e["v"])
         return self.fresh()
 
-    def join(self, a, b):
+    def join_token(self, pairs, x, y):
+        # Equal tokens stay; places that agreed on both paths (the same
+        # pair) share one fresh token; anything else is unrelated.
+        if x == y:
+            return x
+        if (x, y) not in pairs:
+            pairs[(x, y)] = self.fresh()
+        return pairs[(x, y)]
+
+    def join(self, a, b, pairs=None):
         if a is None:
             return b
         if b is None:
             return a
+        if pairs is None:
+            pairs = {}
         result = {}
-        for p in set(a) | set(b):
-            x = a.get(p, ("init", p))
-            y = b.get(p, ("init", p))
-            result[p] = x if x is not None and x == y else self.fresh()
+        for p in sorted(set(a) | set(b)):
+            result[p] = self.join_token(pairs, self.read(a, p), self.read(b, p))
         return result
 
     def written(self, body):
@@ -106,8 +116,9 @@ class Model:
                 other = dict(state)
                 self.kill(other, h["place"])
                 value = self.expr(other, h["e"])
-                joined = self.join(state, other)
-                joined[s["dst"]] = success if success == value else self.fresh()
+                pairs = {}
+                joined = self.join(state, other, pairs)
+                joined[s["dst"]] = self.join_token(pairs, success, value)
                 state = joined
             else:
                 value = self.expr(state, h["e"])

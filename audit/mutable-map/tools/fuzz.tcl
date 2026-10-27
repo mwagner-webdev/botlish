@@ -160,7 +160,7 @@ proc ValueDeclarations {vkind} {
 proc Declarations {kind vkind} {
     set t [KeyType $kind]
     set vt [ValueType $vkind]
-    set text "import std::list\nimport std::str\nimport std::int\nimport std::mutable_map\nimport std::mutable_set\nimport std::mutable_vector\n\n"
+    set text "import std::list\nimport std::str\nimport std::int\nimport std::mutable_map\nimport std::mutable_set\nimport std::mutable_vector\nimport std::mutable_array\n\n"
     append text "struct P:\n    id: int\n    name: str\n\nstruct Q:\n    inner: P\n    tags: List\[int\]\n\nstruct W:\n    n: int\n    label: str\n\n"
     append text [ValueDeclarations $vkind]
     append text "enum Color:\n    [join [lmap i {0 1 2 3 4 5 6 7} {string cat C$i}] {, }]\n\n"
@@ -213,11 +213,17 @@ proc Declarations {kind vkind} {
     append text "    if mode == 3 and i == n - 1:\n        return -1\n"
     append text "    if mode == 5 and i == 0:\n        return -1\n"
     append text "    i\n\n"
+    append text "fn shuffled(ks: List\[$t\], b: int) -> std::mutable_set::MutableSet\[$t\]:\n"
+    append text "    a = std::mutable_array::from_list(ks)\n    n = std::list::length(ks)\n"
+    append text "    loop k from 1 to n:\n        i = n - k\n        j = (b * 7919 + i * 104729).mod(i + 1)\n"
+    append text "        x = a.at(i):\n            on IndexNotFound:\n                continue\n        y = a.at(j):\n            on IndexNotFound:\n                continue\n"
+    append text "        a.set(i, y):\n            on IndexNotFound:\n                unit\n        a.set(j, x):\n            on IndexNotFound:\n                unit\n"
+    append text "    c = std::mutable_set::create\[$t\]()\n    loop x in a:\n        c.add(x)\n    c\n\n"
     append text "fn arrange(ks: List\[$t\], mode: int, b: int, absent: int) -> std::mutable_set::MutableSet\[$t\]:\n"
     append text "    c = std::mutable_set::create\[$t\]()\n    n = std::list::length(ks)\n"
     append text "    if mode == 5:\n        c.add(key(absent))\n"
     append text "    loop pass from 0 to 2:\n        loop i from 0 to n:\n            j = pick(mode, b, i, n, pass)\n            if j < 0:\n                continue\n            x = std::list::at(ks, j):\n                on IndexNotFound:\n                    continue\n            c.add(x)\n"
-    append text "    if mode == 4:\n        c.add(key(absent))\n    c\n\n"
+    append text "    if mode == 4:\n        c.add(key(absent))\n    if mode == 6:\n        return shuffled(ks, b)\n    c\n\n"
     append text "fn reloop_map(place out: MutableVector\[int\], place m: std::mutable_map::MutableMap\[$t, $vt\]) -> unit:\n    loop e in m:\n        out.push(tag(e.key))\n        o = [Call map validate_order m "arrange(keys_map(m), 1, 0, 0)"]:\n            on std::mutable_map::OrderMismatch:\n                [Call map order m]\n        [Call map reorder m o]\n    unit\n\n"
     append text "fn reloop_set(place out: MutableVector\[int\], place s: std::mutable_set::MutableSet\[$t\]) -> unit:\n    loop x in s:\n        out.push(tag(x))\n        o = [Call set validate_order s "arrange(keys_set(s), 1, 0, 0)"]:\n            on std::mutable_set::OrderMismatch:\n                [Call set order s]\n        [Call set reorder s o]\n    unit\n\n"
     return $text
@@ -288,7 +294,7 @@ proc Program {kind count opsN profile} {
             set absent [expr {$kind eq "enum" ? 7 : -424242}]
             set form [Rand 10]
             if {$form < 6 || $form == 9} {
-                set mode [Rand 6]
+                set mode [Rand 7]
                 set b [Rand 20]
                 append src "o$n = [Call $what validate_order $v "arrange(keys_$what\($v), $mode, $b, $absent)"]:\n    on std::mutable_$what\::OrderMismatch:\n        out.push(-7)\n        [Call $what order $v]\n[Call $what reorder $v o$n]\nout.push([Call $what length $v])\n"
                 lappend ops [list reorder $v $mode $b $absent]

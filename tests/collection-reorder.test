@@ -199,15 +199,29 @@ d = [reorder_to(one, []), reorder_to(e, [7]), reorder_set_to(s, [1]), pairs(one)
 }
 } -result {value {[[true, []], [true, [[7, 70]]], [true, []], [false, false, false, [[7, 70]], []]]}}
 
-test cr-current-order {reordering to the current order changes nothing observable} -body {
+test cr-current-order {reordering to the current order changes nothing observable, also after removals and reinsertions (the order then shares the map's dead entries)} -body {
     crRun {m = int_map([5, 3, 9, 1])
 o = m.order()
 m.reorder(o)
 a = pairs(m)
 m.reorder(m.order())
-[a, pairs(m)]
+loop k in [2, 4, 6, 8, 10, 12, 14, 16, 18]:
+    m.set(k, k)
+loop k in [3, 4, 8, 12, 16]:
+    r = m.remove(k):
+        on std::mutable_map::KeyNotFound:
+            0
+m.set(3, 33)
+b = pairs(m)
+m.reorder(m.order())
+s = set_of([7, 1, 4, 9, 2])
+r2 = s.remove(1)
+r3 = s.remove(9)
+s.add(1)
+s.reorder(s.order())
+[a, pairs(m), b == pairs(m), elems(s)]
 }
-} -result {value {[[[5, 50], [3, 30], [9, 90], [1, 10]], [[5, 50], [3, 30], [9, 90], [1, 10]]]}}
+} -result {value {[[[5, 50], [3, 30], [9, 90], [1, 10]], [[5, 50], [9, 90], [1, 10], [2, 2], [6, 6], [10, 10], [14, 14], [18, 18], [3, 33]], true, [7, 4, 2, 1]]}}
 
 test cr-reverse-after-churn {300 keys grown through several rebuilds, a third removed (dead entries, a compaction), reversed by an order built in any way: exactly the survivors, reversed, their values kept} -body {
     crRun {m = int_map([])
@@ -235,7 +249,7 @@ vals = loop e in m:
 } {compile cranelift-generic cranelift}
 } -result {value {[true, true, 200, 200]}}
 
-test cr-order-snapshot {m.order() is a MutableSet of exactly m's keys in m's current order; s.order() is a copy of s} -body {
+test cr-order-snapshot {m.order() is a MutableSet of exactly m's keys in m's current order, and a value of its own: later changes of the map never reach it, nor its changes the map; s.order() is a copy of s} -body {
     crRun {m = int_map([3, 1, 2])
 r = m.remove(1):
     on std::mutable_map::KeyNotFound:
@@ -244,9 +258,19 @@ m.set(1, 0)
 o = m.order()
 s = set_of([9, 8])
 p = s.order()
-[elems(o), o.length(), o.contains(3), o.contains(4), elems(p)]
+a = [elems(o), o.length(), o.contains(3), o.contains(4), elems(p)]
+loop k from 10 to 30:
+    m.set(k, k)
+r2 = m.remove(3):
+    on std::mutable_map::KeyNotFound:
+        0
+q = m.order()
+q.add(99)
+q.clear()
+s.add(7)
+[a, elems(o), m.length(), m.contains(99), elems(p)]
 }
-} -result {value {[[3, 2, 1], 3, true, false, [9, 8]]}}
+} -result {value {[[[3, 2, 1], 3, true, false, [9, 8]], [3, 2, 1], 22, false, [9, 8]]}}
 
 test cr-later-operations {after a reorder the ordinary rules hold in the new order: a new key appends, an existing key keeps its (new) place, remove then set appends, a set's duplicate add does not move, growth and compaction keep the order, clear starts a new one} -body {
     crRun {m = int_map([1, 2, 3, 4])
@@ -599,7 +623,7 @@ b.m.reorder(b.o)
 }
 } -result {copy-changed 6 original-changed 6 struct-copy 11}
 
-test cr-proof-joins {a join keeps the relation only when every completing path gives it: both branches proven, one branch arbitrary, one branch changing the map, an early return, a decided condition, a handler that falls back to order() or to the candidate or changes the map} -body {
+test cr-proof-joins {a join keeps the relation exactly when every completing path gives it, however each path does: both branches proven, both proven after one of them changes the map, one branch arbitrary, one branch another map's order (also after the first changes its map), one branch or both changing the map, an early return, a decided condition, a handler that falls back to order() (also after changing the map) or to the candidate} -body {
     crProofs {
 both {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
     o = if b:
@@ -608,6 +632,29 @@ both {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
         m.validate_order(set_of([1])):
             on std::mutable_map::OrderMismatch:
                 m.order()
+    m.reorder(o)
+}
+two-forms {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = if b:
+        m.set(5, 5)
+        m.order()
+    else:
+        m.order()
+    m.reorder(o)
+}
+crossed {fn f(place m: std::mutable_map::MutableMap[int, int], place n: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = if b:
+        m.order()
+    else:
+        n.order()
+    m.reorder(o)
+}
+crossed-after-change {fn f(place m: std::mutable_map::MutableMap[int, int], place n: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = if b:
+        m.set(5, 5)
+        m.order()
+    else:
+        n.order()
     m.reorder(o)
 }
 one-arbitrary {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
@@ -649,6 +696,14 @@ handler-changes {fn f(place m: std::mutable_map::MutableMap[int, int], c: std::m
             m.order()
     m.reorder(o)
 }
+both-change {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = m.order()
+    if b:
+        m.set(5, 5)
+    else:
+        m.set(6, 6)
+    m.reorder(o)
+}
 handled-call-changes {fn take(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::mutable_map::KeyNotFound:
     m.remove(1)
 fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
@@ -659,7 +714,7 @@ fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
     m.reorder(o)
 }
 }
-} -result {both ok one-arbitrary 6 one-changes 5 early-return ok decided ok handler-candidate 5 handler-changes 6 handled-call-changes 8}
+} -result {both ok two-forms ok crossed 6 crossed-after-change 7 one-arbitrary 6 one-changes 5 early-return ok decided ok handler-candidate 5 handler-changes ok both-change 7 handled-call-changes 8}
 
 test cr-proof-loops {a loop that changes the map (anywhere in its body, before or after the reorder) loses the relation inside it and after it; one that does not keeps it; an order taken inside the body is proven there} -body {
     crProofs {
@@ -951,6 +1006,35 @@ test cr-reorder-checks-nothing {a proven reorder performs no membership validati
     }
     set result
 } -cleanup {unset -nocomplain hir result name block e reached work seen b inner x kind target} -result {std::mutable_map::reorder {} 1 std::mutable_set::reorder {} 1}
+
+test cr-unproven-run-keeps-content {a program run despite its REORDER-NOT-PROVEN (a lenient build) still changes no content: the order's keys the collection lacks are skipped, and the entries it does not name follow in their old order with their values} -body {
+    set result {}
+    foreach {setup order} {
+        {m = int_map([1, 2, 5])} {[3, 5, 2]}
+        {m = int_map([1, 2, 5])} {[]}
+        {m = int_map([1, 2, 5])} {[9, 5, 7, 1, 2, 8]}
+        {m = int_map([1, 2, 5])} {[2]}
+        {m = int_map([1, 2, 3, 4, 5, 6])
+m.remove(2):
+    on std::mutable_map::KeyNotFound:
+        0
+m.remove(5):
+    on std::mutable_map::KeyNotFound:
+        0} {[6, 7]}
+        {m = int_map([])} {[1]}
+    } {
+        set body "$setup\nm.reorder(set_of($order))\nfound = m.at(1):\n    on std::mutable_map::KeyNotFound:\n        -1\n\[\[\[m.length(), found\]\], pairs(m)\]\n"
+        set hir [surface::compile "${::crDecls}$body" -warnings off -strict 0]
+        set outcomes [lsort -unique [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 1}]]
+        lappend result [list [lmap d [dict get $hir diagnostics] {dict get $d kind}] {*}$outcomes]
+    }
+    join $result \n
+} -cleanup {unset -nocomplain result setup order body hir outcomes b d} -result {REORDER-NOT-PROVEN {value {[[[3, 10]], [[5, 50], [2, 20], [1, 10]]]}}
+REORDER-NOT-PROVEN {value {[[[3, 10]], [[1, 10], [2, 20], [5, 50]]]}}
+REORDER-NOT-PROVEN {value {[[[3, 10]], [[5, 50], [1, 10], [2, 20]]]}}
+REORDER-NOT-PROVEN {value {[[[3, 10]], [[2, 20], [1, 10], [5, 50]]]}}
+REORDER-NOT-PROVEN {value {[[[4, 10]], [[6, 60], [1, 10], [3, 30], [4, 40]]]}}
+REORDER-NOT-PROVEN {value {[[[0, -1]], []]}}}
 
 test cr-allocations-constant {natively a proven reorder allocates the same managed objects whatever the size (its temporary permutation array and counter, the logical copies of the entry vectors it rewrites); no List of entries, keys or values} -constraints nativeBuilt -body {
     set rows [lmap n {500 1000} {

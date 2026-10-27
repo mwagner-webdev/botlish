@@ -501,13 +501,11 @@ fn fill_value_holes(t: Table[K], place values: MutableVector[V], hole: int, last
 @@ compaction-stale-index a rebuild that keeps the slot count keeps the old index (stale entry positions after compaction)
 ## stdlib/ordered_table.bot
 <<<<
-    std::mutable_vector::clear(t.index)
-    loop s from 0 to slots_for(needed):
+    t.reindex(slots_for(needed))
 ====
     if slots_for(needed) == std::mutable_vector::length(t.index):
         return unit
-    std::mutable_vector::clear(t.index)
-    loop s from 0 to slots_for(needed):
+    t.reindex(slots_for(needed))
 >>>>
 
 @@ hash-not-moved-with-key compaction moves the keys down but leaves the stored hashes where they were
@@ -738,6 +736,9 @@ import std::table_hash
 <<<<
     table: std::ordered_table::Table[T]
 
+# A candidate order that does not hold exactly the collection's elements.
+error OrderMismatch
+
 fn create() -> MutableSet[T]:
     MutableSet[T] {table: std::ordered_table::fresh[T](0)}
 
@@ -746,6 +747,9 @@ fn with_capacity(count: int) -> MutableSet[T]:
 ====
     table: std::ordered_table::Table[T]
     vals: MutableVector[bool]
+
+# A candidate order that does not hold exactly the collection's elements.
+error OrderMismatch
 
 fn create() -> MutableSet[T]:
     MutableSet[T] {table: std::ordered_table::fresh[T](0), vals: std::mutable_vector::from_list([true])}
@@ -760,6 +764,11 @@ fn with_capacity(count: int) -> MutableSet[T]:
     s.table.append(h, x)
     s.vals.push(true)
     true
+>>>>
+<<<<
+    MutableSet[T] {table: t}
+====
+    MutableSet[T] {table: t, vals: std::mutable_vector::from_list([true])}
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -845,11 +854,11 @@ nomethod fn iteration_end(m: MutableMap[K, V]) -> int:
 >>>>
 <<<<
 import std::mutable_vector
-import std::table_hash
+import std::mutable_set
 ====
 import std::list
 import std::mutable_vector
-import std::table_hash
+import std::mutable_set
 >>>>
 
 # ---------------------------------------------------------------------------

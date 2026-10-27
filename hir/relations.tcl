@@ -66,10 +66,12 @@
 #
 # Control flow: the two branches of an `if` (one, when its condition is
 # decided: hir::types::KnownOutcome) and the handled call and its handlers
-# are walked from the state before them, and joined: a place keeps its
-# token only when every completing path gives it the same one, else it gets
-# a fresh token (never one of the incoming ones), and so does an `if`'s or
-# a handled call's value. A path that cannot complete (return, fail, break,
+# are walked from the state before them, and joined: two places (or a
+# place and an `if`'s or a handled call's value) share a token after the
+# join exactly when they shared one on every completing path -- the token
+# itself when it is the same on every path, else a fresh one (never one of
+# the incoming ones) shared by exactly the places that agreed. A relation
+# true on one path only is lost. A path that cannot complete (return, fail, break,
 # continue, unreachable code) contributes nothing. A handler is entered
 # with every place the handled call may change already changed. A loop's
 # body is walked once, entered with every place changed anywhere in the
@@ -311,44 +313,74 @@ proc hir::relations::ReadValue {state path type} {
     return $value
 }
 
-# The abstract value whose leaves are the tokens VALUES and VALUE agree on.
-proc hir::relations::JoinValue {a b} {
+# The token after a join of a place or value leaf whose tokens on the two
+# incoming paths are X and Y (PAIRS: the join's tokens so far, by {X Y}):
+# X when they are equal; otherwise the token the join already gave the pair
+# -- what had one token on both paths has one after -- or a fresh one,
+# which it then gives the pair.
+proc hir::relations::JoinToken {pairsVar x y} {
+    upvar 1 $pairsVar pairs
+    if {$x eq $y} {
+        return $x
+    }
+    set pair [list $x $y]
+    if {![dict exists $pairs $pair]} {
+        dict set pairs $pair [Fresh]
+    }
+    return [dict get $pairs $pair]
+}
+
+# The abstract value after a join of the abstract values A and B: a leaf
+# both know, with JoinToken's token (PAIRS, the state join's).
+proc hir::relations::JoinValue {a b {pairsVar ""}} {
+    if {$pairsVar ne ""} {
+        upvar 1 $pairsVar pairs
+    } else {
+        set pairs [dict create]
+    }
     set result [dict create]
     dict for {leaf token} $a {
-        if {[dict exists $b $leaf] && [dict get $b $leaf] eq $token} {
-            dict set result $leaf $token
+        if {[dict exists $b $leaf]} {
+            dict set result $leaf [JoinToken pairs $token [dict get $b $leaf]]
         }
     }
     return $result
 }
 
-# The state after paths ending in states A and B join: each place keeps
-# its token where both give it the same one, else gets a fresh one.
-proc hir::relations::JoinState {a b} {
+# The state after paths ending in states A and B join (Control flow,
+# header): two places, or a place and a value, have one token after it
+# exactly when they had one token on each path -- the relations true on
+# every completing path, and no other. A place whose last change differs
+# gets a fresh stamp; its implicit token after the join stands for the
+# pair of its tokens on the two paths. PAIRS receives the pairs' tokens,
+# for the value join.
+proc hir::relations::JoinState {a b pairsVar} {
+    upvar 1 $pairsVar pairs
+    variable next
     set result [dict create tokens [dict create] kills [dict create]]
-    # Kills first: a place whose last change differs gets a fresh stamp.
     set ka [dict get $a kills]
     set kb [dict get $b kills]
+    set changed {}
     foreach k [lsort -unique [concat [dict keys $ka] [dict keys $kb]]] {
         set sa [dict getdef $ka $k ""]
         set sb [dict getdef $kb $k ""]
         if {$sa eq $sb} {
             dict set result kills $k $sa
         } else {
-            variable next
             dict set result kills $k [incr next]
+            lappend changed $k
+        }
+    }
+    foreach k $changed {
+        set pair [list [Read $a $k] [Read $b $k]]
+        if {![dict exists $pairs $pair]} {
+            dict set pairs $pair [Read $result $k]
         }
     }
     set ta [dict get $a tokens]
     set tb [dict get $b tokens]
     foreach path [lsort -unique [concat [dict keys $ta] [dict keys $tb]]] {
-        set x [Read $a $path]
-        set y [Read $b $path]
-        if {$x eq $y} {
-            dict set result tokens $path $x
-        } else {
-            dict set result tokens $path [Fresh]
-        }
+        dict set result tokens $path [JoinToken pairs [Read $a $path] [Read $b $path]]
     }
     return $result
 }
@@ -365,7 +397,9 @@ proc hir::relations::Join {outcomes} {
         }
         lassign $result value state
         lassign $outcome v s
-        set result [list [JoinValue $value $v] [JoinState $state $s]]
+        set pairs [dict create]
+        set state [JoinState $state $s pairs]
+        set result [list [JoinValue $value $v pairs] $state]
     }
     return $result
 }
