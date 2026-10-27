@@ -37,6 +37,7 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 testConstraint windowsHost $::windowsHost
 testConstraint macosHost [string match macos-* $::hostTarget]
 testConstraint linuxHost [string match linux-* $::hostTarget]
+testConstraint unixHost [expr {[string match linux-* $::hostTarget] || [string match macos-* $::hostTarget]}]
 # The driver's directory: the runtime archive (the system linker's) and the
 # rustc linker's runtime library.
 if {[testConstraint nativeBuilt]} {
@@ -599,16 +600,23 @@ test nlp-static-refusals {what a static declaration's file must be, checked befo
     lappend results $code [string match "*a path relative to the program's application root, and this program has none*" $message]
 } -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1}
 
-test nlp-static-wrong-architecture {an archive of another architecture is refused, naming both} -constraints {nlpFixture linuxHost} -body {
-    set other [expr {$::hostTarget eq "linux-x86_64" ? "aarch64" : "x86_64"}]
-    if {[auto_execok clang] eq "" || [catch {exec clang --target=$other-linux-gnu -c [nlpFixturePath src nlp.c] -o [nlpFixturePath src other.o]}]} {
-        return skipped
+test nlp-static-wrong-architecture {an archive of another architecture is refused, naming both: AArch64 objects on Linux x86-64 and the reverse, x86-64 Mach-O objects on macOS arm64} -constraints {nlpFixture unixHost} -body {
+    set source [nlpFixturePath src nlp.c]
+    set object [nlpFixturePath src other.o]
+    switch -- $::hostTarget {
+        linux-x86_64 { set compile [list clang --target=aarch64-linux-gnu -c $source -o $object] }
+        linux-aarch64 { set compile [list clang --target=x86_64-linux-gnu -c $source -o $object] }
+        default { set compile [list cc -arch x86_64 -c $source -o $object] }
+    }
+    if {[auto_execok [lindex $compile 0]] eq "" || [catch {exec {*}$compile}]} {
+        # No cross compiler here: nothing to refuse.
+        return {{NATIVE LINK ARCHIVE} 1}
     }
     set dir [nlpApp [nlpDir] {main.bot "extern c library \"nlp\" static at \"native/libnlp.a\"\n1\n"}]
     file mkdir [file join $dir native]
-    exec ar rcs [file join $dir native libnlp.a] [nlpFixturePath src other.o]
+    exec ar rcs [file join $dir native libnlp.a] $object
     lassign [nlpResolve [nlpHir $dir]] code message
-    list $code [regexp {holds object code for ELF (AArch64|x86-64), and this program is linked for linux-(x86_64|aarch64) \(ELF (x86-64|AArch64)\)} $message]
+    list $code [regexp {holds object code for (ELF AArch64|ELF x86-64|Mach-O x86-64), and this program is linked for (linux-x86_64|linux-aarch64|macos-aarch64) \((ELF x86-64|ELF AArch64|Mach-O arm64)\)} $message]
 } -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1}
 
 test nlp-static-path-security {an archive's path is one argument, whatever it holds -- spaces, non-ASCII letters, shell metacharacters, a leading dash -- and never a linker option} -constraints {nlpFixture} -body {

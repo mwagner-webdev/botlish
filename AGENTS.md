@@ -2711,6 +2711,59 @@ static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
 
+## Native link plan (static libraries, archive paths, frameworks)
+
+`extern c library "NAME" static`, `extern c library "NAME" static at
+"PATH"` and `extern c framework "NAME"` (NATIVE-LINK-PLAN-MILESTONE-1.md)
+state a program's native dependencies in source; `extern c library "NAME"`
+keeps its old meaning exactly. Keep it so:
+
+* The plan states intent, never linker flags: HIR's `links`
+  (hir/foreign.tcl's `LinkPlan`) holds each dependency's kind, name,
+  linkage and an archive's path as written beside the directory it
+  resolves from (`base`: the application root, surface/modules.tcl's
+  `LinkDecls`; "" for a standard-library module or a program compiled from
+  text). Never store a resolved path, a `-l`, `-framework` or `/LIBPATH:`
+  in HIR, and never add a general linker-flags string, a linker script, an
+  arbitrary build command or a computed name or path: every name is
+  `nir::is_link_name`'s, every path a string literal with `/` separators.
+* Declarations of one library merge into the strictest requirement
+  (default < static < static at PATH), whichever comes first; two that no
+  archive satisfies are LINK-CONFLICT. Never pick the first or the last.
+* An archive path resolves from the application root, never the working
+  directory, never the compiler's own files (the single executable's ZIP,
+  Botlish.app's Resources). The root is a front-end input (in the cache
+  key); the join is the driver's (codegen/aot.rs's `resolve_link_plan`),
+  at every link: never cache an archive, a resolved path or a link.
+* `static` is a requirement: the driver finds the archive (`static_archive_name`
+  in the -L directories, then `default_library_dirs`) and checks it
+  (`check_static_archive`, `archive_facts`: a regular file of objects of
+  the host's format and architecture, no Windows import member) before any
+  linker runs, and passes its absolute path. Never fall back to a shared
+  library, `-lNAME` or another file, and never relabel a refusal: it is
+  NATIVE LINK ARCHIVE.
+* A framework is Apple's: UNSUPPORTED-PLATFORM for a target whose linker
+  has none (`core::cabi::linksFrameworks`), `-framework NAME` and `-FDIR`
+  on Apple's ld only. Never map a framework to a library elsewhere.
+* Both host linkers (rustc, system) take one resolved plan
+  (`link_plan_args_for`); the stub refuses any plan. A native library's
+  shared library links the plan, its static library holds none of it and
+  its manifest lists it (`dependencies`).
+
+If you change any of that (the report's "What to run when changing this"
+lists the files), run `tests/native-link-plan.test` (also with
+`BOTLISH_NATIVE_LINKER=system` and under `BOTLISH_NATIVE_GC_STRESS=1`),
+`tests/c-ffi.test`, `tests/system-linker.test`, `cargo test --release
+--manifest-path native/Cargo.toml --bin botlish-native link_plan` and
+`audit/native-link-plan/tools/mutate.tcl` (every mutant in its
+`mutants.txt` that applies to the host must still apply and be killed:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), plus the C FFI, native-AOT, interchange and
+isolation harnesses for a change to code they share; on macOS the
+`link-plan-sdl3` job (tests/platform/link-plan-sdl3.sh: static SDL3
+through Botlish.app) and the acceptance tier, on Windows the workflow's
+smoke and system-linker jobs (the import-library refusal).
+
 ## Native libraries (exported c fn)
 
 `exported c fn NAME(PARAMS) -> T` declares a C export

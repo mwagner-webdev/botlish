@@ -1040,7 +1040,10 @@ fn default_library_dirs(flavor: LinkerFlavor) -> Vec<PathBuf> {
     }
     let mut unique: Vec<PathBuf> = Vec::new();
     for dir in dirs {
-        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        // Links resolved, so /lib and /usr/lib are one directory; on Windows
+        // only made absolute: canonicalize's `\\?\` verbatim paths are no
+        // paths to hand link.exe.
+        let dir = if cfg!(windows) { std::path::absolute(&dir).unwrap_or(dir) } else { std::fs::canonicalize(&dir).unwrap_or(dir) };
         if dir.is_dir() && !unique.contains(&dir) {
             unique.push(dir);
         }
@@ -2442,12 +2445,28 @@ mod tests {
         crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message))
     }
 
-    /// A private scratch directory of this test process.
-    fn scratch(name: &str) -> PathBuf {
+    /// A private scratch directory of this test process, removed when the
+    /// value is dropped -- also when its test fails.
+    struct Scratch(PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(name: &str) -> Scratch {
         let dir = std::env::temp_dir().join(format!("botlish-link-plan-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        Scratch(dir)
     }
 
     /// An ELF64 object header of MACHINE (62 x86-64, 183 AArch64) and type
@@ -2584,7 +2603,6 @@ mod tests {
             describe_link_plan_for(LinkerFlavor::Gnu, &with_links("link \"m\"\nlink \"z\" static\nlink \"fx\" static path=\"native/libfx.a\" base=\"/a\"\nframework \"Metal\"\n")),
             "symbols c_add; libraries -lm libz.a (static) native/libfx.a (static); frameworks Metal"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A declared archive is its path joined to the application root (an
@@ -2617,7 +2635,6 @@ mod tests {
             assert_eq!(error.detail, Some("ARCHIVE"), "{links}");
             assert!(error.message.contains(words), "{links}: {}", error.message);
         }
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A static library declared without a path is the first libNAME.a of the
@@ -2636,7 +2653,7 @@ mod tests {
         let mut asked = 0;
         let found = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &search, &mut || {
             asked += 1;
-            vec![system.clone()]
+            vec![system.to_path_buf()]
         })
         .unwrap_or_else(|e| panic!("{}", e.message));
         assert_eq!(asked, 0);
@@ -2646,20 +2663,17 @@ mod tests {
         let only = LinkSearch::libraries(&[first.display().to_string()]);
         let none = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &only, &mut || {
             asked += 1;
-            vec![system.clone()]
+            vec![system.to_path_buf()]
         })
         .unwrap_err();
         assert_eq!(asked, 1);
         assert!(none.message.contains("libfx.so is a shared library") && none.message.contains(&system.display().to_string()), "{}", none.message);
         archive_at(&system, "libfx.a", &[member("fx.o/", &gnu_object())]);
-        let defaulted = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &only, &mut || vec![system.clone()]).unwrap_or_else(|e| panic!("{}", e.message));
-        assert!(matches!(&defaulted[0], LinkInput::Archive { from: ArchiveSource::Searched(d), .. } if *d == system));
+        let defaulted = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &only, &mut || vec![system.to_path_buf()]).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(matches!(&defaulted[0], LinkInput::Archive { from: ArchiveSource::Searched(d), .. } if *d == *system));
         // Each linker's names: libNAME.a; NAME.lib for link.exe.
         assert_eq!(static_archive_name(LinkerFlavor::Apple, "SDL3"), "libSDL3.a");
         assert_eq!(static_archive_name(LinkerFlavor::Msvc, "SDL3-static"), "SDL3-static.lib");
-        for dir in [first, second, system] {
-            let _ = std::fs::remove_dir_all(&dir);
-        }
     }
 
     /// What a static declaration's file must be: an archive of objects of
@@ -2734,7 +2748,6 @@ mod tests {
         let mut x86_only = fat.clone();
         x86_only[8 + 20..8 + 24].copy_from_slice(&0x0100_0007u32.to_be_bytes());
         refused(check("fat-x86.a", &x86_only, LinkerFlavor::Apple), "without an arm64 slice");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The toolchain's own library directories, from the C driver's and GNU

@@ -86,10 +86,11 @@ foreign native, the ABI transport and the link.
 
 ## 1. Syntax
 
-Two top-level declarations, in any module or the entry program:
+Three top-level declarations, in any module or the entry program:
 
 ```
-externLibrary := "extern" "c" "library" STRING
+externLibrary := "extern" "c" "library" STRING ["static" ["at" STRING]]
+externFramework := "extern" "c" "framework" STRING
 
 externFn      := "extern" "c" "fn" NAME ["named" STRING]
                  "(" [param ("," param)* ["," "variadic"] [","]] ")"
@@ -120,6 +121,10 @@ extern c fn keep named "bcf_keep"(p: std::ffi::c::Ptr[std::ffi::c::Void] capture
   and `_ + . -`, not starting with `-`. A path or a `-l` flag is an error
   naming the form, and so is an unquoted name. (A file name such as
   `"libcrypto.a"` is a name the linker will not find: `-llibcrypto.a`.)
+* **`static`** requires the library's static archive, and **`static at
+  "PATH"`** names its file, relative to the application root unless
+  absolute; **`extern c framework "NAME"`** links an Apple framework
+  (NATIVE-LINK-PLAN-MILESTONE-1.md; section 11).
 * **`named "SYMBOL"`** overrides the link symbol (section 2): letters,
   digits, `_ . $`, not starting with a digit. One `named` per declaration.
 * **The signature is the C signature**: every parameter typed, the result
@@ -173,7 +178,10 @@ the entry program, and one library may serve functions declared in several
 modules (`cf-direct-two-modules-one-library`). The plan holds each name
 once, in first-declaration order -- the loader's order: a module's own
 declarations after its imports', the entry program's last
-(`cf-link-plan`).
+(`cf-link-plan`). Declarations of one library merge into the strictest
+requirement (the linker's choice, a static archive, a named archive); two
+that no archive satisfies are `LINK-CONFLICT` (NATIVE-LINK-PLAN-MILESTONE-1.md,
+"Conflicting and repeated declarations").
 
 **Validation** is the front end's and located: every type must be a C ABI
 value type (`cf-decl-types`), every fact one its parameter or result can
@@ -671,6 +679,27 @@ Linux (CI's system-linker jobs, x86-64 and AArch64).
 to the prebuilt `botlish-aot-stub`; it links no native library, so it
 refuses a program that calls C, naming what it calls and the linkers that
 can (`cf-stub-linker`).
+
+**Static archives and frameworks** (NATIVE-LINK-PLAN-MILESTONE-1.md). The
+plan above is a library's when it is declared without `static`, and is
+unchanged. A library declared `static` is no `-lNAME`: before any linker
+runs, the driver resolves the plan (codegen/aot.rs's `resolve_link_plan`)
+-- `static at PATH` is PATH joined to the application root the front end
+recorded, `static` alone the first `libNAME.a` (`NAME.lib`) of the -L
+directories and then the toolchain's own (the C driver's and GNU ld's on
+Linux, ld(1)'s defaults on macOS, `LIB` on Windows) -- checks the file (a
+regular file, an `ar` archive of objects of the host's format and
+architecture; never a shared library, a `.tbd` stub, a linker script, a
+thin archive or a Windows import library) and passes it by its absolute
+path at the library's place in the plan, inside the group on Linux. A
+framework becomes Apple's `-framework NAME` after the libraries, with
+`-F DIR` (main.tcl's `-F`, `--framework-dir` to the driver) after the -L
+directories; no other linker is given either. A resolution failure is
+`NATIVE LINK ARCHIVE` (`nlp-static-refusals`, `nlp-static-shared-only`), and
+`BOTLISH_NATIVE_LINK_LOG` records which file each static library was and
+why (`link plan: static NAME: PATH (declared at "native/libNAME.a")`). The
+driver's `link-plan FILE.nir` (`native::linkPlan HIR`) prints the resolved
+plan without linking.
 
 ## 12. Backends
 

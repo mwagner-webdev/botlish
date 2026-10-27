@@ -194,9 +194,19 @@ short:
   another platform, or without a runtime helper the program calls),
   `NATIVE LINK` with the linker's own lines (a missing library or symbol),
   `NATIVE STARTUP` from the executable (a record of another runtime
-  build). A failed link
-  publishes nothing. `BOTLISH_NATIVE_LINK_LOG=FILE` appends every system
+  build), and `NATIVE LINK ARCHIVE` for a declared static archive that is
+  missing, of another architecture or no static archive at all, before the
+  linker runs (NATIVE-LINK-PLAN-MILESTONE-1.md). A failed link
+  publishes nothing. `BOTLISH_NATIVE_LINK_LOG=FILE` appends every link's
+  resolved plan (which archive each static library is), every system
   link's command line and the linker's output to FILE.
+* **Static archives and frameworks** a program declares (`extern c library
+  "NAME" static [at "PATH"]`, `extern c framework "NAME"`) are linked by the
+  same system linker from the single executable and Botlish.app: the
+  archive by its absolute path (a relative one from the program's
+  application root, never the compiler's own ZIP), a framework as
+  `-framework NAME` on macOS (NATIVE-LINK-PLAN-MILESTONE-1.md;
+  single/ffi-smoke-test.sh's application F).
 * **The executable** is an ordinary one of the platform: its Botlish
   functions are symbols, it imports only the system's libraries (and any
   shared library the program declared), and it needs neither the compiler

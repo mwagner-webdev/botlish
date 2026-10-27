@@ -81,15 +81,12 @@ proc hir::interchange::WithoutRepresentations {hir} {
         root "" \
 >>>>
 
-@@ archive-contents-kept the driver keeps the first copy of each declared archive it links and links that copy ever after, whatever the file holds now
+@@ archive-contents-kept the driver keeps the first copy of each declared archive it links (beside it) and links that copy ever after, whatever the file holds now
 ## native/src/codegen/aot.rs
 <<<<
                 inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Declared(declared.written.clone()) });
 ====
-                let kept = std::env::temp_dir().join(format!(
-                    "botlish-kept-{:x}.a",
-                    path.to_string_lossy().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b)))
-                ));
+                let kept = path.with_extension("botlish-kept");
                 if !kept.exists() {
                     let _ = std::fs::copy(&path, &kept);
                 }
