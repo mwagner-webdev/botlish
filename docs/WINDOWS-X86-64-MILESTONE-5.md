@@ -1144,7 +1144,7 @@ gained:
 * **The `roots` job:**
   - "Coroutine costs" (bench/coroutines.tcl and bench/dfa.tcl, section 9);
   - the before-and-after probe of programs without coroutines (section
-    9.5), with `[ci-probes]` or a manual run;
+    9.5), with `[ci-probes]` or a manual run with `probes` set;
   - the fallback plan's refusal test.
 * **The full tier** (`[ci-full]`, or a manual run with tier `full`): the
   acceptance tier under `BOTLISH_NATIVE_GC_STRESS=1` in four shards, or the
