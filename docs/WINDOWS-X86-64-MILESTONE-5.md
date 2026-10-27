@@ -1107,7 +1107,10 @@ The evidence:
     the 26 that apply there killed, among them
     `effects-infallible-on-fallback` and `fallback-runs-coroutines` by
     the fallback build's own tests (the other 24 are another host's
-    code), and none of audit/windows-unwind's 21, which are Windows'.
+    code), and none of audit/windows-unwind's 21, which are Windows';
+  - macos-arm64.yml run 40458676360 at 3a71734b (section 8.2's change to
+    the shared runtime), every job green again, the Tier C mutant shard
+    included.
 
 ## 9. Performance
 
