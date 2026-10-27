@@ -1125,6 +1125,40 @@ The evidence:
     the shared runtime), every job green again, the Tier C mutant shard
     included.
 
+### 8.6 CI
+
+`.github/workflows/windows-x86_64.yml` is the one workflow that runs
+production code on Windows; this milestone added no competing one. What it
+gained:
+
+* **The smoke job:**
+  - the coroutine Rust tests and the commit line of
+    `a_fresh_fiber_commits_its_guarantee_and_a_page`;
+  - `native_stack`'s coroutine checks;
+  - native-status.tcl's and aot-facts.tcl's coroutine probes;
+  - gc-workloads.tcl's coroutine workloads under GC stress and under the
+    unwind check;
+  - the smoke tier's coroutine files.
+* **The acceptance tier:** every golden suite on the native backends,
+  through the golden runner, a coroutine.
+* **The `roots` job:**
+  - "Coroutine costs" (bench/coroutines.tcl and bench/dfa.tcl, section 9);
+  - the before-and-after probe of programs without coroutines (section
+    9.5), with `[ci-probes]` or a manual run;
+  - the fallback plan's refusal test.
+* **The full tier** (`[ci-full]`, or a manual run with tier `full`): the
+  acceptance tier under `BOTLISH_NATIVE_GC_STRESS=1` in four shards, or the
+  tier.tcl items a `CI-Tests:` trailer names. That includes the
+  native-stack and windows-unwind mutants, whose `win-*`,
+  `walk-suspended-*` and `switch-*` mutants run on Windows only.
+
+`.github/workflows/windows-coroutines-probe.yml` runs only the experiments
+of section 2 (audit/windows-coroutines/probe, no botlish-native code), on
+pushes that change them or on demand. It gates nothing.
+
+The GC-stress tier at 3a71734b (real Windows, a manual run with tier
+`full`): PENDING-WIN-GC-STRESS.
+
 ## 9. Performance
 
 Times are observations of one machine at one moment. The Windows figures
