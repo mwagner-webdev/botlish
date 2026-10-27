@@ -992,7 +992,8 @@ Results:
   - `tclsh9.0 tests/local.tcl`, the whole local suite: Tcl tests on interp
     7320 passed and on compile 7315 passed, 0 failed; golden suites 108
     run, 0 failed (interp 5180/5180, compile 5180/5180, cranelift-generic
-    5088/5088, cranelift 5190/5190);
+    5088/5088, cranelift 5190/5190). The same counts again at 3a71734b
+    (section 8.2's change), 0 failed;
   - `BOTLISH_NATIVE_GC_STRESS=1 tests/coroutines.test`: 81 passed;
   - `audit/coroutines/tools/fuzz.tcl` (seeds 3, 17, 41, 40 programs
     each): 0 disagreements;
