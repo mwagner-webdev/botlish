@@ -27,7 +27,38 @@ Claims are labelled as the brief asks: **built**, **inspected** (by the
 host's own tools), **executed**, **signed**, **verified** (`codesign
 --verify`), and -- never, here -- **notarized**.
 
-<<EV result>>
+**Result.** On commit 69b23498, in run 40140537637 (section 38), and
+again on @@FINAL-HEAD@@ in run @@FINAL-MAC@@:
+
+* **Built** on a macos-15 arm64 runner by `single/macos/build.sh`:
+  `Botlish.app`, 26,840 KiB, and the download `botlish-macos-aarch64.zip`,
+  10,700,286 bytes, SHA-256
+  `f32acfea50104f807eff2d5e3200661870774e392801bf32030dd1cd263566d2`,
+  uploaded as the job's artifact only after every check of the job passed.
+* **Inspected** (`file`, `lipo`, `otool`): every Mach-O in it is arm64
+  only, deployment target 11.0, SDK 15.5. The only load commands that
+  point outside the system are the launcher's weak
+  `@rpath/Tcl.framework/Versions/9.0/Tcl` and its one `LC_RPATH`,
+  `@executable_path/../Frameworks`.
+* **Signed** ad hoc, inner code first, and **verified** with `codesign
+  --verify --deep --strict`: in the build directory, unpacked in
+  "Prögram Files" after every run, after moves, and on a second runner
+  with Xcode, the Command Line Tools, Rust and the checkout removed.
+* **Executed**:
+  - `single/smoke-test.sh` and `single/ffi-smoke-test.sh`, the packaged
+    compiler's acceptance, which the Linux single executable also passes;
+  - `single/macos/app-test.sh`'s eleven groups;
+  - `single/macos/compare.sh`'s 150 comparisons with the checkout, all
+    alike;
+  - the smoke test again without developer tools.
+
+  26 of 26 application mutants and 5 of 5 driver mutants were killed on
+  macOS.
+* **Not notarized.** `spctl --assess` rejects it, as it rejects any
+  ad-hoc signature (section 41).
+* **Found on the way:** Tcl 9.0.1 crashes at startup in a non-ASCII
+  directory without a UTF-8 locale (section 11, step 5). The launcher
+  avoids the crash.
 
 ## Contents
 
@@ -582,6 +613,110 @@ startup script runs. What follows from that:
   26 has the cache's rules) and answers with that path; the copy is
   compared file for file with the archive (app-test's cache group).
 
+## 13. Compiler and standard-library contents
+
+`Contents/Resources/botlish.zip` holds 190 files, about 7.1 MB unpacked,
+1.96 MB packed -- exactly what `single/package.tcl`'s `StageCompiler`
+stages for the single executable too:
+
+| archive path | files | what |
+|---|---:|---|
+| `main.tcl` | 1 | `single/main.tcl`, the startup script |
+| `botlish/main.tcl`, `LICENSE`, `BUILD` | 3 | the checkout's main.tcl, unchanged; the license; the source revision |
+| `botlish/core/` | 39 | the reference interpreter, values, natives' registry |
+| `botlish/compiler/` | 1 | the Tcl compiler |
+| `botlish/hir/` | 68 | the front end's analyses |
+| `botlish/surface/` | 10 | lexer, parser, loader, lowering, the front-end cache |
+| `botlish/service/` | 1 | the compiler service (`-check`) |
+| `botlish/lsp/` | 10 | the language server (`-lsp`) |
+| `botlish/native/*.tcl` | 9 | native lowering and the driver's Tcl side |
+| `botlish/stdlib/` | 31 | every standard-library module |
+| `botlish/compilerpedia/` | 16 | the engine, 14 topic files, the generated stdlib topic |
+| `native-bin/ID` | 1 | the bundle's driver's and runtime archive's identity |
+
+Two checks hold it to the checkout. `verify.sh`'s archive group compares
+each of `core`, `compiler`, `hir`, `surface`, `service`, `lsp`, `stdlib`,
+`compilerpedia/topics` and `compilerpedia/generated` with the checkout file
+for file (names), and counts `native/*.tcl`; and `compare.sh` runs both
+compilers on the same programs and requires the same output. Its census
+compiles a one-line program importing each standard-library module (30
+namespaces from 31 files: `std::linux::sys` is one namespace with an
+architecture file per architecture) with `-check` through both: on macOS
+the modules of other platforms (`std::linux*`, `std::windows*`) are refused
+as UNSUPPORTED-PLATFORM, `std::ordered_table` as INTERNAL-NAMESPACE, by
+both alike, and every other loads. Observed (run 40140537637): "the
+standard library's 30 modules: 23 load; refused alike: linux, linux-io,
+linux-path, linux-sys, windows, windows-io (SURFACE MODULE
+UNSUPPORTED-PLATFORM), ordered_table (SURFACE MODULE INTERNAL-NAMESPACE)".
+
+## 14. Compilerpedia contents
+
+The archive's `compilerpedia/` is the checkout's engine, its 14 topic files
+and `generated/stdlib.topic`: `-help all` through the application lists
+the same 845 topics as the checkout's topic files (`compare.sh`'s census;
+the count is computed from the checkout, never written in the script),
+and `-help`, `-help warnings`, `-help cli.options`, `-help
+std::list::at`, `-help KNOWN-ERROR` and `-help "bounds proof"` print the
+same text as the checkout's, after the invocation (`botlish` for
+`tclsh9.0 main.tcl`) and the wrapping it moves. The "help:" lines under a
+diagnostic name the application's invocation (`botlish -help
+error.unsupported-platform`). Compilerpedia reads only those files; it
+never compiles, loads a module or starts the native backend
+(`single/smoke-test.sh`: every `-help` query runs no program).
+
+## 15. Compiler-service and LSP acceptance
+
+The compiler service and the language server are the checkout's, packed
+(`service/`, `lsp/`), run by the application's own Tcl from the archive.
+
+* **`-check`.** The service's command-line client prints what the
+  checkout's prints, in `compare.sh`'s runs of:
+  - the diagnostics programs: a syntax error, a type error, a missing
+    module, and `std::web`'s own warnings, located in
+    `//zipfs:/app/botlish/stdlib/web.bot`;
+  - every sample at once;
+  - the thirty standard-library loaders (section 13).
+* **An editor session.** `single/smoke-test.sh` frames the session by
+  hand and runs it in an empty environment:
+  - Standard output begins with a protocol header (`Content-Length: `).
+    Nothing comes before it: no banner (mutant `startup-banner`).
+  - The hover on an application module's function is `fn
+    shapes::area(w: int, h: int) -> int`.
+  - The published diagnostics include `unbound name "nosuch"`.
+  - The definition of `std::list::get` is
+    `.../Library/Caches/botlish/stdlib-df0224a5/list.bot`: a real file,
+    never a `//zipfs:` path, which an editor cannot open.
+  - Standard error reports that the analysis worker started. The worker
+    is a second run of the launcher: the server starts it from `info
+    nameofexecutable`, which is the launcher's real path (section 11).
+    That environment's PATH has no `tclsh`.
+
+  The session passed in "Prögram Files" (the app job), and in "Clean
+  Äpps" with the developer tools removed (section 19).
+* **Its processes.** In app-test's processes group, a SIGINT sent to the
+  server's process group, as a terminal sends it, ends both the server
+  and its analysis worker (pid 10104 in run 40140537637). Neither
+  outlives the interrupt.
+* **Its cache.** In app-test's cache group:
+  - The library's copy goes to `~/Library/Caches/botlish/stdlib-ID` of
+    a HOME named "hömé dir"; nothing else is written in HOME.
+  - A second session reuses the copy (same file, same mtime).
+  - `BOTLISH_CACHE_DIR` replaces the location.
+  - An unwritable HOME gets the diagnostic "cannot be copied out of the
+    executable", and nothing is written there.
+  - Two servers started at once in one fresh cache leave one copy,
+    equal file for file to the archive's `stdlib/`.
+
+  The mutant `cache-in-bundle`, which writes the copy inside the bundle,
+  is killed.
+* **A moved bundle.** In app-test's moved group, the application is
+  moved to another directory while its server runs. The hover asked
+  after the move is answered (`fn area(w: int, h: int) -> int`), the
+  server exits with status 0 at `exit`, and the moved bundle verifies.
+* **Cost.** A whole session (initialize, one document's diagnostics,
+  shutdown; synchronous scheduler) takes 74.1 ms, best of 7 (section
+  34).
+
 ## 16. Native backend discovery
 
 `BOTLISH_NATIVE_BIN` is `native::binary`'s existing override; the
@@ -631,6 +766,309 @@ mutants `sys-runtime-bundle-ignored`, `sys-runtime-bundle-relative` and
 names a linker) is the system linker on macOS for every executable: the
 stub is Linux x86-64's (`STUB_LINKER`). No change to the selection.
 
+## 19. Toolchain-free operations
+
+The job "Botlish.app without developer tools" (run 40140537637, job
+121013898572) runs on a fresh macos-15 runner:
+
+1. **Before.** Xcode 16.0 to 26.3 and `/Library/Developer/CommandLineTools`
+   are installed. There is no `tclsh9.0`, `rustc` and `cargo` are in
+   `~/.cargo`, there is no Homebrew Tcl, and `/usr/bin/tclsh` is the
+   system's.
+2. **The download.** The job downloads the app job's artifact
+   (`actions/download-artifact` checks its digest), runs `shasum -a 256
+   -c botlish-macos-aarch64.zip.sha256` (`OK`), and unzips it into
+   `$RUNNER_TEMP/Clean Äpps`.
+3. **Removing the tools.** It copies `single/smoke-test.sh`,
+   `single/macos/verify.sh` and five `examples/` directories out, then:
+   - deletes the checkout (`rm -rf "${GITHUB_WORKSPACE:?}"/*` and its
+     dot files);
+   - moves `~/.cargo` and `~/.rustup` away;
+   - moves every `/Applications/Xcode*.app` and
+     `/Library/Developer/CommandLineTools` to
+     `/private/var/hidden-developer`.
+
+   After that, `xcode-select -p` says "Unable to get active developer
+   directory", and `/usr/bin/cc --version` says "xcode-select: note: No
+   developer tools were found, requesting install." The job fails if cc
+   still runs.
+4. **Verification.** `codesign --verify --deep --strict` (codesign is the
+   system's, not the developer tools') reports the bundle valid on disk
+   and that it satisfies its Designated Requirement. `verify.sh
+   --no-developer-tools` reports:
+   - layout: ok;
+   - dependencies: SKIPPED (otool and lipo are developer tools);
+   - signature: ok;
+   - archive: ok (190 files).
+5. **The smoke test.** `single/smoke-test.sh` finds no tclsh9.0, rustc or
+   cargo on the host, and passes:
+   - interp, compile and cranelift: 23 values each;
+   - the usage, the `-help` pages, `-version` and every inspection
+     option;
+   - a rejected program;
+   - an application module 3000 calls deep, on all four backends;
+   - non-ASCII directories and arguments with no locale;
+   - the standard library read from inside the archive;
+   - a native run without HOME;
+   - `-emit-native-executable` refused with NATIVE LINK TOOLCHAIN and
+     `xcode-select --install`, with no mention of Rust;
+   - a C program's link refused (NATIVE LINK TOOLCHAIN);
+   - `-lsp`: hover, diagnostics and definition.
+
+**What runs without the developer tools:**
+* the Tcl backends;
+* the native JIT (`cranelift`, `cranelift-generic`) of a program that
+  calls no C;
+* `-check`, `-lsp`, `-help`, `-version` and the inspection options.
+
+**What needs them:**
+* every standalone executable: the system linker is Apple's `cc`;
+* a native run of a program that calls C, which is a linked run
+  (C-FFI.md). On macOS that includes every program that prints through
+  `std::io`: `std::darwin::io` is libSystem's C
+  (MACOS-AARCH64-MILESTONE-8.md), and the Tcl backends refuse C calls
+  (NATIVE-ONLY). The clean job does not run this case: its smoke test
+  checks the executable's refusal and the C program's.
+
+The refusal names the remedy, `xcode-select --install`, and never Rust
+(mutant `sys-apple-remedy-rust`).
+
+## 20. Native executable compilation
+
+Every executable is linked by the system linker (auto, section 18) from
+the application, with PATH=/usr/bin:/bin.
+
+* **app-test's executables group.**
+  - A copy of the application emits `coroutine`, `coroutine-kept`,
+    `context`, `overflow` and `args`, and is then deleted.
+  - Each is a Mach-O 64-bit executable for arm64 (`file`) with `LC_MAIN`.
+    `otool -L` names only `/usr/lib` and `/System/Library`, there is no
+    `LC_RPATH`, and `strings` names neither `Botlish.app` nor the
+    builder's directory.
+  - Run with `env -i` from `/`, they print:
+    - coroutine: `[0, 1, 4, -1]`, also under GC stress;
+    - coroutine-kept: `[[0, [1, 4, -1]], [4, 5, 6, 7, -1]]`, also under
+      GC stress;
+    - context: `[3, 42, -6]`;
+    - args: the arguments `a`, `b c` and `ü` as given;
+    - overflow: `NATIVE LIMIT STACK`, with status 1.
+* **`compare.sh`.** Five programs are linked by both the checkout's
+  compiler and the application's. Output, status and startup report
+  (`BOTLISH_NATIVE_STARTUP_REPORT`) are the same, plainly and under GC
+  stress.
+* **`single/smoke-test.sh`.** `hello.bot` (Darwin IO) is linked and run,
+  also with no HOME.
+* **`single/ffi-smoke-test.sh`.** Five executables, a to e, of 828,840
+  to 869,704 bytes, each needing only `/usr/lib/libiconv.2.dylib` and
+  `/usr/lib/libSystem.B.dylib`. They run with the compiler, its cache and
+  the C libraries deleted, also under GC stress (section 22).
+* **Cost.** `-emit-native-executable` of a small program takes 167.8 ms,
+  of which the object and the link are about 48.6 ms (section 34).
+
+## 21. Darwin IO acceptance
+
+* **app-test's darwin-io group.**
+  - `-check hello-darwin.bot` is ok.
+  - Its `-emit-nir` holds a function
+    `std::io::print_line<std::io::IO=std::darwin::io::DarwinIO>` that
+    calls `std::darwin::io::write_text` directly: the context trait is
+    selected statically, with no dispatch.
+  - Its executable links `/usr/lib/libSystem.B.dylib` and prints `Hello,
+    world!`, then `unit`.
+* **`compare.sh`.** `hello-darwin.bot` matches the checkout:
+  - on both native backends (a linked run), plainly and under GC stress;
+  - as an executable;
+  - in `-emit-nir`.
+* **`single/ffi-smoke-test.sh`'s E.** `std::io::print_line` through
+  `std::darwin::io` prints `Hello from portable IO`, then `unit`. It is
+  linked by the system linker: Darwin arm64 has no stub.
+* **app-test's concurrency group.** Four links of `hello-darwin.bot` at
+  once in one HOME; each executable prints.
+* **`single/smoke-test.sh`.** A native run shows the program's output
+  before its value on both native backends.
+
+## 22. Static C fixture acceptance
+
+`single/ffi-smoke-test.sh` runs with Apple clang 17.0.0
+(clang-1700.0.13.5) on PATH=/usr/bin, and checks that no Rust is
+reachable. It builds `tests/cffi/fixture.c` into
+`libbotlish_cffi_fixture.a`, and a second library depending on it,
+`libbotlish_cffi_dependent.a`, with the host's cc. Then it compiles with
+the application (run 40140537637):
+
+| program | what | result |
+|---|---|---|
+| a | libc's `labs` | `42` |
+| b | `bcf_add` and `bcf_add_twice` from the two static libraries, declared in the order that needs GNU ld's group on Linux (macOS's ld needs none), and the variadic `bcf_vsum(3, 1, 20, 300)` | `[42, 42, 321]` |
+| c | borrowed Bytes and MutableBytes (section 23) | `[37602, 1768, 888]` |
+| d | errno through `__error()`, and the `(size_t)-1` sentinel (section 23) | `[[16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]` |
+| e | `std::io` through `std::darwin::io` | `Hello from portable IO \| unit` |
+
+* **The executables.** Each runs after the compiler, its cache and the C
+  libraries are deleted, also under GC stress, and needs only libSystem
+  and libiconv (`otool -L`).
+* **The refusals:**
+  - no C compiler: NATIVE LINK TOOLCHAIN;
+  - a missing library: named (`definitely_missing_botlish_lib`);
+  - an undefined symbol: named (`botlish_no_such_symbol`);
+  - `BOTLISH_NATIVE_LINKER=stub`: "links no native library".
+* **A linked run.** `b` also runs on `-backend cranelift`.
+
+The same script gives the same values with the Linux single executable
+(section 35).
+
+## 23. C borrowing and error-capture acceptance
+
+Programs c and d of section 22 are the application's end-to-end check of
+byte borrowing and error capture:
+
+* **c, borrowing.**
+  - `bcf_sum` (`read noescape`) reads 300 bytes of Botlish storage in
+    place: 37602.
+  - `bcf_fill` (`write noescape`) writes 16 bytes into a private copy,
+    returned as the call's `out`: its checksum is 1768.
+  - The original MutableBytes is unchanged by the write exposure: its
+    checksum is 888.
+* **d, error capture.**
+  - `bcf_fill_errno` succeeds: `[16, 0, 1736]`.
+  - It fails with errno 34 (ERANGE), read through `__error()` right after
+    the call: `[-1, 34, 1736]`.
+  - `bcf_large_error` returns SIZE_MAX, a 64-bit C word compared as it
+    is, with errno 5: `[18446744073709551615, 5]`.
+  - On success it returns `[42, 0]`.
+
+These are the Linux single executable's values too. The lowering's own
+tests run the checkout on macOS, not the application:
+`tests/c-pointer-borrowing.test`, `tests/c-byte-borrowing.test` and
+`tests/c-ffi-error-capture.test`, in the acceptance tier (the macOS
+workflow's Tier B). The application's front end is the checkout's, file
+for file (section 13). Its driver is the same `cargo build`'s, stripped
+of debug symbols and re-signed.
+
+## 24. Native JIT behavior
+
+The application's driver runs Cranelift's JIT in place, from
+`Contents/MacOS`. It is signed ad hoc, with no hardened runtime and no
+entitlement (`flags=0x2(adhoc)`).
+
+* **`compare.sh`.** Both compilers agree on:
+  - the 24 sample programs (examples/surface, examples/stdlib) on
+    interp, compile, cranelift and cranelift-generic: 96 runs alike;
+  - the acceptance programs (coroutines fused and kept, closures, a
+    context, the stack overflow) on every backend, and natively under GC
+    stress;
+  - `args.bot` with non-ASCII and invalid-UTF-8 arguments (`-argv-hex
+    41ff`) on interp and cranelift;
+  - the 2048 benchmark on cranelift;
+  - `hello-darwin.bot` on both native backends.
+
+  Run 40140537637, before `coroutine-kept.bot` was added: "the
+  acceptance programs, natively also under GC stress: 125 runs alike"
+  (the samples' 96 included).
+* **A runtime error.** `overflow.bot`'s unbounded recursion ends in
+  `NATIVE LIMIT STACK` (the stack guard, MACOS-AARCH64-MILESTONE-4.md):
+  - on both native backends, with status 1 through the launcher
+    (app-test's processes group);
+  - in an executable;
+  - with the same text as the checkout's (`compare.sh`).
+
+  This is the only runtime error the application's own tests exercise.
+* **The census (C6).** The bundle's driver runs a JIT program. So does a
+  copy signed with the hardened runtime and no entitlement, and copies
+  with `com.apple.security.cs.allow-jit` or
+  `allow-unsigned-executable-memory`. On these runners that shows less
+  than it seems: `csrutil status` reports "disabled", and whether the
+  signing variants behave the same on a Mac with SIP enabled was not
+  tested. The hardened-runtime observation is no evidence for a user's
+  Mac (section 41). The shipped driver has no hardened runtime.
+* **Time.** A native run of a small program takes 119.2 ms, 14.6 ms more
+  than the interpreter's run of it (section 34).
+
+## 25. GC stress and coroutines
+
+`BOTLISH_NATIVE_GC_STRESS=1` forces a collection at every allocation
+site. Through the application:
+
+* **The two coroutine programs.**
+  - `coroutine.bot` is fused into its function (the driver's fusion log:
+    `fused drive e22 {... yields 1 creates 1 starts 1 resumes 3 ...}`).
+  - `coroutine-kept.bot` is kept on the general runtime: `kept passed
+    ... {its handle reaches ... call ...}` and `kept tree ... {its
+    yielding function leaves is recursive}`. Its coroutines are objects
+    with stacks of their own, switched at every resume and yield, and
+    the collector walks their suspended frames, which hold the structs
+    they made.
+
+  Both logs come from this checkout on Linux. The pass reads the
+  program's NIR, not the host, and runs wherever native coroutines do,
+  macOS AArch64 included.
+* **`compare.sh`.** These two, `closures.bot`, `context.bot`,
+  `overflow.bot` and `hello-darwin.bot` run on cranelift and
+  cranelift-generic under GC stress, alike with the checkout. The five
+  executables under GC stress give the same output and startup report.
+* **app-test.** The executables group runs both coroutine executables
+  under GC stress. The concurrency group runs `coroutine-kept.bot`
+  natively four times at once.
+* **`single/ffi-smoke-test.sh`.** Every executable runs under GC stress.
+
+Run 40140537637 had only the fused program. The application's tests
+therefore exercised no coroutine object, stack switch or walk of a
+suspended stack until `coroutine-kept.bot` was added (commit d1e2de57;
+run @@FINAL-MAC@@).
+
+## 26. Relocation and symlink tests
+
+* **app-test's relocation group.**
+  - A copy in "A dir with spaces/Ünïcödé" runs (cranelift, value 50),
+    also with `LC_ALL=C`, and verifies.
+  - Moved to another directory, it runs and verifies.
+  - Through a symbolic link to the launcher on PATH, invoked as
+    `botlish` from `/`: `-version` says `invocation: botlish` and
+    `native backend: packaged`, and a native run works.
+  - Through a symbolic link to the bundle (`Linked.app`), it runs.
+  - A `TCL_LIBRARY` naming a decoy script library, and
+    `BOTLISH_NATIVE_BIN=/nonexistent/botlish-native`, change nothing: no
+    "DECOY", value 50.
+  - `DYLD_FRAMEWORK_PATH` naming a copy of the framework whose
+    `init.tcl` announces itself: dyld loads that copy, and the launcher
+    refuses it ("not this application's own", status 2). The mutant
+    `framework-from-system` removes that check and is killed.
+* **The census (C5).** A copy in "moved place/ü" runs `-version` and
+  verifies. `DYLD_PRINT_LIBRARIES` lists the launcher and the moved
+  bundle's Tcl, and nothing else outside the system.
+* **app-test's paths group.** An application of two files in "sources
+  dir/ünï cödé":
+  - by absolute path from `/`, on all four backends (value 42);
+  - by relative path;
+  - with `-argv 'ü' -argv 'two words'`;
+  - as an executable built in that directory, which receives `ü` and
+    `two words`.
+* **A moved application's first start.** For three fresh copies, the
+  first `-version` took 71.8 to 90.4 ms and the second 70.8 to 128.6 ms
+  (section 34): nothing is installed or extracted at first start.
+* **The CI app job itself** runs every acceptance on a copy unpacked to
+  `$RUNNER_TEMP/Prögram Files`, outside the checkout. The clean job uses
+  "Clean Äpps".
+
+## 27. Read-only bundle tests
+
+In app-test's read-only group, the copy is made read-only (`chmod -R
+a-w`), and `touch` inside it fails. Then:
+
+* `single/smoke-test.sh`'s whole run passes on it ("12 checks": the
+  smoke test's summary lines).
+* A write into the archive is refused ("writes not permitted"). The
+  write comes from `-emit-hir-interchange
+  //zipfs:/app/botlish/stdlib/ascii.bot`, whose output would go beside
+  the file. The mutant `zip-writable` is killed: with it, zipfs keeps the
+  write in memory.
+* Afterwards every file's mode, size, mtime and SHA-1 are unchanged
+  (`stat`, `shasum`), and the copy verifies.
+
+The app job's last step verifies the bundle the whole job ran from ("The
+application, untouched by the runs"). The application never writes into
+itself: the language server's cache is outside it (section 15).
+
 ## 28. Ad-hoc signing implementation
 
 `single/macos/build.sh`, after assembling the bundle unsigned:
@@ -663,7 +1101,299 @@ codesign --force --sign - Botlish.app
   namespace in reverse-DNS form, chosen to stay valid for a Developer ID
   build (section 41).
 
-<<EV rest>>
+## 29. Signature verification and tamper controls
+
+* **Verified.** `codesign --verify --deep --strict --verbose=4` of the
+  built application validates the framework's version and the driver,
+  then reports "valid on disk" and "satisfies its Designated
+  Requirement". It reports the same for:
+  - the copy in "Prögram Files" after every run;
+  - the moved copies;
+  - the copy in "moved place/ü";
+  - the copy in "Clean Äpps", without developer tools.
+* **The signatures** (`codesign -dvvv --entitlements -`):
+
+  | | identifier | format | sealed |
+  |---|---|---|---|
+  | application | `io.github.mwagner-webdev.botlish` | app bundle with Mach-O thin (arm64) | `Sealed Resources version=2 rules=13 files=4` |
+  | framework | `com.tcltk.tcllibrary` | bundle with Mach-O thin (arm64) | `files=238` |
+  | driver | `io.github.mwagner-webdev.botlish.native` | Mach-O thin (arm64) | `Info.plist=not bound` |
+
+  Each has `flags=0x2(adhoc)`, `Signature=adhoc` and `TeamIdentifier=not
+  set`. None has entitlements.
+* **Gatekeeper.** `spctl --assess --type execute`: `rejected`, as
+  expected for an ad-hoc signature.
+* **Tamper.** In app-test's tamper group, one byte is changed in a copy
+  of each part, and strict verification rejects every one:
+
+  | changed | `codesign --verify --deep --strict` |
+  |---|---|
+  | a byte of `botlish.zip` | a sealed resource is missing or invalid |
+  | a byte of the driver | invalid signature (code or signature have been modified) |
+  | a byte of the launcher | invalid signature (code or signature have been modified) |
+  | a byte of the framework's binary | invalid signature ... In subcomponent |
+  | an added resource | a sealed resource is missing or invalid |
+  | a byte of the framework's `init.tcl` | a sealed resource is missing or invalid In subcomponent |
+  | the bundle copied with `cp -RL` (the framework's links as files) | bundle format is ambiguous (could be app or framework) |
+
+* **What verification does not do.** The copies with a changed driver
+  and a changed launcher still ran, with status 0: the native run
+  printed value 50, and `-version` printed. We did not establish why.
+  The kernel validates a signed page as it is paged in, and these
+  runners have SIP disabled. Nothing here shows what a Mac with SIP
+  enabled does. Strict verification is the check this milestone relies
+  on, and it rejects both. The mutants `modified-after-signing` and
+  `zip-changed-after-signing` (a change after the build signed) are
+  killed by `verify.sh`.
+
+## 30. Distribution archive integrity
+
+* **How it is made.** `single/macos/build.sh` archives the signed bundle
+  with `ditto -c -k --norsrc --noextattr --noacl --keepParent
+  Botlish.app botlish-macos-aarch64.zip`. ditto keeps the framework's
+  symbolic links as links, and the modes. The script writes `shasum -a
+  256` beside the archive, unzips it into a temporary directory and
+  verifies what it unpacked (`verify.sh --checkout`: layout, the links,
+  dependencies, signature, the archive's contents against the checkout).
+* **The app job (run 40140537637).** `f32acfea50104f807eff2d5e3200661870774e392801bf32030dd1cd263566d2
+  botlish-macos-aarch64.zip`, 10,700,286 bytes. The job unpacks it again
+  with `unzip` into "Prögram Files" and runs `verify.sh` there before
+  any test. The artifact is uploaded last, only when every step passed.
+* **The clean job.** `actions/download-artifact` checks the artifact's
+  digest, `shasum -a 256 -c` prints `botlish-macos-aarch64.zip: OK`, and
+  the unpacked bundle verifies strictly with no developer tools
+  (section 19).
+* **Mutants.** `archive-without-links` stores the links as files; it is
+  killed ("Tcl.framework/Versions/Current is not the symbolic link to
+  9.0"), as is the `cp -RL` tamper control above.
+* **Not reproducible byte for byte.** The mutants job built the same
+  commit on another runner. Its download was 10,700,290 bytes, SHA-256
+  `028a225cc863cb141b863e07b8b548ffe501e3989fc828dcf6a4d0dd442199ef`.
+  The compiler archive inside was the same size in both (1,958,413
+  bytes). The checksum identifies a download, not a build. We did not
+  look further into which bytes differ.
+
+## 31. Dynamic dependency inspection
+
+The app job's inspect step (run 40140537637):
+
+| Mach-O | `file`, `lipo -archs` | `otool -L` | other load commands | `LC_BUILD_VERSION` |
+|---|---|---|---|---|
+| `MacOS/botlish` | Mach-O 64-bit executable arm64 | `@rpath/Tcl.framework/Versions/9.0/Tcl` (weak), `/usr/lib/libSystem.B.dylib` | `LC_RPATH @executable_path/../Frameworks` | minos 11.0, sdk 15.5 |
+| `MacOS/botlish-native` | Mach-O 64-bit executable arm64 | `/usr/lib/libiconv.2.dylib`, `/usr/lib/libSystem.B.dylib` | none | minos 11.0, sdk 15.5 |
+| `Tcl.framework/Versions/9.0/Tcl` | dynamically linked shared library arm64 | `LC_ID_DYLIB @rpath/Tcl.framework/Versions/9.0/Tcl`; `/usr/lib/libz.1.dylib`, libSystem, CoreFoundation | none | minos 11.0, sdk 15.5 |
+| `Resources/libbotlish_runtime.a` | `lipo -info`: non-fat, arm64 | (an archive) | | |
+| every executable it links | Mach-O 64-bit executable arm64 | libiconv, libSystem | `LC_MAIN`, no `LC_RPATH` | |
+
+* **Loaded at run time.** `DYLD_PRINT_LIBRARIES` of a moved copy shows
+  only the launcher and the moved bundle's Tcl outside `/usr/lib` and
+  `/System/Library` (section 10).
+* **Checked.** `verify.sh`'s dependency group checks every load command
+  of every Mach-O in the bundle. It kills the mutants
+  `launcher-system-tcl`, `launcher-build-tcl`, `rpath-outside-bundle` and
+  `modified-after-signing`, each of which leaves another `LC_RPATH`.
+
+## 32. Mutation results
+
+`audit/macos-app/tools/mutate.tcl` builds the unmutated application and
+requires it to pass every detector. Then, for each mutant, it builds the
+application and runs the detectors (`verify.sh`, the smoke tests,
+`app-test.sh`, the archive's checks) until one fails. Results of the
+app-mutants job, run 40140537637, on macos-15:
+
+| mutant | what it breaks | killed by |
+|---|---|---|
+| `launcher-system-tcl` | search path `/Library/Frameworks` | verify: the launcher's `LC_RPATH` |
+| `launcher-build-tcl` | search path the framework's build directory | verify: `LC_RPATH` |
+| `rpath-outside-bundle` | search path beside `Frameworks` | verify: `LC_RPATH` |
+| `tcl-library-from-environment` | no `tcl_library`: `$TCL_LIBRARY` first | app relocation: DECOY TCL LIBRARY |
+| `launcher-locale-kept` | Tcl starts in the environment's locale | app relocation: the copy in a non-ASCII path does not run |
+| `launcher-locale-leaked` | `LC_ALL=UTF-8` never put back | app processes: the linker ran with LC_ALL 'UTF-8' |
+| `zip-omitted` | no compiler archive | verify layout |
+| `zip-wrong-mount` | mounted elsewhere than `//zipfs:/app` | smoke: a native run |
+| `zip-writable` | `wrmax` left: writes kept in memory | app read-only: a write into the archive |
+| `source-from-checkout` | the compiler sourced from the checkout | smoke: the standard library not read from inside |
+| `stdlib-module-omitted` | `std::darwin` left out | verify archive: stdlib differs |
+| `compilerpedia-omitted` | no topics | verify (main.tcl fails) |
+| `backend-omitted` | no driver | verify layout |
+| `backend-from-environment` | `BOTLISH_NATIVE_BIN` from the environment | app relocation |
+| `runtime-omitted` | no runtime archive | verify layout |
+| `runtime-relative` | runtime archive relative to the working directory | smoke: emit hello |
+| `linker-rustc` | linker rustc, not auto | smoke: emit hello |
+| `argument-dropped` | the launcher drops an argument | smoke: a native run |
+| `startup-banner` | a greeting on standard output | smoke: `-help warnings` |
+| `cache-in-bundle` | the library copy inside the bundle | smoke: `-lsp` copied outside `~/Library/Caches/botlish` |
+| `modified-after-signing` | the launcher changed after signing | verify: `LC_RPATH` |
+| `framework-unsigned` | the framework never signed | verify layout: no `_CodeSignature` |
+| `backend-unsigned` | the driver keeps the linker's signature | verify signature: identifier |
+| `zip-changed-after-signing` | the archive rewritten after signing | verify: `codesign --verify` rejects |
+| `archive-without-links` | the download stores links as files | archive: `Versions/Current` |
+| `framework-from-system` | any loaded Tcl accepted | app relocation: DYLD_FRAMEWORK_PATH's Tcl ran |
+
+"26 mutants: 26 KILLED; killed by: framework loading 4, compiler behavior
+10, packaging 6, ZIP mounting 1, runtime linking 3, code signing 2."
+
+**The driver's mutants** (`audit/native-aot/tools/mutate.tcl -only
+sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-runtime-bundle-remedy-build,sys-apple-remedy-rust,sys-executable-rpath`):
+
+| mutant | macos-aarch64 (run 40140537637) | linux-x86_64 (this container) |
+|---|---|---|
+| `sys-runtime-bundle-ignored` | killed (system-linker.test: `system-linker-bundle-runtime`) | skipped (not compiled differently for Linux) |
+| `sys-runtime-bundle-relative` | killed (Rust `packaged_runtime_archive_follows_the_driver`, system-linker.test) | killed (Rust) |
+| `sys-runtime-bundle-remedy-build` | killed (Rust `runtime_remedy_is_the_distributions`) | killed (Rust) |
+| `sys-apple-remedy-rust` | killed (Rust `toolchain_remedy_is_the_platforms`) | killed (Rust) |
+| `sys-executable-rpath` | killed (Rust `system_link_args_*`, system-linker.test) | killed (Rust, system-linker.test) |
+
+**The single executable's mutants**
+(`audit/single-executable/tools/mutate.tcl`, Linux x86-64, at d1e2de57's
+tree): 9 mutants, 9 killed. The shared staging and `single/main.tcl`'s
+new branch kill nothing of its own.
+
+## 33. Bundle and download sizes
+
+`bench/macos-app.tcl`, run 40140537637 (MiB, files only, symbolic links
+not counted):
+
+| part | MiB | bytes |
+|---|---:|---:|
+| `Frameworks/Tcl.framework` (the library 1.74 MiB, its script library 2.55 MiB, on disk) | 4.03 | |
+| `MacOS/botlish` (the launcher) | 0.07 | 70,928 |
+| `Resources/botlish.zip` (the compiler: 190 files, 7,149,215 bytes unpacked) | 1.87 | 1,958,413 |
+| `MacOS/botlish-native` (the driver, `strip -S`) | 5.80 | 6,084,384 |
+| `Resources/libbotlish_runtime.a` | 13.74 | 14,406,808 |
+| **Botlish.app** | **25.51** | |
+| **download** (`botlish-macos-aarch64.zip`) | **10.20** | 10,700,286 |
+
+The runtime archive is more than half of the bundle. Only links read it,
+and it is the system linker's input (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+For comparison, the Linux single executable built from the same tree is
+13,910,137 bytes (static Tcl, and an archive holding the driver, the stub
+and the runtime archive).
+
+## 34. Startup and build performance
+
+`bench/macos-app.tcl` on the app job's runner (macos-15 arm64, a shared
+CI machine), run 40140537637. Each figure is the best of 7, in ms, each
+run a fresh process with HOME and PATH only:
+
+| measured | ms |
+|---|---:|
+| process: the launcher exiting before Tcl (no framework) | 3.6 |
+| tcl: + loading Tcl.framework and `Tcl_Init` | 12.0 |
+| mount: + mounting the archive | 13.4 |
+| `-version`: + `single/main.tcl` and `main.tcl` | 86.4 |
+| `-help` (Compilerpedia's overview) | 119.5 |
+| `-check` of a small program | 112.6 |
+| the same program on the interpreter | 104.6 |
+| a language-server session (section 15) | 74.1 |
+| the driver's own start | 6.0 |
+| the program on cranelift (JIT) | 119.2 |
+| `-emit-native-executable` of it | 167.8 |
+
+| phase (difference) | ms |
+|---|---:|
+| loading Tcl.framework and `Tcl_Init` (tcl - process) | 8.4 |
+| mounting the archive (mount - tcl) | 1.4 |
+| the compiler's startup (-version - mount) | 73.0 |
+| lowering, the driver, Cranelift and the run (jit - interp) | 14.6 |
+| the object and the link (executable - jit) | 48.6 |
+
+* **Moving costs nothing.** A moved application's first and second
+  `-version`, for three fresh copies: 71.8/70.8, 90.4/100.7 and
+  83.4/128.6 ms. There is no first-start installation, extraction or
+  cache to fill. The spread is the shared runner's, which earlier runs
+  on this branch also showed.
+* **The startup is the compiler's sources.** Loading the framework and
+  mounting the archive together take under 10 ms. Sourcing the compiler
+  from the archive takes the 73 ms.
+* **The build.** `single/macos/build.sh` took 96 s on the app job's
+  runner, from the step's start to its end. That covers the framework
+  built from source (the cache missed), the cargo build (cached: 0.30
+  s), the launcher, signing, the archive, `ditto` and both
+  verifications.
+
+## 35. Linux single-executable regressions
+
+The shared parts are `single/package.tcl`'s `StageCompiler`,
+`single/main.tcl`, `single/smoke-test.sh`, `single/ffi-smoke-test.sh` and
+the driver's runtime-archive lookup. Observed:
+
+* **`single-executable` workflow, run 40131935089 on c7d581f6.** This
+  commit carries the shared staging, `single/main.tcl`'s re-decoding and
+  the portable smoke tests. Success: build, and smoke and FFI smoke tests
+  in stock containers. On d1e2de57: run 40451935419, success.
+* **Locally, Linux x86-64, at d1e2de57's tree:**
+  - `single/build.sh`: 13,910,137 bytes.
+  - `single/smoke-test.sh` passed: interp, compile and cranelift 23
+    values each; `-lsp` hover, diagnostics, and definition into
+    `~/.cache/botlish/stdlib-df0224a5/list.bot`.
+  - `single/ffi-smoke-test.sh`: a `42`; b `[42, 42, 321]`; c `[37602,
+    1768, 888]`; d `[[16, 0, 1736], [-1, 34, 1736],
+    [18446744073709551615, 5], [42, 0]]`; e stub-linked with no C
+    compiler on PATH. These are the macOS application's values.
+  - `audit/single-executable/tools/mutate.tcl`: 9 of 9 killed.
+  - `cargo test ... aot::`: 19 passed.
+  - `tests/system-linker.test`: 15 of 15.
+  - `tests/main-cli.test`: 63 of 63.
+  - `tests/compilerpedia.test`: 39 of 39.
+  - `tools/compilerpedia.tcl check`: 845 topics, 627 examples, 0
+    problems.
+* **`tests` workflow, run 40131786095 on c7d581f6.** All 14 jobs green:
+  - interp and compile;
+  - cranelift and cranelift-generic coverage;
+  - stub-linked executables;
+  - system-linked executables, also under GC stress;
+  - golden shards 1 to 4;
+  - the warning gate;
+  - the native Rust unit tests;
+  - the method-call decision.
+
+  On d1e2de57, whose later changes are the driver's remedy and the macOS
+  scripts: run @@FINAL-TESTS@@.
+* **Found:** the non-ASCII directory limitation (section 39). It is
+  pre-existing and unchanged.
+
+## 36. Linux AArch64 regressions
+
+* **`tests (linux arm64)`, run 40131788283 on c7d581f6:** success.
+* **On d1e2de57:** run @@FINAL-ARM64@@.
+
+Nothing Linux-specific changed after c7d581f6 except `aot.rs`'s remedy
+function. Its unit tests run there too.
+
+## 37. Windows regressions
+
+* **`tests (windows x86-64)`, run 40126544966 on 0b941feb:** success.
+* **On d1e2de57:** run @@FINAL-WINDOWS@@.
+
+What reaches Windows is the driver's `runtime_archive`. There
+`application_contents` is never true (`bundles` is macOS's), so the
+message and location are the ones before this milestone.
+
+## 38. macOS GitHub Actions links
+
+`.github/workflows/macos-arm64.yml` on branch `ccr-c70bc7cc-uspdp2`
+(https://github.com/mwagner-webdev/botlish/actions/runs/RUN):
+
+| run | commit | what it showed |
+|---|---|---|
+| 40126544954 | 0b941feb | push run, cancelled by the next dispatch |
+| 40129027396 | effaa172 | the first acceptance run: failed; fixed by 57ed5bc7 (paths in Tcl's encoding, re-decoded arguments) |
+| 40130083782 | 57ed5bc7 | failed: the launcher crashing in a non-ASCII path |
+| 40131369183 | df2b087a | failed, by design: the crash diagnosed (crash report, lldb) |
+| 40133897160 | bb625bf5 | the UTF-8 locale fix; failed: app-test's check after a missing driver matched the wrong pattern (fixed by bd3df4f9) |
+| 40137867969 | bd3df4f9 | failed: the driver's remedy named cargo for a damaged application (fixed by 69b23498) |
+| **40140537637** | **69b23498** | **app, app-clean, app-mutants: all success** |
+| @@FINAL-MAC@@ | d1e2de57 | the full matrix (smoke, Tier B, system linker) and the three app jobs, with `coroutine-kept.bot` |
+
+The jobs of 40140537637:
+* `Botlish.app (macOS arm64 distribution)`: job 121011155199;
+* `Botlish.app without developer tools`: job 121013898572;
+* `Botlish.app mutants`: job 121011154978.
+
+The artifacts are `botlish-macos-aarch64` (the download and its
+`.sha256`), the app job's logs and `botlish-macos-app-mutants`. Like
+every artifact, they expire.
 
 ## 39. Known limitations
 
@@ -678,6 +1408,10 @@ codesign --force --sign - Botlish.app
   compiler driver: without them `-emit-native-executable` and the native
   run of a program that calls C report `NATIVE LINK TOOLCHAIN` with
   `xcode-select --install` (section 19). There is no stub linker on macOS.
+  That includes every program that prints through `std::io`: its
+  `std::darwin::io` is libSystem's C, so without the developer tools such
+  a program runs on no backend (the Tcl backends refuse C calls). Its
+  value is shown; its output is not.
 * **Not a GUI application.** `LSBackgroundOnly`: it has no window, Dock
   icon or menu, and opening it from Finder is not a supported use (not
   tested). It is used from a terminal, through `Contents/MacOS/botlish` or
@@ -687,6 +1421,13 @@ codesign --force --sign - Botlish.app
 * **Built in CI only.** The download is CI's artifact; there is no release
   workflow that publishes it beside the Linux single executable's
   `single-latest` prerelease.
+* **The download is not reproducible byte for byte.** Two builds of one
+  commit gave different SHA-256s (section 30). The `.sha256` file
+  identifies a download, not a source revision.
+* **A changed launcher or driver still ran on the runners** (section 29).
+  Strict verification rejects both; the kernel's page checks did not stop
+  them on a runner with SIP disabled. What a Mac with SIP enabled does
+  was not observed.
 * **The Linux single executable, in a directory whose name is not ASCII,
   without a UTF-8 locale** (a pre-existing limitation, found by this
   milestone's tests and not changed by it): Tcl decodes its own path with
@@ -696,8 +1437,8 @@ codesign --force --sign - Botlish.app
   hover`; every other check passes). The arguments, the environment and
   the paths `single/main.tcl` computes are re-decoded (section 11); the
   worker's command line is `lsp/server.tcl`'s, from `info
-  nameofexecutable`. The macOS application is not affected: Tcl's startup
-  encoding on macOS without a locale is UTF-8.
+  nameofexecutable`. The macOS application is not affected: its launcher
+  starts Tcl in a UTF-8 locale (section 11, step 5).
 
 ## 40. Prerequisites for explicit static-library/framework declarations
 
