@@ -80,8 +80,21 @@ proc cffi::Build {} {
     source [file join $root audit c-header tools common.tcl]
     set source [file join [::chdr::sourcesDir] boringssl]
     file mkdir $dir
+    # BoringSSL builds with -Werror. GCC 15 generating x86-64-v3 code (the
+    # default of Ubuntu 26.04's amd64v3 packages, which GitHub's
+    # ubuntu-26.04 runners install) reports a -Wstringop-overflow false
+    # positive in keccak.cc.inc's left_encode, which writes at most 9 bytes.
+    # That one diagnostic stays a warning, for GCC only (clang refuses the
+    # option): CMake includes this file after BoringSSL's project(), when the
+    # compiler is known.
+    set include [file join $dir botlish-project-include.cmake]
+    set channel [open $include w]
+    puts $channel {add_compile_options("$<$<COMPILE_LANG_AND_ID:C,GNU>:-Wno-error=stringop-overflow>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-error=stringop-overflow>")}
+    close $channel
     puts "boringssl: building libcrypto.a (BORINGSSL_PREFIX=$prefix) in $dir"
-    exec cmake -S $source -B $dir -GNinja -DCMAKE_BUILD_TYPE=Release -DBORINGSSL_PREFIX=$prefix >@stdout 2>@stderr
+    exec cmake -S $source -B $dir -GNinja -DCMAKE_BUILD_TYPE=Release -DBORINGSSL_PREFIX=$prefix \
+        -DCMAKE_PROJECT_INCLUDE=$include >@stdout 2>@stderr
     exec ninja -C $dir crypto ssl decrepit >@stdout 2>@stderr
     if {[boringsslDir] eq ""} {
         error "boringssl: the build produced no libcrypto.a in $dir"

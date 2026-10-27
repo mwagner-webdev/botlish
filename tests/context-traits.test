@@ -596,6 +596,17 @@ test ct-implementation-obligations {the selected context's implementations are c
      -> std::ct::clock::now
         directly requires std::ct::clock::Clock} {value 35}}
 
+test ct-implementation-obligations-select-nothing {selection never discards a provider because its implementation's own requirements fail (SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md): with A and Timed installed and Timed's emit needing the Clock nobody installed, the call is AMBIGUOUS-CONTEXT-IMPLEMENTATION between both, never A's; with the Clock installed too it stays ambiguous} -body {
+    list [moduleRejection $::ctLib [selectionProgram {std::ct::a::create() std::ct::timed::create()}]] \
+        [lindex [moduleRejection $::ctLib [selectionProgram {std::ct::clock::create() std::ct::a::create() std::ct::timed::create()}]] 0]
+} -result {{AMBIGUOUS-CONTEXT-IMPLEMENTATION {std::ct::out::Out is required by this call, and more than one installed context implements it:
+    std::ct::a::A
+    std::ct::timed::Timed
+no installed context is preferred over another (there is no ranking and no installation-order preference): install exactly one context implementing std::ct::out::Out where this call runs
+    std::ct::app::run
+     -> std::ct::out::twice
+        directly requires std::ct::out::Out}} AMBIGUOUS-CONTEXT-IMPLEMENTATION}
+
 test ct-implementation-order {an implementation declared after the first code that needs it is TRAIT-IMPL-ORDER (no forward references)} -body {
     rejectionKind "error WriteFailed\ntype Small = Int in 0..1000\ncontext trait Out:\n    fn emit(n: int) -> int errors WriteFailed\ncontext struct A:\n    k: Small\nfn twice(n: int, context out: Out) -> int errors WriteFailed:\n    out.emit(n)\nwith context A {k: 1}\nr = twice(3):\n    on WriteFailed:\n        0\nfn emit(n: int, context c: A) -> int errors WriteFailed:\n    n + c.k\nr\n"
 } -result {TRAIT-IMPL-ORDER}

@@ -27,3 +27,6 @@ extern c fn FlsFree(dwFlsIndex: std::ffi::c::ULong) -> std::ffi::c::Int
 
 # C: WINBOOL IsThreadAFiber(void)
 extern c fn IsThreadAFiber() -> std::ffi::c::Int
+
+# C: PVOID FlsGetValue2(DWORD dwTlsIndex)
+extern c fn FlsGetValue2(dwTlsIndex: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]

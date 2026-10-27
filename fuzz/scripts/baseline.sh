@@ -30,7 +30,7 @@ for target_dir in "$ROOT"/fuzz/seeds/*/; do
     fi
     end=${EPOCHREALTIME/./}
     err="$(head -1 /tmp/baseline-err.$$ 2>/dev/null || true)"; rm -f /tmp/baseline-err.$$
-    printf '%s\t%d\t%d\t%s\t%s\n' "plain" "$code" "$(((end - start) / 1000))" "$out" "$err" >> "$tsv"
+    printf '%s\t%d\t%d\t%s\t%s\n' "plain" "$code" "$(((end - start) / 1000))" "${out//$'\n'/ }" "$err" >> "$tsv"
     for seed in "$target_dir"/*; do
         [[ -f "$seed" ]] || continue
         start=${EPOCHREALTIME/./}
@@ -41,7 +41,7 @@ for target_dir in "$ROOT"/fuzz/seeds/*/; do
         fi
         end=${EPOCHREALTIME/./}
         err="$(head -1 /tmp/baseline-err.$$ 2>/dev/null || true)"; rm -f /tmp/baseline-err.$$
-        printf '%s\t%d\t%d\t%s\t%s\n' "$(basename "$seed")" "$code" "$(((end - start) / 1000))" "$out" "$err" >> "$tsv"
+        printf '%s\t%d\t%d\t%s\t%s\n' "$(basename "$seed")" "$code" "$(((end - start) / 1000))" "${out//$'\n'/ }" "$err" >> "$tsv"
     done
     echo "baseline: $target ($(grep -c '' "$tsv") rows incl. plain)"
 done

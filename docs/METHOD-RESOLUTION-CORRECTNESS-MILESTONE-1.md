@@ -275,7 +275,7 @@ candidate swap can change).
   `ArgumentOf`), the context requirements of a top-level call's callee
   (hir/contexts.tcl's `Obligations`: MISSING-CONTEXT stays an obligation,
   AMBIGUOUS-CONTEXT-IMPLEMENTATION counts against the candidate, both as
-  before).
+  before; SFIAE-MILESTONE-1.md made the second an obligation too).
 * Not inside it, deliberately: declared results, operators, bindings,
   captures, an `if` condition -- every check of a value by the construct
   that uses it.
@@ -786,14 +786,16 @@ filter, 7 with it; now 7).
   diagnostic -- never another candidate's acceptance by elimination.
 * **Trait programs.** The trait monomorphization rebuilds the program and
   keeps the decisions as `methodChoices`, not `methodDecided` (as before).
-* **Context obligations, an inherited inconsistency.** A missing context is
-  an obligation of a valid call (CONTEXTS.md, "Method syntax": it never
-  makes a candidate inapplicable), but two installed contexts implementing a
-  required context trait (AMBIGUOUS-CONTEXT-IMPLEMENTATION) count against
-  the candidate, as the location rule counted them. The same reasoning --
-  the environment, not the call's arguments -- suggests it is an obligation
-  too. The milestone keeps the established behavior and leaves the
-  decision to the language design.
+* **Context obligations, an inherited inconsistency** (resolved by
+  SFIAE-MILESTONE-1.md, which made AMBIGUOUS-CONTEXT-IMPLEMENTATION an
+  obligation and stated the rule as SFIAE, LANGUAGE-DESIGN-PRINCIPLES.md). A
+  missing context is an obligation of a valid call (CONTEXTS.md, "Method
+  syntax": it never makes a candidate inapplicable), but two installed
+  contexts implementing a required context trait
+  (AMBIGUOUS-CONTEXT-IMPLEMENTATION) count against the candidate, as the
+  location rule counted them. The same reasoning -- the environment, not the
+  call's arguments -- suggests it is an obligation too. The milestone keeps
+  the established behavior and leaves the decision to the language design.
 
 ### 10.2 Diagnostics (milestone 2)
 

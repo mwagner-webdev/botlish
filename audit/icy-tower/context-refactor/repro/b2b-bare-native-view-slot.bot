@@ -17,10 +17,17 @@
 #
 # (Native only: the Tcl backends refuse the C call that makes the pointer.)
 #
+# Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md the enumeration follows the
+# principle: a C address word -- a pointer, a native view or edit -- is an
+# immediate leaf of a native context slot (native::lower::ContextLeaves), so
+# this program runs natively. It reads memory malloc returned and nothing
+# wrote, so its value is whatever was there (`value: *`); b2c-native-view-
+# slot-written.bot writes the cell first and reads 42 back.
+#
 # expect interp: NATIVE-ONLY
 # expect compile: NATIVE-ONLY
-# expect cranelift-generic: CONTEXT-NATIVE-LOWERING-UNSUPPORTED
-# expect cranelift: CONTEXT-NATIVE-LOWERING-UNSUPPORTED
+# expect cranelift-generic: value: *
+# expect cranelift: value: *
 import std::binary
 import std::binary::native
 import std::ffi::c

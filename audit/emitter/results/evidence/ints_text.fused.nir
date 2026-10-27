@@ -1,0 +1,772 @@
+nir 1 call-effects=1 statics=0
+shape 0 anon fields="at"
+shape 1 anon fields="recognizer state symbol"
+
+
+
+
+
+
+
+
+
+
+func 0 "<program>" params=0 env=0 regs=27 pnames="" captures=0 rawregs="1 5 7 8 13 15 16 21 23 24"
+    pusherrorexit L0 @e8308
+    %1 = rawint 4 @e8311
+    %2 = call 8 %1 @e8309
+    poperrorexit @e8308
+    %0 = move %2 @e8308
+    jump L1 @e8308
+  label L0
+    %3 = declarederroreq 1073741825 @e8308
+    br %3 L2 L3 @e8308
+  label L2
+    cleardeclarederror @e8308
+    %4 = int 0 @e8316
+    %5 = rawint 0
+    %6 = int 1 @e8317
+    %7 = rawint 1
+    %8 = op risub %5 %7 @e8314
+    %9 = op rbox %8
+    %10 = op listnew %9 @e8312
+    %0 = move %10 @e8308
+    jump L1 @e8308
+  label L3
+    %11 = declarederroreq 12 @e8308
+    br %11 L4 L5 @e8308
+  label L4
+    cleardeclarederror @e8308
+    %12 = int 0 @e8322
+    %13 = rawint 0
+    %14 = int 2 @e8323
+    %15 = rawint 2
+    %16 = op risub %13 %15 @e8320
+    %17 = op rbox %16
+    %18 = op listnew %17 @e8318
+    %0 = move %18 @e8308
+    jump L1 @e8308
+  label L5
+    %19 = declarederroreq 3 @e8308
+    br %19 L6 L7 @e8308
+  label L6
+    cleardeclarederror @e8308
+    %20 = int 0 @e8328
+    %21 = rawint 0
+    %22 = int 3 @e8329
+    %23 = rawint 3
+    %24 = op risub %21 %23 @e8326
+    %25 = op rbox %24
+    %26 = op listnew %25 @e8324
+    %0 = move %26 @e8308
+    jump L1 @e8308
+  label L7
+    reraise @e8308
+  label L1
+    ret %0
+end
+
+func 1 "json_grammar::digit_symbol#run" params=2 env=0 regs=22 pnames="state c" captures=0 rawregs="2 8 9 10 11 14 18"
+    %3 = bytes "020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202" @e1189
+    %4 = int -1 @e1189
+    %5 = op ilt %1 %4 @e1189
+    br %5 L4 L5 @e1189
+  label L5
+    %6 = int 255 @e1189
+    %7 = op igt %1 %6 @e1189
+    br %7 L4 L6 @e1189
+  label L6
+    %8 = op runbox %1 @e1189
+    %9 = rawint 1 @e1189
+    %10 = op riadd %8 %9 @e1189
+    %2 = op rtabload8 %3 %10 @e1189
+    jump L0 @e1189
+  label L4
+    %11 = rawint 257 @e1189
+    %2 = op rtabload8 %3 %11 @e1189
+    jump L0 @e1189
+  label L3
+    raise INTERNAL "dfa#transition: a state outside the table (the compiler's error)" @e1189
+  label L0
+    %12 = op rbox %2
+    %13 = int 1 @e1198
+    %14 = rawint 1
+    %15 = op ieq %12 %13 @e1195
+    br %15 L7 L8 @e1194
+  label L7
+    %17 = int -2 @e1200
+    %18 = rawint -2
+    ret %17 @e1199
+  label L8
+    %19 = unit
+    %20 = str "json_grammar::digit_symbol" @e1212
+    %21 = str "start" @e1213
+    faildeclared 1 "std::dfa::UnrecognizedInput" 1 %20 %21 %1 @e1210
+end
+
+func 2 "json_grammar::digit_symbol" params=1 env=0 regs=8 pnames="first" captures=0 rawregs="2 5 7"
+    %1 = int 0 @e1219
+    %2 = rawint 0
+    %3 = call 1 %1 %0 @e1217
+    %4 = int -2 @e1217
+    %5 = rawint -2
+    %6 = int 0 @e1221
+    %7 = rawint 0
+    ret %6
+end
+
+func 3 "json_grammar::nonzero_symbol#run" params=2 env=0 regs=22 pnames="state c" captures=0 rawregs="2 8 9 10 11 14 18"
+    %3 = bytes "020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202" @e1225
+    %4 = int -1 @e1225
+    %5 = op ilt %1 %4 @e1225
+    br %5 L4 L5 @e1225
+  label L5
+    %6 = int 255 @e1225
+    %7 = op igt %1 %6 @e1225
+    br %7 L4 L6 @e1225
+  label L6
+    %8 = op runbox %1 @e1225
+    %9 = rawint 1 @e1225
+    %10 = op riadd %8 %9 @e1225
+    %2 = op rtabload8 %3 %10 @e1225
+    jump L0 @e1225
+  label L4
+    %11 = rawint 257 @e1225
+    %2 = op rtabload8 %3 %11 @e1225
+    jump L0 @e1225
+  label L3
+    raise INTERNAL "dfa#transition: a state outside the table (the compiler's error)" @e1225
+  label L0
+    %12 = op rbox %2
+    %13 = int 1 @e1234
+    %14 = rawint 1
+    %15 = op ieq %12 %13 @e1231
+    br %15 L7 L8 @e1230
+  label L7
+    %17 = int -2 @e1236
+    %18 = rawint -2
+    ret %17 @e1235
+  label L8
+    %19 = unit
+    %20 = str "json_grammar::nonzero_symbol" @e1248
+    %21 = str "start" @e1249
+    faildeclared 1 "std::dfa::UnrecognizedInput" 1 %20 %21 %1 @e1246
+end
+
+func 4 "json_grammar::nonzero_symbol" params=1 env=0 regs=8 pnames="first" captures=0 rawregs="2 5 7"
+    %1 = int 0 @e1255
+    %2 = rawint 0
+    %3 = call 3 %1 %0 @e1253
+    %4 = int -2 @e1253
+    %5 = rawint -2
+    %6 = int 0 @e1257
+    %7 = rawint 0
+    ret %6
+end
+
+func 5 "number_emit::integer_text" params=1 env=0 regs=54 pnames="n" captures=0 rawregs="3 7 12 16 19 21 27 31 33 34 36 37 46 50 51"
+    unreachable
+end
+
+func 6 "number_emit::integer_text_source" params=1 env=0 regs=8 pnames="n" captures=0 rawregs="3 5 6"
+    unreachable
+end
+
+func 7 "bench_work::nth" params=1 env=0 regs=25 pnames="i" captures=0 rawregs="4 9 11 13 15 16 18 23"
+    %1 = int 6364136223846793005 @e6697
+    %2 = op imul %0 %1 @e6694
+    %3 = int 1442695040888963407 @e6698
+    %4 = rawint 1442695040888963407
+    %5 = op iadd %2 %3 @e6692
+    %6 = int 9000000000000000000 @e6699
+    %7 = op imod %5 %6 @e6690
+    %8 = int 1000000000000000000 @e6700
+    %9 = rawint 1000000000000000000
+    %10 = op iadd %7 %8 @e6688
+    %11 = op runbox %0
+    %12 = int 2 @e6707
+    %13 = rawint 2
+    %14 = int 1 @e6704
+    %15 = rawint 1
+    %16 = op riand %11 %15 @e6704
+    %17 = int 0 @e6708
+    %18 = rawint 0
+    %19 = op rieq %16 %18 @e6702
+    br %19 L0 L1 @e6701
+  label L0
+    ret %10 @e6709
+  label L1
+    %21 = unit
+    %20 = move %21
+    jump L2
+  label L2
+    %22 = int 0 @e6713
+    %23 = rawint 0
+    %24 = op isub %22 %10 @e6711
+    ret %24
+end
+
+func 8 "bench_work::ints_text" params=1 env=0 regs=174 pnames="count" captures=0 rawregs="0 2 4 7 8 22 32 34 39 44 48 51 57 59 64 70 80 81 84 87 90 98 102 104 105 110 114 119 123 126 128 134 138 140 141 143 144 153 157 158 162 163 165 167 169 171" rawparams="0"
+    %1 = int 3 @e6987
+    %2 = rawint 3
+    %3 = int 0 @e6988
+    %4 = rawint 0
+    %5 = op mutarraycreate %1 %3 @e6985
+    %6 = int 0 @e6990
+    %7 = rawint 0
+    %8 = move %7 @e6989
+    jump L0 @e6989
+  label L0
+    %10 = op rilt %8 %0 @e6989
+    br %10 L1 L3 @e6989
+  label L1
+    %11 = op rbox %8
+    %12 = call 7 %11 @e6993
+    %94 = move %12 @e6999
+    %90 = rawint 0 @e6997
+    %14 = unit @e6997
+    %108 = unit @e6997
+    %121 = unit @e6997
+    %91 = unit @e6997
+    %92 = unit @e6997
+    %93 = unit @e6997
+    pusherrorexit L5 @e7004
+    jump L53 @e7004
+  label L51
+    %161 = op coresume0 %93 @e7004
+    unreachable @e7004
+  label L50
+    %15 = move %91 @e7004
+    poperrorexit @e7004
+    jump L6 @e7004
+  label L5
+    %16 = declarederroreq 1073741825 @e7004
+    br %16 L7 L8 @e7004
+  label L7
+    %17 = unit @e7004
+    reraise @e7004
+  label L8
+    %18 = declarederroreq 3 @e7004
+    br %18 L9 L10 @e7004
+  label L9
+    %19 = unit @e7004
+    reraise @e7004
+  label L10
+    reraise @e7004
+  label L6
+    %20 = unit @e7007
+    pusherrorexit L11 @e7008
+    %21 = int 2 @e7011
+    %22 = rawint 2
+    %23 = op mutarraysetproven %5 %21 %15 @e7008
+    poperrorexit @e7008
+    jump L12 @e7008
+  label L11
+    %24 = declarederroreq 1073741825 @e7008
+    br %24 L13 L14 @e7008
+  label L13
+    %25 = unit @e7008
+    reraise @e7008
+  label L14
+    reraise @e7008
+  label L12
+    jump L15 @e7013
+  label L15
+    %162 = rawint 0 @e7015
+    %27 = op rilt %90 %162 @e7015
+    br %27 L17 L18 @e7014
+  label L17
+    %29 = unit
+    %26 = move %29 @e7018
+    jump L16 @e7018
+  label L18
+    %30 = unit
+    %28 = move %30
+    jump L19
+  label L19
+    pusherrorexit L20 @e7019
+    %31 = int 0 @e7022
+    %32 = rawint 0
+    pusherrorexit L21 @e7025
+    %33 = int 0 @e7028
+    %34 = rawint 0
+    %35 = op mutarraygetproven %5 %33 @e7025
+    poperrorexit @e7025
+    jump L22 @e7025
+  label L21
+    %36 = declarederroreq 1073741825 @e7025
+    br %36 L23 L24 @e7025
+  label L23
+    %37 = unit @e7025
+    reraise @e7025
+  label L24
+    reraise @e7025
+  label L22
+    pusherrorexit L25 @e7029
+    %38 = int 2 @e7032
+    %39 = rawint 2
+    %40 = op mutarraygetproven %5 %38 @e7029
+    poperrorexit @e7029
+    jump L26 @e7029
+  label L25
+    %41 = declarederroreq 1073741825 @e7029
+    br %41 L27 L28 @e7029
+  label L27
+    %42 = unit @e7029
+    reraise @e7029
+  label L28
+    reraise @e7029
+  label L26
+    %43 = int 31 @e5893
+    %44 = rawint 31
+    %45 = op imul %35 %43 @e5890
+    %46 = op iadd %45 %40 @e5888
+    %47 = int 1 @e5895
+    %48 = rawint 1
+    %49 = op iadd %46 %47 @e5886
+    %50 = int 2147483647 @e5896
+    %51 = rawint 2147483647
+    %52 = op imod %49 %50 @e5884
+    %53 = op mutarraysetproven %5 %31 %52 @e7019
+    poperrorexit @e7019
+    jump L29 @e7019
+  label L20
+    %54 = declarederroreq 1073741825 @e7019
+    br %54 L30 L31 @e7019
+  label L30
+    %55 = unit @e7019
+    reraise @e7019
+  label L31
+    reraise @e7019
+  label L29
+    pusherrorexit L32 @e7033
+    %56 = int 1 @e7036
+    %57 = rawint 1
+    pusherrorexit L33 @e7039
+    %58 = int 1 @e7042
+    %59 = rawint 1
+    %60 = op mutarraygetproven %5 %58 @e7039
+    poperrorexit @e7039
+    jump L34 @e7039
+  label L33
+    %61 = declarederroreq 1073741825 @e7039
+    br %61 L35 L36 @e7039
+  label L35
+    %62 = unit @e7039
+    reraise @e7039
+  label L36
+    reraise @e7039
+  label L34
+    %63 = int 1 @e7043
+    %64 = rawint 1
+    %65 = op iadd %60 %63 @e7037
+    %66 = op mutarraysetproven %5 %56 %65 @e7033
+    poperrorexit @e7033
+    jump L37 @e7033
+  label L32
+    %67 = declarederroreq 1073741825 @e7033
+    br %67 L38 L39 @e7033
+  label L38
+    %68 = unit @e7033
+    reraise @e7033
+  label L39
+    reraise @e7033
+  label L37
+    pusherrorexit L40 @e7044
+    %69 = int 2 @e7047
+    %70 = rawint 2
+    pusherrorexit L41 @e7048
+    %92 = unit @e7048
+    jump L122 @e7048
+  label L88
+    %173 = op coresume0 %93 @e7048
+    unreachable @e7048
+  label L87
+    %71 = move %91 @e7048
+    poperrorexit @e7048
+    jump L42 @e7048
+  label L41
+    %72 = declarederroreq 1073741825 @e7048
+    br %72 L43 L44 @e7048
+  label L43
+    %73 = unit @e7048
+    reraise @e7048
+  label L44
+    %74 = declarederroreq 3 @e7048
+    br %74 L45 L46 @e7048
+  label L45
+    %75 = unit @e7048
+    reraise @e7048
+  label L46
+    reraise @e7048
+  label L42
+    %76 = op mutarraysetproven %5 %69 %71 @e7044
+    poperrorexit @e7044
+    jump L47 @e7044
+  label L40
+    %77 = declarederroreq 1073741825 @e7044
+    br %77 L48 L49 @e7044
+  label L48
+    %78 = unit @e7044
+    reraise @e7044
+  label L49
+    reraise @e7044
+  label L47
+    jump L15 @e7013
+  label L16
+    %79 = unit @e7013
+    jump L2 @e7051
+  label L2
+    %80 = rawint 1 @e6989
+    %81 = op riadd %8 %80 @e6989
+    %8 = move %81 @e6989
+    jump L0 @e6989
+  label L3
+    %82 = unit @e6989
+    %9 = move %82 @e6989
+    jump L4 @e6989
+  label L4
+    %83 = int 1 @e7057
+    %84 = rawint 1
+    %85 = op mutarraygetproven %5 %83 @e7054
+    %86 = int 0 @e7061
+    %87 = rawint 0
+    %88 = op mutarraygetproven %5 %86 @e7058
+    %89 = op listnew %85 %88 @e7052
+    ret %89
+  label L85
+    pusherrorexit L86 @e7004
+  label L53
+    %95 = move %94
+    %99 = move %95
+  label L55
+    %107 = move %99
+  label L57
+    %108 = op inttostr %107 @e1571
+    %109 = int 0 @e1578
+    %110 = rawint 0
+    %111 = op ieq %107 %109 @e1575
+    br %111 L58 L59 @e1574
+  label L58
+    %113 = int 48 @e1581
+    %114 = rawint 48
+    %91 = move %113 @e1579
+    %90 = rawint 1 @e1579
+    jump L50 @e1579
+  label L81
+    %115 = move %92 @e1579
+    %116 = unit @e1583
+    %100 = move %116 @e1582
+    jump L56 @e1582
+  label L59
+    %117 = unit
+    %112 = move %117
+    jump L60
+  label L60
+    %118 = int 0 @e1589
+    %119 = rawint 0
+    %120 = op ilt %107 %118 @e1586
+    br %120 L61 L62 @e1585
+  label L61
+    %122 = int 45 @e1592
+    %123 = rawint 45
+    %91 = move %122 @e1590
+    %90 = rawint 2 @e1590
+    jump L50 @e1590
+  label L82
+    %124 = move %92 @e1590
+    %125 = int 1 @e1593
+    %126 = rawint 1
+    %121 = move %125
+    jump L63
+  label L62
+    %127 = int 0 @e1594
+    %128 = rawint 0
+    %121 = move %127
+    jump L63
+  label L63
+    %129 = op strcharat %108 %121 @e1598
+    %130 = op charcodepoint %129 @e1596
+    pusherrorexit L64 @e1602
+    %132 = call 4 %130 @e1603
+    %133 = int 0 @e1603
+    %134 = rawint 0
+    poperrorexit @e1602
+    %131 = move %133 @e1602
+    jump L65 @e1602
+  label L64
+    %135 = declarederroreq 1 @e1602
+    br %135 L66 L67 @e1602
+  label L66
+    cleardeclarederror @e1602
+    faildeclared 3 "number_emit::NotCanonical" 0 %121 @e1606
+  label L67
+    %136 = declarederroreq 2 @e1602
+    br %136 L68 L69 @e1602
+  label L68
+    cleardeclarederror @e1602
+    faildeclared 3 "number_emit::NotCanonical" 0 %121 @e1609
+  label L69
+    reraise @e1602
+  label L65
+    %91 = move %130 @e1612
+    %90 = rawint 3 @e1612
+    jump L50 @e1612
+  label L83
+    %137 = move %92 @e1612
+    %138 = op runbox %121
+    %139 = int 1 @e1619
+    %140 = rawint 1
+    %141 = op riadd %138 %140 @e1616
+    %142 = op strlen %108 @e1620
+    %143 = op runbox %142
+    %144 = move %141 @e1615
+    jump L70 @e1615
+  label L70
+    %146 = op rilt %144 %143 @e1615
+    br %146 L71 L73 @e1615
+  label L71
+    %147 = op rbox %144
+    %148 = op strcharatproven %108 %147 @e1626
+    %149 = op charcodepoint %148 @e1624
+    pusherrorexit L75 @e1630
+    %151 = call 2 %149 @e1631
+    %152 = int 0 @e1631
+    %153 = rawint 0
+    poperrorexit @e1630
+    %150 = move %152 @e1630
+    jump L76 @e1630
+  label L75
+    %154 = declarederroreq 1 @e1630
+    br %154 L77 L78 @e1630
+  label L77
+    cleardeclarederror @e1630
+    faildeclared 3 "number_emit::NotCanonical" 0 %147 @e1634
+  label L78
+    %155 = declarederroreq 2 @e1630
+    br %155 L79 L80 @e1630
+  label L79
+    cleardeclarederror @e1630
+    faildeclared 3 "number_emit::NotCanonical" 0 %147 @e1637
+  label L80
+    reraise @e1630
+  label L76
+    %91 = move %149 @e1640
+    %90 = rawint 4 @e1640
+    jump L50 @e1640
+  label L84
+    %156 = move %92 @e1640
+    jump L72 @e1643
+  label L72
+    %157 = rawint 1 @e1615
+    %158 = op riadd %144 %157 @e1615
+    %144 = move %158 @e1615
+    jump L70 @e1615
+  label L73
+    %159 = unit @e1615
+    %145 = move %159 @e1615
+    jump L74 @e1615
+  label L74
+    %160 = unit @e1644
+    %100 = move %160
+    jump L56
+  label L56
+    %101 = int 0 @e1682
+    %102 = rawint 0
+    %103 = int 1 @e1683
+    %104 = rawint 1
+    %105 = op risub %102 %104 @e1680
+    %106 = op rbox %105
+    %96 = move %106
+    jump L54
+  label L54
+    %97 = int -1 @e7000
+    %98 = rawint -1
+    %91 = move %97
+    %90 = rawint -1
+    jump L50
+    poperrorexit @e7004
+  label L86
+    %93 = op cofailed @e7004
+    %90 = rawint -2 @e7004
+    jump L51 @e7004
+  label L122
+    pusherrorexit L123 @e7048
+    %163 = rawint 1 @e7048
+    %164 = op rieq %90 %163 @e7048
+    br %164 L118 L124 @e7048
+  label L124
+    %165 = rawint 2 @e7048
+    %166 = op rieq %90 %165 @e7048
+    br %166 L119 L125 @e7048
+  label L125
+    %167 = rawint 3 @e7048
+    %168 = op rieq %90 %167 @e7048
+    br %168 L120 L126 @e7048
+  label L126
+    %169 = rawint 4 @e7048
+    %170 = op rieq %90 %169 @e7048
+    br %170 L121 L127 @e7048
+  label L127
+    %171 = rawint -1 @e7048
+    %172 = op rieq %90 %171 @e7048
+    br %172 L87 L88 @e7048
+  label L90
+    %95 = move %94
+    %99 = move %95
+  label L92
+    %107 = move %99
+  label L94
+    %108 = op inttostr %107 @e1571
+    %109 = int 0 @e1578
+    %110 = rawint 0
+    %111 = op ieq %107 %109 @e1575
+    br %111 L95 L96 @e1574
+  label L95
+    %113 = int 48 @e1581
+    %114 = rawint 48
+    %91 = move %113 @e1579
+    %90 = rawint 1 @e1579
+    jump L87 @e1579
+  label L118
+    %115 = move %92 @e1579
+    %116 = unit @e1583
+    %100 = move %116 @e1582
+    jump L93 @e1582
+  label L96
+    %117 = unit
+    %112 = move %117
+    jump L97
+  label L97
+    %118 = int 0 @e1589
+    %119 = rawint 0
+    %120 = op ilt %107 %118 @e1586
+    br %120 L98 L99 @e1585
+  label L98
+    %122 = int 45 @e1592
+    %123 = rawint 45
+    %91 = move %122 @e1590
+    %90 = rawint 2 @e1590
+    jump L87 @e1590
+  label L119
+    %124 = move %92 @e1590
+    %125 = int 1 @e1593
+    %126 = rawint 1
+    %121 = move %125
+    jump L100
+  label L99
+    %127 = int 0 @e1594
+    %128 = rawint 0
+    %121 = move %127
+    jump L100
+  label L100
+    %129 = op strcharat %108 %121 @e1598
+    %130 = op charcodepoint %129 @e1596
+    pusherrorexit L101 @e1602
+    %132 = call 4 %130 @e1603
+    %133 = int 0 @e1603
+    %134 = rawint 0
+    poperrorexit @e1602
+    %131 = move %133 @e1602
+    jump L102 @e1602
+  label L101
+    %135 = declarederroreq 1 @e1602
+    br %135 L103 L104 @e1602
+  label L103
+    cleardeclarederror @e1602
+    faildeclared 3 "number_emit::NotCanonical" 0 %121 @e1606
+  label L104
+    %136 = declarederroreq 2 @e1602
+    br %136 L105 L106 @e1602
+  label L105
+    cleardeclarederror @e1602
+    faildeclared 3 "number_emit::NotCanonical" 0 %121 @e1609
+  label L106
+    reraise @e1602
+  label L102
+    %91 = move %130 @e1612
+    %90 = rawint 3 @e1612
+    jump L87 @e1612
+  label L120
+    %137 = move %92 @e1612
+    %138 = op runbox %121
+    %139 = int 1 @e1619
+    %140 = rawint 1
+    %141 = op riadd %138 %140 @e1616
+    %142 = op strlen %108 @e1620
+    %143 = op runbox %142
+    %144 = move %141 @e1615
+    jump L107 @e1615
+  label L107
+    %146 = op rilt %144 %143 @e1615
+    br %146 L108 L110 @e1615
+  label L108
+    %147 = op rbox %144
+    %148 = op strcharatproven %108 %147 @e1626
+    %149 = op charcodepoint %148 @e1624
+    pusherrorexit L112 @e1630
+    %151 = call 2 %149 @e1631
+    %152 = int 0 @e1631
+    %153 = rawint 0
+    poperrorexit @e1630
+    %150 = move %152 @e1630
+    jump L113 @e1630
+  label L112
+    %154 = declarederroreq 1 @e1630
+    br %154 L114 L115 @e1630
+  label L114
+    cleardeclarederror @e1630
+    faildeclared 3 "number_emit::NotCanonical" 0 %147 @e1634
+  label L115
+    %155 = declarederroreq 2 @e1630
+    br %155 L116 L117 @e1630
+  label L116
+    cleardeclarederror @e1630
+    faildeclared 3 "number_emit::NotCanonical" 0 %147 @e1637
+  label L117
+    reraise @e1630
+  label L113
+    %91 = move %149 @e1640
+    %90 = rawint 4 @e1640
+    jump L87 @e1640
+  label L121
+    %156 = move %92 @e1640
+    jump L109 @e1643
+  label L109
+    %157 = rawint 1 @e1615
+    %158 = op riadd %144 %157 @e1615
+    %144 = move %158 @e1615
+    jump L107 @e1615
+  label L110
+    %159 = unit @e1615
+    %145 = move %159 @e1615
+    jump L111 @e1615
+  label L111
+    %160 = unit @e1644
+    %100 = move %160
+    jump L93
+  label L93
+    %101 = int 0 @e1682
+    %102 = rawint 0
+    %103 = int 1 @e1683
+    %104 = rawint 1
+    %105 = op risub %102 %104 @e1680
+    %106 = op rbox %105
+    %96 = move %106
+    jump L91
+  label L91
+    %97 = int -1 @e7000
+    %98 = rawint -1
+    %91 = move %97
+    %90 = rawint -1
+    jump L87
+    poperrorexit @e7048
+  label L123
+    %93 = op cofailed @e7048
+    %90 = rawint -2 @e7048
+    jump L88 @e7048
+end
+
+func 9 "" params=0 env=1 regs=4 pnames="" captures=1 rawregs="3"
+    unreachable
+end

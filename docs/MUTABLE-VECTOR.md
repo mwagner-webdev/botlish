@@ -395,6 +395,16 @@ context whose members are all `any` too (a dynamic copy, `d`; on the Tcl
 backends: natively such a context is CONTEXT-NATIVE-LOWERING-UNSUPPORTED),
 `mv-any-slot-copies`.
 
+Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md the elements may be affine:
+the installed context owns the vector and what it holds, push moves an
+element in, take, pop and swap move one out, and
+`std::mutable_vector::element(io.sessions, i)` is the place of element i,
+observed where it is stored (`io.sessions.element(0).window.null?()`); `at`
+of an affine element stays AFFINE-ELEMENT-COPY-OUT, naming the element
+place. An unrestricted vector beside an affine member keeps its value
+semantics: an affine struct's share descriptor lists its unrestricted
+collection slots (`hir::mutvec::ShareDescriptor`).
+
 ### 16. `length`
 
 `std::mutable_vector::length(v) -> int` (a collection-length range fact),

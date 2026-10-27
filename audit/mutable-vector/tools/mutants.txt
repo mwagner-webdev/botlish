@@ -225,7 +225,7 @@
 ## hir/mutvec.tcl
 <<<<
 proc hir::mutvec::ShareDescriptor {type} {
-    if {[hir::types::IsAffine $type]} {
+    if {[hir::types::IsAffine $type] && ![hir::types::IsStructLike $type]} {
         return ""
     }
 ====

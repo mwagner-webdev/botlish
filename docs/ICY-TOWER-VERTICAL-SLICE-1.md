@@ -22,8 +22,17 @@ nearest-int`). One rule changed with the rounding: a position is shown at
 its nearest Int with a half to the even one (it was away from zero); of 50
 seed and frame-count summaries compared with the earlier executable, one
 differs (seed 3 after 60 frames, x=286.5: 287 before, 286 now), and
-oracle.py's `nearest` is Python's `round` to match. The text below
-describes the slice as it was built.
+oracle.py's `nearest` is Python's `round` to match.
+
+**Since ICY-TOWER-WINDOWS.md**, the game also builds for Windows x86-64.
+main.bot's program is `game.bot`, an application module, and `main.bot`
+(Linux) and `main-windows.bot` (Windows) only install the contexts. The game
+makes no variadic C call: a failure's SDL_GetError text is copied out of SDL
+with `SDL_strlcpy`, read back through the text buffer's layout, and written
+by the game on standard error through `std::io` (the same bytes SDL_Log
+wrote; the SDL call trace of a played run is identical). Scancodes are
+Ints, since an SDL enumeration constant's C type is the target's. The text
+below describes the slice as it was built.
 
 ![Three frames of the X11 window under Xvfb: the start, floor 26, a restarted game](../audit/icy-tower/screenshots/xvfb-x11.png)
 
@@ -94,7 +103,7 @@ autopilot at floor 26, and a game after a restart.*
 | `audit/icy-tower/tools/xvfb-session.py` | | the graphical run: Xvfb, XTest, screenshots, WM close |
 | `audit/icy-tower/tools/perf.tcl`, `callgrind-frame.py`, `callgrind-split.py` | | the performance and allocation report |
 | `tests/workload-icy-tower.test` | | 15 tests in the Tcl suite (8 need the package-owned libSDL3) |
-| `.github/workflows/icy-tower.yml` | | CI: SDL3 built, every test run (none skipped), oracle, mutants, Xvfb, the executable uploaded |
+| `.github/workflows/icy-tower.yml` | | CI: SDL3 built, every Linux test run (none skipped; the Windows tests run in icy-tower-windows.yml), oracle, mutants, Xvfb, the executable uploaded |
 | `stdlib/float64.bot` | | the stdlib addition |
 
 Each `.bot` file beside `main.bot` is an application module (IMPORTS.md):

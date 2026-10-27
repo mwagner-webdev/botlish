@@ -297,8 +297,11 @@ payload may carry a pointer (`fail Failed {handle: p}`, destructured by its
 handler); a coroutine may own one as an argument, but a coroutine's
 segments may not end with one (`COROUTINE-CONTRACT`: a completed coroutine
 returns its cached result again); a MutableVector, a MutableArray and a List
-may own pointers; a context struct may not hold one (installation erases it:
-`AFFINE-ERASURE-UNSUPPORTED`), nor may an ImmutableSet. A pointer owns nothing,
+may own pointers; so may a context struct -- installation moves it into the
+installed context, which owns it, and a contextual function observes it
+where it is stored, never copying it out (`AFFINE-CONTEXT-COPY-OUT`;
+CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md: before it, installing one was
+`AFFINE-ERASURE-UNSUPPORTED`) -- but not an ImmutableSet. A pointer owns nothing,
 so its owner's death releases nothing:
 `hir::affine::Descriptor` gives it no descriptor, and an aggregate that owns
 only pointers needs no release at all.

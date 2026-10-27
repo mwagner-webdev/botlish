@@ -335,7 +335,7 @@ name, sizeof, _Alignof, every member's name, C declaration, Botlish type,
 offset, size and category, every blocker, the by-value dependencies, the
 root reasons, and how many bound APIs point to it. Its first line names the
 target and the toolchain (`toolchain clang x86_64-w64-mingw32 (Ubuntu clang
-version 18.1.3 ...)`); `manifest.txt` repeats it as `layout_abi` with the
+version 21.1.8 ...)`); `manifest.txt` repeats it as `layout_abi` with the
 counts (`layout_count`, `layout_blocked`). `report.txt` gained the sections
 "Records and layouts", "Layout blockers", "Layout pressure" and "API
 pressure"; `report -why NAME` explains a record by its key or by a typedef
@@ -412,7 +412,7 @@ alone, 10 with unions alone, 65 with both (section 13). The oracle checks all
 ## 11. Win32 GNU x86-64
 
 The `win32` profile (`tools/c-bindgen/profiles/win32.tcl`) binds the raw
-Win32 API of MinGW-w64 11.0.1's `<windows.h>` for **windows-x86_64-gnu**:
+Win32 API of MinGW-w64 13.0.0's `<windows.h>` for **windows-x86_64-gnu**:
 Windows x86-64 with the GNU ABI, as MinGW-w64's headers and clang's
 `x86_64-w64-mingw32` target give it. It is generated entirely on Linux, from
 the cross toolchain's own headers (Debian and Ubuntu's
@@ -428,7 +428,10 @@ one is refused for the other (interchange, the cache, NATIVE TARGET), and
 the C convention is Cranelift's Windows fastcall for both. The toolchain
 adapter maps it to clang `--target=x86_64-w64-mingw32`; windows-x86_64 has no
 toolchain configuration (no MSVC tool exists to generate for it), and
-`layout-windows-gnu-as-msvc` is a mutant.
+`layout-windows-gnu-as-msvc` is a mutant. (Since ICY-TOWER-WINDOWS.md,
+windows-x86_64 is clang's `x86_64-pc-windows-msvc`, generated only on
+Windows, where clang finds MSVC's and the Windows SDK's headers: the Icy
+Tower build generates its SDL3 binding there; none is committed.)
 
 **Explicit configuration.** The translation unit is `<windows.h>` with
 exactly the profile's defines -- nothing comes from the shell (the
@@ -440,8 +443,8 @@ NTDDI_VERSION=0x0A000000 STRICT NOMINMAX
 ```
 
 The headers are pinned by MinGW-w64's own version macros, as a fetched
-source is pinned by its commit (`version {__MINGW64_VERSION_MAJOR 11
-__MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 1}`; headers of another
+source is pinned by its commit (`version {__MINGW64_VERSION_MAJOR 13
+__MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 0}`; headers of another
 version are refused, `cb-win32-version-pinned`), and the manifest records
 that revision, the preprocessing command (no include directory but the
 toolchain's own) and clang's version. MinGW-w64's
@@ -450,7 +453,7 @@ are private: their declarations are not the Win32 API.
 
 **A and W.** With UNICODE, every generic name is the W API's: `FooA` and
 `FooW` are both bound as declared, and the generic macro `Foo` (`#define
-CreateFile CreateFileW`) is an alias of `FooW`'s symbol (597 aliases).
+CreateFile CreateFileW`) is an alias of `FooW`'s symbol (601 aliases).
 STRICT gives every handle type its own identity (`HWND` is `struct HWND__
 *`, 4 bytes, a layout of its own).
 
@@ -461,9 +464,9 @@ whose MinGW-w64 import library (`clang -print-file-name=libNAME.a`, read by
 `llvm-nm`) defines its link symbol: the toolchain's answer, never a table of
 names. A symbol several define takes the first; the manifest lists every one
 (`import_multiple VerLanguageNameW kernel32 version`); a function none
-defines is unsupported (`no-import-library`: 75 functions and 28 macros --
+defines is unsupported (`no-import-library`: 66 functions and 27 macros --
 compiler intrinsics, WinMain/wWinMain, `__C_ASSERT__`, API-set-only
-functions such as VirtualAllocFromApp, and APIs MinGW-w64 11's import
+functions such as VirtualAllocFromApp, and APIs MinGW-w64 13's import
 libraries do not define). Each module declares the libraries of its own
 functions (`win32::fileapi` links kernel32).
 
@@ -471,7 +474,7 @@ functions (`win32::fileapi` links kernel32).
 the x86-64 targets ignore. A function declaring a convention is bound when
 the compiler says its type is the plain one
 (`__builtin_types_compatible_p` against the type with the convention
-dropped; `convention_default stdcall 3176` in the manifest, and
+dropped; `convention_default stdcall 3215` in the manifest, and
 `ms_abi 1` for the fixture on windows-x86_64-gnu), and blocked
 (`unsupported-calling-convention`) where it is not (`ms_abi` on Linux
 x86-64). No stdcall or fastcall surface exists in Botlish and none is added:
@@ -938,7 +941,7 @@ win32 (regenerate and review the diff when it is intended),
 `audit/c-bindgen/tools/layout-scale.tcl` for the layout pass, and
 `audit/c-bindgen/tools/mutate.tcl` (every mutant must apply and be killed).
 A change to the target table runs the target model's harnesses (AGENTS.md,
-"Compilation targets"). The Win32 tests need MinGW-w64 11.0.1's
+"Compilation targets"). The Win32 tests need MinGW-w64 13.0.0's
 `mingw-w64-x86-64-dev`, `llvm-nm` and `gcc-mingw-w64-x86-64`.
 
 ## 23. Files

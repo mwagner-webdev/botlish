@@ -130,6 +130,16 @@
 #                   element type is affine). AT is the argument whose static
 #                   type holds the element type (a collection), or `result`
 #                   (the call's own type, a constructor's).
+#   elementPlace    0 | 1 (default 0): the call is the *place* of its
+#                   receiver's element at the index (argument 1) -- never a
+#                   value of its own (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md,
+#                   "Element places"). Its receiver (observed) must be a place
+#                   of the installed context's storage, and the call is only
+#                   ever a step of such a place: projected further, observed,
+#                   or read out when what it holds is unrestricted; an affine
+#                   element it holds is never copied out of it. Static analyses
+#                   (hir/affine.tcl, hir/mutvec.tcl) read it by registration,
+#                   never by name; at run time it is the element read.
 #   fold            "" or a command prefix deciding a call whose every
 #                   argument is exactly known: `{*}FOLD ARG...` returns
 #                   {value V} (the call returns V), {error NAME} (it completes
@@ -538,7 +548,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {} -measures {} -hashing {}]
+        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -711,6 +721,11 @@ proc core::native::register {name args} {
             || $arity eq "*" || [lindex $hashing 0] >= $arity || [lindex $hashing 1] ni {required checked})} {
         error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
     }
+    set elementPlace [dict get $options -element-place]
+    if {$elementPlace ni {0 1} || ($elementPlace && ($arity ne "2" || [lindex $ownership 0] ne "observe"
+            || [core::type::base [lindex $paramTypes 0]] ni {mutvec mutarray}))} {
+        error "core::native::register: bad -element-place \"$elementPlace\" for \"$name\" (1 needs a MutableVector or MutableArray receiver it observes and an index)"
+    }
     set bounds [dict get $options -bounds]
     if {$bounds ne "" && ![ValidBounds $bounds $arity $errors]} {
         error "core::native::register: bad -bounds \"$bounds\" for \"$name\" (with -errors {$errors})"
@@ -732,7 +747,7 @@ proc core::native::register {name args} {
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
-        measures $measures hashing $hashing]
+        measures $measures hashing $hashing elementPlace $elementPlace]
     return [core::value::native $name]
 }
 

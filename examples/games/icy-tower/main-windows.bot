@@ -1,0 +1,17 @@
+# main-windows.bot -- main.bot on Windows (ICY-TOWER-WINDOWS.md): the same
+# game (game.bot) and SDL (sdl.bot), with Windows' std::io::IO context
+# installed -- std::windows::io's, whose writes are kernel32's WriteFile.
+#
+#   examples/games/icy-tower/build-windows.sh    the Windows executable
+import game
+import sdl
+import std::io
+import std::windows::io
+
+with context std::windows::io::create()
+with context sdl::create()
+
+result = game::main(game::arguments()):
+    on std::io::WriteFailed:
+        "failed: writing to the terminal"
+result

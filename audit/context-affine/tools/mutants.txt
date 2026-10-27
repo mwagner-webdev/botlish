@@ -1,0 +1,208 @@
+# Mutants of context-owned affine state
+# (audit/context-affine/tools/mutate.tcl; CONTEXT-OWNED-AFFINE-STATE-
+# MILESTONE-1.md, "Mutation testing"): each a deliberate bug in the
+# installation's ownership role (core/contexts.tcl), the context places of
+# the ownership analysis (hir/affine.tcl), the element places and the
+# share descriptors (hir/mutvec.tcl, core/mutvec.tcl, core/native.tcl) or
+# the native context slots (native/lower.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+#
+# Not a mutant, and why: "the context-trait plan copies the installed
+# state". The plan binds no context value at all -- a clone's trait
+# parameter disappears and each operation becomes a direct call of the
+# implementation, which loads its own context parameter
+# (tests/context-affine.test's cao-trait-plan-no-state-copy checks the
+# monomorphized HIR) -- so there is no copy to make; a plan that passed the
+# installed value would be a new code path, not a one-line slip. Nor is "a
+# private helper bypasses affinity": privacy has no ownership code path (a
+# private function is analyzed exactly like a public one); the helpers of
+# cao-helpers-wrappers-traits are covered by every mutant below.
+
+@@ install-does-not-consume installation observes the installed value instead of moving it into the context: the hygienic temporary stays its owner and is released after the installation, dropping the context's coroutines
+## core/contexts.tcl
+<<<<
+    -param-types {struct} -result-type unit -ownership {move}
+====
+    -param-types {struct} -result-type unit -ownership {observe}
+>>>>
+
+@@ install-erases the pre-milestone rule: installation erases its value (the default role), so no context may hold affine state
+## core/contexts.tcl
+<<<<
+    -param-types {struct} -result-type unit -ownership {move}
+====
+    -param-types {struct} -result-type unit
+>>>>
+
+@@ context-binding-owns a context parameter's binding is an owner (runtime loads mint owners): moved, and released at its last use, the installed coroutines with it
+## hir/affine.tcl
+<<<<
+    if {[IsContextBinding $hir $b]} {
+        return 0
+    }
+    return [hir::types::IsAffine [BindingType $hir $b]]
+====
+    return [hir::types::IsAffine [BindingType $hir $b]]
+>>>>
+
+@@ context-copy-accepted context access copies an affine member: a move of a context place stays a move instead of AFFINE-CONTEXT-COPY-OUT
+## hir/affine.tcl
+<<<<
+        move {
+            return [list reject AFFINE-CONTEXT-COPY-OUT [ContextCopyOutMessage $hir $e [lindex $consumer 1] [lindex $consumer 2]]]
+        }
+====
+        move {
+            return $consumer
+        }
+>>>>
+
+@@ context-erasure-accepted an erasure of a context place keeps the old AFFINE-ERASURE-UNSUPPORTED (no context diagnostic)
+## hir/affine.tcl
+<<<<
+            if {[lindex $consumer 1] eq "AFFINE-ERASURE-UNSUPPORTED"} {
+                return [list reject AFFINE-CONTEXT-COPY-OUT [ContextCopyOutMessage $hir $e erase]]
+            }
+====
+>>>>
+
+@@ element-copy-accepted affine vector elements are treated as unrestricted: an element place may be bound, passed or pushed (a second owner of a stored element)
+## hir/affine.tcl
+<<<<
+proc hir::affine::ContextConsumer {hir e consumer} {
+    switch -- [lindex $consumer 0] {
+====
+proc hir::affine::ContextConsumer {hir e consumer} {
+    if {[dict get $hir exprs $e kind] eq "call" && [ElementPlace $hir $e]} {
+        return $consumer
+    }
+    switch -- [lindex $consumer 0] {
+>>>>
+
+@@ observation-consumes context member observation incorrectly consumes: an observed context place is treated as a temporary nothing owns (AFFINE-TEMPORARY-UNSUPPORTED)
+## hir/affine.tcl
+<<<<
+            if {$kind ne "ref" && !($collection && $kind eq "project") && ![ContextPlace $hir $e]} {
+====
+            if {$kind ne "ref" && !($collection && $kind eq "project")} {
+>>>>
+
+@@ projection-not-place a field projection of a context place is no place step: the pre-milestone AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE for every affine member read
+## hir/affine.tcl
+<<<<
+            if {[ContextPlace $hir $e]} {
+                # A step of a context place: the projection reaches the
+                # installed context's storage where it is (ContextConsumer
+                # judges what it is used for).
+                return {use place}
+            }
+====
+>>>>
+
+@@ capture-accepted a closure may capture the installed context's affine state
+## hir/affine.tcl
+<<<<
+            if {[dict get $hir scopes $refScope invocation] ne [dict get $hir scopes $bindingScope invocation]} {
+                dict set diagnostics $e [list AFFINE-CAPTURE-UNSUPPORTED \
+                    "`[hir::semantic::RefName $hir $e]` is the installed context
+====
+            if {0} {
+                dict set diagnostics $e [list AFFINE-CAPTURE-UNSUPPORTED \
+                    "`[hir::semantic::RefName $hir $e]` is the installed context
+>>>>
+
+@@ later-argument-unchecked an observation through an element place whose call's later argument runs code (and may take the element out) is accepted
+## hir/affine.tcl
+<<<<
+proc hir::affine::LaterArgumentRunsCode {hir p e} {
+    set args [dict get $hir exprs $p args]
+====
+proc hir::affine::LaterArgumentRunsCode {hir p e} {
+    return 0
+    set args [dict get $hir exprs $p args]
+>>>>
+
+@@ element-receiver-unchecked an element place of a collection no context owns is accepted (a reference into a local's storage)
+## hir/mutvec.tcl
+<<<<
+            if {$receiver ne "" && ![hir::affine::ContextPlace $hir $receiver]} {
+====
+            if {0} {
+>>>>
+
+@@ element-place-unregistered the vector's element is no element place (its registration says 0): element(i) reads are ordinary values, and an affine one is copied out
+## core/mutvec.tcl
+<<<<
+    -ownership {observe observe} -element-place 1
+core::native::register std::mutable_vector::push
+====
+    -ownership {observe observe} -element-place 0
+core::native::register std::mutable_vector::push
+>>>>
+
+@@ non-affine-context-rejected a non-affine context is unnecessarily rejected: every expression reaching into a context is judged by the context rule, unrestricted ones too
+## hir/affine.tcl
+<<<<
+        if {![hir::types::IsAffine [hir::typeOf $hir $e]]} continue
+        set consumer [Consumer $hir $parent $e]
+====
+        if {![hir::types::IsAffine [hir::typeOf $hir $e]] && ![ContextPlace $hir $e]} continue
+        set consumer [Consumer $hir $parent $e]
+>>>>
+
+@@ share-affine-struct-off an affine struct's unrestricted collection slots are not copied (the pre-milestone ShareDescriptor): an unrestricted vector member of an affine context aliases its installation's source and its read-outs
+## hir/mutvec.tcl
+<<<<
+    if {[hir::types::IsAffine $type] && ![hir::types::IsStructLike $type]} {
+        return ""
+    }
+====
+    if {[hir::types::IsAffine $type]} {
+        return ""
+    }
+>>>>
+
+@@ take-leaves-slot-populated a move out of a collection leaves the slot populated: take returns the element and keeps it (two owners of a coroutine)
+## core/mutvec.tcl
+<<<<
+    set i [Index $id $index std::mutable_vector::take]
+    return [lpop store($id) $i]
+====
+    set i [Index $id $index std::mutable_vector::take]
+    return [lindex $store($id) $i]
+>>>>
+
+@@ context-roots-lost managed roots are lost: an installed vector header is stored in the context area but never registered as a GC root
+## native/lower.tcl
+<<<<
+        if {[hir::types::kindOf [lindex $leaf 1]] in {mutvec mutarray}} {
+            Assign fn "op ctxroot $r" $e
+        }
+====
+>>>>
+
+@@ view-eligibility-overgeneralized native-view eligibility falsely generalizes to a heap-pointer-containing type: a String member is an "immediate" leaf of the fixed slot
+## native/lower.tcl
+<<<<
+            bool - unit - UnicodeChar - enum - cptr {
+====
+            bool - unit - UnicodeChar - enum - cptr - str {
+>>>>
+
+@@ pointer-not-eligible the pre-milestone eligibility: a C address word is no context-slot leaf, so no context holding a pointer or a view compiles natively
+## native/lower.tcl
+<<<<
+            bool - unit - UnicodeChar - enum - cptr {
+====
+            bool - unit - UnicodeChar - enum {
+>>>>

@@ -4587,6 +4587,7 @@ related: stdlib.module.std::compiler
     enum DiagnosticCode:
         AffineCaptureUnsupported,
         AffineContainerUnsupported,
+        AffineContextCopyOut,
         AffineDuplicationUnsupported,
         AffineElementCopyOut,
         AffineEqualityUnsupported,
@@ -4607,7 +4608,6 @@ related: stdlib.module.std::compiler
         ContextBindingCollision,
         ContextFunctionValue,
         ContextInstallationUnsupported,
-        ContextTraitMisuse,
 
 == MODULE
 stdlib/compiler.bot: import std::compiler, then write
@@ -8619,7 +8619,9 @@ counted loop to a.capacity(), a dominating guard, or an array of known
 capacity with an index of known range needs no handler; otherwise handle or
 admit IndexNotFound, or use std::mutable_array::get with a default. For an
 array of affine elements, at would make a second owner and is rejected
-(AFFINE-ELEMENT-COPY-OUT): swap the element out instead.
+(AFFINE-ELEMENT-COPY-OUT): swap the element out instead, or reach it
+where it is with std::mutable_array::element when an installed context
+owns the array.
 
 == EXAMPLES
 @example accept
@@ -8754,6 +8756,59 @@ a = std::mutable_array::create(3, 0)
 a.set(1, 7)
 a.freeze(3)
 @value [0, 7, 0]
+@end
+
+@topic stdlib.std::mutable_array::element
+title: std::mutable_array::element -- intrinsic of namespace std::mutable_array
+summary: The place of slot i of a MutableArray an installed context owns, written c.member.element(i): observed where it is stored, never a value; IndexNotFound outside 0..capacity-1.
+index: stdlib
+symbol: std::mutable_array::element
+keywords: element place; observe slot; context-owned array; affine element
+related: stdlib.module.std::mutable_array stdlib.std::mutable_array::at stdlib.std::mutable_array::swap concept.context-owned-state error.affine-context-copy-out stdlib.std::mutable_vector::element
+
+== SIGNATURE
+    std::mutable_array::element(mutarray, int) -> any
+
+== ERRORS
+    IndexNotFound
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::mutable_array: import std::mutable_array,
+then write std::mutable_array::element. Method syntax:
+receiver.element(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+std::mutable_vector::element's rule for arrays: the receiver is a place of
+an installed context, the result the slot's place (observed, projected,
+never copied out when affine), IndexNotFound when there is no such slot.
+To exchange an affine element, swap it.
+
+== EXAMPLES
+@example accept
+import std::mutable_array
+
+opaque context struct Table:
+    cells: MutableArray[int]
+
+fn cell(i: int, context t: Table) -> int errors IndexNotFound:
+    t.cells.element(i)
+
+fn read(i: int) -> int:
+    v = cell(i):
+        on IndexNotFound:
+            -1
+    v
+
+with context Table {cells: std::mutable_array::from_list([4, 5])}
+[read(1), read(2)]
+@caption A slot read where the installed array stores it
+@value [5, -1]
 @end
 
 @topic stdlib.std::mutable_array::freeze
@@ -9016,6 +9071,7 @@ stdlib/mutable_array.bot (import std::mutable_array).
     std::mutable_array::capacity   intrinsic -- The number of slots of a Mu...
     std::mutable_array::copy       intrinsic -- Copies count elements of sr...
     std::mutable_array::create     intrinsic -- A new MutableArray of n slo...
+    std::mutable_array::element    intrinsic -- The place of slot i of a Mu...
     std::mutable_array::freeze     intrinsic -- An immutable List of the fi...
     std::mutable_array::from_list  intrinsic -- A new MutableArray holding ...
     std::mutable_array::generate   intrinsic -- A new MutableArray of n slo...
@@ -9774,7 +9830,9 @@ Every call must handle IndexNotFound or admit it: unlike std::list::at, a
 vector read is not proven in range, even inside
 `loop i from 0 to v.length():`. To visit every element, `loop x in v:`
 needs no index at all. For a vector of affine elements at would copy
-one out and is rejected (AFFINE-ELEMENT-COPY-OUT): use take, pop or swap.
+one out and is rejected (AFFINE-ELEMENT-COPY-OUT): use take, pop or swap --
+or, for a vector an installed context owns, std::mutable_vector::element,
+the element's place.
 
 == EXAMPLES
 @example accept
@@ -9825,6 +9883,70 @@ w = v
 v.clear()
 [v.length(), w.length()]
 @value [0, 2]
+@end
+
+@topic stdlib.std::mutable_vector::element
+title: std::mutable_vector::element -- intrinsic of namespace std::mutable_vector
+summary: The place of element i of a MutableVector an installed context owns, written c.member.element(i): observed where it is stored, never a value; IndexNotFound without element i.
+index: stdlib
+symbol: std::mutable_vector::element
+keywords: element place; observe element; context-owned vector; affine element; session
+related: stdlib.module.std::mutable_vector stdlib.std::mutable_vector::at stdlib.std::mutable_vector::take stdlib.std::mutable_vector::pop concept.context-owned-state error.affine-context-copy-out error.mutable-place-receiver
+
+== SIGNATURE
+    std::mutable_vector::element(mutvec, int) -> any
+
+== ERRORS
+    IndexNotFound
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::mutable_vector: import std::mutable_vector,
+then write std::mutable_vector::element. Method syntax:
+receiver.element(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The receiver must be a place of an installed context (a context
+parameter's member, `c.sessions.element(0)`): any other collection's
+elements are read with at and moved out with take, pop or swap
+(MUTABLE-PLACE-RECEIVER otherwise). The result is the element's place,
+used where it is written: `c.sessions.element(0).window.null?()` observes
+an affine field where the vector stores it, `c.sessions.element(0).id`
+reads an unrestricted one. Binding the place to a name, passing or
+returning it is AFFINE-CONTEXT-COPY-OUT for an affine element (the vector
+still owns it). A missing element fails with IndexNotFound, which a
+handler of the call that uses the place does not cover (it is an argument
+of that call): use the place in a function that declares IndexNotFound.
+
+== EXAMPLES
+@example accept
+import std::mutable_vector
+
+struct Job:
+    name: int
+    weight: int
+
+opaque context struct Queue:
+    jobs: MutableVector[Job]
+
+fn weight_of(i: int, context q: Queue) -> int errors IndexNotFound:
+    q.jobs.element(i).weight
+
+fn weight(i: int) -> int:
+    w = weight_of(i):
+        on IndexNotFound:
+            -1
+    w
+
+with context Queue {jobs: std::mutable_vector::from_list([Job {name: 1, weight: 3}])}
+[weight(0), weight(1)]
+@caption An element read where the installed vector stores it
+@value [3, -1]
 @end
 
 @topic stdlib.std::mutable_vector::empty?
@@ -10127,6 +10249,7 @@ Compiler intrinsics only, no module file (import std::mutable_vector).
 == MEMBERS
     std::mutable_vector::at        intrinsic -- The element of a MutableVec...
     std::mutable_vector::clear     intrinsic -- Removes every element of a ...
+    std::mutable_vector::element   intrinsic -- The place of element i of a...
     std::mutable_vector::empty?    intrinsic -- Whether a MutableVector has...
     std::mutable_vector::from_list intrinsic -- A new MutableVector holding...
     std::mutable_vector::length    intrinsic -- The number of elements of a...
@@ -12200,11 +12323,12 @@ std::windows::io::create()` is MISSING-CONTEXT at compile time.
 What the context holds is the process's standard *devices* -- its output and
 its error -- never a handle: a Windows standard handle is the process's
 slot, read with GetStdHandle when a write needs it (windows::
-standard_handle), and a C pointer cannot live in a context anyway (an
-installed context is erased: AFFINE-ERASURE-UNSUPPORTED, C-ABI-TYPES.md). So
-every write uses the handle the process has at that moment -- a console, a
-file or a pipe, whatever the launcher redirected it to -- and the context
-owns nothing: no handle is opened, duplicated or closed here.
+standard_handle): a context may own a C pointer (CONTEXT-OWNED-AFFINE-
+STATE-MILESTONE-1.md), but a cached standard handle would outlive the
+process replacing it (SetStdHandle). So every write uses the handle the
+process has at that moment -- a console, a file or a pipe, whatever the
+launcher redirected it to -- and the context owns nothing: no handle is
+opened, duplicated or closed here.
 
 Representation authority. WindowsIO is opaque (OPAQUE-STRUCTS.md): only this
 module may construct it or look inside; a WindowsIO a function receives as

@@ -3,7 +3,14 @@
 #
 # The intended airlock -- a context that privately retains the pointer a
 # foreign library returned and hands it to C on every contextual call --
-# spelled the natural way. Two diagnostics:
+# spelled the natural way.
+#
+# Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md this program is valid on
+# every backend (the expectations below): the installation moves the
+# Holder into the installed context, which owns the pointer, and `h.p` is a
+# context place -- null? observes the pointer where the context stores it,
+# and nothing is copied out. What the census recorded, before that
+# milestone, was two diagnostics:
 #
 # * the field read `h.p` through the context parameter is
 #   AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE: a context parameter is an
@@ -18,10 +25,10 @@
 # Destructuring the context local instead (`{p} = h`) passes the first
 # check and still fails the second: a1b-destructured.bot.
 #
-# expect interp: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
-# expect compile: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift-generic: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
-# expect cranelift: AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-ERASURE-UNSUPPORTED
+# expect interp: value: true
+# expect compile: value: true
+# expect cranelift-generic: value: true
+# expect cranelift: value: true
 import std::ffi::c
 
 opaque context struct Holder:

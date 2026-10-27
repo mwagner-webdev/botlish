@@ -1,0 +1,1 @@
+fused bench_work::ints_trusted e7077 {inlined {{#5} number_emit::integer_trusted_source number_emit::integer_trusted} yields 1 creates 1 starts 1 resumes 1 queries 1 releases 10 template 54 copied 129 unboxed 0}

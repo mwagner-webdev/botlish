@@ -1,0 +1,1096 @@
+nir 1 call-effects=1 statics=0
+shape 0 anon fields="at recognizer state"
+shape 1 named "std::dfa::Symbol" fields="code"
+shape 2 anon fields="recognizer state"
+shape 3 anon fields="recognizer state symbol"
+
+
+
+
+
+
+
+
+
+
+func 0 "<program>" params=0 env=0 regs=27 pnames="" captures=0 rawregs="1 5 7 8 13 15 16 21 23 24"
+    pusherrorexit L0 @e8308
+    %1 = rawint 4 @e8311
+    %2 = call 7 %1 @e8309
+    poperrorexit @e8308
+    %0 = move %2 @e8308
+    jump L1 @e8308
+  label L0
+    %3 = declarederroreq 1073741825 @e8308
+    br %3 L2 L3 @e8308
+  label L2
+    cleardeclarederror @e8308
+    %4 = int 0 @e8316
+    %5 = rawint 0
+    %6 = int 1 @e8317
+    %7 = rawint 1
+    %8 = op risub %5 %7 @e8314
+    %9 = op rbox %8
+    %10 = op listnew %9 @e8312
+    %0 = move %10 @e8308
+    jump L1 @e8308
+  label L3
+    %11 = declarederroreq 12 @e8308
+    br %11 L4 L5 @e8308
+  label L4
+    cleardeclarederror @e8308
+    %12 = int 0 @e8322
+    %13 = rawint 0
+    %14 = int 2 @e8323
+    %15 = rawint 2
+    %16 = op risub %13 %15 @e8320
+    %17 = op rbox %16
+    %18 = op listnew %17 @e8318
+    %0 = move %18 @e8308
+    jump L1 @e8308
+  label L5
+    %19 = declarederroreq 3 @e8308
+    br %19 L6 L7 @e8308
+  label L6
+    cleardeclarederror @e8308
+    %20 = int 0 @e8328
+    %21 = rawint 0
+    %22 = int 3 @e8329
+    %23 = rawint 3
+    %24 = op risub %21 %23 @e8326
+    %25 = op rbox %24
+    %26 = op listnew %25 @e8324
+    %0 = move %26 @e8308
+    jump L1 @e8308
+  label L7
+    reraise @e8308
+  label L1
+    ret %0
+end
+
+func 1 "json_lex::json_number#state" params=1 env=0 regs=44 pnames="code" captures=0 rawregs="2 5 7 11 17 23 26 28 34 39"
+    %1 = int 14 @e7
+    %2 = rawint 14
+    %3 = op ilt %0 %1 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = op runbox %0
+    %6 = int 12 @e12
+    %7 = rawint 12
+    %8 = op rilt %5 %7 @e9
+    br %8 L3 L4 @e8
+  label L3
+    %10 = int 11 @e17
+    %11 = rawint 11
+    %12 = op rilt %5 %11 @e14
+    br %12 L6 L7 @e13
+  label L6
+    %14 = str "start" @e18
+    %13 = move %14
+    jump L8
+  label L7
+    %15 = str "minus" @e19
+    %13 = move %15
+    jump L8
+  label L8
+    %9 = move %13
+    jump L5
+  label L4
+    %16 = int 13 @e24
+    %17 = rawint 13
+    %18 = op rilt %5 %17 @e21
+    br %18 L9 L10 @e20
+  label L9
+    %20 = str "zero" @e25
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = str "integer" @e26
+    %19 = move %21
+    jump L11
+  label L11
+    %9 = move %19
+    jump L5
+  label L5
+    %4 = move %9
+    jump L2
+  label L1
+    %22 = int 16 @e31
+    %23 = rawint 16
+    %24 = op ilt %0 %22 @e28
+    br %24 L12 L13 @e27
+  label L12
+    %26 = op runbox %0
+    %27 = int 15 @e36
+    %28 = rawint 15
+    %29 = op rilt %26 %28 @e33
+    br %29 L15 L16 @e32
+  label L15
+    %31 = str "point" @e37
+    %30 = move %31
+    jump L17
+  label L16
+    %32 = str "exponent" @e38
+    %30 = move %32
+    jump L17
+  label L17
+    %25 = move %30
+    jump L14
+  label L13
+    %33 = int 17 @e43
+    %34 = rawint 17
+    %35 = op ilt %0 %33 @e40
+    br %35 L18 L19 @e39
+  label L18
+    %37 = str "fraction" @e44
+    %36 = move %37
+    jump L20
+  label L19
+    %38 = int 18 @e49
+    %39 = rawint 18
+    %40 = op ilt %0 %38 @e46
+    br %40 L21 L22 @e45
+  label L21
+    %42 = str "exponent_sign" @e50
+    %41 = move %42
+    jump L23
+  label L22
+    %43 = str "exponent_digits" @e51
+    %41 = move %43
+    jump L23
+  label L23
+    %36 = move %41
+    jump L20
+  label L20
+    %25 = move %36
+    jump L14
+  label L14
+    %4 = move %25
+    jump L2
+  label L2
+    ret %4
+end
+
+func 2 "json_lex::json_number#run" params=2 env=0 regs=41 pnames="state c" captures=0 rawregs="0 3 5 10 11 12 13 14 15 16 17 20 24 28 37 39"
+    unreachable
+end
+
+func 3 "json_lex::json_number" params=1 env=0 regs=12 pnames="first" captures=0 rawregs="2 5 9 11"
+    unreachable
+end
+
+func 4 "number_emit::integer_trusted" params=1 env=0 regs=17 pnames="n" captures=0 rawregs="3 5 6 13 14"
+    unreachable
+end
+
+func 5 "number_emit::integer_trusted_source" params=1 env=0 regs=8 pnames="n" captures=0 rawregs="3 5 6"
+    unreachable
+end
+
+func 6 "bench_work::nth" params=1 env=0 regs=25 pnames="i" captures=0 rawregs="4 9 11 13 15 16 18 23"
+    %1 = int 6364136223846793005 @e6697
+    %2 = op imul %0 %1 @e6694
+    %3 = int 1442695040888963407 @e6698
+    %4 = rawint 1442695040888963407
+    %5 = op iadd %2 %3 @e6692
+    %6 = int 9000000000000000000 @e6699
+    %7 = op imod %5 %6 @e6690
+    %8 = int 1000000000000000000 @e6700
+    %9 = rawint 1000000000000000000
+    %10 = op iadd %7 %8 @e6688
+    %11 = op runbox %0
+    %12 = int 2 @e6707
+    %13 = rawint 2
+    %14 = int 1 @e6704
+    %15 = rawint 1
+    %16 = op riand %11 %15 @e6704
+    %17 = int 0 @e6708
+    %18 = rawint 0
+    %19 = op rieq %16 %18 @e6702
+    br %19 L0 L1 @e6701
+  label L0
+    ret %10 @e6709
+  label L1
+    %21 = unit
+    %20 = move %21
+    jump L2
+  label L2
+    %22 = int 0 @e6713
+    %23 = rawint 0
+    %24 = op isub %22 %10 @e6711
+    ret %24
+end
+
+func 7 "bench_work::ints_validated" params=1 env=0 regs=289 pnames="count" captures=0 rawregs="0 2 4 7 8 29 36 39 50 55 57 63 69 73 76 83 85 91 114 121 123 131 133 134 143 149 153 156 160 161 164 167 170 178 182 184 185 190 192 193 200 201 205 207 210 211 220 223 227 229 230 233 235 240 241 242 243 244 245 246 247 250 254 258 267 269 271 274 275 277 280 282" rawparams="0"
+    %1 = int 3 @e7147
+    %2 = rawint 3
+    %3 = int 0 @e7148
+    %4 = rawint 0
+    %5 = op mutarraycreate %1 %3 @e7145
+    %6 = int 0 @e7150
+    %7 = rawint 0
+    %8 = move %7 @e7149
+    jump L0 @e7149
+  label L0
+    %10 = op rilt %8 %0 @e7149
+    br %10 L1 L3 @e7149
+  label L1
+    %11 = op rbox %8
+    %12 = call 6 %11 @e7153
+    %174 = move %12 @e7159
+    %170 = rawint 0 @e7157
+    %14 = unit @e7157
+    %188 = unit @e7157
+    %171 = unit @e7157
+    %172 = unit @e7157
+    %173 = unit @e7157
+    pusherrorexit L5 @e7164
+    jump L73 @e7164
+  label L71
+    %204 = op coresume0 %173 @e7164
+    unreachable @e7164
+  label L70
+    %15 = move %171 @e7164
+    poperrorexit @e7164
+    jump L6 @e7164
+  label L5
+    %16 = declarederroreq 1073741825 @e7164
+    br %16 L7 L8 @e7164
+  label L7
+    %17 = unit @e7164
+    reraise @e7164
+  label L8
+    reraise @e7164
+  label L6
+    %18 = unit @e7167
+    %215 = move %15 @e7173
+    %211 = rawint 0 @e7171
+    %20 = unit @e7171
+    %252 = unit @e7171
+    %212 = unit @e7171
+    %287 = unit @e7171
+    %214 = unit @e7171
+    pusherrorexit L9 @e7177
+    jump L106 @e7178
+  label L104
+    %273 = op coresume0 %214 @e7178
+    unreachable @e7178
+  label L103
+    %22 = move %212 @e7178
+    poperrorexit @e7177
+    %21 = move %22 @e7177
+    jump L10 @e7177
+  label L9
+    %23 = declarederroreq 1 @e7177
+    br %23 L11 L12 @e7177
+  label L11
+    %24 = declaredpayload 0 @e7177
+    %25 = declaredpayload 1 @e7177
+    cleardeclarederror @e7177
+    %26 = unit @e7187
+    %27 = unit @e7187
+    %28 = int 0 @e7189
+    %29 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %28 %24 %25 @e7187
+  label L12
+    %30 = declarederroreq 2 @e7177
+    br %30 L13 L14 @e7177
+  label L13
+    %31 = declaredpayload 0 @e7177
+    %32 = declaredpayload 1 @e7177
+    cleardeclarederror @e7177
+    %33 = unit @e7198
+    %34 = unit @e7198
+    %35 = int 0 @e7200
+    %36 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %35 %31 %32 @e7198
+  label L14
+    reraise @e7177
+  label L10
+    %37 = unit @e7203
+    pusherrorexit L15 @e7204
+    %38 = int 2 @e7207
+    %39 = rawint 2
+    %40 = op mutarraysetproven %5 %38 %15 @e7204
+    poperrorexit @e7204
+    jump L16 @e7204
+  label L15
+    %41 = declarederroreq 1073741825 @e7204
+    br %41 L17 L18 @e7204
+  label L17
+    %42 = unit @e7204
+    %43 = unit @e7204
+    reraise @e7204
+  label L18
+    reraise @e7204
+  label L16
+    jump L19 @e7209
+  label L19
+    %274 = rawint 0 @e7211
+    %45 = op rilt %211 %274 @e7211
+    br %45 L21 L22 @e7210
+  label L21
+    %47 = unit @e7214
+    %48 = unit @e7214
+    %49 = int 0 @e7216
+    %50 = rawint 0
+    %51 = str "json_lex::json_number" @e7217
+    %52 = str "ended early" @e7218
+    faildeclared 12 "sinks::Invalid" 0 %49 %51 %52 @e7214
+  label L22
+    %53 = unit
+    %46 = move %53
+    jump L23
+  label L23
+    pusherrorexit L24 @e7219
+    %54 = int 0 @e7222
+    %55 = rawint 0
+    pusherrorexit L25 @e7225
+    %56 = int 0 @e7228
+    %57 = rawint 0
+    %58 = op mutarraygetproven %5 %56 @e7225
+    poperrorexit @e7225
+    jump L26 @e7225
+  label L25
+    %59 = declarederroreq 1073741825 @e7225
+    br %59 L27 L28 @e7225
+  label L27
+    %60 = unit @e7225
+    %61 = unit @e7225
+    reraise @e7225
+  label L28
+    reraise @e7225
+  label L26
+    pusherrorexit L29 @e7229
+    %62 = int 2 @e7232
+    %63 = rawint 2
+    %64 = op mutarraygetproven %5 %62 @e7229
+    poperrorexit @e7229
+    jump L30 @e7229
+  label L29
+    %65 = declarederroreq 1073741825 @e7229
+    br %65 L31 L32 @e7229
+  label L31
+    %66 = unit @e7229
+    %67 = unit @e7229
+    reraise @e7229
+  label L32
+    reraise @e7229
+  label L30
+    %68 = int 31 @e5893
+    %69 = rawint 31
+    %70 = op imul %58 %68 @e5890
+    %71 = op iadd %70 %64 @e5888
+    %72 = int 1 @e5895
+    %73 = rawint 1
+    %74 = op iadd %71 %72 @e5886
+    %75 = int 2147483647 @e5896
+    %76 = rawint 2147483647
+    %77 = op imod %74 %75 @e5884
+    %78 = op mutarraysetproven %5 %54 %77 @e7219
+    poperrorexit @e7219
+    jump L33 @e7219
+  label L24
+    %79 = declarederroreq 1073741825 @e7219
+    br %79 L34 L35 @e7219
+  label L34
+    %80 = unit @e7219
+    %81 = unit @e7219
+    reraise @e7219
+  label L35
+    reraise @e7219
+  label L33
+    pusherrorexit L36 @e7233
+    %82 = int 1 @e7236
+    %83 = rawint 1
+    pusherrorexit L37 @e7239
+    %84 = int 1 @e7242
+    %85 = rawint 1
+    %86 = op mutarraygetproven %5 %84 @e7239
+    poperrorexit @e7239
+    jump L38 @e7239
+  label L37
+    %87 = declarederroreq 1073741825 @e7239
+    br %87 L39 L40 @e7239
+  label L39
+    %88 = unit @e7239
+    %89 = unit @e7239
+    reraise @e7239
+  label L40
+    reraise @e7239
+  label L38
+    %90 = int 1 @e7243
+    %91 = rawint 1
+    %92 = op iadd %86 %90 @e7237
+    %93 = op mutarraysetproven %5 %82 %92 @e7233
+    poperrorexit @e7233
+    jump L41 @e7233
+  label L36
+    %94 = declarederroreq 1073741825 @e7233
+    br %94 L42 L43 @e7233
+  label L42
+    %95 = unit @e7233
+    %96 = unit @e7233
+    reraise @e7233
+  label L43
+    reraise @e7233
+  label L41
+    pusherrorexit L44 @e7245
+    %172 = unit @e7245
+    jump L100 @e7245
+  label L87
+    %209 = op coresume0 %173 @e7245
+    unreachable @e7245
+  label L86
+    %97 = move %171 @e7245
+    poperrorexit @e7245
+    jump L45 @e7245
+  label L44
+    %98 = declarederroreq 1073741825 @e7245
+    br %98 L46 L47 @e7245
+  label L46
+    %99 = unit @e7245
+    %100 = unit @e7245
+    reraise @e7245
+  label L47
+    reraise @e7245
+  label L45
+    %210 = rawint 0 @e7249
+    %101 = op rilt %170 %210 @e7249
+    br %101 L48 L49 @e7248
+  label L48
+    %103 = unit
+    %44 = move %103 @e7252
+    jump L20 @e7252
+  label L49
+    %104 = unit
+    %102 = move %104
+    jump L50
+  label L50
+    pusherrorexit L51 @e7253
+    %285 = move %97 @e7256
+    %287 = move %285 @e7254
+    jump L193 @e7254
+  label L150
+    %279 = op coresume0 %214 @e7254
+    unreachable @e7254
+  label L149
+    %107 = move %212 @e7254
+    poperrorexit @e7253
+    %105 = move %107 @e7253
+    jump L52 @e7253
+  label L51
+    %108 = declarederroreq 1 @e7253
+    br %108 L53 L54 @e7253
+  label L53
+    %109 = declaredpayload 0 @e7253
+    %110 = declaredpayload 1 @e7253
+    cleardeclarederror @e7253
+    %111 = unit @e7265
+    %112 = unit @e7265
+    %113 = int 0 @e7267
+    %114 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %113 %109 %110 @e7265
+  label L54
+    %115 = declarederroreq 2 @e7253
+    br %115 L55 L56 @e7253
+  label L55
+    %116 = declaredpayload 0 @e7253
+    %117 = declaredpayload 1 @e7253
+    cleardeclarederror @e7253
+    %118 = unit @e7276
+    %119 = unit @e7276
+    %120 = int 0 @e7278
+    %121 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %120 %116 %117 @e7276
+  label L56
+    reraise @e7253
+  label L52
+    pusherrorexit L57 @e7281
+    %122 = int 2 @e7284
+    %123 = rawint 2
+    %124 = op mutarraysetproven %5 %122 %97 @e7281
+    poperrorexit @e7281
+    jump L58 @e7281
+  label L57
+    %125 = declarederroreq 1073741825 @e7281
+    br %125 L59 L60 @e7281
+  label L59
+    %126 = unit @e7281
+    %127 = unit @e7281
+    reraise @e7281
+  label L60
+    reraise @e7281
+  label L58
+    jump L19 @e7209
+  label L20
+    %128 = unit @e7209
+    pusherrorexit L61 @e7287
+    %130 = int 0 @e7293
+    %131 = rawint 0
+    %132 = int 1 @e7294
+    %133 = rawint 1
+    %134 = op risub %131 %133 @e7291
+    %135 = op rbox %134
+    %286 = move %135 @e7290
+    %287 = move %286 @e7288
+    jump L240 @e7288
+  label L197
+    %284 = op coresume0 %214 @e7288
+    unreachable @e7288
+  label L196
+    %137 = move %212 @e7288
+    poperrorexit @e7287
+    %129 = move %137 @e7287
+    jump L62 @e7287
+  label L61
+    %138 = declarederroreq 1 @e7287
+    br %138 L63 L64 @e7287
+  label L63
+    %139 = declaredpayload 0 @e7287
+    %140 = declaredpayload 1 @e7287
+    cleardeclarederror @e7287
+    %141 = unit @e7302
+    %142 = int 0 @e7304
+    %143 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %142 %139 %140 @e7302
+  label L64
+    %144 = declarederroreq 2 @e7287
+    br %144 L65 L66 @e7287
+  label L65
+    %145 = declaredpayload 0 @e7287
+    %146 = declaredpayload 1 @e7287
+    cleardeclarederror @e7287
+    %147 = unit @e7313
+    %148 = int 0 @e7315
+    %149 = rawint 0
+    faildeclared 12 "sinks::Invalid" 0 %148 %145 %146 @e7313
+  label L66
+    reraise @e7287
+  label L62
+    %150 = unit @e7286
+    %152 = int 0 @e7323
+    %153 = rawint 0
+    %154 = op ieq %129 %152 @e7320
+    br %154 L68 L67 @e7320
+  label L67
+    %155 = int 0 @e7328
+    %156 = rawint 0
+    %157 = str "json_lex::json_number" @e7329
+    %158 = str "ended early" @e7330
+    faildeclared 12 "sinks::Invalid" 0 %155 %157 %158 @e7326
+  label L68
+    %159 = unit
+    %151 = move %159
+    jump L69
+  label L69
+    jump L2 @e7331
+  label L2
+    %160 = rawint 1 @e7149
+    %161 = op riadd %8 %160 @e7149
+    %8 = move %161 @e7149
+    jump L0 @e7149
+  label L3
+    %162 = unit @e7149
+    %9 = move %162 @e7149
+    jump L4 @e7149
+  label L4
+    %163 = int 1 @e7337
+    %164 = rawint 1
+    %165 = op mutarraygetproven %5 %163 @e7334
+    %166 = int 0 @e7341
+    %167 = rawint 0
+    %168 = op mutarraygetproven %5 %166 @e7338
+    %169 = op listnew %165 %168 @e7332
+    ret %169
+  label L84
+    pusherrorexit L85 @e7164
+  label L73
+    %175 = move %174
+    %179 = move %175
+  label L75
+    %187 = move %179
+  label L77
+    %188 = op inttostr %187 @e1648
+    %189 = int 0 @e1652
+    %190 = rawint 0
+    %191 = op strlen %188 @e1653
+    %192 = op runbox %191
+    %193 = move %190 @e1651
+    jump L78 @e1651
+  label L78
+    %195 = op rilt %193 %192 @e1651
+    br %195 L79 L81 @e1651
+  label L79
+    %196 = op rbox %193
+    %197 = op strcharatproven %188 %196 @e1660
+    %198 = op charcodepoint %197 @e1658
+    %171 = move %198 @e1656
+    %170 = rawint 1 @e1656
+    jump L70 @e1656
+  label L83
+    %199 = move %172 @e1656
+    jump L80 @e1664
+  label L80
+    %200 = rawint 1 @e1651
+    %201 = op riadd %193 %200 @e1651
+    %193 = move %201 @e1651
+    jump L78 @e1651
+  label L81
+    %202 = unit @e1651
+    %194 = move %202 @e1651
+    jump L82 @e1651
+  label L82
+    %203 = unit @e1665
+    %180 = move %203
+    jump L76
+  label L76
+    %181 = int 0 @e1691
+    %182 = rawint 0
+    %183 = int 1 @e1692
+    %184 = rawint 1
+    %185 = op risub %182 %184 @e1689
+    %186 = op rbox %185
+    %176 = move %186
+    jump L74
+  label L74
+    %177 = int -1 @e7160
+    %178 = rawint -1
+    %171 = move %177
+    %170 = rawint -1
+    jump L70
+    poperrorexit @e7164
+  label L85
+    %173 = op cofailed @e7164
+    %170 = rawint -2 @e7164
+    jump L71 @e7164
+  label L100
+    pusherrorexit L101 @e7245
+    %205 = rawint 1 @e7245
+    %206 = op rieq %170 %205 @e7245
+    br %206 L99 L102 @e7245
+  label L102
+    %207 = rawint -1 @e7245
+    %208 = op rieq %170 %207 @e7245
+    br %208 L86 L87 @e7245
+  label L89
+    %175 = move %174
+    %179 = move %175
+  label L91
+    %187 = move %179
+  label L93
+    %188 = op inttostr %187 @e1648
+    %189 = int 0 @e1652
+    %190 = rawint 0
+    %191 = op strlen %188 @e1653
+    %192 = op runbox %191
+    %193 = move %190 @e1651
+    jump L94 @e1651
+  label L94
+    %195 = op rilt %193 %192 @e1651
+    br %195 L95 L97 @e1651
+  label L95
+    %196 = op rbox %193
+    %197 = op strcharatproven %188 %196 @e1660
+    %198 = op charcodepoint %197 @e1658
+    %171 = move %198 @e1656
+    %170 = rawint 1 @e1656
+    jump L86 @e1656
+  label L99
+    %199 = move %172 @e1656
+    jump L96 @e1664
+  label L96
+    %200 = rawint 1 @e1651
+    %201 = op riadd %193 %200 @e1651
+    %193 = move %201 @e1651
+    jump L94 @e1651
+  label L97
+    %202 = unit @e1651
+    %194 = move %202 @e1651
+    jump L98 @e1651
+  label L98
+    %203 = unit @e1665
+    %180 = move %203
+    jump L92
+  label L92
+    %181 = int 0 @e1691
+    %182 = rawint 0
+    %183 = int 1 @e1692
+    %184 = rawint 1
+    %185 = op risub %182 %184 @e1689
+    %186 = op rbox %185
+    %176 = move %186
+    jump L90
+  label L90
+    %177 = int -1 @e7160
+    %178 = rawint -1
+    %171 = move %177
+    %170 = rawint -1
+    jump L86
+    poperrorexit @e7245
+  label L101
+    %173 = op cofailed @e7245
+    %170 = rawint -2 @e7245
+    jump L87 @e7245
+  label L147
+    pusherrorexit L148 @e7178
+  label L106
+    %216 = move %215
+    %218 = move %216
+  label L108
+    %219 = int 0 @e106
+    %220 = rawint 0
+    %230 = op runbox %219
+    %231 = move %218
+  label L113
+    %232 = op rbox %230
+    %234 = bytes "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a010a0a020303030303030303030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b020303030303030303030b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b090c0c0c0c0c0c0c0c0c09090c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c090c040c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090d0d0d0d0d0d0d0d0d09090d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d090d040d030303030303030303030d0d0d0d0d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e060606060606060606060e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f070f070f0f080808080808080808080f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0910101010101010101009091010091010101010101010101010101010101010100910101010101010101010100910101006060606060606060606101010101010101010101005101010101010101010101010101010101010101010101009101010101010100510101010101010101010101010101010101010101010100910101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110808080808080808080811111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111109121212121212121212090912120912121212121212121212121212121212121209121212121212121212121209121212080808080808080808081212121212121212121212121212121212121212121212121212121212121212121212091212121212121212121212121212121212121212121212121212121212121209121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212120a0b0c0d0e0f101112" @e55
+    %235 = op runbox %232 @e55
+    %236 = int -1 @e55
+    %237 = op ilt %231 %236 @e55
+    br %237 L134 L135 @e55
+  label L135
+    %238 = int 255 @e55
+    %239 = op igt %231 %238 @e55
+    br %239 L134 L136 @e55
+  label L136
+    %240 = op runbox %231 @e55
+    %241 = rawint 1 @e55
+    %242 = op riadd %240 %241 @e55
+    %243 = rawint 257 @e55
+    %244 = op rimul %235 %243 @e55
+    %245 = op riadd %244 %242 @e55
+    %233 = op rtabload8 %234 %245 @e55
+    jump L114 @e55
+  label L134
+    %246 = rawint 2313 @e55
+    %247 = op riadd %235 %246 @e55
+    %233 = op rtabload8 %234 %247 @e55
+    jump L114 @e55
+  label L133
+    raise INTERNAL "dfa#transition: a state outside the table (the compiler's error)" @e55
+  label L114
+    %248 = op rbox %233
+    %249 = int 9 @e65
+    %250 = rawint 9
+    %251 = op ilt %248 %249 @e62
+    br %251 L137 L138 @e61
+  label L137
+    %252 = move %248
+    jump L139
+  label L138
+    %253 = int 9 @e71
+    %254 = rawint 9
+    %255 = op ieq %248 %253 @e68
+    br %255 L140 L141 @e67
+  label L140
+    %221 = move %231 @e72
+    jump L112 @e72
+  label L141
+    %257 = int -1 @e78
+    %258 = rawint -1
+    %259 = op ieq %231 %257 @e75
+    br %259 L143 L144 @e74
+  label L143
+    %261 = str "json_lex::json_number" @e81
+    %262 = call 1 %248 @e82
+    faildeclared 2 "std::dfa::UnexpectedEnd" 2 %261 %262 @e79
+  label L144
+    %263 = unit
+    %260 = move %263
+    jump L145
+  label L145
+    %264 = str "json_lex::json_number" @e87
+    %265 = call 1 %248 @e88
+    faildeclared 1 "std::dfa::UnrecognizedInput" 3 %264 %265 %231 @e85
+  label L139
+    %266 = int 0 @e95
+    %267 = rawint 0
+    %212 = move %266 @e93
+    %211 = rawint 1 @e93
+    jump L103 @e93
+  label L146
+    %288 = move %287 @e93
+    %269 = op runbox %252
+    %270 = move %288 @e99
+    %271 = move %269 @e96
+    %272 = move %270 @e96
+    %230 = move %271 @e96
+    %231 = move %272 @e96
+    jump L113 @e96
+  label L112
+    %222 = int 0 @e112
+    %223 = rawint 0
+    %224 = op ige %221 %222 @e109
+    br %224 L109 L110 @e108
+  label L109
+    %226 = int 1 @e113
+    %227 = rawint 1
+    %225 = move %226
+    jump L111
+  label L110
+    %228 = int 0 @e114
+    %229 = rawint 0
+    %225 = move %228
+    jump L111
+  label L111
+    %217 = move %225
+    jump L107
+  label L107
+    %212 = move %217
+    %211 = rawint -1
+    jump L103
+    poperrorexit @e7178
+  label L148
+    %214 = op cofailed @e7178
+    %211 = rawint -2 @e7178
+    jump L104 @e7178
+  label L193
+    pusherrorexit L194 @e7254
+    %275 = rawint 1 @e7254
+    %276 = op rieq %211 %275 @e7254
+    br %276 L192 L195 @e7254
+  label L195
+    %277 = rawint -1 @e7254
+    %278 = op rieq %211 %277 @e7254
+    br %278 L149 L150 @e7254
+  label L152
+    %216 = move %215
+    %218 = move %216
+  label L154
+    %219 = int 0 @e106
+    %220 = rawint 0
+    %230 = op runbox %219
+    %231 = move %218
+  label L159
+    %232 = op rbox %230
+    %234 = bytes "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a010a0a020303030303030303030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b020303030303030303030b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b090c0c0c0c0c0c0c0c0c09090c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c090c040c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090d0d0d0d0d0d0d0d0d09090d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d090d040d030303030303030303030d0d0d0d0d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e060606060606060606060e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f070f070f0f080808080808080808080f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0910101010101010101009091010091010101010101010101010101010101010100910101010101010101010100910101006060606060606060606101010101010101010101005101010101010101010101010101010101010101010101009101010101010100510101010101010101010101010101010101010101010100910101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110808080808080808080811111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111109121212121212121212090912120912121212121212121212121212121212121209121212121212121212121209121212080808080808080808081212121212121212121212121212121212121212121212121212121212121212121212091212121212121212121212121212121212121212121212121212121212121209121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212120a0b0c0d0e0f101112" @e55
+    %235 = op runbox %232 @e55
+    %236 = int -1 @e55
+    %237 = op ilt %231 %236 @e55
+    br %237 L180 L181 @e55
+  label L181
+    %238 = int 255 @e55
+    %239 = op igt %231 %238 @e55
+    br %239 L180 L182 @e55
+  label L182
+    %240 = op runbox %231 @e55
+    %241 = rawint 1 @e55
+    %242 = op riadd %240 %241 @e55
+    %243 = rawint 257 @e55
+    %244 = op rimul %235 %243 @e55
+    %245 = op riadd %244 %242 @e55
+    %233 = op rtabload8 %234 %245 @e55
+    jump L160 @e55
+  label L180
+    %246 = rawint 2313 @e55
+    %247 = op riadd %235 %246 @e55
+    %233 = op rtabload8 %234 %247 @e55
+    jump L160 @e55
+  label L179
+    raise INTERNAL "dfa#transition: a state outside the table (the compiler's error)" @e55
+  label L160
+    %248 = op rbox %233
+    %249 = int 9 @e65
+    %250 = rawint 9
+    %251 = op ilt %248 %249 @e62
+    br %251 L183 L184 @e61
+  label L183
+    %252 = move %248
+    jump L185
+  label L184
+    %253 = int 9 @e71
+    %254 = rawint 9
+    %255 = op ieq %248 %253 @e68
+    br %255 L186 L187 @e67
+  label L186
+    %221 = move %231 @e72
+    jump L158 @e72
+  label L187
+    %257 = int -1 @e78
+    %258 = rawint -1
+    %259 = op ieq %231 %257 @e75
+    br %259 L189 L190 @e74
+  label L189
+    %261 = str "json_lex::json_number" @e81
+    %262 = call 1 %248 @e82
+    faildeclared 2 "std::dfa::UnexpectedEnd" 2 %261 %262 @e79
+  label L190
+    %263 = unit
+    %260 = move %263
+    jump L191
+  label L191
+    %264 = str "json_lex::json_number" @e87
+    %265 = call 1 %248 @e88
+    faildeclared 1 "std::dfa::UnrecognizedInput" 3 %264 %265 %231 @e85
+  label L185
+    %266 = int 0 @e95
+    %267 = rawint 0
+    %212 = move %266 @e93
+    %211 = rawint 1 @e93
+    jump L149 @e93
+  label L192
+    %288 = move %287 @e93
+    %269 = op runbox %252
+    %270 = move %288 @e99
+    %271 = move %269 @e96
+    %272 = move %270 @e96
+    %230 = move %271 @e96
+    %231 = move %272 @e96
+    jump L159 @e96
+  label L158
+    %222 = int 0 @e112
+    %223 = rawint 0
+    %224 = op ige %221 %222 @e109
+    br %224 L155 L156 @e108
+  label L155
+    %226 = int 1 @e113
+    %227 = rawint 1
+    %225 = move %226
+    jump L157
+  label L156
+    %228 = int 0 @e114
+    %229 = rawint 0
+    %225 = move %228
+    jump L157
+  label L157
+    %217 = move %225
+    jump L153
+  label L153
+    %212 = move %217
+    %211 = rawint -1
+    jump L149
+    poperrorexit @e7254
+  label L194
+    %214 = op cofailed @e7254
+    %211 = rawint -2 @e7254
+    jump L150 @e7254
+  label L240
+    pusherrorexit L241 @e7288
+    %280 = rawint 1 @e7288
+    %281 = op rieq %211 %280 @e7288
+    br %281 L239 L242 @e7288
+  label L242
+    %282 = rawint -1 @e7288
+    %283 = op rieq %211 %282 @e7288
+    br %283 L196 L197 @e7288
+  label L199
+    %216 = move %215
+    %218 = move %216
+  label L201
+    %219 = int 0 @e106
+    %220 = rawint 0
+    %230 = op runbox %219
+    %231 = move %218
+  label L206
+    %232 = op rbox %230
+    %234 = bytes "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a010a0a020303030303030303030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b020303030303030303030b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b090c0c0c0c0c0c0c0c0c09090c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c090c040c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c050c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c090d0d0d0d0d0d0d0d0d09090d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d090d040d030303030303030303030d0d0d0d0d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d050d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d090d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e060606060606060606060e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f070f070f0f080808080808080808080f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0910101010101010101009091010091010101010101010101010101010101010100910101010101010101010100910101006060606060606060606101010101010101010101005101010101010101010101010101010101010101010101009101010101010100510101010101010101010101010101010101010101010100910101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110808080808080808080811111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111109121212121212121212090912120912121212121212121212121212121212121209121212121212121212121209121212080808080808080808081212121212121212121212121212121212121212121212121212121212121212121212091212121212121212121212121212121212121212121212121212121212121209121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212120a0b0c0d0e0f101112" @e55
+    %235 = op runbox %232 @e55
+    %236 = int -1 @e55
+    %237 = op ilt %231 %236 @e55
+    br %237 L227 L228 @e55
+  label L228
+    %238 = int 255 @e55
+    %239 = op igt %231 %238 @e55
+    br %239 L227 L229 @e55
+  label L229
+    %240 = op runbox %231 @e55
+    %241 = rawint 1 @e55
+    %242 = op riadd %240 %241 @e55
+    %243 = rawint 257 @e55
+    %244 = op rimul %235 %243 @e55
+    %245 = op riadd %244 %242 @e55
+    %233 = op rtabload8 %234 %245 @e55
+    jump L207 @e55
+  label L227
+    %246 = rawint 2313 @e55
+    %247 = op riadd %235 %246 @e55
+    %233 = op rtabload8 %234 %247 @e55
+    jump L207 @e55
+  label L226
+    raise INTERNAL "dfa#transition: a state outside the table (the compiler's error)" @e55
+  label L207
+    %248 = op rbox %233
+    %249 = int 9 @e65
+    %250 = rawint 9
+    %251 = op ilt %248 %249 @e62
+    br %251 L230 L231 @e61
+  label L230
+    %252 = move %248
+    jump L232
+  label L231
+    %253 = int 9 @e71
+    %254 = rawint 9
+    %255 = op ieq %248 %253 @e68
+    br %255 L233 L234 @e67
+  label L233
+    %221 = move %231 @e72
+    jump L205 @e72
+  label L234
+    %257 = int -1 @e78
+    %258 = rawint -1
+    %259 = op ieq %231 %257 @e75
+    br %259 L236 L237 @e74
+  label L236
+    %261 = str "json_lex::json_number" @e81
+    %262 = call 1 %248 @e82
+    faildeclared 2 "std::dfa::UnexpectedEnd" 2 %261 %262 @e79
+  label L237
+    %263 = unit
+    %260 = move %263
+    jump L238
+  label L238
+    %264 = str "json_lex::json_number" @e87
+    %265 = call 1 %248 @e88
+    faildeclared 1 "std::dfa::UnrecognizedInput" 3 %264 %265 %231 @e85
+  label L232
+    %266 = int 0 @e95
+    %267 = rawint 0
+    %212 = move %266 @e93
+    %211 = rawint 1 @e93
+    jump L196 @e93
+  label L239
+    %288 = move %287 @e93
+    %269 = op runbox %252
+    %270 = move %288 @e99
+    %271 = move %269 @e96
+    %272 = move %270 @e96
+    %230 = move %271 @e96
+    %231 = move %272 @e96
+    jump L206 @e96
+  label L205
+    %222 = int 0 @e112
+    %223 = rawint 0
+    %224 = op ige %221 %222 @e109
+    br %224 L202 L203 @e108
+  label L202
+    %226 = int 1 @e113
+    %227 = rawint 1
+    %225 = move %226
+    jump L204
+  label L203
+    %228 = int 0 @e114
+    %229 = rawint 0
+    %225 = move %228
+    jump L204
+  label L204
+    %217 = move %225
+    jump L200
+  label L200
+    %212 = move %217
+    %211 = rawint -1
+    jump L196
+    poperrorexit @e7288
+  label L241
+    %214 = op cofailed @e7288
+    %211 = rawint -2 @e7288
+    jump L197 @e7288
+end
+
+func 8 "" params=0 env=1 regs=4 pnames="" captures=1 rawregs="3"
+    unreachable
+end
+
+func 9 "" params=0 env=1 regs=2 pnames="" captures=1
+    unreachable
+end

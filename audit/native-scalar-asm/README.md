@@ -12,7 +12,7 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 9c40d21ea87c7c1919932cd46b0e8f86a7214c28
+- git commit: 58ec5967e7d45b1b2ab715e148488e1a8b4956f4
 - Tcl: 9.0.1
 - rustc 1.99.1 (58cf8f9c3 2026-10-13)
 - cranelift-codegen: 0.135.2

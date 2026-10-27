@@ -439,7 +439,7 @@ body is in another translation unit and proves nothing. The facts become
 `proven noescape`, `read`, `write` and `alias P` (an alias only when the
 result and the parameter have the same Botlish type). The IR's producer
 line is recorded in the manifest (`evidence llvm {Ubuntu clang version
-18.1.3 (1ubuntu1)}`).
+21.1.8 (6ubuntu1)}`).
 
 Measured: 8 proven parameters in Tcl, 123 in BoringSSL, 16 in SDL3 (the
 inline functions' pointer parameters the optimizer could see through).
@@ -1110,7 +1110,9 @@ relocation change), and anything on macOS (section 34).
 * **Contracts at scale**: 98% of pointer parameters are unknown (section 29).
 * A GCC evidence producer. (Windows x86-64 with the GNU ABI is a target
   now, windows-x86_64-gnu, with a Win32 binding; MSVC is not:
-  C-BINDGEN-LAYOUTS.md.)
+  C-BINDGEN-LAYOUTS.md. Since ICY-TOWER-WINDOWS.md MSVC's windows-x86_64
+  has a toolchain configuration, generated on Windows only, with no
+  committed binding.)
 
 ## 35. What to run when changing this
 

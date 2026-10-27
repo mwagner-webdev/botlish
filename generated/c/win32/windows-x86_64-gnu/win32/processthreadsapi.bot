@@ -18,7 +18,9 @@ ProcessTelemetryCoverageInfo = win32::ctypes::c_uint(6)
 ProcessProtectionLevelInfo = win32::ctypes::c_uint(7)
 ProcessLeapSecondInfo = win32::ctypes::c_uint(8)
 ProcessMachineTypeInfo = win32::ctypes::c_uint(9)
-ProcessInformationClassMax = win32::ctypes::c_uint(10)
+ProcessOverrideSubsequentPrefetchParameter = win32::ctypes::c_uint(10)
+ProcessMaxOverridePrefetchParameter = win32::ctypes::c_uint(11)
+ProcessInformationClassMax = win32::ctypes::c_uint(12)
 # enum _MACHINE_ATTRIBUTES (unsigned int)
 UserEnabled = win32::ctypes::c_uint(1)
 KernelEnabled = win32::ctypes::c_uint(2)
@@ -43,6 +45,9 @@ MEMORY_PRIORITY_LOW = win32::ctypes::c_int(2)
 MEMORY_PRIORITY_MEDIUM = win32::ctypes::c_int(3)
 MEMORY_PRIORITY_BELOW_NORMAL = win32::ctypes::c_int(4)
 MEMORY_PRIORITY_NORMAL = win32::ctypes::c_int(5)
+THREAD_POWER_THROTTLING_CURRENT_VERSION = win32::ctypes::c_int(1)
+THREAD_POWER_THROTTLING_EXECUTION_SPEED = win32::ctypes::c_int(1)
+THREAD_POWER_THROTTLING_VALID_FLAGS = win32::ctypes::c_int(1)
 
 # C: HANDLE OpenProcess(DWORD dwDesiredAccess, WINBOOL bInheritHandle, DWORD dwProcessId)
 extern c fn OpenProcess(
@@ -183,6 +188,81 @@ extern c fn SetProcessInformation(
     ProcessInformationSize: std::ffi::c::ULong
 ) -> std::ffi::c::Int
 
+# C: WINBOOL GetSystemCpuSetInformation(PSYSTEM_CPU_SET_INFORMATION Information, ULONG BufferLength, PULONG ReturnedLength, HANDLE Process, ULONG Flags)
+extern c fn GetSystemCpuSetInformation(
+    Information: std::ffi::c::Ptr[win32::ctypes::SYSTEM_CPU_SET_INFORMATION],
+    BufferLength: std::ffi::c::ULong,
+    ReturnedLength: std::ffi::c::Ptr[std::ffi::c::ULong],
+    Process: std::ffi::c::Ptr[std::ffi::c::Void],
+    Flags: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: WINBOOL GetProcessDefaultCpuSets(HANDLE Process, PULONG CpuSetIds, ULONG CpuSetIdCount, PULONG RequiredIdCount)
+extern c fn GetProcessDefaultCpuSets(
+    Process: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetIds: std::ffi::c::Ptr[std::ffi::c::ULong],
+    CpuSetIdCount: std::ffi::c::ULong,
+    RequiredIdCount: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetProcessDefaultCpuSets(HANDLE Process, const ULONG *CpuSetIds, ULONG CpuSetIdCount)
+extern c fn SetProcessDefaultCpuSets(
+    Process: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetIds: std::ffi::c::Ptr[std::ffi::c::ULong],
+    CpuSetIdCount: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: WINBOOL GetThreadSelectedCpuSets(HANDLE Thread, PULONG CpuSetIds, ULONG CpuSetIdCount, PULONG RequiredIdCount)
+extern c fn GetThreadSelectedCpuSets(
+    Thread: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetIds: std::ffi::c::Ptr[std::ffi::c::ULong],
+    CpuSetIdCount: std::ffi::c::ULong,
+    RequiredIdCount: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetThreadSelectedCpuSets(HANDLE Thread, const ULONG *CpuSetIds, ULONG CpuSetIdCount)
+extern c fn SetThreadSelectedCpuSets(
+    Thread: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetIds: std::ffi::c::Ptr[std::ffi::c::ULong],
+    CpuSetIdCount: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: HRESULT GetMachineTypeAttributes(USHORT Machine, MACHINE_ATTRIBUTES *MachineTypeAttributes)
+extern c fn GetMachineTypeAttributes(
+    Machine: std::ffi::c::UShort,
+    MachineTypeAttributes: std::ffi::c::Ptr[std::ffi::c::UInt]
+) -> std::ffi::c::Long
+
+# C: WINBOOL GetProcessDefaultCpuSetMasks(HANDLE Process, PGROUP_AFFINITY CpuSetMasks, USHORT CpuSetMaskCount, PUSHORT RequiredMaskCount)
+extern c fn GetProcessDefaultCpuSetMasks(
+    Process: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetMasks: std::ffi::c::Ptr[win32::ctypes::GROUP_AFFINITY],
+    CpuSetMaskCount: std::ffi::c::UShort,
+    RequiredMaskCount: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetProcessDefaultCpuSetMasks(HANDLE Process, PGROUP_AFFINITY CpuSetMasks, USHORT CpuSetMaskCount)
+extern c fn SetProcessDefaultCpuSetMasks(
+    Process: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetMasks: std::ffi::c::Ptr[win32::ctypes::GROUP_AFFINITY],
+    CpuSetMaskCount: std::ffi::c::UShort
+) -> std::ffi::c::Int
+
+# C: WINBOOL GetThreadSelectedCpuSetMasks(HANDLE Thread, PGROUP_AFFINITY CpuSetMasks, USHORT CpuSetMaskCount, PUSHORT RequiredMaskCount)
+extern c fn GetThreadSelectedCpuSetMasks(
+    Thread: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetMasks: std::ffi::c::Ptr[win32::ctypes::GROUP_AFFINITY],
+    CpuSetMaskCount: std::ffi::c::UShort,
+    RequiredMaskCount: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetThreadSelectedCpuSetMasks(HANDLE Thread, PGROUP_AFFINITY CpuSetMasks, USHORT CpuSetMaskCount)
+extern c fn SetThreadSelectedCpuSetMasks(
+    Thread: std::ffi::c::Ptr[std::ffi::c::Void],
+    CpuSetMasks: std::ffi::c::Ptr[win32::ctypes::GROUP_AFFINITY],
+    CpuSetMaskCount: std::ffi::c::UShort
+) -> std::ffi::c::Int
+
 # C: HANDLE CreateRemoteThread(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress, LPVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId)
 extern c fn CreateRemoteThread(
     hProcess: std::ffi::c::Ptr[std::ffi::c::Void],
@@ -312,6 +392,25 @@ extern c fn SetProcessMitigationPolicy(
     dwLength: std::ffi::c::ULongLong
 ) -> std::ffi::c::Int
 
+# C: WINBOOL IsProcessCritical(HANDLE hProcess, PBOOL Critical)
+extern c fn IsProcessCritical(
+    hProcess: std::ffi::c::Ptr[std::ffi::c::Void],
+    Critical: std::ffi::c::Ptr[std::ffi::c::Int]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetProtectedPolicy(LPCGUID PolicyGuid, ULONG_PTR PolicyValue, PULONG_PTR OldPolicyValue)
+extern c fn SetProtectedPolicy(
+    PolicyGuid: std::ffi::c::Ptr[win32::ctypes::GUID],
+    PolicyValue: std::ffi::c::ULongLong,
+    OldPolicyValue: std::ffi::c::Ptr[std::ffi::c::ULongLong]
+) -> std::ffi::c::Int
+
+# C: WINBOOL QueryProtectedPolicy(LPCGUID PolicyGuid, PULONG_PTR PolicyValue)
+extern c fn QueryProtectedPolicy(
+    PolicyGuid: std::ffi::c::Ptr[win32::ctypes::GUID],
+    PolicyValue: std::ffi::c::Ptr[std::ffi::c::ULongLong]
+) -> std::ffi::c::Int
+
 # C: WINBOOL CreateProcessA(LPCSTR lpApplicationName, LPSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, WINBOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCSTR lpCurrentDirectory, LPSTARTUPINFOA lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation)
 extern c fn CreateProcessA(
     lpApplicationName: std::ffi::c::Ptr[std::ffi::c::Char],
@@ -411,6 +510,9 @@ extern c fn GetExitCodeThread(
     lpExitCode: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Int
 
+# C: LPVOID TlsGetValue2(DWORD dwTlsIndex)
+extern c fn TlsGetValue2(dwTlsIndex: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+
 # C: DWORD SuspendThread(HANDLE hThread)
 extern c fn SuspendThread(hThread: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::ULong
 
@@ -438,6 +540,18 @@ extern c fn SetThreadIdealProcessorEx(
     lpIdealProcessor: std::ffi::c::Ptr[win32::ctypes::PROCESSOR_NUMBER],
     lpPreviousIdealProcessor: std::ffi::c::Ptr[win32::ctypes::PROCESSOR_NUMBER]
 ) -> std::ffi::c::Int
+
+# C: HRESULT SetThreadDescription(HANDLE hThread, PCWSTR lpThreadDescription)
+extern c fn SetThreadDescription(
+    hThread: std::ffi::c::Ptr[std::ffi::c::Void],
+    lpThreadDescription: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Long
+
+# C: HRESULT GetThreadDescription(HANDLE hThread, PWSTR *ppszThreadDescription)
+extern c fn GetThreadDescription(
+    hThread: std::ffi::c::Ptr[std::ffi::c::Void],
+    ppszThreadDescription: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::UShort]]
+) -> std::ffi::c::Long
 
 # C: GetStartupInfo: an alias of GetStartupInfoW, void GetStartupInfoW(LPSTARTUPINFOW lpStartupInfo)
 extern c fn GetStartupInfo named "GetStartupInfoW"(

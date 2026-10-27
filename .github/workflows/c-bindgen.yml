@@ -26,7 +26,7 @@ permissions:
 jobs:
   bindings:
     name: c-bindgen (generate, check, acceptance)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
@@ -44,19 +44,11 @@ jobs:
       # (C-BINDGEN.md, "Pipeline"). CMake and Ninja build BoringSSL and SDL3.
       # The windows-x86_64-gnu target reads MinGW-w64's headers and import
       # libraries (mingw-w64-x86-64-dev: the Win32 profile pins its version
-      # macros, MinGW-w64 11.0.1), clang probes it (--target=
+      # macros, MinGW-w64 13.0.0), clang probes it (--target=
       # x86_64-w64-mingw32), llvm-nm reads the import libraries, and
       # MinGW-w64's GCC is the layouts' second compiler.
       - name: Install the C toolchain
-        run: |
-          sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            clang llvm gcc-aarch64-linux-gnu libc6-dev-arm64-cross cmake ninja-build \
-            mingw-w64-x86-64-dev gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
-          clang --version
-          clang --target=aarch64-linux-gnu -E -v -x c /dev/null -o /dev/null 2>&1 | sed -n '/search starts here/,/End of search/p'
-          clang --target=x86_64-w64-mingw32 -E -v -x c /dev/null -o /dev/null 2>&1 | sed -n '/search starts here/,/End of search/p'
-          x86_64-w64-mingw32-gcc --version | head -1
+        run: bash .devcontainer/setup-c-toolchain.sh
 
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native

@@ -1,9 +1,9 @@
 seed	exit	wall_ms	stdout	stderr-first-line
 plain	0	3	[true, false, true, true]	
 many-args	0	3	[true, false, true, true]	
-numeric-sample-2	0	3	[true, false, true, true]	
+numeric-sample-2	0	4	[true, false, true, true]	
 numeric-sample-4	0	4	[true, false, true, true]	
-numeric-sample-7	0	3	[true, false, true, true]	
+numeric-sample-7	0	4	[true, false, true, true]	
 numeric-sample-8	0	4	[true, false, true, true]	
 numeric-sample-9	0	3	[true, false, true, true]	
 one-empty-arg	0	4	[true, false, true, true]	

@@ -4029,6 +4029,30 @@ extern c fn DefDlgProcW(
     lParam: std::ffi::c::LongLong
 ) -> std::ffi::c::LongLong
 
+# C: WINBOOL SetDialogControlDpiChangeBehavior(HWND hWnd, DIALOG_CONTROL_DPI_CHANGE_BEHAVIORS mask, DIALOG_CONTROL_DPI_CHANGE_BEHAVIORS values)
+extern c fn SetDialogControlDpiChangeBehavior(
+    hWnd: std::ffi::c::Ptr[win32::ctypes::HWND__],
+    mask: std::ffi::c::UInt,
+    values: std::ffi::c::UInt
+) -> std::ffi::c::Int
+
+# C: DIALOG_CONTROL_DPI_CHANGE_BEHAVIORS GetDialogControlDpiChangeBehavior(HWND hWnd)
+extern c fn GetDialogControlDpiChangeBehavior(
+    hWnd: std::ffi::c::Ptr[win32::ctypes::HWND__]
+) -> std::ffi::c::UInt
+
+# C: WINBOOL SetDialogDpiChangeBehavior(HWND hDlg, DIALOG_DPI_CHANGE_BEHAVIORS mask, DIALOG_DPI_CHANGE_BEHAVIORS values)
+extern c fn SetDialogDpiChangeBehavior(
+    hDlg: std::ffi::c::Ptr[win32::ctypes::HWND__],
+    mask: std::ffi::c::UInt,
+    values: std::ffi::c::UInt
+) -> std::ffi::c::Int
+
+# C: DIALOG_DPI_CHANGE_BEHAVIORS GetDialogDpiChangeBehavior(HWND hDlg)
+extern c fn GetDialogDpiChangeBehavior(
+    hDlg: std::ffi::c::Ptr[win32::ctypes::HWND__]
+) -> std::ffi::c::UInt
+
 # C: WINBOOL CallMsgFilterA(LPMSG lpMsg, int nCode)
 extern c fn CallMsgFilterA(
     lpMsg: std::ffi::c::Ptr[win32::ctypes::MSG],
@@ -6930,6 +6954,11 @@ extern c fn GetAwarenessFromDpiAwarenessContext(
     value: std::ffi::c::Ptr[win32::ctypes::DPI_AWARENESS_CONTEXT__]
 ) -> std::ffi::c::Int
 
+# C: UINT GetDpiFromDpiAwarenessContext(DPI_AWARENESS_CONTEXT value)
+extern c fn GetDpiFromDpiAwarenessContext(
+    value: std::ffi::c::Ptr[win32::ctypes::DPI_AWARENESS_CONTEXT__]
+) -> std::ffi::c::UInt
+
 # C: WINBOOL AreDpiAwarenessContextsEqual(DPI_AWARENESS_CONTEXT dpiContextA, DPI_AWARENESS_CONTEXT dpiContextB)
 extern c fn AreDpiAwarenessContextsEqual(
     dpiContextA: std::ffi::c::Ptr[win32::ctypes::DPI_AWARENESS_CONTEXT__],
@@ -6947,6 +6976,11 @@ extern c fn GetDpiForWindow(hwnd: std::ffi::c::Ptr[win32::ctypes::HWND__]) -> st
 # C: UINT GetDpiForSystem(void)
 extern c fn GetDpiForSystem() -> std::ffi::c::UInt
 
+# C: UINT GetSystemDpiForProcess(HANDLE hProcess)
+extern c fn GetSystemDpiForProcess(
+    hProcess: std::ffi::c::Ptr[std::ffi::c::Void]
+) -> std::ffi::c::UInt
+
 # C: WINBOOL EnableNonClientDpiScaling(HWND hwnd)
 extern c fn EnableNonClientDpiScaling(
     hwnd: std::ffi::c::Ptr[win32::ctypes::HWND__]
@@ -6961,6 +6995,17 @@ extern c fn InheritWindowMonitor(
 # C: WINBOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value)
 extern c fn SetProcessDpiAwarenessContext(
     value: std::ffi::c::Ptr[win32::ctypes::DPI_AWARENESS_CONTEXT__]
+) -> std::ffi::c::Int
+
+# C: DPI_HOSTING_BEHAVIOR SetThreadDpiHostingBehavior(DPI_HOSTING_BEHAVIOR value)
+extern c fn SetThreadDpiHostingBehavior(value: std::ffi::c::Int) -> std::ffi::c::Int
+
+# C: DPI_HOSTING_BEHAVIOR GetThreadDpiHostingBehavior(void)
+extern c fn GetThreadDpiHostingBehavior() -> std::ffi::c::Int
+
+# C: DPI_HOSTING_BEHAVIOR GetWindowDpiHostingBehavior(HWND hwnd)
+extern c fn GetWindowDpiHostingBehavior(
+    hwnd: std::ffi::c::Ptr[win32::ctypes::HWND__]
 ) -> std::ffi::c::Int
 
 # C: WINBOOL GetCursorInfo(PCURSORINFO pci)

@@ -1210,4 +1210,6 @@ recorded here, not worked around.
   recognizer -- recognition used as the oracle of emission -- before
   designing any bidirectional syntax. The declaration model needs no change
   for that; a grammar language that both parses and prints would, and is
-  not proposed.
+  not proposed. (Done, and taken further: EMITTER-COROUTINE-EXPLORATION.md
+  proves emitters against the declarations statically, and generates the
+  witnesses.)

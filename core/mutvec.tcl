@@ -37,6 +37,13 @@
 #   std::mutable_vector::length(v)      the number of elements
 #   std::mutable_vector::empty?(v)      length == 0
 #   std::mutable_vector::at(v, i)       the element at i (IndexNotFound)
+#   std::mutable_vector::element(v, i)  the *place* of the element at i of a
+#                                       vector the installed context owns
+#                                       (IndexNotFound): projected or observed
+#                                       where it is, never copied out of the
+#                                       vector (core/native.tcl's
+#                                       elementPlace); at run time the
+#                                       element read
 #   std::mutable_vector::push(v, x)     appends x; unit
 #   std::mutable_vector::pop(v)         removes and returns the last element
 #                                       (IndexNotFound when empty)
@@ -142,6 +149,16 @@ proc core::mutvec::at {v index} {
     variable store
     set id [Id $v std::mutable_vector::at]
     set i [Index $id $index std::mutable_vector::at]
+    return [lindex $store($id) $i]
+}
+
+# The element place (std::mutable_vector::element V INDEX): what is stored
+# there, read where the place is used -- the static rules (hir/affine.tcl)
+# keep an affine one from being copied out.
+proc core::mutvec::element {v index} {
+    variable store
+    set id [Id $v std::mutable_vector::element]
+    set i [Index $id $index std::mutable_vector::element]
     return [lindex $store($id) $i]
 }
 
@@ -329,6 +346,10 @@ core::native::register std::mutable_vector::at -arity 2 -impl core::mutvec::at \
     -param-types {mutvec int} -result-type any -runtime range-check \
     -result-shape {mutvec-element 0} -errors IndexNotFound -bounds {index mutvec 0 1} \
     -ownership {copy-out observe}
+core::native::register std::mutable_vector::element -arity 2 -impl core::mutvec::element \
+    -param-types {mutvec int} -result-type any -runtime range-check \
+    -result-shape {mutvec-element 0} -errors IndexNotFound -bounds {index mutvec 0 1} \
+    -ownership {observe observe} -element-place 1
 core::native::register std::mutable_vector::push -arity 2 -impl core::mutvec::push \
     -param-types {mutvec any} -result-type unit -runtime mutvec-mutate -ownership {place move}
 core::native::register std::mutable_vector::pop -arity 1 -impl core::mutvec::pop \

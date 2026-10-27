@@ -1,0 +1,92 @@
+# A3. A context that acquires affine state after installation
+# (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md): b1's lifecycle with b2's
+# pointers, kept in the context itself.
+#
+# The installed Store starts closed (an empty vector: installation acquires
+# nothing). `open` mallocs the string, writes it, and moves a Session -- the
+# affine pointer itself -- into the context's vector. `length` observes the
+# pointer where the context stores it, through the element place
+# `s.open.element(0)`, and hands it to strlen, which only observes it:
+# nothing is copied out of the context. `close` moves the session out
+# (pop), takes it apart and frees the string: the context is closed again,
+# with no stale pointer left in it; closing twice closes once, and a closed
+# Store reports -1. No native record, view or edit holds a pointer, and no
+# `.clone()` is written.
+#
+# (C calls run natively only.)
+#
+# expect interp: NATIVE-ONLY
+# expect compile: NATIVE-ONLY
+# expect cranelift-generic: value: [-1, 5, -1, -1, 5]
+# expect cranelift: value: [-1, 5, -1, -1, 5]
+import std::binary
+import std::binary::native
+import std::ffi::c
+import std::mutable_vector
+
+extern c fn malloc(size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void]
+extern c fn free(p: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
+extern c fn strlen(s: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::ULong
+
+layout Text:
+    size 8
+    align 1
+    field chars: array 8 of std::ffi::c::Char at 0
+
+struct Session:
+    name: std::ffi::c::Ptr[std::ffi::c::Char]
+
+opaque context struct Store:
+    open: MutableVector[Session]
+
+fn create() -> Store:
+    Store {open: std::mutable_vector::from_list([])}
+
+fn write_hello(e: NativeEdit[Text]) errors IndexNotFound:
+    std::binary::store_element(e.chars, 0, 104)
+    std::binary::store_element(e.chars, 1, 101)
+    std::binary::store_element(e.chars, 2, 108)
+    std::binary::store_element(e.chars, 3, 108)
+    std::binary::store_element(e.chars, 4, 111)
+    std::binary::store_element(e.chars, 5, 0)
+
+fn open(context s: Store) errors NativeEditNull, IndexNotFound:
+    name = std::ffi::c::retype[std::ffi::c::Char](malloc(8))
+    hello = std::binary::native::edit(Text, name)
+    hello.write_hello()
+    s.open.push(Session {name: name})
+
+fn measured(context s: Store) -> int errors IndexNotFound:
+    strlen(s.open.element(0).name)
+
+fn length(context s: Store) -> int:
+    n = measured():
+        on IndexNotFound:
+            return -1
+    n
+
+fn close(context s: Store):
+    session = s.open.pop():
+        on IndexNotFound:
+            return unit
+    {name} = session
+    memory = std::ffi::c::erase(name)
+    free(memory)
+
+fn reopen() -> int:
+    opened = open():
+        on NativeEditNull:
+            return -2
+        on IndexNotFound:
+            return -2
+    length()
+
+with context create()
+
+before = length()
+during = reopen()
+close()
+after = length()
+close()
+again = length()
+[before, during, after, again, reopen()]

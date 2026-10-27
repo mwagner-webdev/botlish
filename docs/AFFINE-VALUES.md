@@ -622,6 +622,13 @@ unrestricted whatever its contract.
 
 ### 41. Context interaction
 
+(Since CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md an installed context may
+own affine values: installation moves its value into the context, a
+context parameter is a place of that state rather than an owner -- never
+moved, copied or released -- and copying affine state out of it is
+AFFINE-CONTEXT-COPY-OUT. Affinity there is still at most once: nothing
+releases what an installed context owns when the program ends.)
+
 None new. A coroutine's context providers are still fixed at its
 construction (COROUTINES.md point 39); moving it through calls, structs and
 generic functions changes nothing about them. A generic function whose

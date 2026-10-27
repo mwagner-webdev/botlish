@@ -3,7 +3,6 @@
 # The constants and directly linked functions of fltwinerror.h (C-BINDGEN.md).
 import win32::ctypes
 
-FACILITY_USERMODE_FILTER_MANAGER = win32::ctypes::c_int(31)
 ERROR_FLT_IO_COMPLETE = win32::ctypes::c_long(2031617)
 ERROR_FLT_NO_HANDLER_DEFINED = win32::ctypes::c_long(-2145452031)
 ERROR_FLT_CONTEXT_ALREADY_DEFINED = win32::ctypes::c_long(-2145452030)

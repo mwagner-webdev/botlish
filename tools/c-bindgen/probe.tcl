@@ -286,7 +286,7 @@ proc ::cbind::probe::SymbolSource {prelude names live} {
 # {list of per-parameter attribute lists}, and the IR's producer line.
 # Only the attributes whose meaning the generator translates are kept:
 # nocapture (and LLVM 21's captures(none)), readonly, writeonly, readnone,
-# returned.
+# returned, in that order whatever order the IR spells them in.
 proc ::cbind::probe::evidence {config hprofile source symbols} {
     lassign [::chdr::toolchain::llvm $config $hprofile $source {-w -O2}] ok ir stderr command
     if {!$ok} {
@@ -305,9 +305,11 @@ proc ::cbind::probe::evidence {config hprofile source symbols} {
         foreach p [SplitParams $params] {
             set kept {}
             foreach a {nocapture readonly writeonly readnone returned} {
-                if {[regexp "\\m$a\\M" $p]} { lappend kept $a }
+                if {[regexp "\\m$a\\M" $p]
+                        || ($a eq "nocapture" && [regexp {captures\(none\)} $p])} {
+                    lappend kept $a
+                }
             }
-            if {[regexp {captures\(none\)} $p] && "nocapture" ni $kept} { lappend kept nocapture }
             lappend facts $kept
         }
         dict set out $sym $facts

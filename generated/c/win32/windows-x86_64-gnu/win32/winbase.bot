@@ -459,6 +459,7 @@ FORMAT_MESSAGE_FROM_HMODULE = win32::ctypes::c_int(2048)
 FORMAT_MESSAGE_FROM_SYSTEM = win32::ctypes::c_int(4096)
 FORMAT_MESSAGE_ARGUMENT_ARRAY = win32::ctypes::c_int(8192)
 FORMAT_MESSAGE_MAX_WIDTH_MASK = win32::ctypes::c_int(255)
+FORMAT_MESSAGE_ALLOCATE_BUFFER = win32::ctypes::c_int(256)
 FILE_ENCRYPTABLE = win32::ctypes::c_int(0)
 FILE_IS_ENCRYPTED = win32::ctypes::c_int(1)
 FILE_SYSTEM_ATTR = win32::ctypes::c_int(2)
@@ -469,7 +470,6 @@ FILE_SYSTEM_NOT_SUPPORT = win32::ctypes::c_int(6)
 FILE_USER_DISALLOWED = win32::ctypes::c_int(7)
 FILE_READ_ONLY = win32::ctypes::c_int(8)
 FILE_DIR_DISALLOWED = win32::ctypes::c_int(9)
-FORMAT_MESSAGE_ALLOCATE_BUFFER = win32::ctypes::c_int(256)
 EFS_USE_RECOVERY_KEYS = win32::ctypes::c_int(1)
 CREATE_FOR_IMPORT = win32::ctypes::c_int(1)
 CREATE_FOR_DIR = win32::ctypes::c_int(2)
@@ -672,6 +672,11 @@ PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_CORE_SHARING_DEFER = win32::ctypes:
 PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_CORE_SHARING_ALWAYS_ON = win32::ctypes::c_ulong_long(4503599627370496)
 PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_CORE_SHARING_ALWAYS_OFF = win32::ctypes::c_ulong_long(9007199254740992)
 PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_CORE_SHARING_RESERVED = win32::ctypes::c_ulong_long(13510798882111488)
+PROCESS_CREATION_MITIGATION_POLICY2_FSCTL_SYSTEM_CALL_DISABLE_MASK = win32::ctypes::c_ulong_long(216172782113783808)
+PROCESS_CREATION_MITIGATION_POLICY2_FSCTL_SYSTEM_CALL_DISABLE_DEFER = win32::ctypes::c_ulong_long(0)
+PROCESS_CREATION_MITIGATION_POLICY2_FSCTL_SYSTEM_CALL_DISABLE_ALWAYS_ON = win32::ctypes::c_ulong_long(72057594037927936)
+PROCESS_CREATION_MITIGATION_POLICY2_FSCTL_SYSTEM_CALL_DISABLE_ALWAYS_OFF = win32::ctypes::c_ulong_long(144115188075855872)
+PROCESS_CREATION_MITIGATION_POLICY2_FSCTL_SYSTEM_CALL_DISABLE_RESERVED = win32::ctypes::c_ulong_long(216172782113783808)
 PROC_THREAD_ATTRIBUTE_JOB_LIST = win32::ctypes::c_int(131085)
 PROCESS_CREATION_CHILD_PROCESS_RESTRICTED = win32::ctypes::c_int(1)
 PROCESS_CREATION_CHILD_PROCESS_OVERRIDE = win32::ctypes::c_int(2)
@@ -2321,16 +2326,6 @@ extern c fn Wow64EnableWow64FsRedirection(
     Wow64FsEnableRedirection: std::ffi::c::UChar
 ) -> std::ffi::c::UChar
 
-# C: WINBOOL SetDllDirectoryA(LPCSTR lpPathName)
-extern c fn SetDllDirectoryA(
-    lpPathName: std::ffi::c::Ptr[std::ffi::c::Char]
-) -> std::ffi::c::Int
-
-# C: WINBOOL SetDllDirectoryW(LPCWSTR lpPathName)
-extern c fn SetDllDirectoryW(
-    lpPathName: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Int
-
 # C: DWORD GetDllDirectoryA(DWORD nBufferLength, LPSTR lpBuffer)
 extern c fn GetDllDirectoryA(
     nBufferLength: std::ffi::c::ULong,
@@ -2412,6 +2407,16 @@ extern c fn SetFirmwareEnvironmentVariableExW(
     pValue: std::ffi::c::Ptr[std::ffi::c::Void],
     nSize: std::ffi::c::ULong,
     dwAttributes: std::ffi::c::ULong
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetDllDirectoryA(LPCSTR lpPathName)
+extern c fn SetDllDirectoryA(
+    lpPathName: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> std::ffi::c::Int
+
+# C: WINBOOL SetDllDirectoryW(LPCWSTR lpPathName)
+extern c fn SetDllDirectoryW(
+    lpPathName: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::Int
 
 # C: WINBOOL CreateDirectoryExA(LPCSTR lpTemplateDirectory, LPCSTR lpNewDirectory, LPSECURITY_ATTRIBUTES lpSecurityAttributes)
@@ -2768,17 +2773,17 @@ extern c fn ReplaceFileW(
     lpReserved: std::ffi::c::Ptr[std::ffi::c::Void]
 ) -> std::ffi::c::Int
 
-# C: WINBOOL CreateHardLinkA(LPCSTR lpFileName, LPCSTR lpExistingFileName, LPSECURITY_ATTRIBUTES lpSecurityAttributes)
-extern c fn CreateHardLinkA(
-    lpFileName: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpExistingFileName: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES]
-) -> std::ffi::c::Int
-
 # C: WINBOOL CreateHardLinkW(LPCWSTR lpFileName, LPCWSTR lpExistingFileName, LPSECURITY_ATTRIBUTES lpSecurityAttributes)
 extern c fn CreateHardLinkW(
     lpFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
     lpExistingFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES]
+) -> std::ffi::c::Int
+
+# C: WINBOOL CreateHardLinkA(LPCSTR lpFileName, LPCSTR lpExistingFileName, LPSECURITY_ATTRIBUTES lpSecurityAttributes)
+extern c fn CreateHardLinkA(
+    lpFileName: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpExistingFileName: std::ffi::c::Ptr[std::ffi::c::Char],
     lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES]
 ) -> std::ffi::c::Int
 
@@ -4323,21 +4328,6 @@ extern c fn InterlockedCompareExchangePointerRelease named "_InterlockedCompareE
     ExChange: std::ffi::c::Ptr[std::ffi::c::Void],
     Comperand: std::ffi::c::Ptr[std::ffi::c::Void]
 ) -> std::ffi::c::Ptr[std::ffi::c::Void]
-
-# C: EnumResourceNames: an alias of EnumResourceNamesW, WINBOOL EnumResourceNamesW(HMODULE hModule, LPCWSTR lpType, ENUMRESNAMEPROCW lpEnumFunc, LONG_PTR lParam)
-extern c fn EnumResourceNames named "EnumResourceNamesW"(
-    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    lpType: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpEnumFunc: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[win32::ctypes::HINSTANCE__], std::ffi::c::Ptr[std::ffi::c::UShort], std::ffi::c::Ptr[std::ffi::c::UShort], std::ffi::c::LongLong], return: std::ffi::c::Int}],
-    lParam: std::ffi::c::LongLong
-) -> std::ffi::c::Int
-
-# C: FindResource: an alias of FindResourceW, HRSRC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType)
-extern c fn FindResource named "FindResourceW"(
-    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpType: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
 
 # C: EnumResourceLanguages: an alias of EnumResourceLanguagesW, WINBOOL EnumResourceLanguagesW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, ENUMRESLANGPROCW lpEnumFunc, LONG_PTR lParam)
 extern c fn EnumResourceLanguages named "EnumResourceLanguagesW"(
