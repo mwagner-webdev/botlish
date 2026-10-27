@@ -608,7 +608,13 @@ unchanged checkout.
   `recovery-facts-by-spelling`, came with the fix of a defect this
   milestone found in itself (below).
 * Mutants of code this milestone rewrote, in other harnesses (their texts
-  updated, same rules): RETARGETED-PLACEHOLDER.
+  updated, same rules), each run with `-only`: module-privacy's
+  `qualified-lookup-ignored`, `rooted-lookup-ignored`, `type-lookup-ignored`,
+  `error-lookup-ignored` and `type-import-ignored` (5 killed),
+  error-payloads' `qualified-error-unauthorized`, hashable's
+  `ordinary-code-can-fully-qualify` and type-predicates'
+  `module-member-admits-type-predicate` (each killed): 8 of 8 apply and are
+  killed.
 * `audit/hir-interchange/tools/mutate.tcl`: HX-PLACEHOLDER;
   `audit/compiler-service/tools/mutate.tcl`: CS-PLACEHOLDER.
 * `audit/bot-modules/tools/fuzz.tcl` (new: random application trees of
