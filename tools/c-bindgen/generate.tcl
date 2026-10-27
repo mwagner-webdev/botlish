@@ -519,8 +519,11 @@ proc ::cbind::generate::buildShim {profile target out {dir ""}} {
 # Copies the files of application APP (a directory, or a program file and
 # the application modules beside it) and the generated binding in DIR
 # (PROFILE/TARGET's committed one by default) into INTO: one application
-# root, which the ordinary compiler compiles.
-proc ::cbind::generate::stage {profile target app into {dir ""}} {
+# root, which the ordinary compiler compiles. With PACKAGE 1 the binding is
+# installed as the application's package instead (INTO/.bot_modules/NS/NS/,
+# NS the profile's namespace: BOT-MODULES-MILESTONE-1.md), its own scope
+# beside the application's modules rather than files of the application.
+proc ::cbind::generate::stage {profile target app into {dir ""} {package 0}} {
     if {$dir eq ""} { set dir [::cbind::profile::outputDir $profile $target] }
     if {![file isdirectory [file join $dir [dict get $profile name]]]} {
         error "c-bindgen stage: no generated binding in $dir (run generate)"
@@ -533,6 +536,11 @@ proc ::cbind::generate::stage {profile target app into {dir ""}} {
         }
     }
     set ns [dict get $profile name]
+    if {$package} {
+        set into [file join $into .bot_modules $ns]
+        file delete -force $into
+        file mkdir $into
+    }
     file delete -force [file join $into $ns]
     file copy -force [file join $dir $ns] [file join $into $ns]
 }

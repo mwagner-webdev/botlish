@@ -530,13 +530,13 @@
 @@ qualified-error-unauthorized a qualified error is accepted without its namespace's import
 ## surface/modules.tcl
 <<<<
-        ErrorRef [dict get $node name] [dict get $node nameSpan] found
+            Put node name [ErrorRef [dict get $node name] [dict get $node nameSpan]]
 ====
-        list
+            list
 >>>>
 ## surface/modules.tcl
 <<<<
-                ErrorRef [dict get $handler name] [dict get $handler nameSpan] found
+                dict set handler name [ErrorRef [dict get $handler name] [dict get $handler nameSpan]]
 ====
-                list
+                set handler
 >>>>

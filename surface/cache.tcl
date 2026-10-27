@@ -37,7 +37,10 @@
 # standard namespace does not need), which must still have none. A module's
 # paths are a function of its namespace, the library directory, the
 # target's architecture and the application root alone (surface/modules.tcl:
-# no search path), so nothing else can change which files a program reads.
+# no search path), so nothing else can change which files a program reads --
+# but which packages are installed, below the root: every package directory
+# the loader asked about (there or not) and every file of a package's tree
+# it probed are dependencies too (BOT-MODULES-MILESTONE-1.md).
 #
 # Targets: the key holds the full target name (macos-aarch64, never its
 # architecture alone), so a compilation for one target never reads another
@@ -142,7 +145,16 @@ proc surface::cache::Contents {path existsVar} {
 # its build read (READS: PATH -> text). Every candidate path of every
 # namespace is kept, whichever exists: a file appearing at another one
 # changes what the build would do.
-proc surface::cache::Dependencies {hir reads {target ""} {root ""}} {
+#
+# Package scopes (BOT-MODULES-MILESTONE-1.md): which file a namespace names
+# depends on whether a package of its first segment is installed, in the
+# importing file's scope, and a package's modules on its own scope's. The
+# loader records every such probe -- each package directory it asked about
+# (OWNER/.bot_modules/NAME, there or not) and each candidate file in a
+# package's tree -- in PROBES (PATH -> file or directory, surface/modules.tcl's
+# Probe), and every one is a dependency: {PATH EXISTS "" directory} for a
+# directory, which must still be one (or still none).
+proc surface::cache::Dependencies {hir reads {target ""} {root ""} {probes ""}} {
     set target [hir::cabi::ResolveTarget $target]
     if {$target eq ""} {
         set arch ""
@@ -157,6 +169,11 @@ proc surface::cache::Dependencies {hir reads {target ""} {root ""}} {
             lappend imported [join [lrange $segments 0 end-1] ::]
         }
         foreach namespace $imported {
+            if {[string first / $namespace] >= 0} {
+                # A module of a package installed by a package: its paths are
+                # the loader's probes (below).
+                continue
+            }
             # A standard namespace's library files (none outside std), and
             # its path under the application root: the application's module
             # or, for std::NAME, the file that would make the import
@@ -170,7 +187,18 @@ proc surface::cache::Dependencies {hir reads {target ""} {root ""}} {
             }
         }
     }
+    set directories {}
+    dict for {path kind} $probes {
+        if {$kind eq "directory"} {
+            lappend directories $path
+        } else {
+            lappend paths $path
+        }
+    }
     set result {}
+    foreach directory [lsort -unique $directories] {
+        lappend result [list $directory [surface::source::directory $directory] "" directory]
+    }
     foreach dependency [lsort -unique $paths] {
         if {$dependency eq ""} {
             continue
@@ -209,7 +237,15 @@ proc surface::cache::lookup {dir path source mode strict {target ""} {root ""}} 
             return ""
         }
         foreach dependency [dict get $entry dependencies] {
-            lassign $dependency file exists text
+            lassign $dependency file exists text kind
+            if {$kind eq "directory"} {
+                if {[surface::source::directory $file] != $exists} {
+                    dict incr stats stale
+                    dict incr stats misses
+                    return ""
+                }
+                continue
+            }
             if {[Contents $file present] ne $text || $present != $exists} {
                 dict incr stats stale
                 dict incr stats misses
@@ -243,10 +279,10 @@ proc surface::cache::Replay {hir mode channel} {
 
 # Keeps HIR, just built from the program at PATH with text SOURCE under
 # warning MODE and -strict STRICT, reading the module files READS (PATH ->
-# text), in DIR. Writes the entry under a private name, then renames it into
+# text) after the probes PROBES (Dependencies), in DIR. Writes the entry under a private name, then renames it into
 # place: a concurrent lookup sees the whole entry or none. A failure leaves
 # the cache as it was (unstored).
-proc surface::cache::store {dir path source mode strict hir reads {target ""} {root ""}} {
+proc surface::cache::store {dir path source mode strict hir reads {target ""} {root ""} {probes ""}} {
     variable stats
     variable magic
     variable version
@@ -257,7 +293,7 @@ proc surface::cache::store {dir path source mode strict hir reads {target ""} {r
     set entryPath [EntryPath $dir $key]
     set temporary ""
     try {
-        set dependencies [Dependencies $hir $reads $target $root]
+        set dependencies [Dependencies $hir $reads $target $root $probes]
         if {![surface::source::persistable]} {
             # (Asked after Dependencies, whose probes are the snapshot's too.)
             dict incr stats buffered

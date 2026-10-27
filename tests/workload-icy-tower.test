@@ -107,7 +107,9 @@ test workload-icy-tower-warning-clean {the pure modules and their programs have 
 } -result {}
 
 # The HIR of main.bot, staged with the committed generated SDL3 binding
-# (tools/c-bindgen.tcl stage) and compiled under -warnings error for
+# installed as its package .bot_modules/sdl3 (tools/c-bindgen.tcl stage
+# -package 1, as build.sh stages it: BOT-MODULES-MILESTONE-1.md) and
+# compiled under -warnings error for
 # linux-x86_64; compiled once, for the tests that read it.
 proc icyStagedHir {} {
     if {[info exists ::icyStagedHir]} {
@@ -115,7 +117,7 @@ proc icyStagedHir {} {
     }
     set stage [file join [tcltest::temporaryDirectory] icy-tower-stage]
     file delete -force $stage
-    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $::gameDir -into $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 -app $::gameDir -into $stage -package 1
     try {
         set ::icyStagedHir [surface::readProgramFile [file join $stage main.bot] -warnings error -warning-channel "" -target linux-x86_64]
     } finally {

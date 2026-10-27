@@ -1,0 +1,805 @@
+# bot-modules.test -- package-scoped modules: installed packages under
+# `.bot_modules`, downward-only resolution, and package-instance identity
+# (BOT-MODULES-MILESTONE-1.md).
+#
+# A package is an ordinary module tree installed under the immediate
+# `.bot_modules` directory of its owner: ROOT/.bot_modules/NAME for the
+# application's package NAME, PKG/.bot_modules/D for package PKG's own
+# package D. A namespace an import names is, by its first segment and nothing
+# else, the standard library's (std::...), a package's installed in the
+# importing file's own scope (its whole root namespace), or a module of that
+# scope's own tree: never a consumer's, a sibling's or an ancestor's. A
+# package instance is its place in the logical dependency tree (physics,
+# physics/geometry), and a module's canonical identity is that place and its
+# namespace below the package's root: two installed geometry packages are
+# two modules, two Point types, two Bad errors.
+#
+# Every application is a fresh directory of the tcltest temporary directory
+# (its packages under its own .bot_modules); programs are compiled by
+# surface::readProgramFile (main.tcl's front end), by main.tcl as its own
+# process, or by a bundled compiler packed the way single/package.tcl packs
+# the single executable.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot service service.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint singlePackage [expr {[info commands zipfs] ne "" && [testConstraint nativeBuilt]
+    && [file isfile [file join [file dirname [native::binary]] botlish-native]]
+    && [file isfile [file join [file dirname [native::binary]] botlish-aot-stub]]}]
+# A symbolic link to a directory: every POSIX host (a Windows host needs a
+# privilege for one).
+testConstraint symlinks [expr {$::tcl_platform(platform) eq "unix"}]
+
+set mainScript [file join $::projectRoot main.tcl]
+set ::appCounter 0
+
+# A fresh application directory holding FILES ({RELATIVE-PATH TEXT ...}, a
+# path such as .bot_modules/geo/geo.bot for a package's module): its absolute
+# path.
+proc app {files} {
+    set dir [makeDirectory bm-[pid]-[incr ::appCounter]]
+    foreach {relative text} $files {
+        writeText [file join $dir {*}[file split $relative]] $text
+    }
+    return $dir
+}
+
+proc writeText {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# The HIR of DIR/MAIN.
+proc appHir {dir {main main.bot} args} {
+    return [surface::readProgramFile [file join $dir $main] -warnings off -cache "" {*}$args]
+}
+
+# The value of DIR/MAIN on each of BACKENDS, or "TAG: VALUE" of an outcome
+# that is none.
+proc appValues {dir {backends {interp compile cranelift-generic cranelift}} {main main.bot}} {
+    set hir [appHir $dir $main]
+    lmap backend $backends {
+        lassign [outcomeUnderHir $backend $hir] tag value
+        expr {$tag eq "value" ? $value : "$tag: $value"}
+    }
+}
+
+# "KIND: MESSAGE" of the compilation of DIR/MAIN, with DIR spelled APP and the
+# library directory LIB, or accepted.
+proc appRejection {dir {main main.bot}} {
+    if {[catch {appHir $dir $main} message options]} {
+        set kind [lindex [dict get $options -errorcode] end]
+        return "$kind: [string map [list $dir APP $::core::libraryDir LIB] $message]"
+    }
+    return accepted
+}
+
+proc removeApps {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] bm-[pid]-* bm-sdl-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+# The files of HIR as {IDENTITY RELATIVE-PATH} pairs, sorted: the module each
+# FileId was loaded as (its section's namespace; "" for the entry program),
+# its path relative to DIR (LIB/... for the standard library's).
+proc hirModules {hir dir} {
+    set namespaces [dict create]
+    dict for {ns scope} [dict get $hir modules] {
+        dict set namespaces [lindex [dict get $hir scopes $scope origin] 1] $ns
+    }
+    lsort [lmap {id file} [dict get $hir files] {
+        list [dict getdef $namespaces $id ""] [string map [list $dir/ "" $::core::libraryDir LIB] [dict get $file path]]
+    }]
+}
+
+# The output of `main.tcl ARGS` run as its own process from the working
+# directory CWD.
+proc compilerIn {cwd args} {
+    set here [pwd]
+    cd $cwd
+    try {
+        return [exec [info nameofexecutable] $::mainScript {*}$args 2>@1]
+    } finally {
+        cd $here
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Fixtures
+
+# A package `widgets` with a nested module and an installed package of its
+# own, `helper`.
+set widgets {
+    .bot_modules/widgets/widgets.bot "import widgets::shapes\nimport helper\n\nfn area(n: int) -> int:\n    widgets::shapes::square(n) + helper::one()\n"
+    .bot_modules/widgets/widgets/shapes.bot "fn square(n: int) -> int:\n    n * n\n"
+    .bot_modules/widgets/.bot_modules/helper/helper.bot "fn one() -> int:\n    1\n"
+}
+
+# Two packages, physics and rendering, each with its own installed geometry:
+# the same namespace, the same names, other declarations.
+proc geometryPackage {fields make} {
+    return "struct Point:\n$fields\nenum Side:\n    Left, Right\n\nerror Bad:\n    code: int\n\nfn make(n: int) -> Point:\n    $make\n\nfn norm(p: Point) -> int:\n    p.x * 10\n\nfn side(n: int) -> Side:\n    if n > 0:\n        return Side::Right\n    Side::Left\n\nfn check(n: int) -> int errors Bad:\n    if n < 0:\n        fail Bad {code: n}\n    n\n"
+}
+set twoGeometries [list \
+    .bot_modules/physics/physics.bot "import geometry\n\nfn make(n: int) -> geometry::Point:\n    geometry::make(n)\n\nfn read(p: geometry::Point) -> int:\n    p.x\n\nfn normed(n: int) -> int:\n    geometry::make(n).norm()\n\nfn side(n: int) -> geometry::Side:\n    geometry::side(n)\n\nfn safe(n: int) -> int:\n    geometry::check(n):\n        on geometry::Bad {code}:\n            code * 100\n" \
+    .bot_modules/physics/.bot_modules/geometry/geometry.bot [geometryPackage "    x: int\n" "Point {x: n}"] \
+    .bot_modules/rendering/rendering.bot "import geometry\n\nfn make(n: int) -> geometry::Point:\n    geometry::make(n)\n\nfn read(p: geometry::Point) -> int:\n    p.x + p.y\n\nfn normed(n: int) -> int:\n    geometry::make(n).norm()\n\nfn is_right(s: geometry::Side) -> bool:\n    s == geometry::Side::Right\n\nfn safe(n: int) -> int:\n    geometry::check(n):\n        on geometry::Bad {code}:\n            code * 1000\n" \
+    .bot_modules/rendering/.bot_modules/geometry/geometry.bot [geometryPackage "    x: int\n    y: int\n" "Point {x: n, y: n + 1}"]]
+set twoMain "import physics\nimport rendering\n\n\[physics::read(physics::make(3)), rendering::read(rendering::make(3)), physics::normed(2), rendering::normed(2), physics::safe(-1), rendering::safe(-1)\]\n"
+
+# ---------------------------------------------------------------------------
+# 1. Without .bot_modules nothing changes
+
+test bm-no-packages {an application with no .bot_modules resolves exactly as before: its own modules and the standard library, every module's identity its namespace} -body {
+    set dir [app {
+        main.bot "import game\nimport std::list\n\n\[game::score(4), std::list::length(\[1, 2\])\]\n"
+        game.bot "import util::math\n\nfn score(n: int) -> int:\n    util::math::twice(n)\n"
+        util/math.bot "fn twice(x: int) -> int:\n    x + x\n"
+    }]
+    list [appValues $dir] [hirModules [appHir $dir] $dir]
+} -cleanup removeApps -result {{{[8, 2]} {[8, 2]} {[8, 2]} {[8, 2]}} {{game game.bot} {std::list LIB/list.bot} {util::math util/math.bot} {{} main.bot}}}
+
+test bm-no-packages-same-hir {an application's HIR is the same with and without an unrelated .bot_modules beside it (a package nobody imports changes nothing), and with one in an ancestor directory (nothing is looked up above the root)} -body {
+    set files {
+        main.bot "import game\n\ngame::score(4)\n"
+        game.bot "fn score(n: int) -> int:\n    n + 1\n"
+    }
+    set plain [app $files]
+    set beside [app [concat $files {.bot_modules/unused/unused.bot "fn x() -> int:\n    1\n"}]]
+    set outer [app [list .bot_modules/game/game.bot "fn score(n: int) -> int:\n    -1\n"]]
+    set nested [file join $outer project]
+    foreach {relative text} $files {
+        writeText [file join $nested $relative] $text
+    }
+    set formats [lmap dir [list $plain $beside $nested] {
+        string map [list $dir APP] [hir::format [appHir $dir]]
+    }]
+    list [llength [lsort -unique $formats]] [appValues $nested {interp}]
+} -cleanup removeApps -result {1 5}
+
+# ---------------------------------------------------------------------------
+# 2-6. Packages, their modules and their own packages
+
+test bm-direct-package {the application imports a package installed in its .bot_modules, and a nested module of it, on every backend} -body {
+    appValues [app [concat $widgets {
+        main.bot "import widgets\nimport widgets::shapes\n\n\[widgets::area(3), widgets::shapes::square(5)\]\n"
+    }]]
+} -cleanup removeApps -result {{[10, 25]} {[10, 25]} {[10, 25]} {[10, 25]}}
+
+test bm-package-files {a package's modules are its directory's files of its root namespace: widgets is PKG/widgets.bot, widgets::shapes PKG/widgets/shapes.bot, its own package helper PKG/.bot_modules/helper/helper.bot; the application's package's identity is its namespace, its own package's begins with its place (widgets/helper)} -body {
+    set dir [app [concat $widgets {main.bot "import widgets\n\nwidgets::area(2)\n"}]]
+    hirModules [appHir $dir] $dir
+} -cleanup removeApps -result {{widgets .bot_modules/widgets/widgets.bot} {widgets/helper .bot_modules/widgets/.bot_modules/helper/helper.bot} {widgets::shapes .bot_modules/widgets/widgets/shapes.bot} {{} main.bot}}
+
+test bm-rooted-agrees {a rooted import and reference name the same package module as the unrooted ones, in the application and in a package; importing both spellings is DUPLICATE-IMPORT} -body {
+    set dir [app [concat $widgets {
+        main.bot "import ::widgets::shapes\nimport widgets\n\n\[::widgets::shapes::square(4), widgets::shapes::square(4), ::widgets::area(1)\]\n"
+        twice.bot "import widgets::shapes\nimport ::widgets::shapes\n\n1\n"
+    }]]
+    writeText [file join $dir .bot_modules widgets widgets rooted.bot] "import ::widgets::shapes\nimport ::helper\n\nfn f() -> int:\n    ::widgets::shapes::square(2) + ::helper::one()\n"
+    writeText [file join $dir rooted.bot] "import widgets::rooted\n\nwidgets::rooted::f()\n"
+    list [appValues $dir {interp compile}] [appValues $dir {interp} rooted.bot] [appRejection $dir twice.bot]
+} -cleanup removeApps -result {{{[16, 16, 2]} {[16, 16, 2]}} 5 {DUPLICATE-IMPORT: APP/twice.bot:2:8: namespace "widgets::shapes" is already imported (first imported at APP/twice.bot:1:8)}}
+
+test bm-package-imports-std {a package imports the standard library like any module (and its own std/ directory is no module of anything)} -body {
+    appValues [app {
+        main.bot "import tally\n\ntally::count(\[1, 2, 3\])\n"
+        .bot_modules/tally/tally.bot "import std::list\n\nfn count(xs: List\[int\]) -> int:\n    std::list::length(xs)\n"
+        .bot_modules/tally/std/list.bot "fn length(xs) -> int:\n    -1\n"
+    }] {interp cranelift}
+} -cleanup removeApps -result {3 3}
+
+# ---------------------------------------------------------------------------
+# 7-9. Downward only: no transitive, consumer, sibling or ancestor modules
+
+test bm-no-transitive-dependency {the application cannot import a package its package installed: helper is widgets' own, so for the application it is an application path that does not exist} -body {
+    appRejection [app [concat $widgets {main.bot "import helper\n\nhelper::one()\n"}]]
+} -cleanup removeApps -result {UNKNOWN-NAMESPACE: APP/main.bot:1:8: unknown namespace "helper": no such module file APP/helper.bot (an application's own modules are the files beside its entry program)}
+
+test bm-package-cannot-see-consumer {a package cannot import its consumer's modules: the application's game is none of the package's namespaces} -body {
+    appRejection [app {
+        main.bot "import game\nimport snoop\n\nsnoop::f()\n"
+        game.bot "fn secret() -> int:\n    42\n"
+        .bot_modules/snoop/snoop.bot "import game\n\nfn f() -> int:\n    game::secret()\n"
+    }]
+} -cleanup removeApps -result {UNKNOWN-NAMESPACE: APP/.bot_modules/snoop/snoop.bot:1:8: unknown namespace "game": package snoop (instance snoop, at APP/.bot_modules/snoop) has no package "game" installed (no directory APP/.bot_modules/snoop/.bot_modules/game), and its own modules are its root namespace's, snoop and snoop::...: a package's modules see its own namespace, its own installed packages and the standard library, never its consumer's modules or packages}
+
+test bm-package-cannot-name-consumer {a package's qualified reference to a consumer's module, even one the program loaded, is UNKNOWN-NAMESPACE where a type is written too (a context parameter's type, an error payload's field)} -body {
+    set dir [app {
+        main.bot "import game\nimport snoop\n\nsnoop::f()\n"
+        game.bot "context struct Ctx:\n    n: int\n"
+        .bot_modules/snoop/snoop.bot "fn f(context c: game::Ctx) -> int:\n    c.n\n"
+        payload.bot "import game\nimport other\n\n1\n"
+        .bot_modules/other/other.bot "error Wrapped:\n    inner: game::Ctx\n"
+    }]
+    list [appRejection $dir] [appRejection $dir payload.bot]
+} -cleanup removeApps -match glob -result {{UNKNOWN-NAMESPACE: APP/.bot_modules/snoop/snoop.bot:1:17: unknown namespace "game": package snoop (instance snoop, *} {UNKNOWN-NAMESPACE: APP/.bot_modules/other/other.bot:2:12: unknown namespace "game": package other (instance other, *}}
+
+test bm-no-sibling-or-ancestor {a package never sees a sibling package or its consumer's packages: physics's geometry is physics's alone, and a package without its own geometry has none, whoever else installed one} -body {
+    set dir [app {
+        main.bot "import physics\nimport rendering\n\nrendering::draw()\n"
+        .bot_modules/geometry/geometry.bot "fn k() -> int:\n    1\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn k() -> int:\n    geometry::k()\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "fn k() -> int:\n    2\n"
+        .bot_modules/rendering/rendering.bot "import geometry\n\nfn draw() -> int:\n    geometry::k()\n"
+        deep.bot "import physics::inner\n\nphysics::inner::k()\n"
+        .bot_modules/physics/physics/inner.bot "import vector\n\nfn k() -> int:\n    vector::k()\n"
+        .bot_modules/physics/.bot_modules/geometry/.bot_modules/vector/vector.bot "fn k() -> int:\n    3\n"
+    }]
+    list [appRejection $dir] [appRejection $dir deep.bot]
+} -cleanup removeApps -match glob -result {{UNKNOWN-NAMESPACE: APP/.bot_modules/rendering/rendering.bot:1:8: unknown namespace "geometry": package rendering (instance rendering, at APP/.bot_modules/rendering) has no package "geometry" installed*} {UNKNOWN-NAMESPACE: APP/.bot_modules/physics/physics/inner.bot:1:8: unknown namespace "vector": package physics (instance physics, at APP/.bot_modules/physics) has no package "vector" installed*}}
+
+test bm-no-upward-search {a package's own package never sees the application's modules or the packages above it: geometry inside physics cannot import physics, the application's util or the application's vector} -body {
+    set dir [app {
+        main.bot "import physics\n\nphysics::k()\n"
+        util.bot "fn k() -> int:\n    1\n"
+        .bot_modules/vector/vector.bot "fn k() -> int:\n    1\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn k() -> int:\n    geometry::k()\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "import physics\nimport util\nimport vector\n\nfn k() -> int:\n    1\n"
+    }]
+    appRejection $dir
+} -cleanup removeApps -match glob -result {UNKNOWN-NAMESPACE: APP/.bot_modules/physics/.bot_modules/geometry/geometry.bot:1:8: unknown namespace "physics": package geometry (instance physics/geometry, at APP/.bot_modules/physics/.bot_modules/geometry) has no package "physics" installed*}
+
+# ---------------------------------------------------------------------------
+# 10-13. Collisions, std, missing modules
+
+test bm-application-package-collision {an application file of a namespace an installed package claims is MODULE-COLLISION, naming both -- the package's module, or that the package has none -- never a silent choice} -body {
+    set dir [app [concat $widgets {
+        main.bot "import widgets\n\n1\n"
+        widgets.bot "fn area(n: int) -> int:\n    0\n"
+        extra.bot "import widgets::extra\n\n1\n"
+        widgets/extra.bot "fn x() -> int:\n    0\n"
+    }]]
+    list [appRejection $dir] [appRejection $dir extra.bot]
+} -cleanup removeApps -result {{MODULE-COLLISION: APP/main.bot:1:8: application file APP/widgets.bot would be the namespace "widgets", but "widgets" is the root namespace of the package installed at APP/.bot_modules/widgets (whose module is APP/.bot_modules/widgets/widgets.bot): an installed package claims its root namespace, and `import widgets` never chooses between an application module and a package's; rename or move the application file, or remove the package} {MODULE-COLLISION: APP/extra.bot:1:8: application file APP/widgets/extra.bot would be the namespace "widgets::extra", but "widgets" is the root namespace of the package installed at APP/.bot_modules/widgets (which has no module "widgets::extra"): an installed package claims its root namespace, and `import widgets::extra` never chooses between an application module and a package's; rename or move the application file, or remove the package}}
+
+test bm-entry-file-is-no-module {an entry file named like an installed package is no module, and collides with nothing: its import of that namespace is the package's} -body {
+    appValues [app [concat $widgets {widgets.bot "import widgets\n\nwidgets::area(2)\n"}]] {interp} widgets.bot
+} -cleanup removeApps -result 5
+
+test bm-unimported-application-file-collides-with-nothing {an application file of a package's namespace that nothing imports collides with nothing: the package's other modules are imported as usual} -body {
+    appValues [app [concat $widgets {
+        main.bot "import widgets::shapes\n\nwidgets::shapes::square(3)\n"
+        widgets.bot "fn area(n: int) -> int:\n    0\n"
+    }]] {interp}
+} -cleanup removeApps -result 9
+
+test bm-package-dependency-collision {a package that installs a package of its own root namespace's name is MODULE-COLLISION at an import of that namespace from the package} -body {
+    appRejection [app {
+        main.bot "import widgets\n\nwidgets::f()\n"
+        .bot_modules/widgets/widgets.bot "import widgets::shapes\n\nfn f() -> int:\n    widgets::shapes::g()\n"
+        .bot_modules/widgets/widgets/shapes.bot "fn g() -> int:\n    1\n"
+        .bot_modules/widgets/.bot_modules/widgets/widgets/shapes.bot "fn g() -> int:\n    2\n"
+    }]
+} -cleanup removeApps -result {MODULE-COLLISION: APP/.bot_modules/widgets/widgets.bot:1:8: namespace "widgets::shapes" is the root namespace of package widgets (instance widgets, at APP/.bot_modules/widgets) itself, and the package has a package of that name installed too (APP/.bot_modules/widgets/.bot_modules/widgets): a package's own modules and a package it installs never share a root namespace, and `import widgets::shapes` never chooses between them; rename or remove the installed package}
+
+test bm-std-reserved {an installed package directory named std never shadows the standard library: importing std::NAME beside one is RESERVED-NAMESPACE, in the application and in a package} -body {
+    set dir [app {
+        main.bot "import std::list\n\nstd::list::length(\[1\])\n"
+        .bot_modules/std/list.bot "fn length(xs) -> int:\n    -1\n"
+        .bot_modules/std/std/list.bot "fn length(xs) -> int:\n    -1\n"
+    }]
+    set pkg [app {
+        main.bot "import tally\n\ntally::count()\n"
+        .bot_modules/tally/tally.bot "import std::list\n\nfn count() -> int:\n    std::list::length(\[1\])\n"
+        .bot_modules/tally/.bot_modules/std/std/list.bot "fn length(xs) -> int:\n    -1\n"
+    }]
+    list [appRejection $dir] [string map [list $pkg APP] [appRejection $pkg]]
+} -cleanup removeApps -result {{RESERVED-NAMESPACE: APP/main.bot:1:8: the application (APP) has an installed package directory APP/.bot_modules/std, but std and every namespace under it belong to the standard library: no package is ever named std, and `import std::list` never chooses between the two; remove or rename the package directory} {RESERVED-NAMESPACE: APP/.bot_modules/tally/tally.bot:1:8: package tally (instance tally, at APP/.bot_modules/tally) has an installed package directory APP/.bot_modules/tally/.bot_modules/std, but std and every namespace under it belong to the standard library: no package is ever named std, and `import std::list` never chooses between the two; remove or rename the package directory}}
+
+test bm-missing-package-module {a package installed without the module an import names: the diagnostic names the package and the file it would be (an incomplete package tree); a package's file outside its root namespace is no module, and the diagnostic says so} -body {
+    set dir [app {
+        main.bot "import widgets::nosuch\n\n1\n"
+        root.bot "import widgets\n\n1\n"
+        .bot_modules/widgets/widgets/shapes.bot "fn g() -> int:\n    1\n"
+        stray.bot "import loose\n\nloose::f()\n"
+        .bot_modules/loose/loose.bot "import other\n\nfn f() -> int:\n    other::g()\n"
+        .bot_modules/loose/other.bot "fn g() -> int:\n    1\n"
+    }]
+    list [appRejection $dir] [appRejection $dir root.bot] [appRejection $dir stray.bot]
+} -cleanup removeApps -result {{UNKNOWN-NAMESPACE: APP/main.bot:1:8: unknown namespace "widgets::nosuch": the package "widgets" installed at APP/.bot_modules/widgets has no module "widgets::nosuch" (no such module file APP/.bot_modules/widgets/widgets/nosuch.bot)} {UNKNOWN-NAMESPACE: APP/root.bot:1:8: unknown namespace "widgets": the package "widgets" installed at APP/.bot_modules/widgets has no module "widgets" (no such module file APP/.bot_modules/widgets/widgets.bot)} {UNKNOWN-NAMESPACE: APP/.bot_modules/loose/loose.bot:1:8: unknown namespace "other": package loose (instance loose, at APP/.bot_modules/loose) has no package "other" installed (no directory APP/.bot_modules/loose/.bot_modules/other), and its own modules are its root namespace's, loose and loose::...: a package's modules see its own namespace, its own installed packages and the standard library, never its consumer's modules or packages; APP/.bot_modules/loose/other.bot is in the package's directory, but outside its root namespace "loose", so it is no module}}
+
+test bm-missing-hint {a missing namespace in a package names the standard namespace of that name as a hint, never a fallback} -body {
+    appRejection [app {
+        main.bot "import tally\n\n1\n"
+        .bot_modules/tally/tally.bot "import list\n\nfn f() -> int:\n    1\n"
+    }]
+} -cleanup removeApps -match glob -result {UNKNOWN-NAMESPACE: *has no package "list" installed*; the standard library's namespace of that name is std::list (`import std::list`)*}
+
+test bm-not-a-directory {only a directory is an installed package: a file at .bot_modules/NAME, or a .bot_modules that is a file, installs nothing, and the import is the application's own module} -body {
+    set a [app {
+        main.bot "import widgets\n\nwidgets::f()\n"
+        widgets.bot "fn f() -> int:\n    7\n"
+        .bot_modules/widgets "not a package\n"
+    }]
+    set b [app {
+        main.bot "import widgets\n\nwidgets::f()\n"
+        widgets.bot "fn f() -> int:\n    8\n"
+        .bot_modules "not a directory\n"
+    }]
+    list [appValues $a {interp}] [appValues $b {interp}]
+} -cleanup removeApps -result {7 8}
+
+test bm-self-import-and-cycle {a package module importing its own namespace is SELF-IMPORT, and a cycle through a package's modules is CYCLE, by the modules' identities} -body {
+    set dir [app {
+        main.bot "import widgets\n\n1\n"
+        .bot_modules/widgets/widgets.bot "import widgets\n\nfn f() -> int:\n    1\n"
+        cycle.bot "import ring\n\n1\n"
+        .bot_modules/ring/ring.bot "import ring::a\n\nfn f() -> int:\n    1\n"
+        .bot_modules/ring/ring/a.bot "import ring\n\nfn g() -> int:\n    1\n"
+    }]
+    list [appRejection $dir] [appRejection $dir cycle.bot]
+} -cleanup removeApps -result {{SELF-IMPORT: APP/.bot_modules/widgets/widgets.bot:1:8: a file of namespace "widgets" cannot import its own namespace: a module is inside its namespace and needs no import to name its own members} {CYCLE: APP/.bot_modules/ring/ring/a.bot:1:8: module dependency cycle: ring -> ring::a -> ring}}
+
+test bm-nested-self-import {in a package installed by a package, SELF-IMPORT and CYCLE speak of the namespaces as the files write them, and the chain of the instances' modules} -body {
+    set dir [app {
+        main.bot "import outer\n\n1\n"
+        .bot_modules/outer/outer.bot "import inner\n\nfn f() -> int:\n    1\n"
+        .bot_modules/outer/.bot_modules/inner/inner.bot "import inner::a\n\nfn f() -> int:\n    1\n"
+        .bot_modules/outer/.bot_modules/inner/inner/a.bot "import inner\n\nfn g() -> int:\n    1\n"
+    }]
+    appRejection $dir
+} -cleanup removeApps -result {CYCLE: APP/.bot_modules/outer/.bot_modules/inner/inner/a.bot:1:8: module dependency cycle: outer -> outer/inner -> outer/inner::a -> outer/inner}
+
+test bm-symlink-cycle {a package directory installed inside itself through a symbolic link would be an endless chain of instances: CYCLE through package directories, never a hang} -constraints symlinks -body {
+    set dir [app {
+        main.bot "import ping\n\nping::f()\n"
+        .bot_modules/ping/ping.bot "import pong\n\nfn f() -> int:\n    pong::g()\n"
+        .bot_modules/ping/.bot_modules/pong/pong.bot "import ping\n\nfn g() -> int:\n    ping::f()\n"
+    }]
+    file mkdir [file join $dir .bot_modules ping .bot_modules pong .bot_modules]
+    file link -symbolic [file join $dir .bot_modules ping .bot_modules pong .bot_modules ping] [file join $dir .bot_modules ping]
+    appRejection $dir
+} -cleanup removeApps -match glob -result {CYCLE: APP/.bot_modules/ping/.bot_modules/pong/pong.bot:1:8: module dependency cycle through package directories: ping -> ping/pong -> ping/pong/ping (the module "ping" of the package directory *}
+
+test bm-symlinked-package {a package directory may be a symbolic link (a store an installer shares): it is followed, and its instance is still its place in the dependency tree} -constraints symlinks -body {
+    set store [app {geometry/geometry.bot "fn k() -> int:\n    5\n"}]
+    set dir [app {
+        main.bot "import physics\nimport rendering\n\n\[physics::k(), rendering::k()\]\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn k() -> int:\n    geometry::k()\n"
+        .bot_modules/rendering/rendering.bot "import geometry\n\nfn k() -> int:\n    geometry::k() + 1\n"
+    }]
+    foreach pkg {physics rendering} {
+        file mkdir [file join $dir .bot_modules $pkg .bot_modules]
+        file link -symbolic [file join $dir .bot_modules $pkg .bot_modules geometry] [file join $store geometry]
+    }
+    set hir [appHir $dir]
+    list [appValues $dir {interp cranelift}] [lsort [lmap pair [hirModules $hir $dir] {lindex $pair 0}]]
+} -cleanup removeApps -result {{{[5, 6]} {[5, 6]}} {{} physics physics/geometry rendering rendering/geometry}}
+
+test bm-package-is-not-std {a package's module is no standard-library module: it may not import or name an internal namespace of the standard library} -body {
+    appRejection [app {
+        main.bot "import tally\n\n1\n"
+        .bot_modules/tally/tally.bot "import std::table_hash\n\nfn f() -> int:\n    1\n"
+    }]
+} -cleanup removeApps -result {INTERNAL-NAMESPACE: APP/.bot_modules/tally/tally.bot:1:8: namespace "std::table_hash" is internal to the standard library: only its modules may import it or name its members (the module "tally" of package tally (instance tally, at APP/.bot_modules/tally) is not one)}
+
+# ---------------------------------------------------------------------------
+# 14-18. Same-named package instances are distinct
+
+test bm-instances-distinct-values {two installed geometry packages on separate branches are two modules: each package calls its own, on every backend} -body {
+    appValues [app [concat $twoGeometries [list main.bot $twoMain]]]
+} -cleanup removeApps -result {{[3, 7, 20, 20, -100, -1000]} {[3, 7, 20, 20, -100, -1000]} {[3, 7, 20, 20, -100, -1000]} {[3, 7, 20, 20, -100, -1000]}}
+
+test bm-instances-identities {each instance's declarations have their own identity: structs, enums, errors and functions of physics/geometry and rendering/geometry, side by side in the HIR's registries} -body {
+    set hir [appHir [app [concat $twoGeometries [list main.bot $twoMain]]]]
+    hir::activate $hir
+    list [lsort [lmap id $::hir::errordecls::current {if {[string match *geometry* $id]} {set id} else continue}]] \
+        [lsort [lmap id [dict keys $::hir::structs::registry] {if {[string match *geometry* $id]} {set id} else continue}]] \
+        [lsort [lmap id [dict keys $::hir::enums::registry] {if {[string match *geometry* $id]} {set id} else continue}]] \
+        [lsort [dict keys [dict get $hir modules]]]
+} -cleanup removeApps -result {{physics/geometry::Bad rendering/geometry::Bad} {physics/geometry::Point rendering/geometry::Point} {physics/geometry::Side rendering/geometry::Side} {physics physics/geometry rendering rendering/geometry}}
+
+test bm-instances-nominal-types {one instance's Point is never the other's: passing it across is a TYPE error naming both identities} -body {
+    appRejection [app [concat $twoGeometries {main.bot "import physics\nimport rendering\n\nrendering::read(physics::make(5))\n"}]]
+} -cleanup removeApps -result {TYPE: APP/main.bot:4:17: argument for parameter "p" cannot be proven to satisfy rendering/geometry::Point (argument type: physics/geometry::Point); physics/geometry::Point and rendering/geometry::Point are distinct named struct types: a named struct type is nominal, and no value is ever converted from one to another implicitly}
+
+test bm-instances-nominal-enums {one instance's enum is never the other's: its cases are not the other's values} -body {
+    appRejection [app [concat $twoGeometries {main.bot "import physics\nimport rendering\n\nrendering::is_right(physics::side(1))\n"}]]
+} -cleanup removeApps -match glob -result {TYPE: APP/main.bot:4:21: argument for parameter "s" cannot be proven to satisfy rendering/geometry::Side (argument type: physics/geometry::Side); rendering/geometry::Side is a nominal enum type*}
+
+test bm-instances-errors {each instance's Bad is its own error identity: a handler of one never handles the other's, and an unhandled one is reported by its identity} -body {
+    set dir [app [concat $twoGeometries {
+        main.bot "import physics\nimport rendering\n\n\[physics::safe(-2), rendering::safe(-2)\]\n"
+        leak.bot "import rendering\n\nfn f(n: int) -> int:\n    rendering::raw(n)\n\nf(1)\n"
+    }]]
+    writeText [file join $dir .bot_modules rendering rendering.bot] \
+        "[core::ReadFile [file join $dir .bot_modules rendering rendering.bot]]\nfn raw(n: int) -> int errors geometry::Bad:\n    geometry::check(n)\n"
+    list [appValues $dir {interp compile cranelift}] [appRejection $dir leak.bot]
+} -cleanup removeApps -result {{{[-200, -2000]} {[-200, -2000]} {[-200, -2000]}} {UNHANDLED-ERROR: APP/leak.bot:4:5: this call may produce the declared error "rendering/geometry::Bad", which is neither handled here nor admitted by the enclosing function's own "errors" declaration}}
+
+test bm-instances-methods {method syntax in each package resolves to its own instance's function: the candidate is the imported namespace's, by identity} -body {
+    appValues [app [concat $twoGeometries {main.bot "import physics\nimport rendering\n\n\[physics::normed(4), rendering::normed(4)\]\n"}]] {interp cranelift}
+} -cleanup removeApps -result {{[40, 40]} {[40, 40]}}
+
+test bm-instances-native-functions {native lowering compiles each instance's functions as its own: two NIR functions geometry::make, by identity, never one} -constraints nativeBuilt -body {
+    set nir [native::nir [appHir [app [concat $twoGeometries [list main.bot $twoMain]]]]]
+    lsort [regexp -all -inline {"[a-z]+/geometry::make"} $nir]
+} -cleanup removeApps -result {{"physics/geometry::make"} {"rendering/geometry::make"}}
+
+test bm-application-and-nested-same-name {the application's own package geometry and physics's geometry are two modules with the same names: the application's spelling and physics's, every form of qualified reference included, each name its own} -body {
+    set dir [app {
+        main.bot "import physics\nimport geometry\n\nwith context physics::ctx(10)\n\nb = physics::body(3)\n\[physics::norm_of(b), physics::small_or(5), physics::small_or(42), physics::via_apply(30), physics::side_name(b.side), physics::many(), physics::hide(9), physics::scaled(2), physics::squares(), geometry::make(1), geometry::K\]\n"
+        .bot_modules/geometry/geometry.bot "struct Point:\n    label: str\n\ntype Small = Int in 100..200\n\nerror Bad\n\nenum Side:\n    Up, Down\n\ntrait Shaped:\n    fn area(value: Shaped) -> str\n\ncontext struct Ctx:\n    label: str\n\nK = \"app\"\n\nfn make(n: int) -> str:\n    \"app\"\n\nfn norm(s: str) -> str:\n    s\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "struct Point:\n    x: int\n    y: int\n\nopaque struct Hidden:\n    v: int\n\ntype Small = Int in 0..9\n\ntype Scale = Int in 0..1000\n\nerror Bad:\n    code: int\n\nenum Side:\n    Left, Right\n\ntrait Shaped:\n    fn area(value: Shaped) -> int\n\ncontext struct Ctx:\n    scale: Scale\n\nK = 7\n\nfn make(n: int) -> Point:\n    Point {x: n, y: n + 1}\n\nfn norm(p: Point) -> int:\n    p.x * p.x + p.y * p.y\n\nfn hidden(v: int) -> Hidden:\n    Hidden {v: v}\n\nfn reveal(h: Hidden) -> int:\n    h.v\n\nfn small(n: int) -> Small errors Bad:\n    if n >= 0 and n <= 9:\n        return n\n    fail Bad {code: n}\n\nfn ctx(scale: Scale) -> Ctx:\n    Ctx {scale: scale}\n\nfn scaled(n: int, context c: Ctx) -> int:\n    n * c.scale\n"
+        .bot_modules/physics/physics.bot "import geometry\nimport type geometry::Small\n\nstruct Body:\n    at: geometry::Point\n    side: geometry::Side\n\nstruct Square:\n    side: int\n\nfn area(s: Square) -> int:\n    s.side * s.side\n\nfn total(shape: geometry::Shaped) -> int:\n    shape.area()\n\nerror Wrapped:\n    inner: geometry::Point\n\nfn body(n: int) -> Body:\n    Body {at: geometry::Point {x: n, y: geometry::K}, side: geometry::Side::Right}\n\nfn norm_of(b: Body) -> int:\n    b.at.norm()\n\nfn keep(s: Small) -> int:\n    s + 0\n\nfn small_or(n: int) -> int:\n    s = geometry::small(n):\n        on geometry::Bad {code}:\n            return code * -1\n    keep(s)\n\nfn apply(f: Fn{args: \[int\], return: geometry::Small, errors: \[geometry::Bad\]}, n: int) -> int:\n    v = f(n):\n        on geometry::Bad:\n            return -100\n    v + 0\n\nfn via_apply(n: int) -> int:\n    apply(geometry::small, n)\n\nfn side_name(s: geometry::Side) -> int:\n    if s == geometry::Side::Left:\n        return 1\n    2\n\nfn std_sum(xs: List\[geometry::Point\]) -> int:\n    if xs == \[\]:\n        return 0\n    1\n\nfn sum(variadic xs: List\[geometry::Point\]) -> int:\n    std_sum(xs)\n\nfn many() -> int:\n    sum(geometry::make(1), geometry::make(2), geometry::make(3))\n\nfn hide(v: int) -> int:\n    geometry::reveal(geometry::hidden(v))\n\nfn ctx(scale: geometry::Scale) -> geometry::Ctx:\n    geometry::ctx(scale)\n\nfn scaled(n: int, context c: geometry::Ctx) -> int:\n    geometry::scaled(n) + c.scale\n\nfn squares() -> int:\n    total(Square {side: 4})\n"
+    }]
+    appValues $dir
+} -cleanup removeApps -result {{[58, 5, -42, -100, 2, 1, 9, 30, 16, "app", "app"]} {[58, 5, -42, -100, 2, 1, 9, 30, 16, "app", "app"]} {[58, 5, -42, -100, 2, 1, 9, 30, 16, "app", "app"]} {[58, 5, -42, -100, 2, 1, 9, 30, 16, "app", "app"]}}
+
+test bm-identity-unspellable {an instance's identity is no spelling: physics/geometry::make written in source is a division, never a reference to the instance} -body {
+    appRejection [app [concat $twoGeometries {main.bot "import physics\n\nphysics/geometry::make(1)\n"}]]
+} -cleanup removeApps -match glob -result {UNKNOWN-NAMESPACE: APP/main.bot:3:9: unknown namespace "geometry"*}
+
+test bm-nested-privacy-and-opaque {a private declaration or an opaque struct of one instance is its module's alone: the consumer package may not name the private function or build the struct} -body {
+    set dir [app {
+        main.bot "import physics\n\nphysics::f()\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn f() -> int:\n    geometry::secret()\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "private fn secret() -> int:\n    1\n\nopaque struct Hidden:\n    v: int\n"
+        build.bot "import builder\n\nbuilder::f()\n"
+        .bot_modules/builder/builder.bot "import geometry\n\nfn f() -> int:\n    h = geometry::Hidden {v: 1}\n    1\n"
+        .bot_modules/builder/.bot_modules/geometry/geometry.bot "opaque struct Hidden:\n    v: int\n"
+    }]
+    list [appRejection $dir] [appRejection $dir build.bot]
+} -cleanup removeApps -match glob -result {{PRIVATE-ACCESS: APP/.bot_modules/physics/physics.bot:4:5: *physics/geometry*secret*} {*builder/geometry::Hidden*}}
+
+test bm-nested-direct-module {a direct module of a package's own package is designated like any module: its consumer's unmediated call of it is a direct edge, by the module's identity} -body {
+    set dir [app {
+        main.bot "import physics\n\nphysics::f()\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn f() -> int:\n    geometry::raw()\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "direct module\n\nfn raw() -> int:\n    1\n"
+    }]
+    appRejection $dir
+} -cleanup removeApps -match glob -result {*APP/.bot_modules/physics/physics.bot:4:5: module "physics" uses direct authority: function "physics::f" calls physics/geometry::raw, a callable of the direct module "physics/geometry", without a context defined by "physics"*}
+
+test bm-nested-dfa {a declared recognizer of a package's own package, and a class of it the consumer's recognizer uses, are its instance's} -body {
+    appValues [app {
+        main.bot "import physics\n\nphysics::count(\"aab\")\n"
+        .bot_modules/physics/physics.bot "import std::dfa\nimport std::str\nimport geometry\n\ndfa ab over ascii:\n    start:\n        geometry::letters -> start\n        end -> accept\n\nfn count(s: str) -> int:\n    std::str::length(s)\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "class letters = 'a' 'b'\n"
+    }] {interp}
+} -cleanup removeApps -result 3
+
+# ---------------------------------------------------------------------------
+# 19-21. Interchange, isolation, the cache and the service
+
+test bm-interchange {HIR interchange keeps the instances apart: an encoded and decoded HIR runs as built, and a .hirx runs from another directory with the sources gone} -constraints nativeBuilt -body {
+    set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
+    set hir [appHir $dir]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    set values [lmap backend {interp compile cranelift} {lindex [outcomeUnderHir $backend $decoded] 1}]
+    exec [info nameofexecutable] $::mainScript -emit-hir-interchange [file join $dir main.bot] 2>@1
+    set hirx [file join [makeDirectory bm-hirx-[pid]-1] main.hirx]
+    file rename [file join $dir main.hirx] $hirx
+    file delete -force $dir
+    list $values [expr {[string first {value: [3, 7, 20, 20, -100, -1000]} [compilerIn / -backend cranelift $hirx]] >= 0}]
+} -cleanup removeApps -result {{{[3, 7, 20, 20, -100, -1000]} {[3, 7, 20, 20, -100, -1000]} {[3, 7, 20, 20, -100, -1000]}} 1}
+
+test bm-isolation {interleaved compilations do not contaminate one another: a later program whose own geometry::Point has other fields leaves the earlier HIR's two instances as they were, on every backend} -body {
+    set a [app [concat $twoGeometries [list main.bot $twoMain]]]
+    set b [app {
+        main.bot "import geometry\n\ngeometry::Point {label: \"b\"}.label\n"
+        .bot_modules/geometry/geometry.bot "struct Point:\n    label: str\n"
+    }]
+    set hA [appHir $a]
+    set before [lmap backend {interp compile cranelift-generic cranelift} {outcomeUnderHir $backend $hA}]
+    set hB [appHir $b]
+    set other [lindex [outcomeUnderHir cranelift $hB] 1]
+    set after [lmap backend {interp compile cranelift-generic cranelift} {outcomeUnderHir $backend $hA}]
+    list [expr {$before eq $after}] [lrange [lindex $after 0] 0 1] $other
+} -cleanup removeApps -result {1 {value {[3, 7, 20, 20, -100, -1000]}} {"b"}}
+
+# The front-end cache's stats, from a reset, after compiling DIR/main.bot with
+# the cache in CACHE: {hits H misses M stale S} and the program's value.
+proc cachedRun {dir cache} {
+    surface::cache::resetStats
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    set stats [surface::cache::stats]
+    list [dict get $stats hits] [dict get $stats misses] [dict get $stats stale] [lindex [outcomeUnderHir interp $hir] 1]
+}
+
+test bm-cache-invalidation {the front-end cache depends on the package instances the program read and the package directories the loader asked about: editing the instance a program uses misses, editing the other branch's same-named file (unread) or an uninstalled package's does not, and installing a package where an import looked misses} -body {
+    set dir [app [concat $twoGeometries [list main.bot "import physics\n\nphysics::read(physics::make(3))\n" \
+        .bot_modules/unused/unused.bot "fn x() -> int:\n    1\n"]]]
+    set cache [makeDirectory bm-cache-[pid]-1]
+    set runs {}
+    lappend runs [cachedRun $dir $cache] [cachedRun $dir $cache]
+    # rendering's geometry: the program never read it.
+    set rendering [file join $dir .bot_modules rendering .bot_modules geometry geometry.bot]
+    writeText $rendering "[core::ReadFile $rendering]\nfn extra() -> int:\n    1\n"
+    writeText [file join $dir .bot_modules unused unused.bot] "fn x() -> int:\n    2\n"
+    lappend runs [cachedRun $dir $cache]
+    # physics's geometry: the program's own instance.
+    set physics [file join $dir .bot_modules physics .bot_modules geometry geometry.bot]
+    writeText $physics [string map {"Point {x: n}" "Point {x: n * 2}"} [core::ReadFile $physics]]
+    lappend runs [cachedRun $dir $cache]
+    # physics installs a package of its own named like a module it may not
+    # see yet: nothing it imports changes, and the probed directory did not.
+    file mkdir [file join $dir .bot_modules physics .bot_modules widgets]
+    lappend runs [cachedRun $dir $cache]
+    # The application's own geometry now: physics's import still names its
+    # own (the probe was physics's .bot_modules/geometry).
+    writeText [file join $dir .bot_modules geometry geometry.bot] "fn k() -> int:\n    1\n"
+    lappend runs [cachedRun $dir $cache]
+    # Removing physics's geometry: the probed directory changed.
+    file delete -force [file join $dir .bot_modules physics .bot_modules geometry]
+    lappend runs [catch {cachedRun $dir $cache}]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-cache-[pid]-1]} -result {{0 1 0 3} {1 0 0 3} {1 0 0 3} {0 1 1 6} {1 0 0 6} {1 0 0 6} 1}
+
+test bm-cache-package-installed {installing a package where an import found none is a change the cache sees, though no file the program read changed: the application's game becomes a collision with the package game, never a stale hit} -body {
+    set dir [app {main.bot "import game\n\ngame::f()\n" game.bot "fn f() -> int:\n    1\n"}]
+    set cache [makeDirectory bm-cache-[pid]-2]
+    set runs [list [cachedRun $dir $cache] [cachedRun $dir $cache]]
+    file mkdir [file join $dir .bot_modules game]
+    surface::cache::resetStats
+    catch {surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache} message options
+    lappend runs [lindex [dict get $options -errorcode] end] [dict get [surface::cache::stats] stale]
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-cache-[pid]-2]} -result {{0 1 0 1} {1 0 0 1} MODULE-COLLISION 1}
+
+test bm-service-sources {a compiler-service revision records the package directories it asked about and the package files it read; editing a package file it read makes it stale, and only that file} -body {
+    set dir [app [concat $twoGeometries [list main.bot "import physics\n\nphysics::read(physics::make(3))\n"]]]
+    set ws [service::workspace -warnings off]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set sources [dict get [service::revision $rev] sources]
+    set dirs [lsort [lmap {path observation} $sources {
+        if {![dict exists $observation directory]} continue
+        list [string map [list $dir APP] $path] [dict get $observation exists]
+    }]]
+    set physics [file join $dir .bot_modules physics .bot_modules geometry geometry.bot]
+    service::setDocument $ws $physics "[core::ReadFile $physics]\nfn extra() -> int:\n    1\n"
+    service::setDocument $ws [file join $dir .bot_modules rendering .bot_modules geometry geometry.bot] "garbage\n"
+    set stale [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
+    list $dirs $stale [dict get [service::revision $rev] outcome]
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {{{APP/.bot_modules/physics 1} {APP/.bot_modules/physics/.bot_modules/geometry 1} {APP/.bot_modules/physics/.bot_modules/geometry/.bot_modules/Side 0}} APP/.bot_modules/physics/.bot_modules/geometry/geometry.bot ok}
+
+test bm-service-directory-stale {a package directory appearing where an analysis found none makes its revision stale} -body {
+    set dir [app {main.bot "import game\n\ngame::f()\n" game.bot "fn f() -> int:\n    1\n"}]
+    set ws [service::workspace -warnings off]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set before [dict keys [service::stale $rev]]
+    file mkdir [file join $dir .bot_modules game]
+    list $before [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {{} APP/.bot_modules/game}
+
+# The service's definition of the reference at LINE COLUMN of the file
+# RELATIVE (to DIR) in revision REV: {BINDING-NAME FILE LINE}.
+proc definitionAt {rev dir relative line column} {
+    set q [service::at $rev [file join $dir $relative] $line $column]
+    set d [dict get $q definition]
+    list [dict get $q binding name] [string map [list $dir/ ""] [dict get $d file]] [dict get $d line]
+}
+
+test bm-service-navigation {navigation distinguishes same-named package declarations: geometry::make in physics goes to physics's geometry, in rendering to rendering's, and references are by identity} -body {
+    set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
+    set ws [service::workspace -warnings off]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set refs [dict get [service::at $rev [file join $dir .bot_modules physics .bot_modules geometry geometry.bot] 10 4] references]
+    list [definitionAt $rev $dir .bot_modules/physics/physics.bot 4 15] \
+        [definitionAt $rev $dir .bot_modules/rendering/rendering.bot 4 15] \
+        [lsort -unique [lmap r $refs {string map [list $dir/ ""] [dict get $r file]}]]
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {{physics/geometry::make .bot_modules/physics/.bot_modules/geometry/geometry.bot 10} {rendering/geometry::make .bot_modules/rendering/.bot_modules/geometry/geometry.bot 11} .bot_modules/physics/physics.bot}
+
+test bm-service-syntax-recovery {analysis past a syntax error in a package's own package reports it in that file, and the program's other diagnostics as before} -body {
+    set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
+    set physics [file join $dir .bot_modules physics .bot_modules geometry geometry.bot]
+    set ws [service::workspace -warnings off]
+    service::setDocument $ws $physics "[core::ReadFile $physics]\nfn broken(n: int) -> int:\n    n *\n"
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set d [lindex [service::diagnostics $rev] 0]
+    list [dict get [service::revision $rev] outcome] [string map [list $dir/ ""] [dict get $d file]] [dict get $d code]
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {syntax .bot_modules/physics/.bot_modules/geometry/geometry.bot {SURFACE SYNTAX}}
+
+# ---------------------------------------------------------------------------
+# 23-25. Working directories, the bundled compiler, executables
+
+test bm-cwd-independence {main.tcl resolves the same packages from any working directory, ignoring a decoy .bot_modules there} -body {
+    set dir [app [concat $widgets {main.bot "import widgets\n\nwidgets::area(3)\n"}]]
+    set decoy [app {.bot_modules/widgets/widgets.bot "fn area(n: int) -> int:\n    -1\n" main.bot "1\n"}]
+    set outputs [lmap cwd [list $decoy $dir /] {compilerIn $cwd -backend interp [file join $dir main.bot]}]
+    list [string match "*value: 10*" [lindex $outputs 0]] [llength [lsort -unique $outputs]]
+} -cleanup removeApps -result {1 1}
+
+# A bundled compiler packed by single/package.tcl with this process's tclsh as
+# its base kit: the path of the executable, made once.
+proc bundledCompiler {} {
+    if {[info exists ::bundled]} {
+        return $::bundled
+    }
+    set ::bundled [file join [makeDirectory bm-bundle-[pid]] botlish]
+    exec [info nameofexecutable] [file join $::projectRoot single package.tcl] $::bundled \
+        [file dirname [native::binary]]
+    return $::bundled
+}
+
+test bm-bundled-compiler {the bundled compiler resolves installed packages, their own packages included, as the checkout does, on the interpreter and natively} -constraints singlePackage -body {
+    set exe [bundledCompiler]
+    set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
+    lmap backend {interp cranelift} {
+        set out [exec $exe -backend $backend [file join $dir main.bot] 2>@1]
+        expr {[string first {value: [3, 7, 20, 20, -100, -1000]} $out] >= 0}
+    }
+} -cleanup removeApps -result {1 1}
+
+test bm-executable-needs-no-packages {a native executable of a program of packages runs with its source and its .bot_modules gone} -constraints {executableAot nativeBuilt} -body {
+    set dir [app [concat $twoGeometries [list main.bot $twoMain]]]
+    exec [info nameofexecutable] $::mainScript -emit-native-executable [file join $dir main.bot] 2>@1
+    set exe [native::executableFile [file join [makeDirectory bm-exe-[pid]] main]]
+    file rename [native::executableFile [file join $dir main]] $exe
+    file delete -force $dir
+    exec $exe
+} -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-exe-[pid]]} -result {[3, 7, 20, 20, -100, -1000]}
+
+# ---------------------------------------------------------------------------
+# 26. SDL3: the real generated binding as a package
+
+source [file join $::projectRoot tests cffi sdl3.tcl]
+source [file join $::projectRoot tools c-bindgen lib.tcl]
+# The committed binding of linux-x86_64 compiles anywhere for that target;
+# running it needs this host to be that target, with C calls, the
+# package-owned libSDL3.so (tests/cffi/sdl3.tcl) and, for the shim of the
+# demo's static inline thunks, clang and SDL's pinned headers.
+set sdlBinding [file join $::projectRoot generated c sdl3 linux-x86_64]
+set sdlDemo [file join $::projectRoot examples ffi bindgen sdl3 demo.bot]
+testConstraint sdl3Run [expr {[core::cabi::hostTarget] eq "linux-x86_64" && [testConstraint nativeCCalls]
+    && [cffi::sdl3Dir] ne "" && [auto_execok clang] ne ""
+    && ![catch {::cbind::profile::sourceRoot [::cbind::profile::load sdl3] 0}]}]
+
+# A fresh application whose package sdl3 is the committed binding, staged by
+# tools/c-bindgen.tcl stage -package 1 with the program PROGRAM's directory
+# (the demo's by default).
+proc sdlApp {{program ""}} {
+    if {$program eq ""} {
+        set program $::sdlDemo
+    }
+    set dir [makeDirectory bm-sdl-[pid]-[incr ::appCounter]]
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-x86_64 \
+        -app $program -into $dir -package 1
+    return $dir
+}
+
+# The SDL3 wrapper package sdlkit: an ordinary module that installs the
+# generated binding as its own package and keeps SDL's objects behind its
+# context Kit (the airlock), the application's only view of SDL.
+set sdlkit "# sdlkit -- a reusable SDL3 airlock over the generated binding it installs\n# itself (.bot_modules/sdl3): SDL's objects stay behind the Kit context.\nimport std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport std::list\nimport std::str\nimport sdl3::events\nimport sdl3::init\nimport sdl3::render\nimport sdl3::timer\nimport sdl3::version\nimport sdl3::video\n\nopaque context struct Kit:\n    started: bool\n\n# SDL initialized for video: the context every operation requires.\nfn open() -> Kit:\n    Kit {started: sdl3::init::SDL_Init(sdl3::init::SDL_INIT_VIDEO)}\n\nfn nul() -> std::byte::Byte:\n    0\n\nfn cstring(text: str) -> std::abi::bytes::Bytes:\n    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))\n\n# One frame in a window: what each step reported.\nfn frame(context kit: Kit) -> List\[bool\]:\n    window = cstring(\"Botlish package over generated SDL3\").SDL_CreateWindow(320, 240, sdl3::video::SDL_WINDOW_RESIZABLE)\n    no_name = std::ffi::c::null\[std::ffi::c::Char\]()\n    renderer = window.SDL_CreateRenderer(no_name)\n    colored = renderer.SDL_SetRenderDrawColor(32, 96, 160, 255)\n    cleared = sdl3::render::SDL_RenderClear(renderer)\n    presented = sdl3::render::SDL_RenderPresent(renderer)\n    before = sdl3::timer::SDL_GetTicks()\n    sdl3::timer::SDL_Delay(20)\n    after = sdl3::timer::SDL_GetTicks()\n    sdl3::events::SDL_PumpEvents()\n    id = sdl3::video::SDL_GetWindowID(window)\n    sdl3::render::SDL_DestroyRenderer(renderer)\n    sdl3::video::SDL_DestroyWindow(window)\n    \[kit.started, colored, cleared, presented, after - before >= 20, id > 0\]\n\nfn version_matches(context kit: Kit) -> bool:\n    sdl3::version::SDL_GetVersion() == sdl3::version::SDL_VERSION\n\nfn close(context kit: Kit) -> unit:\n    sdl3::init::SDL_Quit()\n"
+set sdlkitMain "import sdlkit\n\nwith context sdlkit::open()\n\nshown = sdlkit::frame()\nsame = sdlkit::version_matches()\nsdlkit::close()\n\[shown, same\]\n"
+
+proc sdlkitApp {} {
+    set dir [app [list main.bot $::sdlkitMain .bot_modules/sdlkit/sdlkit.bot $::sdlkit]]
+    set nested [file join $dir .bot_modules sdlkit .bot_modules sdl3]
+    file mkdir $nested
+    file copy [file join $::sdlBinding sdl3] [file join $nested sdl3]
+    return $dir
+}
+
+test bm-sdl3-stage-package {tools/c-bindgen.tcl stage -package 1 installs the generated SDL3 binding as the application's package (.bot_modules/sdl3/sdl3/*.bot), never among its files: the unchanged demo compiles from it under -warnings error, sdl3::video and its other modules read from the package's tree} -body {
+    set dir [sdlApp]
+    set hir [appHir $dir demo.bot -warnings error -target linux-x86_64]
+    set modules [lmap pair [hirModules $hir $dir] {
+        if {![string match sdl3::* [lindex $pair 0]]} continue
+        set pair
+    }]
+    list [file exists [file join $dir sdl3]] [lsort [glob -tails -directory [file join $dir .bot_modules sdl3] *]] \
+        [lindex $modules [lsearch -index 0 $modules sdl3::video]] [llength $modules]
+} -cleanup removeApps -result {0 sdl3 {sdl3::video .bot_modules/sdl3/sdl3/video.bot} 7}
+
+test bm-sdl3-package-boundary {the SDL3 package cannot import the application's modules: a module of it that names the application's game is UNKNOWN-NAMESPACE, at its import} -body {
+    set dir [sdlApp]
+    writeText [file join $dir game.bot] "fn f() -> int:\n    1\n"
+    writeText [file join $dir .bot_modules sdl3 sdl3 peek.bot] "import game\n\nfn f() -> int:\n    game::f()\n"
+    writeText [file join $dir peek.bot] "import game\nimport sdl3::peek\n\nsdl3::peek::f()\n"
+    appRejection $dir peek.bot
+} -cleanup removeApps -match glob -result {UNKNOWN-NAMESPACE: APP/.bot_modules/sdl3/sdl3/peek.bot:1:8: unknown namespace "game": package sdl3 (instance sdl3, at APP/.bot_modules/sdl3) has no package "game" installed*}
+
+test bm-sdl3-nested-airlock {a reusable SDL3 package installs the binding as its own package: its modules are sdlkit/sdl3::..., ordinary; the wrapper is contextualized (every retaining C call mediated by its own Kit context); the application is ordinary -- no privilege of any kind -- and the foreign table calls SDL by its C symbols} -constraints nativeBuilt -body {
+    set hir [appHir [sdlkitApp] main.bot -warnings error -target linux-x86_64]
+    set statuses {}
+    foreach line [split [hir::direct::summary $hir] \n] {
+        if {([regexp {^module (\S+): (\S+)} $line -> module status] && ![string match std::* $module])
+                || [regexp {^(entry program): (\S+)} $line -> module status]} {
+            lappend statuses $module $status
+        }
+    }
+    set foreign [lmap line [split [native::nir $hir] \n] {
+        if {![regexp {^foreign \d+ "(SDL_\w+)".* name="([^"]+)"} $line -> symbol name]} continue
+        list $symbol $name
+    }]
+    list $statuses [lrange [lsort $foreign] 0 3]
+} -cleanup removeApps -result {{sdlkit/sdl3::ctypes ordinary sdlkit/sdl3::events ordinary sdlkit/sdl3::init ordinary sdlkit/sdl3::render ordinary sdlkit/sdl3::timer ordinary sdlkit/sdl3::version ordinary sdlkit/sdl3::video ordinary sdlkit contextualized {entry program} ordinary} {{SDL_CreateRenderer sdlkit/sdl3::render::SDL_CreateRenderer} {SDL_CreateWindow sdlkit/sdl3::video::SDL_CreateWindow} {SDL_Delay sdlkit/sdl3::timer::SDL_Delay} {SDL_DestroyRenderer sdlkit/sdl3::render::SDL_DestroyRenderer}}}
+
+test bm-sdl3-run {headless (SDL's dummy video driver) against the package-owned libSDL3.so, on both native backends: the unchanged demo over the binding installed as the application's package (its static inline thunks from the binding's shim), and the application of the SDL3 wrapper package with its own binding} -constraints sdl3Run -setup {
+    set savedEnv [array get ::env]
+    set ::env(SDL_VIDEO_DRIVER) dummy
+    set ::env(LD_LIBRARY_PATH) [join [concat [list [cffi::sdl3Dir]] [expr {[info exists ::env(LD_LIBRARY_PATH)] ? [list $::env(LD_LIBRARY_PATH)] : {}}]] :]
+} -body {
+    set demo [sdlApp]
+    set shim [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] build sdl3 -target linux-x86_64 -out [file join $demo .shim]]
+    set results {}
+    foreach {dir main links} [list $demo demo.bot [list [cffi::sdl3Dir] $shim] [sdlkitApp] main.bot [list [cffi::sdl3Dir]]] {
+        set hir [appHir $dir $main -warnings error]
+        native::withLinkDirs $links {
+            lappend results [lmap backend {cranelift cranelift-generic} {
+                lassign [outcomeUnderHir $backend $hir] tag value
+                expr {$tag eq "value" ? $value : "$tag: $value"}
+            }]
+        }
+    }
+    set results
+} -cleanup {
+    array unset ::env
+    array set ::env $savedEnv
+    removeApps
+} -result {{{[true, true, true, true, true, true, true, true, true, true]} {[true, true, true, true, true, true, true, true, true, true]}} {{[[true, true, true, true, true, true], true]} {[[true, true, true, true, true, true], true]}}}
+
+# ---------------------------------------------------------------------------
+# The loader's one traversal
+
+# Every AST of the corpus: the standard library's modules and the golden
+# suites, parsed.
+proc corpusAsts {} {
+    set asts {}
+    foreach path [concat [glob -directory $::core::libraryDir *.bot */*.bot] \
+            [glob -directory [file join $::projectRoot tests golden] *.bot]] {
+        if {[catch {surface::parse [core::ReadFile $path] $path} ast]} {
+            continue
+        }
+        lappend asts $ast
+    }
+    return $asts
+}
+
+proc collectChildren {node} {
+    lappend ::visited [dict get $node kind]
+    surface::ast::MapChildren $node collectChildren
+}
+
+proc childrenKinds {node} {
+    lappend ::expected [dict get $node kind]
+    foreach child [surface::ast::Children $node] {
+        childrenKinds $child
+    }
+}
+
+test bm-ast-map-children-parity {surface::ast::MapChildren is surface::ast::Children's traversal: over the corpus it visits the same nodes in the same order, and mapping every child to itself gives the node back} -body {
+    set mismatches 0
+    set count 0
+    foreach ast [corpusAsts] {
+        set ::visited {}
+        set ::expected {}
+        set mapped [collectChildren $ast]
+        childrenKinds $ast
+        if {$::visited ne $::expected || $mapped ne $ast} {
+            incr mismatches
+        }
+        incr count
+    }
+    list [expr {$count > 100}] $mismatches
+} -result {1 0}
+
+test bm-rewrite-covers-every-reference {RewriteQualified rewrites exactly the qualified references the loader checks (QualifiedRefs): over the corpus, mapping every namespace N to bmq::N (a spelling, so that the rewritten AST's references read back) gives an AST whose references are the mapped ones, in the same order, and an empty map gives the AST back} -body {
+    set bad 0
+    foreach ast [corpusAsts] {
+        set refs [surface::modules::QualifiedRefs $ast]
+        set map [dict create]
+        foreach ref $refs {
+            dict set map [lindex $ref 0] bmq::[lindex $ref 0]
+        }
+        set rewritten [surface::modules::RewriteQualified $ast $map]
+        set expected [lmap ref $refs {lreplace $ref 0 0 bmq::[lindex $ref 0]}]
+        if {[surface::modules::QualifiedRefs $rewritten] ne $expected
+                || [surface::modules::RewriteQualified $ast {}] ne $ast} {
+            incr bad
+        }
+    }
+    set bad
+} -result 0
+
+cleanupTests
