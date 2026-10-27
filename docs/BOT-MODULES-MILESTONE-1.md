@@ -570,7 +570,32 @@ constraints, the same as on the unchanged checkout):
 | workload-icy-tower.test | 20 passed, 6 skipped (the Windows executable's: `icyTowerWindowsExecutable`); its Linux executable tests ran: build.sh with the package staging, the game, the oracle |
 | c-bindgen.test | 58 passed, 26 skipped (BoringSSL, Tcl sources, MinGW, cross toolchains not installed here); its SDL3 tests ran |
 
-LOCAL-RUN-PLACEHOLDER
+### The whole local suite (executed)
+
+`tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile,
+every golden suite on all four backends through the front-end cache; 4
+cores, 3,366 s wall) on the first commit of this milestone:
+
+| layer | passed | failed | skipped |
+|---|---:|---:|---:|
+| Tcl tests, interp | 7,426 | 1 | 80 |
+| Tcl tests, compile | 7,421 | 1 | 85 |
+| golden, interp (108 suites) | 5,180 | 0 | |
+| golden, compile | 5,180 | 0 | |
+| golden, cranelift-generic | 5,088 | 0 | |
+| golden, cranelift | 5,190 | 0 | |
+
+The one failure on both Tcl passes was this milestone's:
+`tests/numeric-looking-names.test`'s `nl-no-string-ternary` found an `expr`
+`?:` choosing a package instance's name (a package named `nan` would have
+been a domain error). It is fixed (below), and after the fix
+`numeric-looking-names.test` (5/5), `bot-modules.test` (56/56),
+`syntax-recovery.test` (33/33), `diagnostic-recovery.test` (52/52),
+`compiler-service.test` (54/54), `lsp.test` (70/70), `imports.test`
+(104/104) and `module-privacy.test` (75/75) were run again on the final
+code, all passing. The skips are host constraints (Windows, macOS, the
+single executable, missing optional libraries), the same set as on the
+unchanged checkout.
 
 ### Mutation and fuzzing (executed)
 
@@ -619,18 +644,62 @@ ROUNDTRIP-PLACEHOLDER
 
 ### Compile-time overhead (executed)
 
-BENCH-PLACEHOLDER
+User CPU seconds of one fresh front-end compilation (`surface::
+readProgramFile -cache ""`, warnings off), the unchanged checkout against
+this one, three runs each, sequentially:
 
-### A defect found and fixed during verification
+| program | unchanged | this milestone |
+|---|---|---|
+| `examples/games/2048/demo.bot` | 1.69, 1.62, 1.52 | 1.61, 1.54, 1.51 |
+| Icy Tower (`main.bot`, binding staged into the root) | 44.1, 45.3, 43.2 | 47.6, 49.1, 43.6 |
+| `tests/golden/values.bot` | 3.86, 3.89, 4.05 | 4.25, 4.07, 4.11 |
+| `tests/golden/declared-errors.bot` | 14.2, 13.9, 15.1 | 14.1, 14.0, 13.7 |
 
-Reading the loader for spelling/identity mismatches after the tests passed
-found one more: syntax recovery looked a module's "may declare anything"
-facts up by the namespace as written, so in a nested package a malformed
-declaration made its consumer's reference to a missing member a spurious
-`UNKNOWN-SYMBOL` beside the syntax error. `DependentReference` now looks
-them up by identity; `bm-service-syntax-recovery-dependent` pins it (it
-fails without the fix) and the mutant `recovery-facts-by-spelling` checks
-the test.
+The sequential runs drift more than they differ (Icy Tower's third pair is
+within 1%, its first two 8% apart), so the two checkouts were then timed
+side by side, at the same moment, per front-end phase (wall
+milliseconds; the loader is `CollectAndLoad`, which holds the new
+resolution, the reference walk and the rewrite):
+
+| program | phase | unchanged | this milestone |
+|---|---|---|---|
+| Icy Tower, 3 pairs | loader | 3,494; 3,439; 3,367 | 3,617; 3,477; 3,281 |
+| | whole front end | 43,107; 42,959; 44,478 | 42,603; 42,660; 45,048 |
+| `values.bot`, 5 pairs | loader | 379; 378; 360; 371; 396 | 375; 375; 374; 381; 367 |
+| | whole front end | 4,181; 4,315; 4,247; 4,138; 4,033 | 4,229; 4,069; 4,249; 4,210; 4,169 |
+
+No difference is measurable for a program without packages: the loader's
+mean moves by under 1% on Icy Tower (whose generated SDL3 binding is the
+largest module in the repository, and whose references the walk visits
+once more than before) and not at all on `values.bot`, and the HIR they
+build is identical. A program with packages pays one directory probe per
+first segment per scope (recorded once in the loader's probe table) and, in
+a file whose names differ from their identities, one rebuilding walk of
+its AST. Over 118 ASTs (the standard library, the example games and the
+staged SDL3 binding; the best of five), the reference walk takes 99 ms in
+the unchanged checkout and 120 ms in this one (it now also visits context,
+variadic, resume and payload types), and the same walk rewriting every
+reference takes 182 ms, the cost only such files pay.
+
+### Defects found and fixed during verification
+
+Two, both in this milestone's own code:
+
+* The full local run's `nl-no-string-ternary` (above): `Instance` chose a
+  package instance's name with `expr`'s `?:`, which reads a name such as
+  `nan` or `inf` as a number (AGENTS.md, "Tcl's `expr` reads a
+  numeric-looking result as a number"). It is an `if` now, as is the
+  collision message's choice between two texts;
+  `bm-numeric-looking-package-names` installs packages named `nan` and
+  `inf` and compiles them on every backend.
+* Reading the loader for spelling/identity mismatches after the tests
+  passed found one more: syntax recovery looked a module's "may declare
+  anything" facts up by the namespace as written, so in a nested package a
+  malformed declaration made its consumer's reference to a missing member a
+  spurious `UNKNOWN-SYMBOL` beside the syntax error. `DependentReference`
+  now looks them up by identity; `bm-service-syntax-recovery-dependent`
+  pins it (it fails without the fix) and the mutant
+  `recovery-facts-by-spelling` checks the test.
 
 ### Continuous integration (requested)
 
