@@ -376,20 +376,23 @@ test nlp-check {main.tcl -check (the compiler service's analysis) takes static a
 # Linking: the fixture
 
 # The fixture's C text: functions whose results tell the static archive's
-# code (TAG 1) from the shared library's (TAG 2).
-proc nlpSource {tag} {
-    return [string map [list @TAG@ $tag] {#include <stddef.h>
-int nlp_tag(void) { return @TAG@; }
-int nlp_add(int a, int b) { return a + b + 1000 * @TAG@; }
-unsigned long nlp_sum(const unsigned char *data, unsigned long count) {
+# code (TAG 1) from the shared library's (TAG 2). EXPORTED: a DLL's source
+# on Windows, whose functions MSVC exports (and writes the import library
+# NAME.lib of) only when they are declared __declspec(dllexport).
+proc nlpSource {tag {exported 0}} {
+    set api [expr {$exported && $::windowsHost ? "__declspec(dllexport) " : ""}]
+    return [string map [list @TAG@ $tag @API@ $api] {#include <stddef.h>
+@API@int nlp_tag(void) { return @TAG@; }
+@API@int nlp_add(int a, int b) { return a + b + 1000 * @TAG@; }
+@API@unsigned long nlp_sum(const unsigned char *data, unsigned long count) {
     unsigned long total = 0;
     for (unsigned long i = 0; i < count; i++) total += data[i];
     return total;
 }
-void nlp_fill(unsigned char *out, unsigned long count, unsigned char seed) {
+@API@void nlp_fill(unsigned char *out, unsigned long count, unsigned char seed) {
     for (unsigned long i = 0; i < count; i++) out[i] = (unsigned char)(seed + i);
 }
-long nlp_checked_div(long a, long b) { return b == 0 ? -1 : a / b; }
+@API@long nlp_checked_div(long a, long b) { return b == 0 ? -1 : a / b; }
 }]
 }
 
@@ -406,7 +409,7 @@ proc nlpBinding {declaration} {
 proc nlpFixture {dir} {
     foreach sub {static shared both src} { file mkdir [file join $dir $sub] }
     set staticSource [nlpWrite [file join $dir src nlp.c] [nlpSource 1]]
-    set sharedSource [nlpWrite [file join $dir src nlpshared.c] [nlpSource 2]]
+    set sharedSource [nlpWrite [file join $dir src nlpshared.c] [nlpSource 2 1]]
     set depSource [nlpWrite [file join $dir src nlpdep.c] "int nlp_add(int a, int b);\nint nlp_twice(int a, int b) { return 2 * nlp_add(a, b); }\n"]
     ctool::staticLibrary [file join $dir static] nlp $staticSource
     ctool::staticLibrary [file join $dir static] nlpdep $depSource
@@ -531,8 +534,17 @@ test nlp-static-resolution {the driver's plan names each archive and why: declar
     file mkdir [file join $dir native]
     file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
     set plan [nlpResolve [nlpHir $dir] [list [nlpFixturePath static]]]
+    # The driver's paths are the host's (on Windows, `\` separators): each
+    # is compared normalized, and a character no mapping explains shows as
+    # its code point.
+    set map [list [file normalize $dir] APP [file normalize [nlpFixturePath static]] FIXTURE]
     lmap record $plan {
-        lmap word $record {string map [list [file normalize $dir] APP [nlpFixturePath static] FIXTURE] $word}
+        lmap word $record {
+            if {[file pathtype $word] eq "absolute"} {
+                set word [file normalize $word]
+            }
+            regsub -all -command {[^\x00-\x7f]} [string map $map $word] {apply {c {format <U+%04X> [scan $c %c]}}}
+        }
     }
 } -cleanup {file delete -force $dir} -result [list \
     [list archive nlp APP/native/[ctool::staticName nlp] declared native/[ctool::staticName nlp]] \
