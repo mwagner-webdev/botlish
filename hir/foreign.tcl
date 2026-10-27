@@ -1,10 +1,12 @@
-# foreign.tcl -- `extern c fn` and `extern c library` declarations (C-FFI.md).
+# foreign.tcl -- `extern c fn`, `extern c library` and `extern c framework`
+# declarations (C-FFI.md, NATIVE-LINK-PLAN-MILESTONE-1.md).
 #
 #   hir::foreign::Reset                 drops the previous compilation's
 #   hir::foreign::apply DECLS LINKS     registers this compilation's
 #   hir::foreign::DeclareBindings ...   their names, in their unit's scope
 #   hir::foreign::declarations HIR      the HIR's `foreign` side table
-#   hir::foreign::links HIR             the HIR's link plan
+#   hir::foreign::links HIR             the HIR's link plan, as spelled
+#   hir::foreign::linkPlan HIR          the HIR's link plan entries
 #
 # An extern c fn is a truthful C ABI declaration with no body:
 #
@@ -36,14 +38,22 @@
 # hir::activate (Install). The HIR also keeps them as its own side tables:
 #
 #   foreign   KEY -> {key namespace name symbol native origin contract abi}
-#   links     the link plan: {{library NAME origins {ORIGIN...}} ...}
+#   links     the link plan: {{kind library name NAME linkage default|static
+#             path PATH base BASE origins {ORIGIN...}} | {kind framework name
+#             NAME origins {ORIGIN...}} ...} (LinkPlan)
 #
-# The link plan is every `extern c library` of the program, one entry per
-# distinct name in first-declaration order (the loader's order: a module's
-# own declarations after its imports', the entry program's last). A library
-# is never associated with a declaration: the system linker resolves every
-# symbol against all of them. Native linking passes them inside one linker
-# group (codegen/aot.rs), so their order never decides a static link.
+# The link plan is every `extern c library` and `extern c framework` of the
+# program (NATIVE-LINK-PLAN-MILESTONE-1.md), one entry per distinct
+# dependency in first-declaration order (the loader's order: a module's own
+# declarations after its imports', the entry program's last), each library
+# with the strictest linkage its declarations require. A library is never
+# associated with a declaration: the system linker resolves every symbol
+# against all of them. Native linking passes them inside one linker group
+# where the linker needs one (codegen/aot.rs), so their order never decides
+# a static link. The plan states what the program needs, never how a host
+# provides it: an archive's path is kept as written beside the directory it
+# is resolved from, and the driver finds, checks and passes the file when it
+# links (codegen/aot.rs's `resolve_link_plan`).
 
 namespace eval hir::foreign {
     # KEY -> the registration record of each extern c fn of the compilation
@@ -236,19 +246,127 @@ proc hir::foreign::apply {decls linkDecls} {
             native $native origin [dict get $decl origin] nameSpan [dict get $decl nameSpan] \
             contract [dict get [core::native::metadata $native] foreign] abi $abi]
     }
+    set links [LinkPlan $linkDecls]
+}
+
+# The link plan of LINKDECLS (surface/lower.tcl's LinkDeclOf dicts, in the
+# loader's order; NATIVE-LINK-PLAN-MILESTONE-1.md): one entry per native
+# dependency, in first-declaration order --
+#
+#   {kind library name NAME linkage default|static path PATH base BASE origins {ORIGIN...}}
+#   {kind framework name NAME origins {ORIGIN...}}
+#
+# PATH the static archive's file as written ("" unless `static at`), BASE
+# the directory a relative PATH is resolved from (the application root, or
+# "" when there is none: LinkDecls). A dependency is identified by its kind
+# and name, and every declaration of it states one requirement:
+#
+#   default        the linker's choice: -lNAME, shared or static;
+#   static         a static archive libNAME.a (NAME.lib) the driver finds in
+#                  the library search directories, never a shared library;
+#   static at PATH exactly that archive.
+#
+# Each is stricter than the one before it and admits what it admits, so
+# declarations of one library merge into the strictest, whichever comes
+# first: a binding module's `extern c library "SDL3"` and the application's
+# `extern c library "SDL3" static at "native/libSDL3.a"` are one
+# dependency, the archive. Two declarations that admit no common archive
+# are LINK-CONFLICT, at the later one and naming the earlier, never one of
+# them chosen: two archive paths (compared as written, after "." and empty
+# components are dropped, against one BASE), and a library and a framework
+# of one name. ORIGINS are every declaration's, in order.
+proc hir::foreign::LinkPlan {linkDecls} {
     set plan {}
     set index [dict create]
+    set first [dict create]
     foreach decl $linkDecls {
-        set library [dict get $decl library]
-        if {![dict exists $index $library]} {
-            dict set index $library [llength $plan]
-            lappend plan [dict create library $library origins {}]
+        set kind [dict get $decl link]
+        set name [dict get $decl name]
+        set other [expr {$kind eq "library" ? "framework" : "library"}]
+        if {[dict exists $index $other $name]} {
+            LinkConflict $decl [dict get $first $other $name] \
+                "$kind \"$name\" is also declared a $other (at [LinkAt [dict get $first $other $name]]): one name is linked one way, a framework or a library, never both"
         }
-        set i [dict get $index $library]
-        lset plan $i [dict merge [lindex $plan $i] \
-            [dict create origins [concat [dict get [lindex $plan $i] origins] [list [dict get $decl origin]]]]]
+        if {![dict exists $index $kind $name]} {
+            dict set index $kind $name [llength $plan]
+            dict set first $kind $name $decl
+            if {$kind eq "framework"} {
+                lappend plan [dict create kind framework name $name origins {}]
+            } else {
+                lappend plan [dict create kind library name $name linkage default path "" base "" origins {}]
+            }
+        }
+        set i [dict get $index $kind $name]
+        set entry [lindex $plan $i]
+        if {$kind eq "library"} {
+            set entry [MergeLibrary $entry $decl [dict get $first $kind $name]]
+        }
+        dict lappend entry origins [dict get $decl origin]
+        lset plan $i $entry
     }
-    set links $plan
+    return [lmap entry $plan {dict remove $entry pathDecl}]
+}
+
+# The library entry ENTRY of the link plan (LinkPlan) with the requirement
+# of declaration DECL merged in, FIRST the library's first declaration (for
+# a conflict's message).
+proc hir::foreign::MergeLibrary {entry decl first} {
+    set path [dict get $decl path]
+    if {[dict get $decl linkage] eq "static"} {
+        dict set entry linkage static
+    }
+    if {$path eq ""} {
+        return $entry
+    }
+    set written [ArchivePathKey $path]
+    if {[dict get $entry path] eq ""} {
+        dict set entry path $path
+        dict set entry base [dict get $decl base]
+        dict set entry pathDecl $decl
+        return $entry
+    }
+    set earlier [dict get $entry pathDecl]
+    if {[ArchivePathKey [dict get $entry path]] ne $written || [dict get $entry base] ne [dict get $decl base]} {
+        LinkConflict $decl $earlier \
+            "library \"[dict get $decl name]\" is declared with two static archives, \"$path\" here and \"[dict get $entry path]\" at [LinkAt $earlier]: a library is one archive, and neither declaration is chosen over the other"
+    }
+    return $entry
+}
+
+# The archive path PATH as two declarations of one archive compare it: its
+# components without "." and empty ones ("native/./libx.a" and
+# "native//libx.a" are "native/libx.a"), a leading "/" kept.
+proc hir::foreign::ArchivePathKey {path} {
+    set parts [lmap part [split $path /] {
+        if {$part in {"" .}} continue
+        set part
+    }]
+    set key [join $parts /]
+    if {[string index $path 0] eq "/"} {
+        set key /$key
+    }
+    return $key
+}
+
+# "FILE:LINE:COLUMN" of the link declaration DECL.
+proc hir::foreign::LinkAt {decl} {
+    return [string range [Location [LinkSpan $decl]] 0 end-2]
+}
+
+# The span a diagnostic of link declaration DECL is reported at: its
+# archive path's, if written, else its name's.
+proc hir::foreign::LinkSpan {decl} {
+    if {[dict getdef $decl pathSpan ""] ne ""} {
+        return [dict get $decl pathSpan]
+    }
+    return [dict get $decl nameSpan]
+}
+
+# Raises LINK-CONFLICT at declaration DECL, which conflicts with EARLIER.
+proc hir::foreign::LinkConflict {decl earlier message} {
+    core::raiseDiagnostics [list [dict create errorcode {CORE SEMANTIC LINK-CONFLICT} \
+        message "[Location [LinkSpan $decl]]$message" summary $message \
+        location [LinkSpan $decl] related [list [LinkSpan $earlier]]]]
 }
 
 # The indices of the parameters of the ABI signature ABI ({params CLASSES
@@ -318,12 +436,71 @@ proc hir::foreign::declarations {hir} {
     return [dict getdef $hir foreign {}]
 }
 
-# HIR's link plan: the library names, in order.
+# HIR's link plan, in order, each dependency as its declaration spells it
+# without the keywords that are every one's: a library's NAME (NAME static,
+# NAME static at PATH), a framework's `framework NAME`.
 proc hir::foreign::links {hir} {
-    if {![dict exists $hir links]} {
-        return {}
+    return [lmap entry [linkPlan $hir] {
+        if {[dict get $entry kind] eq "framework"} {
+            list framework [dict get $entry name]
+        } elseif {[dict get $entry path] ne ""} {
+            list [dict get $entry name] static at [dict get $entry path]
+        } elseif {[dict get $entry linkage] eq "static"} {
+            list [dict get $entry name] static
+        } else {
+            dict get $entry name
+        }
+    }]
+}
+
+# HIR's link plan entries (LinkPlan), in order.
+proc hir::foreign::linkPlan {hir} {
+    return [dict getdef $hir links {}]
+}
+
+# Why VALUE is no link plan (LinkPlan's list of entries), or "": what
+# reading a HIR checks of one it did not build (hir::interchange::decode).
+proc hir::foreign::LinkPlanProblem {value} {
+    if {[catch {llength $value}]} {
+        return "the link plan is not a list"
     }
-    return [lmap entry [dict get $hir links] {dict get $entry library}]
+    foreach entry $value {
+        if {[catch {dict size $entry}] || ![dict exists $entry kind] || ![dict exists $entry name]
+                || ![dict exists $entry origins]} {
+            return "a link plan entry without its kind, name or origins: $entry"
+        }
+        set name [dict get $entry name]
+        if {![regexp {^[A-Za-z0-9_+.][A-Za-z0-9_+.-]*$} $name]} {
+            return "a link plan entry of no library or framework name: \"$name\""
+        }
+        switch -- [dict get $entry kind] {
+            framework {
+                if {[dict size $entry] != 3} {
+                    return "a framework entry with fields of a library's: $entry"
+                }
+            }
+            library {
+                if {[dict size $entry] != 6 || ![dict exists $entry linkage] || ![dict exists $entry path]
+                        || ![dict exists $entry base]} {
+                    return "a library entry without its linkage, path or base: $entry"
+                }
+                set linkage [dict get $entry linkage]
+                if {$linkage ni {default static}} {
+                    return "a library entry of unknown linkage \"$linkage\""
+                }
+                set path [dict get $entry path]
+                # (The parser's rule, surface::parser::ArchivePathProblem: a
+                # file's path, "/" between its components.)
+                if {$path ne "" && ($linkage ne "static" || [regexp {[\x00\\]|/$} $path])} {
+                    return "a library entry with an archive path it cannot have: $entry"
+                }
+            }
+            default {
+                return "a link plan entry of unknown kind \"[dict get $entry kind]\""
+            }
+        }
+    }
+    return ""
 }
 
 # The state of this registry, for hir::declarations::capture.

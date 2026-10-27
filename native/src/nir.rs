@@ -1889,11 +1889,12 @@ pub struct Program {
     /// The C functions the program calls (`foreign` declarations, dense, in
     /// order; C-FFI.md).
     pub foreigns: Vec<ForeignDecl>,
-    /// The program's link plan (`link "NAME"` declarations, in order): the
-    /// native libraries the system linker links it with (-lNAME). A program
-    /// with a foreign function or a library is linked as an executable to
-    /// run (main.rs), never JIT-run.
-    pub links: Vec<String>,
+    /// The program's link plan (`link` and `framework` declarations, in
+    /// order; C-FFI.md, NATIVE-LINK-PLAN-MILESTONE-1.md): the native
+    /// dependencies the system linker links it with. A program with a
+    /// foreign function or a dependency is linked as an executable to run
+    /// (main.rs), never JIT-run.
+    pub links: Vec<Link>,
     /// The size in bytes of the program's context area (the header's
     /// `contexts=N`, CONTEXTS.md): one zero-initialized, 8-byte-aligned,
     /// writable, linker-local data object holding every context slot. Zero
@@ -2147,12 +2148,10 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                         _ => return p.err("target needs a quoted target name and triple=TRIPLE"),
                     }
                 }
-                "link" => match tokens.get(1) {
-                    Some(Token::Quoted(name)) if !name.is_empty() && tokens.len() == 2 => {
-                        program.links.push(name.clone())
-                    }
-                    _ => return p.err("link needs exactly one quoted library name"),
-                },
+                "link" | "framework" => {
+                    let link = parse_link(&p, &tokens)?;
+                    program.links.push(link);
+                }
                 "foreign" => {
                     let decl = parse_foreign(&p, &tokens)?;
                     if decl.0 as usize != program.foreigns.len() {
@@ -2405,6 +2404,82 @@ fn parse_export(p: &Parser, tokens: &[Token]) -> Result<ExportDecl, NirError> {
 
 /// Whether TEXT is a C identifier: a letter or `_`, then letters, digits and
 /// `_` (ASCII).
+/// One native dependency of a program's link plan (hir/foreign.tcl's
+/// LinkPlan, NATIVE-LINK-PLAN-MILESTONE-1.md): what the program needs, never
+/// how a host's linker provides it (codegen::aot's `resolve_link_plan`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// `link "NAME"`: the library NAME, the linker's to find, shared or
+    /// static (-lNAME, NAME.lib).
+    Library(String),
+    /// `link "NAME" static`, with `path="PATH" base="BASE"` for `static at
+    /// PATH`: the library NAME's static archive, never a shared library --
+    /// the file PATH (as written: BASE, the application root, joined to it
+    /// unless it is absolute), or the one the driver finds in the search
+    /// directories.
+    Static { name: String, archive: Option<ArchivePath> },
+    /// `framework "NAME"`: the Apple framework NAME (-framework NAME).
+    Framework(String),
+}
+
+/// A static archive's path as the source wrote it (`static at "PATH"`) and
+/// the directory it is resolved from (the application root; "" when the
+/// program has none).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchivePath {
+    pub written: String,
+    pub base: String,
+}
+
+impl Link {
+    /// The dependency's name (a library's or a framework's).
+    pub fn name(&self) -> &str {
+        match self {
+            Link::Library(name) | Link::Framework(name) | Link::Static { name, .. } => name,
+        }
+    }
+}
+
+/// Whether NAME is a library or framework name as Botlish source writes one
+/// (surface/parser.tcl's LinkDecl): letters, digits, `_ + . -`, never
+/// starting with `-` -- never a path or a linker option.
+pub fn is_link_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphanumeric() || "_+.".contains(c))
+        && chars.all(|c| c.is_ascii_alphanumeric() || "_+.-".contains(c))
+}
+
+/// A `link` or `framework` header line's TOKENS: `link "NAME"`, `link
+/// "NAME" static`, `link "NAME" static path="PATH" base="BASE"`,
+/// `framework "NAME"`.
+fn parse_link(p: &Parser, tokens: &[Token]) -> Result<Link, NirError> {
+    let Some(Token::Quoted(name)) = tokens.get(1) else {
+        return p.err("link and framework need a quoted name");
+    };
+    if !is_link_name(name) {
+        return p.err(format!("{name:?} is no library or framework name"));
+    }
+    if word(&tokens[0]) == Some("framework") {
+        if tokens.len() != 2 {
+            return p.err("framework needs exactly one quoted framework name");
+        }
+        return Ok(Link::Framework(name.clone()));
+    }
+    match &tokens[2..] {
+        [] => Ok(Link::Library(name.clone())),
+        [static_word] if word(static_word) == Some("static") => Ok(Link::Static { name: name.clone(), archive: None }),
+        [static_word, Token::Pair(k1, written), Token::Pair(k2, base)]
+            if word(static_word) == Some("static") && k1 == "path" && k2 == "base" =>
+        {
+            if written.is_empty() || written.contains('\0') || written.contains('\\') || written.ends_with('/') {
+                return p.err(format!("{written:?} is no archive path"));
+            }
+            Ok(Link::Static { name: name.clone(), archive: Some(ArchivePath { written: written.clone(), base: base.clone() }) })
+        }
+        _ => p.err("link needs a quoted library name, then nothing, `static`, or `static path=\"PATH\" base=\"BASE\"`"),
+    }
+}
+
 pub fn is_c_identifier(text: &str) -> bool {
     let mut chars = text.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')

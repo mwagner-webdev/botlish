@@ -1,0 +1,761 @@
+# native-link-plan.test -- explicit static C libraries, archive paths and
+# Apple frameworks in the link plan (NATIVE-LINK-PLAN-MILESTONE-1.md).
+#
+#   extern c library "NAME" static              a static archive, searched
+#   extern c library "NAME" static at "PATH"    exactly that archive, PATH
+#                                               from the application root
+#   extern c framework "NAME"                   an Apple framework (macOS)
+#
+# The front end validates the declarations, merges each library's into its
+# strictest requirement (LINK-CONFLICT where none admits both), records an
+# archive's path as written beside the application root it resolves from,
+# refuses a framework for a target without frameworks (UNSUPPORTED-PLATFORM)
+# and keeps all of it through HIR interchange and the front-end cache. The
+# driver resolves the plan when it links (codegen/aot.rs's
+# resolve_link_plan): it finds and checks each archive -- a regular file of
+# objects of the host's format and architecture, never a shared library or
+# an import library -- and passes it to the platform linker by its absolute
+# path, NATIVE LINK ARCHIVE before any linker runs otherwise.
+#
+# The link tests build a C fixture with the host's toolchain
+# (tests/ctoolchain.tcl) in private directories of the tcltest temporary
+# directory: a static archive and a shared library of the same name whose
+# functions return different values, so which one an executable linked is
+# visible in what it prints as well as in its dynamic dependencies (ldd,
+# otool -L, the PE import directory). Every executable also runs with the
+# archives deleted.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tests binary-header.tcl]
+source [file join $::projectRoot lsp json.tcl]
+
+set ::windowsHost [expr {$::tcl_platform(platform) eq "windows"}]
+set ::hostTarget [core::cabi::hostTarget]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint windowsHost $::windowsHost
+testConstraint macosHost [string match macos-* $::hostTarget]
+testConstraint linuxHost [string match linux-* $::hostTarget]
+# The driver's directory: the runtime archive (the system linker's) and the
+# rustc linker's runtime library.
+if {[testConstraint nativeBuilt]} {
+    set ::release [file dirname [native::binary]]
+} else {
+    set ::release [file join $native::home target release]
+}
+set ::runtimeArchive [file join $::release [expr {$::windowsHost ? "botlish_runtime.lib" : "libbotlish_runtime.a"}]]
+testConstraint systemLinkerBuilt [expr {[testConstraint nativeBuilt] && [file isfile $::runtimeArchive]}]
+testConstraint nativeLibraries [expr {[native::hostSupports libraries] && [testConstraint nativeBuilt]
+    && [auto_execok cc] ne "" && [auto_execok ld] ne "" && [auto_execok objcopy] ne "" && [auto_execok ar] ne ""
+    && [file exists [file join [file dirname [native::binary]] libbotlish_native.a]]}]
+testConstraint rustcLinkerBuilt [expr {[testConstraint nativeBuilt] && [auto_execok rustc] ne ""
+    && [file isfile [file join $::release libbotlish_native.rlib]]}]
+
+set ::nlpCounter 0
+
+# A fresh directory of the tcltest temporary directory, its name holding a
+# space and a non-ASCII letter: its absolute path.
+proc nlpDir {{tag app}} {
+    return [makeDirectory "nlp $tag ü [pid]-[incr ::nlpCounter]"]
+}
+
+proc nlpWrite {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# Writes FILES ({RELATIVE-PATH TEXT ...}) under DIR; returns DIR.
+proc nlpApp {dir files} {
+    foreach {relative text} $files {
+        nlpWrite [file join $dir {*}[split $relative /]] $text
+    }
+    return $dir
+}
+
+# The HIR of DIR/MAIN (OPTIONS: surface::readProgramFile's).
+proc nlpHir {dir {main main.bot} args} {
+    return [surface::readProgramFile [file join $dir $main] -warnings off -cache "" {*}$args]
+}
+
+# "SHOWN-CODE: MESSAGE" of the compilation of DIR/MAIN's first diagnostic,
+# DIR spelled away, or accepted.
+proc nlpRejection {dir {main main.bot} args} {
+    if {[catch {nlpHir $dir $main {*}$args} message options]} {
+        set first [lindex [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] 0]
+        return "[lindex [dict get $first errorcode] end]: [string map [list $dir/ ""] [dict get $first message]]"
+    }
+    return accepted
+}
+
+# HIR's link plan entries, each without its origins, followed by how many
+# declarations it has; a base that is the directory ROOT is ROOT.
+proc nlpPlan {hir {root ""}} {
+    lmap entry [hir::foreign::linkPlan $hir] {
+        if {$root ne "" && [dict exists $entry base] && [dict get $entry base] eq [file normalize $root]} {
+            dict set entry base ROOT
+        }
+        list {*}[dict remove $entry origins] declarations [llength [dict get $entry origins]]
+    }
+}
+
+# The `link` and `framework` lines of HIR's NIR header.
+proc nlpNirLinks {hir} {
+    lmap line [split [native::nir $hir] \n] {
+        expr {[regexp {^(link|framework) } $line] ? $line : [continue]}
+    }
+}
+
+# The text of a parse of SOURCE, or its first diagnostic's "LINE:COLUMN
+# CODE".
+proc nlpParse {source} {
+    if {[catch {surface::parse $source t.bot} message]} {
+        if {![regexp {^t.bot:([0-9]+:[0-9]+): ([A-Z-]+):} $message -> at code]} {
+            regexp {^t.bot:([0-9]+:[0-9]+): } $message -> at
+            set code SYNTAX
+        }
+        return [list $at $code]
+    }
+    return [surface::formatAst [surface::parse $source t.bot]]
+}
+
+# ---------------------------------------------------------------------------
+# Syntax
+
+test nlp-parse-forms {the declarations: a library the linker finds, one that must be static, its archive's file, an Apple framework; a module's text prints them back as written} -body {
+    nlpParse [join {
+        {extern c library "m"}
+        {extern c library "SDL3" static}
+        {extern c library "SDL3" static at "native/macos/libSDL3.a"}
+        {extern c library "x" static at "/opt/x lib/libx.a"}
+        {extern c framework "Cocoa"}
+        {extern c framework "IOKit"}
+    } \n]\n
+} -result {extern c library "m"
+extern c library "SDL3" static
+extern c library "SDL3" static at "native/macos/libSDL3.a"
+extern c library "x" static at "/opt/x lib/libx.a"
+extern c framework "Cocoa"
+extern c framework "IOKit"}
+
+test nlp-parse-errors {malformed declarations are located EXTERN-SYNTAX errors: an archive path without `static`, an empty path, a backslash, a directory, an unquoted path, a trailing word, a framework that is a linker option or unquoted, a framework with a library's words, an unknown kind; and `private` names nothing of them} -body {
+    lmap src {
+        "extern c library \"x\" at \"a.a\"\n"
+        "extern c library \"x\" static at \"\"\n"
+        "extern c library \"x\" static at \"native\\\\\\\\x.a\"\n"
+        "extern c library \"x\" static at \"native/\"\n"
+        "extern c library \"x\" static at native\n"
+        "extern c library \"x\" static shared\n"
+        "extern c library \"x\" dynamic\n"
+        "extern c library \"x\" static at \"a.a\" more\n"
+        "extern c framework \"-Wl,-x\"\n"
+        "extern c framework Cocoa\n"
+        "extern c framework \"Cocoa\" static\n"
+        "extern c framework \"Cocoa/Cocoa.h\"\n"
+        "extern c package \"x\"\n"
+        "private extern c framework \"Cocoa\"\n"
+    } {
+        nlpParse [subst -nocommands -novariables $src]
+    }
+} -result {{1:22 EXTERN-SYNTAX} {1:32 EXTERN-SYNTAX} {1:32 EXTERN-SYNTAX} {1:32 EXTERN-SYNTAX} {1:32 EXTERN-SYNTAX} {1:29 EXTERN-SYNTAX} {1:22 EXTERN-SYNTAX} {1:38 EXTERN-SYNTAX} {1:20 EXTERN-SYNTAX} {1:20 EXTERN-SYNTAX} {1:28 EXTERN-SYNTAX} {1:20 EXTERN-SYNTAX} {1:10 EXTERN-SYNTAX} {1:1 SYNTAX}}
+
+test nlp-parse-messages {the messages name what is wrong and the remedy} -body {
+    lmap src [list "extern c library \"x\" at \"a.a\"\n" "extern c library \"x\" static at \"native\\\\x.a\"\n" \
+            "extern c framework \"-Wl,-x\"\n" "extern c thing\n"] {
+        catch {surface::parse $src t.bot} message
+        set message
+    }
+} -result {{t.bot:1:22: EXTERN-SYNTAX: an archive path names the file of a static library: write "extern c library \"x\" static at PATH" (a library without `static` is the linker's to find, shared or static)} {t.bot:1:32: EXTERN-SYNTAX: "native\x.a": write "/" between the components of an archive path (every host's separator: "native/SDL3-static.lib"), never "\"} {t.bot:1:20: EXTERN-SYNTAX: "-Wl,-x" is not a framework name: "extern c framework" names an Apple framework the way the platform linker does ("Cocoa" for -framework Cocoa) -- letters, digits, _ + . and -, never a path or a linker option; search directories are the toolchain's (main.tcl -F DIR)} {t.bot:1:10: EXTERN-SYNTAX: expected "fn", "library" or "framework" after "extern c", found name "thing"}}
+
+test nlp-parse-contextual {static, at and framework are contextual: ordinary names everywhere else} -body {
+    set hir [surface::compile "static = 1\nfn at(framework):\n    framework + static\nat(41)\n" -warnings off]
+    lrange [outcomeUnderHir interp $hir] 0 1
+} -result {value 42}
+
+test nlp-parse-recover {a recovering parse reports a malformed declaration once and keeps the valid ones} -body {
+    set ast [surface::parse "extern c library \"x\" at \"a\"\nextern c framework \"Cocoa\"\nextern c library \"y\" static\nx = 1\n" t.bot -recover 1]
+    list [lmap d [dict get $ast diagnostics] {dict get $d line}] [lmap s [dict get $ast body] {dict get $s kind}]
+} -result {1 {error externlib externlib bind}}
+
+# ---------------------------------------------------------------------------
+# The link plan in HIR
+
+test nlp-plan-entries {every declaration of the program and its modules is one entry of the plan, in first-declaration order (a module's before its importer's): a library with its linkage, archive path as written and the application root it resolves from; a framework by name} -body {
+    set dir [nlpApp [nlpDir] {
+        main.bot "import binding\nextern c library \"m\"\nextern c library \"z\" static\n1\n"
+        binding.bot "extern c library \"SDL3\" static at \"native/libSDL3.a\"\n"
+    }]
+    set hir [nlpHir $dir]
+    list [hir::foreign::links $hir] [nlpPlan $hir $dir] [hir::cabi::targetOf $hir]
+} -cleanup {removeDirectory [file tail $dir]} -result {{{SDL3 static at native/libSDL3.a} m {z static}} {{kind library name SDL3 linkage static path native/libSDL3.a base ROOT declarations 1} {kind library name m linkage default path {} base {} declarations 1} {kind library name z linkage static path {} base {} declarations 1}} {}}
+
+test nlp-plan-merge {declarations of one library merge into the strictest requirement, whichever comes first -- default, static, an archive -- with every declaration's origin; one archive spelled two ways ("." and empty components) is one} -body {
+    set results {}
+    foreach {mainLinks bindingLinks} {
+        {extern c library "SDL3"} {extern c library "SDL3" static at "native/libSDL3.a"}
+        {extern c library "SDL3" static at "native/libSDL3.a"} {extern c library "SDL3"}
+        {extern c library "SDL3" static} {extern c library "SDL3"}
+        {extern c library "SDL3" static} {extern c library "SDL3" static at "native//./libSDL3.a"}
+        {extern c framework "Cocoa"} {extern c framework "Cocoa"}
+    } {
+        set dir [nlpApp [nlpDir] [list main.bot "import binding\n$mainLinks\n1\n" binding.bot "$bindingLinks\n"]]
+        set target [expr {[string match *framework* $mainLinks] ? "macos-aarch64" : ""}]
+        lappend results [nlpPlan [nlpHir $dir main.bot -target $target] $dir]
+        removeDirectory [file tail $dir]
+    }
+    join $results \n
+} -result {{kind library name SDL3 linkage static path native/libSDL3.a base ROOT declarations 2}
+{kind library name SDL3 linkage static path native/libSDL3.a base ROOT declarations 2}
+{kind library name SDL3 linkage static path {} base {} declarations 2}
+{kind library name SDL3 linkage static path native//./libSDL3.a base ROOT declarations 2}
+{kind framework name Cocoa declarations 2}}
+
+test nlp-plan-conflicts {requirements no archive satisfies are LINK-CONFLICT at the later declaration, naming the earlier one -- two archives of one library, one name a library and a framework -- whatever the modules' order; the diagnostic's locations are data} -body {
+    set results {}
+    foreach {mainLinks bindingLinks target} {
+        {extern c library "SDL3" static at "native/libSDL3.a"} {extern c library "SDL3" static at "vendor/libSDL3.a"} {}
+        {extern c library "SDL3" static at "vendor/libSDL3.a"} {extern c library "SDL3" static at "native/libSDL3.a"} {}
+        {extern c framework "z"} {extern c library "z"} macos-aarch64
+        {extern c library "z"} {extern c framework "z"} macos-aarch64
+    } {
+        set dir [nlpApp [nlpDir] [list main.bot "import binding\n$mainLinks\n1\n" binding.bot "$bindingLinks\n"]]
+        catch {nlpHir $dir main.bot -target $target} message options
+        set entry [lindex [dict get $options -diagnostics] 0]
+        lappend results [dict get $options -errorcode] [string map [list $dir/ ""] $message] \
+            [lmap span [concat [list [dict get $entry location]] [dict get $entry related]] {
+                list [file tail [dict get $span file]] [dict get $span line] [dict get $span column]
+            }]
+        removeDirectory [file tail $dir]
+    }
+    join $results \n
+} -result {CORE SEMANTIC LINK-CONFLICT
+main.bot:2:35: library "SDL3" is declared with two static archives, "native/libSDL3.a" here and "vendor/libSDL3.a" at binding.bot:1:35: a library is one archive, and neither declaration is chosen over the other
+{main.bot 2 35} {binding.bot 1 35}
+CORE SEMANTIC LINK-CONFLICT
+main.bot:2:35: library "SDL3" is declared with two static archives, "vendor/libSDL3.a" here and "native/libSDL3.a" at binding.bot:1:35: a library is one archive, and neither declaration is chosen over the other
+{main.bot 2 35} {binding.bot 1 35}
+CORE SEMANTIC LINK-CONFLICT
+main.bot:2:20: framework "z" is also declared a library (at binding.bot:1:18): one name is linked one way, a framework or a library, never both
+{main.bot 2 20} {binding.bot 1 18}
+CORE SEMANTIC LINK-CONFLICT
+main.bot:2:18: library "z" is also declared a framework (at binding.bot:1:20): one name is linked one way, a framework or a library, never both
+{main.bot 2 18} {binding.bot 1 20}}
+
+test nlp-plan-application-root {an archive path resolves from the application root -- the entry file's directory, for an imported module's declaration too, whatever the working directory; none for a program compiled from text} -body {
+    set dir [nlpApp [nlpDir] {
+        main.bot "import binding\n1\n"
+        binding.bot "extern c library \"fx\" static at \"native/libfx.a\"\n"
+    }]
+    set elsewhere [nlpDir elsewhere]
+    set saved [pwd]
+    cd $elsewhere
+    try {
+        set fromElsewhere [dict get [lindex [hir::foreign::linkPlan [surface::readProgramFile [file join .. [file tail $dir] main.bot] -warnings off -cache ""]] 0] base]
+    } finally {
+        cd $saved
+    }
+    set fromText [dict get [lindex [hir::foreign::linkPlan [surface::compile "extern c library \"fx\" static at \"native/libfx.a\"\n1\n" -warnings off]] 0] base]
+    list [expr {$fromElsewhere eq [file normalize $dir]}] [list $fromText]
+} -cleanup {
+    removeDirectory [file tail $dir]
+    removeDirectory [file tail $elsewhere]
+} -result {1 {{}}}
+
+test nlp-framework-target {a framework is the macOS target's: UNSUPPORTED-PLATFORM at the declaration for every target whose linker has none, accepted for a macOS one, whose HIR then records its target} -body {
+    set dir [nlpApp [nlpDir] {main.bot "extern c framework \"CoreFoundation\"\n1\n"}]
+    set results {}
+    foreach target {linux-x86_64 linux-aarch64 windows-x86_64 windows-x86_64-gnu} {
+        lappend results [nlpRejection $dir main.bot -target $target]
+    }
+    lappend results [hir::cabi::targetOf [nlpHir $dir main.bot -target macos-aarch64]]
+    join $results \n
+} -cleanup {removeDirectory [file tail $dir]} -result {UNSUPPORTED-PLATFORM: main.bot:1:20: framework "CoreFoundation" (`extern c framework`) is an Apple framework, which only macOS's linker links, and this compilation is for target linux-x86_64 (Linux on x86_64): a framework is never mapped to a library or linked for another operating system; compile for a macOS target (-target macos-x86_64) or declare no framework
+UNSUPPORTED-PLATFORM: main.bot:1:20: framework "CoreFoundation" (`extern c framework`) is an Apple framework, which only macOS's linker links, and this compilation is for target linux-aarch64 (Linux on aarch64): a framework is never mapped to a library or linked for another operating system; compile for a macOS target (-target macos-aarch64) or declare no framework
+UNSUPPORTED-PLATFORM: main.bot:1:20: framework "CoreFoundation" (`extern c framework`) is an Apple framework, which only macOS's linker links, and this compilation is for target windows-x86_64 (Windows on x86_64): a framework is never mapped to a library or linked for another operating system; compile for a macOS target (-target macos-x86_64) or declare no framework
+UNSUPPORTED-PLATFORM: main.bot:1:20: framework "CoreFoundation" (`extern c framework`) is an Apple framework, which only macOS's linker links, and this compilation is for target windows-x86_64-gnu (Windows on x86_64): a framework is never mapped to a library or linked for another operating system; compile for a macOS target (-target macos-x86_64) or declare no framework
+macos-aarch64}
+
+test nlp-static-needs-no-target {a static library or an archive path is no target's: its HIR stays every target's, and checking reads no file (the archive does not exist)} -body {
+    set dir [nlpApp [nlpDir] {main.bot "extern c library \"z\" static\nextern c library \"q\" static at \"native/missing.a\"\n2\n"}]
+    set hir [nlpHir $dir]
+    list [hir::cabi::targetOf $hir] [lrange [outcomeUnderHir interp $hir] 0 1]
+} -cleanup {removeDirectory [file tail $dir]} -result {{} {value 2}}
+
+test nlp-plan-interchange {HIR interchange keeps every entry -- kind, linkage, path, root -- and a reader refuses a link plan its front end cannot have built, in the HIR or in its declaration state} -body {
+    set dir [nlpApp [nlpDir] {
+        main.bot "extern c library \"m\"\nextern c library \"z\" static\nextern c library \"fx\" static at \"native/libfx.a\"\nextern c framework \"Metal\"\n1\n"
+    }]
+    set hir [nlpHir $dir main.bot -target macos-aarch64]
+    set text [hir::interchange::encode $hir]
+    set read [hir::interchange::decode $text]
+    set results [list [expr {[dict get $read links] eq [dict get $hir links]}] [hir::foreign::links $read] \
+        [expr {[nlpNirLinks $read] eq [nlpNirLinks $hir]}]]
+    foreach {where entry} {
+        links {kind library name fx linkage dynamic path {} base {} origins {}}
+        links {kind package name fx origins {}}
+        links {kind library name -Wl,--wrap linkage default path {} base {} origins {}}
+        links {kind library name fx linkage default path native/libfx.a base / origins {}}
+        links {kind framework name Metal linkage static origins {}}
+        {declarations foreign links} {kind library name fx linkage static path {a\b.a} base / origins {}}
+    } {
+        set bad $hir
+        dict set bad {*}$where [list $entry]
+        set badText [hir::interchange::encode $bad]
+        lappend results [catch {hir::interchange::decode $badText} message options] [dict get $options -errorcode]
+    }
+    hir::activate $hir
+    set results
+} -cleanup {removeDirectory [file tail $dir]} -result {1 {m {z static} {fx static at native/libfx.a} {framework Metal}} 1 1 {HIR INTERCHANGE FORMAT} 1 {HIR INTERCHANGE FORMAT} 1 {HIR INTERCHANGE FORMAT} 1 {HIR INTERCHANGE FORMAT} 1 {HIR INTERCHANGE FORMAT} 1 {HIR INTERCHANGE FORMAT}}
+
+test nlp-plan-cache {the front-end cache keeps the plan as built, and a moved application is another compilation: its HIR names the new root, never the old one -- also for one entry path, main.bot, given from two applications' directories} -body {
+    set cache [nlpDir cache]
+    set text "extern c library \"fx\" static at \"native/libfx.a\"\n1\n"
+    set dir [nlpApp [nlpDir] [list main.bot $text]]
+    set twin [nlpApp [nlpDir] [list main.bot $text]]
+    surface::cache::resetStats
+    set first [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    set again [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    set hits [dict get [surface::cache::stats] hits]
+    set moved "$dir moved"
+    file rename $dir $moved
+    set afterMove [surface::readProgramFile [file join $moved main.bot] -warnings off -cache $cache]
+    set saved [pwd]
+    set bases {}
+    try {
+        foreach app [list $moved $twin] {
+            cd $app
+            lappend bases [expr {[dict get [lindex [dict get [surface::readProgramFile main.bot -warnings off -cache $cache] links] 0] base] eq [file normalize $app]}]
+        }
+    } finally {
+        cd $saved
+    }
+    list $hits [expr {[dict get $again links] eq [dict get $first links]}] \
+        [expr {[dict get [lindex [dict get $afterMove links] 0] base] eq [file normalize $moved]}] \
+        [expr {[dict get [lindex [dict get $first links] 0] base] eq [file normalize $dir]}] $bases
+} -cleanup {
+    file delete -force $moved $twin $cache
+} -result {1 1 1 1 {1 1}}
+
+test nlp-nir-header {the NIR header states each dependency as the program does -- the archive's path as written and its root, for the driver to join -- and frameworks apart from libraries} -body {
+    set dir [nlpApp [nlpDir] {
+        main.bot "extern c library \"m\"\nextern c library \"z\" static\nextern c library \"fx\" static at \"native/lib fx.a\"\nextern c framework \"Metal\"\n1\n"
+    }]
+    string map [list [file normalize $dir] ROOT] [nlpNirLinks [nlpHir $dir main.bot -target macos-aarch64]]
+} -cleanup {removeDirectory [file tail $dir]} -result {{link "m"} {link "z" static} {link "fx" static path="native/lib fx.a" base="ROOT"} {framework "Metal"}}
+
+test nlp-isolation {a link plan is compilation-local: compiling another program never changes an earlier HIR's plan or NIR} -body {
+    set dir [nlpApp [nlpDir] {
+        a.bot "extern c library \"fx\" static at \"native/libfx.a\"\n1\n"
+        b.bot "extern c library \"other\"\n2\n"
+    }]
+    set a [nlpHir $dir a.bot]
+    set before [nlpNirLinks $a]
+    set b [nlpHir $dir b.bot]
+    list [expr {[nlpNirLinks $a] eq $before}] [nlpNirLinks $b]
+} -cleanup {removeDirectory [file tail $dir]} -result {1 {{link "other"}}}
+
+# ---------------------------------------------------------------------------
+# Linking: the fixture
+
+# The fixture's C text: functions whose results tell the static archive's
+# code (TAG 1) from the shared library's (TAG 2).
+proc nlpSource {tag} {
+    return [string map [list @TAG@ $tag] {#include <stddef.h>
+int nlp_tag(void) { return @TAG@; }
+int nlp_add(int a, int b) { return a + b + 1000 * @TAG@; }
+unsigned long nlp_sum(const unsigned char *data, unsigned long count) {
+    unsigned long total = 0;
+    for (unsigned long i = 0; i < count; i++) total += data[i];
+    return total;
+}
+void nlp_fill(unsigned char *out, unsigned long count, unsigned char seed) {
+    for (unsigned long i = 0; i < count; i++) out[i] = (unsigned char)(seed + i);
+}
+long nlp_checked_div(long a, long b) { return b == 0 ? -1 : a / b; }
+}]
+}
+
+# The fixture's binding text, its library declared by DECLARATION.
+proc nlpBinding {declaration} {
+    return "import std::ffi::c\n\n$declaration\n\nextern c fn tag named \"nlp_tag\"() -> std::ffi::c::Int\nextern c fn add named \"nlp_add\"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int\n"
+}
+
+# Builds the fixture under DIR (made): DIR/static/ the static archive
+# (libnlp.a, nlp.lib), DIR/shared/ the shared library (libnlp.so,
+# libnlp.dylib; nlp.dll and its import library nlp.lib), and DIR/both/ both
+# on Unix (where they can share a directory); and libnlpdep.a (nlpdep.lib)
+# in DIR/static/, whose function calls the fixture's. Returns DIR.
+proc nlpFixture {dir} {
+    foreach sub {static shared both src} { file mkdir [file join $dir $sub] }
+    set staticSource [nlpWrite [file join $dir src nlp.c] [nlpSource 1]]
+    set sharedSource [nlpWrite [file join $dir src nlpshared.c] [nlpSource 2]]
+    set depSource [nlpWrite [file join $dir src nlpdep.c] "int nlp_add(int a, int b);\nint nlp_twice(int a, int b) { return 2 * nlp_add(a, b); }\n"]
+    ctool::staticLibrary [file join $dir static] nlp $staticSource
+    ctool::staticLibrary [file join $dir static] nlpdep $depSource
+    if {$::windowsHost} {
+        ctool::sharedLibrary [file join $dir shared] nlp $sharedSource
+    } else {
+        set shared [lindex [ctool::sharedLibrary [file join $dir shared] nlp $sharedSource] 0]
+        file copy [file join $dir static [ctool::staticName nlp]] [file join $dir both]
+        file copy $shared [file join $dir both]
+    }
+    return $dir
+}
+
+set ::nlpFixtureDir ""
+if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt]} {
+    if {[catch {nlpFixture [nlpDir fixture]} ::nlpFixtureDir]} {
+        puts stderr "native-link-plan.test: the fixture did not build: $::nlpFixtureDir"
+        set ::nlpFixtureDir ""
+    }
+}
+testConstraint nlpFixture [expr {$::nlpFixtureDir ne "" && [testConstraint cLinker]}]
+
+proc nlpFixturePath {args} {
+    return [file join $::nlpFixtureDir {*}$args]
+}
+
+# The dynamic libraries executable EXE loads, as the host's tools list them.
+proc nlpDynamic {exe} {
+    if {$::tcl_platform(os) eq "Darwin"} {
+        return [exec otool -L $exe]
+    }
+    if {$::windowsHost} {
+        return [join [dict get [peFacts $exe] imports] \n]
+    }
+    return [exec ldd $exe]
+}
+
+# Whether executable EXE depends on the fixture's shared library.
+proc nlpDependsOnShared {exe} {
+    return [regexp -nocase {(libnlp\.(so|dylib)|nlp\.dll)} [nlpDynamic $exe]]
+}
+
+# Links HIR to DIR/NAME with the library directories DIRS (and the
+# framework directories FRAMEWORKS) and the linker in force: the executable.
+proc nlpExecutable {hir dir name {dirs {}} {frameworks {}}} {
+    set run {native::withLinkDirs $dirs {native::withFrameworkDirs $frameworks {native::executable $hir [file join $dir $name]}}}
+    if {$::windowsHost} {
+        return [ctool::withMsvc $run]
+    }
+    return [eval $run]
+}
+
+# The standard output of executable EXE, run alone (runBare), trimmed.
+proc nlpRun {exe args} {
+    return [string trim [runBare $exe]]
+}
+
+# The error code's last words and message of HIR's link plan, resolved by
+# the driver with library directories DIRS, or its records.
+proc nlpResolve {hir {dirs {}}} {
+    if {[catch {native::withLinkDirs $dirs {native::linkPlan $hir}} message options]} {
+        return [list [dict get $options -errorcode] $message]
+    }
+    return $message
+}
+
+# ---------------------------------------------------------------------------
+# Linking: static archives
+
+test nlp-static-at-links {a library declared static at an application-relative path is that archive: the executable runs the archive's code, depends on no shared library of it, and runs with the archive, the application and the fixture gone} -constraints nlpFixture -body {
+    set dir [nlpApp [nlpDir] [list \
+        main.bot "import nlp\nnlp::add(1, 2) + 10 * nlp::tag()\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set out [nlpDir out]
+    set exe [nlpExecutable [nlpHir $dir] $out prog]
+    file delete -force $dir
+    list [nlpRun $exe] [nlpDependsOnShared $exe]
+} -cleanup {file delete -force $out} -result {1013 0}
+
+test nlp-static-beats-shared {a static declaration takes the archive where the shared library of its name is beside it, on the -L path; an ordinary declaration takes what the linker chooses, the shared library there} -constraints {nlpFixture} -body {
+    set results {}
+    foreach {declaration dirs} [list \
+            {extern c library "nlp" static} [list [nlpFixturePath [expr {$::windowsHost ? "static" : "both"}]]] \
+            {extern c library "nlp"} [list [nlpFixturePath [expr {$::windowsHost ? "shared" : "both"}]]]] {
+        set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::tag()\n" nlp.bot [nlpBinding $declaration]]]
+        set exe [nlpExecutable [nlpHir $dir] $dir prog $dirs]
+        if {[nlpDependsOnShared $exe]} {
+            if {$::windowsHost} {
+                file copy [nlpFixturePath shared nlp.dll] [file dirname $exe]
+                set value [nlpRun $exe]
+            } else {
+                set value [withEnvironment [list LD_LIBRARY_PATH [lindex $dirs 0] DYLD_LIBRARY_PATH [lindex $dirs 0]] {
+                    string trim [exec $exe]
+                }]
+            }
+            lappend results shared $value
+        } else {
+            lappend results static [nlpRun $exe]
+        }
+        file delete -force $dir
+    }
+    set results
+} -result {static 1 shared 2}
+
+test nlp-static-shared-only {a static declaration whose library is only a shared one on the search path is NATIVE LINK ARCHIVE, never a fallback: the message names the directories searched and the shared library it would not take} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::tag()\n" nlp.bot [nlpBinding {extern c library "nlp" static}]]]
+    lassign [nlpResolve [nlpHir $dir] [list [nlpFixturePath shared]]] code message
+    if {$::windowsHost} {
+        # A DLL's import library is nlp.lib too: found, and refused as one.
+        list $code [string match "*nlp.lib of library \"nlp\"*is an import library*" $message] 1
+    } else {
+        list $code [string match "*library \"nlp\" is declared static, and no static archive [ctool::staticName nlp] is in the library search directories (*[nlpFixturePath shared]*)*" $message] \
+            [string match "*is a shared library of that name, which a static declaration never links*" $message]
+    }
+} -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1 1}
+
+test nlp-static-resolution {the driver's plan names each archive and why: declared at a path (its absolute file under the application root) or found in a search directory; ordinary libraries stay the linker's} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nextern c library \"nlpdep\" static\nextern c library \"m\"\nnlp::tag()\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set plan [nlpResolve [nlpHir $dir] [list [nlpFixturePath static]]]
+    lmap record $plan {
+        lmap word $record {string map [list [file normalize $dir] APP [nlpFixturePath static] FIXTURE] $word}
+    }
+} -cleanup {file delete -force $dir} -result [list \
+    [list archive nlp APP/native/[ctool::staticName nlp] declared native/[ctool::staticName nlp]] \
+    [list archive nlpdep FIXTURE/[ctool::staticName nlpdep] searched FIXTURE] \
+    {library m}]
+
+test nlp-static-dependent-archives {two static archives, the one that needs the other declared first, link in either order} -constraints {nlpFixture} -body {
+    set results {}
+    foreach order {{nlpdep nlp} {nlp nlpdep}} {
+        set lines [lmap lib $order {string cat "extern c library \"$lib\" static at \"native/[ctool::staticName $lib]\""}]
+        set dir [nlpApp [nlpDir] [list main.bot "import std::ffi::c\n[join $lines \n]\nextern c fn twice named \"nlp_twice\"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int\ntwice(1, 2)\n"]]
+        file mkdir [file join $dir native]
+        foreach lib $order { file copy [nlpFixturePath static [ctool::staticName $lib]] [file join $dir native] }
+        lappend results [nlpRun [nlpExecutable [nlpHir $dir] $dir prog]]
+        file delete -force $dir
+    }
+    set results
+} -result {2006 2006}
+
+test nlp-static-relocation {moving an application with its archive moves its link: compiled through the front-end cache from another working directory, the moved copy links its own archive (its old place gone)} -constraints {nlpFixture} -body {
+    set cache [nlpDir cache]
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::add(2, 3)\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"vendor/c libs/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir vendor "c libs"]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir vendor "c libs"]
+    set elsewhere [nlpDir cwd]
+    set saved [pwd]
+    cd $elsewhere
+    try {
+        set first [nlpRun [nlpExecutable [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache] $elsewhere one]]
+        set moved "[file dirname $dir]/nlp moved [pid]-[incr ::nlpCounter]"
+        file rename $dir $moved
+        set second [nlpRun [nlpExecutable [surface::readProgramFile [file join $moved main.bot] -warnings off -cache $cache] $elsewhere two]]
+    } finally {
+        cd $saved
+    }
+    list $first $second [file exists $dir]
+} -cleanup {file delete -force $moved $elsewhere $cache} -result {1005 1005 0}
+
+test nlp-static-rebuild {rebuilding an archive changes the next executable, whatever the front-end cache holds: the link reads the archive again, never a copy} -constraints {nlpFixture} -body {
+    set cache [nlpDir cache]
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::tag()\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    set build [file join $dir build]
+    file mkdir $build [file join $dir native]
+    set values {}
+    surface::cache::resetStats
+    foreach tag {7 8} {
+        nlpWrite [file join $build nlp.c] [nlpSource $tag]
+        file copy -force [ctool::staticLibrary $build nlp [file join $build nlp.c]] [file join $dir native]
+        lappend values [nlpRun [nlpExecutable [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache] $dir prog$tag]]
+    }
+    lappend values [dict get [surface::cache::stats] hits]
+} -cleanup {file delete -force $dir $cache} -result {7 8 1}
+
+test nlp-static-refusals {what a static declaration's file must be, checked before any linker runs (NATIVE LINK ARCHIVE): it exists, is a file, is an archive of objects -- never a shared library -- of the host's architecture; a relative path needs an application root} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] {}]
+    file mkdir [file join $dir native] [file join $dir native adir.a]
+    nlpWrite [file join $dir native text.a] "not an archive\n"
+    if {!$::windowsHost} {
+        file copy [lindex [glob [nlpFixturePath shared *nlp*]] 0] [file join $dir native shared.a]
+    } else {
+        file copy [nlpFixturePath shared nlp.dll] [file join $dir native shared.a]
+    }
+    set results {}
+    foreach {file words} {
+        missing.a "does not exist"
+        adir.a "is not a file"
+        text.a "is no static archive"
+        shared.a "is no static archive: it is"
+    } {
+        nlpWrite [file join $dir main.bot] "extern c library \"nlp\" static at \"native/$file\"\n1\n"
+        lassign [nlpResolve [nlpHir $dir]] code message
+        lappend results $code [string match "*$words*" $message]
+    }
+    set hir [surface::compile "extern c library \"nlp\" static at \"native/libnlp.a\"\n1\n" -warnings off]
+    lassign [nlpResolve $hir] code message
+    lappend results $code [string match "*a path relative to the program's application root, and this program has none*" $message]
+} -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1}
+
+test nlp-static-wrong-architecture {an archive of another architecture is refused, naming both} -constraints {nlpFixture linuxHost} -body {
+    set other [expr {$::hostTarget eq "linux-x86_64" ? "aarch64" : "x86_64"}]
+    if {[auto_execok clang] eq "" || [catch {exec clang --target=$other-linux-gnu -c [nlpFixturePath src nlp.c] -o [nlpFixturePath src other.o]}]} {
+        return skipped
+    }
+    set dir [nlpApp [nlpDir] {main.bot "extern c library \"nlp\" static at \"native/libnlp.a\"\n1\n"}]
+    file mkdir [file join $dir native]
+    exec ar rcs [file join $dir native libnlp.a] [nlpFixturePath src other.o]
+    lassign [nlpResolve [nlpHir $dir]] code message
+    list $code [regexp {holds object code for ELF (AArch64|x86-64), and this program is linked for linux-(x86_64|aarch64) \(ELF (x86-64|AArch64)\)} $message]
+} -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1}
+
+test nlp-static-path-security {an archive's path is one argument, whatever it holds -- spaces, non-ASCII letters, shell metacharacters, a leading dash -- and never a linker option} -constraints {nlpFixture} -body {
+    set results {}
+    foreach name [list "we-ird/-lnlp.a" "we-ird/lib nlp \$(echo x); 'q'.a" "we-ird/libnlpü.a" "-lnlp.a"] {
+        if {$::windowsHost} {
+            set name [string map {.a .lib ' _ \$ _ ( _ ) _ ; _} $name]
+        }
+        set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::tag()\n" \
+            nlp.bot [nlpBinding "extern c library \"nlp\" static at \"$name\""]]]
+        file mkdir [file dirname [file join $dir $name]]
+        file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir $name]
+        lappend results [nlpRun [nlpExecutable [nlpHir $dir] $dir prog]]
+        file delete -force $dir
+    }
+    set results
+} -result {1 1 1 1}
+
+test nlp-static-missing-symbol {a C function no archive of the plan defines fails the link with the linker's own words, naming the symbol (NATIVE LINK)} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import std::ffi::c\nextern c library \"nlp\" static at \"native/[ctool::staticName nlp]\"\nextern c fn nope named \"nlp_no_such_function\"() -> std::ffi::c::Int\nnope()\n"]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    catch {nlpExecutable [nlpHir $dir] $dir prog} message options
+    list [dict get $options -errorcode] [string match "*native/[ctool::staticName nlp] (static)*nlp_no_such_function*" $message]
+} -cleanup {file delete -force $dir} -result {{NATIVE LINK} 1}
+
+test nlp-static-borrowing {C byte borrowing and a C sentinel result through a statically linked archive behave as through any library: read and write exposures, the result checked right after the call} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot {import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::str
+extern c library "nlp" static at "native/NLP"
+extern c fn sum named "nlp_sum"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, count: std::ffi::c::ULong) -> std::ffi::c::ULong
+extern c fn fill named "nlp_fill"(out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong, seed: std::ffi::c::UChar) -> unit
+extern c fn checked_div named "nlp_checked_div"(a: std::ffi::c::Long, b: std::ffi::c::Long) -> std::ffi::c::Long
+data = std::abi::bytes::from_list(std::str::encode_utf8("abc"))
+filled = fill(std::abi::bytes::zeroed(std::abi::usize(4)), 4, 10)
+[sum(data, 3), sum(std::abi::bytes::freeze(filled.out), 4), checked_div(7, 0), checked_div(7, 2)]
+}]]
+    nlpWrite [file join $dir main.bot] [string map [list NLP [ctool::staticName nlp]] [core::ReadFile [file join $dir main.bot]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set exe [nlpExecutable [nlpHir $dir] $dir prog]
+    list [nlpRun $exe] [string trim [lindex [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {list [exec $exe]}] 0]]
+} -cleanup {file delete -force $dir} -result {{[294, 46, -1, 3]} {[294, 46, -1, 3]}}
+
+test nlp-static-imported-module-backends {an imported module's static declaration reaches the program's link on the native backends (a linked run) and the Tcl backends refuse the C call as ever} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::add(1, 1)\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set hir [nlpHir $dir]
+    set run {lmap backend {cranelift cranelift-generic interp} {
+        lassign [outcomeUnderHir $backend $hir] tag value
+        expr {$tag eq "value" ? $value : [lrange $value end-1 end]}
+    }}
+    if {$::windowsHost} { ctool::withMsvc $run } else { eval $run }
+} -cleanup {file delete -force $dir} -result {1002 1002 {SEMANTIC NATIVE-ONLY}}
+
+test nlp-link-log {BOTLISH_NATIVE_LINK_LOG records the resolved plan: which archive each static library is, and why} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nextern c library \"nlpdep\" static\nnlp::tag()\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set log [file join $dir link.log]
+    withEnvironment [list BOTLISH_NATIVE_LINK_LOG $log] {
+        nlpExecutable [nlpHir $dir] $dir prog [list [nlpFixturePath static]]
+    }
+    set lines [lmap line [split [core::ReadFile $log] \n] {expr {[string match "link plan: *" $line] ? $line : [continue]}}]
+    string map [list [file nativename [file normalize $dir]] APP [file normalize $dir] APP [file nativename [nlpFixturePath static]] FIXTURE [nlpFixturePath static] FIXTURE \\ /] $lines
+} -cleanup {file delete -force $dir} -result [list \
+    "link plan: static nlp: APP/native/[ctool::staticName nlp] (declared at \"native/[ctool::staticName nlp]\")" \
+    "link plan: static nlpdep: FIXTURE/[ctool::staticName nlpdep] (found in FIXTURE)"]
+
+test nlp-linkers-agree {the rustc and the system linker implement one plan: the same archive, the same value, no shared dependency; the stub linker refuses a program with a static library or a framework} -constraints {nlpFixture systemLinkerBuilt rustcLinkerBuilt} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::add(4, 5)\n" \
+        nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir native]
+    set hir [nlpHir $dir]
+    set results {}
+    foreach linker {rustc system} {
+        set exe [withEnvironment [list BOTLISH_NATIVE_LINKER $linker] {nlpExecutable $hir $dir $linker}]
+        lappend results $linker [nlpRun $exe] [nlpDependsOnShared $exe]
+    }
+    if {$::hostTarget eq "linux-x86_64"} {
+        catch {withEnvironment {BOTLISH_NATIVE_LINKER stub} {nlpExecutable $hir $dir stub}} message options
+        lappend results [dict get $options -errorcode] [string match "*libraries native/[ctool::staticName nlp] (static)*stub linker*" $message]
+    } else {
+        lappend results {NATIVE LINK} 1
+    }
+    set results
+} -cleanup {file delete -force $dir} -result {rustc 1009 0 system 1009 0 {NATIVE LINK} 1}
+
+test nlp-native-library {a native library's shared library is linked with the program's static archive (its code inside, nothing of it undefined), and its static library holds none of it -- the C function stays undefined there -- which its manifest lists for a consumer's link} -constraints {nlpFixture nativeLibraries} -body {
+    set dir [nlpApp [nlpDir] [list lib.bot "import std::ffi::c\nextern c library \"nlp\" static at \"native/libnlp.a\"\nextern c fn add named \"nlp_add\"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int\n\nexported c fn plus(a: int, b: int) -> int:\n    if a < -1000 or a > 1000 or b < -1000 or b > 1000:\n        return 0\n    add(a, b) + 0\n"]]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath static libnlp.a] [file join $dir native]
+    set built [native::library [nlpHir $dir lib.bot] -name nlplib -out [file join $dir out]]
+    set manifest [lsp::json::parse [core::ReadFile [dict get $built manifest]]]
+    set dependencies [lmap d [lsp::json::elements [lsp::json::get $manifest dependencies]] {
+        list [lsp::json::text [lsp::json::get $d name]] [lsp::json::text [lsp::json::get $d linkage]] \
+            [expr {[lsp::json::text [lsp::json::get $d archive]] eq [file join [file normalize $dir] native libnlp.a]}]
+    }]
+    set shared [dict get $built shared]
+    list $dependencies [regexp {libnlp\.so} [exec ldd $shared]] [regexp {nlp_add} [exec nm -D --defined-only $shared]] \
+        [regexp {nlp_add} [exec nm -D --undefined-only $shared]] [regexp {nlp_add} [exec nm -u [dict get $built static]]]
+} -cleanup {file delete -force $dir} -result {{{nlp static 1}} 0 1 0 1}
+
+# ---------------------------------------------------------------------------
+# Linking: Apple frameworks (macOS)
+
+test nlp-framework-system {macOS: a system framework links through Apple's ld (-framework) and its function runs; the executable loads it from the system} -constraints {nlpFixture macosHost} -body {
+    set dir [nlpApp [nlpDir] {main.bot "import std::ffi::c\nextern c framework \"CoreFoundation\"\nextern c fn type_id named \"CFStringGetTypeID\"() -> std::ffi::c::ULong\ntype_id() > 0\n"}]
+    set exe [nlpExecutable [nlpHir $dir] $dir prog]
+    list [nlpRun $exe] [regexp {CoreFoundation\.framework/Versions/A/CoreFoundation} [nlpDynamic $exe]]
+} -cleanup {file delete -force $dir} -result {true 1}
+
+test nlp-framework-dir {macOS: -F DIR is where Apple's ld finds an application's framework (here one whose binary is the fixture's static archive: linked in, no dependency); without it the framework is not found (NATIVE LINK)} -constraints {nlpFixture macosHost} -body {
+    set frameworks [nlpDir frameworks]
+    file mkdir [file join $frameworks NlpKit.framework]
+    file copy [nlpFixturePath static libnlp.a] [file join $frameworks NlpKit.framework NlpKit]
+    set dir [nlpApp [nlpDir] {main.bot "import std::ffi::c\nextern c framework \"NlpKit\"\nextern c fn tag named \"nlp_tag\"() -> std::ffi::c::Int\ntag()\n"}]
+    set hir [nlpHir $dir]
+    set exe [nlpExecutable $hir $dir prog {} [list $frameworks]]
+    set value [nlpRun $exe]
+    catch {nlpExecutable $hir $dir prog2} message options
+    list $value [regexp NlpKit [nlpDynamic $exe]] [dict get $options -errorcode] [string match "*framework*NlpKit*" $message]
+} -cleanup {file delete -force $dir $frameworks} -result {1 0 {NATIVE LINK} 1}
+
+# ---------------------------------------------------------------------------
+# Linking: Windows import libraries
+
+test nlp-import-library-refused {Windows: a DLL's import library is a .lib too, and a static declaration refuses it -- as the archive a path names and as the one a search finds -- before link.exe runs, which would accept it} -constraints {nlpFixture windowsHost} -body {
+    set dir [nlpApp [nlpDir] {}]
+    file mkdir [file join $dir native]
+    file copy [nlpFixturePath shared nlp.lib] [file join $dir native]
+    set results {}
+    nlpWrite [file join $dir main.bot] "extern c library \"nlp\" static at \"native/nlp.lib\"\n1\n"
+    lassign [nlpResolve [nlpHir $dir]] code message
+    lappend results $code [string match "*is an import library*" $message]
+    nlpWrite [file join $dir main.bot] "extern c library \"nlp\" static\n1\n"
+    lassign [nlpResolve [nlpHir $dir] [list [nlpFixturePath shared]]] code message
+    lappend results $code [string match "*is an import library*" $message]
+} -cleanup {file delete -force $dir} -result {{NATIVE LINK ARCHIVE} 1 {NATIVE LINK ARCHIVE} 1}
+
+if {$::nlpFixtureDir ne ""} {
+    file delete -force $::nlpFixtureDir
+}
+cleanupTests

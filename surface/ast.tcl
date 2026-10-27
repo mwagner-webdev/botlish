@@ -207,9 +207,14 @@
 #              declared payload field, in written order, exactly a
 #              structdecl's; empty for a payload-free error. No runtime
 #              meaning, exactly like typedecl.
-#   externlib  library, librarySpan -- "extern c library NAME" (C-FFI.md): a
-#              native library the program's link plan names (-lNAME); no
-#              runtime meaning, no binding, associated with no declaration
+#   externlib  link (library | framework), dependency (its name: an externlib
+#              has no `name`, being no member), dependencySpan, linkage (default |
+#              static), linkageSpan, path, pathSpan -- "extern c library NAME
+#              [static [at PATH]]" (C-FFI.md) or "extern c framework NAME"
+#              (NATIVE-LINK-PLAN-MILESTONE-1.md): a native dependency the
+#              program's link plan names (-lNAME, a static archive, -framework
+#              NAME); PATH "" unless written; no runtime meaning, no binding,
+#              associated with no declaration
 #   externfn   name, nameSpan, symbol (the `named` link symbol, "" for the
 #              name itself), symbolSpan, params ({name nameSpan type typeSpan
 #              access escape factsSpan} dicts in written order: access read |
@@ -1007,7 +1012,14 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             return
         }
         externlib {
-            lappend lines "${pad}extern c library [Quote [dict get $node library]]$at"
+            set line "${pad}extern c [dict get $node link] [Quote [dict get $node dependency]]"
+            if {[dict get $node linkage] eq "static"} {
+                append line " static"
+            }
+            if {[dict get $node path] ne ""} {
+                append line " at [Quote [dict get $node path]]"
+            }
+            lappend lines $line$at
             return
         }
         externfn {

@@ -354,7 +354,7 @@ jobs:
         run: |
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
-            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test \
+            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test native-link-plan.test \
             coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
 
       - name: Publish summary
@@ -637,10 +637,10 @@ jobs:
           Remove-Item env:BOTLISH_NATIVE_LINK_LOG
           tclsh9.0 tests/all.tcl -file system-linker.test
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
-          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test"
+          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test native-link-plan.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           $env:BOTLISH_NATIVE_GC_STRESS = "1"
-          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test"
+          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test native-link-plan.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           exit $failed
 

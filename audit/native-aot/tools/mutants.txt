@@ -217,10 +217,10 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/codegen/aot.rs
 <<<<
     if flavor == LinkerFlavor::Msvc {
-        for dir in link_dirs {
+        for dir in &search.libraries {
 ====
-    if flavor == LinkerFlavor::Msvc && link_dirs.is_empty() && link_dirs.len() > 0 {
-        for dir in link_dirs {
+    if flavor == LinkerFlavor::Msvc && search.libraries.is_empty() && !search.libraries.is_empty() {
+        for dir in &search.libraries {
 >>>>
 
 @@ msvc-crt-dynamic an MSVC executable links rustc's dynamic C runtime, which needs the Visual C++ redistributable's VCRUNTIME140.dll

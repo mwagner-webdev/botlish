@@ -43,10 +43,10 @@
 @@ library-dropped the link plan loses the last library a program declares
 ## hir/foreign.tcl
 <<<<
-    set links $plan
+    set links [LinkPlan $linkDecls]
 }
 ====
-    set links [lrange $plan 0 end-1]
+    set links [lrange [LinkPlan $linkDecls] 0 end-1]
 }
 >>>>
 
@@ -198,7 +198,7 @@
 @@ nearest-library each C function is associated with the last library its own unit declares, and only libraries some function is associated with are linked
 ## hir/foreign.tcl
 <<<<
-    set links $plan
+    set links [LinkPlan $linkDecls]
 }
 ====
     set near {}
@@ -206,15 +206,15 @@
         set best ""
         foreach link $linkDecls {
             if {[dict get $link namespace] eq [dict get $decl namespace]} {
-                set best [dict get $link library]
+                set best [dict get $link name]
             }
         }
         if {$best ne "" && $best ni $near} {
             lappend near $best
         }
     }
-    set links [lmap entry $plan {
-        if {[dict get $entry library] ni $near} continue
+    set links [lmap entry [LinkPlan $linkDecls] {
+        if {[dict get $entry name] ni $near} continue
         set entry
     }]
 }
@@ -291,12 +291,12 @@
 @@ link-group-dropped the declared libraries are passed to the linker without a group, so their order decides a static link
 ## native/src/codegen/aot.rs
 <<<<
-        args.extend(["-C".to_string(), "link-arg=-Wl,--start-group".to_string()]);
+            arg("-Wl,--start-group".to_string());
 ====
 >>>>
 ## native/src/codegen/aot.rs
 <<<<
-        args.extend(["-C".to_string(), "link-arg=-Wl,--end-group".to_string()]);
+            arg("-Wl,--end-group".to_string());
 ====
 >>>>
 
@@ -376,11 +376,11 @@ const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
 @@ link-dirs-dropped the -L search directories never reach the linker
 ## native/src/codegen/aot.rs
 <<<<
-    for dir in link_dirs {
-        args.extend(["-C".to_string(), format!("link-arg=-L{dir}")]);
+    for dir in &search.libraries {
+        arg(format!("-L{dir}"));
     }
 ====
-    for _dir in link_dirs {}
+    for _dir in &search.libraries {}
 >>>>
 
 @@ apple-linker-diagnostics-dropped a failed link's Apple ld lines (undefined symbols, the linker's failure) are filtered out of its message

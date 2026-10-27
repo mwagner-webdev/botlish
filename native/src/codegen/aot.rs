@@ -65,7 +65,7 @@
 //! Prompt, and the C runtime's startup (`mainCRTStartup`) is rustc's. An
 //! executable's file name ends in `.exe` (`executable_path`).
 use super::{ObjectProgram, emit_object};
-use crate::nir::Program;
+use crate::nir::{Link, Program};
 use botlish_native::runtime::aotimage::{self, Fixup, Image, Target};
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -241,9 +241,29 @@ fn linker_named(name: Option<&str>, program: &Program, stub: bool) -> Result<Lin
     }
 }
 
+/// The search directories of a link (main.rs's `--link-dir` and
+/// `--framework-dir`; main.tcl's -L DIR and -F DIR): where the linker looks
+/// for a library it is given by name (-LDIR, /LIBPATH:DIR) and, on macOS,
+/// for a framework (-FDIR), in order; and where the driver looks for a
+/// static archive declared without a path (`resolve_link_plan`). The two
+/// lists are kept apart: a framework directory is never a library one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkSearch {
+    pub libraries: Vec<String>,
+    pub frameworks: Vec<String>,
+}
+
+#[cfg(test)]
+impl LinkSearch {
+    /// Library directories DIRS and no framework directory.
+    pub fn libraries(dirs: &[String]) -> LinkSearch {
+        LinkSearch { libraries: dirs.to_vec(), frameworks: Vec::new() }
+    }
+}
+
 /// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`
 /// and returns that path (absolute).
-pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<PathBuf, LinkError> {
+pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearch) -> Result<PathBuf, LinkError> {
     if !EXECUTABLES {
         return Err("executable emission requires Linux glibc on x86_64 or aarch64, macOS on aarch64, or Windows on x86_64 with the MSVC toolchain".into());
     }
@@ -256,7 +276,7 @@ pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[Strin
     }
     let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
     match chosen_linker(program)? {
-        Linker::Rustc => link_rustc(program, &destination, link_dirs)?,
+        Linker::Rustc => link_rustc(program, &destination, search)?,
         Linker::Stub if calls_c(program) => {
             return Err(format!(
                 "native link failed: this program calls C or declares a C library ({}), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library: link it with the system linker (BOTLISH_NATIVE_LINKER=system or auto, the single executable's: a C compiler driver and the runtime archive) or the rustc linker of a Botlish checkout (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)",
@@ -265,7 +285,7 @@ pub fn emit_executable(program: &Program, destination: &Path, link_dirs: &[Strin
             .into());
         }
         Linker::Stub => link_stub(program, &destination)?,
-        Linker::System => link_system(program, &destination, link_dirs)?,
+        Linker::System => link_system(program, &destination, search)?,
     }
     Ok(destination)
 }
@@ -282,9 +302,22 @@ fn describe_link_plan_for(flavor: LinkerFlavor, program: &Program) -> String {
         let names: Vec<&str> = program.foreigns.iter().map(|f| f.symbol.as_str()).collect();
         parts.push(format!("symbols {}", names.join(", ")));
     }
-    if !program.links.is_empty() {
-        let libraries: Vec<String> = program.links.iter().map(|l| library_argument(flavor, l)).collect();
+    let libraries: Vec<String> = program
+        .links
+        .iter()
+        .filter_map(|link| match link {
+            Link::Library(name) => Some(library_argument(flavor, name)),
+            Link::Static { archive: Some(path), .. } => Some(format!("{} (static)", path.written)),
+            Link::Static { name, archive: None } => Some(format!("{} (static)", static_archive_name(flavor, name))),
+            Link::Framework(_) => None,
+        })
+        .collect();
+    if !libraries.is_empty() {
         parts.push(format!("libraries {}", libraries.join(" ")));
+    }
+    let frameworks: Vec<&str> = program.links.iter().filter_map(|l| if let Link::Framework(n) = l { Some(n.as_str()) } else { None }).collect();
+    if !frameworks.is_empty() {
+        parts.push(format!("frameworks {}", frameworks.join(" ")));
     }
     parts.join("; ")
 }
@@ -357,7 +390,7 @@ fn link_hint(flavor: LinkerFlavor, diagnostics: &str) -> Option<&'static str> {
 
 /// The `rustc` linker: a generated startup crate, compiled and linked
 /// against this build's runtime library.
-fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<(), String> {
+fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch) -> Result<(), LinkError> {
     let driver = std::env::current_exe().map_err(|e| e.to_string())?;
     let release = driver.parent().ok_or("cannot locate native runtime")?;
     let library = release.join("libbotlish_native.rlib");
@@ -365,8 +398,11 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
         return Err(format!(
             "runtime library missing: {}; run cargo build --release --manifest-path native/Cargo.toml",
             library.display()
-        ));
+        )
+        .into());
     }
+    let inputs = resolve_link_plan(program, search)?;
+    log_plan(&inputs);
     let work = WorkDir::beside(destination)?;
     let object = emit_object(program).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join("program.o");
@@ -398,7 +434,7 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
         .arg(format!("dependency={}", release.join("deps").display()))
         .arg("-C")
         .arg(format!("link-arg={}", object_path.display()))
-        .args(link_plan_args(program, link_dirs))
+        .args(link_plan_args(program, &inputs, search))
         .args(crt_args(program))
         .arg(&source_path)
         .arg("-o")
@@ -415,9 +451,10 @@ fn link_rustc(program: &Program, destination: &Path, link_dirs: &[String]) -> Re
                 describe_link_plan(program),
                 diagnostics,
                 hint
-            ));
+            )
+            .into());
         }
-        return Err(format!("executable link failed ({}):\n{}", output.status, stderr));
+        return Err(format!("executable link failed ({}):\n{}", output.status, stderr).into());
     }
     // Publish only a successfully linked file, on the same filesystem. A
     // failed build leaves any previous executable intact.
@@ -512,19 +549,26 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     args
 }
 
-/// rustc's arguments passing PROGRAM's link plan to this host's system
-/// linker (`link_plan_args_for`).
-fn link_plan_args(program: &Program, link_dirs: &[String]) -> Vec<String> {
-    link_plan_args_for(LINKER, program, link_dirs)
+/// rustc's arguments passing PROGRAM's resolved link plan INPUTS to this
+/// host's system linker (`link_plan_args_for`).
+fn link_plan_args(program: &Program, inputs: &[LinkInput], search: &LinkSearch) -> Vec<String> {
+    link_plan_args_for(LINKER, program, inputs, search)
 }
 
-/// rustc's arguments passing PROGRAM's link plan to a FLAVOR system linker:
-/// the search directories LINK_DIRS (`-LDIR`), then every library
-/// `-lNAME`, in the plan's order -- for GNU ld inside one linker group,
-/// for Apple's ld as they are; for link.exe in its own spelling,
-/// `/LIBPATH:DIR` and `NAME.lib`, and no group: link.exe searches every
-/// library until nothing more resolves, in any order. Nothing for a program
-/// that names none.
+/// rustc's arguments passing PROGRAM's resolved link plan INPUTS
+/// (`resolve_link_plan`) to a FLAVOR system linker: the library search
+/// directories of SEARCH (`-LDIR`) and, for Apple's ld, its framework
+/// directories (`-FDIR`), then every library and archive in the plan's
+/// order -- a library by name, `-lNAME`, a static archive by its absolute
+/// path, which the linker takes as it is, never searching -- for GNU ld
+/// inside one linker group, for Apple's ld as they are, followed by every
+/// framework, `-framework NAME`; for link.exe in its own spelling,
+/// `/LIBPATH:DIR`, `NAME.lib` and the archive's path, and no group:
+/// link.exe searches every library until nothing more resolves, in any
+/// order. Nothing for a program that names none. Every directory and
+/// archive is one argument, whatever it holds (a space, a leading `-`
+/// inside an absolute path), and no name is anything but a name
+/// (nir::is_link_name): nothing of the plan can become a linker option.
 ///
 /// The group is GNU ld's (and gold's) way of resolving archives whatever
 /// their order: they search an archive only for what is undefined when they
@@ -555,37 +599,511 @@ fn link_plan_args(program: &Program, link_dirs: &[String]) -> Vec<String> {
 ///     c-ffi.test's cf-availability-check), Rust's standard library defines
 ///     too, and it comes first. `ffi_link_plan_apple_has_no_gnu_flags`
 ///     pins the argument.
-fn link_plan_args_for(flavor: LinkerFlavor, program: &Program, link_dirs: &[String]) -> Vec<String> {
+fn link_plan_args_for(flavor: LinkerFlavor, program: &Program, inputs: &[LinkInput], search: &LinkSearch) -> Vec<String> {
     let mut args = Vec::new();
     if !calls_c(program) {
         return args;
     }
     args.extend(["-C".to_string(), "default-linker-libraries=yes".to_string()]);
+    let mut arg = |text: String| args.extend(["-C".to_string(), format!("link-arg={text}")]);
+    let library = |input: &LinkInput| match input {
+        LinkInput::Library(name) => Some(library_argument(flavor, name)),
+        LinkInput::Archive { path, .. } => Some(path.to_string_lossy().into_owned()),
+        LinkInput::Framework(_) => None,
+    };
     if flavor == LinkerFlavor::Msvc {
-        for dir in link_dirs {
-            args.extend(["-C".to_string(), format!("link-arg=/LIBPATH:{dir}")]);
+        for dir in &search.libraries {
+            arg(format!("/LIBPATH:{dir}"));
         }
-        for library in &program.links {
-            args.extend(["-C".to_string(), format!("link-arg={}", library_argument(flavor, library))]);
+        for text in inputs.iter().filter_map(library) {
+            arg(text);
         }
         return args;
     }
-    for dir in link_dirs {
-        args.extend(["-C".to_string(), format!("link-arg=-L{dir}")]);
+    for dir in &search.libraries {
+        arg(format!("-L{dir}"));
     }
-    if !program.links.is_empty() {
+    if flavor == LinkerFlavor::Apple {
+        for dir in &search.frameworks {
+            arg(format!("-F{dir}"));
+        }
+    }
+    let libraries: Vec<String> = inputs.iter().filter_map(library).collect();
+    if !libraries.is_empty() {
         let group = flavor == LinkerFlavor::Gnu;
         if group {
-            args.extend(["-C".to_string(), "link-arg=-Wl,--start-group".to_string()]);
+            arg("-Wl,--start-group".to_string());
         }
-        for library in &program.links {
-            args.extend(["-C".to_string(), format!("link-arg=-l{library}")]);
+        for text in libraries {
+            arg(text);
         }
         if group {
-            args.extend(["-C".to_string(), "link-arg=-Wl,--end-group".to_string()]);
+            arg("-Wl,--end-group".to_string());
+        }
+    }
+    for input in inputs {
+        if let LinkInput::Framework(name) = input {
+            arg("-framework".to_string());
+            arg(name.clone());
         }
     }
     args
+}
+
+// ------------------------------------------------------- resolving the plan
+
+/// One input of a resolved link plan (`resolve_link_plan`), in the plan's
+/// order: what the linker is given for one native dependency.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkInput {
+    /// A library the linker finds, shared or static: -lNAME (NAME.lib).
+    Library(String),
+    /// A static archive the driver found and checked (`check_static_archive`):
+    /// its file, absolute, which the linker is given as it is.
+    Archive { name: String, path: PathBuf, from: ArchiveSource },
+    /// An Apple framework: -framework NAME.
+    Framework(String),
+}
+
+/// Where a static archive of the resolved plan came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArchiveSource {
+    /// `static at "WRITTEN"`: the file the program names.
+    Declared(String),
+    /// `static`: the first `static_archive_name` file of the library
+    /// search directories, found in this one.
+    Searched(PathBuf),
+}
+
+/// A failure of the link plan's own inputs (a declared static archive that
+/// is missing, of another format or architecture, or no static archive at
+/// all; a framework where no linker has one): `NATIVE LINK ARCHIVE`, found
+/// before any linker runs (main.rs's emit_link_error).
+fn archive_error(message: String) -> LinkError {
+    LinkError { detail: Some("ARCHIVE"), message }
+}
+
+/// The file name a FLAVOR linker's static archive of library NAME has:
+/// `libNAME.a` (GNU ld's and Apple's ld's archive for -lNAME), `NAME.lib`
+/// (link.exe's, a name it shares with an import library: the members tell
+/// them apart, `archive_facts`).
+fn static_archive_name(flavor: LinkerFlavor, name: &str) -> String {
+    if flavor == LinkerFlavor::Msvc { format!("{name}.lib") } else { format!("lib{name}.a") }
+}
+
+/// The shared libraries a FLAVOR linker would link for -lNAME instead of a
+/// static archive, by file name in a search directory: what a missing static
+/// archive's message names when one is there (a static declaration never
+/// links one).
+fn shared_library_names(flavor: LinkerFlavor, name: &str) -> Vec<String> {
+    match flavor {
+        LinkerFlavor::Gnu => vec![format!("lib{name}.so")],
+        LinkerFlavor::Apple => vec![format!("lib{name}.dylib"), format!("lib{name}.tbd")],
+        LinkerFlavor::Msvc => vec![format!("{name}.dll")],
+    }
+}
+
+/// The object format and architecture a FLAVOR host links, as
+/// `archive_facts` names a member's (HOST_MACHINE for this host).
+fn flavor_machine(flavor: LinkerFlavor) -> &'static str {
+    if flavor == LINKER {
+        return HOST_MACHINE;
+    }
+    match flavor {
+        LinkerFlavor::Gnu => "ELF x86-64",
+        LinkerFlavor::Apple => "Mach-O arm64",
+        LinkerFlavor::Msvc => "COFF x86-64",
+    }
+}
+
+/// PROGRAM's link plan resolved for this host's linker
+/// (NATIVE-LINK-PLAN-MILESTONE-1.md), before anything is linked:
+///
+///   * a library is the linker's to find (-lNAME, NAME.lib), as ever;
+///   * a static library declared at a path (`static at PATH`) is that file:
+///     PATH joined to the program's application root (the BASE the front end
+///     recorded) unless it is absolute -- never the working directory, never
+///     the compiler's own files -- checked by `check_static_archive`;
+///   * a static library declared without a path (`static`) is the first
+///     `static_archive_name` file in the library search directories, SEARCH's
+///     (-L) first, then the toolchain's own (`default_library_dirs`), checked
+///     the same way: never a shared library of that name, whichever comes
+///     first, and no fallback to one when no archive is there;
+///   * a framework is Apple's ld's (-framework NAME), and no other linker's.
+///
+/// A failure is the plan's (`archive_error`): nothing is linked, and no
+/// other file is tried in the failing one's place.
+pub fn resolve_link_plan(program: &Program, search: &LinkSearch) -> Result<Vec<LinkInput>, LinkError> {
+    resolve_link_plan_with(LINKER, program, search, &mut || default_library_dirs(LINKER))
+}
+
+/// `resolve_link_plan` for a FLAVOR linker, whose default library
+/// directories DEFAULTS gives (asked once, and only when a static library is
+/// in none of SEARCH's).
+fn resolve_link_plan_with(
+    flavor: LinkerFlavor,
+    program: &Program,
+    search: &LinkSearch,
+    defaults: &mut dyn FnMut() -> Vec<PathBuf>,
+) -> Result<Vec<LinkInput>, LinkError> {
+    let mut inputs = Vec::with_capacity(program.links.len());
+    let mut default_dirs: Option<Vec<PathBuf>> = None;
+    let machine = flavor_machine(flavor);
+    for link in &program.links {
+        match link {
+            Link::Library(name) => inputs.push(LinkInput::Library(name.clone())),
+            Link::Framework(name) => {
+                if flavor != LinkerFlavor::Apple {
+                    return Err(archive_error(format!(
+                        "native link failed: framework {name:?} (`extern c framework`) is an Apple framework, which only macOS's linker links, and this program is linked for {HOST_TARGET}: a framework is never mapped to a library or linked for another operating system"
+                    )));
+                }
+                inputs.push(LinkInput::Framework(name.clone()));
+            }
+            Link::Static { name, archive: Some(declared) } => {
+                let written = Path::new(&declared.written);
+                let path = if written.is_absolute() {
+                    written.to_path_buf()
+                } else if declared.base.is_empty() || !Path::new(&declared.base).is_absolute() {
+                    return Err(archive_error(format!(
+                        "native link failed: library {name:?} is declared static at {:?}, a path relative to the program's application root, and this program has none (it was compiled from text rather than from a file, or the declaration is a standard-library module's, which never names an application's file): name the archive by an absolute path, or compile the program from its file",
+                        declared.written
+                    )));
+                } else {
+                    Path::new(&declared.base).join(written)
+                };
+                let how = format!("declared at {:?}, relative to the application root {}", declared.written, declared.base);
+                let how = if written.is_absolute() { format!("declared at {:?}", declared.written) } else { how };
+                check_static_archive(flavor, machine, name, &path, &how)?;
+                inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Declared(declared.written.clone()) });
+            }
+            Link::Static { name, archive: None } => {
+                let file = static_archive_name(flavor, name);
+                let mut dirs: Vec<PathBuf> = search.libraries.iter().map(|d| std::path::absolute(d).unwrap_or_else(|_| PathBuf::from(d))).collect();
+                let mut found = dirs.iter().find(|d| d.join(&file).is_file()).cloned();
+                if found.is_none() {
+                    let more = default_dirs.get_or_insert_with(|| defaults());
+                    for dir in more.iter() {
+                        if !dirs.contains(dir) {
+                            dirs.push(dir.clone());
+                        }
+                    }
+                    found = dirs.iter().find(|d| d.join(&file).is_file()).cloned();
+                }
+                let Some(dir) = found else {
+                    let shared: Vec<String> = dirs
+                        .iter()
+                        .flat_map(|d| shared_library_names(flavor, name).into_iter().map(move |f| d.join(f)))
+                        .filter(|p| p.exists())
+                        .map(|p| p.display().to_string())
+                        .collect();
+                    let searched: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+                    let shared_note = if shared.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" -- {} is a shared library of that name, which a static declaration never links", shared.join(", "))
+                    };
+                    return Err(archive_error(format!(
+                        "native link failed: library {name:?} is declared static, and no static archive {file} is in the library search directories ({}){shared_note}: add the archive's directory (main.tcl -L DIR), or name its file (`extern c library {name:?} static at \"PATH\"`)",
+                        if searched.is_empty() { "none".to_string() } else { searched.join(", ") }
+                    )));
+                };
+                let path = dir.join(&file);
+                check_static_archive(flavor, machine, name, &path, &format!("found in {}", dir.display()))?;
+                inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Searched(dir) });
+            }
+        }
+    }
+    Ok(inputs)
+}
+
+/// Checks that PATH (HOW: where it came from, for messages) is a static
+/// archive the FLAVOR linker links into an executable for MACHINE, library
+/// NAME's: a regular, readable file, an `ar` archive (never a shared library,
+/// a text stub, a linker script or a thin archive), every object member of
+/// MACHINE's format and architecture (a Mach-O universal file's MACHINE
+/// slice, on macOS), and no DLL import member -- a Windows import library is
+/// a `.lib` too, and links the executable to a DLL, which a static
+/// declaration never does.
+fn check_static_archive(flavor: LinkerFlavor, machine: &str, name: &str, path: &Path, how: &str) -> Result<(), LinkError> {
+    let what = format!("the static archive {} of library {name:?} ({how})", path.display());
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(archive_error(format!("native link failed: {what} does not exist")));
+        }
+        Err(e) => return Err(archive_error(format!("native link failed: {what} cannot be read: {e}"))),
+    };
+    if !metadata.is_file() {
+        return Err(archive_error(format!("native link failed: {what} is not a file")));
+    }
+    let facts = archive_facts(path, flavor).map_err(|why| archive_error(format!("native link failed: {what} is no static archive: {why}")))?;
+    if let Some(other) = facts.machines.iter().find(|m| m.as_str() != machine) {
+        return Err(archive_error(format!(
+            "native link failed: {what} holds object code for {other}, and this program is linked for {HOST_TARGET} ({machine}): an archive of another architecture or object format never links"
+        )));
+    }
+    if facts.machines.is_empty() {
+        return Err(archive_error(format!("native link failed: {what} is no static archive: it holds no object file")));
+    }
+    if facts.imports > 0 {
+        return Err(archive_error(format!(
+            "native link failed: {what} is an import library: {} of its members import functions from a DLL, so linking it makes the executable load that DLL at run time, which a static declaration never does: link the library's static build (a .lib of object files, cl /MT), or declare the library without `static`",
+            facts.imports
+        )));
+    }
+    Ok(())
+}
+
+/// What a static archive holds, as linking it needs to know: the distinct
+/// object formats and architectures of its object members (`archive_machine`'s
+/// names), in first-seen order, and how many of its members import from a
+/// DLL (Microsoft's short import members, and COFF objects with `.idata$`
+/// sections: an import library's, long form).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ArchiveFacts {
+    machines: Vec<String>,
+    imports: usize,
+}
+
+/// The facts of the static archive at PATH for a FLAVOR linker: every
+/// member read, its symbol and name tables skipped, LLVM bitcode or any
+/// other non-object member ignored. A Mach-O universal ("fat") file is read
+/// at its slice for the host's architecture when FLAVOR is Apple's (Apple's
+/// ld picks that slice). Why the file is no static archive otherwise: a
+/// shared library, a text-based stub, a GNU linker script, a thin archive.
+fn archive_facts(path: &Path, flavor: LinkerFlavor) -> Result<ArchiveFacts, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let be32 = |b: &[u8], i: usize| b.get(i..i + 4).map(|x| u32::from_be_bytes(x.try_into().unwrap()));
+    let le32 = |b: &[u8], i: usize| b.get(i..i + 4).map(|x| u32::from_le_bytes(x.try_into().unwrap()));
+    let le16 = |b: &[u8], i: usize| b.get(i..i + 2).map(|x| u16::from_le_bytes(x.try_into().unwrap()));
+    let mut archive: &[u8] = &bytes;
+    if matches!(be32(&bytes, 0), Some(0xcafe_babe | 0xcafe_babf)) {
+        if flavor != LinkerFlavor::Apple {
+            return Err("it is a Mach-O universal file, which only Apple's linker reads".to_string());
+        }
+        let wide = be32(&bytes, 0) == Some(0xcafe_babf);
+        let count = be32(&bytes, 4).ok_or("damaged universal file")? as usize;
+        let entry = if wide { 32 } else { 20 };
+        let mut slices = Vec::new();
+        for i in 0..count.min(64) {
+            let at = 8 + i * entry;
+            let cpu = be32(&bytes, at).ok_or("damaged universal file")?;
+            let (offset, size) = if wide {
+                let o = bytes.get(at + 8..at + 16).ok_or("damaged universal file")?;
+                let n = bytes.get(at + 16..at + 24).ok_or("damaged universal file")?;
+                (u64::from_be_bytes(o.try_into().unwrap()) as usize, u64::from_be_bytes(n.try_into().unwrap()) as usize)
+            } else {
+                (be32(&bytes, at + 8).ok_or("damaged universal file")? as usize, be32(&bytes, at + 12).ok_or("damaged universal file")? as usize)
+            };
+            slices.push((cpu, offset, size));
+        }
+        let arm64 = slices.iter().find(|(cpu, _, _)| *cpu == 0x0100_000c);
+        let Some(&(_, offset, size)) = arm64 else {
+            let cpus: Vec<String> = slices.iter().map(|(cpu, _, _)| format!("{cpu:#x}")).collect();
+            return Err(format!("it is a Mach-O universal file without an arm64 slice (cpu types {})", cpus.join(", ")));
+        };
+        archive = bytes.get(offset..offset + size).ok_or("damaged universal file (a slice past its end)")?;
+    }
+    if !archive.starts_with(b"!<arch>\n") {
+        let head = &archive[..archive.len().min(64)];
+        let text = String::from_utf8_lossy(head);
+        let why = if archive.starts_with(b"!<thin>\n") {
+            "it is a GNU thin archive, whose members are other files: make a regular archive (ar rcs)".to_string()
+        } else if head.starts_with(b"\x7fELF") && le16(head, 16) == Some(3) {
+            "it is an ELF shared library".to_string()
+        } else if head.starts_with(b"\x7fELF") {
+            "it is an ELF file, not an archive of objects".to_string()
+        } else if le32(head, 0) == Some(0xfeed_facf) && le32(head, 12) == Some(6) {
+            "it is a Mach-O dynamic library".to_string()
+        } else if le32(head, 0) == Some(0xfeed_facf) {
+            "it is a Mach-O file, not an archive of objects".to_string()
+        } else if text.starts_with("--- !tapi-tbd") || text.starts_with("--- !tapi") {
+            "it is a text-based stub (.tbd) of a dynamic library".to_string()
+        } else if ["GROUP", "INPUT", "/*", "OUTPUT_FORMAT"].iter().any(|w| text.trim_start().starts_with(w)) {
+            "it is a GNU linker script".to_string()
+        } else if head.starts_with(b"MZ") {
+            "it is a Windows executable or DLL".to_string()
+        } else {
+            "no !<arch> header".to_string()
+        };
+        return Err(why);
+    }
+    let mut facts = ArchiveFacts::default();
+    let length = archive.len();
+    let mut at = 8usize;
+    while at + 60 <= length {
+        let header = &archive[at..at + 60];
+        if &header[58..60] != b"`\n" {
+            return Err("damaged static library (bad member header)".to_string());
+        }
+        let name = String::from_utf8_lossy(&header[..16]).trim_end().to_string();
+        let size: usize = String::from_utf8_lossy(&header[48..58])
+            .trim()
+            .parse()
+            .map_err(|_| "damaged static library (bad member size)".to_string())?;
+        let mut data_at = at + 60;
+        let mut data_size = size;
+        if let Some(n) = name.strip_prefix("#1/").and_then(|n| n.parse::<usize>().ok()) {
+            data_at += n;
+            data_size = data_size.saturating_sub(n);
+        }
+        if data_at + data_size > length {
+            return Err("damaged static library (a member past its end)".to_string());
+        }
+        let data = &archive[data_at..data_at + data_size];
+        let special = name == "/" || name == "//" || name.starts_with("/SYM64/") || name.starts_with("__.SYMDEF");
+        if !special && data.len() >= 20 {
+            let machine = if data.starts_with(b"\x7fELF") {
+                Some(match (data[4], le16(data, 18).unwrap_or(0)) {
+                    (2, 62) => "ELF x86-64".to_string(),
+                    (2, 183) => "ELF AArch64".to_string(),
+                    (class, machine) => format!("ELF (class {class}, machine {machine})"),
+                })
+            } else if le32(data, 0) == Some(0xfeed_facf) {
+                Some(match le32(data, 4).unwrap_or(0) {
+                    0x0100_000c => "Mach-O arm64".to_string(),
+                    0x0100_0007 => "Mach-O x86-64".to_string(),
+                    cpu => format!("Mach-O (cpu type {cpu:#x})"),
+                })
+            } else if le16(data, 0) == Some(0) && le16(data, 2) == Some(0xffff) {
+                facts.imports += 1;
+                None
+            } else if let Some(m @ (0x8664 | 0xaa64 | 0x14c)) = le16(data, 0) {
+                let sections = le16(data, 2).unwrap_or(0) as usize;
+                let optional = le16(data, 16).unwrap_or(0) as usize;
+                let imports = (0..sections.min(4096)).any(|i| {
+                    let h = 20 + optional + 40 * i;
+                    data.get(h..h + 7) == Some(b".idata$".as_slice())
+                });
+                if imports {
+                    facts.imports += 1;
+                }
+                Some(match m {
+                    0x8664 => "COFF x86-64".to_string(),
+                    0xaa64 => "COFF AArch64".to_string(),
+                    _ => "COFF x86".to_string(),
+                })
+            } else {
+                None
+            };
+            if let Some(machine) = machine {
+                if !facts.machines.contains(&machine) {
+                    facts.machines.push(machine);
+                }
+            }
+        }
+        at = (at + 60 + size).next_multiple_of(2);
+    }
+    Ok(facts)
+}
+
+/// The directories a FLAVOR linker searches for a library after the -L
+/// ones, where a static archive declared without a path is looked for when
+/// it is in none of those (`resolve_link_plan`), existing ones only, in the
+/// linker's order:
+///
+///   * GNU: the C compiler driver's (`-print-search-dirs`: the -L
+///     directories gcc and clang pass ld), then ld's own (its default linker
+///     script's SEARCH_DIRs, `ld --verbose` of the driver's `ld`);
+///   * Apple: ld(1)'s defaults, /usr/local/lib and /usr/lib (Apple's SDK
+///     holds no third-party archive; Homebrew's is a -L directory);
+///   * Microsoft: link.exe's, the LIB environment's directories.
+///
+/// None when the toolchain cannot be asked: the message of a missing archive
+/// lists what was searched.
+fn default_library_dirs(flavor: LinkerFlavor) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    match flavor {
+        LinkerFlavor::Gnu => {
+            if let Ok(tool) = system_linker(flavor) {
+                let ask = |args: &[&str]| Command::new(&tool).args(args).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+                if let Some(text) = ask(&["-print-search-dirs"]) {
+                    dirs.extend(gnu_driver_dirs(&text));
+                }
+                if let Some(ld) = ask(&["-print-prog-name=ld"]) {
+                    let ld = ld.trim();
+                    if !ld.is_empty() {
+                        if let Ok(o) = Command::new(ld).arg("--verbose").output() {
+                            dirs.extend(gnu_script_dirs(&String::from_utf8_lossy(&o.stdout)));
+                        }
+                    }
+                }
+            }
+        }
+        LinkerFlavor::Apple => dirs.extend(["/usr/local/lib", "/usr/lib"].map(PathBuf::from)),
+        LinkerFlavor::Msvc => {
+            if let Some(lib) = std::env::var_os("LIB") {
+                dirs.extend(std::env::split_paths(&lib).filter(|d| !d.as_os_str().is_empty()));
+            }
+        }
+    }
+    let mut unique: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        if dir.is_dir() && !unique.contains(&dir) {
+            unique.push(dir);
+        }
+    }
+    unique
+}
+
+/// The `libraries: =DIR:DIR...` line of a GCC or Clang driver's
+/// `-print-search-dirs`.
+fn gnu_driver_dirs(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .find_map(|line| line.strip_prefix("libraries: "))
+        .map(|list| list.trim_start_matches('=').split(':').filter(|d| !d.is_empty()).map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
+
+/// The SEARCH_DIR("=DIR") directories of GNU ld's `--verbose` linker script
+/// (`=` the sysroot, the root directory of a native toolchain).
+fn gnu_script_dirs(text: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("SEARCH_DIR(\"") {
+        rest = &rest[at + 12..];
+        let Some(end) = rest.find("\")") else { break };
+        let dir = rest[..end].trim_start_matches('=');
+        if !dir.is_empty() {
+            dirs.push(PathBuf::from(dir));
+        }
+        rest = &rest[end..];
+    }
+    dirs
+}
+
+/// The resolved plan INPUTS, one line per dependency, for the link's verbose
+/// account (BOTLISH_NATIVE_LINK_LOG; `log_link`) and the driver's
+/// `link-plan` report: which file each static archive is, and why.
+pub fn describe_inputs(inputs: &[LinkInput]) -> Vec<String> {
+    inputs
+        .iter()
+        .map(|input| match input {
+            LinkInput::Library(name) => format!("library {name}: {}", library_argument(LINKER, name)),
+            LinkInput::Archive { name, path, from: ArchiveSource::Declared(written) } => {
+                format!("static {name}: {} (declared at {written:?})", path.display())
+            }
+            LinkInput::Archive { name, path, from: ArchiveSource::Searched(dir) } => {
+                format!("static {name}: {} (found in {})", path.display(), dir.display())
+            }
+            LinkInput::Framework(name) => format!("framework {name}: -framework {name}"),
+        })
+        .collect()
+}
+
+/// Appends the resolved plan INPUTS to BOTLISH_NATIVE_LINK_LOG, when set
+/// (the verbose mode of either linker).
+fn log_plan(inputs: &[LinkInput]) {
+    if inputs.is_empty() {
+        return;
+    }
+    let Some(log) = std::env::var_os("BOTLISH_NATIVE_LINK_LOG").filter(|p| !p.is_empty()) else { return };
+    let text: String = describe_inputs(inputs).iter().map(|line| format!("link plan: {line}\n")).collect();
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = std::io::Write::write_all(&mut file, text.as_bytes());
+    }
 }
 
 /// The `stub` linker: the prebuilt `botlish-aot-stub` with the program's
@@ -940,7 +1458,8 @@ fn system_link_args(
     runtime: &Path,
     output: &Path,
     program: &Program,
-    link_dirs: &[String],
+    inputs: &[LinkInput],
+    search: &LinkSearch,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     let mut push = |a: &str| args.push(a.into());
@@ -975,7 +1494,7 @@ fn system_link_args(
     args.extend(objects.iter().map(|o| o.as_os_str().to_owned()));
     // The plan exactly as the rustc linker passes it to the same linker,
     // rustc's own wrapping (`-C link-arg=`) taken off.
-    let plan = link_plan_args_for(flavor, program, link_dirs);
+    let plan = link_plan_args_for(flavor, program, inputs, search);
     args.extend(plan.iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
     args.push(runtime.into());
     args.extend(runtime_system_libraries(flavor).iter().map(OsString::from));
@@ -1069,16 +1588,18 @@ fn undefined_helper(output: &str) -> Option<&'static str> {
 /// no rustc, no Rust library and no checkout: only `system_linker`, the
 /// runtime archive (`runtime_archive`) and the libraries the program
 /// declares.
-fn link_system(program: &Program, destination: &Path, link_dirs: &[String]) -> Result<(), LinkError> {
+fn link_system(program: &Program, destination: &Path, search: &LinkSearch) -> Result<(), LinkError> {
     let runtime = runtime_archive()?;
     let tool = system_linker(LINKER)?;
+    let inputs = resolve_link_plan(program, search)?;
+    log_plan(&inputs);
     let work = WorkDir::beside(destination)
         .map_err(|e| format!("native link failed: cannot write the executable {}: {e}", destination.display()))?;
     let object = emit_object(program).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join(if LINKER == LinkerFlavor::Msvc { "program.obj" } else { "program.o" });
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
-    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, link_dirs);
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search);
     let output = Command::new(&tool)
         .args(&args)
         .output()
@@ -1120,7 +1641,7 @@ fn link_system(program: &Program, destination: &Path, link_dirs: &[String]) -> R
             // A link directory that is none is no error of the plan's (the
             // linker searches the others), but said after a failed link,
             // where it may be why a library was not found.
-            for dir in link_dirs.iter().filter(|dir| !Path::new(dir).is_dir()) {
+            for dir in search.libraries.iter().filter(|dir| !Path::new(dir).is_dir()) {
                 write!(hint, "\nthe link directory {dir} (-L) is not a directory").unwrap();
             }
             return Err(format!(
@@ -1421,6 +1942,18 @@ fn image(program: &Program, object: &ObjectProgram) -> Result<Image, String> {
 mod tests {
     use super::*;
 
+    /// PROGRAM's link plan resolved for a FLAVOR linker with no default
+    /// library directory (its static libraries must be declared at a path).
+    fn resolved(flavor: LinkerFlavor, program: &Program) -> Vec<LinkInput> {
+        resolve_link_plan_with(flavor, program, &LinkSearch::default(), &mut Vec::new).unwrap_or_else(|e| panic!("{}", e.message))
+    }
+
+    /// rustc's link plan arguments of PROGRAM for a FLAVOR linker searching
+    /// DIRS (`link_plan_args_for` of `resolved`).
+    fn plan_args(flavor: LinkerFlavor, program: &Program, dirs: &[String]) -> Vec<String> {
+        link_plan_args_for(flavor, program, &resolved(flavor, program), &LinkSearch::libraries(dirs))
+    }
+
     /// A program that calls one C function and declares two libraries.
     const FFI_PROGRAM: &str = concat!(
         "nir 1 call-effects=1 statics=0\n",
@@ -1442,7 +1975,7 @@ mod tests {
     fn ffi_link_plan_is_one_linker_group() {
         let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         assert!(calls_c(&program));
-        let args = link_plan_args_for(LinkerFlavor::Gnu, &program, &["/opt/lib".to_string()]);
+        let args = plan_args(LinkerFlavor::Gnu, &program, &["/opt/lib".to_string()]);
         let links: Vec<&str> = args.iter().filter(|a| *a != "-C").map(String::as_str).collect();
         assert_eq!(
             links,
@@ -1466,7 +1999,7 @@ mod tests {
     #[test]
     fn ffi_link_plan_apple_has_no_gnu_flags() {
         let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        let args = link_plan_args_for(LinkerFlavor::Apple, &program, &["/opt/lib".to_string(), "rel dir".to_string()]);
+        let args = plan_args(LinkerFlavor::Apple, &program, &["/opt/lib".to_string(), "rel dir".to_string()]);
         let links: Vec<&str> = args.iter().filter(|a| *a != "-C").map(String::as_str).collect();
         assert_eq!(
             links,
@@ -1489,7 +2022,7 @@ mod tests {
     #[test]
     fn ffi_link_plan_msvc_is_link_exes_spelling() {
         let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        let args = link_plan_args_for(LinkerFlavor::Msvc, &program, &["C:\\opt\\lib".to_string(), "rel dir".to_string()]);
+        let args = plan_args(LinkerFlavor::Msvc, &program, &["C:\\opt\\lib".to_string(), "rel dir".to_string()]);
         let links: Vec<&str> = args.iter().filter(|a| *a != "-C").map(String::as_str).collect();
         assert_eq!(
             links,
@@ -1583,7 +2116,8 @@ mod tests {
         };
         assert_eq!(LINKER, expected);
         let program = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
-        assert_eq!(link_plan_args(&program, &[]), link_plan_args_for(expected, &program, &[]));
+        let inputs = resolved(expected, &program);
+        assert_eq!(link_plan_args(&program, &inputs, &LinkSearch::default()), link_plan_args_for(expected, &program, &inputs, &LinkSearch::default()));
     }
 
     /// A failed link's message keeps the system linker's own lines --
@@ -1697,7 +2231,7 @@ mod tests {
     fn system_link_args_gnu() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("/w d/program.o")];
-        let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &["/opt/my lib".to_string()]);
+        let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &resolved(LinkerFlavor::Gnu, &ffi), &LinkSearch::libraries(&["/opt/my lib".to_string()]));
         assert_eq!(
             texts(&args),
             [
@@ -1707,11 +2241,11 @@ mod tests {
             ]
         );
         // The plan is the rustc linker's, unwrapped.
-        let plan: Vec<String> = link_plan_args_for(LinkerFlavor::Gnu, &ffi, &["/opt/my lib".to_string()])
+        let plan: Vec<String> = plan_args(LinkerFlavor::Gnu, &ffi, &["/opt/my lib".to_string()])
             .into_iter().filter_map(|a| a.strip_prefix("link-arg=").map(String::from)).collect();
         assert!(texts(&args).windows(plan.len()).any(|w| w == plan.as_slice()));
         // A program that calls no C: no plan, the rest as it was.
-        let plain = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &plain_program(), &["/opt/my lib".to_string()]);
+        let plain = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &plain_program(), &resolved(LinkerFlavor::Gnu, &plain_program()), &LinkSearch::libraries(&["/opt/my lib".to_string()]));
         assert!(texts(&plain).iter().all(|a| !a.starts_with("-L") && !a.contains("group") && a != "-lfirst"));
         assert_eq!(texts(&plain).len(), texts(&args).len() - 5);
     }
@@ -1721,7 +2255,7 @@ mod tests {
     fn system_link_args_apple_has_no_gnu_flags() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("/w/program.o")];
-        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &["/opt/lib".to_string()]));
+        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &resolved(LinkerFlavor::Apple, &ffi), &LinkSearch::libraries(&["/opt/lib".to_string()])));
         assert_eq!(&args[..2], ["-arch", "arm64"]);
         assert!(args.contains(&"-Wl,-dead_strip".to_string()));
         let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
@@ -1737,7 +2271,7 @@ mod tests {
     fn system_link_args_msvc() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("C:\\w\\program.obj")];
-        let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &["C:\\opt lib".to_string()]));
+        let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &resolved(LinkerFlavor::Msvc, &ffi), &LinkSearch::libraries(&["C:\\opt lib".to_string()])));
         for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OUT:C:\\w d\\executable.exe"] {
             assert!(args.contains(&flag.to_string()), "{flag} not in {args:?}");
         }
@@ -1897,6 +2431,320 @@ mod tests {
             .replace("%2 = foreigncall 0 %0 %1", "%2 = int 42");
         let program = crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
         assert!(!calls_c(&program));
-        assert!(link_plan_args(&program, &["/opt/lib".to_string()]).is_empty());
+        assert!(link_plan_args(&program, &[], &LinkSearch::libraries(&["/opt/lib".to_string()])).is_empty());
+    }
+
+    // ------------------------------------- the link plan (NATIVE-LINK-PLAN-MILESTONE-1.md)
+
+    /// FFI_PROGRAM with its link plan replaced by the header lines LINKS.
+    fn with_links(links: &str) -> Program {
+        let text = FFI_PROGRAM.replace("link \"first\"\nlink \"second\"\n", links);
+        crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message))
+    }
+
+    /// A private scratch directory of this test process.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("botlish-link-plan-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// An ELF64 object header of MACHINE (62 x86-64, 183 AArch64) and type
+    /// KIND (1 relocatable, 3 shared).
+    fn elf(machine: u16, kind: u16) -> Vec<u8> {
+        let mut e = vec![0u8; 64];
+        e[..4].copy_from_slice(b"\x7fELF");
+        e[4] = 2;
+        e[16..18].copy_from_slice(&kind.to_le_bytes());
+        e[18..20].copy_from_slice(&machine.to_le_bytes());
+        e
+    }
+
+    /// A relocatable ELF object of the machine a GNU-flavor link is for
+    /// (`flavor_machine`: the host's on Linux AArch64, x86-64 elsewhere).
+    fn gnu_object() -> Vec<u8> {
+        elf(if flavor_machine(LinkerFlavor::Gnu) == "ELF AArch64" { 183 } else { 62 }, 1)
+    }
+
+    /// An ELF object of the other Linux architecture than `gnu_object`'s.
+    fn foreign_gnu_object() -> (Vec<u8>, &'static str) {
+        if flavor_machine(LinkerFlavor::Gnu) == "ELF AArch64" { (elf(62, 1), "ELF x86-64") } else { (elf(183, 1), "ELF AArch64") }
+    }
+
+    /// An archive file NAME in DIR of MEMBERS.
+    fn archive_at(dir: &Path, name: &str, members: &[Vec<u8>]) -> PathBuf {
+        let mut bytes = b"!<arch>\n".to_vec();
+        for m in members {
+            bytes.extend_from_slice(m);
+        }
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// The header lines of every kind of dependency parse into the plan, in
+    /// order; anything else is invalid NIR -- a name that could be an
+    /// option, a path a source could not write, a framework with a
+    /// library's words.
+    #[test]
+    fn link_plan_header_lines_parse() {
+        let program = with_links(concat!(
+            "link \"m\"\n",
+            "link \"SDL3\" static\n",
+            "link \"fx\" static path=\"native/lib fx.a\" base=\"/app root\"\n",
+            "framework \"Cocoa\"\n",
+        ));
+        assert_eq!(
+            program.links,
+            vec![
+                Link::Library("m".into()),
+                Link::Static { name: "SDL3".into(), archive: None },
+                Link::Static {
+                    name: "fx".into(),
+                    archive: Some(crate::nir::ArchivePath { written: "native/lib fx.a".into(), base: "/app root".into() })
+                },
+                Link::Framework("Cocoa".into()),
+            ]
+        );
+        // A plan of static libraries or frameworks only, calling nothing, is
+        // still a program that calls C: the system linker's, never the stub's.
+        let declares_only = |links: &str| {
+            let text = FFI_PROGRAM
+                .replace("link \"first\"\nlink \"second\"\n", links)
+                .replace("foreign 0 \"c_add\" params=\"i32 i32\" result=i32 name=\"m::add\"\n", "")
+                .replace("%2 = foreigncall 0 %0 %1", "%2 = int 42");
+            crate::nir::parse(&text).unwrap_or_else(|e| panic!("{}", e.message))
+        };
+        for links in ["link \"z\" static\n", "link \"z\" static path=\"libz.a\" base=\"/a\"\n", "framework \"Metal\"\n"] {
+            let program = declares_only(links);
+            assert!(program.foreigns.is_empty() && calls_c(&program), "{links}");
+            assert_eq!(linker_named(Some("auto"), &program, true), Ok(Linker::System), "{links}");
+        }
+        for bad in [
+            "link \"-Wl,--wrap=x\"\n",
+            "link \"\"\n",
+            "link \"x\" shared\n",
+            "link \"x\" static path=\"\" base=\"/a\"\n",
+            "link \"x\" static path=\"a\\\\b.a\" base=\"/a\"\n",
+            "link \"x\" static path=\"dir/\" base=\"/a\"\n",
+            "link \"x\" static base=\"/a\" path=\"x.a\"\n",
+            "framework \"Cocoa\" static\n",
+            "framework \"-framework\"\n",
+        ] {
+            let text = FFI_PROGRAM.replace("link \"first\"\nlink \"second\"\n", bad);
+            assert!(crate::nir::parse(&text).is_err(), "{bad:?} parsed");
+        }
+    }
+
+    /// Every dependency kind as each linker is given it: a static archive by
+    /// its absolute path inside GNU's group, among Apple's libraries, as a
+    /// link.exe input; a framework as Apple's `-framework NAME` pair after
+    /// the libraries, with -F directories after the -L ones; frameworks and
+    /// framework directories are Apple's alone.
+    #[test]
+    fn link_plan_static_archives_and_frameworks_lower_per_linker() {
+        let dir = scratch("lower");
+        let path = archive_at(&dir, "libfx.a", &[member("fx.o/", &gnu_object())]);
+        let inputs = vec![
+            LinkInput::Library("m".into()),
+            LinkInput::Archive { name: "fx".into(), path: path.clone(), from: ArchiveSource::Declared("libfx.a".into()) },
+            LinkInput::Framework("Cocoa".into()),
+        ];
+        let program = with_links("link \"m\"\nlink \"fx\" static\nframework \"Cocoa\"\n");
+        let search = LinkSearch { libraries: vec!["/opt/lib".into()], frameworks: vec!["/opt/My Frameworks".into()] };
+        let shown = |args: Vec<String>| args.into_iter().filter(|a| a != "-C").collect::<Vec<_>>();
+        let fx = format!("link-arg={}", path.display());
+        assert_eq!(
+            shown(link_plan_args_for(LinkerFlavor::Apple, &program, &inputs, &search)),
+            ["default-linker-libraries=yes", "link-arg=-L/opt/lib", "link-arg=-F/opt/My Frameworks", "link-arg=-lm", &fx, "link-arg=-framework", "link-arg=Cocoa"]
+        );
+        let unframed = vec![inputs[0].clone(), inputs[1].clone()];
+        assert_eq!(
+            shown(link_plan_args_for(LinkerFlavor::Gnu, &program, &unframed, &search)),
+            ["default-linker-libraries=yes", "link-arg=-L/opt/lib", "link-arg=-Wl,--start-group", "link-arg=-lm", &fx, "link-arg=-Wl,--end-group"]
+        );
+        assert_eq!(
+            shown(link_plan_args_for(LinkerFlavor::Msvc, &program, &unframed, &search)),
+            ["default-linker-libraries=yes", "link-arg=/LIBPATH:/opt/lib", "link-arg=m.lib", &fx]
+        );
+        // The system linker's arguments carry the same plan, unwrapped: the
+        // archive one argument, a framework two.
+        let objects = [Path::new("/w/program.o")];
+        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &program, &inputs, &search));
+        let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
+        assert_eq!(&tail[..8], ["/w/program.o", "-L/opt/lib", "-F/opt/My Frameworks", "-lm", path.to_str().unwrap(), "-framework", "Cocoa", "/rt/libbotlish_runtime.a"]);
+        // Frameworks never reach another linker: resolution refuses them.
+        for flavor in [LinkerFlavor::Gnu, LinkerFlavor::Msvc] {
+            let error = resolve_link_plan_with(flavor, &with_links("framework \"Cocoa\"\n"), &LinkSearch::default(), &mut Vec::new).unwrap_err();
+            assert_eq!(error.detail, Some("ARCHIVE"));
+            assert!(error.message.contains("Apple framework"), "{}", error.message);
+        }
+        assert_eq!(
+            describe_link_plan_for(LinkerFlavor::Gnu, &with_links("link \"m\"\nlink \"z\" static\nlink \"fx\" static path=\"native/libfx.a\" base=\"/a\"\nframework \"Metal\"\n")),
+            "symbols c_add; libraries -lm libz.a (static) native/libfx.a (static); frameworks Metal"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A declared archive is its path joined to the application root (an
+    /// absolute path as it is), never the working directory's: so a written
+    /// path that starts with `-` is still an absolute path, never an option.
+    /// A relative path without a root is refused, as is a missing file.
+    #[test]
+    fn link_plan_declared_archives_resolve_from_the_application_root() {
+        let root = scratch("root dir ü");
+        std::fs::create_dir_all(root.join("native")).unwrap();
+        let fx = archive_at(&root.join("native"), "-libfx.a", &[member("fx.o/", &gnu_object())]);
+        // As native/lower.tcl's Quote writes a path into NIR text.
+        let quoted = |p: &Path| p.display().to_string().replace('\\', "\\\\");
+        let base = quoted(&root);
+        let gnu = |links: &str| resolve_link_plan_with(LinkerFlavor::Gnu, &with_links(links), &LinkSearch::default(), &mut Vec::new);
+        let inputs = gnu(&format!("link \"fx\" static path=\"native/-libfx.a\" base=\"{base}\"\n")).unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(inputs, vec![LinkInput::Archive { name: "fx".into(), path: root.join("native/-libfx.a"), from: ArchiveSource::Declared("native/-libfx.a".into()) }]);
+        let args = plan_args(LinkerFlavor::Gnu, &with_links(&format!("link \"fx\" static path=\"native/-libfx.a\" base=\"{base}\"\n")), &[]);
+        assert!(args.iter().filter_map(|a| a.strip_prefix("link-arg=")).all(|a| a.starts_with("-Wl,") || Path::new(a).is_absolute()), "{args:?}");
+        let absolute = gnu(&format!("link \"fx\" static path=\"{}\" base=\"\"\n", fx.display().to_string().replace('\\', "/"))).unwrap_or_else(|e| panic!("{}", e.message));
+        let fx = PathBuf::from(fx.display().to_string().replace('\\', "/"));
+        assert!(matches!(&absolute[0], LinkInput::Archive { path, .. } if *path == fx));
+        for (links, words) in [
+            ("link \"fx\" static path=\"native/-libfx.a\" base=\"\"\n".to_string(), "has none"),
+            ("link \"fx\" static path=\"native/-libfx.a\" base=\"relative/root\"\n".to_string(), "has none"),
+            (format!("link \"fx\" static path=\"native/missing.a\" base=\"{base}\"\n"), "does not exist"),
+            (format!("link \"fx\" static path=\"native\" base=\"{base}\"\n"), "is not a file"),
+        ] {
+            let error = gnu(&links).unwrap_err();
+            assert_eq!(error.detail, Some("ARCHIVE"), "{links}");
+            assert!(error.message.contains(words), "{links}: {}", error.message);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A static library declared without a path is the first libNAME.a of the
+    /// -L directories, then of the toolchain's (asked once, and only when no
+    /// -L directory has one) -- never a shared library of that name, which
+    /// the refusal names when it is there instead.
+    #[test]
+    fn link_plan_searched_archives_never_take_a_shared_library() {
+        let first = scratch("search-first");
+        let second = scratch("search-second");
+        let system = scratch("search-system");
+        std::fs::write(first.join("libfx.so"), elf(62, 3)).unwrap();
+        archive_at(&second, "libfx.a", &[member("fx.o/", &gnu_object())]);
+        let program = with_links("link \"fx\" static\n");
+        let search = LinkSearch::libraries(&[first.display().to_string(), second.display().to_string()]);
+        let mut asked = 0;
+        let found = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &search, &mut || {
+            asked += 1;
+            vec![system.clone()]
+        })
+        .unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(asked, 0);
+        assert_eq!(found, vec![LinkInput::Archive { name: "fx".into(), path: second.join("libfx.a"), from: ArchiveSource::Searched(second.clone()) }]);
+        // Only the shared library on the -L path: the toolchain's directories
+        // are asked, and an archive there is taken.
+        let only = LinkSearch::libraries(&[first.display().to_string()]);
+        let none = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &only, &mut || {
+            asked += 1;
+            vec![system.clone()]
+        })
+        .unwrap_err();
+        assert_eq!(asked, 1);
+        assert!(none.message.contains("libfx.so is a shared library") && none.message.contains(&system.display().to_string()), "{}", none.message);
+        archive_at(&system, "libfx.a", &[member("fx.o/", &gnu_object())]);
+        let defaulted = resolve_link_plan_with(LinkerFlavor::Gnu, &program, &only, &mut || vec![system.clone()]).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(matches!(&defaulted[0], LinkInput::Archive { from: ArchiveSource::Searched(d), .. } if *d == system));
+        // Each linker's names: libNAME.a; NAME.lib for link.exe.
+        assert_eq!(static_archive_name(LinkerFlavor::Apple, "SDL3"), "libSDL3.a");
+        assert_eq!(static_archive_name(LinkerFlavor::Msvc, "SDL3-static"), "SDL3-static.lib");
+        for dir in [first, second, system] {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// What a static declaration's file must be: an archive of objects of
+    /// the linked machine, and no import library -- never a shared
+    /// library, a text stub, a linker script, a thin archive or another
+    /// architecture's objects.
+    #[test]
+    fn link_plan_archive_facts_refuse_what_is_no_static_archive() {
+        let dir = scratch("facts");
+        let check = |name: &str, bytes: &[u8], flavor: LinkerFlavor| -> Result<(), String> {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            check_static_archive(flavor, flavor_machine(flavor), "fx", &path, "test").map_err(|e| e.message)
+        };
+        let archive = |members: &[Vec<u8>]| {
+            let mut bytes = b"!<arch>\n".to_vec();
+            for m in members {
+                bytes.extend_from_slice(m);
+            }
+            bytes
+        };
+        let mut macho_dylib = vec![0u8; 32];
+        macho_dylib[..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
+        macho_dylib[4..8].copy_from_slice(&0x0100_000cu32.to_le_bytes());
+        macho_dylib[12..16].copy_from_slice(&6u32.to_le_bytes());
+        let mut macho_object = macho_dylib.clone();
+        macho_object[12..16].copy_from_slice(&1u32.to_le_bytes());
+        let mut coff = vec![0u8; 20 + 40];
+        coff[..2].copy_from_slice(&0x8664u16.to_le_bytes());
+        coff[2..4].copy_from_slice(&1u16.to_le_bytes());
+        coff[20..28].copy_from_slice(b".text\0\0\0");
+        let mut idata = coff.clone();
+        idata[20..28].copy_from_slice(b".idata$5");
+        let mut short_import = vec![0u8; 32];
+        short_import[2..4].copy_from_slice(&0xffffu16.to_le_bytes());
+        let ok = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
+        let refused = |r: Result<(), String>, words: &str| {
+            let e = r.unwrap_err();
+            assert!(e.contains(words), "{words:?} not in {e}");
+        };
+        ok(check("gnu.a", &archive(&[member("/", &[0; 8]), member("fx.o/", &gnu_object())]), LinkerFlavor::Gnu));
+        refused(check("so.a", &elf(62, 3), LinkerFlavor::Gnu), "ELF shared library");
+        refused(check("thin.a", b"!<thin>\n", LinkerFlavor::Gnu), "thin archive");
+        refused(check("script.a", b"/* GNU ld script */\nGROUP ( libfx.so.1 )\n", LinkerFlavor::Gnu), "linker script");
+        let (foreign, foreign_machine) = foreign_gnu_object();
+        refused(check("arm.a", &archive(&[member("fx.o/", &foreign)]), LinkerFlavor::Gnu), foreign_machine);
+        refused(check("mixed.a", &archive(&[member("a.o/", &gnu_object()), member("b.o/", &foreign)]), LinkerFlavor::Gnu), foreign_machine);
+        refused(check("empty.a", &archive(&[member("/", &[0; 8])]), LinkerFlavor::Gnu), "no object file");
+        ok(check("apple.a", &archive(&[member("__.SYMDEF SORTED", &[0; 8]), member("#1/8", &[b"fx.o\0\0\0\0".as_slice(), &macho_object].concat())]), LinkerFlavor::Apple));
+        refused(check("dylib.a", &macho_dylib, LinkerFlavor::Apple), "Mach-O dynamic library");
+        refused(check("tbd.a", b"--- !tapi-tbd\ntbd-version: 4\n", LinkerFlavor::Apple), "text-based stub");
+        refused(check("elf.a", &archive(&[member("fx.o/", &gnu_object())]), LinkerFlavor::Apple), "ELF");
+        ok(check("static.lib", &archive(&[member("/", &[0; 8]), member("fx.obj/", &coff)]), LinkerFlavor::Msvc));
+        refused(check("import.lib", &archive(&[member("/", &[0; 8]), member("fx.dll/", &short_import), member("fx.dll/", &idata)]), LinkerFlavor::Msvc), "import library: 2 of its members");
+        refused(check("longimport.lib", &archive(&[member("fx.dll/", &idata)]), LinkerFlavor::Msvc), "import library");
+        refused(check("dll.lib", b"MZ\x90\0", LinkerFlavor::Msvc), "Windows executable or DLL");
+        // A universal file: its arm64 slice, on Apple's linker only.
+        let slice = archive(&[member("#1/8", &[b"fx.o\0\0\0\0".as_slice(), &macho_object].concat())]);
+        let mut fat = Vec::new();
+        fat.extend_from_slice(&0xcafe_babeu32.to_be_bytes());
+        fat.extend_from_slice(&2u32.to_be_bytes());
+        let offset = 4096u32;
+        for (cpu, at) in [(0x0100_0007u32, offset), (0x0100_000cu32, offset)] {
+            for word in [cpu, 0, at, slice.len() as u32, 12] {
+                fat.extend_from_slice(&word.to_be_bytes());
+            }
+        }
+        fat.resize(offset as usize, 0);
+        fat.extend_from_slice(&slice);
+        ok(check("fat.a", &fat, LinkerFlavor::Apple));
+        refused(check("fat-gnu.a", &fat, LinkerFlavor::Gnu), "universal file");
+        let mut x86_only = fat.clone();
+        x86_only[8 + 20..8 + 24].copy_from_slice(&0x0100_0007u32.to_be_bytes());
+        refused(check("fat-x86.a", &x86_only, LinkerFlavor::Apple), "without an arm64 slice");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The toolchain's own library directories, from the C driver's and GNU
+    /// ld's words.
+    #[test]
+    fn link_plan_default_dirs_read_the_toolchains_words() {
+        let gcc = "install: /usr/lib/gcc/x86_64-linux-gnu/13/\nprograms: =/usr/libexec/gcc\nlibraries: =/usr/lib/gcc/x86_64-linux-gnu/13/:/lib/x86_64-linux-gnu/:/usr/lib/\n";
+        assert_eq!(gnu_driver_dirs(gcc), ["/usr/lib/gcc/x86_64-linux-gnu/13/", "/lib/x86_64-linux-gnu/", "/usr/lib/"].map(PathBuf::from));
+        let ld = "SEARCH_DIR(\"=/usr/local/lib/x86_64-linux-gnu\"); SEARCH_DIR(\"=/usr/local/lib\"); SEARCH_DIR(\"/opt/x\");";
+        assert_eq!(gnu_script_dirs(ld), ["/usr/local/lib/x86_64-linux-gnu", "/usr/local/lib", "/opt/x"].map(PathBuf::from));
+        assert!(gnu_driver_dirs("no such line").is_empty());
     }
 }

@@ -1,0 +1,281 @@
+# Mutants of the native link plan (audit/native-link-plan/tools/mutate.tcl;
+# NATIVE-LINK-PLAN-MILESTONE-1.md): each a deliberate bug in the declaration
+# grammar's lowering (surface/lower.tcl), the loader's placement of a
+# declaration (surface/modules.tcl), the plan's merge (hir/foreign.tcl), HIR
+# interchange (hir/interchange.tcl), the front-end cache's key
+# (surface/cache.tcl), the NIR header (native/lower.tcl), the driver's
+# options (native/native.tcl) or the driver's resolution, checks and
+# arguments (native/src/codegen/aot.rs). The milestone's table first, then
+# further ones.
+#
+#   @@ NAME DESCRIPTION
+#   %% TARGET ...          (optional: the hosts it runs on)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# --- the milestone's table ---------------------------------------------------
+
+@@ static-dropped-in-lowering a declaration's `static` is lost between the AST and HIR: the library is the linker's choice again
+## surface/lower.tcl
+<<<<
+        linkage [dict get $node linkage] path [dict get $node path] base "" namespace $namespace \
+====
+        linkage default path [dict get $node path] base "" namespace $namespace \
+>>>>
+
+@@ static-dropped-in-interchange HIR interchange writes every library as an ordinary one, without its archive
+## hir/interchange.tcl
+<<<<
+proc hir::interchange::WithoutRepresentations {hir} {
+====
+proc hir::interchange::WithoutRepresentations {hir} {
+    if {[dict exists $hir links]} {
+        dict set hir links [lmap entry [dict get $hir links] {
+            if {[dict exists $entry linkage]} {
+                dict set entry linkage default
+                dict set entry path ""
+            }
+            set entry
+        }]
+    }
+>>>>
+
+@@ archive-path-ignored the NIR header drops a declared archive's path: the driver searches for libNAME.a instead
+## native/lower.tcl
+<<<<
+                append line " path=[Quote [dict get $entry path]] base=[Quote [dict get $entry base]]"
+====
+                # (the path dropped)
+>>>>
+
+@@ path-from-working-directory the driver resolves an archive's relative path from its working directory, not the application root
+## native/src/codegen/aot.rs
+<<<<
+                    Path::new(&declared.base).join(written)
+====
+                    std::path::absolute(written).unwrap_or_else(|_| written.to_path_buf())
+>>>>
+
+@@ imported-path-from-library a module's archive path is resolved from the compiler's own library directory (the single executable's ZIP), not the application root
+## surface/modules.tcl
+<<<<
+    set base [dict get $state root]
+====
+    set base [dict get $state root]
+    if {$namespace ne ""} {
+        set base $::core::libraryDir
+    }
+>>>>
+
+@@ cache-key-without-root the front-end cache keys a compilation without its application root: one entry path given from two directories is one entry, the first one's root
+## surface/cache.tcl
+<<<<
+        root $root \
+====
+        root "" \
+>>>>
+
+@@ archive-contents-kept the driver keeps the first copy of each declared archive it links and links that copy ever after, whatever the file holds now
+## native/src/codegen/aot.rs
+<<<<
+                inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Declared(declared.written.clone()) });
+====
+                let kept = std::env::temp_dir().join(format!(
+                    "botlish-kept-{:x}.a",
+                    path.to_string_lossy().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b)))
+                ));
+                if !kept.exists() {
+                    let _ = std::fs::copy(&path, &kept);
+                }
+                let path = kept;
+                inputs.push(LinkInput::Archive { name: name.clone(), path, from: ArchiveSource::Declared(declared.written.clone()) });
+>>>>
+
+@@ shared-fallback a static library with no archive on the search path is linked as an ordinary one (-lNAME): a shared library of its name, if there is one
+## native/src/codegen/aot.rs
+<<<<
+                let Some(dir) = found else {
+====
+                let Some(dir) = found else {
+                    if true {
+                        inputs.push(LinkInput::Library(name.clone()));
+                        continue;
+                    }
+>>>>
+
+@@ plan-order-reversed the link plan's entries come out in reverse declaration order
+## hir/foreign.tcl
+<<<<
+    return [lmap entry $plan {dict remove $entry pathDecl}]
+====
+    return [lreverse [lmap entry $plan {dict remove $entry pathDecl}]]
+>>>>
+
+@@ module-links-dropped the loader drops an imported module's link declarations: the program links without its binding's library
+## surface/modules.tcl
+<<<<
+    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
+====
+    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state {} $name] $fileId]]
+>>>>
+
+@@ archive-conflict-merged two archives of one library merge silently, the first one kept
+## hir/foreign.tcl
+<<<<
+    if {[ArchivePathKey [dict get $entry path]] ne $written || [dict get $entry base] ne [dict get $decl base]} {
+====
+    if {0} {
+>>>>
+
+@@ framework-dropped the NIR header leaves frameworks out of the plan
+## native/lower.tcl
+<<<<
+            lappend header "framework [Quote [dict get $entry name]]"
+====
+            # (the framework dropped)
+>>>>
+
+@@ framework-as-library Apple's ld gets a framework as -lNAME, never -framework NAME
+## native/src/codegen/aot.rs
+<<<<
+            arg("-framework".to_string());
+            arg(name.clone());
+====
+            arg(format!("-l{name}"));
+>>>>
+
+@@ framework-on-linux a framework declaration is accepted for a target whose linker has none
+## surface/modules.tcl
+<<<<
+            FrameworkCheck state $decl
+====
+            # (no check)
+>>>>
+
+@@ framework-dir-dropped the -F search directories never reach Apple's ld
+## native/src/codegen/aot.rs
+<<<<
+            arg(format!("-F{dir}"));
+====
+            let _ = dir;
+>>>>
+
+@@ framework-dir-not-passed native::frameworkDirs (main.tcl's -F) never reaches the driver
+%% macos-aarch64
+## native/native.tcl
+<<<<
+        lappend args --framework-dir $dir
+====
+        # (not passed)
+>>>>
+
+@@ archive-path-as-option an archive path written with a leading `-` is passed as it is, not resolved from the application root
+## native/src/codegen/aot.rs
+<<<<
+                let path = if written.is_absolute() {
+====
+                let path = if written.is_absolute() || declared.written.starts_with('-') {
+>>>>
+
+@@ import-library-accepted a Windows import library passes as a static archive: the executable imports the library's DLL
+## native/src/codegen/aot.rs
+<<<<
+    if facts.imports > 0 {
+====
+    if facts.imports > 0 && false {
+>>>>
+
+@@ rustc-loses-static the rustc linker links a static archive as an ordinary library (-lNAME)
+## native/src/codegen/aot.rs
+<<<<
+        .args(link_plan_args(program, &inputs, search))
+====
+        .args(link_plan_args(
+            program,
+            &inputs
+                .iter()
+                .map(|i| match i {
+                    LinkInput::Archive { name, .. } => LinkInput::Library(name.clone()),
+                    other => other.clone(),
+                })
+                .collect::<Vec<_>>(),
+            search,
+        ))
+>>>>
+
+@@ system-loses-static the system linker links a static archive as an ordinary library (-lNAME)
+## native/src/codegen/aot.rs
+<<<<
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search);
+====
+    let lost: Vec<LinkInput> = inputs
+        .iter()
+        .map(|i| match i {
+            LinkInput::Archive { name, .. } => LinkInput::Library(name.clone()),
+            other => other.clone(),
+        })
+        .collect();
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &lost, search);
+>>>>
+
+@@ static-only-plan-is-no-c a program whose plan holds only static libraries or frameworks counts as one that calls no C: auto links it with the stub
+## native/src/codegen/aot.rs
+<<<<
+    !program.foreigns.is_empty() || !program.links.is_empty()
+====
+    !program.foreigns.is_empty() || program.links.iter().any(|l| matches!(l, Link::Library(_)))
+>>>>
+
+@@ machine-misclassified an AArch64 object in an archive is taken for an x86-64 one (and the reverse is never told apart)
+## native/src/codegen/aot.rs
+<<<<
+                Some(match (data[4], le16(data, 18).unwrap_or(0)) {
+                    (2, 62) => "ELF x86-64".to_string(),
+                    (2, 183) => "ELF AArch64".to_string(),
+====
+                Some(match (data[4], le16(data, 18).unwrap_or(0)) {
+                    (2, 62 | 183) => HOST_MACHINE.to_string(),
+>>>>
+
+@@ linker-diagnostics-hidden a failed link of a program that calls C says it failed, not what the linker said (the undefined symbol)
+## native/src/codegen/aot.rs
+<<<<
+            let diagnostics = linker_diagnostics(&stderr);
+====
+            let diagnostics = String::new();
+>>>>
+
+# --- further mutants ---------------------------------------------------------
+
+@@ archive-base-dropped the NIR header gives every archive path an empty root: no relative path resolves
+## native/lower.tcl
+<<<<
+                append line " path=[Quote [dict get $entry path]] base=[Quote [dict get $entry base]]"
+====
+                append line " path=[Quote [dict get $entry path]] base=\"\""
+>>>>
+
+@@ library-framework-conflict-merged a name declared both a library and a framework is linked both ways
+## hir/foreign.tcl
+<<<<
+        if {[dict exists $index $other $name]} {
+====
+        if {0} {
+>>>>
+
+@@ shared-library-accepted-as-archive a shared library named as a static archive passes the driver's check (the linker then makes the executable depend on it)
+## native/src/codegen/aot.rs
+<<<<
+    let facts = archive_facts(path, flavor).map_err(|why| archive_error(format!("native link failed: {what} is no static archive: {why}")))?;
+====
+    let facts = match archive_facts(path, flavor) {
+        Ok(facts) => facts,
+        Err(_) => return Ok(()),
+    };
+>>>>

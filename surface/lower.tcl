@@ -242,11 +242,17 @@ proc surface::lower::ExternDeclOf {node namespace} {
 }
 
 # The declaration dict of an `externlib` node declared in module NAMESPACE,
-# for hir::buildSyntax's -link-decls (C-FFI.md): {library NAME namespace NS
-# span SPAN origin ORIGIN}.
+# for hir::buildSyntax's -link-decls (C-FFI.md, NATIVE-LINK-PLAN-
+# MILESTONE-1.md): {link library|framework name NAME linkage default|static
+# path PATH base "" namespace NS span SPAN nameSpan SPAN pathSpan SPAN
+# origin ORIGIN}. BASE, the directory a relative PATH is resolved from, is
+# the loader's (surface::modules::LinkDecls: the application root), never
+# read from the (cached, importer-neutral) AST.
 proc surface::lower::LinkDeclOf {node namespace} {
-    return [dict create library [dict get $node library] namespace $namespace \
-        span [dict get $node span] origin [OriginOf $node]]
+    return [dict create link [dict get $node link] name [dict get $node dependency] \
+        linkage [dict get $node linkage] path [dict get $node path] base "" namespace $namespace \
+        span [dict get $node span] nameSpan [dict get $node dependencySpan] pathSpan [dict get $node pathSpan] \
+        origin [OriginOf $node]]
 }
 
 # The declaration dict of an `enumdecl` node declared in module NAMESPACE (""
