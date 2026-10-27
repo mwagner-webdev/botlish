@@ -264,15 +264,16 @@ if {$raw} {
 # framing).
 set result ""
 set panic ""
-if {$linesMode && $signal eq "" && $vertical in {aot aot-asan cranelift cranelift-generic}} {
+if {$linesMode && $signal eq "" && $vertical in {aot aot-asan interp compile cranelift cranelift-generic}} {
     # Multi-line report target: the whole stdout (minus the in-process
     # runner's framing lines) is the oracle, joined into one normalized
-    # string.
+    # string. Error lines are KEPT: a refusal (NATIVE-ONLY) or a runtime
+    # error is part of the observable report.
     set kept {}
     foreach line [split $stdout \n] {
         set line [string trimright $line \r]
         if {$line eq ""} continue
-        if {$inProcess && [regexp {^(== |   value: |   error: |   help: |   type: |   block )} $line]} continue
+        if {$inProcess && [regexp {^(== |   value: |   help: |   type: |   block )} $line]} continue
         lappend kept $line
     }
     # The aot executable's runtime prints the program's value as the last

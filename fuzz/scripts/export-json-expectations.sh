@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="$ROOT/fuzz/windows/expected-conformance.tsv"
 : > "$OUT"
 for seed in "$ROOT"/fuzz/seeds/conformance/*; do
-    report="$(tclsh9.0 "$ROOT/fuzz/scripts/replay.tcl" aot conformance "$seed" | head -1)"
+    report="$(tclsh9.0 "$ROOT/fuzz/scripts/replay.tcl" aot conformance "$seed" 2>/dev/null | sed -n 1p)"
     printf '%s\t%s\n' "$(basename "$seed")" "$report" >> "$OUT"
 done
 echo "wrote $(grep -c '' "$OUT") expectations to $OUT"

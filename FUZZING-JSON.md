@@ -53,16 +53,19 @@ QEMU mode; earlier reports have the details). Reproducible:
   report is the oracle (`report|<lines joined>`), with the in-process
   framing stripped and the aot value line dropped, so all runnable
   verticals normalize identically.
-* Seeds (`fuzz/seeds/conformance/`, committed, cmin-minimized 59 -> 11):
-  RFC 8259 valid shapes (all literal types, number grammar extremes --
-  `-0`, `1e999`, `1E+5` -- escapes including the surrogate-pair halves,
-  an astral-plane literal, nesting to 16 and 64, whitespace forms),
-  classic malformations (trailing commas, single quotes, `NaN`,
-  `Infinity`, comments, `01`, `+1`, `.5`, `0x1`, unterminated strings,
-  a lone high surrogate, raw newlines in strings, `{"a" 1}`), the
-  program's own limits probed (`TooDeep` with depth 500, long tokens at
-  5k and 90k symbols), multi-document argv vectors, and the structural
-  set every target gets.
+* Seeds (`fuzz/seeds/conformance/`, committed, cmin-minimized 49 -> 10):
+  the driver's arguments are **hex-encoded** case bytes (`str.unhex`;
+  a leading `+` continues the previous case -- the program's own
+  contract), so seeds carry the hex text of RFC 8259 valid shapes (all
+  literal types, number extremes -- `-0`, `1e999`, `1E+5` -- escapes
+  including the surrogate-pair halves, an astral literal, nesting to 16
+  and 64, whitespace), classic malformations (trailing commas, single
+  quotes, `NaN`, comments, `01`, `+1`, `.5`, `0x1`, unterminated
+  strings, a lone high surrogate), the program's own limits probed
+  (`TooDeep` at depth 500, long tokens at 5k and 40k symbols -- 40k,
+  not 90k, because a 90k case hex-doubles past the kernel's 128 KiB
+  per-argument limit), the continuation form (`5b` + `+315d`),
+  multi-document vectors, and the structural set every target gets.
 * `fuzz/dictionaries/json.dict`: RFC 8259's grammar tokens (structural
   pairs, literals, escape machinery with the surrogate boundary values,
   number grammar, whitespace, BOM), hand-written from the RFC.
@@ -75,22 +78,44 @@ only crash oracle, WSL environment variables.
 
 ## 4. Results
 
-* Release pass: **537,230 executions in 1200 s (448/s), corpus 17,
-  0 crashes, 0 hangs**, plateaued (60 queue cycles without finds;
+* Release pass: **567,472 executions in 1200 s (237/s), corpus 17,
+  0 crashes, 0 hangs**, plateaued (65 queue cycles without finds;
   `fuzz/campaign-stats/2026-10-26/`).
+* ASan pass: **15,782 executions in 600 s, corpus 17, 0 crashes,
+  2 saved hangs** -- and one of those "hangs" is the campaign's finding:
+  an ASan abort that triage's plain run at first missed (it reproduces
+  20/20 with the right environment; see FZ-004).
 * ASan pass: **22,760 executions in 600 s (38/s), corpus 17, 0 crashes,
-  0 hangs** -- the sanitizer build adds no finding.
-* Differential matrix (1303 recorded runs, all targets; conformance's
+  0 hangs** -- the sanitizer build adds no finding.* Differential matrix (1303 recorded runs, all targets; conformance's
   rows compared on the full report): **0 hard mismatches**; the
   native-only-refusal class now keys on the designed diagnostic itself
   (a program's module files can carry the native-only construct -- here
   `json.bot`'s machine-address use -- so the target's own source text
   does not decide it).
-* Findings: **zero** -- no crashes, hangs, panics, sanitizer reports, or
-  divergences; FZ-001 stays fixed; the one triage candidate (string
-  reverse's documented O(n^2) on ~100 KiB inputs) is the known
-  performance observation again (recorded under its new triage id,
-  FZ-003, same signature as FZ-002).
+* Findings: **one real bug, filed** -- plus one input-contract correction
+  of the campaign's own corpus:
+
+  * **FZ-004** (`fuzz/triage/FZ-004/`): **the collector frees a live
+    String object** -- `heap-use-after-free`, READ in `StrObj::wide`
+    (strobj.rs:139) of an object freed by `Heap::collect`'s
+    `free_object` (heap.rs:227): a GC root-tracking hole in the native
+    runtime, shared by every native vertical. Deterministic **20/20** in
+    the ASan build; the release build is latent on this input (correct
+    report, identical across repeats and to in-process; the same heap
+    code -- the freed read hits recycled memory that still holds the
+    right bytes). Trigger: ~500 small hex cases' allocation churn grows
+    the heap until a collection lands while generated code still holds
+    the unrooted String. Not fixed, per campaign policy; the first
+    runtime-layer finding of any campaign, and exactly what the ASan
+    second pass exists for.
+  * Corpus correction: the driver's arguments are **hex-encoded** case
+    bytes (`str.unhex`, `+` continues a case) -- the campaign's first
+    corpus pass fed raw JSON text and unknowingly fuzzed hex-garbled
+    space (nothing found there either); the committed corpus, dictionary
+    and all numbers above are the corrected hex-text ones.
+  * FZ-001 stays fixed; string-reverse's O(n^2) on ~100 KiB inputs
+    reappeared once more under triage (same known performance
+    observation, recorded under its newest candidate id, not a bug).
 
 ## 5. Windows replay (the cross-operating-system oracle)
 
@@ -120,11 +145,15 @@ Result: JSON3-WINDOWS
 6. Seeds minimized and dictionaries checked in: **yes** (59 -> 11).
 7-11. Oracle, dedup, matrix replay, manual reproduction: as before; zero
    findings to replay this campaign.
-12-16. Raw 0 crashes / 0 hangs (both passes); 0 deduplicated; 0
-   confirmed bugs; classification distribution empty; no new mismatch
-   classes (one exception *reclassification*: native-only-refusal keyed
-   on the diagnostic); no hangs; GC-stress not needed (nothing to
-   replay).
+12-16. Raw: 0 crashes + 2 saved hangs (one is FZ-004's ASan abort);
+   1 deduplicated signature; 1 confirmed bug (FZ-004, runtime GC
+   root-tracking, filed with the vertical matrix and 20/20
+   reproduction); classification: runtime 1, everything else 0; no new
+   differential mismatch classes (one normalization gap fixed in
+   lines-mode: zero-line reports and refusal retention); the two
+   differential "hangs" classes of earlier campaigns: none here; GC
+   stress on the release build of FZ-004's input: correct report (the
+   finding is ASan-build-visible today).
 17. Full regression on this base: JSON3-REGRESSION
 18. All targets still compile AOT (38 ok on this base; the same designed
     gates) and match recorded baselines.

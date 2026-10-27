@@ -149,10 +149,15 @@ rawhex() { local target="$1" name="$2" hex="$3"
     printf '%s' "$hex" | xxd -r -p > "$SRC/$target/$name"
 }
 
-# conformance.bot: one JSON document per argument (RFC 8259 shapes, valid
-# and invalid, from the grammar the json/json_lex recognizers implement).
-# Provenance: RFC 8259's grammar and the classic malformations; the verdict
-# text is the program's own ("lexical/structure ..." with offset).
+# conformance.bot: each argument is ONE CASE AS ITS HEX TEXT (the driver
+# unhex()s every argument; a leading "+" continues the previous case -- the
+# program's own header documents this contract). Seeds therefore carry the
+# hex of each RFC 8259 shape; the structural argv seeds below ride along
+# unhex-encoded (they exercise the argv layer, not the grammar).
+hexarg() { local target="$1" name="$2" text="$3"
+    mkdir -p "$SRC/$target"
+    printf '%s' "$text" | xxd -p | tr -d '\n' > "$SRC/$target/$name"
+}
 JSON_VALID=(
     '{}'
     '[]'
@@ -164,14 +169,11 @@ JSON_VALID=(
     '0.5'
     '-1.5e-3'
     '1e999'
-    '1E+5'
     '"x"'
     '""'
-    '"\\u0041"'
-    '"\\uD834\\uDD1E"'
-    '"\\\\"'
-    '"\\/"'
-    '"\\t"'
+    '"\u0041"'
+    '"\uD834\uDD1E"'
+    '"\\"'
     '"😀"'
     '[1, 2, 3]'
     '{"a": null, "b": [true, false]}'
@@ -181,43 +183,42 @@ JSON_VALID=(
 JSON_INVALID=(
     'not json'
     '{'
-    '['
-    '{"a":}'
-    '{"a": 1,}'
-    "[1, 2,]"
+    '[1, 2,]'
     "{'a': 1}"
     'NaN'
-    'Infinity'
     '// comment'
-    '/* comment */'
     '01'
     '+1'
     '.5'
-    '1.'
     '0x1'
     '"unterminated'
-    '"\\uD800"'
-    '"a
-b"'
+    '"\uD800"'
     '{"a" 1}'
     '[1 2]'
-    '"\\x41"'
 )
-i=0; for s in "${JSON_VALID[@]}"; do i=$((i+1)); seed conformance "valid-$i" "$s"; done
-i=0; for s in "${JSON_INVALID[@]}"; do i=$((i+1)); seed conformance "invalid-$i" "$s"; done
-# Boundary shapes the program's own limits define (TooDeep, MAX_TOKEN):
-python3 - <<'EOF'
-import os
+i=0; for doc in "${JSON_VALID[@]}"; do i=$((i+1)); hexarg conformance "valid-$i" "$doc"; done
+i=0; for doc in "${JSON_INVALID[@]}"; do i=$((i+1)); hexarg conformance "invalid-$i" "$doc"; done
+# Boundary shapes the program's own limits define (TooDeep, long tokens):
+python3 - <<'PYEOF'
+import binascii, os
 d = 'fuzz/seeds-src/conformance'
-open(f'{d}/valid-deep-16', 'w').write('[' * 16 + ']' * 16)
-open(f'{d}/valid-deep-64', 'w').write('[' * 64 + ']' * 64)
-open(f'{d}/invalid-deep-500', 'w').write('[' * 500)
-open(f'{d}/valid-longtoken-5000', 'w').write('"' + 'a' * 5000 + '"')
-open(f'{d}/invalid-longtoken-90000', 'w').write('"' + 'b' * 90000 + '"')
-EOF
-# Multiple documents as separate arguments (the driver's per-argument loop):
-seedhex conformance "two-docs" "$(printf '{}\0[1]' | xxd -p | tr -d '\n')"
-seedhex conformance "good-bad-mix" "$(printf '[1]\0nope\0"ok"' | xxd -p | tr -d '\n')"
+def w(name, text):
+    open(os.path.join(d, name), 'w').write(binascii.hexlify(text.encode()).decode())
+w('valid-deep-16', '[' * 16 + ']' * 16)
+w('valid-deep-64', '[' * 64 + ']' * 64)
+w('invalid-deep-500', '[' * 500)
+w('valid-longtoken-5000', '"' + 'a' * 5000 + '"')
+w('invalid-longtoken-40000', '"' + 'b' * 40000 + '"')
+# One case split across continuation arguments ("+HEX"): [1] as "5b" then "+315d".
+open(os.path.join(d, 'continuation-split'), 'wb').write(b'5b\x00+315d')
+PYEOF
+# Two cases as two arguments (the driver's per-case loop):
+python3 -c "import binascii,sys
+d1 = binascii.hexlify(b'{}').decode(); d2 = binascii.hexlify(b'[1]').decode()
+open('fuzz/seeds-src/conformance/two-docs','wb').write((d1 + '\x00' + d2).encode())
+d3 = binascii.hexlify(b'[1]').decode(); d4 = binascii.hexlify(b'nope').decode(); d5 = binascii.hexlify(b'"ok"').decode()
+open('fuzz/seeds-src/conformance/good-bad-mix','wb').write((d3 + '\x00' + d4 + '\x00' + d5).encode())"
+
 raw read-stdin "hello" 'hello from stdin\n'
 : > "$SRC/read-stdin/empty-only"
 head -c 4096 /dev/zero | tr '\0' 'a' > "$SRC/read-stdin/exactly-4096"

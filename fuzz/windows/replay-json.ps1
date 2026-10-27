@@ -39,11 +39,12 @@ if (-not (Test-Path $driver)) {
 # --- 3. Emit the conformance executable (module files beside it) ------------
 $work = Join-Path $Repo "fuzz\build\aot-win"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-foreach ($m in 'conformance.bot', 'json.bot', 'json_lex.bot') {
+foreach ($m in 'json.bot', 'json_lex.bot') {
     Copy-Item (Join-Path $Repo "examples\dfa\json\$m") (Join-Path $work $m) -Force
 }
-$exe = Join-Path $work "conformance.exe"
-& $tclsh (Join-Path $Repo "main.tcl") -emit-native-executable (Join-Path $work 'conformance.bot') | Out-Null
+Copy-Item (Join-Path $Repo "fuzz\programs\conformance-win.bot") (Join-Path $work 'conformance-win.bot') -Force
+$exe = Join-Path $work "conformance-win.exe"
+& $tclsh (Join-Path $Repo "main.tcl") -emit-native-executable (Join-Path $work 'conformance-win.bot') | Out-Null
 if (-not (Test-Path $exe)) { Write-Output "EMIT-FAILED"; exit 0 }
 Write-Output "exe: $exe"
 
