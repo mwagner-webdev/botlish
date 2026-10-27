@@ -1,4 +1,4 @@
-cdecl.tcl lines: code 1031, comment 127, blank 56
+cdecl.tcl lines: code 1038, comment 130, blank 56
 cdecl.tcl procedures: 46
   tokenizer (2): Lex FileIndex
   token-access (8): Peek Kind Next Expect Fail TextOf IsKeyword Loc
@@ -8,8 +8,8 @@ cdecl.tcl procedures: 46
   recovery (1): Recover
   literals (6): IntLiteral CharLiteral Parenthesized Bound lambda AnonTag
 recognized storageWords: 9 (typedef extern static auto register _Thread_local __thread thread_local constexpr)
-recognized fnspecWords: 5 (inline __inline __inline__ _Noreturn __noreturn__)
-recognized typeWords: 17 (void char short int long float double signed __signed __signed__ unsigned _Bool _Complex __complex__ __complex _Imaginary __int128)
+recognized fnspecWords: 6 (inline __inline __inline__ __forceinline _Noreturn __noreturn__)
+recognized typeWords: 21 (void char short int long float double signed __signed __signed__ unsigned _Bool _Complex __complex__ __complex _Imaginary __int128 __int8 __int16 __int32 __int64)
 recognized ccWords: 11 (__cdecl _cdecl __stdcall _stdcall __fastcall _fastcall __thiscall __vectorcall __clrcall __pascal __regcall)
 recognized attrWords: 5 (__attribute__ __attribute __declspec _Alignas alignas)
 recognized typeofWords: 6 (typeof __typeof__ __typeof typeof_unqual __typeof_unqual__ __auto_type)
@@ -33,10 +33,10 @@ tool query.tcl: code 161, comment 26, blank 6
 tool run.tcl: code 86, comment 26, blank 6
 tool thunks.tcl: code 105, comment 19, blank 5
 tool variants.tcl: code 50, comment 11, blank 7
-tool cdecl.tcl: code 1031, comment 127, blank 56
+tool cdecl.tcl: code 1038, comment 130, blank 56
 tool common.tcl: code 81, comment 22, blank 11
 tool ir.tcl: code 183, comment 33, blank 19
 tool macrocat.tcl: code 229, comment 30, blank 14
 tool macros.tcl: code 39, comment 12, blank 3
 tool pipeline.tcl: code 274, comment 53, blank 12
-tool toolchain.tcl: code 300, comment 93, blank 25
+tool toolchain.tcl: code 318, comment 103, blank 26

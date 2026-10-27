@@ -1110,7 +1110,9 @@ relocation change), and anything on macOS (section 34).
 * **Contracts at scale**: 98% of pointer parameters are unknown (section 29).
 * A GCC evidence producer. (Windows x86-64 with the GNU ABI is a target
   now, windows-x86_64-gnu, with a Win32 binding; MSVC is not:
-  C-BINDGEN-LAYOUTS.md.)
+  C-BINDGEN-LAYOUTS.md. Since ICY-TOWER-WINDOWS.md MSVC's windows-x86_64
+  has a toolchain configuration, generated on Windows only, with no
+  committed binding.)
 
 ## 35. What to run when changing this
 

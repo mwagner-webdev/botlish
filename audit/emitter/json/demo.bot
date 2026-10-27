@@ -1,0 +1,75 @@
+# demo.bot -- a JSON text streamed to standard output in chunks
+# (EMITTER-COROUTINE-EXPLORATION.md, "Streaming output and sinks"). The
+# emitter (value_emit's value_stacked, its claim proved) has no authority;
+# the consumer installs the Linux IO context, encodes each chunk of 64
+# symbols as UTF-8 and writes it. No document is ever held whole.
+#
+#   tclsh9.0 main.tcl -backend cranelift WORKSPACE/demo.bot
+#
+# (The encoding is the sink's: the claim is about the scalar values, and a
+# byte-level claim is string_bytes's, over json_text_bytes.)
+
+import value_emit
+import std::linux::io
+import std::abi::bytes
+import std::byte
+import std::coroutine
+import std::mutable_vector
+import std::mutable_array
+
+fn no_keys() -> List[str]:
+    []
+
+fn document() -> value_emit::Value:
+    tags = ["streamed", "chunked", "checked"]
+    keys = ["name", "tags", "count", "nested"]
+    strings = loop t in tags:
+        value_emit::string(t)
+    keys.object([value_emit::string("emitter demo: é, 中, 😀"), value_emit::array(strings), value_emit::number(-123456789012345678901234567890), no_keys().object([])])
+
+fn stream(v: value_emit::Value, context io: std::linux::io::LinuxIO) -> int errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    coroutine {step, first} = value_emit::stacked_source(v)
+    chunk = std::mutable_vector::from_list([0])
+    chunk.pop()
+    state = std::mutable_array::create(3, 0)
+    state.set(0, first)
+    loop:
+        done = std::coroutine::done?(step)
+        if not done:
+            c = state.at(0)
+            if c < 128:
+                chunk.push(c)
+            elif c < 2048:
+                chunk.push(192 + c.shift_right(6))
+                chunk.push(128 + c.mod(64))
+            elif c < 65536:
+                chunk.push(224 + c.shift_right(12))
+                chunk.push(128 + c.shift_right(6).mod(64))
+                chunk.push(128 + c.mod(64))
+            else:
+                chunk.push(240 + c.shift_right(18))
+                chunk.push(128 + c.shift_right(12).mod(64))
+                chunk.push(128 + c.shift_right(6).mod(64))
+                chunk.push(128 + c.mod(64))
+            state.set(1, state.at(1) + 1)
+        if done or chunk.length() >= 64:
+            bytes = loop i from 0 to chunk.length():
+                std::byte::from_int(chunk.at(i))
+            chunk.clear()
+            std::linux::io::write(std::abi::bytes::from_list(bytes))
+            state.set(2, state.at(2) + 1)
+        if done:
+            break
+        state.set(0, step())
+    std::linux::io::write(std::abi::bytes::from_list([std::byte::from_int(10)]))
+    state.at(2)
+
+with context std::linux::io::create()
+
+stream(document()):
+    on IndexNotFound:
+        -1
+    on std::byte::BelowRange:
+        -2
+    on std::byte::AboveRange:
+        -3

@@ -1,0 +1,247 @@
+# value_emit.bot -- complete JSON texts from a value tree, composed of the
+# token emitters (EMITTER-COROUTINE-EXPLORATION.md, "Complete JSON").
+#
+# The value: Botlish has no sum type, so a JSON value is a struct with a
+# kind and a field per kind's payload, the fields its kind does not use
+# empty (the representation's cost, recorded in the report):
+#
+#   Null, False, True    no payload
+#   Number               number: an Int (any magnitude: no floating point)
+#   String               text
+#   Array                items
+#   Object               keys and items, pairwise (keys may repeat:
+#                        serialized as given)
+#
+# The serializers stream the text's symbols (Unicode scalar values) as
+# yields, building no document. Their claims (`#: emits`) are checked
+# against json_grammar's json_text: every token valid, every boundary valid,
+# and each token helper's token ending where the helper claims (the
+# checker's EMIT-BOUNDARY). Nesting is not a regular language, so the
+# structure -- a separator between values, a colon after a key, brackets
+# that match -- is the serializers' code, held to an independent parser by
+# the tests, not proved.
+#
+#   value             recursive: the grammar position is the control flow
+#                     (a value, then a separator or a closing bracket)
+#   value_stacked     an explicit stack of open containers, one loop over
+#                     "start a value" and an inner one over "after a value":
+#                     non-recursive, so coroutine fusion takes it, and
+#                     checkable because where a value starts and where one
+#                     ended are different code
+#   value_flat        an explicit stack and one loop: correct, but the
+#                     grammar position is data (the frame popped), so the
+#                     checker cannot tell that a value never starts right
+#                     after a number -- it rejects it, and it carries no
+#                     directive (the report's negative cases)
+
+import number_emit
+import string_emit
+import std::list
+import std::mutable_vector
+import std::mutable_array
+
+enum Kind:
+    Null,
+    False,
+    True,
+    Number,
+    String,
+    Array,
+    Object,
+
+struct Value:
+    kind: Kind
+    number: int
+    text: str
+    items: List[Value]
+    keys: List[str]
+
+fn null_value() -> Value:
+    Value {kind: Kind::Null, number: 0, text: "", items: [], keys: []}
+
+fn boolean(b: bool) -> Value:
+    kind = if b:
+        Kind::True
+    else:
+        Kind::False
+    Value {kind: kind, number: 0, text: "", items: [], keys: []}
+
+fn number(n: int) -> Value:
+    Value {kind: Kind::Number, number: n, text: "", items: [], keys: []}
+
+fn string(text: str) -> Value:
+    Value {kind: Kind::String, number: 0, text: text, items: [], keys: []}
+
+fn array(items: List[Value]) -> Value:
+    Value {kind: Kind::Array, number: 0, text: "", items: items, keys: []}
+
+fn object(keys: List[str], items: List[Value]) -> Value:
+    Value {kind: Kind::Object, number: 0, text: "", items: items, keys: keys}
+
+#: emits json_lex::json_literal
+fn literal_null() -> unit:
+    yield 110
+    yield 117
+    yield 108
+    yield 108
+    unit
+
+#: emits json_lex::json_literal
+fn literal_true() -> unit:
+    yield 116
+    yield 114
+    yield 117
+    yield 101
+    unit
+
+#: emits json_lex::json_literal
+fn literal_false() -> unit:
+    yield 102
+    yield 97
+    yield 108
+    yield 115
+    yield 101
+    unit
+
+# A value of no container kind, its one token.
+fn scalar(v: Value) -> unit errors IndexNotFound:
+    if v.kind == Kind::Null:
+        literal_null()
+    elif v.kind == Kind::True:
+        literal_true()
+    elif v.kind == Kind::False:
+        literal_false()
+    elif v.kind == Kind::Number:
+        number_emit::integer(v.number)
+    else:
+        string_emit::string(v.text)
+    unit
+
+#: emits json_grammar::json_text
+fn value(v: Value) -> unit errors IndexNotFound:
+    if v.kind == Kind::Array:
+        yield 91
+        loop item in v.items and i from 0 to std::list::length(v.items):
+            if i > 0:
+                yield 44
+            value(item)
+            continue
+        yield 93
+    elif v.kind == Kind::Object:
+        yield 123
+        loop i from 0 to std::list::length(v.keys):
+            if i > 0:
+                yield 44
+            string_emit::string(std::list::at(v.keys, i))
+            yield 58
+            value(std::list::at(v.items, i))
+            continue
+        yield 125
+    else:
+        v.scalar()
+    unit
+
+# An open container of value_stacked: the container and its next member.
+struct Open:
+    value: Value
+    next: int
+
+fn members(v: Value) -> int:
+    std::list::length(v.items)
+
+#: emits json_grammar::json_text
+fn value_stacked(root: Value) -> unit errors IndexNotFound:
+    stack = std::mutable_vector::from_list([Open {value: root, next: 0}])
+    stack.pop()
+    current = std::mutable_array::create(1, root)
+    loop:
+        # Start the value CURRENT.
+        v = current.at(0)
+        if v.kind == Kind::Array or v.kind == Kind::Object:
+            if v.kind == Kind::Array:
+                yield 91
+            else:
+                yield 123
+            if v.members() > 0:
+                if v.kind == Kind::Object:
+                    string_emit::string(std::list::at(v.keys, 0))
+                    yield 58
+                stack.push(Open {value: v, next: 1})
+                current.set(0, std::list::at(v.items, 0))
+                continue
+            if v.kind == Kind::Array:
+                yield 93
+            else:
+                yield 125
+        else:
+            v.scalar()
+        # After a value: a separator and the next member, or the end of
+        # the container -- or of the text.
+        loop:
+            if stack.empty?():
+                return unit
+            top = stack.pop()
+            c = top.value
+            if top.next < c.members():
+                yield 44
+                if c.kind == Kind::Object:
+                    string_emit::string(std::list::at(c.keys, top.next))
+                    yield 58
+                stack.push(Open {value: c, next: top.next + 1})
+                current.set(0, std::list::at(c.items, top.next))
+                break
+            if c.kind == Kind::Array:
+                yield 93
+            else:
+                yield 125
+        continue
+    unit
+
+# value_stacked's stack with one loop: correct output, unprovable claim.
+fn value_flat(root: Value) -> unit errors IndexNotFound:
+    stack = std::mutable_vector::from_list([Open {value: root, next: -1}])
+    loop:
+        if stack.empty?():
+            break
+        top = stack.pop()
+        v = top.value
+        if top.next == -1:
+            if v.kind == Kind::Array:
+                yield 91
+                stack.push(Open {value: v, next: 0})
+            elif v.kind == Kind::Object:
+                yield 123
+                stack.push(Open {value: v, next: 0})
+            else:
+                v.scalar()
+            continue
+        if top.next >= v.members():
+            if v.kind == Kind::Array:
+                yield 93
+            else:
+                yield 125
+            continue
+        if top.next > 0:
+            yield 44
+        if v.kind == Kind::Object:
+            string_emit::string(std::list::at(v.keys, top.next))
+            yield 58
+        stack.push(Open {value: v, next: top.next + 1})
+        stack.push(Open {value: std::list::at(v.items, top.next), next: -1})
+    unit
+
+# Coroutine roots: the text's symbols, then -1.
+
+#: emits json_grammar::json_text
+fn text_source(v: Value) -> int errors IndexNotFound:
+    value(v)
+    -1
+
+#: emits json_grammar::json_text
+fn stacked_source(v: Value) -> int errors IndexNotFound:
+    value_stacked(v)
+    -1
+
+fn flat_source(v: Value) -> int errors IndexNotFound:
+    value_flat(v)
+    -1

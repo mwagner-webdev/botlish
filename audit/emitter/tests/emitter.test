@@ -1,0 +1,494 @@
+# emitter.test -- the grammar-constrained emission experiment
+# (EMITTER-COROUTINE-EXPLORATION.md): the emission checker
+# (audit/emitter/tools/emitcheck.tcl) on the JSON emitters and on emitters
+# with planted mistakes, its diagnostics and their locations, the emitters'
+# coroutine protocol on every backend, a small property run against the
+# oracle and the reference interpreter, grammar-directed witnesses, and the
+# native evidence (fusion, no recognizer machinery left in a statically
+# checked emitter).
+#
+# An exploratory prototype, like audit/c-header/tests: tests/local.tcl and
+# CI do not run it.
+#
+#   tclsh9.0 audit/emitter/tests/emitter.test
+
+set auditDir [file dirname [file dirname [file normalize [info script]]]]
+source [file join [file dirname [file dirname $auditDir]] tests helpers.tcl]
+source [file join $::projectRoot tests dfa-support.tcl]
+source [file join $auditDir tools workspace.tcl]
+source [file join $auditDir tools emitcheck.tcl]
+source [file join $auditDir tools support.tcl]
+interp recursionlimit {} 100000
+core::useProgramRecursionLimit
+
+testConstraint python3 [expr {![catch {exec python3 -c "import json"}]}]
+
+# The diagnostics of the checker on the program TEXT (main.bot, beside the
+# JSON modules), each as {KIND LINE:COLUMN} with the location's file name
+# dropped when it is main.bot; with -messages 1, {KIND LINE:COLUMN MESSAGE}.
+proc check {text args} {
+    set options [dict merge {-messages 0 -emits {}} $args]
+    set dir [emitws::scratch main.bot $text]
+    set result [emitcheck::check [file join $dir main.bot] -emits [dict get $options -emits]]
+    return [lmap d [dict get $result diagnostics] {
+        set where [lindex [split [dict get $d location] /] end]
+        set where [string map {main.bot: ""} $where]
+        if {[dict get $options -messages]} {
+            list [dict get $d kind] $where [string map [list $dir/ ""] [dict get $d message]]
+        } else {
+            list [dict get $d kind] $where
+        }
+    }]
+}
+
+# A program whose entry declares the emitter BODY (`fn` and its directive)
+# and drives the root function ROOT (with ARGS) to its end; IMPORTS more
+# imports, ERRORS the declared errors the root may fail with besides
+# IndexNotFound. BODY starts at line 8.
+proc emitter {body root {args ""} {imports ""} {errors ""}} {
+    set declared [join [concat IndexNotFound $errors] ", "]
+    set handlers [join [lmap e $errors {string cat "    on $e:\n        -3"}] \n]
+    return "import json_lex
+import json_grammar
+import std::coroutine
+import std::mutable_array
+import std::char
+import std::str
+$imports
+$body
+
+fn run() -> int errors $declared:
+    coroutine {step, first} = $root\($args)
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        c.set(0, step())
+    c.at(0)
+
+run():
+    on IndexNotFound:
+        -2
+$handlers
+"
+}
+
+# ---------------------------------------------------------------------------
+# The JSON emitters
+
+test emit-json-claims-hold {every claim of the JSON emitters holds in check_all.bot: 22 claims, no diagnostic} -body {
+    set dir [emitws::scratch]
+    set result [emitcheck::check [file join $dir check_all.bot]]
+    list [llength [dict get $result diagnostics]] [lmap e [dict get $result emitters] {
+        string cat [dict get $e name] ":" [namespace tail [dict get $e recognizer]]
+    }]
+} -result {0 {integer:json_number integer_text:json_number integer_source:json_number integer_text_source:json_number string:json_string string:json_string_strict string_ascii:json_string string_ascii:json_string_strict string_bytes:json_string_bytes string_codes:json_string string_codes:json_string_strict string_source:json_string string_ascii_source:json_string_strict string_bytes_source:json_string_bytes string_codes_source:json_string literal_null:json_literal literal_true:json_literal literal_false:json_literal value:json_text value_stacked:json_text text_source:json_text stacked_source:json_text}}
+
+test emit-json-boundaries {each token emitter's boundary, read from its exit states: a number or literal may be followed by the end or by json_lex's after_value, a string ends on its own last symbol, a text at the end only} -body {
+    set dir [emitws::scratch]
+    set result [emitcheck::check [file join $dir check_all.bot]]
+    set after "the end, or '\\t'..'\\n' '\\r' ' ' ',' '\]' '\}'"
+    set own "nothing (the token completes on its own last symbol)"
+    set want [list json_literal $after json_number $after json_string $own json_string_bytes $own json_string_strict $own json_text "the end only"]
+    set got [dict create]
+    foreach e [dict get $result emitters] {
+        dict set got [namespace tail [dict get $e recognizer]] [dict get $e follows]
+    }
+    expr {[lsort -stride 2 $want] eq [lsort -stride 2 $got] ? "ok" : $got}
+} -result ok
+
+test emit-json-warning-clean {the emitter modules, the check program and the benchmark workloads compile under -warnings error} -body {
+    set dir [emitws::scratch main.bot "import bench_work\n\n0\n"]
+    surface::readProgramFile [file join $dir check_all.bot] -warnings error
+    surface::readProgramFile [file join $dir main.bot] -warnings error
+    string cat ok
+} -result ok
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+test emit-diag-rejected {a symbol no transition of the state takes: at the yield, the state's declaration a related location} -body {
+    check [emitter {#: emits json_lex::json_number
+fn plus() -> int:
+    yield 43
+    yield 49
+    -1} plus] -messages 1
+} -result {{EMIT-REJECTED 10:5 {this yield may send symbols no transition takes: '+' in state start of json_lex::json_number}}}
+
+test emit-diag-rejected-value {a value-dependent symbol whose set the facts do not confine to the state's transitions: a digit from 0..10} -body {
+    check [emitter {fn digit(n: int) -> int:
+    if n > 10:
+        return 10
+    n
+
+#: emits json_lex::json_number
+fn number(n: int) -> int:
+    yield 49
+    yield 48 + n.digit()
+    -1} number 7]
+} -result {{EMIT-REJECTED 16:5}}
+
+test emit-diag-beyond {a symbol the token ends before: the number would end before the comma} -body {
+    check [emitter {#: emits json_lex::json_number
+fn number() -> int:
+    yield 49
+    yield 44
+    -1} number] -messages 1
+} -result {{EMIT-BEYOND-TOKEN 11:5 {this yield may send a symbol the json_lex::json_number token ends before ("accept before"), which would begin the next token: ',' in state integer of json_lex::json_number}}}
+
+test emit-diag-after {a symbol after a token that completed on its own last symbol} -body {
+    check [emitter {#: emits json_lex::json_string
+fn s() -> int:
+    yield 34
+    yield 34
+    yield 32
+    -1} s]
+} -result {{EMIT-AFTER-TOKEN 12:5}}
+
+test emit-diag-incomplete {a normal completion with the token incomplete, at the function, naming the state and what it needs} -body {
+    check [emitter {#: emits json_lex::json_number
+fn number() -> int:
+    yield 49
+    yield 101
+    yield 43
+    -1} number] -messages 1
+} -result {{EMIT-INCOMPLETE 9:10 {this emitter may complete with its json_lex::json_number token incomplete, where the end of the input is rejected (the state needs one of the symbols shown): '0'..'9' in state exponent_sign of json_lex::json_number}}}
+
+test emit-diag-end-symbol {-1, the end of the input, yielded as a symbol} -body {
+    check [emitter {#: emits json_lex::json_number
+fn number(n: int) -> int:
+    yield 49
+    yield n
+    -1} number -1]
+} -match glob -result {{EMIT-END-SYMBOL 11:5}*}
+
+test emit-diag-not-symbol {a yield of a String is no symbol} -body {
+    check {import json_lex
+import std::coroutine
+
+#: emits json_lex::json_string
+fn s() -> unit:
+    yield "x"
+    unit
+
+fn root() -> str:
+    s()
+    ""
+
+fn run() -> str:
+    coroutine {first} = root()
+    first
+
+run()
+} -messages 1
+} -result {{EMIT-NOT-SYMBOL 6:5 {this yield sends a str, not an Int: an emitter's yields are the symbols of json_lex::json_string}}}
+
+test emit-diag-byte-character {a non-ASCII character's scalar value sent to a bytes recognizer (an ASCII one is its own byte); the bytes that follow are rejected too} -body {
+    set ds [check [emitter {#: emits json_lex::json_string_bytes
+fn s(t: str) -> int errors IndexNotFound:
+    yield 34
+    loop i from 0 to t.length():
+        c = std::char::scalar_value(t.char_at(i))
+        if c >= 32 and c < 128 and c != 34 and c != 92:
+            yield c
+        elif c >= 128:
+            yield c
+        continue
+    yield 34
+    -1} s {"aé"}]]
+    list [lsearch -all -inline $ds EMIT-BYTE-CHARACTER*] [llength [lsearch -all -inline $ds {EMIT-BYTE-CHARACTER 14:13}]]
+} -result {{{EMIT-BYTE-CHARACTER 16:13}} 0}
+
+test emit-diag-terminal-value {a coroutine root whose final value is not -1} -body {
+    check [emitter {#: emits json_lex::json_literal
+fn t() -> int:
+    yield 116
+    yield 114
+    yield 117
+    yield 101
+    0} t]
+} -result {{EMIT-TERMINAL-VALUE 9:5}}
+
+test emit-diag-boundary {a helper claiming one number token whole, followed by a digit: the token would absorb it} -body {
+    check [emitter {#: emits json_lex::json_number
+fn one() -> unit:
+    yield 49
+    unit
+
+#: emits json_grammar::json_text
+fn two() -> int:
+    one()
+    one()
+    -1} two] -messages 1
+} -result {{EMIT-BOUNDARY 10:5 {this yield may send a symbol that continues the json_lex::json_number token one emitted (called at main.bot:15:5), which claims to emit that token whole: the token would absorb it: '1' in state integer of json_lex::json_number (called by json_lex::json_token, then accept) (called by json_grammar::json_text, then between)}}}
+
+test emit-diag-unknown-recognizer {a directive naming no declared recognizer} -body {
+    check [emitter {#: emits json_lex::json_nothing
+fn t() -> int:
+    yield 1
+    -1} t]
+} -result {{EMIT-UNKNOWN-RECOGNIZER 9:5}}
+
+test emit-diag-unused {an emitter the program never calls: no facts, so no claim is checked} -body {
+    check [emitter {#: emits json_lex::json_number
+fn never() -> int:
+    yield 49
+    -1
+
+fn once() -> int:
+    yield 49
+    -1} once]
+} -result {{EMIT-UNUSED 9:9}}
+
+# ---------------------------------------------------------------------------
+# What the facts prove
+
+test emit-facts-negation {`c == 34 or c == 92` false excludes both symbols: an interval cannot, the path facts do} -body {
+    check [emitter {#: emits json_lex::json_string
+fn s(t: str) -> int errors IndexNotFound:
+    yield 34
+    loop i from 0 to t.length():
+        c = std::char::scalar_value(t.char_at(i))
+        if c < 32 or c == 34 or c == 92:
+            yield 92
+            yield 117
+            yield 48
+            yield 48
+            yield 50
+            yield 48
+        else:
+            yield c
+        continue
+    yield 34
+    -1} s {"a\"b"}]
+} -result {}
+
+test emit-facts-surrogates {a character's scalar value is never a surrogate (std::char::scalar_value's set); an Int from a List may be, until a check excludes it} -body {
+    list [check [emitter {#: emits json_lex::json_string
+fn s(codes: List[int]) -> int:
+    yield 34
+    loop c in codes:
+        if c >= 32 and c != 34 and c != 92 and c <= 1114111:
+            yield c
+        continue
+    yield 34
+    -1} s {[97, 233]}]] [check [emitter {error Bad
+
+#: emits json_lex::json_string
+fn s(codes: List[int]) -> int errors Bad:
+    yield 34
+    loop c in codes:
+        if c < 32 or c == 34 or c == 92 or c > 1114111 or (c >= 55296 and c <= 57343):
+            fail Bad
+        yield c
+        continue
+    yield 34
+    -1} s {[97, 233]} "" Bad]]
+} -result {{{EMIT-REJECTED 13:13}} {}}
+
+test emit-facts-first-iteration {a counted loop's first iteration is its own: `if i > 0:` a separator, then a value -- the list printer idiom} -body {
+    check [emitter {#: emits json_grammar::json_text
+fn list(n: int) -> int:
+    yield 91
+    loop i from 0 to n:
+        if i > 0:
+            yield 44
+        yield 55
+        continue
+    yield 93
+    -1} list 3]
+} -result {}
+
+test emit-facts-no-separator {the same without the separator: after the first iteration a digit follows a digit} -body {
+    check [emitter {#: emits json_lex::json_number
+fn one() -> unit:
+    yield 55
+    unit
+
+#: emits json_grammar::json_text
+fn list(n: int) -> int:
+    yield 91
+    loop i from 0 to n:
+        one()
+        continue
+    yield 93
+    -1} list 3]
+} -result {{EMIT-BOUNDARY 10:5}}
+
+test emit-facts-call-context {a helper's parameter is checked with what each call passes: one hexadecimal-digit helper serves a nibble in 0..15 and one in 8..11} -body {
+    check [emitter {fn hex(n: int) -> unit:
+    if n < 10:
+        yield 48 + n
+    else:
+        yield 87 + n
+    unit
+
+#: emits json_lex::json_escape_strict
+fn high(u: int) -> int:
+    yield 92
+    yield 117
+    yield 100
+    hex(8 + u.shift_right(18))
+    hex(u.shift_right(14).mod(16))
+    hex(u.shift_right(10).mod(16))
+    yield 92
+    yield 117
+    yield 100
+    hex(12 + u.mod(1024).shift_right(8))
+    hex(u.shift_right(4).mod(16))
+    hex(u.mod(16))
+    -1} high 1000 {}]
+} -result {}
+
+test emit-facts-guard {a guard -- a recognizer of one symbol, declared from json_lex's classes -- confines a symbol it completed on} -body {
+    list [check [emitter {error Bad
+
+#: emits json_lex::json_number
+fn number(t: str) -> int errors IndexNotFound, Bad:
+    loop i from 0 to t.length():
+        c = std::char::scalar_value(t.char_at(i))
+        json_grammar::digit_symbol(c):
+            on std::dfa::UnrecognizedInput:
+                fail Bad
+            on std::dfa::UnexpectedEnd:
+                fail Bad
+        if i == 0:
+            yield 49
+        yield c
+        continue
+    yield 48
+    -1} number {"123"} "import std::dfa" Bad]] [check [emitter {#: emits json_lex::json_number
+fn number(t: str) -> int errors IndexNotFound:
+    yield 49
+    loop i from 0 to t.length():
+        yield std::char::scalar_value(t.char_at(i))
+        continue
+    -1} number {"123"}]]
+} -result {{} {{EMIT-INCOMPLETE 9:10} {EMIT-BEYOND-TOKEN 12:9} {EMIT-REJECTED 12:9}}}
+
+test emit-facts-recursion {a recursive emitter: summaries to a fixpoint} -body {
+    check [emitter {fn digits(k: int) -> unit:
+    if k > 0:
+        yield 55
+        digits(k - 1)
+    unit
+
+#: emits json_lex::json_number
+fn number(k: int) -> int:
+    yield 49
+    digits(k)
+    -1} number 5]
+} -result {}
+
+test emit-facts-flat-serializer {value_flat's output is valid, but its grammar position is data: the checker rejects its claim} -body {
+    # (The modules' other claims are not called by this program: EMIT-UNUSED.)
+    set kinds [lsort -unique [lmap d [check "import sinks\nimport value_emit\n\nfn no_keys() -> List\[str\]:\n    \[\]\n\nsinks::collect_flat(value_emit::array(\[value_emit::number(1)\])):\n    on IndexNotFound:\n        \[\]\n" -emits {value_emit::flat_source json_grammar::json_text}] {lindex $d 0}]]
+} -result {EMIT-BOUNDARY EMIT-REJECTED EMIT-UNUSED}
+
+# ---------------------------------------------------------------------------
+# The coroutine protocol, on every backend that runs here
+
+proc probes {calls} {
+    set main "import sinks\nimport value_emit\nimport number_emit\nimport string_emit\n\nfn no_keys() -> List\[str\]:\n    \[\]\n\nfn doc() -> value_emit::Value:\n    value_emit::array(\[value_emit::number(12), value_emit::string(\"ab\"), value_emit::boolean(true)\])\n\nfn all() -> List\[List\[int\]\] errors IndexNotFound, sinks::Invalid, sinks::SinkFull, string_emit::NotAScalar:\n    \[[join $calls {, }]\]\n\nall():\n    on IndexNotFound:\n        \[\[-1\]\]\n    on sinks::Invalid:\n        \[\[-2\]\]\n    on sinks::SinkFull:\n        \[\[-3\]\]\n    on string_emit::NotAScalar:\n        \[\[-4\]\]\n"
+    set dir [emitws::scratch main.bot $main]
+    return [dfatest::agreed [dfatest::outcomes [file join $dir main.bot]]]
+}
+
+test emit-protocol-terminal {after the end, every resume answers the stable final value -1 and runs nothing; done? holds} -body {
+    probes [list "sinks::after_end(-5, 3)"]
+} -result {value {[[-1, -1, -1, 1]]}}
+
+test emit-protocol-failure-after-prefix {an emitter may fail after yielding a prefix (a surrogate in string_codes): the consumer gets the failure, not a token} -body {
+    probes [list "sinks::collect_string_codes(\[97, 55296, 98\])"]
+} -result {value {[[-4]]}}
+
+test emit-protocol-abandon {a consumer that stops early abandons the emitter: its prefix, then nothing} -body {
+    probes [list "sinks::prefix_text(doc(), 4)" "sinks::prefix_text(doc(), 0)"]
+} -result {value {[[91, 49, 50, 44], []]}}
+
+test emit-protocol-sink-failure {a sink that fails mid-token (its limit) fails the consumer; the emitter is released, never resumed} -body {
+    probes [list "sinks::limited_text(doc(), 6)"]
+} -result {value {[[-3]]}}
+
+test emit-protocol-prefixes-viable {every prefix of a checked emitter's output is a prefix of a valid text: the reference interpreter suspends on each, never rejects} -body {
+    lassign [probes [list "sinks::collect_text(doc())"]] - shown
+    set out [lindex [emitsup::lists $shown] 0]
+    set dir [emitws::scratch]
+    set model [dfaref::load [list json_lex [file join $dir json_lex.bot] json_grammar [file join $dir json_grammar.bot]]]
+    set verdicts {}
+    for {set k 1} {$k <= [llength $out]} {incr k} {
+        lappend verdicts [dfaref::text [dfaref::run $model json_grammar json_text [lrange $out 0 $k-1] 0]]
+    }
+    list [lsort -unique $verdicts] [dfaref::text [dfaref::run $model json_grammar json_text [concat $out -1] 0]]
+} -result {suspended {accept 14 0}}
+
+test emit-protocol-validation {design A over the same coroutines: an unchecked emitter's tokens validated incrementally and buffered} -body {
+    probes [list "sinks::validated_integer(-120)" "sinks::buffered_integer(0)"]
+} -result {value {[[45, 49, 50, 48], [48]]}}
+
+test emit-protocol-stream {a real sink: demo.bot's consumer holds the Linux IO context and writes the text in chunks of 64 symbols; the emitter has no authority; the bytes are the text} -constraints {nativeCoroutines python3} -body {
+    set dir [emitws::scratch]
+    set out [exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend cranelift [file join $dir demo.bot] 2>@1]
+    set lines [split $out \n]
+    set text [lindex $lines 1]
+    set script {import sys,json; v=json.loads(sys.stdin.read()); print(sorted(v), v['count'])}
+    set f [open "|[list python3 -I -c $script]" r+]
+    fconfigure $f -encoding utf-8
+    puts -nonewline $f $text
+    close $f write
+    set parsed [string trim [read $f]]
+    close $f
+    list $parsed [string trim [lindex $lines 2]]
+} -result {{['count', 'name', 'nested', 'tags'] -123456789012345678901234567890} {value: 3}}
+
+# ---------------------------------------------------------------------------
+# Correctness
+
+test emit-property-small {random integers, texts and values on every backend: every output valid and denoting its case (the oracle), one token or text of its recognizer (the reference interpreter), validated and decoded in the program} -constraints python3 -body {
+    set options [dict create -seed 11 -ints 12 -texts 12 -values 6 -depth 3 -backends $::dfatest::backends]
+    source [file join $::auditDir tools property.tcl]
+    lassign [emitprop::run $options] n failures
+    list [expr {$n > 100}] [lrange $failures 0 4]
+} -result {1 {}}
+
+test emit-witnesses {grammar-directed generation: json_number's shortest token, and every coverage witness of every recognizer accepted by the reference interpreter} -body {
+    set out [exec [info nameofexecutable] [file join $::auditDir tools witness.tcl]]
+    list [regexp {\| json_lex::json_number \| ascii \| 9 \| 17 \| `0` \| 13/13 \| 13/13 \|} $out] [regexp {not accepted} $out]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Native evidence
+
+proc workload {name {n 4}} {
+    set main "import bench_work\nimport sinks\nimport number_emit\nimport json\n\nbench_work::$name\($n):\n    on IndexNotFound:\n        \[-1\]\n    on sinks::Invalid:\n        \[-2\]\n    on number_emit::NotCanonical:\n        \[-3\]\n"
+    set dir [emitws::scratch main.bot $main]
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off]
+}
+
+proc fusion {hir} {
+    set lines [native::fusion $hir]
+    return [list [llength [lsearch -all -glob $lines {fused *}]] [llength [lsearch -all -glob $lines {kept *}]]]
+}
+
+test emit-native-fused {an emitter driven in the function that constructs it is fused, its helpers inlined; a recursive serializer and a handle passed to a sink are kept on the general runtime} -constraints nativeCoroutines -body {
+    list [lindex [fusion [workload ints_static]] 1] [lindex [fusion [workload strings_static]] 1] \
+        [lindex [fusion [workload documents_stacked]] 1] [expr {[lindex [fusion [workload documents_recursive]] 1] > 0}] \
+        [expr {[lindex [fusion [workload ints_drained]] 1] > 0}]
+} -result {0 0 0 1 1}
+
+test emit-native-no-recognizer {a statically checked emitter's fused code holds no transition of its grammar (no table load, no switch, no dfa#transition); run-time validation's does} -constraints nativeCoroutines -body {
+    set counts {}
+    foreach name {ints_static strings_static ints_validated strings_validated} {
+        set nir [native::fusedNir [workload $name]]
+        lappend counts [expr {[regexp -all {rtabload} $nir] + [regexp -all -line {^\s*switch } $nir] + [regexp -all {dfa#transition} $nir]}]
+    }
+    list [lrange $counts 0 1] [expr {[lindex $counts 2] > 0 && [lindex $counts 3] > 0}]
+} -result {{0 0} 1}
+
+test emit-native-allocations {fused, the per-token coroutines allocate no coroutine object} -constraints nativeCoroutines -body {
+    set report [native::allocationReport [workload ints_static 50] summary]
+    expr {[dict exists $report byKind Coroutine] ? [dict get $report byKind Coroutine allocations] : 0}
+} -result 0
+
+emitws::cleanup
+cleanupTests
