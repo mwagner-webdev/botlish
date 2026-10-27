@@ -209,13 +209,17 @@ compiles `main-windows.bot` under `-warnings error` with
 3. `build-windows.sh dist/icy-tower-windows-x86_64`;
 4. the Windows executable's tests (section 8), all six required to pass;
 5. the game played headless and on SDL's dummy driver, and `--help`;
-6. a README and the two licenses (Botlish's MIT, SDL's zlib) beside the
+6. the signing dry run (section 9): signed copies played against the
+   originals;
+7. a README and the two licenses (Botlish's MIT, SDL's zlib) beside the
    executable, then the folder uploaded as the `icy-tower-windows-x86_64`
    artifact and the binding as `sdl3-binding-windows-x86_64`;
-7. on main only, `release`: the folder zipped as
-   `icy-tower-windows-x86_64.zip` (and its `.sha256`) and published to the
-   rolling `icy-tower-windows-latest` prerelease, never replacing the build
-   of a later commit (single-executable.yml's rule). The README's Windows
+8. on main only, once `WINDOWS_SIGNING` is set, `sign` (section 9);
+9. on main only, `release`: the folder (the signed one when `sign` ran)
+   zipped as `icy-tower-windows-x86_64.zip` (and its `.sha256`) and
+   published to the rolling `icy-tower-windows-latest` prerelease, never
+   replacing the build of a later commit (single-executable.yml's rule),
+   and never unsigned while signing is configured. The README's Windows
    download button links to that asset: a release asset needs no GitHub
    login and does not expire, as a run's artifact does.
 
@@ -247,7 +251,147 @@ skipped), `oracle.py compare` 0 differences, the SDL call trace identical,
 tests) and `corpus.test` passing, every committed binding current, every
 icy-tower mutant still applying and killed.
 
-## 9. Not done
+## 9. Signing
+
+Windows marks a downloaded file as coming from the internet, and SmartScreen
+stops an unsigned executable with that mark: "Windows protected your PC",
+publisher "Unknown publisher", until the user picks "More info" and "Run
+anyway". An Authenticode signature names the publisher. It does not buy
+SmartScreen's trust at once: that is reputation, which a signed file and its
+publisher build up as people download and run them, and no certificate
+grants it immediately (EV certificates stopped doing so in 2024). So a
+signed build replaces "Unknown publisher" with a name at once; the warning
+itself fades as the reputation grows.
+
+The build is ready for signing and does not sign until it is configured:
+
+* **Every build** signs copies of `icy-tower.exe` and `SDL3.dll` with a
+  throwaway self-signed certificate (`sign-windows.ps1`, signtool) and plays
+  them; they must print exactly what the originals print. A signature is a
+  certificate table appended to the PE file, which would break an
+  executable that reads data appended to itself (as the Linux stub
+  linker's executables do): this one does not. The uploaded game stays
+  unsigned.
+* **The `sign` job** runs only once the repository variable
+  `WINDOWS_SIGNING` is set, only for main (or a manual run), in the GitHub
+  environment `windows-signing`, which alone holds the credentials. It
+  signs both files in place with Azure Artifact Signing (a SHA-256 digest
+  and an RFC 3161 timestamp from Microsoft's timestamp service, so the
+  signature outlives the short-lived certificate), requires both
+  signatures to be valid and timestamped (`sign-windows.ps1 -Verify`),
+  plays the signed game and uploads it as
+  `icy-tower-windows-x86_64-signed`.
+* **The release** publishes the signed files when the job ran, naming the
+  publisher in the release notes, and the unsigned ones only while
+  `WINDOWS_SIGNING` is unset: a failed signature publishes nothing, and the
+  previous release stays.
+
+### Why Azure Artifact Signing
+
+Since June 2023 the private key of a publicly trusted code-signing
+certificate must live in hardware (a token, an HSM), never in a file, so no
+certificate authority issues the PFX file a CI job could sign with. Azure
+Artifact Signing (Trusted Signing until 2026) keeps the key in Microsoft's
+HSMs, issues short-lived certificates in the validated publisher's name,
+and signs through OpenID Connect: GitHub holds no key and no password, and
+Azure accepts the token of this repository's `windows-signing` environment
+only. It costs a monthly fee per account (Azure's pricing page has the
+current one). At the time of writing Microsoft validates organizations
+(in a list of countries that includes the USA, Canada, the EU and the UK)
+and individual developers in the USA and Canada only: check eligibility
+first.
+
+### Setting it up: Azure
+
+1. In an Azure subscription, register the resource provider
+   `Microsoft.CodeSigning` (Subscription, Resource providers) and create an
+   **Artifact Signing account** (Basic tier) in a resource group. Its
+   overview shows the account URI, the region's endpoint, e.g.
+   `https://eus.codesigning.azure.net/` for East US.
+2. On the account, give your own user the identity verifier role (Access
+   control (IAM)) and submit an **identity validation** of type Public: the
+   organization's legal name (or yours), with the documents Microsoft asks
+   for. Validation takes from hours to days; the validated name is the
+   publisher Windows will show.
+3. Create a **certificate profile** of type Public Trust on that validation.
+4. In Microsoft Entra ID, register an **application** (no client secret).
+   Under Certificates & secrets, Federated credentials, add one for GitHub
+   Actions: organization `mwagner-webdev`, repository `botlish`, entity type
+   Environment, environment `windows-signing` (subject
+   `repo:mwagner-webdev/botlish:environment:windows-signing`). Note its
+   Application (client) ID and the Directory (tenant) ID.
+5. On the signing account, Access control (IAM), assign the role
+   **Artifact Signing Certificate Profile Signer** to that application.
+
+### Setting it up: GitHub
+
+In the repository's Settings:
+
+1. **Environments**, New environment `windows-signing`. Under Deployment
+   branches and tags choose "Selected branches and tags" and add the rule
+   `main`. (Required reviewers would make every push to main wait for an
+   approval before signing; the rolling release does not need them.)
+2. In that environment, **Environment secrets**: `AZURE_CLIENT_ID` (the
+   application's client ID), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+   **Environment variables**: `ARTIFACT_SIGNING_ENDPOINT` (the account URI),
+   `ARTIFACT_SIGNING_ACCOUNT` (the account's name),
+   `ARTIFACT_SIGNING_PROFILE` (the certificate profile's name).
+3. Last, because it switches signing on: **Secrets and variables, Actions,
+   Variables**, the repository variable `WINDOWS_SIGNING` with the value
+   `artifact-signing`. It must be a repository variable: the sign job's
+   condition reads it before the job enters its environment. Any other
+   value fails the sign job, and so the release.
+4. Push to main, or run the workflow on main (Actions, icy-tower (windows
+   x86-64), Run workflow). The run has three jobs; the sign job's log
+   names the signer and the timestamp authority of each file, and the
+   release notes name the publisher.
+
+The same with the GitHub CLI:
+
+    repo=mwagner-webdev/botlish
+    gh api --method PUT repos/$repo/environments/windows-signing \
+      -F 'deployment_branch_policy[protected_branches]=false' \
+      -F 'deployment_branch_policy[custom_branch_policies]=true'
+    gh api --method POST repos/$repo/environments/windows-signing/deployment-branch-policies \
+      -f name=main -f type=branch
+    gh secret set AZURE_CLIENT_ID --repo $repo --env windows-signing
+    gh secret set AZURE_TENANT_ID --repo $repo --env windows-signing
+    gh secret set AZURE_SUBSCRIPTION_ID --repo $repo --env windows-signing
+    gh variable set ARTIFACT_SIGNING_ENDPOINT --repo $repo --env windows-signing --body https://eus.codesigning.azure.net/
+    gh variable set ARTIFACT_SIGNING_ACCOUNT --repo $repo --env windows-signing --body ACCOUNT
+    gh variable set ARTIFACT_SIGNING_PROFILE --repo $repo --env windows-signing --body PROFILE
+    gh variable set WINDOWS_SIGNING --repo $repo --body artifact-signing
+
+To stop signing, delete `WINDOWS_SIGNING`: the next build of main is
+published unsigned again. To try a change to the sign job on a branch, add
+the branch to the environment's deployment rule and run the workflow on it
+by hand (the release stays main's).
+
+### Checking a signature
+
+In Explorer: `icy-tower.exe`'s Properties, Digital Signatures, which names
+the signer and the timestamp. In PowerShell, from the unpacked zip:
+
+    pwsh examples/games/icy-tower/sign-windows.ps1 -Verify icy-tower.exe SDL3.dll
+
+(`Get-AuthenticodeSignature icy-tower.exe` without the checkout.)
+
+### Another signing service
+
+A publisher Artifact Signing does not validate needs a certificate from a
+certificate authority, whose key then lives in that authority's cloud HSM
+or on a hardware token. A cloud HSM comes with its own signing tool: give
+the sign job a step of that tool, under a new value of `WINDOWS_SIGNING`,
+in place of the two Azure steps, and keep the verification after it. A
+hardware token needs the machine it is plugged into: a self-hosted Windows
+runner for the sign job.
+
+## 10. Not done
+
+* **No signature yet.** Signing waits for an Azure Artifact Signing account
+  and the GitHub configuration of section 9; until then the release is
+  unsigned and SmartScreen warns. The sign job has not run: its first run
+  is the first push to main after `WINDOWS_SIGNING` is set.
 
 * **No committed MSVC binding**, and so no c-bindgen workflow check of
   one, and no MSVC binding of the generator's fixture: the fixture's tests
@@ -262,7 +406,7 @@ icy-tower mutant still applying and killed.
   windows driver, a real window and keyboard input are not exercised.
 * **x86-64 only**: no Windows on Arm.
 
-## 10. What to run when changing this
+## 11. What to run when changing this
 
 * The game: `tests/workload-icy-tower.test` (on Linux; on Windows with
   SDL3.dll built it runs the Windows section too), the mutants and the
@@ -274,3 +418,7 @@ icy-tower mutant still applying and killed.
   the archaeology's `parser.test`, `corpus.test` and `tools/all.tcl`, and
   the Windows workflow (the only place windows-x86_64 is generated).
 * `tests/cffi/sdl3.tcl`'s Windows build: the Windows workflow.
+* Signing (`sign-windows.ps1`, the dry run, the sign or release job): the
+  Windows workflow on the branch runs the dry run; the sign job runs on
+  main, or by hand on a branch the `windows-signing` environment admits
+  (section 9).

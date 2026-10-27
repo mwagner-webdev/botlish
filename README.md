@@ -159,7 +159,10 @@ else is (no Visual C++ runtime). The zip is the latest build of main by the
 [Windows workflow](https://github.com/mwagner-webdev/botlish/actions/workflows/icy-tower-windows.yml),
 which also keeps every run's game as its `icy-tower-windows-x86_64`
 artifact; `examples/games/icy-tower/build-windows.sh` builds it on Windows
-([ICY-TOWER-WINDOWS.md](docs/ICY-TOWER-WINDOWS.md)).
+([ICY-TOWER-WINDOWS.md](docs/ICY-TOWER-WINDOWS.md)). The build is not
+code-signed yet, so SmartScreen says "Windows protected your PC": choose
+"More info", then "Run anyway". The workflow signs it with Azure Artifact
+Signing once that is configured (ICY-TOWER-WINDOWS.md, "Signing").
 Its rules run headless on all four backends, the executable agrees with an
 independent oracle, and valgrind finds no leaks
 ([ICY-TOWER-VERTICAL-SLICE-1.md](docs/ICY-TOWER-VERTICAL-SLICE-1.md)).

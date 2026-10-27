@@ -3298,6 +3298,14 @@ every push to any branch), which also publishes main's build as the
 `icy-tower-windows-latest` release the README's Windows button links to:
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
+Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
+only that job, on main or a manual run, in the `windows-signing`
+environment, sees signing credentials -- never give them to the build job,
+a pull request or another workflow, never store a signing key or password
+in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
+release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
+build's signing dry run must keep passing: the executable must run with a
+signature appended.
 
 ## Application modules, native program output, the recursion limit
 

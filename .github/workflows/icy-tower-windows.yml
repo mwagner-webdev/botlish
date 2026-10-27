@@ -18,6 +18,16 @@ name: icy-tower (windows x86-64)
 # icy-tower-windows-x86_64.zip, which the README's Windows download button
 # links to.
 #
+# Authenticode signing (ICY-TOWER-WINDOWS.md, "Signing", has the setup): every
+# build signs copies of icy-tower.exe and SDL3.dll with a throwaway
+# self-signed certificate and plays them, so a signature is known not to
+# break the game. Real signatures are made only once the repository variable
+# WINDOWS_SIGNING says how (artifact-signing: Azure Artifact Signing
+# through OpenID Connect), only for main, by the sign job in the
+# windows-signing environment, which alone holds the credentials; the
+# release then publishes the signed files, and never the unsigned ones while
+# signing is configured.
+#
 # Pushes to any branch run it, as tests (windows x86-64) does, so a branch
 # gets the Windows build before this file is on main; a pull request from
 # this repository's own branches skips (its push already ran), one from a
@@ -114,6 +124,53 @@ jobs:
           SDL_VIDEO_DRIVER=dummy ./icy-tower.exe --autopilot --fixed-step --frames 600 --seed 7
           ./icy-tower.exe --help
 
+      # The signing dry run: an Authenticode signature is a certificate table
+      # appended to the PE file, which breaks an executable that reads data
+      # appended to itself. So copies of the executable and the DLL are
+      # signed by sign-windows.ps1 with signtool and a throwaway self-signed
+      # code-signing certificate (no timestamp: nothing would trust it
+      # more), then played like the originals, which they must match frame
+      # for frame. It needs no secret and runs on every build; the uploaded
+      # game stays unsigned.
+      - name: Signing dry run (a throwaway self-signed certificate)
+        shell: pwsh
+        run: |
+          $key = [System.Security.Cryptography.RSA]::Create(3072)
+          $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+              "CN=Icy Tower signing dry run", $key,
+              [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+              [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+          $codeSigning = [System.Security.Cryptography.OidCollection]::new()
+          [void]$codeSigning.Add([System.Security.Cryptography.Oid]::new("1.3.6.1.5.5.7.3.3"))
+          $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($codeSigning, $true))
+          $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                  [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature, $true))
+          $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddDays(1))
+          $password = [Guid]::NewGuid().ToString()
+          $pfx = Join-Path $env:RUNNER_TEMP "dry-run.pfx"
+          [IO.File]::WriteAllBytes($pfx,
+              $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, $password))
+          $signed = Join-Path $env:RUNNER_TEMP "signed"
+          New-Item -ItemType Directory -Force $signed | Out-Null
+          Copy-Item dist/icy-tower-windows-x86_64/icy-tower.exe, dist/icy-tower-windows-x86_64/SDL3.dll $signed
+          ./examples/games/icy-tower/sign-windows.ps1 -Pfx $pfx -Password $password -TimestampUrl "" `
+              (Join-Path $signed icy-tower.exe) (Join-Path $signed SDL3.dll)
+          Remove-Item -Force $pfx
+
+      - name: Play the dry run's signed copies
+        run: |
+          play() {
+            "$1/icy-tower.exe" --headless --frames 600 --seed 7
+            SDL_VIDEO_DRIVER=dummy "$1/icy-tower.exe" --autopilot --fixed-step --frames 600 --seed 7
+          }
+          tmp=$(cygpath -u "$RUNNER_TEMP")
+          play dist/icy-tower-windows-x86_64 >"$tmp/unsigned.txt"
+          play "$tmp/signed" >"$tmp/signed.txt"
+          diff "$tmp/unsigned.txt" "$tmp/signed.txt"
+          cat "$tmp/signed.txt"
+
       - name: Add the README and the licenses
         run: |
           out=dist/icy-tower-windows-x86_64
@@ -146,6 +203,11 @@ jobs:
           (docs/ICY-TOWER-WINDOWS.md). SDL3.dll is SDL 3.4.18, built with
           MSVC; LICENSE-SDL3.txt is its license, LICENSE-Botlish.txt the
           game's.
+
+          If Windows says "Windows protected your PC", the build is not
+          code-signed (or its publisher has no SmartScreen reputation yet):
+          "More info", then "Run anyway". A signed build names its publisher
+          under icy-tower.exe's Properties, Digital Signatures.
           EOF
           ls -l "$out"
 
@@ -166,15 +228,132 @@ jobs:
             test.log
           if-no-files-found: warn
 
+  # Authenticode signatures for the release (ICY-TOWER-WINDOWS.md,
+  # "Signing"). Off while the repository variable WINDOWS_SIGNING is unset:
+  # a repository variable, not the environment's, because a job's `if` is
+  # decided before the job enters its environment. Pushes to main get here,
+  # and a manual run (workflow_dispatch) on any ref, in the windows-signing
+  # environment, which holds the credentials and whose deployment rule
+  # admits main alone (a manual run elsewhere fails here unless the rule
+  # admits its branch): the build job, other pushes and pull requests never
+  # see them. It signs icy-tower.exe and SDL3.dll in place (a SHA-256
+  # digest, an RFC 3161 timestamp), requires both signatures to be valid and
+  # timestamped, plays the signed game and uploads it as
+  # icy-tower-windows-x86_64-signed. The one method is artifact-signing
+  # (Azure Artifact Signing, through OpenID Connect: no key or password in
+  # GitHub); another service's signing step would take its place before the
+  # verification.
+  sign:
+    name: sign (Authenticode)
+    needs: build
+    if: >-
+      vars.WINDOWS_SIGNING != '' && github.event_name != 'pull_request'
+      && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      publisher: ${{ steps.verify.outputs.publisher }}
+    env:
+      METHOD: ${{ vars.WINDOWS_SIGNING }}
+      GAME: dist/icy-tower-windows-x86_64
+    steps:
+      - name: The signing method
+        run: |
+          case "$METHOD" in
+            artifact-signing) echo "signing with $METHOD" ;;
+            *) echo "::error::WINDOWS_SIGNING is '$METHOD', not artifact-signing (docs/ICY-TOWER-WINDOWS.md, \"Signing\")"
+               exit 1 ;;
+          esac
+
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      # For sign-windows.ps1 -Verify.
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: icy-tower-windows-x86_64
+          path: dist/icy-tower-windows-x86_64
+
+      # Third-party actions that see signing credentials are pinned by
+      # commit, their release in the comment.
+      - name: Log in to Azure (OpenID Connect)
+        if: vars.WINDOWS_SIGNING == 'artifact-signing'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign with Azure Artifact Signing
+        if: vars.WINDOWS_SIGNING == 'artifact-signing'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: |
+            ${{ github.workspace }}\dist\icy-tower-windows-x86_64\icy-tower.exe
+            ${{ github.workspace }}\dist\icy-tower-windows-x86_64\SDL3.dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Icy Tower
+          description-url: ${{ github.server_url }}/${{ github.repository }}
+          # Only the Azure CLI's login above.
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Verify the signatures
+        id: verify
+        shell: pwsh
+        run: |
+          ./examples/games/icy-tower/sign-windows.ps1 -Verify "$env:GAME/icy-tower.exe" "$env:GAME/SDL3.dll"
+          $signer = (Get-AuthenticodeSignature "$env:GAME/icy-tower.exe").SignerCertificate
+          $publisher = $signer.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+          "publisher=$publisher" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Play the signed game
+        run: |
+          cd "$GAME"
+          ./icy-tower.exe --headless --frames 600 --seed 7
+          SDL_VIDEO_DRIVER=dummy ./icy-tower.exe --autopilot --fixed-step --frames 600 --seed 7
+
+      - name: Upload the signed game
+        uses: actions/upload-artifact@v4
+        with:
+          name: icy-tower-windows-x86_64-signed
+          path: dist/icy-tower-windows-x86_64/
+          if-no-files-found: error
+
   # The README's Windows download button: a rolling prerelease whose tag and
   # asset follow main, as single-executable.yml's single-latest. Run
   # artifacts need a GitHub login to download and expire; a release asset
   # has a stable URL anyone can fetch:
   #   https://github.com/OWNER/REPO/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip
+  # It publishes the signed game when the sign job ran, and the unsigned one
+  # only while signing is not configured: a failed or cancelled signature
+  # publishes nothing.
   release:
     name: publish the latest build
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [build, sign]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      && needs.build.result == 'success'
+      && (needs.sign.result == 'success' || (needs.sign.result == 'skipped' && vars.WINDOWS_SIGNING == ''))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -188,10 +367,12 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: icy-tower-windows-latest
       ASSET: icy-tower-windows-x86_64.zip
+      SIGNED: ${{ needs.sign.result == 'success' }}
+      PUBLISHER: ${{ needs.sign.outputs.publisher }}
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: icy-tower-windows-x86_64
+          name: ${{ needs.sign.result == 'success' && 'icy-tower-windows-x86_64-signed' || 'icy-tower-windows-x86_64' }}
           path: dist/icy-tower-windows-x86_64
 
       - name: Publish to the icy-tower-windows-latest release
@@ -212,7 +393,14 @@ jobs:
           cd dist
           zip -r -X "$ASSET" icy-tower-windows-x86_64
           sha256sum "$ASSET" >"$ASSET.sha256"
+          if [ "$SIGNED" = true ]; then
+            signature="icy-tower.exe and SDL3.dll carry Authenticode signatures of $PUBLISHER, timestamped (their Properties, Digital Signatures). SmartScreen may still warn while the publisher's reputation builds up."
+          else
+            signature="The files are not code-signed yet, so Windows SmartScreen warns (\"Windows protected your PC\"): More info, then Run anyway."
+          fi
           notes="Icy Tower, a game written in Botlish, for Windows x86-64 (docs/ICY-TOWER-WINDOWS.md): icy-tower.exe and the SDL3.dll it loads, in one zip -- unpack it and run icy-tower.exe. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose Windows build passes its tests.
+
+          $signature
 
           Left/A and Right/D run, landing bounces, R restarts after a fall, Escape quits; icy-tower.exe --help lists the options."
           if gh release view "$TAG" >/dev/null 2>&1; then
