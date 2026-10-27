@@ -169,9 +169,12 @@ proc generation {profile target} {
     return [dict get $::generations $key]
 }
 
-# The files RESULT generated that differ from DIR's committed ones.
+# The files RESULT generated that differ from DIR's committed ones, but for
+# the generating clang's provenance (asRecordedToolchain): byte for byte
+# with the clang that generated them, every other byte with another clang
+# (the arm64 runners' Ubuntu 24.04 clang, say).
 proc staleFiles {result dir ns} {
-    return [lmap d [::cbind::generate::compare [dict get $result files] $dir $ns] {lrange $d 0 1}]
+    return [lmap d [::cbind::generate::compare [asRecordedToolchain [dict get $result files] $dir] $dir $ns] {lrange $d 0 1}]
 }
 
 # The value of manifest FIELD (the rest of its line, one Tcl word or more)
