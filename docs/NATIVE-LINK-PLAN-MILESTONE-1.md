@@ -796,7 +796,33 @@ static and dynamic executables' sizes and `otool -L` lists.
 
 ## 33. Linux x86-64 CI
 
-(Filled in below.)
+Locally (**Executed**, Linux x86-64, the branch merged with main at
+ff0826c, the release driver):
+
+* `tests/native-link-plan.test`: 35 tests, 32 passed, 3 skipped (two
+  `macosHost`, one `windowsHost`), 0 failed; also with
+  `BOTLISH_NATIVE_LINKER=system`, with `stub` and under
+  `BOTLISH_NATIVE_GC_STRESS=1`.
+* `cargo test --release --bin botlish-native link_plan`: 12 passed.
+* The link-plan mutants: 26, 25 killed, 1 skipped (section 30).
+* The updated mutants of the other harnesses, each still applying and
+  killed: c-ffi's link-plan and declaration mutants (`-only` the 13 of
+  them: 12 killed, `macos-link-plan-is-gnus` skipped, another host's
+  code), native-aot's link mutants (`msvc-link-plan-is-gnus`,
+  `linker-status-ignored`, `sys-auto-stub-for-c`,
+  `sys-auto-system-for-plain`, `sys-group-dropped`, `sys-link-dirs-lost`,
+  `sys-plan-lost`, `sys-failed-link-replaces`: 8 killed), target-model's
+  `driver-runs-any-target` and `windows-environments-one-target` (2
+  killed).
+* `audit/c-ffi/tools/fuzz.tcl -n 25` with seeds 3 and 17: 50 programs, 600
+  functions (172 variadic, 710 trailing arguments), 0 disagreements.
+* `audit/hir-interchange/tools/roundtrip.tcl -via interchange` (12 suites,
+  108 artifacts and outcomes, 0 differ) and `-via cache` (120, 0 differ);
+  `audit/compilation-isolation/tools/interleave.tcl` (96, 0 differ).
+* `tools/compilerpedia.tcl check`: 852 topics, 641 examples, 0 problems;
+  tests/static-compile.test's `sc-census-exhaustive` passes.
+
+In CI: (Filled in below.)
 
 ## 34. Linux AArch64 CI
 
