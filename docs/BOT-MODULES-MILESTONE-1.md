@@ -603,7 +603,10 @@ unchanged checkout.
 
 ### Mutation and fuzzing (executed)
 
-* `audit/bot-modules/tools/mutate.tcl`: MUTATE-PLACEHOLDER. Its first
+* `audit/bot-modules/tools/mutate.tcl` (each mutant against
+  `tests/bot-modules.test` in a private copy of the tree, the bundled,
+  executable and SDL3-run tests left out for time): 20 mutants, 20 apply,
+  20 killed, 0 survived, on the final code. Its first
   run (19 mutants) left one survivor, `cache-ignores-directories`: removing
   a package directory also removes its files, so the file dependencies
   invalidated the entry anyway. The case only the directory dependency
