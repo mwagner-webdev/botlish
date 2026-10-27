@@ -1137,6 +1137,29 @@ show runner A and the container to be about equally fast.
 * **Destruction** (the abandoned rows) is a release: the coroutine's fiber
   goes back to the pool without running anything on it (section 3.3).
 
+**The stack size read once (3a71734b).** Every figure above was measured
+before commit 3a71734b, when every start read the stack size from the
+environment (section 8.2). On Linux the same container ran this
+checkout's driver before and after that commit three times, alternating
+(controlled experiment; best of 5 within each run, the three runs'
+range):
+
+| Operation | Before 3a71734b | After |
+|---|---:|---:|
+| construction (to the first yield) | 429–451 ns | 241–248 ns |
+| construction + resume to completion + one cached call | 465–594 ns | 315–392 ns |
+| resume (yield in the root) | 111–135 ns | 135–140 ns |
+| construction, abandoned on an early return | 349–442 ns | 201–260 ns |
+| construction, abandoned on a fail | 466–475 ns | 277–287 ns |
+| construction, abandoned on a callee's propagated error | 350–508 ns | 271–278 ns |
+| construction, abandoned on a break | 418–446 ns | 196–256 ns |
+
+* **A construction is about 190 ns cheaper; a resume is unchanged.** The
+  environment read was about 40 % of what a construction cost. It was a
+  cost on every host, not a Windows one.
+* **On Windows,** run C's roots job (3a71734b) measured the same rows:
+  PENDING-WIN-COSTS.
+
 ### 9.2 What a coroutine holds
 
 | | Windows | Linux |
