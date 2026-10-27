@@ -39,6 +39,21 @@ and so did the `cb-policy-conflict` message. The probe now keeps the
 attributes in the generator's order, whatever order the IR spells them in.
 The recorded evidence is therefore the same under Clang 18 and Clang 21.
 
+## The BoringSSL build
+
+The runner installs Ubuntu 26.04's amd64v3 packages
+(`resolute-updates/main amd64v3`), and their GCC 15 generates x86-64-v3
+code. Under it, GCC reports a `-Wstringop-overflow` false positive in
+BoringSSL's `keccak.cc.inc` (`left_encode` writes at most 9 bytes; GCC says
+16). BoringSSL builds with `-Werror`, so the workflow's "Build the
+package-owned BoringSSL and SDL3" step failed. The plain amd64 GCC 15.2.0
+reproduces it with `-march=x86-64-v3`. `tests/cffi/boringssl.tcl` now
+passes CMake a project include (`CMAKE_PROJECT_INCLUDE`) that adds
+`-Wno-error=stringop-overflow` for GCC's C and C++ only, because clang
+refuses the option. The diagnostic stays visible, and every other warning
+stays an error. `tests.yml` and `tests-arm64.yml` build BoringSSL with the
+same script. Their cache keys hash it, so they rebuild once.
+
 ## Regenerated bindings
 
 Every committed profile and target was regenerated with the pinned toolchain
