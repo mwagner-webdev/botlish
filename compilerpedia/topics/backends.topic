@@ -363,7 +363,7 @@ A program cannot set its process exit status
 
 @topic backend.platforms
 title: Platforms and what runs where
-summary: The Tcl backends need only Tcl 9; the native backend runs on Linux, macOS AArch64 and Windows x86-64, C calls too (variadic ones not on Windows); syscalls are Linux's; stub linking Linux x86-64's.
+summary: The Tcl backends need only Tcl 9; the native backend runs on Linux, macOS AArch64 and Windows x86-64, C calls too, variadic ones included; syscalls are Linux's; stub linking Linux x86-64's.
 index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
@@ -426,8 +426,9 @@ other platforms.
                              ld, Apple's arm64 C ABI) and Windows x86-64
                              (link.exe: /LIBPATH and NAME.lib, the Win64
                              C ABI, the static C runtime); variadic C
-                             calls not on Windows (NATIVE CODEGEN);
-                             never with the stub linker
+                             calls on all of them (Win64's through a
+                             stub copying doubles into integer
+                             registers); never with the stub linker
     single executable        Linux x86-64
 
 @topic backend.targets

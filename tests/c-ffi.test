@@ -1995,7 +1995,7 @@ test cf-va-dll-wsprintf {Windows: a variadic function of a system DLL through it
     set exe [native::withLinkDirs [fixtureDirs] {native::executable [appHir $dir] [file join $dir program]}]
     list {*}[lmap value [appValues $dir {cranelift cranelift-generic}] {snprintfTexts $value}] [snprintfTexts [string trim [exec $exe]]] \
         [string toupper [importedFromDll $exe wsprintfA]]
-} -cleanup removeApps -result [concat [lrepeat 3 {{28 {-42 4000000000 beef botlish 7\0}}}] USER32.DLL]
+} -cleanup removeApps -result [concat [lrepeat 3 {{29 {-42 4000000000 beef botlish 7\0}}}] USER32.DLL]
 
 test cf-va-tcl-backends {the Tcl backends run no C call: a variadic one is NATIVE-ONLY too} -constraints cfFixture -body {
     set dir [bcfApp "import std::ffi::c\nimport bcf\n\nbcf::vsum(1, bcf::c_int(2))\n"]

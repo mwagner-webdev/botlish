@@ -3421,8 +3421,9 @@ layering:
   same pinned headers on the Windows host and stages it the same way (none
   is committed: C binding generator, above). Never copy a binding into the
   example directory or hand-write a parallel SDL declaration.
-* The game makes no variadic C call: Windows' native backend refuses them
-  (`cVariadics`). SDL's error text is copied out of SDL (`SDL_strlcpy`
+* The game makes no variadic C call (it was written while Windows' native
+  backend refused them; WINDOWS-X86-64-MILESTONE-6.md lowers them now, and
+  the design stays). SDL's error text is copied out of SDL (`SDL_strlcpy`
   into the session's text buffer, read through its layout) and reported by
   `game.bot` through `std::io`, never by `SDL_Log`. An SDL enumeration
   constant's C type is the target's (`unsigned int` on Linux, `int` with
