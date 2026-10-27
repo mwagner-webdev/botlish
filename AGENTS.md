@@ -2975,11 +2975,15 @@ needs the arm64 cross C library where clang finds it (`gcc-aarch64-linux-gnu`,
 which brings `libc6-dev-arm64-cross`; the headers package alone is not
 enough, and generation then stops rather than read the host's headers). The
 Win32 binding and the fixture's windows-x86_64-gnu target need MinGW-w64's
-cross headers and import libraries (`mingw-w64-x86-64-dev`, version 11.0.1:
+cross headers and import libraries (`mingw-w64-x86-64-dev`, version 13.0.0:
 the profile pins its version macros), `llvm-nm` and, for the second
 compiler, `gcc-mingw-w64-x86-64`. The
 `c-bindgen` workflow
-(`.github/workflows/c-bindgen.yml`) runs all of it. macOS bindings of real
+(`.github/workflows/c-bindgen.yml`) runs all of it, on Ubuntu 26.04 with the
+toolchain `.devcontainer/setup-c-toolchain.sh` pins (clang 21.1.8): every
+committed binding records the clang that generated it, so regenerate and
+check with that toolchain (an Ubuntu 26.04 container or chroot running the
+script), never with another clang. macOS bindings of real
 libraries need the macOS SDK (`BOTLISH_C_SYSROOT_macos_aarch64`, or a Mac).
 
 ## Static intrinsics

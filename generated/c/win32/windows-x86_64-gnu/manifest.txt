@@ -1,11 +1,11 @@
 c-bindgen manifest (C-BINDGEN.md, "Manifest")
 generator_version 2
 profile win32
-profile_file tools/c-bindgen/profiles/win32.tcl 13ec0995
+profile_file tools/c-bindgen/profiles/win32.tcl 03c999de
 target windows-x86_64-gnu
 library mingw-w64
-source {toolchain windows.h version {__MINGW64_VERSION_MAJOR 11 __MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 1}}
-revision mingw-w64 __MINGW64_VERSION_MAJOR=11 __MINGW64_VERSION_MINOR=0 __MINGW64_VERSION_BUGFIX=1
+source {toolchain windows.h version {__MINGW64_VERSION_MAJOR 13 __MINGW64_VERSION_MINOR 0 __MINGW64_VERSION_BUGFIX 0}}
+revision mingw-w64 __MINGW64_VERSION_MAJOR=13 __MINGW64_VERSION_MINOR=0 __MINGW64_VERSION_BUGFIX=0
 entry windows.h
 include {}
 defines {WIN32_LEAN_AND_MEAN UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00 NTDDI_VERSION=0x0A000000 STRICT NOMINMAX}
@@ -13,37 +13,40 @@ undefines {}
 flags {}
 command {clang -E -x c --target=x86_64-w64-mingw32 -DWIN32_LEAN_AND_MEAN -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A000000 -DSTRICT -DNOMINMAX $TU/entry.c}
 toolchain_family clang
-toolchain_version {Ubuntu clang version 18.1.3 (1ubuntu1)}
+toolchain_version {Ubuntu clang version 21.1.8 (6ubuntu1)}
 toolchain_target x86_64-w64-mingw32
 toolchain_sysroot none
 user_label_prefix {}
-evidence llvm {Ubuntu clang version 18.1.3 (1ubuntu1)}
-preprocessed_tokens 398476
+evidence llvm {Ubuntu clang version 21.1.8 (6ubuntu1)}
+preprocessed_tokens 439219
 header basetsd.h 862d2430
 header bemapiset.h e7194043
+header consoleapi.h 73db3167
+header consoleapi2.h ac7b3491
+header consoleapi3.h 66011685
 header datetimeapi.h 0038094e
 header debugapi.h a51f16a7
-header errhandlingapi.h 6dc13a79
-header fibersapi.h 0dfbe229
-header fileapi.h 0fcd3b1f
+header errhandlingapi.h 95d2ebfe
+header fibersapi.h 881ae2e4
+header fileapi.h eb840324
 header guiddef.h 75f44faa
-header handleapi.h 8a40868a
-header heapapi.h 51c71520
+header handleapi.h a2badeba
+header heapapi.h b2a319fb
 header imm.h 98d3c6f1
 header interlockedapi.h 8621ffdc
 header ioapiset.h d727c820
 header jobapi.h 1960aa46
 header ktmtypes.h 27335ddc
-header libloaderapi.h bc8e3d5a
+header libloaderapi.h 072fbef8
 header mcx.h dd2ad77b
-header memoryapi.h 2d89132a
-header minwinbase.h 5c02ce23
+header memoryapi.h 99881fd2
+header minwinbase.h 3712e9a7
 header minwindef.h d11c0071
 header namedpipeapi.h f175ac78
 header namespaceapi.h 85d2c20a
 header poppack.h 97d2770d
 header processenv.h f217ca72
-header processthreadsapi.h 4d8ae26a
+header processthreadsapi.h 839a2d36
 header processtopologyapi.h c965ebdc
 header profileapi.h fed2f0d8
 header pshpack1.h f555b847
@@ -56,69 +59,72 @@ header securitybaseapi.h e1d65d8c
 header stralign.h 5adb0305
 header stringapiset.h e0eeeaed
 header synchapi.h 0a9d9de6
-header sysinfoapi.h eb1adac6
-header systemtopologyapi.h 6dc827a8
+header sysinfoapi.h 97674193
+header systemtopologyapi.h 6da75a8e
 header threadpoolapiset.h 814c8ca6
 header threadpoollegacyapiset.h 860ba7af
 header timezoneapi.h faafe92f
 header tvout.h 69025753
 header utilapiset.h 4af52f60
-header virtdisk.h 1e0652ad
-header winbase.h fd259c8a
-header wincon.h ed908677
+header virtdisk.h 8cccfeab
+header winbase.h 4fa81be3
+header wincontypes.h 8ac02b2c
 header windef.h 9074879
-header wingdi.h 090e4e28
+header wingdi.h 7b3629c0
 header winnetwk.h 310688c1
 header winnls.h 4c3f5a74
-header winnt.h debcbe35
-header winreg.h cb5f27cd
+header winnt.h 7330b24c
+header winreg.h d3b72072
 header winsvc.h d7781f6a
-header winuser.h 4dadbaa4
+header winuser.h d1d3d3fb
 header winver.h 736e7a39
 header wow64apiset.h e7a43da7
 shim_library botlish_shim_win32_e3f8535c
-file layouts-check.c 7580 03b1a06c
-file layouts.tsv 7169 00c35774
-file report.tsv 24619 013ad8b9
-file report.txt 170 0ef7e2fd
+file layouts-check.c 7973 5a6e0aea
+file layouts.tsv 7671 fd74e1c2
+file report.tsv 25132 5cdccb75
+file report.txt 170 6d4fbf85
 file shim.c 198 e3f8535c
 file win32/apiset.bot 9 5357b816
 file win32/basetsd.bot 43 a4712ae3
-file win32/ctypes.bot 1359 50342be6
+file win32/consoleapi.bot 170 1aefb77e
+file win32/consoleapi2.bot 173 fa0dc8ed
+file win32/consoleapi3.bot 255 55854b7d
+file win32/ctypes.bot 1379 22895edf
 file win32/datetimeapi.bot 88 4a45e8a5
 file win32/debugapi.bot 55 0ba326c4
 file win32/errhandlingapi.bot 59 948b334e
-file win32/fibersapi.bot 29 fc80fc9a
-file win32/fileapi.bot 785 63c5be76
-file win32/fltwinerror.bot 37 8934592a
+file win32/fibersapi.bot 32 cacb789a
+file win32/fileapi.bot 803 48c738c2
+file win32/fltwinerror.bot 36 672ef4fe
 file win32/handleapi.bot 33 f497d60e
-file win32/heapapi.bot 104 b4f34874
+file win32/heapapi.bot 104 144a0dd8
 file win32/imm.bot 824 09cd6727
 file win32/interlockedapi.bot 47 f3776998
 file win32/ioapiset.bot 85 567931f5
 file win32/jobapi.bot 13 d9568fa2
 file win32/ktmtypes.bot 59 92935949
-file win32/layouts.bot 10119 c6966023
-file win32/libloaderapi.bot 343 7fada7bb
+file win32/layouts.bot 10562 f615d35b
+file win32/libloaderapi.bot 358 81d7d40e
 file win32/mcx.bot 153 98fcafe6
-file win32/memoryapi.bot 372 18cf19a5
-file win32/minwinbase.bot 100 fece3235
+file win32/memoryapi.bot 372 2a921b92
+file win32/minwinbase.bot 98 bf0ceaca
 file win32/minwindef.bot 8 66c0016f
 file win32/namedpipeapi.bot 111 f1286b78
 file win32/namespaceapi.bot 58 3914ba8c
 file win32/processenv.bot 202 5aeba11a
-file win32/processthreadsapi.bot 474 0cf5a981
+file win32/processthreadsapi.bot 588 92c1c206
 file win32/processtopologyapi.bot 27 b3c7921c
 file win32/profileapi.bot 17 b9ff6f57
 file win32/realtimeapiset.bot 36 8d5a40cc
 file win32/reason.bot 71 d3665932
-file win32/sdkddkver.bot 113 1a1253c5
+file win32/sdkddkver.bot 117 d34f0131
 file win32/securityappcontainer.bot 15 922bc96d
 file win32/securitybaseapi.bot 1006 d8989818
 file win32/stralign.bot 51 81fbd014
 file win32/stringapiset.bot 115 c816fd71
 file win32/synchapi.bot 456 775ccd77
-file win32/sysinfoapi.bot 212 197cd571
+file win32/sysinfoapi.bot 216 80e7eedb
 file win32/systemtopologyapi.bot 18 9292b34e
 file win32/threadpoolapiset.bot 212 535d4a3a
 file win32/threadpoollegacyapiset.bot 54 cb83ae93
@@ -131,20 +137,24 @@ file win32/tvout.bot 43 ad030bd3
 file win32/utilapiset.bot 32 3c20a465
 file win32/virtdisk.bot 353 390dac8d
 file win32/winapifamily.bot 10 2baab97c
-file win32/winbase.bot 5154 d7ee20cf
-file win32/wincon.bot 614 cad22d9d
+file win32/winbase.bot 5144 9801225e
+file win32/wincon.bot 6 8bdb2a4a
+file win32/wincontypes.bot 36 d2b2e80c
 file win32/windef.bot 17 c46f08bd
-file win32/winerror.bot 4466 a31395b2
-file win32/wingdi.bot 4421 e65dddb2
+file win32/winerror.bot 4780 88dacef0
+file win32/wingdi.bot 4433 721da7f0
 file win32/winnetwk.bot 564 a6663b57
 file win32/winnls.bot 1489 2638fc7e
-file win32/winnt.bot 4089 96ad3163
-file win32/winreg.bot 1157 6be46d20
+file win32/winnt.bot 4150 30e71c41
+file win32/winreg.bot 1157 a9f3955a
 file win32/winsvc.bot 754 4229d521
-file win32/winuser.bot 8329 182aeba3
+file win32/winuser.bot 8374 da899f40
 file win32/winver.bot 296 7dfa1428
 file win32/wnnc.bot 74 d78e07ac
 file win32/wow64apiset.bot 65 db191c45
+libraries win32/consoleapi.bot kernel32
+libraries win32/consoleapi2.bot kernel32
+libraries win32/consoleapi3.bot kernel32
 libraries win32/datetimeapi.bot kernel32
 libraries win32/debugapi.bot kernel32
 libraries win32/errhandlingapi.bot kernel32
@@ -182,7 +192,6 @@ libraries win32/timezoneapi.bot {kernel32 advapi32}
 libraries win32/utilapiset.bot kernel32
 libraries win32/virtdisk.bot virtdisk
 libraries win32/winbase.bot {kernel32 advapi32}
-libraries win32/wincon.bot kernel32
 libraries win32/wingdi.bot {gdi32 opengl32 msimg32 winspool}
 libraries win32/winnetwk.bot mpr
 libraries win32/winnls.bot kernel32
@@ -192,8 +201,8 @@ libraries win32/winsvc.bot advapi32
 libraries win32/winuser.bot user32
 libraries win32/winver.bot {kernel32 version}
 libraries win32/wow64apiset.bot kernel32
-import_library kernel32 libkernel32.a 1411
-import_library user32 libuser32.a 832
+import_library kernel32 libkernel32.a 1432
+import_library user32 libuser32.a 841
 import_library gdi32 libgdi32.a 386
 import_library advapi32 libadvapi32.a 401
 import_library version libversion.a 21
@@ -205,84 +214,47 @@ import_library synchronization libsynchronization.a 3
 import_library opengl32 libopengl32.a 20
 import_library msimg32 libmsimg32.a 2
 import_library winspool libwinspool.a 3
-import_multiple AcquireSRWLockExclusive kernel32 synchronization
-import_multiple AcquireSRWLockShared kernel32 synchronization
-import_multiple CancelWaitableTimer kernel32 synchronization
-import_multiple CreateEventA kernel32 synchronization
-import_multiple CreateEventExA kernel32 synchronization
-import_multiple CreateEventExW kernel32 synchronization
-import_multiple CreateEventW kernel32 synchronization
-import_multiple CreateMutexA kernel32 synchronization
-import_multiple CreateMutexExA kernel32 synchronization
-import_multiple CreateMutexExW kernel32 synchronization
-import_multiple CreateMutexW kernel32 synchronization
-import_multiple CreateSemaphoreExW kernel32 synchronization
-import_multiple CreateWaitableTimerExW kernel32 synchronization
-import_multiple DeleteCriticalSection kernel32 synchronization
-import_multiple EnterCriticalSection kernel32 synchronization
+import_multiple DeleteSynchronizationBarrier kernel32 synchronization
+import_multiple EnterSynchronizationBarrier kernel32 synchronization
 import_multiple InitOnceBeginInitialize kernel32 synchronization
 import_multiple InitOnceComplete kernel32 synchronization
 import_multiple InitOnceExecuteOnce kernel32 synchronization
 import_multiple InitOnceInitialize kernel32 synchronization
 import_multiple InitializeConditionVariable kernel32 synchronization
-import_multiple InitializeCriticalSection kernel32 synchronization
-import_multiple InitializeCriticalSectionAndSpinCount kernel32 synchronization
-import_multiple InitializeCriticalSectionEx kernel32 synchronization
-import_multiple InitializeSRWLock kernel32 synchronization
-import_multiple LeaveCriticalSection kernel32 synchronization
-import_multiple OpenEventA kernel32 synchronization
-import_multiple OpenEventW kernel32 synchronization
-import_multiple OpenMutexW kernel32 synchronization
-import_multiple OpenSemaphoreW kernel32 synchronization
-import_multiple OpenWaitableTimerW kernel32 synchronization
-import_multiple ReleaseMutex kernel32 synchronization
-import_multiple ReleaseSRWLockExclusive kernel32 synchronization
-import_multiple ReleaseSRWLockShared kernel32 synchronization
-import_multiple ReleaseSemaphore kernel32 synchronization
-import_multiple ResetEvent kernel32 synchronization
+import_multiple InitializeSynchronizationBarrier kernel32 synchronization
 import_multiple RtlAddFunctionTable kernel32 ntdll
 import_multiple RtlCaptureContext kernel32 ntdll
 import_multiple RtlCaptureStackBackTrace kernel32 ntdll
 import_multiple RtlCompareMemory kernel32 ntdll
 import_multiple RtlDeleteFunctionTable kernel32 ntdll
 import_multiple RtlInstallFunctionTableCallback kernel32 ntdll
+import_multiple RtlIsEcCode kernel32 ntdll
 import_multiple RtlLookupFunctionEntry kernel32 ntdll
 import_multiple RtlPcToFileHeader kernel32 ntdll
 import_multiple RtlRestoreContext kernel32 ntdll
 import_multiple RtlUnwind kernel32 ntdll
 import_multiple RtlUnwindEx kernel32 ntdll
 import_multiple RtlVirtualUnwind kernel32 ntdll
-import_multiple SetCriticalSectionSpinCount kernel32 synchronization
-import_multiple SetEvent kernel32 synchronization
-import_multiple SetWaitableTimer kernel32 synchronization
-import_multiple SetWaitableTimerEx kernel32 synchronization
 import_multiple SignalObjectAndWait kernel32 synchronization
 import_multiple Sleep kernel32 synchronization
 import_multiple SleepConditionVariableCS kernel32 synchronization
 import_multiple SleepConditionVariableSRW kernel32 synchronization
-import_multiple SleepEx kernel32 synchronization
-import_multiple TryAcquireSRWLockExclusive kernel32 synchronization
-import_multiple TryAcquireSRWLockShared kernel32 synchronization
-import_multiple TryEnterCriticalSection kernel32 synchronization
 import_multiple VerLanguageNameA kernel32 version
 import_multiple VerLanguageNameW kernel32 version
 import_multiple VerSetConditionMask kernel32 ntdll
-import_multiple WaitForMultipleObjectsEx kernel32 synchronization
-import_multiple WaitForSingleObject kernel32 synchronization
-import_multiple WaitForSingleObjectEx kernel32 synchronization
 import_multiple WakeAllConditionVariable kernel32 synchronization
 import_multiple WakeConditionVariable kernel32 synchronization
-count alias 600
-count aliases 639
+count alias 601
+count aliases 640
 count bool 0
 count boolOnly 0
 count callbacks 168
-count complete 900
-count constants 15309
-count constantsSeen 14448
-count declared 2787
-count direct 2665
-count enumerators 1049
+count complete 920
+count constants 15708
+count constantsSeen 14835
+count declared 2807
+count direct 2694
+count enumerators 1061
 count excluded 0
 count fnmacros 286
 count fnptrTypedefs 125
@@ -290,47 +262,47 @@ count inline 42
 count manual 0
 count opaque 10
 count proven 19
-count ptrParams 6507
-count ptrResults 506
+count ptrParams 6554
+count ptrResults 508
 count resultAlias 0
 count resultIndependent 0
-count resultUnknown 506
+count resultUnknown 508
 count tablestubs 0
 count thunk 42
-count unknownParams 6488
-count unknownRetention 3016
-count unsupported 447
-count views 1801
+count unknownParams 6535
+count unknownRetention 3041
+count unsupported 438
+count views 1820
 blocked by-value-aggregate 36
 blocked macro-needs-signature 248
-blocked no-import-library 103
-blocked no-link-symbol 8
+blocked no-import-library 93
+blocked no-link-symbol 9
 blocked union-by-value 1
 blocked unsupported-callback-signature 15
 blocked unsupported-macro 30
 blocked va-list 6
-convention_default stdcall 3185
-layout_abi windows-x86_64-gnu clang x86_64-w64-mingw32 {Ubuntu clang version 18.1.3 (1ubuntu1)}
-layout_count anonymous 271
-layout_count blocked 152
-layout_count blockedDirect 58
-layout_count blockedStructs 106
-layout_count blockedTransitive 94
-layout_count blockedUnions 46
-layout_count emitted 1015
-layout_count emittedSynthetic 66
-layout_count emittedUnions 78
+convention_default stdcall 3215
+layout_abi windows-x86_64-gnu clang x86_64-w64-mingw32 {Ubuntu clang version 21.1.8 (6ubuntu1)}
+layout_count anonymous 283
+layout_count blocked 158
+layout_count blockedDirect 60
+layout_count blockedStructs 110
+layout_count blockedTransitive 98
+layout_count blockedUnions 48
+layout_count emitted 1041
+layout_count emittedSynthetic 74
+layout_count emittedUnions 84
 layout_count incomplete 10
-layout_count promoted 3
-layout_count public 1171
-layout_count structs 1044
-layout_count synthetic 145
+layout_count promoted 4
+layout_count public 1203
+layout_count structs 1068
+layout_count synthetic 157
 layout_count system 0
 layout_count unheld 4
-layout_count unions 127
-layout_blocked bitfield 55
+layout_count unions 135
+layout_blocked bitfield 57
 layout_blocked flexible-array 3
-layout_blocked nested-layout-blocked 95
+layout_blocked nested-layout-blocked 99
 contract TpInitializeCallbackEnviron cbe {escape proven-noescape access write} compiler {nocapture writeonly}
 contract TpSetCallbackThreadpool cbe {escape proven-noescape access write} compiler {nocapture writeonly}
 contract TpSetCallbackCleanupGroup cbe {escape proven-noescape access write} compiler {nocapture writeonly}

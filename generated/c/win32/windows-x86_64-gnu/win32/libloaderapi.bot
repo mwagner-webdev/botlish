@@ -16,6 +16,10 @@ RESOURCE_ENUM_MUI_SYSTEM = win32::ctypes::c_int(4)
 RESOURCE_ENUM_VALIDATE = win32::ctypes::c_int(8)
 RESOURCE_ENUM_MODULE_EXACT = win32::ctypes::c_int(16)
 SUPPORT_LANG_NUMBER = win32::ctypes::c_int(32)
+GET_MODULE_HANDLE_EX_FLAG_PIN = win32::ctypes::c_int(1)
+GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = win32::ctypes::c_int(2)
+GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = win32::ctypes::c_int(4)
+CURRENT_IMPORT_REDIRECTION_VERSION = win32::ctypes::c_int(1)
 DONT_RESOLVE_DLL_REFERENCES = win32::ctypes::c_int(1)
 LOAD_LIBRARY_AS_DATAFILE = win32::ctypes::c_int(2)
 LOAD_WITH_ALTERED_SEARCH_PATH = win32::ctypes::c_int(8)
@@ -29,10 +33,13 @@ LOAD_LIBRARY_SEARCH_USER_DIRS = win32::ctypes::c_int(1024)
 LOAD_LIBRARY_SEARCH_SYSTEM32 = win32::ctypes::c_int(2048)
 LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = win32::ctypes::c_int(4096)
 LOAD_LIBRARY_SEARCH_SYSTEM32_NO_FORWARDER = win32::ctypes::c_int(2048)
-GET_MODULE_HANDLE_EX_FLAG_PIN = win32::ctypes::c_int(1)
-GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT = win32::ctypes::c_int(2)
-GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = win32::ctypes::c_int(4)
-CURRENT_IMPORT_REDIRECTION_VERSION = win32::ctypes::c_int(1)
+
+# C: HRSRC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType)
+extern c fn FindResourceW(
+    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpType: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
 
 # C: WINBOOL EnumResourceNamesW(HMODULE hModule, LPCWSTR lpType, ENUMRESNAMEPROCW lpEnumFunc, LONG_PTR lParam)
 extern c fn EnumResourceNamesW(
@@ -42,37 +49,8 @@ extern c fn EnumResourceNamesW(
     lParam: std::ffi::c::LongLong
 ) -> std::ffi::c::Int
 
-# C: HRSRC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType)
-extern c fn FindResourceW(
-    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpType: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
-
-# C: HRSRC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage)
-extern c fn FindResourceExW(
-    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    lpType: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    wLanguage: std::ffi::c::UShort
-) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
-
 # C: WINBOOL FreeResource(HGLOBAL hResData)
 extern c fn FreeResource(hResData: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
-
-# C: HMODULE LoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
-extern c fn LoadLibraryExA(
-    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::Char],
-    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
-    dwFlags: std::ffi::c::ULong
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
-
-# C: HMODULE LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
-extern c fn LoadLibraryExW(
-    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
-    dwFlags: std::ffi::c::ULong
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
 
 # C: HGLOBAL LoadResource(HMODULE hModule, HRSRC hResInfo)
 extern c fn LoadResource(
@@ -80,32 +58,10 @@ extern c fn LoadResource(
     hResInfo: std::ffi::c::Ptr[win32::ctypes::HRSRC__]
 ) -> std::ffi::c::Ptr[std::ffi::c::Void]
 
-# C: int LoadStringA(HINSTANCE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax)
-extern c fn LoadStringA(
-    hInstance: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    uID: std::ffi::c::UInt,
-    lpBuffer: std::ffi::c::Ptr[std::ffi::c::Char],
-    cchBufferMax: std::ffi::c::Int
-) -> std::ffi::c::Int
-
-# C: int LoadStringW(HINSTANCE hInstance, UINT uID, LPWSTR lpBuffer, int cchBufferMax)
-extern c fn LoadStringW(
-    hInstance: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    uID: std::ffi::c::UInt,
-    lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort],
-    cchBufferMax: std::ffi::c::Int
-) -> std::ffi::c::Int
-
 # C: LPVOID LockResource(HGLOBAL hResData)
 extern c fn LockResource(
     hResData: std::ffi::c::Ptr[std::ffi::c::Void]
 ) -> std::ffi::c::Ptr[std::ffi::c::Void]
-
-# C: DWORD SizeofResource(HMODULE hModule, HRSRC hResInfo)
-extern c fn SizeofResource(
-    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
-    hResInfo: std::ffi::c::Ptr[win32::ctypes::HRSRC__]
-) -> std::ffi::c::ULong
 
 # C: DLL_DIRECTORY_COOKIE AddDllDirectory(PCWSTR NewDirectory)
 extern c fn AddDllDirectory(
@@ -117,20 +73,6 @@ extern c fn RemoveDllDirectory(Cookie: std::ffi::c::Ptr[std::ffi::c::Void]) -> s
 
 # C: WINBOOL SetDefaultDllDirectories(DWORD DirectoryFlags)
 extern c fn SetDefaultDllDirectories(DirectoryFlags: std::ffi::c::ULong) -> std::ffi::c::Int
-
-# C: WINBOOL GetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE *phModule)
-extern c fn GetModuleHandleExA(
-    dwFlags: std::ffi::c::ULong,
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::Char],
-    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
-) -> std::ffi::c::Int
-
-# C: WINBOOL GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule)
-extern c fn GetModuleHandleExW(
-    dwFlags: std::ffi::c::ULong,
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
-) -> std::ffi::c::Int
 
 # C: WINBOOL EnumResourceLanguagesA(HMODULE hModule, LPCSTR lpType, LPCSTR lpName, ENUMRESLANGPROCA lpEnumFunc, LONG_PTR lParam)
 extern c fn EnumResourceLanguagesA(
@@ -210,16 +152,6 @@ extern c fn EnumResourceTypesExW(
     LangId: std::ffi::c::UShort
 ) -> std::ffi::c::Int
 
-# C: HMODULE GetModuleHandleA(LPCSTR lpModuleName)
-extern c fn GetModuleHandleA(
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::Char]
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
-
-# C: HMODULE GetModuleHandleW(LPCWSTR lpModuleName)
-extern c fn GetModuleHandleW(
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
-
 # C: HMODULE LoadLibraryA(LPCSTR lpLibFileName)
 extern c fn LoadLibraryA(
     lpLibFileName: std::ffi::c::Ptr[std::ffi::c::Char]
@@ -270,35 +202,88 @@ extern c fn FindStringOrdinal(
     bIgnoreCase: std::ffi::c::Int
 ) -> std::ffi::c::Int
 
-# C: FindResourceEx: an alias of FindResourceExW, HRSRC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage)
-extern c fn FindResourceEx named "FindResourceExW"(
+# C: HRSRC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage)
+extern c fn FindResourceExW(
     hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
     lpType: std::ffi::c::Ptr[std::ffi::c::UShort],
     lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
     wLanguage: std::ffi::c::UShort
 ) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
 
-# C: LoadString: an alias of LoadStringW, int LoadStringW(HINSTANCE hInstance, UINT uID, LPWSTR lpBuffer, int cchBufferMax)
-extern c fn LoadString named "LoadStringW"(
+# C: HMODULE GetModuleHandleA(LPCSTR lpModuleName)
+extern c fn GetModuleHandleA(
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: HMODULE GetModuleHandleW(LPCWSTR lpModuleName)
+extern c fn GetModuleHandleW(
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: WINBOOL GetModuleHandleExA(DWORD dwFlags, LPCSTR lpModuleName, HMODULE *phModule)
+extern c fn GetModuleHandleExA(
+    dwFlags: std::ffi::c::ULong,
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::Char],
+    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
+) -> std::ffi::c::Int
+
+# C: WINBOOL GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule)
+extern c fn GetModuleHandleExW(
+    dwFlags: std::ffi::c::ULong,
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
+) -> std::ffi::c::Int
+
+# C: HMODULE LoadLibraryExA(LPCSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+extern c fn LoadLibraryExA(
+    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::Char],
+    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
+    dwFlags: std::ffi::c::ULong
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: HMODULE LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+extern c fn LoadLibraryExW(
+    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
+    dwFlags: std::ffi::c::ULong
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: DWORD SizeofResource(HMODULE hModule, HRSRC hResInfo)
+extern c fn SizeofResource(
+    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    hResInfo: std::ffi::c::Ptr[win32::ctypes::HRSRC__]
+) -> std::ffi::c::ULong
+
+# C: int LoadStringA(HINSTANCE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax)
+extern c fn LoadStringA(
+    hInstance: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    uID: std::ffi::c::UInt,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::Char],
+    cchBufferMax: std::ffi::c::Int
+) -> std::ffi::c::Int
+
+# C: int LoadStringW(HINSTANCE hInstance, UINT uID, LPWSTR lpBuffer, int cchBufferMax)
+extern c fn LoadStringW(
     hInstance: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
     uID: std::ffi::c::UInt,
     lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort],
     cchBufferMax: std::ffi::c::Int
 ) -> std::ffi::c::Int
 
-# C: GetModuleHandleEx: an alias of GetModuleHandleExW, WINBOOL GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule)
-extern c fn GetModuleHandleEx named "GetModuleHandleExW"(
-    dwFlags: std::ffi::c::ULong,
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
-) -> std::ffi::c::Int
+# C: FindResource: an alias of FindResourceW, HRSRC FindResourceW(HMODULE hModule, LPCWSTR lpName, LPCWSTR lpType)
+extern c fn FindResource named "FindResourceW"(
+    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpType: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
 
-# C: LoadLibraryEx: an alias of LoadLibraryExW, HMODULE LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
-extern c fn LoadLibraryEx named "LoadLibraryExW"(
-    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
-    dwFlags: std::ffi::c::ULong
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+# C: EnumResourceNames: an alias of EnumResourceNamesW, WINBOOL EnumResourceNamesW(HMODULE hModule, LPCWSTR lpType, ENUMRESNAMEPROCW lpEnumFunc, LONG_PTR lParam)
+extern c fn EnumResourceNames named "EnumResourceNamesW"(
+    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    lpType: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpEnumFunc: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[win32::ctypes::HINSTANCE__], std::ffi::c::Ptr[std::ffi::c::UShort], std::ffi::c::Ptr[std::ffi::c::UShort], std::ffi::c::LongLong], return: std::ffi::c::Int}],
+    lParam: std::ffi::c::LongLong
+) -> std::ffi::c::Int
 
 # C: EnumResourceLanguagesEx: an alias of EnumResourceLanguagesExW, WINBOOL EnumResourceLanguagesExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, ENUMRESLANGPROCW lpEnumFunc, LONG_PTR lParam, DWORD dwFlags, LANGID LangId)
 extern c fn EnumResourceLanguagesEx named "EnumResourceLanguagesExW"(
@@ -330,14 +315,44 @@ extern c fn EnumResourceTypesEx named "EnumResourceTypesExW"(
     LangId: std::ffi::c::UShort
 ) -> std::ffi::c::Int
 
-# C: GetModuleHandle: an alias of GetModuleHandleW, HMODULE GetModuleHandleW(LPCWSTR lpModuleName)
-extern c fn GetModuleHandle named "GetModuleHandleW"(
-    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
-
 # C: GetModuleFileName: an alias of GetModuleFileNameW, DWORD GetModuleFileNameW(HMODULE hModule, LPWSTR lpFilename, DWORD nSize)
 extern c fn GetModuleFileName named "GetModuleFileNameW"(
     hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
     lpFilename: std::ffi::c::Ptr[std::ffi::c::UShort],
     nSize: std::ffi::c::ULong
 ) -> std::ffi::c::ULong
+
+# C: FindResourceEx: an alias of FindResourceExW, HRSRC FindResourceExW(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLanguage)
+extern c fn FindResourceEx named "FindResourceExW"(
+    hModule: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    lpType: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    wLanguage: std::ffi::c::UShort
+) -> std::ffi::c::Ptr[win32::ctypes::HRSRC__]
+
+# C: GetModuleHandle: an alias of GetModuleHandleW, HMODULE GetModuleHandleW(LPCWSTR lpModuleName)
+extern c fn GetModuleHandle named "GetModuleHandleW"(
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: GetModuleHandleEx: an alias of GetModuleHandleExW, WINBOOL GetModuleHandleExW(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule)
+extern c fn GetModuleHandleEx named "GetModuleHandleExW"(
+    dwFlags: std::ffi::c::ULong,
+    lpModuleName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    phModule: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]]
+) -> std::ffi::c::Int
+
+# C: LoadLibraryEx: an alias of LoadLibraryExW, HMODULE LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+extern c fn LoadLibraryEx named "LoadLibraryExW"(
+    lpLibFileName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    hFile: std::ffi::c::Ptr[std::ffi::c::Void],
+    dwFlags: std::ffi::c::ULong
+) -> std::ffi::c::Ptr[win32::ctypes::HINSTANCE__]
+
+# C: LoadString: an alias of LoadStringW, int LoadStringW(HINSTANCE hInstance, UINT uID, LPWSTR lpBuffer, int cchBufferMax)
+extern c fn LoadString named "LoadStringW"(
+    hInstance: std::ffi::c::Ptr[win32::ctypes::HINSTANCE__],
+    uID: std::ffi::c::UInt,
+    lpBuffer: std::ffi::c::Ptr[std::ffi::c::UShort],
+    cchBufferMax: std::ffi::c::Int
+) -> std::ffi::c::Int

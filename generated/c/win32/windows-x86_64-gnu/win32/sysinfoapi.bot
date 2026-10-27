@@ -16,6 +16,10 @@ ComputerNamePhysicalDnsHostname = win32::ctypes::c_uint(5)
 ComputerNamePhysicalDnsDomain = win32::ctypes::c_uint(6)
 ComputerNamePhysicalDnsFullyQualified = win32::ctypes::c_uint(7)
 ComputerNameMax = win32::ctypes::c_uint(8)
+USER_CET_ENVIRONMENT_WIN32_PROCESS = win32::ctypes::c_int(0)
+USER_CET_ENVIRONMENT_SGX2_ENCLAVE = win32::ctypes::c_int(2)
+USER_CET_ENVIRONMENT_VBS_ENCLAVE = win32::ctypes::c_int(16)
+USER_CET_ENVIRONMENT_VBS_BASIC_ENCLAVE = win32::ctypes::c_int(17)
 
 # C: void GetSystemTime(LPSYSTEMTIME lpSystemTime)
 extern c fn GetSystemTime(lpSystemTime: std::ffi::c::Ptr[win32::ctypes::SYSTEMTIME]) -> unit

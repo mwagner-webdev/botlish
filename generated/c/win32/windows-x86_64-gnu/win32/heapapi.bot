@@ -20,18 +20,6 @@ extern c fn HeapSummary(
     lpSummary: std::ffi::c::Ptr[win32::ctypes::HEAP_SUMMARY]
 ) -> std::ffi::c::Int
 
-# C: DWORD GetProcessHeaps(DWORD NumberOfHeaps, PHANDLE ProcessHeaps)
-extern c fn GetProcessHeaps(
-    NumberOfHeaps: std::ffi::c::ULong,
-    ProcessHeaps: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]]
-) -> std::ffi::c::ULong
-
-# C: WINBOOL HeapLock(HANDLE hHeap)
-extern c fn HeapLock(hHeap: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
-
-# C: WINBOOL HeapUnlock(HANDLE hHeap)
-extern c fn HeapUnlock(hHeap: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
-
 # C: WINBOOL HeapWalk(HANDLE hHeap, LPPROCESS_HEAP_ENTRY lpEntry)
 extern c fn HeapWalk(
     hHeap: std::ffi::c::Ptr[std::ffi::c::Void],
@@ -46,6 +34,18 @@ extern c fn HeapQueryInformation(
     HeapInformationLength: std::ffi::c::ULongLong,
     ReturnLength: std::ffi::c::Ptr[std::ffi::c::ULongLong]
 ) -> std::ffi::c::Int
+
+# C: DWORD GetProcessHeaps(DWORD NumberOfHeaps, PHANDLE ProcessHeaps)
+extern c fn GetProcessHeaps(
+    NumberOfHeaps: std::ffi::c::ULong,
+    ProcessHeaps: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Void]]
+) -> std::ffi::c::ULong
+
+# C: WINBOOL HeapLock(HANDLE hHeap)
+extern c fn HeapLock(hHeap: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
+
+# C: WINBOOL HeapUnlock(HANDLE hHeap)
+extern c fn HeapUnlock(hHeap: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int
 
 # C: HANDLE HeapCreate(DWORD flOptions, SIZE_T dwInitialSize, SIZE_T dwMaximumSize)
 extern c fn HeapCreate(

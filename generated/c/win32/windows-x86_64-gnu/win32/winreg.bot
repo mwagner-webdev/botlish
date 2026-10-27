@@ -50,9 +50,6 @@ SHUTDOWN_SOFT_REBOOT = win32::ctypes::c_int(2048)
 SHUTDOWN_MOBILE_UI = win32::ctypes::c_int(4096)
 SHUTDOWN_ARSO = win32::ctypes::c_int(8192)
 
-# C: LONG RegCloseKey(HKEY hKey)
-extern c fn RegCloseKey(hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__]) -> std::ffi::c::Long
-
 # C: LONG RegOverridePredefKey(HKEY hKey, HKEY hNewHKey)
 extern c fn RegOverridePredefKey(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
@@ -123,32 +120,6 @@ extern c fn RegCreateKeyW(
     phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
 ) -> std::ffi::c::Long
 
-# C: LONG RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
-extern c fn RegCreateKeyExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
-    Reserved: std::ffi::c::ULong,
-    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
-    dwOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
-    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: LONG RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
-extern c fn RegCreateKeyExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    Reserved: std::ffi::c::ULong,
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    dwOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
-    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
 # C: LONG RegDeleteKeyA(HKEY hKey, LPCSTR lpSubKey)
 extern c fn RegDeleteKeyA(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
@@ -159,22 +130,6 @@ extern c fn RegDeleteKeyA(
 extern c fn RegDeleteKeyW(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
-# C: LONG RegDeleteKeyExA(HKEY hKey, LPCSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
-extern c fn RegDeleteKeyExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
-    samDesired: std::ffi::c::ULong,
-    Reserved: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
-# C: LONG RegDeleteKeyExW(HKEY hKey, LPCWSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
-extern c fn RegDeleteKeyExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    samDesired: std::ffi::c::ULong,
-    Reserved: std::ffi::c::ULong
 ) -> std::ffi::c::Long
 
 # C: LONG RegDisableReflectionKey(HKEY hBase)
@@ -193,18 +148,6 @@ extern c fn RegQueryReflectionKey(
     bIsReflectionDisabled: std::ffi::c::Ptr[std::ffi::c::Int]
 ) -> std::ffi::c::Long
 
-# C: LONG RegDeleteValueA(HKEY hKey, LPCSTR lpValueName)
-extern c fn RegDeleteValueA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char]
-) -> std::ffi::c::Long
-
-# C: LONG RegDeleteValueW(HKEY hKey, LPCWSTR lpValueName)
-extern c fn RegDeleteValueW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
 # C: LONG RegEnumKeyA(HKEY hKey, DWORD dwIndex, LPSTR lpName, DWORD cchName)
 extern c fn RegEnumKeyA(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
@@ -219,54 +162,6 @@ extern c fn RegEnumKeyW(
     dwIndex: std::ffi::c::ULong,
     lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
     cchName: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
-# C: LONG RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
-extern c fn RegEnumKeyExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpName: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
-) -> std::ffi::c::Long
-
-# C: LONG RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPWSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
-extern c fn RegEnumKeyExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
-) -> std::ffi::c::Long
-
-# C: LONG RegEnumValueA(HKEY hKey, DWORD dwIndex, LPSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegEnumValueA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: LONG RegEnumValueW(HKEY hKey, DWORD dwIndex, LPWSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegEnumValueW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: LONG RegFlushKey(HKEY hKey)
@@ -294,15 +189,6 @@ extern c fn RegLoadKeyW(
     lpFile: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::Long
 
-# C: LONG RegNotifyChangeKeyValue(HKEY hKey, WINBOOL bWatchSubtree, DWORD dwNotifyFilter, HANDLE hEvent, WINBOOL fAsynchronous)
-extern c fn RegNotifyChangeKeyValue(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    bWatchSubtree: std::ffi::c::Int,
-    dwNotifyFilter: std::ffi::c::ULong,
-    hEvent: std::ffi::c::Ptr[std::ffi::c::Void],
-    fAsynchronous: std::ffi::c::Int
-) -> std::ffi::c::Long
-
 # C: LONG RegOpenKeyA(HKEY hKey, LPCSTR lpSubKey, PHKEY phkResult)
 extern c fn RegOpenKeyA(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
@@ -315,56 +201,6 @@ extern c fn RegOpenKeyW(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
     phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
-) -> std::ffi::c::Long
-
-# C: LONG RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
-extern c fn RegOpenKeyExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
-    ulOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
-) -> std::ffi::c::Long
-
-# C: LONG RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
-extern c fn RegOpenKeyExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    ulOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
-) -> std::ffi::c::Long
-
-# C: LONG RegQueryInfoKeyA(HKEY hKey, LPSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
-extern c fn RegQueryInfoKeyA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
-) -> std::ffi::c::Long
-
-# C: LONG RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
-extern c fn RegQueryInfoKeyW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
 ) -> std::ffi::c::Long
 
 # C: LONG RegQueryValueA(HKEY hKey, LPCSTR lpSubKey, LPSTR lpData, PLONG lpcbData)
@@ -399,26 +235,6 @@ extern c fn RegQueryMultipleValuesW(
     num_vals: std::ffi::c::ULong,
     lpValueBuf: std::ffi::c::Ptr[std::ffi::c::UShort],
     ldwTotsize: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: LONG RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegQueryValueExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegQueryValueExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: LONG RegReplaceKeyA(HKEY hKey, LPCSTR lpSubKey, LPCSTR lpNewFile, LPCSTR lpOldFile)
@@ -490,26 +306,6 @@ extern c fn RegSetValueW(
     cbData: std::ffi::c::ULong
 ) -> std::ffi::c::Long
 
-# C: LONG RegSetValueExA(HKEY hKey, LPCSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
-extern c fn RegSetValueExA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
-    Reserved: std::ffi::c::ULong,
-    dwType: std::ffi::c::ULong,
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    cbData: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
-# C: LONG RegSetValueExW(HKEY hKey, LPCWSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
-extern c fn RegSetValueExW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    Reserved: std::ffi::c::ULong,
-    dwType: std::ffi::c::ULong,
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    cbData: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
 # C: LONG RegUnLoadKeyA(HKEY hKey, LPCSTR lpSubKey)
 extern c fn RegUnLoadKeyA(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
@@ -520,28 +316,6 @@ extern c fn RegUnLoadKeyA(
 extern c fn RegUnLoadKeyW(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
-# C: LONG RegGetValueA(HKEY hkey, LPCSTR lpSubKey, LPCSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
-extern c fn RegGetValueA(
-    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
-    lpValue: std::ffi::c::Ptr[std::ffi::c::Char],
-    dwFlags: std::ffi::c::ULong,
-    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
-    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: LONG RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
-extern c fn RegGetValueW(
-    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpValue: std::ffi::c::Ptr[std::ffi::c::UShort],
-    dwFlags: std::ffi::c::ULong,
-    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
-    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: WINBOOL InitiateSystemShutdownA(LPSTR lpMachineName, LPSTR lpMessage, DWORD dwTimeout, WINBOOL bForceAppsClosed, WINBOOL bRebootAfterShutdown)
@@ -693,18 +467,6 @@ extern c fn RegDeleteKeyValueW(
     lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::Long
 
-# C: LONG RegDeleteTreeA(HKEY hKey, LPCSTR lpSubKey)
-extern c fn RegDeleteTreeA(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char]
-) -> std::ffi::c::Long
-
-# C: LONG RegDeleteTreeW(HKEY hKey, LPCWSTR lpSubKey)
-extern c fn RegDeleteTreeW(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
 # C: LONG RegLoadAppKeyA(LPCSTR lpFile, PHKEY phkResult, REGSAM samDesired, DWORD dwOptions, DWORD Reserved)
 extern c fn RegLoadAppKeyA(
     lpFile: std::ffi::c::Ptr[std::ffi::c::Char],
@@ -818,6 +580,244 @@ extern c fn CheckForHiberboot(
     bClearFlag: std::ffi::c::UChar
 ) -> std::ffi::c::ULong
 
+# C: LONG RegCloseKey(HKEY hKey)
+extern c fn RegCloseKey(hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__]) -> std::ffi::c::Long
+
+# C: LONG RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved, LPSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
+extern c fn RegCreateKeyExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
+    Reserved: std::ffi::c::ULong,
+    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
+    dwOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
+    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
+extern c fn RegCreateKeyExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    Reserved: std::ffi::c::ULong,
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    dwOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
+    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteKeyExA(HKEY hKey, LPCSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
+extern c fn RegDeleteKeyExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
+    samDesired: std::ffi::c::ULong,
+    Reserved: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteKeyExW(HKEY hKey, LPCWSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
+extern c fn RegDeleteKeyExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    samDesired: std::ffi::c::ULong,
+    Reserved: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteValueA(HKEY hKey, LPCSTR lpValueName)
+extern c fn RegDeleteValueA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteValueW(HKEY hKey, LPCWSTR lpValueName)
+extern c fn RegDeleteValueW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Long
+
+# C: LONG RegEnumKeyExA(HKEY hKey, DWORD dwIndex, LPSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
+extern c fn RegEnumKeyExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpName: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: LONG RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPWSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
+extern c fn RegEnumKeyExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: LONG RegEnumValueA(HKEY hKey, DWORD dwIndex, LPSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegEnumValueA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegEnumValueW(HKEY hKey, DWORD dwIndex, LPWSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegEnumValueW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegGetValueA(HKEY hkey, LPCSTR lpSubKey, LPCSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
+extern c fn RegGetValueA(
+    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpValue: std::ffi::c::Ptr[std::ffi::c::Char],
+    dwFlags: std::ffi::c::ULong,
+    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
+    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
+extern c fn RegGetValueW(
+    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpValue: std::ffi::c::Ptr[std::ffi::c::UShort],
+    dwFlags: std::ffi::c::ULong,
+    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
+    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegNotifyChangeKeyValue(HKEY hKey, WINBOOL bWatchSubtree, DWORD dwNotifyFilter, HANDLE hEvent, WINBOOL fAsynchronous)
+extern c fn RegNotifyChangeKeyValue(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    bWatchSubtree: std::ffi::c::Int,
+    dwNotifyFilter: std::ffi::c::ULong,
+    hEvent: std::ffi::c::Ptr[std::ffi::c::Void],
+    fAsynchronous: std::ffi::c::Int
+) -> std::ffi::c::Long
+
+# C: LONG RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
+extern c fn RegOpenKeyExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char],
+    ulOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
+) -> std::ffi::c::Long
+
+# C: LONG RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
+extern c fn RegOpenKeyExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    ulOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
+) -> std::ffi::c::Long
+
+# C: LONG RegQueryInfoKeyA(HKEY hKey, LPSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
+extern c fn RegQueryInfoKeyA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: LONG RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
+extern c fn RegQueryInfoKeyW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: LONG RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegQueryValueExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegQueryValueExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: LONG RegSetValueExA(HKEY hKey, LPCSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
+extern c fn RegSetValueExA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::Char],
+    Reserved: std::ffi::c::ULong,
+    dwType: std::ffi::c::ULong,
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    cbData: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: LONG RegSetValueExW(HKEY hKey, LPCWSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
+extern c fn RegSetValueExW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    Reserved: std::ffi::c::ULong,
+    dwType: std::ffi::c::ULong,
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    cbData: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteTreeA(HKEY hKey, LPCSTR lpSubKey)
+extern c fn RegDeleteTreeA(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::Char]
+) -> std::ffi::c::Long
+
+# C: LONG RegDeleteTreeW(HKEY hKey, LPCWSTR lpSubKey)
+extern c fn RegDeleteTreeW(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Long
+
 # C: RegConnectRegistry: an alias of RegConnectRegistryW, LONG RegConnectRegistryW(LPCWSTR lpMachineName, HKEY hKey, PHKEY phkResult)
 extern c fn RegConnectRegistry named "RegConnectRegistryW"(
     lpMachineName: std::ffi::c::Ptr[std::ffi::c::UShort],
@@ -840,37 +840,10 @@ extern c fn RegCreateKey named "RegCreateKeyW"(
     phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
 ) -> std::ffi::c::Long
 
-# C: RegCreateKeyEx: an alias of RegCreateKeyExW, LONG RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
-extern c fn RegCreateKeyEx named "RegCreateKeyExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    Reserved: std::ffi::c::ULong,
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    dwOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
-    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
 # C: RegDeleteKey: an alias of RegDeleteKeyW, LONG RegDeleteKeyW(HKEY hKey, LPCWSTR lpSubKey)
 extern c fn RegDeleteKey named "RegDeleteKeyW"(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
-# C: RegDeleteKeyEx: an alias of RegDeleteKeyExW, LONG RegDeleteKeyExW(HKEY hKey, LPCWSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
-extern c fn RegDeleteKeyEx named "RegDeleteKeyExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    samDesired: std::ffi::c::ULong,
-    Reserved: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
-# C: RegDeleteValue: an alias of RegDeleteValueW, LONG RegDeleteValueW(HKEY hKey, LPCWSTR lpValueName)
-extern c fn RegDeleteValue named "RegDeleteValueW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::Long
 
 # C: RegEnumKey: an alias of RegEnumKeyW, LONG RegEnumKeyW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, DWORD cchName)
@@ -879,30 +852,6 @@ extern c fn RegEnumKey named "RegEnumKeyW"(
     dwIndex: std::ffi::c::ULong,
     lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
     cchName: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
-# C: RegEnumKeyEx: an alias of RegEnumKeyExW, LONG RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPWSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
-extern c fn RegEnumKeyEx named "RegEnumKeyExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
-) -> std::ffi::c::Long
-
-# C: RegEnumValue: an alias of RegEnumValueW, LONG RegEnumValueW(HKEY hKey, DWORD dwIndex, LPWSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegEnumValue named "RegEnumValueW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    dwIndex: std::ffi::c::ULong,
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: RegLoadKey: an alias of RegLoadKeyW, LONG RegLoadKeyW(HKEY hKey, LPCWSTR lpSubKey, LPCWSTR lpFile)
@@ -917,31 +866,6 @@ extern c fn RegOpenKey named "RegOpenKeyW"(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
     phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
-) -> std::ffi::c::Long
-
-# C: RegOpenKeyEx: an alias of RegOpenKeyExW, LONG RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
-extern c fn RegOpenKeyEx named "RegOpenKeyExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    ulOptions: std::ffi::c::ULong,
-    samDesired: std::ffi::c::ULong,
-    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
-) -> std::ffi::c::Long
-
-# C: RegQueryInfoKey: an alias of RegQueryInfoKeyW, LONG RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
-extern c fn RegQueryInfoKey named "RegQueryInfoKeyW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
 ) -> std::ffi::c::Long
 
 # C: RegQueryValue: an alias of RegQueryValueW, LONG RegQueryValueW(HKEY hKey, LPCWSTR lpSubKey, LPWSTR lpData, PLONG lpcbData)
@@ -959,16 +883,6 @@ extern c fn RegQueryMultipleValues named "RegQueryMultipleValuesW"(
     num_vals: std::ffi::c::ULong,
     lpValueBuf: std::ffi::c::Ptr[std::ffi::c::UShort],
     ldwTotsize: std::ffi::c::Ptr[std::ffi::c::ULong]
-) -> std::ffi::c::Long
-
-# C: RegQueryValueEx: an alias of RegQueryValueExW, LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
-extern c fn RegQueryValueEx named "RegQueryValueExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: RegReplaceKey: an alias of RegReplaceKeyW, LONG RegReplaceKeyW(HKEY hKey, LPCWSTR lpSubKey, LPCWSTR lpNewFile, LPCWSTR lpOldFile)
@@ -1002,31 +916,10 @@ extern c fn RegSetValue named "RegSetValueW"(
     cbData: std::ffi::c::ULong
 ) -> std::ffi::c::Long
 
-# C: RegSetValueEx: an alias of RegSetValueExW, LONG RegSetValueExW(HKEY hKey, LPCWSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
-extern c fn RegSetValueEx named "RegSetValueExW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
-    Reserved: std::ffi::c::ULong,
-    dwType: std::ffi::c::ULong,
-    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
-    cbData: std::ffi::c::ULong
-) -> std::ffi::c::Long
-
 # C: RegUnLoadKey: an alias of RegUnLoadKeyW, LONG RegUnLoadKeyW(HKEY hKey, LPCWSTR lpSubKey)
 extern c fn RegUnLoadKey named "RegUnLoadKeyW"(
     hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
     lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
-# C: RegGetValue: an alias of RegGetValueW, LONG RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
-extern c fn RegGetValue named "RegGetValueW"(
-    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
-    lpValue: std::ffi::c::Ptr[std::ffi::c::UShort],
-    dwFlags: std::ffi::c::ULong,
-    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
-    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
-    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
 ) -> std::ffi::c::Long
 
 # C: InitiateSystemShutdown: an alias of InitiateSystemShutdownW, WINBOOL InitiateSystemShutdownW(LPWSTR lpMachineName, LPWSTR lpMessage, DWORD dwTimeout, WINBOOL bForceAppsClosed, WINBOOL bRebootAfterShutdown)
@@ -1100,12 +993,6 @@ extern c fn RegDeleteKeyValue named "RegDeleteKeyValueW"(
     lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
 ) -> std::ffi::c::Long
 
-# C: RegDeleteTree: an alias of RegDeleteTreeW, LONG RegDeleteTreeW(HKEY hKey, LPCWSTR lpSubKey)
-extern c fn RegDeleteTree named "RegDeleteTreeW"(
-    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
-    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
-) -> std::ffi::c::Long
-
 # C: RegLoadAppKey: an alias of RegLoadAppKeyW, LONG RegLoadAppKeyW(LPCWSTR lpFile, PHKEY phkResult, REGSAM samDesired, DWORD dwOptions, DWORD Reserved)
 extern c fn RegLoadAppKey named "RegLoadAppKeyW"(
     lpFile: std::ffi::c::Ptr[std::ffi::c::UShort],
@@ -1155,3 +1042,116 @@ extern c fn InitiateShutdown named "InitiateShutdownW"(
     dwShutdownFlags: std::ffi::c::ULong,
     dwReason: std::ffi::c::ULong
 ) -> std::ffi::c::ULong
+
+# C: RegCreateKeyEx: an alias of RegCreateKeyExW, LONG RegCreateKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD Reserved, LPWSTR lpClass, DWORD dwOptions, REGSAM samDesired, LPSECURITY_ATTRIBUTES lpSecurityAttributes, PHKEY phkResult, LPDWORD lpdwDisposition)
+extern c fn RegCreateKeyEx named "RegCreateKeyExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    Reserved: std::ffi::c::ULong,
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    dwOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    lpSecurityAttributes: std::ffi::c::Ptr[win32::ctypes::SECURITY_ATTRIBUTES],
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]],
+    lpdwDisposition: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: RegDeleteKeyEx: an alias of RegDeleteKeyExW, LONG RegDeleteKeyExW(HKEY hKey, LPCWSTR lpSubKey, REGSAM samDesired, DWORD Reserved)
+extern c fn RegDeleteKeyEx named "RegDeleteKeyExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    samDesired: std::ffi::c::ULong,
+    Reserved: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: RegDeleteValue: an alias of RegDeleteValueW, LONG RegDeleteValueW(HKEY hKey, LPCWSTR lpValueName)
+extern c fn RegDeleteValue named "RegDeleteValueW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Long
+
+# C: RegEnumKeyEx: an alias of RegEnumKeyExW, LONG RegEnumKeyExW(HKEY hKey, DWORD dwIndex, LPWSTR lpName, LPDWORD lpcchName, LPDWORD lpReserved, LPWSTR lpClass, LPDWORD lpcchClass, PFILETIME lpftLastWriteTime)
+extern c fn RegEnumKeyEx named "RegEnumKeyExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: RegEnumValue: an alias of RegEnumValueW, LONG RegEnumValueW(HKEY hKey, DWORD dwIndex, LPWSTR lpValueName, LPDWORD lpcchValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegEnumValue named "RegEnumValueW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    dwIndex: std::ffi::c::ULong,
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchValueName: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: RegGetValue: an alias of RegGetValueW, LONG RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DWORD dwFlags, LPDWORD pdwType, PVOID pvData, LPDWORD pcbData)
+extern c fn RegGetValue named "RegGetValueW"(
+    hkey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpValue: std::ffi::c::Ptr[std::ffi::c::UShort],
+    dwFlags: std::ffi::c::ULong,
+    pdwType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    pvData: std::ffi::c::Ptr[std::ffi::c::Void],
+    pcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: RegOpenKeyEx: an alias of RegOpenKeyExW, LONG RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
+extern c fn RegOpenKeyEx named "RegOpenKeyExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort],
+    ulOptions: std::ffi::c::ULong,
+    samDesired: std::ffi::c::ULong,
+    phkResult: std::ffi::c::Ptr[std::ffi::c::Ptr[win32::ctypes::HKEY__]]
+) -> std::ffi::c::Long
+
+# C: RegQueryInfoKey: an alias of RegQueryInfoKeyW, LONG RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClass, LPDWORD lpReserved, LPDWORD lpcSubKeys, LPDWORD lpcbMaxSubKeyLen, LPDWORD lpcbMaxClassLen, LPDWORD lpcValues, LPDWORD lpcbMaxValueNameLen, LPDWORD lpcbMaxValueLen, LPDWORD lpcbSecurityDescriptor, PFILETIME lpftLastWriteTime)
+extern c fn RegQueryInfoKey named "RegQueryInfoKeyW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpClass: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpcchClass: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcSubKeys: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxSubKeyLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxClassLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcValues: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueNameLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbMaxValueLen: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpcbSecurityDescriptor: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpftLastWriteTime: std::ffi::c::Ptr[win32::ctypes::FILETIME]
+) -> std::ffi::c::Long
+
+# C: RegQueryValueEx: an alias of RegQueryValueExW, LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE lpData, LPDWORD lpcbData)
+extern c fn RegQueryValueEx named "RegQueryValueExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    lpReserved: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpType: std::ffi::c::Ptr[std::ffi::c::ULong],
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    lpcbData: std::ffi::c::Ptr[std::ffi::c::ULong]
+) -> std::ffi::c::Long
+
+# C: RegSetValueEx: an alias of RegSetValueExW, LONG RegSetValueExW(HKEY hKey, LPCWSTR lpValueName, DWORD Reserved, DWORD dwType, const BYTE *lpData, DWORD cbData)
+extern c fn RegSetValueEx named "RegSetValueExW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpValueName: std::ffi::c::Ptr[std::ffi::c::UShort],
+    Reserved: std::ffi::c::ULong,
+    dwType: std::ffi::c::ULong,
+    lpData: std::ffi::c::Ptr[std::ffi::c::UChar],
+    cbData: std::ffi::c::ULong
+) -> std::ffi::c::Long
+
+# C: RegDeleteTree: an alias of RegDeleteTreeW, LONG RegDeleteTreeW(HKEY hKey, LPCWSTR lpSubKey)
+extern c fn RegDeleteTree named "RegDeleteTreeW"(
+    hKey: std::ffi::c::Ptr[win32::ctypes::HKEY__],
+    lpSubKey: std::ffi::c::Ptr[std::ffi::c::UShort]
+) -> std::ffi::c::Long
