@@ -130,7 +130,16 @@ comparing each full report against the Linux AOT expectations
 has: Tcl 9.0 (`%LOCALAPPDATA%\Apps\Tcl90`), cargo, and the Windows SDK
 link that rustc finds by itself; it builds nothing of the compiler.
 
-Result: JSON3-WINDOWS
+Result: **Windows support is insufficient for this target -- skipped,
+per the campaign's own rule** (do not implement anything to close the
+gap). The replay script runs end to end (toolchain checks, driver
+build, emission) and the Windows executable reports the platform's own
+clean refusal: *native coroutines need stack switching, implemented for
+Linux x86-64 and AArch64 and macOS AArch64 only* (`NATIVE UNSUPPORTED
+value`) -- the JSON recognizer stack is coroutine-built throughout, and
+the coroutines milestone has not reached windows-x86_64. The script and
+expectations stay committed and ready: the moment native coroutines
+land on Windows, `fuzz\windows\replay-json.ps1` is the cross-OS oracle.
 
 ## 6. Required questions
 
@@ -165,8 +174,10 @@ Result: JSON3-WINDOWS
 
 * No JSON emitter exists; emission fuzzing waits for one (a product
   decision, not recorded here as a gap of the campaign).
-* The Windows side is replay-only; a coverage-feedback Windows fuzzer
-  would need an instrumentation story there (out of scope).
+* The Windows side is replay-only **and currently refused by the
+  platform** (no native coroutines on windows-x86_64 yet); the script
+  stands ready for when they land. A coverage-feedback Windows fuzzer
+  would additionally need an instrumentation story there (out of scope).
 * by_hand/composition recognizers are reachable only through their own
   golden suites; argv drivers for them would be new fuzz programs
   (future work, same pattern as fuzz/programs/).
