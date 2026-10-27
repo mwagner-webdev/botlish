@@ -1,0 +1,51 @@
+# Coroutines the native backend's fusion keeps on the general runtime
+# (COROUTINE-FUSION-MILESTONE-1.md, "Fallback"): a handle passed to another
+# function, and a recursive yielding function. Each is a coroutine object
+# with a stack of its own, switched to and from at every resume and yield,
+# its suspended frames -- holding the structs it made -- walked by the
+# collector (under GC stress in single/macos/compare.sh). coroutine.bot is
+# the fused case. (MACOS-AARCH64-MILESTONE-9.md's acceptance programs.)
+
+struct Ev:
+    n: int
+    label: str
+
+fn counting(limit: int) -> Ev:
+    loop i from 0 to limit:
+        yield Ev {n: i * i, label: "step"}
+    return Ev {n: -1, label: "done"}
+
+# The handle is an argument: drain owns it, so the function that made it
+# does not see every use of it.
+fn drain(h: Coroutine{args: [], return: Ev, errors: []}) -> List[int]:
+    a = h()
+    b = h()
+    c = h()
+    [a.n, b.n, c.n]
+
+fn passed() -> list:
+    coroutine {step, first} = counting(3)
+    [first.n, drain(step)]
+
+# A recursive yielding function: as many suspended frames as the recursion
+# is deep.
+fn leaves(depth: int, at: int) -> unit:
+    if depth == 0:
+        yield Ev {n: at, label: "leaf"}
+        return unit
+    leaves(depth - 1, 2 * at)
+    leaves(depth - 1, 2 * at + 1)
+
+fn walk() -> Ev:
+    leaves(2, 1)
+    Ev {n: -1, label: "done"}
+
+fn tree() -> List[int]:
+    coroutine {step, first} = walk()
+    a = step()
+    b = step()
+    c = step()
+    d = step()
+    [first.n, a.n, b.n, c.n, d.n]
+
+[passed(), tree()]

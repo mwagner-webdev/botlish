@@ -30,7 +30,8 @@
 #                 user gave it, whatever Tcl started in); an interrupt
 #                 (SIGINT to the process group, as a terminal's) of the
 #                 language server leaves no process behind
-#   concurrency   concurrent runs, links and language servers in one HOME
+#   concurrency   four concurrent native runs (coroutines on their own stacks)
+#                 and links in one HOME (two language servers at once: cache)
 #   cache         the language server's copy of the standard library in
 #                 ~/Library/Caches/botlish (a HOME with spaces and
 #                 non-ASCII characters), BOTLISH_CACHE_DIR, reused when
@@ -43,8 +44,9 @@
 #                 reason to install Tcl, Rust or Cargo
 #   executables   a standalone Mach-O: arm64, LC_MAIN, only the system's
 #                 libraries, no LC_RPATH, no reference to the application,
-#                 run with the
-#                 application gone, its arguments and status
+#                 run with the application gone (coroutines fused and kept
+#                 on the general runtime, also under GC stress), its
+#                 arguments and status
 #   darwin-io     examples/io/hello-darwin.bot: checked, its context selected
 #                 statically (NIR), linked against libSystem, run
 #
@@ -206,17 +208,17 @@ section concurrency
 pids=""
 for i in 1 2 3 4; do
   mkdir -p "$work/c$i"
-  cp coroutine.bot hello-darwin.bot "$work/c$i/"
-  (cd "$work/c$i" && bl "$app" -backend cranelift coroutine.bot >run.out 2>&1 &&
+  cp coroutine-kept.bot hello-darwin.bot "$work/c$i/"
+  (cd "$work/c$i" && bl "$app" -backend cranelift coroutine-kept.bot >run.out 2>&1 &&
      bl "$app" -warnings off -emit-native-executable hello-darwin.bot >emit.out 2>&1) &
   pids="$pids $!"
 done
 for pid in $pids; do wait "$pid" || fail "a concurrent run failed"; done
 for i in 1 2 3 4; do
-  grep -q 'value: \[0, 1, 4, -1\]' "$work/c$i/run.out" || fail "concurrent run $i: $(cat "$work/c$i/run.out")"
+  grep -qF 'value: [[0, [1, 4, -1]], [4, 5, 6, 7, -1]]' "$work/c$i/run.out" || fail "concurrent run $i: $(cat "$work/c$i/run.out")"
   [[ $(env -i "$work/c$i/hello-darwin") == $'Hello, world!\nunit' ]] || fail "concurrent link $i"
 done
-echo "   four concurrent native runs and links: ok"
+echo "   four concurrent native runs (coroutines on their own stacks) and links: ok"
 
 # --- cache ----------------------------------------------------------------------
 section cache
@@ -369,11 +371,11 @@ echo "   no C compiler driver (BOTLISH_NATIVE_SYSTEM_LINKER=/nonexistent/cc): NA
 section executables
 builder=$(copy_app "$work/builder")
 mkdir -p "$work/exe"
-cp coroutine.bot context.bot overflow.bot args.bot "$work/exe/"
-for program in coroutine context overflow args; do
+cp coroutine.bot coroutine-kept.bot context.bot overflow.bot args.bot "$work/exe/"
+for program in coroutine coroutine-kept context overflow args; do
   (cd "$work/exe" && bl "$builder" -warnings off -emit-native-executable "$program.bot" >/dev/null) || fail "emit $program"
 done
-for program in coroutine context overflow args; do
+for program in coroutine coroutine-kept context overflow args; do
   exe="$work/exe/$program"
   file "$exe" | grep -q 'Mach-O 64-bit executable arm64' || fail "$program: $(file "$exe")"
   otool -l "$exe" | grep -q 'cmd LC_MAIN' || fail "$program has no LC_MAIN entry point"
@@ -387,12 +389,16 @@ rm -rf "$work/builder"
 cd /
 [[ $(env -i "$work/exe/coroutine") == '[0, 1, 4, -1]' ]] || fail "coroutine: $(env -i "$work/exe/coroutine")"
 [[ $(env -i BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine") == '[0, 1, 4, -1]' ]] || fail "coroutine under GC stress"
+# (Kept on the general runtime: coroutine objects, their own stacks.)
+kept='[[0, [1, 4, -1]], [4, 5, 6, 7, -1]]'
+[[ $(env -i "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept: $(env -i "$work/exe/coroutine-kept")"
+[[ $(env -i BOTLISH_NATIVE_GC_STRESS=1 "$work/exe/coroutine-kept") == "$kept" ]] || fail "coroutine-kept under GC stress"
 [[ $(env -i "$work/exe/context") == '[3, 42, -6]' ]] || fail "context: $(env -i "$work/exe/context")"
 [[ $(env -i "$work/exe/args" a 'b c' ü) == *'"a", "b c", "ü"]' ]] || fail "args: $(env -i "$work/exe/args" a 'b c' ü)"
 status=0; env -i "$work/exe/overflow" >"$work/exe.out" 2>&1 || status=$?
 [[ $status == 1 ]] && grep -q 'NATIVE LIMIT STACK' "$work/exe.out" || fail "overflow: status $status, $(cat "$work/exe.out")"
 cd "$work/p"
-echo "   arm64 Mach-O, LC_MAIN, system libraries only, run with the application deleted (also under GC stress), arguments, statuses: ok"
+echo "   arm64 Mach-O, LC_MAIN, system libraries only, run with the application deleted (coroutines fused and kept, also under GC stress), arguments, statuses: ok"
 
 # --- darwin-io ------------------------------------------------------------------
 section darwin-io

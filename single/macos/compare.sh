@@ -15,8 +15,9 @@
 # text is wrapped to a width, line breaks and runs of spaces too. Compared:
 #
 #   * every backend's run of the sample programs (examples/surface,
-#     examples/stdlib) and audit/macos-app/programs (coroutines, closures, a
-#     context, a native stack overflow), the native ones also under
+#     examples/stdlib) and audit/macos-app/programs (a coroutine fusion
+#     compiles into its function, two it keeps on the general runtime,
+#     closures, a context, a native stack overflow), the native ones also under
 #     BOTLISH_NATIVE_GC_STRESS=1; the 2048 benchmark on cranelift;
 #     examples/io/hello-darwin.bot (Darwin IO: a linked run) on both native
 #     backends;
@@ -26,7 +27,7 @@
 #     checked (-check); Compilerpedia's every topic listed (-help all);
 #   * -emit-nir of three programs; -help (Compilerpedia: its indices and
 #     five pages) and the usage summary;
-#   * standalone executables of four programs, linked by each (the system
+#   * standalone executables of five programs, linked by each (the system
 #     linker): their output, status and startup report
 #     (BOTLISH_NATIVE_STARTUP_REPORT), plainly and under GC stress.
 #
@@ -89,7 +90,7 @@ for backend in interp compile cranelift cranelift-generic; do
   done
 done
 echo "   the samples on every backend: $compared runs alike"
-for program in coroutine.bot closures.bot context.bot overflow.bot; do
+for program in coroutine.bot coroutine-kept.bot closures.bot context.bot overflow.bot; do
   for backend in interp compile cranelift cranelift-generic; do
     [[ $program == overflow.bot && $backend != cranelift* ]] && continue
     both 0 "$program on $backend" -backend "$backend" "$program"
@@ -151,7 +152,7 @@ echo "   diagnostics, -check, NIR, Compilerpedia and the usage: $compared runs a
 
 # Executables: each compiler links its own; outputs, statuses and startup
 # reports must agree.
-for program in coroutine.bot context.bot hello-darwin.bot overflow.bot; do
+for program in coroutine.bot coroutine-kept.bot context.bot hello-darwin.bot overflow.bot; do
   name=${program%.bot}
   env -i HOME="$work/home" PATH=/usr/bin:/bin LANG=en_US.UTF-8 BOTLISH_NATIVE_LINKER=system \
     "$tclsh" "$root/main.tcl" -warnings off -emit-native-executable "$program" >/dev/null || fail "the checkout cannot link $program"
