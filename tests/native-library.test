@@ -16,6 +16,10 @@
 #     through C), instances on four threads at once; a coroutine run inside a
 #     call (the general runtime's stacks under the call's walk); the walk's
 #     boundary (a call's collections never read the frames above it);
+#   * stack safety: Botlish recursion that would exhaust the caller's stack
+#     (the main thread's, a 512 KiB or 1 MiB thread's) or a coroutine's is
+#     NATIVE LIMIT STACK and the instance goes on; a call on a stack the
+#     instance did not make is not checked against the thread's;
 #   * two independently compiled libraries in one executable, alternating,
 #     allocating, failing, under GC stress; one called from inside the
 #     other's call; their symbols;
@@ -673,6 +677,187 @@ int main(void) {
 " [list [dict get $built static]]]
     nlRunBoth $exe
 } -result {200 calls: 39800; chain(3000) = 6000}
+
+# Stack safety (NATIVE-LIBRARY-MILESTONE-1.md, "Stack safety"): a library
+# installs no stack guard in its host, so its functions check their stack
+# pointer (codegen::clif's prologue_stack_limit). Recursion that would exhaust
+# the calling thread's stack -- the main thread's, or a small thread's such as
+# a React Native JS thread (512 KiB) -- fails with the runtime error NATIVE
+# LIMIT STACK, and the instance answers the next call.
+set ::nlDepth {
+fn down(n: int) -> int:
+    if n <= 0:
+        return 0
+    down(n - 1) + 1
+
+exported c fn depth(n: int) -> int:
+    down(n)
+}
+
+test nl-stack-safety {exhausting a thread's stack is NATIVE LIMIT STACK, never the end of the process; the instance goes on} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir st $::nlDepth]
+    set exe [nlExecutable $dir "[nlPrelude st]
+#include <pthread.h>
+static void probe(const char *where) {
+    st_instance *in; st_error *e = NULL; int64_t r = -1; int32_t s;
+    check(\"create\", st_create(&in, &e), &e);
+    s = st_depth(in, 2000, &r, &e);
+    printf(\"%s: depth(2000) status %d = %lld\\n\", where, (int) s, (long long) r);
+    s = st_depth(in, 100000000, &r, &e);
+    report(where, s, &e);
+    s = st_depth(in, 1000, &r, &e);
+    printf(\"%s: then depth(1000) status %d = %lld\\n\", where, (int) s, (long long) r);
+    check(\"destroy\", st_destroy(in), NULL);
+}
+static void *thread(void *where) { probe(where); return NULL; }
+int main(void) {
+    probe(\"main thread\");
+    size_t sizes\[\] = {512 * 1024, 1024 * 1024};
+    const char *names\[\] = {\"512 KiB thread\", \"1 MiB thread\"};
+    for (int i = 0; i < 2; i++) {
+        pthread_attr_t attr; pthread_t t;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, sizes\[i\]);
+        pthread_create(&t, &attr, thread, (void *) names\[i\]);
+        pthread_join(t, NULL);
+    }
+    return 0;
+}
+" [list [dict get $built static]] -pthread]
+    nlRunBoth $exe
+} -result {main thread: depth(2000) status 0 = 2000
+main thread: status 2 NATIVE LIMIT STACK
+main thread: then depth(1000) status 0 = 1000
+512 KiB thread: depth(2000) status 0 = 2000
+512 KiB thread: status 2 NATIVE LIMIT STACK
+512 KiB thread: then depth(1000) status 0 = 1000
+1 MiB thread: depth(2000) status 0 = 2000
+1 MiB thread: status 2 NATIVE LIMIT STACK
+1 MiB thread: then depth(1000) status 0 = 1000}
+
+# The same inside a coroutine, whose body runs on the coroutine's own stack
+# (8 MiB by default) and is bounded by it: the check's limit follows every
+# switch (Vm::publish_active_stack). `in_coroutine` hands its handle to
+# another function, so its coroutine keeps the general runtime and really
+# runs on a coroutine stack (codegen::fusion); the call runs on a 512 KiB
+# thread, where `depth(50000)` cannot run, so `in_coroutine(50000)`
+# succeeding shows the coroutine's stack bounding it. `fused` resumes its
+# coroutine in place, which fusion inlines into it, on the thread's stack --
+# and a library with a fused coroutine keeps its other exports' code
+# (`depth`; codegen::fusion's drop_unreferenced).
+test nl-stack-safety-coroutine {recursion on a coroutine's stack inside a call is bounded by that stack, not the thread's} -constraints {nativeLibraries nativeCoroutines} -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir sc "$::nlDepth
+struct Go:
+    extra: int
+
+fn later(n: int, resume Go) -> int:
+    go = yield 0
+    down(n + go.extra)
+
+fn resume_with(step: Coroutine{args: \[Go\], return: int}, extra: int) -> int:
+    step(Go {extra: extra})
+
+exported c fn in_coroutine(n: int) -> int:
+    coroutine {step, first} = later(n)
+    resume_with(step, first)
+
+exported c fn fused(n: int) -> int:
+    coroutine {step, first} = later(n)
+    step(Go {extra: first})
+"]
+    set exe [nlExecutable $dir "[nlPrelude sc]
+#include <pthread.h>
+static void call(sc_instance *in, const char *name, int64_t n) {
+    sc_error *e = NULL; int64_t r = -1; int32_t s;
+    if (name\[0\] == 'd') s = sc_depth(in, n, &r, &e);
+    else if (name\[0\] == 'i') s = sc_in_coroutine(in, n, &r, &e);
+    else s = sc_fused(in, n, &r, &e);
+    char what\[64\];
+    snprintf(what, sizeof what, \"%s(%lld)\", name, (long long) n);
+    if (s != sc_STATUS_OK) report(what, s, &e);
+    else printf(\"%s = %lld\\n\", what, (long long) r);
+}
+static void *thread(void *unused) {
+    sc_instance *in; sc_error *e = NULL;
+    (void) unused;
+    check(\"create\", sc_create(&in, &e), &e);
+    call(in, \"depth\", 3000);
+    call(in, \"depth\", 50000);
+    call(in, \"in_coroutine\", 50000);
+    call(in, \"in_coroutine\", 100000000);
+    call(in, \"fused\", 3000);
+    call(in, \"fused\", 50000);
+    call(in, \"in_coroutine\", 500);
+    call(in, \"depth\", 1000);
+    check(\"destroy\", sc_destroy(in), NULL);
+    return NULL;
+}
+int main(void) {
+    pthread_attr_t attr; pthread_t t;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 512 * 1024);
+    pthread_create(&t, &attr, thread, NULL);
+    pthread_join(t, NULL);
+    return 0;
+}
+" [list [dict get $built static]] -pthread]
+    nlRunBoth $exe
+} -result {depth(3000) = 3000
+depth(50000): status 2 NATIVE LIMIT STACK
+in_coroutine(50000) = 50000
+in_coroutine(100000000): status 2 NATIVE LIMIT STACK
+fused(3000) = 3000
+fused(50000): status 2 NATIVE LIMIT STACK
+in_coroutine(500) = 500
+depth(1000) = 1000}
+
+# A call made on a stack the instance did not make -- a host's own coroutine
+# or fiber stack, here a ucontext on mapped memory -- has no limit of ours
+# (Vm::stack_limit_at): it is never checked against the thread's stack, which
+# would fail every call there. The thread's limit is back for the next call.
+test nl-stack-safety-foreign-stack {a call on a host-made stack is not checked against the thread's limit; the next call on the thread is} -constraints nativeLibraries -body {
+    set dir [nlDir]
+    set built [nlLibrary $dir fs $::nlDepth]
+    set exe [nlExecutable $dir "[nlPrelude fs]
+#include <sys/mman.h>
+#include <ucontext.h>
+static fs_instance *in;
+static ucontext_t back, there;
+static void call(const char *where, int64_t n) {
+    fs_error *e = NULL; int64_t r = -1;
+    int32_t s = fs_depth(in, n, &r, &e);
+    char what\[64\];
+    snprintf(what, sizeof what, \"%s: depth(%lld)\", where, (long long) n);
+    if (s != fs_STATUS_OK) report(what, s, &e);
+    else printf(\"%s = %lld\\n\", what, (long long) r);
+}
+static void on_foreign_stack(void) { call(\"host stack\", 2000); }
+int main(void) {
+    fs_error *e = NULL;
+    check(\"create\", fs_create(&in, &e), &e);
+    size_t size = 1024 * 1024;
+    void *stack = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+    if (stack == MAP_FAILED) return 1;
+    getcontext(&there);
+    there.uc_stack.ss_sp = stack;
+    there.uc_stack.ss_size = size;
+    there.uc_link = &back;
+    makecontext(&there, on_foreign_stack, 0);
+    swapcontext(&back, &there);
+    call(\"thread\", 2000);
+    call(\"thread\", 100000000);
+    call(\"thread\", 1000);
+    check(\"destroy\", fs_destroy(in), NULL);
+    return 0;
+}
+" [list [dict get $built static]]]
+    nlRunBoth $exe
+} -result {host stack: depth(2000) = 2000
+thread: depth(2000) = 2000
+thread: depth(100000000): status 2 NATIVE LIMIT STACK
+thread: depth(1000) = 1000}
 
 # The walk's boundary (Vm::stack_ceiling): a call's collections walk its own
 # frames, never the frames above it. Instance `first`'s export holds a

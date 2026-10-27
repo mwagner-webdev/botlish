@@ -1921,6 +1921,13 @@ pub struct Program {
     /// Kept so a pass that rewrites functions (codegen::fusion) can settle
     /// the summaries again (`resummarize`).
     pub call_effects: bool,
+    /// Whether every function that makes a Botlish call checks its stack
+    /// pointer against the Vm's stack limit and fails with NATIVE LIMIT
+    /// STACK (`check_stack_limit`): a native library's program, whose host
+    /// runs no stack guard of ours (NATIVE-LIBRARY-MILESTONE-1.md, "Stack
+    /// safety"). The NIR text never says so: the driver decides it when it
+    /// emits a library.
+    pub stack_limit_checked: bool,
 }
 
 #[derive(Debug)]
@@ -2076,6 +2083,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         exports: Vec::new(),
         errors: Vec::new(),
         call_effects: true,
+        stack_limit_checked: false,
     };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
@@ -2203,6 +2211,15 @@ pub fn resummarize(program: &mut Program) {
     summarize_call_effects(program, enabled);
 }
 
+/// Makes PROGRAM a native library's: every function that makes a Botlish
+/// call checks its stack pointer in its prologue (codegen::roots's
+/// `stack_check`), so such a call can fail with NATIVE LIMIT STACK and its
+/// callers check it (the effect summaries settled again).
+pub fn check_stack_limit(program: &mut Program) {
+    program.stack_limit_checked = true;
+    resummarize(program);
+}
+
 fn summarize_call_effects(program: &mut Program, enabled: bool) {
     let n = program.functions.len();
     let mut local = vec![(false, false); n];
@@ -2212,8 +2229,12 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
     // callers must check: wherever native frames hold the roots the stack
     // guard ends an exhausted run instead, and no call fails for it.
     let depth_checked = crate::runtime::native_stack::depth_checked(crate::runtime::framewalk::NATIVE_FRAME_ROOTS);
+    // A native library's functions check their stack pointer instead
+    // (`check_stack_limit`; codegen::roots's `stack_check`): the same
+    // failure from the same functions.
+    let stack_checked = program.stack_limit_checked && crate::runtime::framewalk::NATIVE_FRAME_ROOTS;
     for (i, f) in program.functions.iter().enumerate() {
-        local[i].0 = depth_checked && f.has_botlish_call();
+        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
         for inst in &f.body {
             match inst {
                 Inst::Guard { .. } | Inst::GuardBool { .. }

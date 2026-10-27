@@ -217,8 +217,14 @@ pub fn fuse(program: &mut Program) -> Vec<SiteReport> {
 fn drop_unreferenced(program: &mut Program) {
     let n = program.functions.len();
     let mut reached = vec![false; n];
+    // The program function, and a native library's exports: the C host
+    // calls those through the library's export table, which no instruction
+    // refers to (NATIVE-LIBRARY-MILESTONE-1.md).
     let mut work = vec![0usize];
-    reached[0] = true;
+    work.extend(program.exports.iter().map(|e| e.func as usize));
+    for &i in &work {
+        reached[i] = true;
+    }
     while let Some(i) = work.pop() {
         for inst in &program.functions[i].body {
             let target = match inst {
@@ -1164,6 +1170,21 @@ mod tests {
         // It runs without the coroutine runtime: no stack, no switch (the
         // general program's value is the same, tests/coroutine-fusion.test).
         assert_eq!(run(&program), crate::runtime::value::make_small(44));
+    }
+
+    /// A native library's export is called through its export table, which
+    /// no instruction refers to: fusing a coroutine elsewhere in the program
+    /// keeps its code (an emptied export failed every call with
+    /// "native code reached a point HIR proved unreachable").
+    #[test]
+    fn a_library_export_keeps_its_code_when_a_coroutine_is_fused() {
+        let text = program("", "").replacen("\n\n", "\nexport \"lib_twice\" func=5 params=\"int\" result=int\n\n", 1)
+            + "func 5 \"twice\" params=1 env=0 regs=2 pnames=\"n\" captures=0\n    %1 = op iadd %0 %0\n    ret %1\nend\n";
+        let mut program = nir::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        let reports = fuse(&mut program);
+        assert!(reports[0].outcome.is_ok());
+        assert!(matches!(program.functions[1].body[..], [Inst::Unreachable]));
+        assert_eq!(program.functions[5].body.len(), 2);
     }
 
     #[test]

@@ -249,9 +249,15 @@ type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 #[inline(never)]
 fn enter(vm: &mut Vm, f: impl FnOnce(&mut Vm) -> Value) -> Value {
     let outer = vm.stack_ceiling;
-    vm.stack_ceiling = super::framewalk::frame_record();
+    let outer_limit = vm.stack_limit;
+    let frame = super::framewalk::frame_record();
+    vm.stack_ceiling = frame;
+    // The call's own stack bounds its recursion: the thread's, or none on a
+    // stack this instance did not make (Vm::stack_limit_at).
+    vm.stack_limit = vm.stack_limit_at(frame);
     let result = f(vm);
     vm.stack_ceiling = outer;
+    vm.stack_limit = outer_limit;
     // Keeps this frame from becoming a tail call of F.
     std::hint::black_box(result)
 }
@@ -435,6 +441,9 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
         let previous = vm::swap_current_program(None);
         let (mut vm, entry): (Box<Vm>, ProgramEntry) = program::instantiate(&descriptor, &code);
         vm.set_argv(Vec::new());
+        // A library's code checks its stack (codegen::clif's
+        // `prologue_stack_limit`): no guard of ours runs in the host.
+        vm.check_stack_limit();
         let mut made = Instance { vm, exports: descriptor.exports, code, program: program as usize };
         let initialized = {
             let _scope = ProgramScope::enter(&made.vm);

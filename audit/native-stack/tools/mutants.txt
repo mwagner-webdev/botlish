@@ -485,7 +485,7 @@
 @@ effects-fallible-again a Botlish call is fallible again where native frames hold the roots: callers check for an error the guard makes impossible
 ## native/src/nir.rs
 <<<<
-        local[i].0 = depth_checked && f.has_botlish_call();
+        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
 ====
         local[i].0 = f.has_botlish_call();
 >>>>
@@ -493,9 +493,9 @@
 @@ effects-infallible-on-fallback a Botlish call proven infallible on the fallback plan, whose shadow stack's depth check can fail it: callers do not check
 ## native/src/nir.rs
 <<<<
-        local[i].0 = depth_checked && f.has_botlish_call();
+        local[i].0 = (depth_checked || stack_checked) && f.has_botlish_call();
 ====
-        local[i].0 = false && depth_checked && f.has_botlish_call();
+        local[i].0 = (false && depth_checked || stack_checked) && f.has_botlish_call();
 >>>>
 
 @@ depth-reserved-on-native-frames a function with a Botlish call reserves depth where native frames hold the roots, as the stack-limit check did

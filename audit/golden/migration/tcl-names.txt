@@ -9633,6 +9633,9 @@ tests/native-library.test nl-main-cli pass
 tests/native-library.test nl-manifest pass
 tests/native-library.test nl-nested-libraries pass
 tests/native-library.test nl-reentrant pass
+tests/native-library.test nl-stack-safety pass
+tests/native-library.test nl-stack-safety-coroutine pass
+tests/native-library.test nl-stack-safety-foreign-stack pass
 tests/native-library.test nl-symbols pass
 tests/native-library.test nl-threads pass
 tests/native-library.test nl-two-instances pass
