@@ -647,7 +647,55 @@ indicative only; the builds are exact. No candidate is rebuilt for an
 explanation beyond what the decision already builds (NO-APPLICABLE-METHOD's
 reasons for kind-proof candidates were built before, and still are).
 
-@@INTEGRATION@@
+### 10.2 Consumers
+
+* **A strict compilation** raises the reported program's diagnostics
+  (`core::raiseDiagnostics`, unchanged): the rejection first, its `notes`
+  in its `-diagnostics` entry (`hir::recovery::entries`: each note's
+  located text, summary and span). `main.tcl` prints them as `note:` lines
+  under the diagnostic, for a failed run and for `-check`; its `help:`
+  lines are looked up from the code and message as before.
+* **The compiler service** (`service::diagnostics`) reports exactly the
+  strict compilation's diagnostics -- the same entries in the same order --
+  with `notes` as ranges, each with its `message` and located `text`; a
+  hover on a binding of a rejected call's result answers that its value is
+  not known, never the placeholder's type (`cs-method-rejection-notes`).
+* **The language server** re-encodes the service's notes as
+  `relatedInformation`, each with the note's own message, after the
+  diagnostic's own related locations (`lsp-lang-related-candidates`).
+* **Compilerpedia**: `error.ambiguous-method-call`,
+  `error.no-applicable-method`, `rule.method-resolution` ("WHAT IS
+  REPORTED") and `rule.sfiae` describe the reported program and the
+  explanations; the new rejected example of `error.no-applicable-method`
+  pins `rejects the receiver` and `rejects argument 1`. `tclsh9.0
+  tools/compilerpedia.tcl check`: 849 topics, 636 examples, no problem.
+
+### 10.3 Static compile, the cache and interchange
+
+* **Static compile rounds** read the reported program (section 8.3): a
+  round's attribution and its dependency analysis run on what
+  `hir::BuildFull` returns; a rejected call's operands in the dependency
+  analysis are its projection's receiver and its arguments
+  (`hir::methods::Operands`). A block that reifies a rejection reifies the
+  strict compilation's message, without notes (`mr-diag-static-and-cached`).
+  `tests/static-economics.test` (87 tests) and `tests/static-compile.test`
+  (83) pass; the static-decision fuzzer over seeds 17, 41 and 5 (10
+  programs each, 240 sites a seed) and the static-compile fuzzer report no
+  failure (section 9.4); the batched-against-sequential comparison of the
+  golden suites is CI's (10.5).
+* **The front-end cache and HIR interchange** hold the HIR dict, so the
+  `methodRejected` side table, the projection's `methodRejected` field and
+  a diagnostic's `notes` travel with it; nothing reads them from process
+  state. A rejected program's lenient HIR encoded and decoded
+  (`hir::interchange::encode`/`decode`) is identical, its reported
+  diagnostics too; `dr-interchange-rejected` and `mr-diag-static-and-cached`
+  read rejected programs back through interchange and the cache. The cache
+  key is unchanged (no new input). `tests/hir-interchange.test` (11) and
+  `tests/hir-cache.test` (17) pass.
+* **Backends** compile accepted programs, whose HIR is identical (8.1); a
+  lenient run of a rejected program raises at the rejected call (5.5).
+
+@@LOCAL@@
 
 ## 11. Remaining limitations
 
