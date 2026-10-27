@@ -217,6 +217,11 @@ proc native::binary {} {
     # audit-patched runtime) without replacing the shipped one.
     if {[info exists ::env(BOTLISH_NATIVE_BIN)]} {
         set path $::env(BOTLISH_NATIVE_BIN)
+        # A packaged compiler names its own (single/main.tcl): missing, it
+        # is damaged, and no cargo build in its archive would make one.
+        if {![file exists $path] && [info exists ::single::app]} {
+            throw {NATIVE NOT-BUILT} "this compiler's native backend is missing: $path: the installation is incomplete (reinstall it)"
+        }
     }
     if {![file exists $path]} {
         throw {NATIVE NOT-BUILT} "native backend not built: run \"cargo build --release\" in $home"

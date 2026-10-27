@@ -258,7 +258,7 @@ summary: The packed `botlish` executable is this compiler, its command line, the
 index: backends
 alias: single executable; botlish executable; packed compiler; zipkit
 keywords: single, zipkit, zipfs, cache, install, glibc
-related: backend.native-executable backend.platforms cli.usage
+related: backend.native-executable backend.platforms backend.macos-application cli.usage
 docs: SINGLE-EXECUTABLE.md
 
 == WHAT IT IS
@@ -277,10 +277,44 @@ executables into a cache directory ($BOTLISH_CACHE_DIR,
 $XDG_CACHE_HOME/botlish or ~/.cache/botlish), and on its first run that may
 link (-emit-native-executable, a native backend) its runtime archive too;
 without a usable cache it uses a temporary one. Usage, -help and -version
-need no installation. It is built for Linux x86-64. A program that calls C
-needs a C compiler on the machine that builds it (Debian, Ubuntu: apt
-install gcc) and the libraries it declares; without one its link says so
-(NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
+need no installation. It is built for Linux x86-64 (on macOS the packaged
+compiler is an application: backend.macos-application). A program that
+calls C needs a C compiler on the machine that builds it (Debian, Ubuntu:
+apt install gcc) and the libraries it declares; without one its link says
+so (NATIVE LINK TOOLCHAIN). The executable it builds needs neither.
+
+@topic backend.macos-application
+title: The macOS application (Botlish.app)
+summary: On Apple Silicon macOS the packaged compiler is Botlish.app, a relocatable application bundling Tcl, the compiler, the native backend and its runtime archive, signed ad hoc.
+index: backends
+alias: Botlish.app; macOS application; mac app; app bundle; Tcl.framework
+keywords: macos, app, bundle, framework, zipfs, codesign, ad hoc, notarization, xcode-select, Library/Caches
+related: backend.single-executable backend.platforms backend.native-executable error.native-link
+docs: MACOS-AARCH64-MILESTONE-9.md SINGLE-EXECUTABLE.md
+
+== WHAT IT IS
+single/macos/build.sh in a checkout builds Botlish.app and its download
+archive, botlish-macos-aarch64.zip. The command is
+Botlish.app/Contents/MacOS/botlish (a symbolic link to it on PATH works),
+with every option and argument of the single executable. Inside:
+Contents/MacOS/botlish (the launcher) and botlish-native (the native
+driver), Contents/Frameworks/Tcl.framework (Tcl 9.0.1),
+Contents/Resources/botlish.zip (the compiler, the standard library and
+Compilerpedia, mounted read-only at //zipfs:/app) and
+libbotlish_runtime.a (what executables are linked with). Move it anywhere;
+it installs nothing and never writes into itself.
+
+== THINGS TO KNOW
+Analysis, -check, -help, the language server, interp, compile and native
+runs of programs that call no C need nothing else installed. Every
+executable is linked by the system linker (there is no stub on macOS), so
+-emit-native-executable, and a native run of a program that calls C (Darwin
+I/O does), need Apple's Command Line Tools (xcode-select --install) or
+Xcode; never Rust. Diagnostics in library code name //zipfs:/app/...
+paths; the language server copies the standard library to
+~/Library/Caches/botlish (or $BOTLISH_CACHE_DIR) for an editor. The
+application is ad-hoc signed, not notarized: a copy downloaded through a
+browser is quarantined, and Gatekeeper refuses it until it is notarized.
 
 @topic backend.native-only
 title: Native-only operations
@@ -367,8 +401,8 @@ summary: The Tcl backends need only Tcl 9; the native backend runs on Linux, mac
 index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
-related: backend.targets backend.overview backend.native-executable backend.single-executable
-docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md WINDOWS-X86-64-MILESTONE-5.md MACOS-AARCH64-MILESTONE-8.md
+related: backend.targets backend.overview backend.native-executable backend.single-executable backend.macos-application
+docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md WINDOWS-X86-64-MILESTONE-5.md MACOS-AARCH64-MILESTONE-8.md MACOS-AARCH64-MILESTONE-9.md
 
 == WHAT IS TESTED
 The repository's continuous integration runs every test on Linux x86-64 and
@@ -429,6 +463,7 @@ other platforms.
                              calls not on Windows (NATIVE CODEGEN);
                              never with the stub linker
     single executable        Linux x86-64
+    Botlish.app              macOS AArch64 (backend.macos-application)
 
 @topic backend.targets
 title: -target: the compilation target, an operating system and an architecture

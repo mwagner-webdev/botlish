@@ -1341,7 +1341,8 @@ on 3cc2a2b1.
 
 ## 35. Remaining distribution work
 
-* **macOS and Windows single-file compilers** are not built here. The
+* **macOS and Windows single-file compilers** are not built here (macOS's
+  since: MACOS-AARCH64-MILESTONE-9.md, an application bundle). The
   system linker and the runtime archive are the parts of them this
   milestone owns, and both work there (sections 26 and 27). What is left
   is the distribution itself: a Tcl 9 zipkit (or an application bundle)
@@ -1375,6 +1376,12 @@ on 3cc2a2b1.
   smoke-tests it (section 25) but publishes only x86-64's.
 
 ## 36. For the next macOS milestone
+
+**Done since: MACOS-AARCH64-MILESTONE-9.md** (`Botlish.app`, the macOS
+distribution: the archive and the driver packed as below, no stub, the
+toolchain diagnostic checked with the developer tools moved away, the
+deployment target 11.0, ad-hoc signing, `~/Library/Caches/botlish`, the
+bundled `Tcl.framework`). The list as it was written:
 
 What a macOS single-file compiler needs from this one, and what it must add:
 

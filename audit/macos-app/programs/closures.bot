@@ -1,0 +1,13 @@
+# Closures: a captured binding, a function value passed and called.
+# (MACOS-AARCH64-MILESTONE-9.md's acceptance programs.)
+
+fn make_adder(x):
+    fn add(y):
+        x + y
+    add
+
+fn twice(f, x):
+    f(f(x))
+
+add10 = make_adder(10)
+[twice(add10, 1), twice(make_adder(-3), 2), add10(32)]
