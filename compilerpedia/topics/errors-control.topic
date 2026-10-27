@@ -526,6 +526,84 @@ fn skip():
 @at 2:5
 @end
 
+@topic error.reorder-not-proven
+title: REORDER-NOT-PROVEN: an order not known to hold the collection's members
+summary: m.reorder(order) compiles only where the compiler knows ORDER holds exactly m's current keys (a set's elements): a MutableSet of the right type, or of the same length, is not enough.
+index: errors
+alias: order is not known to hold exactly; unproven order; reorder not proven
+keywords: reorder, order, validate_order, OrderMismatch, MutableMap, MutableSet, permutation, members, keys, relation, proof
+related: concept.collection-order proof.same-members concept.mutable-map concept.mutable-set stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder
+docs: PROVEN-COLLECTION-REORDERING.md
+code: CORE SEMANTIC REORDER-NOT-PROVEN
+
+== MEANING
+    `c` is not known to hold exactly the current keys of `m`, which
+    std::mutable_map::reorder requires of its order ...
+
+A reorder trusts its order and checks nothing at run time, so the
+compiler admits it only where it knows a relation between the two
+particular values: the order's members are exactly the collection's
+members, now. Its type says only which values may be members. The
+relation comes from `m.order()`, from `m.validate_order(candidate)`'s
+result or from a copy of either; a change to the collection's members
+(set, remove, clear, add, a place call over it, for a context member a
+call that may change the installed context) or to the order's, anywhere
+on a path to the call, loses it, and so does a function boundary.
+
+== WHAT TO DO
+Take the order from `m.order()` and rearrange it, or build a candidate
+and check it once with `m.validate_order(candidate)` -- handling (or
+declaring) its error OrderMismatch -- and reorder by the result, with no
+change to either value's members in between.
+
+@example reject
+import std::mutable_map
+import std::mutable_set
+
+m = std::mutable_map::create[str, int]()
+m.set("pear", 1)
+m.set("fig", 2)
+c = std::mutable_set::create[str]()
+c.add("fig")
+c.add("pear")
+m.reorder(c)
+@caption The candidate holds the right keys, but nothing proved it
+@error CORE SEMANTIC REORDER-NOT-PROVEN
+@at 10:1
+@end
+
+@example accept
+import std::mutable_map
+import std::mutable_set
+
+m = std::mutable_map::create[str, int]()
+m.set("pear", 1)
+m.set("fig", 2)
+c = std::mutable_set::create[str]()
+c.add("fig")
+c.add("pear")
+o = m.validate_order(c):
+    on std::mutable_map::OrderMismatch:
+        m.order()
+m.reorder(o)
+loop e in m:
+    e.key
+@caption Checked once, then trusted
+@value ["fig", "pear"]
+@end
+
+@example reject
+import std::mutable_map
+
+m = std::mutable_map::create[str, int]()
+o = m.order()
+m.set("kiwi", 3)
+m.reorder(o)
+@caption A new key since the order was taken
+@error CORE SEMANTIC REORDER-NOT-PROVEN
+@at 6:1
+@end
+
 @topic error.return-outside-callable
 title: RETURN-OUTSIDE-CALLABLE: return outside a function
 summary: `return` leaves the enclosing function, so it is legal only inside a function body; the program's top level is not a function.

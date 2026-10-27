@@ -18,8 +18,18 @@
 #                                             returned, or KeyNotFound (the map
 #                                             unchanged)
 #   m.clear()                                 every entry removed
-#   loop e in m:                              every entry, in insertion order,
-#                                             as a MutableMapEntry[K, V]
+#   m.order()                                 the keys in their order: a
+#                                             std::mutable_set::MutableSet[K]
+#                                             of exactly m's keys, known so
+#   m.validate_order(candidate)               CANDIDATE, once checked to hold
+#                                             exactly m's keys (any order),
+#                                             or OrderMismatch
+#   m.reorder(order)                          m's entries in ORDER's order:
+#                                             ORDER must be known to hold
+#                                             exactly m's keys
+#   loop e in m:                              every entry, in insertion order
+#                                             (or the last reorder's), as a
+#                                             MutableMapEntry[K, V]
 #
 # A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing
 # m, returning it, storing it in a struct) makes a logical copy, and
@@ -36,9 +46,17 @@
 # contains, at, set and remove; O(1) for length; O(n) for a loop; a growth
 # or compaction is O(n), amortized over the operations before it.
 #
+# A map's identity is its associations; its order is a permutation of its
+# keys (PROVEN-COLLECTION-REORDERING.md). reorder changes the order only:
+# every key keeps its stored key and its value. Its order must be known, at
+# the call, to hold exactly the map's keys (REORDER-NOT-PROVEN otherwise):
+# from order(), or from validate_order, which checks a candidate once. A
+# proven reorder checks nothing; it is O(n) and hashes nothing again.
+#
 # The representation is std::ordered_table's, opaque: no program sees a
 # slot, a hash, a capacity or a removed entry.
 import std::mutable_vector
+import std::mutable_set
 import std::table_hash
 import std::ordered_table
 
@@ -53,6 +71,9 @@ struct MutableMapEntry[K, V]:
 
 # A key with no entry in the map.
 error KeyNotFound
+
+# A candidate order that does not hold exactly the map's keys.
+error OrderMismatch
 
 fn create() -> MutableMap[K, V]:
     MutableMap[K, V] {table: std::ordered_table::fresh[K](0), vals: std::mutable_vector::from_list([])}
@@ -102,6 +123,33 @@ fn remove(place m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
 fn clear(place m: MutableMap[K, V]) -> unit:
     std::ordered_table::clear(m.table)
     std::mutable_vector::clear(m.vals)
+
+# ---------------------------------------------------------------------------
+# Order (PROVEN-COLLECTION-REORDERING.md). The compiler knows, by these
+# functions' relational contracts (hir/relations.tcl), that order's result
+# and validate_order's hold exactly M's keys, and reorder requires it.
+
+# M's keys in M's iteration order: a MutableSet of exactly M's keys, which
+# the compiler knows it is (an order M.reorder admits).
+fn order(m: MutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+    std::mutable_set::of_table(m.table)
+
+# CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+# (OrderMismatch otherwise): the compiler then knows it is an order of M.
+# M is not reordered. O(n), no key hashed again.
+fn validate_order(m: MutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+    if not m.table.same_members?(std::mutable_set::table_of(candidate)):
+        fail OrderMismatch
+    candidate
+
+# M's entries in ORDER's order: every key keeps its stored key and its
+# value, only the iteration order changes. ORDER must be known to hold
+# exactly M's current keys (order, validate_order: REORDER-NOT-PROVEN
+# otherwise); nothing is checked at run time. O(n), no key hashed again.
+fn reorder(place m: MutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> unit:
+    perm = m.table.arrangement(std::mutable_set::table_of(order))
+    m.table.permute_values(perm, m.vals)
+    m.table.permute(perm)
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.

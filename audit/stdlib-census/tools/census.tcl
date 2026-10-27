@@ -154,6 +154,12 @@ dict for {ns files} $moduleNamespaces {
                 # only the standard library may name it.
                 set role std-internal
             }
+            if {[info commands ::core::native::isInternalMember] ne ""
+                    && [core::native::isInternalMember "${ns}::[dict get $statement name]"]} {
+                # Representation access for another standard library module
+                # (core::native::declareInternalMember).
+                set role std-internal
+            }
             set name "${ns}::[dict get $statement name]"
             set location "[Rel $path]:[dict get $statement span line]"
             switch -- [dict get $statement kind] {

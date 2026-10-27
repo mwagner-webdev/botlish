@@ -16,7 +16,17 @@
 #                                           one, false when it was not (the
 #                                           set unchanged)
 #   s.clear()                               every element removed
+#   s.order()                               the elements in their order: a
+#                                           MutableSet of exactly s's
+#                                           elements (a copy of s), known so
+#   s.validate_order(candidate)             CANDIDATE, once checked to hold
+#                                           exactly s's elements (any
+#                                           order), or OrderMismatch
+#   s.reorder(order)                        s's elements in ORDER's order:
+#                                           ORDER must be known to hold
+#                                           exactly s's elements
 #   loop x in s:                            every element, in insertion order
+#                                           (or the last reorder's)
 #
 # A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 # copy, and mutating one copy never changes another. The mutating operations
@@ -27,6 +37,13 @@
 # element and adding it again adds it last. Expected cost: O(1) amortized
 # for contains, add and remove; O(1) for length; O(n) for a loop.
 #
+# Order is not membership (PROVEN-COLLECTION-REORDERING.md): reorder
+# changes the iteration order only, never which elements the set holds, and
+# its order is a permutation of the set's elements -- which the compiler
+# must know at the call (REORDER-NOT-PROVEN otherwise), from order(), a
+# copy of the set, or validate_order. A proven reorder checks nothing; it
+# is O(n) and hashes nothing again.
+#
 # The representation is std::ordered_table's alone (the elements are its
 # keys): a set stores no value per element.
 import std::table_hash
@@ -34,6 +51,9 @@ import std::ordered_table
 
 opaque struct MutableSet[T satisfies Hashable]:
     table: std::ordered_table::Table[T]
+
+# A candidate order that does not hold exactly the collection's elements.
+error OrderMismatch
 
 fn create() -> MutableSet[T]:
     MutableSet[T] {table: std::ordered_table::fresh[T](0)}
@@ -70,6 +90,42 @@ fn remove(place s: MutableSet[T], x: T) -> bool:
 
 fn clear(place s: MutableSet[T]) -> unit:
     std::ordered_table::clear(s.table)
+
+# ---------------------------------------------------------------------------
+# Order (PROVEN-COLLECTION-REORDERING.md). The compiler knows, by these
+# functions' relational contracts (hir/relations.tcl), that order's result
+# and validate_order's hold exactly S's elements, and reorder requires it.
+
+# S's elements in S's iteration order: a copy of S, which the compiler
+# knows is an order of S (as any copy of S is).
+fn order(s: MutableSet[T]) -> MutableSet[T]:
+    s
+
+# CANDIDATE unchanged, once checked to hold exactly S's elements, in any
+# order (OrderMismatch otherwise): the compiler then knows it is an order
+# of S. S is not reordered. O(n), no element hashed again.
+fn validate_order(s: MutableSet[T], candidate: MutableSet[T]) -> MutableSet[T] errors OrderMismatch:
+    if not s.table.same_members?(candidate.table):
+        fail OrderMismatch
+    candidate
+
+# S's elements in ORDER's order: the members are unchanged, only the
+# iteration order changes. ORDER must be known to hold exactly S's current
+# elements (order, a copy, validate_order: REORDER-NOT-PROVEN otherwise);
+# nothing is checked at run time. O(n), no element hashed again.
+fn reorder(place s: MutableSet[T], order: MutableSet[T]) -> unit:
+    perm = s.table.arrangement(order.table)
+    s.table.permute(perm)
+
+# ---------------------------------------------------------------------------
+# Representation access for std::mutable_map's order operations: internal to
+# the standard library (core/native.tcl's internal members).
+
+nomethod fn table_of(s: MutableSet[T]) -> std::ordered_table::Table[T]:
+    s.table
+
+nomethod fn of_table(t: std::ordered_table::Table[T]) -> MutableSet[T]:
+    MutableSet[T] {table: t}
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.

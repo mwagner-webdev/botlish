@@ -1,0 +1,974 @@
+# collection-reorder.test -- proven reordering of std::mutable_map::MutableMap
+# and std::mutable_set::MutableSet (PROVEN-COLLECTION-REORDERING.md).
+#
+# `m.reorder(order)` changes a collection's iteration order and nothing else:
+# every association (a map's stored key and value), the membership and the
+# length are what they were. ORDER is a MutableSet that must hold exactly
+# the collection's members, and the compiler must know it at the call -- the
+# relational fact SameMembers(order, m), which neither value's type states
+# (hir/relations.tcl): it comes from m.order() (the current order), from
+# m.validate_order(candidate) (a candidate checked once), or from a copy;
+# membership-changing operations on either value lose it, order-only ones
+# (reorder itself) keep it, and a join keeps it only when every completing
+# path does. A proven reorder checks nothing at run time and hashes nothing
+# again.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set crDecls {import std::list
+import std::str
+import std::compiler
+import std::mutable_map
+import std::mutable_set
+
+fn pairs(m: std::mutable_map::MutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn names(m: std::mutable_map::MutableMap[str, int]) -> List[str]:
+    loop e in m:
+        e.key
+
+fn elems(s: std::mutable_set::MutableSet[int]) -> List[int]:
+    loop x in s:
+        x
+
+fn set_of(xs: List[int]) -> std::mutable_set::MutableSet[int]:
+    s = std::mutable_set::create[int]()
+    loop x in xs:
+        s.add(x)
+    s
+
+fn str_set(xs: List[str]) -> std::mutable_set::MutableSet[str]:
+    s = std::mutable_set::create[str]()
+    loop x in xs:
+        s.add(x)
+    s
+
+fn int_map(xs: List[int]) -> std::mutable_map::MutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop x in xs:
+        m.set(x, x * 10)
+    m
+
+fn reorder_to(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> bool:
+    o = m.validate_order(set_of(xs)):
+        on std::mutable_map::OrderMismatch:
+            return false
+    m.reorder(o)
+    true
+
+fn reorder_set_to(place s: std::mutable_set::MutableSet[int], xs: List[int]) -> bool:
+    o = s.validate_order(set_of(xs)):
+        on std::mutable_set::OrderMismatch:
+            return false
+    s.reorder(o)
+    true
+
+}
+
+proc crRun {body {backends {interp compile cranelift-generic cranelift}}} {
+    return [sourceAgree "$::crDecls$body" $backends]
+}
+
+# The REORDER-NOT-PROVEN diagnostics of the program BODY (after the
+# declarations): their lines in BODY, or "ok" when it compiles; any other
+# diagnostic as KIND@LINE.
+proc crProof {body} {
+    set offset [llength [split $::crDecls \n]]
+    if {![catch {surface::compile "$::crDecls$body" -warnings off} message options]} {
+        return ok
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] {
+        set line ""
+        regexp {^[^:]*:([0-9]+):} [dict get $d message] -> line
+        if {$line ne ""} {
+            set line [expr {$line - $offset + 1}]
+        }
+        set kind [lindex [dict get $d errorcode] end]
+        if {$kind eq "REORDER-NOT-PROVEN"} {
+            lappend result $line
+        } else {
+            lappend result $kind@$line
+        }
+    }
+    return $result
+}
+
+# The verdicts (crProof) of the programs CASES ({NAME BODY ...}), as {NAME
+# VERDICT ...}.
+proc crProofs {cases} {
+    set result {}
+    foreach {name body} $cases {
+        lappend result $name [crProof $body]
+    }
+    return $result
+}
+
+# The ops of NIR function NAME (every instance), or "missing" when NIR has
+# no function NAME.
+proc crOps {nir name} {
+    set ops {}
+    set inside 0
+    set found 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            if {$inside} {
+                set found 1
+            }
+            continue
+        }
+        if {$inside && [regexp {op ([a-z0-9_]+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    if {!$found} {
+        return missing
+    }
+    return [lsort -unique $ops]
+}
+
+# ---------------------------------------------------------------------------
+# Semantics: order changes, contents do not
+
+test cr-map-reorder {a map reordered iterates in the order's order; every key keeps its value, and the length, membership and lookups are unchanged} -body {
+    crRun {m = int_map([1, 2, 3, 4, 5])
+ok = reorder_to(m, [3, 1, 5, 2, 4])
+v = m.at(5):
+    on std::mutable_map::KeyNotFound:
+        -1
+[ok, pairs(m), m.length(), m.contains(2), m.contains(9), v]
+}
+} -result {value {[true, [[3, 30], [1, 10], [5, 50], [2, 20], [4, 40]], 5, true, false, 50]}}
+
+test cr-map-values-aligned {values move with their keys through a reorder after replacement, removal and reinsertion (dead entries): no value is paired with another key} -body {
+    crRun {m = int_map([10, 11, 12, 13, 14, 15, 16])
+m.set(12, -12)
+r = m.remove(11):
+    on std::mutable_map::KeyNotFound:
+        0
+r2 = m.remove(14):
+    on std::mutable_map::KeyNotFound:
+        0
+m.set(11, -11)
+ok = reorder_to(m, [16, 11, 10, 15, 13, 12])
+found = loop k in [10, 11, 12, 13, 15, 16]:
+    m.at(k):
+        on std::mutable_map::KeyNotFound:
+            0
+[ok, pairs(m), found]
+}
+} -result {value {[true, [[16, 160], [11, -11], [10, 100], [15, 150], [13, 130], [12, -12]], [100, -11, -12, 130, 150, 160]]}}
+
+test cr-map-string-keys {String keys: reordered by a candidate built independently (equal Strings), each value still found by its key} -body {
+    crRun {m = std::mutable_map::create[str, int]()
+loop k in ["pear", "fig", "kiwi", "date"]:
+    m.set(k, std::str::length(k))
+o = m.validate_order(str_set([std::str::concat("da", "te"), "kiwi", "pear", "fig"])):
+    on std::mutable_map::OrderMismatch:
+        m.order()
+m.reorder(o)
+lens = loop k in names(m):
+    m.at(k):
+        on std::mutable_map::KeyNotFound:
+            -1
+[names(m), lens]
+}
+} -result {value {[["date", "kiwi", "pear", "fig"], [4, 4, 4, 3]]}}
+
+test cr-set-reorder {a set reordered iterates in the order's order with the same members} -body {
+    crRun {s = set_of([4, 8, 15, 16, 23, 42])
+ok = reorder_set_to(s, [42, 4, 23, 8, 16, 15])
+[ok, elems(s), s.length(), s.contains(15), s.contains(7)]
+}
+} -result {value {[true, [42, 4, 23, 8, 16, 15], 6, true, false]}}
+
+test cr-empty-and-singleton {an empty collection is reordered by the empty order and a singleton by itself; an empty candidate for a non-empty collection, and a non-empty one for an empty collection, are mismatches} -body {
+    crRun {e = int_map([])
+one = int_map([7])
+s = set_of([])
+a = [reorder_to(e, []), pairs(e)]
+b = [reorder_to(one, [7]), pairs(one)]
+c = [reorder_set_to(s, []), elems(s)]
+d = [reorder_to(one, []), reorder_to(e, [7]), reorder_set_to(s, [1]), pairs(one), pairs(e)]
+[a, b, c, d]
+}
+} -result {value {[[true, []], [true, [[7, 70]]], [true, []], [false, false, false, [[7, 70]], []]]}}
+
+test cr-current-order {reordering to the current order changes nothing observable} -body {
+    crRun {m = int_map([5, 3, 9, 1])
+o = m.order()
+m.reorder(o)
+a = pairs(m)
+m.reorder(m.order())
+[a, pairs(m)]
+}
+} -result {value {[[[5, 50], [3, 30], [9, 90], [1, 10]], [[5, 50], [3, 30], [9, 90], [1, 10]]]}}
+
+test cr-reverse-after-churn {300 keys grown through several rebuilds, a third removed (dead entries, a compaction), reversed by an order built in any way: exactly the survivors, reversed, their values kept} -body {
+    crRun {m = int_map([])
+loop i from 0 to 300:
+    m.set(i * 7, i)
+loop i from 0 to 300:
+    if i.mod(3) == 1:
+        r = m.remove(i * 7):
+            on std::mutable_map::KeyNotFound:
+                -1
+ks = loop e in m:
+    e.key
+rev = loop i from 0 to std::list::length(ks):
+    std::list::at(ks, std::list::length(ks) - 1 - i):
+        on IndexNotFound:
+            -1
+ok = reorder_to(m, rev)
+after = loop e in m:
+    e.key
+vals = loop e in m:
+    if e.value * 7 != e.key:
+        continue
+    e.value
+[ok, after == rev, std::list::length(vals), m.length()]
+} {compile cranelift-generic cranelift}
+} -result {value {[true, true, 200, 200]}}
+
+test cr-order-snapshot {m.order() is a MutableSet of exactly m's keys in m's current order; s.order() is a copy of s} -body {
+    crRun {m = int_map([3, 1, 2])
+r = m.remove(1):
+    on std::mutable_map::KeyNotFound:
+        0
+m.set(1, 0)
+o = m.order()
+s = set_of([9, 8])
+p = s.order()
+[elems(o), o.length(), o.contains(3), o.contains(4), elems(p)]
+}
+} -result {value {[[3, 2, 1], 3, true, false, [9, 8]]}}
+
+test cr-later-operations {after a reorder the ordinary rules hold in the new order: a new key appends, an existing key keeps its (new) place, remove then set appends, a set's duplicate add does not move, growth and compaction keep the order, clear starts a new one} -body {
+    crRun {m = int_map([1, 2, 3, 4])
+ok = reorder_to(m, [4, 2, 3, 1])
+m.set(9, 90)
+m.set(2, 22)
+r = m.remove(3):
+    on std::mutable_map::KeyNotFound:
+        0
+m.set(3, 33)
+a = pairs(m)
+loop i from 100 to 140:
+    m.set(i, i)
+loop i from 100 to 140:
+    r2 = m.remove(i):
+        on std::mutable_map::KeyNotFound:
+            0
+b = pairs(m)
+s = set_of([1, 2, 3])
+ok2 = reorder_set_to(s, [3, 1, 2])
+dup = s.add(1)
+s.add(5)
+c = elems(s)
+s.clear()
+s.add(7)
+[ok, a, b == a, dup, c, elems(s)]
+}
+} -result {value {[true, [[4, 40], [2, 22], [1, 10], [9, 90], [3, 33]], true, false, [3, 1, 2, 5], [7]]}}
+
+# ---------------------------------------------------------------------------
+# Validation
+
+test cr-validate-mismatch {against keys a b c, a candidate holding a b, a b d or a b c d is the declared error OrderMismatch, and every permutation of a b c is accepted} -body {
+    crRun {m = std::mutable_map::create[str, int]()
+m.set("a", 1)
+m.set("b", 2)
+m.set("c", 3)
+fn verdict(m: std::mutable_map::MutableMap[str, int], xs: List[str]) -> bool:
+    o = m.validate_order(str_set(xs)):
+        on std::mutable_map::OrderMismatch:
+            return false
+    true
+bad = loop xs in [["a", "b"], ["a", "b", "d"], ["a", "b", "c", "d"], [], ["d", "e", "f"]]:
+    verdict(m, xs)
+good = loop xs in [["a", "b", "c"], ["a", "c", "b"], ["b", "a", "c"], ["b", "c", "a"], ["c", "a", "b"], ["c", "b", "a"]]:
+    verdict(m, xs)
+[bad, good]
+}
+} -result {value {[[false, false, false, false, false], [true, true, true, true, true, true]]}}
+
+test cr-validate-changes-nothing {validation reorders nothing and returns the candidate as it is; a failed validation leaves both the collection and the candidate unchanged} -body {
+    crRun {m = int_map([1, 2, 3])
+c = set_of([3, 2, 1])
+o = m.validate_order(c):
+    on std::mutable_map::OrderMismatch:
+        m.order()
+bad = set_of([2, 1])
+failed = m.validate_order(bad):
+    on std::mutable_map::OrderMismatch:
+        set_of([0])
+s = set_of([5, 6])
+sbad = set_of([6, 7])
+sfailed = s.validate_order(sbad):
+    on std::mutable_set::OrderMismatch:
+        set_of([0])
+[pairs(m), elems(o), elems(c), elems(failed), elems(bad), elems(s), elems(sbad), elems(sfailed)]
+}
+} -result {value {[[[1, 10], [2, 20], [3, 30]], [3, 2, 1], [3, 2, 1], [0], [2, 1], [5, 6], [6, 7], [0]]}}
+
+test cr-validate-propagates {OrderMismatch is a declared error of validate_order: unhandled, it is UNHANDLED-ERROR; declared, it propagates; reorder itself declares no error} -body {
+    list [crProof "m = int_map(\[1\])\no = m.validate_order(set_of(\[2\]))\nm.reorder(o)\n"] \
+        [crRun "fn f(place m: std::mutable_map::MutableMap\[int, int\]) -> int errors std::mutable_map::OrderMismatch:\n    o = m.validate_order(set_of(\[2\]))\n    m.reorder(o)\n    1\nm = int_map(\[1\])\nr = f(m):\n    on std::mutable_map::OrderMismatch:\n        -1\nr\n"] \
+        [crProof "fn f(place m: std::mutable_map::MutableMap\[int, int\]) -> unit:\n    m.reorder(m.order())\nm = int_map(\[1\])\nf(m)\n"]
+} -result {UNHANDLED-ERROR@2 {value -1} ok}
+
+# ---------------------------------------------------------------------------
+# The proof: what establishes SameMembers, what loses it
+
+test cr-proof-established {order(), validate_order (handled or propagated), a copy of a proven order, a copy of the collection and the inline forms are proven} -body {
+    crProofs {
+snapshot {m = int_map([1, 2])
+o = m.order()
+m.reorder(o)
+}
+inline {m = int_map([1, 2])
+m.reorder(m.order())
+std::mutable_map::reorder(m, std::mutable_map::order(m))
+}
+validated {m = int_map([1, 2])
+o = m.validate_order(set_of([2, 1])):
+    on std::mutable_map::OrderMismatch:
+        m.order()
+m.reorder(o)
+}
+validated-exit {fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    o = m.validate_order(set_of([2, 1])):
+        on std::mutable_map::OrderMismatch:
+            return unit
+    m.reorder(o)
+}
+propagated {fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit errors std::mutable_map::OrderMismatch:
+    o = m.validate_order(set_of([2, 1]))
+    m.reorder(o)
+}
+order-copy {m = int_map([1, 2])
+o = m.order()
+c = o
+m.reorder(c)
+}
+map-copy {m = int_map([1, 2])
+o = m.order()
+m2 = m
+m2.reorder(o)
+m.reorder(o)
+}
+set-forms {s = set_of([1, 2])
+s.reorder(s.order())
+t = s
+s.reorder(t)
+s.reorder(s)
+o = s.validate_order(set_of([2, 1])):
+    on std::mutable_set::OrderMismatch:
+        s
+s.reorder(o)
+}
+generic {fn f(place m: std::mutable_map::MutableMap[K, V]) -> unit:
+    o = m.order()
+    m.reorder(o)
+}
+}
+} -result {snapshot ok inline ok validated ok validated-exit ok propagated ok order-copy ok map-copy ok set-forms ok generic ok}
+
+test cr-proof-type-is-not-enough {a MutableSet of the key type, a parameter, a helper's result, another map's order, a List element and the validator's argument (rather than its result) are not proven: REORDER-NOT-PROVEN} -body {
+    crProofs {
+arbitrary {m = int_map([1, 2])
+c = set_of([2, 1])
+m.reorder(c)
+}
+parameters {fn f(place m: std::mutable_map::MutableMap[int, int], o: std::mutable_set::MutableSet[int]) -> unit:
+    m.reorder(o)
+}
+helper {fn order_of(m: std::mutable_map::MutableMap[int, int]) -> std::mutable_set::MutableSet[int]:
+    m.order()
+m = int_map([1, 2])
+m.reorder(order_of(m))
+}
+other-map {a = int_map([1, 2])
+b = int_map([1, 2])
+o = a.order()
+a.reorder(o)
+b.reorder(o)
+}
+element {m = int_map([1, 2])
+xs = [m.order()]
+y = std::list::at(xs, 0):
+    on IndexNotFound:
+        m.order()
+m.reorder(y)
+}
+validator-argument {fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit errors std::mutable_map::OrderMismatch:
+    o = m.validate_order(c)
+    m.reorder(c)
+}
+set-arbitrary {s = set_of([1, 2])
+s.reorder(set_of([2, 1]))
+}
+}
+} -result {arbitrary 3 parameters 2 helper 4 other-map 5 element 6 validator-argument 3 set-arbitrary 2}
+
+test cr-proof-equal-length-is-not-equal-members {equal lengths, and every candidate element being a key, are each tested and still prove nothing: only exact membership (validate_order) does} -body {
+    crProofs {
+equal-length {m = int_map([1, 2])
+c = set_of([1, 3])
+if c.length() == m.length():
+    m.reorder(c)
+}
+subset {m = int_map([1, 2, 3])
+c = set_of([1, 3])
+missing = loop x in c:
+    if m.contains(x):
+        continue
+    x
+if std::list::length(missing) == 0:
+    m.reorder(c)
+}
+both {m = int_map([1, 2])
+c = set_of([2, 1])
+missing = loop x in c:
+    if m.contains(x):
+        continue
+    x
+if std::list::length(missing) == 0 and c.length() == m.length():
+    m.reorder(c)
+}
+}
+} -result {equal-length 4 subset 8 both 8}
+
+test cr-proof-membership-changes {set, remove and clear of the map, add, remove and clear of the order, a place call over the map or a struct holding it, and a call that may change the installed context (one that requires it, even if it only reads) over a context member lose the relation} -body {
+    crProofs {
+map-set {m = int_map([1])
+o = m.order()
+m.set(1, 5)
+m.reorder(o)
+}
+map-remove {m = int_map([1])
+o = m.order()
+r = m.remove(1):
+    on std::mutable_map::KeyNotFound:
+        0
+m.reorder(o)
+}
+map-clear {m = int_map([1])
+o = m.order()
+m.clear()
+m.reorder(o)
+}
+order-add {m = int_map([1])
+o = m.order()
+o.add(1)
+m.reorder(o)
+}
+order-remove {m = int_map([1])
+o = m.order()
+r = o.remove(5)
+m.reorder(o)
+}
+order-clear {m = int_map([1])
+o = m.order()
+o.clear()
+m.reorder(o)
+}
+place-call {fn touch(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    unit
+m = int_map([1])
+o = m.order()
+touch(m)
+m.reorder(o)
+}
+struct-place-call {struct Box:
+    m: std::mutable_map::MutableMap[int, int]
+fn touch(place b: Box) -> unit:
+    unit
+b = Box {m: int_map([1])}
+o = b.m.order()
+touch(b)
+b.m.reorder(o)
+}
+context {context struct Store:
+    m: std::mutable_map::MutableMap[int, int]
+fn grow(context s: Store) -> unit:
+    s.m.set(3, 3)
+fn f(context s: Store) -> unit:
+    o = s.m.order()
+    grow()
+    s.m.reorder(o)
+with context Store {m: int_map([1])}
+f()
+}
+context-reader {context struct Store:
+    m: std::mutable_map::MutableMap[int, int]
+fn read(context s: Store) -> int:
+    s.m.length()
+fn f(context s: Store) -> unit:
+    o = s.m.order()
+    n = read()
+    s.m.reorder(o)
+with context Store {m: int_map([1])}
+f()
+}
+}
+} -result {map-set 4 map-remove 6 map-clear 4 order-add 4 order-remove 4 order-clear 4 place-call 6 struct-place-call 8 context 8 context-reader 8}
+
+test cr-proof-order-only-and-reads-preserve {reads (length, contains, at, empty?, a loop) of either value, a value call, a call that cannot reach the installed context, and a reorder -- of the map, or of the order itself -- keep the relation} -body {
+    crProofs {
+reads {m = int_map([1, 2])
+o = m.order()
+a = [m.length(), m.contains(2), m.empty?(), o.length(), o.contains(1)]
+v = m.at(1):
+    on std::mutable_map::KeyNotFound:
+        0
+ks = loop e in m:
+    e.key
+os = loop x in o:
+    x
+fn look(m: std::mutable_map::MutableMap[int, int]) -> int:
+    m.length()
+n = look(m)
+m.reorder(o)
+}
+reorders {m = int_map([1, 2])
+o = m.order()
+m.reorder(o)
+m.reorder(o)
+m.reorder(m.order())
+m.reorder(o)
+}
+order-reordered {m = int_map([1, 2])
+o = m.order()
+o.reorder(o.order())
+m.reorder(o)
+}
+in-loop {fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+    o = m.order()
+    loop x in xs:
+        m.reorder(o)
+    m.reorder(o)
+}
+context-member {context struct Store:
+    m: std::mutable_map::MutableMap[int, int]
+fn plain() -> int:
+    3
+fn f(context s: Store) -> unit:
+    o = s.m.order()
+    n = plain()
+    s.m.reorder(o)
+with context Store {m: int_map([1])}
+f()
+}
+}
+} -result {reads ok reorders ok order-reordered ok in-loop ok context-member ok}
+
+test cr-proof-copies {relations follow value versions: a copy of the map has the original's members until either changes; changing the copy loses the copy's relation, not the original's} -body {
+    crProofs {
+copy-changed {m = int_map([1])
+o = m.order()
+m2 = m
+m2.set(2, 2)
+m.reorder(o)
+m2.reorder(o)
+}
+original-changed {m = int_map([1])
+o = m.order()
+m2 = m
+m.set(2, 2)
+m2.reorder(o)
+m.reorder(o)
+}
+struct-copy {struct Box:
+    m: std::mutable_map::MutableMap[int, int]
+    o: std::mutable_set::MutableSet[int]
+m = int_map([1])
+b = Box {m: m, o: m.order()}
+b.m.reorder(b.o)
+c = b
+c.m.reorder(b.o)
+b.m.set(4, 4)
+c.m.reorder(c.o)
+b.m.reorder(b.o)
+}
+}
+} -result {copy-changed 6 original-changed 6 struct-copy 11}
+
+test cr-proof-joins {a join keeps the relation only when every completing path gives it: both branches proven, one branch arbitrary, one branch changing the map, an early return, a decided condition, a handler that falls back to order() or to the candidate or changes the map} -body {
+    crProofs {
+both {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = if b:
+        m.order()
+    else:
+        m.validate_order(set_of([1])):
+            on std::mutable_map::OrderMismatch:
+                m.order()
+    m.reorder(o)
+}
+one-arbitrary {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = if b:
+        m.order()
+    else:
+        set_of([1])
+    m.reorder(o)
+}
+one-changes {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = m.order()
+    if b:
+        m.set(5, 5)
+    m.reorder(o)
+}
+early-return {fn f(place m: std::mutable_map::MutableMap[int, int], b: bool) -> unit:
+    o = m.order()
+    if b:
+        m.set(5, 5)
+        return unit
+    m.reorder(o)
+}
+decided {fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    o = m.order()
+    if false:
+        m.set(5, 5)
+    m.reorder(o)
+}
+handler-candidate {fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit:
+    o = m.validate_order(c):
+        on std::mutable_map::OrderMismatch:
+            c
+    m.reorder(o)
+}
+handler-changes {fn f(place m: std::mutable_map::MutableMap[int, int], c: std::mutable_set::MutableSet[int]) -> unit:
+    o = m.validate_order(c):
+        on std::mutable_map::OrderMismatch:
+            m.set(5, 5)
+            m.order()
+    m.reorder(o)
+}
+handled-call-changes {fn take(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::mutable_map::KeyNotFound:
+    m.remove(1)
+fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    o = m.order()
+    r = take(m):
+        on std::mutable_map::KeyNotFound:
+            0
+    m.reorder(o)
+}
+}
+} -result {both ok one-arbitrary 6 one-changes 5 early-return ok decided ok handler-candidate 5 handler-changes 6 handled-call-changes 8}
+
+test cr-proof-loops {a loop that changes the map (anywhere in its body, before or after the reorder) loses the relation inside it and after it; one that does not keeps it; an order taken inside the body is proven there} -body {
+    crProofs {
+changes-after {fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+    o = m.order()
+    loop x in xs:
+        m.reorder(o)
+        m.set(x, x)
+    unit
+}
+changes-before {fn f(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    o = m.order()
+    loop i from 0 to 3:
+        m.set(i, i)
+    m.reorder(o)
+}
+inner-order {fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+    loop x in xs:
+        m.set(x, x)
+        o = m.order()
+        m.reorder(o)
+    unit
+}
+order-changes {fn f(place m: std::mutable_map::MutableMap[int, int], xs: List[int]) -> unit:
+    o = m.order()
+    loop x in xs:
+        m.reorder(o)
+        o.add(x)
+    unit
+}
+}
+} -result {changes-after 4 changes-before 5 inner-order ok order-changes 4}
+
+test cr-proof-function-boundary {no relation crosses a function boundary but by a contract: a place parameter and an order parameter are unrelated, a nested function's captured order is unrelated to its own parameter, and a closure observing the order changes nothing} -body {
+    crProofs {
+callee {fn f(place m: std::mutable_map::MutableMap[int, int], o: std::mutable_set::MutableSet[int]) -> unit:
+    m.reorder(o)
+m = int_map([1])
+f(m, m.order())
+}
+nested {fn outer(o: std::mutable_set::MutableSet[int]) -> unit:
+    fn inner(m: std::mutable_map::MutableMap[int, int]) -> unit:
+        n = m
+        n.reorder(o)
+    unit
+}
+observer {m = int_map([1])
+o = m.order()
+fn look() -> int:
+    o.length()
+x = look()
+m.reorder(o)
+}
+}
+} -result {callee 2 nested 4 observer ok}
+
+test cr-proof-no-cascade {an order of the wrong type is its type's diagnostic only: nothing restates it as an unproven order} -body {
+    list [crProof "m = int_map(\[1\])\nm.reorder(std::mutable_set::create\[str\]())\n"] \
+        [crProof "m = int_map(\[1\])\nm.reorder(\[1\])\n"]
+} -result {{NO-APPLICABLE-METHOD@2 IMPRINT@2} {NO-APPLICABLE-METHOD@2 IMPRINT@2}}
+
+test cr-proof-message {the diagnostic names the order, the collection, its members, and how to establish the proof} -body {
+    catch {surface::compile "${::crDecls}m = int_map(\[1\])\nc = set_of(\[1\])\nm.reorder(c)\n" -warnings off} message options
+    list [lindex [dict get $options -errorcode] end] \
+        [string match "*`c` is not known to hold exactly the current keys of `m`, which std::mutable_map::reorder requires*equal lengths are not equal keys*`m.order()`*`m.validate_order(candidate)`*std::mutable_map::OrderMismatch*" $message]
+} -cleanup {unset -nocomplain message options} -result {REORDER-NOT-PROVEN 1}
+
+test cr-proof-static-compile {an unproven reorder in a static compile block is the reified diagnostic DiagnosticCode::ReorderNotProven; a proven one is accepted} -body {
+    crRun {fn probe(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::compiler::CompilerError:
+    c = set_of([1])
+    static compile:
+        m.reorder(c)
+    1
+fn fine(place m: std::mutable_map::MutableMap[int, int]) -> int errors std::compiler::CompilerError:
+    static compile:
+        m.reorder(m.order())
+    2
+m = int_map([1])
+a = probe(m):
+    on std::compiler::CompilerError {code}:
+        if code == std::compiler::DiagnosticCode::ReorderNotProven:
+            -1
+        else:
+            -2
+b = fine(m):
+    on std::compiler::CompilerError:
+        -3
+[a, b]
+}
+} -result {value {[-1, 2]}}
+
+test cr-proof-method-syntax {with both collections imported, m.reorder and s.reorder are each their own module's function (nominal exclusion), and the proof is the same written qualified} -body {
+    set hir [surface::compile "${::crDecls}m = int_map(\[1, 2\])\nm.reorder(m.order())\ns = set_of(\[1\])\ns.reorder(s.order())\n" -warnings off]
+    set targets {}
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "call"} continue
+        lassign [hir::get $hir $e target] kind block
+        if {$kind ne "block"} continue
+        set name [hir::signatures::Name $hir $block]
+        if {[string match *reorder $name]} {
+            lappend targets $name
+        }
+    }
+    lsort -unique $targets
+} -cleanup {unset -nocomplain hir targets e kind block name} -result {std::mutable_map::reorder std::mutable_set::reorder}
+
+# ---------------------------------------------------------------------------
+# Value semantics
+
+test cr-copies-independent {a copy reorders independently: a binding, a chain of copies, a struct field, a List element, a function argument and result never observe another version's reorder} -body {
+    crRun {struct Box:
+    m: std::mutable_map::MutableMap[int, int]
+fn rev(m: std::mutable_map::MutableMap[int, int]) -> std::mutable_map::MutableMap[int, int]:
+    n = m
+    ok = reorder_to(n, [3, 2, 1])
+    n
+a = int_map([1, 2, 3])
+b = a
+c = b
+ok1 = reorder_to(b, [2, 3, 1])
+box = Box {m: a}
+xs = [a]
+r = rev(a)
+ok2 = reorder_to(c, [3, 1, 2])
+ok3 = reorder_to(a, [1, 3, 2])
+x0 = std::list::at(xs, 0):
+    on IndexNotFound:
+        int_map([])
+[pairs(a), pairs(b), pairs(c), pairs(box.m), pairs(x0), pairs(r)]
+}
+} -result {value {[[[1, 10], [3, 30], [2, 20]], [[2, 20], [3, 30], [1, 10]], [[3, 30], [1, 10], [2, 20]], [[1, 10], [2, 20], [3, 30]], [[1, 10], [2, 20], [3, 30]], [[3, 30], [2, 20], [1, 10]]]}}
+
+test cr-copy-then-reorder-then-mutate {a reordered copy and its original stay separate through later growth, removal and clear of either} -body {
+    crRun {a = int_map([1, 2, 3, 4])
+b = a
+ok = reorder_to(b, [4, 3, 2, 1])
+loop i from 10 to 40:
+    a.set(i, i)
+r = b.remove(3):
+    on std::mutable_map::KeyNotFound:
+        0
+c = b
+b.clear()
+[a.length(), pairs(c), b.length()]
+}
+} -result {value {[34, [[4, 40], [2, 20], [1, 10]], 0]}}
+
+test cr-observer-overlap {s.reorder(s) is a no-op reorder (the order is the set as it was), and so are the forms through a struct field} -body {
+    crRun {struct W:
+    s: std::mutable_set::MutableSet[int]
+s = set_of([3, 1, 2])
+s.reorder(s)
+w = W {s: set_of([5, 4])}
+w.s.reorder(w.s)
+w.s.reorder(w.s.order())
+[elems(s), elems(w.s)]
+}
+} -result {value {[[3, 1, 2], [5, 4]]}}
+
+test cr-iteration-snapshot {a loop over a collection it reorders iterates the collection as it was when the loop began; a later loop sees the new order} -body {
+    crRun {m = int_map([1, 2, 3])
+seen = loop e in m:
+    if e.key == 1:
+        ok = reorder_to(m, [3, 2, 1])
+    e.key
+s = set_of([1, 2, 3])
+seen2 = loop x in s:
+    ok = reorder_set_to(s, [2, 3, 1])
+    x
+[seen, pairs(m), seen2, elems(s)]
+}
+} -result {value {[[1, 2, 3], [[3, 30], [2, 20], [1, 10]], [1, 2, 3], [2, 3, 1]]}}
+
+# ---------------------------------------------------------------------------
+# Hashing: placement only, stored hashes reused
+
+test cr-hidden-key-independent {the same reorders under two fixed hidden keys and the process's own give the same observations: the hidden hash chooses slots, the order chooses positions} -body {
+    set body {m = int_map([])
+loop i from 0 to 120:
+    m.set((i * 7919).mod(1000), i)
+loop i from 0 to 120:
+    if i.mod(4) == 0:
+        r = m.remove((i * 7919).mod(1000)):
+            on std::mutable_map::KeyNotFound:
+                -1
+ks = loop e in m:
+    e.key
+evens = loop k in ks:
+    if k.mod(2) == 1:
+        continue
+    k
+odds = loop k in ks:
+    if k.mod(2) == 0:
+        continue
+    k
+c = set_of(odds)
+loop k in evens:
+    c.add(k)
+o = m.validate_order(c):
+    on std::mutable_map::OrderMismatch:
+        m.order()
+m.reorder(o)
+s = set_of(ks)
+d = set_of(evens)
+loop k in odds:
+    d.add(k)
+p = s.validate_order(d):
+    on std::mutable_set::OrderMismatch:
+        s
+s.reorder(p)
+[o.length() == m.length(), pairs(m), elems(s)]
+}
+    set outcomes {}
+    foreach key {{1 2} {0x123456789abcdef0 0x0fedcba987654321} ""} {
+        core::hashing::useTableHashKey $key
+        try {
+            lappend outcomes [crRun $body {compile cranelift-generic cranelift}]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    list [llength [lsort -unique $outcomes]] [string range [lindex $outcomes 0 1] 0 30]
+} -cleanup {unset -nocomplain body outcomes key} -result {1 {[true, [[919, 1], [757, 3], [59}}
+
+test cr-full-hash-collisions {genuine collisions of the stored keyed hash -- a private library whose collections keep two bits of it -- are told apart by equality: a reorder moves every entry to its own key's rank with its own value} -body {
+    withPrivateLibrary {
+        foreach file {mutable_map.bot mutable_set.bot} {
+            set path [file join $::core::libraryDir $file]
+            set text [string map {{std::table_hash::of(key)} {bit_and(std::table_hash::of(key), 3)} {std::table_hash::of(x)} {bit_and(std::table_hash::of(x), 3)}} [core::ReadFile $path]]
+            set f [open $path w]
+            puts -nonewline $f $text
+            close $f
+        }
+        set result [sourceAgree "$::crDecls\nm = int_map(\[\])\nloop i from 0 to 40:\n    m.set(i * 11, i)\nloop i from 0 to 40:\n    if i.mod(5) == 2:\n        r = m.remove(i * 11):\n            on std::mutable_map::KeyNotFound:\n                -1\nks = loop e in m:\n    e.key\nrev = loop i from 0 to std::list::length(ks):\n    std::list::at(ks, std::list::length(ks) - 1 - i):\n        on IndexNotFound:\n            -1\nok = reorder_to(m, rev)\nbad = loop e in m:\n    if e.value * 11 == e.key:\n        continue\n    e.key\nafter = loop e in m:\n    e.key\n\[ok, after == rev, bad, m.length()\]\n"]
+    }
+    set result
+} -cleanup {unset -nocomplain file path text f result} -result {value {[true, true, [], 32]}}
+
+test cr-no-rehash {natively a reorder computes no keyed hash: order, reorder and the engine's arrangement and permutation have no tablehash operation (validate_order neither: it probes with the candidate's stored hashes; a set's order is its copy, inlined)} -constraints nativeBuilt -body {
+    set nir [native::nir [surface::compile "${::crDecls}m = int_map(\[1, 2, 3\])\nok = reorder_to(m, \[3, 1, 2\])\ns = set_of(\[1, 2\])\nok2 = reorder_set_to(s, \[2, 1\])\ns.reorder(s.order())\nm.reorder(m.order())\n\[ok, ok2\]\n" -warnings off]]
+    set found {}
+    foreach f {std::mutable_map::reorder std::mutable_map::order std::mutable_map::validate_order std::mutable_set::reorder std::mutable_set::validate_order std::ordered_table::arrangement std::ordered_table::permute std::ordered_table::permute_values std::ordered_table::reindex std::ordered_table::count_shared} {
+        set ops [crOps $nir $f]
+        if {$ops eq "missing"} {
+            lappend found $f:missing
+            continue
+        }
+        foreach op $ops {
+            if {[string match tablehash* $op] || $op in {hash hashtotal}} {
+                lappend found $f:$op
+            }
+        }
+    }
+    set found
+} -cleanup {unset -nocomplain nir found f ops op} -result {}
+
+test cr-reorder-checks-nothing {a proven reorder performs no membership validation: reorder declares no error, and neither its body nor anything it calls counts shared members or can fail with OrderMismatch} -body {
+    set hir [surface::compile "${::crDecls}m = int_map(\[1\])\nm.reorder(m.order())\ns = set_of(\[1\])\ns.reorder(s)\n" -warnings off]
+    set result {}
+    foreach name {std::mutable_map::reorder std::mutable_set::reorder} {
+        set block ""
+        foreach e [hir::walk $hir] {
+            if {[hir::kind $hir $e] eq "block" && [hir::signatures::Name $hir $e] eq $name} {
+                set block $e
+            }
+        }
+        set reached {}
+        set work [list $block]
+        set seen [dict create]
+        while {$work ne {}} {
+            set work [lassign $work b]
+            if {[dict exists $seen $b]} continue
+            dict set seen $b 1
+            lappend reached [hir::signatures::Name $hir $b]
+            set inner [list $b]
+            while {$inner ne {}} {
+                set inner [lassign $inner x]
+                if {[hir::kind $hir $x] eq "call"} {
+                    lassign [hir::get $hir $x target] kind target
+                    if {$kind eq "block"} {
+                        lappend work $target
+                    }
+                }
+                lappend inner {*}[hir::children $hir $x]
+            }
+        }
+        lappend result $name [dict getdef [hir::node $hir $block] declaredErrors {}] \
+            [expr {[lsearch -glob $reached *count_shared] < 0 && [lsearch -glob $reached *same_members?] < 0 && [lsearch -glob $reached *validate_order] < 0}]
+    }
+    set result
+} -cleanup {unset -nocomplain hir result name block e reached work seen b inner x kind target} -result {std::mutable_map::reorder {} 1 std::mutable_set::reorder {} 1}
+
+test cr-allocations-constant {natively a proven reorder allocates the same managed objects whatever the size (its temporary permutation array and counter, the logical copies of the entry vectors it rewrites); no List of entries, keys or values} -constraints nativeBuilt -body {
+    set rows [lmap n {500 1000} {
+        set hir [surface::compile "${::crDecls}fn build(n: int) -> std::mutable_map::MutableMap\[int, int\]:\n    m = std::mutable_map::create\[int, int\]()\n    loop i from 0 to n:\n        m.set(i, i)\n    m\nm = build($n)\no = m.order()\nm.reorder(o)\nm.length()\n" -warnings off]
+        set base [surface::compile "${::crDecls}fn build(n: int) -> std::mutable_map::MutableMap\[int, int\]:\n    m = std::mutable_map::create\[int, int\]()\n    loop i from 0 to n:\n        m.set(i, i)\n    m\nm = build($n)\no = m.order()\nm.length()\n" -warnings off]
+        list [dict get [native::allocationReport $hir summary] total allocations] [dict get [native::allocationReport $base summary] total allocations]
+    }]
+    set d0 [expr {[lindex $rows 0 0] - [lindex $rows 0 1]}]
+    set d1 [expr {[lindex $rows 1 0] - [lindex $rows 1 1]}]
+    list [expr {$d0 == $d1}] [expr {$d0 <= 16}]
+} -cleanup {unset -nocomplain rows hir base n d0 d1} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# The representation access is internal
+
+test cr-internal-members {std::mutable_set's representation access for std::mutable_map is internal to the standard library: an application names it INTERNAL-NAMESPACE, and method syntax to it is NOMETHOD-CALL} -body {
+    list [crProof "s = set_of(\[1\])\nt = std::mutable_set::table_of(s)\n"] \
+        [crProof "s = set_of(\[1\])\nt = s.table_of()\n"]
+} -result {INTERNAL-NAMESPACE@2 NOMETHOD-CALL@2}
+
+cleanupTests

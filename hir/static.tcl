@@ -293,6 +293,7 @@ namespace eval hir::static {
         PROOF-CLAUSE                             ProofClause
         REFINEMENT-MINT-AUTHORITY                RefinementMintAuthority
         REFINEMENT-PARAMETER                     RefinementParameter
+        REORDER-NOT-PROVEN                       ReorderNotProven
         RETURN-OUTSIDE-CALLABLE                  ReturnOutsideCallable
         TRAIT-IMPL-ORDER                         TraitImplOrder
         TRAIT-INSTANCE-BUDGET                    TraitInstanceBudget

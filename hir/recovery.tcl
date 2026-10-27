@@ -35,7 +35,10 @@
 #     argument, or the call itself (anything but an obligation a valid call
 #     may still carry: hir::methods::ObligationKinds) -- `p + 1` with a pointer
 #     `p`, a call of a value that cannot be called: no program has that
-#     position to own a value in.
+#     position to own a value in. Likewise a call's unproven relation
+#     (REORDER-NOT-PROVEN, hir/relations.tcl) is not reported when an
+#     earlier check rejected the call or one of its arguments: an order of
+#     the wrong type (IMPRINT, TYPE) has no members to prove.
 #
 # The order is the build's (hir::diagnostics): resolution diagnostics first,
 # in source order, then each check's, in the order the checks run, each in its
@@ -96,9 +99,12 @@ proc hir::recovery::reported {hir} {
 }
 
 # DIAGNOSTICS of HIR without the erasures of arguments an earlier check
-# rejected, or whose call it rejected (above).
+# rejected, or whose call it rejected, and without the unproven relations
+# of calls an earlier check rejected, or one of whose arguments it rejected
+# (above).
 proc hir::recovery::OwnedPositions {hir diagnostics} {
-    if {[lsearch -exact [lmap d $diagnostics {dict get $d kind}] AFFINE-ERASURE-UNSUPPORTED] < 0} {
+    set kinds [lmap d $diagnostics {dict get $d kind}]
+    if {"AFFINE-ERASURE-UNSUPPORTED" ni $kinds && "REORDER-NOT-PROVEN" ni $kinds} {
         return $diagnostics
     }
     # Argument ExprId -> its call.
@@ -116,6 +122,11 @@ proc hir::recovery::OwnedPositions {hir diagnostics} {
         set e [dict getdef $d expr ""]
         if {[dict get $d kind] eq "AFFINE-ERASURE-UNSUPPORTED" && [dict exists $callOf $e]
                 && ([dict exists $rejected $e] || [dict exists $rejected [dict get $callOf $e]])} {
+            continue
+        }
+        if {[dict get $d kind] eq "REORDER-NOT-PROVEN" && [dict exists $hir exprs $e]
+                && ([dict exists $rejected $e] || [lsearch -exact [lmap a [dict get $hir exprs $e args] {
+                    dict exists $rejected $a}] 1] >= 0)} {
             continue
         }
         if {[dict get $d kind] ni [hir::methods::ObligationKinds]} {

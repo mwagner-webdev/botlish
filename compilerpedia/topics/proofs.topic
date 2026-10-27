@@ -786,6 +786,61 @@ fn widened() -> List[int]:
 @at 8:5
 @end
 
+@topic proof.same-members
+title: Same members: the relation a reorder needs
+summary: The compiler knows two particular values hold the same members -- an order and a map's keys -- from order(), validate_order or a copy, and loses it at any change to either's members.
+index: proofs
+alias: same members proof; order proof; membership relation; relational fact
+keywords: reorder, order, validate_order, relation, members, keys, invalidation, join, copy
+related: concept.collection-order error.reorder-not-proven proof.overview proof.lockstep
+docs: PROVEN-COLLECTION-REORDERING.md
+
+== RECOGNIZED PATTERNS
+The fact relates two values, not a type: it is minted by `m.order()` (its
+result holds m's members), by `m.validate_order(c)` (its result, once the
+check passed) and carried by copies (`o2 = o`, `m2 = m`, a struct field);
+`m.reorder(o)` requires it of O and m as m is when the call runs, and
+keeps it. Reads of either value (length, contains, at, a loop) keep it.
+
+@example accept
+import std::mutable_map
+
+fn rotate(place m: std::mutable_map::MutableMap[int, int]) -> unit:
+    o = m.order()
+    if m.length() > 1:
+        m.reorder(o)
+    m.reorder(o)
+
+m = std::mutable_map::create[int, int]()
+m.set(1, 10)
+rotate(m)
+m.length()
+@caption Reorders and reads keep the relation; both paths of the if do
+@value 1
+@end
+
+== LIMITATIONS
+Any change to either value's members loses the fact -- also a set of a
+key already present, a place call that may change nothing, and, for a
+context member, any call that may run code changing the installed
+context. A join keeps it only when every completing path gives it; a
+loop that changes either value anywhere in its body loses it in the body
+and after it. Nothing crosses a function boundary: a parameter, or a
+helper's result, is unrelated to everything.
+
+@example reject
+import std::mutable_map
+import std::mutable_set
+
+fn apply(place m: std::mutable_map::MutableMap[int, int], o: std::mutable_set::MutableSet[int]) -> unit:
+    m.reorder(o)
+
+0
+@caption A parameter carries no relation into the function
+@error CORE SEMANTIC REORDER-NOT-PROVEN
+@at 5:5
+@end
+
 @topic proof.contexts
 title: Context requirements
 summary: The compiler derives every function's transitive context requirements from the call graph and proves that each top-level call runs after the installation of every context it needs.

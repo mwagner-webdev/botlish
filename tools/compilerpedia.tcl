@@ -503,6 +503,12 @@ proc cpt::Generate {} {
                     # a program iterates the collection with a loop.
                     continue
                 }
+                if {[core::native::isInternalMember "${ns}::$name"]} {
+                    # A collection's representation access for another
+                    # standard library module (core::native::
+                    # declareInternalMember): internal, no API.
+                    continue
+                }
                 set qualified "${ns}::$name"
                 set id stdlib.$qualified
                 set kind [DeclarationKind $node]

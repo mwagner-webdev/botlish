@@ -3780,13 +3780,96 @@ grow(std::mutable_vector::from_list([]))
 == MORE
 PLACE-PARAMETERS.md.
 
+@topic concept.collection-order
+title: Order, membership and identity of a map or set
+summary: A MutableMap's or MutableSet's iteration order is a permutation of its members that reorder may replace, never part of its contents: reorder changes the order only.
+index: concepts
+alias: reorder; reordering; iteration order; collection order; permutation of keys
+keywords: reorder, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet
+related: concept.mutable-map concept.mutable-set proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order
+docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md
+
+== WHAT IT IS
+    o = m.order()                  the keys, in m's order: a MutableSet
+    o = m.validate_order(c)        C, checked once to hold exactly m's
+        on std::mutable_map::OrderMismatch:    keys (any order)
+            m.order()
+    m.reorder(o)                   m in O's order
+
+A map's *contents* are its associations, a set's its members; its
+*order* is a permutation of those members. Insertion order is only the
+default history: reorder replaces the order and nothing else -- every
+key keeps its stored key and its value, lookups and length are
+unchanged, and the next new key still goes last. The same holds for
+`s.order()`, `s.validate_order(c)` and `s.reorder(o)` of a set (a copy
+of the set is an order of it too).
+
+== RULES
+  * The order is a MutableSet (distinct by construction) that must hold
+    exactly the collection's current members: the compiler must know it
+    (REORDER-NOT-PROVEN), and a proven reorder checks nothing at run time.
+  * Changing either value's members (set, remove, clear, add, a place
+    call) loses that knowledge; reading either, and reordering either,
+    keeps it.
+  * A reorder is O(n): it moves the entries with their stored hashes
+    (nothing is hashed again) and keeps the table's reservation.
+  * Maps and sets are values: a copy reorders independently, and a loop
+    iterates the collection as it was when the loop began.
+
+== WHY
+Order is under the program's control, not the hidden hash's; and an order
+is a permutation of what the collection holds, never an arbitrary
+sequence. Equal lengths or matching types prove nothing about which keys
+an order holds, so the fact is proven, or checked once, and then trusted.
+
+== EXAMPLES
+@example accept
+import std::mutable_map
+
+m = std::mutable_map::create[str, int]()
+m.set("pear", 2)
+m.set("fig", 1)
+o = m.order()
+m.reorder(o)
+m.set("kiwi", 3)
+loop e in m:
+    e.key
+@caption The current order, then a new key last
+@value ["pear", "fig", "kiwi"]
+@end
+
+@example accept
+import std::mutable_set
+
+s = std::mutable_set::create[int]()
+s.add(1)
+s.add(2)
+s.add(3)
+want = std::mutable_set::create[int]()
+want.add(3)
+want.add(1)
+want.add(2)
+o = s.validate_order(want):
+    on std::mutable_set::OrderMismatch:
+        s
+s.reorder(o)
+loop x in s:
+    x
+@caption A set in a chosen order
+@value [3, 1, 2]
+@end
+
+== MORE
+PROVEN-COLLECTION-REORDERING.md; proof.same-members for what the
+compiler proves.
+
 @topic concept.mutable-map
 title: MutableMap[K, V]: an insertion-ordered mutable map
 summary: std::mutable_map::MutableMap[K, V] maps Hashable keys to values and iterates in insertion order: a replaced value keeps its key's place, a removed and re-set key goes last.
 index: concepts
 alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
-keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value
-related: concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
+keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder
+related: concept.collection-order concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
 docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 == WHAT IT IS
@@ -3800,7 +3883,8 @@ docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
         e.key                      insertion order
 
 After `import std::mutable_map`: create[K, V](), with_capacity[K, V](n),
-length, empty?, contains, at, set, remove (returns the value), clear, and
+length, empty?, contains, at, set, remove (returns the value), clear,
+order, validate_order, reorder (concept.collection-order) and
 `loop e in m:`. Expected cost: O(1) for contains, at, set and remove,
 O(n) for a loop.
 
@@ -3863,7 +3947,7 @@ title: MutableSet[T]: an insertion-ordered mutable set
 summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
 index: concepts
 alias: MutableSet; ordered set; mutable set
-keywords: mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
+keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
 related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
 docs: ORDERED-MUTABLE-MAP-SET.md
 

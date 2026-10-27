@@ -281,9 +281,23 @@ fn compact_values(t: Table[K], place values: MutableVector[V]) -> unit:
                 unit
     values.truncate(t.length())
 
+# T's index rebuilt at SLOTS slots (a power of two of at least min_slots(),
+# holding every entry at most 7/10 full) from the entries' stored hashes: no
+# key is hashed again. Every entry is live (a rebuild compacts first).
+fn reindex(place t: Table[K], slots: int) -> unit:
+    std::mutable_vector::clear(t.index)
+    loop s from 0 to slots:
+        t.index.push(-1)
+    loop p from 0 to std::mutable_vector::length(t.hashes):
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        t.place_entry(p, h)
+    unit
+
 # T with its dead entries dropped -- the live ones moved down in order, in
-# place -- and its index rebuilt at slots_for(NEEDED) slots, NEEDED at least
-# its live entry count.
+# place -- and its index rebuilt (reindex) at slots_for(NEEDED) slots,
+# NEEDED at least its live entry count.
 fn rebuild(place t: Table[K], needed: int) -> unit:
     if t.positions() != t.length():
         w = std::mutable_array::create(1, 0)
@@ -309,15 +323,7 @@ fn rebuild(place t: Table[K], needed: int) -> unit:
                     unit
         t.hashes.truncate(t.length())
         t.keys.truncate(t.length())
-    std::mutable_vector::clear(t.index)
-    loop s from 0 to slots_for(needed):
-        t.index.push(-1)
-    loop p from 0 to std::mutable_vector::length(t.hashes):
-        h = t.hashes.at(p):
-            on IndexNotFound:
-                continue
-        t.place_entry(p, h)
-    unit
+    t.reindex(slots_for(needed))
 
 # T rebuilt for NEEDED entries (rebuild) together with VALUES, a
 # collection's per-entry payload aligned with T's positions, compacted the
@@ -338,3 +344,108 @@ fn clear(place t: Table[K]) -> unit:
     t.live.set(0, 0):
         on IndexNotFound:
             unit
+
+# ---------------------------------------------------------------------------
+# Membership and order (PROVEN-COLLECTION-REORDERING.md)
+#
+# An *order* for T is another table C whose live keys are exactly T's: the
+# same members, in an order of their own. std::mutable_map's and
+# std::mutable_set's order operations are these functions over the
+# collections' tables (a MutableSet's is its whole representation). They
+# find T's entries by C's stored hashes -- the keyed hash of a key is the
+# same in every table of one process -- so nothing is hashed again, and a
+# key is compared only at an entry whose stored hash is equal (holds?).
+
+# The number of C's live entries whose key has an entry in T.
+fn count_shared(t: Table[K], c: Table[K]) -> int:
+    found = std::mutable_array::create(1, 0)
+    loop q from 0 to std::mutable_vector::length(c.hashes):
+        h = c.hashes.at(q):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        if t.slot_of(h, c.key_at(q)) >= 0:
+            n = found.at(0):
+                on IndexNotFound:
+                    0
+            found.set(0, n + 1):
+                on IndexNotFound:
+                    unit
+    n = found.at(0):
+        on IndexNotFound:
+            0
+    n
+
+# Whether C's live keys are exactly T's: as many, each with an entry in T
+# (C's keys are distinct, being a table's, so they are then all of T's).
+fn same_members?(t: Table[K], c: Table[K]) -> bool:
+    t.length() == c.length() and t.count_shared(c) == c.length()
+
+# T's entry positions in the order of C's live entries: at rank I, the
+# position of T's entry whose key equals C's live entry of rank I (-1 when T
+# has none, which an order of T never leaves). Locating an entry is a probe
+# with C's stored hash; nothing is validated (an order's members are T's by
+# the proof that admitted it).
+fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
+    perm = std::mutable_array::create(c.length(), -1)
+    rank = std::mutable_array::create(1, 0)
+    loop q from 0 to std::mutable_vector::length(c.hashes):
+        h = c.hashes.at(q):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        i = rank.at(0):
+            on IndexNotFound:
+                0
+        perm.set(i, t.position(t.slot_of(h, c.key_at(q)))):
+            on IndexNotFound:
+                unit
+        rank.set(0, i + 1):
+            on IndexNotFound:
+                unit
+    perm
+
+# T's entries in the order PERM (arrangement's) gives: the live entry at
+# position PERM[I] moves to position I with its stored hash and its stored
+# key, and the dead entries are dropped. The index keeps its slot count
+# (a reservation stays one) and is rebuilt from the stored hashes (reindex).
+fn permute(place t: Table[K], perm: MutableArray[int]) -> unit:
+    hashes = t.hashes
+    keys = t.keys
+    std::mutable_vector::clear(t.hashes)
+    std::mutable_vector::clear(t.keys)
+    loop i from 0 to perm.capacity():
+        p = perm.at(i):
+            on IndexNotFound:
+                continue
+        h = hashes.at(p):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        t.hashes.push(h)
+        t.keys.push(keys.at(p.mod(std::mutable_vector::length(keys))))
+    t.live.set(0, std::mutable_vector::length(t.hashes)):
+        on IndexNotFound:
+            unit
+    t.reindex(std::mutable_vector::length(t.index))
+
+# VALUES (a collection's per-entry payload, aligned with T's positions) in
+# the order permute gives T's entries by PERM: the value at position PERM[I]
+# moves to position I. Called before permute, which moves T's own.
+fn permute_values(t: Table[K], perm: MutableArray[int], place values: MutableVector[V]) -> unit:
+    old = values
+    std::mutable_vector::clear(values)
+    loop i from 0 to perm.capacity():
+        p = perm.at(i):
+            on IndexNotFound:
+                continue
+        if not t.live_at?(p):
+            continue
+        v = old.at(p):
+            on IndexNotFound:
+                continue
+        values.push(v)
+    unit

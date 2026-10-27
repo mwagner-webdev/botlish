@@ -9428,6 +9428,23 @@ std::mutable_map::KeyNotFound.
 == DESCRIPTION
 A key with no entry in the map.
 
+@topic stdlib.std::mutable_map::OrderMismatch
+title: std::mutable_map::OrderMismatch -- Error of module std::mutable_map
+summary: A candidate order that does not hold exactly the map's keys.
+index: stdlib
+symbol: std::mutable_map::OrderMismatch
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    error OrderMismatch
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::OrderMismatch.
+
+== DESCRIPTION
+A candidate order that does not hold exactly the map's keys.
+
 @topic stdlib.std::mutable_map::create
 title: std::mutable_map::create -- Function of module std::mutable_map
 summary: The function std::mutable_map::create of the standard module std::mutable_map.
@@ -9555,6 +9572,64 @@ related: stdlib.module.std::mutable_map
 stdlib/mutable_map.bot: import std::mutable_map, then write
 std::mutable_map::clear or, as a method, receiver.clear(...).
 
+@topic stdlib.std::mutable_map::order
+title: std::mutable_map::order -- Function of module std::mutable_map
+summary: M's keys in M's iteration order
+index: stdlib
+symbol: std::mutable_map::order
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn order(m: MutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::order or, as a method, receiver.order(...).
+
+== DESCRIPTION
+M's keys in M's iteration order: a MutableSet of exactly M's keys, which the
+compiler knows it is (an order M.reorder admits).
+
+@topic stdlib.std::mutable_map::validate_order
+title: std::mutable_map::validate_order -- Function of module std::mutable_map
+summary: CANDIDATE unchanged, once checked to hold exactly M's keys, in any order (OrderMismatch otherwise)
+index: stdlib
+symbol: std::mutable_map::validate_order
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn validate_order(m: MutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::validate_order or, as a method,
+receiver.validate_order(...).
+
+== DESCRIPTION
+CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+(OrderMismatch otherwise): the compiler then knows it is an order of M. M is
+not reordered. O(n), no key hashed again.
+
+@topic stdlib.std::mutable_map::reorder
+title: std::mutable_map::reorder -- Function of module std::mutable_map
+summary: M's entries in ORDER's order
+index: stdlib
+symbol: std::mutable_map::reorder
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn reorder(place m: MutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> unit:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::reorder or, as a method, receiver.reorder(...).
+
+== DESCRIPTION
+M's entries in ORDER's order: every key keeps its stored key and its value,
+only the iteration order changes. ORDER must be known to hold exactly M's
+current keys (order, validate_order: REORDER-NOT-PROVEN otherwise); nothing
+is checked at run time. O(n), no key hashed again.
+
 @topic stdlib.module.std::mutable_map
 title: std::mutable_map -- standard namespace
 summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
@@ -9579,8 +9654,18 @@ symbol: std::mutable_map
                                             returned, or KeyNotFound (the map
                                             unchanged)
   m.clear()                                 every entry removed
-  loop e in m:                              every entry, in insertion order,
-                                            as a MutableMapEntry[K, V]
+  m.order()                                 the keys in their order: a
+                                            std::mutable_set::MutableSet[K]
+                                            of exactly m's keys, known so
+  m.validate_order(candidate)               CANDIDATE, once checked to hold
+                                            exactly m's keys (any order),
+                                            or OrderMismatch
+  m.reorder(order)                          m's entries in ORDER's order:
+                                            ORDER must be known to hold
+                                            exactly m's keys
+  loop e in m:                              every entry, in insertion order
+                                            (or the last reorder's), as a
+                                            MutableMapEntry[K, V]
 
 A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing m,
 returning it, storing it in a struct) makes a logical copy, and mutating one
@@ -9596,6 +9681,13 @@ again adds it last. Expected cost: O(1) amortized for contains, at, set and
 remove; O(1) for length; O(n) for a loop; a growth or compaction is O(n),
 amortized over the operations before it.
 
+A map's identity is its associations; its order is a permutation of its keys
+(PROVEN-COLLECTION-REORDERING.md). reorder changes the order only: every key
+keeps its stored key and its value. Its order must be known, at the call, to
+hold exactly the map's keys (REORDER-NOT-PROVEN otherwise): from order(), or
+from validate_order, which checks a candidate once. A proven reorder checks
+nothing; it is O(n) and hashes nothing again.
+
 The representation is std::ordered_table's, opaque: no program sees a slot,
 a hash, a capacity or a removed entry.
 
@@ -9606,14 +9698,18 @@ stdlib/mutable_map.bot (import std::mutable_map).
     std::mutable_map::KeyNotFound  error -- A key with no entry in the map.
     std::mutable_map::MutableMap   opaque struct
     std::mutable_map::MutableMapEntry struct -- One entry of a map, as a lo...
+    std::mutable_map::OrderMismatch error -- A candidate order that does no...
     std::mutable_map::at           function
     std::mutable_map::clear        function
     std::mutable_map::contains     function
     std::mutable_map::create       function
     std::mutable_map::empty?       function
     std::mutable_map::length       function
+    std::mutable_map::order        function -- M's keys in M's iteration order
     std::mutable_map::remove       function
+    std::mutable_map::reorder      function -- M's entries in ORDER's order
     std::mutable_map::set          function
+    std::mutable_map::validate_order function -- CANDIDATE unchanged, once ...
     std::mutable_map::with_capacity function
 
 Each member is a topic: -help NAME (e.g. -help
@@ -9633,6 +9729,23 @@ related: stdlib.module.std::mutable_set
 == MODULE
 stdlib/mutable_set.bot: import std::mutable_set, then write
 std::mutable_set::MutableSet.
+
+@topic stdlib.std::mutable_set::OrderMismatch
+title: std::mutable_set::OrderMismatch -- Error of module std::mutable_set
+summary: A candidate order that does not hold exactly the collection's elements.
+index: stdlib
+symbol: std::mutable_set::OrderMismatch
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    error OrderMismatch
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::OrderMismatch.
+
+== DESCRIPTION
+A candidate order that does not hold exactly the collection's elements.
 
 @topic stdlib.std::mutable_set::create
 title: std::mutable_set::create -- Function of module std::mutable_set
@@ -9747,6 +9860,64 @@ related: stdlib.module.std::mutable_set
 stdlib/mutable_set.bot: import std::mutable_set, then write
 std::mutable_set::clear or, as a method, receiver.clear(...).
 
+@topic stdlib.std::mutable_set::order
+title: std::mutable_set::order -- Function of module std::mutable_set
+summary: S's elements in S's iteration order
+index: stdlib
+symbol: std::mutable_set::order
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn order(s: MutableSet[T]) -> MutableSet[T]:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::order or, as a method, receiver.order(...).
+
+== DESCRIPTION
+S's elements in S's iteration order: a copy of S, which the compiler knows
+is an order of S (as any copy of S is).
+
+@topic stdlib.std::mutable_set::validate_order
+title: std::mutable_set::validate_order -- Function of module std::mutable_set
+summary: CANDIDATE unchanged, once checked to hold exactly S's elements, in any order (OrderMismatch otherwise)
+index: stdlib
+symbol: std::mutable_set::validate_order
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn validate_order(s: MutableSet[T], candidate: MutableSet[T]) -> MutableSet[T] errors OrderMismatch:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::validate_order or, as a method,
+receiver.validate_order(...).
+
+== DESCRIPTION
+CANDIDATE unchanged, once checked to hold exactly S's elements, in any order
+(OrderMismatch otherwise): the compiler then knows it is an order of S. S is
+not reordered. O(n), no element hashed again.
+
+@topic stdlib.std::mutable_set::reorder
+title: std::mutable_set::reorder -- Function of module std::mutable_set
+summary: S's elements in ORDER's order
+index: stdlib
+symbol: std::mutable_set::reorder
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn reorder(place s: MutableSet[T], order: MutableSet[T]) -> unit:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::reorder or, as a method, receiver.reorder(...).
+
+== DESCRIPTION
+S's elements in ORDER's order: the members are unchanged, only the iteration
+order changes. ORDER must be known to hold exactly S's current elements
+(order, a copy, validate_order: REORDER-NOT-PROVEN otherwise); nothing is
+checked at run time. O(n), no element hashed again.
+
 @topic stdlib.module.std::mutable_set
 title: std::mutable_set -- standard namespace
 summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
@@ -9769,7 +9940,17 @@ symbol: std::mutable_set
                                           one, false when it was not (the
                                           set unchanged)
   s.clear()                               every element removed
+  s.order()                               the elements in their order: a
+                                          MutableSet of exactly s's
+                                          elements (a copy of s), known so
+  s.validate_order(candidate)             CANDIDATE, once checked to hold
+                                          exactly s's elements (any
+                                          order), or OrderMismatch
+  s.reorder(order)                        s's elements in ORDER's order:
+                                          ORDER must be known to hold
+                                          exactly s's elements
   loop x in s:                            every element, in insertion order
+                                          (or the last reorder's)
 
 A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 copy, and mutating one copy never changes another. The mutating operations
@@ -9780,6 +9961,13 @@ cannot observe, and iterated in insertion order. Removing an element and
 adding it again adds it last. Expected cost: O(1) amortized for contains,
 add and remove; O(1) for length; O(n) for a loop.
 
+Order is not membership (PROVEN-COLLECTION-REORDERING.md): reorder changes
+the iteration order only, never which elements the set holds, and its order
+is a permutation of the set's elements -- which the compiler must know at
+the call (REORDER-NOT-PROVEN otherwise), from order(), a copy of the set, or
+validate_order. A proven reorder checks nothing; it is O(n) and hashes
+nothing again.
+
 The representation is std::ordered_table's alone (the elements are its
 keys): a set stores no value per element.
 
@@ -9788,13 +9976,17 @@ stdlib/mutable_set.bot (import std::mutable_set).
 
 == MEMBERS
     std::mutable_set::MutableSet   opaque struct
+    std::mutable_set::OrderMismatch error -- A candidate order that does no...
     std::mutable_set::add          function
     std::mutable_set::clear        function
     std::mutable_set::contains     function
     std::mutable_set::create       function
     std::mutable_set::empty?       function
     std::mutable_set::length       function
+    std::mutable_set::order        function -- S's elements in S's iteratio...
     std::mutable_set::remove       function
+    std::mutable_set::reorder      function -- S's elements in ORDER's order
+    std::mutable_set::validate_order function -- CANDIDATE unchanged, once ...
     std::mutable_set::with_capacity function
 
 Each member is a topic: -help NAME (e.g. -help

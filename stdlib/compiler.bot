@@ -127,6 +127,7 @@ enum DiagnosticCode:
     ProofClause,
     RefinementMintAuthority,
     RefinementParameter,
+    ReorderNotProven,
     ReturnOutsideCallable,
     TraitImplOrder,
     TraitInstanceBudget,

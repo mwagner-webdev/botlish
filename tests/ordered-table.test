@@ -25,6 +25,11 @@
 #   contents  the live keys in position order are the model's keys in order,
 #             a map's values the model's values
 #
+# A reorder (PROVEN-COLLECTION-REORDERING.md) is checked by the same
+# invariants, and also leaves no dead entry and keeps the index's slot count
+# (a reservation stays one): the size bound applies again from the next
+# rebuild on.
+#
 # The policy (the 7/10 load, the garbage rule, the slot counts) is the
 # engine's, not a semantic commitment: a change to it changes these tests
 # and the report, never a program's observations.
@@ -65,6 +70,27 @@ proc otOps {seed count pool} {
     return $ops
 }
 
+# OPS with a {reorder IDS} operation inserted after about one operation in
+# EVERY (SEED's choice): IDS a random permutation of the live key ids then.
+proc otWithReorders {ops seed every} {
+    set ::otSeed $seed
+    set states [lrange [otModel $ops] 1 end]
+    set result {}
+    foreach op $ops state $states {
+        lappend result $op
+        if {[otRand $every] != 0} continue
+        set ids [dict keys $state]
+        for {set i [expr {[llength $ids] - 1}]} {$i > 0} {incr i -1} {
+            set j [otRand [expr {$i + 1}]]
+            set t [lindex $ids $i]
+            lset ids $i [lindex $ids $j]
+            lset ids $j $t
+        }
+        lappend result [list reorder $ids]
+    }
+    return $result
+}
+
 # The program applying OPS to a WHAT (map or set) of key kind KIND (int or
 # str), returning the List of its snapshots: the collection before the first
 # operation and after each.
@@ -86,6 +112,7 @@ proc otProgram {what kind ops} {
         set drop "c.remove(key(arg(op, 1)))"
         set dropLoop "c.remove(key(i))"
     }
+    set mismatch "std::mutable_$what\::OrderMismatch"
     set codes {}
     foreach op $ops {
         switch -- [lindex $op 0] {
@@ -94,12 +121,13 @@ proc otProgram {what kind ops} {
             clear { lappend codes "\[2\]" }
             fill { lappend codes "\[3, [lindex $op 1], [lindex $op 2]\]" }
             drain { lappend codes "\[4, [lindex $op 1], [lindex $op 2]\]" }
+            reorder { lappend codes "\[[join [concat 5 [lindex $op 1]] {, }]\]" }
         }
     }
     return "import std::list
 import std::int
 import std::mutable_$what
-import std::mutable_vector
+[expr {$what eq "map" ? "import std::mutable_set\n" : ""}]import std::mutable_vector
 
 fn arg(op: List\[int\], i: int) -> int:
     x = std::list::at(op, i):
@@ -124,6 +152,14 @@ fn apply(place c: $type, op: List\[int\]) -> unit:
     if code == 4:
         loop i from arg(op, 1) to arg(op, 1) + arg(op, 2):
             $dropLoop
+    if code == 5:
+        candidate = std::mutable_set::create\[$t\]()
+        loop j from 1 to std::list::length(op):
+            candidate.add(key(arg(op, j)))
+        order = c.validate_order(candidate):
+            on $mismatch:
+                c.order()
+        c.reorder(order)
     unit
 
 ops = \[[join $codes {, }]\]
@@ -159,6 +195,13 @@ proc otModel {ops} {
                     dict unset m $i
                 }
             }
+            reorder {
+                set r [dict create]
+                foreach id [lindex $op 1] {
+                    dict set r $id [dict get $m $id]
+                }
+                set m $r
+            }
         }
         lappend states $m
     }
@@ -174,8 +217,9 @@ proc otKey {kind id} {
 }
 
 # The problems of snapshot SNAP (a raw map or set value) against the model
-# state STATE: "" when every invariant holds.
-proc otProblems {what kind snap state} {
+# state STATE: "" when every invariant holds. KEPT is the slot count the
+# last reorder kept, which the size bound allows until the index changes.
+proc otProblems {what kind snap state {kept ""}} {
     set table [core::value::structGet $snap table]
     set index [otInts [core::value::structGet $table index]]
     set hashes [otInts [core::value::structGet $table hashes]]
@@ -245,7 +289,7 @@ proc otProblems {what kind snap state} {
     if {$dead >= 8 && $dead >= [llength $livePositions]} {
         lappend problems "$dead dead entries for [llength $livePositions] live"
     }
-    if {$slots > max(8, 4 * ($positions + 1))} {
+    if {$slots > max(8, 4 * ($positions + 1)) && $slots ne $kept} {
         lappend problems "$slots slots for $positions positions"
     }
     set got [lmap p $livePositions {lindex $keys $p}]
@@ -269,8 +313,23 @@ proc otCheck {what kind ops} {
     if {[llength $snaps] != [llength $states]} {
         return "[llength $snaps] snapshots for [llength $states] states"
     }
+    set kept ""
+    set slots ""
     foreach snap $snaps state $states op [concat [list start] $ops] {
-        set problems [otProblems $what $kind $snap $state]
+        set table [core::value::structGet $snap table]
+        set now [llength [core::mutvec::items [core::value::structGet $table index]]]
+        if {[lindex $op 0] eq "reorder"} {
+            # A reorder keeps the slot count and leaves no dead entry.
+            set positions [llength [core::mutvec::items [core::value::structGet $table hashes]]]
+            if {$now != $slots || $positions != [dict size $state]} {
+                return "after $op: $now slots (before: $slots), $positions positions for [dict size $state] entries"
+            }
+            set kept $now
+        } elseif {$now ne $kept} {
+            set kept ""
+        }
+        set slots $now
+        set problems [otProblems $what $kind $snap $state $kept]
         if {$problems ne {}} {
             return "after $op: [join [lrange $problems 0 3] {; }]"
         }
@@ -425,5 +484,106 @@ test ot-keyed-collisions {genuine collisions of the table's own hash: under the 
     }
     list $homes $check [llength $clustered] $run
 } -cleanup {unset -nocomplain keys ops k j homes check snap table index hashes mask clustered run} -result {0 {ok 122} 1 64}
+
+# ---------------------------------------------------------------------------
+# Reordering (PROVEN-COLLECTION-REORDERING.md)
+
+test ot-reorder-invariants-map-int {a MutableMap[int, int] reordered by random permutations between 300 random operations (growth, removal, compaction, clear): every invariant after every operation, no dead entry and the slot count kept after each reorder} -body {
+    otCheck map int [otWithReorders [otOps 61 300 24] 67 6]
+} -result {ok 357}
+
+test ot-reorder-invariants-map-str {the same for a MutableMap[str, int]} -body {
+    otCheck map str [otWithReorders [otOps 71 200 40] 73 5]
+} -result {ok 246}
+
+test ot-reorder-invariants-set-int {the same for a MutableSet[int]} -body {
+    otCheck set int [otWithReorders [otOps 79 300 24] 83 6]
+} -result {ok 350}
+
+test ot-reorder-invariants-hidden-keys {reorders under two fixed hidden keys: every stored hash is that key's table hash, and every invariant holds} -body {
+    set ops [otWithReorders [otOps 89 200 30] 97 5]
+    set results {}
+    foreach key {{1 2} {0x9e3779b97f4a7c15 0xbf58476d1ce4e5b9}} {
+        core::hashing::useTableHashKey $key
+        try {
+            lappend results [otCheck set str $ops]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    set results
+} -cleanup {unset -nocomplain ops results key} -result {{ok 245} {ok 245}}
+
+test ot-reorder-drops-dead-keeps-slots {a reorder of a table with dead entries leaves exactly its live entries and its slot count; a reservation (with_capacity) survives it, so the reserved insertions after it do not rebuild} -body {
+    set hir [surface::compile {import std::mutable_map
+import std::mutable_set
+m = std::mutable_map::create[int, int]()
+loop i from 0 to 40:
+    m.set(i, i)
+loop i from 0 to 40:
+    if i.mod(5) == 0:
+        r = m.remove(i):
+            on std::mutable_map::KeyNotFound:
+                -1
+before = m
+m.reorder(m.order())
+after = m
+r = std::mutable_map::with_capacity[int, int](100)
+loop i from 0 to 60:
+    r.set(i, i)
+reserved = r
+r.reorder(r.order())
+loop i from 60 to 100:
+    r.set(i, i)
+[before, after, reserved, r]
+} -warnings off]
+    set result {}
+    foreach snap [lindex [core::compiler::evalHir $hir] 1] {
+        set table [core::value::structGet $snap table]
+        lappend result [list [llength [core::mutvec::items [core::value::structGet $table index]]] \
+            [llength [core::mutvec::items [core::value::structGet $table hashes]]] \
+            [core::value::intOf [lindex [core::mutarray::items [core::value::structGet $table live]] 0]]]
+    }
+    set result
+} -cleanup {unset -nocomplain hir result snap table} -result {{64 40 32} {64 32 32} {256 60 60} {256 100 100}}
+
+test ot-reorder-hashes-not-recomputed {a reorder computes no table hash: on the Tcl compiler's backend, building a map and reordering it calls core::hashing::tableHash exactly as often as building it and taking its order without reordering} -body {
+    set counts {}
+    foreach tail {"m.reorder(o)\nm.reorder(o)\n" ""} {
+        set hir [surface::compile "import std::mutable_map\nm = std::mutable_map::create\[int, int\]()\nloop i from 0 to 200:\n    m.set(i * 3, i)\no = m.order()\n${tail}m.length()\n" -warnings off]
+        set ::otHashCalls 0
+        set trace [list ::apply {{args} {incr ::otHashCalls}}]
+        trace add execution core::hashing::tableHash enter $trace
+        try {
+            core::compiler::evalHir $hir
+        } finally {
+            trace remove execution core::hashing::tableHash enter $trace
+        }
+        lappend counts $::otHashCalls
+    }
+    list [expr {[lindex $counts 0] == [lindex $counts 1]}] [expr {[lindex $counts 1] >= 200}]
+} -cleanup {unset -nocomplain counts tail hir trace ::otHashCalls} -result {1 1}
+
+test ot-reorder-keyed-collisions {reordering a probe cluster of genuine collisions of the table's own hash (keyed-collide.txt under the hidden key {1 2}): reversed, every invariant holds and every entry is found by equality} -body {
+    set keys [lrange [string trim [core::ReadFile [file join $::projectRoot audit mutable-map data keyed-collide.txt]]] 0 47]
+    set ops {}
+    foreach k $keys {
+        lappend ops [list set $k 1]
+    }
+    foreach k [lrange $keys 0 15] {
+        lappend ops [list remove $k]
+    }
+    lappend ops [list reorder [lreverse [lrange $keys 16 end]]]
+    foreach k [lrange $keys 0 7] {
+        lappend ops [list set $k 2]
+    }
+    lappend ops [list reorder [concat [lrange $keys 0 7] [lrange $keys 16 end]]]
+    core::hashing::useTableHashKey {1 2}
+    try {
+        otCheck map int $ops
+    } finally {
+        core::hashing::useTableHashKey ""
+    }
+} -cleanup {unset -nocomplain keys ops k} -result {ok 75}
 
 cleanupTests

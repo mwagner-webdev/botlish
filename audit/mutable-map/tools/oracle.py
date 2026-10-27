@@ -40,6 +40,35 @@ Input (standard input): a JSON list of operations, each a list
     ["fill", V, A, B, STEP]        set: add each of them
     ["drain", V, A, B, STEP]       remove keys A, A+STEP, ... < B (map or
                                    set), observing nothing
+    ["reorder", V, MODE, B, ABSENT]
+                                   (PROVEN-COLLECTION-REORDERING.md) a
+                                   candidate order CANDIDATE(L, MODE, B,
+                                   ABSENT) of V's current order L (below),
+                                   as a set (a repeated key once, at its
+                                   first place): when its members are
+                                   exactly V's, V's order becomes it,
+                                   contents unchanged; otherwise observe
+                                   -7 (the mismatch) and V is unchanged.
+                                   Then observe V's count
+    ["reorder-same", V]            V reordered by its own current order:
+                                   nothing changes; observe V's count
+    ["reorder-via-order", V, B]    V's order, rotated by B, then V
+                                   reordered by it; observe V's count
+    ["reloop", V]                  for each key K of a snapshot of V, in
+                                   order: observe K, then reorder V by its
+                                   current order reflected (MODE 1, B 0)
+
+CANDIDATE(L, MODE, B, ABSENT), n = len(L):
+    0  rotated:   L[(i + B) mod n] for i < n
+    1  reflected: L[(B - i) mod n] for i < n
+    2  L's even positions, then its odd ones
+    3  L without its last key
+    4  L, then ABSENT
+    5  ABSENT, then L without its first key
+
+Order is not content: the map's dict and the set's membership are what
+they were; only the sequence a reorder installs changes. The model never
+asks how the compiler proved an order (a proof is no run-time event).
 
 Output: the observations, one JSON list of integers.
 """
@@ -78,6 +107,53 @@ class OrderedSetModel:
 
     def __len__(self):
         return len(self.order)
+
+
+def candidate(order, mode, b, absent):
+    n = len(order)
+    if mode == 0:
+        c = [order[(i + b) % n] for i in range(n)]
+    elif mode == 1:
+        c = [order[(b - i) % n] for i in range(n)]
+    elif mode == 2:
+        c = order[0::2] + order[1::2]
+    elif mode == 3:
+        c = order[:-1]
+    elif mode == 4:
+        c = order + [absent]
+    elif mode == 5:
+        c = [absent] + order[1:]
+    else:
+        raise ValueError("unknown reorder mode %r" % (mode,))
+    seen = []
+    for k in c:
+        if k not in seen:
+            seen.append(k)
+    return seen
+
+
+def current_order(v):
+    return list(v.order) if isinstance(v, OrderedSetModel) else list(v.keys())
+
+
+def install(env, var, order):
+    """VAR's order becomes ORDER (a permutation of its members)."""
+    v = env[var]
+    if isinstance(v, OrderedSetModel):
+        assert set(order) == v.members
+        v.order = list(order)
+    else:
+        assert set(order) == set(v.keys())
+        env[var] = {k: v[k] for k in order}
+
+
+def reorder(env, var, mode, b, absent, out):
+    order = current_order(env[var])
+    c = candidate(order, mode, b, absent)
+    if set(c) == set(order):
+        install(env, var, c)
+    else:
+        out.append(-7)
 
 
 def run(ops):
@@ -146,6 +222,20 @@ def run(ops):
                     v.remove(k)
                 else:
                     v.pop(k, None)
+        elif name == "reorder":
+            reorder(env, op[1], op[2], op[3], op[4], out)
+            out.append(len(env[op[1]]))
+        elif name == "reorder-same":
+            out.append(len(env[op[1]]))
+        elif name == "reorder-via-order":
+            order = current_order(env[op[1]])
+            install(env, op[1], candidate(order, 0, op[2], None))
+            out.append(len(env[op[1]]))
+        elif name == "reloop":
+            for k in current_order(env[op[1]]):
+                out.append(k)
+                order = current_order(env[op[1]])
+                install(env, op[1], candidate(order, 1, 0, None))
         else:
             raise ValueError("unknown operation %r" % (name,))
     return out
@@ -162,6 +252,22 @@ def selftest():
     got = run(ops)
     if got != expect:
         print("selftest FAILED: %r != %r" % (got, expect))
+        return 1
+    # Reordering (PROVEN-COLLECTION-REORDERING.md): order only, contents
+    # kept; a candidate with other members is a mismatch and changes nothing.
+    ops = [["new", "m", "map"], ["set", "m", 1, 10], ["set", "m", 2, 20], ["set", "m", 3, 30],
+           ["copy", "m", "n"], ["reorder", "m", 1, 0, -1], ["iterate", "m"], ["iterate", "n"],
+           ["reorder", "m", 3, 0, -1], ["reorder", "m", 4, 0, -1], ["reorder", "m", 5, 0, -1],
+           ["reorder", "m", 0, 1, -1], ["iterate", "m"], ["set", "m", 4, 40], ["remove", "m", 3],
+           ["set", "m", 3, 33], ["iterate", "m"], ["reorder-via-order", "m", 2], ["iterate", "m"],
+           ["new", "s", "set"], ["add", "s", 5], ["add", "s", 6], ["add", "s", 7], ["reorder", "s", 2, 0, 5],
+           ["iterate", "s"], ["reorder", "s", 4, 0, 6], ["reloop", "s"], ["iterate", "s"], ["reorder-same", "s"]]
+    expect = [3, -9, 1, 10, 3, 30, 2, 20, -9, 1, 10, 2, 20, 3, 30, -7, 3, -7, 3, -7, 3, 3,
+              -9, 3, 30, 2, 20, 1, 10, 30, -9, 2, 20, 1, 10, 4, 40, 3, 33, 4, -9, 4, 40, 3, 33, 2, 20, 1, 10,
+              1, 1, 1, 3, -9, 5, 7, 6, 3, 5, 7, 6, -9, 5, 6, 7, 3]
+    got = run(ops)
+    if got != expect:
+        print("selftest FAILED (reorder): %r != %r" % (got, expect))
         return 1
     print("selftest ok")
     return 0

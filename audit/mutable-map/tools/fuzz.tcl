@@ -5,7 +5,7 @@
 #   tclsh9.0 audit/mutable-map/tools/fuzz.tcl ?-n N? ?-seed S? ?-ops N?
 #       ?-backends LIST? ?-gc-stress 0|1? ?-keys KINDS? ?-dump 1?
 #       ?-keyed 0|1? ?-profile PROFILE? ?-sugar N? ?-interp-every N?
-#       ?-values KINDS?
+#       ?-values KINDS? ?-reorders PERCENT?
 #
 # Each program is one long, stateful operation sequence over several
 # collections -- MutableMap[K, int] and MutableSet[K] variables, some of them
@@ -37,7 +37,12 @@
 # fill (a loop inserting a run of fresh keys: growth), drain (a loop removing
 # most keys: compaction and the index shrinking), and bump (a loop over a
 # collection that mutates it in its body: replace, insert, remove and growth
-# during iteration). The biases favour what breaks tables: copies mutated in
+# during iteration) -- and reorders (PROVEN-COLLECTION-REORDERING.md): a
+# candidate built from the collection's current order (rotated, reflected,
+# evens then odds; or one key short, one extra, one replaced: a mismatch)
+# validated and installed, the collection reordered by its own order(), by
+# an order() itself reordered first, and a loop reordering the collection
+# it iterates. The biases favour what breaks tables: copies mutated in
 # turn around growth, removal and compaction, re-insertion after removal,
 # long histories of one key pool. Each observation is an Int the program
 # pushes; the program's result is the List of them.
@@ -63,13 +68,14 @@
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -n 20 -seed 1 -ops 120 -backends {interp compile cranelift-generic cranelift} \
     -gc-stress 0 -keys {int str enum struct nested list collide kcollide} -dump 0 -keyed 1 -profile small \
-    -sugar 4 -interp-every 3 -values {int str rec list vec}]
+    -sugar 4 -interp-every 3 -values {int str rec list vec} -reorders 10]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "fuzz.tcl: unknown option $option"
     }
     dict set options $option $value
 }
+set ::fuzzOptions $options
 set argv {}
 source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
@@ -195,6 +201,25 @@ proc Declarations {kind vkind} {
     append text "fn drain_set(place s: std::mutable_set::MutableSet\[$t\], a: int, b: int, step: int) -> unit:\n    loop k from a to b:\n        if (k - a).mod(step) != 0:\n            continue\n        [Call set remove s "key(k)"]\n    unit\n\n"
     append text "fn bump_map(place out: MutableVector\[int\], place m: std::mutable_map::MutableMap\[$t, $vt\], offset: int) -> unit:\n    loop e in m:\n        out.push(tag(e.key))\n        m.set(e.key, val(vtag(e.value) + 1))\n        m.set(key(tag(e.key) + offset), e.value)\n    unit\n\n"
     append text "fn bump_set(place out: MutableVector\[int\], place s: std::mutable_set::MutableSet\[$t\], offset: int) -> unit:\n    loop x in s:\n        out.push(tag(x))\n        [Call set remove s x]\n        s.add(key(tag(x) + offset))\n    unit\n\n"
+    # Reordering (oracle.py's CANDIDATE): a candidate order of a current
+    # order KS by MODE, B and the absent key's id.
+    append text "fn keys_map(m: std::mutable_map::MutableMap\[$t, $vt\]) -> List\[$t\]:\n    loop e in m:\n        e.key\n\n"
+    append text "fn keys_set(s: std::mutable_set::MutableSet\[$t\]) -> List\[$t\]:\n    loop x in s:\n        x\n\n"
+    append text "fn pick(mode: int, b: int, i: int, n: int, pass: int) -> int:\n"
+    append text "    if mode == 2:\n        if i.mod(2) == pass:\n            return i\n        return -1\n"
+    append text "    if pass == 1:\n        return -1\n"
+    append text "    if mode == 0:\n        return (i + b).mod(n)\n"
+    append text "    if mode == 1:\n        return (b - i).mod(n)\n"
+    append text "    if mode == 3 and i == n - 1:\n        return -1\n"
+    append text "    if mode == 5 and i == 0:\n        return -1\n"
+    append text "    i\n\n"
+    append text "fn arrange(ks: List\[$t\], mode: int, b: int, absent: int) -> std::mutable_set::MutableSet\[$t\]:\n"
+    append text "    c = std::mutable_set::create\[$t\]()\n    n = std::list::length(ks)\n"
+    append text "    if mode == 5:\n        c.add(key(absent))\n"
+    append text "    loop pass from 0 to 2:\n        loop i from 0 to n:\n            j = pick(mode, b, i, n, pass)\n            if j < 0:\n                continue\n            x = std::list::at(ks, j):\n                on IndexNotFound:\n                    continue\n            c.add(x)\n"
+    append text "    if mode == 4:\n        c.add(key(absent))\n    c\n\n"
+    append text "fn reloop_map(place out: MutableVector\[int\], place m: std::mutable_map::MutableMap\[$t, $vt\]) -> unit:\n    loop e in m:\n        out.push(tag(e.key))\n        o = [Call map validate_order m "arrange(keys_map(m), 1, 0, 0)"]:\n            on std::mutable_map::OrderMismatch:\n                [Call map order m]\n        [Call map reorder m o]\n    unit\n\n"
+    append text "fn reloop_set(place out: MutableVector\[int\], place s: std::mutable_set::MutableSet\[$t\]) -> unit:\n    loop x in s:\n        out.push(tag(x))\n        o = [Call set validate_order s "arrange(keys_set(s), 1, 0, 0)"]:\n            on std::mutable_set::OrderMismatch:\n                [Call set order s]\n        [Call set reorder s o]\n    unit\n\n"
     return $text
 }
 
@@ -258,6 +283,28 @@ proc Program {kind count opsN profile} {
         set k [KeyLiteral $kind $id]
         set r [Rand 100]
         incr n
+        if {[Rand 100] < [dict get $::fuzzOptions -reorders]} {
+            # A reorder (oracle.py's reorder operations).
+            set absent [expr {$kind eq "enum" ? 7 : -424242}]
+            set form [Rand 10]
+            if {$form < 6 || $form == 9} {
+                set mode [Rand 6]
+                set b [Rand 20]
+                append src "o$n = [Call $what validate_order $v "arrange(keys_$what\($v), $mode, $b, $absent)"]:\n    on std::mutable_$what\::OrderMismatch:\n        out.push(-7)\n        [Call $what order $v]\n[Call $what reorder $v o$n]\nout.push([Call $what length $v])\n"
+                lappend ops [list reorder $v $mode $b $absent]
+            } elseif {$form == 6} {
+                append src "o$n = [Call $what order $v]\n[Call $what reorder $v o$n]\nout.push([Call $what length $v])\n"
+                lappend ops [list reorder-same $v]
+            } elseif {$form == 7} {
+                set b [Rand 20]
+                append src "o$n = [Call $what order $v]\np$n = [Call set validate_order o$n "arrange(keys_set(o$n), 0, $b, 0)"]:\n    on std::mutable_set::OrderMismatch:\n        o$n\n[Call set reorder o$n p$n]\n[Call $what reorder $v o$n]\nout.push([Call $what length $v])\n"
+                lappend ops [list reorder-via-order $v $b]
+            } else {
+                append src "reloop_$what\(out, $v)\n"
+                lappend ops [list reloop $v]
+            }
+            continue
+        }
         if {$r < 30} {
             if {$what eq "map"} {
                 set x [expr {$step * 10 + [Rand 10]}]

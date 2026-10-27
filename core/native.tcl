@@ -438,6 +438,9 @@ namespace eval core::native {
     # declareInternalNamespace beside the namespace's natives, never derived
     # from a name.
     variable internalNamespaces [dict create]
+    # The members of standard-library Botlish modules internal to the
+    # standard library (declareInternalMember): NS::NAME -> 1.
+    variable internalMembers [dict create]
 }
 
 # Declares the intrinsic namespace NS (one with qualified root natives,
@@ -497,6 +500,27 @@ proc core::native::declareInternalModule {ns} {
         error "core::native::declareInternalModule: \"$ns\" is an intrinsic namespace (declareInternalNamespace)"
     }
     dict set internalNamespaces $ns 1
+}
+
+# Declares the function NAME (NS::MEMBER) of the standard library module of
+# namespace NS internal to the standard library, as declareInternalModule a
+# whole module: only a standard library module may name it
+# (surface/modules.tcl's CheckInternal, INTERNAL-NAMESPACE), and its
+# declaration is `nomethod`, so no method call reaches it either. The
+# representation access one collection's module gives another's
+# (std::mutable_set's table_of and of_table, which std::mutable_map's order
+# operations read and build a MutableSet's table with:
+# PROVEN-COLLECTION-REORDERING.md); nothing the generated reference or the
+# standard-library census lists as API.
+proc core::native::declareInternalMember {name} {
+    variable internalMembers
+    dict set internalMembers $name 1
+}
+
+# 1 if NAME (NS::MEMBER) is an internal member (declareInternalMember).
+proc core::native::isInternalMember {name} {
+    variable internalMembers
+    return [dict exists $internalMembers $name]
 }
 
 # 1 if the intrinsic namespace NS is internal (declareInternalNamespace).
@@ -1370,3 +1394,6 @@ core::native::declareError NonFiniteFloat
 
 # The standard library's internal Botlish modules (declareInternalModule).
 core::native::declareInternalModule std::ordered_table
+# ... and the internal members of its public ones (declareInternalMember).
+core::native::declareInternalMember std::mutable_set::table_of
+core::native::declareInternalMember std::mutable_set::of_table
