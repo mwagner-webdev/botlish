@@ -620,7 +620,26 @@ No mutant was equivalent. `reported-diagnostics-decide` needed
 `mr-diag-decision-reads-every-check`, written for it: no earlier test had a
 method call in a unit that recovery's taint hides.
 
-@@HARNESSES@@
+### 9.4 The other harnesses
+
+Every mutation harness and fuzzer that covers code this milestone changed
+or reads, run on this branch:
+
+| harness | result |
+|---|---|
+| `audit/static-decisions/tools/mutate.tcl -only` its eight method-call mutants (`stale-method-reuse`, `method-key-alias`, `same-choices-unchecked`, `method-memo-by-index`, `method-final-any-build`, `method-trial-ignored`, `method-memo-initial-only`, `never-reuse-methods`) | 8 killed |
+| `audit/method-filter/tools/mutate.tcl` (the kind proofs) | @@MF@@ |
+| `audit/contexts/tools/mutate.tcl -only method-candidate-dropped` | killed |
+| `audit/direct-modules/tools/mutate.tcl -only method-obligation-dropped` | killed (`dm-method-sugar-two-candidates`) |
+| `audit/diagnostic-recovery/tools/mutate.tcl` | 25 of 25 killed |
+| `audit/compiler-service/tools/mutate.tcl` | 21 of 21 killed |
+| `audit/lsp/tools/mutate.tcl` | 30 of 30 killed |
+| `audit/syntax-recovery/tools/mutate.tcl` | 37 of 37 killed |
+| `audit/hir-interchange/tools/mutate.tcl` | @@HIRX@@ |
+| `audit/static-decisions/tools/fuzz.tcl -n 10`, seeds 17, 41 and 5 | 240, 304 and 252 sites (116, 184 and 180 rejected), 0 failures |
+| `audit/static-compile/tools/fuzz.tcl`, seeds 1 and 2 | 0 disagreements (110 transparent valid sites each; 66 and 68 exact diagnostics) |
+| `audit/syntax-recovery/tools/fuzz.tcl`, seeds 1, 2 and 3 | seeds 2 and 3: 46 and 52 damaged programs, 0 failures; seed 1: two failures of one case, identical on the base (pre-existing: 10.5) |
+| `audit/method-resolution/tools/oracle.tcl`, `audit/method-filter/tools/fuzz.tcl` | section 8.2 |
 
 ## 10. Economics and integration
 
