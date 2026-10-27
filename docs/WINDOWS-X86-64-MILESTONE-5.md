@@ -1193,6 +1193,15 @@ green. The four full shards ran the acceptance tier under
 
 Each shard took 32 to 40 minutes.
 
+**After merging main** (ad2006ea: context-owned affine state, SFIAE
+milestone 1, Icy Tower on Windows, c-bindgen on Ubuntu 26.04), Windows
+run 40547555969 (real Windows) was green in every job: the smoke job,
+the four acceptance shards, the four GC-stress shards, the system linker
+and the `roots` job. It ran context-affine.test's four tests of coroutines
+an installed context owns (`nativeCoroutines`) on Windows for the first
+time. The local suite on Linux passed on the merge too: 7355 and 7350 Tcl
+tests, 108 golden suites, 0 failed (other hosts).
+
 ## 9. Performance
 
 Times are observations of one machine at one moment. The Windows figures
