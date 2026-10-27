@@ -28,7 +28,7 @@ host's own tools), **executed**, **signed**, **verified** (`codesign
 --verify`), and -- never, here -- **notarized**.
 
 **Result.** On commit 69b23498, in run 40140537637 (section 38), and
-again on @@FINAL-HEAD@@ in run @@FINAL-MAC@@:
+again on d1e2de57 in run 40452138744:
 
 * **Built** on a macos-15 arm64 runner by `single/macos/build.sh`:
   `Botlish.app`, 26,840 KiB, and the download `botlish-macos-aarch64.zip`,
@@ -48,8 +48,9 @@ again on @@FINAL-HEAD@@ in run @@FINAL-MAC@@:
   - `single/smoke-test.sh` and `single/ffi-smoke-test.sh`, the packaged
     compiler's acceptance, which the Linux single executable also passes;
   - `single/macos/app-test.sh`'s eleven groups;
-  - `single/macos/compare.sh`'s 150 comparisons with the checkout, all
-    alike;
+  - `single/macos/compare.sh`'s comparisons with the checkout, all alike:
+    150 on 69b23498, and 157 on d1e2de57, which adds the kept-coroutine
+    program;
   - the smoke test again without developer tools.
 
   26 of 26 application mutants and 5 of 5 driver mutants were killed on
@@ -962,9 +963,11 @@ entitlement (`flags=0x2(adhoc)`).
   - the 2048 benchmark on cranelift;
   - `hello-darwin.bot` on both native backends.
 
-  Run 40140537637, before `coroutine-kept.bot` was added: "the
-  acceptance programs, natively also under GC stress: 125 runs alike"
-  (the samples' 96 included).
+  The counts, the samples' 96 included:
+  - run 40140537637, before `coroutine-kept.bot` was added: "the
+    acceptance programs, natively also under GC stress: 125 runs alike";
+  - run 40452138744: 131 runs alike, and "157 comparisons, the
+    application and the checkout alike" in all.
 * **A runtime error.** `overflow.bot`'s unbounded recursion ends in
   `NATIVE LIMIT STACK` (the stack guard, MACOS-AARCH64-MILESTONE-4.md):
   - on both native backends, with status 1 through the launcher
@@ -1013,8 +1016,8 @@ site. Through the application:
 
 Run 40140537637 had only the fused program. The application's tests
 therefore exercised no coroutine object, stack switch or walk of a
-suspended stack until `coroutine-kept.bot` was added (commit d1e2de57;
-run @@FINAL-MAC@@).
+suspended stack until `coroutine-kept.bot` was added (commit d1e2de57).
+In run 40452138744 it passed every one of the checks above.
 
 ## 26. Relocation and symlink tests
 
@@ -1232,11 +1235,13 @@ app-mutants job, run 40140537637, on macos-15:
 
 "26 mutants: 26 KILLED; killed by: framework loading 4, compiler behavior
 10, packaging 6, ZIP mounting 1, runtime linking 3, code signing 2."
+On d1e2de57 (run 40452138744) the same harness passed again: its exit
+status is non-zero for any surviving or unapplied mutant.
 
 **The driver's mutants** (`audit/native-aot/tools/mutate.tcl -only
 sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-runtime-bundle-remedy-build,sys-apple-remedy-rust,sys-executable-rpath`):
 
-| mutant | macos-aarch64 (run 40140537637) | linux-x86_64 (this container) |
+| mutant | macos-aarch64 (runs 40140537637 and 40452138744) | linux-x86_64 (this container) |
 |---|---|---|
 | `sys-runtime-bundle-ignored` | killed (system-linker.test: `system-linker-bundle-runtime`) | skipped (not compiled differently for Linux) |
 | `sys-runtime-bundle-relative` | killed (Rust `packaged_runtime_archive_follows_the_driver`, system-linker.test) | killed (Rust) |
@@ -1273,39 +1278,42 @@ and the runtime archive).
 ## 34. Startup and build performance
 
 `bench/macos-app.tcl` on the app job's runner (macos-15 arm64, a shared
-CI machine), run 40140537637. Each figure is the best of 7, in ms, each
-run a fresh process with HOME and PATH only:
+CI machine), in runs 40140537637 and 40452138744 (two runners, the
+second building d1e2de57). Each figure is the best of 7, in ms, each run
+a fresh process with HOME and PATH only:
 
-| measured | ms |
-|---|---:|
-| process: the launcher exiting before Tcl (no framework) | 3.6 |
-| tcl: + loading Tcl.framework and `Tcl_Init` | 12.0 |
-| mount: + mounting the archive | 13.4 |
-| `-version`: + `single/main.tcl` and `main.tcl` | 86.4 |
-| `-help` (Compilerpedia's overview) | 119.5 |
-| `-check` of a small program | 112.6 |
-| the same program on the interpreter | 104.6 |
-| a language-server session (section 15) | 74.1 |
-| the driver's own start | 6.0 |
-| the program on cranelift (JIT) | 119.2 |
-| `-emit-native-executable` of it | 167.8 |
+| measured | 40140537637 | 40452138744 |
+|---|---:|---:|
+| process: the launcher exiting before Tcl (no framework) | 3.6 | 4.6 |
+| tcl: + loading Tcl.framework and `Tcl_Init` | 12.0 | 10.9 |
+| mount: + mounting the archive | 13.4 | 12.6 |
+| `-version`: + `single/main.tcl` and `main.tcl` | 86.4 | 73.4 |
+| `-help` (Compilerpedia's overview) | 119.5 | 116.2 |
+| `-check` of a small program | 112.6 | 118.7 |
+| the same program on the interpreter | 104.6 | 109.6 |
+| a language-server session (section 15) | 74.1 | 74.3 |
+| the driver's own start | 6.0 | 4.7 |
+| the program on cranelift (JIT) | 119.2 | 120.7 |
+| `-emit-native-executable` of it | 167.8 | 173.3 |
 
-| phase (difference) | ms |
-|---|---:|
-| loading Tcl.framework and `Tcl_Init` (tcl - process) | 8.4 |
-| mounting the archive (mount - tcl) | 1.4 |
-| the compiler's startup (-version - mount) | 73.0 |
-| lowering, the driver, Cranelift and the run (jit - interp) | 14.6 |
-| the object and the link (executable - jit) | 48.6 |
+| phase (difference) | 40140537637 | 40452138744 |
+|---|---:|---:|
+| loading Tcl.framework and `Tcl_Init` (tcl - process) | 8.4 | 6.3 |
+| mounting the archive (mount - tcl) | 1.4 | 1.7 |
+| the compiler's startup (-version - mount) | 73.0 | 60.8 |
+| lowering, the driver, Cranelift and the run (jit - interp) | 14.6 | 11.1 |
+| the object and the link (executable - jit) | 48.6 | 52.6 |
 
 * **Moving costs nothing.** A moved application's first and second
-  `-version`, for three fresh copies: 71.8/70.8, 90.4/100.7 and
-  83.4/128.6 ms. There is no first-start installation, extraction or
-  cache to fill. The spread is the shared runner's, which earlier runs
-  on this branch also showed.
+  `-version`, for three fresh copies:
+  - run 40140537637: 71.8/70.8, 90.4/100.7 and 83.4/128.6 ms;
+  - run 40452138744: 78.2/83.3, 75.4/79.2 and 78.0/83.6 ms.
+
+  There is no first-start installation, extraction or cache to fill. The
+  spread is the shared runners'.
 * **The startup is the compiler's sources.** Loading the framework and
   mounting the archive together take under 10 ms. Sourcing the compiler
-  from the archive takes the 73 ms.
+  from the archive takes 61 to 73 ms.
 * **The build.** `single/macos/build.sh` took 96 s on the app job's
   runner, from the step's start to its end. That covers the framework
   built from source (the cache missed), the cargo build (cached: 0.30
@@ -1321,7 +1329,7 @@ the driver's runtime-archive lookup. Observed:
 * **`single-executable` workflow, run 40131935089 on c7d581f6.** This
   commit carries the shared staging, `single/main.tcl`'s re-decoding and
   the portable smoke tests. Success: build, and smoke and FFI smoke tests
-  in stock containers. On d1e2de57: run 40451935419, success.
+  in stock containers. On d1e2de57: run 40451935419, also success.
 * **Locally, Linux x86-64, at d1e2de57's tree:**
   - `single/build.sh`: 13,910,137 bytes.
   - `single/smoke-test.sh` passed: interp, compile and cranelift 23
@@ -1348,8 +1356,50 @@ the driver's runtime-archive lookup. Observed:
   - the native Rust unit tests;
   - the method-call decision.
 
-  On d1e2de57, whose later changes are the driver's remedy and the macOS
-  scripts: run @@FINAL-TESTS@@.
+  On d1e2de57 (run 40451930787), whose later changes are the driver's
+  remedy and the macOS scripts, 9 of the 14 jobs passed:
+  - the stub-linked executables;
+  - golden shards 1 to 4;
+  - the warning gate;
+  - the native Rust unit tests;
+  - the method-call decision.
+
+  Five failed, every one on tests this milestone does not touch:
+  - **interp, compile, and cranelift and cranelift-generic coverage:**
+    `c-bindgen.test`'s `cb-fixture-current`, `cb-fixture-contracts` and
+    `cb-policy-conflict`, and nothing else.
+  - **The system-linked executables:** those three, and `c-ffi.test`'s
+    `cf-wrong-architecture`.
+
+  Between the two runs, GitHub's `ubuntu-latest` image moved from Ubuntu
+  24.04 to 26.04 ("Ubuntu 26.04.1 LTS", image ubuntu-26.04 20261012.163):
+  - **clang 18.1.3 became clang 21.1.8.** Its IR names a parameter's
+    attributes `readonly nocapture`, where the committed fixture bindings
+    and the tests' expectations record clang 18's `nocapture readonly`
+    (the manifest's line 118 or 119, and one diagnostic's wording).
+  - **GNU ld changed its words** for a library of another architecture:
+    the test's reading finds no line that names the library file. The
+    log shows only the test's booleans, `error {NATIVE LINK} 0 1`, not
+    the linker's text.
+
+  Nothing in this milestone touches either: the generator, its profiles,
+  the bindings, `c-ffi.test` and the system linker's link plan are
+  unchanged.
+
+  `main` is in the middle of the same migration.
+  `docs/C-BINDGEN-UBUNTU-26.04-HANDOFF.md` and commit 19b01025 pin the
+  c-bindgen workflow to Ubuntu 26.04 and clang 21, and say that the
+  committed-binding check "is expected to fail" until every profile is
+  regenerated. There is no fix to port yet. What would fix each:
+  - **c-bindgen:** regenerate the committed bindings with the new
+    toolchain, as that document plans; or record the compiler's
+    attribute words in a canonical order, so that the manifest does not
+    depend on clang's printing order. Either is a change to the
+    generator's outputs and its checks (AGENTS.md, "The C binding
+    generator").
+  - **`cf-wrong-architecture`:** capture the 26.04 linker's message (the
+    test prints only its booleans) and add its wording to the test's
+    pattern.
 * **Found:** the non-ASCII directory limitation (section 39). It is
   pre-existing and unchanged.
 
@@ -1364,7 +1414,7 @@ function. Its unit tests run there too.
 ## 37. Windows regressions
 
 * **`tests (windows x86-64)`, run 40126544966 on 0b941feb:** success.
-* **On d1e2de57:** run @@FINAL-WINDOWS@@.
+* **On d1e2de57:** run 40451928051, success.
 
 What reaches Windows is the driver's `runtime_archive`. There
 `application_contents` is never true (`bundles` is macOS's), so the
@@ -1384,7 +1434,7 @@ message and location are the ones before this milestone.
 | 40133897160 | bb625bf5 | the UTF-8 locale fix; failed: app-test's check after a missing driver matched the wrong pattern (fixed by bd3df4f9) |
 | 40137867969 | bd3df4f9 | failed: the driver's remedy named cargo for a damaged application (fixed by 69b23498) |
 | **40140537637** | **69b23498** | **app, app-clean, app-mutants: all success** |
-| @@FINAL-MAC@@ | d1e2de57 | the full matrix (smoke, Tier B, system linker) and the three app jobs, with `coroutine-kept.bot` |
+| **40452138744** | **d1e2de57** | **the full matrix, all success:** smoke, linux control, Tier B shards 1 and 2, system linker, app, app-clean, app-mutants (26 of 26; driver 5 of 5); `coroutine-kept.bot` added |
 
 The jobs of 40140537637:
 * `Botlish.app (macOS arm64 distribution)`: job 121011155199;
