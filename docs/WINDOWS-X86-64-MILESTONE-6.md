@@ -81,7 +81,8 @@ r.result
 ```
 
 The MSVC C runtime's `snprintf` writes `3.142|-42` into the exposed buffer
-(section 6). The double is `snprintf`'s fourth argument, so Win64 passes it
+(`cf-va-crt-snprintf`'s first call begins with these two conversions:
+section 6). The double is `snprintf`'s fourth argument, so Win64 passes it
 in xmm3 *and* r9, and the C runtime's `va_arg` reads it from r9's home
 slot.
 
@@ -128,19 +129,21 @@ trailing arguments continue the positions of its fixed ones.
 "Varargs": for a call of a variadic function, a floating-point value in
 one of the first four positions must also be in the integer register of
 its position, "in case the callee expects the value in the integer
-registers". The callee's `va_start` spills rcx, rdx, r8 and r9 into their
-home slots (the shadow space) and `va_arg` reads every variadic argument
-from memory -- a double of the first four positions from its integer
-register's home slot. A named parameter is read by its prototype, a double
-from its xmm register. Neither callee reads both.
+registers". A variadic callee's `va_start` spills rcx, rdx, r8 and r9 into
+their home slots (the shadow space), and `va_arg` reads every variadic
+argument from memory -- a double of the first four positions from its
+integer register's home slot. Where a callee takes a named double from is
+its compiler's business; the rule makes either place right.
 
 The rule is about the *callee's* convention, not about which side of the
-`...` an argument is on: MSVC duplicates every floating-point argument of
-the first four positions of a call of a variadic function, named ones
-included, and so does LLVM (X86ISelLowering's `LowerCall`: "Win64 ABI
-requires argument XMM reg to be copied to the corresponding shadow reg if
-callee is a varargs function"). Botlish does the same. A fixed-arity call
-duplicates nothing.
+`...` an argument is on: a caller duplicates every floating-point argument
+of the first four positions of a call of a variadic function, named ones
+included. LLVM does (X86ISelLowering's `LowerCall`: "Win64 ABI requires
+argument XMM reg to be copied to the corresponding shadow reg if callee is
+a varargs function"), and so does MSVC: **real Windows**, the reference
+half of `cf-va-abi-fixedd` -- MSVC's own call of `int (*)(double, int,
+...)` -- arrives with the named 0.75 in xmm0 and in rcx (section 5.1).
+Botlish does the same. A fixed-arity call duplicates nothing.
 
 The integer register holds the value's bits, not a conversion: a double's
 64 bits, a C float's 32 in the low half (the rest of a register holding a
@@ -402,7 +405,8 @@ platform's compiler makes of it.
 
 ## 6. Real C runtime calls
 
-[[CI: the results, linkage, legacy_stdio_definitions]]
+**Real Windows** (run 40572363212, section 8.3; the static release C
+runtime, `/MT`, and link.exe), and every other host:
 
 * **`cf-va-crt-snprintf`** (every host): the platform C runtime's
   `snprintf`, its buffer a MutableBytes exposed for writing and its format
@@ -508,12 +512,41 @@ On a 4-core Linux x86-64 container, at `68c2d46`:
 
 ### 8.3 Windows
 
-[[CI]]
+**Real Windows**, run [40572363212](https://github.com/mwagner-webdev/botlish/actions/runs/40572363212)
+(`68c2d46`, windows-2025):
+
+* smoke: the native Rust tests (293 + 102 passed, every
+  `win64_variadic_tests` test among them: the Win64 calls through the stub
+  executed on Windows itself); the native status, `c-variadic`
+  `{printf windows_fastcall}` and every other capability as recorded; the
+  objects, executables, GC workloads, census programs, Windows I/O and
+  dumpbin steps; the variadic program's object, whose CLIF legend names
+  its two stubs (`botlish_va_0_x2 (rdx=xmm1 stub of C probe)`,
+  `botlish_va_0_x10 (rdx=xmm1,r9=xmm3 stub of C probe)`) and whose
+  disassembly by dumpbin is section 9.3's.
+* c-ffi.test on Windows, in the smoke tier on interp and on compile and
+  in the new step under GC stress: every `cf-va-*` test passed --
+  `cf-va-abi-none`, `-small`, `-ints`, `-mixed`, `-fixedd`, `-doubles`,
+  `-narrow` against MSVC's own calls, the `va_arg` tests, the C runtime's
+  `snprintf` and `_open`, the coroutine and executable test -- but one:
+  `cf-va-dll-wsprintf`, whose expectation was wrong (28 characters for the
+  29 of `-42 4000000000 beef botlish 7`; wsprintfA returned 29 and wrote
+  exactly that text, on both backends and in the executable, imported from
+  USER32.DLL). Under GC stress: `Total 129 Passed 35 Skipped 93 Failed 1`
+  (`-match 'cf-va-*'`), the one failure the same.
+* full, `CI-Tests: c-ffi-fuzz c-ffi-mutants=...`: the C FFI fuzzer, now
+  built with MSVC, ok on seeds 1 and 2 and on seed 9 under GC stress
+  (random fixed and variadic functions, doubles at every position, MSVC's
+  `va_arg`); the mutants (section 8.4).
+* The acceptance and system-linker jobs were cancelled by the next push.
+
+[[run 2]]
 
 ### 8.4 Mutants
 
-`audit/c-ffi/tools/mutants.txt` gained ten mutants of the brief's list;
-three existing ones (`va-al-omitted`, `va-stub-jit-jump-misplaced`,
+`audit/c-ffi/tools/mutants.txt` gained ten mutants: nine of the brief's
+list (its promotion item is two existing mutants') and the naive
+duplication it warns against, extra arguments. Three existing ones (`va-al-omitted`, `va-stub-jit-jump-misplaced`,
 `va-stub-plt-addend-dropped`) were rewritten for the new code, keeping
 their rules, the latter two now of both stubs; and one, `stub-links-c`,
 had stopped applying before this milestone (aot.rs's stub-linker refusal
@@ -560,7 +593,16 @@ detector: c-ffi.test, six fuzzer programs, the `ffi_` Rust tests):
 
 ### 8.5 Linux AArch64 and macOS
 
-[[CI]]
+**macOS AArch64**, run [40572363052](https://github.com/mwagner-webdev/botlish/actions/runs/40572363052)
+(`68c2d46`, macos-15): every job succeeded -- smoke (Tier A, the native
+Rust tests with the Apple placement tests), the system linker, both
+acceptance shards (c-ffi.test's new `cf-va-*` tests on Apple's convention:
+the two new capture scenarios, the position matrix, the float promotion
+and libSystem's `snprintf`), the full tier (the C FFI fuzzer on seeds 1, 2
+and 9 under GC stress, ok; the mutants: 1 killed, `va-keepalive-dropped`,
+and 11 skipped as x86-64's) and the Linux control.
+
+[[Linux CI]]
 
 ## 9. Performance and code generation
 
@@ -611,7 +653,51 @@ V's lowering, which this milestone does not change:
 
 ### 9.3 The machine code
 
-[[dumpbin]]
+**Real Windows**: dumpbin's `/disasm` of the program object of section
+8.3's variadic program (the smoke job's summary), its four calls of
+`probe(int n, ...)` and `fixed(double, int, double)`:
+
+```text
+botlish_va_0_x2:
+  66 48 0F 7E CA     movq        rdx,xmm1
+  E9 00 00 00 00     jmp         botlish_variadic_probe
+botlish_va_0_x10:
+  66 48 0F 7E CA     movq        rdx,xmm1
+  66 49 0F 7E D9     movq        r9,xmm3
+  E9 00 00 00 00     jmp         botlish_variadic_probe
+
+ints(a) = probe(3, a, a, a): no double, no stub
+  movsxd  rcx,eax                                ; 3
+  mov     rax,qword ptr [.refptr.botlish_variadic_probe]
+  mov     rdx,r9 / mov r8,r9 (r9 = a)
+  call    rax
+
+one(x) = probe(1, x)
+  movsd   xmm1,mmword ptr [rdx+8]                ; x, from its Float64
+  movsxd  rcx,eax                                ; 1
+  mov     rax,qword ptr [.refptr.botlish_va_0_x2]
+  call    rax
+
+mixed(a, x) = probe(7, x, a, x, a, x, a, x)
+  movsd   xmm3,mmword ptr [r8+8]                 ; x: position 3
+  mov     r8,rdx; sar r8,1                       ; a: position 2
+  movsxd  rcx,eax                                ; 7: position 0
+  mov     dword ptr [rsp+20h],r8d                ; a: position 4
+  movsd   mmword ptr [rsp+28h],xmm3              ; x: position 5
+  mov     dword ptr [rsp+30h],r8d                ; a: position 6
+  movsd   mmword ptr [rsp+38h],xmm3              ; x: position 7
+  mov     rax,qword ptr [.refptr.botlish_va_0_x10]
+  movdqa  xmm1,xmm3                              ; x: position 1
+  call    rax
+```
+
+Each call site is what a fixed call of the same signature would be, the
+callee the stub instead of the C function when a double is in the first
+four positions. The positions, the shadow space (the first stack argument
+at `rsp+20h`) and the 8-byte slots are Cranelift's; an `int` is stored as
+its 32 bits, which is all `va_arg(ap, int)` reads. The fixed-arity call
+`fixed(x, a, x)` has no stub (the legend lists two). The stubs' padding
+to 16 bytes is never executed.
 
 ## 10. Remaining limitations
 
