@@ -163,7 +163,12 @@ land on Windows, `fuzz\windows\replay-json.ps1` is the cross-OS oracle.
    differential "hangs" classes of earlier campaigns: none here; GC
    stress on the release build of FZ-004's input: correct report (the
    finding is ASan-build-visible today).
-17. Full regression on this base: JSON3-REGRESSION
+17. Full regression on this base (`tests/local.tcl`, the parallel local
+   runner): **234 Tcl test files -- interp 7302 passed / 0 failed,
+   compile 7297 passed / 0 failed -- and 108 golden suites on all four
+   backends, 0 failed** (interp 5180/5180, compile 5180/5180,
+   cranelift-generic 5088/5088, cranelift 5190/5190), 41 min wall on 12
+   jobs.
 18. All targets still compile AOT (38 ok on this base; the same designed
     gates) and match recorded baselines.
 19. Every step reproducible from committed scripts: **yes** (plus the
