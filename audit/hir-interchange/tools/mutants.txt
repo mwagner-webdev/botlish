@@ -169,13 +169,20 @@
 ====
 >>>>
 
-@@ deps-ignore-application-paths an entry's dependencies leave out the application-module paths of its imports: an edited application module, or a new application file std/NAME.bot that would be the standard namespace an import names (RESERVED-NAMESPACE), hits the old HIR
+@@ deps-ignore-application-paths an entry's dependencies leave out the application-module paths of its imports -- the HIR's candidates and the loader's file probes, which hold them too: an edited application module, or a new application file std/NAME.bot that would be the standard namespace an import names (RESERVED-NAMESPACE), hits the old HIR
 ## surface/cache.tcl
 <<<<
             if {$root ne ""} {
                 lappend paths [surface::modules::NamespaceFile $root $namespace]
             }
 ====
+>>>>
+<<<<
+        } else {
+            lappend paths $path
+        }
+====
+        }
 >>>>
 
 @@ deps-read-when-kept an entry records its modules' texts when it is kept, not the texts the build read: a module edited during the build hits the old HIR

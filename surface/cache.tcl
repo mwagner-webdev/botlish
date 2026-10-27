@@ -146,14 +146,20 @@ proc surface::cache::Contents {path existsVar} {
 # namespace is kept, whichever exists: a file appearing at another one
 # changes what the build would do.
 #
-# Package scopes (BOT-MODULES-MILESTONE-1.md): which file a namespace names
-# depends on whether a package of its first segment is installed, in the
-# importing file's scope, and a package's modules on its own scope's. The
-# loader records every such probe -- each package directory it asked about
-# (OWNER/.bot_modules/NAME, there or not) and each candidate file in a
-# package's tree -- in PROBES (PATH -> file or directory, surface/modules.tcl's
-# Probe), and every one is a dependency: {PATH EXISTS "" directory} for a
-# directory, which must still be one (or still none).
+# Resolution reads more than the imports' candidates
+# (BOT-MODULES-MILESTONE-1.md): which file a namespace names depends on
+# whether a package of its first segment is installed, in the importing
+# file's scope, and a package's modules on its own scope's; and whether a
+# qualifier names a namespace at all depends on a file no import names (an
+# enum's case Color::Red, while no file Color.bot makes Color a namespace:
+# AMBIGUOUS-QUALIFIER). The loader records every file and directory it asks
+# about -- each candidate file of the application's or a package's tree and
+# each package directory (OWNER/.bot_modules/NAME), there or not -- in PROBES
+# (PATH -> file or directory, surface/modules.tcl's Probe), and every one is
+# a dependency: {PATH EXISTS "" directory} for a directory, which must still
+# be one (or still none). A build's application-module paths are among its
+# probes; the HIR's own candidates above are what a caller with a HIR alone
+# (no probes) gets.
 proc surface::cache::Dependencies {hir reads {target ""} {root ""} {probes ""}} {
     set target [hir::cabi::ResolveTarget $target]
     if {$target eq ""} {

@@ -462,13 +462,17 @@ Source:
 
 Tests, audits and documentation:
 
-* `tests/bot-modules.test` (56 tests); `tests/workload-icy-tower.test`'s
+* `tests/bot-modules.test` (56 tests); `tests/hir-cache.test`'s
+  `hc-qualifier-namespace-appears` (section F); `tests/workload-icy-tower.test`'s
   staging; census rows (`audit/golden/migration/census/bot-modules.tsv`,
-  `tcl-names.txt`, the regenerated `tests/golden/manifest.tsv`).
+  `hir-cache.tsv`, `tcl-names.txt`, the regenerated
+  `tests/golden/manifest.tsv`).
 * `audit/bot-modules/tools/mutate.tcl` and `mutants.txt` (20 mutants), `fuzz.tcl`;
   mutants of `CheckRef`/`CheckImports` code in the module-privacy,
   error-payloads, hashable and type-predicates harnesses retargeted to the
-  rewritten lines (same rules).
+  rewritten lines, and the hir-interchange harness's
+  `deps-ignore-application-paths` to the probes that now hold those paths
+  too (same rules).
 * This report, `docs/INDEX.md`, `docs/IMPORTS.md` ("Installed packages"),
   `docs/STD-NAMESPACE.md`, `AGENTS.md` ("Package-scoped modules"),
   Compilerpedia (`rule.package-modules`; `error.module-collision`,
@@ -615,8 +619,14 @@ unchanged checkout.
   `ordinary-code-can-fully-qualify` and type-predicates'
   `module-member-admits-type-predicate` (each killed): 8 of 8 apply and are
   killed.
-* `audit/hir-interchange/tools/mutate.tcl`: HX-PLACEHOLDER;
-  `audit/compiler-service/tools/mutate.tcl`: CS-PLACEHOLDER.
+* `audit/hir-interchange/tools/mutate.tcl`: 28 mutants. The first run
+  killed 27; `deps-ignore-application-paths` survived. It removes the
+  application-module paths the cache derives from a HIR's imports, which
+  the loader's file probes now hold as well, so it had become equivalent.
+  The mutant now removes both (the same rule: application-module paths are
+  dependencies), and asking what *only* the probes hold found a defect of
+  the unchanged cache (below). After the fix the rerun kills all 28.
+* `audit/compiler-service/tools/mutate.tcl`: 21 mutants, 21 killed.
 * `audit/bot-modules/tools/fuzz.tcl` (new: random application trees of
   modules, packages, nested packages, collisions, `.bot_modules/std` and
   rooted imports, against an independent model of section B's table and
@@ -689,7 +699,8 @@ reference takes 182 ms, the cost only such files pay.
 
 ### Defects found and fixed during verification
 
-Two, both in this milestone's own code:
+Two in this milestone's own code, and one in the unchanged compiler's
+front-end cache that this milestone's probes fix:
 
 * The full local run's `nl-no-string-ternary` (above): `Instance` chose a
   package instance's name with `expr`'s `?:`, which reads a name such as
@@ -706,6 +717,17 @@ Two, both in this milestone's own code:
   now looks them up by identity; `bm-service-syntax-recovery-dependent`
   pins it (it fails without the fix) and the mutant
   `recovery-facts-by-spelling` checks the test.
+* The cache's dependencies were the imports' candidate files only, but
+  resolution also asks about files no import names: `Color::Red`, a case
+  of the program's enum `Color`, is `AMBIGUOUS-QUALIFIER` as soon as an
+  application file `Color.bot` makes `Color` a namespace too. In the
+  unchanged checkout a cached build of such a program kept hitting after
+  `Color.bot` appeared, while an uncached build rejects it (checked on both
+  checkouts). The loader's probes record every file resolution asked
+  about, so the entry is stale now; `tests/hir-cache.test`'s
+  `hc-qualifier-namespace-appears` pins it (it fails on the unchanged
+  checkout: the third compilation hits), and the retargeted interchange
+  mutant is killed by it and by `hc-application-module-edited`.
 
 ### Continuous integration (requested)
 

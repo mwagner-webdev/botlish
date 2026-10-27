@@ -9579,6 +9579,7 @@ tests/hir-cache.test hc-module-edited pass
 tests/hir-cache.test hc-module-edited-during-build pass
 tests/hir-cache.test hc-namespace-gains-file pass
 tests/hir-cache.test hc-program-edited pass
+tests/hir-cache.test hc-qualifier-namespace-appears pass
 tests/hir-cache.test hc-trait-program pass
 tests/hir-cache.test hc-type-import-edited pass
 tests/hir-cache.test hc-unwritable pass
