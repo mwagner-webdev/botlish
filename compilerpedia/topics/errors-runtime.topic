@@ -1183,12 +1183,12 @@ the linker's output to FILE.
 
 @topic error.native-not-built
 title: NATIVE NOT-BUILT: the native backend has not been built
-summary: NATIVE NOT-BUILT means the botlish-native driver is missing: the checkout's native backend has not been built with cargo, or BOTLISH_NATIVE_BIN names no file.
+summary: NATIVE NOT-BUILT means the botlish-native driver is missing: the checkout's native backend has not been built with cargo, BOTLISH_NATIVE_BIN names no file, or a packaged compiler lost its own.
 index: errors backends
 alias: native backend not built; build the native backend
 keywords: cargo build, rustc, native/target/release, botlish-native, BOTLISH_NATIVE_BIN, rustup
-related: backend.cranelift backend.single-executable error.native-invalid-nir error.native-link backend.interp
-docs: README.md SINGLE-EXECUTABLE.md
+related: backend.cranelift backend.single-executable backend.macos-application error.native-invalid-nir error.native-link backend.interp
+docs: README.md SINGLE-EXECUTABLE.md MACOS-AARCH64-MILESTONE-9.md
 code: NATIVE NOT-BUILT
 
 == MEANING
@@ -1201,14 +1201,21 @@ is built separately; until then every native run stops with
     .../native (NATIVE NOT-BUILT)
 
 BOTLISH_NATIVE_BIN, when set, names the driver to use instead. The single
-executable packs its drivers and installs them itself.
+executable packs its drivers and installs them itself; the macOS
+application runs its own Contents/MacOS/botlish-native. Either one without
+its driver is damaged:
+
+    error: this compiler's native backend is missing: PATH: the
+    installation is incomplete (reinstall it) (NATIVE NOT-BUILT)
 
 == WHAT TO DO
 Build it: cargo build --release --manifest-path native/Cargo.toml. The
 pinned Cranelift crates need a recent stable rustc; if cargo reports that
 a package is not supported, update the toolchain (rustup toolchain install
 stable; rustup default stable). Without a native build, interp and compile
-run every program except the native-only operations.
+run every program except the native-only operations. A packaged compiler
+whose driver is missing: reinstall it (download it again); nothing needs
+building.
 
 @topic error.native-startup
 title: NATIVE STARTUP: a standalone executable could not start

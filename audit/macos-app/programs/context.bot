@@ -1,0 +1,14 @@
+# A context (CONTEXTS.md) installed once and read by an ordinary call:
+# natively a fixed context slot. (MACOS-AARCH64-MILESTONE-9.md.)
+
+type Small = Int in 0..1000
+
+context struct Scale:
+    k: Small
+
+fn scaled(n: int, context s: Scale) -> int:
+    n * s.k
+
+with context Scale {k: 3}
+
+[scaled(1), scaled(14), scaled(-2)]

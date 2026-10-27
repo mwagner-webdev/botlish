@@ -1,0 +1,8 @@
+# Unbounded recursion: natively NATIVE LIMIT STACK, the stack guard's
+# report (MACOS-AARCH64-MILESTONE-4.md); a runtime error the packaged
+# compiler reports as the checkout's does (MACOS-AARCH64-MILESTONE-9.md).
+
+fn deep(n: int) -> int:
+    1 + deep(n + 1)
+
+deep(0)
