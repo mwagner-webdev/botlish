@@ -543,7 +543,14 @@ proc compiled {hir} {
     }
     dict for {key info} [dict get $hir methodCalls] {
         set e [dict get $info expr]
-        set origin [dict get $hir exprs $e method nameOrigin]
+        # (A rejected call keeps its written callee, the projection of the
+        # method name: METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md.)
+        set node [dict get $hir exprs $e]
+        if {[dict exists $node method]} {
+            set origin [dict get $node method nameOrigin]
+        } else {
+            set origin [dict get $hir exprs [dict get $node callee] nameOrigin]
+        }
         set where [list [dict get $origin line] [dict get $origin column]]
         if {[dict exists $rejections $e]} {
             dict set out $where [list rejected [dict get $rejections $e]]

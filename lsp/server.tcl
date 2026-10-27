@@ -1244,6 +1244,12 @@ proc lsp::server::Diagnostic {rev path d} {
             lappend related [lsp::json::obj location $location message [lsp::json::str $note]]
         }
     }
+    foreach n [dict getdef $d notes {}] {
+        set location [Location $rev $n]
+        if {$location ne ""} {
+            lappend related [lsp::json::obj location $location message [lsp::json::str [dict get $n message]]]
+        }
+    }
     if {$related ne {}} {
         dict set diagnostic relatedInformation [lsp::json::arrayOf $related]
     }

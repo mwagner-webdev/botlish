@@ -42,7 +42,14 @@
 #   several applicable candidates is AMBIGUOUS-METHOD-CALL, with none
 #   NO-APPLICABLE-METHOD (it stands at its first applicable candidate, else
 #   at its first candidate: a placeholder that decides nothing, so the
-#   program keeps a call that types).
+#   decision's builds keep a call that types).
+# * What is reported of it is not a build the decision reads
+#   (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md): the program returned is
+#   S with every rejected call resolved to no candidate (its callee poison),
+#   so no placeholder's checks, obligations, result type or contracts reach
+#   it, and the rejections that hold whatever nobody established are
+#   reported first, in source order, explained by each candidate's own
+#   problems (Final, Report). Nothing the decision reads is presentation.
 #
 # The procedure (Decide)
 # ----------------------
@@ -76,8 +83,11 @@
 # 4. The final program is the build of S: the last build made when it is
 #    S's (its process state is then the final one), else built again. A call
 #    whose applicable set is exactly {S(C)} is decided; every other call is
-#    rejected, its diagnostic prepended, with every candidate's reason (its
-#    first own problem, from its own build) for NO-APPLICABLE-METHOD.
+#    rejected: the final program is then S with the rejected calls at no
+#    candidate (Final), a build made after every build the decision reads,
+#    and each rejection's diagnostic comes first, with every candidate's
+#    reason (its first own problem, from its own build) for
+#    NO-APPLICABLE-METHOD (Report).
 #
 # Why the outcome is the rule's, and is independent of the search: every
 # verdict that decides is computed relative to the final configuration
@@ -165,8 +175,11 @@ proc hir::methods::ObligationKinds {} {
 }
 
 # The own problems (header) of method call KEY in HIR (a typed build), as
-# a sorted unique list of {kind message expr}; {} when HIR has no such call.
-# Empty: the ordinary call with the candidate HIR resolved it to is valid.
+# a sorted unique list of {kind message expr origin} (ORIGIN where the
+# diagnostic is located); {} when HIR has no such call. Empty: the ordinary
+# call with the candidate HIR resolved it to is valid. The decision reads
+# whether it is empty, nothing else: the rest is what NO-APPLICABLE-METHOD
+# explains a candidate's rejection with (Rejection).
 proc hir::methods::Problems {hir key} {
     if {![dict exists $hir methodCalls $key]} {
         return {}
@@ -176,16 +189,30 @@ proc hir::methods::Problems {hir key} {
 }
 
 # The diagnostics of HIR that a call's own check reported, by the call: a
-# dict call ExprId -> {kind message expr} list (the obligation kinds left
-# out).
+# dict call ExprId -> {kind message expr origin} list (the obligation kinds
+# left out).
 proc hir::methods::OwnedBySubject {hir} {
     set owned [dict create]
     set obligations [ObligationKinds]
     foreach d [dict get $hir diagnostics] {
         if {![dict exists $d subject] || [dict get $d kind] in $obligations} continue
-        dict lappend owned [dict get $d subject] [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+        dict lappend owned [dict get $d subject] [list [dict get $d kind] [dict get $d message] [dict get $d expr] \
+            [DiagnosticOrigin $hir $d]]
     }
     return $owned
+}
+
+# Where diagnostic D of HIR is located: its own origin, else its
+# expression's ("" when it has neither).
+proc hir::methods::DiagnosticOrigin {hir d} {
+    if {[dict exists $d origin]} {
+        return [dict get $d origin]
+    }
+    set e [dict getdef $d expr ""]
+    if {$e eq "" || ![dict exists $hir exprs $e]} {
+        return ""
+    }
+    return [hir::get $hir $e origin]
 }
 
 # The own problems of call E of HIR, OWNED its OwnedBySubject.
@@ -210,7 +237,8 @@ proc hir::methods::CallProblems {hir e owned} {
                 if {$mismatch ne {}} {
                     lassign $mismatch kind wanted
                     lappend problems [list TYPE \
-                        "the receiver is a $kind, but argument 1 of native $native requires $wanted" $receiver]
+                        "the receiver is a $kind, but argument 1 of native $native requires $wanted" $receiver \
+                        [hir::get $hir $receiver origin]]
                 }
             }
         }
@@ -652,8 +680,9 @@ proc hir::methods::Decide {nodes options given hir seeds} {
         }
         dict set verdicts $key problems $problems
     }
-    # 4. The final program.
-    set final [Final state $choices]
+    # 4. The final program: the decided calls at their decisions, the
+    # rejected ones -- every judged call not decided -- at no candidate
+    # (Final), their rejections first, in source order (Report).
     set decided $fixed
     dict for {key verdict} $verdicts {
         if {[dict exists $unstable $key] || [dict get $verdict poisoned]} continue
@@ -662,10 +691,12 @@ proc hir::methods::Decide {nodes options given hir seeds} {
             dict set decided $key [lindex $applicable 0]
         }
     }
-    foreach key $keys {
+    set rejected [lmap key $keys {
         if {[dict exists $decided $key] || ![dict exists $verdicts $key]} continue
-        Reject final $key [dict get $verdicts $key] [dict getdef $unstable $key {}]
-    }
+        set key
+    }]
+    set final [Final state $choices $rejected]
+    Report final $calls $rejected $verdicts $unstable
     # Every call's candidate, and the decided calls (not the rejected ones'
     # stand-ins), for a later build of a changed program that can reuse them
     # (hir/static.tcl). Bookkeeping of the decision, never read by an
@@ -844,13 +875,32 @@ proc hir::methods::Verdicts {stateVar record choices open} {
 # reused: a later build's state would be left behind it, and what runs after
 # the decision -- BuildFull's elaborations, hir/static.tcl's attribution and
 # dependency analysis, the warnings -- is not audited for reading it.)
-proc hir::methods::Final {stateVar choices} {
+#
+# With calls REJECTED, the program reported is not that build: there each
+# rejected call stands at a placeholder candidate, which the decision needed
+# so the program keeps typing, but which the program does not mean. Its own
+# checks, obligations, result type, errors, contexts, parameter contracts and
+# ownership roles are artifacts of the placeholder, and the diagnostics they
+# make would explain a choice nobody made. The final program is then the
+# configuration CHOICES with every rejected call resolved to no candidate
+# (hir/resolve.tcl's MethodChoice: its callee poison): a build of its own,
+# made after every build the decision reads, so nothing the decision judged
+# changes (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+proc hir::methods::Final {stateVar choices rejected} {
     upvar 1 $stateVar state
     variable ::hir::methodBuildReuse
     variable ::hir::methodBuildAudit
+    lassign [dict get $state inputs] nodes options given
+    if {$rejected ne {}} {
+        set reported $choices
+        foreach key $rejected {
+            dict set reported $key [hir::resolve::RejectedMethodChoice]
+        }
+        dict incr ::hir::buildStats methodReports
+        return [hir::BuildOnce $nodes $options $given $reported 0 checked]
+    }
     set config [Config [dict get $state calls] $choices]
     lassign [dict get $state last] lastConfig lastHir
-    lassign [dict get $state inputs] nodes options given
     if {$methodBuildReuse && $config eq $lastConfig} {
         dict incr ::hir::buildStats methodReused
         if {$methodBuildAudit} {
@@ -866,69 +916,295 @@ proc hir::methods::Final {stateVar choices} {
     return [hir::BuildOnce $nodes $options $given $choices 0 checked]
 }
 
-# Prepends to FINAL (a caller variable: the decided program) the rejection
-# of call KEY, whose VERDICT (Verdicts) has no single applicable candidate:
-# AMBIGUOUS-METHOD-CALL when several are applicable (or UNSTABLE, the two
-# candidates a call moved between at the round bound), NO-APPLICABLE-METHOD,
-# with every candidate's reason, when none is.
-proc hir::methods::Reject {finalVar key verdict unstable} {
+# Adds to FINAL (a caller variable: the reported program, Final) the
+# rejections of the calls REJECTED (keys of CALLS, the decision's table),
+# whose VERDICTS (Verdicts) have no single applicable candidate, first and in
+# source order (SourceOrder), and records every one of them in its
+# `methodRejected` side table (key -> Rejection's record): what the decision
+# found, whether or not it is reported. Presentation only: the decision is
+# made, and nothing here reads or changes it.
+proc hir::methods::Report {finalVar calls rejected verdicts unstable} {
     upvar 1 $finalVar final
-    if {![dict exists $final methodCalls $key]} {
+    if {$rejected eq {}} {
         return
     }
-    set info [dict get $final methodCalls $key]
-    set e [dict get $info expr]
-    set callArgs [dict get $final exprs $e args]
-    if {$callArgs ne "" && [hir::types::Poisoned $final [lindex $callArgs 0]]} {
-        # A poisoned receiver (hir/types.tcl, "Poison") fits every
-        # candidate and decides nothing: the diagnostic that rejected it is
-        # the cause, already reported (DIAGNOSTIC-RECOVERY.md).
-        return
-    }
-    if {$callArgs ne "" && [UnknownTraitOperation $final [lindex $callArgs 0]]} {
-        # A receiver computed by an operation its trait does not declare
-        # (TRAIT-UNKNOWN-OPERATION) is what fails every candidate: that
-        # diagnostic is the cause and is already reported.
-        return
-    }
-    set name [dict get $info name]
-    set origin [dict get $final exprs $e method nameOrigin]
-    set candidates [dict get $info candidates]
-    if {$unstable ne {}} {
-        set valid [lmap c $candidates {if {$c ni $unstable} continue; set c}]
-    } else {
-        set valid [dict get $verdict applicable]
-    }
-    if {[llength $valid] > 1} {
-        set message [::format {method-style call "%s" is ambiguous: more than one visible function accepts the receiver (%s); there is no precedence between them: call the one you mean explicitly, e.g. %s(receiver, ...)} \
-            $name [join $valid {, }] [lindex $valid 0]]
-        set kind AMBIGUOUS-METHOD-CALL
-    } else {
-        set reasons {}
-        set problems [dict get $verdict problems]
-        foreach candidate $candidates {
-            set own [dict getdef $problems $candidate {}]
-            if {$own eq ""} {
-                set reason "no problem found"
-            } else {
-                set reason [lindex [lindex $own 0] 1]
-            }
-            lappend reasons "$candidate: $reason"
+    set records [dict create]
+    set added {}
+    foreach key $rejected {
+        if {![dict exists $final methodCalls $key]} continue
+        set record [Rejection $final $calls $key [dict get $verdicts $key] [dict getdef $unstable $key {}]]
+        dict set records $key $record
+        if {[dict get $record reported]} {
+            lappend added [Diagnostic $final $record]
         }
-        set message [::format {method-style call "%s": none of the visible functions of that name accepts the receiver (%s)} \
-            $name [join $reasons {; }]]
-        set kind NO-APPLICABLE-METHOD
     }
-    set diagnostics [dict get $final diagnostics]
-    hir::DiagnoseAt final $kind $message $e $origin
-    set added [lindex [dict get $final diagnostics] end]
-    dict set final diagnostics [concat [list $added] $diagnostics]
+    dict set final methodRejected $records
+    if {$added eq {}} {
+        return
+    }
+    set added [SourceOrder $final $added]
+    dict set final diagnostics [concat $added [dict get $final diagnostics]]
     if {[dict exists $final beforeCompletions]} {
         # Not one of them: what each candidate's own build reported decided
         # it.
         lassign [dict get $final beforeCompletions] from to
-        dict set final beforeCompletions [list [expr {$from + 1}] [expr {$to + 1}]]
+        set n [llength $added]
+        dict set final beforeCompletions [list [expr {$from + $n}] [expr {$to + $n}]]
     }
+}
+
+# DIAGNOSTICS (method-call rejections of HIR) in source order: by file, in
+# the order the program's units are (hir::roots: each module before the file
+# importing it, as the loader reports), then by the offset of the method
+# name. (The decision's own order is the calls' resolution order, which is
+# no statement about the source: a chain's outer call is resolved before
+# its receiver.)
+proc hir::methods::SourceOrder {hir diagnostics} {
+    set files {}
+    foreach root [dict get $hir roots] {
+        set file [dict getdef [hir::get $hir $root origin] file ""]
+        if {$file ne "" && $file ni $files} {
+            lappend files $file
+        }
+    }
+    lappend files {*}[dict keys [dict getdef $hir files {}]]
+    set keyed [lmap d $diagnostics {
+        set origin [dict get $d origin]
+        set file [lsearch -exact $files [dict getdef $origin file ""]]
+        list $file [dict getdef $origin start 0] $d
+    }]
+    return [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 $keyed]] {lindex $entry 2}]
+}
+
+# The record of the rejection of call KEY (of CALLS) in FINAL, the reported
+# program, whose VERDICT (Verdicts) has no single applicable candidate (or
+# UNSTABLE, the two candidates a call moved between at the round bound):
+#
+#   kind        AMBIGUOUS-METHOD-CALL when several candidates are applicable
+#               (the candidates UNSTABLE names), NO-APPLICABLE-METHOD when
+#               none is
+#   expr        the call in FINAL
+#   name        the method's name; origin: where it is written
+#   candidates  every candidate, in the decision's order
+#   applicable  the applicable ones (AMBIGUOUS-METHOD-CALL)
+#   reasons     candidate -> {operand O kind K message M origin ORIGIN}: the
+#               reason NO-APPLICABLE-METHOD gives for it, its first own
+#               problem (from its own build) outside every poisoned operand;
+#               O is 0 for the receiver, N for the call's Nth argument, ""
+#               for the call itself
+#   reported    1, or 0 when the rejection depends on what the program does
+#               not establish (`why`): the receiver is poison (`receiver`:
+#               the cause is its own diagnostic), or computed by an operation
+#               its trait does not declare (`trait-operation`), or the
+#               verdict read a poisoned operand (`operand`: the result of
+#               another rejected call, or of an expression already rejected
+#               -- an ambiguity whatever the operand holds is not known, and
+#               a candidate whose only problems are inside it fails only by
+#               what nobody established)
+#
+# The verdict is the decision's, unchanged: this decides only whether it is
+# reported, and how it is explained.
+proc hir::methods::Rejection {final calls key verdict unstable} {
+    set info [dict get $calls $key]
+    set candidates [dict get $info candidates]
+    set e [dict get $final methodCalls $key expr]
+    set operands [Operands $final $e]
+    if {$unstable ne {}} {
+        set applicable [lmap c $candidates {if {$c ni $unstable} continue; set c}]
+    } else {
+        set applicable [dict get $verdict applicable]
+    }
+    set kind [expr {[llength $applicable] > 1 ? "AMBIGUOUS-METHOD-CALL" : "NO-APPLICABLE-METHOD"}]
+    set record [dict create kind $kind expr $e name [dict get $info name] \
+        origin [NameOrigin $final $e] candidates $candidates \
+        applicable $applicable reasons [dict create] reported 1 why ""]
+    if {[dict get $verdict poisoned] || ($operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]])} {
+        # A poisoned receiver (hir/types.tcl, "Poison") fits every
+        # candidate and decides nothing: the diagnostic that rejected it is
+        # the cause, already reported (DIAGNOSTIC-RECOVERY.md).
+        return [dict replace $record reported 0 why receiver]
+    }
+    if {$operands ne {} && [UnknownTraitOperation $final [lindex $operands 0]]} {
+        # A receiver computed by an operation its trait does not declare
+        # (TRAIT-UNKNOWN-OPERATION) is what fails every candidate: that
+        # diagnostic is the cause and is already reported.
+        return [dict replace $record reported 0 why trait-operation]
+    }
+    # The spans of the operands the reported program does not establish.
+    set poisoned [lmap op $operands {
+        if {![hir::types::Poisoned $final $op]} continue
+        hir::get $final $op origin
+    }]
+    if {$kind eq "AMBIGUOUS-METHOD-CALL"} {
+        if {$poisoned ne {}} {
+            return [dict replace $record reported 0 why operand]
+        }
+        return $record
+    }
+    set problems [dict get $verdict problems]
+    set reasons [dict create]
+    foreach candidate $candidates {
+        foreach problem [dict getdef $problems $candidate {}] {
+            lassign $problem pkind message pexpr origin
+            if {[Within $origin $poisoned]} continue
+            set operand [OperandOf $final $operands $origin]
+            if {$operand eq "" && $poisoned ne {}} {
+                # A problem of the call itself (its instance, its imprint)
+                # reads every operand.
+                continue
+            }
+            dict set reasons $candidate [dict create operand $operand kind $pkind message $message origin $origin]
+            break
+        }
+        if {![dict exists $reasons $candidate] && $poisoned ne {}} {
+            return [dict replace $record reported 0 why operand reasons $reasons]
+        }
+    }
+    return [dict replace $record reasons $reasons]
+}
+
+# Where the method name of method-style call E of HIR is written: a resolved
+# call's `method` records it, a rejected call's written callee is the
+# projection of it.
+proc hir::methods::NameOrigin {hir e} {
+    set node [dict get $hir exprs $e]
+    if {[dict exists $node method]} {
+        return [dict get $node method nameOrigin]
+    }
+    return [dict get $hir exprs [dict get $node callee] nameOrigin]
+}
+
+# The operands of call E of HIR: its receiver and arguments -- of a rejected
+# call, whose written callee holds the receiver (hir/resolve.tcl), that
+# receiver and the call's arguments.
+proc hir::methods::Operands {hir e} {
+    set node [dict get $hir exprs $e]
+    set callee [dict get $hir exprs [dict get $node callee]]
+    if {[dict get $callee kind] eq "project" && [dict exists $callee methodRejected]} {
+        return [concat [list [dict get $callee receiver]] [dict get $node args]]
+    }
+    return [dict get $node args]
+}
+
+# 1 if source location ORIGIN (an origin dict) lies within one of SPANS.
+proc hir::methods::Within {origin spans} {
+    foreach span $spans {
+        if {[Contains $span $origin]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1 if the source span SPAN holds the start of ORIGIN (both origins of one
+# program's source).
+proc hir::methods::Contains {span origin} {
+    if {[dict getdef $span file ""] eq "" || [dict getdef $origin file ""] ne [dict get $span file]
+            || ![dict exists $origin start] || ![dict exists $span start] || ![dict exists $span end]} {
+        return 0
+    }
+    set at [dict get $origin start]
+    expr {$at >= [dict get $span start] && $at < [dict get $span end]}
+}
+
+# Which operand of OPERANDS (call operands of HIR, the receiver first) the
+# source location ORIGIN lies in: 0 for the receiver, N for the Nth argument,
+# "" for none (the call itself).
+proc hir::methods::OperandOf {hir operands origin} {
+    set index 0
+    foreach op $operands {
+        if {[Contains [hir::get $hir $op origin] $origin]} {
+            return $index
+        }
+        incr index
+    }
+    return ""
+}
+
+# The diagnostic of the rejection RECORD (Rejection) in HIR, the reported
+# program: located at the method name, with a note per candidate declared in
+# source (`notes`: {origin ORIGIN message TEXT} each, beside the
+# diagnostic's own text -- where the candidates are, for a reader; no part of
+# its identity, so never a static compile block's `related`).
+proc hir::methods::Diagnostic {hir record} {
+    set name [dict get $record name]
+    set candidates [dict get $record candidates]
+    set e [dict get $record expr]
+    set notes {}
+    if {[dict get $record kind] eq "AMBIGUOUS-METHOD-CALL"} {
+        set valid [dict get $record applicable]
+        set message [::format {method-style call "%s" is ambiguous: more than one visible function accepts the call (%s); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. %s(receiver, ...)} \
+            $name [join $valid {, }] [lindex $valid 0]]
+        foreach candidate $valid {
+            set origin [CandidateOrigin $hir $e $candidate]
+            if {$origin ne ""} {
+                lappend notes [dict create origin $origin message "$candidate accepts the call"]
+            }
+        }
+    } else {
+        set reasons {}
+        foreach candidate $candidates {
+            set reason [dict getdef $record reasons $candidate {}]
+            if {$reason eq {}} {
+                set text "$candidate: no problem found"
+            } else {
+                set text "$candidate [OperandText [dict get $reason operand]]: [dict get $reason message]"
+            }
+            lappend reasons $text
+            set origin [CandidateOrigin $hir $e $candidate]
+            if {$origin ne ""} {
+                lappend notes [dict create origin $origin message "$candidate is declared here"]
+            }
+        }
+        set message [::format {method-style call "%s": none of the visible functions of that name accepts the call (%s)} \
+            $name [join $reasons {; }]]
+    }
+    set diagnostic [dict create kind [dict get $record kind] message $message expr $e origin [dict get $record origin]]
+    if {$notes ne {}} {
+        dict set diagnostic notes $notes
+    }
+    return $diagnostic
+}
+
+# How a candidate's reason names operand OPERAND (Rejection's `operand`).
+proc hir::methods::OperandText {operand} {
+    if {$operand eq ""} {
+        return "rejects the call"
+    }
+    if {$operand == 0} {
+        return "rejects the receiver"
+    }
+    return "rejects argument $operand"
+}
+
+# Where method candidate CANDIDATE (a display) of call E in HIR is declared:
+# the origin of a module function's or a lexical function's declaration, ""
+# for an intrinsic (no source) or anything else.
+proc hir::methods::CandidateOrigin {hir e candidate} {
+    if {[regexp {^(.+)::[^:]+$} $candidate -> ns]} {
+        if {[core::native::isQualifiedNative $candidate]} {
+            return ""
+        }
+        set v [CandidateBlock $hir $ns $candidate]
+        if {$v eq ""} {
+            return ""
+        }
+        set b [dict get $hir scopes [dict get $hir modules $ns] names $candidate]
+    } else {
+        set b [hir::lookup $hir [dict get $hir exprs $e scope] $candidate]
+        if {$b eq ""} {
+            return ""
+        }
+    }
+    set d [dict get $hir bindings $b declaredBy]
+    if {$d eq "" || ![dict exists $hir exprs $d]} {
+        return ""
+    }
+    set origin [hir::get $hir $d origin]
+    if {[lindex $origin 0] ne "file"} {
+        return ""
+    }
+    return $origin
 }
 
 # 1 if expression E of HIR is a call diagnosed TRAIT-UNKNOWN-OPERATION.

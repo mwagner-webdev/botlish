@@ -957,6 +957,22 @@ test lsp-lang-closed-module-diagnostics {an error in a module no editor has open
     list $diagnostics [lsp::json::has [lspc::published $c [lspc::uri $dir/shapes.bot]] version] [lt::Stop $c]
 } -cleanup {file delete -force $dir; unset -nocomplain dir c diagnostics} -result {{{1:8-1:14 1 {CORE SEMANTIC UNBOUND} {unbound name "nosuch"}}} 0 0}
 
+test lsp-lang-related-candidates {a rejected method-style call is published once, its candidates' declarations its related information, each with its own message; nothing of the candidate the call stood at is published (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md)} -body {
+    set dir [lt::Dir related-candidates]
+    lt::Put $dir/aa.bot "fn size(s: List\[int\]) -> int:\n    3\n"
+    lt::Put $dir/zz.bot "\nfn size(s: List\[int\]) -> Float64:\n    4.5\n"
+    set program "import aa\nimport zz\n\nfn u() -> Float64:\n    \[1, 2\].size() + 0.5\n\nu()\n"
+    set c [lt::Start]
+    set main [lspc::uri $dir/main.bot]
+    lspc::didOpen $c $main $program
+    set brief [lt::Diagnostics $c $main 1]
+    set diagnostic [lindex [lsp::json::elements [lsp::json::get [lspc::published $c $main] diagnostics]] 0]
+    set related [lmap r [lsp::json::elements [lsp::json::get $diagnostic relatedInformation]] {
+        list [lt::Location [lsp::json::get $r location]] [lsp::json::text [lsp::json::get $r message]]
+    }]
+    list [lmap d $brief {lrange $d 0 2}] $related [lt::Stop $c]
+} -cleanup {file delete -force $dir; unset -nocomplain dir program c main brief diagnostic related} -result {{{4:11-4:15 1 {CORE SEMANTIC AMBIGUOUS-METHOD-CALL}}} {{aa.bot:0:0-1:5 {aa::size accepts the call}} {zz.bot:1:0-2:7 {zz::size accepts the call}}} 0}
+
 test lsp-lang-out-of-order {a change that does not advance the document's version is ignored (and logged): the document stays at its version} -body {
     set dir [lt::Project out-of-order]
     set c [lt::Start]

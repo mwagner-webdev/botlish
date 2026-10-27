@@ -151,6 +151,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [METHOD-DECISION-FILTER.md](METHOD-DECISION-FILTER.md) -- kind proofs in the method-call decision: candidates the receiver's kind or a named struct's declaration rules out need no build of their own
 - [METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md](METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) -- method-style calls decided by each call's own checks, certified relative to the decided program: the semantic rule, its procedure, an independent oracle and the economics
 - [SFIAE-MILESTONE-1.md](SFIAE-MILESTONE-1.md) -- obligations do not select operations: an ambiguous context-trait implementation, like a missing context, is an obligation of the selected call and never decides a method-style call; SFIAE stated as a language principle (completion report)
+- [METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md](METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md) -- method-call failures reported without changing method decisions: the reported program resolves a rejected call to no candidate (poison), so no placeholder's checks, obligations or result type cascade; dependent rejections, source order, candidate explanations and notes (completion report)
 - [GOLDEN-TEST-FRAMEWORK.md](GOLDEN-TEST-FRAMEWORK.md) -- `stdlib/test.bot`: a test framework written in Botlish
 - [LARGE-SCALE-GOLDEN-MIGRATION.md](LARGE-SCALE-GOLDEN-MIGRATION.md) -- porting the Tcl tests to golden suites
 - [GOLDEN-VS-TCL-BENCHMARK.md](GOLDEN-VS-TCL-BENCHMARK.md) -- golden suites against their Tcl originals

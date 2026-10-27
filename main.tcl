@@ -38,7 +38,10 @@
 # compiler nor a backend: compilerpedia/ is data). An unknown option, an
 # option missing its argument, an invalid value, or options with no input
 # file are usage errors: a message on stderr, exit status 2. A run exits 1
-# when any input fails, 0 otherwise. Each printed diagnostic is followed,
+# when any input fails, 0 otherwise. A printed diagnostic with notes
+# (further locations with a text of their own: where a rejected method-style
+# call's candidates are declared) is followed by a "note: LOCATION: TEXT"
+# line for each. Each printed diagnostic is followed,
 # once per topic, by a "help: ... -help TOPIC" line naming the Compilerpedia
 # topic of its rule or code (compilerpedia::topicForDiagnostic: presentation
 # only, read from the catalogue, never from or into the compiler's
@@ -119,7 +122,8 @@
 # unchanged (the front-end cache, surface/cache.tcl).
 #
 # -check analyzes each .bot input as a compilation does and reports what it
-# reports -- the same diagnostics, in the same words, the same "help:" lines,
+# reports -- the same diagnostics, in the same words, the same "note:" and
+# "help:" lines,
 # its warnings on stderr under the -warnings policy -- without evaluating the
 # program, generating native code or writing anything: through the compiler
 # service (service/service.tcl, COMPILER-SERVICE-MILESTONE-1.md), the
@@ -460,12 +464,23 @@ proc printError {channel prefix message options} {
     if {[dict exists $options -diagnostics]} {
         foreach diagnostic [dict get $options -diagnostics] {
             puts $channel "$prefix[dict get $diagnostic message] ([core::ShownCode $diagnostic])"
+            printNotes $channel $prefix [lmap n [dict getdef $diagnostic notes {}] {dict get $n message}]
             helpHint $channel $prefix [core::ShownCode $diagnostic] [dict get $diagnostic message]
         }
         return
     }
     puts $channel "$prefix$message ([dict get $options -errorcode])"
     helpHint $channel $prefix [dict get $options -errorcode] $message
+}
+
+# After a printed diagnostic, a line "PREFIXnote: TEXT" for each of its
+# notes (TEXTS, each located: core::raiseDiagnostics), PREFIX's "error"
+# word replaced, its indentation kept.
+proc printNotes {channel prefix texts} {
+    regsub {[^ ].*$} $prefix "" indent
+    foreach text $texts {
+        puts $channel "${indent}note: $text"
+    }
 }
 
 # After a printed diagnostic of error code CODE and MESSAGE, the line
@@ -721,6 +736,7 @@ proc checkFile {path} {
         set errors [service::diagnostics $revision -severity error]
         foreach error $errors {
             puts "   error: [dict get $error text] ([dict get $error code])"
+            printNotes stdout "   " [lmap n [dict get $error notes] {dict get $n text}]
             helpHint stdout "   " [dict get $error code] [dict get $error text]
         }
     } finally {

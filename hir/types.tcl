@@ -4013,6 +4013,13 @@ proc hir::types::Project {hirVar ctxVar e} {
         }
         return never
     }
+    if {[dict exists $node methodRejected]} {
+        # The written callee of a rejected method-style call (hir/resolve.tcl's
+        # MethodChoice): no candidate was established, so the call computes
+        # nothing the program knows -- poison, whatever the receiver's
+        # fields (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+        return [ProjectionFailed hir $ctx $e]
+    }
     set name [dict get $node name]
     # A projection hir::structs::ProjectionProblem rejects in every context
     # (NOT-A-STRUCT, UNKNOWN-FIELD, OPAQUE-REPRESENTATION; a method-style

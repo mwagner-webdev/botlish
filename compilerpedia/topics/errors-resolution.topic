@@ -1760,8 +1760,8 @@ Rename the enum (enum types are conventionally capitalized: `Game`,
 title: AMBIGUOUS-METHOD-CALL: method syntax with more than one possible callee
 summary: receiver.name(...) could call more than one visible function named name (or a function and a callable field), and Botlish never chooses by precedence; call the one you mean explicitly.
 index: errors
-alias: ambiguous method call; more than one visible function accepts the receiver
-keywords: method syntax, method sugar, candidates, ambiguous, precedence, field, local name, parameter name, shadowing
+alias: ambiguous method call; more than one visible function accepts the call; more than one visible function accepts the receiver
+keywords: method syntax, method sugar, candidates, ambiguous, precedence, field, local name, parameter name, shadowing, related information, cascade
 related: concept.method-sugar rule.method-resolution error.no-applicable-method error.nomethod-call concept.imports
 docs: METHOD-SUGAR.md IMPORTS.md 2048-ENGINE-WORKLOAD.md
 code: CORE SEMANTIC AMBIGUOUS-METHOD-CALL
@@ -1773,12 +1773,26 @@ bindings and parameters of this file) plus every member `f` of a
 namespace the file imports directly. Each candidate is tried as
 `f(x, a)`; the call is accepted when exactly one is valid. When several
 are, the call is rejected -- there is no precedence: not import order,
-not "local wins", not "standard library wins":
+not "local wins", not "standard library wins", not by result type, by how
+the result is used or by which candidate's context requirements the
+installed contexts meet (rule.sfiae):
 
     method-style call "length" is ambiguous: more than one visible
-    function accepts the receiver (length, std::list::length); there is no
-    precedence between them: call the one you mean explicitly, e.g.
-    length(receiver, ...)
+    function accepts the call (length, std::list::length); there is no
+    precedence between them (none by namespace, result type, how the
+    result is used, or which one's context requirements are met): call the
+    one you mean explicitly, e.g. length(receiver, ...)
+
+A note for each candidate declared in source says where it is (`note:`
+lines under the error; an editor's related information).
+
+The rejected call is the program's one error there: what it would compute
+is not known, so nothing is checked against any candidate's result type,
+and no candidate's obligations -- a context it requires, an error it may
+raise -- are reported. An argument that is invalid whatever the call
+means is still reported. A call whose verdict depends on what the program
+does not establish -- an argument an earlier error rejected, the result of
+another rejected call -- is not reported at all (fix the first error).
 
 A second form: the receiver is a struct with a field `f` that may hold a
 callable, and a function `f` is also visible:
@@ -1835,11 +1849,11 @@ fn count(xs: List[int], limit: int) -> int:
 @end
 
 @topic error.no-applicable-method
-title: NO-APPLICABLE-METHOD: method syntax where no candidate accepts the receiver
-summary: receiver.name(...) has several visible functions named name, and none of them accepts this receiver and these arguments; the message says why each one fails.
+title: NO-APPLICABLE-METHOD: method syntax where no candidate accepts the call
+summary: receiver.name(...) has several visible functions named name, and none of them accepts this receiver and these arguments; the message says why each one fails, and which operand it rejects.
 index: errors
-alias: no visible function accepts the receiver
-keywords: method syntax, candidates, receiver type, overload, no applicable
+alias: no visible function accepts the receiver; none of the visible functions of that name accepts the call
+keywords: method syntax, candidates, receiver type, argument, overload, no applicable, rejects the receiver, rejects argument
 related: concept.method-sugar rule.method-resolution error.ambiguous-method-call error.type
 docs: METHOD-SUGAR.md IMPORTS.md
 code: CORE SEMANTIC NO-APPLICABLE-METHOD
@@ -1848,13 +1862,25 @@ code: CORE SEMANTIC NO-APPLICABLE-METHOD
 When method syntax has several candidate functions (see
 error.ambiguous-method-call), each is tried with the receiver as first
 argument. If none of the calls would be valid, the call is rejected, and
-the message gives each candidate's reason:
+the message gives each candidate's reason -- its own first problem, and
+whether it rejects the receiver, an argument (counted from 1 inside the
+parentheses) or the call as a whole (its instance, an imprint):
 
     method-style call "length": none of the visible functions of that
-    name accepts the receiver (length: argument for parameter "s" cannot
-    be proven to satisfy str (argument type: int); std::list::length: the
-    receiver is a int, but argument 1 of native std::list::length requires
-    list)
+    name accepts the call (length rejects the receiver: argument for
+    parameter "s" cannot be proven to satisfy str (argument type: int);
+    std::list::length rejects the receiver: the receiver is a int, but
+    argument 1 of native std::list::length requires list)
+
+A note for each candidate declared in source (`note:` lines under the
+error; an editor's related information) says where it is declared.
+
+That one diagnostic is all the call reports: a candidate's reason is not
+reported again as an error of its own, and nothing that uses the call's
+result is checked against a candidate's result type. When the only
+problems of a candidate are in an argument the program does not establish
+(another rejected call's result, an argument an earlier error rejected),
+the call is not reported: its failure depends on that first error.
 
 Botlish has no overloading: candidates are not ranked or converted to,
 they are only tried. With a single candidate there is nothing to choose:
@@ -1868,12 +1894,14 @@ checks its argument's kind when it runs).
     this receiver.
 
 == HOW TO INVESTIGATE
-The message gives each candidate's reason, separated by ";". The
-receiver's type is in the reasons ("the receiver is a int").
+The message gives each candidate's reason, separated by ";": "rejects the
+receiver" when the receiver's type is wrong for it ("the receiver is a
+int"), "rejects argument N" when a later argument is. The notes locate the
+candidates.
 
 == WHAT TO DO
-Read each candidate's reason; fix the receiver's type or call the
-intended function explicitly.
+Read each candidate's reason; fix the receiver's or the argument's type,
+or call the intended function explicitly.
 
 @example reject
 import std::list
@@ -1885,6 +1913,23 @@ fn length(s: str) -> int:
 @caption Neither length nor std::list::length accepts an int
 @error CORE SEMANTIC NO-APPLICABLE-METHOD
 @at 6:3
+@end
+
+@example reject
+import shapes
+import labels
+
+(1).scale(2)
+@module shapes
+fn scale(n: int, label: str) -> int:
+    n
+@module labels
+fn scale(label: str, n: int) -> int:
+    n
+@caption One candidate rejects the receiver, the other its argument
+@error CORE SEMANTIC NO-APPLICABLE-METHOD
+@at 4:5
+@message *labels::scale rejects the receiver: *shapes::scale rejects argument 1: *
 @end
 
 @topic error.nomethod-call

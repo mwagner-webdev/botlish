@@ -359,12 +359,14 @@ test mf-nominal-inferred-contract-not-compared {an inferred first-parameter cont
     }
 } -result {1 1 {} std::mfnb::tag}
 
-test mf-problem-in-the-only-survivor {a call whose only surviving candidate has a problem of its own (an argument the candidate's inferred contract rejects) has no applicable candidate: NO-APPLICABLE-METHOD, beside the candidate's own TYPE error, which the decision must not drop} -body {
+test mf-problem-in-the-only-survivor {a call whose only surviving candidate has a problem of its own (an argument the candidate's inferred contract rejects) has no applicable candidate: NO-APPLICABLE-METHOD, whose reason for that candidate is its own TYPE error, which the decision must not drop -- as the rejection's explanation, never as a second diagnostic of a candidate nobody chose (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md)} -body {
     set text "${::mfImports}xs = \[1, 2\]\nxs.get(\"k\", 0)\n"
     set reference [mfCompile $text 0]
     set decided [mfCompile $text 1]
-    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference]
-} -result {{NO-APPLICABLE-METHOD TYPE} 1}
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
+        [regexp {std::list::get rejects argument 1: argument for parameter "index" is statically incompatible with int} \
+            [lindex [dict get $decided diagnostics] 0 1]]
+} -result {NO-APPLICABLE-METHOD 1 1}
 
 test mf-trait-operation-is-the-traits {a method-style call on a trait view is an operation of the trait: it is decided by the trait before any candidate is judged, whatever candidates are visible by name; the calls beside it are decided around it} -body {
     set text "import std::list\nimport std::str\nimport std::mutable_array\n\ntrait Measured:\n    fn length(value: Measured) -> int\n\nfn size(v: Measured) -> int:\n    v.length()\n\nfn h() -> int errors IndexNotFound:\n    a = std::mutable_array::allocate(2)\n    std::mutable_array::set(a, 0, 5)\n    a.at(0) + a.get(1, -1)\n\nr = h():\n    on IndexNotFound:\n        -1\nsize(\"abcd\") + \[1, 2\].length() + r\n"

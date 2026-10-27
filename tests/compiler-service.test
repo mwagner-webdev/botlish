@@ -162,6 +162,28 @@ test cs-related-locations {a semantic diagnostic's related locations are ranges:
         [expr {$strict eq [cs::Service $path]}]
 } -cleanup {file delete -force $dir; unset -nocomplain dir path strict d} -result {{CORE SEMANTIC USE-AFTER-MOVE} 20 13 {{19 13 17}} 1}
 
+test cs-method-rejection-notes {a rejected method-style call is reported as a strict compilation reports it: one diagnostic, with a note per candidate declaration (a range and the note's text), and nothing of the candidate it stood at -- the value it would compute is not known, never the placeholder's type (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md)} -body {
+    set dir [cs::Dir rejection]
+    set f "fn size(s: List\[int\]) -> int:\n    3\n"
+    cs::Put $dir/aa.bot $f
+    cs::Put $dir/zz.bot "\nfn size(s: List\[int\]) -> Float64:\n    4.5\n"
+    set path [cs::Put $dir/main.bot "import aa\nimport zz\n\nfn u() -> Float64:\n    n = \[1, 2\].size()\n    n + 0.5\n\nu()\n"]
+    catch {surface::readProgramFile $path -warnings off -cache ""} message options
+    set strict [lmap entry [dict get $options -diagnostics] {
+        list [core::ShownCode $entry] [lmap note [dict get $entry notes] {dict get $note summary}]
+    }]
+    set ws [cs::Workspace]
+    set rev [service::analyze $ws $path]
+    set errors [service::diagnostics $rev -severity error]
+    set at [service::at $rev $path 5 5]
+    list $strict [lmap d $errors {
+        list [dict get $d code] [lmap n [dict get $d notes] {
+            list [file tail [dict get $n file]] [dict get $n line]:[dict get $n column] [dict get $n message] \
+                [expr {[string match "*[file tail [dict get $n file]]:[dict get $n line]:[dict get $n column]: [dict get $n message]" [dict get $n text]]}]
+        }]
+    }] [dict get $at unavailable type]
+} -cleanup {service::closeWorkspace $ws; file delete -force $dir; unset -nocomplain dir f path message options strict ws rev errors at} -result {{{{CORE SEMANTIC AMBIGUOUS-METHOD-CALL} {{aa::size accepts the call} {zz::size accepts the call}}}} {{{CORE SEMANTIC AMBIGUOUS-METHOD-CALL} {{aa.bot 1:1 {aa::size accepts the call} 1} {zz.bot 2:1 {zz::size accepts the call} 1}}}} {its value is not known: it depends on a construct a diagnostic rejects}}
+
 test cs-warning-origins {a warning keeps its primary and secondary origins: its range and related ranges, its text the compilation's own rendering (notes included)} -body {
     set dir [cs::Dir warning]
     set path [cs::Put $dir/main.bot "fn f(x: int) -> int:\n    if x > 0:\n        return 1\n    1\n\nf(2)\n"]

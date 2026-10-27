@@ -1420,7 +1420,7 @@ test se-method-memo {a method-call decision builds no configuration twice: a bui
             [sdDiff [lindex $records 0] [lindex $records 2]] [dict get [lindex $records 0] diagnostics]
     }
     set results
-} -result {{8 9 8} {} {} {} {7 8 7} {} {} {} {1 2 1} {} {} {{AMBIGUOUS-METHOD-CALL {method-style call "length" is ambiguous: more than one visible function accepts the receiver (length, std::str::length); there is no precedence between them: call the one you mean explicitly, e.g. length(receiver, ...)}}}}
+} -result {{8 9 8} {} {} {} {7 8 7} {} {} {} {1 2 1} {} {} {{AMBIGUOUS-METHOD-CALL {method-style call "length" is ambiguous: more than one visible function accepts the call (length, std::str::length); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. length(receiver, ...)}}}}
 
 # The batched run itself (hir::static::Simulate), on a synthetic dependency
 # relation: sites a, u, f in post-order; u depends on a and on f, f on
@@ -1521,7 +1521,7 @@ test se-property-subsume-local {the contract-boundary check of what an uncontrac
     regexp {if \{!\$diagnose \|\| \$value eq "" \|\| \[ErasedErrors \$hir\] eq \{\}\} \{\s*return} $body
 } -result 1
 
-test se-property-subsume-positions {what the contract-boundary edges rely on (hir/staticdeps.tcl, Z:site): the check skips exactly the coroutine operations the analysis lists, checks a handle only when its construction is in the body, and reports only in the completion walk -- before which hir::CheckOnce records the diagnostics so far (beforeCompletions), shifted past the method-style call rejections hir::methods::Reject prepends} -body {
+test se-property-subsume-positions {what the contract-boundary edges rely on (hir/staticdeps.tcl, Z:site): the check skips exactly the coroutine operations the analysis lists, checks a handle only when its construction is in the body, and reports only in the completion walk -- before which hir::CheckOnce records the diagnostics so far (beforeCompletions), shifted past the method-style call rejections hir::methods::Report prepends} -body {
     set skipped [lsort [regexp -all -inline {core::coroutines::[a-z]+Native} [info body hir::completions::SubsumeCall]]]
     set listed [lsort [regexp -all -inline {core::coroutines::[a-z]+Native} [info body hir::staticdeps::CoroutineOperations]]]
     set reporters {}
@@ -1541,7 +1541,7 @@ test se-property-subsume-positions {what the contract-boundary edges rely on (hi
         [regexp {set thunk \[hir::coroutines::thunkOfHandle \$hir \$value\]\s*if \{\$thunk eq ""\} \{\s*return} [info body hir::completions::SubsumeHandle]] \
         $reporters $walkers \
         [regexp {dict set hir beforeCompletions \[list 0 \[llength \[dict get \$hir diagnostics\]\]\]\s*hir::errorsets::verify hir\n} [info body hir::CheckOnce]] \
-        [regexp {dict set final diagnostics \[concat \[list \$added\] \$diagnostics\]\s*if \{\[dict exists \$final beforeCompletions\]\}} [info body hir::methods::Reject]]
+        [regexp {dict set final diagnostics \[concat \$added \[dict get \$final diagnostics\]\]\s*if \{\[dict exists \$final beforeCompletions\]\}} [info body hir::methods::Report]]
 } -result {1 1 completions.tcl errorsets.tcl 1 1}
 
 test se-property-ownership-verdict {release scopes, and so AFFINE-PATH-RELEASE-UNSUPPORTED, are computed only for a program the ownership analysis accepts as a whole, whose diagnostics are exactly the kinds hir/staticdeps.tcl's C:verdict lists; a semantic instance's carried to its call reads "call to" -- the facts the verdict's edges rely on} -body {

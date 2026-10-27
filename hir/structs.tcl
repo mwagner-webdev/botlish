@@ -916,6 +916,11 @@ proc hir::structs::ProjectionProblem {hir e} {
         return ""
     }
     set node [dict get $hir exprs $e]
+    if {[dict exists $node methodRejected]} {
+        # The callee of a rejected method-style call: no field access, and
+        # its rejection is the call's diagnostic (hir::methods::Report).
+        return ""
+    }
     set receiver [dict get $node receiver]
     set type [hir::typeOf $hir $receiver]
     set name [dict get $node name]

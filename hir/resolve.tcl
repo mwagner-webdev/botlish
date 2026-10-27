@@ -520,6 +520,12 @@ proc hir::resolve::MethodKey {node} {
 # stands in provisionally. Every call with several candidates is recorded in
 # `methodCalls` (key -> {expr E name NAME candidates DISPLAYS chosen D}) for
 # that disambiguation, whatever the build chose.
+#
+# A call the build is told is rejected (its choice RejectedMethodChoice: the
+# decision found no single applicable candidate,
+# METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md) resolves to none: "" -- the
+# call keeps its written callee, marked `methodRejected` (hir::types::Project
+# makes it poison, and nothing else reads it as a field access).
 proc hir::resolve::MethodChoice {hirVar e node candidates} {
     upvar 1 $hirVar hir
     if {[llength $candidates] == 1} {
@@ -527,17 +533,31 @@ proc hir::resolve::MethodChoice {hirVar e node candidates} {
     }
     set key [MethodKey $node]
     set chosen [lindex $candidates 0]
+    set display [dict get $chosen display]
     if {$key ne "" && [dict exists $hir methodChoices $key]} {
+        set want [dict get $hir methodChoices $key]
         foreach candidate $candidates {
-            if {[dict get $candidate display] eq [dict get $hir methodChoices $key]} {
+            if {[dict get $candidate display] eq $want} {
                 set chosen $candidate
+                set display $want
             }
+        }
+        if {$want eq [RejectedMethodChoice]} {
+            set chosen ""
+            set display $want
         }
     }
     dict set hir methodCalls [if {$key ne ""} {set key} else {set e}] [dict create expr $e \
         name [dict get [dict get $node callee] name] \
-        candidates [lmap c $candidates {dict get $c display}] chosen [dict get $chosen display]]
+        candidates [lmap c $candidates {dict get $c display}] chosen $display]
     return $chosen
+}
+
+# The choice that tells a build a method-style call with several candidates
+# is rejected (MethodChoice): no candidate display, since `#` is no
+# identifier character.
+proc hir::resolve::RejectedMethodChoice {} {
+    return "#rejected"
 }
 
 # The syntax node of the callee CHOSEN (a MethodCandidates dict) denotes.
@@ -1290,7 +1310,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 SetField hir $e operator [dict get $node operator]
                 dict lappend hir operatorCalls $e
             }
+            set chosen ""
             if {$candidates ne ""} {
+                set chosen [MethodChoice hir $e $node $candidates]
+            }
+            if {$chosen ne ""} {
                 # Method-call sugar (METHOD-SUGAR.md): `receiver.name(args)`
                 # is the ordinary call of the function `name` denotes when
                 # one is visible from here -- under ordinary lexical
@@ -1309,7 +1333,6 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # told is valid; hir::buildSyntax decides which that is.
                 set name [dict get $written name]
                 set nameOrigin [dict get $written nameOrigin]
-                set chosen [MethodChoice hir $e $node $candidates]
                 SetField hir $e callee [Expr hir [MethodCalleeSyntax $chosen $name $nameOrigin] $ctx]
                 # (The collection of a variadic callee's trailing arguments
                 # is the call's own check: hir::CheckingCall.)
@@ -1352,7 +1375,21 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     # value: the handle becomes its first argument.
                     CoroutineResume hir $e $ctx
                 }
-                if {[dict exists $node method] && $hidden ne ""} {
+                if {$candidates ne ""} {
+                    # Several functions are visible, and the decision found
+                    # no single one whose ordinary call is valid: the call
+                    # is rejected (AMBIGUOUS-METHOD-CALL or
+                    # NO-APPLICABLE-METHOD, hir::methods::Report), and what
+                    # it would compute is not established -- no candidate's
+                    # result, errors, contexts, parameter contracts or
+                    # ownership roles belong to the program. Its written
+                    # callee is kept, marked: poison (hir::types::Project),
+                    # never a field access, so the receiver and the
+                    # arguments are checked as the expressions they are and
+                    # nothing restates the rejection
+                    # (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+                    SetField hir [dict get $hir exprs $e callee] methodRejected 1
+                } elseif {[dict exists $node method] && $hidden ne ""} {
                     # The only function(s) of that name visible are declared
                     # nomethod (WARNINGS-METHOD-ELIGIBLE.md): method syntax
                     # never denotes one. A resolution diagnostic, like an

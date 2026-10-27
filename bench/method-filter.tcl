@@ -13,7 +13,9 @@
 # Each program is compiled in a process of its own with the kind proofs (the
 # default decision): its whole-program builds, the method trial builds among
 # them, the single deviations among those, the final programs built again,
-# the builds read from a record, and the front end's time. -reference 1
+# the reported forms of programs with a rejected call (`reports`,
+# METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md), the builds read from a
+# record, and the front end's time. -reference 1
 # compiles it again by the reference rule (hir::methodKindProofs 0: every
 # candidate judged by its own build) and prints its builds, trials and time
 # beside them. -audit 1 compiles it under hir::methodReferenceAudit, which
@@ -31,7 +33,7 @@ set suites {callable-contracts collection-iteration collections declared-errors
     refinements static-compile stdlib-namespaces structs-and-enums traits
     variadics}
 
-set counters {builds methodTrials methodDeviations methodFinals methodReused}
+set counters {builds methodTrials methodDeviations methodFinals methodReused methodReports}
 
 proc one {file mode} {
     global root counters
@@ -50,7 +52,7 @@ proc one {file mode} {
     set after [hir::BuildStats]
     set fields {}
     foreach counter $counters {
-        lappend fields $counter [expr {[dict get $after $counter] - [dict get $before $counter]}]
+        lappend fields $counter [expr {[dict getdef $after $counter 0] - [dict getdef $before $counter 0]}]
     }
     puts "RESULT ok $fields ms $ms audits $hir::methodReferenceAudits"
 }
@@ -100,7 +102,7 @@ if {$files eq ""} {
     exit 2
 }
 
-puts [format "%-30s %7s %7s %5s %6s %6s %8s  %s" program builds trials devs finals reused ms \
+puts [format "%-30s %7s %7s %5s %6s %7s %6s %8s  %s" program builds trials devs finals reports reused ms \
     [if {$reference} {string cat "reference builds/trials/ms"} else {string cat ""}]]
 set totals [dict create ms 0 refBuilds 0 refTrials 0 refMs 0]
 foreach counter $counters { dict set totals $counter 0 }
@@ -136,15 +138,15 @@ foreach file $files {
             append note "  audited [dict get [dict create {*}[lrange $a 1 end]] audits]"
         }
     }
-    puts [format "%-30s %7d %7d %5d %6d %6d %8d  %s" [file tail $file] \
+    puts [format "%-30s %7d %7d %5d %6d %7d %6d %8d  %s" [file tail $file] \
         [dict get $k builds] [dict get $k methodTrials] [dict get $k methodDeviations] \
-        [dict get $k methodFinals] [dict get $k methodReused] [dict get $k ms] $note]
+        [dict get $k methodFinals] [dict get $k methodReports] [dict get $k methodReused] [dict get $k ms] $note]
     foreach counter [concat $counters ms] {
         dict incr totals $counter [dict get $k $counter]
     }
 }
-puts [format "%-30s %7d %7d %5d %6d %6d %8d  %s" total \
+puts [format "%-30s %7d %7d %5d %6d %7d %6d %8d  %s" total \
     [dict get $totals builds] [dict get $totals methodTrials] [dict get $totals methodDeviations] \
-    [dict get $totals methodFinals] [dict get $totals methodReused] [dict get $totals ms] \
+    [dict get $totals methodFinals] [dict get $totals methodReports] [dict get $totals methodReused] [dict get $totals ms] \
     [if {$reference} {format "%5d/%-5d %8d" [dict get $totals refBuilds] [dict get $totals refTrials] [dict get $totals refMs]} else {string cat ""}]]
 exit [expr {$problems > 0}]

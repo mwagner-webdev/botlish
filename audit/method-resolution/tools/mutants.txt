@@ -6,6 +6,11 @@
 # tests/method-resolution.test or tests/method-filter.test, or else by the
 # independent oracle (audit/method-resolution/tools/oracle.tcl).
 #
+# The mutants of the last section are of how a rejected call is reported
+# (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md): placeholders' diagnostics
+# and cascades, dependent and independent diagnostics, explanations, order,
+# and the separation of the decision from its presentation.
+#
 #   @@ NAME DESCRIPTION
 #   ## FILE
 #   <<<<
@@ -20,9 +25,9 @@
 @@ owned-by-location a call's problems are the diagnostics located at it (the old rule): an outer call's rejection of an inner call's result, reported at the inner call's node, is charged to the inner call
 ## hir/methods.tcl
 <<<<
-        dict lappend owned [dict get $d subject] [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+        dict lappend owned [dict get $d subject] [list [dict get $d kind] [dict get $d message] [dict get $d expr] \
 ====
-        dict lappend owned [dict get $d expr] [list [dict get $d kind] [dict get $d message] [dict get $d expr]]
+        dict lappend owned [dict get $d expr] [list [dict get $d kind] [dict get $d message] [dict get $d expr] \
 >>>>
 
 @@ nested-call-problems-charged a call's problems include those of the calls in its arguments (the old subtree rule): an inner call's failure in the build of an outer candidate rules that candidate out
@@ -133,9 +138,9 @@
 @@ ambiguity-reported-as-none a call with several applicable candidates is reported as having none
 ## hir/methods.tcl
 <<<<
-    if {[llength $valid] > 1} {
+    set kind [expr {[llength $applicable] > 1 ? "AMBIGUOUS-METHOD-CALL" : "NO-APPLICABLE-METHOD"}]
 ====
-    if {[llength $valid] > 99} {
+    set kind [expr {[llength $applicable] > 99 ? "AMBIGUOUS-METHOD-CALL" : "NO-APPLICABLE-METHOD"}]
 >>>>
 
 @@ certification-on-guesses certification reads the receivers the kind waves guess, not the ones the build gives
@@ -197,4 +202,147 @@
     return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
 ====
     return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+>>>>
+
+# ---------------------------------------------------------------------------
+# Reporting a rejected call (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md):
+# the decision is made; these break only what is reported of it -- or, the
+# last group, let the reporting reach the decision
+
+@@ placeholder-reported the reported program is the decision's build, every rejected call at its placeholder: the placeholder's own checks, obligations (MISSING-CONTEXT, AMBIGUOUS-CONTEXT-IMPLEMENTATION, UNHANDLED-ERROR) and the uses of its result are reported with the rejection
+## hir/methods.tcl
+<<<<
+    if {$rejected ne {}} {
+        set reported $choices
+====
+    if {0} {
+        set reported $choices
+>>>>
+
+@@ rejected-result-any a rejected call's value is `any`, not poison: what uses it is checked against an unknown type (the S13 cascade: a TYPE where the value meets a declared type)
+## hir/types.tcl
+<<<<
+        # fields (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+        return [ProjectionFailed hir $ctx $e]
+====
+        # fields (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+        return any
+>>>>
+
+@@ rejected-callee-a-field a rejected call's written callee is the field access it would be with no function visible: its projection's diagnostics (NOT-A-STRUCT, UNPROVEN-FIELD, MISSING-IMPORT) are reported beside the rejection
+## hir/resolve.tcl
+<<<<
+                    SetField hir [dict get $hir exprs $e callee] methodRejected 1
+====
+                    SetField hir [dict get $hir exprs $e callee] methodCallee 1
+>>>>
+
+@@ independent-argument-suppressed every diagnostic located in a rejected call is taken for a consequence of the rejection and dropped: an argument invalid whatever the call means is no longer reported
+## hir/methods.tcl
+<<<<
+    set added [SourceOrder $final $added]
+    dict set final diagnostics [concat $added [dict get $final diagnostics]]
+====
+    set added [SourceOrder $final $added]
+    set spans [lmap {key record} $records {hir::get $final [dict get $record expr] origin}]
+    dict set final diagnostics [concat $added [lmap d [dict get $final diagnostics] {
+        if {[Within [DiagnosticOrigin $final $d] $spans]} continue
+        set d
+    }]]
+>>>>
+
+@@ reason-of-another-candidate NO-APPLICABLE-METHOD gives every candidate the reason of the first: an explanation taken from a check that is not the candidate's own
+## hir/methods.tcl
+<<<<
+        foreach problem [dict getdef $problems $candidate {}] {
+====
+        foreach problem [dict getdef $problems [lindex $candidates 0] {}] {
+>>>>
+
+@@ dependent-ambiguity-reported an ambiguity whose verdict read an operand nobody established (another rejected call's result, an argument an earlier check rejected) is reported
+## hir/methods.tcl
+<<<<
+        if {$poisoned ne {}} {
+            return [dict replace $record reported 0 why operand]
+        }
+        return $record
+====
+        return $record
+>>>>
+
+@@ dependent-no-applicable-reported NO-APPLICABLE-METHOD is reported for an outer call whose candidates fail only on an argument that is a rejected call's placeholder result (nested failures cascade)
+## hir/methods.tcl
+<<<<
+            if {[Within $origin $poisoned]} continue
+====
+>>>>
+
+@@ poisoned-receiver-reported a call whose receiver the reported program does not establish (a rejected call's result) is judged by the placeholder's receiver type, not dismissed as depending on the rejection
+## hir/methods.tcl
+<<<<
+    if {[dict get $verdict poisoned] || ($operands ne {} && [hir::types::Poisoned $final [lindex $operands 0]])} {
+====
+    if {[dict get $verdict poisoned]} {
+>>>>
+
+@@ rejections-in-decision-order the rejections are prepended one by one, in the order the decision recorded them (the order before this milestone): the last call judged is reported first
+## hir/methods.tcl
+<<<<
+    set added [SourceOrder $final $added]
+====
+    set added [lreverse $added]
+>>>>
+
+@@ every-diagnostic-in-source-order every diagnostic of the reported program, the rejections among them, is sorted by its location: an independent diagnostic written before a rejected call becomes the first, and a static compile block holding both reifies it instead of the rejection
+## hir/methods.tcl
+<<<<
+    set added [SourceOrder $final $added]
+    dict set final diagnostics [concat $added [dict get $final diagnostics]]
+====
+    dict set final diagnostics [SourceOrder $final [concat $added [dict get $final diagnostics]]]
+>>>>
+
+@@ notes-dropped the notes that locate a rejected call's candidates are not recorded
+## hir/methods.tcl
+<<<<
+    if {$notes ne {}} {
+        dict set diagnostic notes $notes
+    }
+====
+>>>>
+
+@@ unreported-rejection-decided a rejection that is not reported (it depends on what nobody established) is taken as its placeholder's decision: the reporting decides a call
+## hir/methods.tcl
+<<<<
+    Report final $calls $rejected $verdicts $unstable
+====
+    Report final $calls $rejected $verdicts $unstable
+    dict for {key record} [dict getdef $final methodRejected {}] {
+        if {![dict get $record reported]} {
+            dict set decided $key [dict get $choices $key]
+        }
+    }
+>>>>
+
+@@ reported-diagnostics-decide a call's own problems are read from what diagnostic recovery reports (hir::recovery::reported), not from the checks: a candidate whose problem is in a tainted unit looks applicable
+## hir/methods.tcl
+<<<<
+    foreach d [dict get $hir diagnostics] {
+        if {![dict exists $d subject] || [dict get $d kind] in $obligations} continue
+====
+    foreach d [hir::recovery::reported $hir] {
+        if {![dict exists $d subject] || [dict get $d kind] in $obligations} continue
+>>>>
+
+@@ reported-form-decides the reported form of a rejected call (no candidate) is a configuration the decision builds and judges: the single deviations are built with every other call at no candidate
+## hir/methods.tcl
+<<<<
+            if {$cand eq $standing} continue
+            set deviation [Build state [dict merge $choices [list $key $cand]] deviation]
+====
+            if {$cand eq $standing} continue
+            set reported [dict map {k v} $choices {
+                if {$k eq $key} {set v} else {hir::resolve::RejectedMethodChoice}
+            }]
+            set deviation [Build state [dict merge $reported [list $key $cand]] deviation]
 >>>>

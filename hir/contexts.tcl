@@ -922,7 +922,7 @@ proc hir::contexts::ContextTraitReceiver {hir parent e} {
             return [expr {[dict exists $node method] && [lindex [dict get $node args] 0] eq $e}]
         }
         project {
-            if {![dict exists $node methodCallee] || ![dict exists $parent $p]} {
+            if {(![dict exists $node methodCallee] && ![dict exists $node methodRejected]) || ![dict exists $parent $p]} {
                 return 0
             }
             lassign [dict get $parent $p] pp prole
