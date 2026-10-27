@@ -1264,7 +1264,7 @@ Sources:
     opposite directions on the two hosts. They make one construction per
     run, not per item, so this is noise and code placement, not the
     change.
-* **The general runtime is about 50 ns per item dearer on Windows** where
+* **The general runtime is 30 to 50 ns per item dearer on Windows** where
   every item is one switch round trip (dfa-micro: 196 against 146–166).
   That is the resume's difference in section 9.1 again. The DFA workloads
   that matter run fused, at 3.5 to 25 ns per item on Windows. The general
