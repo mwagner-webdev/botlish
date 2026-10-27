@@ -103,7 +103,7 @@ autopilot at floor 26, and a game after a restart.*
 | `audit/icy-tower/tools/xvfb-session.py` | | the graphical run: Xvfb, XTest, screenshots, WM close |
 | `audit/icy-tower/tools/perf.tcl`, `callgrind-frame.py`, `callgrind-split.py` | | the performance and allocation report |
 | `tests/workload-icy-tower.test` | | 15 tests in the Tcl suite (8 need the package-owned libSDL3) |
-| `.github/workflows/icy-tower.yml` | | CI: SDL3 built, every test run (none skipped), oracle, mutants, Xvfb, the executable uploaded |
+| `.github/workflows/icy-tower.yml` | | CI: SDL3 built, every Linux test run (none skipped; the Windows tests run in icy-tower-windows.yml), oracle, mutants, Xvfb, the executable uploaded |
 | `stdlib/float64.bot` | | the stdlib addition |
 
 Each `.bot` file beside `main.bot` is an application module (IMPORTS.md):
