@@ -446,7 +446,8 @@ on the other three hosts, only together with native-frame roots
    has one.
 3. **Otherwise it creates a fiber.** The call is `CreateFiberEx` with:
    - the usable size (8 MiB by default,
-     `BOTLISH_NATIVE_COROUTINE_STACK_BYTES` as on every host) plus
+     `BOTLISH_NATIVE_COROUTINE_STACK_BYTES`, read once per process, as
+     on every host) plus
      `GUARD_BYTES` (64 KiB) reserved;
    - one page committed, a thread's default: Windows commits the rest by
      the guard page as the fiber grows (section 9 measures what a fiber
@@ -899,10 +900,46 @@ Results:
 
   Commit a4d5d108 runs that sweep on a pooled fiber, as every start but a
   thread's first runs. It adds `fresh-start-from-thread`, which sweeps the
-  first start from 0 to 64 KiB in 512-byte steps. Their result:
-  PENDING-WIN-SWEEP.
+  first start from 0 to 64 KiB in 512-byte steps.
+* **Real Windows** (run 40141758225's smoke job, a4d5d108):
+  - the first start: 10 overflowed / 119 completed. A thread's
+    conversion, `CreateFiberEx` and the setup need about 5 KiB of the
+    thread's stack;
+  - **the start on a pooled fiber still overflowed at all 129 offsets.**
+    Every overflow was reported, never a crash.
+
+  The start's own frames could not explain that. The cross-built object
+  (code inspection) gives their sizes from their prologues:
+
+  | Function | Frame |
+  |---|---:|
+  | `rt_co_start` | 200 B |
+  | `CoStack::new` | 376 B |
+  | `segment` | 152 B |
+  | `bl_co_switch` | 56 B |
+
+  Ours add up to 784 bytes. A resume needs 352 bytes, `SwitchToFiber`'s
+  share included, so a pooled start should need under 1 KiB. By
+  inspection, the difference was `stack_bytes()`. It read
+  `BOTLISH_NATIVE_COROUTINE_STACK_BYTES` from the environment at every
+  start, a pooled one's included. On Windows, `std::env::var` is
+  `GetEnvironmentVariableW` behind a 1 KiB buffer of Rust's standard
+  library on the calling stack, under the standard library's
+  environment lock. On Linux it cost about 190 ns per construction
+  (section 9.1).
+
+  Commit 3a71734b reads the size once per process. It also sweeps the
+  pooled start from 0 to 4 KiB, still in 16-byte steps, so that the sweep
+  reaches the edge's other side whatever the start's frames take. Its
+  result: PENDING-WIN-SWEEP.
 * **Other hosts (Linux):** the POSIX checks of the same file pass. The
-  sweeps there gave 12/85, 48/49, 12/85 and 6/91 completed/overflowed.
+  POSIX sweeps run 97 offsets each. Overflowed/completed:
+  - resume from the thread: 12 / 85;
+  - a start from the thread (a first start): 63 / 34 at 3a71734b,
+    48 / 49 before it. The first start now also runs the `OnceLock`'s
+    first read near the edge; every later start skips it;
+  - resume from a coroutine: 12 / 85;
+  - yield from a coroutine: 6 / 91.
 
 ### 8.3 The capability tables and the test files
 
@@ -992,7 +1029,9 @@ native_stack failed without any mutant (the start sweep above). So
 `win-driver-unguarded`, `win-executable-unguarded`,
 `effects-infallible-on-fallback` and `fallback-runs-coroutines` were
 "killed" by that sweep alone, and their own detectors never ran. They were
-run again on a4d5d108, with the sweep fixed: PENDING-WIN-RERUN.
+On a4d5d108 the pooled start's sweep still failed (section 8.2), and the
+same four were again killed by it alone. They run again on 3a71734b:
+PENDING-WIN-RERUN.
 
 * **Linux:** `audit/native-stack/tools/mutate.tcl`, the five mutants of
   the table that apply on Linux with `gc-walk-half-stack`: 6 mutants on
@@ -1011,13 +1050,16 @@ run again on a4d5d108, with the sweep fixed: PENDING-WIN-RERUN.
 
 ### 8.5 Linux, Linux AArch64 and macOS
 
-This milestone changes no Linux or macOS code path. On those hosts the
-POSIX switch, stack and walk are the code they were, behind `cfg`s. Two
-shared changes reach them:
+On Linux and macOS the POSIX switch, stack and walk are the code they
+were, behind `cfg`s. Three shared changes reach them:
 
 * `STACK_SWITCHING` is now conditioned on native-frame roots, which is
   true there;
-* the fallback refusal in `rt_co_start`, a constant check there.
+* the fallback refusal in `rt_co_start`, a constant check there;
+* a coroutine stack's size is read from the environment once per
+  process, not at every start (3a71734b, section 8.2). This makes every
+  host's construction about 190 ns cheaper on Linux and changes nothing
+  else: nothing sets the variable while a process runs.
 
 The evidence:
 
