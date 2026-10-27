@@ -69,7 +69,7 @@ set mutations {
     {placement-check-off hir/contexts.tcl
         {$c ne $r || [hir::get $hir $c scope] ne $top || [hir::mode $hir] ne "program"}
         {0}}
-    {method-candidate-dropped hir/hir.tcl
+    {method-candidate-dropped hir/methods.tcl
         {AMBIGUOUS-METHOD-CALL MISSING-CONTEXT}
         {AMBIGUOUS-METHOD-CALL}}
     {runtime-missing-not-raised core/contexts.tcl
@@ -142,7 +142,7 @@ proc makeMutantTree {scratch} {
         file copy -force $f [file join $scratch native]
     }
     file mkdir [file join $scratch tests]
-    foreach f {helpers.tcl binary-header.tcl contexts.test} {
+    foreach f {helpers.tcl ctoolchain.tcl binary-header.tcl contexts.test} {
         file copy -force [file join $root tests $f] [file join $scratch tests]
     }
     file mkdir [file join $scratch examples linux]

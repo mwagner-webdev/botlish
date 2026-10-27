@@ -2065,7 +2065,7 @@ where it appears. Keep it so:
   least 8, the garbage rule) is the engine's and may change: never let a
   test of a program's behavior depend on it -- tests/ordered-table.test is
   the one white-box test of the representation.
-* The engine's own method calls are written so the kind filter decides them
+* The engine's own method calls are written so the kind proofs decide them
   (a qualified call where a lexical name would be a second candidate):
   every program importing the collections compiles their modules.
 * A loop over a collection is the loop protocol (hir/iteration.tcl): the
@@ -3011,11 +3011,12 @@ regenerates the economics report.
 `audit/static-decisions/tools/compare.tcl` compiles each golden suite under
 the batched scheduler and the sequential reference and requires them to
 agree. The sequential order is one whole-program build per typed rejection:
-mutable-array.bot takes 69 rounds and 953 builds, destructuring.bot 205. On a
-GitHub runner that is 75 and 15 minutes; in an agent's container it is
-several times slower (mutable-array.bot did not finish in 2 h 37 min), beyond
-the 2-hour background-task limit, and it starves everything else on the
-machine. So:
+mutable-array.bot takes 69 rounds and 205 builds, destructuring.bot 69 rounds
+(953 and 205 builds before METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md). On a
+GitHub runner that is 24 and 9 minutes; in an agent's container it is several
+times slower (under the old method-call decision mutable-array.bot did not
+finish in 2 h 37 min), close to the 2-hour background-task limit, and it
+starves everything else on the machine. So:
 
 * **Never run it locally.** Don't run `compare.tcl` on a golden suite, all
   of them or one, and don't compile one under
@@ -3035,7 +3036,7 @@ machine. So:
     server's `actions_run_trigger`, method `run_workflow`, or `gh workflow
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
-* **Read its result.** A run takes about 80 minutes, mutable-array.bot's job
+* **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
   (the shards finish within it), and on main it may first wait for the run
   before it. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
@@ -3044,54 +3045,75 @@ machine. So:
 * **A failing run on main is a standing signal**, like a failing `gc-stress`
   run: reproduce the disagreement on a small program and fix it.
 
-## Method-call decisions (the kind filter)
+## Method-call decisions
 
-`hir::DecideMethodCalls` decides which function a method-style call means by
-the rule of METHOD-SUGAR.md: the exact decision (`DecideMethodCallsExact`)
-tries candidates with whole-program trial builds; the kind filter
-(`hir/methodfilter.tcl`, METHOD-DECISION-FILTER.md) settles most calls from
-the receiver's kind first and gives everything else to the exact decision, made
-from the start. The filter changes how many builds a decision takes, never its
-outcome. Keep it so:
+`hir::DecideMethodCalls` (`hir/methods.tcl`;
+METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md) decides which function a
+method-style call means by the rule of METHOD-SUGAR.md: the one visible
+candidate whose ordinary call is valid. Keep it so:
 
-* The filter *excludes*, it never *accepts*. A candidate is excluded only when
-  the ordinary call is provably invalid by kind (a native's first parameter,
-  a module function's declared or inferred first-parameter contract, the plain
-  value kinds only) or by a named struct's declaration (a module function
-  whose *declared* first parameter is a named struct of another declaration
-  than the receiver's named struct: named structs are nominal,
-  `hir::types::subtype`; `NominalMismatch`); that a survivor is valid is the
-  certificate's job (a build with no problem in the call), never an
-  inference. Never exclude a lexical name, never exclude by a domain or a
+* **A candidate is judged by the call's own checks.** A diagnostic carries a
+  `subject` -- the call -- only when the call's own check against its callee
+  reported it: code inside `hir::CheckingCall $e {...}` (hir/hir.tcl;
+  `hir::Diagnose` adds it). A call's problems are the diagnostics whose
+  subject it is (minus the obligation kinds, `ObligationKinds`) and a
+  native's kind mismatch (`NativeMismatch`). A new check of a call's
+  arguments, flags, imprint, instance or context requirements against its
+  callee goes inside `CheckingCall`; a check of a value by the construct
+  that uses it (an outer call's parameter is the *outer* call's, an
+  operator, a declared result or binding type, a capture) never does. Never judge a candidate by where a
+  diagnostic is located, by a subtree, by comparing messages, or by what
+  every candidate "shares".
+* **Relative to the decided program.** A candidate is applicable when the
+  call has no problem of its own in the build of the decided configuration
+  with only that call moved to it (the decided build for the candidate the
+  call stands at, a single deviation for any other), or when a kind proof
+  rules it out (next item). The decision is the configuration in which
+  every call has exactly the candidate it stands at applicable; a call with
+  several is AMBIGUOUS-METHOD-CALL, with none NO-APPLICABLE-METHOD, and a
+  call that is still moving at the certification's bound is ambiguous. The
+  search (the kind waves, the trial rounds) only proposes stand-ins: never
+  decide a call from a stand-in, a trial round, candidate order, a guess or
+  an unrelated call's outcome, and never add a precedence.
+* **Kind proofs exclude, never accept** (METHOD-DECISION-FILTER.md). A
+  candidate is excluded only when the receiver the build gives makes the
+  ordinary call invalid by kind (a native's first parameter, a module
+  function's declared or inferred first-parameter contract, the plain value
+  kinds only) or by a named struct's declaration (a *declared* first
+  parameter of another named struct declaration than the receiver's:
+  `NominalMismatch`). Never exclude a lexical name, by a domain or a
   refinement, by a struct's type arguments, by an inferred contract's struct
-  or by a type's spelling (a declaration identity is the type, never matched
-  as text), and never decide a call with several survivors (no precedence,
-  ever).
-* One statement of each rule. The native receiver rule is
-  `hir::methodfilter::NativeMismatch`, which `hir::MethodCallProblems` also
-  asks; a second copy of it, a restated admission rule, or a table of
-  methods by type is a second source of truth.
-* A rejection, an ambiguity, a message and every diagnostic is the exact
-  decision's. The filter hands over (certified 0) on anything it cannot settle;
-  it never discards or reorders a diagnostic. The decisions it made before
-  handing over are discarded, not passed on as seeds.
-* Its builds are counted as `methodTrials`; `hir::methodFilter` and
-  `hir::methodFilterAudit` are no front-end input (no cache key, no new
-  interchange rule). The exact decision's own audits run without the filter.
+  or by a type's spelling. The native rule is stated once
+  (`NativeMismatch`, which a call's problems and the kind proofs both ask).
+  Certification never reads a waves' guess (`DefinedType`).
+* **Checked, not trusted.** `hir::methodKindProofs 0`
+  (`BOTLISH_METHOD_KIND_PROOFS=0`) is the reference rule: every candidate
+  judged by its own build. `hir::methodReferenceAudit 1`
+  (`BOTLISH_METHOD_REFERENCE_AUDIT=1`) decides by both and fails unless the
+  decisions and the HIR are identical; `hir::methodBuildAudit 1` rebuilds
+  every reused build. None is a front-end input (no cache key, no new
+  interchange rule). Builds are counted as `methodTrials`
+  (`methodDeviations` among them), `methodFinals` and `methodReused`.
+* The seeds across static rounds (`hir::static::MethodSeeds`) fix a call's
+  decision as made; a seeded call is not certified again.
 
-If you change `hir/methodfilter.tcl`, `hir::DecideMethodCalls`,
-`hir::MethodCallProblems`, `hir::resolve::MethodCandidates`, the contracts
-`hir/signatures.tcl` records on a first parameter, `hir::types::kindOf`, or
-when a struct type is a subtype of a named one (`hir::types::subtype`), run
-`tests/method-filter.test`, `tests/static-economics.test`,
-`tests/static-compile.test`, `tests/method-sugar.test`,
-`audit/method-filter/tools/fuzz.tcl` (several seeds) and
-`audit/method-filter/tools/mutate.tcl` (every mutant in it must still apply and
-be killed: update a mutant's text when you change the code it mutates, keeping
-it a mutant of the same rule), and run the golden suites that decide method
-calls (`bench/method-filter.tcl -suites -audit 1`) and the suites above under
-`BOTLISH_METHOD_FILTER_AUDIT=1`. A new test file's tests get census rows
-(`audit/golden/migration/census/method-filter.tsv`).
+If you change `hir/methods.tcl`, `hir::DecideMethodCalls`,
+`hir::CheckingCall` or any check that uses it, `hir::Diagnose`'s fields,
+`hir::resolve::MethodCandidates`, the contracts `hir/signatures.tcl` records
+on a first parameter, `hir::types::kindOf`, or when a struct type is a
+subtype of a named one (`hir::types::subtype`), run
+`tests/method-resolution.test`, `tests/method-filter.test`,
+`tests/static-economics.test`, `tests/static-compile.test`,
+`tests/method-sugar.test`, `audit/method-resolution/tools/oracle.tcl` (the
+independent oracle; 200 seeds), `audit/method-filter/tools/fuzz.tcl`
+(several seeds), `audit/method-resolution/tools/mutate.tcl` and
+`audit/method-filter/tools/mutate.tcl` (every mutant in each must still
+apply and be killed: update a mutant's text when you change the code it
+mutates, keeping it a mutant of the same rule), and the golden suites that
+decide method calls under the reference audit (`bench/method-filter.tcl
+-suites SUITES -audit 1`; mutable-array.bot takes long by the reference
+rule). A new test file's tests get census rows
+(`audit/golden/migration/census/`).
 
 ## Declared recognizers (dfa and class)
 

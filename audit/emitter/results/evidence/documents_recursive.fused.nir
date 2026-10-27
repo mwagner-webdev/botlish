@@ -1,0 +1,1244 @@
+nir 1 call-effects=1 statics=0
+shape 0 named "value_emit::Value" fields="kind number text items keys"
+enum 0 "value_emit::Kind" cases="Null False True Number String Array Object"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+func 0 "<program>" params=0 env=0 regs=27 pnames="" captures=0 rawregs="1 5 7 8 13 15 16 21 23 24"
+    pusherrorexit L0 @e8308
+    %1 = rawint 4 @e8311
+    %2 = call 23 %1 @e8309
+    poperrorexit @e8308
+    %0 = move %2 @e8308
+    jump L1 @e8308
+  label L0
+    %3 = declarederroreq 1073741825 @e8308
+    br %3 L2 L3 @e8308
+  label L2
+    cleardeclarederror @e8308
+    %4 = int 0 @e8316
+    %5 = rawint 0
+    %6 = int 1 @e8317
+    %7 = rawint 1
+    %8 = op risub %5 %7 @e8314
+    %9 = op rbox %8
+    %10 = op listnew %9 @e8312
+    %0 = move %10 @e8308
+    jump L1 @e8308
+  label L3
+    %11 = declarederroreq 12 @e8308
+    br %11 L4 L5 @e8308
+  label L4
+    cleardeclarederror @e8308
+    %12 = int 0 @e8322
+    %13 = rawint 0
+    %14 = int 2 @e8323
+    %15 = rawint 2
+    %16 = op risub %13 %15 @e8320
+    %17 = op rbox %16
+    %18 = op listnew %17 @e8318
+    %0 = move %18 @e8308
+    jump L1 @e8308
+  label L5
+    %19 = declarederroreq 3 @e8308
+    br %19 L6 L7 @e8308
+  label L6
+    cleardeclarederror @e8308
+    %20 = int 0 @e8328
+    %21 = rawint 0
+    %22 = int 3 @e8329
+    %23 = rawint 3
+    %24 = op risub %21 %23 @e8326
+    %25 = op rbox %24
+    %26 = op listnew %25 @e8324
+    %0 = move %26 @e8308
+    jump L1 @e8308
+  label L7
+    reraise @e8308
+  label L1
+    ret %0
+end
+
+func 1 "number_emit::digit_at" params=2 env=0 regs=73 pnames="r p" captures=0 rawregs="3 8 13 18 21 26 29 32 37 40 43 48 53 56 59 64 69 72"
+    %2 = int 5 @e1276
+    %3 = rawint 5
+    %4 = op imul %2 %1 @e1274
+    %5 = op ige %0 %4 @e1271
+    br %5 L0 L1 @e1270
+  label L0
+    %7 = int 7 @e1284
+    %8 = rawint 7
+    %9 = op imul %7 %1 @e1282
+    %10 = op ige %0 %9 @e1279
+    br %10 L3 L4 @e1278
+  label L3
+    %12 = int 9 @e1292
+    %13 = rawint 9
+    %14 = op imul %12 %1 @e1290
+    %15 = op ige %0 %14 @e1287
+    br %15 L6 L7 @e1286
+  label L6
+    %17 = int 9 @e1295
+    %18 = rawint 9
+    ret %17 @e1294
+  label L7
+    %19 = unit
+    %16 = move %19
+    jump L8
+  label L8
+    %20 = int 8 @e1302
+    %21 = rawint 8
+    %22 = op imul %20 %1 @e1300
+    %23 = op ige %0 %22 @e1297
+    br %23 L9 L10 @e1296
+  label L9
+    %25 = int 8 @e1305
+    %26 = rawint 8
+    ret %25 @e1304
+  label L10
+    %27 = unit
+    %24 = move %27
+    jump L11
+  label L11
+    %28 = int 7 @e1307
+    %29 = rawint 7
+    ret %28 @e1306
+  label L4
+    %30 = unit
+    %11 = move %30
+    jump L5
+  label L5
+    %31 = int 6 @e1314
+    %32 = rawint 6
+    %33 = op imul %31 %1 @e1312
+    %34 = op ige %0 %33 @e1309
+    br %34 L12 L13 @e1308
+  label L12
+    %36 = int 6 @e1317
+    %37 = rawint 6
+    ret %36 @e1316
+  label L13
+    %38 = unit
+    %35 = move %38
+    jump L14
+  label L14
+    %39 = int 5 @e1319
+    %40 = rawint 5
+    ret %39 @e1318
+  label L1
+    %41 = unit
+    %6 = move %41
+    jump L2
+  label L2
+    %42 = int 3 @e1326
+    %43 = rawint 3
+    %44 = op imul %42 %1 @e1324
+    %45 = op ige %0 %44 @e1321
+    br %45 L15 L16 @e1320
+  label L15
+    %47 = int 4 @e1334
+    %48 = rawint 4
+    %49 = op imul %47 %1 @e1332
+    %50 = op ige %0 %49 @e1329
+    br %50 L18 L19 @e1328
+  label L18
+    %52 = int 4 @e1337
+    %53 = rawint 4
+    ret %52 @e1336
+  label L19
+    %54 = unit
+    %51 = move %54
+    jump L20
+  label L20
+    %55 = int 3 @e1339
+    %56 = rawint 3
+    ret %55 @e1338
+  label L16
+    %57 = unit
+    %46 = move %57
+    jump L17
+  label L17
+    %58 = int 2 @e1346
+    %59 = rawint 2
+    %60 = op imul %58 %1 @e1344
+    %61 = op ige %0 %60 @e1341
+    br %61 L21 L22 @e1340
+  label L21
+    %63 = int 2 @e1349
+    %64 = rawint 2
+    ret %63 @e1348
+  label L22
+    %65 = unit
+    %62 = move %65
+    jump L23
+  label L23
+    %66 = op ige %0 %1 @e1351
+    br %66 L24 L25 @e1350
+  label L24
+    %68 = int 1 @e1356
+    %69 = rawint 1
+    ret %68 @e1355
+  label L25
+    %70 = unit
+    %67 = move %70
+    jump L26
+  label L26
+    %71 = int 0 @e1357
+    %72 = rawint 0
+    ret %71
+end
+
+func 2 "number_emit::leading_digit_at" params=2 env=0 regs=68 pnames="r p" captures=0 rawregs="3 8 13 18 21 26 29 32 37 40 43 48 53 56 59 64 67"
+    %2 = int 5 @e1366
+    %3 = rawint 5
+    %4 = op imul %2 %1 @e1364
+    %5 = op ige %0 %4 @e1361
+    br %5 L0 L1 @e1360
+  label L0
+    %7 = int 7 @e1374
+    %8 = rawint 7
+    %9 = op imul %7 %1 @e1372
+    %10 = op ige %0 %9 @e1369
+    br %10 L3 L4 @e1368
+  label L3
+    %12 = int 9 @e1382
+    %13 = rawint 9
+    %14 = op imul %12 %1 @e1380
+    %15 = op ige %0 %14 @e1377
+    br %15 L6 L7 @e1376
+  label L6
+    %17 = int 9 @e1385
+    %18 = rawint 9
+    ret %17 @e1384
+  label L7
+    %19 = unit
+    %16 = move %19
+    jump L8
+  label L8
+    %20 = int 8 @e1392
+    %21 = rawint 8
+    %22 = op imul %20 %1 @e1390
+    %23 = op ige %0 %22 @e1387
+    br %23 L9 L10 @e1386
+  label L9
+    %25 = int 8 @e1395
+    %26 = rawint 8
+    ret %25 @e1394
+  label L10
+    %27 = unit
+    %24 = move %27
+    jump L11
+  label L11
+    %28 = int 7 @e1397
+    %29 = rawint 7
+    ret %28 @e1396
+  label L4
+    %30 = unit
+    %11 = move %30
+    jump L5
+  label L5
+    %31 = int 6 @e1404
+    %32 = rawint 6
+    %33 = op imul %31 %1 @e1402
+    %34 = op ige %0 %33 @e1399
+    br %34 L12 L13 @e1398
+  label L12
+    %36 = int 6 @e1407
+    %37 = rawint 6
+    ret %36 @e1406
+  label L13
+    %38 = unit
+    %35 = move %38
+    jump L14
+  label L14
+    %39 = int 5 @e1409
+    %40 = rawint 5
+    ret %39 @e1408
+  label L1
+    %41 = unit
+    %6 = move %41
+    jump L2
+  label L2
+    %42 = int 3 @e1416
+    %43 = rawint 3
+    %44 = op imul %42 %1 @e1414
+    %45 = op ige %0 %44 @e1411
+    br %45 L15 L16 @e1410
+  label L15
+    %47 = int 4 @e1424
+    %48 = rawint 4
+    %49 = op imul %47 %1 @e1422
+    %50 = op ige %0 %49 @e1419
+    br %50 L18 L19 @e1418
+  label L18
+    %52 = int 4 @e1427
+    %53 = rawint 4
+    ret %52 @e1426
+  label L19
+    %54 = unit
+    %51 = move %54
+    jump L20
+  label L20
+    %55 = int 3 @e1429
+    %56 = rawint 3
+    ret %55 @e1428
+  label L16
+    %57 = unit
+    %46 = move %57
+    jump L17
+  label L17
+    %58 = int 2 @e1436
+    %59 = rawint 2
+    %60 = op imul %58 %1 @e1434
+    %61 = op ige %0 %60 @e1431
+    br %61 L21 L22 @e1430
+  label L21
+    %63 = int 2 @e1439
+    %64 = rawint 2
+    ret %63 @e1438
+  label L22
+    %65 = unit
+    %62 = move %65
+    jump L23
+  label L23
+    %66 = int 1 @e1440
+    %67 = rawint 1
+    ret %66
+end
+
+func 3 "number_emit::magnitude" params=1 env=0 regs=59 pnames="m" captures=0 rawregs="2 7 9 10 14 21 27 28 29 33 44 48 49 50 54"
+    %1 = int 1 @e1448
+    %2 = rawint 1
+    %3 = op listnew %1 @e1446
+    %4 = op mvfromlist %3 @e1444
+    jump L0 @e1449
+  label L0
+    %6 = op mvlen %4 @e1456
+    %7 = op runbox %6
+    %8 = int 1 @e1459
+    %9 = rawint 1
+    %10 = op risub %7 %9 @e1454
+    %11 = op rbox %10
+    %12 = op mvat %4 %11 @e1451
+    %13 = int 10 @e1466
+    %14 = rawint 10
+    %15 = op imul %12 %13 @e1463
+    %16 = op igt %15 %0 @e1461
+    br %16 L2 L3 @e1460
+  label L2
+    %18 = unit
+    %5 = move %18 @e1468
+    jump L1 @e1468
+  label L3
+    %19 = unit
+    %17 = move %19
+    jump L4
+  label L4
+    %20 = int 10 @e1475
+    %21 = rawint 10
+    %22 = op imul %12 %20 @e1472
+    %23 = op mvpush %4 %22 @e1469
+    jump L0 @e1449
+  label L1
+    %24 = op mvpop %4 @e1477
+    %25 = call 2 %0 %24 @e1481
+    %26 = int 48 @e1489
+    %27 = rawint 48
+    %28 = op runbox %25
+    %29 = op riadd %27 %28 @e1487
+    %30 = op rbox %29
+    %31 = op coyield %30 @e1485
+    %32 = int 1 @e1494
+    %33 = rawint 1
+    %34 = op imul %25 %24 @e1498
+    %35 = op isub %0 %34 @e1495
+    %36 = op mutarraycreate %32 %35 @e1492
+    jump L5 @e1502
+  label L5
+    %38 = op mvempty %4 @e1504
+    br %38 L7 L8 @e1503
+  label L7
+    %40 = unit
+    %37 = move %40 @e1507
+    jump L6 @e1507
+  label L8
+    %41 = unit
+    %39 = move %41
+    jump L9
+  label L9
+    %42 = op mvpop %4 @e1509
+    %43 = int 0 @e1516
+    %44 = rawint 0
+    %45 = op mutarraygetproven %36 %43 @e1513
+    %46 = call 1 %45 %42 @e1518
+    %47 = int 48 @e1526
+    %48 = rawint 48
+    %49 = op runbox %46
+    %50 = op riadd %48 %49 @e1524
+    %51 = op rbox %50
+    %52 = op coyield %51 @e1522
+    %53 = int 0 @e1531
+    %54 = rawint 0
+    %55 = op imul %46 %42 @e1535
+    %56 = op isub %45 %55 @e1532
+    %57 = op mutarraysetproven %36 %53 %56 @e1528
+    jump L5 @e1502
+  label L6
+    %58 = unit @e1539
+    ret %58
+end
+
+func 4 "number_emit::integer" params=1 env=0 regs=21 pnames="n" captures=0 rawregs="2 6 9 13 16"
+    %1 = int 0 @e1546
+    %2 = rawint 0
+    %3 = op ieq %0 %1 @e1543
+    br %3 L0 L1 @e1542
+  label L0
+    %5 = int 48 @e1549
+    %6 = rawint 48
+    %7 = op coyield %5 @e1547
+    %4 = move %7
+    jump L2
+  label L1
+    %8 = int 0 @e1554
+    %9 = rawint 0
+    %10 = op ilt %0 %8 @e1551
+    br %10 L3 L4 @e1550
+  label L3
+    %12 = int 45 @e1557
+    %13 = rawint 45
+    %14 = op coyield %12 @e1555
+    %15 = int 0 @e1562
+    %16 = rawint 0
+    %17 = op isub %15 %0 @e1560
+    %18 = call 3 %17 @e1558
+    %11 = move %18
+    jump L5
+  label L4
+    %19 = call 3 %0 @e1564
+    %11 = move %19
+    jump L5
+  label L5
+    %4 = move %11
+    jump L2
+  label L2
+    %20 = unit @e1567
+    ret %20
+end
+
+func 5 "string_emit::hex_digit" params=1 env=0 regs=16 pnames="n" captures=0 rawregs="0 2 6 7 11 12" rawparams="0"
+    %1 = int 10 @e1756
+    %2 = rawint 10
+    %3 = op rilt %0 %2 @e1753
+    br %3 L0 L1 @e1752
+  label L0
+    %5 = int 48 @e1761
+    %6 = rawint 48
+    %7 = op riadd %6 %0 @e1759
+    %8 = op rbox %7
+    %9 = op coyield %8 @e1757
+    %4 = move %9
+    jump L2
+  label L1
+    %10 = int 87 @e1767
+    %11 = rawint 87
+    %12 = op riadd %11 %0 @e1765
+    %13 = op rbox %12
+    %14 = op coyield %13 @e1763
+    %4 = move %14
+    jump L2
+  label L2
+    %15 = unit @e1769
+    ret %15
+end
+
+func 6 "string_emit::control" params=1 env=0 regs=59 pnames="c" captures=0 rawregs="0 2 5 9 12 16 19 23 26 30 33 37 40 43 46 49 50 53 55 56" rawparams="0"
+    %1 = int 92 @e1807
+    %2 = rawint 92
+    %3 = op coyield %1 @e1805
+    %4 = int 8 @e1812
+    %5 = rawint 8
+    %6 = op rieq %0 %5 @e1809
+    br %6 L0 L1 @e1808
+  label L0
+    %8 = int 98 @e1815
+    %9 = rawint 98
+    %10 = op coyield %8 @e1813
+    %7 = move %10
+    jump L2
+  label L1
+    %11 = int 9 @e1820
+    %12 = rawint 9
+    %13 = op rieq %0 %12 @e1817
+    br %13 L3 L4 @e1816
+  label L3
+    %15 = int 116 @e1823
+    %16 = rawint 116
+    %17 = op coyield %15 @e1821
+    %14 = move %17
+    jump L5
+  label L4
+    %18 = int 10 @e1828
+    %19 = rawint 10
+    %20 = op rieq %0 %19 @e1825
+    br %20 L6 L7 @e1824
+  label L6
+    %22 = int 110 @e1831
+    %23 = rawint 110
+    %24 = op coyield %22 @e1829
+    %21 = move %24
+    jump L8
+  label L7
+    %25 = int 12 @e1836
+    %26 = rawint 12
+    %27 = op rieq %0 %26 @e1833
+    br %27 L9 L10 @e1832
+  label L9
+    %29 = int 102 @e1839
+    %30 = rawint 102
+    %31 = op coyield %29 @e1837
+    %28 = move %31
+    jump L11
+  label L10
+    %32 = int 13 @e1844
+    %33 = rawint 13
+    %34 = op rieq %0 %33 @e1841
+    br %34 L12 L13 @e1840
+  label L12
+    %36 = int 114 @e1847
+    %37 = rawint 114
+    %38 = op coyield %36 @e1845
+    %35 = move %38
+    jump L14
+  label L13
+    %39 = int 117 @e1850
+    %40 = rawint 117
+    %41 = op coyield %39 @e1848
+    %42 = int 48 @e1853
+    %43 = rawint 48
+    %44 = op coyield %42 @e1851
+    %45 = int 48 @e1856
+    %46 = rawint 48
+    %47 = op coyield %45 @e1854
+    %48 = int 4 @e1862
+    %49 = rawint 4
+    %50 = op rishr %0 %49 @e1859
+    %51 = call 5 %50 @e1857
+    %52 = int 16 @e1868
+    %53 = rawint 16
+    %54 = int 15 @e1865
+    %55 = rawint 15
+    %56 = op riand %0 %55 @e1865
+    %57 = call 5 %56 @e1863
+    %35 = move %57
+    jump L14
+  label L14
+    %28 = move %35
+    jump L11
+  label L11
+    %21 = move %28
+    jump L8
+  label L8
+    %14 = move %21
+    jump L5
+  label L5
+    %7 = move %14
+    jump L2
+  label L2
+    %58 = unit @e1869
+    ret %58
+end
+
+func 7 "string_emit::character" params=1 env=0 regs=20 pnames="c" captures=0 rawregs="2 4 7 10 14"
+    %2 = op runbox %0
+    %3 = int 34 @e1877
+    %4 = rawint 34
+    %5 = op rieq %2 %4 @e1874
+    br %5 L0 L3 @e1874
+  label L3
+    %6 = int 92 @e1883
+    %7 = rawint 92
+    %8 = op rieq %2 %7 @e1880
+    br %8 L0 L1 @e1880
+  label L0
+    %9 = int 92 @e1888
+    %10 = rawint 92
+    %11 = op coyield %9 @e1886
+    %12 = op coyield %0 @e1889
+    %1 = move %12
+    jump L2
+  label L1
+    %13 = int 32 @e1896
+    %14 = rawint 32
+    %15 = op rilt %2 %14 @e1893
+    br %15 L4 L5 @e1892
+  label L4
+    %17 = call 6 %2 @e1897
+    %16 = move %17
+    jump L6
+  label L5
+    %18 = op coyield %0 @e1900
+    %16 = move %18
+    jump L6
+  label L6
+    %1 = move %16
+    jump L2
+  label L2
+    %19 = unit @e1903
+    ret %19
+end
+
+func 8 "string_emit::string" params=1 env=0 regs=22 pnames="text" captures=0 rawregs="2 5 7 8 15 16 19"
+    %1 = int 34 @e1908
+    %2 = rawint 34
+    %3 = op coyield %1 @e1906
+    %4 = int 0 @e1910
+    %5 = rawint 0
+    %6 = op strlen %0 @e1911
+    %7 = op runbox %6
+    %8 = move %5 @e1909
+    jump L0 @e1909
+  label L0
+    %10 = op rilt %8 %7 @e1909
+    br %10 L1 L3 @e1909
+  label L1
+    %11 = op rbox %8
+    %12 = op strcharatproven %0 %11 @e1918
+    %13 = op charcodepoint %12 @e1916
+    %14 = call 7 %13 @e1914
+    jump L2 @e1922
+  label L2
+    %15 = rawint 1 @e1909
+    %16 = op riadd %8 %15 @e1909
+    %8 = move %16 @e1909
+    jump L0 @e1909
+  label L3
+    %17 = unit @e1909
+    %9 = move %17 @e1909
+    jump L4 @e1909
+  label L4
+    %18 = int 34 @e1925
+    %19 = rawint 34
+    %20 = op coyield %18 @e1923
+    %21 = unit @e1926
+    ret %21
+end
+
+func 9 "value_emit::null_value" params=0 env=0 regs=7 pnames="" captures=0 rawregs="2"
+    %0 = enum 0 0 @e2562
+    %1 = int 0 @e2563
+    %2 = rawint 0
+    %3 = str "" @e2564
+    %4 = op listnew @e2565
+    %5 = op listnew @e2567
+    %6 = structnew 0 %0 %1 %3 %4 %5 @e2561
+    ret %6
+end
+
+func 10 "value_emit::boolean" params=1 env=0 regs=10 pnames="b" captures=0 rawregs="5"
+    br %0 L0 L1 @e2572
+  label L0
+    %2 = enum 0 2 @e2574
+    %1 = move %2
+    jump L2
+  label L1
+    %3 = enum 0 1 @e2575
+    %1 = move %3
+    jump L2
+  label L2
+    %4 = int 0 @e2578
+    %5 = rawint 0
+    %6 = str "" @e2579
+    %7 = op listnew @e2580
+    %8 = op listnew @e2582
+    %9 = structnew 0 %1 %4 %6 %7 %8 @e2576
+    ret %9
+end
+
+func 11 "value_emit::number" params=1 env=0 regs=6 pnames="n" captures=0
+    %1 = enum 0 3 @e2587
+    %2 = str "" @e2589
+    %3 = op listnew @e2590
+    %4 = op listnew @e2592
+    %5 = structnew 0 %1 %0 %2 %3 %4 @e2586
+    ret %5
+end
+
+func 12 "value_emit::string" params=1 env=0 regs=7 pnames="text" captures=0 rawregs="3"
+    %1 = enum 0 4 @e2597
+    %2 = int 0 @e2598
+    %3 = rawint 0
+    %4 = op listnew @e2600
+    %5 = op listnew @e2602
+    %6 = structnew 0 %1 %2 %0 %4 %5 @e2596
+    ret %6
+end
+
+func 13 "value_emit::array" params=1 env=0 regs=7 pnames="items" captures=0 rawregs="3"
+    %1 = enum 0 5 @e2607
+    %2 = int 0 @e2608
+    %3 = rawint 0
+    %4 = str "" @e2609
+    %5 = op listnew @e2611
+    %6 = structnew 0 %1 %2 %4 %0 %5 @e2606
+    ret %6
+end
+
+func 14 "value_emit::object" params=2 env=0 regs=7 pnames="keys items" captures=0 rawregs="4"
+    %2 = enum 0 6 @e2616
+    %3 = int 0 @e2617
+    %4 = rawint 0
+    %5 = str "" @e2618
+    %6 = structnew 0 %2 %3 %5 %1 %0 @e2615
+    ret %6
+end
+
+func 15 "value_emit::literal_null" params=0 env=0 regs=13 pnames="" captures=0 rawregs="1 4 7 10"
+    %0 = int 110 @e2625
+    %1 = rawint 110
+    %2 = op coyield %0 @e2623
+    %3 = int 117 @e2628
+    %4 = rawint 117
+    %5 = op coyield %3 @e2626
+    %6 = int 108 @e2631
+    %7 = rawint 108
+    %8 = op coyield %6 @e2629
+    %9 = int 108 @e2634
+    %10 = rawint 108
+    %11 = op coyield %9 @e2632
+    %12 = unit @e2635
+    ret %12
+end
+
+func 16 "value_emit::literal_true" params=0 env=0 regs=13 pnames="" captures=0 rawregs="1 4 7 10"
+    %0 = int 116 @e2640
+    %1 = rawint 116
+    %2 = op coyield %0 @e2638
+    %3 = int 114 @e2643
+    %4 = rawint 114
+    %5 = op coyield %3 @e2641
+    %6 = int 117 @e2646
+    %7 = rawint 117
+    %8 = op coyield %6 @e2644
+    %9 = int 101 @e2649
+    %10 = rawint 101
+    %11 = op coyield %9 @e2647
+    %12 = unit @e2650
+    ret %12
+end
+
+func 17 "value_emit::literal_false" params=0 env=0 regs=16 pnames="" captures=0 rawregs="1 4 7 10 13"
+    %0 = int 102 @e2655
+    %1 = rawint 102
+    %2 = op coyield %0 @e2653
+    %3 = int 97 @e2658
+    %4 = rawint 97
+    %5 = op coyield %3 @e2656
+    %6 = int 108 @e2661
+    %7 = rawint 108
+    %8 = op coyield %6 @e2659
+    %9 = int 115 @e2664
+    %10 = rawint 115
+    %11 = op coyield %9 @e2662
+    %12 = int 101 @e2667
+    %13 = rawint 101
+    %14 = op coyield %12 @e2665
+    %15 = unit @e2668
+    ret %15
+end
+
+func 18 "value_emit::scalar" params=1 env=0 regs=25 pnames="v" captures=0
+    %1 = structget 0 %0 @e2674
+    %2 = enum 0 0 @e2676
+    %3 = op enumeq %1 %2 @e2672
+    br %3 L0 L1 @e2671
+  label L0
+    %5 = call 15 @e2677
+    %4 = move %5
+    jump L2
+  label L1
+    %6 = structget 0 %0 @e2682
+    %7 = enum 0 2 @e2684
+    %8 = op enumeq %6 %7 @e2680
+    br %8 L3 L4 @e2679
+  label L3
+    %10 = call 16 @e2685
+    %9 = move %10
+    jump L5
+  label L4
+    %11 = structget 0 %0 @e2690
+    %12 = enum 0 1 @e2692
+    %13 = op enumeq %11 %12 @e2688
+    br %13 L6 L7 @e2687
+  label L6
+    %15 = call 17 @e2693
+    %14 = move %15
+    jump L8
+  label L7
+    %16 = structget 0 %0 @e2698
+    %17 = enum 0 3 @e2700
+    %18 = op enumeq %16 %17 @e2696
+    br %18 L9 L10 @e2695
+  label L9
+    %20 = structget 1 %0 @e2703
+    %21 = call 4 %20 @e2701
+    %19 = move %21
+    jump L11
+  label L10
+    %22 = structget 2 %0 @e2707
+    %23 = call 8 %22 @e2705
+    %19 = move %23
+    jump L11
+  label L11
+    %14 = move %19
+    jump L8
+  label L8
+    %9 = move %14
+    jump L5
+  label L5
+    %4 = move %9
+    jump L2
+  label L2
+    %24 = unit @e2709
+    ret %24
+end
+
+func 19 "value_emit::value" params=1 env=0 regs=80 pnames="v" captures=0 rawregs="6 10 13 14 16 19 25 29 33 37 44 47 50 51 55 59 67 72 73 76"
+    %1 = structget 0 %0 @e2715
+    %2 = enum 0 5 @e2717
+    %3 = op enumeq %1 %2 @e2713
+    br %3 L0 L1 @e2712
+  label L0
+    %5 = int 91 @e2720
+    %6 = rawint 91
+    %7 = op coyield %5 @e2718
+    %8 = structget 3 %0 @e2722
+    %9 = int 0 @e2724
+    %10 = rawint 0
+    %11 = structget 3 %0 @e2727
+    %12 = op listlen %11 @e2725
+    %13 = op runbox %12
+    %14 = move %10 @e2721
+    %15 = int 1 @e2721
+    %16 = rawint 1
+    %18 = int 0 @e2721
+    %19 = rawint 0
+    %17 = move %18 @e2721
+    %20 = op listlen %8 @e2721
+    jump L3 @e2721
+  label L3
+    %22 = op ilt %17 %20 @e2721
+    br %22 L4 L6 @e2721
+  label L4
+    %23 = op listget %8 %17 @e2721
+    %24 = int 0 @e2733
+    %25 = rawint 0
+    %26 = op rigt %14 %25 @e2730
+    br %26 L8 L9 @e2729
+  label L8
+    %28 = int 44 @e2736
+    %29 = rawint 44
+    %30 = op coyield %28 @e2734
+    %27 = move %30
+    jump L10
+  label L9
+    %31 = unit
+    %27 = move %31
+    jump L10
+  label L10
+    %32 = call 19 %23 @e2737
+    jump L5 @e2740
+  label L5
+    %33 = op riadd %14 %16 @e2721
+    %14 = move %33 @e2721
+    %34 = op iadd %17 %15 @e2721
+    %17 = move %34 @e2721
+    jump L3 @e2721
+  label L6
+    %35 = unit @e2721
+    %21 = move %35 @e2721
+    jump L7 @e2721
+  label L7
+    %36 = int 93 @e2743
+    %37 = rawint 93
+    %38 = op coyield %36 @e2741
+    %4 = move %38
+    jump L2
+  label L1
+    %39 = structget 0 %0 @e2747
+    %40 = enum 0 6 @e2749
+    %41 = op enumeq %39 %40 @e2745
+    br %41 L11 L12 @e2744
+  label L11
+    %43 = int 123 @e2752
+    %44 = rawint 123
+    %45 = op coyield %43 @e2750
+    %46 = int 0 @e2754
+    %47 = rawint 0
+    %48 = structget 4 %0 @e2757
+    %49 = op listlen %48 @e2755
+    %50 = op runbox %49
+    %51 = move %47 @e2753
+    jump L14 @e2753
+  label L14
+    %53 = op rilt %51 %50 @e2753
+    br %53 L15 L17 @e2753
+  label L15
+    %54 = int 0 @e2763
+    %55 = rawint 0
+    %56 = op rigt %51 %55 @e2760
+    br %56 L19 L20 @e2759
+  label L19
+    %58 = int 44 @e2766
+    %59 = rawint 44
+    %60 = op coyield %58 @e2764
+    %57 = move %60
+    jump L21
+  label L20
+    %61 = unit
+    %57 = move %61
+    jump L21
+  label L21
+    %62 = structget 4 %0 @e2771
+    %63 = op rbox %51
+    %64 = op listgetproven %62 %63 @e2769
+    %65 = call 8 %64 @e2767
+    %66 = int 58 @e2776
+    %67 = rawint 58
+    %68 = op coyield %66 @e2774
+    %69 = structget 3 %0 @e2781
+    %70 = op listget %69 %63 @e2779
+    %71 = call 19 %70 @e2777
+    jump L16 @e2784
+  label L16
+    %72 = rawint 1 @e2753
+    %73 = op riadd %51 %72 @e2753
+    %51 = move %73 @e2753
+    jump L14 @e2753
+  label L17
+    %74 = unit @e2753
+    %52 = move %74 @e2753
+    jump L18 @e2753
+  label L18
+    %75 = int 125 @e2787
+    %76 = rawint 125
+    %77 = op coyield %75 @e2785
+    %42 = move %77
+    jump L13
+  label L12
+    %78 = call 18 %0 @e2788
+    %42 = move %78
+    jump L13
+  label L13
+    %4 = move %42
+    jump L2
+  label L2
+    %79 = unit @e2791
+    ret %79
+end
+
+func 20 "value_emit::text_source" params=1 env=0 regs=8 pnames="v" captures=0 rawregs="3 5 6"
+    %1 = call 19 %0 @e3124
+    %2 = int 0 @e3129
+    %3 = rawint 0
+    %4 = int 1 @e3130
+    %5 = rawint 1
+    %6 = op risub %3 %5 @e3127
+    %7 = op rbox %6
+    ret %7
+end
+
+func 21 "bench_work::texts" params=0 env=0 regs=9 pnames="" captures=0
+    %0 = str "The quick brown fox jumps over the lazy dog, 0123456789 times." @e7411
+    %1 = str "\"Quoted\" and \\back\\slashed\\ text with a /solidus/ and tabs\t\t." @e7412
+    %2 = str "Latin-1: àéîõü ÀÉÎÕÜ ñç ß ø å æ, and more of the same: àéîõü!" @e7413
+    %3 = str "日本語のテキストと中文文本，还有한국어 텍스트가 섞여 있습니다。" @e7414
+    %4 = str "Line one\nline two\r\nline three\tand a tab, then\n\n\tmore lines." @e7415
+    %5 = str "Emoji: 😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗 and a smile." @e7416
+    %6 = str "Mixed: a\"b\\c/d\te\nf é ü 中 😀 \r\n and the end of the piece." @e7417
+    %7 = str "Plain ASCII words, nothing to escape, nothing to encode at all." @e7418
+    %8 = op listnew %0 %1 %2 %3 %4 %5 %6 %7 @e7409
+    ret %8
+end
+
+func 22 "bench_work::tree" params=1 env=0 regs=57 pnames="count" captures=0 rawregs="0 16 17 26 27 31 32 40 42 43 53 54" planregs="20 52" rawparams="0"
+    %1 = call 21 @e7861
+    %2 = str "id" @e7866
+    %3 = str "name" @e7867
+    %4 = str "flags" @e7868
+    %5 = str "point" @e7869
+    %6 = str "big" @e7870
+    %7 = op listnew %2 %3 %4 %5 %6 @e7864
+    %8 = bool true @e7878
+    %9 = call 10 %8 @e7876
+    %10 = bool false @e7881
+    %11 = call 10 %10 @e7879
+    %12 = call 9 @e7882
+    %13 = op listnew %9 %11 %12 @e7874
+    %14 = call 13 %13 @e7872
+    %15 = int 0 @e7886
+    %16 = rawint 0
+    %17 = move %16 @e7885
+    %19 = op listnew @e7885
+    %20 = move %19 @e7885
+    jump L0 @e7885
+  label L0
+    %21 = op rilt %17 %0 @e7885
+    br %21 L1 L3 @e7885
+  label L1
+    %22 = str "px" @e7891
+    %23 = str "py" @e7892
+    %24 = op listnew %22 %23 @e7889
+    %25 = int 0 @e7903
+    %26 = rawint 0
+    %27 = op risub %26 %17 @e7901
+    %28 = op rbox %27
+    %29 = call 11 %28 @e7899
+    %30 = int 7 @e7910
+    %31 = rawint 7
+    %32 = op rimul %17 %31 @e7907
+    %33 = op rbox %32
+    %34 = call 11 %33 @e7905
+    %35 = op listnew %29 %34 @e7897
+    %36 = call 14 %24 %35 @e7894
+    %37 = op rbox %17
+    %38 = call 11 %37 @e7916
+    %39 = int 8 @e7927
+    %40 = rawint 8
+    %41 = int 7 @e7924
+    %42 = rawint 7
+    %43 = op riand %17 %42 @e7924
+    %44 = op rbox %43
+    %45 = op listget %1 %44 @e7921
+    %46 = call 12 %45 @e7919
+    %47 = int 1180591620717411303424 @e7934
+    %48 = op iadd %47 %37 @e7932
+    %49 = call 11 %48 @e7930
+    %50 = op listnew %38 %46 %14 %36 %49 @e7914
+    %51 = call 14 %7 %50 @e7911
+    %52 = construct list plan %20 elem %51 @e7885
+    %20 = move %52 @e7885
+    jump L2 @e7885
+  label L2
+    %53 = rawint 1 @e7885
+    %54 = op riadd %17 %53 @e7885
+    %17 = move %54 @e7885
+    jump L0 @e7885
+  label L3
+    %55 = construct list flat %20 @e7885
+    %18 = move %55 @e7885
+    jump L4 @e7885
+  label L4
+    %56 = call 13 %18 @e7936
+    ret %56
+end
+
+func 23 "bench_work::documents_recursive" params=1 env=0 regs=77 pnames="count" captures=0 rawregs="0 3 5 14 24 26 31 36 40 43 49 51 56 62 71 74" rawparams="0"
+    %1 = call 22 %0 @e8034
+    %2 = int 3 @e8040
+    %3 = rawint 3
+    %4 = int 0 @e8041
+    %5 = rawint 0
+    %6 = op mutarraycreate %2 %4 @e8038
+    %7 = closure 24 %1 @e8047
+    %8 = op cocreate %7 @e8045
+    pusherrorexit L0 @e8052
+    %9 = op costart %8 @e8052
+    poperrorexit @e8052
+    jump L1 @e8052
+  label L0
+    %10 = declarederroreq 1073741825 @e8052
+    br %10 L2 L3 @e8052
+  label L2
+    %11 = op corelease %8 @e8052
+    reraise @e8052
+  label L3
+    reraise @e8052
+  label L1
+    %12 = unit @e8055
+    pusherrorexit L4 @e8056
+    %13 = int 2 @e8059
+    %14 = rawint 2
+    %15 = op mutarraysetproven %6 %13 %9 @e8056
+    poperrorexit @e8056
+    jump L5 @e8056
+  label L4
+    %16 = declarederroreq 1073741825 @e8056
+    br %16 L6 L7 @e8056
+  label L6
+    %17 = op corelease %8 @e8056
+    reraise @e8056
+  label L7
+    reraise @e8056
+  label L5
+    jump L8 @e8061
+  label L8
+    %19 = op codone %8 @e8063
+    br %19 L10 L11 @e8062
+  label L10
+    %21 = unit
+    %18 = move %21 @e8066
+    jump L9 @e8066
+  label L11
+    %22 = unit
+    %20 = move %22
+    jump L12
+  label L12
+    pusherrorexit L13 @e8067
+    %23 = int 0 @e8070
+    %24 = rawint 0
+    pusherrorexit L14 @e8073
+    %25 = int 0 @e8076
+    %26 = rawint 0
+    %27 = op mutarraygetproven %6 %25 @e8073
+    poperrorexit @e8073
+    jump L15 @e8073
+  label L14
+    %28 = declarederroreq 1073741825 @e8073
+    br %28 L16 L17 @e8073
+  label L16
+    %29 = op corelease %8 @e8073
+    reraise @e8073
+  label L17
+    reraise @e8073
+  label L15
+    pusherrorexit L18 @e8077
+    %30 = int 2 @e8080
+    %31 = rawint 2
+    %32 = op mutarraygetproven %6 %30 @e8077
+    poperrorexit @e8077
+    jump L19 @e8077
+  label L18
+    %33 = declarederroreq 1073741825 @e8077
+    br %33 L20 L21 @e8077
+  label L20
+    %34 = op corelease %8 @e8077
+    reraise @e8077
+  label L21
+    reraise @e8077
+  label L19
+    %35 = int 31 @e5893
+    %36 = rawint 31
+    %37 = op imul %27 %35 @e5890
+    %38 = op iadd %37 %32 @e5888
+    %39 = int 1 @e5895
+    %40 = rawint 1
+    %41 = op iadd %38 %39 @e5886
+    %42 = int 2147483647 @e5896
+    %43 = rawint 2147483647
+    %44 = op imod %41 %42 @e5884
+    %45 = op mutarraysetproven %6 %23 %44 @e8067
+    poperrorexit @e8067
+    jump L22 @e8067
+  label L13
+    %46 = declarederroreq 1073741825 @e8067
+    br %46 L23 L24 @e8067
+  label L23
+    %47 = op corelease %8 @e8067
+    reraise @e8067
+  label L24
+    reraise @e8067
+  label L22
+    pusherrorexit L25 @e8081
+    %48 = int 1 @e8084
+    %49 = rawint 1
+    pusherrorexit L26 @e8087
+    %50 = int 1 @e8090
+    %51 = rawint 1
+    %52 = op mutarraygetproven %6 %50 @e8087
+    poperrorexit @e8087
+    jump L27 @e8087
+  label L26
+    %53 = declarederroreq 1073741825 @e8087
+    br %53 L28 L29 @e8087
+  label L28
+    %54 = op corelease %8 @e8087
+    reraise @e8087
+  label L29
+    reraise @e8087
+  label L27
+    %55 = int 1 @e8091
+    %56 = rawint 1
+    %57 = op iadd %52 %55 @e8085
+    %58 = op mutarraysetproven %6 %48 %57 @e8081
+    poperrorexit @e8081
+    jump L30 @e8081
+  label L25
+    %59 = declarederroreq 1073741825 @e8081
+    br %59 L31 L32 @e8081
+  label L31
+    %60 = op corelease %8 @e8081
+    reraise @e8081
+  label L32
+    reraise @e8081
+  label L30
+    pusherrorexit L33 @e8092
+    %61 = int 2 @e8095
+    %62 = rawint 2
+    pusherrorexit L34 @e8096
+    %63 = op coresume0 %8 @e8096
+    poperrorexit @e8096
+    jump L35 @e8096
+  label L34
+    %64 = declarederroreq 1073741825 @e8096
+    br %64 L36 L37 @e8096
+  label L36
+    %65 = op corelease %8 @e8096
+    reraise @e8096
+  label L37
+    reraise @e8096
+  label L35
+    %66 = op mutarraysetproven %6 %61 %63 @e8092
+    poperrorexit @e8092
+    jump L38 @e8092
+  label L33
+    %67 = declarederroreq 1073741825 @e8092
+    br %67 L39 L40 @e8092
+  label L39
+    %68 = op corelease %8 @e8092
+    reraise @e8092
+  label L40
+    reraise @e8092
+  label L38
+    jump L8 @e8061
+  label L9
+    %69 = op corelease %8 @e8061
+    %70 = int 1 @e8104
+    %71 = rawint 1
+    %72 = op mutarraygetproven %6 %70 @e8101
+    %73 = int 0 @e8108
+    %74 = rawint 0
+    %75 = op mutarraygetproven %6 %73 @e8105
+    %76 = op listnew %72 %75 @e8099
+    ret %76
+end
+
+func 24 "" params=0 env=1 regs=4 pnames="" captures=1 rawregs="3"
+    %0 = capture 0
+    %1 = call 20 %0 @e8048
+    %2 = int -1 @e8048
+    %3 = rawint -1
+    ret %2
+end

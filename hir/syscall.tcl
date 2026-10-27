@@ -49,7 +49,8 @@ proc hir::syscall::verify {hirVar} {
         set name [dict get [hir::symbol $hir $target] name]
         if {![core::linuxabi::isSyscall $name] && ![core::bytestore::isBridge $name]} continue
         if {![dict get $node reachable]} continue
-        VerifyCall hir $e $node
+        # (The call's own problems with its transport: hir::CheckingCall.)
+        hir::CheckingCall $e {VerifyCall hir $e $node}
     }
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] ne "ref" || [dict exists $callees $e]} continue

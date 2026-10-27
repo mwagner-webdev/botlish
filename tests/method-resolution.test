@@ -1,0 +1,418 @@
+# method-resolution.test -- the semantic correctness of method-call decisions
+# (METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md, METHOD-SUGAR.md,
+# hir/methods.tcl).
+#
+# `receiver.name(args)` is the one visible function `name` whose ordinary call
+# is valid. A candidate is judged by the call's own checks (diagnostics whose
+# `subject` is the call: hir::CheckingCall), relative to the decided
+# configuration itself (the decided build, or a single deviation of it).
+# These tests pin
+#
+#   * ownership: a check of a call records the call as its subject; an outer
+#     call's check of an inner call's result is the outer call's;
+#   * the reported defect (EXACT-METHOD-DECISION-MISATTRIBUTION.md) and its
+#     variants: a valid chain whose outer call has an earlier-sorting
+#     candidate that rejects the inner result;
+#   * the inner call in an argument position: an ambiguous outer call is
+#     never decided by an inner call's problems;
+#   * deeper chains, every receiver kind, application and standard-library
+#     candidates, genuine ambiguity and no applicable method, candidate-
+#     specific contract, instance and imprint failures;
+#   * metamorphic invariants: qualified spelling, renamed modules, an added
+#     inapplicable candidate, an unrelated ambiguous call, an unrelated invalid
+#     expression or syntax error, kind proofs on or off, build reuse on or off;
+#   * static rounds and the oscillation bound.
+#
+# Every decision here is also made under hir::methodReferenceAudit (the
+# reference rule: every candidate judged by its own build).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+# Compiles the application FILES (a dict: file name -> text, `main.bot` the
+# entry) in a fresh directory, -strict 0 (a rejection stays a diagnostic),
+# with the kind proofs KIND and the reference audit AUDIT: a dict of the HIR,
+# its diagnostics ({kind message}), its decided calls (the candidates, in the
+# order of the calls) and the build counters the compilation moved.
+proc mrCompile {files {kind 1} {audit 1} args} {
+    set dir [makeDirectory mr-app-[pid]-[incr ::mrCounter]]
+    try {
+        dict for {name text} $files {
+            set f [open [file join $dir $name] w]
+            fconfigure $f -encoding utf-8
+            puts -nonewline $f $text
+            close $f
+        }
+        set saved [list $hir::methodKindProofs $hir::methodReferenceAudit]
+        set hir::methodKindProofs $kind
+        set hir::methodReferenceAudit $audit
+        try {
+            set before [hir::BuildStats]
+            set hir [surface::readProgramFile [file join $dir main.bot] -strict 0 -warnings off -cache "" {*}$args]
+            set after [hir::BuildStats]
+        } finally {
+            lassign $saved hir::methodKindProofs hir::methodReferenceAudit
+        }
+    } finally {
+        removeDirectory mr-app-[pid]-$::mrCounter
+    }
+    set result [dict create hir $hir \
+        diagnostics [lmap d [dict get $hir diagnostics] {list [dict get $d kind] [dict get $d message]}] \
+        decided [expr {[dict exists $hir methodDecided] ? [lmap {k v} [dict get $hir methodDecided] {set v}] : {}}]]
+    foreach counter {builds methodTrials methodFinals methodReused methodDeviations} {
+        dict set result $counter [expr {[dict get $after $counter] - [dict get $before $counter]}]
+    }
+    return $result
+}
+set ::mrCounter 0
+
+# The candidates the compilation R decided for the calls written in the file
+# NAME of its application.
+proc mrDecidedIn {r name} {
+    set hir [dict get $r hir]
+    set ids [lmap {f info} [dict get $hir files] {if {[file tail [dict get $info path]] ne $name} continue; set f}]
+    # (A trait program's HIR is the monomorphized build, which keeps the
+    # decisions as its choices.)
+    set decided [if {[dict exists $hir methodDecided]} {dict get $hir methodDecided} else {dict get $hir methodChoices}]
+    lmap {key candidate} $decided {
+        if {[lindex [split $key :] 0] ni $ids} continue
+        set candidate
+    }
+}
+
+# The kinds of a compilation's diagnostics.
+proc mrKinds {r} {
+    lmap d [dict get $r diagnostics] {lindex $d 0}
+}
+
+# The value of the compilation R's program on BACKEND, or its outcome.
+proc mrValue {r {backend interp}} {
+    set outcome [outcomeUnderHir $backend [dict get $r hir]]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+set ::mrStd "import std::list\nimport std::str\nimport std::mutable_array\nimport std::mutable_vector\n"
+
+# The reported program: `bag::length` sorts before every `std::` candidate
+# and rejects the List the inner `at` returns.
+set ::mrBag "struct Bag:\n    n: int\n\nfn length(b: Bag) -> int:\n    b.n\n"
+set ::mrChainBody "fn f() -> int errors IndexNotFound:\n    \[\[1, 2\], \[3\]\].at(1).length()\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"
+set ::mrChain [dict create bag.bot $::mrBag main.bot "${::mrStd}import bag\n\n$::mrChainBody"]
+set ::mrChainQualified [dict create bag.bot $::mrBag main.bot "${::mrStd}import bag\n\nfn f() -> int errors IndexNotFound:\n    std::list::length(std::list::at(\[\[1, 2\], \[3\]\], 1))\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"]
+
+# An inner method call in an argument position: both `f`s accept (int, int),
+# only one `g` accepts an Int.
+proc mrArgumentNested {validG} {
+    set gInt "fn g(x: int) -> int:\n    x\n"
+    set gStr "fn g(x: str) -> int:\n    0\n"
+    if {$validG eq "alpha"} {
+        lassign [list $gInt $gStr] alphaG betaG
+    } else {
+        lassign [list $gStr $gInt] alphaG betaG
+    }
+    set alpha "fn f(x: int, y: int) -> int:\n    x + y\n\n$alphaG"
+    set beta "fn f(x: int, y: int) -> int:\n    x - y\n\n$betaG"
+    return [dict create alpha.bot $alpha beta.bot $beta main.bot "import alpha\nimport beta\n\na = 1\na.f(2.g())\n"]
+}
+
+# ---------------------------------------------------------------------------
+# Ownership
+
+test mr-subject-is-the-checked-call {an argument a call's callee rejects is reported at the argument, with the call as its subject: the outer call's check of an inner call's result names the outer call, never the inner one} -body {
+    set r [mrCompile [dict create main.bot "import std::list\n\nfn take(s: str) -> int:\n    0\n\ntake(std::list::at(\[1\], 0))\n"] 1 0]
+    set hir [dict get $r hir]
+    set results {}
+    foreach d [dict get $hir diagnostics] {
+        if {[dict get $d kind] ne "TYPE"} continue
+        set anchor [dict get $d expr]
+        set subject [dict get $d subject]
+        lappend results [dict get $hir exprs $anchor kind] [dict get $hir exprs $subject kind] \
+            [expr {$anchor in [dict get $hir exprs $subject args]}]
+    }
+    set results
+} -result {call call 1}
+
+test mr-consumer-check-has-no-subject {a check that holds a value to the construct that uses it is no call's own check, whatever calls were checked before it: the Float64 operator's rejection of an Int operand carries no subject, while the argument rejected by `take` has `take`'s call as its subject} -body {
+    set r [mrCompile [dict create main.bot "import std::list\n\nfn take(s: str) -> int:\n    0\n\nx = take(std::list::at(\[1\], 0))\ny = std::list::length(\[1\]) + 1.5\n"] 1 0]
+    lmap d [dict get $r hir diagnostics] {
+        list [dict get $d kind] [dict exists $d subject]
+    }
+} -result {{TYPE 1} {TYPE 0}}
+
+test mr-problems-are-owned {a candidate's problems are the diagnostics its call's own checks report, never one located in the call: in the build where the outer `length` stands at `bag::length`, its rejection of the List is reported at the inner call's node, and it is the outer call's problem, not the inner call's} -body {
+    set r [mrCompile $::mrChain 1 0]
+    set hir [dict get $r hir]
+    set calls [dict get $hir methodCalls]
+    lassign [dict keys $calls] outer inner
+    # (The build with the outer call at its first candidate, bag::length.)
+    set choices [dict create $outer bag::length $inner std::list::at]
+    set captured {}
+    rename hir::methods::Decide hir::methods::DecideReal
+    proc hir::methods::Decide {nodes options given hir seeds} {
+        set ::captured [list $nodes $options $given]
+        hir::methods::DecideReal $nodes $options $given $hir $seeds
+    }
+    try {
+        mrCompile $::mrChain 1 0
+    } finally {
+        rename hir::methods::Decide {}
+        rename hir::methods::DecideReal hir::methods::Decide
+    }
+    lassign $::captured nodes options given
+    set trial [hir::BuildOnce $nodes $options $given $choices 0 checked]
+    set outerProblems [hir::methods::Problems $trial $outer]
+    set innerProblems [hir::methods::Problems $trial $inner]
+    set innerExpr [dict get $trial methodCalls $inner expr]
+    list [llength $outerProblems] [lindex $outerProblems 0 0] [expr {[lindex $outerProblems 0 2] eq $innerExpr}] \
+        $innerProblems
+} -cleanup {
+    hir::activate [dict get $r hir]
+} -result {1 TYPE 1 {}}
+
+# ---------------------------------------------------------------------------
+# The reported defect and its variants
+
+test mr-reported-chain-compiles {the valid chain `[[1, 2], [3]].at(1).length()` beside an application module's `length(b: Bag)` compiles, with the kind proofs and without them, to the qualified spelling's value} -body {
+    set results {}
+    foreach kind {1 0} {
+        set r [mrCompile $::mrChain $kind]
+        lappend results [dict get $r diagnostics] [dict get $r decided] [mrValue $r]
+    }
+    lappend results [mrValue [mrCompile $::mrChainQualified]]
+} -result {{} {std::list::length std::list::at} 1 {} {std::list::length std::list::at} 1 1}
+
+test mr-reported-chain-any-sort-order {the chain decides alike whether the outer candidate that rejects the List sorts before std::list (std::boxlen), after it (std::zbox) or before every std:: name (an application module)} -body {
+    set results {}
+    withPrivateLibrary {
+        foreach ns {boxlen zbox} {
+            set f [open [file join $::core::libraryDir $ns.bot] w]
+            puts $f "struct Box:\n    v: int\n\nfn length(b: Box) -> int:\n    b.v\n"
+            close $f
+            set r [mrCompile [dict create main.bot "${::mrStd}import std::$ns\n\n$::mrChainBody"]]
+            lappend results [dict get $r diagnostics] [dict get $r decided]
+        }
+    }
+    set r [mrCompile $::mrChain]
+    lappend results [dict get $r diagnostics] [dict get $r decided]
+} -result {{} {std::list::length std::list::at} {} {std::list::length std::list::at} {} {std::list::length std::list::at}}
+
+test mr-unrelated-ambiguous-call {an unrelated call with an untyped receiver is ambiguous; the valid chain beside it keeps its decisions and gets no diagnostic} -body {
+    set body "fn u(x) -> int:\n    x.length()\n\nfn f() -> int errors IndexNotFound:\n    \[\[1, 2\], \[3\]\].at(1).length() + u(\[7\])\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"
+    set r [mrCompile [dict create bag.bot $::mrBag main.bot "${::mrStd}import bag\n\n$body"]]
+    set hir [dict get $r hir]
+    set rejected {}
+    foreach d [dict get $hir diagnostics] {
+        if {[dict get $d kind] in {AMBIGUOUS-METHOD-CALL NO-APPLICABLE-METHOD}} {
+            lappend rejected [dict get $hir exprs [dict get $d expr] method name] \
+                [hir::originLocation $hir [dict get $d origin]]
+        }
+    }
+    list [lindex [mrKinds $r] 0] [regsub -all {[^ ]*main.bot:} $rejected {}] [dict get $r decided]
+} -result {AMBIGUOUS-METHOD-CALL {length 8:7} {std::list::length std::list::at}}
+
+test mr-argument-nested-ambiguity {an inner method call in an argument position never decides the outer call: both `f`s accept (int, int), so `a.f(2.g())` is AMBIGUOUS-METHOD-CALL whichever module holds the `g` that accepts an Int, and the inner call is decided} -body {
+    set results {}
+    foreach valid {alpha beta} {
+        set r [mrCompile [mrArgumentNested $valid]]
+        lappend results [mrKinds $r] [dict get $r decided]
+    }
+    set results
+} -result {AMBIGUOUS-METHOD-CALL alpha::g AMBIGUOUS-METHOD-CALL beta::g}
+
+test mr-argument-nested-qualified {the program with the outer call written qualified compiles and decides the inner call} -body {
+    set files [mrArgumentNested beta]
+    dict set files main.bot "import alpha\nimport beta\n\na = 1\nalpha::f(a, 2.g())\n"
+    set r [mrCompile $files]
+    list [dict get $r diagnostics] [dict get $r decided] [mrValue $r]
+} -result {{} beta::g 3}
+
+# The method names of a compilation's AMBIGUOUS-METHOD-CALL and
+# NO-APPLICABLE-METHOD diagnostics: {KIND NAME} each.
+proc mrRejected {r} {
+    set out {}
+    foreach d [dict get $r diagnostics] {
+        lassign $d kind message
+        if {$kind ni {AMBIGUOUS-METHOD-CALL NO-APPLICABLE-METHOD}} continue
+        regexp {method-style call "([^"]+)"} $message -> name
+        lappend out [list $kind $name]
+    }
+    return $out
+}
+
+test mr-inner-failure-is-not-the-outer-calls {an inner call with no applicable candidate is rejected alone: `(1).pick((7).size())` -- no `size` accepts an Int, both of whose results are Int -- decides the outer call by its own checks to aa::pick (the location rule reported it NO-APPLICABLE-METHOD too, naming the inner call's problem as aa::pick's)} -body {
+    set aa "fn size(s: List\[int\]) -> int:\n    3\n\nfn pick(a: int, b: int) -> int:\n    a + b\n"
+    set zz "fn size(s: List\[str\]) -> int:\n    4\n\nfn pick(a: str, b: int) -> str:\n    a\n"
+    set r [mrCompile [dict create aa.bot $aa zz.bot $zz main.bot "import aa\nimport zz\n\nfn main() -> int:\n    (1).pick((7).size())\n\nmain()\n"]]
+    list [mrRejected $r] [dict get $r decided]
+} -result {{{NO-APPLICABLE-METHOD size}} aa::pick}
+
+test mr-use-does-not-select {how a call's result is used is no check of the call's: two `size`s that accept the receiver and differ only in their results (Int, Float64) are ambiguous as the argument of a function that accepts only an Int, as an operand of a Float64 operator, and as a function's declared Int result (the location rule decided the first by its use)} -body {
+    set aa "fn size(s: List\[int\]) -> int:\n    3\n"
+    set zz "fn size(s: List\[int\]) -> Float64:\n    4.5\n"
+    set main "import aa\nimport zz\n\nfn take(n: int) -> int:\n    n\n\nfn a() -> int:\n    take(\[1, 2\].size())\n\nfn b() -> Float64:\n    \[1, 2\].size() + 1.5\n\nfn c() -> int:\n    \[1, 2\].size()\n\n1\n"
+    set r [mrCompile [dict create aa.bot $aa zz.bot $zz main.bot $main]]
+    list [mrRejected $r] [dict get $r decided]
+} -result {{{AMBIGUOUS-METHOD-CALL size} {AMBIGUOUS-METHOD-CALL size} {AMBIGUOUS-METHOD-CALL size}} {}}
+
+# ---------------------------------------------------------------------------
+# Chains, receivers, modules
+
+set ::mrBox "struct Box:\n    v: int\n\nfn at(b: Box, i: int) -> int:\n    b.v + i\n\nfn length(b: Box) -> int:\n    b.v\n"
+
+test mr-chain-three-deep {a chain of four calls -- three `at` and a `length` -- each with an application module candidate that sorts first and rejects the receiver, decides every link to the standard library and runs to the qualified spelling's value} -body {
+    set chain [dict create box.bot $::mrBox main.bot "${::mrStd}import box\n\nfn f() -> int errors IndexNotFound:\n    \[\[\[\"ab\"\], \[\"cde\"\]\]\].at(0).at(1).at(0).length()\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"]
+    set qualified [dict create box.bot $::mrBox main.bot "${::mrStd}import box\n\nfn f() -> int errors IndexNotFound:\n    std::str::length(std::list::at(std::list::at(std::list::at(\[\[\[\"ab\"\], \[\"cde\"\]\]\], 0), 1), 0))\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"]
+    set r [mrCompile $chain]
+    list [dict get $r diagnostics] [dict get $r decided] [mrValue $r] [mrValue $r compile] [mrValue [mrCompile $qualified]]
+} -result {{} {std::str::length std::list::at std::list::at std::list::at} 3 3 3}
+
+test mr-receivers-of-every-kind {List, String, MutableArray, MutableVector, MutableMap and a named struct receive `length` and `at` from the candidate their kind or declaration admits, with application candidates that sort before every std:: one} -body {
+    set main "${::mrStd}import std::mutable_map\nimport box\n\nfn f() -> int errors IndexNotFound:\n    xs = \[4, 5\]\n    s = \"hey\"\n    a = std::mutable_array::create(2, 7)\n    v = std::mutable_vector::from_list(\[1, 2, 3\])\n    m = std::mutable_map::create\[int, int\]()\n    m.set(1, 2)\n    b = box::Box {v: 10}\n    xs.length() + s.length() + v.length() + m.length() + b.length() + xs.at(1) + a.at(0) + v.at(2) + b.at(1)\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"
+    set r [mrCompile [dict create box.bot $::mrBox main.bot $main]]
+    list [dict get $r diagnostics] [lsort [mrDecidedIn $r main.bot]] [mrValue $r]
+} -result {{} {box::at box::length std::list::at std::list::length std::mutable_array::at std::mutable_map::length std::mutable_map::set std::mutable_vector::at std::mutable_vector::length std::str::length} 45}
+
+test mr-genuine-ambiguity-and-no-applicable {two visible functions that both accept the receiver are ambiguous, and a receiver none accepts has no applicable method -- with application and standard-library candidates alike} -body {
+    set two "fn length(xs: List\[int\]) -> int:\n    0\n"
+    set ambiguous [mrCompile [dict create two.bot $two main.bot "import std::list\nimport two\n\n\[1, 2\].length()\n"]]
+    set none [mrCompile [dict create box.bot $::mrBox main.bot "import std::list\nimport box\n\n\"abc\".length()\n"]]
+    list [mrKinds $ambiguous] [dict get $ambiguous decided] [mrKinds $none] [dict get $none decided]
+} -result {AMBIGUOUS-METHOD-CALL {} {NO-APPLICABLE-METHOD TYPE} {}}
+
+test mr-instance-failure-is-the-candidates {a candidate whose generic body is invalid for the receiver (the semantic instance of `area(c)` reads a field `r` the receiver lacks) is not applicable, by the call's own instance check: `{w: 2, h: 3}.area()` is shape::area} -body {
+    set r [mrCompile [dict create shape.bot "fn area(s) -> int:\n    s.w * s.h\n" disk.bot "fn area(c) -> int:\n    c.r * c.r\n" \
+        main.bot "import shape\nimport disk\n\n{w: 2, h: 3}.area()\n"]]
+    list [dict get $r diagnostics] [dict get $r decided] [mrValue $r]
+} -result {{} shape::area 6}
+
+test mr-imprint-decides {two functions over applications of one parameterized struct: the receiver's type arguments imprint only one of them validly, so `p.get()` on a Pair[int, bool] is ints::get and on a Pair[str, bool] strs::get} -body {
+    set pair "struct Pair\[A, B\]:\n    a: A\n    b: B\n"
+    set ints "import pair\n\nfn get(p: pair::Pair\[int, B\]) -> int:\n    p.a\n"
+    set strs "import pair\n\nfn get(p: pair::Pair\[str, B\]) -> int:\n    1\n"
+    set results {}
+    foreach {args values} {{int, bool} {a: 5, b: true} {str, bool} {a: "x", b: true}} {
+        set r [mrCompile [dict create pair.bot $pair ints.bot $ints strs.bot $strs \
+            main.bot "import pair\nimport ints\nimport strs\n\np = pair::Pair\[$args\] {$values}\np.get()\n"]]
+        lappend results [dict get $r diagnostics] [dict get $r decided] [mrValue $r]
+    }
+    set results
+} -result {{} ints::get 5 {} strs::get 1}
+
+# ---------------------------------------------------------------------------
+# Metamorphic invariants
+
+test mr-renamed-modules {renaming the candidates' modules so that they sort the other way changes no applicability: the same calls are decided, ambiguous or not applicable} -body {
+    set results {}
+    foreach {early late} {alpha beta zeta aardvark} {
+        set files [dict create $early.bot "fn f(x: int, y: int) -> int:\n    x + y\n\nfn g(x: str) -> int:\n    0\n\nfn h(x: str) -> int:\n    1\n" \
+            $late.bot "fn f(x: int, y: int) -> int:\n    x - y\n\nfn g(x: int) -> int:\n    x\n\nfn h(x: int) -> int:\n    2\n" \
+            main.bot "import $early\nimport $late\n\nfn k() -> int:\n    3.h()\n\n1.f(2.g()) + k()\n"]
+        set r [mrCompile $files]
+        lappend results [mrKinds $r] [regsub -all "$early|$late" [dict get $r decided] M]
+    }
+    set results
+} -result {AMBIGUOUS-METHOD-CALL {M::h M::g} AMBIGUOUS-METHOD-CALL {M::h M::g}}
+
+test mr-added-inapplicable-candidate {a visible candidate that accepts no receiver of the program leaves every decision as it was} -body {
+    set noise "struct Noise:\n    z: int\n\nfn at(n: Noise, i: int) -> int:\n    n.z\n\nfn length(n: Noise) -> int:\n    n.z\n"
+    set without [mrCompile $::mrChain]
+    set files $::mrChain
+    dict set files noise.bot $noise
+    dict set files main.bot "${::mrStd}import bag\nimport noise\n\n$::mrChainBody"
+    set with [mrCompile $files]
+    list [dict get $with diagnostics] [expr {[dict get $with decided] eq [dict get $without decided]}] [mrValue $with]
+} -result {{} 1 1}
+
+test mr-unrelated-invalid-expression {an unrelated invalid expression -- an unbound name in another function, a type error in another -- changes no decision of the independent chain} -body {
+    set clean [mrCompile $::mrChain]
+    set results {}
+    foreach extra {"fn other() -> int:\n    nosuch(1)\n\n" "fn other() -> int:\n    \"a\" + 1\n\n"} {
+        set r [mrCompile [dict create bag.bot $::mrBag main.bot "${::mrStd}import bag\n\n$extra$::mrChainBody"]]
+        lappend results [expr {[dict get $r decided] eq [dict get $clean decided]}] \
+            [expr {[lsearch -exact -index 0 [dict get $r diagnostics] AMBIGUOUS-METHOD-CALL] < 0
+                && [lsearch -exact -index 0 [dict get $r diagnostics] NO-APPLICABLE-METHOD] < 0}]
+    }
+    set results
+} -result {1 1 1 1}
+
+test mr-unrelated-syntax-error {with an unrelated malformed statement in another function, the recovered analysis (-recover-syntax 1, the compiler service's) decides the independent chain as the clean program does} -body {
+    set clean [mrCompile $::mrChain]
+    set r [mrCompile [dict create bag.bot $::mrBag main.bot "${::mrStd}import bag\n\nfn other() -> int:\n    x = (1 +\n    2\n\n$::mrChainBody"] 1 1 -recover-syntax 1]
+    list [expr {[dict get $r decided] eq [dict get $clean decided]}] \
+        [expr {[lsearch -exact -index 0 [dict get $r diagnostics] AMBIGUOUS-METHOD-CALL] < 0}]
+} -result {1 1}
+
+test mr-switches-change-no-decision {the kind proofs and the build reuse change how many builds a decision takes, never what it decides} -body {
+    set programs [list $::mrChain [mrArgumentNested alpha] [dict create box.bot $::mrBox main.bot "${::mrStd}import box\n\nfn f() -> int errors IndexNotFound:\n    \[\[\[\"ab\"\]\]\].at(0).at(0).at(0).length()\n\nr = f():\n    on IndexNotFound:\n        -1\nr\n"]]
+    set results {}
+    foreach files $programs {
+        set outcomes {}
+        foreach {kind reuse} {1 1 0 1 1 0 0 0} {
+            set saved $hir::methodBuildReuse
+            set hir::methodBuildReuse $reuse
+            try {
+                set r [mrCompile $files $kind 0]
+            } finally {
+                set hir::methodBuildReuse $saved
+            }
+            lappend outcomes [list [dict get $r diagnostics] [dict get $r decided] [hir::format [dict get $r hir]]]
+        }
+        lappend results [llength [lsort -unique $outcomes]]
+    }
+    set results
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Static rounds and the oscillation bound
+
+test mr-static-blocks {method-style calls inside static compile blocks: the block holding the valid chain is accepted, the one holding the ambiguous call rejected with AMBIGUOUS-METHOD-CALL, alike under the batched and the sequential scheduler} -body {
+    set main "${::mrStd}import std::compiler\nimport bag\n\nfn chain() -> int errors IndexNotFound, std::compiler::CompilerError:\n    static compile:\n        \[\[1, 2\], \[3\]\].at(1).length()\n\nfn amb(x) -> int errors std::compiler::CompilerError:\n    static compile:\n        x.length()\n\nr = chain():\n    on IndexNotFound:\n        -1\n    on std::compiler::CompilerError:\n        -2\nq = amb(\[1\]):\n    on std::compiler::CompilerError:\n        -3\n\[r, q\]\n"
+    set results {}
+    foreach scheduler {batched sequential} {
+        set saved [expr {[info exists ::env(BOTLISH_STATIC_SCHEDULER)] ? $::env(BOTLISH_STATIC_SCHEDULER) : ""}]
+        set ::env(BOTLISH_STATIC_SCHEDULER) $scheduler
+        try {
+            set r [mrCompile [dict create bag.bot $::mrBag main.bot $main]]
+        } finally {
+            if {$saved eq ""} { unset ::env(BOTLISH_STATIC_SCHEDULER) } else { set ::env(BOTLISH_STATIC_SCHEDULER) $saved }
+        }
+        set hir [dict get $r hir]
+        set outcomes [lmap {k site} [dict get $hir staticSites] {
+            set o [dict get $site outcome]
+            if {[dict exists $site diagnostic]} { lappend o [dict get $site diagnostic kind] }
+            set o
+        }]
+        lappend results $outcomes [mrValue $r]
+    }
+    set results
+} -result {{accepted {rejected AMBIGUOUS-METHOD-CALL}} {[1, -3]} {accepted {rejected AMBIGUOUS-METHOD-CALL}} {[1, -3]}}
+
+test mr-oscillation-is-ambiguous {a call whose verdict still changes when the certification's bound is reached (forced here: its applicable candidate flips every round) is rejected as ambiguous between the candidates it moved between, never decided by the last round} -body {
+    rename hir::methods::Verdicts hir::methods::VerdictsReal
+    proc hir::methods::Verdicts {stateVar record choices open} {
+        upvar 1 $stateVar state
+        set verdicts [uplevel 1 [list hir::methods::VerdictsReal state $record $choices $open]]
+        dict for {key verdict} $verdicts {
+            set survivors [dict get $verdict survivors]
+            if {[llength $survivors] < 2} continue
+            # The applicable candidate is whichever does not stand now.
+            set other [lindex [lmap c $survivors {if {$c eq [dict get $choices $key]} continue; set c}] 0]
+            dict set verdicts $key applicable [list $other]
+        }
+        return $verdicts
+    }
+    try {
+        set r [mrCompile [dict create two.bot "fn length(xs: List\[int\]) -> int:\n    0\n" \
+            main.bot "import std::list\nimport two\n\n\[1, 2\].length()\n"] 1 0]
+    } finally {
+        rename hir::methods::Verdicts {}
+        rename hir::methods::VerdictsReal hir::methods::Verdicts
+    }
+    list [mrKinds $r] [dict get $r decided] [regexp {accepts the receiver \(std::list::length, two::length\)} [lindex [dict get $r diagnostics] 0 1]]
+} -result {AMBIGUOUS-METHOD-CALL {} 1}
+
+cleanupTests

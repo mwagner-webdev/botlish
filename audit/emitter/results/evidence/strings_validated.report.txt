@@ -1,0 +1,2 @@
+fused bench_work::strings_validated e7702 {inlined {{#13} string_emit::string_source string_emit::string string_emit::character string_emit::control string_emit::hex_digit string_emit::hex_digit} yields 18 creates 1 starts 1 resumes 1 queries 1 releases 15 template 315 copied 719 unboxed 0}
+fused bench_work::strings_validated e7716 {inlined {{#14} json_lex::json_string json_lex::json_string#run json_lex::json_escape#run} yields 2 creates 1 starts 1 resumes 1 queries 2 releases 15 template 212 copied 449 unboxed 1}

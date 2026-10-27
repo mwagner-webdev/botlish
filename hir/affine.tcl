@@ -373,6 +373,19 @@ proc hir::affine::Consumer {hir parent e} {
     return [Erasure $hir $e "used as a value here"]
 }
 
+# The call whose argument E is (PARENT: the parent map), "" when E is no
+# call's argument: the call whose check a rejection of E's consumer is.
+proc hir::affine::ArgumentOf {hir parent e} {
+    if {![dict exists $parent $e]} {
+        return ""
+    }
+    lassign [dict get $parent $e] p role
+    if {$p eq "" || $role eq "callee" || [dict get $hir exprs $p kind] ne "call"} {
+        return ""
+    }
+    return $p
+}
+
 # The consumer of affine value E (of static TYPE) at position ROLE of call P.
 proc hir::affine::CallConsumer {hir p e role type} {
     set node [dict get $hir exprs $p]
@@ -591,8 +604,12 @@ proc hir::affine::verify {hirVar} {
     set accepted [Analyze hir $parentMap $regions [dict keys [dict get $hir exprs]] 1]
     variable diagnostics
     foreach e [lsort -dictionary [dict keys $diagnostics]] {
-        lassign [dict get $diagnostics $e] kind message at related
-        hir::Diagnose hir $kind $message $at $related
+        lassign [dict get $diagnostics $e] kind message at related call
+        if {$call ne ""} {
+            hir::CheckingCall $call {hir::Diagnose hir $kind $message $at $related}
+        } else {
+            hir::Diagnose hir $kind $message $at $related
+        }
     }
     # Releases: only for a program the discipline accepts (a rejected one
     # that still runs, -strict 0, keeps every value until collected), and
@@ -666,8 +683,10 @@ proc hir::affine::Analyze {hirVar parentMap regions exprs program} {
         dict set consumers $e $consumer
         if {[lindex $consumer 0] eq "reject" && !($kind eq "project" && [AffineProjection $hir $e])} {
             # (A projection of an affine field outside a destructuring is
-            # diagnosed once, at its receiver.)
-            dict set diagnostics $e [list [lindex $consumer 1] [lindex $consumer 2] $e]
+            # diagnosed once, at its receiver.) An argument's rejection is
+            # the call's own problem with its callee's ownership role.
+            dict set diagnostics $e [list [lindex $consumer 1] [lindex $consumer 2] $e {} \
+                [ArgumentOf $hir $parent $e]]
         }
         if {$kind ne "ref"} continue
         set b [dict get $node binding]
@@ -782,8 +801,12 @@ proc hir::affine::verifyInstance {viewVar block exprs} {
     Analyze view $parentMap $regions $exprs 0
     variable diagnostics
     foreach e [lsort -dictionary [dict keys $diagnostics]] {
-        lassign [dict get $diagnostics $e] kind message at related
-        hir::Diagnose view $kind $message $at $related
+        lassign [dict get $diagnostics $e] kind message at related call
+        if {$call ne ""} {
+            hir::CheckingCall $call {hir::Diagnose view $kind $message $at $related}
+        } else {
+            hir::Diagnose view $kind $message $at $related
+        }
     }
     # A resume of a coroutine the instance was given charges its declared
     # errors exactly as a direct resume does (AFFINE-VALUES.md, "Generic

@@ -448,66 +448,75 @@ proc hir::cabi::verify {hirVar} {
         if {[dict exists $node reachable] && ![dict get $node reachable]} {
             continue
         }
-        set calleeType [hir::typeOf $hir [dict get $node callee]]
-        if {[hir::types::IsCAddress $calleeType]} {
-            # A C function pointer (or any C address) is no Botlish callable:
-            # calling C is the next milestone (C-ABI-TYPES.md).
-            set callee [dict get $hir exprs [dict get $node callee]]
-            if {[dict get $callee kind] eq "ref"} {
-                set name [hir::semantic::RefName $hir [dict get $node callee]]
+        # (Each problem below is the call's own with its callee:
+        # hir::CheckingCall.)
+        hir::CheckingCall $e {VerifyCallKinds hir $e $node}
+    }
+}
+
+# The C address problems of call E (NODE): a C address called, or given a
+# native parameter of another kind (verify).
+proc hir::cabi::VerifyCallKinds {hirVar e node} {
+    upvar 1 $hirVar hir
+    set calleeType [hir::typeOf $hir [dict get $node callee]]
+    if {[hir::types::IsCAddress $calleeType]} {
+        # A C function pointer (or any C address) is no Botlish callable:
+        # calling C is the next milestone (C-ABI-TYPES.md).
+        set callee [dict get $hir exprs [dict get $node callee]]
+        if {[dict get $callee kind] eq "ref"} {
+            set name [hir::semantic::RefName $hir [dict get $node callee]]
+        } else {
+            set name "this value"
+        }
+        hir::Diagnose hir TYPE [format \
+            {%s is a C %s, %s: Botlish cannot call one yet (calling C is the next milestone)} \
+            $name [expr {[hir::types::IsCFnPtr $calleeType] ? "function pointer" : "pointer"}] \
+            [hir::types::show $calleeType]] $e
+        return
+    }
+    if {[lindex [dict get $node target] 0] ne "native"} {
+        return
+    }
+    set name [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
+    set paramTypes [dict get [core::native::metadata $name] paramTypes]
+    if {$paramTypes eq ""} {
+        return
+    }
+    # (A native of arity * repeats its last kind, except a variadic C
+    # function: its trailing arguments have no kind of a fixed
+    # parameter, each its own C type, hir::borrow.)
+    set variadic [dict getdef [dict get [core::native::metadata $name] foreign] variadic 0]
+    set index 0
+    foreach arg [dict get $node args] {
+        if {$variadic && $index >= [llength $paramTypes]} {
+            break
+        }
+        set paramType [lindex $paramTypes [expr {min($index, [llength $paramTypes] - 1)}]]
+        incr index
+        set argType [hir::typeOf $hir $arg]
+        if {[hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
+                && [dict get [core::native::metadata $name] imprint] eq ""} {
+            # (An imprinted native's signature rejects it itself: IMPRINT.)
+            # A native view's word is its pointer's, but a view is no
+            # pointer and no Int (NATIVE-LAYOUT-VIEWS.md): no pointer
+            # operation (null?, clone, ...) and no other native takes one.
+            if {[hir::types::IsNativeEdit $argType]} {
+                # (A native edit, NATIVE-LAYOUT-WRITES.md, likewise.)
+                set what "a native edit, where %s requires %s: a native edit is a window onto native memory, read by its fields (or std::binary::load) and written by std::binary::store, never a pointer, an Int or any other value"
             } else {
-                set name "this value"
+                set what "a native view, where %s requires %s: a native view is a read-only window onto native memory, read by its fields (or std::binary::load), never a pointer, an Int or any other value"
             }
-            hir::Diagnose hir TYPE [format \
-                {%s is a C %s, %s: Botlish cannot call one yet (calling C is the next milestone)} \
-                $name [expr {[hir::types::IsCFnPtr $calleeType] ? "function pointer" : "pointer"}] \
-                [hir::types::show $calleeType]] $e
-            continue
-        }
-        if {[lindex [dict get $node target] 0] ne "native"} {
-            continue
-        }
-        set name [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
-        set paramTypes [dict get [core::native::metadata $name] paramTypes]
-        if {$paramTypes eq ""} {
-            continue
-        }
-        # (A native of arity * repeats its last kind, except a variadic C
-        # function: its trailing arguments have no kind of a fixed
-        # parameter, each its own C type, hir::borrow.)
-        set variadic [dict getdef [dict get [core::native::metadata $name] foreign] variadic 0]
-        set index 0
-        foreach arg [dict get $node args] {
-            if {$variadic && $index >= [llength $paramTypes]} {
-                break
-            }
-            set paramType [lindex $paramTypes [expr {min($index, [llength $paramTypes] - 1)}]]
-            incr index
-            set argType [hir::typeOf $hir $arg]
-            if {[hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
-                    && [dict get [core::native::metadata $name] imprint] eq ""} {
-                # (An imprinted native's signature rejects it itself: IMPRINT.)
-                # A native view's word is its pointer's, but a view is no
-                # pointer and no Int (NATIVE-LAYOUT-VIEWS.md): no pointer
-                # operation (null?, clone, ...) and no other native takes one.
-                if {[hir::types::IsNativeEdit $argType]} {
-                    # (A native edit, NATIVE-LAYOUT-WRITES.md, likewise.)
-                    set what "a native edit, where %s requires %s: a native edit is a window onto native memory, read by its fields (or std::binary::load) and written by std::binary::store, never a pointer, an Int or any other value"
-                } else {
-                    set what "a native view, where %s requires %s: a native view is a read-only window onto native memory, read by its fields (or std::binary::load), never a pointer, an Int or any other value"
-                }
-                hir::Diagnose hir TYPE [format "argument %d of %s is %s, $what" \
-                    $index $name [hir::types::show $argType] $name [core::type::show $paramType]] $arg
-                continue
-            }
-            if {![hir::types::IsCAddress $argType] || $paramType in {"" any}
-                    || [core::type::base $paramType] eq "cptr"} {
-                continue
-            }
-            hir::Diagnose hir TYPE [format \
-                {argument %d of %s is %s, a C pointer, where %s requires %s: a pointer is an opaque address, not an Int or any other value (it has no arithmetic, ordering, bitwise operation or conversion)} \
+            hir::Diagnose hir TYPE [format "argument %d of %s is %s, $what" \
                 $index $name [hir::types::show $argType] $name [core::type::show $paramType]] $arg
+            continue
         }
+        if {![hir::types::IsCAddress $argType] || $paramType in {"" any}
+                || [core::type::base $paramType] eq "cptr"} {
+            continue
+        }
+        hir::Diagnose hir TYPE [format \
+            {argument %d of %s is %s, a C pointer, where %s requires %s: a pointer is an opaque address, not an Int or any other value (it has no arithmetic, ordering, bitwise operation or conversion)} \
+            $index $name [hir::types::show $argType] $name [core::type::show $paramType]] $arg
     }
 }
 

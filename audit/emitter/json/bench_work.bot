@@ -1,0 +1,331 @@
+# bench_work.bot -- the emitter experiment's benchmark workloads
+# (EMITTER-COROUTINE-EXPLORATION.md, "Performance"; audit/emitter/tools/
+# bench.tcl runs them natively). Each emits COUNT items through a checksum
+# sink (sinks.bot's mix: no symbol stored) and returns [symbols, checksum].
+# Every emitter coroutine is constructed and drained in the workload's own
+# function, so coroutine fusion takes it (but where a workload says
+# otherwise: a recursive emitter, a handle passed to a function).
+#
+#   ints_*       the Int of a deterministic sequence of 19-digit magnitudes
+#                (signs alternating; past 2^62, so BigInts natively), one
+#                json_number token each; ints_small_* magnitudes below 10^9
+#   strings_*    one string token per item, cycling through eight texts of
+#                about 60 characters (ASCII, quotation marks, controls,
+#                Latin-1, CJK, an emoji)
+#   documents_*  one JSON text: an array of COUNT objects of five members
+#                (numbers, a string, literals, a nested array and object)
+
+import number_emit
+import string_emit
+import value_emit
+import json_lex
+import json_grammar
+import json
+import sinks
+import std::dfa
+import std::coroutine
+import std::list
+import std::mutable_array
+
+# The I-th Int of the sequence: magnitudes 10^18..10^19, signs alternating.
+fn nth(i: int) -> int:
+    m = (i * 6364136223846793005 + 1442695040888963407).mod(9000000000000000000) + 1000000000000000000
+    if i.mod(2) == 0:
+        return m
+    0 - m
+
+# The I-th Int of a sequence of magnitudes below 10^9 (small Ints natively:
+# no BigInt arithmetic), signs alternating.
+fn nth_small(i: int) -> int:
+    m = (i * 2654435761 + 12345).mod(1000000000)
+    if i.mod(2) == 0:
+        return m
+    0 - m
+
+fn ints_small_static(count: int) -> List[int] errors IndexNotFound:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_source(i.nth_small())
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn ints_small_trusted(count: int) -> List[int] errors IndexNotFound:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_trusted_source(i.nth_small())
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn ints_static(count: int) -> List[int] errors IndexNotFound:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_source(i.nth())
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn ints_text(count: int) -> List[int] errors IndexNotFound, number_emit::NotCanonical:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_text_source(i.nth())
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn ints_trusted(count: int) -> List[int] errors IndexNotFound:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_trusted_source(i.nth())
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+# integer_trusted's symbols, each fed to json_number as it is emitted
+# (design A, incrementally): two coroutines per token, both fused.
+fn ints_validated(count: int) -> List[int] errors IndexNotFound, sinks::Invalid:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_trusted_source(i.nth())
+        coroutine {step: feed} = json_lex::json_number(first):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(feed):
+                fail sinks::Invalid {at: 0, recognizer: "json_lex::json_number", state: "ended early"}
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            x = step()
+            if std::coroutine::done?(step):
+                break
+            feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state}:
+                    fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            st.set(2, x)
+        r = feed(std::dfa::Symbol {code: -1}):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        if r != 0:
+            fail sinks::Invalid {at: 0, recognizer: "json_lex::json_number", state: "ended early"}
+        continue
+    [st.at(1), st.at(0)]
+
+# ints_static through sinks::drain, a reusable sink the handle is passed
+# to: the handle leaves the function that constructs it, so fusion keeps
+# every token's coroutine on the general runtime.
+fn ints_drained(count: int) -> List[int] errors IndexNotFound:
+    st = std::mutable_array::create(2, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = number_emit::integer_source(i.nth())
+        loop c in step.drain(first):
+            st.set(0, st.at(0).mix(c))
+            st.set(1, st.at(1) + 1)
+            continue
+        continue
+    [st.at(1), st.at(0)]
+
+fn texts() -> List[str]:
+    ["The quick brown fox jumps over the lazy dog, 0123456789 times.", "\"Quoted\" and \\back\\slashed\\ text with a /solidus/ and tabs\t\t.", "Latin-1: àéîõü ÀÉÎÕÜ ñç ß ø å æ, and more of the same: àéîõü!", "日本語のテキストと中文文本，还有한국어 텍스트가 섞여 있습니다。", "Line one\nline two\r\nline three\tand a tab, then\n\n\tmore lines.", "Emoji: 😀😁😂🤣😃😄😅😆😉😊😋😎😍😘🥰😗 and a smile.", "Mixed: a\"b\\c/d\te\nf é ü 中 😀 \r\n and the end of the piece.", "Plain ASCII words, nothing to escape, nothing to encode at all."]
+
+fn strings_static(count: int) -> List[int] errors IndexNotFound:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = string_emit::string_source(std::list::at(pieces, i.mod(8)))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn strings_ascii(count: int) -> List[int] errors IndexNotFound:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = string_emit::string_ascii_source(std::list::at(pieces, i.mod(8)))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn strings_bytes(count: int) -> List[int] errors IndexNotFound:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = string_emit::string_bytes_source(std::list::at(pieces, i.mod(8)))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+# string's symbols, each fed to json_string as it is emitted (design A).
+fn strings_validated(count: int) -> List[int] errors IndexNotFound, sinks::Invalid:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = string_emit::string_source(std::list::at(pieces, i.mod(8)))
+        coroutine {step: feed} = json_lex::json_string(first):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        st.set(2, first)
+        loop:
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            x = step()
+            if std::coroutine::done?(step):
+                break
+            if std::coroutine::done?(feed):
+                fail sinks::Invalid {at: 0, recognizer: "json_lex::json_string", state: "ended early"}
+            feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput {recognizer, state}:
+                    fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+                on std::dfa::UnexpectedEnd {recognizer, state}:
+                    fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            st.set(2, x)
+        if not std::coroutine::done?(feed):
+            fail sinks::Invalid {at: 0, recognizer: "json_lex::json_string", state: "incomplete"}
+        continue
+    [st.at(1), st.at(0)]
+
+fn no_keys() -> List[str]:
+    []
+
+# An array of COUNT objects: {"id": I, "name": a text, "flags": [true,
+# false, null], "point": {"px": -I, "py": I * 7}, "big": 2^70 + I}.
+fn tree(count: int) -> value_emit::Value errors IndexNotFound:
+    pieces = texts()
+    keys = ["id", "name", "flags", "point", "big"]
+    flags = value_emit::array([value_emit::boolean(true), value_emit::boolean(false), value_emit::null_value()])
+    items = loop i from 0 to count:
+        coordinates = ["px", "py"]
+        point = coordinates.object([value_emit::number(0 - i), value_emit::number(i * 7)])
+        keys.object([value_emit::number(i), value_emit::string(std::list::at(pieces, i.mod(8))), flags, point, value_emit::number(1180591620717411303424 + i)])
+    value_emit::array(items)
+
+fn documents_stacked(count: int) -> List[int] errors IndexNotFound:
+    v = tree(count)
+    st = std::mutable_array::create(3, 0)
+    coroutine {step, first} = value_emit::stacked_source(v)
+    st.set(2, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        st.set(0, st.at(0).mix(st.at(2)))
+        st.set(1, st.at(1) + 1)
+        st.set(2, step())
+    [st.at(1), st.at(0)]
+
+# documents_stacked's symbols handed to the checksum in chunks of 64
+# (sinks::chunked_stacked: a buffered writer's sink).
+fn documents_chunked(count: int) -> List[int] errors IndexNotFound:
+    d = sinks::chunked_stacked(tree(count))
+    [d.symbols, d.digest]
+
+# The recursive serializer: its yielding call chain is recursive, so fusion
+# keeps it on the general runtime.
+fn documents_recursive(count: int) -> List[int] errors IndexNotFound:
+    v = tree(count)
+    st = std::mutable_array::create(3, 0)
+    coroutine {step, first} = value_emit::text_source(v)
+    st.set(2, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        st.set(0, st.at(0).mix(st.at(2)))
+        st.set(1, st.at(1) + 1)
+        st.set(2, step())
+    [st.at(1), st.at(0)]
+
+# value_stacked's symbols, each fed to json_grammar::json_text as it is
+# emitted (design A: the lexical layer checked at run time).
+fn documents_validated(count: int) -> List[int] errors IndexNotFound, sinks::Invalid:
+    v = tree(count)
+    st = std::mutable_array::create(3, 0)
+    coroutine {step, first} = value_emit::stacked_source(v)
+    coroutine {step: feed} = json_grammar::json_text(first):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+    st.set(2, first)
+    loop:
+        st.set(0, st.at(0).mix(st.at(2)))
+        st.set(1, st.at(1) + 1)
+        x = step()
+        if std::coroutine::done?(step):
+            break
+        feed(std::dfa::Symbol {code: x}):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        st.set(2, x)
+    feed(std::dfa::Symbol {code: -1}):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail sinks::Invalid {at: 0, recognizer: recognizer, state: state}
+    [st.at(1), st.at(0)]
+
+# The text collected, then validated whole -- its structure included -- by
+# json.bot's validate_scalars (design A, afterwards: the sink held the
+# text before the verdict).
+fn documents_checked_after(count: int) -> List[int] errors IndexNotFound, json::Lexical, json::Truncated, json::Structure, json::TooDeep, json::TokenTooLong:
+    out = sinks::collect_stacked(tree(count))
+    chunks = [out]
+    s = chunks.validate_scalars(1000, 100000000)
+    [s.symbols, s.tokens]

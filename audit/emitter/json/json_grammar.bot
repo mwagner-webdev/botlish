@@ -1,0 +1,47 @@
+# json_grammar.bot -- the languages the JSON emitters are checked against
+# (EMITTER-COROUTINE-EXPLORATION.md), composed from json_lex.bot's
+# recognizers and classes: nothing here restates a token's grammar.
+#
+#   json_text, json_text_bytes   a JSON text's lexical layer: tokens, each
+#                                one of json_lex's json_token (over Unicode
+#                                scalar values) or json_token_bytes (over
+#                                UTF-8 bytes), with whitespace between them
+#                                -- every token valid and every boundary one
+#                                its token accepts (a number or literal ends
+#                                before whitespace, a separator or a closing
+#                                bracket, or at the end)
+#   digit_symbol, nonzero_symbol one symbol of json_lex's classes: guards (a
+#                                recognizer that never suspends is an
+#                                ordinary function of its one symbol)
+#
+# A JSON text's structure -- brackets that nest, a value between separators
+# -- is not a regular language, so no declaration here states it: the
+# serializers' structure is their own code (value_emit.bot), checked by the
+# document validators of json.bot and an independent parser in the tests.
+
+import std::dfa
+import json_lex
+
+# Every symbol a token can start with: anything but whitespace (json_token
+# rejects what no token starts with).
+class not_ws = any except json_lex::ws
+
+dfa json_text over unicode:
+    between:
+        json_lex::ws -> between
+        not_ws -> call json_lex::json_token then between
+        end -> accept
+
+dfa json_text_bytes over bytes:
+    between:
+        json_lex::ws -> between
+        not_ws -> call json_lex::json_token_bytes then between
+        end -> accept
+
+dfa digit_symbol over ascii:
+    start:
+        json_lex::digit -> accept
+
+dfa nonzero_symbol over ascii:
+    start:
+        json_lex::nonzero -> accept

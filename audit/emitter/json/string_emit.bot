@@ -1,0 +1,247 @@
+# string_emit.bot -- JSON strings emitted as json_lex's string tokens
+# (EMITTER-COROUTINE-EXPLORATION.md, "JSON strings"). Each emitter's yields
+# are the token's symbols; which representation a character gets is the
+# emitter's policy, the grammar only says which ones are valid.
+#
+#   string        over Unicode scalar values: every character raw except
+#                 the quotation mark, the reverse solidus (\" \\) and the
+#                 controls (\b \f \n \r \t, else \u00XX); json_string and
+#                 json_string_strict both hold it
+#   string_ascii  the same, ASCII only: a character past U+007F as \uXXXX,
+#                 one past U+FFFF as an escaped surrogate pair (strictly
+#                 paired: json_string_strict)
+#   string_bytes  over bytes: string's policy, every raw character in its
+#                 UTF-8 bytes (json_string_bytes, which validates UTF-8)
+#   string_codes  over a List of Ints that are meant to be scalar values (a
+#                 decoded text): each checked first, NotAScalar otherwise --
+#                 a surrogate or an out-of-range value is never emitted
+#
+# Hexadecimal digits are lowercase. Every emitter carries the experiment's
+# directive (`#: emits R`); audit/emitter/tools/emitcheck.tcl proves each
+# claim.
+#
+# The encoders are written in the grammar's own case structure where the
+# grammar distinguishes cases the arithmetic does not: utf8 splits the
+# three-byte range at U+0FFF, U+CFFF and U+D7FF and the four-byte range at
+# U+3FFFF and U+FFFFF, as utf8_char's lead classes do (E0, E1..EC, ED,
+# EE..EF, F0, F1..F3, F4), and string_ascii writes U+D000..U+D7FF on its
+# own branch, as json_escape_strict's `d2` state does: the checker's facts
+# are sets of values, not relations between two symbols, so a constraint the
+# grammar puts on a second symbol given the first must be visible as a
+# branch (the report's section 7).
+
+import std::char
+import std::str
+import std::list
+
+# The lowercase hexadecimal digit of N (0..15).
+fn hex_digit(n: int) -> unit:
+    if n < 10:
+        yield 48 + n
+    else:
+        yield 87 + n
+    unit
+
+# The four hexadecimal digits of V (0..0xFFFF).
+fn hex4(v: int) -> unit:
+    hex_digit(v.shift_right(12))
+    hex_digit(v.shift_right(8).mod(16))
+    hex_digit(v.shift_right(4).mod(16))
+    hex_digit(v.mod(16))
+    unit
+
+# The escape of control character C (0..31), its reverse solidus first.
+fn control(c: int) -> unit:
+    yield 92
+    if c == 8:
+        yield 98
+    elif c == 9:
+        yield 116
+    elif c == 10:
+        yield 110
+    elif c == 12:
+        yield 102
+    elif c == 13:
+        yield 114
+    else:
+        yield 117
+        yield 48
+        yield 48
+        hex_digit(c.shift_right(4))
+        hex_digit(c.mod(16))
+    unit
+
+# One character, the scalar value C, of a string's body: raw unless it is
+# the quotation mark, the reverse solidus or a control.
+fn character(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        yield c
+    unit
+
+#: emits json_lex::json_string
+#: emits json_lex::json_string_strict
+fn string(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+# U+10000 + U (U in 0..0xFFFFF) as "\uD8xx\uDCxx": the high surrogate's
+# second digit 8..b, the low one's c..f.
+fn surrogate_pair(u: int) -> unit:
+    yield 92
+    yield 117
+    yield 100
+    hex_digit(8 + u.shift_right(18))
+    hex_digit(u.shift_right(14).mod(16))
+    hex_digit(u.shift_right(10).mod(16))
+    yield 92
+    yield 117
+    yield 100
+    hex_digit(12 + u.mod(1024).shift_right(8))
+    hex_digit(u.shift_right(4).mod(16))
+    hex_digit(u.mod(16))
+    unit
+
+# One character of an ASCII-only body: string's escapes, a BMP character
+# past U+007E as \uXXXX, a supplementary one as an escaped surrogate pair.
+fn character_ascii(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    elif c < 127:
+        yield c
+    elif c >= 53248 and c < 55296:
+        # U+D000..U+D7FF: "\ud" and a second digit below 8 (no surrogate).
+        yield 92
+        yield 117
+        yield 100
+        hex_digit((c - 53248).shift_right(8))
+        hex_digit(c.shift_right(4).mod(16))
+        hex_digit(c.mod(16))
+    elif c < 65536:
+        yield 92
+        yield 117
+        hex4(c)
+    else:
+        surrogate_pair(c - 65536)
+    unit
+
+#: emits json_lex::json_string
+#: emits json_lex::json_string_strict
+fn string_ascii(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character_ascii(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+# The UTF-8 bytes of the scalar value V (RFC 3629), in utf8_char's cases.
+fn utf8(v: int) -> unit:
+    if v < 128:
+        yield v
+    elif v < 2048:
+        yield 192 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 4096:
+        yield 224
+        yield 128 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 53248:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 57344:
+        yield 237
+        yield 128 + (v - 53248).shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 65536:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 262144:
+        yield 240
+        yield 128 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 1048576:
+        yield 240 + v.shift_right(18)
+        yield 128 + v.shift_right(12).mod(64)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    else:
+        yield 244
+        yield 128 + (v - 1048576).shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    unit
+
+# One character of a string's body as bytes.
+fn character_bytes(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        control(c)
+    else:
+        utf8(c)
+    unit
+
+#: emits json_lex::json_string_bytes
+fn string_bytes(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        character_bytes(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+# A value of a List of scalar values that is not one (a surrogate, or
+# outside 0..0x10FFFF), at index AT: never emitted.
+error NotAScalar:
+    at: int
+    value: int
+
+#: emits json_lex::json_string
+#: emits json_lex::json_string_strict
+fn string_codes(codes: List[int]) -> unit errors NotAScalar:
+    yield 34
+    loop c in codes and i from 0 to std::list::length(codes):
+        if c < 0 or c > 1114111 or (c >= 55296 and c <= 57343):
+            fail NotAScalar {at: i, value: c}
+        character(c)
+        continue
+    yield 34
+    unit
+
+# Coroutine roots (number_emit.bot's convention: the symbols, then -1).
+
+#: emits json_lex::json_string
+fn string_source(text: str) -> int errors IndexNotFound:
+    string(text)
+    -1
+
+#: emits json_lex::json_string_strict
+fn string_ascii_source(text: str) -> int errors IndexNotFound:
+    string_ascii(text)
+    -1
+
+#: emits json_lex::json_string_bytes
+fn string_bytes_source(text: str) -> int errors IndexNotFound:
+    string_bytes(text)
+    -1
+
+#: emits json_lex::json_string
+fn string_codes_source(codes: List[int]) -> int errors NotAScalar:
+    string_codes(codes)
+    -1
