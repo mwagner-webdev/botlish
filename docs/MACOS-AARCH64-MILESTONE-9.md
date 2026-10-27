@@ -1406,7 +1406,17 @@ the driver's runtime-archive lookup. Observed:
 ## 36. Linux AArch64 regressions
 
 * **`tests (linux arm64)`, run 40131788283 on c7d581f6:** success.
-* **On d1e2de57:** run @@FINAL-ARM64@@.
+* **On d1e2de57:** run 40451933379, success on all 11 jobs:
+  - interp and compile, `c-bindgen.test` and `c-ffi.test` included;
+  - cranelift and cranelift-generic coverage;
+  - the system-linked executables, also under GC stress;
+  - golden shards 1 to 4;
+  - the native Rust unit tests, also under GC stress;
+  - the whole suite under GC stress (2 h 16 min).
+
+  Its runners are still Ubuntu 24.04 (`ubuntu-24.04-arm`), with clang 18
+  and the old GNU ld. The same tree passes there the four tests the
+  x86-64 runners' new image fails (section 35).
 
 Nothing Linux-specific changed after c7d581f6 except `aot.rs`'s remedy
 function. Its unit tests run there too.
