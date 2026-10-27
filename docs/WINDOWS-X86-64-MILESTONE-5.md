@@ -1232,29 +1232,45 @@ for utf8-*), at 200,000 items. "General" is the coroutine runtime
 these coroutines into their consumer (COROUTINE-FUSION-MILESTONE-1.md).
 Each figure is the median of three driver processes.
 
-| Workload | Windows general | Windows fused | Linux general | Linux fused |
+| Workload | Windows general, A → C | Windows fused, C | Linux general, before → after | Linux fused, after |
 |---|---:|---:|---:|---:|
-| coroutine (hand-written JSON-like lexer) | 354.0 | 9.4 | 268.2 | 11.2 |
-| dfa-lex (json_lex.bot, RFC 8259's lexical grammar) | 430.8 | 11.8 | 328.3 | 13.0 |
-| dfa-validate (the same with the structural layer) | 539.0 | 26.0 | 411.1 | 23.0 |
-| yaml-tokens | 426.2 | 17.7 | 327.9 | 20.2 |
-| utf8-coroutine | 205.7 | 7.2 | 143.5 | 9.0 |
-| utf8-dfa | 203.7 | 6.4 | 151.4 | 7.4 |
-| dfa-micro (one recognizer, per symbol) | 202.4 | 3.5 | 139.0 | 4.1 |
-| hand-micro (the same by hand) | 209.3 | 2.7 | 155.1 | 4.6 |
+| coroutine (hand-written JSON-like lexer) | 354.0 → 355.7 | 9.3 | 265–276 → 196–237 | 10.4–11.5 |
+| dfa-lex (json_lex.bot, RFC 8259's lexical grammar) | 430.8 → 317.8 | 11.8 | 320–332 → 215–237 | 12.8–13.6 |
+| dfa-validate (the same with the structural layer) | 539.0 → 411.9 | 24.8 | 374–416 → 270–322 | 22.1–23.4 |
+| yaml-tokens | 426.2 → 326.3 | 17.7 | 310–328 → 242–248 | 17.3–18.7 |
+| utf8-coroutine | 205.7 → 204.8 | 7.3 | 128–156 → 158–165 | 9.0–9.2 |
+| utf8-dfa | 203.7 → 202.2 | 6.2 | 135–146 → 147–148 | 7.0–7.3 |
+| dfa-micro (one recognizer, per symbol) | 202.4 → 195.8 | 3.5 | 143 → 146–166 | 4.1–4.2 |
+| hand-micro (the same by hand) | 209.3 → 205.7 | 2.7 | 130–150 → 152–162 | 2.3–2.4 |
 
-(Windows: real Windows, run 40123395211's `roots` job, 48056543. Linux:
-controlled experiment.)
+Sources:
+
+* Windows: real Windows, the `roots` jobs of runs A (48056543) and C
+  (3a71734b), one processor model;
+* Linux: controlled experiment, this checkout's driver before and after
+  3a71734b, two pairs in opposite orders, the two figures' range.
 
 * **Fused code is equally fast on both.** It is the same machine code with
-  no switch: 9.4 against 11.2 ns per character, the Windows runner slightly
-  ahead.
-* **The general runtime is 50 to 60 ns per item dearer on Windows**, where
-  every item is one switch round trip (dfa-micro: 202 against 139). That is
-  the resume's difference in section 9.1 again. The DFA workloads that matter run
-  fused, at 3.5 to 26 ns per item on Windows. The general runtime remains
-  what runs the coroutines fusion cannot take (a handle that leaves its
-  function, a recursive yielding chain), and the golden runner.
+  no switch: 9.3 against 10.4–11.5 ns per character, the Windows runner
+  slightly ahead.
+* **The lexers that construct a recognizer per token gained most from
+  3a71734b.** dfa-lex, dfa-validate and yaml-tokens construct one for
+  every token, and their general runtime is about a quarter cheaper on
+  both hosts.
+  - The hand-written lexer constructs one only for numbers and strings.
+    It moved on Linux (265–276 → 196–237) and not on Windows (354.0 →
+    355.7). This report has no explanation for the difference.
+  - The rows that construct nothing per item moved within 30 ns, in
+    opposite directions on the two hosts. They make one construction per
+    run, not per item, so this is noise and code placement, not the
+    change.
+* **The general runtime is about 50 ns per item dearer on Windows** where
+  every item is one switch round trip (dfa-micro: 196 against 146–166).
+  That is the resume's difference in section 9.1 again. The DFA workloads
+  that matter run fused, at 3.5 to 25 ns per item on Windows. The general
+  runtime remains what runs the coroutines fusion cannot take (a handle
+  that leaves its function, a recursive yielding chain), and the golden
+  runner.
 
 ### 9.5 Programs without coroutines, before and after
 
