@@ -749,9 +749,50 @@ fixture provides.
 
 ## 32. Link time and executable size
 
-`bench/native-link-plan.tcl` (median of 5; Linux x86-64, 4 cores):
+`bench/native-link-plan.tcl -runs 5` (**Executed**: medians of 5, Linux
+x86-64, a 4-core container with nothing else running, the release driver,
+GNU ld 2.42 through cc; the fixture of tests/native-link-plan.test, a
+static archive and a shared library of one name):
 
-(See the table filled in below by the benchmark run.)
+| Front end (parse, load, build, check) | ms |
+|---|---:|
+| no link declaration | 3.2 |
+| 50 ordinary `extern c library` | 4.1 |
+| 50 static ones (25 `static at`) | 4.4 |
+
+| The driver's resolution (`botlish-native link-plan`) | ms | result |
+|---|---:|---|
+| an archive declared at a path | 2.6 | archive |
+| an archive on the -L path | 2.4 | archive |
+| an archive found nowhere | 8.5 | NATIVE LINK ARCHIVE |
+
+| The link | link ms | executable bytes | dynamic libraries | whole run ms |
+|---|---:|---:|---:|---:|
+| rustc, `extern c library` (shared) | 386.6 | 10,034,128 | 6 | 3.2 |
+| rustc, `static at` (archive) | 368.7 | 10,034,232 | 5 | 2.9 |
+| system, `extern c library` (shared) | 202.1 | 9,930,336 | 6 | 2.9 |
+| system, `static at` (archive) | 211.6 | 9,930,400 | 5 | 3.1 |
+
+What it shows:
+
+* The plan costs the front end about a millisecond for 50 declarations
+  of either kind (3.2 ms without one, 4.1 and 4.4 ms with them).
+* Resolution is a few milliseconds and never the link's cost. A refusal
+  costs more (8.5 ms) because the driver has looked everywhere first:
+  the -L directories, then the toolchain's own (`cc -print-search-dirs`
+  and `ld --verbose`, each a process). A found archive never asks the
+  toolchain: the -L directories come first.
+* A static link takes as long as a shared one (within 5% either way), the
+  executable grows by the archive's code (64 to 104 bytes for the
+  fixture's two functions) and has one dynamic library fewer (the
+  fixture's). The whole runs of an executable that adds two numbers differ
+  by less than their noise.
+* The system linker links in about half the rustc linker's time, with
+  both linkages, as SINGLE-EXECUTABLE-FFI-MILESTONE-1.md measured for
+  ordinary programs.
+
+The macOS numbers are the SDL3 job's (section 35): its log prints the
+static and dynamic executables' sizes and `otool -L` lists.
 
 ## 33. Linux x86-64 CI
 

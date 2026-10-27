@@ -11,9 +11,9 @@
 #     ones and with 50 static ones (25 with archive paths) -- the cost of
 #     parsing, merging and recording the plan;
 #   * the driver's resolution (botlish-native link-plan, NIR already
-#     written): an archive declared at a path, one found on the -L path, one
-#     found only in the toolchain's own directories (asking the C driver and
-#     GNU ld for them), and none at all (the refusal);
+#     written): an archive declared at a path, one found on the -L path, and
+#     one found nowhere (the refusal, after asking the C driver and GNU ld
+#     for the toolchain's own directories);
 #   * the link, per linker: the program linked with the shared library
 #     (`extern c library`) and with the archive (`static at`): wall time,
 #     the executable's size and dynamic libraries, and its run's wall time
