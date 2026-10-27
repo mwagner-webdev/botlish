@@ -462,10 +462,10 @@ Source:
 
 Tests, audits and documentation:
 
-* `tests/bot-modules.test` (53 tests); `tests/workload-icy-tower.test`'s
+* `tests/bot-modules.test` (56 tests); `tests/workload-icy-tower.test`'s
   staging; census rows (`audit/golden/migration/census/bot-modules.tsv`,
   `tcl-names.txt`, the regenerated `tests/golden/manifest.tsv`).
-* `audit/bot-modules/tools/mutate.tcl` and `mutants.txt` (19 mutants);
+* `audit/bot-modules/tools/mutate.tcl` and `mutants.txt` (20 mutants), `fuzz.tcl`;
   mutants of `CheckRef`/`CheckImports` code in the module-privacy,
   error-payloads, hashable and type-predicates harnesses retargeted to the
   rewritten lines (same rules).
@@ -498,7 +498,150 @@ names), rustc 1.97, clang 18.1.3; the native backend built with `cargo
 build --release`. Every command ran with `LANG=C.utf8 LC_ALL=C.utf8` and a
 private `-tmpdir`. "Executed" means run here, with the output shown.
 
-VERIFICATION-PLACEHOLDER
+### The package suite (executed)
+
+`tclsh9.0 tests/bot-modules.test -tmpdir DIR`: **56 tests, 56 passed, 0
+skipped** (with the package-owned libSDL3 built and the native backend
+built; the symbolic-link tests need a POSIX host, the SDL3 run a
+linux-x86_64 one). The prompt's required cases map to it as follows:
+
+| # | requirement | tests |
+|---|---|---|
+| 1 | no `.bot_modules`: as before | bm-no-packages, bm-no-packages-same-hir |
+| 2 | a direct package | bm-direct-package, bm-package-files |
+| 3 | a nested module of it | bm-direct-package, bm-package-files |
+| 4 | rooted and unrooted agree | bm-rooted-agrees |
+| 5 | a package imports its own modules | bm-package-files, bm-rooted-agrees |
+| 6 | a package imports its own dependency | bm-package-files (widgets/helper) |
+| 7 | no transitive dependency | bm-no-transitive-dependency |
+| 8 | no consumer modules | bm-package-cannot-see-consumer, bm-package-cannot-name-consumer, bm-sdl3-package-boundary |
+| 9 | no upward, sibling or ancestor lookup | bm-no-sibling-or-ancestor, bm-no-upward-search, bm-no-packages-same-hir |
+| 10 | application/package collision | bm-application-package-collision, bm-unimported-application-file-collides-with-nothing, bm-entry-file-is-no-module |
+| 11 | dependency/package collision in a package | bm-package-dependency-collision |
+| 12 | `std` reserved | bm-std-reserved, bm-package-imports-std, bm-package-is-not-std |
+| 13 | missing modules' diagnostics | bm-missing-package-module, bm-missing-hint, bm-not-a-directory |
+| 14 | same-named instances on separate branches | bm-instances-distinct-values, bm-symlinked-package |
+| 15 | distinct nominal types and errors | bm-instances-nominal-types, bm-instances-nominal-enums, bm-instances-errors, bm-instances-identities |
+| 16 | no interference through methods or registries | bm-instances-methods, bm-instances-identities, bm-application-and-nested-same-name |
+| 17 | every backend agrees | bm-instances-distinct-values (four backends), bm-application-and-nested-same-name (four backends) |
+| 18 | native symbols do not collide | bm-instances-native-functions, bm-executable-needs-no-packages |
+| 19 | HIR interchange keeps the distinction | bm-interchange |
+| 20 | interleaved compilations | bm-isolation |
+| 21 | cache and service invalidation | bm-cache-invalidation, bm-cache-package-installed, bm-service-sources, bm-service-directory-stale |
+| 22 | navigation | bm-service-navigation, bm-service-syntax-recovery, bm-service-syntax-recovery-dependent |
+| 23 | working directory | bm-cwd-independence |
+| 24 | bundled compiler | bm-bundled-compiler |
+| 25 | executable without sources | bm-executable-needs-no-packages |
+| 26 | a real SDL3 binding from `.bot_modules` | bm-sdl3-stage-package, bm-sdl3-package-boundary, bm-sdl3-nested-airlock, bm-sdl3-run |
+
+and the negative cases: an incomplete package tree (bm-missing-package-
+module), duplicate imports (bm-rooted-agrees), cycles (bm-self-import-and-
+cycle, bm-nested-self-import, bm-symlink-cycle), malformed structures
+(bm-not-a-directory; a non-identifier directory can never be named), the
+privacy, opaque, direct-module, recognizer and `static compile:` rules
+inside nested instances (bm-nested-*), and the loader's traversal itself
+(bm-ast-map-children-parity, bm-rewrite-covers-every-reference).
+
+### Regression suites (executed)
+
+Each with `tclsh9.0 tests/X.test -tmpdir DIR`, all passing (skips are host
+constraints, the same as on the unchanged checkout):
+
+| file | result |
+|---|---|
+| imports.test | 104/104 |
+| std-namespace.test | 36/36 |
+| application-modules.test | 21/21 |
+| surface-modules.test | 37/37 |
+| hir-cache.test | 17/17 |
+| compiler-service.test | 54/54 |
+| compilation-isolation.test | 19/19 |
+| hir-interchange.test | 11/11 |
+| main-cli.test | 63/63 |
+| diagnostic-recovery.test | 52/52 |
+| syntax-recovery.test | 33/33 |
+| static-compile.test (the diagnostic census) | 83/83 |
+| direct-modules.test | 55 passed, 1 skipped (`singleExecutable`: no single executable built here) |
+| module-privacy.test | 75/75 |
+| opaque-struct.test | 141/141 |
+| namespaced-errors.test | 31/31 |
+| dfa.test | 85/85 |
+| lsp.test | 70/70 |
+| workload-icy-tower.test | 20 passed, 6 skipped (the Windows executable's: `icyTowerWindowsExecutable`); its Linux executable tests ran: build.sh with the package staging, the game, the oracle |
+| c-bindgen.test | 58 passed, 26 skipped (BoringSSL, Tcl sources, MinGW, cross toolchains not installed here); its SDL3 tests ran |
+
+LOCAL-RUN-PLACEHOLDER
+
+### Mutation and fuzzing (executed)
+
+* `audit/bot-modules/tools/mutate.tcl`: MUTATE-PLACEHOLDER. Its first
+  run (19 mutants) left one survivor, `cache-ignores-directories`: removing
+  a package directory also removes its files, so the file dependencies
+  invalidated the entry anyway. The case only the directory dependency
+  covers is a package *appearing* where the loader found none;
+  `bm-cache-package-installed` was added and kills it. A twentieth mutant,
+  `recovery-facts-by-spelling`, came with the fix of a defect this
+  milestone found in itself (below).
+* Mutants of code this milestone rewrote, in other harnesses (their texts
+  updated, same rules): RETARGETED-PLACEHOLDER.
+* `audit/hir-interchange/tools/mutate.tcl`: HX-PLACEHOLDER;
+  `audit/compiler-service/tools/mutate.tcl`: CS-PLACEHOLDER.
+* `audit/bot-modules/tools/fuzz.tcl` (new: random application trees of
+  modules, packages, nested packages, collisions, `.bot_modules/std` and
+  rooted imports, against an independent model of section B's table and
+  of the loader's depth-first order): FUZZ-PLACEHOLDER.
+* `audit/imports/tools/fuzz.tcl -n 60 -seed S -backends "interp
+  compile"` for seeds 1, 2 and 3: 60 programs, 60 negatives each, 0
+  differential, oracle, negative-escape or backend disagreements.
+
+### Interchange and isolation over the corpus (executed)
+
+ROUNDTRIP-PLACEHOLDER
+
+### Compilerpedia and the census (executed)
+
+* `tclsh9.0 tools/compilerpedia.tcl check`: 851 topics, 635 examples run,
+  0 problems.
+* `tclsh9.0 audit/golden/migration/merge.tcl -names
+  audit/golden/migration/tcl-names.txt -check 1`: exit 0 (the new tests'
+  census rows, `KEEP-MULTI-PROGRAM` or `KEEP-INTERNAL`: a golden suite is
+  one file, with no directory of its own to install a package in).
+
+### Unchanged output for ordinary programs (executed)
+
+* `hir::format` of the HIR of `examples/games/2048/demo.bot`,
+  `tests/golden/values.bot`, `imports.bot` and `contexts.bot` is
+  byte-identical between the unchanged checkout and this one.
+* Icy Tower: the game's NIR is byte-identical with the binding copied into
+  the root and installed as a package (155,350 bytes), and `build.sh`'s
+  executable is byte-identical to the unchanged checkout's built in the
+  same container.
+
+### Compile-time overhead (executed)
+
+BENCH-PLACEHOLDER
+
+### A defect found and fixed during verification
+
+Reading the loader for spelling/identity mismatches after the tests passed
+found one more: syntax recovery looked a module's "may declare anything"
+facts up by the namespace as written, so in a nested package a malformed
+declaration made its consumer's reference to a missing member a spurious
+`UNKNOWN-SYMBOL` beside the syntax error. `DependentReference` now looks
+them up by identity; `bm-service-syntax-recovery-dependent` pins it (it
+fails without the fix) and the mutant `recovery-facts-by-spelling` checks
+the test.
+
+### Continuous integration (requested)
+
+The branch push started the macOS arm64, Windows x86-64 and Icy Tower
+(Windows) workflows, and the Linux workflows were dispatched on the branch
+(`tests.yml`, `tests-arm64.yml`, `static-decisions.yml` -- the batched
+against sequential comparison, never run locally -- `icy-tower.yml`,
+`c-bindgen.yml`, `single-executable.yml`).
+
+CI-PLACEHOLDER
+
 
 ## G. Remaining limitations
 

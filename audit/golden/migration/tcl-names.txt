@@ -582,6 +582,7 @@ tests/bot-modules.test bm-package-dependency-collision pass
 tests/bot-modules.test bm-std-reserved pass
 tests/bot-modules.test bm-missing-package-module pass
 tests/bot-modules.test bm-missing-hint pass
+tests/bot-modules.test bm-numeric-looking-package-names pass
 tests/bot-modules.test bm-not-a-directory pass
 tests/bot-modules.test bm-self-import-and-cycle pass
 tests/bot-modules.test bm-nested-self-import pass
@@ -600,6 +601,7 @@ tests/bot-modules.test bm-identity-unspellable pass
 tests/bot-modules.test bm-nested-privacy-and-opaque pass
 tests/bot-modules.test bm-nested-direct-module pass
 tests/bot-modules.test bm-nested-dfa pass
+tests/bot-modules.test bm-nested-static-compile pass
 tests/bot-modules.test bm-interchange pass
 tests/bot-modules.test bm-isolation pass
 tests/bot-modules.test bm-cache-invalidation pass
@@ -608,6 +610,7 @@ tests/bot-modules.test bm-service-sources pass
 tests/bot-modules.test bm-service-directory-stale pass
 tests/bot-modules.test bm-service-navigation pass
 tests/bot-modules.test bm-service-syntax-recovery pass
+tests/bot-modules.test bm-service-syntax-recovery-dependent pass
 tests/bot-modules.test bm-cwd-independence pass
 tests/bot-modules.test bm-bundled-compiler pass
 tests/bot-modules.test bm-executable-needs-no-packages pass

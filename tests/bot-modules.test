@@ -315,6 +315,15 @@ test bm-missing-hint {a missing namespace in a package names the standard namesp
     }]
 } -cleanup removeApps -match glob -result {UNKNOWN-NAMESPACE: *has no package "list" installed*; the standard library's namespace of that name is std::list (`import std::list`)*}
 
+test bm-numeric-looking-package-names {packages named nan and inf, and one of them installed by the other, resolve and run like any (a package's name is a String, never a number: NUMERIC-LOOKING-NAMES)} -body {
+    appValues [app {
+        main.bot "import nan\nimport inf\n\n\[nan::f(), inf::g()\]\n"
+        .bot_modules/nan/nan.bot "import inf\n\nfn f() -> int:\n    inf::g() + 1\n"
+        .bot_modules/nan/.bot_modules/inf/inf.bot "fn g() -> int:\n    10\n"
+        .bot_modules/inf/inf.bot "fn g() -> int:\n    20\n"
+    }] {interp compile cranelift}
+} -cleanup removeApps -result {{[11, 20]} {[11, 20]} {[11, 20]}}
+
 test bm-not-a-directory {only a directory is an installed package: a file at .bot_modules/NAME, or a .bot_modules that is a file, installs nothing, and the import is the application's own module} -body {
     set a [app {
         main.bot "import widgets\n\nwidgets::f()\n"
@@ -469,6 +478,14 @@ test bm-nested-dfa {a declared recognizer of a package's own package, and a clas
     }] {interp}
 } -cleanup removeApps -result 3
 
+test bm-nested-static-compile {a static compile block of a package names its own package by the identity the loader rewrote, and a block that names a namespace the package has not installed is rejected as a block (its deferred reference), on every backend} -body {
+    appValues [app {
+        main.bot "import physics\n\n\[physics::f(), physics::g()\]\n"
+        .bot_modules/physics/physics.bot "import geometry\nimport std::compiler\n\nfn bad() -> int errors std::compiler::CompilerError:\n    static compile:\n        geometry::make(1) + nosuch::g()\n\nfn good() -> int errors std::compiler::CompilerError:\n    static compile:\n        geometry::make(3)\n\nfn f() -> int:\n    a = bad():\n        on std::compiler::CompilerError:\n            return -1\n    a\n\nfn g() -> int:\n    good():\n        on std::compiler::CompilerError:\n            -2\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "fn make(n: int) -> int:\n    n * 10\n"
+    }]
+} -cleanup removeApps -result {{[-1, 30]} {[-1, 30]} {[-1, 30]} {[-1, 30]}}
+
 # ---------------------------------------------------------------------------
 # 19-21. Interchange, isolation, the cache and the service
 
@@ -597,6 +614,17 @@ test bm-service-syntax-recovery {analysis past a syntax error in a package's own
     set d [lindex [service::diagnostics $rev] 0]
     list [dict get [service::revision $rev] outcome] [string map [list $dir/ ""] [dict get $d file]] [dict get $d code]
 } -cleanup {service::closeWorkspace $ws; removeApps} -result {syntax .bot_modules/physics/.bot_modules/geometry/geometry.bot {SURFACE SYNTAX}}
+
+test bm-service-syntax-recovery-dependent {a malformed statement of a package's own package that may declare any member leaves its consumer's reference to a missing member unknown, not wrong: no UNKNOWN-SYMBOL beside the syntax error (the module's recovery facts are found by its identity)} -body {
+    set dir [app {
+        main.bot "import physics\n\nphysics::f()\n"
+        .bot_modules/physics/physics.bot "import geometry\n\nfn f() -> int:\n    geometry::make(1)\n"
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "fn (n: int) -> int:\n    n\n"
+    }]
+    set ws [service::workspace -warnings off]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    lmap d [service::diagnostics $rev] {list [dict get $d code] [file tail [dict get $d file]]}
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {{{SURFACE SYNTAX} geometry.bot}}
 
 # ---------------------------------------------------------------------------
 # 23-25. Working directories, the bundled compiler, executables

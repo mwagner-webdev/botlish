@@ -42,7 +42,7 @@
 @@ application-precedence an application file of a namespace an installed package claims wins over the package (precedence, not a collision)
 ## surface/modules.tcl
 <<<<
-                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ([expr {$path eq "" ? "which has no module \"$name\"" : "whose module is $path"}]): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
                 return $result
 ====
                 set owner ""
@@ -52,7 +52,7 @@
 @@ package-precedence the installed package silently wins over an application file of its namespace
 ## surface/modules.tcl
 <<<<
-                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ([expr {$path eq "" ? "which has no module \"$name\"" : "whose module is $path"}]): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
                 return $result
 ====
 >>>>
@@ -157,6 +157,14 @@
             return [dict get $map $prefix][string range $ns $cut end]
         }
 ====
+>>>>
+
+@@ recovery-facts-by-spelling syntax recovery looks a module's open facts up by the namespace as written: a nested instance's malformed declarations are never found, and its consumer's reference is reported UNKNOWN-SYMBOL
+## surface/modules.tcl
+<<<<
+    set ns [IdentityOf $state $key [lindex $ref 0]]
+====
+    set ns [lindex $ref 0]
 >>>>
 
 # ---------------------------------------------------------------------------

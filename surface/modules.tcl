@@ -479,7 +479,12 @@ proc surface::modules::Installed {state scope name} {
 # is named. Its identity is SCOPE/NAME, or NAME in the application.
 proc surface::modules::Instance {stateVar scope name} {
     upvar 1 $stateVar state
-    set instance [expr {$scope eq "" ? $name : "$scope/$name"}]
+    # (Never expr's ?: over a name: `nan` and `inf` read as numbers there.)
+    if {$scope eq ""} {
+        set instance $name
+    } else {
+        set instance $scope/$name
+    }
     if {![dict exists $state packages $instance]} {
         dict set state packages $instance [dict create name $name parent $scope \
             dir [file normalize [PackageDir $state $scope $name]]]
@@ -561,7 +566,12 @@ proc surface::modules::Locate {stateVar key name} {
             if {$own ne "" && [file normalize $own] ne [dict get $state entry]} {
                 # (The entry file is in no namespace: it is no module, and
                 # competes with none.)
-                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ([expr {$path eq "" ? "which has no module \"$name\"" : "whose module is $path"}]): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                if {$path eq ""} {
+                    set theirs "which has no module \"$name\""
+                } else {
+                    set theirs "whose module is $path"
+                }
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
                 return $result
             }
         }
@@ -1596,7 +1606,8 @@ proc surface::modules::DependentReference {state key ref kind} {
     if {[dict exists $state open $key] && [dict get $state open $key header]} {
         return 1
     }
-    set ns [lindex $ref 0]
+    # (The module the reference's namespace denotes, by its identity.)
+    set ns [IdentityOf $state $key [lindex $ref 0]]
     if {$kind eq "UNKNOWN-SYMBOL" && [dict exists $state open $ns]} {
         set open [dict get $state open $ns]
         return [expr {[dict get $open values] || [dict get $open types]}]

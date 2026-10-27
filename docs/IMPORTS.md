@@ -516,6 +516,10 @@ spelled qualified.
   a module naming another module's integer domain and refinement qualified
   or type-imported, collisions, non-types, nested namespaces, ABI), cache
   non-leakage, dependency graph, cycles, protected intrinsics.
+* `tests/bot-modules.test`: installed packages (`.bot_modules`), their
+  scopes, collisions and package-instance identity
+  (BOT-MODULES-MILESTONE-1.md); `audit/bot-modules/tools/fuzz.tcl` and
+  `mutate.tcl`.
 * `audit/imports/tools/fuzz.tcl`: random valid programs over `list::`,
   `str::`, `mutable_array::`, `abi::`, `std::abi::x86_64::` and `std::linux::abi::` with
   exactly the imports they need, method and type-import spellings checked
