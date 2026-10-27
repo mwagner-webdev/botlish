@@ -800,9 +800,17 @@ Locally (**Executed**, Linux x86-64, the branch merged with main at
 ff0826c, the release driver):
 
 * `tests/native-link-plan.test`: 35 tests, 32 passed, 3 skipped (two
-  `macosHost`, one `windowsHost`), 0 failed; also with
-  `BOTLISH_NATIVE_LINKER=system`, with `stub` and under
-  `BOTLISH_NATIVE_GC_STRESS=1`.
+  `macosHost`, one `windowsHost`), 0 failed; the same with
+  `BOTLISH_NATIVE_LINKER=system` and under `BOTLISH_NATIVE_GC_STRESS=1`;
+  with `stub`, 16 passed and 19 skipped (every test that links C needs
+  `nlpFixture`, which requires `cLinker`), 0 failed.
+* The narrowed `tests/local.tcl` of the files this milestone touches
+  (native-link-plan, c-ffi, native-library, system-linker,
+  native-executable, aot-stub-linker, static-compile, compilerpedia,
+  main-cli, hir-interchange, hir-cache, compilation-isolation,
+  target-model, compiler-service) with their golden suites: 499 and 498
+  Tcl tests passed on interp and compile, 132 golden tests on each of the
+  four backends, 0 failed.
 * `cargo test --release --bin botlish-native link_plan`: 12 passed.
 * The link-plan mutants: 26, 25 killed, 1 skipped (section 30).
 * The updated mutants of the other harnesses, each still applying and
