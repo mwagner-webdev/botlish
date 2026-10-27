@@ -108,7 +108,7 @@ worked.
   walk of suspended stacks and the fallback refusal. Four publication
   mutants that Linux and macOS already ran now run on Windows too. On real
   Windows the native-stack and windows-unwind tools kill every mutant that
-  applies there. PENDING-RESULT-RUNS
+  applies there, each by its own detector (3a71734b).
 * **What it costs** (section 9; Windows runners A and C):
   - a resume is 192–211 ns at any depth, against 132–179 ns on Linux;
     most of the difference is `SwitchToFiber`'s round trip (57.9 ns,
@@ -809,8 +809,9 @@ coroutine-aware. So:
   are off. The message names the fallback plan.
 * `fallback_tests::the_fallback_plan_refuses_native_coroutines` checks
   both (Linux in a fallback build, and the Windows `roots` job).
-* The mutant `fallback-runs-coroutines` lifts both refusals. It was killed
-  on Linux by that test (controlled experiment, section 8.4).
+* The mutant `fallback-runs-coroutines` lifts both refusals. That test
+  killed it on Linux (controlled experiment), on macOS and on real Windows
+  (CI's mutant tiers, section 8.4).
 
 ## 8. Tests
 
@@ -923,7 +924,8 @@ Results:
 
   Ours add up to 784 bytes. A resume needs 352 bytes, `SwitchToFiber`'s
   share included, so a pooled start should need under 1 KiB. By
-  inspection, the difference was `stack_bytes()`. It read
+  inspection, the difference was `stack_bytes()` (3a71734b's sweep below
+  confirms it). It read
   `BOTLISH_NATIVE_COROUTINE_STACK_BYTES` from the environment at every
   start, a pooled one's included. On Windows, `std::env::var` is
   `GetEnvironmentVariableW` behind a 1 KiB buffer of Rust's standard
@@ -933,8 +935,16 @@ Results:
 
   Commit 3a71734b reads the size once per process. It also sweeps the
   pooled start from 0 to 4 KiB, still in 16-byte steps, so that the sweep
-  reaches the edge's other side whatever the start's frames take. Its
-  result: PENDING-WIN-SWEEP.
+  reaches the edge's other side whatever the start's frames take.
+* **Real Windows** (run 40458676354's smoke job, 3a71734b): every native
+  stack check passed. Overflowed / completed:
+  - resume from the thread: 22 / 107;
+  - a start on a pooled fiber: 38 / 219. The start needs about 600 bytes
+    of the thread's stack, against a resume's 352, as its frames
+    predicted. This confirms the diagnosis;
+  - a thread's first start: 10 / 119, as on a4d5d108;
+  - resume from a coroutine: 22 / 107;
+  - yield from a coroutine: 15 / 114.
 * **Other hosts (Linux):** the POSIX checks of the same file pass. The
   POSIX sweeps run 97 offsets each. Overflowed/completed:
   - resume from the thread: 12 / 85;
@@ -1010,7 +1020,7 @@ Results:
 | audit/native-stack | `start-publishes-thread-stack` | a first segment publishes the thread's stack | Linux; Windows: coroutine fresh, wide, publication |
 | audit/native-stack | `resume-not-published` | a resumed coroutine does not publish its stack | Linux; Windows: coroutine after-yields, nested, publication |
 | audit/native-stack | `yield-not-restored` | the resumer does not publish its stack when a segment returns | Linux; Windows: publication, the sweep resuming from the thread |
-| audit/native-stack | `fallback-runs-coroutines` | the fallback plan starts native coroutines | Linux: the fallback build's refusal test. Windows: PENDING-WIN-RERUN |
+| audit/native-stack | `fallback-runs-coroutines` | the fallback plan starts native coroutines | Linux, macOS and Windows: the fallback build's refusal test |
 | audit/native-stack | `win-published-stack-ignored` | the Windows guard reads the stack it was installed with | Windows: every coroutine exhaustion check |
 | audit/native-stack | `win-fiber-without-guarantee` | a fiber gets no stack guarantee, and none is checked | Windows: the fiber's guarantee and commit tests |
 | audit/native-stack | `win-fiber-never-pooled` | a fiber is deleted, never pooled | Windows: the pooling and lifecycle tests |
@@ -1021,21 +1031,32 @@ Results:
 | audit/windows-unwind | `switch-records-its-callers-stack-pointer` | the switch's record off by its return address | Windows: `a_suspended_stack_unwinds_to_its_fibers_start` |
 | audit/windows-unwind | `switch-records-no-frame-register` | the switch's record without RBP | Windows: the driver's Rust tests |
 
-On real Windows (run 40131658659's mutant tier, fa711b43):
+On real Windows, the mutant tier of runs 40131658659 (fa711b43),
+40141758225 (a4d5d108) and 40458676354 (3a71734b) gave the same counts:
 
 * **audit/native-stack:** 50 mutants on windows-x86_64, 31 killed, 0
   survived, 19 skipped (another host's code).
 * **audit/windows-unwind:** 21 mutants, 21 killed.
 
-Four of those kills were not evidence. The mutation tool runs its
-detectors cheapest first and stops at the first that fails, and on fa711b43
-native_stack failed without any mutant (the start sweep above). So
-`win-driver-unguarded`, `win-executable-unguarded`,
+On the first two, four of the kills were not evidence. The mutation tool
+runs its detectors cheapest first and stops at the first that fails, and
+there `native_stack` failed without any mutant: the start's sweep
+(section 8.2). So `win-driver-unguarded`, `win-executable-unguarded`,
 `effects-infallible-on-fallback` and `fallback-runs-coroutines` were
-"killed" by that sweep alone, and their own detectors never ran. They were
-On a4d5d108 the pooled start's sweep still failed (section 8.2), and the
-same four were again killed by it alone. They run again on 3a71734b:
-PENDING-WIN-RERUN.
+"killed" by that sweep alone, and their own detectors never ran.
+
+On 3a71734b, where every native stack check passes unmutated, each was
+killed by its own detector:
+
+* `win-driver-unguarded`: native-stack-overflow.test (17 failures, its
+  coroutine cases `ns-co-after-yields` and `ns-co-edge` among them);
+* `win-executable-unguarded`: aot-facts.tcl's `standalone-depth-limit`,
+  `standalone-stack-overflow`, `standalone-runtime-overflow` and
+  `standalone-co-overflow`;
+* `effects-infallible-on-fallback`: the fallback build's
+  `nir::effect_tests`;
+* `fallback-runs-coroutines`: the fallback build's
+  `the_fallback_plan_refuses_native_coroutines`.
 
 * **Linux:** `audit/native-stack/tools/mutate.tcl`, the five mutants of
   the table that apply on Linux with `gc-walk-half-stack`: 6 mutants on
