@@ -102,7 +102,8 @@ worked.
 * **Everywhere native code runs** (section 8): both Cranelift backends,
   the JIT, executables linked by rustc and by the system linker, and the
   golden runner, which runs every golden suite on Windows' native backends
-  for the first time.
+  for the first time. The whole acceptance tier also passes on Windows
+  under GC stress (section 8.6).
 * **Mutants** (section 8.4). There are 10 new mutants, of the fiber's
   lifecycle, the Windows guard's reading of the published stack, the
   walk of suspended stacks and the fallback refusal. Four publication
@@ -1185,9 +1186,9 @@ green. The four full shards ran the acceptance tier under
 * every Tcl test file on interp and on compile, 59 + 58 + 58 + 58 = 233
   files;
 * every golden suite on interp, compile, cranelift-generic and
-  cranelift, 4 × 27 = 108 suites. Under GC stress that means a
-  collection at every allocation site of the golden runner, a
-  coroutine, on every suspended fiber;
+  cranelift, 4 × 27 = 108 suites. Under GC stress every allocation
+  collects, and on the native backends every collection walks the
+  golden runner's suspended fibers (the runner is a coroutine);
 * the examples on every backend, and the C ABI facts.
 
 Each shard took 32 to 40 minutes.
