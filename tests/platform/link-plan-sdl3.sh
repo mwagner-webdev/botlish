@@ -101,14 +101,34 @@ step "SDL3's static link interface (sdl3.pc Libs.private)"
 echo "   $private"
 frameworks=()
 libraries=()
+next=""
 for word in $private; do
+  if [[ -n $next ]]; then frameworks+=("$word"); next=""; continue; fi
   case $word in
     -Wl,-framework,*) frameworks+=("${word#-Wl,-framework,}") ;;
     -Wl,-weak_framework,*) frameworks+=("${word#-Wl,-weak_framework,}") ;;
+    -framework|-weak_framework) next=1 ;;
     -l*) libraries+=("${word#-l}") ;;
+    -pthread) ;;  # libSystem's on macOS: nothing to link
     *) fail "an entry of SDL3's link interface this acceptance does not translate: $word" ;;
   esac
 done
+# One declaration per framework and library (the plan merges repeats anyway;
+# no mapfile: macOS's /bin/bash is 3.2).
+unique() {
+  local seen=" " item
+  for item in "$@"; do
+    case $seen in *" $item "*) ;; *) seen="$seen$item "; printf '%s\n' "$item" ;; esac
+  done
+}
+deduplicated=()
+while IFS= read -r item; do deduplicated+=("$item"); done < <(unique "${frameworks[@]}")
+frameworks=("${deduplicated[@]}")
+deduplicated=()
+if (( ${#libraries[@]} )); then
+  while IFS= read -r item; do deduplicated+=("$item"); done < <(unique "${libraries[@]}")
+  libraries=("${deduplicated[@]}")
+fi
 (( ${#frameworks[@]} > 0 )) || fail "SDL3's metadata names no framework"
 echo "   frameworks: ${frameworks[*]}"
 echo "   libraries:  ${libraries[*]:-none}"
@@ -121,7 +141,9 @@ binding() {
   echo "$1"
   if [[ $2 == 1 ]]; then
     for f in "${frameworks[@]}"; do echo "extern c framework \"$f\""; done
-    for l in "${libraries[@]}"; do echo "extern c library \"$l\""; done
+    if (( ${#libraries[@]} )); then
+      for l in "${libraries[@]}"; do echo "extern c library \"$l\""; done
+    fi
   fi
   cat <<'BOT'
 
@@ -140,7 +162,10 @@ sdl::quit()
 application="$work/My Gäme"
 mkdir -p "$application/native/macos" "$work/elsewhere" "$work/out"
 cp "$static" "$application/native/macos/libSDL3.a"
-cp "$prefix/lib/$shared" "$application/native/macos/libSDL3.dylib"
+# The dylib under its install name's leaf (libSDL3.0.dylib: what dyld looks
+# for) and the name -lSDL3 finds.
+cp "$prefix/lib/$shared" "$application/native/macos/$shared"
+ln -s "$shared" "$application/native/macos/libSDL3.dylib"
 printf '%s' "$main_bot" >"$application/main.bot"
 binding 'extern c library "SDL3" static at "native/macos/libSDL3.a"' 1 >"$application/sdl.bot"
 want="[$expected_version, true]"
@@ -195,7 +220,7 @@ binding 'extern c library "SDL3"' 1 >"$application/sdl.bot"
 build "$botlish" dynamic -L "$application/native/macos"
 otool -L "$work/out/dynamic" | sed 's/^/   /'
 otool -L "$work/out/dynamic" | grep -q 'libSDL3' || fail "the control (an ordinary declaration) did not link the dylib"
-got=$(DYLD_LIBRARY_PATH="$application/native/macos" "$work/out/dynamic") || fail "the dynamic control failed"
+got=$(DYLD_LIBRARY_PATH="$application/native/macos" DYLD_FALLBACK_LIBRARY_PATH="$application/native/macos" "$work/out/dynamic") || fail "the dynamic control failed"
 [[ $got == "$want" ]] || fail "the dynamic control printed $got"
 echo "   the control, an ordinary declaration, links the dylib (Apple ld's choice) and prints $got"
 echo "   sizes: static $(wc -c <"$work/out/static-at" | tr -d ' ') bytes, dynamic $(wc -c <"$work/out/dynamic" | tr -d ' ') bytes"
