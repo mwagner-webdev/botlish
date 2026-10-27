@@ -602,7 +602,25 @@ and libSystem's `snprintf`), the full tier (the C FFI fuzzer on seeds 1, 2
 and 9 under GC stress, ok; the mutants: 1 killed, `va-keepalive-dropped`,
 and 11 skipped as x86-64's) and the Linux control.
 
-[[Linux CI]]
+**Linux AArch64**, run [40572439192](https://github.com/mwagner-webdev/botlish/actions/runs/40572439192)
+(`tests-arm64.yml` dispatched on `68c2d46`, ubuntu-24.04-arm): every job
+succeeded -- the Tcl suite on interp and compile, its cranelift and
+cranelift-generic coverage, the four golden shards, the native Rust unit
+tests (the AAPCS64 placement tests among them; the Win64 ones are x86-64's
+and not built there), the system-linked executables and the GC-stress run.
+
+**Linux x86-64**, run [40572434563](https://github.com/mwagner-webdev/botlish/actions/runs/40572434563)
+(`tests.yml` dispatched on `68c2d46`): every job that finished succeeded
+[[interp, cranelift-generic]] but for one test of one job,
+`cf-wrong-architecture` in the system-linked executables -- a
+fixed-arity test of the linker's refusal of another architecture's
+library, which failed the same way on main (runs 40526876902 and
+40558777965): the `ubuntu-latest` image had become Ubuntu 26.04, whose GCC
+runs GNU ld as `x86_64-linux-gnu-ld.bfd`, and the driver's filter of the
+linker's lines dropped its "skipping incompatible" line. Main fixed it in
+`411ee25`, which `ea9cc44` merges into this branch.
+
+[[Linux CI ea9cc44]]
 
 ## 9. Performance and code generation
 
