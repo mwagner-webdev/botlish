@@ -54,7 +54,7 @@ The evidence:
 
 * Tcl tests: tests/collection-reorder.test (36 tests) and seven new tests
   in tests/ordered-table.test.
-* A golden suite, tests/golden/collection-reorder.bot (73 cases on all
+* A golden suite, tests/golden/collection-reorder.bot (77 cases on all
   four backends).
 * The extended collection oracle and stateful fuzzer, with reorders on by
   default.
