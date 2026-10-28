@@ -941,6 +941,24 @@ oversights of this change, not regressions of existing behaviour:
   golden duplicates, its cranelift coverage, `check.tcl`'s golden shards,
   the GC-stress run and the arm64 workflow.
 
+**The merges with main.** Main moved twice while this change was
+finished, and both merges were clean:
+
+* **Main at 803223e** brought package-scoped modules, the native link
+  plan and Win64 variadic calls. A full `tclsh9.0 tests/local.tcl` on the
+  merge passed: 7,473 Tcl tests on interp and 7,468 on compile, with 0
+  failed, and every test of the 109 golden suites on every backend.
+* **Main at f680445** brought METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md.
+  That change reports a rejected method call without its placeholder's
+  consequences, so `cr-proof-no-cascade` no longer sees the placeholder's
+  IMPRINT. The test's claim holds unchanged: an order of the wrong type
+  is its type's diagnostic only, so only its expectation was updated. On
+  that merge:
+  - 21 Tcl test files passed on interp and compile: the collections, the
+    method decisions, recovery, static decisions, the service, the
+    language server, Compilerpedia and interchange.
+  - Every golden suite passed on all four backends.
+
 ## Future representation-independent equality/hash
 
 This milestone deliberately comes before content identity. Explicit order
