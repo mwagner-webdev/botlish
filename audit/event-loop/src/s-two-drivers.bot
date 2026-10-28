@@ -1,0 +1,15 @@
+# s-two-drivers.bot -- must be rejected: two installed drivers
+# (AMBIGUOUS-CONTEXT-IMPLEMENTATION). Driver choice is one, explicit,
+# application-level decision; a second one is an error, never a precedence.
+import evloop
+import evn
+import simdrv
+
+with context evloop::create(8, 0)
+with context simdrv::create()
+with context evn::create(64, 8, 0)
+n = evloop::run():
+    on IndexNotFound:
+        -1
+    on evloop::LoopReentered:
+        -2

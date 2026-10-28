@@ -1,0 +1,11 @@
+# s-loop-internals.bot -- must be rejected: a library reaches into the
+# scheduler's queues (OPAQUE-REPRESENTATION): Loop is opaque, so the tasks
+# it owns are reachable only through evloop's operations.
+import evloop
+import std::mutable_vector
+
+fn steal(context ev: evloop::Loop) -> int:
+    ev.parked.length()
+
+with context evloop::create(8, 0)
+steal()

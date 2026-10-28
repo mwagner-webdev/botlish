@@ -1,0 +1,7 @@
+# s-library-installs.bot -- must be rejected: a library (rogue.bot) installs
+# a context at its top level. Importing a library cannot change who drives
+# the loop.
+import evloop
+import rogue
+
+rogue::nothing()

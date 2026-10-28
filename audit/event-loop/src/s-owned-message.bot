@@ -1,0 +1,16 @@
+# s-owned-message.bot -- must be rejected: an affine registration token sent
+# through a resume message. Messages are unrestricted (an unreceived one
+# would be dropped silently): ownership moves into a task only at its
+# construction.
+import ownedreg
+
+struct Handoff:
+    token: ownedreg::Owned
+
+fn receiver(resume Handoff) -> int:
+    h = yield 0
+    {token} = h
+    1
+
+coroutine {step, first} = receiver()
+first

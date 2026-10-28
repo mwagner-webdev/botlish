@@ -1,0 +1,38 @@
+# ownedreg.bot -- an affine registration token (EVENT-LOOP-EXPLORATION.md,
+# Experiment D). Owned holds a Reg and an affine marker -- a null C pointer,
+# the one affine value besides a coroutine handle that costs nothing (no
+# allocation; natively an immediate word) -- so the token cannot be
+# duplicated: one owner, moved through arguments, results, fields and
+# coroutine constructions, never through a resume message or a yield.
+#
+# What affinity gives: no second owner can revoke (or keep using) a
+# registration another owner holds. What it cannot give today: a release
+# that runs anything when the token dies -- a dropped Owned is released
+# without running code (AFFINE-VALUES.md), so its registration stays
+# registered. `release` is the explicit, consuming revocation.
+import evloop
+import std::ffi::c
+
+opaque struct Owned:
+    reg: evloop::Reg
+    mark: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn own(reg: evloop::Reg) -> Owned:
+    Owned {reg: reg, mark: std::ffi::c::null[std::ffi::c::Void]()}
+
+# The token and a copy of its registration's identity (unrestricted, for
+# waiting on). There is no borrow: a function given an affine value owns
+# it, so reading the identity hands the token back -- the "thread it
+# through" idiom.
+struct Peeked:
+    reg: evloop::Reg
+    token: Owned
+
+fn peek(o: Owned) -> Peeked:
+    {reg, mark} = o
+    Peeked {reg: reg, token: Owned {reg: reg, mark: mark}}
+
+# Revoke and consume the token.
+fn release(o: Owned, context ev: evloop::Loop) -> int errors IndexNotFound:
+    {reg, mark} = o
+    evloop::revoke(reg)

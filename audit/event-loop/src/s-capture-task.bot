@@ -1,0 +1,17 @@
+# s-capture-task.bot -- must be rejected: a closure capturing a task's handle
+# (AFFINE-CAPTURE-UNSUPPORTED): a closure may be called any number of times
+# and copied, so it would alias the one owner.
+import evloop
+
+fn task(context ev: evloop::Loop) -> int:
+    evloop::yield_now()
+    0
+
+fn main(context ev: evloop::Loop) -> int:
+    coroutine {step, first} = task()
+    fn later() -> int:
+        step()
+    first
+
+with context evloop::create(8, 0)
+main()

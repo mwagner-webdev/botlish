@@ -1,0 +1,9 @@
+# drivinglib.bot -- a library whose function requires the driver (it runs a
+# nested loop). The compiler accepts it -- requiring evloop::Driver is an
+# ordinary context requirement -- but the requirement is visible in its
+# signature's transitive requirements, which tools/static.tcl audits: only
+# the entry program and evloop itself may need Driver.
+import evloop
+
+fn settle(context ev: evloop::Loop, d: evloop::Driver) -> int errors IndexNotFound, evloop::LoopReentered:
+    evloop::run()

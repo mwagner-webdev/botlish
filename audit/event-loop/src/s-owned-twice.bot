@@ -1,0 +1,21 @@
+# s-owned-twice.bot -- must be rejected: one registration token given to two
+# tasks (USE-AFTER-MOVE): an affine token has one owner, so two tasks can
+# never both revoke, or both believe they own, one registration.
+import evloop
+import ownedreg
+
+fn holder(t: ownedreg::Owned, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    ownedreg::release(t)
+
+fn main(context ev: evloop::Loop) -> int errors IndexNotFound:
+    token = ownedreg::own(evloop::channel(1))
+    coroutine {step: a, first: af} = holder(token)
+    evloop::adopt(a, af)
+    coroutine {step: b, first: bf} = holder(token)
+    evloop::adopt(b, bf)
+
+with context evloop::create(8, 0)
+main():
+    on IndexNotFound:
+        -1

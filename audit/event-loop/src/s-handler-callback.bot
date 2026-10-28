@@ -1,0 +1,13 @@
+# s-handler-callback.bot -- must be rejected: a handler written as a function
+# value that needs the loop (CONTEXT-FUNCTION-VALUE). Handlers that need the
+# loop are coroutines (tasks), constructed where their contexts are known.
+import evloop
+
+fn handler(x: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::post(evloop::Reg {slot: 0, gen: 1}, x, 0)
+
+fn register(callback: Fn{args: [int], return: int, errors: [IndexNotFound]}) -> int:
+    1
+
+with context evloop::create(8, 0)
+register(handler)

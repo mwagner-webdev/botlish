@@ -1,0 +1,17 @@
+# s-adopt-twice.bot -- must be rejected: one task handed to the scheduler
+# twice (USE-AFTER-MOVE): the scheduler owns the handle once adopted.
+import evloop
+
+fn task(context ev: evloop::Loop) -> int:
+    evloop::yield_now()
+    0
+
+fn main(context ev: evloop::Loop) -> int errors IndexNotFound:
+    coroutine {step, first} = task()
+    evloop::adopt(step, first)
+    evloop::adopt(step, first)
+
+with context evloop::create(8, 0)
+main():
+    on IndexNotFound:
+        -1

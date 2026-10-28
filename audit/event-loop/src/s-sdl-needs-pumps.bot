@@ -1,0 +1,17 @@
+# s-sdl-needs-pumps.bot -- must be rejected: the SDL adapter's modes 1-4 need
+# a driver that runs native pumps (evloop::NativePumps); the deterministic
+# driver does not (MISSING-CONTEXT). An incompatible combination is a
+# compile-time error, never a silently different driver.
+import evloop
+import evsdl
+import simdrv
+
+fn main(context ev: evloop::Loop) -> int errors IndexNotFound:
+    reg = evloop::source(1, 8)
+    evsdl::start(3, reg, 0)
+
+with context evloop::create(8, 0)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        -1

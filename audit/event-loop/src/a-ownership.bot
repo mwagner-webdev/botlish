@@ -1,0 +1,89 @@
+# a-ownership.bot -- EVENT-LOOP-EXPLORATION.md, Experiment D: registration
+# ownership with an affine token (ownedreg.bot), on the deterministic
+# driver, every backend.
+#
+#   1. a listener task owns its token (moved into its construction) and
+#      releases it when it decides to stop: the registration is revoked;
+#   2. ownership moves: the spawner hands the token to a second task at its
+#      construction; that task releases it (the spawner cannot: its name is
+#      moved -- see s-owned-twice.bot for the compiler's rejection);
+#   3. a task that ends while still owning its token drops it: the token is
+#      released without running code, and the registration STAYS
+#      registered -- what a drop action would have to fix (no such
+#      mechanism exists today);
+#   4. the same for a task abandoned at shutdown while parked.
+import evloop
+import ownedreg
+import simdrv
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn listener(owned: ownedreg::Owned, events: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    {reg: r, token} = ownedreg::peek(owned)
+    loop i from 0 to events:
+        e = evloop::wait(r)
+        say("listener got ", e.a)
+    say("listener releases: ", ownedreg::release(token))
+    events
+
+fn heir(token: ownedreg::Owned, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    say("heir releases the token it was given: ", ownedreg::release(token))
+    0
+
+fn forgetful(owned: ownedreg::Owned, context ev: evloop::Loop) -> int errors IndexNotFound:
+    {reg: r, token} = ownedreg::peek(owned)
+    e = evloop::wait(r)
+    say("forgetful got ", e.a)
+    # returns without releasing: the token dies here
+    e.a
+
+fn parked(owned: ownedreg::Owned, context ev: evloop::Loop) -> int errors IndexNotFound:
+    {reg: r, token} = ownedreg::peek(owned)
+    e = evloop::wait(r)
+    e.a
+
+fn if_live(r: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    if evloop::live?(r):
+        1
+    else:
+        0
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    a = evloop::source(1, 8)
+    simdrv::inject(3, a.slot, a.gen, 10, 0)
+    simdrv::inject(4, a.slot, a.gen, 11, 0)
+    coroutine {step: l, first: lf} = listener(ownedreg::own(a), 2)
+    evloop::adopt(l, lf)
+    b = evloop::channel(4)
+    tb = ownedreg::own(b)
+    coroutine {step: h, first: hf} = heir(tb)
+    evloop::adopt(h, hf)
+    c = evloop::source(1, 8)
+    simdrv::inject(5, c.slot, c.gen, 30, 0)
+    coroutine {step: f, first: ff} = forgetful(ownedreg::own(c))
+    evloop::adopt(f, ff)
+    p = evloop::source(1, 8)
+    coroutine {step: q, first: qf} = parked(ownedreg::own(p))
+    evloop::adopt(q, qf)
+    evloop::stop()
+    evloop::run()
+    # one turn at a time until the forgetful task is done
+    loop k from 0 to 10:
+        evloop::turn()
+    say("listener's registration live after release: ", if_live(a))
+    say("heir's registration live after release: ", if_live(b))
+    say("forgetful's registration live after its owner died: ", if_live(c))
+    say("abandoned at shutdown: ", evloop::abandon())
+    say("parked task's registration live after its owner was abandoned: ", if_live(p))
+    evloop::trace()
+
+with context evloop::create(8, 0)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

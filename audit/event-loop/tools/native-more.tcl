@@ -90,3 +90,35 @@ if {$::sdlDir eq "" || ![file isdirectory $::sdlInclude]} {
             [expr {[r hostwait {host needed a kick event to start}] == 1 && [r hostwait {host max gap us}] > 800000}]
     }
 }
+
+# --- the Win32 probe, cross-compiled and run under Wine: a development aid,
+# never Windows evidence (AGENTS.md). Skipped without MinGW-w64, Wine and
+# xvfb-run.
+if {[string match $::only win32] || $::only eq "*"} {
+    set mingw [auto_execok x86_64-w64-mingw32-gcc]
+    set wine [auto_execok wine]
+    set xvfb [auto_execok xvfb-run]
+    if {$mingw eq "" || $wine eq "" || $xvfb eq ""} {
+        puts "  skip  win32              MinGW-w64, Wine or xvfb-run missing (the probe is for Windows: native/win32/README.md)"
+    } else {
+        set exe [file join $::evBuild evwin32.exe]
+        exec {*}$mingw -O2 -Wall -Wno-array-bounds [file join $::evRoot native win32 evwin32.c] -o $exe -lws2_32 -luser32
+        catch {exec {*}$mingw -O2 -Wall -Wno-array-bounds -DEVW_SDL3 -I$::sdlInclude -c [file join $::evRoot native win32 evwin32.c] -o [file join $::evBuild evwin32-sdl.o]} sdlCompile
+        claim win32 "the Win32 probe cross-compiles (MinGW-w64), also with EVW_SDL3" [file exists [file join $::evBuild evwin32-sdl.o]] $sdlCompile
+        set prefix [file tempdir evwine]
+        foreach mode {direct inverted} {
+            catch {exec env WINEPREFIX=$prefix WINEDEBUG=-all {*}$xvfb -a {*}$wine $exe $mode 2>@1} out
+            set lines [lsearch -all -inline -not [split $out \n] {X connection*}]
+            set kv [join $lines "; "]
+            regexp {turns_during_modal (\d+) timer_turns_in_modal (\d+)} $out -> during timerTurns
+            set ok [expr {[lsearch $lines ok] >= 0}]
+            if {$mode eq "direct"} {
+                claim win32-wine "direct (Wine, development aid): a modal loop on the loop's stack stops every turn; WM_CLOSE contained by policy" $ok $kv
+            } else {
+                claim win32-wine "inverted (Wine, development aid): the pump on a host fiber keeps turns running inside the modal loop ($timerTurns timer turns)" $ok $kv
+            }
+            puts "        win32 $mode: $kv"
+        }
+        file delete -force $prefix
+    }
+}

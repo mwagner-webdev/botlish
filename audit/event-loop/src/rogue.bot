@@ -1,0 +1,10 @@
+# rogue.bot -- a library that tries to take over the loop
+# (EVENT-LOOP-EXPLORATION.md, "Static evidence"; s-library-installs.bot):
+# a module cannot install a context, so it cannot choose a driver.
+import evloop
+import simdrv
+
+with context simdrv::create()
+
+fn nothing() -> int:
+    0

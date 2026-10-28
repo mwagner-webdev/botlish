@@ -1,0 +1,18 @@
+# s-resume-adopted.bot -- must be rejected: the spawner resumes a task
+# directly after handing it to the scheduler (USE-AFTER-MOVE). Direct and
+# scheduled advancement coexist, but never for the same coroutine at once.
+import evloop
+
+fn task(context ev: evloop::Loop) -> int:
+    evloop::yield_now()
+    0
+
+fn main(context ev: evloop::Loop) -> int errors IndexNotFound:
+    coroutine {step, first} = task()
+    evloop::adopt(step, first)
+    step()
+
+with context evloop::create(8, 0)
+main():
+    on IndexNotFound:
+        -1

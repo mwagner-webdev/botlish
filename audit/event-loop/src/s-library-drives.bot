@@ -1,0 +1,15 @@
+# s-library-drives.bot -- ACCEPTED by the compiler, flagged by the audit
+# (tools/static.tcl): a library function (drivinglib::settle) requires the
+# driver -- it runs the loop itself. The requirement is part of its
+# signature's transitive context requirements, so it is visible statically.
+import drivinglib
+import evloop
+import simdrv
+
+with context evloop::create(8, 0)
+with context simdrv::create()
+n = drivinglib::settle():
+    on IndexNotFound:
+        -1
+    on evloop::LoopReentered:
+        -2

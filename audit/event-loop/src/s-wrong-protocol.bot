@@ -1,0 +1,21 @@
+# s-wrong-protocol.bot -- must be rejected: a coroutine of another protocol
+# (it takes a message) handed to the scheduler (TYPE): the scheduler resumes
+# with no message. A coroutine of its own protocol is driven directly by
+# its owner, or wrapped by a task that does.
+import evloop
+
+struct Line:
+    v: int
+
+fn talker(context ev: evloop::Loop, resume Line) -> int:
+    line = yield -1
+    line.v
+
+fn main(context ev: evloop::Loop) -> int errors IndexNotFound:
+    coroutine {step, first} = talker()
+    evloop::adopt(step, first)
+
+with context evloop::create(8, 0)
+main():
+    on IndexNotFound:
+        -1
