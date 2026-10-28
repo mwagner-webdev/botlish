@@ -765,15 +765,14 @@ against sequential comparison, never run locally -- `icy-tower.yml`,
 `c-bindgen.yml`, `single-executable.yml`).
 
 Results as observed (a run superseded by a later push was cancelled and
-is not counted; "pending" means it had not run when this was written, and
-nothing is claimed for it):
+is not counted). Every workflow passed:
 
 | workflow | commit | result |
 |---|---|---|
 | `c-bindgen.yml` (every profile's committed bindings checked, the generator's tests, fuzzers and mutants) | 759d3b9 | **passed** |
 | `icy-tower.yml` (the game's tests with the binding staged as a package, `build.sh`, the oracle comparison, the mutants, the Xvfb session) | 3844140 | **passed** |
-| `tests.yml` (the whole Tcl suite, golden shards, native, stub and system linkers, warning gate) | a12e615 | pending (running) |
-| `tests-arm64.yml` | a12e615 | pending (running) |
+| `tests.yml` (the whole Tcl suite on interp and compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust tests, stub- and system-linked executables, the warning gate, the method-call oracle) | a12e615 | **passed**: all 14 jobs; the whole Tcl suite 9,665 passed on interp and 9,660 on compile, 0 failed, `bot-modules.test` and `hir-cache.test` included (and `bot-modules.test` in the stub- and system-linked runs); the warning gate 75 programs, 30 library loaders, 40 manifest entries |
+| `tests-arm64.yml` (ubuntu-24.04-arm: the same layers, and the Tcl suite under native GC stress) | a12e615 | **passed**: all 11 jobs; the Tcl suite 9,611 passed on interp, 9,606 on compile, and twice under GC stress, 0 failed, `bot-modules.test` and `hir-cache.test` included |
 | `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | **passed**: 108 suites, every one agreeing (mutable-array.bot: batched 5 rounds / 7 builds, sequential 69 / 205) |
 | `single-executable.yml` (builds the single executable, smoke tests in stock containers) | 3844140 | **passed** |
 | `macos-arm64.yml` (smoke, the two acceptance shards, the system linker, Botlish.app and the app without developer tools) | b6b05aa | **passed**: acceptance 4,790 + 4,730 tests passed, 0 failed, `bot-modules.test` and `hir-cache.test` among them (shard 2); the system linker job ran `bot-modules.test` too; Tier C and the app mutants are opt-in and did not run |
