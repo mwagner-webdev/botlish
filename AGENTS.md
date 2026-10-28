@@ -3437,6 +3437,24 @@ candidate whose ordinary call is valid. Keep it so:
   the list; a feature that would choose another operation because one fails
   an obligation is a language-design decision, never an implementation
   detail.
+* **Reporting never decides** (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+  The decision reads the check records of its own builds; what is reported
+  of it is a separate projection, made after every build it reads: the
+  reported program is the decided configuration with every rejected call
+  resolved to no candidate (`hir::resolve::RejectedMethodChoice`: its
+  written callee marked `methodRejected`, poison), and `hir::methods::Report`
+  adds the rejections, first and in source order, with each candidate's
+  reason and `notes` locating the candidates. A rejected call's placeholder
+  is a stand-in, never a selection: never report its own checks, its
+  obligations, its errors or the uses of its result, never give its
+  parameters' contracts to the program, and never let a check, a cascade
+  rule or a recovery rule read it. A rejection is reported only when it
+  holds whatever the operands nobody established are (a poisoned operand:
+  `Rejection`'s `why`); never drop a diagnostic located inside a rejected
+  call for being there. Never make the decision read what is reported
+  (`hir::recovery::reported`, a message, an order, a note), and never let
+  a presentation rule move, add or remove a decision: `methodChoices` and
+  `methodDecided` stay the decision's.
 
 If you change `hir/methods.tcl`, `hir::DecideMethodCalls`,
 `hir::CheckingCall` or any check that uses it, `hir::Diagnose`'s fields,
@@ -3455,7 +3473,19 @@ mutates, keeping it a mutant of the same rule), and the golden suites that
 decide method calls under the reference audit (`bench/method-filter.tcl
 -suites SUITES -audit 1`; mutable-array.bot takes long by the reference
 rule). A new test file's tests get census rows
-(`audit/golden/migration/census/`).
+(`audit/golden/migration/census/`). If you change how a rejection is
+reported (`Final`, `Report`, `Rejection`, `Diagnostic`, `SourceOrder`, the
+`methodRejected` callee and its cases in hir/resolve.tcl, hir/types.tcl,
+hir/structs.tcl and hir/contexts.tcl, or a diagnostic's `notes` and their
+consumers: hir/recovery.tcl's `entries`, the compiler service, the language
+server, main.tcl), also run `tests/compiler-service.test`, `tests/lsp.test`,
+`tests/main-cli.test`, `tests/diagnostic-recovery.test`, `tests/imports.test`,
+`tools/compilerpedia.tcl check`, the static-decisions harnesses (Static
+intrinsics, above: the rounds read the reported program) and
+`audit/method-resolution/tools/invariance.tcl` against the tree before the
+change (`-root` of each tree, then `-compare`: no semantic difference --
+decisions, choices, static outcomes, accepted programs' HIR -- over the
+golden suites).
 
 ## Declared recognizers (dfa and class)
 
@@ -3824,6 +3854,10 @@ build's order. Keep it so:
   its diagnostics, so a new backend entry point compiles
   `hir::recovery::runnable` of its HIR (checked again without poison). A
   check that holds a value to a declared boundary skips a poisoned one.
+* A method-style call the decision rejects is poison in the program
+  reported, never its placeholder candidate's call (Method-call decisions,
+  "Reporting never decides"): never let a stand-in the decision needed
+  reach a diagnostic, a contract, an obligation or an ownership role.
 * The source frontend checks a program whose resolution failed. A new way
   for one top-level unit to depend on another, beyond referring to a binding
   it declares, goes into `hir::recovery::Tainted`.

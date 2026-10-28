@@ -195,7 +195,7 @@ test dr-method-ambiguity-unchanged {two visible functions that both accept the r
         main.bot "import left\nimport right\n\nfn f(x: int) -> int:\n    x.twice()\n\nf(1)\n" \
         left.bot "fn twice(x) -> int:\n    2\n" \
         right.bot "fn twice(x) -> int:\n    3\n"]
-} -match glob -result {{AMBIGUOUS-METHOD-CALL 5:7 {method-style call "twice" is ambiguous: more than one visible function accepts the receiver (left::twice, right::twice)*}}}
+} -match glob -result {{AMBIGUOUS-METHOD-CALL 5:7 {method-style call "twice" is ambiguous: more than one visible function accepts the call (left::twice, right::twice)*}}}
 
 test dr-callable-field-unchanged {a callable struct field called with method syntax (no function of its name visible) is the field's call, as before, on every backend} -body {
     drValues "struct Op:\n    run: Fn\{args: \[int\], return: int\}\n\nfn twice(x: int) -> int:\n    x * 2\n\nfn f(o: Op) -> int:\n    o.run(4)\n\nf(Op \{run: twice\})\n"
@@ -478,6 +478,6 @@ test dr-corpus-efficiency {every known primary of every corpus case is reported 
         }
     }
     list [dict size $data] $wrong
-} -cleanup {unset -nocomplain data wrong name r f} -result {14 {}}
+} -cleanup {unset -nocomplain data wrong name r f} -result {15 {}}
 
 cleanupTests

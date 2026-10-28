@@ -334,7 +334,9 @@ proc hir::recovery::raise {hir reported locate} {
 
 # The core::raiseDiagnostics entries of the diagnostics REPORTED of HIR, as
 # raise raises them (LOCATE as raise's): each with its location and its
-# related locations as data, beside the located text, and the HIR diagnostic
+# related locations as data, beside the located text, its notes (a HIR
+# diagnostic's `notes`: further locations with a text of their own, e.g.
+# where a method-style call's candidates are declared) and the HIR diagnostic
 # itself as its `record`. The one statement of what a semantic diagnostic is
 # outside HIR: a strict compilation raises these, and the compiler service
 # reports exactly these for a lenient one (COMPILER-SERVICE-MILESTONE-1.md).
@@ -344,6 +346,7 @@ proc hir::recovery::entries {hir reported locate} {
         set message [dict get $diagnostic message]
         set location ""
         set related {}
+        set notes {}
         if {$locate} {
             set origin [if {[dict exists $diagnostic origin]} {dict get $diagnostic origin} else {hir::get $hir [dict get $diagnostic expr] origin}]
             set message "[hir::originLocation $hir $origin]: $message"
@@ -351,9 +354,18 @@ proc hir::recovery::entries {hir reported locate} {
             foreach o [dict getdef $diagnostic related {}] {
                 lappend related [hir::originSpan $hir $o]
             }
+            foreach note [dict getdef $diagnostic notes {}] {
+                set o [dict get $note origin]
+                lappend notes [dict create message "[hir::originLocation $hir $o]: [dict get $note message]" \
+                    summary [dict get $note message] location [hir::originSpan $hir $o]]
+            }
         }
-        lappend entries [dict create errorcode [list CORE SEMANTIC [dict get $diagnostic kind]] message $message \
+        set entry [dict create errorcode [list CORE SEMANTIC [dict get $diagnostic kind]] message $message \
             summary [dict get $diagnostic message] location $location related $related record $diagnostic]
+        if {$notes ne {}} {
+            dict set entry notes $notes
+        }
+        lappend entries $entry
     }
     return $entries
 }

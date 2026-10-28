@@ -1,0 +1,12 @@
+# Two rejected method-style calls and an independent error (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md):
+# an ambiguous `size` (aa::size an Int, zz::size a Float64) as a Float64 result, and a `size` no
+# candidate accepts. Their cascades were the placeholder aa::size's: the Int result held to Float64, and aa::size's
+# own rejection of the receiver, which NO-APPLICABLE-METHOD gives as its reason.
+primary 8:12
+fix 8     zz::size([1, 2])
+primary 11:9
+fix 11     aa::size([7])
+primary 14:14
+fix 14     take_str("9")
+cascade 7:8
+cascade 11:6

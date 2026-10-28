@@ -442,7 +442,7 @@ test imports-method-ambiguous-between-namespaces {two imported namespaces each w
         list [diagKinds "import std::alpha\nimport std::beta\n1.f()\n"] [diagKinds "import std::beta\nimport std::alpha\n1.f()\n"] \
             [lsort $a] [lsort $b]
     }
-} -match glob -result {AMBIGUOUS-METHOD-CALL AMBIGUOUS-METHOD-CALL {{method-style call "f" is ambiguous: more than one visible function accepts the receiver (std::alpha::f, std::beta::f);*}} {{method-style call "f" is ambiguous: more than one visible function accepts the receiver (std::alpha::f, std::beta::f);*}}}
+} -match glob -result {AMBIGUOUS-METHOD-CALL AMBIGUOUS-METHOD-CALL {{method-style call "f" is ambiguous: more than one visible function accepts the call (std::alpha::f, std::beta::f);*}} {{method-style call "f" is ambiguous: more than one visible function accepts the call (std::alpha::f, std::beta::f);*}}}
 
 test imports-method-ambiguity-is-the-same-either-order {the reported candidates do not depend on import order} -body {
     withScratchLibrary {
@@ -476,12 +476,12 @@ test imports-method-typed-candidate-target {the typed winner is the very functio
     }
 } -result 1
 
-test imports-method-no-applicable {when no candidate accepts the receiver the call is rejected with each reason} -body {
+test imports-method-no-applicable {when no candidate accepts the receiver the call is rejected with each reason -- inside the rejection, never as a second diagnostic of the candidate it stands at (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md)} -body {
     withScratchLibrary {
         writeFixtures $dir
         diagKinds "import std::talpha\nimport std::tbeta\n\[1\].g()\n"
     }
-} -result {NO-APPLICABLE-METHOD TYPE}
+} -result {NO-APPLICABLE-METHOD}
 
 test imports-method-list-and-mutable-array {with both imports, a List receiver picks std::list::at and a MutableArray receiver picks std::mutable_array::at} -body {
     set src "import std::list\nimport std::mutable_array\na = std::mutable_array::create(2, 7)\nxs = \[1, 2, 3\]\nx = xs.at(1):\n    on IndexNotFound:\n        0\ny = a.at(0):\n    on IndexNotFound:\n        0\n\[x, y\]\n"
@@ -489,10 +489,10 @@ test imports-method-list-and-mutable-array {with both imports, a List receiver p
     list [agree $src] [diagKinds $src]
 } -result {{[2, 7]} {}}
 
-test imports-method-untyped-receiver-is-ambiguous {an untyped receiver fits both std::list::at and std::mutable_array::at: ambiguous, spell it qualified} -body {
+test imports-method-untyped-receiver-is-ambiguous {an untyped receiver fits both std::list::at and std::mutable_array::at: ambiguous, spell it qualified -- and nothing else: the errors of the candidate the rejected call stands at are no obligation of the program (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md)} -body {
     set src "import std::list\nimport std::mutable_array\nfn first(q):\n    q.at(0)\n1\n"
     diagKinds $src
-} -result {AMBIGUOUS-METHOD-CALL UNHANDLED-ERROR}
+} -result {AMBIGUOUS-METHOD-CALL}
 
 test imports-method-lexical-and-imported-are-distinct-candidates {a local function and an imported member of the same name are two candidates: no local-wins rule} -body {
     withScratchLibrary {

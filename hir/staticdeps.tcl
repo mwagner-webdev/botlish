@@ -902,7 +902,9 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
                     set operation 1
                 }
             }
-            foreach arg [dict get $exprs $e args] {
+            # (A rejected call's receiver is its written callee's:
+            # hir::methods::Operands.)
+            foreach arg [hir::methods::Operands $hir $e] {
                 set type [hir::typeOf $hir $arg]
                 if {[hir::types::IsCoroutine $type]} {
                     if {$operation} {

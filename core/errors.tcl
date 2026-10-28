@@ -70,6 +70,11 @@ proc core::semanticError {kind message} {
 #             Unicode scalar values of the normalized text, lines and columns
 #             1-based, END exclusive), or "" when the diagnostic has none
 #   related   the further spans it names, in order (a list of such spans)
+#   notes     optional: further locations with a text of their own, for a
+#             reader (where a method-style call's candidates are declared):
+#             {message TEXT summary SUMMARY location SPAN} each, TEXT
+#             located as the entry's own message is; never part of the
+#             entry's message, and no part of its identity
 #   record    the producer's own richer record, when it has one (a HIR
 #             diagnostic, a warning, a syntax diagnostic)
 proc core::raiseDiagnostics {diagnostics} {

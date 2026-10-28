@@ -1,0 +1,2 @@
+fn size(s: List[int]) -> int:
+    3

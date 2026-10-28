@@ -524,7 +524,10 @@ MILESTONE-1.md, section 10):
   candidate whose obligations are reported with the rejection: the
   ambiguous `7.f()` of section 2 comes with alpha::f's MISSING-CONTEXT or
   AMBIGUOUS-CONTEXT-IMPLEMENTATION. The decision is right; the report is
-  noisy (milestone 2, diagnostics).
+  noisy (milestone 2, diagnostics). Resolved by
+  METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md: the reported program
+  resolves a rejected call to no candidate, so `7.f()` reports
+  AMBIGUOUS-METHOD-CALL alone.
 * **Checks not yet owned, cycles, related locations, candidate
   explanations** -- unchanged.
 * **The obligation list is a list of kinds.** SFIAE is enforced by

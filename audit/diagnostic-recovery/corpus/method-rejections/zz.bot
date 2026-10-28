@@ -1,0 +1,2 @@
+fn size(s: List[int]) -> Float64:
+    4.5

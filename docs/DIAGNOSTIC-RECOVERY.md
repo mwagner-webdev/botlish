@@ -185,7 +185,11 @@ dropped the code after the handler, and native code trapped).
 Poison is also what three other `any` stand-ins became (section 7): an
 operation a trait does not declare (TRAIT-UNKNOWN-OPERATION), a handled call
 whose handler has no type in common with it, and a semantic instance's
-failed projection.
+failed projection. A method-style call the decision rejects
+(AMBIGUOUS-METHOD-CALL, NO-APPLICABLE-METHOD) became one later: the
+reported program resolves it to no candidate, its written callee poison,
+so nothing of the placeholder candidate it stood at during the decision is
+reported (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
 
 ## 3. Part B: independent errors in one compilation
 
@@ -357,7 +361,9 @@ Every place a member or method resolution failure, or its recovery, made an
 ## 8. Diagnostic-efficiency corpus
 
 `audit/diagnostic-recovery/corpus/` holds 14 intentionally invalid
-programs, each with its known independent primaries (location, and a message
+programs (a 15th, `method-rejections`, came with
+METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md: its two cascades were a
+rejected method call's placeholder's), each with its known independent primaries (location, and a message
 fragment where one site carries several), a line-preserving fix per primary,
 and its known cascades. `audit/diagnostic-recovery/tools/efficiency.tcl`
 compiles each as a programmer would -- with a checkout's `main.tcl`,

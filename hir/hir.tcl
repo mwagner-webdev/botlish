@@ -71,8 +71,12 @@
 #                `subject` (the call ExprId whose own check -- against
 #                the callee the call resolves to -- produced it: written by
 #                hir::CheckingCall's checks, read only by the method-call
-#                decision, hir/methods.tcl), and `internal 1` on a failure
-#                of the compiler itself
+#                decision, hir/methods.tcl), `notes` (further locations a
+#                reader may want, each {origin ORIGIN message TEXT}: where a
+#                rejected method-style call's candidates are declared;
+#                presentation only, never part of its identity or of a
+#                static site's reified diagnostic) and `internal 1` on a
+#                failure of the compiler itself
 #   staticSites  the static intrinsics of a source program and their
 #                decisions (hir/static.tcl, STATIC-COMPILE.md): site key ->
 #                {key origin operation outcome accepted|rejected ?diagnostic
@@ -146,7 +150,12 @@
 #             ambiguity check and diagnostics only (no analysis, lowering or
 #             backend reads it).
 #             Without such a function the written callee is a `project`
-#             marked `methodCallee 1` (diagnostic wording only). A call the
+#             marked `methodCallee 1` (diagnostic wording only). With
+#             several, a call the method-call decision rejects (no single
+#             valid candidate) has, in the program it returns, no candidate:
+#             its written callee is a `project` marked `methodRejected 1`,
+#             poison (hir/methods.tcl's Final; METHOD-RESOLUTION-DIAGNOSTICS-
+#             MILESTONE-2.md), with no `method` field. A call the
 #             source frontend built also carries `written` {form F ns NS}: how
 #             it was spelled (F: function `f(x)`, method `x.f()`, list `[x]`,
 #             operator `x + y`, which no later stage can recover) and the
@@ -257,10 +266,13 @@ namespace eval hir {
     # trials: the kind waves' builds and the builds of single deviations,
     # `methodDeviations` counting the latter), and `methodReused` the builds
     # a decision did not repeat because the one it needed had already been
-    # made (hir/methods.tcl). Measurement only: read as differences by
-    # hir/static.tcl and the benchmarks, never by an analysis.
+    # made (hir/methods.tcl); `methodReports` the builds of a decided
+    # program's reported form, its rejected calls resolved to no candidate
+    # (hir::methods::Final; METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
+    # Measurement only: read as differences by hir/static.tcl and the
+    # benchmarks, never by an analysis.
     variable buildStats [dict create builds 0 methodTrials 0 methodFinals 0 methodReused 0 \
-        methodDeviations 0]
+        methodDeviations 0 methodReports 0]
     # 0 makes the method-call decision build every build again even when a
     # build of the same configuration was already made (measurement and
     # audits only).

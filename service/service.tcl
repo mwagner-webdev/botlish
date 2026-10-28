@@ -366,6 +366,11 @@ proc service::Configuration {workspace path} {
 #             invented one
 #   related   the further ranges it names, in order ({file start end line
 #             column endLine endColumn} each)
+#   notes     further locations with a text of their own (the entry's
+#             notes, core::raiseDiagnostics: where a method-style call's
+#             candidates are declared), in order: a range's keys,
+#             `message` (its text) and `text` (located, as main.tcl prints
+#             it) each
 #   record    the producer's own record, when it has one (the HIR
 #             diagnostic, the warning, the syntax diagnostic), else ""
 proc service::Record {severity entry} {
@@ -392,6 +397,10 @@ proc service::Record {severity entry} {
     dict set diagnostic related [lmap span [dict getdef $entry related {}] {
         if {$span eq ""} continue
         Range $span
+    }]
+    dict set diagnostic notes [lmap note [dict getdef $entry notes {}] {
+        if {[dict get $note location] eq ""} continue
+        dict replace [Range [dict get $note location]] message [dict get $note summary] text [dict get $note message]
     }]
     dict set diagnostic record [dict getdef $entry record ""]
     return $diagnostic

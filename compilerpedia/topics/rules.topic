@@ -688,12 +688,27 @@ runs.
 CORE SEMANTIC AMBIGUOUS-METHOD-CALL, at the method name:
 
     method-style call "length" is ambiguous: more than one visible
-    function accepts the receiver (length, std::list::length); there is no
-    precedence between them: call the one you mean explicitly, e.g.
-    length(receiver, ...)
+    function accepts the call (length, std::list::length); there is no
+    precedence between them (none by namespace, result type, how the
+    result is used, or which one's context requirements are met): call the
+    one you mean explicitly, e.g. length(receiver, ...)
 
 and CORE SEMANTIC NO-APPLICABLE-METHOD, `method-style call "length": none
-of the visible functions of that name accepts the receiver (...)`.
+of the visible functions of that name accepts the call (...)`, giving each
+candidate's own reason and the operand it rejects. Each comes with a note
+per candidate declared in source.
+
+A rejected call means nothing yet, so it is the one error reported there:
+no candidate's obligations (a context it needs, an error it may raise),
+no check of the call's result against a candidate's result type (an
+operator, an argument, a declared result), no contract a candidate would
+give an untyped parameter. A failed method decision does not make the
+expressions around it invalid; an expression that is invalid whatever the
+call means -- an ill-typed argument, an error elsewhere -- is still
+reported. A call whose verdict depends on what the program does not
+establish (the result of another rejected call, an argument an earlier
+error rejected) is not reported; fixing the first error shows whether it
+holds. Rejections come first, in source order.
 
 @example reject
 import std::list
@@ -772,7 +787,8 @@ remedies are explicit: meet the obligation, or name the operation.
 The obligation's own diagnostic at the call (MISSING-CONTEXT,
 AMBIGUOUS-CONTEXT-IMPLEMENTATION, UNHANDLED-ERROR, DIRECT) when one
 candidate applies; AMBIGUOUS-METHOD-CALL when several apply, whatever
-their obligations.
+their obligations -- and then nothing else: an ambiguous call selected no
+operation, so no candidate's obligation is reported as the program's.
 
 @example reject
 import env

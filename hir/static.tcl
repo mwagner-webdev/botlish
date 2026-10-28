@@ -892,7 +892,7 @@ proc hir::static::decide {nodes options given halt} {
         incr rounds
     }
     set end [hir::BuildStats]
-    foreach counter {builds methodTrials methodFinals methodReused} {
+    foreach counter {builds methodTrials methodFinals methodReused methodReports} {
         dict set stats $counter [expr {[dict get $end $counter] - [dict get $start $counter]}]
     }
     dict set stats rounds $rounds
@@ -1345,7 +1345,7 @@ proc hir::static::TraceDecision {key diagnostic} {
 # ENTRY with the builds made since the counters were BEFORE.
 proc hir::static::RoundEntry {entry before} {
     set now [hir::BuildStats]
-    foreach counter {builds methodTrials methodFinals methodReused} {
+    foreach counter {builds methodTrials methodFinals methodReused methodReports} {
         dict set entry $counter [expr {[dict get $now $counter] - [dict get $before $counter]}]
     }
     return $entry
@@ -1356,7 +1356,8 @@ proc hir::static::RoundEntry {entry before} {
 proc hir::static::FormatTrace {stats} {
     set lines [list "static decisions ([dict get $stats scheduler]): [dict get $stats rounds] rounds,\
         [dict get $stats builds] builds ([dict get $stats methodTrials] method trials,\
-        [dict get $stats methodFinals] method finals, [dict get $stats methodReused] reused)"]
+        [dict get $stats methodFinals] method finals, [dict get $stats methodReports] reported forms,\
+        [dict get $stats methodReused] reused)"]
     foreach entry [dict get $stats trace] {
         set head "round [dict get $entry round] ([dict get $entry phase])"
         foreach field {bodies undecided failing builds methodTrials methodSeeds methodRetried} {

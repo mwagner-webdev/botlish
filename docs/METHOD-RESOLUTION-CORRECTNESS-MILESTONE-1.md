@@ -799,6 +799,10 @@ filter, 7 with it; now 7).
 
 ### 10.2 Diagnostics (milestone 2)
 
+(Addressed by METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md: no placeholder
+diagnostics or cascades, NO-APPLICABLE-METHOD's reasons inside the
+rejection, notes locating the candidates, rejections in source order.)
+
 * A rejected call stands at a placeholder candidate, whose own diagnostics
   and consequences are reported with the rejection: NO-APPLICABLE-METHOD
   comes with the placeholder's TYPE (6.3: as in the base), an ambiguous call

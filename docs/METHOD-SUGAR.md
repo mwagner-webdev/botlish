@@ -64,8 +64,9 @@ accepted with the candidate whose ordinary call `f(x, a, b)` is valid**:
   inferred contract rejects it);
 * more than one valid: `AMBIGUOUS-METHOD-CALL`, naming the candidates -- no
   precedence of any kind (not import order, not shortest namespace, not
-  "local wins", not "standard library wins"); spell the one you mean
-  qualified, `alpha::f(x, ...)`;
+  "local wins", not "standard library wins", not result type, not how the
+  result is used, not which candidate's obligations can be met); spell the
+  one you mean qualified, `alpha::f(x, ...)`;
 * none valid: `NO-APPLICABLE-METHOD`, listing why each candidate fails.
 
 "Valid" is checked, not guessed (`hir::DecideMethodCalls`, `hir/methods.tcl`;
@@ -264,9 +265,20 @@ receiver rejected by parameter 1 (`5.takes_text()`) at the receiver
 | no function of that name visible (`x.nothere(1)`, a function of a namespace the file does not import, a function defined later) | the existing field diagnostic of the call it falls back to (`NOT-A-STRUCT`, `UNKNOWN-FIELD`, `UNPROVEN-FIELD`) plus: `as a method-style call, no function named "f" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or import the namespace that defines it with `import NAMESPACE`)` |
 | receiver rejected by parameter 1, a bad later argument, wrong arity, errors not handled | exactly the free call's diagnostic (same kind and message; locations point at the receiver/argument) |
 | a field and a function both candidates | `AMBIGUOUS-METHOD-CALL` (above), at the method name |
-| several distinct visible functions, more than one fits the receiver | `AMBIGUOUS-METHOD-CALL` ("more than one visible function accepts the receiver"), at the method name |
-| several distinct visible functions, none fits | `NO-APPLICABLE-METHOD`, at the method name, with each candidate's reason |
+| several distinct visible functions, more than one fits the call | `AMBIGUOUS-METHOD-CALL` ("more than one visible function accepts the call"), at the method name, a note locating each applicable candidate |
+| several distinct visible functions, none fits | `NO-APPLICABLE-METHOD`, at the method name, with each candidate's reason (the operand it rejects: the receiver, argument N, or the call) and a note locating each candidate |
 | shadowing local that is not callable | `NOT-CALLABLE`, as `f(x)` |
+
+A rejected call -- ambiguous, or with no applicable candidate -- is that one
+diagnostic and nothing else (METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md):
+the program reported resolves it to no candidate, so what it would compute
+is poison (DIAGNOSTIC-RECOVERY.md), and no candidate's own checks,
+obligations (a context it needs, an error it may raise), result type or
+parameter contracts reach the program. An operand that is invalid whatever
+the call means is reported as ever; a rejection that holds only by an
+operand the program does not establish (the result of another rejected
+call, an argument an earlier check rejected) is not reported. Rejections
+come first, in source order.
 
 The "no function visible" diagnostic does not claim `f` is a declared member of
 the receiver's type, and it does not require the receiver's type to have been

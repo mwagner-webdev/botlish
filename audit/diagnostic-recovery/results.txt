@@ -24,7 +24,7 @@ s4-unhandled-set                 3      1         1        0      0             
 synthetic-closer                 1      2         1        1      0             1        1 yes
 total (14 files)                29     22        12       10      0            27       10
 
-## after: this tree
+## after: the tree of DIAGNOSTIC-RECOVERY.md (the 14 files it measured)
 
 case                     primaries first:   visible cascades  other  compilations cascades clean
 app-modules                      3      3         3        0      0             1        0 yes
@@ -42,3 +42,43 @@ s17-if-operand                   2      2         2        0      0             
 s4-unhandled-set                 3      1         3        0      0             1        0 yes
 synthetic-closer                 1      1         1        0      0             1        0 yes
 total (14 files)                29     27        29        0      0            14        0
+
+## before: commit b29787c, with the method-rejections case of METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md (tclsh9.0 audit/diagnostic-recovery/tools/efficiency.tcl -root CHECKOUT-AT-b29787c)
+
+case                     primaries first:   visible cascades  other  compilations cascades clean
+app-modules                      3      3         3        0      0             1        0 yes
+call-arguments                   3      3         3        0      0             1        0 yes
+functions-independent            3      3         3        0      0             1        0 yes
+if-missing-colon                 2      2         2        0      0             1        0 yes
+loader-references                2      2         2        0      0             1        0 yes
+method-rejections                3      5         3        2      0             1        2 yes
+mixed-phases                     3      3         3        0      0             1        0 yes
+poisoned-binding                 2      2         2        0      0             1        0 yes
+resolution-taint                 2      2         2        0      0             1        0 yes
+s13-argument                     1      1         1        0      0             1        0 yes
+s13-generic                      1      1         1        0      0             1        0 yes
+s13-return                       1      1         1        0      0             1        0 yes
+s17-if-operand                   2      2         2        0      0             1        0 yes
+s4-unhandled-set                 3      1         3        0      0             1        0 yes
+synthetic-closer                 1      1         1        0      0             1        0 yes
+total (15 files)                32     32        32        2      0            15        2
+
+## after: this tree
+
+case                     primaries first:   visible cascades  other  compilations cascades clean
+app-modules                      3      3         3        0      0             1        0 yes
+call-arguments                   3      3         3        0      0             1        0 yes
+functions-independent            3      3         3        0      0             1        0 yes
+if-missing-colon                 2      2         2        0      0             1        0 yes
+loader-references                2      2         2        0      0             1        0 yes
+method-rejections                3      3         3        0      0             1        0 yes
+mixed-phases                     3      3         3        0      0             1        0 yes
+poisoned-binding                 2      2         2        0      0             1        0 yes
+resolution-taint                 2      2         2        0      0             1        0 yes
+s13-argument                     1      1         1        0      0             1        0 yes
+s13-generic                      1      1         1        0      0             1        0 yes
+s13-return                       1      1         1        0      0             1        0 yes
+s17-if-operand                   2      2         2        0      0             1        0 yes
+s4-unhandled-set                 3      1         3        0      0             1        0 yes
+synthetic-closer                 1      1         1        0      0             1        0 yes
+total (15 files)                32     30        32        0      0            15        0
