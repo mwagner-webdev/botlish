@@ -69,10 +69,10 @@ Get-ChildItem (Join-Path $Repo "fuzz\seeds\conformance") | ForEach-Object {
     if ($seg.Count -gt 0) { $args.Add([Text.Encoding]::UTF8.GetString($seg)) }
     if ($args.Count -gt 0 -and $args[$args.Count - 1] -eq '') { $args.RemoveAt($args.Count - 1) }
 
-    $out = & $exe @args 2>&1 | Where-Object { $_ -ne '' }
-    $lines = @($out | ForEach-Object { "$_" })
+    $out = & $exe @args 2>&1 | Where-Object { "$_" -ne '' }
+    $lines = @($out | ForEach-Object { "$_".TrimEnd() })
     if ($lines.Count -gt 0) { $lines = $lines[0..($lines.Count - 2)] }  # drop the value line
-    $report = 'report|' + ($lines -join ' / ')
+    $report = 'result|report|' + ($lines -join ' / ')
 
     if (-not $expected.ContainsKey($name)) { $missing++; return }
     if ($expected[$name] -eq $report) { $agree++ }

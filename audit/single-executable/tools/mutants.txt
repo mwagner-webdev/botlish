@@ -18,9 +18,9 @@
 @@ runtime-not-packed the runtime archive is left out of the single executable
 ## single/package.tcl
 <<<<
-    foreach name {botlish-native botlish-aot-stub libbotlish_runtime.a} {
+        StageNative [file join $stage native-bin] $nativeDir {botlish-native botlish-aot-stub libbotlish_runtime.a} 1
 ====
-    foreach name {botlish-native botlish-aot-stub} {
+        StageNative [file join $stage native-bin] $nativeDir {botlish-native botlish-aot-stub} 1
 >>>>
 
 @@ runtime-never-installed the runtime archive is never installed beside the driver, even for a run that links
@@ -63,25 +63,25 @@ proc ::single::MayLink {argv} {
 @@ linker-stub the single executable links every program with the stub, as before the milestone: C is refused
 ## single/main.tcl
 <<<<
-        set ::env(BOTLISH_NATIVE_LINKER) auto
+    set ::env(BOTLISH_NATIVE_LINKER) auto
 ====
-        set ::env(BOTLISH_NATIVE_LINKER) stub
+    set ::env(BOTLISH_NATIVE_LINKER) stub
 >>>>
 
 @@ linker-system the single executable links every program with the system linker: one that calls no C needs a C compiler
 ## single/main.tcl
 <<<<
-        set ::env(BOTLISH_NATIVE_LINKER) auto
+    set ::env(BOTLISH_NATIVE_LINKER) auto
 ====
-        set ::env(BOTLISH_NATIVE_LINKER) system
+    set ::env(BOTLISH_NATIVE_LINKER) system
 >>>>
 
 @@ linker-choice-overridden an explicit BOTLISH_NATIVE_LINKER is replaced by auto
 ## single/main.tcl
 <<<<
-    if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
+if {![info exists ::env(BOTLISH_NATIVE_LINKER)] || $::env(BOTLISH_NATIVE_LINKER) eq ""} {
 ====
-    if {1} {
+if {1} {
 >>>>
 
 @@ installed-modes-decimal the installed files' modes computed by expr, which reads 0755 as the decimal 755 (no owner read)

@@ -146,6 +146,14 @@ pub struct RootPlan {
     /// frames hold the roots: every such host has the stack guard, which
     /// reports an exhausted stack (runtime::native_stack's assertion).
     pub depth_reservation: bool,
+    /// The function compares its stack pointer with the Vm's stack limit in
+    /// its prologue and fails with NATIVE LIMIT STACK below it (codegen::
+    /// clif's `prologue_stack_limit`): a native library's function with a
+    /// Botlish call and native-frame storage (`plan_with_stack_check`;
+    /// nir's `check_stack_limit`). A library's host runs no stack guard of
+    /// ours, so its recursion is bounded here instead
+    /// (NATIVE-LIBRARY-MILESTONE-1.md, "Stack safety").
+    pub stack_check: bool,
     /// `RootStorage::NativeFrame` on the native-stack-map path only: for
     /// each safepoint instruction (by its index into `f.body`), the
     /// physical slots (`slot_of`'s values) live *at that specific point* --
@@ -812,6 +820,15 @@ fn entry_zero_slots(f: &Function, cfg: &Cfg, slot_of: &[Option<u32>], num_slots:
 /// `slot_of`/`entry_zero`/liveness/coloring above, and on the fallback path
 /// it reproduces the pre-stack-map behavior exactly, byte for byte.
 pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
+    plan_with_stack_check(f, native_frame_supported, false)
+}
+
+/// `plan`, for a function of a program whose functions check their stack
+/// pointer when STACK_CHECK (a native library's: nir::Program's
+/// `stack_limit_checked`): `stack_check` exactly for one with a Botlish call
+/// and native-frame storage, the functions nir's call effects make fallible
+/// for it.
+pub fn plan_with_stack_check(f: &Function, native_frame_supported: bool, stack_check: bool) -> RootPlan {
     let cfg = Cfg::build(f);
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots, &liveness.def_edges);
@@ -849,6 +866,7 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
     // storage leaves it to the stack guard (codegen::clif reserves nothing
     // for it).
     assert!(!(depth_reservation && storage == RootStorage::NativeFrame), "native-frame storage with a depth reservation");
+    let stack_check = stack_check && has_call && storage == RootStorage::NativeFrame;
     RootPlan {
         slot_of,
         num_slots,
@@ -857,6 +875,7 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
         max_live,
         storage,
         depth_reservation,
+        stack_check,
         safepoint_slots,
         entry_zero,
     }

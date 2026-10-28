@@ -499,6 +499,10 @@ fn cli(args: &[String]) -> i32 {
                 emit_error(&["NATIVE", "LIBRARY"], &format!("library name {name:?} is not a C identifier"));
                 return 1;
             }
+            // A library's code bounds its own recursion: its host runs no
+            // stack guard of ours (NATIVE-LIBRARY-MILESTONE-1.md, "Stack
+            // safety").
+            nir::check_stack_limit(&mut program);
             match codegen::emit_library_object(&program, name) {
                 Ok(object) => {
                     if let Err(e) = std::fs::write(out, &object.bytes) {

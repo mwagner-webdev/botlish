@@ -504,7 +504,31 @@ proc dependencies {executable} {
     }
 }
 
-test system-linker-static-incorporation {static libraries and the runtime archive are linked into the executable: it names no Botlish or fixture library among its dynamic dependencies, only the system's, and runs from anywhere with the runtime archive it was linked with gone} -constraints {cFixture} -body {
+# The library search paths EXECUTABLE carries (readelf's RPATH and
+# RUNPATH, otool -l's LC_RPATH): none, for every linker's executable, which
+# would point at the build's directories.
+proc searchPaths {executable} {
+    switch -glob -- $::hostTarget {
+        linux-* {
+            return [lmap line [split [exec readelf -d $executable] \n] {
+                if {![regexp {\((?:RPATH|RUNPATH)\).*\[(.*)\]} $line -> path]} continue
+                set path
+            }]
+        }
+        macos-* {
+            set paths {}
+            set command ""
+            foreach line [split [exec otool -l $executable] \n] {
+                if {[regexp {^\s*cmd (\S+)} $line -> command]} continue
+                if {$command eq "LC_RPATH" && [regexp {^\s*path (\S+)} $line -> path]} { lappend paths $path }
+            }
+            return $paths
+        }
+        default { return {} }
+    }
+}
+
+test system-linker-static-incorporation {static libraries and the runtime archive are linked into the executable: it names no Botlish or fixture library among its dynamic dependencies, only the system's, carries no library search path, and runs from anywhere with the runtime archive it was linked with gone} -constraints {cFixture} -body {
     set dir [makeDirectory system-linker-static]
     set libs [makeDirectory system-linker-static-libs]
     fixtureLibraries $libs
@@ -521,6 +545,7 @@ test system-linker-static-incorporation {static libraries and the runtime archiv
     file copy $exe $elsewhere
     set run [runCaptured $elsewhere ""]
     set needed [dependencies $elsewhere]
+    set paths [searchPaths $elsewhere]
     removeDirectory system-linker-elsewhere
     removeDirectory system-linker-static
     set foreign [lsearch -all -inline -regexp $needed {botlish|cffi|fixture|dependent}]
@@ -529,8 +554,34 @@ test system-linker-static-incorporation {static libraries and the runtime archiv
         macos-* { list libSystem.B.dylib }
         windows-* { list kernel32.dll }
     }]
-    list $run $foreign [expr {[lindex $expected 0] in $needed}]
-} -result {{0 42 {}} {} 1}
+    list $run $foreign [expr {[lindex $expected 0] in $needed}] $paths
+} -result {{0 42 {}} {} 1 {}}
+
+test system-linker-bundle-runtime {a driver in a macOS application bundle's Contents/MacOS links with the runtime archive in that bundle's Contents/Resources, found from the driver's own path whatever the working directory (MACOS-AARCH64-MILESTONE-9.md); on every other host, and anywhere else, the archive is the one beside the driver} -constraints {systemLinker unixShell} -body {
+    set bundle [file join [makeDirectory "system-linker bündle"] "Bötlish Test.app" Contents]
+    file mkdir [file join $bundle MacOS] [file join $bundle Resources]
+    set driver [file join $bundle MacOS botlish-native]
+    file copy [native::binary] $driver
+    file copy $::runtimeArchive [file join $bundle Resources]
+    # (Elsewhere the archive beside the driver is missing: system-linker
+    # says so, with a failing status.)
+    catch {exec sh -c {cd / && "$1" system-linker} - $driver} facts
+    set runtime [lsearch -inline -index 0 [split $facts \n] runtime]
+    set expected [file join $bundle [expr {$::hostTarget eq "macos-aarch64" ? "Resources" : "MacOS"}] [file tail $::runtimeArchive]]
+    set linked {}
+    if {$::hostTarget eq "macos-aarch64"} {
+        set dir [makeDirectory system-linker-bundle-program]
+        set main [writeFile [file join $dir main.bot] "40 + 2\n"]
+        set exe [withEnv [list BOTLISH_NATIVE_BIN $driver BOTLISH_NATIVE_RUNTIME {}] {
+            linkWith system [surface::readProgramFile $main -warnings off -cache ""] [file join $dir program]
+        }]
+        set linked [runCaptured $exe ""]
+        removeDirectory system-linker-bundle-program
+    }
+    removeDirectory "system-linker bündle"
+    set named [expr {$::hostTarget eq "macos-aarch64" ? [lindex $runtime 1] eq $expected : [string first "missing: $expected" $runtime] >= 0}]
+    list $named [expr {$::hostTarget ne "macos-aarch64" || $linked eq {0 42 {}}}]
+} -result {1 1}
 
 test system-linker-ordinary-executable {a system-linked executable is the platform's own kind of executable: its format and architecture, its Botlish functions and the program record as symbols, the runtime archive's main, nothing appended} -constraints {systemLinker linuxHost} -body {
     set dir [makeDirectory system-linker-ordinary]

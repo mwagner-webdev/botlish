@@ -19,6 +19,18 @@ name: tests (macos arm64)
 #                  and C test files linked by it
 #   acceptance     Tier B, every push, two shards: the acceptance tier --
 #                  the test files and golden suites that pass on macOS
+#   app            every push: the macOS distribution, Botlish.app
+#                  (MACOS-AARCH64-MILESTONE-9.md) -- built, signed ad hoc,
+#                  verified, its packaging census, accepted outside the
+#                  checkout, compared with the checkout's compiler, measured
+#                  -- and its download archive the run's
+#                  botlish-macos-aarch64 artifact
+#   app-clean      every push, after app: the downloaded application on the
+#                  runner with Apple's developer tools, Rust and the
+#                  checkout moved away
+#   app-mutants    opt-in, "[ci-app-mutants]" in the pushed head commit's
+#                  message (or a manual run's app_mutants): the
+#                  application's packaging mutants
 #   linux control  Tier A on ubuntu-latest, every push: the same smoke
 #                  commands on Linux x86-64, for telling a macOS failure from
 #                  a Linux one at the same commit
@@ -37,7 +49,8 @@ name: tests (macos arm64)
 # this file is on main; a pull request from this repository's own branches
 # skips (its push already ran), one from a fork runs. Documentation-only
 # pushes skip. A newer push to the same branch cancels a running one, except
-# on main. No macOS job waits for a Linux runner. The runner label, macos-15
+# on main. No macOS job waits for a Linux runner. A manual run with app_only
+# runs only the application's jobs. The runner label, macos-15
 # (an Apple Silicon image; the smoke job fails on anything else), is written
 # in the smoke, acceptance and full jobs: change all three together.
 
@@ -61,6 +74,14 @@ on:
         description: "Run the named Tier C items under BOTLISH_NATIVE_GC_STRESS=1"
         type: boolean
         default: false
+      app_only:
+        description: "Run only the application's jobs (app, app-clean; MACOS-AARCH64-MILESTONE-9.md)"
+        type: boolean
+        default: false
+      app_mutants:
+        description: "Also run the application's mutants (app-mutants)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -79,7 +100,7 @@ jobs:
   smoke:
     name: smoke (Tier A, macOS arm64)
     # A same-repository pull request's push run already covers its commits.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -158,7 +179,7 @@ jobs:
   # and (the C ones) under GC stress.
   system-linker:
     name: system linker (macOS arm64)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 120
     env:
@@ -201,9 +222,243 @@ jobs:
           BOTLISH_NATIVE_GC_STRESS: "1"
         run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test darwin-io.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
 
+  # The macOS distribution of the compiler (MACOS-AARCH64-MILESTONE-9.md):
+  # Botlish.app -- the launcher, the bundled Tcl.framework, the compiler's
+  # ZIP archive, the native backend and the runtime archive -- built, signed
+  # ad hoc and verified (single/macos/build.sh), inspected, probed (the
+  # packaging census), then accepted from outside the checkout, its framework
+  # build hidden: the packaged-compiler smoke tests, the application's own
+  # (single/macos/app-test.sh) and the comparison with this checkout's
+  # compiler (single/macos/compare.sh), with Apple's developer tools; the
+  # sizes and startup times. Every check runs even when an earlier one fails.
+  # Only a build that passes all of them is uploaded as the run's
+  # botlish-macos-aarch64 artifact (the download archive and its checksum:
+  # ad-hoc signed, not notarized); the logs always are.
+  app:
+    name: Botlish.app (macOS arm64 distribution)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      # single/macos/build.sh keys its framework build by the recipe:
+      # tcl-framework.sh and the Tcl pin in single/build.sh.
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - name: Build Botlish.app
+        run: single/macos/build.sh -o dist 2>&1 | tee build.log
+
+      - name: Inspect the application
+        if: always()
+        run: |
+          app=dist/Botlish.app
+          set -x
+          find "$app" -maxdepth 6 -not -path '*/Scripts/*' -not -path '*/tcl9/*' | sort
+          ls -l@ "$app/Contents" "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks/Tcl.framework" "$app/Contents/Frameworks/Tcl.framework/Versions"
+          cat "$app/Contents/Info.plist"
+          for f in MacOS/botlish MacOS/botlish-native Frameworks/Tcl.framework/Versions/9.0/Tcl; do
+            file "$app/Contents/$f"; lipo -archs "$app/Contents/$f"; otool -L "$app/Contents/$f"
+            otool -l "$app/Contents/$f" | grep -A4 -E 'LC_RPATH|LC_BUILD_VERSION|LC_ID_DYLIB|LC_LOAD_WEAK_DYLIB'
+          done
+          lipo -info "$app/Contents/Resources/libbotlish_runtime.a"
+          for f in . Contents/Frameworks/Tcl.framework/Versions/9.0 Contents/MacOS/botlish-native; do codesign -dvvv --entitlements - "$app/$f"; done
+          codesign --verify --deep --strict --verbose=4 "$app"
+          spctl --assess --type execute --verbose=4 "$app" || true
+          unzip -l "$app/Contents/Resources/botlish.zip" | tail -3
+          cat dist/botlish-macos-aarch64.zip.sha256
+          "$app/Contents/MacOS/botlish" -version
+
+      # The launcher in a directory with non-ASCII characters, with and
+      # without a locale: a crash's report and lldb's backtrace, for the
+      # log. (Diagnostics; the acceptance below decides.)
+      - name: Packaging census
+        if: always()
+        run: audit/macos-app/tools/census.sh "$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)" dist/Botlish.app 2>&1 | tee census.log
+
+      # The application moved out of the checkout into a path with a space
+      # and non-ASCII characters; the framework's build (and its staging)
+      # made inaccessible; the download archive extracted there by unzip.
+      - name: Place the application outside the checkout
+        if: always()
+        run: |
+          place="$RUNNER_TEMP/Prögram Files"
+          mkdir -p "$place"
+          (cd "$place" && unzip -q "$GITHUB_WORKSPACE/dist/botlish-macos-aarch64.zip")
+          echo "APP=$place/Botlish.app" >>"$GITHUB_ENV"
+          mv ~/Library/Caches/botlish-app ~/Library/Caches/botlish-app.hidden
+          single/macos/verify.sh --checkout "$PWD" "$place/Botlish.app"
+
+      - name: Packaged-compiler smoke test (single/smoke-test.sh)
+        if: always()
+        run: bash single/smoke-test.sh "$APP/Contents/MacOS/botlish" 2>&1 | tee smoke.log
+
+      - name: C FFI smoke test (single/ffi-smoke-test.sh)
+        if: always()
+        run: bash single/ffi-smoke-test.sh "$APP/Contents/MacOS/botlish" 2>&1 | tee ffi-smoke.log
+
+      - name: The application's acceptance (single/macos/app-test.sh)
+        if: always()
+        run: bash single/macos/app-test.sh "$APP" 2>&1 | tee app-test.log
+
+      - name: The application against the checkout (single/macos/compare.sh)
+        if: always()
+        run: bash single/macos/compare.sh "$(command -v tclsh9.0)" "$APP" 2>&1 | tee compare.log
+
+      - name: Sizes and startup times (bench/macos-app.tcl)
+        if: always()
+        run: tclsh9.0 bench/macos-app.tcl "$APP" dist/botlish-macos-aarch64.zip 2>&1 | tee measure.log
+
+      - name: The application, untouched by the runs
+        if: always()
+        run: codesign --verify --deep --strict --verbose=2 "$APP"
+
+      # (The cache's post step saves the framework build from its path.)
+      - name: Restore the framework build's cache directory
+        if: always()
+        run: if [ -d ~/Library/Caches/botlish-app.hidden ]; then mv ~/Library/Caches/botlish-app.hidden ~/Library/Caches/botlish-app; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: botlish-macos-aarch64
+          path: |
+            dist/botlish-macos-aarch64.zip
+            dist/botlish-macos-aarch64.zip.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botlish-macos-aarch64-logs
+          path: "*.log"
+          if-no-files-found: warn
+
+  # The application on a Mac without the developer tools and without any of
+  # what built it: the uploaded download archive extracted (unzip), this
+  # checkout deleted (its scripts and examples copied out first), Rust's
+  # directories moved away, and Apple's developer tools -- every Xcode and
+  # the Command Line Tools -- moved away, so that the shims in /usr/bin
+  # (cc, clang, otool, git ...) report "no developer tools" exactly as on a
+  # fresh Mac. Then: the signature, the toolchain-free smoke test (the
+  # analysis, Compilerpedia, the language server, the interpreter, the Tcl
+  # compiler, the native JIT; an executable refused with NATIVE LINK
+  # TOOLCHAIN and xcode-select --install).
+  app-clean:
+    name: Botlish.app without developer tools (macOS arm64)
+    needs: app
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      # (No credentials kept: nothing is left for a post step, which would
+      # need git, a developer tool, in the checkout this job deletes.)
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-macos-aarch64
+          path: download
+
+      - name: What this Mac has before
+        run: |
+          sw_vers; xcode-select -p || true
+          ls -d /Applications/Xcode*.app /Library/Developer/CommandLineTools 2>/dev/null || true
+          for t in tclsh tclsh9.0 wish rustc cargo cc clang; do echo "$t: $(command -v $t || echo none)"; done
+          ls /opt/homebrew/bin 2>/dev/null | grep -i -E '^(tcl|wish)' || echo "no Homebrew Tcl"
+
+      - name: Extract the download; copy the tests out; delete the checkout
+        run: |
+          kit="$RUNNER_TEMP/kit"
+          mkdir -p "$kit/single/macos" "$kit/examples" "$RUNNER_TEMP/Clean Äpps"
+          cp single/smoke-test.sh "$kit/single/"
+          cp single/macos/verify.sh "$kit/single/macos/"
+          cp -R examples/surface examples/stdlib examples/hir examples/io examples/linux "$kit/examples/"
+          (cd download && shasum -a 256 -c botlish-macos-aarch64.zip.sha256)
+          (cd "$RUNNER_TEMP/Clean Äpps" && unzip -q "$GITHUB_WORKSPACE/download/botlish-macos-aarch64.zip")
+          cd /
+          rm -rf "${GITHUB_WORKSPACE:?}"/* "${GITHUB_WORKSPACE:?}"/.[!.]*
+          mv ~/.cargo ~/.cargo.hidden 2>/dev/null || true
+          mv ~/.rustup ~/.rustup.hidden 2>/dev/null || true
+
+      - name: Move Apple's developer tools away
+        run: |
+          sudo mkdir -p /private/var/hidden-developer
+          for d in /Applications/Xcode*.app /Library/Developer/CommandLineTools; do
+            if [ -e "$d" ]; then sudo mv "$d" /private/var/hidden-developer/; fi
+          done
+          echo "xcode-select -p: $(xcode-select -p 2>&1)"
+          if /usr/bin/cc --version >"$RUNNER_TEMP/cc.out" 2>&1; then cat "$RUNNER_TEMP/cc.out"; echo "::error::cc still runs"; exit 1; fi
+          echo "/usr/bin/cc now says:"; cat "$RUNNER_TEMP/cc.out"
+
+      - name: The signature and the bundle, without developer tools
+        run: |
+          app="$RUNNER_TEMP/Clean Äpps/Botlish.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          bash "$RUNNER_TEMP/kit/single/macos/verify.sh" --no-developer-tools "$app"
+
+      - name: Toolchain-free smoke test
+        run: bash "$RUNNER_TEMP/kit/single/smoke-test.sh" "$RUNNER_TEMP/Clean Äpps/Botlish.app/Contents/MacOS/botlish"
+
+  # Mutation testing of the application's packaging (opt-in: "[ci-app-
+  # mutants]" in the pushed head commit's message, or a manual run's
+  # app_mutants): audit/macos-app/tools/
+  # mutate.tcl, and the driver's share of it, the native-aot mutants of the
+  # bundle's runtime archive, the toolchain remedy and an executable's search
+  # path.
+  app-mutants:
+    name: Botlish.app mutants (macOS arm64)
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+      && (contains(github.event.head_commit.message, '[ci-app-mutants]') || inputs.app_mutants)
+    runs-on: macos-15
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - name: Build Botlish.app (and the framework, unless cached)
+        run: single/macos/build.sh -o dist
+
+      - name: The application's mutants
+        if: always()
+        run: tclsh9.0 audit/macos-app/tools/mutate.tcl -tcl-framework "$(ls -d ~/Library/Caches/botlish-app/tcl-framework-* | head -n 1)" 2>&1 | tee app-mutants.log
+
+      - name: The driver's mutants of the application's share
+        if: always()
+        run: tclsh9.0 audit/native-aot/tools/mutate.tcl -only sys-runtime-bundle-ignored,sys-runtime-bundle-relative,sys-runtime-bundle-remedy-build,sys-apple-remedy-rust,sys-executable-rpath 2>&1 | tee native-aot-mutants.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botlish-macos-app-mutants
+          path: "*.log"
+          if-no-files-found: warn
+
   acceptance:
     name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 75
     strategy:
@@ -238,7 +493,7 @@ jobs:
 
   linux-control:
     name: linux control (Tier A, ubuntu x86-64)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -272,7 +527,7 @@ jobs:
     name: full (Tier C, macOS arm64, shard ${{ matrix.shard }}/3)
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
-      && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full')
+      && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full') && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 180
     strategy:
