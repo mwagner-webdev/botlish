@@ -1566,9 +1566,10 @@ test se-property-plan-gate {the trait monomorphization's plan runs only on a che
         [expr {$kinds eq [lsort $hir::staticdeps::planKinds]}] $kinds
 } -result {1 1 {AFFINE-GENERIC-NESTED-UNSUPPORTED AFFINE-INSTANCE-BUDGET TRAIT-IMPL-ORDER TRAIT-INSTANCE-BUDGET TRAIT-INTERNAL TRAIT-NOT-SATISFIED TRAIT-POLYMORPHIC-RECURSION}}
 
-test se-property-demotion-keeps-diagnostics {a demoted trusted contract changes no diagnostic: hir::check keeps the diagnostics of the check before the demotion -- why demotion is not a channel} -body {
-    regexp {set diagnostics \[dict get \$hir diagnostics\].*CheckOnce hir \$demote.*dict set hir diagnostics \$diagnostics} [info body hir::check]
-} -result 1
+test se-property-demotion-keeps-diagnostics {a demoted trusted contract changes no diagnostic: hir::check keeps the diagnostics of the check before the demotion (each of its checks is hir::CheckWith's) -- why demotion is not a channel} -body {
+    list [regexp {set diagnostics \[dict get \$hir diagnostics\].*CheckOnce hir \$demote.*dict set hir diagnostics \$diagnostics} [info body hir::CheckWith]] \
+        [regexp {CheckWith hir} [info body hir::check]]
+} -result {1 1}
 
 # Programs whose check demotes a trusted inferred contract (hir::check), by
 # the shape of the signature fixpoint (hir::signatures::infer): the demoted
