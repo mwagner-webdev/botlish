@@ -1,0 +1,30 @@
+# busylib.bot -- an ACTIVE library for the composition experiment
+# (EVENT-LOOP-EXPLORATION.md, Experiment B, invariant 2): a task that is
+# always ready (continuous activity) and a task that drains a flooding
+# source. It costs turns and time; the claim is only that it cannot starve
+# another library's ready work or reorder it.
+import evloop
+import std::mutable_array
+import std::str
+
+fn spin(n: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to n:
+        evloop::yield_now()
+    n
+
+fn drain(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(src)
+        if e.reason != evloop::woke_event:
+            break
+        total.set(0, total.at(0) + 1)
+    total.at(0)
+
+fn init(spins: int, context ev: evloop::Loop) -> evloop::Reg errors IndexNotFound:
+    src = evloop::source(0, 1000)
+    coroutine {step: s, first: sf} = spin(spins)
+    evloop::adopt(s, sf)
+    coroutine {step: d, first: df} = drain(src)
+    evloop::adopt(d, df)
+    src

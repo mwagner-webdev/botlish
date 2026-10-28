@@ -1,0 +1,20 @@
+# b-wake.bot -- EVENT-LOOP-EXPLORATION.md, section 7 (native): wakeprobe.bot
+# with the adapter's real wakeup protocol (eventfd).
+import evloop
+import evn
+import wakeprobe
+
+fn main(context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    wakeprobe::latency("stream", 300, 1000, 1, 1, 0)
+    wakeprobe::latency("pairs", 40, 30000, 2, 0, 150)
+    wakeprobe::idle(300000, false)
+    wakeprobe::idle(300000, true)
+    evloop::trace()
+
+with context evloop::create(64, 0)
+with context evn::create(4096, 64, 0)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,53 @@
+# a-gameserver.bot -- EVENT-LOOP-EXPLORATION.md, Experiment A: the
+# game-server workload (gameserver.bot) on the deterministic driver, every
+# backend.
+#
+# Three connections arrive at t=5, 6 and 7. Connection 1 asks for a long
+# path (MOVE 300: 30 pathfinding segments) and then talks; connections 2
+# and 3 talk every few microseconds meanwhile. The world ticks every 40 us
+# and advances its AI coroutine directly. The checks (tools/check.tcl,
+# a-gameserver): every TALK line is handled in the turn it is collected,
+# also while pathfinding runs; connection 1's TALK sent during
+# pathfinding waits for the path (one session handles its lines in order);
+# the replies of each connection arrive in order; every flush happens once
+# per turn at most.
+import evloop
+import gameserver
+import simdrv
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    listener = evloop::source(1, 8)
+    outbox = evloop::channel(256)
+    simdrv::inject(5, listener.slot, listener.gen, 1, 0)
+    simdrv::inject(6, listener.slot, listener.gen, 2, 0)
+    simdrv::inject(7, listener.slot, listener.gen, 3, 0)
+    simdrv::line(1, 1, 1, 300)
+    simdrv::line(1, 3, 2, 11)
+    simdrv::line(1, 400, 9, 0)
+    loop k from 0 to 8:
+        simdrv::line(2, 2 + k * 9, 2, 20 + k)
+        simdrv::line(3, 3 + k * 11, 2, 30 + k)
+    simdrv::line(2, 300, 9, 0)
+    simdrv::line(3, 310, 9, 0)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 3)
+    evloop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    evloop::adopt(f, ff)
+    coroutine {step: w, first: wf} = gameserver::world(40, 5)
+    evloop::adopt(w, wf)
+    say("turns ", evloop::run())
+    loop v in simdrv::sent():
+        say("sent ", v)
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

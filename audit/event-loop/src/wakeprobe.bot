@@ -1,0 +1,102 @@
+# wakeprobe.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B / section 7:
+# wakeups, sleeping and idle cost on the native driver (b-wake.bot,
+# b-wake-broken.bot).
+#
+#   latency  a producer thread posts COUNT records (a jittered stream, or
+#            bursts of two 150 us apart -- the second lands while the loop is
+#            going back to sleep after the first, the window a racy wakeup
+#            protocol loses); a task waiting on the source measures, at each
+#            dispatch, now - the post's time: the post -> dispatch latency,
+#            including the wakeup of a sleeping loop. A 50 ms heartbeat timer
+#            bounds how long a LOST wakeup can delay a post;
+#   idle     the loop sleeps 300 ms on a timer, with and without an observer
+#            registered: the CPU time it uses while asleep.
+import evloop
+import evn
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn receiver(src: evloop::Reg, count: int, context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound:
+    lat = std::mutable_array::create(4, 0)
+    loop i from 0 to count:
+        e = evloop::wait(src)
+        if e.reason != evloop::woke_event:
+            break
+        l = evn::clock() - e.b
+        lat.set(0, lat.at(0) + 1)
+        lat.set(1, lat.at(1) + l)
+        if l > lat.at(2):
+            lat.set(2, l)
+        if l > 5000:
+            lat.set(3, lat.at(3) + 1)
+    say("received ", lat.at(0))
+    say("total latency us ", lat.at(1))
+    say("max latency us ", lat.at(2))
+    say("posts later than 5 ms ", lat.at(3))
+    evloop::revoke(src)
+
+fn heartbeat(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::every(50000)
+    beats = std::mutable_array::create(1, 0)
+    loop:
+        if not evloop::live?(src):
+            break
+        evloop::wait(t)
+        beats.set(0, beats.at(0) + 1)
+    evloop::revoke(t)
+    beats.at(0)
+
+fn idle_sleeper(us: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::sleep(us)
+
+fn watcher(reg: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+    runs.at(0)
+
+fn if_int(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+fn idle(us: int, observed: bool, context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound, evloop::LoopReentered:
+    obs = evloop::observer()
+    if observed:
+        coroutine {step: w, first: wf} = watcher(obs)
+        evloop::adopt(w, wf)
+    coroutine {step, first} = idle_sleeper(us)
+    evloop::adopt(step, first)
+    cpu = evn::cpu_us()
+    wall = evn::clock()
+    turns = evloop::run()
+    used = evn::cpu_us() - cpu
+    say(evloop::cat("idle observed=", if_int(observed)).concat(" turns "), turns)
+    say(evloop::cat("idle observed=", if_int(observed)).concat(" wall us "), evn::clock() - wall)
+    say(evloop::cat("idle observed=", if_int(observed)).concat(" cpu us "), used)
+    evloop::revoke(obs)
+    used
+
+nomethod fn latency(label: str, count: int, interval: int, burst: int, jitter: int, gap: int, context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound, evloop::LoopReentered:
+    evloop::log(label)
+    src = evloop::source(1, 4096)
+    coroutine {step: r, first: rf} = receiver(src, count)
+    evloop::adopt(r, rf)
+    coroutine {step: h, first: hf} = heartbeat(src)
+    evloop::adopt(h, hf)
+    evn::synth(src.slot, src.gen, count, interval, burst, jitter, gap)
+    turns = evloop::run()
+    evn::synth_join()
+    say("latency turns ", turns)
+    say("eventfd writes ", evn::stat(evn::st_eventfd_writes))
+    say("wakeups ", evn::stat(evn::st_wakeups))
+    say("blocks ", evn::stat(evn::st_blocks))
+    say("timeouts ", evn::stat(evn::st_timeouts))
+    turns

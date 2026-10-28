@@ -1,0 +1,113 @@
+# a-timers.bot -- EVENT-LOOP-EXPLORATION.md, Experiment A: timers,
+# deadlines, missed intervals, frame-oriented work.
+#
+# On the deterministic driver (one virtual microsecond per driver visit;
+# simdrv::advance makes a segment take time):
+#
+#   * metro: a repeating 100 us timer. Its task's 3rd segment takes 350 us:
+#     the next wake reports 3 missed intervals (coalesced, never queued), and
+#     the deadline stays on the 100 us grid (no drift);
+#   * twins: two one-shot timers with the same deadline, the second
+#     registered first in the source text order of `later` then `sooner`:
+#     they fire in registration order;
+#   * jump: a repeating 10 us timer with a segment of 10,000,000 us: one wake,
+#     999,999 missed, computed by doubling (no per-interval loop);
+#   * idle: a repeating 50 us timer nobody waits on for 1000 us: when its
+#     task finally waits, it is ready at once with the coalesced count;
+#   * frames: a 16,667 us frame task (60 Hz) while a busy task and a
+#     flood of records produce many more turns than frames: the frame count
+#     follows elapsed time, not the turn rate.
+import evloop
+import simdrv
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn metro(context ev: evloop::Loop, s: simdrv::Sim) -> int errors IndexNotFound:
+    t = evloop::every(100)
+    loop i from 0 to 5:
+        e = evloop::wait(t)
+        say("metro at ", evloop::now())
+        say("metro missed ", e.a)
+        if i == 2:
+            simdrv::advance(350)
+    evloop::revoke(t)
+
+fn twin(name: str, deadline: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::timer(deadline, 0)
+    e = evloop::wait(t)
+    evloop::log(name.concat(evloop::cat(" fired at ", evloop::now())))
+    e.reason
+
+fn jumper(context ev: evloop::Loop, s: simdrv::Sim) -> int errors IndexNotFound:
+    t = evloop::every(10)
+    e = evloop::wait(t)
+    simdrv::advance(10000000)
+    e2 = evloop::wait(t)
+    say("jump missed ", e2.a)
+    evloop::revoke(t)
+
+fn idler(context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::every(50)
+    evloop::sleep(1000)
+    say("idler waits at ", evloop::now())
+    e = evloop::wait(t)
+    say("idler woke at ", evloop::now())
+    say("idler coalesced missed ", e.a)
+    evloop::revoke(t)
+
+fn frames(context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::every(16667)
+    count = std::mutable_array::create(1, 0)
+    start = evloop::stat(evloop::s_turn)
+    loop i from 0 to 6:
+        e = evloop::wait(t)
+        count.set(0, count.at(0) + 1 + e.a)
+    say("frames ", count.at(0))
+    say("frame turns ", evloop::stat(evloop::s_turn) - start)
+    evloop::revoke(t)
+
+fn busy(context ev: evloop::Loop, s: simdrv::Sim) -> int errors IndexNotFound:
+    loop i from 0 to 300:
+        simdrv::advance(97)
+        evloop::yield_now()
+    0
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    coroutine {step: m, first: mf} = metro()
+    say("metro id ", evloop::adopt(m, mf))
+    coroutine {step: l, first: lf} = twin("later", 700)
+    say("later id ", evloop::adopt(l, lf))
+    coroutine {step: o, first: of} = twin("sooner", 700)
+    say("sooner id ", evloop::adopt(o, of))
+    coroutine {step: i, first: inf} = idler()
+    say("idler id ", evloop::adopt(i, inf))
+    turns = evloop::run()
+    say("turns ", turns)
+    # A segment that takes ten seconds: nothing else runs meanwhile (the
+    # scheduler is cooperative), and the repeating timer owes one wake.
+    coroutine {step: j, first: jf} = jumper()
+    say("jumper id ", evloop::adopt(j, jf))
+    say("jump phase turns ", evloop::run())
+    # The frame phase: frames against a busy task and a record flood.
+    src = evloop::source(0, 4)
+    loop k from 0 to 100:
+        simdrv::inject(evloop::now() + k * 300, src.slot, src.gen, k, 0)
+    coroutine {step: f, first: ff} = frames()
+    evloop::adopt(f, ff)
+    coroutine {step: b, first: bf} = busy()
+    evloop::adopt(b, bf)
+    turns2 = evloop::run()
+    say("frame phase turns ", turns2)
+    say("dropped ", evloop::dropped(src))
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

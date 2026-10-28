@@ -1,0 +1,21 @@
+# quietlib.bot -- an independently developed library for the composition
+# experiment (EVENT-LOOP-EXPLORATION.md, Experiment B, invariant 1): it
+# registers an optional input source and a task waiting on it. Importing
+# or initializing it changes no other task's ordering: it never becomes
+# ready unless its source delivers, and it does not keep the loop alive.
+# It installs nothing (a module cannot install a context) and drives
+# nothing (it has no access to a driver).
+import evloop
+import std::str
+
+fn listen(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(src)
+    evloop::log("quietlib: woke")
+    e.reason
+
+# Initialize the library: one registration, one waiting task.
+fn init(context ev: evloop::Loop) -> evloop::Reg errors IndexNotFound:
+    src = evloop::source(0, 4)
+    coroutine {step, first} = listen(src)
+    evloop::adopt(step, first)
+    src

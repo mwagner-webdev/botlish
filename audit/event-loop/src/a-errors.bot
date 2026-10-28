@@ -1,0 +1,120 @@
+# a-errors.bot -- EVENT-LOOP-EXPLORATION.md, Experiment A: failures,
+# reentrancy, liveness and shutdown.
+#
+#   * fails_later fails with TaskFailed {code: 7} in its third segment: the
+#     loop records it (results: id, -1000007) and every other task goes on;
+#   * fails_now fails in its first segment, which runs inside the spawner
+#     (construction is eager): the spawner's handler gets the error, and the
+#     loop never sees the task;
+#   * bad_index fails with IndexNotFound (an error the task protocol
+#     carries): recorded as -2000000;
+#   * nester calls evloop::turn from inside its segment -- a nested loop --
+#     and gets LoopReentered; it handles it and goes on;
+#   * optional waits on a source that does not keep the loop alive: the
+#     first run returns ("no live work") while it still waits;
+#   * stopper stops the second run; shutdown then revokes every
+#     registration (a timer waiter and the optional reader wake with
+#     woke_revoked and end), runs at most 3 more turns, and abandons the
+#     one task that never ends (stubborn) -- released without running.
+import evloop
+import simdrv
+import std::coroutine
+import std::list
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn fails_later(context ev: evloop::Loop) -> int errors IndexNotFound, evloop::TaskFailed:
+    evloop::yield_now()
+    evloop::yield_now()
+    fail evloop::TaskFailed {code: 7}
+
+fn fails_now(code: int, context ev: evloop::Loop) -> int errors evloop::TaskFailed:
+    if code > 0:
+        fail evloop::TaskFailed {code: code}
+    evloop::yield_now()
+    0
+
+fn bad_index(i: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    xs = [1, 2]
+    xs.at(i)
+
+fn nester(context ev: evloop::Loop, d: evloop::Driver) -> int errors IndexNotFound:
+    evloop::yield_now()
+    n = evloop::turn():
+        on evloop::LoopReentered:
+            say("nester: nested turn refused in turn ", evloop::stat(evloop::s_turn))
+            -1
+    n
+
+fn optional(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(src)
+    say("optional woke with reason ", e.reason)
+    e.reason
+
+fn stopper(context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    evloop::yield_now()
+    say("stopper stops the loop in turn ", evloop::stat(evloop::s_turn))
+    evloop::stop()
+    0
+
+fn sleeper(context ev: evloop::Loop) -> int errors IndexNotFound:
+    reason = evloop::sleep(1000000)
+    say("sleeper woke with reason ", reason)
+    reason
+
+fn stubborn(context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop:
+        evloop::yield_now()
+    0
+
+fn if_done(step: Coroutine{args: [], return: int, errors: [evloop::TaskFailed]}) -> int:
+    if std::coroutine::done?(step):
+        1
+    else:
+        0
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    # The root declares TaskFailed, so its construction (the first segment)
+    # may fail too: every spawn handles the task's errors once, eagerly.
+    coroutine {step: a, first: af} = fails_later():
+        on evloop::TaskFailed:
+            -1
+    say("fails_later id ", evloop::adopt(a, af))
+    coroutine {step: b, first: bf} = fails_now(8):
+        on evloop::TaskFailed {code}:
+            say("spawner caught a failure at construction, code ", code)
+            -1
+    say("fails_now done at construction: ", if_done(b))
+    coroutine {step: c, first: cf} = bad_index(5)
+    say("bad_index id ", evloop::adopt(c, cf))
+    coroutine {step: n, first: nf} = nester()
+    say("nester id ", evloop::adopt(n, nf))
+    src = evloop::source(0, 4)
+    coroutine {step: o, first: of} = optional(src)
+    say("optional id ", evloop::adopt(o, of))
+    say("first run turns ", evloop::run())
+    say("failed ", evloop::stat(evloop::s_failed))
+    say("reentered ", evloop::stat(evloop::s_reentered))
+    coroutine {step: s, first: sf} = stopper()
+    say("stopper id ", evloop::adopt(s, sf))
+    coroutine {step: z, first: zf} = sleeper()
+    say("sleeper id ", evloop::adopt(z, zf))
+    coroutine {step: u, first: uf} = stubborn()
+    say("stubborn id ", evloop::adopt(u, uf))
+    say("second run turns ", evloop::run())
+    say("abandoned ", evloop::shutdown(3))
+    loop r in evloop::results():
+        say("result ", r)
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

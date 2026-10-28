@@ -1,0 +1,8 @@
+opaque context struct D:
+    x: int
+
+fn create() -> D:
+    D {x: 0}
+
+fn wait(deadline: int, context d: D) -> int:
+    deadline

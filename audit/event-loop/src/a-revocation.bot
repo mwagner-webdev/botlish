@@ -1,0 +1,148 @@
+# a-revocation.bot -- EVENT-LOOP-EXPLORATION.md, Experiment D: revoking
+# registrations, independently of the coroutines they woke or started.
+#
+# On the deterministic driver:
+#
+#   1. queued, not dispatched: task `revoker` is ahead of `victim` in the
+#      run queue when a record for source s1 makes victim ready; revoker
+#      revokes s1 in the same dispatch phase; victim's wake is suppressed
+#      (it sees woke_revoked, never the event);
+#   2. five records queue on s2 with no waiter; revoking s2 discards all
+#      five; a later wait on s2 returns woke_revoked without suspending;
+#   3. a handler revokes its own registration s3 while handling its event:
+#      the handler's segment completes; its next wait returns woke_revoked;
+#   4. s4 is revoked and its slot reused by s5; a record still tagged with
+#      s4's generation (a native callback that was in flight) arrives and is
+#      dropped as stale -- s5's waiter is not woken by it;
+#   5. revoking twice, or through a stale copy of the Reg, does nothing;
+#   6. a listener on s6 starts one independent worker task per event; s6 is
+#      revoked after two events: the listener ends, both workers finish;
+#   7. three tasks wait on one channel; revoking it wakes all three, in the
+#      order they waited.
+import evloop
+import simdrv
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn victim(s1: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(s1)
+    say("victim woke with reason ", e.reason)
+    say("victim event value ", e.a)
+    e.reason
+
+fn revoker(s1: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    # Ready every turn, so in the turn s1's record is collected it is ahead of
+    # victim (made ready by that collection) in the run queue.
+    loop i from 0 to 30:
+        if evloop::delivered(s1) == 1 and evloop::live?(s1):
+            say("revoker revokes s1 in turn ", evloop::stat(evloop::s_turn))
+            evloop::revoke(s1)
+        evloop::yield_now()
+    0
+
+fn handler(s3: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(s3)
+    say("handler got ", e.a)
+    say("handler revokes its own registration: ", evloop::revoke(s3))
+    say("handler continues after revoking, reason was ", e.reason)
+    again = evloop::wait(s3)
+    say("handler's next wait: reason ", again.reason)
+    again.reason
+
+fn s5_waiter(s5: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(s5)
+    say("s5 waiter woke with value ", e.a)
+    say("s5 waiter woke at turn ", evloop::stat(evloop::s_turn))
+    e.a
+
+fn worker(n: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 3:
+        evloop::yield_now()
+    say("worker finished for event ", n)
+    n
+
+fn listener(s6: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    count = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(s6)
+        if e.reason != evloop::woke_event:
+            say("listener sees revocation, reason ", e.reason)
+            break
+        count.set(0, count.at(0) + 1)
+        coroutine {step, first} = worker(e.a)
+        evloop::adopt(step, first)
+        if count.at(0) == 2:
+            say("listener revokes s6: ", evloop::revoke(s6))
+    count.at(0)
+
+fn queuer(name: int, ch: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(ch)
+    say("channel waiter woke, name ", name)
+    e.reason
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    s1 = evloop::source(1, 8)
+    s2 = evloop::source(1, 8)
+    s3 = evloop::source(1, 8)
+    s4 = evloop::source(1, 8)
+    s6 = evloop::source(1, 8)
+    ch = evloop::channel(4)
+    # 1
+    coroutine {step: rv, first: rvf} = revoker(s1)
+    say("revoker id ", evloop::adopt(rv, rvf))
+    coroutine {step: vi, first: vif} = victim(s1)
+    say("victim id ", evloop::adopt(vi, vif))
+    simdrv::inject(10, s1.slot, s1.gen, 41, 0)
+    # 2
+    loop i from 0 to 5:
+        simdrv::inject(3, s2.slot, s2.gen, i, 0)
+    # 3
+    coroutine {step: h, first: hf} = handler(s3)
+    say("handler id ", evloop::adopt(h, hf))
+    simdrv::inject(5, s3.slot, s3.gen, 33, 0)
+    simdrv::inject(6, s3.slot, s3.gen, 34, 0)
+    # 6
+    coroutine {step: l, first: lf} = listener(s6)
+    say("listener id ", evloop::adopt(l, lf))
+    simdrv::inject(4, s6.slot, s6.gen, 61, 0)
+    simdrv::inject(5, s6.slot, s6.gen, 62, 0)
+    simdrv::inject(6, s6.slot, s6.gen, 63, 0)
+    # 7
+    loop k from 0 to 3:
+        coroutine {step: q, first: qf} = queuer(k, ch)
+        evloop::adopt(q, qf)
+    first = evloop::run()
+    say("phase 1 turns ", first)
+    # 2, after the records arrived
+    say("s2 pending ", evloop::pending(s2))
+    say("revoke s2: ", evloop::revoke(s2))
+    say("revoke s2 again: ", evloop::revoke(s2))
+    copy = evloop::Reg {slot: s2.slot, gen: s2.gen}
+    say("revoke a stale copy of s2: ", evloop::revoke(copy))
+    # 7
+    say("revoke the channel: ", evloop::revoke(ch))
+    # 4
+    say("revoke s4: ", evloop::revoke(s4))
+    s5 = evloop::source(1, 8)
+    say("s5 reuses slot ", s5.slot)
+    say("s4 slot was ", s4.slot)
+    coroutine {step: w5, first: w5f} = s5_waiter(s5)
+    evloop::adopt(w5, w5f)
+    simdrv::inject(evloop::now() + 5, s4.slot, s4.gen, 444, 0)
+    simdrv::inject(evloop::now() + 9, s5.slot, s5.gen, 555, 0)
+    second = evloop::run()
+    say("phase 2 turns ", second)
+    say("stale records ", evloop::stat(evloop::s_stale))
+    say("suppressed wakes ", evloop::stat(evloop::s_suppressed))
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

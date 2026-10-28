@@ -1,0 +1,998 @@
+# evloop.bot -- the prototype scheduler of EVENT-LOOP-EXPLORATION.md (the
+# application module `evloop` of audit/event-loop/src).
+#
+# One thread-local scheduler. Its state is an installed context (Loop); its
+# waiting is an installed driver (any context implementing the context trait
+# Driver, selected statically: two installed drivers are
+# AMBIGUOUS-CONTEXT-IMPLEMENTATION, none MISSING-CONTEXT). A library never
+# installs a context -- only the entry program can -- so importing one cannot
+# change who drives the loop.
+#
+# Tasks are ordinary Botlish coroutines of one protocol,
+#
+#     Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}
+#
+# built by whoever spawns them (eagerly: the first segment runs inside the
+# spawner, before the scheduler owns the task) and handed over with `adopt`,
+# which moves the handle into the Loop. A segment ends by yielding an int
+# request -- -1, "run me again" (continuous activity), or the slot of the
+# registration it waits on -- or by returning. A task is resumed with no
+# message: what woke it is in the Loop's wake registers, which `wait` reads
+# right after its yield. Nothing is allocated per dispatch: the run queue,
+# the parked set and every table are vectors of handles and ints.
+#
+# A scheduling turn (EVENT-LOOP-EXPLORATION.md, "Proposed semantics"):
+#
+#   0. wait     the driver blocks until a native record, a wakeup or the
+#               earliest deadline -- or polls, when ready work exists;
+#   1. collect  expired timers (deadline, then registration order), then at
+#               most `budget` native records, each delivered to its
+#               registration: the first waiter is made ready, else the
+#               event is queued (bounded; the excess is counted, dropped);
+#   2. dispatch exactly the tasks ready when the phase starts, in the order
+#               they became ready; work made ready during the phase waits
+#               for the next turn;
+#   3. observe  each observer registration live when the phase starts runs
+#               its waiting task once, in registration order -- only in a
+#               turn that collected or dispatched something.
+#
+# Registrations and tasks have independent lifetimes. A registration is a
+# row of ints addressed by Reg {slot, gen}; revoking it bumps the
+# generation, discards its queued events, and wakes its waiters with
+# woke_revoked (they decide what to do: revocation is not cancellation); a
+# wake already queued for a task is checked against the generation when the
+# task is dispatched, so a revoked registration never delivers again.
+import std::coroutine
+import std::int
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import std::str
+
+# A task's own failure, carried out of its coroutine to the scheduler.
+error TaskFailed:
+    code: int
+
+# run or turn called while a task is being dispatched (a nested loop).
+error LoopReentered
+
+# Registration kinds.
+kind_timer = 1
+kind_source = 2
+kind_channel = 3
+kind_turn = 4
+
+# Wake reasons: what made a task ready.
+woke_ready = 0
+woke_event = 1
+woke_timer = 2
+woke_revoked = 3
+woke_turn = 4
+
+# A registration's identity: its slot and the generation it had when made.
+struct Reg:
+    slot: int
+    gen: int
+
+# What woke a task: the reason, the registration's slot, and the event's
+# two ints (a timer's a: the intervals missed and coalesced).
+struct Event:
+    reason: int
+    slot: int
+    a: int
+    b: int
+
+# The environment the loop waits in. Times are microseconds of one
+# monotonic clock. block(DEADLINE) returns when a record is available, a
+# wakeup arrives or DEADLINE passes (-1: no deadline; a deadline not after
+# now: do not block), with the number of records available, or -1 when no
+# record can ever arrive again (a script that ran out). take_record() makes
+# the next record current and returns its slot, or -1 when there is none;
+# the record_* operations read the current record.
+context trait Driver:
+    fn clock() -> int
+    fn block(deadline: int) -> int
+    fn take_record() -> int
+    fn record_gen() -> int
+    fn record_a() -> int
+    fn record_b() -> int
+
+# Registration rows (stride rs).
+rs = 16
+r_gen = 0
+r_kind = 1
+r_live = 2
+r_keep = 3
+r_whead = 4
+r_wtail = 5
+r_nwait = 6
+r_deadline = 7
+r_period = 8
+r_cap = 9
+r_phead = 10
+r_ptail = 11
+r_npend = 12
+r_dropped = 13
+r_seq = 14
+r_delivered = 15
+
+# Task rows (stride ts).
+ts = 8
+t_pos = 0
+t_next = 1
+t_reason = 2
+t_slot = 3
+t_gen = 4
+t_a = 5
+t_b = 6
+t_live = 7
+
+# Pending event nodes (stride es): a, b, next.
+es = 3
+
+# Registers (st).
+s_turn = 0
+s_now = 1
+s_dispatching = 2
+s_stopping = 3
+s_budget = 4
+s_seq = 5
+s_tracing = 6
+s_dispatched = 7
+s_collected = 8
+s_stale = 9
+s_failed = 10
+s_completed = 11
+s_wake_reason = 12
+s_wake_slot = 13
+s_wake_a = 14
+s_wake_b = 15
+s_ntasks = 16
+s_nregs = 17
+s_nevents = 18
+s_keepwait = 19
+s_suppressed = 20
+s_reentered = 21
+s_observed = 22
+s_spawned = 23
+s_maxready = 24
+s_turn_collected = 25
+s_turn_dispatched = 26
+s_current = 27
+s_idle_turns = 28
+s_count = 29
+
+opaque context struct Loop:
+    ready_in: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}]
+    ready_in_id: MutableVector[int]
+    ready_out: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}]
+    ready_out_id: MutableVector[int]
+    parked: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}]
+    parked_id: MutableVector[int]
+    tasks: MutableVector[int]
+    t_free: MutableVector[int]
+    regs: MutableVector[int]
+    r_free: MutableVector[int]
+    events: MutableVector[int]
+    e_free: MutableVector[int]
+    observers: MutableVector[int]
+    observer_gens: MutableVector[int]
+    st: MutableArray[int]
+    trace: MutableVector[str]
+    results: MutableVector[int]
+
+fn no_tasks() -> MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}]:
+    std::mutable_vector::from_list([])
+
+fn no_ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn no_strs() -> MutableVector[str]:
+    std::mutable_vector::from_list([])
+
+# A Loop that dispatches at most BUDGET native records per turn; TRACING 1
+# records a trace of every scheduling decision (tests).
+fn create(budget: int, tracing: int) -> Loop:
+    st = std::mutable_array::create(s_count, 0)
+    st.set(s_budget, budget):
+        on IndexNotFound:
+            unit
+    st.set(s_tracing, tracing):
+        on IndexNotFound:
+            unit
+    Loop {
+        ready_in: no_tasks(), ready_in_id: no_ints(),
+        ready_out: no_tasks(), ready_out_id: no_ints(),
+        parked: no_tasks(), parked_id: no_ints(),
+        tasks: no_ints(), t_free: no_ints(),
+        regs: no_ints(), r_free: no_ints(),
+        events: no_ints(), e_free: no_ints(),
+        observers: no_ints(), observer_gens: no_ints(),
+        st: st, trace: no_strs(), results: no_ints()
+    }
+
+# ---------------------------------------------------------------------------
+# Registers, rows, tracing
+
+nomethod fn reg_of(i: int, context ev: Loop) -> int errors IndexNotFound:
+    ev.st.at(i)
+
+nomethod fn set_reg(i: int, v: int, context ev: Loop) errors IndexNotFound:
+    ev.st.set(i, v)
+
+nomethod fn bump(i: int, context ev: Loop) errors IndexNotFound:
+    ev.st.set(i, ev.st.at(i) + 1)
+
+nomethod fn rget(slot: int, f: int, context ev: Loop) -> int errors IndexNotFound:
+    ev.regs.at(slot * rs + f)
+
+nomethod fn rset(slot: int, f: int, v: int, context ev: Loop) errors IndexNotFound:
+    ev.regs.swap(slot * rs + f, v)
+
+nomethod fn tget(id: int, f: int, context ev: Loop) -> int errors IndexNotFound:
+    ev.tasks.at(id * ts + f)
+
+nomethod fn tset(id: int, f: int, v: int, context ev: Loop) errors IndexNotFound:
+    ev.tasks.swap(id * ts + f, v)
+
+fn tracing?(context ev: Loop) -> bool errors IndexNotFound:
+    ev.st.at(s_tracing) == 1
+
+nomethod fn cat(text: str, n: int) -> str:
+    text.concat(std::int::to_string(n))
+
+fn note(text: str, context ev: Loop) errors IndexNotFound:
+    if tracing?():
+        ev.trace.push(cat("t=", ev.st.at(s_turn)).concat(": ").concat(text))
+
+# The trace so far, oldest first.
+fn trace(context ev: Loop) -> List[str] errors IndexNotFound:
+    loop i from 0 to ev.trace.length():
+        ev.trace.at(i)
+
+# Application notes in the same trace (tests and workloads): recorded also
+# when scheduler tracing is off.
+fn log(text: str, context ev: Loop) errors IndexNotFound:
+    ev.trace.push(cat("t=", ev.st.at(s_turn)).concat(": ").concat(text))
+
+# A counter of the loop (s_* index).
+nomethod fn stat(i: int, context ev: Loop) -> int errors IndexNotFound:
+    ev.st.at(i)
+
+fn now(context ev: Loop) -> int errors IndexNotFound:
+    ev.st.at(s_now)
+
+# The completed tasks' results, as id, value pairs in completion order.
+fn results(context ev: Loop) -> List[int] errors IndexNotFound:
+    loop i from 0 to ev.results.length():
+        ev.results.at(i)
+
+# ---------------------------------------------------------------------------
+# Tasks
+
+fn new_task(context ev: Loop) -> int errors IndexNotFound:
+    id = if ev.t_free.empty?():
+        n = ev.st.at(s_ntasks)
+        loop f from 0 to ts:
+            ev.tasks.push(0)
+        set_reg(s_ntasks, n + 1)
+        n
+    else:
+        ev.t_free.pop()
+    tset(id, t_pos, -1)
+    tset(id, t_next, -1)
+    tset(id, t_reason, woke_ready)
+    tset(id, t_slot, -1)
+    tset(id, t_gen, 0)
+    tset(id, t_a, 0)
+    tset(id, t_b, 0)
+    tset(id, t_live, 1)
+    bump(s_spawned)
+    id
+
+nomethod fn retire_task(id: int, context ev: Loop) errors IndexNotFound:
+    tset(id, t_live, 0)
+    ev.t_free.push(id)
+
+fn ready_count(context ev: Loop) -> int:
+    ev.ready_in.length() + ev.ready_out.length()
+
+# Make task ID (handle STEP) ready with REASON from registration SLOT/GEN.
+nomethod fn push_ready(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}, id: int, reason: int, slot: int, gen: int, a: int, b: int, context ev: Loop) errors IndexNotFound:
+    tset(id, t_reason, reason)
+    tset(id, t_slot, slot)
+    tset(id, t_gen, gen)
+    tset(id, t_a, a)
+    tset(id, t_b, b)
+    ev.ready_in.push(step)
+    ev.ready_in_id.push(id)
+    n = ready_count()
+    if n > ev.st.at(s_maxready):
+        set_reg(s_maxready, n)
+
+fn refill(context ev: Loop) errors IndexNotFound:
+    loop:
+        if ev.ready_in.empty?():
+            break
+        ev.ready_out.push(ev.ready_in.pop())
+        ev.ready_out_id.push(ev.ready_in_id.pop())
+
+# The id of the task that has been ready longest, which the next pop_ready
+# returns (call before it).
+fn front_ready(context ev: Loop) -> int errors IndexNotFound:
+    if ev.ready_out.empty?():
+        refill()
+    ev.ready_out_id.at(ev.ready_out_id.length() - 1)
+
+fn pop_ready(context ev: Loop) -> Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]} errors IndexNotFound:
+    if ev.ready_out.empty?():
+        refill()
+    ev.ready_out_id.pop()
+    ev.ready_out.pop()
+
+nomethod fn complete(id: int, value: int, context ev: Loop) errors IndexNotFound:
+    bump(s_completed)
+    ev.results.push(id)
+    ev.results.push(value)
+    retire_task(id)
+
+# Take the parked task ID out of the parked set (swap-remove) and return its
+# handle.
+nomethod fn unpark(id: int, context ev: Loop) -> Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]} errors IndexNotFound:
+    i = tget(id, t_pos)
+    last = ev.parked.length() - 1
+    tset(id, t_pos, -1)
+    if i == last:
+        ev.parked_id.pop()
+        return ev.parked.pop()
+    moved = ev.parked_id.pop()
+    ev.parked_id.swap(i, moved)
+    tset(moved, t_pos, i)
+    moved_step = ev.parked.pop()
+    ev.parked.swap(i, moved_step)
+
+# The first waiter of SLOT, removed from its FIFO (-1 when none).
+nomethod fn pop_waiter(slot: int, context ev: Loop) -> int errors IndexNotFound:
+    id = rget(slot, r_whead)
+    if id == -1:
+        return -1
+    next = tget(id, t_next)
+    rset(slot, r_whead, next)
+    if next == -1:
+        rset(slot, r_wtail, -1)
+    tset(id, t_next, -1)
+    rset(slot, r_nwait, rget(slot, r_nwait) - 1)
+    if rget(slot, r_keep) == 1:
+        set_reg(s_keepwait, ev.st.at(s_keepwait) - 1)
+    id
+
+# ---------------------------------------------------------------------------
+# Registrations
+
+nomethod fn new_reg(kind: int, keep: int, cap: int, context ev: Loop) -> Reg errors IndexNotFound:
+    slot = if ev.r_free.empty?():
+        n = ev.st.at(s_nregs)
+        loop f from 0 to rs:
+            ev.regs.push(0)
+        set_reg(s_nregs, n + 1)
+        rset(n, r_gen, 1)
+        n
+    else:
+        ev.r_free.pop()
+    rset(slot, r_kind, kind)
+    rset(slot, r_live, 1)
+    rset(slot, r_keep, keep)
+    rset(slot, r_whead, -1)
+    rset(slot, r_wtail, -1)
+    rset(slot, r_nwait, 0)
+    rset(slot, r_deadline, -1)
+    rset(slot, r_period, 0)
+    rset(slot, r_cap, cap)
+    rset(slot, r_phead, -1)
+    rset(slot, r_ptail, -1)
+    rset(slot, r_npend, 0)
+    rset(slot, r_dropped, 0)
+    rset(slot, r_seq, ev.st.at(s_seq))
+    rset(slot, r_delivered, 0)
+    bump(s_seq)
+    Reg {slot: slot, gen: rget(slot, r_gen)}
+
+# True when REG still names a live registration.
+fn live?(reg: Reg, context ev: Loop) -> bool errors IndexNotFound:
+    if reg.slot < 0 or reg.slot >= ev.st.at(s_nregs):
+        return false
+    rget(reg.slot, r_gen) == reg.gen and rget(reg.slot, r_live) == 1
+
+# A one-shot timer at DEADLINE, or a repeating one (PERIOD > 0) whose first
+# expiry is DEADLINE. A timer keeps the loop alive while a task waits on it.
+nomethod fn timer(deadline: int, period: int, context ev: Loop) -> Reg errors IndexNotFound:
+    reg = new_reg(kind_timer, 1, 1)
+    rset(reg.slot, r_deadline, deadline)
+    rset(reg.slot, r_period, period)
+    note(cat("timer ", reg.slot).concat(cat(" at ", deadline)).concat(cat(" every ", period)))
+    reg
+
+fn after(delay: int, context ev: Loop) -> Reg errors IndexNotFound:
+    timer(ev.st.at(s_now) + delay, 0)
+
+fn every(period: int, context ev: Loop) -> Reg errors IndexNotFound:
+    timer(ev.st.at(s_now) + period, period)
+
+# A source of native (driver) records. KEEP 1: a task waiting on it keeps
+# the loop alive (a listening socket); 0: it does not (an optional input).
+# At most CAP undelivered events are queued; the excess is counted, dropped.
+fn source(keep: int, cap: int, context ev: Loop) -> Reg errors IndexNotFound:
+    reg = new_reg(kind_source, keep, cap)
+    note(cat("source ", reg.slot).concat(cat(" keep ", keep)))
+    reg
+
+# A channel Botlish code posts to (post). It never keeps the loop alive by
+# itself: only a running task can post to it.
+fn channel(cap: int, context ev: Loop) -> Reg errors IndexNotFound:
+    reg = new_reg(kind_channel, 0, cap)
+    note(cat("channel ", reg.slot))
+    reg
+
+# A once-per-turn registration: a task waiting on it runs once in the
+# observer phase of every turn that collected or dispatched something. It
+# never keeps the loop alive (an idle loop sleeps; it does not spin for it).
+# It takes effect at the first observer phase that starts after this call.
+fn observer(context ev: Loop) -> Reg errors IndexNotFound:
+    reg = new_reg(kind_turn, 0, 0)
+    ev.observers.push(reg.slot)
+    ev.observer_gens.push(reg.gen)
+    note(cat("observer ", reg.slot))
+    reg
+
+nomethod fn free_reg(slot: int, context ev: Loop) errors IndexNotFound:
+    rset(slot, r_gen, rget(slot, r_gen) + 1)
+    rset(slot, r_live, 0)
+    ev.r_free.push(slot)
+
+# A one-shot timer that fired: no longer live, but its generation stands
+# until its wake is dispatched (or the timer revoked), so a revocation in
+# between still suppresses that wake.
+nomethod fn spend_timer(slot: int, context ev: Loop) errors IndexNotFound:
+    if rget(slot, r_period) == 0:
+        rset(slot, r_live, 0)
+
+# Revoke REG: no handler invocation after this one -- queued events are
+# discarded, a wake already queued for a task is suppressed when the task is
+# dispatched, and every waiter is made ready with woke_revoked. Running
+# code is not undone, and no task is cancelled. Revoking twice, or a stale
+# Reg, does nothing (returns 0).
+fn revoke(reg: Reg, context ev: Loop) -> int errors IndexNotFound:
+    stale = if reg.slot < 0 or reg.slot >= ev.st.at(s_nregs):
+        true
+    else:
+        rget(reg.slot, r_gen) != reg.gen
+    if stale:
+        note(cat("revoke stale ", reg.slot))
+        return 0
+    slot = reg.slot
+    discarded = rget(slot, r_npend)
+    rset(slot, r_live, 0)
+    rset(slot, r_gen, reg.gen + 1)
+    # The queued events.
+    loop:
+        node = rget(slot, r_phead)
+        if node == -1:
+            break
+        rset(slot, r_phead, ev.events.at(node * es + 2))
+        ev.e_free.push(node)
+    rset(slot, r_ptail, -1)
+    rset(slot, r_npend, 0)
+    note(cat("revoke ", slot).concat(cat(" discarding ", discarded)))
+    # The waiters, in the order they waited.
+    loop:
+        id = pop_waiter(slot)
+        if id == -1:
+            break
+        push_ready(unpark(id), id, woke_revoked, slot, reg.gen, 0, 0)
+    ev.r_free.push(slot)
+    1
+
+# Queue event (A, B) on registration SLOT, which has room.
+nomethod fn enqueue(slot: int, a: int, b: int, context ev: Loop) errors IndexNotFound:
+    node = if ev.e_free.empty?():
+        n = ev.st.at(s_nevents)
+        ev.events.push(0)
+        ev.events.push(0)
+        ev.events.push(0)
+        set_reg(s_nevents, n + 1)
+        n
+    else:
+        ev.e_free.pop()
+    ev.events.swap(node * es, a)
+    ev.events.swap(node * es + 1, b)
+    ev.events.swap(node * es + 2, -1)
+    tail = rget(slot, r_ptail)
+    if tail == -1:
+        rset(slot, r_phead, node)
+    else:
+        ev.events.swap(tail * es + 2, node)
+    rset(slot, r_ptail, node)
+    rset(slot, r_npend, rget(slot, r_npend) + 1)
+
+# Deliver event (A, B) to registration SLOT, expected at generation GEN:
+# its first waiter is made ready, else the event is queued, else (no room)
+# it is counted and dropped. Returns 0 for a stale record (no such live
+# registration), else 1.
+nomethod fn deliver(slot: int, gen: int, reason: int, a: int, b: int, context ev: Loop) -> int errors IndexNotFound:
+    stale = if slot < 0 or slot >= ev.st.at(s_nregs):
+        true
+    else:
+        rget(slot, r_gen) != gen or rget(slot, r_live) != 1
+    if stale:
+        bump(s_stale)
+        note(cat("stale record for ", slot).concat(cat(" gen ", gen)))
+        return 0
+    rset(slot, r_delivered, rget(slot, r_delivered) + 1)
+    id = pop_waiter(slot)
+    if id != -1:
+        push_ready(unpark(id), id, reason, slot, gen, a, b)
+    elif rget(slot, r_npend) >= rget(slot, r_cap):
+        rset(slot, r_dropped, rget(slot, r_dropped) + 1)
+        note(cat("overflow ", slot))
+    else:
+        enqueue(slot, a, b)
+    1
+
+# Post (A, B) to a channel or source REG from Botlish code (a task or the
+# top level). Returns 0 when REG is not live (nothing happens).
+fn post(reg: Reg, a: int, b: int, context ev: Loop) -> int errors IndexNotFound:
+    if not live?(reg):
+        return 0
+    deliver(reg.slot, reg.gen, woke_event, a, b)
+
+# Events of REG queued and undelivered / dropped for want of room.
+fn pending(reg: Reg, context ev: Loop) -> int errors IndexNotFound:
+    if not live?(reg):
+        return 0
+    rget(reg.slot, r_npend)
+
+fn delivered(reg: Reg, context ev: Loop) -> int errors IndexNotFound:
+    if reg.slot < 0 or reg.slot >= ev.st.at(s_nregs):
+        return 0
+    rget(reg.slot, r_delivered)
+
+fn dropped(reg: Reg, context ev: Loop) -> int errors IndexNotFound:
+    if reg.slot < 0 or reg.slot >= ev.st.at(s_nregs):
+        return 0
+    rget(reg.slot, r_dropped)
+
+# ---------------------------------------------------------------------------
+# Parking and adoption
+
+# Park task ID on registration SLOT, or make it ready at once when the
+# registration has something for it (or is not live).
+nomethod fn park(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}, id: int, slot: int, context ev: Loop) errors IndexNotFound:
+    if slot < 0 or slot >= ev.st.at(s_nregs):
+        push_ready(step, id, woke_revoked, slot, 0, 0, 0)
+        return unit
+    gen = rget(slot, r_gen)
+    if rget(slot, r_live) != 1:
+        push_ready(step, id, woke_revoked, slot, gen, 0, 0)
+        return unit
+    kind = rget(slot, r_kind)
+    npend = rget(slot, r_npend)
+    if kind == kind_timer and npend > 0:
+        rset(slot, r_npend, 0)
+        spend_timer(slot)
+        push_ready(step, id, woke_timer, slot, gen, npend - 1, 0)
+        return unit
+    if npend > 0:
+        node = rget(slot, r_phead)
+        a = ev.events.at(node * es)
+        b = ev.events.at(node * es + 1)
+        next = ev.events.at(node * es + 2)
+        rset(slot, r_phead, next)
+        if next == -1:
+            rset(slot, r_ptail, -1)
+        rset(slot, r_npend, npend - 1)
+        ev.e_free.push(node)
+        push_ready(step, id, woke_event, slot, gen, a, b)
+        return unit
+    tset(id, t_pos, ev.parked.length())
+    tset(id, t_next, -1)
+    ev.parked.push(step)
+    ev.parked_id.push(id)
+    tail = rget(slot, r_wtail)
+    if tail == -1:
+        rset(slot, r_whead, id)
+    else:
+        tset(tail, t_next, id)
+    rset(slot, r_wtail, id)
+    rset(slot, r_nwait, rget(slot, r_nwait) + 1)
+    if rget(slot, r_keep) == 1:
+        bump(s_keepwait)
+
+# What a segment's request means: -1 ready again; a slot, park there.
+nomethod fn after_segment(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}, id: int, code: int, context ev: Loop) errors IndexNotFound:
+    if code == -1:
+        push_ready(step, id, woke_ready, -1, 0, 0, 0)
+    else:
+        park(step, id, code)
+
+# Hand a task to the scheduler: STEP was constructed by the caller (its first
+# segment already ran), FIRST is what that segment yielded. The handle moves
+# into the Loop.
+nomethod fn adopt(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}, first: int, context ev: Loop) -> int errors IndexNotFound:
+    id = new_task()
+    if std::coroutine::done?(step):
+        note(cat("task ", id).concat(cat(" done at start ", first)))
+        complete(id, first)
+    else:
+        note(cat("adopt task ", id).concat(cat(" wants ", first)))
+        after_segment(step, id, first)
+    id
+
+# ---------------------------------------------------------------------------
+# What tasks call (they yield to the scheduler)
+
+# Run again in the next turn: continuous activity, which keeps the loop
+# awake and polling.
+fn yield_now():
+    yield -1
+
+# Wait for REG's next event (or its timer, its turn, its revocation).
+fn wait(reg: Reg, context ev: Loop) -> Event errors IndexNotFound:
+    if not live?(reg):
+        return Event {reason: woke_revoked, slot: reg.slot, a: 0, b: 0}
+    yield reg.slot
+    Event {reason: ev.st.at(s_wake_reason), slot: ev.st.at(s_wake_slot), a: ev.st.at(s_wake_a), b: ev.st.at(s_wake_b)}
+
+# REG's next queued event without suspending: reason woke_event, or -1 when
+# nothing is queued (woke_revoked when REG is not live). A task that drains
+# a queue this way handles a whole batch in one dispatch; the queue's
+# capacity bounds the batch.
+fn try_take(reg: Reg, context ev: Loop) -> Event errors IndexNotFound:
+    if not live?(reg):
+        return Event {reason: woke_revoked, slot: reg.slot, a: 0, b: 0}
+    slot = reg.slot
+    npend = rget(slot, r_npend)
+    if npend == 0 or rget(slot, r_kind) == kind_timer:
+        return Event {reason: -1, slot: slot, a: 0, b: 0}
+    node = rget(slot, r_phead)
+    a = ev.events.at(node * es)
+    b = ev.events.at(node * es + 1)
+    next = ev.events.at(node * es + 2)
+    rset(slot, r_phead, next)
+    if next == -1:
+        rset(slot, r_ptail, -1)
+    rset(slot, r_npend, npend - 1)
+    ev.e_free.push(node)
+    Event {reason: woke_event, slot: slot, a: a, b: b}
+
+# Sleep DELAY microseconds (a one-shot timer of its own).
+fn sleep(delay: int, context ev: Loop) -> int errors IndexNotFound:
+    e = wait(after(delay))
+    e.reason
+
+# The registers of the wake that resumed the running task.
+fn wake_reason(context ev: Loop) -> int errors IndexNotFound:
+    ev.st.at(s_wake_reason)
+
+# ---------------------------------------------------------------------------
+# The turn
+
+# Resume task ID (handle STEP), already out of every queue.
+nomethod fn run_task(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound]}, id: int, context ev: Loop) errors IndexNotFound:
+    reason = tget(id, t_reason)
+    slot = tget(id, t_slot)
+    gen = tget(id, t_gen)
+    valid = if reason == woke_event or reason == woke_timer or reason == woke_turn:
+        rget(slot, r_gen) == gen
+    else:
+        true
+    if not valid:
+        bump(s_suppressed)
+        note(cat("suppress wake of task ", id).concat(cat(" from revoked ", slot)))
+    effective = if valid:
+        reason
+    else:
+        woke_revoked
+    # A fired one-shot timer is freed once its wake is dispatched.
+    if valid and reason == woke_timer and rget(slot, r_live) == 0 and rget(slot, r_period) == 0:
+        free_reg(slot)
+    set_reg(s_wake_reason, effective)
+    set_reg(s_wake_slot, slot)
+    # A suppressed wake carries nothing of the event it was for.
+    wa = if valid:
+        tget(id, t_a)
+    else:
+        0
+    wb = if valid:
+        tget(id, t_b)
+    else:
+        0
+    set_reg(s_wake_a, wa)
+    set_reg(s_wake_b, wb)
+    set_reg(s_current, id)
+    set_reg(s_dispatching, 1)
+    bump(s_dispatched)
+    set_reg(s_turn_dispatched, ev.st.at(s_turn_dispatched) + 1)
+    note(cat("run task ", id).concat(cat(" reason ", effective)))
+    code = step():
+        on TaskFailed {code}:
+            set_reg(s_dispatching, 0)
+            bump(s_failed)
+            note(cat("task ", id).concat(cat(" failed ", code)))
+            ev.results.push(id)
+            ev.results.push(-1000000 - code)
+            retire_task(id)
+            return unit
+        on IndexNotFound:
+            set_reg(s_dispatching, 0)
+            bump(s_failed)
+            note(cat("task ", id).concat(" failed IndexNotFound"))
+            ev.results.push(id)
+            ev.results.push(-2000000)
+            retire_task(id)
+            return unit
+    set_reg(s_dispatching, 0)
+    if std::coroutine::done?(step):
+        note(cat("task ", id).concat(cat(" done ", code)))
+        complete(id, code)
+        return unit
+    after_segment(step, id, code)
+
+# The live timer slot with the earliest deadline <= NOW (smallest sequence
+# among equals), or -1.
+nomethod fn earliest_timer(n: int, now: int, context ev: Loop) -> int errors IndexNotFound:
+    best = std::mutable_array::create(1, -1)
+    loop slot from 0 to n:
+        if rget(slot, r_live) == 1 and rget(slot, r_kind) == kind_timer:
+            d = rget(slot, r_deadline)
+            if d >= 0 and d <= now:
+                b = best.at(0)
+                if b == -1:
+                    best.set(0, slot)
+                else:
+                    bd = rget(b, r_deadline)
+                    if d < bd or (d == bd and rget(slot, r_seq) < rget(b, r_seq)):
+                        best.set(0, slot)
+    best.at(0)
+
+# How many whole periods past DEADLINE NOW is (>= 1 when NOW >= DEADLINE):
+# the expiries a repeating timer owes, found with doubling, not one step per
+# missed interval.
+nomethod fn periods_due(deadline: int, period: int, now: int) -> int:
+    if now < deadline:
+        return 0
+    # k = 1 + floor((now - deadline) / period), without division.
+    span = now - deadline
+    hi = std::mutable_array::create(1, 1)
+    loop:
+        h = hi.at(0):
+            on IndexNotFound:
+                1
+        if h * period > span:
+            break
+        hi.set(0, h * 2):
+            on IndexNotFound:
+                unit
+    lo = std::mutable_array::create(1, 0)
+    top = hi.at(0):
+        on IndexNotFound:
+            1
+    # Largest q in [0, top) with q * period <= span: binary search.
+    step = std::mutable_array::create(1, top)
+    loop:
+        s = step.at(0):
+            on IndexNotFound:
+                0
+        if s == 0:
+            break
+        half = s.shift_right(1)
+        l = lo.at(0):
+            on IndexNotFound:
+                0
+        if (l + s) * period <= span and l + s < top:
+            lo.set(0, l + s):
+                on IndexNotFound:
+                    unit
+        step.set(0, half):
+            on IndexNotFound:
+                unit
+    q = lo.at(0):
+        on IndexNotFound:
+            0
+    q + 1
+
+nomethod fn fire_timer(slot: int, now: int, context ev: Loop) errors IndexNotFound:
+    deadline = rget(slot, r_deadline)
+    period = rget(slot, r_period)
+    due = if period > 0:
+        periods_due(deadline, period, now)
+    else:
+        1
+    missed = due - 1
+    if period > 0:
+        rset(slot, r_deadline, deadline + due * period)
+    else:
+        rset(slot, r_deadline, -1)
+    note(cat("timer ", slot).concat(cat(" fires late ", now - deadline)).concat(cat(" missed ", missed)))
+    id = pop_waiter(slot)
+    if id != -1:
+        spend_timer(slot)
+        push_ready(unpark(id), id, woke_timer, slot, rget(slot, r_gen), missed, 0)
+        return unit
+    # Nobody waits: the expiries are coalesced into one pending count.
+    rset(slot, r_npend, rget(slot, r_npend) + due)
+    if period == 0:
+        rset(slot, r_deadline, -1)
+
+# Expire the timers due at NOW, earliest deadline first (registration order
+# among equal deadlines); returns how many fired.
+nomethod fn expire_timers(now: int, context ev: Loop) -> int errors IndexNotFound:
+    n = ev.st.at(s_nregs)
+    fired = std::mutable_array::create(1, 0)
+    loop:
+        best = earliest_timer(n, now)
+        if best == -1:
+            break
+        fire_timer(best, now)
+        fired.set(0, fired.at(0) + 1)
+    fired.at(0)
+
+# Collect at most the budget of native records from the driver; returns how
+# many were delivered (a stale record is taken, counted, and does nothing).
+fn collect_records(context ev: Loop, d: Driver) -> int errors IndexNotFound:
+    budget = ev.st.at(s_budget)
+    count = std::mutable_array::create(1, 0)
+    taken = std::mutable_array::create(1, 0)
+    loop:
+        c = count.at(0)
+        if taken.at(0) >= budget:
+            break
+        slot = d.take_record()
+        if slot < 0:
+            break
+        taken.set(0, taken.at(0) + 1)
+        count.set(0, c + deliver(slot, d.record_gen(), woke_event, d.record_a(), d.record_b()))
+    count.at(0)
+
+# The observer phase: every turn registration live when it starts, in
+# registration order, runs its first waiting task once.
+fn observe(context ev: Loop) errors IndexNotFound:
+    n = ev.observers.length()
+    loop i from 0 to n:
+        slot = ev.observers.at(i)
+        gen = ev.observer_gens.at(i)
+        if rget(slot, r_gen) == gen and rget(slot, r_live) == 1:
+            id = pop_waiter(slot)
+            if id != -1:
+                step = unpark(id)
+                tset(id, t_reason, woke_turn)
+                tset(id, t_slot, slot)
+                tset(id, t_gen, gen)
+                tset(id, t_a, ev.st.at(s_turn))
+                tset(id, t_b, 0)
+                bump(s_observed)
+                run_task(step, id)
+    # Drop the entries of revoked observers (registrations made during the
+    # phase were appended after the snapshot and stay).
+    keep = loop i from 0 to ev.observers.length():
+        slot = ev.observers.at(i)
+        gen = ev.observer_gens.at(i)
+        if rget(slot, r_gen) == gen and rget(slot, r_live) == 1:
+            [slot, gen]
+        else:
+            continue
+    if std::list::length(keep) < ev.observers.length():
+        ev.observers.clear()
+        ev.observer_gens.clear()
+        loop pair in keep:
+            ev.observers.push(std::list::at(pair, 0))
+            ev.observer_gens.push(std::list::at(pair, 1))
+
+# One scheduling turn without waiting (the driver has waited, or a host
+# advances the loop): collect, dispatch, observe. Returns how many tasks it
+# dispatched.
+fn turn(context ev: Loop, d: Driver) -> int errors IndexNotFound, LoopReentered:
+    if ev.st.at(s_dispatching) == 1:
+        bump(s_reentered)
+        fail LoopReentered
+    bump(s_turn)
+    set_reg(s_now, d.clock())
+    set_reg(s_turn_dispatched, 0)
+    timers = expire_timers(ev.st.at(s_now))
+    records = collect_records()
+    collected = timers + records
+    set_reg(s_turn_collected, collected)
+    set_reg(s_collected, ev.st.at(s_collected) + records)
+    n = ready_count()
+    note(cat("collect timers ", timers).concat(cat(" records ", records)).concat(cat(" ready ", n)))
+    loop i from 0 to n:
+        id = front_ready()
+        run_task(pop_ready(), id)
+    if collected + n > 0:
+        observe()
+    else:
+        bump(s_idle_turns)
+    n
+
+# Whether anything can still happen: ready work, or a task waiting on a
+# registration that keeps the loop alive.
+fn live_work?(context ev: Loop) -> bool errors IndexNotFound:
+    ready_count() > 0 or ev.st.at(s_keepwait) > 0
+
+# The earliest deadline of a timer some task waits on, or -1.
+fn next_deadline(context ev: Loop) -> int errors IndexNotFound:
+    best = std::mutable_array::create(1, -1)
+    loop slot from 0 to ev.st.at(s_nregs):
+        if rget(slot, r_live) == 1 and rget(slot, r_kind) == kind_timer and rget(slot, r_nwait) > 0:
+            d = rget(slot, r_deadline)
+            b = best.at(0)
+            if d >= 0 and (b == -1 or d < b):
+                best.set(0, d)
+    best.at(0)
+
+# Ask run to return after the current turn.
+fn stop(context ev: Loop) errors IndexNotFound:
+    set_reg(s_stopping, 1)
+
+# Drive the loop until nothing can happen any more (or stop, or a driver
+# that can never deliver again). Returns the number of turns.
+fn run(context ev: Loop, d: Driver) -> int errors IndexNotFound, LoopReentered:
+    if ev.st.at(s_dispatching) == 1:
+        bump(s_reentered)
+        fail LoopReentered
+    set_reg(s_stopping, 0)
+    set_reg(s_now, d.clock())
+    first = ev.st.at(s_turn)
+    loop:
+        if ev.st.at(s_stopping) == 1:
+            note("stopped")
+            break
+        if not live_work?():
+            note("no live work")
+            break
+        deadline = if ready_count() > 0:
+            d.clock()
+        else:
+            next_deadline()
+        available = d.block(deadline)
+        if available < 0 and ready_count() == 0 and next_deadline() == -1:
+            note("driver exhausted")
+            break
+        turn()
+    ev.st.at(s_turn) - first
+
+# Release every task the loop still owns, without running it (a dropped
+# coroutine is unwound, never resumed): the end of a shutdown. Returns how
+# many it dropped.
+fn abandon(context ev: Loop) -> int errors IndexNotFound:
+    dropped = ready_count() + ev.parked.length()
+    loop:
+        if ev.ready_in.empty?():
+            break
+        ev.ready_in.pop()
+        retire_task(ev.ready_in_id.pop())
+    loop:
+        if ev.ready_out.empty?():
+            break
+        ev.ready_out.pop()
+        retire_task(ev.ready_out_id.pop())
+    loop:
+        if ev.parked.empty?():
+            break
+        ev.parked.pop()
+        retire_task(ev.parked_id.pop())
+    note(cat("abandon ", dropped))
+    dropped
+
+# Shutdown: revoke every live registration (their waiters wake with
+# woke_revoked and may finish), run at most ROUNDS more turns while tasks are
+# ready, then abandon what is left. Returns how many tasks were abandoned.
+fn shutdown(rounds: int, context ev: Loop, d: Driver) -> int errors IndexNotFound, LoopReentered:
+    note("shutdown")
+    loop slot from 0 to ev.st.at(s_nregs):
+        if rget(slot, r_live) == 1 or rget(slot, r_nwait) > 0:
+            revoke(Reg {slot: slot, gen: rget(slot, r_gen)})
+    loop r from 0 to rounds:
+        if ready_count() == 0:
+            break
+        turn()
+    abandon()

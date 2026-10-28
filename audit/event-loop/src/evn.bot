@@ -1,0 +1,156 @@
+# evn.bot -- the native Linux driver of EVENT-LOOP-EXPLORATION.md (Experiment
+# B): the context Native, which implements evloop::Driver (real monotonic
+# time, epoll, an eventfd for wakeups) and gameserver::Net (TCP), over the C
+# adapter audit/event-loop/native/evn.c (libevn.a, built by
+# tools/native.tcl). Every C function takes and returns scalars: no pointer
+# crosses, nothing native is retained by Botlish, and what the kernel
+# delivered reaches the program only as copied ints.
+#
+# Native programs only: the Tcl backends refuse a C call.
+import std::ffi::c
+import std::mutable_array
+
+extern c library "evn" static at "../build/libevn.a"
+
+extern c fn evn_open(capacity: std::ffi::c::Int, quota: std::ffi::c::Int, flags: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_now() -> std::ffi::c::LongLong
+extern c fn evn_cpu_us() -> std::ffi::c::LongLong
+extern c fn evn_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evn_block(deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evn_take() -> std::ffi::c::Int
+extern c fn evn_gen() -> std::ffi::c::Int
+extern c fn evn_a() -> std::ffi::c::LongLong
+extern c fn evn_b() -> std::ffi::c::LongLong
+extern c fn evn_wake() -> std::ffi::c::Int
+extern c fn evn_post(slot: std::ffi::c::Int, gen: std::ffi::c::Int, a: std::ffi::c::LongLong, b: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evn_listen(port: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_unlisten() -> std::ffi::c::Int
+extern c fn evn_attach(conn: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, credit: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_credit(conn: std::ffi::c::Int, n: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_send(conn: std::ffi::c::Int, value: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evn_hangup(conn: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_synth(slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int, burst: std::ffi::c::Int, jitter: std::ffi::c::Int, gap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_synth_join() -> std::ffi::c::Int
+extern c fn evn_client(port: std::ffi::c::Int, id: std::ffi::c::Int, pattern: std::ffi::c::Int, lines: std::ffi::c::Int, interval: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_clients_join() -> std::ffi::c::Int
+extern c fn evn_client_replies(id: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evn_spin(us: std::ffi::c::Int) -> std::ffi::c::Int
+
+# The counters of evn_stat.
+st_blocks = 0
+st_wakeups = 1
+st_spurious = 2
+st_timeouts = 3
+st_records = 4
+st_posts = 5
+st_posts_refused = 6
+st_ring_max = 7
+st_post_max = 8
+st_accepts = 9
+st_lines = 10
+st_paused = 11
+st_eventfd_writes = 12
+st_sends = 13
+
+# The installed native environment: the adapter's status (0, or -errno).
+opaque context struct Native:
+    state: MutableArray[int]
+
+# A C int of X (clamped: every value the prototype passes is in range).
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+# FLAGS 1: the deliberately broken wakeup protocol (evn.c, EVN_BROKEN_WAKE).
+fn create(capacity: int, quota: int, flags: int) -> Native:
+    state = std::mutable_array::create(1, 0)
+    state.set(0, ci(capacity).evn_open(ci(quota), ci(flags))):
+        on IndexNotFound:
+            unit
+    Native {state: state}
+
+fn status(context n: Native) -> int:
+    n.state.at(0):
+        on IndexNotFound:
+            -1
+
+# evloop::Driver
+fn clock(context n: Native) -> int:
+    evn_now()
+
+fn block(deadline: int, context n: Native) -> int:
+    evn_block(cll(deadline))
+
+fn take_record(context n: Native) -> int:
+    evn_take()
+
+fn record_gen(context n: Native) -> int:
+    evn_gen()
+
+fn record_a(context n: Native) -> int:
+    evn_a()
+
+fn record_b(context n: Native) -> int:
+    evn_b()
+
+# gameserver::Net
+fn attach(conn: int, slot: int, gen: int, context n: Native) -> int:
+    ci(conn).evn_attach(ci(slot), ci(gen), 16)
+
+fn send(conn: int, value: int, context n: Native) -> int:
+    ci(conn).evn_send(cll(value))
+
+fn hangup(conn: int, context n: Native) -> int:
+    evn_hangup(ci(conn))
+
+fn ack(conn: int, context n: Native) -> int:
+    ci(conn).evn_credit(1)
+
+# Test and measurement operations.
+fn listen(port: int, slot: int, gen: int, context n: Native) -> int:
+    ci(port).evn_listen(ci(slot), ci(gen))
+
+fn unlisten(context n: Native) -> int:
+    evn_unlisten()
+
+fn post(slot: int, gen: int, a: int, b: int, context n: Native) -> int:
+    ci(slot).evn_post(ci(gen), cll(a), cll(b))
+
+fn wake(context n: Native) -> int:
+    evn_wake()
+
+nomethod fn synth(slot: int, gen: int, count: int, interval: int, burst: int, jitter: int, gap: int, context n: Native) -> int:
+    ci(slot).evn_synth(ci(gen), ci(count), ci(interval), ci(burst), ci(jitter), ci(gap))
+
+fn synth_join(context n: Native) -> int:
+    evn_synth_join()
+
+nomethod fn client(port: int, id: int, pattern: int, lines: int, interval: int, context n: Native) -> int:
+    ci(port).evn_client(ci(id), ci(pattern), ci(lines), ci(interval))
+
+fn clients_join(context n: Native) -> int:
+    evn_clients_join()
+
+fn client_replies(id: int, context n: Native) -> int:
+    evn_client_replies(ci(id))
+
+nomethod fn stat(i: int, context n: Native) -> int:
+    evn_stat(ci(i))
+
+fn cpu_us(context n: Native) -> int:
+    evn_cpu_us()
+
+fn spin(us: int, context n: Native) -> int:
+    evn_spin(ci(us))

@@ -1,0 +1,30 @@
+import evloop
+import simdrv
+import std::mutable_vector
+import std::str
+
+fn worker(name: int, n: int, context ev: evloop::Loop) -> int:
+    loop i from 0 to n:
+        evloop::log(evloop::cat("w=", name).concat(evloop::cat(" step ", i))):
+            on IndexNotFound:
+                unit
+        evloop::yield_now()
+    name
+
+fn spawn(name: int, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    coroutine {step, first} = worker(name, n)
+    evloop::adopt(step, first)
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    spawn(1, 3)
+    spawn(2, 2)
+    evloop::run()
+    evloop::trace()
+
+with context evloop::create(16, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["index"]
+    on evloop::LoopReentered:
+        ["reentered"]

@@ -1,0 +1,37 @@
+# workload.bot -- the base workload W of the composition experiment
+# (EVENT-LOOP-EXPLORATION.md, Experiment B): three tasks that interleave
+# through yields, a channel and a timer, logging "W:" lines.
+import evloop
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat("W: ".concat(text), n))
+
+fn producer(ch: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 5:
+        ch.post(i, 0)
+        say("produced ", i)
+        evloop::yield_now()
+    0
+
+fn consumer(ch: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 5:
+        e = evloop::wait(ch)
+        say("consumed ", e.a)
+    0
+
+fn sleeper(context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::sleep(3)
+    say("slept until ", evloop::now())
+    evloop::yield_now()
+    say("after sleep ", 1)
+    0
+
+fn start(context ev: evloop::Loop) errors IndexNotFound:
+    ch = evloop::channel(8)
+    coroutine {step: c, first: cf} = consumer(ch)
+    evloop::adopt(c, cf)
+    coroutine {step: p, first: pf} = producer(ch)
+    evloop::adopt(p, pf)
+    coroutine {step: s, first: sf} = sleeper()
+    evloop::adopt(s, sf)

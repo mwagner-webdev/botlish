@@ -1,0 +1,26 @@
+# a-compose-busy.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B (composition,
+# deterministic driver): the base workload W (busy). tools/check.tcl compares
+# W's lines across the variants: identical, turns included, with an
+# inactive library imported and initialized before or after W; the same
+# order (and bounded delay) beside an active one.
+import busylib
+import evloop
+import quietlib
+import simdrv
+import workload
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    flood = busylib::init(40)
+    loop i from 0 to 300:
+        simdrv::inject(1, flood.slot, flood.gen, i, 0)
+    workload::start()
+    evloop::run()
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

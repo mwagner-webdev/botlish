@@ -1,0 +1,191 @@
+# gameserver.bot -- the game-server-like workload of EVENT-LOOP-EXPLORATION.md
+# (Experiment A), written once against evloop and the context trait Net, so
+# the same code runs on the deterministic driver (a-gameserver.bot, every
+# backend) and on real sockets (b-gameserver.bot, native).
+#
+#   network input  -> a session task per connection (scheduler-owned), which
+#                     drives its own dialogue coroutine DIRECTLY (ordinary
+#                     resumes, its own protocol: resume Line, yields Reply);
+#   dialogue work  -> asks for a path: the session spawns a pathfinding task
+#                     (scheduler-owned, yields every `chunk` steps) and waits
+#                     on a result channel while other inputs keep arriving;
+#   simulation     -> a repeating timer; each tick DIRECTLY advances an AI
+#                     coroutine one step (its own protocol, never scheduled);
+#   output         -> sessions post replies to an outbox channel; an
+#                     observer flushes it once per turn (coalesced writes).
+#
+# Commands of a line (cmd, arg): 1 MOVE arg (a path of `arg` steps), 2 TALK
+# arg (an echo), 9 BYE.
+import evloop
+import std::mutable_array
+import std::str
+
+# What the network gives a program: per connection, its lines become
+# records of a registration the program made (attach), and replies go back
+# (send); a connection is read only as far as the program has acknowledged
+# its lines (ack), so a slow session pushes back on its peer. The
+# deterministic driver and the native driver implement it.
+context trait Net:
+    fn attach(conn: int, slot: int, gen: int) -> int
+    fn send(conn: int, value: int) -> int
+    fn hangup(conn: int) -> int
+    fn ack(conn: int) -> int
+
+struct Line:
+    cmd: int
+    arg: int
+
+struct Reply:
+    kind: int
+    value: int
+
+struct Tick:
+    n: int
+
+struct Move:
+    x: int
+
+# Reply kinds.
+say_kind = 1
+find_kind = 3
+bye_kind = 4
+
+# Steps of pathfinding between yields.
+chunk = 10
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+# A dialogue: an ordinary coroutine of its own protocol, driven directly by
+# its session. It knows nothing of the scheduler: its yields go to the
+# session that resumes it.
+fn dialogue(conn: int, resume Line) -> Reply errors IndexNotFound:
+    cur = std::mutable_array::create(2, 0)
+    first = yield Reply {kind: say_kind, value: 1000 + conn}
+    cur.set(0, first.cmd)
+    cur.set(1, first.arg)
+    loop:
+        cmd = cur.at(0)
+        arg = cur.at(1)
+        if cmd == 9:
+            break
+        line = if cmd == 1:
+            found = yield Reply {kind: find_kind, value: arg}
+            yield Reply {kind: say_kind, value: 2000000 + found.arg}
+        else:
+            yield Reply {kind: say_kind, value: 3000000 + arg}
+        cur.set(0, line.cmd)
+        cur.set(1, line.arg)
+    Reply {kind: bye_kind, value: conn}
+
+# Pathfinding: a scheduler task that yields every `chunk` steps and posts
+# its result (twice the length, say) to CH.
+fn pathfinder(n: int, ch: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to n:
+        if i.mod(chunk) == 0:
+            evloop::yield_now()
+    ch.post(n * 2, 0)
+    n
+
+fn pathfind(n: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    ch = evloop::channel(1)
+    coroutine {step, first} = pathfinder(n, ch)
+    evloop::adopt(step, first)
+    e = evloop::wait(ch)
+    evloop::revoke(ch)
+    e.a
+
+nomethod fn out(conn: int, value: int, outbox: evloop::Reg, context ev: evloop::Loop) errors IndexNotFound:
+    outbox.post(conn, value)
+
+fn session(conn: int, reg: evloop::Reg, outbox: evloop::Reg, context ev: evloop::Loop, net: Net) -> int errors IndexNotFound:
+    lines = std::mutable_array::create(1, 0)
+    coroutine {step, first} = dialogue(conn):
+        on IndexNotFound:
+            Reply {kind: bye_kind, value: -1}
+    out(conn, first.value, outbox)
+    loop:
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_event:
+            break
+        lines.set(0, lines.at(0) + 1)
+        say(evloop::cat("conn ", conn).concat(evloop::cat(" cmd ", e.a)).concat(" in turn "), evloop::stat(evloop::s_turn))
+        reply = step(Line {cmd: e.a, arg: e.b}):
+            on IndexNotFound:
+                Reply {kind: bye_kind, value: -1}
+        final = if reply.kind == find_kind:
+            found = pathfind(reply.value)
+            say(evloop::cat("conn ", conn).concat(" path found in turn "), evloop::stat(evloop::s_turn))
+            step(Line {cmd: 100, arg: found}):
+                on IndexNotFound:
+                    Reply {kind: bye_kind, value: -1}
+        else:
+            reply
+        if final.kind == bye_kind:
+            break
+        out(conn, final.value, outbox)
+        # Demand-driven reading: one more line may be read for this
+        # connection (backpressure, Experiment B).
+        net.ack(conn)
+    net.hangup(conn)
+    evloop::revoke(reg)
+    say(evloop::cat("conn ", conn).concat(" closed in turn "), evloop::stat(evloop::s_turn))
+    lines.at(0)
+
+fn acceptor(listener: evloop::Reg, outbox: evloop::Reg, max: int, context ev: evloop::Loop, net: Net) -> int errors IndexNotFound:
+    loop i from 0 to max:
+        e = evloop::wait(listener)
+        if e.reason != evloop::woke_event:
+            break
+        conn = e.a
+        reg = evloop::source(1, 16)
+        net.attach(conn, reg.slot, reg.gen)
+        coroutine {step, first} = session(conn, reg, outbox)
+        evloop::adopt(step, first)
+    evloop::revoke(listener)
+    max
+
+# The once-per-turn output flush: everything the sessions posted this turn,
+# sent in one batch.
+fn flusher(outbox: evloop::Reg, context ev: evloop::Loop, net: Net) -> int errors IndexNotFound:
+    obs = evloop::observer()
+    total = std::mutable_array::create(1, 0)
+    loop:
+        t = evloop::wait(obs)
+        if t.reason != evloop::woke_turn:
+            break
+        count = std::mutable_array::create(1, 0)
+        loop:
+            m = evloop::try_take(outbox)
+            if m.reason != evloop::woke_event:
+                break
+            net.send(m.a, m.b)
+            count.set(0, count.at(0) + 1)
+        if count.at(0) > 0:
+            say(evloop::cat("flush ", count.at(0)).concat(" in turn "), t.a)
+            total.set(0, total.at(0) + count.at(0))
+    total.at(0)
+
+# An AI agent: its own protocol (resume Tick, yields Move), advanced
+# directly, one step per world tick.
+fn agent(resume Tick) -> Move errors IndexNotFound:
+    pos = std::mutable_array::create(1, 0)
+    loop:
+        x = pos.at(0)
+        tick = yield Move {x: x}
+        pos.set(0, x + tick.n)
+    Move {x: 0}
+
+fn world(period: int, ticks: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    clock = evloop::every(period)
+    coroutine {step, first} = agent():
+        on IndexNotFound:
+            Move {x: -1}
+    pos = std::mutable_array::create(1, first.x)
+    loop k from 0 to ticks:
+        e = evloop::wait(clock)
+        m = step(Tick {n: 1 + e.a})
+        pos.set(0, m.x)
+        say("world tick, agent at ", m.x)
+    evloop::revoke(clock)
+    pos.at(0)

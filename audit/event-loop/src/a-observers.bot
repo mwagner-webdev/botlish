@@ -1,0 +1,120 @@
+# a-observers.bot -- EVENT-LOOP-EXPLORATION.md, Experiment A: once-per-turn
+# registrations (observers).
+#
+# An observer is a registration of kind turn; a task waiting on it runs once
+# in the observer phase of every turn that collected or dispatched
+# something, after the dispatch phase, in registration order. On the
+# deterministic driver:
+#
+#   * obs-a is registered before the loop runs and counts its turns;
+#   * a worker yields 6 times (6 busy turns), then sleeps 500 us (an idle
+#     gap: no turn happens while the loop sleeps, so no observer runs), then
+#     yields twice more;
+#   * in the worker's 2nd turn (dispatch phase) it registers obs-b: it runs
+#     in that same turn's observer phase;
+#   * obs-a registers obs-c from inside the observer phase in its 3rd run:
+#     obs-c's first opportunity is the next turn's phase. obs-a tells obs-b
+#     about obs-c through a channel (a Reg is an ordinary value), which obs-b
+#     reads without suspending (try_take);
+#   * obs-b revokes obs-c in its own 3rd run, which comes before obs-c's
+#     place in that phase: obs-c's entry is skipped, and its task wakes with
+#     woke_revoked in the next dispatch and ends -- never having run;
+#   * obs-a revokes itself in its 6th run: that run completes, no 7th;
+#   * a stale record wakes the sleeping loop at t=200: an empty turn, in
+#     which no observer runs;
+#   * obs-b never ends by itself, and does not keep the loop alive: when the
+#     worker is done, run returns while obs-b still waits.
+import evloop
+import simdrv
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn obs_c(reg: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_turn:
+            say("obs-c woke not for a turn: reason ", e.reason)
+            break
+        runs.set(0, runs.at(0) + 1)
+        say("obs-c run in turn ", e.a)
+    runs.at(0)
+
+fn obs_b(reg: evloop::Reg, news: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    runs = std::mutable_array::create(1, 0)
+    victim = std::mutable_array::create(2, -1)
+    loop:
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+        say("obs-b run in turn ", e.a)
+        heard = evloop::try_take(news)
+        if heard.reason == evloop::woke_event:
+            victim.set(0, heard.a)
+            victim.set(1, heard.b)
+        if runs.at(0) == 3:
+            say("obs-b revokes obs-c: ", evloop::revoke(evloop::Reg {slot: victim.at(0), gen: victim.at(1)}))
+    runs.at(0)
+
+fn obs_a(reg: evloop::Reg, news: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_turn:
+            say("obs-a woke not for a turn: reason ", e.reason)
+            break
+        runs.set(0, runs.at(0) + 1)
+        say("obs-a run in turn ", e.a)
+        if runs.at(0) == 3:
+            c = evloop::observer()
+            coroutine {step, first} = obs_c(c)
+            evloop::adopt(step, first)
+            news.post(c.slot, c.gen)
+            say("obs-a registered obs-c in turn ", e.a)
+        if runs.at(0) == 6:
+            say("obs-a revokes itself: ", evloop::revoke(reg))
+    runs.at(0)
+
+fn worker(news: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 6:
+        say("worker busy turn ", evloop::stat(evloop::s_turn))
+        if i == 1:
+            b = evloop::observer()
+            coroutine {step, first} = obs_b(b, news)
+            evloop::adopt(step, first)
+            say("worker registered obs-b in turn ", evloop::stat(evloop::s_turn))
+        evloop::yield_now()
+    evloop::sleep(500)
+    say("worker woke in turn ", evloop::stat(evloop::s_turn))
+    evloop::yield_now()
+    evloop::yield_now()
+    say("worker ends in turn ", evloop::stat(evloop::s_turn))
+    0
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    news = evloop::channel(4)
+    a = evloop::observer()
+    coroutine {step: oa, first: oaf} = obs_a(a, news)
+    evloop::adopt(oa, oaf)
+    coroutine {step: w, first: wf} = worker(news)
+    evloop::adopt(w, wf)
+    # A record for no live registration, while the worker sleeps: the loop
+    # wakes for nothing -- an empty turn, in which no observer runs.
+    simdrv::inject(200, 999, 1, 0, 0)
+    turns = evloop::run()
+    say("turns ", turns)
+    say("idle turns ", evloop::stat(evloop::s_idle_turns))
+    say("observer runs ", evloop::stat(evloop::s_observed))
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

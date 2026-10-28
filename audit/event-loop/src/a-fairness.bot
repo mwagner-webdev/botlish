@@ -1,0 +1,122 @@
+# a-fairness.bot -- EVENT-LOOP-EXPLORATION.md, Experiment A: a saturated loop.
+#
+# Four kinds of pressure at once, on the deterministic driver:
+#   * greedy: continuous activity (yield_now 40 times);
+#   * storm: every dispatch spawns the next storm task, which is ready at
+#     once -- a ready queue replenished forever (until 60 generations);
+#   * flood: 200 native records for each of two sources, all available at
+#     t=10, one read an event per wake (wait), the other drained per wake
+#     (try_take); and one record of a third source at t=11, behind them in
+#     the driver's queue;
+#   * a ticker sleeping 1000 us three times.
+# and one bystander, spawned by greedy's fifth step, whose first act is to
+# yield. The checks (tools/check.tcl, a-fairness): each turn collects at
+# most the budget (8) of records; greedy runs at most once per turn; the
+# bystander runs in the turn after it became ready; every storm generation
+# runs in the turn after its parent; the ticker's timers fire in the first
+# turn at or after their deadline.
+import evloop
+import simdrv
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn bystander(context ev: evloop::Loop) -> int errors IndexNotFound:
+    say("bystander ready at ", evloop::stat(evloop::s_turn))
+    evloop::yield_now()
+    say("bystander ran at ", evloop::stat(evloop::s_turn))
+    7
+
+fn spawn_bystander(context ev: evloop::Loop) errors IndexNotFound:
+    coroutine {step, first} = bystander()
+    id = evloop::adopt(step, first)
+    say("bystander id ", id)
+
+fn greedy(context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 40:
+        if i == 5:
+            spawn_bystander()
+        evloop::yield_now()
+    1
+
+fn storm(generation: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    say("storm generation ", generation)
+    if generation < 60:
+        coroutine {step, first} = storm(generation + 1)
+        evloop::adopt(step, first)
+    generation
+
+fn reader(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(src)
+        if e.reason != evloop::woke_event:
+            break
+        total.set(0, total.at(0) + 1)
+        if total.at(0) == 200:
+            say("reader got all at ", evloop::stat(evloop::s_turn))
+    total.at(0)
+
+# Takes everything queued in one dispatch (try_take), then waits.
+fn drainer(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(src)
+        if e.reason != evloop::woke_event:
+            break
+        total.set(0, total.at(0) + 1)
+        loop:
+            more = evloop::try_take(src)
+            if more.reason != evloop::woke_event:
+                break
+            total.set(0, total.at(0) + 1)
+        if total.at(0) == 200:
+            say("drainer got all at ", evloop::stat(evloop::s_turn))
+    total.at(0)
+
+fn quiet(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    e = evloop::wait(src)
+    say("quiet record at ", evloop::stat(evloop::s_turn))
+    e.a
+
+fn ticker(context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to 3:
+        evloop::sleep(1000)
+        say("tick at ", evloop::now())
+    3
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    src = evloop::source(1, 1000)
+    other = evloop::source(1, 1000)
+    calm = evloop::source(1, 10)
+    loop i from 0 to 200:
+        simdrv::inject(10, src.slot, src.gen, i, 0)
+        simdrv::inject(10, other.slot, other.gen, i, 0)
+    simdrv::inject(11, calm.slot, calm.gen, 99, 0)
+    coroutine {step: g, first: gf} = greedy()
+    say("greedy id ", evloop::adopt(g, gf))
+    coroutine {step: s, first: sf} = storm(0)
+    say("storm id ", evloop::adopt(s, sf))
+    coroutine {step: r, first: rf} = reader(src)
+    say("reader id ", evloop::adopt(r, rf))
+    coroutine {step: dr, first: drf} = drainer(other)
+    say("drainer id ", evloop::adopt(dr, drf))
+    coroutine {step: q, first: qf} = quiet(calm)
+    say("quiet id ", evloop::adopt(q, qf))
+    coroutine {step: t, first: tf} = ticker()
+    say("ticker id ", evloop::adopt(t, tf))
+    turns = evloop::run()
+    say("turns ", turns)
+    say("max ready ", evloop::stat(evloop::s_maxready))
+    evloop::trace()
+
+with context evloop::create(8, 1)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

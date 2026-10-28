@@ -1,0 +1,18 @@
+# A context-trait operation `wait` and a same-named yielding function of the
+# trait's own module: the trait call `d.wait(5)` resolves to the trait (with
+# `wait` renamed the program evaluates to 5), but the coroutine analysis
+# counts it as a call edge to `m::wait`, so `m::run` "may suspend" and the
+# top-level call is UNWRAPPED-YIELD. EVENT-LOOP-EXPLORATION.md, "Compiler
+# findings".
+struct Reg:
+    slot: int
+
+context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn wait(reg: Reg) -> int:
+    yield reg.slot
+    1
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
