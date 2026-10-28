@@ -774,7 +774,7 @@ m.reorder(o)
 test cr-proof-no-cascade {an order of the wrong type is its type's diagnostic only: nothing restates it as an unproven order} -body {
     list [crProof "m = int_map(\[1\])\nm.reorder(std::mutable_set::create\[str\]())\n"] \
         [crProof "m = int_map(\[1\])\nm.reorder(\[1\])\n"]
-} -result {{NO-APPLICABLE-METHOD@2 IMPRINT@2} {NO-APPLICABLE-METHOD@2 IMPRINT@2}}
+} -result {NO-APPLICABLE-METHOD@2 NO-APPLICABLE-METHOD@2}
 
 test cr-proof-message {the diagnostic names the order, the collection, its members, and how to establish the proof} -body {
     catch {surface::compile "${::crDecls}m = int_map(\[1\])\nc = set_of(\[1\])\nm.reorder(c)\n" -warnings off} message options
