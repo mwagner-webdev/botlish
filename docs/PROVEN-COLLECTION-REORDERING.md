@@ -217,7 +217,10 @@ before the call
 * It is owned by an earlier rejection of its call or of one of its
   arguments (`hir::recovery::OwnedPositions`). An order of the wrong type
   is reported as the type error only, never restated as unproven
-  (`cr-proof-no-cascade`).
+  (`cr-proof-no-cascade`). The qualified call `std::mutable_map::reorder(m,
+  [1])` is where the rule acts: its IMPRINT owns the obligation. A
+  method-style call with such an order is NO-APPLICABLE-METHOD, a call of
+  no reorder at all, so it has no obligation to own.
 
 **Where it runs.** `hir::relations::verify` is part of `hir::CheckOnce`,
 after the iteration protocol's check. It walks only the invocations that
@@ -952,8 +955,12 @@ finished, and both merges were clean:
   That change reports a rejected method call without its placeholder's
   consequences, so `cr-proof-no-cascade` no longer sees the placeholder's
   IMPRINT. The test's claim holds unchanged: an order of the wrong type
-  is its type's diagnostic only, so only its expectation was updated. On
-  that merge:
+  is its type's diagnostic only. But its method-style cases had stopped
+  exercising the ownership rule: the `unproven-cascade` mutant left them
+  unchanged and survived the test files. The test now also checks the
+  qualified calls of both collections, where the mutant restates the
+  IMPRINT as REORDER-NOT-PROVEN, and the mutant is killed again
+  (`mutate.tcl -only unproven-cascade`). On that merge:
   - 21 Tcl test files passed on interp and compile: the collections, the
     method decisions, recovery, static decisions, the service, the
     language server, Compilerpedia and interchange.
