@@ -483,7 +483,7 @@ with the static runtime, and declaring it is the binding's business, as any
 | The C FFI fuzzer | `tclsh9.0 audit/c-ffi/tools/fuzz.tcl -n N -seed S` (tier item `c-ffi-fuzz`) | Linux locally; Windows through `[ci-full]` |
 | The mutants | `tclsh9.0 audit/c-ffi/tools/mutate.tcl -only va-...` (tier item `c-ffi-mutants=...`) | Linux locally; Windows through `[ci-full]` |
 | The disassembly | `native::object` of a variadic program, `dumpbin /disasm` | Windows smoke job (new) |
-| The benchmark | `tclsh9.0 bench/c-ffi.tcl` (tier item `c-ffi-bench`) | Linux locally; Windows through a manual run |
+| The benchmark | `tclsh9.0 bench/c-ffi.tcl` (tier item `c-ffi-bench`) | Linux locally; Windows and macOS through `[ci-full]` |
 
 ### 8.2 Linux, locally
 
@@ -499,7 +499,7 @@ On a 4-core Linux x86-64 container, at `68c2d46`:
   `cf-va-dll-wsprintf`), 0 failed; its `cf-va-*` under
   `BOTLISH_NATIVE_GC_STRESS=1`: 34 passed, 0 failed.
 * `cargo test --release --manifest-path native/Cargo.toml --lib --bins`:
-  299 + 99 passed, the seven `win64_variadic_tests` among them; `cargo
+  299 + 99 passed, the six `win64_variadic_tests` among them; `cargo
   check --tests --target x86_64-pc-windows-msvc` and `--target
   aarch64-unknown-linux-gnu` (cross builds): no error, no warning.
 * `tests/platform/native-status.tcl`: every capability as recorded for
@@ -560,7 +560,11 @@ windows-2025):
   system-linker.test with c-ffi.test, 0 failed.
 * root plans (the fallback plan's Rust tests and GC workloads): passed.
 * full, `CI-Tests: c-ffi-bench`: the benchmark of section 9.2.
-* [[acceptance]]
+* acceptance, four shards: 234 Tcl test files on interp (c-ffi.test
+  among them) and the 108 golden suites on all four backends -- 9,713
+  tests, 9,434 passed, 279 skipped by host constraints, 0 failed.
+
+Every job of the run succeeded.
 
 The mutants ran on the commit before, `ea9cc44`, whose lowering and tests
 are this one's (section 8.4).
@@ -569,7 +573,8 @@ are this one's (section 8.4).
 
 `audit/c-ffi/tools/mutants.txt` gained ten mutants: nine of the brief's
 list (its promotion item is two existing mutants') and the naive
-duplication it warns against, extra arguments. Three existing ones (`va-al-omitted`, `va-stub-jit-jump-misplaced`,
+duplication it warns against, extra arguments. Three existing ones
+(`va-al-omitted`, `va-stub-jit-jump-misplaced`,
 `va-stub-plt-addend-dropped`) were rewritten for the new code, keeping
 their rules, the latter two now of both stubs; and one, `stub-links-c`,
 had stopped applying before this milestone (aot.rs's stub-linker refusal
@@ -653,7 +658,7 @@ Three are killed by one kind of detector only, each for a reason:
   reclaim a borrowed storage there. The keepalive is what keeps that true
   once something does; `cf-va-borrow-nir` pins it.
 
-### 8.5 Linux AArch64 and macOS
+### 8.5 Linux and macOS
 
 **macOS AArch64**, run [40572363052](https://github.com/mwagner-webdev/botlish/actions/runs/40572363052)
 (`68c2d46`, macos-15): every job succeeded -- smoke (Tier A, the native
@@ -678,15 +683,26 @@ suite on interp and compile, its cranelift and cranelift-generic coverage
 the native Rust unit tests (`win64_variadic_tests` among them), the
 stub-linked executables, the warning gate and the method-call oracle --
 but for one test of one job, `cf-wrong-architecture` in the system-linked
-executables: a
-fixed-arity test of the linker's refusal of another architecture's
-library, which failed the same way on main (runs 40526876902 and
+executables: a fixed-arity test of the linker's refusal of another
+architecture's library, which failed the same way on main (runs 40526876902 and
 40558777965): the `ubuntu-latest` image had become Ubuntu 26.04, whose GCC
 runs GNU ld as `x86_64-linux-gnu-ld.bfd`, and the driver's filter of the
 linker's lines dropped its "skipping incompatible" line. Main fixed it in
 `411ee25`, which `ea9cc44` merges into this branch.
 
-[[Linux CI ea9cc44]]
+Run [40600012325](https://github.com/mwagner-webdev/botlish/actions/runs/40600012325)
+(`tests.yml` dispatched on `ea9cc44`, the merge): every job succeeded,
+the system-linked executables' `cf-wrong-architecture` among them (the
+GC-stress job runs on main only). `94aa3fd`, the head the Windows run
+above tested, differs from `ea9cc44` only in `bench/c-ffi.tcl` (which no
+Linux job runs) and in this report.
+
+**macOS AArch64**, second run, [40614341975](https://github.com/mwagner-webdev/botlish/actions/runs/40614341975)
+(`94aa3fd`): every job succeeded -- smoke, the system linker, both
+acceptance shards, the full tier (`CI-Tests: c-ffi-bench`: the benchmark
+on Apple's convention), the Linux control and the jobs main's merge
+brought (the Botlish.app distribution, with and without developer
+tools).
 
 ## 9. Performance and code generation
 
@@ -704,7 +720,8 @@ linker's lines dropped its "skipping incompatible" line. Main fixed it in
   of the C function: one `movq` (5 bytes, a register-to-register move) per
   such position, at most four, then one direct `jmp` (5 bytes). The call
   site is the same size as a direct call. One stub per (C function, mask)
-  a program uses -- at most fifteen per function -- each at most 25 bytes,
+  a program uses -- at most fifteen per function -- each at most 25 bytes
+  in an object (33 in the JIT, whose jump is `movabs`, `jmp *%r11`),
   aligned to 16.
 * Nothing allocates, nothing is a safepoint, and no frame is pushed.
 
