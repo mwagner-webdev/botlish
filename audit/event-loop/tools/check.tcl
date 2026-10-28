@@ -1,13 +1,16 @@
 # check.tcl -- EVENT-LOOP-EXPLORATION.md's executable evidence.
 #
-#   tclsh9.0 audit/event-loop/tools/check.tcl ?-only GLOB? ?-parts sim|static|native|all?
+#   tclsh9.0 audit/event-loop/tools/check.tcl ?-only GLOB? ?-parts sim|static|lifetime|native|all?
 #                                             ?-backends LIST? ?-out DIR?
 #
 # sim     every a-*.bot program (the deterministic driver) compiled once
 #         under -warnings error and run on every backend: the outcomes must
 #         be identical, then each scenario's claims are checked on the trace;
 # static  programs that must be REJECTED by the compiler (driver selection,
-#         capabilities, ownership), each with its expected diagnostic kinds;
+#         capabilities, ownership), each with its expected diagnostic kinds,
+#         and the driver audit;
+# lifetime the prototype foreign-pointer lifetime analysis (tools/lifetime.tcl)
+#         on its fixtures (lifetime/) and on every experiment program;
 # native  the C adapters built (cc, ar) and the b-*.bot programs run on the
 #         native backends against real epoll/eventfd/sockets/threads (and
 #         SDL3 when tests/cffi/sdl3.tcl has built it), with their claims.
@@ -34,7 +37,7 @@ set ::outDir [dict get $options -out]
 if {$::outDir eq ""} { set ::outDir [file tempdir evloop] }
 file mkdir $::outDir
 set parts [dict get $options -parts]
-if {$parts eq "all"} { set parts {sim static native} }
+if {$parts eq "all"} { set parts {sim static lifetime native} }
 
 set ::failures 0
 set ::claims 0
@@ -125,6 +128,34 @@ if {"sim" in $parts} {
 if {"static" in $parts} {
     puts "== static (programs the compiler must reject)"
     source [file join $here static.tcl]
+}
+
+if {"lifetime" in $parts} {
+    puts "== lifetime (prototype analysis of foreign-pointer lifetimes)"
+    source [file join $here lifetime.tcl]
+    set lt [file join [file dirname $::src] lifetime]
+    foreach {name expect} {
+        l-capture-unknown deferred
+        l-across-yield suspend
+        l-capture-independent {}
+        l-copied {}
+    } {
+        if {![string match $::only $name] && ![string match $::only lifetime]} continue
+        set got [lifetime::findings [surface::readProgramFile [file join $lt $name.bot] -warnings off]]
+        set kinds [lsort -unique [lmap f $got {lindex [split $f :] 3}]]
+        set kinds [string trim [join $kinds]]
+        claim $name [expr {$expect eq "" ? "not flagged (accepted by the compiler)" : "flagged: $expect (accepted by the compiler)"}] \
+            [expr {$kinds eq $expect}] $got
+    }
+    if {$::only eq "*" || [string match $::only lifetime]} {
+        set noisy {}
+        foreach path [lsort [glob -directory $::src {[ab]-*.bot}]] {
+            set got [lifetime::findings [surface::readProgramFile $path -warnings off]]
+            if {$got ne ""} { lappend noisy "[file tail $path]: $got" }
+        }
+        claim lifetime "the experiments' own programs have no finding (their adapters hand Botlish copied scalars only)" \
+            [expr {$noisy eq ""}] $noisy
+    }
 }
 
 if {"native" in $parts} {

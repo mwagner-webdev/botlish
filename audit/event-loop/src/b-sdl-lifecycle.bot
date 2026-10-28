@@ -1,0 +1,68 @@
+# b-sdl-lifecycle.bot -- EVENT-LOOP-EXPLORATION.md, Experiment C: a native
+# callback that must be answered by application work before it returns --
+# SDL's WILL_ENTER_BACKGROUND, which SDL's Android backend tells
+# applications to handle inside the event filter, on the reporting thread.
+# The adapter's lifecycle barrier (evsdl.c) posts it to the loop and holds
+# the reporting thread until the program's handler, running on the loop's
+# thread in an ordinary turn, acknowledges it.
+#
+#   1. at 100 ms, while the loop sleeps: the barrier wakes it; the handler
+#      saves and acknowledges within a turn (a short hold);
+#   2. at 600 ms, while a task runs a 300 ms segment that never yields: the
+#      barrier holds the reporting thread until that segment ends -- the
+#      cooperative limit, measured, not hidden.
+import evloop
+import evn
+import evsdl
+import std::mutable_array
+import std::str
+
+fn guardian(reg: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    code = evsdl::background_code()
+    saved = std::mutable_array::create(1, 0)
+    loop:
+        if saved.at(0) == 2:
+            break
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_event:
+            break
+        if e.a == code:
+            saved.set(0, saved.at(0) + 1)
+            evloop::log(evloop::cat("state saved, turn ", evloop::stat(evloop::s_turn)).concat(evloop::cat(" at ", evloop::now())))
+            evsdl::lifecycle_ack()
+    saved.at(0)
+
+fn hog(context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound:
+    evloop::sleep(550000)
+    evloop::log(evloop::cat("hog starts a 300 ms segment at ", evn::clock()))
+    evn::spin(300000)
+    evloop::log(evloop::cat("hog yields at ", evn::clock()))
+    0
+
+fn main(context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlreg = evloop::source(1, 64)
+    evloop::log(evloop::cat("sdl start ", evsdl::start(3, sdlreg, 0)))
+    coroutine {step: g, first: gf} = guardian(sdlreg)
+    evloop::adopt(g, gf)
+    coroutine {step: h, first: hf} = hog()
+    evloop::adopt(h, hf)
+    evsdl::lifecycle_after(100)
+    evsdl::lifecycle_after(600)
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evsdl::lifecycle_join()
+    evloop::log(evloop::cat("barrier posted ", evsdl::stat(evsdl::st_barrier_posted)))
+    evloop::log(evloop::cat("barrier acked ", evsdl::stat(evsdl::st_barrier_acked)))
+    evloop::log(evloop::cat("barrier timeouts ", evsdl::stat(evsdl::st_barrier_timeouts)))
+    evloop::log(evloop::cat("barrier max hold us ", evsdl::stat(evsdl::st_barrier_max_hold)))
+    evloop::log(evloop::cat("last reporting thread returned at ", evsdl::stat(evsdl::st_lifecycle_returned_at)))
+    evsdl::quit()
+    evloop::trace()
+
+with context evloop::create(64, 0)
+with context evn::create(4096, 16, 0)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

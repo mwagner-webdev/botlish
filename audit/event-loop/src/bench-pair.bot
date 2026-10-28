@@ -1,0 +1,25 @@
+# bench-pair.bot -- EVENT-LOOP-EXPLORATION.md, "Performance" (native, real
+# clock): benchwork::spawn_pair(100000), then run; prints dispatches, turns and wall time.
+import benchwork
+import evloop
+import evn
+
+fn main(context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    benchwork::spawn_pair(100000)
+    started = evn::clock()
+    cpu = evn::cpu_us()
+    turns = evloop::run()
+    evloop::log(evloop::cat("wall us ", evn::clock() - started))
+    evloop::log(evloop::cat("cpu us ", evn::cpu_us() - cpu))
+    evloop::log(evloop::cat("turns ", turns))
+    evloop::log(evloop::cat("dispatched ", evloop::stat(evloop::s_dispatched)))
+    evloop::trace()
+
+with context evloop::create(64, 0)
+with context evn::create(4096, 16, 0)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,19 @@
+# alloc-yield-1.bot -- EVENT-LOOP-EXPLORATION.md, "Performance": the
+# allocation report of 10 tasks x 5000 yields on the deterministic driver
+# (tools/bench.tcl subtracts the two sizes: allocations per dispatch).
+import benchwork
+import evloop
+import simdrv
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> int errors IndexNotFound, evloop::LoopReentered:
+    benchwork::spawn_yielders(10, 5000)
+    evloop::run()
+    evloop::stat(evloop::s_dispatched)
+
+with context evloop::create(64, 0)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        -1
+    on evloop::LoopReentered:
+        -2

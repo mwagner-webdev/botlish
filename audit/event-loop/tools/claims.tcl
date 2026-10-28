@@ -170,3 +170,14 @@ proc claims::composition {} {
     claim a-compose "W's trace is identical beside an active library (a spinning task and a 300-record flood)" \
         [expr {[lindex $w 0] eq [lindex $w 3]}]
 }
+
+proc claims::a-ownership {trace} {
+    claim a-ownership "a task that owns its token (moved into its construction) revokes the registration when it releases it" \
+        [expr {[first $trace {listener releases: 1}] ne "" && [first $trace {listener's registration live after release: 0}] ne ""}]
+    claim a-ownership "a token moved to another task at its construction is released by that task" \
+        [expr {[first $trace {heir releases the token it was given: 1}] ne "" && [first $trace {heir's registration live after release: 0}] ne ""}]
+    claim a-ownership "NEGATIVE: a token dropped by a finished task leaves its registration registered (no drop action exists)" \
+        [expr {[first $trace {forgetful's registration live after its owner died: 1}] ne ""}]
+    claim a-ownership "NEGATIVE: a token held by a task abandoned at shutdown leaves its registration registered" \
+        [expr {[first $trace {abandoned at shutdown: 1}] ne "" && [first $trace {parked task's registration live after its owner was abandoned: 1}] ne ""}]
+}

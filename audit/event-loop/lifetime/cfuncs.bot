@@ -1,0 +1,10 @@
+# cfuncs.bot -- C declarations for the lifetime fixtures (never linked: the
+# analysis reads HIR). get_error's result is a borrow valid until the next
+# call into the library (SDL_GetError's contract, which C cannot state:
+# provenance unknown); make's result is declared independent (an owned
+# allocation); peek reads a byte through a pointer.
+import std::ffi::c
+
+extern c fn get_error() -> std::ffi::c::Ptr[std::ffi::c::Char]
+extern c fn make() -> std::ffi::c::Ptr[std::ffi::c::Char] independent
+extern c fn peek(p: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Int

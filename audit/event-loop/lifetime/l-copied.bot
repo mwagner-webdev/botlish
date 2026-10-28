@@ -1,0 +1,15 @@
+# l-copied.bot -- not flagged: the borrow is read into an ordinary value
+# before the suspension; only the copy crosses it.
+import cfuncs
+import std::coroutine
+import std::ffi::c
+import tasks
+
+fn task() -> int:
+    p = cfuncs::get_error()
+    first_byte = cfuncs::peek(p)
+    tasks::pause()
+    first_byte + 1
+
+coroutine {step, first} = task()
+first

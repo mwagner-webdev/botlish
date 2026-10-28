@@ -122,3 +122,44 @@ if {[string match $::only win32] || $::only eq "*"} {
         file delete -force $prefix
     }
 }
+
+# --- every native source in one process, in both initialization orders
+if {$::sdlDir ne "" && [file isdirectory $::sdlInclude] && ([string match $::only b-mixed] || $::only eq "*")} {
+    set mixed [dict create]
+    foreach order {sdl net} {
+        set t [sdlRun b-mixed-$order-first]
+        if {$t eq ""} continue
+        dict set mixed $order $t
+        set replies [lmap c {1 2 3} {num $t "client $c replies (\\d+)"}]
+        claim b-mixed-$order-first "every source delivers: SDL [num $t {sdl received (\d+)}]/260, posts [num $t {posts received (\d+)}]/200, replies [join $replies /] (41/41/2001)" \
+            [expr {[num $t {sdl received (\d+)}] == 260 && [num $t {posts received (\d+)}] == 200 && $replies eq "41 41 2001"}]
+        set quiet {}
+        foreach m [matches $t {conn (\d+) lines 41}] {
+            lappend quiet [num $t "conn [lindex $m 1] max lag us (\\d+)"]
+        }
+        claim b-mixed-$order-first "beside the flood, SDL, posts and timers stay responsive (quiet conns [join $quiet /] us, SDL [num $t {sdl max latency us (\d+)}] us, timer [num $t {timer worst lateness us (\d+)}] us late)" \
+            [expr {[llength $quiet] == 2 && [tcl::mathfunc::max {*}$quiet] < 50000 && [num $t {sdl max latency us (\d+)}] < 50000}]
+    }
+    if {[dict size $mixed] == 2} {
+        set w [lmap order {sdl net} {
+            lmap line [lsearch -all -inline [dict get $mixed $order] {*W: *}] {regsub {^t=\d+: } [regsub {slept until \d+} $line {slept}] {}}
+        }]
+        claim b-mixed "the base workload's own order is the same whichever adapter is initialized first" \
+            [expr {[lindex $w 0] eq [lindex $w 1] && [llength [lindex $w 0]] == 12}]
+    }
+}
+
+# --- the lifecycle barrier: a callback that must be answered by
+# application work before it returns (Experiment C)
+if {$::sdlDir ne "" && [file isdirectory $::sdlInclude] && ([string match $::only b-sdl-lifecycle] || $::only eq "*")} {
+    set t [sdlRun b-sdl-lifecycle]
+    if {$t ne ""} {
+        set saves [lmap m [matches $t {state saved, turn \d+ at (\d+)}] {lindex $m 1}]
+        set returned [num $t {last reporting thread returned at (\d+)}]
+        set hold [num $t {barrier max hold us (\d+)}]
+        claim b-sdl-lifecycle "both lifecycle events were handled on the loop's thread, in a turn, before their reporting threads returned (no timeout)" \
+            [expr {[llength $saves] == 2 && [num $t {barrier acked (\d+)}] == 2 && [num $t {barrier timeouts (\d+)}] == 0 && $returned > [lindex $saves end]}]
+        claim b-sdl-lifecycle "a task's 300 ms segment that never yields holds the reporting thread that long ($hold us): the cooperative limit, measured" \
+            [expr {$hold > 100000}]
+    }
+}

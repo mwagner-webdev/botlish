@@ -1,0 +1,17 @@
+# l-capture-independent.bot -- not flagged: the pointer is declared
+# independent (owned), so its lifetime is its owner's, not a library call's.
+import cfuncs
+import std::coroutine
+import std::ffi::c
+import tasks
+
+fn later(p: std::ffi::c::Ptr[std::ffi::c::Char]) -> int:
+    tasks::pause()
+    cfuncs::peek(p)
+
+fn main() -> int:
+    p = cfuncs::make()
+    coroutine {step, first} = later(p)
+    first
+
+main()

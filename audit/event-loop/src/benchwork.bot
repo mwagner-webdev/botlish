@@ -1,0 +1,46 @@
+# benchwork.bot -- the measured workloads of EVENT-LOOP-EXPLORATION.md's
+# performance section (tools/bench.tcl): tasks that only yield, a
+# producer/consumer pair through a channel, and many sleeping tasks (the
+# prototype's timer scan is linear in the registrations).
+import evloop
+import std::mutable_array
+
+fn yielder(k: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to k:
+        evloop::yield_now()
+    k
+
+fn spawn_yielders(n: int, k: int, context ev: evloop::Loop) errors IndexNotFound:
+    loop t from 0 to n:
+        coroutine {step, first} = yielder(k)
+        evloop::adopt(step, first)
+
+fn producer(ch: evloop::Reg, k: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to k:
+        ch.post(i, 0)
+        evloop::yield_now()
+    k
+
+fn consumer(ch: evloop::Reg, k: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    total = std::mutable_array::create(1, 0)
+    loop i from 0 to k:
+        e = evloop::wait(ch)
+        total.set(0, total.at(0) + e.a)
+    total.at(0)
+
+fn spawn_pair(k: int, context ev: evloop::Loop) errors IndexNotFound:
+    ch = evloop::channel(4)
+    coroutine {step: c, first: cf} = consumer(ch, k)
+    evloop::adopt(c, cf)
+    coroutine {step: p, first: pf} = producer(ch, k)
+    evloop::adopt(p, pf)
+
+fn sleeper(delay: int, k: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    loop i from 0 to k:
+        evloop::sleep(delay)
+    k
+
+fn spawn_sleepers(n: int, k: int, context ev: evloop::Loop) errors IndexNotFound:
+    loop t from 0 to n:
+        coroutine {step, first} = sleeper(50 + t, k)
+        evloop::adopt(step, first)

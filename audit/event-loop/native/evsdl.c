@@ -35,6 +35,7 @@
  * program set beforehand (evsdl_drop_codes_from), never by asking Botlish.
  */
 #include <SDL3/SDL.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -56,6 +57,84 @@ static struct {
     int drop_from;                       /* policy: user codes >= this are dropped */
     atomic_llong callbacks, foreign_thread, nested, copied, dropped_by_policy, pumped, peeped, timer_callbacks;
 } S = { .drop_from = 0x7fffffff };
+
+/* The lifecycle barrier (EVENT-LOOP-EXPLORATION.md, Experiment C). SDL
+ * delivers WILL_ENTER_BACKGROUND through the filter on the thread that
+ * reports it (Android: the Java UI thread; the app thread blocks right
+ * after: "do any life cycle handling in an event filter while the event
+ * was being queued", SDL_androidevents.c). Botlish code cannot run on that
+ * thread, so the filter posts the event to the loop and HOLDS the reporting
+ * thread until the loop acknowledges (evsdl_lifecycle_ack) or a deadline
+ * passes: the program's handler runs on the loop's thread, in a turn,
+ * before the reporting thread returns to the system. */
+static pthread_mutex_t barrier_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t barrier_cond = PTHREAD_COND_INITIALIZER;
+static long long barrier_posted, barrier_acked, barrier_timeouts, barrier_max_hold_us, barrier_us = 2000000;
+
+static void lifecycle_barrier(const SDL_Event *e) {
+    long long start = evn_now();
+    pthread_mutex_lock(&barrier_lock);
+    long long seq = ++barrier_posted;
+    pthread_mutex_unlock(&barrier_lock);
+    while (evn_post(S.slot, S.gen, -(long long)e->type, start) < 0) SDL_DelayNS(50000);
+    struct timespec until;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += (time_t)(barrier_us / 1000000);
+    until.tv_nsec += (long)(barrier_us % 1000000) * 1000;
+    if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
+    pthread_mutex_lock(&barrier_lock);
+    while (barrier_acked < seq) {
+        if (pthread_cond_timedwait(&barrier_cond, &barrier_lock, &until) != 0) {
+            barrier_timeouts++;
+            break;
+        }
+    }
+    long long held = evn_now() - start;
+    if (held > barrier_max_hold_us) barrier_max_hold_us = held;
+    pthread_mutex_unlock(&barrier_lock);
+}
+
+/* The loop's handler is done with the lifecycle event(s) posted so far. */
+int evsdl_lifecycle_ack(void) {
+    pthread_mutex_lock(&barrier_lock);
+    barrier_acked = barrier_posted;
+    pthread_cond_broadcast(&barrier_cond);
+    pthread_mutex_unlock(&barrier_lock);
+    return 0;
+}
+
+static long long lifecycle_returned_at;
+static SDL_Thread *lifecycle_threads[4];
+static int nlifecycle;
+
+static int SDLCALL lifecycle_main(void *p) {
+    SDL_DelayNS((Uint64)(intptr_t)p * 1000000);
+    SDL_Event e = { 0 };
+    e.type = SDL_EVENT_WILL_ENTER_BACKGROUND;
+    SDL_PushEvent(&e);                   /* the filter holds this thread */
+    long long now = evn_now();
+    if (now > lifecycle_returned_at) lifecycle_returned_at = now;
+    return 0;
+}
+
+/* A thread reporting WILL_ENTER_BACKGROUND after MS (the system's
+ * lifecycle thread in this probe). */
+int evsdl_lifecycle_after(int ms) {
+    if (nlifecycle == 4) return -1;
+    lifecycle_threads[nlifecycle] = SDL_CreateThread(lifecycle_main, "evsdl-lifecycle", (void *)(intptr_t)ms);
+    return lifecycle_threads[nlifecycle] ? nlifecycle++ : -1;
+}
+
+int evsdl_lifecycle_join(void) {
+    for (int i = 0; i < nlifecycle; i++) SDL_WaitThread(lifecycle_threads[i], NULL);
+    int n = nlifecycle;
+    nlifecycle = 0;
+    return n;
+}
+
+int evsdl_background_code(void) {
+    return -(int)SDL_EVENT_WILL_ENTER_BACKGROUND;
+}
 
 static long long record_a(const SDL_Event *e) {
     return e->type == SDL_EVENT_USER ? (long long)e->user.code : -(long long)e->type;
@@ -79,6 +158,10 @@ static bool policy_drops(const SDL_Event *e) {
 static bool SDLCALL filter_wakeup(void *userdata, SDL_Event *e) {
     (void)userdata;
     note_callback();
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
+        lifecycle_barrier(e);
+        return false;
+    }
     if (policy_drops(e)) {
         atomic_fetch_add(&S.dropped_by_policy, 1);
         return false;
@@ -95,6 +178,10 @@ static bool SDLCALL filter_wakeup(void *userdata, SDL_Event *e) {
 static bool SDLCALL filter_policy(void *userdata, SDL_Event *e) {
     (void)userdata;
     note_callback();
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
+        lifecycle_barrier(e);
+        return false;
+    }
     if (policy_drops(e)) {
         atomic_fetch_add(&S.dropped_by_policy, 1);
         return false;
@@ -274,6 +361,11 @@ long long evsdl_stat(int i) {
     case 5: return atomic_load(&S.pumped);
     case 6: return atomic_load(&S.peeped);
     case 7: return atomic_load(&S.timer_callbacks);
+    case 8: return barrier_posted;
+    case 9: return barrier_acked;
+    case 10: return barrier_timeouts;
+    case 11: return barrier_max_hold_us;
+    case 12: return lifecycle_returned_at;
     }
     return -1;
 }

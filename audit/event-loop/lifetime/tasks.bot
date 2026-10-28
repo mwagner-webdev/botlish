@@ -1,0 +1,3 @@
+# tasks.bot -- a minimal task protocol for the lifetime fixtures.
+fn pause():
+    yield -1

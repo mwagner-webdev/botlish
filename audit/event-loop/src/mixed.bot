@@ -1,0 +1,60 @@
+# mixed.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B: every native source
+# of the Linux prototype in one process -- SDL3 (hybrid coordination: a
+# watch wakes the loop, a pump hook copies), the TCP game server with a
+# flooding client, a producer thread's posts, timers -- beside the base
+# workload W, initialized in either order (b-mixed-sdl-first.bot,
+# b-mixed-net-first.bot). tools/native-more.tcl requires the same results
+# from both orders: every delivery, W's own order, bounded latencies.
+import evloop
+import evn
+import evsdl
+import gameserver
+import sdlprobe
+import std::str
+import workload
+
+fn start_sdl(context ev: evloop::Loop, n: evn::Native) -> evloop::Reg errors IndexNotFound:
+    reg = evloop::source(1, 4096)
+    evloop::log(evloop::cat("sdl start ", evsdl::start(3, reg, 0)))
+    reg
+
+fn start_net(context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound:
+    listener = evloop::source(1, 64)
+    port = evn::listen(0, listener.slot, listener.gen)
+    outbox = evloop::channel(4096)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 3)
+    evloop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    evloop::adopt(f, ff)
+    port
+
+nomethod fn run(sdl_first: bool, context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlreg = if sdl_first:
+        start_sdl()
+    else:
+        evloop::Reg {slot: -1, gen: 0}
+    port = start_net()
+    sdl = if sdl_first:
+        sdlreg
+    else:
+        start_sdl()
+    workload::start()
+    posts = evloop::source(1, 4096)
+    sdlprobe::spawn_all(sdl, posts)
+    sdlprobe::start_producers()
+    evn::synth(posts.slot, posts.gen, 200, 1000, 1, 1, 0)
+    evn::client(port, 1, 0, 40, 1500)
+    evn::client(port, 2, 0, 40, 1000)
+    evn::client(port, 3, 0, 2000, 0)
+    started = evn::clock()
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evloop::log(evloop::cat("wall us ", evn::clock() - started))
+    evn::unlisten()
+    evn::clients_join()
+    evn::synth_join()
+    evsdl::producers_join()
+    loop c from 1 to 4:
+        evloop::log(evloop::cat("client ", c).concat(evloop::cat(" replies ", evn::client_replies(c))))
+    evsdl::quit()
+    evloop::trace()

@@ -26,6 +26,10 @@ extern c fn evsdl_producers_join() -> std::ffi::c::Int
 extern c fn evsdl_sdl_timer(ms: std::ffi::c::Int, count: std::ffi::c::Int, base: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn evsdl_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
 extern c fn evsdl_quit() -> std::ffi::c::Int
+extern c fn evsdl_lifecycle_ack() -> std::ffi::c::Int
+extern c fn evsdl_lifecycle_after(ms: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_background_code() -> std::ffi::c::Int
+extern c fn evsdl_lifecycle_join() -> std::ffi::c::Int
 extern c fn evn_now() -> std::ffi::c::LongLong
 extern c fn evn_take() -> std::ffi::c::Int
 extern c fn evn_gen() -> std::ffi::c::Int
@@ -46,6 +50,11 @@ st_dropped_by_policy = 4
 st_pumped = 5
 st_peeped = 6
 st_timer_callbacks = 7
+st_barrier_posted = 8
+st_barrier_acked = 9
+st_barrier_timeouts = 10
+st_barrier_max_hold = 11
+st_lifecycle_returned_at = 12
 
 mode_wakeup = 1
 mode_pump = 2
@@ -94,6 +103,21 @@ fn stat(i: int) -> int:
 
 fn quit() -> int:
     evsdl_quit()
+
+# The lifecycle barrier: the record code of WILL_ENTER_BACKGROUND, the
+# acknowledgment that releases the reporting thread, and a probe thread
+# that reports it after MS.
+fn background_code() -> int:
+    evsdl_background_code()
+
+fn lifecycle_ack() -> int:
+    evsdl_lifecycle_ack()
+
+fn lifecycle_after(ms: int) -> int:
+    evsdl_lifecycle_after(ci(ms))
+
+fn lifecycle_join() -> int:
+    evsdl_lifecycle_join()
 
 # Mode 5: SDL waits for the loop. The context SdlWait is a whole driver
 # (evloop::Driver): SDL_WaitEventTimeout with the loop's deadline, then a

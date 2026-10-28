@@ -1,0 +1,18 @@
+# l-capture-unknown.bot -- FLAGGED: a pointer of unknown provenance (a borrow
+# that may die at the next library call) captured by deferred work: a task
+# constructed with it runs in later turns.
+import cfuncs
+import std::coroutine
+import std::ffi::c
+import tasks
+
+fn later(p: std::ffi::c::Ptr[std::ffi::c::Char]) -> int:
+    tasks::pause()
+    cfuncs::peek(p)
+
+fn main() -> int:
+    p = cfuncs::get_error()
+    coroutine {step, first} = later(p)
+    first
+
+main()

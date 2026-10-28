@@ -1,0 +1,13 @@
+# b-mixed-net-first.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B: mixed.bot
+# with the network initialized first.
+import evloop
+import evn
+import mixed
+
+with context evloop::create(64, 0)
+with context evn::create(4096, 16, 0)
+mixed::run(false):
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,16 @@
+# l-across-yield.bot -- FLAGGED: a pointer of unknown provenance obtained
+# before a suspension and used after it: other tasks run in between and may
+# call the library that owns the borrow (the event-loop form of a borrow
+# held across an await).
+import cfuncs
+import std::coroutine
+import std::ffi::c
+import tasks
+
+fn task() -> int:
+    p = cfuncs::get_error()
+    tasks::pause()
+    cfuncs::peek(p)
+
+coroutine {step, first} = task()
+first

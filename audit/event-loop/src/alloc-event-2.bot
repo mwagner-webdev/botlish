@@ -1,0 +1,19 @@
+# alloc-event-2.bot -- EVENT-LOOP-EXPLORATION.md, "Performance": the
+# allocation report of 10000 events through a channel (producer posts and
+# yields, consumer waits) on the deterministic driver.
+import benchwork
+import evloop
+import simdrv
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> int errors IndexNotFound, evloop::LoopReentered:
+    benchwork::spawn_pair(10000)
+    evloop::run()
+    evloop::stat(evloop::s_dispatched)
+
+with context evloop::create(64, 0)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        -1
+    on evloop::LoopReentered:
+        -2
