@@ -240,10 +240,11 @@ proc runBare {file} {
 # toolchain, cToolchain below, and the rustc linker).
 testConstraint nativeCCalls [native::hostSupports cCalls]
 
-# Variadic C calls (VARIADICS-VERTICAL-SLICE-1.md): lowered for the System V
-# and Apple AArch64 C conventions only; on Windows x86-64 a variadic call is
-# a codegen error. A test that compiles one to machine code, or runs one,
-# carries this beside nativeCCalls.
+# Variadic C calls (VARIADICS-VERTICAL-SLICE-1.md): lowered for the System V,
+# Apple AArch64 and Win64 C conventions (WINDOWS-X86-64-MILESTONE-6.md), so
+# wherever C calls run today; a host whose C convention has no variadic
+# lowering would make one a codegen error. A test that compiles one to
+# machine code, or runs one, carries this beside nativeCCalls.
 testConstraint nativeCVariadics [native::hostSupports cVariadics]
 
 # The host's own C toolchain, the one C fixtures are built with
