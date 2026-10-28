@@ -540,7 +540,30 @@ On a 4-core Linux x86-64 container, at `68c2d46`:
   `va_arg`); the mutants (section 8.4).
 * The acceptance and system-linker jobs were cancelled by the next push.
 
-[[run 2]]
+**Real Windows**, run [40614341978](https://github.com/mwagner-webdev/botlish/actions/runs/40614341978)
+(`94aa3fd`: run 1's code with the wsprintf expectation, mutate.tcl's
+line endings and the benchmark's long corrected, and main merged in;
+windows-2025):
+
+* smoke: the native Rust tests, 293 + 106 passed (the six
+  `win64_variadic_tests` among them); the native status, `c-variadic`
+  `{printf windows_fastcall}` and every other capability as recorded;
+  the variadic program's CLIF legend and dumpbin's disassembly (section
+  9.3) as in run 1; the smoke tier's 28 Tcl test files on interp and on
+  compile, c-ffi.test among them, 0 failed -- every `cf-va-*` test,
+  `cf-va-dll-wsprintf` included; and the variadic tests under GC stress,
+  `c-ffi.test: Total 129 Passed 36 Skipped 93 Failed 0` (`-match
+  'cf-va-*'`: all 36 variadic tests ran and passed).
+* system linker: c-ffi.test, windows-io.test, argv.test,
+  native-executable.test, c-float-ffi.test and workload-2048.test with
+  link.exe as the system linker, 300 tests, 0 failed (twice), and
+  system-linker.test with c-ffi.test, 0 failed.
+* root plans (the fallback plan's Rust tests and GC workloads): passed.
+* full, `CI-Tests: c-ffi-bench`: the benchmark of section 9.2.
+* [[acceptance]]
+
+The mutants ran on the commit before, `ea9cc44`, whose lowering and tests
+are this one's (section 8.4).
 
 ### 8.4 Mutants
 
@@ -708,9 +731,36 @@ V's lowering, which this milestone does not change:
 | `va 4.0`: `vscale(1.0, 4, ...)`, a Float64 result allocated | 36.1 | 71.8 | 35.6 |
 | (`big`: a fixed call whose u64 result is boxed) | 35.5 | 68.6 | 33.0 |
 
-**Windows x86-64**:
+**Real Windows** (run 40614341978's full tier, a windows-2025 runner,
+the fixture built with MSVC; one invocation of the benchmark, each row
+the best of five runs, on a shared machine):
 
-[[CI]]
+| Call | loop | + call | call |
+|---|---:|---:|---:|
+| `add(i, 1)`, fixed | 34.5 | 37.7 | 3.2 |
+| `stack 12`, fixed, eight on the stack | 36.0 | 41.9 | 5.9 |
+| `stack 20`, fixed, sixteen on the stack | 34.7 | 43.8 | 9.1 |
+| `va 2`: `vsum(2, a, a)`, no stub | 39.0 | 37.7 | -1.4 |
+| `va 11`: eleven trailing ints, no stub, eight on the stack | 35.7 | 42.5 | 6.8 |
+| `va 1.0`: `vrecord1(7, 0.5)`, the stub's one copy | 35.9 | 41.2 | 5.4 |
+| `va mixed`: seven trailing, alternating; two copies, four on the stack | 35.4 | 49.5 | 14.1 |
+| `va 4.0`: `vscale(1.0, 4, ...)`, three copies, a Float64 result allocated | 36.5 | 109.3 | 72.8 |
+| (`big`: a fixed call whose u64 result is boxed) | 35.4 | 102.9 | 67.6 |
+
+What the numbers say, and what they do not:
+
+* A variadic call without a stub costs what a fixed call does: `va 2`
+  is within the loop's noise, as `add` is, and `va 11` costs about what
+  `stack 12` does for as many stack arguments.
+* The stub's cost is not separable from the noise: `va 1.0`, one `movq`
+  and one jump more than a direct call, is 5.4 ns against `add`'s 3.2;
+  `va mixed`'s 14.1 is a call of eight arguments, four of them stored
+  to the stack, two copies and a jump. A few nanoseconds of difference
+  between two rows of one run on a shared runner is within its spread.
+* `va 4.0` and `big` are dominated by their results' allocation (a
+  Float64, a u64 beyond the small Int range), not by the call.
+* The rest of the table (the byte-storage rows, compile and link times)
+  is milestone 2's measurement repeated; nothing of it is variadic.
 
 ### 9.3 The machine code
 
