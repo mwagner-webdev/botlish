@@ -722,7 +722,18 @@ text, each keeping its rule:
 * `set-value-storage` follows the new error declaration and `of_table`.
 * `iteration-materializes` follows the map's new import.
 
-@@EXISTING-MUTANTS@@
+The existing harnesses, run on the final code, still kill every mutant
+they hold:
+
+| harness | mutants | killed | detectors |
+|---|---:|---:|---|
+| `audit/mutable-map/tools/mutate.tcl` (the collections') | 57 (5 native) | 57 | the collection test files, `place-parameters.test` and `vector-bounds.test`, the collection fuzzer. Its default tests include `ordered-table.test`, whose reorder invariants now also kill index and order mutants. |
+| `audit/hashable/tools/mutate.tcl` | 45 (12 native) | 45 | `hashable.test`, `native-hashing.test`, the Hashable fuzzer |
+| `audit/trait-constrained-types/tools/mutate.tcl` | 43 | 43 | `trait-constrained-types.test`, its fuzzer |
+
+The runs were split by shard or by `-only` chunks: one harness process
+per background task, for the length of the native rebuilds. The harnesses
+themselves are unchanged.
 
 ## Performance
 
