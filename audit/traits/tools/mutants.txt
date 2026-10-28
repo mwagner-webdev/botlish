@@ -191,8 +191,7 @@
 ## hir/resolve.tcl
 <<<<
     SetField hir $e callee $c
-    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
-}
+    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e $argNodes}]
 ====
     SetField hir $e callee $c
     if {[lindex $action 0] eq "redirect"} {
@@ -207,8 +206,7 @@
         }
         set argNodes $wrapped
     }
-    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
-}
+    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e $argNodes}]
 >>>>
 ## hir/resolve.tcl
 <<<<
