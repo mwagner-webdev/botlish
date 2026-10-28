@@ -682,7 +682,8 @@ test system-linker-auto {auto, the single executable's choice, links a program t
         }]
         set channel [open $exe rb]; set bytes [read $channel]; close $channel
         set stub [expr {[string range $bytes end-7 end] eq "BOTLIMG1"}]
-        set system [expr {[file exists $log] && [string match "system linker: *" [readFile $log]]}]
+        # (Its lines after the resolved link plan's, NATIVE-LINK-PLAN-MILESTONE-1.md.)
+        set system [expr {[file exists $log] && [regexp -line {^system linker: } [readFile $log]]}]
         lappend results $name [lindex [runCaptured $exe ""] 1] [expr {$stub ? "stub" : $system ? "system" : "?"}]
     }
     removeDirectory system-linker-auto

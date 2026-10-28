@@ -16,7 +16,11 @@
 #                       and result accessors, and one function per export
 #   NAME.manifest.json  the same interface as data (manifest schema 1), from
 #                       the compiler's facts: what a binding generator or a
-#                       package tool reads instead of the HIR
+#                       package tool reads instead of the HIR, and the
+#                       program's native dependencies (`dependencies`: the
+#                       resolved link plan, NATIVE-LINK-PLAN-MILESTONE-1.md),
+#                       which the shared library is linked with and a
+#                       consumer of the static library links itself
 #
 # and returns a dict {static PATH shared PATH|"" header PATH manifest PATH
 # exports RECORDS}, RECORDS hir::exports' records. Failures raise
@@ -148,6 +152,14 @@ proc native::library {hir args} {
             params [lmap {p t} [dict get $record params] {set t}] result [dict get $record result]
     }]
     set text [nir $hir -exports $lowered {*}$lowering]
+    # The program's native dependencies (NATIVE-LINK-PLAN-MILESTONE-1.md),
+    # resolved as an executable's link would resolve them: the shared
+    # library is linked with them, and the manifest names them for a
+    # consumer of the static library, which holds none of them.
+    set dependencies {}
+    if {[hir::foreign::linkPlan $hir] ne {}} {
+        set dependencies [LinkPlanOf $text]
+    }
     file mkdir $out
     set work [file tempdir]
     try {
@@ -174,12 +186,12 @@ proc native::library {hir args} {
         if {[dict get $options -shared]} {
             set shared [file join $out lib$name.so]
             library::Tool cc -shared -o $shared $final -Wl,-z,defs -Wl,--gc-sections -Wl,-soname,lib$name.so \
-                {*}$library::systemLibraries
+                {*}[library::DependencyArgs $dependencies] {*}$library::systemLibraries
         }
         set header [file join $out $name.h]
         library::Write $header [library::Header $hir $name $records]
         set manifest [file join $out $name.manifest.json]
-        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}]]
+        library::Write $manifest [library::Manifest $hir $name $records [expr {$shared ne ""}] $dependencies]
     } finally {
         file delete -force $work
     }
@@ -428,7 +440,50 @@ proc native::library::CTypes {type} {
     } $type]
 }
 
-proc native::library::Manifest {hir name records shared} {
+# The linker arguments of the resolved link plan DEPENDENCIES
+# (native::linkPlan's records) after a library's object: the library search
+# directories in force (-L), then every library by name and every static
+# archive by its file, in the plan's order, inside one GNU archive group --
+# the executable link's plan (codegen/aot.rs's link_plan_args_for), which a
+# shared library's link is on Linux.
+proc native::library::DependencyArgs {dependencies} {
+    if {$dependencies eq {}} {
+        return {}
+    }
+    set args [lmap dir $::native::linkDirs {string cat -L $dir}]
+    lappend args -Wl,--start-group
+    foreach dependency $dependencies {
+        switch -- [lindex $dependency 0] {
+            library { lappend args -l[lindex $dependency 1] }
+            archive { lappend args [lindex $dependency 2] }
+        }
+    }
+    lappend args -Wl,--end-group
+    return $args
+}
+
+# The manifest's record of the resolved dependency DEPENDENCY (a
+# native::linkPlan record): its kind and name, and how a consumer of the
+# static library links it -- the static library holds none of a program's
+# native dependencies, a consumer's link names each after it (`link`: the
+# shared library is linked with them already, a static archive's code in
+# it).
+proc native::library::Dependency {dependency} {
+    lassign $dependency kind name path how what
+    switch -- $kind {
+        library {
+            return [list obj [list kind [S library] name [S $name] linkage [S default] link [S -l$name]]]
+        }
+        archive {
+            return [list obj [list kind [S library] name [S $name] linkage [S static] archive [S $path] link [S $path]]]
+        }
+        default {
+            return [list obj [list kind [S framework] name [S $name] link [S "-framework $name"]]]
+        }
+    }
+}
+
+proc native::library::Manifest {hir name records shared {dependencies {}}} {
     variable schema
     variable abiVersion
     variable systemLibraries
@@ -474,6 +529,7 @@ proc native::library::Manifest {hir name records shared} {
             shared [if {$shared} {S lib$name.so} else {list null {}}] \
             header [S $name.h]]] \
         link [list arr [lmap l $systemLibraries {S $l}]] \
+        dependencies [list arr [lmap d $dependencies {Dependency $d}]] \
         threading [S thread-affine] \
         statuses [list obj [list ok [N 0] declared [N 1] runtime [N 2] boundary [N 3] invocation [N 4] internal [N 5]]] \
         fieldTypes [list obj [list int [N 1] bool [N 2] float64 [N 3] str [N 4] other [N 5]]] \

@@ -31,6 +31,13 @@
 #      compiler on PATH at all -- on x86-64, where the stub runs; on AArch64,
 #      which has no stub, the system linker (auto's choice there); on macOS
 #      portable IO through std::darwin::io, which is libSystem's C
+#   F  a static archive the program names by a path from its application
+#      root (`extern c library "..." static at "native/..."`,
+#      NATIVE-LINK-PLAN-MILESTONE-1.md), a shared library of the same name
+#      on the -L path beside it, compiled from another working directory in
+#      an application directory whose name holds a space and a non-ASCII
+#      letter; then the application moved and compiled again: the archive
+#      each time, never the shared library
 #
 # On macOS errno is libSystem's __error(), the C toolchain Apple's (cc in
 # /usr/bin), and the evidence that no Rust runs is the PATH and the link's
@@ -201,6 +208,7 @@ expected() {
     c) echo '[37602, 1768, 888]' ;;
     d) echo '[[16, 0, 1736], [-1, 34, 1736], [18446744073709551615, 5], [42, 0]]' ;;
     e) printf 'Hello from portable IO\nunit\n' ;;
+    f) echo 42 ;;
   esac
 }
 size() { wc -c <"$1" | tr -d ' '; }
@@ -234,13 +242,41 @@ else
   echo "   built e ($(size e) bytes, system-linked: no stub on $(uname -s) $(uname -m))"
 fi
 
+# F: the application's own archive, by a path from its root, from another
+# working directory; a shared library of its name on the -L path.
+appf="$work/app fü"
+mkdir -p "$appf/native" "$work/elsewhere"
+cp "$work/lib/libbotlish_cffi_fixture.a" "$appf/native/"
+if (( macos )); then
+  cc -dynamiclib -O2 "$work/lib/fixture.c" -o "$appf/native/libbotlish_cffi_fixture.dylib"
+else
+  cc -shared -fPIC -O2 "$work/lib/fixture.c" -o "$appf/native/libbotlish_cffi_fixture.so"
+fi
+cat >"$appf/f.bot" <<'BOT'
+import std::ffi::c
+
+extern c library "botlish_cffi_fixture" static at "native/libbotlish_cffi_fixture.a"
+
+extern c fn add named "bcf_add"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int
+
+add(40, 2)
+BOT
+for round in first moved; do
+  if [[ $round == moved ]]; then mv "$appf" "$appf moved"; appf="$appf moved"; fi
+  (cd "$work/elsewhere" && run -warnings off -L "$appf/native" -emit-native-executable "$appf/f.bot" >/dev/null) || fail "build f ($round)"
+  [[ -x "$appf/f" ]] || fail "f ($round) was not built beside its source"
+  echo "   built f ($round: $(size "$appf/f") bytes, the archive native/libbotlish_cffi_fixture.a of $appf)"
+done
+mv "$appf/f" f
+rm -rf "$appf"
+
 # No temporary directory left beside the outputs.
 if compgen -G '.botlish-aot-*' >/dev/null; then fail "a link left its work directory"; fi
 
 # The executables need nothing of the compiler: delete it, its cache and the
 # C libraries, then run them, plainly and under GC stress.
 rm -rf "$work/bin" "$work/home"/.cache "$work/home"/Library "$work/lib"
-for name in a b c d e; do
+for name in a b c d e f; do
   got=$(env -i "./$name") || fail "executable $name failed"
   want=$(expected "$name")
   [[ $got == "$want" ]] || fail "executable $name printed '$got', not '$want'"

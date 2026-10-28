@@ -147,6 +147,17 @@ another's could be silently wrong, not just rejected. So:
   for the compilation's target (MACOS-AARCH64-MILESTONE-2.md). Without
   `-target` nothing is checked; the native driver still refuses to run a
   HIR built for another host's target.
+* **The link plan.** A HIR's `links` (and its `declarations`' copy) is what
+  a native link is made of (NATIVE-LINK-PLAN-MILESTONE-1.md): `decode`
+  refuses an entry its front end could not have built -- an unknown kind or
+  linkage, a missing field, an archive path a declaration cannot write --
+  with `{HIR INTERCHANGE FORMAT}`, never dropping it or linking it another
+  way. An archive's path is kept as written with the root it resolves
+  from (the application root or the declaring package's directory: an
+  absolute path of the application, never of the compiler); the driver joins them when it links, so a text read elsewhere
+  links the archive where the application was built, and a moved
+  application is compiled again (its root is in the front-end cache's key).
+  A framework declaration makes a HIR the macOS target's.
 
 ## Using it
 
@@ -221,8 +232,14 @@ tclsh9.0 tests/golden/run.tcl tests/golden/traits-path.bot
     must still have none, and so must an application path a standard
     namespace's import did not need (a file there would now be a
     MODULE-COLLISION).
-  - A module's paths are a function of its namespace, the library directory
-    and the application root alone (no search path, surface/modules.tcl), so
+  - A module's paths are a function of its namespace, the library directory,
+    the application root and which package directories are installed in the
+    importing file's scope (no search path, surface/modules.tcl;
+    BOT-MODULES-MILESTONE-1.md). The loader records every file and package
+    directory it asks about -- a package directory there or not, a file no
+    import names whose existence decides a qualifier (`Color::Red` of an enum
+    `Color`, AMBIGUOUS-QUALIFIER once `Color.bot` exists) -- and every one is
+    a dependency too: a directory must still be one, or still none. So
     nothing else can change which files a program reads.
   - The text recorded is the one the loader read during the build, so a
     module edited during the build leaves an entry that misses.

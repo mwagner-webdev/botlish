@@ -28,6 +28,9 @@ name: tests (macos arm64)
 #   app-clean      every push, after app: the downloaded application on the
 #                  runner with Apple's developer tools, Rust and the
 #                  checkout moved away
+#   link-plan-sdl3 every push, after app: the downloaded application links
+#                  static SDL3 (built from its pinned release) with the
+#                  frameworks SDL3 needs (NATIVE-LINK-PLAN-MILESTONE-1.md)
 #   app-mutants    opt-in, "[ci-app-mutants]" in the pushed head commit's
 #                  message (or a manual run's app_mutants): the
 #                  application's packaging mutants
@@ -220,7 +223,7 @@ jobs:
       - name: System linker and C tests under GC stress
         env:
           BOTLISH_NATIVE_GC_STRESS: "1"
-        run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test darwin-io.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test"
+        run: tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test darwin-io.test c-byte-borrowing.test c-ffi-error-capture.test coroutines.test native-link-plan.test"
 
   # The macOS distribution of the compiler (MACOS-AARCH64-MILESTONE-9.md):
   # Botlish.app -- the launcher, the bundled Tcl.framework, the compiler's
@@ -409,6 +412,58 @@ jobs:
 
       - name: Toolchain-free smoke test
         run: bash "$RUNNER_TEMP/kit/single/smoke-test.sh" "$RUNNER_TEMP/Clean Äpps/Botlish.app/Contents/MacOS/botlish"
+
+  # Static SDL3 through the distribution (NATIVE-LINK-PLAN-MILESTONE-1.md,
+  # "Static SDL3"): the uploaded application extracted outside the checkout
+  # links an application that declares SDL3's static archive by a path from
+  # its root and the Apple frameworks SDL3's own metadata names
+  # (tests/platform/link-plan-sdl3.sh: SDL3 built from the binding profile's
+  # pinned release, static and shared; the static executable's dynamic
+  # libraries, its value, the static/shared collision, the dynamic control,
+  # the application moved, the checkout's compiler with both linkers, every
+  # executable run again with SDL3 deleted). The SDL3 build is cached by its
+  # pinned commit.
+  link-plan-sdl3:
+    name: static SDL3 through Botlish.app (macOS arm64)
+    needs: app
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-macos-aarch64
+          path: download
+
+      - name: Cache the static SDL3 build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-sdl3-static
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+
+      - name: Static SDL3 (tests/platform/link-plan-sdl3.sh)
+        run: |
+          place="$RUNNER_TEMP/Prögram Files"
+          mkdir -p "$place"
+          (cd download && shasum -a 256 -c botlish-macos-aarch64.zip.sha256)
+          (cd "$place" && unzip -q "$GITHUB_WORKSPACE/download/botlish-macos-aarch64.zip")
+          export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
+          bash tests/platform/link-plan-sdl3.sh "$place/Botlish.app" "$(command -v tclsh9.0)" 2>&1 | tee link-plan-sdl3.log
+          codesign --verify --deep --strict --verbose=2 "$place/Botlish.app"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: link-plan-sdl3-log
+          path: link-plan-sdl3.log
+          if-no-files-found: warn
 
   # Mutation testing of the application's packaging (opt-in: "[ci-app-
   # mutants]" in the pushed head commit's message, or a manual run's

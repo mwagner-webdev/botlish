@@ -280,9 +280,12 @@ proc core::ir::CheckShape {node} {
                     }
                     enum {
                         # {ID CASE}: an enum case value (ENUMS.md), its
-                        # declaration identity and its case's name.
+                        # declaration identity and its case's name. A
+                        # package instance's module's identity begins with
+                        # the instance, its segments separated by "/"
+                        # (BOT-MODULES-MILESTONE-1.md: physics/geometry::Side).
                         if {[catch {llength $text} n] || $n != 2
-                                || ![regexp {^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $text 0]]
+                                || ![regexp {^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*)*$} [lindex $text 0]]
                                 || ![regexp {^[A-Za-z_][A-Za-z0-9_]*$} [lindex $text 1]]} {
                             core::malformed "an enum literal is {ENUM-ID CASE}" $node
                         }

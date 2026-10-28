@@ -43,10 +43,10 @@
 @@ library-dropped the link plan loses the last library a program declares
 ## hir/foreign.tcl
 <<<<
-    set links $plan
+    set links [LinkPlan $linkDecls]
 }
 ====
-    set links [lrange $plan 0 end-1]
+    set links [lrange [LinkPlan $linkDecls] 0 end-1]
 }
 >>>>
 
@@ -198,7 +198,7 @@
 @@ nearest-library each C function is associated with the last library its own unit declares, and only libraries some function is associated with are linked
 ## hir/foreign.tcl
 <<<<
-    set links $plan
+    set links [LinkPlan $linkDecls]
 }
 ====
     set near {}
@@ -206,15 +206,15 @@
         set best ""
         foreach link $linkDecls {
             if {[dict get $link namespace] eq [dict get $decl namespace]} {
-                set best [dict get $link library]
+                set best [dict get $link name]
             }
         }
         if {$best ne "" && $best ni $near} {
             lappend near $best
         }
     }
-    set links [lmap entry $plan {
-        if {[dict get $entry library] ni $near} continue
+    set links [lmap entry [LinkPlan $linkDecls] {
+        if {[dict get $entry name] ni $near} continue
         set entry
     }]
 }
@@ -291,21 +291,21 @@
 @@ link-group-dropped the declared libraries are passed to the linker without a group, so their order decides a static link
 ## native/src/codegen/aot.rs
 <<<<
-        args.extend(["-C".to_string(), "link-arg=-Wl,--start-group".to_string()]);
+            arg("-Wl,--start-group".to_string());
 ====
 >>>>
 ## native/src/codegen/aot.rs
 <<<<
-        args.extend(["-C".to_string(), "link-arg=-Wl,--end-group".to_string()]);
+            arg("-Wl,--end-group".to_string());
 ====
 >>>>
 
 @@ stub-links-c the stub linker accepts a program that calls C, linking none of its libraries
 ## native/src/codegen/aot.rs
 <<<<
-        Ok("stub") if calls_c(program) => Err(format!(
+        Linker::Stub if calls_c(program) => {
 ====
-        Ok("stub") if calls_c(program) && false => Err(format!(
+        Linker::Stub if calls_c(program) && false => {
 >>>>
 
 @@ tcl-backends-return-zero the Tcl backends run a C call as a call that returns 0
@@ -376,11 +376,11 @@ const LINKER: LinkerFlavor = if cfg!(target_vendor = "apple") {
 @@ link-dirs-dropped the -L search directories never reach the linker
 ## native/src/codegen/aot.rs
 <<<<
-    for dir in link_dirs {
-        args.extend(["-C".to_string(), format!("link-arg=-L{dir}")]);
+    for dir in &search.libraries {
+        arg(format!("-L{dir}"));
     }
 ====
-    for _dir in link_dirs {}
+    for _dir in &search.libraries {}
 >>>>
 
 @@ apple-linker-diagnostics-dropped a failed link's Apple ld lines (undefined symbols, the linker's failure) are filtered out of its message
@@ -652,9 +652,9 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 %% linux-x86_64
 ## native/src/codegen/clif.rs
 <<<<
-    module.isa().name() == "x64" && super::target::c_call_conv(module.isa().triple()) == CallConv::SystemV
+        CallConv::SystemV => Some(VaStub::Al(vector_registers(sig))),
 ====
-    false
+        CallConv::SystemV => None,
 >>>>
 
 @@ va-al-zero a System V variadic call always states 0 vector registers in %al, doubles or not
@@ -666,22 +666,22 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
     0
 >>>>
 
-@@ va-stub-jit-jump-misplaced the JIT form of the %al stub writes the C function's address one byte late (the jump goes elsewhere; the JIT compiles a C call but never runs one, so only the encoding test sees it)
-%% linux-x86_64
+@@ va-stub-jit-jump-misplaced the JIT form of a variadic call's stub (System V's %al, Win64's copies) writes the C function's address one byte late (the jump goes elsewhere: the encoding tests see it, and the Win64 capture the JIT runs)
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/clif.rs
 <<<<
-        (bytes, 7, cranelift_codegen::binemit::Reloc::Abs8, 0)
+        (bytes, jump + 2, cranelift_codegen::binemit::Reloc::Abs8, 0)
 ====
-        (bytes, 8, cranelift_codegen::binemit::Reloc::Abs8, 0)
+        (bytes, jump + 3, cranelift_codegen::binemit::Reloc::Abs8, 0)
 >>>>
 
-@@ va-stub-plt-addend-dropped the object form of the %al stub's jump has no -4 addend: an executable's variadic call lands four bytes past the C function
-%% linux-x86_64
+@@ va-stub-plt-addend-dropped the object form of a variadic call's stub's jump has no -4 addend (ELF's PLT32, COFF's REL32): an executable's variadic call through a stub lands four bytes past the C function
+%% linux-x86_64 windows-x86_64
 ## native/src/codegen/clif.rs
 <<<<
-        (bytes, 6, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4)
+        (bytes, jump + 1, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4)
 ====
-        (bytes, 6, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, 0)
+        (bytes, jump + 1, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, 0)
 >>>>
 
 @@ va-apple-trailing-in-registers Apple's variadic call is not padded: trailing arguments take the free x and v registers instead of the stack
@@ -802,4 +802,136 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
         let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
             CAbi::Void => false,
+>>>>
+
+# --- Win64 variadic calls (WINDOWS-X86-64-MILESTONE-6.md) ---------------------
+# The x86-64 hosts all compile Win64's lowering (its Rust tests build a
+# windows-x86_64 object and run a Win64 call through the stub in the JIT on
+# any x86-64 host); only Windows runs the MSVC captures, va_arg callees and
+# C runtime calls.
+
+@@ va-win64-no-shadow-copy a Win64 variadic call passes each double of the first four positions in its xmm register only, not in the integer register of its position too (no stub)
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+        CallConv::WindowsFastcall => Some(shadow_positions(sig)).filter(|mask| *mask != 0).map(VaStub::Shadow),
+====
+        CallConv::WindowsFastcall => None,
+>>>>
+
+@@ va-win64-wrong-integer-register the stub copies xmm0 into rdx, position 1's integer register, instead of rcx, position 0's: a fixed double at position 0 is not in rcx, and an argument at position 1 is overwritten
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    ("rcx", [0x66, 0x48, 0x0f, 0x7e, 0xc1]),
+====
+    ("rcx", [0x66, 0x48, 0x0f, 0x7e, 0xc2]),
+>>>>
+
+@@ va-win64-converted-not-copied the stub converts each double to the integer it truncates to (cvttsd2si) instead of copying its 64 bits (movq) into the integer register of its position
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    ("rcx", [0x66, 0x48, 0x0f, 0x7e, 0xc1]),
+    ("rdx", [0x66, 0x48, 0x0f, 0x7e, 0xca]),
+    ("r8", [0x66, 0x49, 0x0f, 0x7e, 0xd0]),
+    ("r9", [0x66, 0x49, 0x0f, 0x7e, 0xd9]),
+====
+    ("rcx", [0xf2, 0x48, 0x0f, 0x2c, 0xc8]),
+    ("rdx", [0xf2, 0x48, 0x0f, 0x2c, 0xd1]),
+    ("r8", [0xf2, 0x4c, 0x0f, 0x2c, 0xc2]),
+    ("r9", [0xf2, 0x4c, 0x0f, 0x2c, 0xcb]),
+>>>>
+
+@@ va-win64-positions-by-kind the stub's positions are counted among the floating-point arguments only, as System V counts registers per kind: the first double, wherever it is, is copied from xmm0 into rcx
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    sig.params.iter().take(4).enumerate().filter(|(_, p)| p.value_type.is_float()).fold(0, |mask, (i, _)| mask | 1 << i)
+====
+    sig.params.iter().filter(|p| p.value_type.is_float()).take(4).enumerate().fold(0, |mask, (i, _)| mask | 1 << i)
+>>>>
+
+@@ va-win64-fourth-position-missed the four-register boundary is taken one position early: a double at the fourth position (xmm3) is not copied into r9
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    sig.params.iter().take(4).enumerate().filter(|(_, p)| p.value_type.is_float()).fold(0, |mask, (i, _)| mask | 1 << i)
+====
+    sig.params.iter().take(3).enumerate().filter(|(_, p)| p.value_type.is_float()).fold(0, |mask, (i, _)| mask | 1 << i)
+>>>>
+
+@@ va-win64-extra-arguments the naive duplication: each trailing double also passed as an extra integer argument at the fixed/trailing boundary, which shifts every trailing argument's position (its register or stack slot) by as many as there are doubles
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    for t in &padding {
+        sig.params.push(AbiParam::new(*t));
+    }
+====
+    if win64 {
+        padding.extend(varargs.iter().filter(|a| a.promoted == nir::CAbi::F64).map(|_| I64));
+    }
+    for t in &padding {
+        sig.params.push(AbiParam::new(*t));
+    }
+>>>>
+
+@@ va-win64-stack-slot-shifted a Win64 call of more than four arguments gets one word more at the fixed/trailing boundary: every trailing argument one position late -- the ones past the registers one stack slot late
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    for t in &padding {
+        sig.params.push(AbiParam::new(*t));
+    }
+====
+    if win64 && decl.params.len() + varargs.len() > 4 {
+        padding.push(I64);
+    }
+    for t in &padding {
+        sig.params.push(AbiParam::new(*t));
+    }
+>>>>
+
+@@ va-win64-fixed-calls-stubbed a fixed-arity C call whose first four arguments hold a double goes through the variadic stub too: Win64's variadic rule applied to a call of a prototype that is not variadic
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+            let (import, decl) = symbols.foreigns[*foreign as usize].clone();
+            if !decl.variadic {
+                continue;
+            }
+            let Some(kind) = va_stub_for(module, &c_call_signature(module, &decl, varargs)?.0) else { continue };
+====
+            let (import, decl) = symbols.foreigns[*foreign as usize].clone();
+            let Some(kind) = va_stub_for(module, &c_call_signature(module, &decl, varargs)?.0) else { continue };
+>>>>
+## native/src/codegen/clif.rs
+<<<<
+        let r = if decl.variadic {
+            // This call's own signature, the callee the C function itself --
+====
+        let r = if decl.variadic || va_stub_for(&*self.module, &signature).is_some() {
+            // This call's own signature, the callee the C function itself --
+>>>>
+
+@@ va-win64-capability-without-lowering the capability without the lowering: Win64's variadic call is refused again (no variadic call lowering for the windows_fastcall convention) while cVariadics lists windows-x86_64
+%% linux-x86_64 windows-x86_64
+## native/src/codegen/clif.rs
+<<<<
+    let win64 = sig.call_conv == CallConv::WindowsFastcall && module.isa().name() == "x64";
+====
+    let win64 = false;
+>>>>
+
+@@ va-keepalive-dropped a variadic C call keeps no exposed storage alive after it: the storage a trailing call's fixed pointer parameters borrow is dead at the call
+## native/lower.tcl
+<<<<
+    KeepExposedAlive fn $operands $e
+    if {[dict size $written] == 0} {
+====
+    if {![dict exists $node cvarargs] || [dict get $node cvarargs] eq {}} {
+        KeepExposedAlive fn $operands $e
+    }
+    if {[dict size $written] == 0} {
 >>>>

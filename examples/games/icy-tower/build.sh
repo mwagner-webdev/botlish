@@ -15,11 +15,12 @@
 #        BOTLISH_SDL3_DIR=DIR BOTLISH_SDL3_CMAKE_FLAGS="" tclsh9.0 tests/cffi/sdl3.tcl
 #      At run time an installed SDL 3 (libSDL3.so.0) should do too -- the
 #      game calls only functions SDL 3.2.0 has -- but only 3.4.18 is tested.
-#   2. The application: the .bot files beside this script and the committed
-#      generated SDL3 binding (generated/c/sdl3/linux-x86_64/sdl3/, the
-#      host's target's) staged
-#      into one application root (tools/c-bindgen.tcl stage): an
-#      application imports only the files beside it.
+#   2. The application: the .bot files beside this script, staged into one
+#      application root with the committed generated SDL3 binding
+#      (generated/c/sdl3/linux-x86_64/sdl3/, the host's target's) installed
+#      as its package sdl3, .bot_modules/sdl3 (tools/c-bindgen.tcl stage
+#      -package 1; BOT-MODULES-MILESTONE-1.md): an application imports only
+#      the files beside it and the packages installed in its .bot_modules.
 #   3. The executable: main.tcl -emit-native-executable, linked with
 #      -lSDL3 from step 1's directory (Botlish adds no rpath), then strip.
 #
@@ -41,7 +42,7 @@ case $(uname -m) in
     aarch64|arm64) target=linux-aarch64 ;;
     *) target=linux-x86_64 ;;
 esac
-tclsh9.0 "$root/tools/c-bindgen.tcl" stage sdl3 -target "$target" -app "$here" -into "$stage/app" >/dev/null
+tclsh9.0 "$root/tools/c-bindgen.tcl" stage sdl3 -target "$target" -app "$here" -into "$stage/app" -package 1 >/dev/null
 tclsh9.0 "$root/main.tcl" -warnings error -emit-native-executable -L "$sdl" "$stage/app/main.bot"
 mkdir -p "$(dirname "$out")"
 cp "$stage/app/main" "$out"

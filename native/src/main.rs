@@ -31,6 +31,15 @@
 //!                                        native/native.tcl's native::library
 //!                                        links it with the runtime
 //!   botlish-native check FILE.nir        parse and validate only
+//!   botlish-native link-plan FILE.nir    the program's link plan as this
+//!                                        host links it (codegen::aot's
+//!                                        resolve_link_plan; NATIVE-LINK-
+//!                                        PLAN-MILESTONE-1.md): a line per
+//!                                        dependency -- library NAME, archive
+//!                                        NAME PATH declared|searched WHAT,
+//!                                        framework NAME -- or the NATIVE
+//!                                        LINK ARCHIVE failure a link would
+//!                                        report; nothing is linked
 //!   botlish-native system-linker         what the system linker would link
 //!                                        with here: `flavor`, `tool` (the C
 //!                                        driver or link.exe), `runtime` (the
@@ -77,7 +86,10 @@
 //!
 //! `--link-dir DIR` (anywhere on the line, repeatable, never empty; main.tcl's
 //! `-L DIR`) adds DIR to the system linker's library search path (-LDIR) when a
-//! program that calls C (C-FFI.md) is linked. Such a program -- one with
+//! program that calls C (C-FFI.md) is linked, and to the directories a static
+//! archive declared without a path is found in; `--framework-dir DIR`
+//! (main.tcl's `-F DIR`) adds DIR to Apple's ld's framework search path (-FDIR)
+//! on macOS, and is passed to no other linker (NATIVE-LINK-PLAN-MILESTONE-1.md). Such a program -- one with
 //! `foreign` functions or `link` libraries -- is never JIT-run: `run` and
 //! `bench` link it as an executable (codegen/aot.rs, the same link
 //! `executable` makes) into a private directory and run that, in the driver
@@ -223,6 +235,7 @@ fn emit_link_error(code: &str, error: &codegen::aot::LinkError) {
     match error.detail {
         Some("TOOLCHAIN") => emit_error(&["NATIVE", code, "TOOLCHAIN"], &error.message),
         Some("RUNTIME") => emit_error(&["NATIVE", code, "RUNTIME"], &error.message),
+        Some("ARCHIVE") => emit_error(&["NATIVE", code, "ARCHIVE"], &error.message),
         _ => emit_error(&["NATIVE", code], &error.message),
     }
 }
@@ -324,34 +337,40 @@ fn extract_table_hash_key(args: &[String]) -> Option<Vec<String>> {
     Some(out)
 }
 
-/// Pulls every "--link-dir DIR" out of ARGS (anywhere): the remaining
-/// arguments in order, and the directories. Err if one has no value or an
-/// empty one: an empty DIR would be a bare `-L`, which GNU's and Apple's
-/// linker drivers read as taking their next argument for the directory, or
-/// a bare `/LIBPATH:`, which link.exe refuses (LNK1146).
-fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
-    let mut dirs = Vec::new();
+/// Pulls every "--link-dir DIR" and "--framework-dir DIR" out of ARGS
+/// (anywhere): the remaining arguments in order, and the directories. Err if
+/// one has no value or an empty one: an empty DIR would be a bare `-L` (or
+/// `-F`), which GNU's and Apple's linker drivers read as taking their next
+/// argument for the directory, or a bare `/LIBPATH:`, which link.exe refuses
+/// (LNK1146).
+fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::LinkSearch), String> {
+    let mut search = codegen::aot::LinkSearch::default();
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--link-dir" {
-            let dir = args.get(i + 1).ok_or("--link-dir needs a directory")?;
+        if args[i] == "--link-dir" || args[i] == "--framework-dir" {
+            let option = args[i].as_str();
+            let dir = args.get(i + 1).ok_or_else(|| format!("{option} needs a directory"))?;
             if dir.is_empty() {
-                return Err("--link-dir needs a directory (found an empty one)".to_string());
+                return Err(format!("{option} needs a directory (found an empty one)"));
             }
-            dirs.push(dir.clone());
+            if option == "--link-dir" {
+                search.libraries.push(dir.clone());
+            } else {
+                search.frameworks.push(dir.clone());
+            }
             i += 2;
             continue;
         }
         out.push(args[i].clone());
         i += 1;
     }
-    Ok((out, dirs))
+    Ok((out, search))
 }
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | target TRIPLE | system-linker (each also [--result PATH])");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
@@ -414,7 +433,7 @@ fn cli(args: &[String]) -> i32 {
         },
         ("object" | "executable", [_, file, ..]) => (1, file),
         ("library", [_, _, file, ..]) => (1, file),
-        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused", [file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check" | "fusion" | "fused" | "link-plan", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -445,7 +464,7 @@ fn cli(args: &[String]) -> i32 {
             }
         }
     }
-    if matches!(command, "run" | "bench" | "batch" | "object" | "executable" | "library") {
+    if matches!(command, "run" | "bench" | "batch" | "object" | "executable" | "library" | "link-plan") {
         // Machine code to run or to keep is the host's own target's only
         // (codegen/target.rs). The diagnostic commands (clif, vcode, size,
         // roots, calls, check) still show this host's view of any program.
@@ -488,6 +507,37 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
             0
+        }
+        "link-plan" => {
+            // The program's link plan as this host links it
+            // (codegen::aot::resolve_link_plan, NATIVE-LINK-PLAN-
+            // MILESTONE-1.md): one line per dependency -- `library NAME`,
+            // `archive NAME PATH declared WRITTEN` or `archive NAME PATH
+            // searched DIR`, `framework NAME` -- or the failure a link
+            // would report, before anything is linked.
+            match codegen::aot::resolve_link_plan(&program, &link_dirs) {
+                Ok(inputs) => {
+                    for input in &inputs {
+                        let words: Vec<String> = match input {
+                            codegen::aot::LinkInput::Library(name) => vec!["library".into(), name.clone()],
+                            codegen::aot::LinkInput::Framework(name) => vec!["framework".into(), name.clone()],
+                            codegen::aot::LinkInput::Archive { name, path, from } => {
+                                let (how, what) = match from {
+                                    codegen::aot::ArchiveSource::Declared(written) => ("declared", written.clone()),
+                                    codegen::aot::ArchiveSource::Searched(dir) => ("searched", dir.to_string_lossy().into_owned()),
+                                };
+                                vec!["archive".into(), name.clone(), path.to_string_lossy().into_owned(), how.into(), what]
+                            }
+                        };
+                        emit(&tcl_list(&words));
+                    }
+                    0
+                }
+                Err(e) => {
+                    emit_link_error("LINK", &e);
+                    1
+                }
+            }
         }
         "library" => {
             let (out, name) = (&rest[0], &rest[1]);
@@ -561,7 +611,7 @@ fn run_linked(
     runs: usize,
     alloc_mode: AllocMode,
     snapshot: Option<Vec<Vec<u8>>>,
-    link_dirs: &[String],
+    link_dirs: &codegen::aot::LinkSearch,
 ) -> i32 {
     if command == "batch" || alloc_mode.enabled() {
         emit_error(

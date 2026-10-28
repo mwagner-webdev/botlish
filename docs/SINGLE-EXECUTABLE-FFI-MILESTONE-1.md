@@ -1445,3 +1445,10 @@ What a macOS single-file compiler needs from this one, and what it must add:
   every system-linker CI job run it) stops when they differ from rustc's
   account. Update `runtime_system_libraries`, never the check.
 * `bench/system-linker.tcl` regenerates sections 30 and 31.
+
+Follow-up: NATIVE-LINK-PLAN-MILESTONE-1.md lets a program require a static
+archive (`extern c library "NAME" static`), name its file from the
+application root (`static at "PATH"`) and link Apple frameworks (`extern c
+framework`); the system linker resolves and checks those inputs before it
+links (`resolve_link_plan`, `NATIVE LINK ARCHIVE`), exactly as the rustc
+linker does.

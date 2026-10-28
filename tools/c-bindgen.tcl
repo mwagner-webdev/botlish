@@ -12,7 +12,7 @@
 #   tclsh9.0 tools/c-bindgen.tcl check PROFILE ?-target T|all|committed? ?-dir DIR?
 #   tclsh9.0 tools/c-bindgen.tcl report PROFILE ?-target T? ?-why NAME? ?-status S? ?-reason R?
 #   tclsh9.0 tools/c-bindgen.tcl build PROFILE ?-target T? -out DIR
-#   tclsh9.0 tools/c-bindgen.tcl stage PROFILE ?-target T? -app DIR -into DIR
+#   tclsh9.0 tools/c-bindgen.tcl stage PROFILE ?-target T? -app DIR -into DIR ?-package 1?
 #   tclsh9.0 tools/c-bindgen.tcl run PROFILE ?-target T? PROGRAM.bot ?MAIN.TCL OPTIONS...?
 #   tclsh9.0 tools/c-bindgen.tcl diff PROFILE ?-targets {A B}?
 #
@@ -22,7 +22,9 @@
 # with what is committed (exit 1 on any difference). report answers "why
 # was NAME not generated?" from the committed report.tsv. build compiles
 # the shim into its static library; stage copies an application's files
-# and a binding into one application root; run stages a program with the
+# and a binding into one application root (with -package 1, the binding
+# installed as the application's package, INTO/.bot_modules/PROFILE:
+# BOT-MODULES-MILESTONE-1.md); run stages a program with the
 # binding, builds the shim and runs main.tcl on it -- the program is
 # compiled by the ordinary compiler, from ordinary modules.
 
@@ -184,12 +186,14 @@ proc Build {name args} {
 
 # Copies the files of application APP (a directory, or a program file and
 # the application modules beside it) and the binding of PROFILE/TARGET into
-# INTO: one application root, compiled by the ordinary compiler.
+# INTO: one application root, compiled by the ordinary compiler -- with
+# -package 1, the binding installed as its package (.bot_modules/PROFILE).
 proc Stage {name args} {
-    lassign [Options $args {-target "" -app "" -into "" -dir ""}] o rest
+    lassign [Options $args {-target "" -app "" -into "" -dir "" -package 0}] o rest
     set profile [::cbind::profile::load $name]
     set target [lindex [Targets $profile [dict get $o -target]] 0]
-    ::cbind::generate::stage $profile $target [dict get $o -app] [dict get $o -into] [dict get $o -dir]
+    ::cbind::generate::stage $profile $target [dict get $o -app] [dict get $o -into] [dict get $o -dir] \
+        [dict get $o -package]
     puts [dict get $o -into]
 }
 

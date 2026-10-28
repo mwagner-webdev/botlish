@@ -1713,9 +1713,24 @@ proc native::lower::Program {hirProgram args} {
         lappend header "enum [EnumIndex $id] [Quote $id] cases=[Quote [join [hir::enums::cases $id] { }]]"
     }
     # The link plan and the C functions called (C-FFI.md): what the native
-    # link step needs, from the HIR alone.
-    foreach library [hir::foreign::links $hir] {
-        lappend header "link [Quote $library]"
+    # link step needs, from the HIR alone. Each dependency as the program
+    # states it (NATIVE-LINK-PLAN-MILESTONE-1.md): `link "NAME"`, `link
+    # "NAME" static`, `link "NAME" static path="PATH" base="ROOT"` (the
+    # archive's path as written and the application root it is resolved
+    # from: the driver joins them when it links), `framework "NAME"`.
+    foreach entry [hir::foreign::linkPlan $hir] {
+        if {[dict get $entry kind] eq "framework"} {
+            lappend header "framework [Quote [dict get $entry name]]"
+            continue
+        }
+        set line "link [Quote [dict get $entry name]]"
+        if {[dict get $entry linkage] eq "static"} {
+            append line " static"
+            if {[dict get $entry path] ne ""} {
+                append line " path=[Quote [dict get $entry path]] base=[Quote [dict get $entry base]]"
+            }
+        }
+        lappend header $line
     }
     variable foreignList
     set declarations [hir::foreign::declarations $hir]

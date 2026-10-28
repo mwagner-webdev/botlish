@@ -1393,10 +1393,17 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   MSVC-built callees (tests/cffi/fixture.c with fixture-win64.asm's
   register and stack capture; c-ffi.test's `cf-abi-*` Win64 model:
   positional registers, the 32-byte shadow space, 8-byte stack slots,
-  LLP64's 32-bit `long`). A variadic C call has no Win64 lowering and is a
-  codegen error there (`nativeCVariadics`): never lower one without
-  checking Win64's variadic rules (a double in both registers) against
-  real callees first. The tests build their C fixtures with MSVC's cl, lib
+  LLP64's 32-bit `long`). Variadic C calls run on Windows too
+  (WINDOWS-X86-64-MILESTONE-6.md): every argument at its position, and a
+  call of a variadic function passes each float or double of the first
+  four positions -- fixed ones included -- in both its xmm register and
+  its position's integer register, as its own 64 bits (the Win64 stub,
+  Compilation targets below). It is checked against MSVC's own variadic
+  calls (fixture-win64.asm's `bcf_vcapture`, c-ffi.test's `cf-va-abi-*`
+  Win64 model) and MSVC-built `va_arg` callees: never count the positions
+  per kind, convert a double instead of copying its bits, pass a duplicate
+  as an extra argument (it shifts every later position), or apply the rule
+  to a fixed-arity call. The tests build their C fixtures with MSVC's cl, lib
   and ml64 through tests/ctoolchain.tcl, whose vcvars64.bat environment is
   set for those tools' runs alone: Botlish's own links never run in it.
 * A linked run (a program that calls C, run by the native backends) starts
@@ -1622,10 +1629,17 @@ C-BINDGEN-LAYOUTS.md) have equal rows and are two targets. Keep it so:
   exception goes). The registers are counted per kind, as AAPCS64 does:
   the eight that keep it are integer-register parameters, never the first
   eight positions (doubles take v0-v7; `cf-abi-doubles-before-integers`).
-  The one register Botlish places itself is x86-64 System V's `%al` of a
-  variadic call (Cranelift cannot give a value a register at a call): the
-  two-instruction stub `va_stub` (Variadics, below). Never extend it to
-  another register or argument.
+  The registers Botlish places itself are those of a variadic call's stub
+  (`va_stub`, `va_stub_for`; Variadics, below), because Cranelift can give
+  no value a fixed register at a call, nor one value two argument
+  registers: x86-64 System V's `%al` (`mov`), and Win64's copy of each
+  float or double of the first four positions from its xmm register into
+  its position's integer register (`movq`, WINDOWS-X86-64-MILESTONE-6.md),
+  then a jump to the C function. A Win64 call with no floating-point
+  argument there needs no stub. Never extend either to another register or
+  argument, never give a stub a frame or a call, and never add a third
+  without first showing, as that report's experiment does, that no
+  Cranelift signature of the pinned release can state the rule.
 * A test that compiles a Linux program (one importing `linux::*`) compiles
   it for `linuxTarget` (tests/helpers.tcl: the host's own on Linux) and runs
   it on `backendsFor` its HIR's target; the golden runner, the warning
@@ -2770,6 +2784,63 @@ static BoringSSL: `tclsh9.0 tests/cffi/boringssl.tcl` builds it once into
 Botlish's cache (never the repository); without it they are skipped.
 `bench/c-ffi.tcl` regenerates the performance report.
 
+## Native link plan (static libraries, archive paths, frameworks)
+
+`extern c library "NAME" static`, `extern c library "NAME" static at
+"PATH"` and `extern c framework "NAME"` (NATIVE-LINK-PLAN-MILESTONE-1.md)
+state a program's native dependencies in source; `extern c library "NAME"`
+keeps its old meaning exactly. Keep it so:
+
+* The plan states intent, never linker flags: HIR's `links`
+  (hir/foreign.tcl's `LinkPlan`) holds each dependency's kind, name,
+  linkage and an archive's path as written beside the directory it
+  resolves from (`base`: the root of the declaring file's scope -- the
+  application root, or a package instance's directory for a package's
+  module -- surface/modules.tcl's `LinkDecls`; "" for a standard-library
+  module or a program compiled from text). Never store a resolved path, a `-l`, `-framework` or `/LIBPATH:`
+  in HIR, and never add a general linker-flags string, a linker script, an
+  arbitrary build command or a computed name or path: every name is
+  `nir::is_link_name`'s, every path a string literal with `/` separators.
+* Declarations of one library merge into the strictest requirement
+  (default < static < static at PATH), whichever comes first; two that no
+  archive satisfies are LINK-CONFLICT. Never pick the first or the last.
+* An archive path resolves from the application root (a package's
+  module: its package instance's directory, never its consumer's), never
+  the working directory, never the compiler's own files (the single
+  executable's ZIP, Botlish.app's Resources). The root is a front-end input (in the cache
+  key); the join is the driver's (codegen/aot.rs's `resolve_link_plan`),
+  at every link: never cache an archive, a resolved path or a link.
+* `static` is a requirement: the driver finds the archive (`static_archive_name`
+  in the -L directories, then `default_library_dirs`) and checks it
+  (`check_static_archive`, `archive_facts`: a regular file of objects of
+  the host's format and architecture, no Windows import member) before any
+  linker runs, and passes its absolute path. Never fall back to a shared
+  library, `-lNAME` or another file, and never relabel a refusal: it is
+  NATIVE LINK ARCHIVE.
+* A framework is Apple's: UNSUPPORTED-PLATFORM for a target whose linker
+  has none (`core::cabi::linksFrameworks`), `-framework NAME` and `-FDIR`
+  on Apple's ld only. Never map a framework to a library elsewhere.
+* Both host linkers (rustc, system) take one resolved plan
+  (`link_plan_args_for`); the stub refuses any plan. A native library's
+  shared library links the plan, its static library holds none of it and
+  its manifest lists it (`dependencies`).
+
+If you change any of that (the report's "What to run when changing this"
+lists the files), run `tests/native-link-plan.test` (also with
+`BOTLISH_NATIVE_LINKER=system` and under `BOTLISH_NATIVE_GC_STRESS=1`),
+`tests/c-ffi.test`, `tests/system-linker.test`, `cargo test --release
+--manifest-path native/Cargo.toml --bin botlish-native link_plan` and
+`audit/native-link-plan/tools/mutate.tcl` (every mutant in its
+`mutants.txt` that applies to the host must still apply and be killed:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), plus the C FFI, native-AOT, interchange and
+isolation harnesses for a change to code they share, and
+`tests/bot-modules.test` and `audit/bot-modules/tools/mutate.tcl` for a
+change to how a declaring file's root is found (its scope's directory);
+on macOS the `link-plan-sdl3` job (tests/platform/link-plan-sdl3.sh: static SDL3
+through Botlish.app) and the acceptance tier, on Windows the workflow's
+smoke and system-linker jobs (the import-library refusal).
+
 ## Native libraries (exported c fn)
 
 `exported c fn NAME(PARAMS) -> T` declares a C export
@@ -3010,7 +3081,10 @@ two things with one marker word. Keep both as they are:
   and lowered to a per-call machine signature (`codegen/clif.rs`'s
   `c_call_signature`): x86-64 System V through the `%al` stub, Linux
   AArch64 as AAPCS64, Apple AArch64 with the free x0-x7/v0-v7 padded so
-  every trailing argument is on the stack in an 8-byte slot. Never build
+  every trailing argument is on the stack in an 8-byte slot, Win64
+  (x86-64 only) by position through the stub copying the first four
+  positions' floats and doubles into their integer registers
+  (WINDOWS-X86-64-MILESTONE-6.md). Never build
   a runtime argument list, use libffi, read a format string, infer
   variadicity from a name, a format attribute or a library, give a trailing
   pointer a contract (it is a direct edge, `hir/direct.tcl`), or lower a
@@ -3030,13 +3104,18 @@ the same rule). If you change the C side (ExternDecl's marker,
 `VariadicArgument`, `promoted`/`promotedBool`, the variadic cases of
 hir/borrow.tcl, hir/direct.tcl, hir/foreign.tcl, native/lower.tcl's
 `varargs=`, nir.rs's `VarArg`, `c_call_signature`, `vararg_value`,
-`va_stub`), run `tests/c-ffi.test` (its `cf-va-*`, also under
-`BOTLISH_NATIVE_GC_STRESS=1`), `audit/c-ffi/tools/fuzz.tcl`,
-`audit/c-ffi/tools/mutate.tcl -only va-...` (the `va-*` mutants; the
-AArch64 ones apply on an AArch64 host), `cargo test --release
---manifest-path native/Cargo.toml --bin botlish-native ffi_` (the
-`x86_64_variadic_tests` here; the Apple and Linux AArch64 placements on an
-AArch64 host: CI's arm64 workflow and the macOS smoke job), and the
+`va_stub`, `va_stub_for`, `shadow_positions`), run `tests/c-ffi.test`
+(its `cf-va-*`, also under `BOTLISH_NATIVE_GC_STRESS=1`),
+`audit/c-ffi/tools/fuzz.tcl`, `audit/c-ffi/tools/mutate.tcl -only va-...`
+(the `va-*` mutants; the AArch64 ones apply on an AArch64 host, the Win64
+ones on an x86-64 host, killed by their Rust tests everywhere and by
+c-ffi.test's MSVC captures on Windows: `CI-Tests: c-ffi-mutants=...` in a
+`[ci-full]` push), `cargo test --release --manifest-path native/Cargo.toml
+--bin botlish-native ffi_` (the `x86_64_variadic_tests` and
+`win64_variadic_tests` here -- the latter runs a Win64 call through its
+stub in the JIT on any x86-64 host; the Apple and Linux AArch64 placements
+on an AArch64 host: CI's arm64 workflow and the macOS smoke job), the
+Windows workflow on the branch for a change to Win64's lowering, and the
 binding generator's checks for a change to what it emits (next sections).
 
 ## C header archaeology (a research instrument)
@@ -3531,8 +3610,9 @@ layering:
   same pinned headers on the Windows host and stages it the same way (none
   is committed: C binding generator, above). Never copy a binding into the
   example directory or hand-write a parallel SDL declaration.
-* The game makes no variadic C call: Windows' native backend refuses them
-  (`cVariadics`). SDL's error text is copied out of SDL (`SDL_strlcpy`
+* The game makes no variadic C call (it was written while Windows' native
+  backend refused them; WINDOWS-X86-64-MILESTONE-6.md lowers them now, and
+  the design stays). SDL's error text is copied out of SDL (`SDL_strlcpy`
   into the session's text buffer, read through its layout) and reported by
   `game.bot` through `std::io`, never by `SDL_Log`. An SDL enumeration
   constant's C type is the target's (`unsigned int` on Linux, `int` with
@@ -3650,6 +3730,73 @@ If you change the namespace model (`surface/modules.tcl`'s resolution,
 `audit/imports/tools/fuzz.tcl` (several seeds) and
 `audit/hir-interchange/tools/mutate.tcl`; a change to the single
 executable's packing also `single/smoke-test.sh` after `single/build.sh`.
+
+## Package-scoped modules (.bot_modules)
+
+A package is an ordinary module tree installed under the immediate
+`.bot_modules` directory of its owner (BOT-MODULES-MILESTONE-1.md):
+ROOT/.bot_modules/NAME for the application's package NAME,
+PKG/.bot_modules/D for package PKG's own package D. Every module file has an
+owning scope -- the application, the standard library or one package
+instance -- and an import is resolved by its first segment in the importing
+file's scope only (`surface/modules.tcl`'s `Locate`): `std::...` the
+standard library's; a segment naming a package installed in that scope the
+package's (it claims the whole root namespace there); otherwise the scope's
+own tree (the application's files; a package's own root namespace). Keep it
+so:
+
+* Downward only: never search a consumer's modules or packages, a sibling's
+  or an ancestor's, a working directory, an environment variable or a path
+  list, and never fall back from one origin to another. Two candidates are
+  MODULE-COLLISION, never a precedence; a package named std is
+  RESERVED-NAMESPACE. The entry file is no module and collides with
+  nothing.
+* No package manager in the compiler: never read `botlish.json`, a version,
+  a lock, a registry or the network; the installed directories are the
+  whole of a package's scope. Installation gives no privilege: a package's
+  modules are ordinary modules (never standard-library modules: no
+  internal namespace, no intrinsic), with the ordinary `private`, contexts,
+  direct-module rules and C FFI; never add package-level visibility, an
+  import alias or a version in source syntax.
+* A package instance is its place in the logical dependency tree (physics,
+  physics/geometry), never an absolute path, a version or a load order. A
+  module's canonical identity is the instance and its namespace below the
+  package's root (`Identity`): the application's and its direct packages'
+  modules keep their spelling, a package's own package's begin with the
+  instance (`physics/geometry::Point`, which no source can spell). Every
+  stage after the loader keys a module by its identity: the loader
+  rewrites a file's qualified spellings to identities wherever one differs
+  (`RewriteQualified`), with the same traversal that checks them
+  (`QualifiedRefs` and `RewriteQualified` are one `Walk`, and
+  `surface::ast::MapChildren` is `Children`'s traversal). A new place where
+  source writes a qualified name goes into `Walk`, never a second walker;
+  never merge two instances by spelling downstream, and never parse a
+  spelling where an identity is expected.
+* A validator of identities accepts the instance separator "/"
+  (core/ir.tcl's enum literal, core/type.tcl's `register`): keep any new
+  one so.
+* The loader's package probes go through the source seam's `directory`
+  question (`surface::source::directory`, recorded in the snapshot) and are
+  the front-end cache's dependencies (`probes`, `surface::cache::
+  Dependencies`): a new resolution input goes there too. The physical
+  package directories on the loading stack stop a symbolic-link cycle
+  (CYCLE); never drop that guard.
+
+If you change resolution, identity, the rewrite, the seam's directory
+question or the cache's probes, run `tests/bot-modules.test`,
+`tests/imports.test`, `tests/application-modules.test`,
+`tests/std-namespace.test`, `tests/surface-modules.test`,
+`tests/hir-cache.test`, `tests/compiler-service.test`, `tests/lsp.test`,
+`tests/compilation-isolation.test`, `tests/hir-interchange.test` and
+`audit/bot-modules/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the
+mutation harnesses whose mutants edit `CheckRef` or `CheckImports`
+(module-privacy, error-payloads, hashable, type-predicates) and the
+HIR-interchange and compiler-service ones for a change to the cache or the
+seam. Icy Tower's builds stage the SDL3 binding as a package (`tools/
+c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
+`icy-tower` workflows cover them.
 
 ## Diagnostic recovery
 

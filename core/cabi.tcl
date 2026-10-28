@@ -215,6 +215,14 @@ proc core::cabi::systemName {os} {
     return [dict get $systems $os]
 }
 
+# 1 if the platform linker of target NAME links Apple frameworks
+# (`extern c framework`, NATIVE-LINK-PLAN-MILESTONE-1.md): a macOS target's,
+# Apple's ld, by its row's operating system. No other system's linker has
+# frameworks, and nothing maps one to a library elsewhere.
+proc core::cabi::linksFrameworks {name} {
+    return [expr {[dict get [target $name] os] eq "macos"}]
+}
+
 proc core::cabi::isTarget {name} {
     variable targets
     return [dict exists $targets $name]

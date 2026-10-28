@@ -1,0 +1,209 @@
+# Mutants of package-scoped modules (audit/bot-modules/tools/mutate.tcl,
+# BOT-MODULES-MILESTONE-1.md).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# Resolution: downward only, no precedence
+
+@@ ancestor-fallback a package's own package that is not installed is looked up among the application's packages instead (an upward search)
+## surface/modules.tcl
+<<<<
+    } elseif {[IsPackageScope $scope]} {
+        # Neither the package's own namespace nor a package it installs.
+        return $result
+====
+    } elseif {[IsPackageScope $scope] && [Installed $state "" $head]} {
+        set owner [Instance state "" $head]
+        set path [OwnFile $state $owner $name]
+    } elseif {[IsPackageScope $scope]} {
+        return $result
+>>>>
+
+@@ consumer-tree-visible a package's import that names neither its own namespace nor a package of its own falls back to the application's modules
+## surface/modules.tcl
+<<<<
+    } elseif {[IsPackageScope $scope]} {
+        # Neither the package's own namespace nor a package it installs.
+        return $result
+    } else {
+====
+    } else {
+>>>>
+
+@@ application-precedence an application file of a namespace an installed package claims wins over the package (precedence, not a collision)
+## surface/modules.tcl
+<<<<
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                return $result
+====
+                set owner ""
+                set path $own
+>>>>
+
+@@ package-precedence the installed package silently wins over an application file of its namespace
+## surface/modules.tcl
+<<<<
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                return $result
+====
+>>>>
+
+@@ dependency-collision-ignored a package's own root namespace and a package of that name it installs are not a collision: its own modules win
+## surface/modules.tcl
+<<<<
+        if {[Installed $state $scope $head]} {
+            dict set result problem [list MODULE-COLLISION "namespace \"$name\" is the root namespace of [ScopeText $state $scope] itself, and the package has a package of that name installed too ([PackageDir $state $scope $head]): a package's own modules and a package it installs never share a root namespace, and `import $name` never chooses between them; rename or remove the installed package"]
+            return $result
+        }
+====
+>>>>
+
+@@ std-package-allowed an installed package directory named std is ignored instead of refused
+## surface/modules.tcl
+<<<<
+            if {[Installed $state $scope $standardRoot]} {
+====
+            if {0} {
+>>>>
+
+@@ entry-file-collides the entry file, no module, collides with a package of its name
+## surface/modules.tcl
+<<<<
+            if {$own ne "" && [file normalize $own] ne [dict get $state entry]} {
+====
+            if {$own ne ""} {
+>>>>
+
+@@ symlink-cycle-unguarded the physical package directories of the loading stack are not compared: a package installed inside itself through a symbolic link is an endless chain of instances
+## surface/modules.tcl
+<<<<
+        set at [lsearch -exact [dict get $state physical] $physical]
+====
+        set at -1
+>>>>
+
+@@ package-module-is-std a package's module is taken for a standard-library module (it may name the standard library's internal namespaces)
+## surface/modules.tcl
+<<<<
+    if {$scope ne "#std"} {
+        # An application's or a package's module: never the standard
+        # library's (CheckInternal).
+        dict set state application $name 1
+====
+    if {$scope eq ""} {
+        dict set state application $name 1
+>>>>
+
+# ---------------------------------------------------------------------------
+# Identity
+
+@@ identity-flattened every module's identity is its namespace as its files spell it: two installed geometry packages are one module, one Point
+## surface/modules.tcl
+<<<<
+    if {![IsPackageScope $scope]} {
+        return $name
+    }
+    return $scope[string range $name [string length [Head $name]] end]
+====
+    return $name
+>>>>
+
+@@ rewrite-skipped a file's qualified spellings are never rewritten to the identities they denote: a package installed by a package is named by its spelling
+## surface/modules.tcl
+<<<<
+    if {[dict size $map]} {
+        set ast [RewriteQualified $ast $map]
+    }
+====
+>>>>
+
+@@ rewrite-skips-context-types the context parameters' types are neither checked nor rewritten: geometry::Ctx in physics names the application's geometry
+## surface/modules.tcl
+<<<<
+            Put node contexts [lmap c [dict getdef $node contexts {}] {
+                dict set c type [TypeRefs [dict get $c type] [dict get $c typeSpan]]
+            }]
+====
+>>>>
+
+@@ rewrite-skips-payload-fields an error payload's field types are neither checked nor rewritten
+## surface/modules.tcl
+<<<<
+        structdecl - layoutdecl - errordecl {
+====
+        structdecl - layoutdecl {
+>>>>
+
+@@ rewrite-skips-dfa a recognizer's qualified classes keep their spelling: a class of a package's own package names nothing
+## surface/modules.tcl
+<<<<
+            set node [DfaRewrite $node]
+====
+>>>>
+
+@@ case-qualifier-unmapped a case qualifier NS::Enum keeps the namespace as written when only NS is mapped
+## surface/modules.tcl
+<<<<
+        if {[dict exists $map $prefix]} {
+            return [dict get $map $prefix][string range $ns $cut end]
+        }
+====
+>>>>
+
+@@ recovery-facts-by-spelling syntax recovery looks a module's open facts up by the namespace as written: a nested instance's malformed declarations are never found, and its consumer's reference is reported UNKNOWN-SYMBOL
+## surface/modules.tcl
+<<<<
+    set ns [IdentityOf $state $key [lindex $ref 0]]
+====
+    set ns [lindex $ref 0]
+>>>>
+
+# ---------------------------------------------------------------------------
+# What a compilation depends on
+
+@@ seam-directory-is-file the disk provider answers a directory question with a file's: no package is ever installed
+## surface/source.tcl
+<<<<
+            return [dict create exists [file isdirectory $path] from disk]
+====
+            return [dict create exists [file isfile $path] from disk]
+>>>>
+
+@@ cache-ignores-probes the front-end cache keeps none of the loader's probes: a package's files and directories are no dependencies
+## surface/cache.tcl
+<<<<
+    dict for {path kind} $probes {
+====
+    dict for {path kind} {} {
+>>>>
+
+@@ cache-ignores-directories the front-end cache keeps the package files the loader probed but not the package directories it asked about
+## surface/cache.tcl
+<<<<
+        if {$kind eq "directory"} {
+            lappend directories $path
+        } else {
+====
+        if {$kind eq "directory"} {
+        } else {
+>>>>
+
+@@ service-directories-never-stale a revision's package directory observations are never compared again: a package installed since is not a change
+## service/service.tcl
+<<<<
+                if {[dict get $now exists] != [dict get $was exists]} {
+                    dict set changed $path [dict create was $was now $now]
+                }
+                continue
+====
+                continue
+>>>>

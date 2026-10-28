@@ -2048,8 +2048,8 @@ summary: import std::NAME is the standard library's stdlib/NAME.bot (or intrinsi
 index: rules
 alias: module search path; import my own file; where does import look; standard library location
 keywords: import, module, file, application root, standard library, std, stdlib, entry file, directory, reserved, rooted, ::
-related: concept.modules concept.imports concept.standard-library rule.imports-not-transitive rule.module-bindings error.unknown-namespace error.reserved-namespace error.module-collision error.self-import
-docs: STD-NAMESPACE.md IMPORTS.md POST-2048-PRODUCT-FIXES.md
+related: concept.modules concept.imports concept.standard-library rule.package-modules rule.imports-not-transitive rule.module-bindings error.unknown-namespace error.reserved-namespace error.module-collision error.self-import
+docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md POST-2048-PRODUCT-FIXES.md
 
 == THE RULE
 A namespace path is resolved from the root, and its first segment says
@@ -2068,6 +2068,9 @@ own modules writes:
     module, and importing std::NAME beside one is RESERVED-NAMESPACE;
   * a leading `::` roots the path explicitly: `import ::std::list` is
     `import std::list`;
+  * a namespace whose first segment names a package installed beside the
+    entry program (ROOT/.bot_modules/NAME) is that package's
+    (rule.package-modules): it claims that whole root namespace;
   * a standard-library module's own imports never see application files;
   * the entry file is not a module and cannot be imported (SELF-IMPORT);
     a file beside it that the program imports is a module and follows the
@@ -2120,6 +2123,59 @@ import list
 Put the module file beside the entry file (or in a subdirectory for a
 nested namespace) and run the entry file; name a standard namespace with
 its std:: (`import std::list`).
+
+@topic rule.package-modules
+title: Installed packages: .bot_modules, downward only
+summary: A package is a module tree in its owner's .bot_modules/NAME, claiming the root namespace NAME there; it sees its own modules, its own packages and std only, and each copy is its own instance.
+index: rules
+alias: package; packages; .bot_modules; install a library; third-party module; dependency; vendored library; node_modules
+keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std
+related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace
+docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md
+
+== THE RULE
+A package is an ordinary module tree installed under the immediate
+`.bot_modules` directory of its owner: the application's package NAME is
+ROOT/.bot_modules/NAME/ (ROOT the entry file's directory), and that
+package's own package D is ROOT/.bot_modules/NAME/.bot_modules/D/. The
+directories are the whole of it: no manifest, version or registry is read.
+
+    game/main.bot                      import sdl3::video
+    game/.bot_modules/sdl3/sdl3/video.bot
+    game/.bot_modules/sdl3/.bot_modules/helper/helper.bot
+
+For an import a file writes, by the namespace's first segment:
+
+  * `std::...` is the standard library's, for every file;
+  * a segment naming a package installed in the file's own scope (its
+    .bot_modules/NAME is a directory) is that package's: `NAME` is
+    PKG/NAME.bot and `NAME::a` PKG/NAME/a.bot. The package claims the
+    whole root namespace there: an own file of that namespace beside it is
+    MODULE-COLLISION, never a precedence;
+  * otherwise the application's file ROOT/NAME.bot, or, in a package, its
+    own root namespace's module (PKG/NAME.bot, PKG/NAME/a.bot) -- a
+    package's own modules are its root namespace's only.
+
+Nothing is looked up upward or sideways: a package never sees its
+consumer's modules or packages, a sibling package or an ancestor's, and the
+application never sees a package its package installed. Imports stay exact
+and non-transitive, and a leading `::` never escapes a scope.
+
+== IDENTITY
+A package instance is its place in the dependency tree (`physics`, the
+application's; `physics/geometry`, physics's own geometry). A module's
+identity is that place and its namespace below the package's root:
+`sdl3::video` for the application's sdl3, `physics/geometry::shapes` for a
+module of physics's geometry, which no source can spell. Two installed
+copies of a package are two instances: physics/geometry::Point and
+rendering/geometry::Point are distinct types, their errors distinct
+errors, on every backend.
+
+== WHY
+A package must work wherever it is installed, so it resolves only what it
+installed itself; and an installation never changes the meaning of a
+program it is not part of (BOT-MODULES-MILESTONE-1.md). A package needs a
+directory and files, so there is no single-file example.
 
 @topic rule.flags
 title: Flag parameters: declared last, written by name

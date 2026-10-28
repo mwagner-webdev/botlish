@@ -75,6 +75,7 @@ whose it is, its **origin**, and nothing else does:
 | `std::NAME` | the standard library | `$::core::libraryDir/NAME.bot`, the target's `NAME.ARCH.bot`, or compiler intrinsics only |
 | any other `NAME`, imported by an application file | the application | `ROOT/NAME.bot` (`ROOT/a/b.bot` for `a::b`) |
 | `std` itself | none | the root of the standard library is no namespace (`UNKNOWN-NAMESPACE`) |
+| `NAME`, `NAME::a`, NAME a package installed in the importing file's scope | the package (BOT-MODULES-MILESTONE-1.md) | `SCOPE/.bot_modules/NAME/NAME.bot`, `.../NAME/a.bot` |
 
 The origin is never part of an identity: `std::list` is the canonical name,
 and the file it came from is where it lives. There is no search and no
@@ -91,12 +92,15 @@ Two kinds of file import standard namespaces only:
 * **Program text compiled with no application root** (`surface::compile
   TEXT`). It has no application to import from.
 
-`surface/modules.tcl`'s `ResolveModule` is the rule; its helpers are:
+`surface/modules.tcl`'s `ResolveModule` is the rule (`Locate` since
+BOT-MODULES-MILESTONE-1.md, which added installed packages); its helpers
+are:
 
 * `StandardNamespace` and `ReservedNamespace`, which classify a path by its
   first segment;
 * `ModulePath`, the standard file of a `std::` path;
-* `RootFile` and `ApplicationFile`, the application file of a path;
+* `OwnFile`, the file of a path in a scope's own module tree (formerly
+  `RootFile` and `ApplicationFile`, the application file of a path);
 * `NoSuchNamespace`, the diagnostic.
 
 ### Where the standard library is
@@ -219,8 +223,13 @@ namespace `std::NAME` by its path, so it is never a module:
 * An application `std/` directory that no import names collides with
   nothing.
 
-**`MODULE-COLLISION` remains** only for a namespace outside `std` that has
-compiler intrinsics. Only a test process registers one (`ffi_fixture`).
+**`MODULE-COLLISION` remains** for a namespace outside `std` that has
+compiler intrinsics, which only a test process registers (`ffi_fixture`),
+and for a namespace that an installed package claims while the importing
+scope has a file of its own of that namespace (BOT-MODULES-MILESTONE-1.md).
+An installed package can never be named std: a `.bot_modules/std` directory
+makes an import of a standard namespace from that scope
+`RESERVED-NAMESPACE`.
 
 **The diagnostics say what to do.** A missing application module names the
 file it would be. When the standard library has a namespace of that name,

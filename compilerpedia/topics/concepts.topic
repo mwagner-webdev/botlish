@@ -2209,11 +2209,13 @@ flags: `sum()` is `sum([])`, `sum(1, 2, 3)` is `sum([1, 2, 3])`,
     _Bool, are passed as int). A trailing pointer has no contract, so the
     call is direct authority (concept.direct-modules). The call's machine
     signature is built per call: x86-64 System V (with its %al count of
-    vector registers), Linux AArch64 (AAPCS64) and Apple AArch64 (every
-    trailing argument on the stack, in an 8-byte slot). Windows x86-64 has
-    no variadic lowering yet: such a call is a NATIVE CODEGEN error there
-    (error.native-codegen), while the front end and every other call take
-    the program.
+    vector registers), Linux AArch64 (AAPCS64), Apple AArch64 (every
+    trailing argument on the stack, in an 8-byte slot) and Windows x86-64
+    (Win64: every argument at its position, each float or double of the
+    first four positions in both its xmm register and its position's
+    integer register). The Microsoft C runtime defines printf and snprintf
+    inline in its headers: a binding of them on Windows declares
+    `extern c library "legacy_stdio_definitions"`.
 
 == WHY
 A function of "any number of values of one type" is a List parameter whose
@@ -2445,8 +2447,8 @@ summary: A module is a source file loaded by `import`, its namespace its path; i
 index: concepts
 alias: module; modules; namespace; module binding; application module; global constant
 keywords: module, namespace, file, stdlib, application root, module binding, MODULE-CONTEXT, MODULE-IMMUTABLE, RESERVED-NAMESPACE, SELF-IMPORT, global, constant
-related: concept.imports concept.standard-library concept.opaque-structs concept.direct-modules concept.contexts rule.module-bindings rule.application-modules principle.explicit-dependencies error.module-context error.module-collision error.unknown-namespace
-docs: IMPORTS.md MODULE-BINDINGS.md NATIVE-MODULES.md POST-2048-PRODUCT-FIXES.md
+related: concept.imports concept.standard-library concept.opaque-structs concept.direct-modules concept.contexts rule.module-bindings rule.application-modules rule.package-modules principle.explicit-dependencies error.module-context error.module-collision error.unknown-namespace
+docs: IMPORTS.md MODULE-BINDINGS.md NATIVE-MODULES.md POST-2048-PRODUCT-FIXES.md BOT-MODULES-MILESTONE-1.md
 
 == WHAT IT IS
 One file is one namespace: `stdlib/abi/bytes.bot` is `std::abi::bytes` (the
@@ -2464,6 +2466,10 @@ and immutable value bindings, each named outside as `game::member`.
     `list.bot` and `std::list` are two modules; an application file
     under std/ is RESERVED-NAMESPACE; importing the entry file is
     SELF-IMPORT.
+  * Installed packages (rule.package-modules): a namespace whose first
+    segment names a package in the importing file's scope
+    (.bot_modules/NAME) is that package's module, and each installed copy
+    is its own instance, with its own types and errors.
   * A module has no top-level statements other than bindings and
     declarations. A value binding runs once, before the entry program,
     and must be context-free (MODULE-CONTEXT) and transitively immutable
@@ -4445,8 +4451,8 @@ summary: `extern c fn` declares a C function by its ABI signature and pointer co
 index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, std::ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
-related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats backend.native-only backend.native-executable error.native-only
-docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md
+related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
+docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -4483,6 +4489,9 @@ or `write noescape`.
   * tools/c-bindgen.tcl generates such declarations from real headers,
     and a layout for every C record a layout represents, as the target's C
     compiler lays it out (concept.c-bindgen-layouts).
+  * `extern c library "NAME" static` (optionally `at "PATH"`) requires a
+    static archive, `extern c framework "NAME"` links an Apple framework
+    (concept.native-link-plan).
 
 == WHY
 C interop reuses the platform ABI and linker for the machine problem and
@@ -4503,6 +4512,101 @@ abs(-5)
 
 == MORE
 C-FFI.md; C-ABI-TYPES.md; C-POINTER-BORROWING.md; C-BINDGEN.md.
+
+@topic concept.native-link-plan
+title: Native dependencies: static libraries, archive paths and Apple frameworks
+summary: `extern c library "NAME" static` requires a static archive, `static at "PATH"` names its file from the application root, and `extern c framework "NAME"` links an Apple framework.
+index: concepts backends
+alias: static linking; link a static archive; static archive path; extern c framework; Apple framework; -framework; link plan; native dependencies
+keywords: extern c library, static, at, archive, .a, .lib, import library, framework, -framework, -F, -L, link plan, application root, LINK-CONFLICT, NATIVE LINK ARCHIVE, BOTLISH_NATIVE_LINK_LOG
+related: concept.c-ffi backend.native-executable backend.native-library error.native-link error.link-conflict error.unsupported-platform cli.options
+docs: NATIVE-LINK-PLAN-MILESTONE-1.md C-FFI.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md
+
+== WHAT IT IS
+    extern c library "m"                                     the linker's choice
+    extern c library "SDL3" static                           libSDL3.a, never libSDL3.so
+    extern c library "SDL3" static at "native/libSDL3.a"     exactly that file
+    extern c framework "Cocoa"                               -framework Cocoa (macOS)
+
+Every declaration of a program, its imported modules' included, is one entry
+of its link plan, in first-declaration order. A library without `static` is
+the platform linker's to find, shared or static (-lNAME; NAME.lib on
+Windows), as it always was. `static` is a requirement: the executable
+incorporates the library's static archive and never depends on a shared
+library of that name. `at PATH` names the archive: a path relative to the
+application root (the entry file's directory, whatever the working
+directory and whichever application module declares it) -- for a module of
+an installed package (.bot_modules), the package's own directory -- unless
+it is absolute, written with `/` between its components on every host. A
+framework is Apple's: Apple's ld links it from the system's or a -F
+directory.
+
+== RULES
+  * Names and paths are string literals: a name is letters, digits,
+    `_ + . -`, never starting with `-` (never a path or a linker option);
+    a path is a file's, never empty, a directory or holding a `\`.
+  * Declarations of one library merge into the strictest: `"SDL3"` and
+    `"SDL3" static at "native/libSDL3.a"` (a generated binding's and the
+    application's) are the archive. Two different archive paths, or a
+    library and a framework of one name, are LINK-CONFLICT
+    (error.link-conflict): neither is chosen.
+  * A framework is refused for a target whose linker has none
+    (UNSUPPORTED-PLATFORM: every Linux and Windows target), and makes the
+    program's HIR the macOS target's.
+  * Checking needs no file: the front end validates the declarations, the
+    link checks the files. Before the platform linker runs the driver finds
+    each static archive (the -L directories, then the toolchain's) and
+    checks it is a regular file holding objects of the target's format and
+    architecture -- never a shared library, a `.tbd` stub, a linker script
+    or a Windows import library (a `.lib` that imports from a DLL) -- and
+    fails with NATIVE LINK ARCHIVE otherwise (error.native-link). The
+    archive is passed to the linker by its absolute path, read again at
+    every link: rebuilding it changes the next executable.
+  * The static library of -emit-native-library holds none of a program's
+    native dependencies: its manifest lists them (`dependencies`) for the
+    consumer's link; its shared library is linked with them.
+
+== WHY
+Which implementation of a foreign interface becomes part of an application,
+and whether it must be incorporated, is part of the program's contract: a
+deployed executable that silently picked up a shared library would need it
+installed wherever it runs. The platform linker still links; Botlish states
+the intent, checks the inputs it can check, and gives the linker the file.
+
+== EXAMPLES
+@example accept
+extern c library "z" static
+
+1 + 1
+@caption Checking needs no archive: the link plan is checked when the program is linked
+@backends interp compile
+@value 2
+@end
+
+@example accept
+extern c framework "CoreFoundation"
+
+1 + 1
+@caption A framework, for a macOS target (the Tcl backends call no C)
+@target macos-aarch64
+@backends interp compile
+@value 2
+@end
+
+@example reject
+import binding
+
+1
+@module binding
+extern c library "SDL3" static at "native/libSDL3.a"
+extern c library "SDL3" static at "vendor/libSDL3.a"
+@caption Two archives of one library
+@error CORE SEMANTIC LINK-CONFLICT
+@at binding.bot:2:35
+@end
+
+== MORE
+NATIVE-LINK-PLAN-MILESTONE-1.md; C-FFI.md, "Linking".
 
 @topic concept.c-floats
 title: C float and C double: std::ffi::c::Float and std::ffi::c::Double

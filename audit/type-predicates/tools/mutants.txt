@@ -34,13 +34,13 @@
 @@ module-member-admits-type-predicate the loader accepts `ns::T?` for a type T of ns as if it were a member (the old qualified-predicate allowance)
 ## surface/modules.tcl
 <<<<
-    set functionNames [dict get $state loaded $namespaceName]
+    set functionNames [dict get $state loaded $id]
     if {$symbolName ni $functionNames} {
 ====
-    set functionNames [dict get $state loaded $namespaceName]
+    set functionNames [dict get $state loaded $id]
     if {$symbolName ni $functionNames
             && !([string index $symbolName end] eq "?"
-                && [string range $symbolName 0 end-1] in [dict get $state loadedTypes $namespaceName])} {
+                && [string range $symbolName 0 end-1] in [dict get $state loadedTypes $id])} {
 >>>>
 
 @@ converter-return-skips-proof a function's declared result is never checked: a converter returning its unproven argument is a cast

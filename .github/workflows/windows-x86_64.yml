@@ -33,7 +33,11 @@ name: tests (windows x86-64)
 #                (argv, targets, executables, the command line, the C FFI
 #                and its Win64 ABI checks against MSVC-built fixtures,
 #                Windows I/O, native coroutines and the stack guard on
-#                their fibers: WINDOWS-X86-64-MILESTONE-5.md)
+#                their fibers: WINDOWS-X86-64-MILESTONE-5.md); variadic C
+#                calls (WINDOWS-X86-64-MILESTONE-6.md) under GC stress:
+#                the machine state against MSVC's own calls, MSVC's va_arg
+#                callees, the C runtime's snprintf and _open, user32's
+#                wsprintfA
 #   roots        every push: the fallback root plan (a `fallback-roots`
 #                driver: its Rust tests, the GC workloads) and native-frame
 #                roots against it on the same runner (bench/root-plans.tcl)
@@ -184,8 +188,9 @@ jobs:
       # windows-x86_64 (tests/platform/native-status.tcl): the JIT, GC
       # stress, objects, executables, the target boundary (another
       # operating system, the other Windows environment), C calls and byte
-      # exposure to the C library, Windows I/O, variadic C calls and
-      # coroutines refused, the stack without its guard.
+      # exposure to the C library, Windows I/O, variadic C calls (through
+      # Win64's stub, WINDOWS-X86-64-MILESTONE-6.md), coroutines, the stack
+      # guard.
       - name: Native status
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: tclsh9.0 tests/platform/native-status.tcl -verbose 1 2>&1 | tee native-status.log
@@ -267,6 +272,37 @@ jobs:
           echo "bench.exe under GC stress, unwind check: $value; $(cat artifacts/unwind-check.txt)"
           test "$value" = 2002720
           grep -qE '^native unwind check: [1-9][0-9]* functions, [1-9][0-9]* Botlish frames' artifacts/unwind-check.txt
+          # A program object of variadic C calls (WINDOWS-X86-64-MILESTONE-6.md),
+          # for the next step's dumpbin /disasm: integers only (a direct
+          # call), one double (its stub copies xmm1 into rdx), doubles and
+          # ints alternating past the four registers, and a fixed-arity call
+          # with doubles (direct). Nothing links or runs it.
+          cat > artifacts/variadic.bot <<'EOF'
+          import std::ffi::c
+
+          extern c fn probe named "botlish_variadic_probe"(n: std::ffi::c::Int, variadic) -> std::ffi::c::Int
+          extern c fn fixed named "botlish_fixed_probe"(x: std::ffi::c::Double, n: std::ffi::c::Int, y: std::ffi::c::Double) -> std::ffi::c::Int
+
+          fn c_int(x: std::ffi::c::Int) -> std::ffi::c::Int:
+              x
+
+          fn ints(a: std::ffi::c::Int) -> std::ffi::c::Int:
+              probe(3, a, a, a)
+
+          fn one(x: Float64) -> std::ffi::c::Int:
+              probe(1, x)
+
+          fn mixed(a: std::ffi::c::Int, x: Float64) -> std::ffi::c::Int:
+              probe(7, x, a, x, a, x, a, x)
+
+          fn fixed_doubles(a: std::ffi::c::Int, x: Float64) -> std::ffi::c::Int:
+              fixed(x, a, x)
+
+          [ints(c_int(1)), one(0.5), mixed(c_int(2), 1.5), fixed_doubles(c_int(3), 2.5)]
+          EOF
+          echo 'source native/native.tcl; native::object [surface::readProgramFile artifacts/variadic.bot -warnings off] artifacts/variadic.obj' | tclsh9.0
+          echo 'source native/native.tcl; puts [native::clif [surface::readProgramFile artifacts/variadic.bot -warnings off]]' | tclsh9.0 > artifacts/variadic.clif
+          grep -E '^; u0:[0-9]+ = botlish_va_' artifacts/variadic.clif
 
       # Windows I/O as a user meets it (WINDOWS-X86-64-MILESTONE-2.md,
       # section 5): hello-windows.bot and the 2048 demo as executables,
@@ -328,6 +364,10 @@ jobs:
           dumpbin /nologo /headers artifacts\bench.exe | findstr /i /c:"Exception Directory" || exit /b 1
           dumpbin /nologo /unwindinfo artifacts\bench.exe > artifacts\bench-unwind.txt || exit /b 1
           findstr /i /c:"Function Table" artifacts\bench-unwind.txt || exit /b 1
+          rem Variadic C calls' machine code (WINDOWS-X86-64-MILESTONE-6.md):
+          rem the callers and the stubs, as MSVC's disassembler reads them.
+          dumpbin /nologo /disasm /symbols artifacts\variadic.obj > artifacts\variadic-disasm.txt || exit /b 1
+          findstr /c:"botlish_va_" artifacts\variadic-disasm.txt || exit /b 1
           exit /b 0
 
       # dumpbin's decoding of each Botlish function's UNWIND_INFO in fib.exe.
@@ -354,8 +394,22 @@ jobs:
         run: |
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
-            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test \
+            c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test native-link-plan.test \
             coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
+
+      # Variadic C calls (WINDOWS-X86-64-MILESTONE-6.md) once more, every
+      # one under GC stress: the machine state each arrives in against
+      # MSVC's own variadic call of the same prototype (a double of the first
+      # four positions in both of its position's registers), MSVC-built
+      # va_arg callees, the static C runtime's snprintf and _open, user32's
+      # wsprintfA, in executables and coroutines.
+      - name: Variadic C calls under GC stress
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p variadic-tmp
+          BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/c-ffi.test -match 'cf-va-*' -tmpdir "$(pwd -W)/variadic-tmp" 2>&1 | tee variadic-gc.log
+          grep -aq 'Failed	0' variadic-gc.log
+          ! grep -aq 'Passed	0' variadic-gc.log
 
       - name: Publish summary
         if: always()
@@ -386,6 +440,12 @@ jobs:
               awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
               echo '```'
             fi
+            if grep -aq '^==== .*FAILED' variadic-gc.log 2>/dev/null; then
+              echo '### Failed variadic tests (GC stress)'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' variadic-gc.log | head -n 300
+              echo '```'
+            fi
             for listing in artifacts/unwind-check.txt artifacts/fib-botlish-found.txt artifacts/fib-botlish-unwind.txt artifacts/fib-obj-unwind.txt artifacts/fib-unwind.txt; do
               if [ -f "$listing" ]; then
                 echo "### $listing"
@@ -394,6 +454,12 @@ jobs:
                 echo '```'
               fi
             done
+            if [ -f artifacts/variadic-disasm.txt ]; then
+              echo "### artifacts/variadic-disasm.txt (variadic C calls, dumpbin /disasm)"
+              echo '```'
+              tr -d '\r' < artifacts/variadic-disasm.txt | head -n 220
+              echo '```'
+            fi
             echo '### Checks'
             echo '```'
             for log in native-stack.log native-status.log aot-facts.log; do
@@ -403,6 +469,7 @@ jobs:
             [ -f gc-workloads-unwind.log ] && sed -n '1p;$p' gc-workloads-unwind.log
             [ -f gc-workloads-unwind.log ] && grep -a 'native unwind check' gc-workloads-unwind.log | head -n 30
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
+            [ -f variadic-gc.log ] && grep -a '^c-ffi.test:' variadic-gc.log | sed 's/^/variadic C calls under GC stress: /'
             echo '```'
             # The Rust tests of this milestone's Windows paths, by name: the
             # evidence that they ran here (WINDOWS-X86-64-MILESTONE-3.md).
@@ -410,7 +477,7 @@ jobs:
               echo '### Rust tests'
               echo '```'
               grep -a 'test result' rust-tests.log
-              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|runtime::coroutine|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
+              grep -aE '^test (codegen::jitunwind|codegen::unwind|codegen::caller_root|codegen::object_format|codegen::clif::win64_variadic_tests|runtime::coroutine|runtime::framewalk|runtime::native_stack|runtime::platform)' rust-tests.log
               grep -a '^windows_unwinds_every_instruction_of_jit_code:' rust-tests.log
               grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' rust-tests.log
               echo '```'
@@ -637,10 +704,10 @@ jobs:
           Remove-Item env:BOTLISH_NATIVE_LINK_LOG
           tclsh9.0 tests/all.tcl -file system-linker.test
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
-          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test"
+          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test native-link-plan.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           $env:BOTLISH_NATIVE_GC_STRESS = "1"
-          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test"
+          tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test native-link-plan.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           exit $failed
 
