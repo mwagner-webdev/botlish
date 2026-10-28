@@ -867,6 +867,17 @@ test se-equal-vector-context-callee {a bounds proof over a context's vector read
     set results
 } -result {{} {UNBOUND accepted} {} {} {accepted UNHANDLED-ERROR} {}}
 
+test se-equal-implementation-yield {a construction's verdict reads the yield effect of the implementation the program selects for its root's trait operation (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md): start's block is accepted while the block in D's wait -- the selected implementation of Driver's wait -- yields, and COROUTINE-RHS-NOT-YIELDING once that block is rejected; so start's block depends on it (hir/staticdeps.tcl reads the implementation as the operation's call target), an independent failure beside them -- the batched decisions are the sequential ones, with no build contradicting a prediction} -body {
+    set text "import std::compiler\n\ncontext trait Driver:\n    fn wait(deadline: int) -> int errors std::compiler::CompilerError\n\ntype Base = Int in 0..100\n\nopaque context struct D:\n    base: Base\n\nfn want(x: int) -> int:\n    x\n\nfn create() -> D:\n    D {base: 1}\n\nfn wait(deadline: int, context d: D) -> int errors std::compiler::CompilerError:\n    if deadline > 100:\n        static compile:\n            yield deadline\n            %s\n    deadline + d.base\n\nfn run(context dr: Driver) -> int errors std::compiler::CompilerError:\n    dr.wait(5)\n\nfn start(context dr: Driver) -> int errors std::compiler::CompilerError:\n    static compile:\n        coroutine {step, first} = run()\n        first\n\nfn other() -> int errors std::compiler::CompilerError:\n    static compile:\n        want(\"t\")\n\nwith context create()\nr = start():\n    on std::compiler::CompilerError {code, primary, message}:\n        -1\nr + other()\n"
+    set results {}
+    foreach body {{want("s")} {deadline + 0}} {
+        set source [format $text $body]
+        set hir [seHir $source]
+        lappend results [seSame $source] [seOutcomes $source] [dict get $hir staticStats mispredicted]
+    }
+    set results
+} -result {{} {TYPE COROUTINE-RHS-NOT-YIELDING TYPE} {} {} {accepted accepted TYPE} {}}
+
 test se-equal-plan-gate {the trait monomorphization's plan runs only on a program with no diagnostic at all, so a site whose diagnostic only the plan reports fails only once every other site's diagnostic is gone (hir/staticdeps.tcl's C:plan): judged beside two checker failures it is unknown, not predicted ok (the dependency analysis once missed the gate, and the next build contradicted its prediction); two plan diagnostics in one build are decided one per build, as the sequential order does (the plan is one computation over the whole program) -- the batched decisions are the sequential ones} -body {
     set results {}
     foreach text [list [sePlanAffine {a nested b}] [sePlanTraits]] {
@@ -1558,9 +1569,14 @@ test se-property-plan-gate {the trait monomorphization's plan runs only on a che
     set f [open [file join $::sdRoot hir traits.tcl]]
     set text [read $f]
     close $f
-    set start [string first "proc hir::traits::Plan " $text]
-    set end [string first "\nproc " $text [expr {$start + 1}]]
-    set body [string range $text $start $end]
+    # (The plan is PlanCalls, its call resolution, and Plan, which places
+    # the clones: TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md.)
+    set body ""
+    foreach name {PlanCalls Plan} {
+        set start [string first "proc hir::traits::$name " $text]
+        set end [string first "\nproc " $text [expr {$start + 1}]]
+        append body [string range $text $start $end]
+    }
     set kinds [lsort -unique [lmap {- kind} [regexp -all -inline {\[list ([A-Z][A-Z-]+) (?:\[|")} $body] {set kind}]]
     list [regexp {&& \$checked && \[dict get \$hir diagnostics\] eq ""\} \{\s*#[^\n]*\n\s*#[^\n]*\n\s*set hir \[hir::traits::monomorphize} [info body hir::BuildFull]] \
         [expr {$kinds eq [lsort $hir::staticdeps::planKinds]}] $kinds

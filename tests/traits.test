@@ -1217,11 +1217,13 @@ test trait-operation-identity-genuine-yield {a genuinely yielding method-syntax 
         [moduleAgree $::toLib "${::toPrelude}coroutine {step, first} = both(std::shapes::make(3), Reg {slot: 2})\n\[first, step()\]\n"]
 } -result {UNWRAPPED-YIELD 1 {value {[2, 10]}}}
 
-test trait-operation-identity-implementation-yield {a witness's yielding implementation reaches the operation's callers in the monomorphized program, explained through that implementation; before monomorphization it is invisible, so a coroutine started at a function whose only yield is the implementation's is COROUTINE-RHS-NOT-YIELDING (COROUTINES.md's limitation)} -body {
+test trait-operation-identity-implementation-yield {a witness's yielding implementation reaches the operation's callers in the checked program, per specialization: a top-level call is UNWRAPPED-YIELD, explained through measure's specialization for the witness and the implementation (never in terms of the monomorphized program), and a coroutine started at a function whose only yield is the implementation's runs (COROUTINE-RHS-NOT-YIELDING before TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md)} -body {
     set r [moduleRejection $::toLib "${::toPrelude}measure(std::ysq::make(3))\n"]
-    list [lindex $r 0] [string match {*which calls std::ysq::area at*} [lindex $r 1]] \
-        [lindex [moduleRejection $::toLib "${::toPrelude}coroutine {step, first} = measure(std::ysq::make(3))\nfirst\n"] 0]
-} -result {UNWRAPPED-YIELD 1 COROUTINE-RHS-NOT-YIELDING}
+    list [lindex $r 0] \
+        [string match {measure (for std::ysq::YSq) may suspend, but this call does not start a coroutine (start it with "coroutine {step, first} = measure(...)"*measure (for std::ysq::YSq), which calls std::ysq::area, the implementation of Shaped's operation area for std::ysq::YSq, at <input>:15:5*} [lindex $r 1]] \
+        [string match {*monomorphized*} [lindex $r 1]] \
+        [moduleAgree $::toLib "${::toPrelude}coroutine {step, first} = measure(std::ysq::make(3))\n\[first, step()\]\n"]
+} -result {UNWRAPPED-YIELD 1 0 {value {[3, 9]}}}
 
 test trait-operation-identity-coroutine-root {a trait operation is no coroutine's root: its construction is rejected by the checked program, not by the monomorphized one} -body {
     moduleRejection $::toLib "${::toPrelude}fn start(s: Shaped) -> unit:\n    coroutine {step, first} = s.area()\n    unit\n\nstart(std::shapes::make(3))\n"
@@ -1237,6 +1239,314 @@ test trait-operation-identity-set-aside {the checked program's coroutine analysi
         [llength [lmap c $ops {expr {$c in $edgeCalls ? $c : [continue]}}]] \
         [dict get $hir2 coroutines operations] [dict get $hir2 coroutines consulted]
 } -result {3 1 0 {} {}}
+
+# ===========================================================================
+# Implementation yields (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md):
+# an operation's yield effect is its witness's implementation's, per
+# specialization -- in the checked program, before monomorphization. A
+# yielding implementation for one witness makes no other witness's
+# specialization, and not the function as written, yield.
+
+set ::tiPrelude {import std::shapes
+import std::ysq
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+fn pick(s: Shaped) -> Shaped:
+    s
+
+fn measure(s: Shaped) -> int:
+    s.area()
+
+fn twice(s: Shaped) -> int:
+    measure(s) + measure(s)
+
+fn deep(s: Shaped) -> int:
+    twice(s) + 1
+
+fn local_view(s: Shaped) -> int:
+    t = pick(s)
+    t.area()
+
+fn helper() -> int:
+    t = pick(std::ysq::make(2))
+    t.area()
+
+}
+
+# Two witnesses whose implementations need different resume protocols.
+set ::tiProtocols {ma.bot {struct MsgA:
+    a: int
+
+struct A:
+    n: int
+
+fn make(n: int) -> A:
+    A {n: n}
+
+fn area(x: A, resume MsgA) -> int:
+    m = yield x.n
+    m.a * 10
+}
+mb.bot {struct MsgB:
+    b: int
+
+struct B:
+    n: int
+
+fn make(n: int) -> B:
+    B {n: n}
+
+fn area(x: B, resume MsgB) -> int:
+    m = yield x.n
+    m.b + 1000
+}}
+
+set ::tiProtocolPrelude {import std::ma
+import std::mb
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+}
+
+# The functions of the program SOURCE (module files FILES) that may yield, as
+# the checked program's coroutine analysis has them and as the monomorphized
+# program's does: {BUILD1 BUILD2}, sorted names of top-level functions -- a
+# specialization by its clone's name (hir::traits::PlanCalls), a function
+# requiring a context trait by its one clone's.
+proc effectAgreement {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set hir [surface::compile $source -strict 0 -warnings off]
+        set checked [dict get $hir traitSource]
+        hir::activate $checked
+        set walk [hir::traits::PlanCalls $checked {}]
+    }
+    set clones [dict get $walk clones]
+    set polys [dict get $walk polys]
+    set first {}
+    foreach n [dict keys [dict get $checked coroutines mayYield]] {
+        if {[llength $n] == 2} {
+            lassign $n k b
+            if {$b eq [lindex $k 0]} {
+                lappend first [dict get $clones $k name]
+            }
+            continue
+        }
+        if {[dict exists $polys $n]} {
+            if {[dict get $polys $n trait] || [dict get $polys $n imprint]} continue
+            dict for {k clone} $clones {
+                if {[dict get $clone block] eq $n} {
+                    lappend first [dict get $clone name]
+                }
+            }
+        } elseif {[TopFunction $checked $n]} {
+            lappend first [hir::contexts::BlockName $checked $n]
+        }
+    }
+    set second {}
+    foreach b [dict keys [dict get $hir coroutines mayYield]] {
+        if {[TopFunction $hir $b]} {
+            lappend second [hir::contexts::BlockName $hir $b]
+        }
+    }
+    return [list [lsort -unique $first] [lsort -unique $second]]
+}
+
+# 1 if block B of HIR is a top-level function: the value of a top-level
+# binding of the program or of a module.
+proc TopFunction {hir b} {
+    foreach r [dict get $hir roots] {
+        set node [dict get $hir exprs $r]
+        if {[dict get $node kind] eq "bind" && [dict get $node value] eq $b} {
+            return 1
+        }
+    }
+    return 0
+}
+
+test trait-implementation-yield-coroutine {a coroutine whose only suspension is a witness's implementation of an operation runs: started at a trait-polymorphic function with a yielding witness, through an intermediate function passing its view on and two levels deep, while the same functions with a non-yielding witness are ordinary calls in the same program, on every backend} -body {
+    list [moduleAgree $::toLib "${::tiPrelude}coroutine {step, first} = twice(std::ysq::make(3))\na = step()\n\[first, a, step(), twice(std::shapes::make(4))\]\n"] \
+        [moduleAgree $::toLib "${::tiPrelude}coroutine {step, first} = deep(std::ysq::make(3))\na = step()\n\[first, a, step(), deep(std::shapes::make(4))\]\n"]
+} -result {{value {[3, 3, 18, 32]}} {value {[3, 3, 19, 33]}}}
+
+test trait-implementation-yield-negative {a non-yielding witness's specialization never yields, whatever other witnesses' implementations or visible functions of the operation's name do: a coroutine of twice for Sq is COROUTINE-RHS-NOT-YIELDING beside twice for YSq and a yielding area of Reg in the program, and the top-level call of twice for Sq is an ordinary call} -body {
+    list [moduleRejection $::toLib "${::toPrelude}fn twice(s: Shaped) -> int:\n    measure(s) + measure(s)\n\nfn other() -> int:\n    twice(std::ysq::make(3))\n\ncoroutine {step, first} = twice(std::shapes::make(3))\nfirst\n"] \
+        [moduleAgree $::toLib "${::toPrelude}fn twice(s: Shaped) -> int:\n    measure(s) + measure(s)\n\ncoroutine {step, first} = twice(std::ysq::make(3))\n\[first, twice(std::shapes::make(4))\]\n"]
+} -result {{COROUTINE-RHS-NOT-YIELDING {twice never yields (it has no reachable yield and calls no function that may yield), so there is no coroutine to start: call it directly}} {value {[3, 32]}}}
+
+test trait-implementation-yield-witnesses {two witnesses whose implementations need different resume protocols, in one program: each specialization's coroutine is resumed with its own witness's message, and the other's is TYPE} -body {
+    list [moduleAgree $::tiProtocols "${::tiProtocolPrelude}fn measure(s: Shaped) -> int:\n    s.area() + 1\n\ncoroutine {step: sa, first: fa} = measure(std::ma::make(3))\ncoroutine {step: sb, first: fb} = measure(std::mb::make(4))\n\[fa, fb, sa(std::ma::MsgA {a: 7}), sb(std::mb::MsgB {b: 8})\]\n"] \
+        [moduleRejection $::tiProtocols "${::tiProtocolPrelude}fn measure(s: Shaped) -> int:\n    s.area() + 1\n\ncoroutine {step: sa, first: fa} = measure(std::ma::make(3))\n\[fa, sa(std::mb::MsgB {b: 8})\]\n"]
+} -result {{value {[3, 4, 71, 1009]}} {TYPE {the resume message of this coroutine must be a std::ma::MsgA, got std::mb::MsgB}}}
+
+test trait-implementation-yield-local-view {a view the typing establishes binds its operation too: a local of a trait-polymorphic function (per witness), a local of an ordinary function with a concrete witness, and a top-level operation on a view -- UNWRAPPED-YIELD in the checked program when its implementation yields, an ordinary call when it does not} -body {
+    set top [moduleRejection $::toLib "${::tiPrelude}pick(std::ysq::make(3)).area()\n"]
+    list [moduleAgree $::toLib "${::tiPrelude}coroutine {step, first} = local_view(std::ysq::make(3))\n\[first, step(), local_view(std::shapes::make(4))\]\n"] \
+        [moduleAgree $::toLib "${::tiPrelude}coroutine {step, first} = helper()\n\[first, step()\]\n"] \
+        [lindex $top 0] \
+        [string match {this call of Shaped's operation area may suspend, because std::ysq::area, its implementation for std::ysq::YSq, may; but it does not start a coroutine, and an operation is no coroutine's root (call it from a function that runs inside a coroutine):
+    std::ysq::area, which yields directly at *ysq.bot:8:5} [lindex $top 1]] \
+        [moduleAgree $::toLib "${::tiPrelude}pick(std::shapes::make(3)).area()\n"]
+} -result {{value {[3, 9, 16]}} {value {[2, 4]}} UNWRAPPED-YIELD 1 {value 9}}
+
+test trait-implementation-yield-own-yield {a trait-polymorphic function with a yield of its own: its specialization's protocol is its implementation's (each witness its own), its yields typed so in the instance the semantic layer analyzes for that witness; a declared protocol the implementation contradicts is COROUTINE-RESUME-CONFLICT of that specialization alone} -body {
+    set p1 "${::tiProtocolPrelude}fn measure(s: Shaped) -> int:\n    yield 0\n    s.area() + 1\n\n"
+    set p2 "${::tiProtocolPrelude}fn keep(x) -> int:\n    7\n\nfn measure(s: Shaped) -> int:\n    m = yield 0\n    keep(m) + s.area()\n\n"
+    set p3 "${::tiProtocolPrelude}fn measure(s: Shaped, resume std::ma::MsgA) -> int:\n    m = yield 0\n    m.a + s.area()\n\n"
+    set run "coroutine {step: sa, first: fa} = measure(std::ma::make(3))\na1 = sa(std::ma::MsgA {a: 1})\n\[fa, a1, sa(std::ma::MsgA {a: 7})\]\n"
+    # The yield's value in the instance of measure for std::ma::A (p2).
+    withPrivateLibrary {
+        writeModules $::tiProtocols
+        set checked [dict get [surface::compile "$p2$run" -warnings off] traitSource]
+    }
+    set typed {}
+    dict for {id inst} [dict get $checked semantic instances] {
+        set view [hir::semantic::View $checked $id]
+        dict for {y o} [dict get $checked coroutines yields] {
+            if {$o eq [dict get $inst block]} {
+                lappend typed [hir::types::show [hir::typeOf $view $y]]
+            }
+        }
+    }
+    list [moduleAgree $::tiProtocols "$p1$run"] [moduleAgree $::tiProtocols "$p2$run"] [lsort -unique $typed] \
+        [moduleAgree $::tiProtocols "$p3$run"] \
+        [moduleRejection $::tiProtocols "${p3}coroutine {step: sb, first: fb} = measure(std::mb::make(3))\nfb\n"]
+} -result {{value {[0, 3, 71]}} {value {[0, 3, 77]}} std::ma::MsgA {value {[0, 3, 71]}} {COROUTINE-RESUME-CONFLICT {measure (for std::mb::B) needs two different resume protocols, and one coroutine has exactly one (no union is inferred: declare a struct with the fields both need, or split the coroutine):
+    resume std::ma::MsgA: measure declares it
+    resume std::mb::MsgB: it calls std::mb::area, the implementation of Shaped's operation area for std::mb::B (<input>:9:11), which declares it}}}
+
+test trait-implementation-yield-use-site {a yield's value passed to a trait operation is constrained by the implementation's declared parameter, as the monomorphized program's direct call of it is (use-site inference): the coroutine's protocol is Msg though the implementation does not yield -- before, zero-message, and the argument a TYPE error. In a trait-polymorphic function, an operation on its own parameter's view binds nothing in the function as written, so it fixes no protocol there: the yield is zero-message and the argument a TYPE error (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md, section 12)} -body {
+    set lib {sink.bot {struct Msg:
+    v: int
+
+struct K:
+    n: int
+
+fn put(k: K, m: Msg) -> int:
+    k.n + m.v
+}}
+    list [moduleAgree $lib "import std::sink\n\ntrait Sink:\n    fn put(self: Sink, m: std::sink::Msg) -> int\n\nfn pick(s: Sink) -> Sink:\n    s\n\nfn f() -> int:\n    m = yield 0\n    t = pick(std::sink::K {n: 1})\n    t.put(m)\n\ncoroutine {step, first} = f()\n\[first, step(std::sink::Msg {v: 5})\]\n"] \
+        [lindex [moduleRejection $lib "import std::sink\n\ntrait Sink:\n    fn put(self: Sink, m: std::sink::Msg) -> int\n\nfn f(s: Sink) -> int:\n    m = yield 0\n    s.put(m)\n\ncoroutine {step, first} = f(std::sink::K {n: 1})\n\[first, step(std::sink::Msg {v: 5})\]\n"] 0]
+} -result {{value {[0, 6]}} TYPE}
+
+test trait-implementation-yield-generic-body {inside a trait-polymorphic function, a coroutine construction is judged by the function as written: a root call passing a concrete witness binds what every specialization binds (it runs); a root call passing the function's own witness is bound only per specialization, and the function as written, checked against its traits alone, does not yield -- COROUTINE-RHS-NOT-YIELDING, the boundary TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md records} -body {
+    list [moduleAgree $::toLib "${::tiPrelude}fn start(s: Shaped) -> int:\n    coroutine {step, first} = measure(std::ysq::make(5))\n    first + measure(s)\n\nstart(std::shapes::make(3))\n"] \
+        [moduleRejection $::toLib "${::tiPrelude}fn start(s: Shaped):\n    coroutine {step, first} = measure(s)\n    first\n\nstart(std::ysq::make(3))\n"]
+} -result {{value 14} {COROUTINE-RHS-NOT-YIELDING {measure never yields (it has no reachable yield and calls no function that may yield), so there is no coroutine to start: call it directly}}}
+
+test trait-implementation-yield-function-value {a function nested in a trait-polymorphic one may yield in a specialization (it performs the operation on the enclosing view): used as a function value there it is UNWRAPPED-YIELD in the checked program; with a non-yielding witness it is an ordinary value} -body {
+    set text "${::tiPrelude}fn apply(f) -> int:\n    f()\n\nfn hold(s: Shaped) -> int:\n    fn g() -> int:\n        s.area()\n    apply(g)\n\n"
+    set r [moduleRejection $::toLib "${text}hold(std::ysq::make(3))\n"]
+    list [lindex $r 0] [string match {g (for std::ysq::YSq) may suspend, so it cannot become a function value*} [lindex $r 1]] \
+        [moduleAgree $::toLib "${text}hold(std::shapes::make(3))\n"]
+} -result {UNWRAPPED-YIELD 1 {value 9}}
+
+test trait-implementation-yield-imprint {an operation on a constrained imprint variable binds its imprinted type's implementation, per binding (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): show for a Person, whose describe yields, runs as a coroutine and is UNWRAPPED-YIELD at the top level; show for a Dog does not yield} -body {
+    set lib {printable.bot {trait Printable:
+    fn describe(value: Printable) -> int
+}
+people.bot {struct Person:
+    n: int
+
+fn describe(p: Person) -> int:
+    yield p.n
+    p.n + 1
+}
+dogs.bot {struct Dog:
+    age: int
+
+fn describe(d: Dog) -> int:
+    d.age * 2
+}}
+    set pre "import std::people\nimport std::dogs\nimport type std::printable::Printable\n\nstruct P\[T satisfies Printable\]:\n    value: T\n\nfn show(p: P\[T\]) -> int:\n    p.value.describe() + 100\n\n"
+    list [moduleAgree $lib "${pre}coroutine {step, first} = show(P {value: std::people::Person {n: 4}})\n\[first, step(), show(P {value: std::dogs::Dog {age: 3}})\]\n"] \
+        [lindex [moduleRejection $lib "${pre}show(P {value: std::people::Person {n: 4}})\n"] 0] \
+        [lindex [moduleRejection $lib "${pre}coroutine {step, first} = show(P {value: std::dogs::Dog {age: 3}})\nfirst\n"] 0]
+} -result {{value {[4, 105, 106]}} UNWRAPPED-YIELD COROUTINE-RHS-NOT-YIELDING}
+
+test trait-implementation-yield-rounds {a witness the second check's typing gives an operation first: f's yield is typed by its protocol, which only the implementation of t.produce() (std::gen::G's, declaring resume MsgS) fixes, and only then is measure(x) a call with a concrete witness, MsgS, whose area yields -- three checks of the program as written, then one of the monomorphized program; the coroutine runs on every backend} -body {
+    set lib {gen.bot {struct MsgS:
+    side: int
+
+fn area(m: MsgS) -> int:
+    yield m.side
+    m.side
+
+struct G:
+    k: int
+
+fn produce(g: G, resume MsgS) -> int:
+    m = yield g.k
+    m.side
+}
+mk.bot {import std::gen
+
+fn g(k: int) -> std::gen::G:
+    std::gen::G {k: k}
+
+fn msg(side: int) -> std::gen::MsgS:
+    std::gen::MsgS {side: side}
+}}
+    set text "import std::mk\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\ntrait Maker:\n    fn produce(self: Maker) -> int\n\nfn pick(m: Maker) -> Maker:\n    m\n\nfn measure(s: Shaped) -> int:\n    s.area()\n\nfn f() -> int:\n    x = yield 0\n    t = pick(std::mk::g(1))\n    t.produce() + measure(x)\n\ncoroutine {step, first} = f()\na = step(std::mk::msg(2))\nb = step(std::mk::msg(5))\n\[first, a, b, step(std::mk::msg(9))\]\n"
+    withPrivateLibrary {
+        writeModules $lib
+        set before [hir::BuildStats]
+        surface::compile $text -warnings error
+        set after [hir::BuildStats]
+    }
+    list [expr {[dict get $after checks] - [dict get $before checks]}] [expr {[dict get $after builds] - [dict get $before builds]}] \
+        [moduleAgree $lib $text]
+} -result {4 2 {value {[0, 1, 2, 7]}}}
+
+test trait-implementation-yield-economics {a program that constructs coroutines but none of whose trait operations' implementations yields is checked as before: one check of the program as written and one of the monomorphized program, no trait-operation edge kept; with a yielding implementation the program as written is checked twice (the second check confirms the edges)} -body {
+    set results {}
+    set quiet "import std::shapes\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\nfn measure(s: Shaped) -> int:\n    s.area()\n\nfn gen() -> int:\n    yield measure(std::shapes::make(1))\n    2\n\n"
+    foreach text [list "${quiet}coroutine {step, first} = gen()\n\[first, step(), measure(std::shapes::make(2))\]\n" \
+            "${::tiPrelude}coroutine {step, first} = twice(std::ysq::make(3))\n\[first, twice(std::shapes::make(4))\]\n"] {
+        withPrivateLibrary {
+            writeModules $::toLib
+            set before [hir::BuildStats]
+            set hir [surface::compile $text -warnings off]
+            set after [hir::BuildStats]
+        }
+        lappend results [expr {[dict get $after checks] - [dict get $before checks]}] \
+            [expr {[dict get $after builds] - [dict get $before builds]}] \
+            [expr {[dict getdef [dict get $hir traitSource] coroutines graph {}] eq {}}]
+    }
+    set results
+} -result {2 2 1 3 2 0}
+
+test trait-implementation-yield-agreement {the checked program's yield effect per specialization is the monomorphized program's: the same functions may yield, a specialization named by its clone -- ordinary traits (two witnesses, through intermediate functions), imprinted functions, context traits (the operation's function by its one clone), per-witness protocols} -body {
+    set results {}
+    lappend results [effectAgreement $::toLib "${::tiPrelude}coroutine {step, first} = deep(std::ysq::make(3))\n\[first, deep(std::shapes::make(4)), local_view(std::shapes::make(1))\]\n"]
+    lappend results [effectAgreement $::tiProtocols "${::tiProtocolPrelude}fn measure(s: Shaped) -> int:\n    s.area() + 1\n\ncoroutine {step: sa, first: fa} = measure(std::ma::make(3))\ncoroutine {step: sb, first: fb} = measure(std::mb::make(4))\nfa + fb\n"]
+    set ct {ty/drv.bot {context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+
+fn wrapper(context d: Driver) -> int:
+    run() + 1
+}
+ty/ysim.bot {type Base = Int in 0..10000
+
+opaque context struct YSim:
+    base: Base
+
+fn create() -> YSim:
+    YSim {base: 100}
+
+fn wait(deadline: int, context s: YSim) -> int:
+    yield deadline
+    deadline + s.base
+}}
+    lappend results [effectAgreement $ct "import std::ty::drv\nimport std::ty::ysim\nwith context std::ty::ysim::create()\ncoroutine {step, first} = std::ty::drv::wrapper()\nfirst\n"]
+    set results
+} -result {{{deep<std::ysq::YSq> helper measure<std::ysq::YSq> std::ysq::area twice<std::ysq::YSq>} {deep<std::ysq::YSq> helper measure<std::ysq::YSq> std::ysq::area twice<std::ysq::YSq>}} {{measure<std::ma::A> measure<std::mb::B> std::ma::area std::mb::area} {measure<std::ma::A> measure<std::mb::B> std::ma::area std::mb::area}} {{std::ty::drv::run<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::drv::wrapper<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::ysim::wait} {std::ty::drv::run<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::drv::wrapper<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::ysim::wait}}}
 
 test trait-source-audit {no compiler or runtime source implements traits with runtime names, method maps, dictionaries, function-pointer tables or backend tags} -body {
     set hits {}

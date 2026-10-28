@@ -1740,6 +1740,15 @@ rejected:
 == LIKELY CAUSES
   * a coroutine binding of a function whose only yield is in a branch
     the compiler proves unreachable, or that has no yield at all;
+  * a function whose only yield would be a trait operation's, while the
+    implementation the program selects for it (the installed context's,
+    the witness's) does not yield;
+  * inside a trait-polymorphic function, a coroutine of a call passing
+    that function's own trait parameter, whose only yield is an operation
+    on it: the function as written is checked against its traits alone,
+    and a trait's requirements say nothing about suspending (start the
+    coroutine where the witness is known;
+    TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md);
   * `coroutine {step} = f` with `f` a function value or a parameter.
 
 == WHAT TO DO

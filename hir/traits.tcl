@@ -2020,10 +2020,19 @@ proc hir::traits::WitnessName {w} {
     return [string map {" " ""} [hir::types::show $w]]
 }
 
-# The monomorphization plan of checked HIR (the source build), or {diagnostics
-# {D ...}} when the program cannot be monomorphized. SYNTAX is the stamped
-# function declarations by sid (Stamp's INDEX).
-proc hir::traits::Plan {hir syntax} {
+# The call resolution of the monomorphization plan of checked HIR: which
+# clone each trait-polymorphic function gets per combination of witnesses
+# its live calls pass, and what each call becomes in each context the plan
+# walks (live code, or a clone) -- {diagnostics D roots R rootIndex I parents
+# P polys F home H byHome B actions A clones C livePos L edges E implUses U}
+# (only `diagnostics` when the walk stops early). SYNTAX is the stamped
+# function declarations by sid (Stamp's INDEX; {} leaves a clone record's
+# `node` empty). Plan places the clones; the coroutine analysis reads the
+# actions as the implementation each trait operation calls and the clone
+# each call of a trait-polymorphic function calls
+# (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md: hir::coroutines::
+# Implementations), so both builds see one call graph.
+proc hir::traits::PlanCalls {hir syntax} {
     set diagnostics {}
     set roots [dict get $hir roots]
     set rootIndex [dict create]
@@ -2161,7 +2170,7 @@ proc hir::traits::Plan {hir syntax} {
                 lappend ckey $binding
             }
             if {![dict exists $clones $ckey]} {
-                set node [dict get $syntax [dict get $fn sid]]
+                set node [dict getdef $syntax [dict get $fn sid] {}]
                 set result ""
                 set declared [dict get $hir exprs $h declaredResult]
                 if {[hir::types::IsTraitConstraint $declared]} {
@@ -2474,9 +2483,20 @@ proc hir::traits::Plan {hir syntax} {
             }
         }
     }
-    if {$diagnostics ne {}} {
-        return [dict create diagnostics $diagnostics]
+    return [dict create diagnostics $diagnostics roots $roots rootIndex $rootIndex parents $parents \
+        polys $polys home $home byHome $byHome actions $actions clones $clones livePos $livePos \
+        edges $edges implUses $implUses]
+}
+
+# The monomorphization plan of checked HIR (the source build), or {diagnostics
+# {D ...}} when the program cannot be monomorphized. SYNTAX is the stamped
+# function declarations by sid (Stamp's INDEX).
+proc hir::traits::Plan {hir syntax} {
+    set walk [PlanCalls $hir $syntax]
+    if {[dict get $walk diagnostics] ne {}} {
+        return [dict create diagnostics [dict get $walk diagnostics]]
     }
+    dict with walk {}
     # Placement: each clone before the earliest top-level statement that
     # needs it, directly or through the clones that call it.
     set pos $livePos

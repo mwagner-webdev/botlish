@@ -287,7 +287,9 @@ required(B)  = direct(B) ∪ ⋃ required(E) for every function E that B's regio
 no context parameter, requires it transitively (`ct-transitive`), and
 intermediate functions receive nothing. A trait operation (`out.emit(n)`) is
 never a call edge, whatever function of that name its method syntax sees
-(its implementation is bound only in the monomorphized program). Reasons are
+(its implementation is bound only in the monomorphized program; its
+implementation's yield effect, though, is the call's in the checked program
+too: TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). Reasons are
 kept per (function, identity) and diagnostics print the shortest
 deterministic chain (`ct-missing-chain`):
 

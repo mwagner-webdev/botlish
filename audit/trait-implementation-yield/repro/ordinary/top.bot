@@ -1,0 +1,13 @@
+import shapes
+import ysq
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+fn measure(s: Shaped) -> int:
+    s.area()
+
+fn twice(s: Shaped) -> int:
+    measure(s) + measure(s)
+
+[twice(shapes::make(4)), twice(ysq::make(3))]

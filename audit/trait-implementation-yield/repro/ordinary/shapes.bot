@@ -1,0 +1,8 @@
+struct Sq:
+    side: int
+
+fn make(side: int) -> Sq:
+    Sq {side: side}
+
+fn area(s: Sq) -> int:
+    s.side * s.side

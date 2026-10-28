@@ -626,3 +626,44 @@ read noescape, count: std::ffi::c::ULongLong, written:
         }
 ====
 >>>>
+
+# Implementation yields (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md):
+# a context-trait operation's yield effect is the selected installed
+# context's implementation's, in the checked program.
+
+@@ implementation-effect-one-level a function is yield-capable only when a callee has a yield of its own: a wrapper of an operation whose implementation yields gets no protocol
+## hir/coroutines.tcl
+<<<<
+            foreach edge [dict get $edges $n] {
+                if {[dict exists $capable [lindex $edge 1]]} {
+                    dict set capable $n 1
+====
+            foreach edge [dict get $edges $n] {
+                if {[dict get $direct [BlockOf [lindex $edge 1]]] ne {}} {
+                    dict set capable $n 1
+>>>>
+
+@@ selection-cascade-restored a construction whose root requires a context trait without one selected provider is also COROUTINE-RHS-NOT-YIELDING beside its MISSING-CONTEXT or AMBIGUOUS-CONTEXT-IMPLEMENTATION
+## hir/coroutines.tcl
+<<<<
+            if {[Unselected $hir [BlockOf $root]] ne {} && [SelectionRejected $hir $create]} {
+====
+            if {0} {
+>>>>
+
+@@ selection-failure-assumed every construction whose root requires an unselected context trait is left unjudged, also where no selection failed (a construction in a function the program never calls)
+## hir/coroutines.tcl
+<<<<
+            if {[Unselected $hir [BlockOf $root]] ne {} && [SelectionRejected $hir $create]} {
+====
+            if {[Unselected $hir [BlockOf $root]] ne {}} {
+>>>>
+
+@@ chain-names-no-operation a chain through a trait operation names only the implementation, never the operation and the context it was selected for
+## hir/coroutines.tcl
+<<<<
+    set via [dict get $hir coroutines graph via $key]
+    return ", the implementation of [dict get $via trait]'s operation [dict get $via operation] for [dict get $via witness],"
+====
+    return ""
+>>>>

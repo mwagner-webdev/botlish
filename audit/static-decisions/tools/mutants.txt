@@ -764,6 +764,14 @@ proc hir::static::Waits {key status deps} {
             CheckOnce hir $demote rounds
 ====
             set hir $input
-            hir::coroutines::analyze hir $operations
+            hir::coroutines::analyze hir $feedback
             CheckOnce hir $demote rounds
+>>>>
+
+@@ staticdeps-implementations-ignored a trait operation's implementation is no call target of the dependency analysis: a construction's verdict, which reads the implementation's yield effect (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md), is predicted unchanged by a rejection inside the implementation
+## hir/staticdeps.tcl
+<<<<
+        implTargets [hir::coroutines::ImplementationTargets $hir]]
+====
+        implTargets {}]
 >>>>
