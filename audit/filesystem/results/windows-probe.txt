@@ -1,0 +1,81 @@
+# audit/filesystem/experiments/windows.tcl on windows-2025 (NTFS, the
+# runner's C:\Users\...\Temp), cranelift, run 40775315573 of the
+# windows-fs-probe workflow (commit ed9410d9). Recorded verbatim.
+directory: C:\Users\RUNNER~1\AppData\Local\Temp\botlish-fs-experiment-_Y09TK35L
+== designs.bot (cranelift)
+W1 made | ok ok ok ok ok ok
+W1 enumeration ended with | 18
+W1 entry units [46] | . | error 5 | . | error 5 | error 5
+W1 entry units [46 46] | .. | error 5 | .. | error 5 | error 5
+W1 entry units [101 769 45 110 102 100] | é-nfd | 2 | é-nfd | 2 | 2
+W1 entry units [112 108 97 105 110 46 116 120 116] | plain.txt | 0 | plain.txt | 0 | 0
+W1 entry units [117 45 55296 45 120] | - | <no name> | u-�-x | 4 | 3
+W1 entry units [117 45 65533 45 120] | u-�-x | 4 | u-�-x | 4 | 4
+W1 entry units [118 45 56320] | - | <no name> | v-� | error 2 | 5
+W1 entry units [233 45 110 102 99] | é-nfc | 1 | é-nfc | 1 | 1
+W2 make w2\trail. (Win32) | ok
+W2 make w2\sp  (Win32, two trailing spaces) | ok
+W2 make \\?\...\w2\verb. (verbatim) | ok
+W2 make \\?\...\w2\vsp  (verbatim) | ok
+W2 listing | . .. sp trail verb. vsp  
+W2 read w2\trail (Win32) | t
+W2 read w2\verb. (Win32) | error 2
+W2 read \\?\...\w2\verb. (verbatim) | v
+W2 read w2\trail... (Win32) | t
+W3 write w3\NUL (Win32, CREATE_ALWAYS) | ok
+W3 write w3\nul.txt (Win32) | ok
+W3 write w3\COM1 (Win32) | ok
+W3 write w3\CON (Win32) | ok
+W3 write w3\AUX.log (Win32) | ok
+W3 write \\?\...\w3\NUL (verbatim) | ok
+W3 listing | . .. AUX.log COM1 CON NUL nul.txt
+W3 read \\?\...\w3\NUL (verbatim) | v
+W3 read w3\NUL (Win32) | <nothing>
+W4 make Case.txt | ok
+W4 read CASE.TXT | C
+W4 make CASE.TXT (CREATE_NEW) | error 80
+W5 GetFullPathNameW x | D:\a\botlish\botlish\x
+W5 GetFullPathNameW \x | D:\x
+W5 GetFullPathNameW C:x | C:\x
+W5 GetFullPathNameW C:\x | C:\x
+W5 GetFullPathNameW D:x | D:\a\botlish\botlish\x
+W5 GetFullPathNameW C:\a\..\b | C:\b
+W5 GetFullPathNameW C:\a\.\b\ | C:\a\b\
+W5 GetFullPathNameW C:\a\b.  | C:\a\b
+W5 GetFullPathNameW C:/a//b | C:\a\b
+W5 GetFullPathNameW \\server\share\x\..\..\y | \\server\share\y
+W5 GetFullPathNameW //server/share/x | \\server\share\x
+W5 GetFullPathNameW \\?\C:\a\..\b | \\?\C:\b
+W5 GetFullPathNameW \\?\C:/a | \\?\C:\a
+W5 GetFullPathNameW \\.\C:\a\..\b | \\.\C:\b
+W5 GetFullPathNameW //./C:/a | \\.\C:\a
+W5 GetFullPathNameW \??\C:\a | D:\??\C:\a
+W5 GetFullPathNameW C:\dir\NUL | \\.\NUL
+W5 GetFullPathNameW C:\dir\nul.txt | C:\dir\nul.txt
+W5 GetFullPathNameW C:\dir\COM1.txt | C:\dir\COM1.txt
+W5 GetFullPathNameW 1:x | 1:\x
+W6 nested 50-unit directories (Win32) | error 3 at length 272
+W6 nested 50-unit directories (verbatim) | all made, length 476
+W6 write a file below the deepest (verbatim) | ok
+W7 make shared.txt | ok
+W7 open for writing, share all | 0
+W7 open again for reading, share all | 0
+W7 open again, share none | 32
+W8 open a directory for reading | error 5
+W8 open a directory for writing | error 5
+W8 open a directory with FILE_FLAG_BACKUP_SEMANTICS | ok
+W9 list missing\* | 0 entries, ended with 3
+W9 list plain.txt\* | 0 entries, ended with 267
+W9 list empty\* | 2 entries, ended with 18
+W9 open plain.txt\child | error 3
+W9 open missing\child | error 3
+W9 attributes of missing | -2
+W9 attributes of the directory | 16
+W9 open a name with < | error 123
+W9 open an empty path | error 3
+W10 read dir/plain.txt (Win32) | 0
+W10 read \\?\dir/plain.txt (verbatim) | error 123
+W11 read sub\..\plain.txt (Win32) | 0
+W11 read \\?\...\sub\..\plain.txt (verbatim) | error 123
+W11 read \\?\...\.\plain.txt (verbatim) | error 3
+   value: unit

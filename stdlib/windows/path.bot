@@ -1,0 +1,141 @@
+# path.bot -- the "std::windows::path" namespace: textual Windows paths
+# (CONTEXT-TRAITS.md, "Paths"; WINDOWS-X86-64-MILESTONE-7.md).
+#
+#   std::windows::path::validate(value)       proves VALUE a WindowsPath, or
+#                                             std::io::path::NotAPath
+#   std::windows::path::valid?(value)         true proves VALUE a WindowsPath
+#   std::windows::path::concat(path, part)    PATH joined with PART by Win32's
+#                                             syntax: a WindowsPath
+#   std::windows::path::text(path)            PATH's String form (the carrier)
+#   std::windows::path::kind(path)            its syntactic kind
+#                                             (std::windows::fs::PathKind)
+#   std::windows::path::native(path)          its std::windows::fs::NativePath
+#
+# WindowsPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
+# be a non-empty String without U+0000 -- text that may be handed to a wide
+# Win32 function once it is encoded as UTF-16 and given its terminating NUL
+# (std::windows::fs does that, for the one call). It is the same String, with
+# the String's representation. It is std::linux::path::LinuxPath's and
+# std::darwin::path::DarwinPath's sibling, not a shared type: a Windows path
+# is not a Unix path with backslashes, and nothing converts one into another.
+#
+# The proposition is textual eligibility and nothing more. It does NOT claim
+# that the path exists; that Win32 accepts it (a name holding "<", ">", "|",
+# '"', "?" or "*", or a ":" past a drive, is valid text that NTFS refuses or
+# reads as a stream); that it is shorter than MAX_PATH; that it means what
+# its spelling suggests -- Win32 drops a component's trailing periods and
+# spaces, resolves "." and "..", reads "NUL" as a device and resolves a
+# relative, drive-relative or root-relative path against the process's
+# current directories -- or that two spellings name two files (NTFS compares
+# names without case). Validation observes no filesystem and normalizes
+# nothing: "C:a", "C:\a", "\a", "\\server\share", "\\?\C:\a\." and "a//b" are
+# valid exactly as written, and different.
+#
+# `kind` and `concat` are std::windows::fs's syntax on the path's UTF-16
+# units (one rule for text and native paths): concat inserts one "\" unless
+# the path ends with a separator or is a bare drive designator ("C:" and
+# "a" are "C:a", drive C's current directory -- never "C:\a"), refuses a
+# component that is not itself relative ("\a", "C:a", "\\s\x", and "1:x":
+# Win32 reads any unit before ":" as a drive), and refuses what would not
+# name the component written: under a verbatim path (\\?\, \??\) a "/" or a
+# "." or ".." component (Win32 resolves neither there), under any other a
+# component ending with a period or a space (Win32 drops them).
+#
+# WindowsPath satisfies std::io::path::Path through `concat` and `text`, and
+# std::io::fs::FilePath through them and the file operations below, which
+# are std::windows::fs's on the path's native path: they declare no context
+# and std::windows::fs's require std::windows::fs::WindowsFS, so a program
+# using a WindowsPath's file operations installs a WindowsFS (or is
+# MISSING-CONTEXT at compile time). Like everything under std::windows, this
+# module is the Windows platform's: compiled for another target its import
+# is UNSUPPORTED-PLATFORM, so no WindowsPath ever meets a Linux filesystem.
+import std::abi
+import std::abi::bytes
+import std::char
+import std::io::fs
+import std::io::path
+import std::str
+import std::windows::fs
+
+refined type WindowsPath = str
+
+# true when no character of VALUE is U+0000.
+fn nul_free?(value: str) -> bool:
+    loop i from 0 to value.length():
+        if value.char_at(i).scalar_value() == 0:
+            return false
+    true
+
+# true when VALUE is a valid textual Windows path (non-empty, no U+0000),
+# which proves it a WindowsPath; false proves nothing.
+fn valid?(value: str) -> bool proves value: WindowsPath:
+    value.length() > 0 and value.nul_free?()
+
+# Completes normally only when VALUE is a valid textual Windows path, which
+# proves it a WindowsPath for the rest of the caller's path; fails with
+# std::io::path::NotAPath otherwise.
+fn validate(value: str) -> unit proves value: WindowsPath errors std::io::path::NotAPath:
+    if valid?(value):
+        unit
+    else:
+        fail std::io::path::NotAPath
+
+# The path's canonical String form: exactly the carrier String (lossless; no
+# escaping, quoting or display conversion).
+fn text(path: WindowsPath) -> str:
+    path
+
+# PATH's native path: its UTF-16 code units, exactly (no normalization).
+fn native(path: WindowsPath) -> std::windows::fs::NativePath:
+    std::windows::fs::of_valid_text(path)
+
+# PATH's syntactic kind (std::windows::fs::PathKind): syntax only.
+fn kind(path: WindowsPath) -> std::windows::fs::PathKind:
+    std::windows::fs::kind(path.native())
+
+# PATH joined with COMPONENT by std::windows::fs::join's rule (the module
+# comment); std::io::path::NotAPath for an empty COMPONENT, one holding
+# U+0000, one that is not relative, or one the rule refuses. The result is a
+# WindowsPath by validation, the ordinary owner proof.
+fn concat(path: WindowsPath, component: str) -> WindowsPath errors std::io::path::NotAPath:
+    joined = std::windows::fs::concat(path.native(), component)
+    result = std::windows::fs::text(joined):
+        on std::io::path::NotText:
+            fail std::io::path::NotAPath
+    validate(result)
+    result
+
+# ---------------------------------------------------------------------------
+# std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md)
+
+# Every byte of the file PATH.
+fn read_file(path: WindowsPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    std::windows::fs::read_file(path.native())
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: WindowsPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::windows::fs::write_file(path.native(), data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists.
+fn create_file(path: WindowsPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::windows::fs::create_file(path.native(), data)
+
+# Every entry of the directory PATH but "." and "..", with its textual name;
+# std::io::path::NotText when a name holds an unpaired surrogate
+# (std::windows::fs::entries lists every name as code units).
+fn entries(path: WindowsPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+    listed = std::windows::fs::entries(path.native())
+    loop e in listed:
+        std::io::fs::Entry {name: std::windows::fs::text(e.name), kind: e.kind}
+
+# A new, empty directory PATH.
+fn create_directory(path: WindowsPath) -> unit errors std::io::fs::FileError:
+    std::windows::fs::create_directory(path.native())
+
+# Removes the file PATH.
+fn remove_file(path: WindowsPath) -> unit errors std::io::fs::FileError:
+    std::windows::fs::remove_file(path.native())
+
+# Removes the empty directory PATH.
+fn remove_directory(path: WindowsPath) -> unit errors std::io::fs::FileError:
+    std::windows::fs::remove_directory(path.native())

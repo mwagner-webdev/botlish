@@ -2523,6 +2523,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.check(v);
                 v
             }
+            BytesSlice => {
+                let v = self.call_allocating("rt_bytes_slice", &[self.vm, a[0], a[1], a[2]], "bytesslice", KIND_BYTES);
+                self.check(v);
+                v
+            }
             // C addresses (C-ABI-TYPES.md): the null pointer is a constant
             // word, the null test one comparison with it, and clone, erase
             // and retype are the word itself -- no machine operation, no

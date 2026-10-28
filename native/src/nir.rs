@@ -323,6 +323,10 @@ pub enum OpCode {
     /// whose UTF-8 encoding is a storage's bytes, or the declared builtin
     /// error InvalidUtf8 (routed like a `fail`). One operand, the storage.
     BytesDecodeUtf8,
+    /// `byte_store::slice` (WINDOWS-X86-64-MILESTONE-7.md): a storage's bytes
+    /// START..END-1 in a new storage, or the declared LowerUnderrun /
+    /// UpperOverrun. Three operands: the storage, START, END.
+    BytesSlice,
     /// `byte_store::byte_count`: the exact byte count of a storage, a small Int.
     /// One operand; TYPE if it is not a byte storage.
     BytesLen,
@@ -917,6 +921,7 @@ op_spellings! {
     "bytesfromlist" => BytesFromList,
     "bytesjoin" => BytesJoin,
     "bytesdecodeutf8" => BytesDecodeUtf8,
+    "bytesslice" => BytesSlice,
     "byteslen" => BytesLen,
     "bytesaddr" => BytesAddr,
     "keepalive" => KeepAlive,
@@ -1087,7 +1092,7 @@ impl OpCode {
             | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
-            Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
+            Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
             RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr

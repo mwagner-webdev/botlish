@@ -21,6 +21,9 @@
 #   std::byte_store::join(List[storage]) -> byte storage
 #       The bytes of every storage of the List, in order, in one new
 #       storage (WINDOWS-X86-64-MILESTONE-7.md).
+#   std::byte_store::slice(storage, start, end) -> byte storage
+#       The bytes START..END-1, in a new storage, or LowerUnderrun /
+#       UpperOverrun (the one slice rule; WINDOWS-X86-64-MILESTONE-7.md).
 #   std::byte_store::byte_count(storage) -> Int
 #       The exact byte count, 0 <= n <= the runtime's collection-length
 #       ceiling (the same enforced bound a String's or List's length has).
@@ -66,10 +69,10 @@
 # storage value into a std::abi::Bytes (constructing one is representation
 # authority: OPAQUE-STRUCTS.md), and a storage value alone gives no address,
 # so these natives cannot manufacture a pointer. There is deliberately no
-# byte_store operation that reads, slices or iterates the bytes; the one
-# that combines them, join (WINDOWS-X86-64-MILESTONE-7.md: a file read in
-# chunks becomes one Bytes), copies storages into a new one and reads none
-# into a Botlish value.
+# byte_store operation that reads or iterates the bytes; the ones that
+# combine and cut them, join and slice (WINDOWS-X86-64-MILESTONE-7.md: a file
+# read in chunks becomes one Bytes, a short write's unwritten rest is one),
+# copy storages into a new one and read none into a Botlish value.
 
 namespace eval core::bytestore {
     # The declaration identity of the opaque struct whose one field holds a
@@ -216,10 +219,26 @@ proc core::bytestore::join {l} {
     return [core::value::bytestore $hex]
 }
 
+# The storage of STORAGE's bytes START..END-1 (WINDOWS-X86-64-MILESTONE-7.md:
+# the bytes a short write left unwritten), by the one slice rule
+# (core::native::checkSlice): LowerUnderrun or UpperOverrun unless 0 <= START
+# <= END <= the byte count.
+proc core::bytestore::slice {storage start end} {
+    core::value::expect bytestore $storage std::byte_store::slice
+    set from [core::value::intOf [core::value::expect int $start std::byte_store::slice]]
+    set to [core::value::intOf [core::value::expect int $end std::byte_store::slice]]
+    core::native::checkSlice std::byte_store::slice $from $to [core::value::bytestoreLength $storage]
+    set hex [core::value::bytestoreHex $storage]
+    return [core::value::bytestore [string range $hex [expr {2 * $from}] [expr {2 * $to - 1}]]]
+}
+
 core::native::register std::byte_store::from_list -arity 1 -impl core::bytestore::fromList \
     -param-types {list} -result-type any -runtime {bytestore-alloc} -context-free 1
 core::native::register std::byte_store::join -arity 1 -impl core::bytestore::join \
     -param-types {list} -result-type any -runtime {bytestore-alloc} -context-free 1
+core::native::register std::byte_store::slice -arity 3 -impl core::bytestore::slice \
+    -param-types {any int int} -result-type any -runtime {bytestore-alloc range-check} -context-free 1 \
+    -errors {LowerUnderrun UpperOverrun}
 core::native::register std::byte_store::byte_count -arity 1 -impl core::bytestore::length \
     -param-types {any} -result-type int -result-range collection-length -context-free 1
 

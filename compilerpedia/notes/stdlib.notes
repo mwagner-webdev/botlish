@@ -2360,6 +2360,37 @@ std::byte_store::join([a, a]).byte_count()
 @value 4
 @end
 
+@topic stdlib.std::byte_store::slice
+title: -
+summary: The byte storage of a storage's bytes from index start up to but not including end; an invalid range fails with LowerUnderrun or UpperOverrun.
+index: stdlib
+keywords: byte slice; part of bytes; rest of a buffer; LowerUnderrun; UpperOverrun
+related: stdlib.std::abi::bytes::slice stdlib.std::byte_store::join stdlib.module.std::byte_store proof.slices
+
+== NOTES
+The substrate of std::abi::bytes::slice, which is what programs call (it
+takes and returns a std::abi::bytes::Bytes). The range is half-open over
+byte indices, valid exactly when 0 <= start <= end <= the byte count, with
+std::str::substring's rule for the two errors: start below 0, or end below
+start, is LowerUnderrun; end past the count is UpperOverrun. It copies the
+range into a new storage and reads no byte into a Botlish value. The file
+writers use it to continue after a short write
+(WINDOWS-X86-64-MILESTONE-7.md).
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+part = std::byte_store::from_list("abcdef".encode_utf8()).slice(1, 4):
+    on LowerUnderrun:
+        std::byte_store::from_list([])
+    on UpperOverrun:
+        std::byte_store::from_list([])
+part.byte_count()
+@value 3
+@end
+
 @topic stdlib.std::byte_store::decode_utf8
 title: -
 summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.

@@ -142,7 +142,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
-            | BytesFromList | BytesJoin | BytesDecodeUtf8
+            | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
             // The writable storage family (MUTABLE-BYTES.md): each of these
             // but length/address makes a fresh object (a collection may run
             // first, with the operands rooted).
@@ -234,7 +234,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // not a byte storage (TYPE), an oversized storage (RANGE). A checked
         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
-        | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr
+        | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice | BytesLen | BytesAddr
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
@@ -1282,6 +1282,26 @@ pub extern "C" fn rt_bytes_join(p: *mut Vm, l: Value) -> Value {
         }
     });
     vm(p).metrics.record_list_copy(total);
+    r
+}
+
+/// `byte_store::slice` (core/bytestore.tcl, WINDOWS-X86-64-MILESTONE-7.md):
+/// the storage of V's bytes START..END-1, by the one slice rule
+/// (`check_slice`: LowerUnderrun / UpperOverrun unless 0 <= START <= END <=
+/// N). One allocation (none for an empty slice); V stays reachable as the
+/// allocating instruction's operand while it is made.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_slice(p: *mut Vm, v: Value, start: Value, end: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::slice") {
+        return failed;
+    }
+    let n = bytes_of(v).len();
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), n) {
+        Ok(bounds) => bounds,
+        Err(failed) => return failed,
+    };
+    let r = vm(p).new_bytes_with(to - from, |init| init.push_slice(&bytes_of(v)[from..to]));
+    vm(p).metrics.record_list_copy(to - from);
     r
 }
 
@@ -3325,6 +3345,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesJoin => rt_bytes_join(p, a[0]),
         BytesDecodeUtf8 => rt_bytes_decode_utf8(p, a[0]),
+        BytesSlice => rt_bytes_slice(p, a[0], a[1], a[2]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
         MBytesFrom => rt_mbytes_from(p, a[0]),
@@ -3480,6 +3501,7 @@ runtime_helpers! {
     (rt_bytes_from_list, 2),
     (rt_bytes_join, 2),
     (rt_bytes_decode_utf8, 2),
+    (rt_bytes_slice, 4),
     (rt_bytes_len, 2),
     (rt_bytes_addr, 2),
     (rt_mbytes_new, 2),

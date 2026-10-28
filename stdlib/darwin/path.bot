@@ -31,7 +31,17 @@
 # module's own `concat` and `text` (TRAITS.md: the owner's declarations,
 # nothing else), so a function over std::io::path::Path specializes to direct
 # calls of them.
+#
+# A DarwinPath is also a std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md):
+# its native path is its UTF-8 bytes (`native`), and its filesystem
+# operations below are std::darwin::fs's on that native path, which require
+# std::darwin::fs::DarwinFS (so every caller does: the requirement is
+# derived).
+import std::abi
+import std::abi::bytes
 import std::char
+import std::darwin::fs
+import std::io::fs
 import std::str
 import std::io::path
 
@@ -92,3 +102,41 @@ fn concat(path: DarwinPath, component: str) -> DarwinPath errors std::io::path::
         std::str::concat(path.append_char('/'), component)
     validate(joined)
     joined
+
+# ---------------------------------------------------------------------------
+# std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md)
+
+# PATH's native path: its UTF-8 bytes, exactly (no normalization).
+fn native(path: DarwinPath) -> std::darwin::fs::NativePath:
+    std::darwin::fs::of_valid_text(path)
+
+# Every byte of the file PATH.
+fn read_file(path: DarwinPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    std::darwin::fs::read_file(path.native())
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: DarwinPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::darwin::fs::write_file(path.native(), data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists.
+fn create_file(path: DarwinPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::darwin::fs::create_file(path.native(), data)
+
+# Every entry of the directory PATH but "." and "..", with its textual name;
+# std::io::path::NotText for a name that is not UTF-8.
+fn entries(path: DarwinPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+    listed = std::darwin::fs::entries(path.native())
+    loop e in listed:
+        std::io::fs::Entry {name: std::darwin::fs::text(e.name), kind: e.kind}
+
+# A new, empty directory PATH.
+fn create_directory(path: DarwinPath) -> unit errors std::io::fs::FileError:
+    std::darwin::fs::create_directory(path.native())
+
+# Removes the name PATH of anything but a directory.
+fn remove_file(path: DarwinPath) -> unit errors std::io::fs::FileError:
+    std::darwin::fs::remove_file(path.native())
+
+# Removes the empty directory PATH.
+fn remove_directory(path: DarwinPath) -> unit errors std::io::fs::FileError:
+    std::darwin::fs::remove_directory(path.native())

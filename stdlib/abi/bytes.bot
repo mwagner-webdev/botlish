@@ -86,7 +86,7 @@
 # observes (std::linux::read does, with `detach`). That is the raw layer's sharp
 # edge.
 #
-# Not here, deliberately: slicing, indexing, capacity,
+# Not here, deliberately: indexing, capacity,
 # resizing, NUL-terminated strings (CString), and any retained-pointer or
 # lifetime story.
 import std::abi
@@ -116,6 +116,13 @@ fn join(parts: List[Bytes]) -> Bytes:
     storages = loop part in parts:
         part.storage
     Bytes {storage: std::byte_store::join(storages)}
+
+# DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md:
+# the bytes a short write left unwritten): the one slice rule of
+# std::str::substring -- LowerUnderrun or UpperOverrun unless 0 <= START <=
+# END <= length(DATA). An empty slice is the empty Bytes.
+fn slice(data: Bytes, start: int, end: int) -> Bytes errors LowerUnderrun, UpperOverrun:
+    Bytes {storage: std::byte_store::slice(data.storage, start, end)}
 
 # The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse
 # (WINDOWS-X86-64-MILESTONE-7.md). Strict -- an overlong form, an encoded

@@ -1,0 +1,38 @@
+# trait-plan-entry-context-trait.bot -- a pre-existing trait-plan defect
+# found while designing std::io::fs (WINDOWS-X86-64-MILESTONE-7.md,
+# "Findings"): a trait, its witness and the witness's implementation all in
+# the entry program, the implementation's body needing a context trait
+# (std::io::IO, through std::io::print_line), is an internal error on every
+# backend --
+#
+#   malformed IR: trait plan: entry-program binding "show" is not
+#   established here: ref show (CORE MALFORMED)
+#
+# -- where it should run (and be MISSING-CONTEXT without the installation).
+# The same program with the implementation needing a context struct, or no
+# context, runs. std::io::fs is not affected: its witnesses
+# (std::linux::path::LinuxPath, std::windows::path::WindowsPath,
+# std::darwin::path::DarwinPath) and their implementations live in their own
+# modules, and the contexts they need are structs.
+#
+#   tclsh9.0 main.tcl audit/filesystem/findings/trait-plan-entry-context-trait.bot
+import std::io
+import std::linux::io
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    std::io::print_line("A"):
+        on std::io::WriteFailed:
+            return 0
+    t.v
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+with context std::linux::io::create()
+twice(A {v: 1})

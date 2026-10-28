@@ -1394,6 +1394,13 @@ core::native::declareError NonFiniteFloat
 
 # The standard library's internal Botlish modules (declareInternalModule).
 core::native::declareInternalModule std::ordered_table
+core::native::declareInternalModule std::io::bytepath
 # ... and the internal members of its public ones (declareInternalMember).
 core::native::declareInternalMember std::mutable_set::table_of
 core::native::declareInternalMember std::mutable_set::of_table
+# ... and the native path of a text a platform's path module already proved
+# a valid path (WINDOWS-X86-64-MILESTONE-7.md): std::linux::path::native and
+# its siblings build it with no second validation.
+core::native::declareInternalMember std::linux::fs::of_valid_text
+core::native::declareInternalMember std::windows::fs::of_valid_text
+core::native::declareInternalMember std::darwin::fs::of_valid_text

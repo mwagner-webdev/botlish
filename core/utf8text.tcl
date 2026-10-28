@@ -21,9 +21,10 @@
 # native/src/runtime/ops.rs's rt_bytes_decode_utf8 decodes by the same rule.
 #
 # It exists because a name the operating system returns is bytes (Linux,
-# Darwin) or UTF-16 (Windows, transcoded to UTF-8 by std::windows::fs): the
-# textual layer of a path needs the String of such a name when it has one,
-# and an explicit failure when it has none (std::io::path::NotText).
+# Darwin) or UTF-16 (Windows, transcoded to UTF-8 by the standard library):
+# the textual layer of a path needs the String of such a name when it has
+# one, and an explicit failure when it has none
+# (WINDOWS-X86-64-MILESTONE-7.md, "Two layers").
 
 namespace eval core::utf8text {}
 

@@ -1,0 +1,124 @@
+# bytepath.bot -- the "std::io::bytepath" namespace: the byte-path syntax the
+# Unix-family native paths share (WINDOWS-X86-64-MILESTONE-7.md). Internal to
+# the standard library (core/native.tcl's declareInternalModule): no program
+# imports it. std::linux::fs's and std::darwin::fs's NativePath each hold the
+# bytes the kernel or libSystem takes, and each module's own functions (its
+# NativePath stays its platform's own type) delegate their syntax here, so
+# both platforms join, decode and display byte names by one text.
+#
+# A byte path is non-empty and holds no 0; "/" separates components. Joining
+# appends a relative fragment with one "/"; nothing is normalized, nothing
+# observed.
+import std::abi
+import std::abi::bytes
+import std::io::path
+import std::list
+import std::str
+import type std::byte::Byte
+
+fn slash() -> Byte:
+    47
+
+fn dot() -> Byte:
+    46
+
+# true when no byte of BYTES is 0.
+fn nul_free?(bytes: List[Byte]) -> bool:
+    loop b in bytes:
+        if b == 0:
+            return false
+    true
+
+# true when BYTES is a valid byte path: non-empty, no byte 0.
+fn valid?(bytes: List[Byte]) -> bool:
+    std::list::length(bytes) > 0 and bytes.nul_free?()
+
+# BYTES' String: their UTF-8 decoding; std::io::path::NotText when they are
+# not UTF-8 (never a replacement character).
+fn text(bytes: List[Byte]) -> str errors std::io::path::NotText:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            fail std::io::path::NotText
+
+# How many bytes the UTF-8 sequence led by B claims (0: B leads none).
+fn claimed(b: Byte) -> int:
+    if b < 128:
+        return 1
+    if b >= 194 and b <= 223:
+        return 2
+    if b >= 224 and b <= 239:
+        return 3
+    if b >= 240 and b <= 244:
+        return 4
+    0
+
+# BYTES[START, START + N), or [] when that is not inside BYTES.
+fn piece(bytes: List[Byte], start: int, n: int) -> List[Byte]:
+    if start < 0 or n < 0 or start + n > std::list::length(bytes):
+        return []
+    loop i from start to start + n:
+        bytes.at(i):
+            on IndexNotFound:
+                0
+
+# BYTES[POS..] for people: each UTF-8 sequence as its character, every byte
+# of none as U+FFFD.
+fn lossy(bytes: List[Byte], pos: int) -> str:
+    lead = bytes.at(pos):
+        on IndexNotFound:
+            return ""
+    n = claimed(lead)
+    decoded = std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes.piece(pos, n))):
+        on InvalidUtf8:
+            ""
+    if n == 0 or std::str::length(decoded) == 0:
+        return std::str::concat("".append_char('�'), bytes.lossy(pos + 1))
+    std::str::concat(decoded, bytes.lossy(pos + n))
+
+# BYTES for people: their String when they have one, else every byte that is
+# not part of a UTF-8 sequence shown as U+FFFD. Lossy: never a path.
+fn display(bytes: List[Byte]) -> str:
+    text(bytes):
+        on std::io::path::NotText:
+            return bytes.lossy(0)
+
+# true when BYTES is a relative fragment: it does not start with "/".
+fn relative?(bytes: List[Byte]) -> bool:
+    first = bytes.at(0):
+        on IndexNotFound:
+            return false
+    first != slash()
+
+# true when BYTES' last byte is "/".
+fn ends_with_slash?(bytes: List[Byte]) -> bool:
+    last = bytes.at(std::list::length(bytes) - 1):
+        on IndexNotFound:
+            return false
+    last == slash()
+
+# The bytes of A followed by the bytes of B.
+fn joined(a: List[Byte], b: List[Byte]) -> List[Byte]:
+    loop i from 0 to std::list::length(a) + std::list::length(b):
+        if i < std::list::length(a):
+            a.at(i):
+                on IndexNotFound:
+                    0
+        else:
+            b.at(i - std::list::length(a)):
+                on IndexNotFound:
+                    0
+
+# PATH joined with the relative NAME: one "/" between them unless PATH
+# already ends with one; std::io::path::NotAPath when NAME starts with "/" (an
+# absolute NAME would replace PATH, which joining never does) or is no byte
+# path.
+fn join(path: List[Byte], name: List[Byte]) -> List[Byte] errors std::io::path::NotAPath:
+    if not name.valid?() or not name.relative?():
+        fail std::io::path::NotAPath
+    if path.ends_with_slash?():
+        return path.joined(name)
+    path.append(slash()).joined(name)
+
+# true for "." and "..".
+fn dot_or_dot_dot?(name: List[Byte]) -> bool:
+    name == [dot()] or name == [dot(), dot()]

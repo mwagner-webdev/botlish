@@ -209,7 +209,7 @@ proc Z {} { return "std::byte::from_int(90)" }
 # ---------------------------------------------------------------------------
 # Registration and declaration
 
-test abi-mutable-bytes-natives-registered {the writable storage family is eight natives -- seven in their own namespace std::mutable_byte_store (zeroed, from_storage, count, replace, detach, freeze, freeze_prefix) and the writable address bridge -- none context-free (a mutable value is never a compile-time constant), none knowing a syscall; the immutable family std::byte_store is from_list, byte_count, join and decode_utf8 (the last two WINDOWS-X86-64-MILESTONE-7.md's); the bridge is a raw-address native like from_bytes; no native reads an address or makes a pointer -- the one name that says read is std::binary::read, the designator read of byte storage (LAYOUT-UNIONS.md)} -body {
+test abi-mutable-bytes-natives-registered {the writable storage family is eight natives -- seven in their own namespace std::mutable_byte_store (zeroed, from_storage, count, replace, detach, freeze, freeze_prefix) and the writable address bridge -- none context-free (a mutable value is never a compile-time constant), none knowing a syscall; the immutable family std::byte_store is from_list, byte_count, join, slice and decode_utf8 (the last three WINDOWS-X86-64-MILESTONE-7.md's); the bridge is a raw-address native like from_bytes; no native reads an address or makes a pointer -- the one name that says read is std::binary::read, the designator read of byte storage (LAYOUT-UNIONS.md)} -body {
     set bridge [core::native::metadata std::abi::x86_64::from_mutable_bytes]
     list [lsort [lsearch -all -inline [core::native::names] std::mutable_byte_store::*]] \
         [lsort [lsearch -all -inline [core::native::names] std::byte_store::*]] \
@@ -217,7 +217,7 @@ test abi-mutable-bytes-natives-registered {the writable storage family is eight 
         [dict get $bridge arity] [dict get $bridge paramTypes] [dict get $bridge resultShape] \
         [dict get $bridge contextFree] [dict get $bridge runtime] [dict get $bridge errors] \
         [lsearch -all -inline -regexp [core::native::names] {(?i)read|keepalive|pointer|ptr}]
-} -result {{std::mutable_byte_store::count std::mutable_byte_store::detach std::mutable_byte_store::freeze std::mutable_byte_store::freeze_prefix std::mutable_byte_store::from_storage std::mutable_byte_store::replace std::mutable_byte_store::zeroed} {std::byte_store::byte_count std::byte_store::decode_utf8 std::byte_store::from_list std::byte_store::join} {0 0 0 0 0 0 0} 1 struct {named-struct std::abi::x86_64::Register64} 0 raw-address {} std::binary::read}
+} -result {{std::mutable_byte_store::count std::mutable_byte_store::detach std::mutable_byte_store::freeze std::mutable_byte_store::freeze_prefix std::mutable_byte_store::from_storage std::mutable_byte_store::replace std::mutable_byte_store::zeroed} {std::byte_store::byte_count std::byte_store::decode_utf8 std::byte_store::from_list std::byte_store::join std::byte_store::slice} {0 0 0 0 0 0 0} 1 struct {named-struct std::abi::x86_64::Register64} 0 raw-address {} std::binary::read}
 
 test abi-mutable-bytes-declaration {std::abi::bytes::MutableBytes is an opaque struct with one hidden field, owned by module std::abi::bytes (the one module that owns both byte types, so Bytes and MutableBytes convert without any public accessor): the existing opaque-struct mechanism, no new visibility rule} -body {
     set text [read [open [file join $::projectRoot stdlib abi bytes.bot]]]
@@ -226,13 +226,13 @@ test abi-mutable-bytes-declaration {std::abi::bytes::MutableBytes is an opaque s
         [hir::structs::isOpaque std::abi::bytes::MutableBytes] [hir::structs::names std::abi::bytes::MutableBytes] [hir::structs::owner std::abi::bytes::MutableBytes]
 } -result {1 1 storage std::abi::bytes}
 
-test abi-mutable-bytes-api-surface {the module adds exactly the small MutableBytes API beside the Bytes pair (and the Bytes' join and decode_utf8, WINDOWS-X86-64-MILESTONE-7.md): zeroed, from_bytes, mutable_length, replace, detach, freeze and freeze_prefix; no indexing, slicing, capacity, resizing, append or address accessor} -body {
+test abi-mutable-bytes-api-surface {the module adds exactly the small MutableBytes API beside the Bytes pair (and the Bytes' join, slice and decode_utf8, WINDOWS-X86-64-MILESTONE-7.md): zeroed, from_bytes, mutable_length, replace, detach, freeze and freeze_prefix; no indexing, slicing, capacity, resizing, append or address accessor} -body {
     set text [read [open [file join $::projectRoot stdlib abi bytes.bot]]]
     set fns [lmap line [split $text \n] {
         if {![regexp {^fn ([a-z0-9_]+)} $line -> name]} continue
         set name
     }]
-    lsearch -all -inline -not -regexp $fns {^(from_list|length|join|decode_utf8)$}
+    lsearch -all -inline -not -regexp $fns {^(from_list|length|join|slice|decode_utf8)$}
 } -result {zeroed from_bytes mutable_length replace detach freeze freeze_prefix}
 
 # ---------------------------------------------------------------------------
