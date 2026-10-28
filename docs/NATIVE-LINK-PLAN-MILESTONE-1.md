@@ -859,7 +859,13 @@ as `ELF AArch64` objects, and the native library test linked its archive.
 clang can build one (the test passes without refusing anything when no
 cross compiler exists, and the log does not say which happened).
 
-(The GC-stress job: filled in below.)
+The GC-stress job's first attempt ended after 75 minutes with "The
+hosted runner lost communication with the server" while the suite was
+running (no test had reported a failure; main's GC-stress jobs take about
+2.3 hours on that runner). Its one re-run passed (**Executed**, job
+122574153301): the whole Tcl suite under `BOTLISH_NATIVE_GC_STRESS=1`,
+native-link-plan.test among it, 9,740 tests on each of its two passes,
+0 failed.
 
 ## 35. macOS AArch64 CI
 
