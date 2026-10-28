@@ -387,9 +387,101 @@ exploration's README record the fix and the tool.
 
 All commands were run on Linux x86-64 with Tcl 9.0.1 (the `.deb` packages
 AGENTS.md pins), `LANG=C.utf8 LC_ALL=C.utf8`, and the native backend built
-in release mode.
+in release mode (rustc 1.97.0).
 
-(Filled in below as the runs completed.)
+**Reproduction, before and after.** Section 2 has both outcomes:
+`tclsh9.0 main.tcl audit/event-loop/repro/trait-op-yield-edge/app.bot` is
+`UNWRAPPED-YIELD` at `cf668038` and evaluates to 5 now. With `-warnings
+error` it is also 5.
+
+**The new tests** (17):
+
+```
+tclsh9.0 tests/context-traits.test -match 'ct-operation-identity-*'    # 11 passed
+tclsh9.0 tests/traits.test -match 'trait-operation-identity-*'         # 6 passed
+```
+
+The same two commands, run with the new test files on a worktree of
+`cf668038`, fail 10 of 11 and 6 of 6.
+
+**Baselines before the change** (`cf668038`): `tests/coroutines.test` 81/81,
+`tests/context-traits.test` 40/40, `tests/traits.test` 78/78.
+
+**The whole local suite** (`tclsh9.0 tests/local.tcl -jobs 3`: every Tcl
+test file on interp and compile, golden duplicates skipped, and every golden
+suite on four backends, through the front-end cache; 103 minutes from an
+empty cache):
+
+```
+Tcl tests on interp    7507 passed, 1 failed, 101 skipped, 2276 golden duplicates skipped
+Tcl tests on compile   7502 passed, 1 failed, 106 skipped, 2276 golden duplicates skipped
+Golden suites: 109 run, 0 failed; tests passed: interp 5257/5257, compile 5257/5257,
+               cranelift-generic 5165/5165, cranelift 5267/5267
+```
+
+The one failure on each backend was `static-economics.test`'s
+`se-property-demotion-keeps-diagnostics`. That is a structural test that
+reads `[info body hir::check]`, and the demotion re-check had moved into
+`hir::CheckWith`. The test now reads `hir::CheckWith` and checks that
+`hir::check` calls it. After that change, `tests/static-economics.test`
+passes 87/87 on both interp and compile (`CORE_BACKEND=interp|compile`).
+
+**Fuzzers** (each with 0 disagreements and 0 failures):
+
+| command | programs |
+|---|---|
+| `audit/coroutines/tools/fuzz.tcl -seed 1`, `-seed 2`, `-seed 3` | 50 each |
+| `audit/context-traits/tools/fuzz.tcl -seed 1`, `-seed 2` | 50 each |
+| `audit/traits/tools/fuzz.tcl -seed 1`, `-seed 2` | 100 each |
+| `audit/direct-modules/tools/fuzz.tcl -seed 1`, `-seed 2` | 60 each |
+| `audit/static-decisions/tools/fuzz.tcl -seed 17`, `-seed 41` | 20 each (484 and 564 static sites) |
+| `audit/method-eligible/tools/fuzz.tcl 40 1` | 40 seeds, 184 of 184 round trips |
+| `audit/affine/tools/fuzz.tcl -seed 1` | 30 |
+
+`static-decisions` seed 41 reports "layout pairs taking different rounds:
+2". The tree before the change prints the identical report for that seed.
+
+**Event loop.** `tclsh9.0 audit/event-loop/tools/original-names.tcl`
+reported PASS with 44 checks: 6 replacements counted, the two collisions
+present, and for each of the 12 deterministic scenarios one outcome per
+tree on 4 backends and the same trace under either name. The same tool,
+run on a worktree of `cf668038`, fails on `a-smoke` with the original bug
+in the full scheduler:
+
+```
+a-smoke.bot:26:1: main may suspend, but this call does not start a coroutine ...
+    main, which calls evloop::run at a-smoke.bot:21:5
+     -> evloop::run, which calls evloop::wait at evloop.bot:1026:21
+     -> evloop::wait, which yields directly at evloop.bot:668:5
+```
+
+**Mutation.**
+
+* `audit/traits/tools/mutate.tcl -only operation-callee-is-candidate,operations-not-set-aside,check-not-repeated,consulted-never-recorded`:
+  4 mutants, 4 killed.
+* `audit/context-traits/tools/mutate.tcl -only 'operation-*,unknown-operation-field-access'`
+  (after the harness copies `audit/event-loop/repro`): 3 mutants, 3
+  killed.
+* `audit/static-decisions/tools/mutate.tcl -only recheck-rounds-across-checks,recheck-rounds-not-shared,recheck-analysis-repeated`
+  (the three re-anchored mutants): 3 mutants, 3 killed.
+* Every edit of every `audit/*/mutants.txt` was checked with a script that
+  counts each replaced text's occurrences: the set of edits that do not
+  apply exactly once is the same as at `cf668038`. The exceptions are
+  multi-edit mutants whose later edit applies to an earlier edit's result,
+  and the hash-table audit's relative paths. No mutant text of this
+  milestone's files was left behind.
+
+**Not run here.** These need hosts or schedules this environment does not
+have:
+
+* the static-decisions sequential comparison
+  (`audit/static-decisions/tools/compare.tcl`), which AGENTS.md reserves for
+  CI;
+* macOS and Windows, and Linux AArch64;
+* GC stress: the change emits no native code and changes no runtime.
+
+The SDL3 and native-driver parts of the event-loop checks were not run:
+the renamed operations were exercised through the deterministic driver.
 
 ## 9. Remaining limitations
 
