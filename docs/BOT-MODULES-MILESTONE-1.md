@@ -774,11 +774,11 @@ nothing is claimed for it):
 | `icy-tower.yml` (the game's tests with the binding staged as a package, `build.sh`, the oracle comparison, the mutants, the Xvfb session) | 3844140 | **passed** |
 | `tests.yml` (the whole Tcl suite, golden shards, native, stub and system linkers, warning gate) | a12e615 | pending (queued) |
 | `tests-arm64.yml` | a12e615 | pending (queued) |
-| `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | pending (plan done, comparisons queued) |
+| `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | pending (plan done; mutable-array.bot running, the four shards queued) |
 | `single-executable.yml` (builds the single executable, smoke tests in stock containers) | 3844140 | pending (queued) |
 | `macos-arm64.yml` (smoke and acceptance tiers, which include `bot-modules.test`) | b6b05aa | pending (queued) |
 | `windows-x86_64.yml` (smoke and acceptance tiers) | b6b05aa | pending (queued) |
-| `icy-tower-windows.yml` (the Windows build stages the MSVC binding as a package) | b6b05aa | pending (queued) |
+| `icy-tower-windows.yml` (on windows-2025: the MSVC SDL3 binding generated and installed as the game's package, the game compiled, linked and its Windows tests run, played headless, the signing dry run) | b6b05aa | **passed** |
 
 The commits after the one each run tested change only documents, the
 fuzzer, the new cache test and a comment (a12e615's `surface/cache.tcl`
