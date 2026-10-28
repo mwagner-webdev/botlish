@@ -689,8 +689,6 @@ proc hir::coroutines::Implementations {hir given} {
         # in code that depends on a resolution failure is not reported.)
         return {}
     }
-    set bySid [dict create]
-    set refs [dict create]
     set operations {}
     set binds {}
     dict for {e node} [dict get $hir exprs] {
@@ -699,12 +697,6 @@ proc hir::coroutines::Implementations {hir given} {
                 if {[dict exists $node traitCall] && ![dict exists $node traitCall unknown]} {
                     lappend operations $e
                 }
-                if {[dict exists $node sid]} {
-                    dict lappend bySid [dict get $node sid] $e
-                }
-            }
-            ref {
-                dict lappend refs [dict get $node binding] $e
             }
             bind {
                 lappend binds $e
@@ -713,6 +705,22 @@ proc hir::coroutines::Implementations {hir given} {
     }
     if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
         return {}
+    }
+    # The calls by their syntax (the plan's actions are per syntax node) and
+    # the references of each binding.
+    set bySid [dict create]
+    set refs [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        switch -- [dict get $node kind] {
+            call {
+                if {[dict exists $node sid]} {
+                    dict lappend bySid [dict get $node sid] $e
+                }
+            }
+            ref {
+                dict lappend refs [dict get $node binding] $e
+            }
+        }
     }
     dict incr ::hir::buildStats effectPlans
     set walk [hir::traits::PlanCalls $hir {}]
