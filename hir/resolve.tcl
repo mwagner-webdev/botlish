@@ -502,6 +502,38 @@ proc hir::resolve::MethodCandidates {hirVar s name ctx argCount {hiddenVar ""} {
     return $all
 }
 
+# The context trait whose operation the method-style call written WRITTEN
+# (`receiver.op`, from scope S) is, when its receiver is a reference to a
+# context-trait binding (hir::contexts::TraitBinding), else "". Such a call
+# is the trait's operation whatever functions named `op` are visible
+# (CONTEXT-TRAITS.md; TRAITS.md, "Trait operations": the trait declaration
+# is authoritative, and the method candidate rule is not consulted) -- and
+# no candidate could be its valid ordinary call, since a context-trait
+# binding is no value to pass (CONTEXT-TRAIT-MISUSE) -- so the call consults
+# none: it stays the call of the projection `receiver.op` that typing makes
+# the operation, the form it has when no function of that name is visible.
+# A candidate would stand in as its callee, and the analyses before typing,
+# its flags and its variadic collection would read the call as that
+# function's (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). The
+# receiver's binding is the one the reference itself resolves to (the
+# lexical walk of Lookup).
+proc hir::resolve::ContextTraitOperation {hirVar s written} {
+    upvar 1 $hirVar hir
+    if {![dict exists $written receiver]} {
+        return ""
+    }
+    set receiver [dict get $written receiver]
+    if {[dict get $receiver kind] ne "ref" || [dict exists $receiver qualified]
+            || [dict exists $receiver hole] || [dict getdef $receiver root 0]} {
+        return ""
+    }
+    set b [LexicalTarget hir $s [dict get $receiver name]]
+    if {$b eq "" || $b eq "ambient" || [llength $b] != 1} {
+        return ""
+    }
+    return [hir::contexts::TraitBinding $hir $b]
+}
+
 # The key naming the method-style call NODE (a call syntax node) across
 # rebuilds of the same program: its source file and its structural node id.
 # "" for a node with no source identity (one that did not come from source).
@@ -1286,7 +1318,8 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 ResolveLayoutQuery hir $e $node $layoutNative $layoutRole $ctx
                 return $e
             }
-            if {[dict exists $node method] && $planned ne "field"} {
+            if {[dict exists $node method] && $planned ne "field"
+                    && [ContextTraitOperation hir $scope $written] eq ""} {
                 set candidates [MethodCandidates hir $scope [dict get $written name] $ctx \
                     [expr {[llength [dict get $node args]] + 1}] hidden private]
                 if {[AfterBindingHole hir $scope ""]} {

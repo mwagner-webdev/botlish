@@ -3,7 +3,9 @@
 # `wait` renamed the program evaluates to 5), but the coroutine analysis
 # counts it as a call edge to `m::wait`, so `m::run` "may suspend" and the
 # top-level call is UNWRAPPED-YIELD. EVENT-LOOP-EXPLORATION.md, "Compiler
-# findings".
+# findings". Fixed by CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md:
+# the program evaluates to 5 (tests/context-traits.test's
+# ct-operation-identity-repro compiles this directory's app.bot).
 struct Reg:
     slot: int
 

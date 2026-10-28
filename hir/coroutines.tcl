@@ -34,6 +34,15 @@
 #                 one, a module function), excluding the thunks' boundary
 #                 calls. A call through a function value is no edge: a
 #                 function that may yield never becomes a value (below).
+#                 Nor is a trait operation (TRAITS.md, CONTEXT-TRAITS.md):
+#                 its implementation is bound only in the monomorphized
+#                 program, and the visible function of its name that
+#                 method syntax may have stood it in with is no part of it
+#                 -- not an edge, not a coroutine's root, not a use-site
+#                 constraint. The typing decides which calls are trait
+#                 operations after this analysis, so hir::check tells it
+#                 (Target, TraitOperations;
+#                 CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md).
 #   protocol      the resume protocol of every function that may yield,
 #                 bottom-up over the call graph, a least fixed point over
 #                   none   no constraint: every yield's value is discarded and
@@ -100,7 +109,9 @@
 # What HIR keeps (dict `coroutines`): blocks (yielding function -> protocol
 # and yield type), thunks (thunk -> its create call and root function),
 # boundaries (a thunk's boundary call -> the thunk), yields (yield call -> its
-# function), and, after verify, mayYield (the functions that may yield),
+# function), operations (the method-style calls set aside as trait
+# operations) and consulted (the method-style calls whose written callee the
+# analysis read), and, after verify, mayYield (the functions that may yield),
 # moves (move bind -> moved binding), releases (a statement -> the handle
 # bindings whose coroutines are released after it), exits (an exit statement
 # -> the bindings released when it leaves) and errorExits (a call or handle
@@ -170,13 +181,22 @@ proc hir::coroutines::ShowProtocol {p} {
 # ---------------------------------------------------------------------------
 # analyze: thunks, call graph, protocols (before type inference)
 
-proc hir::coroutines::analyze {hirVar} {
+proc hir::coroutines::analyze {hirVar {operations {}}} {
     upvar 1 $hirVar hir
     if {![Used $hir]} {
         dict set hir coroutines [dict create]
         return
     }
     lassign [hir::contexts::Walk $hir] owner parent rootOf calls blocks
+    # The method-style calls a typing of this HIR made trait operations
+    # (hir::check): no call of their written callee (Target).
+    set excluded [dict create]
+    foreach c $operations {
+        dict set excluded $c 1
+    }
+    # The method-style calls whose written callee this analysis read
+    # (Consulted): what hir::check asks the typing about.
+    set consulted [dict create]
     # Thunks: the block literal argument of every create call.
     set thunks [dict create]
     dict for {o list} $calls {
@@ -189,7 +209,10 @@ proc hir::coroutines::analyze {hirVar} {
             if {$inner eq ""} {
                 set root ""
             } else {
-                set root [hir::contexts::Callee $hir $inner]
+                set root [Target $hir $inner $excluded]
+                if {$root ne ""} {
+                    Consulted $hir $inner consulted
+                }
             }
             dict set thunks $arg [dict create create $c root $root call $inner]
         }
@@ -213,7 +236,7 @@ proc hir::coroutines::analyze {hirVar} {
                 continue
             }
             if {$native ne "" || $o eq "" || [dict exists $thunks $o]} continue
-            set target [hir::contexts::Callee $hir $c]
+            set target [Target $hir $c $excluded]
             if {$target ne "" && ![dict exists $thunks $target]} {
                 dict lappend edges $o [list $c $target]
             }
@@ -240,6 +263,14 @@ proc hir::coroutines::analyze {hirVar} {
             }
         }
     }
+    # An edge reaches the protocols only through a yield-capable callee.
+    foreach b $blocks {
+        foreach edge [dict get $edges $b] {
+            if {[dict exists $capable [lindex $edge 1]]} {
+                Consulted $hir [lindex $edge 0] consulted
+            }
+        }
+    }
     # Local constraints: declared protocols and use-site inference.
     set local [dict create]
     set used [dict create]
@@ -251,12 +282,13 @@ proc hir::coroutines::analyze {hirVar} {
             lappend constraints [list $declared [list declared $b]]
         }
         foreach y [dict get $direct $b] {
-            lassign [YieldUses $hir $parent $y] isUsed types projections
+            lassign [YieldUses $hir $parent $y $excluded] isUsed types projections
             if {$isUsed} {
                 dict set used $b 1
             }
             foreach {type at} $types {
                 lappend constraints [list $type [list use $y $at]]
+                Consulted $hir [lindex $at 0] consulted
             }
             if {$projections ne {}} {
                 dict lappend needsStruct $b [list $y [lindex $projections 0]]
@@ -331,7 +363,57 @@ proc hir::coroutines::analyze {hirVar} {
         }
     }
     dict set hir coroutines [dict create blocks $table thunks $thunks yields $yields \
-        edges $edges direct $direct boundaries $boundaries]
+        edges $edges direct $direct boundaries $boundaries \
+        operations [lsort [dict keys $excluded]] consulted [lsort [dict keys $consulted]]]
+}
+
+# The block call C calls for this analysis (hir::contexts::Callee), or ""
+# when C is in EXCLUDED: a method-style call a typing of this HIR made a
+# trait operation. analyze runs before the types are inferred (they read the
+# protocols it infers), so a trait operation that resolution stood in with a
+# visible function of the operation's name -- `d.wait(5)` with a function
+# `wait` visible, the operation's receiver typed only later -- still names
+# that function as its callee here; that function is not the operation's
+# implementation, and its yields, protocol and parameters are no part of the
+# call (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). hir::check
+# tells analyze which calls those are, from the typing of a check that read
+# them (TraitOperations).
+proc hir::coroutines::Target {hir c excluded} {
+    if {[dict exists $excluded $c]} {
+        return ""
+    }
+    return [hir::contexts::Callee $hir $c]
+}
+
+# Records method-style call C in the caller's CONSULTEDVAR: its written
+# callee decided part of the analysis (a coroutine's root, an edge into a
+# yield-capable function, a use-site protocol constraint). Only a
+# method-style call can turn out to be a trait operation.
+proc hir::coroutines::Consulted {hir c consultedVar} {
+    upvar 1 $consultedVar consulted
+    if {[dict exists $hir exprs $c method]} {
+        dict set consulted $c 1
+    }
+}
+
+# The method-style calls analyze must set aside as trait operations, read
+# from HIR, a checked HIR whose protocols analyze inferred: every call among
+# the ones it was told (`operations`) and the ones whose written callee it
+# read (`consulted`) that the typing made a trait operation (`traitCall`).
+# Sorted. hir::check checks again, from the same input, until the calls it
+# set aside are exactly these: then no protocol, yield type, coroutine root
+# or edge of the checked HIR came from a trait operation's written callee.
+proc hir::coroutines::TraitOperations {hir} {
+    if {![dict exists $hir coroutines operations]} {
+        return {}
+    }
+    set found {}
+    foreach c [concat [dict get $hir coroutines operations] [dict get $hir coroutines consulted]] {
+        if {[dict exists $hir exprs $c traitCall]} {
+            lappend found $c
+        }
+    }
+    return [lsort -unique $found]
 }
 
 # The declared `resume T` protocol of block E, or "".
@@ -460,7 +542,7 @@ proc hir::coroutines::ExplainReason {hir reason protocols} {
 # the argument of an exact call with a declared struct parameter (AT {CALL
 # TYPE}); PROJECTIONS the field projections of it (a struct use whose type a
 # projection cannot determine).
-proc hir::coroutines::YieldUses {hir parent y} {
+proc hir::coroutines::YieldUses {hir parent y {excluded {}}} {
     set uses {}
     lassign [dict get $parent $y] p role
     if {[Discarded $hir $parent $y]} {
@@ -490,7 +572,7 @@ proc hir::coroutines::YieldUses {hir parent y} {
             call {
                 set index [lsearch -exact [dict get $node args] $u]
                 if {$index < 0} continue
-                set target [hir::contexts::Callee $hir $q]
+                set target [Target $hir $q $excluded]
                 if {$target eq ""} continue
                 set declared [lindex [dict get $hir exprs $target declaredParamTypes] $index]
                 if {[IsStructProtocol $declared]} {

@@ -879,46 +879,79 @@ proc hir::ReferenceAudit {decided reference seeds} {
 # contracts and runs again. recheckReuse 0 redoes the second check from the
 # start instead; recheckAudit 1 does that as well and fails unless both give
 # the same HIR.
+#
+# The coroutine protocols (hir/coroutines.tcl) type every yield, so they are
+# inferred before the types are -- and so before the typing decides which
+# method-style calls are trait operations, whose written callee is a visible
+# function of the operation's name and never the operation's implementation.
+# When the analysis read such a callee (hir::coroutines::TraitOperations),
+# the check is made again from the same input, the analysis told to set
+# those calls aside, until the calls it set aside are exactly the trait
+# operations it would otherwise read
+# (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). Whether a call is a
+# trait operation is decided by its receiver's static type, which only a
+# declared trait type makes a view: no protocol, which is a struct, unit or
+# any, makes one. The second check is therefore the last, and a program
+# none of whose trait operations' written callees the analysis reads is
+# checked once.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
-    variable recheckReuse
-    variable recheckAudit
     # (Under the front end's recursion floor even when not entered through
     # hir::buildSyntax: native::prepareHir re-checks a HIR itself.)
     Deep {
         set input $hir
-        # The coroutine protocols (hir/coroutines.tcl) type every yield, so
-        # they are inferred before the types are.
-        hir::coroutines::analyze hir
-        set pre $hir
-        set rounds [dict create]
-        CheckOnce hir {} rounds
-        if {[dict exists $hir violatedContracts]} {
-            set diagnostics [dict get $hir diagnostics]
-            set before [dict get $hir beforeCompletions]
-            set demote [lsort -unique [dict keys [dict get $hir violatedContracts]]]
-            if {$recheckAudit || !$recheckReuse} {
-                # The second check from the start, sharing nothing.
-                set full $input
-                hir::coroutines::analyze full
-                CheckOnce full $demote
+        set operations {}
+        for {set pass 1} {1} {incr pass} {
+            set hir $input
+            CheckWith hir $operations
+            set found [hir::coroutines::TraitOperations $hir]
+            if {$found eq $operations} {
+                break
             }
-            if {$recheckReuse} {
-                set hir $pre
-                CheckOnce hir $demote rounds
-                if {$recheckAudit} {
-                    AuditRecheck $full $hir
-                }
-            } else {
-                set hir $full
+            if {$pass > 2} {
+                error "hir::check: the trait operations the coroutine analysis sets aside do not settle: {$operations} then {$found}"
             }
-            dict unset hir violatedContracts
-            dict set hir diagnostics $diagnostics
-            dict set hir beforeCompletions $before
-            dict set hir demotedContracts $demote
+            set operations $found
         }
     }
     return
+}
+
+# hir::check's one check of resolved HIR, the coroutine analysis setting
+# aside the method-style calls OPERATIONS (trait operations: the header).
+proc hir::CheckWith {hirVar operations} {
+    upvar 1 $hirVar hir
+    variable recheckReuse
+    variable recheckAudit
+    set input $hir
+    hir::coroutines::analyze hir $operations
+    set pre $hir
+    set rounds [dict create]
+    CheckOnce hir {} rounds
+    if {[dict exists $hir violatedContracts]} {
+        set diagnostics [dict get $hir diagnostics]
+        set before [dict get $hir beforeCompletions]
+        set demote [lsort -unique [dict keys [dict get $hir violatedContracts]]]
+        if {$recheckAudit || !$recheckReuse} {
+            # The second check from the start, sharing nothing.
+            set full $input
+            hir::coroutines::analyze full $operations
+            CheckOnce full $demote
+        }
+        if {$recheckReuse} {
+            set hir $pre
+            CheckOnce hir $demote rounds
+            if {$recheckAudit} {
+                AuditRecheck $full $hir
+            }
+        } else {
+            set hir $full
+        }
+        dict unset hir violatedContracts
+        dict set hir diagnostics $diagnostics
+        dict set hir beforeCompletions $before
+        dict set hir demotedContracts $demote
+    }
 }
 
 # Fails unless SHARED, the second check hir::check made reusing the first's

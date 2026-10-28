@@ -117,7 +117,8 @@ What failed, or is not established:
   a 300 ms segment, verified).
 * **One compiler bug** was found and reduced (section 12): the coroutine
   analysis takes a context-trait operation call `d.wait(...)` for a call of
-  a same-named yielding function of the trait's module.
+  a same-named yielding function of the trait's module (since fixed:
+  CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md).
 
 ## 2. Starting evidence
 
@@ -691,7 +692,12 @@ Findings for the compiler and language:
   (`repro/trait-op-yield-edge/`: `d.wait(5)` with a yielding `wait(reg:
   Reg)` in the same module; the value is the trait's, but the program is
   rejected with `UNWRAPPED-YIELD`). Worked around by naming the driver
-  operations `clock` and `block`.
+  operations `clock` and `block`. Fixed by
+  CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md: the reproduction now
+  evaluates to 5, and `tools/original-names.tcl` runs every deterministic
+  scenario with the operations renamed back to `now` and `wait` (beside
+  evloop's own `now` and yielding `wait`), with the same traces; the
+  prototype keeps the workaround names.
 * **Friction** recorded while writing a thousand lines of scheduler: element
   places cannot receive mutations, so optional slots become parallel
   vectors; every scheduler operation carries `IndexNotFound`, which every

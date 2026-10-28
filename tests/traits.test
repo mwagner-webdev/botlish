@@ -1142,6 +1142,102 @@ trait-polymorphic functions:
 # ===========================================================================
 # 117. Source audit
 
+# ===========================================================================
+# Operation identity (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md):
+# `s.area()` on a view is the trait's operation whatever functions named
+# `area` are visible; a visible yielding `area` that method syntax stood the
+# call in with before the receiver was typed is never its callee -- not a
+# coroutine edge (the coroutine analysis runs before typing and is told the
+# operations: hir::check), not a top-level call's yield or context
+# requirement (hir::contexts::Callee), not a coroutine's root.
+
+set ::toLib {shapes.bot {struct Sq:
+    side: int
+
+fn make(side: int) -> Sq:
+    Sq {side: side}
+
+fn area(s: Sq) -> int:
+    s.side * s.side
+}
+ysq.bot {struct YSq:
+    side: int
+
+fn make(side: int) -> YSq:
+    YSq {side: side}
+
+fn area(s: YSq) -> int:
+    yield s.side
+    s.side * s.side
+}}
+
+set ::toPrelude {import std::shapes
+import std::ysq
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+struct Reg:
+    slot: int
+
+fn area(reg: Reg) -> int:
+    yield reg.slot
+    1
+
+fn measure(s: Shaped) -> int:
+    s.area()
+
+fn pick(s: Shaped) -> Shaped:
+    s
+
+fn measure_local(s: Shaped) -> int:
+    t = pick(s)
+    t.area()
+
+fn poll(reg: Reg) -> int:
+    reg.area() + 10
+
+fn both(s: Shaped, reg: Reg) -> int:
+    s.area() + reg.area()
+
+}
+
+test trait-operation-identity-unrelated-yield {a trait operation does not acquire the yield effect of a visible yielding function of its name: the receiver a declared trait parameter, a local the typing makes a view, or a top-level call's view result} -body {
+    moduleAgree $::toLib "${::toPrelude}\[measure(std::shapes::make(3)), measure_local(std::shapes::make(4)), pick(std::shapes::make(5)).area()\]\n"
+} -result {value {[9, 16, 25]}}
+
+test trait-operation-identity-context {a trait operation does not acquire the context requirement of a visible function of its name, at the top level or in a function} -body {
+    moduleAgree $::toLib "import std::shapes\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\ncontext struct Other:\n    y: int\n\nfn area(x: int, context o: Other) -> int:\n    x + o.y\n\nfn pick(s: Shaped) -> Shaped:\n    s\n\nfn measure(s: Shaped) -> int:\n    s.area()\n\n\[pick(std::shapes::make(3)).area(), measure(std::shapes::make(4))\]\n"
+} -result {value {[9, 16]}}
+
+test trait-operation-identity-genuine-yield {a genuinely yielding method-syntax call keeps its effect beside a trait operation of the same name: UNWRAPPED-YIELD at the top level, explained through the yielding call, and a coroutine runs it} -body {
+    set chain [lindex [moduleRejection $::toLib "${::toPrelude}both(std::shapes::make(3), Reg {slot: 2})\n"] 1]
+    list [lindex [moduleRejection $::toLib "${::toPrelude}poll(Reg {slot: 2})\n"] 0] \
+        [string match {*both, which calls area at <input>:28:16*} $chain] \
+        [moduleAgree $::toLib "${::toPrelude}coroutine {step, first} = both(std::shapes::make(3), Reg {slot: 2})\n\[first, step()\]\n"]
+} -result {UNWRAPPED-YIELD 1 {value {[2, 10]}}}
+
+test trait-operation-identity-implementation-yield {a witness's yielding implementation reaches the operation's callers in the monomorphized program, explained through that implementation; before monomorphization it is invisible, so a coroutine started at a function whose only yield is the implementation's is COROUTINE-RHS-NOT-YIELDING (COROUTINES.md's limitation)} -body {
+    set r [moduleRejection $::toLib "${::toPrelude}measure(std::ysq::make(3))\n"]
+    list [lindex $r 0] [string match {*which calls std::ysq::area at*} [lindex $r 1]] \
+        [lindex [moduleRejection $::toLib "${::toPrelude}coroutine {step, first} = measure(std::ysq::make(3))\nfirst\n"] 0]
+} -result {UNWRAPPED-YIELD 1 COROUTINE-RHS-NOT-YIELDING}
+
+test trait-operation-identity-coroutine-root {a trait operation is no coroutine's root: its construction is rejected by the checked program, not by the monomorphized one} -body {
+    moduleRejection $::toLib "${::toPrelude}fn start(s: Shaped) -> unit:\n    coroutine {step, first} = s.area()\n    unit\n\nstart(std::shapes::make(3))\n"
+} -result {COROUTINE-RHS-NOT-YIELDING {the right side of a coroutine binding must be a direct call of a function that may yield (a named function, not a function value or another expression)}}
+
+test trait-operation-identity-set-aside {the checked program's coroutine analysis set aside exactly the trait operations whose written callee is the visible yielding function (measure's, measure_local's and both's), none of which is an edge; with a visible function that does not yield nothing is set aside: the program is checked once} -body {
+    set hir [dict get [moduleHir $::toLib "${::toPrelude}measure(std::shapes::make(3))\n"] traitSource]
+    set ops [dict get $hir coroutines operations]
+    set edgeCalls [concat {*}[lmap {b list} [dict get $hir coroutines edges] {lmap edge $list {lindex $edge 0}}]]
+    set quiet [string map [list "    yield reg.slot\n    1\n" "    reg.slot\n"] $::toPrelude]
+    set hir2 [dict get [moduleHir $::toLib "${quiet}fn gen() -> int:\n    yield 1\n    2\n\nmeasure(std::shapes::make(3))\n"] traitSource]
+    list [llength $ops] [lsort -unique [lmap c $ops {expr {[dict exists $hir exprs $c traitCall] && [dict exists $hir exprs $c method]}}]] \
+        [llength [lmap c $ops {expr {$c in $edgeCalls ? $c : [continue]}}]] \
+        [dict get $hir2 coroutines operations] [dict get $hir2 coroutines consulted]
+} -result {3 1 0 {} {}}
+
 test trait-source-audit {no compiler or runtime source implements traits with runtime names, method maps, dictionaries, function-pointer tables or backend tags} -body {
     set hits {}
     foreach dir {core native/src compiler} {

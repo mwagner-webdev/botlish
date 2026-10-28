@@ -1067,6 +1067,11 @@ proc hir::traits::TypeCall {hirVar e node} {
     set req [requirement $id $name]
     if {$req eq ""} {
         dict set record unknown 1
+        if {[dict get $shape shape] eq "field"} {
+            # Still the trait's (unknown) operation, never a field access:
+            # TRAIT-UNKNOWN-OPERATION is its one diagnostic.
+            dict set hir exprs [dict get $node callee] traitCallee 1
+        }
         dict set hir exprs $e traitCall $record
         return [list any {}]
     }

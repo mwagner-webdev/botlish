@@ -588,3 +588,41 @@ read noescape, count: std::ffi::c::ULongLong, written:
 ====
     std::windows::standard_handle(io.stderr).write_file(data)
 >>>>
+
+# Operation identity (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md):
+# an operation on a context-trait binding consults no method candidate; a
+# visible function of its name is never its callee.
+
+@@ operation-consults-candidates a method-style call on a context-trait binding consults the visible functions of its name, standing in with one as its callee (its flags, variadic collection and nomethod rule apply; the coroutine analysis reads it)
+## hir/resolve.tcl
+<<<<
+            if {[dict exists $node method] && $planned ne "field"
+                    && [ContextTraitOperation hir $scope $written] eq ""} {
+====
+            if {[dict exists $node method] && $planned ne "field"} {
+>>>>
+
+@@ operation-receiver-binding-unrecognized a context-trait binding is not recognized from its declaration (TraitBinding: never), so its operations consult candidates and the binding's misuse goes unreported
+## hir/contexts.tcl
+<<<<
+    set id [loadId $hir [hir::get $hir $by value]]
+    if {$id ne "" && [isTrait $id]} {
+        return $id
+    }
+    return ""
+}
+====
+    return ""
+}
+>>>>
+
+@@ unknown-operation-field-access an operation the context trait does not declare, in the field-shaped form, is also checked as a field access of the binding (UNPROVEN-FIELD restates TRAIT-UNKNOWN-OPERATION)
+## hir/traits.tcl
+<<<<
+        if {[dict get $shape shape] eq "field"} {
+            # Still the trait's (unknown) operation, never a field access:
+            # TRAIT-UNKNOWN-OPERATION is its one diagnostic.
+            dict set hir exprs [dict get $node callee] traitCallee 1
+        }
+====
+>>>>

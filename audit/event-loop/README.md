@@ -30,7 +30,11 @@ EVENT-LOOP-EXPLORATION.md. An isolated prototype -- nothing in `core/`,
   (`tclsh9.0 audit/event-loop/tools/check.tcl ?-parts sim|static|lifetime|native? ?-only GLOB?`);
   `tools/bench.tcl` -- the performance numbers.
 * `repro/trait-op-yield-edge/` -- a compiler bug found on the way, reduced
-  (the report, section 12).
+  (the report, section 12); fixed by
+  CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md, after which
+  `tools/original-names.tcl` checks the deterministic scenarios with the
+  driver operations under their intended names, `now` and `wait`
+  (`tclsh9.0 audit/event-loop/tools/original-names.tcl ?-only GLOB?`).
 
 The C adapters are built by the tools into `build/` (ignored). The SDL3
 parts need the headless SDL3 that `tclsh9.0 tests/cffi/sdl3.tcl` builds, and

@@ -827,6 +827,250 @@ test ct-no-traits-unchanged {a program that declares no trait or context trait i
     list [dict exists $hir traitSource] [dict exists $hir traits]
 } -result {0 0}
 
+# ===========================================================================
+# Operation identity (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md):
+# `d.wait(5)` on a context-trait binding is the trait's operation whatever
+# functions named `wait` are visible. A visible function of that name -- here
+# a yielding `wait` of the trait's own module -- is never its callee: no
+# coroutine edge, no flags, no variadic collection, no nomethod rule. The
+# operation's implementation is the selected context's, whose own yields
+# still reach every caller.
+
+set ::cyLib {ty/drv.bot {struct Reg:
+    slot: int
+
+context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn wait(reg: Reg) -> int:
+    yield reg.slot
+    1
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+
+fn wrapper(context d: Driver) -> int:
+    run() + 1
+
+fn poll(reg: Reg) -> int:
+    wait(reg) + 10
+
+fn deep(reg: Reg) -> int:
+    poll(reg) + 100
+
+fn both(reg: Reg, context d: Driver) -> int:
+    d.wait(5) + reg.wait()
+}
+ty/sim.bot {type Base = Int in 0..10000
+
+opaque context struct Sim:
+    base: Base
+
+fn create() -> Sim:
+    Sim {base: 100}
+
+fn wait(deadline: int, context s: Sim) -> int:
+    deadline + s.base
+}
+ty/alt.bot {type Base = Int in 0..10000
+
+opaque context struct Alt:
+    base: Base
+
+fn create() -> Alt:
+    Alt {base: 1000}
+
+fn wait(deadline: int, context s: Alt) -> int:
+    deadline + s.base
+}
+ty/ysim.bot {type Base = Int in 0..10000
+
+opaque context struct YSim:
+    base: Base
+
+fn create() -> YSim:
+    YSim {base: 100}
+
+fn wait(deadline: int, context s: YSim) -> int:
+    yield deadline
+    deadline + s.base
+}}
+
+# The kinds of every diagnostic of SOURCE's rejection, in order, or
+# "accepted".
+proc diagnosticKinds {source} {
+    if {[catch {surface::compile $source -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+        }
+        return [list [lindex [dict get $options -errorcode] end]]
+    }
+    return accepted
+}
+
+# The program importing the operation-identity library with INSTALLS
+# installed and BODY as its statements.
+proc cyProgram {installs body} {
+    set text "import std::ty::drv\nimport std::ty::sim\nimport std::ty::alt\nimport std::ty::ysim\n"
+    foreach line $installs {
+        append text "with context std::ty::${line}::create()\n"
+    }
+    return "$text$body"
+}
+
+test ct-operation-identity-repro {the event-loop exploration's reduced reproduction (audit/event-loop/repro/trait-op-yield-edge: a yielding `wait` beside the context trait whose operation `d.wait(5)` calls) compiles with warnings as errors and evaluates to the trait implementation's value on both Tcl backends (its context struct's unbounded Int field has no fixed native slot: CONTEXT-NATIVE-LOWERING-UNSUPPORTED, so the native backends run the same program with a bounded field: ct-operation-identity-unrelated-yield)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot audit event-loop repro trait-op-yield-edge app.bot] -warnings error]
+    lsort -unique [lmap b {interp compile} {lrange [outcomeUnderHir $b $hir] 0 end-1}]
+} -result {{value 5}}
+
+test ct-operation-identity-unrelated-yield {a non-yielding context-trait operation does not acquire the yield effect of a same-named yielding function of the trait's module: the operation, a wrapper calling it and its value through either of two implementations} -body {
+    list [moduleAgree $::cyLib [cyProgram sim "\[std::ty::drv::run(), std::ty::drv::wrapper()\]\n"]] \
+        [moduleAgree $::cyLib [cyProgram alt "\[std::ty::drv::run(), std::ty::drv::wrapper()\]\n"]]
+} -result {{value {[105, 106]}} {value {[1005, 1006]}}}
+
+test ct-operation-identity-genuine-yield {a genuinely yielding call keeps its effect: the same-named yielding function called directly, or through a wrapper, is UNWRAPPED-YIELD at the top level and runs as a coroutine; a function making both the operation and a method-syntax call of the yielding function yields through the latter} -body {
+    list [lindex [moduleRejection $::cyLib [cyProgram sim "std::ty::drv::poll(std::ty::drv::Reg {slot: 7})\n"]] 0] \
+        [lindex [moduleRejection $::cyLib [cyProgram sim "std::ty::drv::deep(std::ty::drv::Reg {slot: 7})\n"]] 0] \
+        [lindex [moduleRejection $::cyLib [cyProgram sim "std::ty::drv::both(std::ty::drv::Reg {slot: 3})\n"]] 0] \
+        [moduleAgree $::cyLib [cyProgram sim "coroutine {step, first} = std::ty::drv::deep(std::ty::drv::Reg {slot: 7})\n\[first, step()\]\n"]] \
+        [moduleAgree $::cyLib [cyProgram sim "coroutine {step, first} = std::ty::drv::both(std::ty::drv::Reg {slot: 3})\n\[first, step()\]\n"]]
+} -result {UNWRAPPED-YIELD UNWRAPPED-YIELD UNWRAPPED-YIELD {value {[7, 111]}} {value {[3, 106]}}}
+
+test ct-operation-identity-genuine-chain {the UNWRAPPED-YIELD of a function making both calls explains the yield through the method-syntax call of the yielding function, never through the operation} -body {
+    lindex [moduleRejection $::cyLib [cyProgram sim "std::ty::drv::both(std::ty::drv::Reg {slot: 3})\n"]] 1
+} -match glob -result {*std::ty::drv::both, which calls std::ty::drv::wait at *drv.bot:24:17
+     -> std::ty::drv::wait, which yields directly at *drv.bot:8:5}
+
+test ct-operation-identity-implementation-yield {a selected implementation that yields reaches every caller of the operation: a top-level call of the operation's function is UNWRAPPED-YIELD, explained through that implementation (std::ty::ysim::wait), never through the same-named function of the trait's module -- reported by the monomorphized program's check, where the operation is a direct call of it (trait-implementation yields are invisible before monomorphization: COROUTINES.md)} -body {
+    set r [moduleRejection $::cyLib [cyProgram ysim "std::ty::drv::run()\n"]]
+    list [lindex $r 0] [string match {*which calls std::ty::ysim::wait at*} [lindex $r 1]] \
+        [string match {*std::ty::drv::wait*} [lindex $r 1]]
+} -result {UNWRAPPED-YIELD 1 0}
+
+test ct-operation-identity-implementation-yield-limitation {the limitation the milestone records: a coroutine started at a function whose only yield is its operation's selected implementation is rejected before monomorphization (COROUTINE-RHS-NOT-YIELDING), the same with and without a same-named yielding function in the trait's module} -body {
+    list [lindex [moduleRejection $::cyLib [cyProgram ysim "coroutine {step, first} = std::ty::drv::run()\nfirst\n"]] 0] \
+        [moduleRejection {ty/plain.bot {context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+}
+ty/ysim.bot {type Base = Int in 0..10000
+
+opaque context struct YSim:
+    base: Base
+
+fn create() -> YSim:
+    YSim {base: 100}
+
+fn wait(deadline: int, context s: YSim) -> int:
+    yield deadline
+    deadline + s.base
+}} "import std::ty::plain\nimport std::ty::ysim\nwith context std::ty::ysim::create()\ncoroutine {step, first} = std::ty::plain::run()\nfirst\n"]
+} -match glob -result {COROUTINE-RHS-NOT-YIELDING {COROUTINE-RHS-NOT-YIELDING *}}
+
+test ct-operation-identity-order {declaration order decides nothing: the yielding function declared before or after the trait, before or after the operation's function (where it is not visible to it), the modules imported in either order} -body {
+    set reg "struct Reg:\n    slot: int\n\n"
+    set trait "context trait Driver:\n    fn wait(deadline: int) -> int\n\n"
+    set yielding "fn wait(reg: Reg) -> int:\n    yield reg.slot\n    1\n\n"
+    set run "fn run(context d: Driver) -> int:\n    d.wait(5)\n\n"
+    set sim [lindex $::cyLib 3]
+    set results {}
+    foreach order [list [list $reg $trait $yielding $run] [list $reg $yielding $trait $run] [list $trait $run $reg $yielding]] {
+        set files [list ty/ord.bot [join $order ""] ty/sim.bot $sim]
+        lappend results [moduleAgree $files "import std::ty::ord\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::ord::run()\n"]
+        lappend results [moduleAgree $files "import std::ty::sim\nimport std::ty::ord\nwith context std::ty::sim::create()\nstd::ty::ord::run()\n"]
+    }
+    lsort -unique $results
+} -result {{value 105}}
+
+test ct-operation-identity-modules {a yielding function of the operation's name in another module -- imported by the trait's module (a method candidate), imported beside a local one (two candidates), or the entry program's own -- never becomes the operation's callee} -body {
+    set other {ty/other.bot {struct Reg:
+    slot: int
+
+fn wait(reg: Reg) -> int:
+    yield reg.slot
+    1
+}}
+    set imported [concat $other [list ty/imp.bot {import std::ty::other
+
+context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+} ty/sim.bot [lindex $::cyLib 3]]]
+    set twoCandidates [concat $other [list ty/two.bot {import std::ty::other
+
+struct Local:
+    slot: int
+
+context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn wait(l: Local) -> int:
+    yield l.slot
+    2
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+} ty/sim.bot [lindex $::cyLib 3]]]
+    list [moduleAgree $imported "import std::ty::imp\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::imp::run()\n"] \
+        [moduleAgree $twoCandidates "import std::ty::two\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::two::run()\n"] \
+        [moduleAgree $::cyLib [cyProgram sim "struct R:\n    slot: int\nfn wait(r: R) -> int:\n    yield r.slot\n    3\nstd::ty::drv::run()\n"]]
+} -result {{value 105} {value 105} {value 105}}
+
+test ct-operation-identity-call-shape {a visible function of the operation's name gives the operation no call shape of its own: its flags are not appended, its variadic parameter collects nothing, and its nomethod declaration does not reject the operation} -body {
+    set results {}
+    foreach decl {
+        "fn wait(deadline: int, flags :urgent) -> int:\n    deadline + 1"
+        "fn wait(variadic xs: List\[int\]) -> int:\n    0"
+        "nomethod fn wait(x: int) -> int:\n    x"
+    } {
+        set files [list ty/shape.bot "context trait Driver:\n    fn wait(deadline: int) -> int\n\n$decl\n\nfn run(context d: Driver) -> int:\n    d.wait(5)\n" ty/sim.bot [lindex $::cyLib 3]]
+        lappend results [moduleAgree $files "import std::ty::shape\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::shape::run()\n"]
+    }
+    set results
+} -result {{value 105} {value 105} {value 105}}
+
+test ct-operation-identity-rejections {invalid calls stay rejected without a substitute callee: an operation the trait does not declare (a yielding function of that name is visible) is TRAIT-UNKNOWN-OPERATION and nothing else, two installed implementations are AMBIGUOUS-CONTEXT-IMPLEMENTATION and none MISSING-CONTEXT, each without a yield diagnostic; passing the binding to the yielding function in an ordinary call is CONTEXT-TRAIT-MISUSE, and that call is a real call of the yielding function (UNWRAPPED-YIELD as well)} -body {
+    set unknown [list ty/unk.bot "struct Reg:\n    slot: int\n\ncontext trait Driver:\n    fn wait(deadline: int) -> int\n\nfn nope(reg: Reg) -> int:\n    yield reg.slot\n    1\n\nfn run(context d: Driver) -> int:\n    d.nope(5)\n" ty/sim.bot [lindex $::cyLib 3]]
+    set misuse [list ty/mis.bot "struct Reg:\n    slot: int\n\ncontext trait Driver:\n    fn wait(deadline: int) -> int\n\nfn wait(reg) -> int:\n    yield 1\n    1\n\nfn run(context d: Driver) -> int:\n    wait(d)\n" ty/sim.bot [lindex $::cyLib 3]]
+    withPrivateLibrary {
+        writeModules $unknown
+        set a [diagnosticKinds "import std::ty::unk\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::unk::run()\n"]
+    }
+    withPrivateLibrary {
+        writeModules $misuse
+        set b [diagnosticKinds "import std::ty::mis\nimport std::ty::sim\nwith context std::ty::sim::create()\nstd::ty::mis::run()\n"]
+    }
+    withPrivateLibrary {
+        writeModules $::cyLib
+        set c [diagnosticKinds [cyProgram {sim alt} "std::ty::drv::run()\n"]]
+        set d [diagnosticKinds [cyProgram {} "std::ty::drv::run()\n"]]
+    }
+    list $a [lindex $b 0] [expr {"UNWRAPPED-YIELD" in $b}] $c $d
+} -result {TRAIT-UNKNOWN-OPERATION CONTEXT-TRAIT-MISUSE 1 AMBIGUOUS-CONTEXT-IMPLEMENTATION MISSING-CONTEXT}
+
+test ct-operation-identity-hir {the checked source program: the operation is the call of the projection `d.wait` (no candidate consulted: no `method` record, a field-shaped trait call), it has no callee for any analysis (hir::contexts::Callee), the coroutine analysis has no edge out of its function into a yield-capable one and nothing to set aside, and the same function's method-syntax call of the yielding function is such an edge} -body {
+    set hir [dict get [moduleHir $::cyLib [cyProgram sim "coroutine {step, first} = std::ty::drv::both(std::ty::drv::Reg {slot: 3})\n\[std::ty::drv::run(), first, step()\]\n"]] traitSource]
+    set ops {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node traitCall]} {
+            lappend ops [list [dict exists $node method] [dict get $node traitCall shape] \
+                [hir::contexts::Callee $hir $e] [hir::kind $hir [dict get $node callee]]]
+        }
+    }
+    set edges {}
+    dict for {b list} [dict get $hir coroutines edges] {
+        foreach edge $list {
+            if {![dict exists $hir coroutines blocks [lindex $edge 1]]} continue
+            lappend edges [list [hir::contexts::BlockName $hir $b] [hir::contexts::BlockName $hir [lindex $edge 1]]]
+        }
+    }
+    list [lsort -unique $ops] [lsort -unique $edges] [dict get $hir coroutines operations]
+} -result {{{0 field {} project}} {{std::ty::drv::both std::ty::drv::wait} {std::ty::drv::deep std::ty::drv::poll} {std::ty::drv::poll std::ty::drv::wait}} {}}
+
 test ct-source-audit {no backend implements context traits: core/, compiler/ and native/ never name a library context trait, context or refinement, never read the trait registry, satisfaction or selection, and the only context-trait mention below HIR is the dead-code placeholder's comment} -body {
     set hits {}
     foreach dir {core compiler native native/src native/src/codegen native/src/runtime} {

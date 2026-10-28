@@ -111,9 +111,10 @@ proc writeFile {path text} {
     close $f
 }
 
-# A private copy of the compiler sources, tests, library and the fuzzer.
+# A private copy of the compiler sources, tests, library and the fuzzer (and
+# the event-loop exploration's reduced reproduction, which a test compiles).
 set tree [file tempdir botlish-context-trait-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/context-traits} {
+foreach dir {compiler core hir surface stdlib tests examples audit/context-traits audit/event-loop/repro} {
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
 }

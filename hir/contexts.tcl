@@ -461,7 +461,22 @@ proc hir::contexts::Denotes {hir b {seen {}}} {
 # the thunk's body runs right there, eagerly, in the execution environment
 # of the construction -- resumptions continue that same execution, so the
 # contexts it needs are this call's requirement.
+#
+# A trait operation (TRAITS.md, CONTEXT-TRAITS.md; typing records
+# `traitCall` on it) calls no function the code can see, whatever its
+# method-syntax callee names: that callee is the visible function of the
+# operation's name resolution stood the call in with before the receiver was
+# typed, never the operation's implementation, which is the witness's (or the
+# selected context's) and is bound only in the monomorphized program, where
+# the call is an ordinary call of it
+# (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). Before typing has
+# decided which calls are trait operations, a caller that must not read a
+# trait operation as a call of its written callee is told which they are
+# (hir/coroutines.tcl's analyze).
 proc hir::contexts::Callee {hir e} {
+    if {[dict exists $hir exprs $e traitCall]} {
+        return ""
+    }
     set callee [hir::get $hir $e callee]
     if {[hir::coroutines::NativeOf $hir $e] eq [core::coroutines::createNative]} {
         set thunk [lindex [hir::get $hir $e args] 0]
@@ -665,14 +680,7 @@ proc hir::contexts::verify {hirVar} {
             if {$o eq ""} {
                 continue
             }
-            if {[dict exists $hir exprs $c traitCall]} {
-                # A trait operation (TRAITS.md, CONTEXT-TRAITS.md) calls no
-                # function the code can see, whatever its method-syntax
-                # callee names: its implementation is the witness's (or the
-                # selected context's), bound only in the monomorphized
-                # program, where the call is an ordinary edge.
-                continue
-            }
+            # (A trait operation is no edge: Callee.)
             set target [Callee $hir $c]
             if {$target ne ""} {
                 dict lappend edges $o [list $c $target]
@@ -878,11 +886,8 @@ proc hir::contexts::CheckTraitBindings {hirVar parent} {
     upvar 1 $hirVar hir
     set traitBindings [dict create]
     dict for {b binding} [dict get $hir bindings] {
-        if {[dict get $binding kind] ne "local"} continue
-        set by [dict get $binding declaredBy]
-        if {$by eq "" || ![dict exists $hir exprs $by] || [hir::kind $hir $by] ne "bind"} continue
-        set id [loadId $hir [hir::get $hir $by value]]
-        if {$id ne "" && [isTrait $id]} {
+        set id [TraitBinding $hir $b]
+        if {$id ne ""} {
             dict set traitBindings $b $id
         }
     }
@@ -903,6 +908,32 @@ proc hir::contexts::CheckTraitBindings {hirVar parent} {
             [::format {"%s" is a context-trait binding (%s): it is not a value -- the only use of a context-trait binding is calling one of %s's operations on it (%s.%s(...)); it cannot be passed, stored, returned, compared, projected or tested, and the installed context that provides it is never recovered} \
                 $name $id $id $name [lindex $ops 0]] $e
     }
+}
+
+# The context trait binding B is the binding of -- a function's `context
+# NAME: T` parameter with T a context trait, which the checked build binds to
+# `context#load("T")` (DeclareParams) -- or "" when B is no such binding.
+# Read from the binding's declaration alone, so resolution can ask it of a
+# binding whose declaration it has resolved (hir/resolve.tcl's
+# ContextTraitOperation).
+proc hir::contexts::TraitBinding {hir b} {
+    if {$b eq "" || ![dict exists $hir bindings $b]} {
+        return ""
+    }
+    set binding [dict get $hir bindings $b]
+    if {[dict get $binding kind] ne "local"} {
+        return ""
+    }
+    set by [dict get $binding declaredBy]
+    if {$by eq "" || ![dict exists $hir exprs $by] || [hir::kind $hir $by] ne "bind"
+            || ![dict exists $hir exprs $by value]} {
+        return ""
+    }
+    set id [loadId $hir [hir::get $hir $by value]]
+    if {$id ne "" && [isTrait $id]} {
+        return $id
+    }
+    return ""
 }
 
 # 1 if reference E is the receiver of a method-syntax call: the first

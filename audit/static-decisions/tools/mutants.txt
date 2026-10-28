@@ -538,13 +538,13 @@ proc hir::static::Waits {key status deps} {
 @@ recheck-rounds-across-checks the signature rounds are remembered across checks instead of per checked HIR: a later build's or program's check takes an earlier one's unseeded typing for its own
 ## hir/hir.tcl
 <<<<
-        set rounds [dict create]
+    set rounds [dict create]
 ====
-        global hirRecheckRounds
-        if {![info exists hirRecheckRounds]} {
-            set hirRecheckRounds [dict create]
-        }
-        upvar #0 hirRecheckRounds rounds
+    global hirRecheckRounds
+    if {![info exists hirRecheckRounds]} {
+        set hirRecheckRounds [dict create]
+    }
+    upvar #0 hirRecheckRounds rounds
 >>>>
 
 # ---------------------------------------------------------------------------
@@ -750,18 +750,20 @@ proc hir::static::Waits {key status deps} {
 @@ recheck-rounds-not-shared the check after a demotion types every signature round again, the unseeded first one included (COMPILER-BOTTLENECKS.md 3.9)
 ## hir/hir.tcl
 <<<<
-                CheckOnce hir $demote rounds
+            CheckOnce hir $demote rounds
+            if {$recheckAudit} {
 ====
-                CheckOnce hir $demote
+            CheckOnce hir $demote
+            if {$recheckAudit} {
 >>>>
 
 @@ recheck-analysis-repeated the check after a demotion infers the coroutine protocols again
 ## hir/hir.tcl
 <<<<
-                set hir $pre
-                CheckOnce hir $demote rounds
+            set hir $pre
+            CheckOnce hir $demote rounds
 ====
-                set hir $input
-                hir::coroutines::analyze hir
-                CheckOnce hir $demote rounds
+            set hir $input
+            hir::coroutines::analyze hir $operations
+            CheckOnce hir $demote rounds
 >>>>

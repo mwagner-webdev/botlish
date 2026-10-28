@@ -334,3 +334,49 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
         }
         set operation [lindex $action 1]
 >>>>
+
+# Operation identity (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md):
+# a trait operation's written callee -- a visible function of the
+# operation's name that method syntax stood the call in with -- is no part
+# of the call in any analysis.
+
+@@ operation-callee-is-candidate hir::contexts::Callee reads a typed trait operation as a call of the visible function its method syntax stood in with (its yields and context requirement reach the caller)
+## hir/contexts.tcl
+<<<<
+    if {[dict exists $hir exprs $e traitCall]} {
+        return ""
+    }
+    set callee [hir::get $hir $e callee]
+====
+    set callee [hir::get $hir $e callee]
+>>>>
+
+@@ operations-not-set-aside the coroutine analysis, run before the typing, reads a trait operation told to it as a call of its written callee anyway
+## hir/coroutines.tcl
+<<<<
+    if {[dict exists $excluded $c]} {
+        return ""
+    }
+    return [hir::contexts::Callee $hir $c]
+====
+    return [hir::contexts::Callee $hir $c]
+>>>>
+
+@@ check-not-repeated hir::check never checks again with the trait operations the coroutine analysis read set aside
+## hir/hir.tcl
+<<<<
+            if {$found eq $operations} {
+                break
+            }
+====
+            break
+>>>>
+
+@@ consulted-never-recorded the coroutine analysis records no method-style call whose written callee it read, so hir::check never learns which to set aside
+## hir/coroutines.tcl
+<<<<
+    if {[dict exists $hir exprs $c method]} {
+        dict set consulted $c 1
+    }
+====
+>>>>

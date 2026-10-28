@@ -340,6 +340,12 @@ again from the same syntax under a plan (build 2, `hir::traits::Plan`):
   (`hir::resolve::ResolvePlannedCall`, action `context`): the binding that
   was the receiver is no value and is not evaluated. The context-trait
   binding itself is not created in build 2 (`hir::contexts::DeclareParams`).
+  In build 1 an operation on the binding consults no method candidate
+  (`hir::resolve::ContextTraitOperation`): a visible function of the
+  operation's name -- one of the trait's own module, say -- is never its
+  callee, so none of its yields, context requirements, flags, variadic
+  collection or `nomethod` rule reach the operation
+  (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md).
 * **Calls** of dependent functions from the entry program's top level and
   from clones call the clones; aliases of them are dropped and their calls
   redirected, exactly as for trait-polymorphic functions.

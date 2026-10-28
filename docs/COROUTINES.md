@@ -1239,7 +1239,12 @@ What this says about the architecture (no optimization was attempted):
   trait operation whose implementation yields is resolved in build 2; in
   build 1 the call is an operation, not an edge. Monomorphized programs are
   checked again, so nothing unsound is accepted, but the diagnostics speak
-  about the clone.
+  about the clone, and a coroutine whose only yield is reached through an
+  operation is COROUTINE-RHS-NOT-YIELDING before monomorphization. Nor is
+  the visible function of the operation's name an edge: method syntax may
+  have stood the call in with one before its receiver was typed, and the
+  analysis, which runs before typing, is told which calls are operations
+  (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md).
 * **Use-site inference reads exact callees' declared parameter types only**:
   a yield value passed to an untyped or inferred parameter does not
   constrain the protocol (a projection then needs `resume T`).
