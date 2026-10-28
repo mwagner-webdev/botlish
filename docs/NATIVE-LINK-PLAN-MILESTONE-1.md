@@ -830,7 +830,16 @@ ff0826c, the release driver):
 * `tools/compilerpedia.tcl check`: 852 topics, 641 examples, 0 problems;
   tests/static-compile.test's `sc-census-exhaustive` passes.
 
-In CI: (Filled in below.)
+In CI: `tests` dispatched on the branch (**Executed**, run 40588986489,
+commit 4a1514c, ubuntu-latest): every job passed -- the Tcl suite on
+interp and on compile (native-link-plan.test among them), its cranelift
+and cranelift-generic coverage, the four golden shards, the native Rust
+unit tests (the `link_plan` tests among them), the system-linked and the
+stub-linked executables (native-link-plan.test under
+`BOTLISH_NATIVE_LINKER=system` and `stub`), the warning gate and the
+method-call decision oracle. The workflow's GC-stress job runs on pushes
+to main only and was skipped; native-link-plan.test under GC stress ran
+locally (above).
 
 ## 34. Linux AArch64 CI
 
@@ -851,7 +860,100 @@ cross compiler exists, and the log does not say which happened).
 
 ## 35. macOS AArch64 CI
 
-(Filled in below.)
+`tests (macos arm64)` on the branch (**Executed**, run 40605875154,
+commit 23c237e, macOS 15.7.9, SDK 15.5, Apple clang 17.0.0): every job
+passed -- smoke (Tier A), the two acceptance shards (Tier B), the system
+linker, Botlish.app (`app`), Botlish.app without developer tools
+(`app-clean`), the Linux control and the new `static SDL3 through
+Botlish.app`. (Tier C and the application mutants run only on request.)
+
+* **Acceptance.** Shard 2 ran native-link-plan.test with 116 other files
+  on interp: 4,767 tests, 4,674 passed, 93 skipped, 0 failed. No
+  `macosHost` test skipped, so the framework tests ran on macOS:
+  `nlp-framework-system` (a system framework declared in source links
+  through Apple's ld, `-framework NAME`, and its function runs) and
+  `nlp-framework-dir` (-F DIR is where Apple's ld finds an application's
+  framework; without it the framework is not found). `nlp-static-wrong-architecture`
+  ran too (`unixHost`): an x86-64 Mach-O archive (`cc -arch x86_64`)
+  refused on arm64 before the linker runs. The native library test skips
+  (`nativeLibraries`: libraries are Linux's).
+* **System linker.** `BOTLISH_NATIVE_LINKER=system` for the whole job:
+  every executable test file (3,520 tests, 3,302 passed, 218 skipped, 0
+  failed) and system-linker, c-ffi, darwin-io, c-byte-borrowing,
+  c-ffi-error-capture, coroutines and native-link-plan on interp and on
+  compile (327 tests, 311 passed, 16 skipped, 0 failed each).
+* **Static SDL3** (`tests/platform/link-plan-sdl3.sh`, job
+  122579580217; sections 22 to 25 describe it). The job's log:
+
+```
+== SDL3 3.4.18 (829a65d769d935c4852f8159e964312c0957260a), static and shared
+   macOS 15.7.9, SDK 15.5, Apple clang version 17.0.0 (clang-1700.0.13.5)
+   CMake flags: -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=ON -DSDL_SHARED=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+   built in 78 s
+   archive: Non-fat file: .../botlish-sdl3-static/lib/libSDL3.a is architecture: arm64
+   archive: 4651024 bytes, sha256 ec298e5d04fdf61071a617bcacaac088cbc144b4dc541e4d0f87ad4380b55d25
+== SDL3's static link interface (sdl3.pc Libs.private)
+   -Wl,-framework,CoreMedia -Wl,-framework,CoreVideo -Wl,-framework,Cocoa -Wl,-weak_framework,UniformTypeIdentifiers -Wl,-framework,IOKit -Wl,-framework,ForceFeedback -Wl,-framework,Carbon -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-framework,AVFoundation -Wl,-framework,Foundation -Wl,-framework,GameController -Wl,-framework,Metal -Wl,-framework,QuartzCore -Wl,-weak_framework,CoreHaptics -lpthread -lm
+   frameworks: CoreMedia CoreVideo Cocoa UniformTypeIdentifiers IOKit ForceFeedback Carbon CoreAudio AudioToolbox AVFoundation Foundation GameController Metal QuartzCore CoreHaptics
+   libraries:  pthread m
+== Static SDL3 through .../Prögram Files/Botlish.app/Contents/MacOS/botlish
+   built static-at in 1 s: 3594808 bytes
+   link plan: static SDL3: .../My Gäme/native/macos/libSDL3.a (declared at "native/macos/libSDL3.a")
+   link plan: framework CoreMedia: -framework CoreMedia
+   ... (one line per framework)
+   link plan: library pthread: -lpthread
+   link plan: library m: -lm
+   system linker: /usr/bin/cc -arch arm64 -mmacosx-version-min=11.0 -Wl,-dead_strip -o '.../executable' '.../program.o' '.../My Gäme/native/macos/libSDL3.a' -lpthread -lm -framework CoreMedia ... -framework CoreHaptics '.../Prögram Files/Botlish.app/Contents/Resources/libbotlish_runtime.a' -liconv -lSystem -lc -lm
+   ran static-at: [3004018, true] (GC stress: [3004018, true]); 22 dynamic libraries, none SDL3's
+== libSDL3.a and libSDL3.dylib in one -L directory
+   link plan: static SDL3: .../My Gäme/native/macos/libSDL3.a (found in .../My Gäme/native/macos)
+   ran static-searched: [3004018, true] (GC stress: [3004018, true]); 22 dynamic libraries, none SDL3's
+   built dynamic in 0 s: 830232 bytes
+      @rpath/libSDL3.0.dylib (compatibility version 401.0.0, current version 401.18.0)
+   the control, an ordinary declaration, links the dylib (Apple ld's choice) and prints [3004018, true]
+   sizes: static 3594808 bytes, dynamic 830232 bytes
+== The archive without its frameworks
+   refused (NATIVE LINK): 404 undefined symbols, e.g. "_AVCaptureDeviceTypeBuiltInWideAngleCamera"
+== The application moved, compiled from another directory
+   link plan: static SDL3: .../Möved Gäme/native/macos/libSDL3.a (declared at "native/macos/libSDL3.a")
+   ran moved: [3004018, true] (GC stress: [3004018, true]); 22 dynamic libraries, none SDL3's
+== The checkout's compiler, both linkers
+   ran checkout-system: [3004018, true] (GC stress: [3004018, true]); 22 dynamic libraries, none SDL3's
+   ran checkout-rustc: [3004018, true] (GC stress: [3004018, true]); 22 dynamic libraries, none SDL3's
+== SDL3's sources, build and archives deleted
+   ran checkout-rustc, checkout-system, moved, static-at, static-searched: [3004018, true] each (GC stress too); none SDL3's
+   (the dynamic control no longer starts: it needs libSDL3's dylib)
+static SDL3 3.4.18: ok
+```
+
+  Afterwards `codesign --verify --deep --strict` of the application the
+  job compiled with: valid on disk, satisfies its Designated Requirement
+  (the compiler wrote nothing into its bundle).
+
+  What it establishes, each **Executed**:
+  - `extern c library "SDL3" static at "native/macos/libSDL3.a"` links
+    the pinned SDL3's archive through the packaged Botlish.app (its
+    driver, its runtime archive in Contents/Resources) with Apple's ld,
+    in a directory whose name holds a space and non-ASCII letters, from
+    another working directory;
+  - SDL3's framework list is SDL3's own (`sdl3.pc`), 15 frameworks
+    (two weak ones linked strongly) and two libraries, every one
+    declared in source; without the frameworks the archive does not link
+    (404 undefined symbols, Apple ld's words);
+  - the executables' 22 dynamic libraries are libSystem, libiconv,
+    libobjc and Apple's frameworks (the 15 declared ones, and AppKit,
+    CoreFoundation, CoreGraphics and CoreServices, which they re-export)
+    -- no
+    SDL3 dylib, so they run with SDL3's build deleted; the dynamic control
+    (an ordinary declaration, the dylib beside the archive) depends on
+    `@rpath/libSDL3.0.dylib` and stops starting (dyld aborts) once it is
+    gone;
+  - a `static` declaration takes the archive where Apple's ld would take
+    the dylib of the same name in the same directory;
+  - the moved application builds and runs the same; the checkout's
+    compiler links the same plan with the system and the rustc linker;
+  - the static executable is 3,594,808 bytes, the dynamic one 830,232:
+    SDL3's code (with `-dead_strip`) is about 2.8 MB of it.
 
 ## 36. Windows x86-64 CI
 
