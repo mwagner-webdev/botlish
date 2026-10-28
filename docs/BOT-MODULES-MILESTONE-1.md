@@ -772,12 +772,12 @@ nothing is claimed for it):
 |---|---|---|
 | `c-bindgen.yml` (every profile's committed bindings checked, the generator's tests, fuzzers and mutants) | 759d3b9 | **passed** |
 | `icy-tower.yml` (the game's tests with the binding staged as a package, `build.sh`, the oracle comparison, the mutants, the Xvfb session) | 3844140 | **passed** |
-| `tests.yml` (the whole Tcl suite, golden shards, native, stub and system linkers, warning gate) | a12e615 | pending (queued) |
-| `tests-arm64.yml` | a12e615 | pending (queued) |
-| `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | pending (plan done; mutable-array.bot running, the four shards queued) |
-| `single-executable.yml` (builds the single executable, smoke tests in stock containers) | 3844140 | pending (queued) |
-| `macos-arm64.yml` (smoke and acceptance tiers, which include `bot-modules.test`) | b6b05aa | pending (queued) |
-| `windows-x86_64.yml` (smoke and acceptance tiers) | b6b05aa | pending (queued) |
+| `tests.yml` (the whole Tcl suite, golden shards, native, stub and system linkers, warning gate) | a12e615 | pending (running) |
+| `tests-arm64.yml` | a12e615 | pending (running) |
+| `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | **passed**: 108 suites, every one agreeing (mutable-array.bot: batched 5 rounds / 7 builds, sequential 69 / 205) |
+| `single-executable.yml` (builds the single executable, smoke tests in stock containers) | 3844140 | **passed** |
+| `macos-arm64.yml` (smoke, the two acceptance shards, the system linker, Botlish.app and the app without developer tools) | b6b05aa | **passed**: acceptance 4,790 + 4,730 tests passed, 0 failed, `bot-modules.test` and `hir-cache.test` among them (shard 2); the system linker job ran `bot-modules.test` too; Tier C and the app mutants are opt-in and did not run |
+| `windows-x86_64.yml` (smoke, four acceptance shards, the system linker, the root plans) | b6b05aa | **passed**: every job 0 failed; `bot-modules.test` and `hir-cache.test` in acceptance shard 2 (2,549 passed, 115 skipped, 0 failed) |
 | `icy-tower-windows.yml` (on windows-2025: the MSVC SDL3 binding generated and installed as the game's package, the game compiled, linked and its Windows tests run, played headless, the signing dry run) | b6b05aa | **passed** |
 
 The commits after the one each run tested change only documents, the
@@ -791,19 +791,21 @@ change is a comment).
 
 None known in the resolution model or identity. What was not done:
 
-* **Windows and macOS were not executed here.** The milestone adds no
-  platform-specific code (`file isdirectory`, `file normalize`, the seam),
-  and `tests/bot-modules.test` joins both platforms' acceptance tiers
-  automatically (`tests/platform/tier.tcl` takes every test file), with its
-  symbolic-link tests constrained to POSIX hosts and the SDL3 run to
-  linux-x86_64. Section F records which CI runs were requested and their
-  results; nothing is claimed for a platform without one.
-* **The single executable was not rebuilt.** `single/build.sh` builds a
-  static Tcl from source; the bundled compiler was tested the way
-  `tests/std-namespace.test` tests it, an archive packed by
-  `single/package.tcl` onto this host's dynamic tclsh
-  (`bm-bundled-compiler`). The packing is unchanged: the compiler reads no
-  new file at run time.
+* **Windows and macOS were not executed in this container.** They ran in
+  CI only (section F: both platforms' test workflows and Icy Tower's Windows
+  build passed). The milestone adds no platform-specific code (`file
+  isdirectory`, `file normalize`, the seam); `tests/bot-modules.test` is in
+  both platforms' acceptance tiers (`tests/platform/tier.tcl` takes every
+  test file), with its symbolic-link tests constrained to POSIX hosts and
+  the SDL3 run to linux-x86_64. No Tier C (GC-stress) run of either
+  platform was requested.
+* **The single executable was not built in this container.**
+  `single/build.sh` builds a static Tcl from source; here the bundled
+  compiler was tested the way `tests/std-namespace.test` tests it, an
+  archive packed by `single/package.tcl` onto this host's dynamic tclsh
+  (`bm-bundled-compiler`), and CI's `single-executable.yml` built it and
+  ran its smoke tests (section F). The packing is unchanged: the compiler
+  reads no new file at run time.
 * **The committed Icy Tower executable** was not rebuilt (section D: the
   difference is this container's toolchain, not this milestone).
 
