@@ -690,17 +690,28 @@ proc hir::coroutines::Implementations {hir given} {
         return {}
     }
     set bySid [dict create]
-    set any 0
+    set refs [dict create]
+    set operations {}
+    set binds {}
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] ne "call"} continue
-        if {[dict exists $node traitCall] && ![dict exists $node traitCall unknown]} {
-            set any 1
-        }
-        if {[dict exists $node sid]} {
-            dict lappend bySid [dict get $node sid] $e
+        switch -- [dict get $node kind] {
+            call {
+                if {[dict exists $node traitCall] && ![dict exists $node traitCall unknown]} {
+                    lappend operations $e
+                }
+                if {[dict exists $node sid]} {
+                    dict lappend bySid [dict get $node sid] $e
+                }
+            }
+            ref {
+                dict lappend refs [dict get $node binding] $e
+            }
+            bind {
+                lappend binds $e
+            }
         }
     }
-    if {!$any} {
+    if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
         return {}
     }
     dict incr ::hir::buildStats effectPlans
@@ -782,25 +793,39 @@ proc hir::coroutines::Implementations {hir given} {
             }
         }
     }
-    # Keep the edges into yield-capable nodes, and an operation's edges where
-    # it receives a yield's value: its implementation's declared parameter
-    # may fix the protocol (use-site inference), yielding or not.
-    set receives [dict create]
-    set walkResult [hir::contexts::Walk $hir]
-    lassign $walkResult owner parent
-    dict for {y o} [dict get $hir coroutines yields] {
-        if {$o eq ""} continue
-        foreach q [UseCalls $hir $parent $y] {
-            dict set receives $q 1
-        }
+    if {[dict size [dict get $candidate impl]] == 0 && [dict size [dict get $candidate spec]] == 0} {
+        return {}
     }
     set graph [dict getdef $given graph {}]
     set excluded [dict create]
     foreach c [concat [dict getdef $given operations {}] [TraitOperations $hir]] {
         dict set excluded $c 1
     }
+    set walkResult [hir::contexts::Walk $hir]
     set built [Build $hir $walkResult $excluded [UnionGraph $graph $candidate]]
     set capable [dict get $built capable]
+    # Keep the edges into yield-capable nodes, and an operation's edges where
+    # it receives a yield's value: its implementation's declared parameter
+    # may fix the protocol (use-site inference), yielding or not. (Which
+    # calls receive one is asked only when an implementation cannot yield.)
+    set receives [dict create]
+    set asks 0
+    dict for {key targets} [dict get $candidate impl] {
+        foreach t $targets {
+            if {![dict exists $capable [lindex $t 0]]} {
+                set asks 1
+            }
+        }
+    }
+    if {$asks} {
+        lassign $walkResult owner parent
+        dict for {y o} [dict get $hir coroutines yields] {
+            if {$o eq ""} continue
+            foreach q [UseCalls $hir $parent $y $refs] {
+                dict set receives $q 1
+            }
+        }
+    }
     set kept [dict create impl {} spec {} clones {} via {}]
     foreach field {impl spec} {
         dict for {key targets} [dict get $candidate $field] {
@@ -827,7 +852,137 @@ proc hir::coroutines::Implementations {hir given} {
             }
         }
     }
-    return [CanonicalGraph $kept]
+    return [CanonicalGraph [Distinct $hir $kept $excluded]]
+}
+
+# GRAPH without the specializations that are their function as written: a
+# specialization is distinct when one of its calls resolves otherwise than
+# the same call of the function's own node does -- an operation bound to an
+# implementation, a call of a distinct specialization. Any other one has
+# exactly its function's nodes (every call of them resolves alike), so its
+# nodes, and a check to find them, would only repeat the function's: an
+# edge into it becomes an edge into the function's own node (the call's
+# exact callee, which needs no entry), and its own entries go. (A
+# trait-polymorphic function that yields by itself, whatever its witness,
+# is the common case.)
+proc hir::coroutines::Distinct {hir graph excluded} {
+    set distinct [dict create]
+    set changed 1
+    while {$changed} {
+        set changed 0
+        foreach field {impl spec} {
+            dict for {key targets} [dict get $graph $field] {
+                lassign $key k c
+                if {$k eq "" || [dict exists $distinct $k]} continue
+                set own [dict getdef [dict get $graph $field] [list "" $c] {}]
+                if {[lsort -unique $own] eq [lsort -unique $targets]} continue
+                if {$field eq "spec"} {
+                    set reaches 0
+                    foreach n $targets {
+                        if {[dict exists $distinct [ContextOf $n]]} {
+                            set reaches 1
+                        }
+                    }
+                    if {!$reaches} continue
+                }
+                dict set distinct $k 1
+                set changed 1
+            }
+        }
+    }
+    set result [dict create impl {} spec {} clones {} via {}]
+    dict for {key targets} [dict get $graph impl] {
+        set k [lindex $key 0]
+        if {$k eq "" || [dict exists $distinct $k]} {
+            dict set result impl $key $targets
+        }
+    }
+    dict for {key targets} [dict get $graph spec] {
+        lassign $key k c
+        if {$k ne "" && ![dict exists $distinct $k]} continue
+        set mapped [lsort -unique [lmap n $targets {
+            if {[dict exists $distinct [ContextOf $n]]} {set n} else {BlockOf $n}
+        }]]
+        if {$mapped eq [list [Target $hir $c $excluded]]} continue
+        dict set result spec $key $mapped
+    }
+    foreach field {impl spec} {
+        dict for {key targets} [dict get $result $field] {
+            if {[dict exists $graph via $key]} {
+                dict set result via $key [dict get $graph via $key]
+            }
+            set k [lindex $key 0]
+            foreach ctx [concat [list $k] [lmap t $targets {
+                ContextOf [if {$field eq "impl"} {lindex $t 0} else {set t}]
+            }]] {
+                if {$ctx ne ""} {
+                    dict set result clones $ctx [dict get $graph clones $ctx]
+                }
+            }
+        }
+    }
+    return $result
+}
+
+# 1 if the trait plan can give checked HIR an edge Implementations keeps,
+# by what its typing and its coroutine analysis (`coroutines blocks`, the
+# yield-capable blocks) already found; OPERATIONS are its trait operations,
+# BINDS its bind expressions, GIVEN the feedback its check was made with.
+#
+# A kept edge needs an operation that receives a yield's value or an
+# implementation that may yield (an edge into a specialization needs one
+# inside it: Distinct). An implementation that may yield reaches a yield,
+# and after the last operation on the way only through ordinary calls and
+# calls of specializations: the target of that operation, an
+# implementation, reaches it through calls the analysis made with no
+# trait-operation edge saw as ordinary calls (a specialization's calls
+# being its function's), so the analysis found it yield-capable. So one of
+# these is needed:
+#
+#   * a yield-capable implementation: a function of the implementation
+#     index (hir::traits::ImplInfo, which conformance and context-trait
+#     satisfaction read) under the name of a declared trait's requirement;
+#   * an operation with a yield, or a binding of one, as an argument.
+#
+# When an earlier check found edges, the analysis saw those instead of some
+# ordinary calls: the plan is asked again. Deciding that neither holds
+# needs no plan: a program whose yields are all elsewhere (a test runner,
+# ordinary functions' coroutines, a trait-polymorphic function that yields
+# by itself) pays only this scan.
+proc hir::coroutines::MayBind {hir operations binds given} {
+    if {[dict getdef $given graph {}] ne {}} {
+        return 1
+    }
+    set capable [dict get $hir coroutines blocks]
+    if {[dict size $capable] == 0} {
+        return 0
+    }
+    set yieldNative [core::coroutines::yieldNative]
+    set yielded [dict create]
+    foreach b $binds {
+        if {[NativeOf $hir [dict get $hir exprs $b value]] eq $yieldNative} {
+            dict set yielded [dict get $hir exprs $b binding] 1
+        }
+    }
+    foreach e $operations {
+        foreach a [dict get $hir exprs $e args] {
+            set node [dict get $hir exprs $a]
+            if {[NativeOf $hir $a] eq $yieldNative
+                    || ([dict get $node kind] eq "ref" && [dict exists $yielded [dict get $node binding]])} {
+                return 1
+            }
+        }
+    }
+    foreach id [hir::traits::declaredIds] {
+        foreach name [hir::traits::requirementNames $id] {
+            foreach info [hir::traits::ImplInfos $name] {
+                if {[dict get $info kind] eq "block" && [dict exists $capable [dict get $info block]]} {
+                    return 1
+                }
+            }
+        }
+    }
+    return 0
 }
 
 # 1 if call E of a trait-polymorphic function's body, which the plan binds
@@ -1137,14 +1292,15 @@ proc hir::coroutines::YieldUses {hir parent y res ctx} {
 }
 
 # The calls the value of yield call Y is an argument of (YieldUses' uses),
-# by the parent map PARENT.
-proc hir::coroutines::UseCalls {hir parent y} {
+# by the parent map PARENT and the references of each binding, REFS
+# (binding -> its ref expressions, as RefsOf finds them).
+proc hir::coroutines::UseCalls {hir parent y refs} {
     lassign [dict get $parent $y] p role
     if {[Discarded $hir $parent $y]} {
         return {}
     }
     if {$p ne "" && [dict get $hir exprs $p kind] eq "bind" && $role eq "operand"} {
-        set uses [RefsOf $hir [dict get $hir exprs $p binding]]
+        set uses [dict getdef $refs [dict get $hir exprs $p binding] {}]
     } else {
         set uses [list $y]
     }

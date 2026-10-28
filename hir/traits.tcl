@@ -164,6 +164,12 @@ proc hir::traits::declared {id} {
     return [dict exists $registry $id]
 }
 
+# The identities of the current compilation's traits.
+proc hir::traits::declaredIds {} {
+    variable registry
+    return [dict keys $registry]
+}
+
 # 1 if any trait is declared in the current compilation.
 proc hir::traits::hasTraits {} {
     variable registry
@@ -600,6 +606,19 @@ proc hir::traits::ImplInfo {unit name} {
         return [dict get $impls $unit $name]
     }
     return ""
+}
+
+# The implementation index entries of NAME in every unit: every function
+# ImplInfo can find for a requirement NAME.
+proc hir::traits::ImplInfos {name} {
+    variable impls
+    set result {}
+    dict for {unit names} $impls {
+        if {[dict exists $names $name]} {
+            lappend result [dict get $names $name]
+        }
+    }
+    return $result
 }
 
 # ---------------------------------------------------------------------------

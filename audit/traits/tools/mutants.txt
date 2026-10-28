@@ -386,7 +386,7 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
 @@ implementation-edges-omitted the typing's trait-operation edges are never computed: a coroutine whose only yield is an implementation's is never-yielding again, and its top-level calls are left to the monomorphized program
 ## hir/coroutines.tcl
 <<<<
-    if {!$any} {
+    if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
         return {}
     }
     dict incr ::hir::buildStats effectPlans
@@ -504,4 +504,53 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
                 if {[dict exists $capable $n] || ($field eq "impl" && [dict exists $receives [lindex $key 1]])} {
 ====
                 if {[dict exists $capable $n]} {
+>>>>
+
+@@ specializations-never-pruned keep every specialization the plan makes, also one whose calls all resolve as its function's own do: its nodes repeat the function's, and finding them costs another check
+## hir/coroutines.tcl
+<<<<
+    return [CanonicalGraph [Distinct $hir $kept $excluded]]
+====
+    return [CanonicalGraph $kept]
+>>>>
+
+@@ specializations-all-pruned take every specialization for its function as written, also one whose operation its witness's implementation binds
+## hir/coroutines.tcl
+<<<<
+                if {[lsort -unique $own] eq [lsort -unique $targets]} continue
+====
+                if {1} continue
+>>>>
+
+@@ effect-plan-always run the trait plan after every check of a program with coroutines and trait operations, whether or not anything may yield through one
+## hir/coroutines.tcl
+<<<<
+    if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
+====
+    if {$operations eq {}} {
+>>>>
+
+@@ effect-plan-gate-without-implementations decide that no trait plan is needed without asking whether an implementation may yield
+## hir/coroutines.tcl
+<<<<
+                if {[dict get $info kind] eq "block" && [dict exists $capable [dict get $info block]]} {
+                    return 1
+                }
+====
+                if {0} {
+                    return 1
+                }
+>>>>
+
+@@ effect-plan-gate-without-receivers decide that no trait plan is needed without asking whether an operation receives a yield's value
+## hir/coroutines.tcl
+<<<<
+            if {[NativeOf $hir $a] eq $yieldNative
+                    || ([dict get $node kind] eq "ref" && [dict exists $yielded [dict get $node binding]])} {
+                return 1
+            }
+====
+            if {0} {
+                return 1
+            }
 >>>>

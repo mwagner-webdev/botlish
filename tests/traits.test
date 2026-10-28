@@ -1501,10 +1501,13 @@ fn msg(side: int) -> std::gen::MsgS:
         [moduleAgree $lib $text]
 } -result {4 2 {value {[0, 1, 2, 7]}}}
 
-test trait-implementation-yield-economics {a program that constructs coroutines but none of whose trait operations' implementations yields is checked as before: one check of the program as written and one of the monomorphized program, no trait-operation edge kept; with a yielding implementation the program as written is checked twice (the second check confirms the edges)} -body {
+test trait-implementation-yield-economics {a program that constructs coroutines but none of whose trait operations' implementations yields is checked as before: one check of the program as written and one of the monomorphized program, no trait-operation edge kept -- and no trait plan run for it when no implementation may yield and no operation receives a yield's value (MayBind); a trait-polymorphic function that yields by itself needs no plan, and when the plan runs (a yielding implementation of a module the program only imports) no specialization of its own (Distinct): no second check; with a yielding implementation the program as written is checked twice (the second check confirms the edges)} -body {
     set results {}
     set quiet "import std::shapes\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\nfn measure(s: Shaped) -> int:\n    s.area()\n\nfn gen() -> int:\n    yield measure(std::shapes::make(1))\n    2\n\n"
+    set own "import std::shapes\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\nfn greet(s: Shaped) -> int:\n    yield s.area()\n    s.area() + 1\n\n"
     foreach text [list "${quiet}coroutine {step, first} = gen()\n\[first, step(), measure(std::shapes::make(2))\]\n" \
+            "${own}coroutine {step, first} = greet(std::shapes::make(4))\n\[first, step()\]\n" \
+            "import std::ysq\n${own}coroutine {step, first} = greet(std::shapes::make(4))\n\[first, step()\]\n" \
             "${::tiPrelude}coroutine {step, first} = twice(std::ysq::make(3))\n\[first, twice(std::shapes::make(4))\]\n"] {
         withPrivateLibrary {
             writeModules $::toLib
@@ -1512,12 +1515,13 @@ test trait-implementation-yield-economics {a program that constructs coroutines 
             set hir [surface::compile $text -warnings off]
             set after [hir::BuildStats]
         }
-        lappend results [expr {[dict get $after checks] - [dict get $before checks]}] \
+        lappend results [list [expr {[dict get $after checks] - [dict get $before checks]}] \
             [expr {[dict get $after builds] - [dict get $before builds]}] \
-            [expr {[dict getdef [dict get $hir traitSource] coroutines graph {}] eq {}}]
+            [expr {[dict getdef [dict get $hir traitSource] coroutines graph {}] eq {}}] \
+            [expr {[dict get $after effectPlans] - [dict get $before effectPlans]}]]
     }
     set results
-} -result {2 2 1 3 2 0}
+} -result {{2 2 1 0} {2 2 1 0} {2 2 1 1} {3 2 0 2}}
 
 test trait-implementation-yield-agreement {the checked program's yield effect per specialization is the monomorphized program's: the same functions may yield, a specialization named by its clone -- ordinary traits (two witnesses, through intermediate functions), imprinted functions, context traits (the operation's function by its one clone), per-witness protocols} -body {
     set results {}

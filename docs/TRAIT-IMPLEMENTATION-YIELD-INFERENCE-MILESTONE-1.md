@@ -231,11 +231,46 @@ self-referential program, and it is conservative (an extra edge can add a
 yield or a protocol constraint, never remove one; build 2 checks the
 monomorphized program anyway).
 
-*What is kept.* Only edges into a node that may yield syntactically. Any
-other edge changes no protocol, no yield effect and no diagnostic, so a
+*What is kept.* Only edges into a node that may yield syntactically, and an
+operation's edges where the operation receives a yield's value (its
+implementation's declared parameter type may fix the protocol: use-site
+inference). Any other edge changes no protocol, no yield effect and no
+diagnostic. And only the specializations that differ from their function as
+written (`hir::coroutines::Distinct`): a specialization is distinct when one
+of its calls resolves otherwise than the same call of the function's own
+node does -- an operation bound to an implementation, a call of a distinct
+specialization. Any other one would have exactly its function's nodes; an
+edge into it is the call's exact edge, which needs no entry. (A
+trait-polymorphic function that yields by itself, whatever its witness, is
+the common case: the golden suite `coroutines.bot` has one, `greet`.) So a
 program none of whose implementations yields keeps an empty graph and is
 checked exactly as before (one check). An empty feedback is `{}`, so the
 loop's comparison is cheap and the HIR of such a program carries no new keys.
+
+*When the plan is asked* (`hir::coroutines::MayBind`). Running the plan's
+call resolution after every check would cost every program that has both a
+coroutine and a trait operation -- every golden suite with a trait, since
+`std::test`'s runner is a coroutine -- 2-4% of its compilation (section 9).
+`Implementations` asks it only when an edge could be kept, which this
+check's own results decide without the plan. A kept edge needs an operation
+that receives a yield's value, or an implementation that may yield; and an
+implementation that may yield reaches a yield, after the last operation on
+the way, through ordinary calls and calls of specializations alone, which
+the coroutine analysis -- made with no trait-operation edge -- saw as
+ordinary calls (a specialization's calls are its function's). So the
+analysis already found that implementation yield-capable. The plan is asked
+when
+
+* a yield-capable function is in the implementation index
+  (`hir::traits::ImplInfo`, which conformance and context-trait
+  satisfaction both read) under the name of a declared trait's
+  requirement -- every implementation is such a function; or
+* a trait operation has a yield, or a binding of one, as an argument; or
+* an earlier check found edges (the analysis then saw those instead of
+  some ordinary calls, and the argument above does not apply).
+
+The index is read only to rule the plan out, never to bind anything: an
+operation's implementation is still the plan's.
 
 ## 5. Context traits
 
