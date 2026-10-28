@@ -834,7 +834,20 @@ In CI: (Filled in below.)
 
 ## 34. Linux AArch64 CI
 
-(Filled in below.)
+`tests (linux arm64)` dispatched on the branch (**Executed**, run
+40588990400, commit 4a1514c, ubuntu-24.04-arm): the Tcl suite on interp
+and on compile, its cranelift and cranelift-generic coverage, the four
+golden shards, the native Rust unit tests and the system-linked
+executables passed, native-link-plan.test among them on interp and
+compile. Its fixture built there (the skip counts list no `nlpFixture`
+and no `nativeLibraries` skip: only `macosHost` and `windowsHost`
+tests), so every static link on arm64 passed the driver's archive check
+as `ELF AArch64` objects, and the native library test linked its archive.
+`nlp-static-wrong-architecture` refuses an x86-64 archive there when
+clang can build one (the test passes without refusing anything when no
+cross compiler exists, and the log does not say which happened).
+
+(The GC-stress job: filled in below.)
 
 ## 35. macOS AArch64 CI
 
@@ -846,7 +859,44 @@ In CI: (Filled in below.)
 
 ## 37. Single-file compiler regressions
 
-(Filled in below.)
+The `single executable` workflow on the branch (**Executed**, run
+40588994473, commit 4a1514c): every job passed --
+
+* `build` (Linux x86-64: single/build.sh, the smoke test and the C FFI
+  smoke test on the build machine) and `build and C FFI smoke test (Linux
+  AArch64)`;
+* the smoke tests in stock `ubuntu:24.04` and `ubuntu:latest` containers;
+* the C FFI smoke tests in `ubuntu:24.04` and `ubuntu:latest` with only
+  `gcc`, `libc6-dev` and `binutils` installed (no checkout, no Rust: the
+  job fails if `rustc` or `cargo` exists).
+
+The new application F of single/ffi-smoke-test.sh, in `ubuntu:latest`:
+
+```
+built f (first: 891664 bytes, the archive native/libbotlish_cffi_fixture.a of /tmp/botlish-ffi-smoke.ScGEDv/app fü)
+built f (moved: 891664 bytes, the archive native/libbotlish_cffi_fixture.a of /tmp/botlish-ffi-smoke.ScGEDv/app fü moved)
+ran f: 42  (needs: libgcc_s.so.1 libm.so.6 libc.so.6 ld-linux-x86-64.so.2 )
+```
+
+The distributed compiler resolves `static at` from the application
+root (a directory named with a space and a non-ASCII letter), never from
+its own ZIP or the working directory, with the fixture's shared library
+on the -L path beside the archive; the moved application builds the same
+executable; its dynamic libraries are the C runtime's only. Applications A
+to E (the milestone before this one's) are unchanged, and the refusals (no
+C compiler, a missing library, an undefined symbol, the stub chosen) are
+the same.
+
+The macOS application's own checks (single/macos/verify.sh, both smoke
+tests and app-test.sh on Botlish.app) are the macOS workflow's `app` and
+`app-clean` jobs: section 35.
+
+The static decisions (`static-decisions` workflow, **Executed**, run
+40588997987, commit 4a1514c: the front end changed): every golden suite
+compiled under the batched scheduler and the sequential reference, in
+four shards and mutable-array.bot's own job, all agreeing (no `DISAGREE`,
+no `DOES NOT COMPILE`); mutable-array.bot took 5 rounds and 7 builds
+batched, 69 rounds and 205 builds sequentially (32 s and 1,177 s).
 
 ## 38. Remaining native-dependency limitations
 
