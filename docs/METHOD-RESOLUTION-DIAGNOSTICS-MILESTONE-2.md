@@ -13,7 +13,10 @@ the compiler temporarily assumed from what it reports, without touching
 what it decides.
 
 The base of every "before" below is `b29787c` (main when the milestone
-started). The change is on the branch `claude/nice-newton-vfi92x`.
+started). The change is on the branch `claude/nice-newton-vfi92x`: the
+implementation, tests, tools and documents in `cf4f5aa`, main merged in
+`fa43b82` (no conflict; the commit CI ran on, section 10.4), and this
+report's results in the commits after it.
 
 ## Contents
 
@@ -737,7 +740,13 @@ application) is tested by its own jobs.
 
 **CI**, dispatched on the branch at `fa43b82`:
 
-@@CI@@
+| workflow (run) | jobs | result |
+|---|---|---|
+| `tests.yml` ([40580115431](https://github.com/mwagner-webdev/botlish/actions/runs/40580115431)) | interp; compile; cranelift and cranelift-generic coverage; golden suites beside their Tcl originals, shards 1-4; the method-call decision (tests, oracle and fuzzer, golden suites under the reference audit); native Rust unit tests; stub-linked and system-linked executables (also under GC stress); the warning gate | all 13 passed (the GC-stress job runs on pushes to main only) |
+| `static-decisions.yml` ([40580120236](https://github.com/mwagner-webdev/botlish/actions/runs/40580120236)) | every golden suite compiled under the batched and the sequential scheduler: mutable-array.bot and four shards | all passed, no `DISAGREE` and no `DOES NOT COMPILE` (mutable-array.bot: batched 5 rounds / 7 builds, sequential 69 / 205) |
+| `macos-arm64.yml` ([40580097795](https://github.com/mwagner-webdev/botlish/actions/runs/40580097795)) | smoke (Tier A) and its Linux control, acceptance (Tier B, two shards), the system linker, Botlish.app and Botlish.app without developer tools | all 7 passed (Tier C and the application's mutants run only on request) |
+| `windows-x86_64.yml` ([40580097868](https://github.com/mwagner-webdev/botlish/actions/runs/40580097868)) | smoke, root plans, the system linker, acceptance (four shards) | all 7 passed (the GC-stress tier runs only on request) |
+| `icy-tower-windows.yml` ([40580098102](https://github.com/mwagner-webdev/botlish/actions/runs/40580098102)) | the Windows build of the workload | passed |
 
 ### 10.5 Pre-existing failures, not this milestone's
 
