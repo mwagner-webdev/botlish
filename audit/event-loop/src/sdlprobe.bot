@@ -1,0 +1,147 @@
+# sdlprobe.bot -- the tasks of the SDL coordination experiment
+# (EVENT-LOOP-EXPLORATION.md, Experiments B and C; b-sdl-*.bot). They use
+# only evloop: what differs between the programs is the driver and how SDL
+# is coordinated with it.
+#
+#   receive   SDL events (a producer thread's and SDL's own timer thread's):
+#             count and post -> dispatch latency per event;
+#   posts     records a producer thread posts through the adapter;
+#   ticker    a 7 ms repeating timer: how late each wake is;
+#   pusher    a task that pushes an SDL event itself, inside its segment
+#             (SDL's filter and watch run synchronously in that call): the
+#             event must reach the program in a later turn.
+import evloop
+import evsdl
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+# One event's measurement (code CODE, posted at POSTED).
+nomethod fn measure(code: int, posted: int, place stats: MutableArray[int], context ev: evloop::Loop) errors IndexNotFound:
+    if code == 9000:
+        say("pushed event received in turn ", evloop::stat(evloop::s_turn))
+    elif code >= 5000:
+        # A host's keepalive (b-sdl-hostwait.bot): not measured.
+        unit
+    else:
+        stats.set(0, stats.at(0) + 1)
+        l = evloop::now() - posted
+        stats.set(1, stats.at(1) + l)
+        if l > stats.at(2):
+            stats.set(2, l)
+        if l > 5000:
+            stats.set(3, stats.at(3) + 1)
+
+# Wait for REG's events and drain what is queued at each wake (try_take):
+# a host that grants one turn per iteration would otherwise cap the rate at
+# one event per iteration.
+nomethod fn latency_sink(label: str, reg: evloop::Reg, expect: int, done: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    stats = std::mutable_array::create(4, 0)
+    loop:
+        if stats.at(0) >= expect:
+            break
+        e = evloop::wait(reg)
+        if e.reason != evloop::woke_event:
+            break
+        measure(e.a, e.b, stats)
+        loop:
+            more = evloop::try_take(reg)
+            if more.reason != evloop::woke_event:
+                break
+            measure(more.a, more.b, stats)
+    say(label.concat(" received "), stats.at(0))
+    say(label.concat(" max latency us "), stats.at(2))
+    say(label.concat(" later than 5 ms "), stats.at(3))
+    say(label.concat(" total latency us "), stats.at(1))
+    done.post(1, 0)
+    stats.at(0)
+
+# A repeating PERIOD timer until TICKS intervals have elapsed (each wake
+# counts itself and the intervals it reports missed): how late each wake is
+# against its interval's deadline.
+fn ticker(period: int, ticks: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::every(period)
+    first = evloop::now() + period
+    # worst lateness, intervals elapsed, intervals missed
+    worst = std::mutable_array::create(3, 0)
+    loop:
+        if worst.at(1) >= ticks:
+            break
+        e = evloop::wait(t)
+        due = first + (worst.at(1) + e.a) * period
+        late = evloop::now() - due
+        worst.set(1, worst.at(1) + 1 + e.a)
+        worst.set(2, worst.at(2) + e.a)
+        if late > worst.at(0):
+            worst.set(0, late)
+    evloop::revoke(t)
+    say("timer worst lateness us ", worst.at(0))
+    say("timer missed intervals ", worst.at(2))
+    worst.at(0)
+
+fn pusher(context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::sleep(20000)
+    say("pusher pushes in turn ", evloop::stat(evloop::s_turn))
+    evsdl::push(9000)
+    say("pusher's segment continues in turn ", evloop::stat(evloop::s_turn))
+    0
+
+# A 100 ms heartbeat until SINKS sinks have posted to DONE: the only thing
+# that wakes a loop whose SDL events cannot (the naive mode).
+fn heartbeat(done: evloop::Reg, sinks: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    t = evloop::every(100000)
+    finished = std::mutable_array::create(2, 0)
+    loop:
+        loop:
+            d = evloop::try_take(done)
+            if d.reason != evloop::woke_event:
+                break
+            finished.set(0, finished.at(0) + 1)
+        if finished.at(0) >= sinks:
+            break
+        evloop::wait(t)
+        finished.set(1, finished.at(1) + 1)
+    evloop::revoke(t)
+    finished.at(1)
+
+fn idle_sleep(us: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::sleep(us)
+
+# Spawn the experiment's tasks.
+nomethod fn spawn_all(sdlreg: evloop::Reg, posts: evloop::Reg, context ev: evloop::Loop) errors IndexNotFound:
+    done = evloop::channel(8)
+    coroutine {step: s, first: sf} = latency_sink("sdl", sdlreg, 260, done)
+    evloop::adopt(s, sf)
+    coroutine {step: p, first: pf} = latency_sink("posts", posts, 200, done)
+    evloop::adopt(p, pf)
+    coroutine {step: t, first: tf} = ticker(7000, 30)
+    evloop::adopt(t, tf)
+    coroutine {step: u, first: uf} = pusher()
+    evloop::adopt(u, uf)
+    coroutine {step: h, first: hf} = heartbeat(done, 2)
+    evloop::adopt(h, hf)
+
+# Start the SDL-side producers: 240 user events from a thread (2 ms apart on
+# average, so they outlast every other source), 50 more the policy drops,
+# and 20 from SDL's own timer thread.
+fn start_producers() -> int:
+    evsdl::drop_codes_from(100000)
+    evsdl::producer(240, 2000, 0)
+    evsdl::producer(50, 2000, 100000)
+    evsdl::sdl_timer(5, 20, 1000)
+
+fn report_sdl(context ev: evloop::Loop) errors IndexNotFound:
+    say("sdl callbacks ", evsdl::stat(evsdl::st_callbacks))
+    say("sdl callbacks on a foreign thread ", evsdl::stat(evsdl::st_foreign_thread))
+    say("sdl callbacks nested in a task's C call ", evsdl::stat(evsdl::st_nested))
+    say("sdl events copied ", evsdl::stat(evsdl::st_copied))
+    say("sdl events dropped by policy ", evsdl::stat(evsdl::st_dropped_by_policy))
+    say("sdl timer callbacks ", evsdl::stat(evsdl::st_timer_callbacks))
+
+# Start the producers once the loop runs (a host-driven SDL is initialized
+# by its host, inside the first iteration).
+fn starter(context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    start_producers()

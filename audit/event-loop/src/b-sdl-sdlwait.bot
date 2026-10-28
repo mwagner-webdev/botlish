@@ -1,0 +1,42 @@
+# b-sdl-sdlwait.bot -- EVENT-LOOP-EXPLORATION.md, Experiments B and C:
+# mode 5, SDL's wait is the loop's wait (the driver evsdl::SdlWait), with
+# the same producers, posts, timer and pusher as b-sdl-*.bot.
+import evloop
+import evsdl
+import sdlprobe
+
+nomethod fn main(sdlreg: evloop::Reg, posts: evloop::Reg, context ev: evloop::Loop, w: evsdl::SdlWait) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlprobe::spawn_all(sdlreg, posts)
+    sdlprobe::start_producers()
+    evsdl::synth(posts.slot, posts.gen, 200, 1000)
+    started = evsdl::clock()
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evloop::log(evloop::cat("wall us ", evsdl::clock() - started))
+    evsdl::producers_join()
+    evsdl::synth_join()
+    sdlprobe::report_sdl()
+    evloop::sync()
+    coroutine {step, first} = sdlprobe::idle_sleep(200000)
+    evloop::adopt(step, first)
+    blocks = evsdl::blocks()
+    cpu = evsdl::cpu_us()
+    evloop::run()
+    evloop::log(evloop::cat("idle blocks ", evsdl::blocks() - blocks))
+    evloop::log(evloop::cat("idle cpu us ", evsdl::cpu_us() - cpu))
+    evsdl::quit()
+    evloop::trace()
+
+with context evloop::create(64, 0)
+sdlreg = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+posts = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+with context evsdl::create_sdlwait(sdlreg)
+main(sdlreg, posts):
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,53 @@
+# b-sdl-hostwait.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B (invariant 6): the
+# scheduler advanced by SDL3's own host (SDL_EnterAppMainCallbacks) at
+# "waitevent" (an iteration only after an SDL event: posts and timer
+# deadlines wait for one; a single SDL event at 1.5 s ends the stall the
+# heartbeat's last deadline is caught in; SDL waits before its FIRST
+# iteration too, so the host pushes one kick event to start the loop) -- the same tasks as b-sdl-*.bot.
+import evloop
+import evsdl
+import evsdlhost
+import sdlprobe
+
+# One SDL timer event 1.5 s after the start (code 5000, not measured): in
+# "waitevent" mode nothing else makes the host iterate once the producers
+# stop, so the heartbeat's pending deadline waits for it.
+fn rescue(context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::yield_now()
+    evsdl::sdl_timer(1500, 1, 5000)
+
+nomethod fn main(sdlreg: evloop::Reg, posts: evloop::Reg, context ev: evloop::Loop, h: evsdlhost::SdlHost) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlprobe::spawn_all(sdlreg, posts)
+    coroutine {step: s, first: sf} = sdlprobe::starter()
+    evloop::adopt(s, sf)
+    coroutine {step: k, first: kf} = rescue()
+    evloop::adopt(k, kf)
+    evsdlhost::synth(posts.slot, posts.gen, 200, 1000)
+    started = evsdlhost::clock()
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evloop::log(evloop::cat("wall us ", evsdlhost::clock() - started))
+    evloop::log(evloop::cat("host iterations ", evsdlhost::stat(evsdlhost::st_iterations)))
+    evloop::log(evloop::cat("host events ", evsdlhost::stat(evsdlhost::st_events)))
+    evloop::log(evloop::cat("host events on a foreign thread ", evsdlhost::stat(evsdlhost::st_foreign_events)))
+    evloop::log(evloop::cat("host max gap us ", evsdlhost::stat(evsdlhost::st_max_gap)))
+    evloop::log(evloop::cat("host quit ", evsdlhost::quit()))
+    evloop::log(evloop::cat("host finished ", evsdlhost::stat(evsdlhost::st_finished)))
+    evloop::log(evloop::cat("host needed a kick event to start ", evsdlhost::stat(evsdlhost::st_kicked)))
+    evsdl::producers_join()
+    evsdlhost::synth_join()
+    evloop::trace()
+
+with context evloop::create(64, 0)
+sdlreg = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+posts = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+with context evsdlhost::create(sdlreg.slot, sdlreg.gen, 0)
+main(sdlreg, posts):
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

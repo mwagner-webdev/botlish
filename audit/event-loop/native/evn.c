@@ -108,6 +108,25 @@ static struct {
     long long stats[ST_COUNT];
 } E = { .epfd = -1, .wakefd = -1, .listenfd = -1, .lock = PTHREAD_MUTEX_INITIALIZER };
 
+/* The pump protocol (prepare/check, EVENT-LOOP-EXPLORATION.md section 4):
+ * a native library that cannot hand the loop a descriptor registers C hooks.
+ * prepare(deadline) runs before the loop sleeps and returns the deadline it
+ * can live with (it may only lower it: a library that must poll caps the
+ * sleep); check(room) runs after every wake, on the loop's thread, and moves
+ * at most ROOM of the library's pending events into records
+ * (evn_push_local). Both are C: no Botlish code runs in them. */
+typedef long long (*evn_prepare_fn)(long long deadline);
+typedef int (*evn_check_fn)(int room);
+static struct { evn_prepare_fn prepare; evn_check_fn check; } pumps[8];
+static int npumps;
+
+int evn_add_pump(evn_prepare_fn prepare, evn_check_fn check) {
+    if (npumps == 8) return -1;
+    pumps[npumps].prepare = prepare;
+    pumps[npumps].check = check;
+    return npumps++;
+}
+
 long long evn_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -157,6 +176,19 @@ static void signal_wakefd(void) {
     }
 }
 
+/* A record from the loop's own thread (a pump's check): 0, or -1 when
+ * the ring is full. */
+int evn_push_local(int slot, int gen, long long a, long long b) {
+    evn_record rec = { slot, gen, a, b };
+    if (ring_push(&E.ring, rec) < 0) return -1;
+    E.stats[ST_RECORDS]++;
+    return 0;
+}
+
+int evn_ring_room(void) {
+    return E.ring.cap - E.ring.count;
+}
+
 /* Wake the loop from any thread. */
 int evn_wake(void) {
     signal_wakefd();
@@ -191,7 +223,7 @@ static void drain_posted(void) {
     pthread_mutex_lock(&E.lock);
     evn_record rec;
     while (E.ring.count < E.ring.cap && ring_pop(&E.posted, &rec) == 0) {
-        ring_push(&E.ring, rec);
+        if (ring_push(&E.ring, rec) == 0) E.stats[ST_RECORDS]++;
     }
     pthread_mutex_unlock(&E.lock);
 }
@@ -208,6 +240,7 @@ static void rearm(evn_conn *c) {
 static void conn_record(evn_conn *c, long long cmd, long long arg) {
     evn_record rec = { c->slot, c->gen, cmd, arg };
     if (ring_push(&E.ring, rec) == 0) {
+        E.stats[ST_RECORDS]++;
         E.stats[ST_LINES]++;
         c->credit--;
     }
@@ -271,7 +304,7 @@ static void accept_some(void) {
         add_fd(fd, TAG_CONN, id, 0);
         E.stats[ST_ACCEPTS]++;
         evn_record rec = { E.listen_slot, E.listen_gen, id, 0 };
-        ring_push(&E.ring, rec);
+        if (ring_push(&E.ring, rec) == 0) E.stats[ST_RECORDS]++;
         produced++;
     }
 }
@@ -305,6 +338,11 @@ int evn_block(long long deadline) {
         if (c->open && c->attached && c->credit > 0 && c->len > 0 && memchr(c->line, '\n', (size_t)c->len)) {
             read_conn(c);
         }
+    }
+    for (int i = 0; i < npumps; i++) {
+        /* A pump with events already pending makes the sleep a poll. */
+        if (pumps[i].check && E.ring.count < E.ring.cap) pumps[i].check(E.ring.cap - E.ring.count);
+        if (pumps[i].prepare) deadline = pumps[i].prepare(deadline);
     }
     struct timespec timeout, *tp = NULL;
     if (E.ring.count > 0) {
@@ -340,8 +378,10 @@ int evn_block(long long deadline) {
         }
     }
     drain_posted();
+    for (int i = 0; i < npumps; i++) {
+        if (pumps[i].check && E.ring.count < E.ring.cap) pumps[i].check(E.ring.cap - E.ring.count);
+    }
     if (n > 0 && E.ring.count == before) E.stats[ST_SPURIOUS]++;
-    E.stats[ST_RECORDS] += E.ring.count - before;
     return E.ring.count;
 }
 

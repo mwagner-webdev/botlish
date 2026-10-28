@@ -1,0 +1,43 @@
+# b-sdl-pump.bot -- EVENT-LOOP-EXPLORATION.md, Experiments B and C:
+# SDL3 beside the epoll driver, coordinated by mode 2 (pump; evsdl.c's
+# header), with a producer thread's posts, a repeating timer and a task that
+# pushes an SDL event from inside its segment. tools/native-more.tcl
+# compares the modes.
+import evloop
+import evn
+import evsdl
+import sdlprobe
+
+fn main(context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlreg = evloop::source(1, 4096)
+    posts = evloop::source(1, 4096)
+    evloop::log(evloop::cat("sdl start ", evsdl::start(2, sdlreg, 10000)))
+    sdlprobe::spawn_all(sdlreg, posts)
+    sdlprobe::start_producers()
+    evn::synth(posts.slot, posts.gen, 200, 1000, 1, 1, 0)
+    started = evn::clock()
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evloop::log(evloop::cat("wall us ", evn::clock() - started))
+    evsdl::producers_join()
+    evn::synth_join()
+    sdlprobe::report_sdl()
+    # Idle: one 200 ms sleep with SDL running.
+    evloop::sync()
+    coroutine {step, first} = sdlprobe::idle_sleep(200000)
+    evloop::adopt(step, first)
+    blocks = evn::stat(evn::st_blocks)
+    cpu = evn::cpu_us()
+    evloop::run()
+    evloop::log(evloop::cat("idle blocks ", evn::stat(evn::st_blocks) - blocks))
+    evloop::log(evloop::cat("idle cpu us ", evn::cpu_us() - cpu))
+    evsdl::quit()
+    evloop::trace()
+
+with context evloop::create(64, 0)
+with context evn::create(4096, 16, 0)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

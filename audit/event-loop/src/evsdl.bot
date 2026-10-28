@@ -1,0 +1,143 @@
+# evsdl.bot -- the SDL3 adapter's binding (EVENT-LOOP-EXPLORATION.md,
+# Experiments B and C; audit/event-loop/native/evsdl.c). SDL events reach the
+# program only as records of one evloop registration (a: the user code, b:
+# the push time), copied by C callbacks that run no Botlish code.
+#
+# Modes 1-4 add SDL to the epoll driver (evn::Native) through the wakeup or
+# the pump protocol: start requires the context trait evloop::NativePumps,
+# which only a driver that runs C pump hooks implements -- a program whose
+# driver cannot is rejected at compile time (MISSING-CONTEXT), never
+# silently given another driver. Mode 5 is a driver of its own (SdlWait:
+# SDL's wait is the loop's wait).
+import evloop
+import std::ffi::c
+import std::mutable_array
+
+extern c library "evsdl" static at "../build/libevsdl.a"
+extern c library "evn" static at "../build/libevn.a"
+extern c library "SDL3"
+
+extern c fn evsdl_start(mode: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, cap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_block(deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evsdl_drop_codes_from(code: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_push(code: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_producer(count: std::ffi::c::Int, interval: std::ffi::c::Int, base: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_producers_join() -> std::ffi::c::Int
+extern c fn evsdl_sdl_timer(ms: std::ffi::c::Int, count: std::ffi::c::Int, base: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evsdl_quit() -> std::ffi::c::Int
+extern c fn evn_now() -> std::ffi::c::LongLong
+extern c fn evn_take() -> std::ffi::c::Int
+extern c fn evn_gen() -> std::ffi::c::Int
+extern c fn evn_a() -> std::ffi::c::LongLong
+extern c fn evn_b() -> std::ffi::c::LongLong
+extern c fn evn_open(capacity: std::ffi::c::Int, quota: std::ffi::c::Int, flags: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_synth(slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int, burst: std::ffi::c::Int, jitter: std::ffi::c::Int, gap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_synth_join() -> std::ffi::c::Int
+extern c fn evn_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evn_cpu_us() -> std::ffi::c::LongLong
+
+# evsdl_stat
+st_callbacks = 0
+st_foreign_thread = 1
+st_nested = 2
+st_copied = 3
+st_dropped_by_policy = 4
+st_pumped = 5
+st_peeped = 6
+st_timer_callbacks = 7
+
+mode_wakeup = 1
+mode_pump = 2
+mode_hybrid = 3
+mode_naive = 4
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+# Start SDL in MODE (1-4) beside the epoll driver; its events become REG's
+# records. CAP: mode 2's polling interval (us).
+fn start(mode: int, reg: evloop::Reg, cap: int, context p: evloop::NativePumps) -> int:
+    p.pumps_supported()
+    ci(mode).evsdl_start(ci(reg.slot), ci(reg.gen), ci(cap))
+
+fn push(code: int) -> int:
+    evsdl_push(ci(code))
+
+fn producer(count: int, interval: int, base: int) -> int:
+    ci(count).evsdl_producer(ci(interval), ci(base))
+
+fn producers_join() -> int:
+    evsdl_producers_join()
+
+fn sdl_timer(ms: int, count: int, base: int) -> int:
+    ci(ms).evsdl_sdl_timer(ci(count), ci(base))
+
+fn drop_codes_from(code: int) -> int:
+    evsdl_drop_codes_from(ci(code))
+
+fn stat(i: int) -> int:
+    evsdl_stat(ci(i))
+
+fn quit() -> int:
+    evsdl_quit()
+
+# Mode 5: SDL waits for the loop. The context SdlWait is a whole driver
+# (evloop::Driver): SDL_WaitEventTimeout with the loop's deadline, then a
+# poll of everything else. It does not implement NativePumps.
+opaque context struct SdlWait:
+    state: MutableArray[int]
+
+fn create_sdlwait(reg: evloop::Reg) -> SdlWait:
+    state = std::mutable_array::create(2, 0)
+    opened = evn_open(512, 16, 0)
+    started = ci(5).evsdl_start(ci(reg.slot), ci(reg.gen), 0)
+    state.set(0, opened + started):
+        on IndexNotFound:
+            unit
+    SdlWait {state: state}
+
+fn clock(context w: SdlWait) -> int:
+    evn_now()
+
+fn block(deadline: int, context w: SdlWait) -> int:
+    evsdl_block(cll(deadline))
+
+fn take_record(context w: SdlWait) -> int:
+    evn_take()
+
+fn record_gen(context w: SdlWait) -> int:
+    evn_gen()
+
+fn record_a(context w: SdlWait) -> int:
+    evn_a()
+
+fn record_b(context w: SdlWait) -> int:
+    evn_b()
+
+# What mode 5's programs use of the native adapter without evn::Native (two
+# installed drivers would be AMBIGUOUS-CONTEXT-IMPLEMENTATION).
+nomethod fn synth(slot: int, gen: int, count: int, interval: int, context w: SdlWait) -> int:
+    ci(slot).evn_synth(ci(gen), ci(count), ci(interval), 1, 1, 0)
+
+fn synth_join(context w: SdlWait) -> int:
+    evn_synth_join()
+
+fn blocks(context w: SdlWait) -> int:
+    evn_stat(0)
+
+fn cpu_us(context w: SdlWait) -> int:
+    evn_cpu_us()

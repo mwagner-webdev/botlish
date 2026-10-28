@@ -1,0 +1,83 @@
+# evsdlhost.bot -- the host-driven driver of EVENT-LOOP-EXPLORATION.md
+# (Experiment B, invariant 6): SDL3's SDL_EnterAppMainCallbacks owns the
+# loop; each host iteration is one scheduling turn
+# (audit/event-loop/native/evsdlhost.c). The deadline the scheduler asks for
+# is not honored -- the host decides when the next turn comes.
+import std::ffi::c
+import std::mutable_array
+
+extern c library "evsdlhost" static at "../build/libevsdlhost.a"
+extern c library "evn" static at "../build/libevn.a"
+extern c library "SDL3"
+
+extern c fn evsdlhost_start(slot: std::ffi::c::Int, gen: std::ffi::c::Int, rate: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdlhost_block(deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evsdlhost_quit(on_quit_event: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdlhost_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evn_now() -> std::ffi::c::LongLong
+extern c fn evn_take() -> std::ffi::c::Int
+extern c fn evn_gen() -> std::ffi::c::Int
+extern c fn evn_a() -> std::ffi::c::LongLong
+extern c fn evn_b() -> std::ffi::c::LongLong
+extern c fn evn_synth(slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int, burst: std::ffi::c::Int, jitter: std::ffi::c::Int, gap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evn_synth_join() -> std::ffi::c::Int
+
+st_iterations = 0
+st_events = 1
+st_foreign_events = 2
+st_max_gap = 3
+st_finished = 4
+st_kicked = 5
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+opaque context struct SdlHost:
+    state: MutableArray[int]
+
+# A host iterating at RATE Hz (0: SDL's "waitevent": only after an event),
+# SDL's events tagged (SLOT, GEN).
+nomethod fn create(slot: int, gen: int, rate: int) -> SdlHost:
+    state = std::mutable_array::create(1, 0)
+    state.set(0, ci(slot).evsdlhost_start(ci(gen), ci(rate))):
+        on IndexNotFound:
+            unit
+    SdlHost {state: state}
+
+fn clock(context h: SdlHost) -> int:
+    evn_now()
+
+fn block(deadline: int, context h: SdlHost) -> int:
+    if deadline > 9223372036854775807 or deadline < -1:
+        evsdlhost_block(-1)
+    else:
+        evsdlhost_block(deadline)
+
+fn take_record(context h: SdlHost) -> int:
+    evn_take()
+
+fn record_gen(context h: SdlHost) -> int:
+    evn_gen()
+
+fn record_a(context h: SdlHost) -> int:
+    evn_a()
+
+fn record_b(context h: SdlHost) -> int:
+    evn_b()
+
+fn quit(context h: SdlHost) -> int:
+    evsdlhost_quit(0)
+
+nomethod fn stat(i: int, context h: SdlHost) -> int:
+    evsdlhost_stat(ci(i))
+
+nomethod fn synth(slot: int, gen: int, count: int, interval: int, context h: SdlHost) -> int:
+    ci(slot).evn_synth(ci(gen), ci(count), ci(interval), 1, 1, 0)
+
+fn synth_join(context h: SdlHost) -> int:
+    evn_synth_join()

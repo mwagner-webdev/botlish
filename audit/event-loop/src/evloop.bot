@@ -97,6 +97,13 @@ context trait Driver:
     fn record_a() -> int
     fn record_b() -> int
 
+# A capability of a driver: it runs native pump hooks (prepare/check, the
+# pump protocol of EVENT-LOOP-EXPLORATION.md section 4) beside its own wait.
+# A native library that needs it requires this trait; installing a driver
+# without it makes that library's use a compile-time MISSING-CONTEXT.
+context trait NativePumps:
+    fn pumps_supported() -> int
+
 # Registration rows (stride rs).
 rs = 16
 r_gen = 0

@@ -1,0 +1,40 @@
+# b-sdl-host60.bot -- EVENT-LOOP-EXPLORATION.md, Experiment B (invariant 6): the
+# scheduler advanced by SDL3's own host (SDL_EnterAppMainCallbacks) at
+# 60 Hz -- the same tasks as b-sdl-*.bot.
+import evloop
+import evsdl
+import evsdlhost
+import sdlprobe
+
+nomethod fn main(sdlreg: evloop::Reg, posts: evloop::Reg, context ev: evloop::Loop, h: evsdlhost::SdlHost) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
+    sdlprobe::spawn_all(sdlreg, posts)
+    coroutine {step: s, first: sf} = sdlprobe::starter()
+    evloop::adopt(s, sf)
+    evsdlhost::synth(posts.slot, posts.gen, 200, 1000)
+    started = evsdlhost::clock()
+    evloop::log(evloop::cat("turns ", evloop::run()))
+    evloop::log(evloop::cat("wall us ", evsdlhost::clock() - started))
+    evloop::log(evloop::cat("host iterations ", evsdlhost::stat(evsdlhost::st_iterations)))
+    evloop::log(evloop::cat("host events ", evsdlhost::stat(evsdlhost::st_events)))
+    evloop::log(evloop::cat("host events on a foreign thread ", evsdlhost::stat(evsdlhost::st_foreign_events)))
+    evloop::log(evloop::cat("host max gap us ", evsdlhost::stat(evsdlhost::st_max_gap)))
+    evloop::log(evloop::cat("host quit ", evsdlhost::quit()))
+    evloop::log(evloop::cat("host finished ", evsdlhost::stat(evsdlhost::st_finished)))
+    evsdl::producers_join()
+    evsdlhost::synth_join()
+    evloop::trace()
+
+with context evloop::create(64, 0)
+sdlreg = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+posts = evloop::source(1, 4096):
+    on IndexNotFound:
+        evloop::Reg {slot: -1, gen: 0}
+with context evsdlhost::create(sdlreg.slot, sdlreg.gen, 60)
+main(sdlreg, posts):
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]
