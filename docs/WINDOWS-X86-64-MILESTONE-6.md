@@ -587,9 +587,48 @@ detector: c-ffi.test, six fuzzer programs, the `ffi_` Rust tests):
 
 16 mutants, 16 killed, 0 survived.
 
-**Windows** (`[ci-full]`, `CI-Tests: c-ffi-mutants=...`):
+**Real Windows**, run [40600000327](https://github.com/mwagner-webdev/botlish/actions/runs/40600000327)
+(`ea9cc44`, the full tier's `c-ffi-mutants=` item with the twelve variadic
+mutants; detectors c-ffi.test on interp and compile against the MSVC
+fixture, six fuzzer programs built with MSVC, the `ffi_` Rust tests):
 
-[[CI]]
+| Mutant | c-ffi.test (failed tests) | Fuzzer (disagreeing programs of 6) | Rust |
+|---|---|---|---|
+| `va-win64-no-shadow-copy` | 11 | 5 | 2 |
+| `va-win64-wrong-integer-register` | 3: `cf-va-abi-fixedd`, `cf-va-doubles`, `cf-va-interchange` | 1 | 2 |
+| `va-win64-converted-not-copied` | 10 | 4 | 2 |
+| `va-win64-positions-by-kind` | 14 | 5 | 2 |
+| `va-win64-fourth-position-missed` | 6: `cf-va-abi-doubles`, `-crt-snprintf`, `-doubles`, `-interchange`, `-position-types`, `-positions` | 4 | 2 |
+| `va-win64-extra-arguments` | 13 | 6 | 3 |
+| `va-win64-stack-slot-shifted` | 15 | 5 | 4 |
+| `va-win64-fixed-calls-stubbed` | 1: `cf-va-stubs` | survived | survived |
+| `va-win64-capability-without-lowering` | 22 | 6 | 4 |
+| `va-stub-jit-jump-misplaced` | survived | survived | 2 |
+| `va-stub-plt-addend-dropped` | 9 | 5 | 2 |
+| `va-keepalive-dropped` | 1: `cf-va-borrow-nir` | survived | -- |
+
+12 mutants, 12 killed, 0 survived. Every mutant of the lowering's
+arithmetic -- the duplication, its register, its bits, the positions, the
+boundary, the stack -- is killed on Windows by MSVC's callees and captures
+and by the fuzzer's MSVC-built `va_arg` code, not only by the Rust tests.
+Three are killed by one kind of detector only, each for a reason:
+
+* `va-win64-fixed-calls-stubbed` is killed by `cf-va-stubs`'s structural
+  check alone. Behaviorally the mutant is benign: a fixed-arity call's
+  floating-point positions leave their integer registers unused, so the
+  stub's copies overwrite nothing a callee reads. The rule it breaks (a
+  fixed call never goes through a variadic stub) is a code-quality and
+  conformance rule, which the structural test pins.
+* `va-stub-jit-jump-misplaced` is the JIT form's: on every host a program
+  that calls C runs as a linked executable (C-FFI.md; native/src/main.rs's
+  `run_linked`), never through the JIT, so only the Rust tests, which run
+  the JIT form, see it -- on Windows by its bytes, on Linux also by the
+  capture that jumps into the misplaced address and dies.
+* `va-keepalive-dropped` is killed by the NIR test, and the fuzzer's
+  programs survive it: nothing allocates between a call's exposures and
+  the end of the C call, so in the present lowering no collection can
+  reclaim a borrowed storage there. The keepalive is what keeps that true
+  once something does; `cf-va-borrow-nir` pins it.
 
 ### 8.5 Linux AArch64 and macOS
 
