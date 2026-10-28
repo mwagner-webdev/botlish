@@ -80,6 +80,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [IMPORTS.md](IMPORTS.md) -- imports: explicit namespace dependencies
 - [DIRECT-MODULES.md](DIRECT-MODULES.md) -- direct modules: raw authority acknowledged at the module boundary (`direct module`), mediated by module-owned contexts
 - [STD-NAMESPACE.md](STD-NAMESPACE.md) -- the standard library under one compiler-owned root `std`, rooted `::` paths, local modules beside it
+- [BOT-MODULES-MILESTONE-1.md](BOT-MODULES-MILESTONE-1.md) -- package-scoped modules: packages installed under `.bot_modules`, downward-only resolution (no consumer, sibling or ancestor search), a package claiming its root namespace in its owner's scope, package-instance identity (`physics/geometry::Point`) through every backend, the cache and the compiler service; the SDL3 binding as a package and a reusable SDL3 airlock package (completion report)
 - [STDLIB-NAMESPACES.md](STDLIB-NAMESPACES.md) -- standard namespaces, intrinsics, `at` and `get`
 - [MODULE-BINDINGS.md](MODULE-BINDINGS.md) -- immutable module bindings
 - [MODULE-STATIC-RETAINED-VALUES.md](MODULE-STATIC-RETAINED-VALUES.md) -- module-static retained values

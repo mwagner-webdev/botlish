@@ -48,7 +48,7 @@
 @@ qualified-lookup-ignored a qualified value reference of another module is never checked
 ## surface/modules.tcl
 <<<<
-    CheckPrivate $state $own $namespaceName $symbolName values $span
+    CheckPrivate $state $key $id $symbolName values $span
 }
 ====
 }
@@ -57,11 +57,11 @@
 @@ rooted-lookup-ignored a rooted reference (::m::f) skips the private check
 ## surface/modules.tcl
 <<<<
-    CheckPrivate $state $own $namespaceName $symbolName values $span
+    CheckPrivate $state $key $id $symbolName values $span
 }
 ====
     if {!$rooted} {
-        CheckPrivate $state $own $namespaceName $symbolName values $span
+        CheckPrivate $state $key $id $symbolName values $span
     }
 }
 >>>>
@@ -69,27 +69,27 @@
 @@ type-lookup-ignored a qualified type or struct of another module is never checked
 ## surface/modules.tcl
 <<<<
-        CheckPrivate $state $own $namespaceName $symbolName types $span
+        CheckPrivate $state $key $id $symbolName types $span
         return
     }
-    if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
+    if {$symbolName in [dict get $state loadedLayouts $id]} {
 ====
         return
     }
-    if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
+    if {$symbolName in [dict get $state loadedLayouts $id]} {
 >>>>
 
 @@ error-lookup-ignored a qualified error of another module is never checked
 ## surface/modules.tcl
 <<<<
-        CheckPrivate $state $own $namespaceName $symbolName errors $span
+        CheckPrivate $state $key $id $symbolName errors $span
 ====
 >>>>
 
 @@ type-import-ignored `import type m::T` of a private type is allowed
 ## surface/modules.tcl
 <<<<
-        CheckPrivate $state $own $ns $name types $nameSpan
+        CheckPrivate $state $key $id $name types $nameSpan
 ====
 >>>>
 

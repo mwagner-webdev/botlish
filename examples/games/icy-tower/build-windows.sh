@@ -20,8 +20,9 @@
 #      None is committed -- a Linux host has no MSVC headers to check one
 #      against -- so the build generates it, into ICY_TOWER_BINDING when
 #      that is set (kept) or a temporary directory.
-#   3. The application: the .bot files beside this script and that binding
-#      staged into one application root (tools/c-bindgen.tcl stage -dir).
+#   3. The application: the .bot files beside this script staged into one
+#      application root, with that binding installed as its package sdl3
+#      (tools/c-bindgen.tcl stage -dir -package 1; BOT-MODULES-MILESTONE-1.md).
 #   4. The executable: main.tcl -emit-native-executable of main-windows.bot,
 #      linked by rustc with link.exe and SDL3.lib (-L), the static C runtime
 #      (WINDOWS-X86-64-MILESTONE-2.md); then icy-tower.exe and SDL3.dll in
@@ -49,7 +50,7 @@ tclsh9.0 "$root/tools/c-bindgen.tcl" fetch sdl3 >/dev/null
 tclsh9.0 "$root/tools/c-bindgen.tcl" generate sdl3 -target windows-x86_64 -out "$binding"
 app=$(winpath "$work")/app
 tclsh9.0 "$root/tools/c-bindgen.tcl" stage sdl3 -target windows-x86_64 -dir "$binding/windows-x86_64" \
-    -app "$here" -into "$app" >/dev/null
+    -app "$here" -into "$app" -package 1 >/dev/null
 tclsh9.0 "$root/main.tcl" -warnings error -emit-native-executable -L "$sdl" "$app/main-windows.bot"
 mkdir -p "$out"
 cp "$app/main-windows.exe" "$out/icy-tower.exe"

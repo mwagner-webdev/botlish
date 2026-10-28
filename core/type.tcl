@@ -144,8 +144,10 @@ proc core::type::register {name args} {
     variable registry
     # A source-declared type of a module is named `NAMESPACE::Name` (its
     # qualified identity, hir/sourcetypes.tcl); a nested namespace has more
-    # segments.
-    if {![regexp {^[A-Za-z_][A-Za-z0-9_.]*(?:::[A-Za-z_][A-Za-z0-9_.]*)*$} $name]
+    # segments, and a package instance's module's identity begins with the
+    # instance, its segments separated by "/" (BOT-MODULES-MILESTONE-1.md:
+    # physics/geometry::Small).
+    if {![regexp {^[A-Za-z_][A-Za-z0-9_.]*(?:/[A-Za-z_][A-Za-z0-9_]*)*(?:::[A-Za-z_][A-Za-z0-9_.]*)*$} $name]
             || $name in $primitives || $name in {any refined never}} {
         error "core::type::register: invalid type name \"$name\""
     }

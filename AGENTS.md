@@ -3669,6 +3669,73 @@ If you change the namespace model (`surface/modules.tcl`'s resolution,
 `audit/hir-interchange/tools/mutate.tcl`; a change to the single
 executable's packing also `single/smoke-test.sh` after `single/build.sh`.
 
+## Package-scoped modules (.bot_modules)
+
+A package is an ordinary module tree installed under the immediate
+`.bot_modules` directory of its owner (BOT-MODULES-MILESTONE-1.md):
+ROOT/.bot_modules/NAME for the application's package NAME,
+PKG/.bot_modules/D for package PKG's own package D. Every module file has an
+owning scope -- the application, the standard library or one package
+instance -- and an import is resolved by its first segment in the importing
+file's scope only (`surface/modules.tcl`'s `Locate`): `std::...` the
+standard library's; a segment naming a package installed in that scope the
+package's (it claims the whole root namespace there); otherwise the scope's
+own tree (the application's files; a package's own root namespace). Keep it
+so:
+
+* Downward only: never search a consumer's modules or packages, a sibling's
+  or an ancestor's, a working directory, an environment variable or a path
+  list, and never fall back from one origin to another. Two candidates are
+  MODULE-COLLISION, never a precedence; a package named std is
+  RESERVED-NAMESPACE. The entry file is no module and collides with
+  nothing.
+* No package manager in the compiler: never read `botlish.json`, a version,
+  a lock, a registry or the network; the installed directories are the
+  whole of a package's scope. Installation gives no privilege: a package's
+  modules are ordinary modules (never standard-library modules: no
+  internal namespace, no intrinsic), with the ordinary `private`, contexts,
+  direct-module rules and C FFI; never add package-level visibility, an
+  import alias or a version in source syntax.
+* A package instance is its place in the logical dependency tree (physics,
+  physics/geometry), never an absolute path, a version or a load order. A
+  module's canonical identity is the instance and its namespace below the
+  package's root (`Identity`): the application's and its direct packages'
+  modules keep their spelling, a package's own package's begin with the
+  instance (`physics/geometry::Point`, which no source can spell). Every
+  stage after the loader keys a module by its identity: the loader
+  rewrites a file's qualified spellings to identities wherever one differs
+  (`RewriteQualified`), with the same traversal that checks them
+  (`QualifiedRefs` and `RewriteQualified` are one `Walk`, and
+  `surface::ast::MapChildren` is `Children`'s traversal). A new place where
+  source writes a qualified name goes into `Walk`, never a second walker;
+  never merge two instances by spelling downstream, and never parse a
+  spelling where an identity is expected.
+* A validator of identities accepts the instance separator "/"
+  (core/ir.tcl's enum literal, core/type.tcl's `register`): keep any new
+  one so.
+* The loader's package probes go through the source seam's `directory`
+  question (`surface::source::directory`, recorded in the snapshot) and are
+  the front-end cache's dependencies (`probes`, `surface::cache::
+  Dependencies`): a new resolution input goes there too. The physical
+  package directories on the loading stack stop a symbolic-link cycle
+  (CYCLE); never drop that guard.
+
+If you change resolution, identity, the rewrite, the seam's directory
+question or the cache's probes, run `tests/bot-modules.test`,
+`tests/imports.test`, `tests/application-modules.test`,
+`tests/std-namespace.test`, `tests/surface-modules.test`,
+`tests/hir-cache.test`, `tests/compiler-service.test`, `tests/lsp.test`,
+`tests/compilation-isolation.test`, `tests/hir-interchange.test` and
+`audit/bot-modules/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the
+mutation harnesses whose mutants edit `CheckRef` or `CheckImports`
+(module-privacy, error-payloads, hashable, type-predicates) and the
+HIR-interchange and compiler-service ones for a change to the cache or the
+seam. Icy Tower's builds stage the SDL3 binding as a package (`tools/
+c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
+`icy-tower` workflows cover them.
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

@@ -644,6 +644,92 @@ proc surface::ast::Children {node} {
     return {}
 }
 
+# NODE with each of its child nodes (Children's, in Children's order)
+# replaced by the result of calling the command prefix CMD on it. Children and
+# MapChildren are one traversal: keep them in step (tests/bot-modules.test's
+# bm-ast-map-children-parity checks them over the corpus).
+proc surface::ast::MapChildren {node cmd} {
+    switch -- [dict get $node kind] {
+        program - suite {
+            dict set node body [lmap child [dict get $node body] {{*}$cmd $child}]
+        }
+        list {
+            dict set node items [lmap child [dict get $node items] {{*}$cmd $child}]
+        }
+        call {
+            dict set node callee [{*}$cmd [dict get $node callee]]
+            dict set node args [lmap child [dict get $node args] {{*}$cmd $child}]
+        }
+        unary - not {
+            dict set node operand [{*}$cmd [dict get $node operand]]
+        }
+        anonstruct - namedstruct {
+            dict set node init fields [lmap field [dict get $node init fields] {
+                dict set field value [{*}$cmd [dict get $field value]]
+            }]
+        }
+        project {
+            dict set node receiver [{*}$cmd [dict get $node receiver]]
+        }
+        methodcall {
+            dict set node receiver [{*}$cmd [dict get $node receiver]]
+            dict set node args [lmap child [dict get $node args] {{*}$cmd $child}]
+        }
+        binary - logical {
+            dict set node left [{*}$cmd [dict get $node left]]
+            dict set node right [{*}$cmd [dict get $node right]]
+        }
+        bind - return - break - destructure - coroutinebind {
+            if {[dict get $node value] ne ""} {
+                dict set node value [{*}$cmd [dict get $node value]]
+            }
+        }
+        with - yield {
+            dict set node value [{*}$cmd [dict get $node value]]
+        }
+        function - static {
+            dict set node body [{*}$cmd [dict get $node body]]
+        }
+        loop {
+            if {[llength [dict get $node clauses]] > 1} {
+                dict set node clauses [lmap clause [dict get $node clauses] {
+                    foreach field {iterable start end} {
+                        if {[dict get $clause $field] ne ""} {
+                            dict set clause $field [{*}$cmd [dict get $clause $field]]
+                        }
+                    }
+                    set clause
+                }]
+            } elseif {[dict get $node iterable] ne ""} {
+                dict set node iterable [{*}$cmd [dict get $node iterable]]
+            } elseif {[dict get $node countStart] ne ""} {
+                dict set node countStart [{*}$cmd [dict get $node countStart]]
+                dict set node countEnd [{*}$cmd [dict get $node countEnd]]
+            }
+            dict set node body [{*}$cmd [dict get $node body]]
+        }
+        if {
+            dict set node condition [{*}$cmd [dict get $node condition]]
+            dict set node then [{*}$cmd [dict get $node then]]
+            if {[dict get $node else] ne ""} {
+                dict set node else [{*}$cmd [dict get $node else]]
+            }
+        }
+        handledcall {
+            dict set node call [{*}$cmd [dict get $node call]]
+            dict set node handlers [lmap handler [dict get $node handlers] {
+                dict set handler body [{*}$cmd [dict get $handler body]]
+            }]
+        }
+        fail {
+            if {[dict exists $node payload] && [dict get $node payload] ne ""} {
+                dict set node payload [{*}$cmd [dict get $node payload]]
+            }
+        }
+    }
+    return $node
+}
+
 # ---------------------------------------------------------------------------
 # Formatting, for debugging and tests.
 #
