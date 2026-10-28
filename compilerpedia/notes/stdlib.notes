@@ -2336,6 +2336,56 @@ std::byte_store::from_list([]).byte_count()
 @value 0
 @end
 
+@topic stdlib.std::byte_store::join
+title: -
+summary: One new immutable byte storage holding the bytes of every storage of a List, in order.
+index: stdlib
+keywords: concatenate bytes; join bytes; append bytes; combine byte buffers
+related: stdlib.std::abi::bytes::join stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::join, which is what programs call (it
+takes a List[std::abi::bytes::Bytes]). One copy of the total length; the
+empty List, or only empty parts, gives the empty storage. An element that
+is not a byte storage is the TYPE error when the call runs. It reads no
+byte into a Botlish value. WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+a = std::byte_store::from_list("ab".encode_utf8())
+std::byte_store::join([a, a]).byte_count()
+@value 4
+@end
+
+@topic stdlib.std::byte_store::decode_utf8
+title: -
+summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.
+index: stdlib
+keywords: decode utf-8; bytes to string; utf8 decode; text from bytes; InvalidUtf8
+related: stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::encode_utf8 stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf8, which is what programs call
+(it takes a std::abi::bytes::Bytes). Strict: an overlong form, an encoded
+surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+U+10FFFF, a truncated sequence or a stray continuation byte is the declared
+error InvalidUtf8, never a replacement character. A 0 byte is U+0000.
+WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
+    on InvalidUtf8:
+        "not text"
+@value "hé"
+@end
+
 @topic stdlib.module.std::mutable_byte_store
 title: -
 summary: The writable byte storage behind std::abi::bytes::MutableBytes: fixed-length byte sequences whose updates return fresh storage (a substrate: use std::abi::bytes).

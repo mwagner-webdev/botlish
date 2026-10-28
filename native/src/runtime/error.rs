@@ -76,6 +76,10 @@ pub const ERR_LENGTH_MISMATCH: u32 = BUILTIN_ERROR_ID_BASE + 10;
 /// not the canonical decimal text of an Int (runtime::inttext's
 /// rt_str_to_int, NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md).
 pub const ERR_INVALID_INTEGER_TEXT: u32 = BUILTIN_ERROR_ID_BASE + 11;
+/// `InvalidUtf8` (builtin error 12): `std::abi::bytes::decode_utf8`'s bytes
+/// are not the UTF-8 encoding of any String (runtime::ops's
+/// rt_bytes_decode_utf8, WINDOWS-X86-64-MILESTONE-7.md).
+pub const ERR_INVALID_UTF8: u32 = BUILTIN_ERROR_ID_BASE + 12;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

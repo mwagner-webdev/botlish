@@ -2127,6 +2127,48 @@ std::abi::bytes::from_list or, as a method, receiver.from_list(...).
 The Bytes holding exactly the given bytes, in order. The empty List gives
 the empty Bytes (length 0).
 
+@topic stdlib.std::abi::bytes::join
+title: std::abi::bytes::join -- Function of module std::abi::bytes
+summary: The bytes of every Bytes of PARTS, in order, as one Bytes
+index: stdlib
+symbol: std::abi::bytes::join
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn join(parts: List[Bytes]) -> Bytes:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::join or, as a method, receiver.join(...).
+
+== DESCRIPTION
+The bytes of every Bytes of PARTS, in order, as one Bytes: one copy of their
+total length (WINDOWS-X86-64-MILESTONE-7.md: a file read in chunks becomes
+one value). The empty List, or one of empty parts, gives the empty Bytes.
+
+@topic stdlib.std::abi::bytes::decode_utf8
+title: std::abi::bytes::decode_utf8 -- Function of module std::abi::bytes
+summary: The String whose UTF-8 encoding is DATA
+index: stdlib
+symbol: std::abi::bytes::decode_utf8
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn decode_utf8(data: Bytes) -> str errors InvalidUtf8:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::decode_utf8 or, as a method, receiver.decode_utf8(...).
+
+== DESCRIPTION
+The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse
+(WINDOWS-X86-64-MILESTONE-7.md). Strict -- an overlong form, an encoded
+surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+U+10FFFF, a truncated sequence or a stray continuation byte is the declared
+error InvalidUtf8, never a replacement character -- so
+decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
+the character U+0000. No byte-order mark is skipped, nothing normalized.
+
 @topic stdlib.std::abi::bytes::length
 title: std::abi::bytes::length -- Function of module std::abi::bytes
 summary: The exact byte count of DATA, as the ABI size domain.
@@ -2368,9 +2410,9 @@ is given and does NOT copy it: a raw-layer caller must hand it a storage
 nothing else observes (std::linux::read does, with `detach`). That is the
 raw layer's sharp edge.
 
-Not here, deliberately: slicing, indexing, concatenation, capacity,
-resizing, NUL-terminated strings (CString), and any retained-pointer or
-lifetime story.
+Not here, deliberately: slicing, indexing, capacity, resizing,
+NUL-terminated strings (CString), and any retained-pointer or lifetime
+story.
 
 == SOURCE
 stdlib/abi/bytes.bot (import std::abi::bytes).
@@ -2378,11 +2420,13 @@ stdlib/abi/bytes.bot (import std::abi::bytes).
 == MEMBERS
     std::abi::bytes::Bytes         opaque struct
     std::abi::bytes::MutableBytes  opaque struct
+    std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
     std::abi::bytes::detach        function -- DATA itself, as a value (a l...
     std::abi::bytes::freeze        function -- An immutable snapshot of all...
     std::abi::bytes::freeze_prefix function -- An immutable snapshot of the...
     std::abi::bytes::from_bytes    function -- An independent writable copy...
     std::abi::bytes::from_list     function -- The Bytes holding exactly th...
+    std::abi::bytes::join          function -- The bytes of every Bytes of ...
     std::abi::bytes::length        function -- The exact byte count of DATA...
     std::abi::bytes::mutable_length function -- The exact byte count of DATA
     std::abi::bytes::replace       function -- DATA with the byte at INDEX ...
@@ -4450,6 +4494,50 @@ std::byte_store::from_list([]).byte_count()
 @value 0
 @end
 
+@topic stdlib.std::byte_store::decode_utf8
+title: std::byte_store::decode_utf8 -- intrinsic of namespace std::byte_store
+summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.
+index: stdlib
+symbol: std::byte_store::decode_utf8
+keywords: decode utf-8; bytes to string; utf8 decode; text from bytes; InvalidUtf8
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::encode_utf8
+
+== SIGNATURE
+    std::byte_store::decode_utf8(any) -> str
+
+== ERRORS
+    InvalidUtf8
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::decode_utf8. Method syntax:
+receiver.decode_utf8(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf8, which is what programs call
+(it takes a std::abi::bytes::Bytes). Strict: an overlong form, an encoded
+surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+U+10FFFF, a truncated sequence or a stray continuation byte is the declared
+error InvalidUtf8, never a replacement character. A 0 byte is U+0000.
+WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
+    on InvalidUtf8:
+        "not text"
+@value "hé"
+@end
+
 @topic stdlib.std::byte_store::from_list
 title: std::byte_store::from_list -- intrinsic of namespace std::byte_store
 summary: A new immutable byte storage holding exactly the given byte values, in order; every element must be an Int in 0..255.
@@ -4488,6 +4576,42 @@ s.byte_count()
 @value 3
 @end
 
+@topic stdlib.std::byte_store::join
+title: std::byte_store::join -- intrinsic of namespace std::byte_store
+summary: One new immutable byte storage holding the bytes of every storage of a List, in order.
+index: stdlib
+symbol: std::byte_store::join
+keywords: concatenate bytes; join bytes; append bytes; combine byte buffers
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::join
+
+== SIGNATURE
+    std::byte_store::join(list) -> any
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::join. Method syntax: receiver.join(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::join, which is what programs call (it
+takes a List[std::abi::bytes::Bytes]). One copy of the total length; the
+empty List, or only empty parts, gives the empty storage. An element that
+is not a byte storage is the TYPE error when the call runs. It reads no
+byte into a Botlish value. WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+a = std::byte_store::from_list("ab".encode_utf8())
+std::byte_store::join([a, a]).byte_count()
+@value 4
+@end
+
 @topic stdlib.module.std::byte_store
 title: std::byte_store -- standard namespace
 summary: The immutable byte storage behind std::abi::bytes::Bytes: build one from a List of bytes and measure it (a substrate: use std::abi::bytes).
@@ -4501,7 +4625,9 @@ Compiler intrinsics only, no module file (import std::byte_store).
 
 == MEMBERS
     std::byte_store::byte_count    intrinsic -- The exact number of bytes o...
+    std::byte_store::decode_utf8   intrinsic -- The String whose UTF-8 enco...
     std::byte_store::from_list     intrinsic -- A new immutable byte storag...
+    std::byte_store::join          intrinsic -- One new immutable byte stor...
 
 Each member is a topic: -help NAME (e.g. -help
 std::byte_store::byte_count).
@@ -7248,6 +7374,166 @@ architecture's transport (std::linux::sys::read).
 * The address is taken and consumed synchronously; the compiler keeps the
   storage alive until the kernel has returned (native/lower.tcl).
 
+@topic stdlib.std::linux::terminator
+title: std::linux::terminator -- Function of module std::linux
+summary: The byte that terminates a C string.
+index: stdlib
+symbol: std::linux::terminator
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn terminator() -> Byte:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::terminator or,
+as a method, receiver.terminator(...).
+
+== DESCRIPTION
+The byte that terminates a C string.
+
+@topic stdlib.std::linux::c_string
+title: std::linux::c_string -- Function of module std::linux
+summary: PATH's bytes and a terminating NUL
+index: stdlib
+symbol: std::linux::c_string
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn c_string(path: List[Byte]) -> std::abi::bytes::Bytes:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::c_string or,
+as a method, receiver.c_string(...).
+
+== DESCRIPTION
+PATH's bytes and a terminating NUL: the C string a path syscall reads.
+
+@topic stdlib.std::linux::openat
+title: std::linux::openat -- Function of module std::linux
+summary: openat(2) of PATH relative to DIRFD (AT_FDCWD, -100, for the working directory) with FLAGS and, when FLAGS create a file, the permission bits MODE ...
+index: stdlib
+symbol: std::linux::openat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn openat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::openat or, as
+a method, receiver.openat(...).
+
+== DESCRIPTION
+openat(2) of PATH relative to DIRFD (AT_FDCWD, -100, for the working
+directory) with FLAGS and, when FLAGS create a file, the permission bits
+MODE (before the umask). The new descriptor, or -errno.
+
+@topic stdlib.std::linux::close
+title: std::linux::close -- Function of module std::linux
+summary: close(2) of FD
+index: stdlib
+symbol: std::linux::close
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn close(fd: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::close or, as a
+method, receiver.close(...).
+
+== DESCRIPTION
+close(2) of FD: 0, or -errno. On Linux the descriptor is released even when
+close reports an error (EINTR, EIO): it is never closed twice.
+
+@topic stdlib.std::linux::getdents64
+title: std::linux::getdents64 -- Function of module std::linux
+summary: getdents64(2)
+index: stdlib
+symbol: std::linux::getdents64
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes) -> ReadResult:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::getdents64 or,
+as a method, receiver.getdents64(...).
+
+== DESCRIPTION
+getdents64(2): the next linux_dirent64 records of the directory open on FD,
+into a logical copy of DATA (read's rule): result.result the bytes of
+records written (0 at the end of the directory, -errno on failure),
+result.data the buffer as the kernel left it.
+
+@topic stdlib.std::linux::mkdirat
+title: std::linux::mkdirat -- Function of module std::linux
+summary: mkdirat(2)
+index: stdlib
+symbol: std::linux::mkdirat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn mkdirat(dirfd: std::abi::I32, path: List[Byte], mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::mkdirat or, as
+a method, receiver.mkdirat(...).
+
+== DESCRIPTION
+mkdirat(2): the directory PATH (relative to DIRFD) with the permission bits
+MODE (before the umask). 0, or -errno.
+
+@topic stdlib.std::linux::unlinkat
+title: std::linux::unlinkat -- Function of module std::linux
+summary: unlinkat(2)
+index: stdlib
+symbol: std::linux::unlinkat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn unlinkat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::unlinkat or,
+as a method, receiver.unlinkat(...).
+
+== DESCRIPTION
+unlinkat(2): removes the name PATH (relative to DIRFD); with FLAGS
+AT_REMOVEDIR (512) an empty directory, else any other kind of entry. 0, or
+-errno.
+
+@topic stdlib.std::linux::o_directory
+title: std::linux::o_directory -- Function of module std::linux
+summary: O_DIRECTORY and O_NOFOLLOW for the compilation target's architecture (the open flags arm64 defines differently)
+index: stdlib
+symbol: std::linux::o_directory
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn o_directory() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::o_directory
+or, as a method, receiver.o_directory(...).
+
+== DESCRIPTION
+O_DIRECTORY and O_NOFOLLOW for the compilation target's architecture (the
+open flags arm64 defines differently): std::linux::sys's.
+
+@topic stdlib.std::linux::o_nofollow
+title: std::linux::o_nofollow -- Function of module std::linux
+summary: The function std::linux::o_nofollow of the standard module std::linux.
+index: stdlib
+symbol: std::linux::o_nofollow
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn o_nofollow() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::o_nofollow or,
+as a method, receiver.o_nofollow(...).
+
 @topic stdlib.module.std::linux
 title: std::linux -- standard namespace
 summary: Thin Botlish wrappers over the raw Linux syscall transports: std::linux::write and std::linux::read, one syscall each with the kernel's raw result (a direct module, native only).
@@ -7328,7 +7614,16 @@ it exercises raw authority.
 
 == MEMBERS
     std::linux::ReadResult         struct -- What read(2) did, with both ha...
+    std::linux::c_string           function -- PATH's bytes and a terminati...
+    std::linux::close              function -- close(2) of FD
+    std::linux::getdents64         function -- getdents64(2)
+    std::linux::mkdirat            function -- mkdirat(2)
+    std::linux::o_directory        function -- O_DIRECTORY and O_NOFOLLOW f...
+    std::linux::o_nofollow         function
+    std::linux::openat             function -- openat(2) of PATH relative t...
     std::linux::read               function -- read(2) from descriptor FD i...
+    std::linux::terminator         function -- The byte that terminates a C...
+    std::linux::unlinkat           function -- unlinkat(2)
     std::linux::write              function -- write(2)
 
 Each member is a topic: -help NAME (e.g. -help std::linux::ReadResult).
@@ -7955,6 +8250,135 @@ kernel writes into a private copy of data, never into storage another
 value can observe. Call std::linux::read instead, which returns a
 std::linux::ReadResult.
 
+@topic stdlib.std::linux::sys::openat
+title: std::linux::sys::openat -- Function of module std::linux::sys
+summary: openat(2)
+index: stdlib
+symbol: std::linux::sys::openat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn openat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::openat or, as a method, receiver.openat(...).
+
+== DESCRIPTION
+openat(2): SYS_openat = 257, rdi = dirfd, rsi = the address of PATH's
+payload (a C string: stdlib/linux.bot builds it with its terminating NUL),
+rdx = flags, r10 = the creation mode. The raw signed result: the new
+descriptor, or -errno.
+
+@topic stdlib.std::linux::sys::close
+title: std::linux::sys::close -- Function of module std::linux::sys
+summary: close(2)
+index: stdlib
+symbol: std::linux::sys::close
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn close(fd: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::close or, as a method, receiver.close(...).
+
+== DESCRIPTION
+close(2): SYS_close = 3, rdi = fd. 0, or -errno.
+
+@topic stdlib.std::linux::sys::getdents64
+title: std::linux::sys::getdents64 -- Function of module std::linux::sys
+summary: getdents64(2)
+index: stdlib
+symbol: std::linux::sys::getdents64
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes):
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::getdents64 or, as a method, receiver.getdents64(...).
+
+== DESCRIPTION
+getdents64(2): SYS_getdents64 = 217, rdi = fd, rsi = the address of a
+freshly detached copy of the buffer, rdx = its byte count. As read: {result:
+the raw signed result (bytes of linux_dirent64 records written, 0 at the end
+of the directory, or -errno), data: the copy as the kernel left it}.
+
+@topic stdlib.std::linux::sys::mkdirat
+title: std::linux::sys::mkdirat -- Function of module std::linux::sys
+summary: mkdirat(2)
+index: stdlib
+symbol: std::linux::sys::mkdirat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn mkdirat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::mkdirat or, as a method, receiver.mkdirat(...).
+
+== DESCRIPTION
+mkdirat(2): SYS_mkdirat = 258, rdi = dirfd, rsi = PATH (a C string), rdx =
+the mode. 0, or -errno.
+
+@topic stdlib.std::linux::sys::unlinkat
+title: std::linux::sys::unlinkat -- Function of module std::linux::sys
+summary: unlinkat(2)
+index: stdlib
+symbol: std::linux::sys::unlinkat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn unlinkat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::unlinkat or, as a method, receiver.unlinkat(...).
+
+== DESCRIPTION
+unlinkat(2): SYS_unlinkat = 263, rdi = dirfd, rsi = PATH (a C string), rdx =
+flags (AT_REMOVEDIR to remove a directory). 0, or -errno.
+
+@topic stdlib.std::linux::sys::o_directory
+title: std::linux::sys::o_directory -- Function of module std::linux::sys
+summary: O_DIRECTORY
+index: stdlib
+symbol: std::linux::sys::o_directory
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn o_directory() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::o_directory or, as a method, receiver.o_directory(...).
+
+== DESCRIPTION
+O_DIRECTORY: 0200000 on x86_64 (open(2)'s flags are not all the same on
+every architecture: arm64 has its own O_DIRECTORY, O_NOFOLLOW, O_DIRECT and
+O_LARGEFILE, x86-64 the generic ones).
+
+@topic stdlib.std::linux::sys::o_nofollow
+title: std::linux::sys::o_nofollow -- Function of module std::linux::sys
+summary: O_NOFOLLOW
+index: stdlib
+symbol: std::linux::sys::o_nofollow
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn o_nofollow() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::o_nofollow or, as a method, receiver.o_nofollow(...).
+
+== DESCRIPTION
+O_NOFOLLOW: 0400000 on x86_64.
+
 @topic stdlib.module.std::linux::sys
 title: std::linux::sys -- standard namespace
 summary: The architecture's Linux syscall numbers and register convention under stdlib/linux.bot's wrappers: std::linux::sys::write and read (a direct module).
@@ -7997,10 +8421,17 @@ stdlib/linux/sys.x86_64.bot and stdlib/linux/sys.aarch64.bot, chosen by
 the compilation's target, have one surface.
 
 == MEMBERS
+    std::linux::sys::close         function -- close(2)
+    std::linux::sys::getdents64    function -- getdents64(2)
+    std::linux::sys::mkdirat       function -- mkdirat(2)
+    std::linux::sys::o_directory   function -- O_DIRECTORY
+    std::linux::sys::o_nofollow    function -- O_NOFOLLOW
+    std::linux::sys::openat        function -- openat(2)
     std::linux::sys::read          function -- read(2)
+    std::linux::sys::unlinkat      function -- unlinkat(2)
     std::linux::sys::write         function -- write(2)
 
-Each member is a topic: -help NAME (e.g. -help std::linux::sys::read).
+Each member is a topic: -help NAME (e.g. -help std::linux::sys::close).
 
 == NOTES
 An architecture-specific module: the compilation target selects

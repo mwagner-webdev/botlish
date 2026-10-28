@@ -60,3 +60,78 @@ fn read(fd: std::abi::I32, data: std::abi::bytes::MutableBytes):
         })
     )
     {result: result, data: local}
+
+# openat(2): SYS_openat = 56, x0 = dirfd, x1 = the address of
+# PATH's payload (a C string: stdlib/linux.bot builds it with its terminating
+# NUL), x2 = flags, x3 = the creation mode. The raw signed result: the new
+# descriptor, or -errno.
+fn openat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32, mode: std::abi::U32) -> int:
+    std::abi::aarch64::to_int(
+        std::linux::abi::aarch64::syscall({
+            x8: std::abi::aarch64::register64(56),
+            x0: std::abi::aarch64::from_i32(dirfd),
+            x1: std::abi::aarch64::from_bytes(path),
+            x2: std::abi::aarch64::from_i32(flags),
+            x3: std::abi::aarch64::from_u32(mode),
+        })
+    )
+
+# close(2): SYS_close = 57, x0 = fd. 0, or -errno.
+fn close(fd: std::abi::I32) -> int:
+    std::abi::aarch64::to_int(
+        std::linux::abi::aarch64::syscall({
+            x8: std::abi::aarch64::register64(57),
+            x0: std::abi::aarch64::from_i32(fd),
+        })
+    )
+
+# getdents64(2): SYS_getdents64 = 61, x0 = fd, x1 = the
+# address of a freshly detached copy of the buffer, x2 = its byte count. As
+# read: {result: the raw signed result (bytes of linux_dirent64 records written,
+# 0 at the end of the directory, or -errno), data: the copy as the kernel left
+# it}.
+fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes):
+    local = std::abi::bytes::detach(data)
+    result = std::abi::aarch64::to_int(
+        std::linux::abi::aarch64::syscall({
+            x8: std::abi::aarch64::register64(61),
+            x0: std::abi::aarch64::from_i32(fd),
+            x1: std::abi::aarch64::from_mutable_bytes(local),
+            x2: std::abi::aarch64::from_usize(std::abi::bytes::mutable_length(local)),
+        })
+    )
+    {result: result, data: local}
+
+# mkdirat(2): SYS_mkdirat = 34, x0 = dirfd, x1 = PATH (a C
+# string), x2 = the mode. 0, or -errno.
+fn mkdirat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, mode: std::abi::U32) -> int:
+    std::abi::aarch64::to_int(
+        std::linux::abi::aarch64::syscall({
+            x8: std::abi::aarch64::register64(34),
+            x0: std::abi::aarch64::from_i32(dirfd),
+            x1: std::abi::aarch64::from_bytes(path),
+            x2: std::abi::aarch64::from_u32(mode),
+        })
+    )
+
+# unlinkat(2): SYS_unlinkat = 35, x0 = dirfd, x1 = PATH (a C
+# string), x2 = flags (AT_REMOVEDIR to remove a directory). 0, or -errno.
+fn unlinkat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32) -> int:
+    std::abi::aarch64::to_int(
+        std::linux::abi::aarch64::syscall({
+            x8: std::abi::aarch64::register64(35),
+            x0: std::abi::aarch64::from_i32(dirfd),
+            x1: std::abi::aarch64::from_bytes(path),
+            x2: std::abi::aarch64::from_i32(flags),
+        })
+    )
+
+# O_DIRECTORY: 040000 on aarch64 (open(2)'s flags are not all the same on
+# every architecture: arm64 has its own O_DIRECTORY, O_NOFOLLOW, O_DIRECT and
+# O_LARGEFILE, x86-64 the generic ones).
+fn o_directory() -> std::abi::I32Value:
+    16384
+
+# O_NOFOLLOW: 0100000 on aarch64.
+fn o_nofollow() -> std::abi::I32Value:
+    32768

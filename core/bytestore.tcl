@@ -18,6 +18,9 @@
 #       reinterpretation, no character coercion (an element that is not such
 #       an Int is a TYPE error). Nothing terminates the sequence: a 0
 #       element is an ordinary byte.
+#   std::byte_store::join(List[storage]) -> byte storage
+#       The bytes of every storage of the List, in order, in one new
+#       storage (WINDOWS-X86-64-MILESTONE-7.md).
 #   std::byte_store::byte_count(storage) -> Int
 #       The exact byte count, 0 <= n <= the runtime's collection-length
 #       ceiling (the same enforced bound a String's or List's length has).
@@ -62,8 +65,11 @@
 # immutable_set for ImmutableSet). Nothing outside module `abi` can turn a
 # storage value into a std::abi::Bytes (constructing one is representation
 # authority: OPAQUE-STRUCTS.md), and a storage value alone gives no address,
-# so these two natives cannot manufacture a pointer. There is deliberately no
-# byte_store operation that reads, slices or iterates the bytes.
+# so these natives cannot manufacture a pointer. There is deliberately no
+# byte_store operation that reads, slices or iterates the bytes; the one
+# that combines them, join (WINDOWS-X86-64-MILESTONE-7.md: a file read in
+# chunks becomes one Bytes), copies storages into a new one and reads none
+# into a Botlish value.
 
 namespace eval core::bytestore {
     # The declaration identity of the opaque struct whose one field holds a
@@ -192,7 +198,27 @@ proc core::bytestore::addressImpl {name data} {
         "$name produces the machine address of [expr {[bridgeWritable $name] ? "a writable byte buffer" : "a byte buffer"}], which exists only in the native backend (cranelift, or a standalone executable) on Linux $label; the Tcl backends (interp, compile) have no machine addresses and do not imitate one"
 }
 
+# The storage of the bytes of every storage of List L, in order
+# (WINDOWS-X86-64-MILESTONE-7.md): one new storage, the empty one when every
+# part is empty. TYPE for an element that is not a byte storage (lib/abi/
+# bytes.bot's wrapper passes only the storages of Bytes values).
+proc core::bytestore::join {l} {
+    set hex ""
+    set position 0
+    foreach item [core::value::items [core::value::expect list $l std::byte_store::join]] {
+        if {[core::value::kind $item] ne "bytestore"} {
+            core::semanticError TYPE \
+                "std::byte_store::join: element $position must be a byte storage, got [core::value::show $item]"
+        }
+        append hex [core::value::bytestoreHex $item]
+        incr position
+    }
+    return [core::value::bytestore $hex]
+}
+
 core::native::register std::byte_store::from_list -arity 1 -impl core::bytestore::fromList \
+    -param-types {list} -result-type any -runtime {bytestore-alloc} -context-free 1
+core::native::register std::byte_store::join -arity 1 -impl core::bytestore::join \
     -param-types {list} -result-type any -runtime {bytestore-alloc} -context-free 1
 core::native::register std::byte_store::byte_count -arity 1 -impl core::bytestore::length \
     -param-types {any} -result-type int -result-range collection-length -context-free 1

@@ -71,6 +71,8 @@ direct module
 import std::abi
 import std::abi::bytes
 import std::linux::sys
+import std::list
+import type std::byte::Byte
 
 # write(2): DATA's bytes to descriptor FD, through the target architecture's
 # transport (std::linux::sys::write).
@@ -111,3 +113,61 @@ struct ReadResult:
 fn read(fd: std::abi::I32, data: std::abi::bytes::MutableBytes) -> ReadResult:
     done = std::linux::sys::read(fd, data)
     ReadResult {result: done.result, data: done.data}
+
+# ---------------------------------------------------------------------------
+# Paths and directories (WINDOWS-X86-64-MILESTONE-7.md): the syscalls
+# std::linux::fs is built on, as thin as write and read -- ONE syscall each,
+# the raw signed result (a descriptor or 0, or the kernel's -errno, exactly),
+# no retry, no ownership.
+#
+# A pathname is a List of bytes WITHOUT its terminator: the C string the
+# kernel reads -- those bytes and one NUL -- is built here, for the one call,
+# so it always ends inside its own storage (a Bytes the caller made could
+# not be checked: nothing reads a Bytes' bytes). A byte 0 inside PATH ends
+# the kernel's pathname there; std::linux::fs's paths never hold one.
+
+# The byte that terminates a C string.
+fn terminator() -> Byte:
+    0
+
+# PATH's bytes and a terminating NUL: the C string a path syscall reads.
+fn c_string(path: List[Byte]) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(path.append(terminator()))
+
+# openat(2) of PATH relative to DIRFD (AT_FDCWD, -100, for the working
+# directory) with FLAGS and, when FLAGS create a file, the permission bits
+# MODE (before the umask). The new descriptor, or -errno.
+fn openat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32, mode: std::abi::U32) -> int:
+    std::linux::sys::openat(dirfd, c_string(path), flags, mode)
+
+# close(2) of FD: 0, or -errno. On Linux the descriptor is released even
+# when close reports an error (EINTR, EIO): it is never closed twice.
+fn close(fd: std::abi::I32) -> int:
+    std::linux::sys::close(fd)
+
+# getdents64(2): the next linux_dirent64 records of the directory open on FD,
+# into a logical copy of DATA (read's rule): result.result the bytes of
+# records written (0 at the end of the directory, -errno on failure),
+# result.data the buffer as the kernel left it.
+fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes) -> ReadResult:
+    done = std::linux::sys::getdents64(fd, data)
+    ReadResult {result: done.result, data: done.data}
+
+# mkdirat(2): the directory PATH (relative to DIRFD) with the permission bits
+# MODE (before the umask). 0, or -errno.
+fn mkdirat(dirfd: std::abi::I32, path: List[Byte], mode: std::abi::U32) -> int:
+    std::linux::sys::mkdirat(dirfd, c_string(path), mode)
+
+# unlinkat(2): removes the name PATH (relative to DIRFD); with FLAGS
+# AT_REMOVEDIR (512) an empty directory, else any other kind of entry. 0, or
+# -errno.
+fn unlinkat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32) -> int:
+    std::linux::sys::unlinkat(dirfd, c_string(path), flags)
+
+# O_DIRECTORY and O_NOFOLLOW for the compilation target's architecture (the
+# open flags arm64 defines differently): std::linux::sys's.
+fn o_directory() -> std::abi::I32Value:
+    std::linux::sys::o_directory()
+
+fn o_nofollow() -> std::abi::I32Value:
+    std::linux::sys::o_nofollow()

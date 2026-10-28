@@ -178,6 +178,8 @@ namespace eval native::lower {
         std::int::to_string     {op inttostr} \
         std::int::from_string   {op strtoint} \
         std::byte_store::from_list {op bytesfromlist} \
+        std::byte_store::join      {op bytesjoin} \
+        std::byte_store::decode_utf8 {op bytesdecodeutf8} \
         std::byte_store::byte_count    {op byteslen} \
         std::mutable_byte_store::zeroed   {op mbytesnew} \
         std::mutable_byte_store::from_storage  {op mbytesfrom} \

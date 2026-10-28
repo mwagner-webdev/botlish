@@ -2516,6 +2516,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.check(v);
                 v
             }
+            // A byte storage's String (WINDOWS-X86-64-MILESTONE-7.md): the
+            // declared InvalidUtf8 is routed by `check` like a `fail`.
+            BytesDecodeUtf8 => {
+                let v = self.call_allocating("rt_bytes_decode_utf8", &[self.vm, a[0]], "bytesdecodeutf8", KIND_STR);
+                self.check(v);
+                v
+            }
             // C addresses (C-ABI-TYPES.md): the null pointer is a constant
             // word, the null test one comparison with it, and clone, erase
             // and retype are the word itself -- no machine operation, no
@@ -2778,6 +2785,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // be a storage (TYPE otherwise) and never allocate
                         // (keepalive is no call: above).
                         BytesFromList => ("rt_bytes_from_list", None, true, Some(("bytesfromlist", KIND_BYTES))),
+                        BytesJoin => ("rt_bytes_join", None, true, Some(("bytesjoin", KIND_BYTES))),
                         BytesLen => ("rt_bytes_len", None, true, None),
                         BytesAddr => ("rt_bytes_addr", None, true, None),
                         // Fixed binary layouts (BINARY-LAYOUT.md): one helper
