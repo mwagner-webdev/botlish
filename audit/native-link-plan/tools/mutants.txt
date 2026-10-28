@@ -65,11 +65,15 @@ proc hir::interchange::WithoutRepresentations {hir} {
 @@ imported-path-from-library a module's archive path is resolved from the compiler's own library directory (the single executable's ZIP), not the application root
 ## surface/modules.tcl
 <<<<
-    set base [dict get $state root]
+    if {[HasOwnTree $scope]} {
+        set base [ScopeDir $state $scope]
+    }
 ====
-    set base [dict get $state root]
-    if {$namespace ne ""} {
-        set base $::core::libraryDir
+    if {[HasOwnTree $scope]} {
+        set base [ScopeDir $state $scope]
+        if {$namespace ne ""} {
+            set base $::core::libraryDir
+        }
     }
 >>>>
 
@@ -264,6 +268,14 @@ proc hir::interchange::WithoutRepresentations {hir} {
         if {[dict exists $index $other $name]} {
 ====
         if {0} {
+>>>>
+
+@@ package-path-from-application a package's archive path is resolved from its consumer's application root, not the package's own directory (BOT-MODULES-MILESTONE-1.md)
+## surface/modules.tcl
+<<<<
+        set base [ScopeDir $state $scope]
+====
+        set base [dict get $state root]
 >>>>
 
 @@ shared-library-accepted-as-archive a shared library named as a static archive passes the driver's check (the linker then makes the executable depend on it)

@@ -81,6 +81,7 @@ the claim end to end) or **Not implemented**.
 | `extern c library "NAME"` keeps its meaning | **Executed**: c-ffi.test, system-linker.test and every host's suite unchanged (sections 33-36), the single executable's applications A to E (section 37), the Windows Icy Tower build |
 | Source can require static linkage, and name the archive | **Executed** on Linux x86-64 and AArch64, macOS arm64 and Windows x86-64 with MSVC (tests/native-link-plan.test in each host's CI, sections 33-36; the single executable's FFI smoke, section 37; static SDL3, section 35) |
 | Source-relative paths from the application root, not the working directory | **Executed** (`nlp-plan-application-root`, `nlp-static-relocation`, smoke F) |
+| A package's archive path is the package's own | **Executed** (`nlp-plan-package-root`, `nlp-static-package`; mutant `package-path-from-application` killed; section 9) |
 | A static archive is chosen where a shared library of the name exists | **Executed** (`nlp-static-beats-shared`: value 1, no `libnlp.so`; the control 2, `libnlp.so`) |
 | No silent fallback to a shared library | **Executed** (`nlp-static-shared-only`; mutant `shared-fallback` killed) |
 | Propagation through imports; deterministic merge; LINK-CONFLICT | **Executed** (`nlp-plan-entries`, `-merge`, `-conflicts`) |
@@ -271,8 +272,10 @@ for it and never substitutes another of the name.
 * A relative path resolves from the **application root**: the directory of
   the entry file, `file dirname [file normalize ENTRY]` (the loader's
   existing rule for application modules) -- whatever the working directory,
-  whichever module declares it (section 9). The root is recorded beside the
-  path (`base`), never joined into it in HIR.
+  whichever application module declares it (section 9). A package's module
+  (BOT-MODULES-MILESTONE-1.md) resolves from its package instance's own
+  directory instead (section 9). The root is recorded beside the path
+  (`base`), never joined into it in HIR.
 * The join happens at the link, in the driver (`Path::join`): the
   platform's own path semantics, spaces and Unicode included
   (`nlp-static-path-security`: `we-ird/lib nlp $(echo x); 'q'.a`,
@@ -301,9 +304,25 @@ root, exactly as the same line in the entry program would
 (`nlp-plan-entries`: the binding module's `static at "native/libSDL3.a"`
 has the entry's root as its base). Tested end to end through a binding
 module in every link test, and on the native backends' linked runs
-(`nlp-static-imported-module-backends`). This is deliberately narrower
-than a future package-specific resource root: a module shipped outside the
-application (a package) has no root of its own yet (section 38).
+(`nlp-static-imported-module-backends`).
+
+Package-scoped modules (BOT-MODULES-MILESTONE-1.md) landed on main while
+this milestone was in review, and its merge decided the rule for them: a
+relative archive path resolves from the root of the scope that owns the
+declaring file -- the application root for the entry program and the
+application's modules, a package instance's own directory
+(`ROOT/.bot_modules/NAME/`, or a nested package's) for its modules
+(surface/modules.tcl's `LinkDecls`, from the loader's `Scope` and
+`ScopeDir`). A package ships its archive inside itself and links it
+wherever it is installed; it never names a file of its consumer's tree,
+the package milestone's downward-only rule (**Executed**:
+`nlp-plan-package-root`, an application's package and that package's own
+package each resolving from where it is installed; `nlp-static-package`,
+a package's `static at` linking the archive inside the package with no
+such file in the application; the mutant `package-path-from-application`,
+the consumer's root for a package, is killed by both). Programs without
+packages are unchanged: the application's scope directory is the
+application root.
 
 ## 10. Conflicting and repeated declarations
 
@@ -1043,9 +1062,11 @@ batched, 69 rounds and 205 builds sequentially (32 s and 1,177 s).
 
 ## 38. Remaining native-dependency limitations
 
-* **No package-relative root.** An archive path is the application's; a
-  module distributed apart from an application cannot name its own
-  archive relative to itself yet (a package system would supply that root).
+* **Package roots are directories, not packages' archives in general.** A
+  package's archive path resolves from the package's directory (section
+  9); a package cannot name a file of its consumer's (by design), and there
+  is no form for a package to require an archive the application provides
+  except a `static` library found on the -L path.
 * **No weak frameworks**, no framework version selection, no `-needed_` or
   `-reexport_` forms, no linker flags at all.
 * **No dynamic dependency bundling.** A program that links a third-party
@@ -1086,8 +1107,9 @@ it needs. Still missing, each a separate experiment:
 
 ## 40. Prerequisites for general application deployment packaging
 
-* a package root for native resources (section 38), so a library's
-  binding can ship its own archives;
+* (done since the package milestone: a package's archive path resolves
+  from its own directory, section 9, so a binding package can ship its own
+  archives);
 * a decision on shared dependencies: bundling dylibs/frameworks or DLLs
   beside an executable, install names and rpaths, Windows DLL placement --
   none of which this milestone does;

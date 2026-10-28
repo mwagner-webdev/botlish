@@ -152,9 +152,9 @@ another's could be silently wrong, not just rejected. So:
   refuses an entry its front end could not have built -- an unknown kind or
   linkage, a missing field, an archive path a declaration cannot write --
   with `{HIR INTERCHANGE FORMAT}`, never dropping it or linking it another
-  way. An archive's path is kept as written with the application root it
-  resolves from (an absolute path of the application, never of the
-  compiler); the driver joins them when it links, so a text read elsewhere
+  way. An archive's path is kept as written with the root it resolves
+  from (the application root or the declaring package's directory: an
+  absolute path of the application, never of the compiler); the driver joins them when it links, so a text read elsewhere
   links the archive where the application was built, and a moved
   application is compiled again (its root is in the front-end cache's key).
   A framework declaration makes a HIR the macOS target's.

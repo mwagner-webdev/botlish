@@ -2736,18 +2736,20 @@ keeps its old meaning exactly. Keep it so:
 * The plan states intent, never linker flags: HIR's `links`
   (hir/foreign.tcl's `LinkPlan`) holds each dependency's kind, name,
   linkage and an archive's path as written beside the directory it
-  resolves from (`base`: the application root, surface/modules.tcl's
-  `LinkDecls`; "" for a standard-library module or a program compiled from
-  text). Never store a resolved path, a `-l`, `-framework` or `/LIBPATH:`
+  resolves from (`base`: the root of the declaring file's scope -- the
+  application root, or a package instance's directory for a package's
+  module -- surface/modules.tcl's `LinkDecls`; "" for a standard-library
+  module or a program compiled from text). Never store a resolved path, a `-l`, `-framework` or `/LIBPATH:`
   in HIR, and never add a general linker-flags string, a linker script, an
   arbitrary build command or a computed name or path: every name is
   `nir::is_link_name`'s, every path a string literal with `/` separators.
 * Declarations of one library merge into the strictest requirement
   (default < static < static at PATH), whichever comes first; two that no
   archive satisfies are LINK-CONFLICT. Never pick the first or the last.
-* An archive path resolves from the application root, never the working
-  directory, never the compiler's own files (the single executable's ZIP,
-  Botlish.app's Resources). The root is a front-end input (in the cache
+* An archive path resolves from the application root (a package's
+  module: its package instance's directory, never its consumer's), never
+  the working directory, never the compiler's own files (the single
+  executable's ZIP, Botlish.app's Resources). The root is a front-end input (in the cache
   key); the join is the driver's (codegen/aot.rs's `resolve_link_plan`),
   at every link: never cache an archive, a resolved path or a link.
 * `static` is a requirement: the driver finds the archive (`static_archive_name`
@@ -2774,8 +2776,10 @@ lists the files), run `tests/native-link-plan.test` (also with
 `mutants.txt` that applies to the host must still apply and be killed:
 update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule), plus the C FFI, native-AOT, interchange and
-isolation harnesses for a change to code they share; on macOS the
-`link-plan-sdl3` job (tests/platform/link-plan-sdl3.sh: static SDL3
+isolation harnesses for a change to code they share, and
+`tests/bot-modules.test` and `audit/bot-modules/tools/mutate.tcl` for a
+change to how a declaring file's root is found (its scope's directory);
+on macOS the `link-plan-sdl3` job (tests/platform/link-plan-sdl3.sh: static SDL3
 through Botlish.app) and the acceptance tier, on Windows the workflow's
 smoke and system-linker jobs (the import-library refusal).
 

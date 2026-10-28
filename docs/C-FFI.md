@@ -122,8 +122,9 @@ extern c fn keep named "bcf_keep"(p: std::ffi::c::Ptr[std::ffi::c::Void] capture
   naming the form, and so is an unquoted name. (A file name such as
   `"libcrypto.a"` is a name the linker will not find: `-llibcrypto.a`.)
 * **`static`** requires the library's static archive, and **`static at
-  "PATH"`** names its file, relative to the application root unless
-  absolute; **`extern c framework "NAME"`** links an Apple framework
+  "PATH"`** names its file, relative to the application root (a
+  package's module: its package's directory) unless absolute; **`extern c
+  framework "NAME"`** links an Apple framework
   (NATIVE-LINK-PLAN-MILESTONE-1.md; section 11).
 * **`named "SYMBOL"`** overrides the link symbol (section 2): letters,
   digits, `_ . $`, not starting with a digit. One `named` per declaration.
@@ -684,8 +685,8 @@ can (`cf-stub-linker`).
 plan above is a library's when it is declared without `static`, and is
 unchanged. A library declared `static` is no `-lNAME`: before any linker
 runs, the driver resolves the plan (codegen/aot.rs's `resolve_link_plan`)
--- `static at PATH` is PATH joined to the application root the front end
-recorded, `static` alone the first `libNAME.a` (`NAME.lib`) of the -L
+-- `static at PATH` is PATH joined to the root the front end recorded
+(the application's, or the declaring package's directory), `static` alone the first `libNAME.a` (`NAME.lib`) of the -L
 directories and then the toolchain's own (the C driver's and GNU ld's on
 Linux, ld(1)'s defaults on macOS, `LIB` on Windows) -- checks the file (a
 regular file, an `ar` archive of objects of the host's format and

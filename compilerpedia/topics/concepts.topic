@@ -4451,8 +4451,9 @@ Windows), as it always was. `static` is a requirement: the executable
 incorporates the library's static archive and never depends on a shared
 library of that name. `at PATH` names the archive: a path relative to the
 application root (the entry file's directory, whatever the working
-directory and whichever module declares it) unless it is absolute, written
-with `/` between its components on every host. A framework is Apple's:
+directory and whichever application module declares it) -- for a module of
+an installed package (.bot_modules), the package's own directory -- unless
+it is absolute, written with `/` between its components on every host. A framework is Apple's:
 Apple's ld links it from the system's or a -F directory.
 
 == RULES

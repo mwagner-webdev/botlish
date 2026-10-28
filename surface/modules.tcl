@@ -730,24 +730,34 @@ proc surface::modules::PlatformCheck {stateVar name span} {
 # DECLS (surface/lower.tcl's LinkDeclOf dicts) of unit NAMESPACE ("" the
 # entry program), checked and placed (NATIVE-LINK-PLAN-MILESTONE-1.md):
 #
-#   * a static archive's path is resolved from the application root, the
-#     entry file's directory, whichever unit declares it: an imported
-#     application module's path means what it would in the entry program,
-#     and nothing depends on the working directory. The root is the
-#     declaration's BASE, kept beside the path as written and joined only
-#     where the program is linked (the driver: codegen/aot.rs). A
-#     standard-library module's BASE is "" (its files never see the
-#     application, and it names no archive of the compiler's own), as is
-#     every unit's of a program compiled from text, which has no root;
+#   * a static archive's path is resolved from the root of the scope that
+#     owns the declaring file: the application root, the entry file's
+#     directory, for the entry program and every application module (an
+#     imported application module's path means what it would in the entry
+#     program), a package instance's own directory for its modules
+#     (ScopeDir: a package's archive is the package's, wherever it is
+#     installed, and it never names a file of its consumer's), and nothing
+#     depends on the working directory. The root is the declaration's
+#     BASE, kept beside the path as written and joined only where the
+#     program is linked (the driver: codegen/aot.rs). A standard-library
+#     module's BASE is "" (its files never see the application, and it
+#     names no archive of the compiler's own), as is every unit's of a
+#     program compiled from text, which has no root;
 #   * a framework is Apple's: UNSUPPORTED-PLATFORM for a target whose linker
 #     has none (core::cabi::linksFrameworks), and a build that declares one
 #     depends on its target (`targetRead`), so its HIR is the macOS
 #     target's.
 proc surface::modules::LinkDecls {stateVar decls namespace} {
     upvar 1 $stateVar state
-    set base [dict get $state root]
-    if {$namespace ne "" && [StandardNamespace $namespace]} {
-        set base ""
+    # An archive path resolves from the root of the scope that owns the
+    # declaring file (BOT-MODULES-MILESTONE-1.md): the application root,
+    # or a package instance's own directory -- a package never reaches into
+    # its consumer's tree -- and nothing for a standard-library module or
+    # program text with no root.
+    set scope [Scope $state $namespace]
+    set base ""
+    if {[HasOwnTree $scope]} {
+        set base [ScopeDir $state $scope]
     }
     return [lmap decl $decls {
         if {[dict get $decl link] eq "framework"} {

@@ -266,6 +266,19 @@ test nlp-plan-application-root {an archive path resolves from the application ro
     removeDirectory [file tail $elsewhere]
 } -result {1 {{}}}
 
+test nlp-plan-package-root {a package's archive path resolves from its own directory, never its consumer's: the application's package and the package that package installs each from where it is installed (BOT-MODULES-MILESTONE-1.md)} -body {
+    set dir [nlpApp [nlpDir] {
+        main.bot "import nlpkg\n1\n"
+        .bot_modules/nlpkg/nlpkg.bot "import inner\nextern c library \"fx\" static at \"native/libfx.a\"\n"
+        .bot_modules/nlpkg/.bot_modules/inner/inner.bot "extern c library \"gx\" static at \"native/libgx.a\"\n"
+    }]
+    set map [list [file normalize [file join $dir .bot_modules nlpkg .bot_modules inner]] INNER \
+        [file normalize [file join $dir .bot_modules nlpkg]] PACKAGE [file normalize $dir] ROOT]
+    lsort [lmap entry [hir::foreign::linkPlan [nlpHir $dir]] {
+        list [dict get $entry name] [string map $map [dict get $entry base]]
+    }]
+} -cleanup {removeDirectory [file tail $dir]} -result {{fx PACKAGE} {gx INNER}}
+
 test nlp-framework-target {a framework is the macOS target's: UNSUPPORTED-PLATFORM at the declaration for every target whose linker has none, accepted for a macOS one, whose HIR then records its target} -body {
     set dir [nlpApp [nlpDir] {main.bot "extern c framework \"CoreFoundation\"\n1\n"}]
     set results {}
@@ -583,6 +596,15 @@ test nlp-static-relocation {moving an application with its archive moves its lin
     }
     list $first $second [file exists $dir]
 } -cleanup {file delete -force $moved $elsewhere $cache} -result {1005 1005 0}
+
+test nlp-static-package {a package's `static at` links the archive inside the package, which the application does not have at that path} -constraints {nlpFixture} -body {
+    set dir [nlpApp [nlpDir] [list main.bot "import nlp\nnlp::add(3, 4)\n" \
+        .bot_modules/nlp/nlp.bot [nlpBinding "extern c library \"nlp\" static at \"native/[ctool::staticName nlp]\""]]]
+    file mkdir [file join $dir .bot_modules nlp native]
+    file copy [nlpFixturePath static [ctool::staticName nlp]] [file join $dir .bot_modules nlp native]
+    set exe [nlpExecutable [nlpHir $dir] $dir prog]
+    list [nlpRun $exe] [nlpDependsOnShared $exe] [file exists [file join $dir native]]
+} -cleanup {file delete -force $dir} -result {1007 0 0}
 
 test nlp-static-rebuild {rebuilding an archive changes the next executable, whatever the front-end cache holds: the link reads the archive again, never a copy} -constraints {nlpFixture} -body {
     set cache [nlpDir cache]

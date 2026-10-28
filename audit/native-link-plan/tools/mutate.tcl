@@ -134,11 +134,12 @@ foreach {name description hosts edits} [readMutants [file join [file dirname [fi
 }
 set selected [concat $selected $nativeSelected]
 
-# A private copy of the compiler sources, tests, library, the audit tools and
-# the native backend. Its native/target is a real copy when a native mutant
+# A private copy of the compiler sources (main.tcl -check's compiler service
+# and Compilerpedia among them: nlp-check runs it), tests, library, the
+# audit tools and the native backend. Its native/target is a real copy when a native mutant
 # is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-link-plan-mutants]
-foreach dir {compiler core hir surface stdlib tests lsp audit/native-link-plan .cargo} {
+foreach dir {compiler core hir surface stdlib service compilerpedia tests lsp audit/native-link-plan .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
