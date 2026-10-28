@@ -600,7 +600,15 @@ the compiler's admission decisions.
 | `-seed 21 -n 40` | 40 | 159 (36) | 1,434 | 0 | 0 |
 | `-seed 22 -n 40` | 40 | 152 (30) | 1,361 | 0 | 0 |
 | `-seed 23 -n 40` | 40 | 177 (53) | 1,544 | 0 | 0 |
-@@PROOFS@@
+| `-seed 24 -n 40` | 40 | 185 (50) | 1,692 | 0 | 0 |
+| `-seed 25 -n 40` | 40 | 146 (33) | 1,187 | 0 | 0 |
+
+In total, 200 programs and 819 reorder sites were checked, 202 of them
+admitted. The compiler and the model agree at every site, and no admitted
+site reached its reorder with an order of other members. Seeds 21 to 23
+ran on the analysis before the decided-condition check was removed (see
+Mutation testing); that change is equivalent, and seeds 24 and 25 ran on
+the final code.
 
 ## Mutation testing
 
