@@ -764,7 +764,25 @@ The branch push started the macOS arm64, Windows x86-64 and Icy Tower
 against sequential comparison, never run locally -- `icy-tower.yml`,
 `c-bindgen.yml`, `single-executable.yml`).
 
-CI-PLACEHOLDER
+Results as observed (a run superseded by a later push was cancelled and
+is not counted; "pending" means it had not run when this was written, and
+nothing is claimed for it):
+
+| workflow | commit | result |
+|---|---|---|
+| `c-bindgen.yml` (every profile's committed bindings checked, the generator's tests, fuzzers and mutants) | 759d3b9 | **passed** |
+| `icy-tower.yml` (the game's tests with the binding staged as a package, `build.sh`, the oracle comparison, the mutants, the Xvfb session) | 3844140 | **passed** |
+| `tests.yml` (the whole Tcl suite, golden shards, native, stub and system linkers, warning gate) | a12e615 | pending (queued) |
+| `tests-arm64.yml` | a12e615 | pending (queued) |
+| `static-decisions.yml` (batched against sequential, every golden suite) | 3844140 | pending (plan done, comparisons queued) |
+| `single-executable.yml` (builds the single executable, smoke tests in stock containers) | 3844140 | pending (queued) |
+| `macos-arm64.yml` (smoke and acceptance tiers, which include `bot-modules.test`) | b6b05aa | pending (queued) |
+| `windows-x86_64.yml` (smoke and acceptance tiers) | b6b05aa | pending (queued) |
+| `icy-tower-windows.yml` (the Windows build stages the MSVC binding as a package) | b6b05aa | pending (queued) |
+
+The commits after the one each run tested change only documents, the
+fuzzer, the new cache test and a comment (a12e615's `surface/cache.tcl`
+change is a comment).
 
 
 ## G. Remaining limitations
