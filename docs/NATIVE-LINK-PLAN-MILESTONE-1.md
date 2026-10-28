@@ -78,18 +78,18 @@ the claim end to end) or **Not implemented**.
 
 | Criterion | Status |
 |---|---|
-| `extern c library "NAME"` keeps its meaning | **Executed**: c-ffi.test, system-linker.test, the whole Linux suite unchanged (sections 33-36) |
-| Source can require static linkage, and name the archive | **Executed** on Linux x86-64 (tests/native-link-plan.test, the single executable's FFI smoke); CI sections for the other hosts |
+| `extern c library "NAME"` keeps its meaning | **Executed**: c-ffi.test, system-linker.test and every host's suite unchanged (sections 33-36), the single executable's applications A to E (section 37), the Windows Icy Tower build |
+| Source can require static linkage, and name the archive | **Executed** on Linux x86-64 and AArch64, macOS arm64 and Windows x86-64 with MSVC (tests/native-link-plan.test in each host's CI, sections 33-36; the single executable's FFI smoke, section 37; static SDL3, section 35) |
 | Source-relative paths from the application root, not the working directory | **Executed** (`nlp-plan-application-root`, `nlp-static-relocation`, smoke F) |
 | A static archive is chosen where a shared library of the name exists | **Executed** (`nlp-static-beats-shared`: value 1, no `libnlp.so`; the control 2, `libnlp.so`) |
 | No silent fallback to a shared library | **Executed** (`nlp-static-shared-only`; mutant `shared-fallback` killed) |
 | Propagation through imports; deterministic merge; LINK-CONFLICT | **Executed** (`nlp-plan-entries`, `-merge`, `-conflicts`) |
 | HIR interchange and cache keep every property; stale data impossible | **Executed** (`nlp-plan-interchange`, `nlp-plan-cache`, `nlp-static-rebuild`) |
-| Apple framework declarations; refused elsewhere | Lowering **Executed** in Rust unit tests on Linux; refusal **Executed**; macOS link: section 35 |
-| Windows import libraries refused as static | **Executed** with synthetic COFF archives in the Rust unit tests; with MSVC: section 36 |
-| rustc and system linkers implement the same plan; stub refuses | **Executed** (`nlp-linkers-agree`) |
-| Static SDL3 through Botlish.app | section 22-24, 35 (CI job `link-plan-sdl3`) |
-| Mutants | 26 in the new harness: 25 killed, 0 survived, 1 another host's (section 30) |
+| Apple framework declarations; refused elsewhere | **Executed**: on macOS (`nlp-framework-system`, `nlp-framework-dir`, SDL3's 15 frameworks), refused for other targets (`nlp-framework-target`), lowered per linker in the Rust unit tests (sections 18, 35) |
+| Windows import libraries refused as static | **Executed** with MSVC's own import library (`nlp-import-library-refused`, `nlp-static-shared-only`, section 36) and synthetic COFF archives in the Rust unit tests |
+| rustc and system linkers implement the same plan; stub refuses | **Executed** (`nlp-linkers-agree`; the system-linker jobs on every host; SDL3 with both linkers on macOS) |
+| Static SDL3 through Botlish.app | **Executed** (section 35): SDL3 3.4.18's archive linked by the packaged application with its frameworks from `sdl3.pc`; prints `[3004018, true]`, also under GC stress; 22 dynamic libraries, none SDL3's; runs with SDL3 deleted; moved and rebuilt |
+| Mutants | 26 in the new harness: 25 killed, 0 survived, 1 another host's; the updated mutants of the c-ffi, native-aot and target-model harnesses all killed (sections 30, 33) |
 
 The milestone is a small extension of the existing machinery: one AST node
 kind (`externlib`) grew three fields, one HIR side table (`links`) changed
@@ -468,14 +468,16 @@ header's class and machine; `ELF AArch64` is machine 183). The test file
 runs on the arm64 runner in tests-arm64.yml's Tcl suite and its
 system-linker job (also under GC stress), and there
 `nlp-static-wrong-architecture` builds an x86-64 archive
-(`clang --target=x86_64-linux-gnu`) and expects its refusal. Results:
-section 34.
+(`clang --target=x86_64-linux-gnu`) and expects its refusal when clang is
+installed (without a cross compiler it refuses nothing and passes).
+**Executed**: section 34.
 
 ## 17. Apple archive selection
 
 Implemented and unit-tested (**Executed** as unit tests on Linux, which
 cover the arguments and the archive checks with synthetic Mach-O members);
-the link itself on macOS: section 35.
+the link itself **Executed** on macOS arm64: the static SDL3 job and the
+acceptance tier's native-link-plan.test (section 35).
 
 * Apple's ld gets the archive's absolute path among the libraries, with no
   group and no GNU flag (`link_plan_static_archives_and_frameworks_lower_per_linker`).
@@ -507,8 +509,8 @@ executable loading
 `/System/Library/Frameworks/CoreFoundation.framework/…`;
 `nlp-framework-dir`: an application framework in a `-F` directory, whose
 binary is the fixture's static archive, linked in, and the same link
-without `-F` refused with Apple ld's "framework not found") run on the
-macOS runners: section 35. Weak frameworks (`-weak_framework`) are not
+without `-F` refused with Apple ld's "framework not found") passed on
+the macOS runner (**Executed**, section 35). Weak frameworks (`-weak_framework`) are not
 expressible; SDL3's are linked strongly (section 23).
 
 ## 19. Windows static/import library distinction
@@ -526,7 +528,8 @@ a static `.lib`, a short-import one, a long-form one, a DLL renamed). On
 Windows the test file builds a real static `nlp.lib` (`cl /MT`, `lib`) and
 a real DLL with its import library (`cl /LD`), links the static one with
 both linkers and checks the PE import directory names no `nlp.dll`, and
-refuses the import library (`nlp-import-library-refused`): section 36. The
+refuses the import library (`nlp-import-library-refused`): **Executed**
+on windows-2025 with MSVC (section 36). The
 static C runtime policy (`/MT`, `/NODEFAULTLIB:` the others), COFF naming,
 unwind information and the fallback root plan are untouched (no code of
 theirs changed).
