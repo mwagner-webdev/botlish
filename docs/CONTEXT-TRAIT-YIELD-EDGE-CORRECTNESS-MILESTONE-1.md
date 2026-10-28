@@ -356,7 +356,9 @@ on the enclosing function's declared result. For example, `fn start() ->
 int: coroutine {step, first} = f(); first`, with `f` an ordinary function,
 also reports "function result does not prove declared type int". The second
 diagnostic follows from the first. This predates the milestone and is
-unrelated to callee identity.
+unrelated to callee identity. Separately, the traits mutant
+`runtime-wrapper` no longer applies to `hir/resolve.tcl`, at `cf668038` as
+now ([section 8](#8-testing-evidence)).
 
 ## 7. Event-loop validation
 
@@ -464,12 +466,36 @@ a-smoke.bot:26:1: main may suspend, but this call does not start a coroutine ...
   killed.
 * `audit/static-decisions/tools/mutate.tcl -only recheck-rounds-across-checks,recheck-rounds-not-shared,recheck-analysis-repeated`
   (the three re-anchored mutants): 3 mutants, 3 killed.
+* The whole of `audit/traits/tools/mutate.tcl`: 24 mutants, 23 killed, 0
+  survived, 1 not applied. The one not applied is `runtime-wrapper`, whose
+  `hir/resolve.tcl` text no longer occurs. It is equally "not applied" at
+  `cf668038` and edits code this milestone does not touch: a pre-existing
+  staleness, recorded here and not fixed.
+* The whole of `audit/context-traits/tools/mutate.tcl`: 59 mutants, 44
+  killed, 0 survived, 15 skipped. The skipped ones are the `darwin-*` and
+  `windows-*` mutants, whose killing tests run on macOS or Windows only.
+  The repro test is now in the harness's tree and kills none of them
+  spuriously.
+* `audit/coroutines/tools/mutate.tcl -only call-crosses-yield,context-reselected-per-resume,effect-one-caller,handle-as-fn,protocol-widened-any,scalar-resume-accepted,two-protocols-accepted`
+  (every coroutine mutant that edits `hir/coroutines.tcl`,
+  `hir/contexts.tcl`, `hir/resolve.tcl` or `hir/types.tcl`): 7 mutants, 7
+  killed.
 * Every edit of every `audit/*/mutants.txt` was checked with a script that
   counts each replaced text's occurrences: the set of edits that do not
   apply exactly once is the same as at `cf668038`. The exceptions are
   multi-edit mutants whose later edit applies to an earlier edit's result,
   and the hash-table audit's relative paths. No mutant text of this
   milestone's files was left behind.
+
+**HIR interchange and cache.** `audit/hir-interchange/tools/roundtrip.tcl
+-via interchange` reported 12 suites and 108 artifacts and outcomes, 0
+differ. With `-via cache` it reported 12 suites and 120, 0 differ. These
+cover the coroutine table's new `operations` and `consulted` keys, which
+the interchange carries.
+
+**Method resolution.** `audit/method-resolution/tools/oracle.tcl 200 1`
+reported 1128 calls with 0 disagreements. `... 200 1 -contexts 1` reported
+1202 calls, 18 of them rejected by an obligation, with 0 disagreements.
 
 **Not run here.** These need hosts or schedules this environment does not
 have:
