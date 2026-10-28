@@ -855,7 +855,39 @@ cross compiler exists, and the log does not say which happened).
 
 ## 36. Windows x86-64 CI
 
-(Filled in below.)
+`tests (windows x86-64)` on the branch (**Executed**, run 40605875302,
+commit 23c237e, windows-2025, MSVC): every job passed -- smoke, root
+plans, the system linker and the four acceptance shards.
+
+* The smoke job's tier ran native-link-plan.test with the other 28
+  Windows-relevant files: on interp 1,069 tests, 1,020 passed, 49 skipped,
+  0 failed; on compile 1,016 passed, 53 skipped, 0 failed. The link-plan
+  tests that skip there are other hosts' (`macosHost`, `unixHost`) and
+  the native library's (`nativeLibraries`: libraries are Linux's):
+  the fixture is built with MSVC (cl and lib), its DLL with an import
+  library, and the Windows tests ran: a static `.lib` linked by
+  link.exe (`/LIBPATH:` and the archive's path), the import library
+  refused before link.exe runs, both as the archive a path names and as
+  the one a search finds (`nlp-import-library-refused`, `nlp-static-
+  shared-only`), and the ordinary declaration linking the DLL through its
+  import library (`nlp-static-beats-shared`: `static 1 shared 2`).
+* The `system linker` job: native-link-plan.test, c-ffi.test and
+  system-linker.test with `BOTLISH_NATIVE_LINKER=system` (link.exe
+  itself), on interp and compile: 171 tests, 139 passed, 32 skipped, 0
+  failed each; and the executable files (argv, c-ffi, c-float-ffi,
+  native-executable, native-link-plan, windows-io, workload-2048): 327
+  tests, 282 passed, 45 skipped, 0 failed each.
+* The earlier run on af6e184 (run 40591109807) failed four Windows tests
+  of native-link-plan.test, all in the tests: MSVC writes a DLL's import
+  library only when the DLL exports something, and the fixture's shared
+  source exported nothing (no `nlp.lib`); and `nlp-static-resolution`
+  compared the driver's paths textually, which Windows spells with `\`.
+  Commit 23c237e exports the shared fixture's functions
+  (`__declspec(dllexport)`, Windows only) and compares normalized paths;
+  the driver did not change.
+* `icy-tower (windows x86-64)` on 23c237e passed (run 40605875328): the
+  game's SDL3 build and tests, which link an ordinary `extern c
+  library`, unchanged.
 
 ## 37. Single-file compiler regressions
 
