@@ -303,130 +303,360 @@ proc surface::modules::NamespaceFile {dir name} {
     return [file join $dir {*}[lrange $segments 0 end-1] [lindex $segments end].bot]
 }
 
-# Application modules (IMPORTS.md, "Application modules"). A program file's
-# *application root* is the directory of its entry file (compileProgramFile;
-# STATE's `root`, "" for program text with no file of its own unless the
-# caller names one). An *application file* is the entry program or a module
-# loaded from that root. A namespace NAME an import names is, by its first
-# segment and nothing else (STD-NAMESPACE.md):
+# Application modules (IMPORTS.md, "Application modules") and package
+# modules (BOT-MODULES-MILESTONE-1.md). A program file's *application root*
+# is the directory of its entry file (compileProgramFile; STATE's `root`, ""
+# for program text with no file of its own unless the caller names one).
+#
+# Every module file has an *owning scope* (Scope): the application (scope
+# ""), the standard library (#std), or one installed *package instance*;
+# program text with no application root is in none of them (#text). A
+# package is installed under the immediate `.bot_modules` directory of its
+# owner -- the application's root, or another package's directory:
+#
+#   ROOT/.bot_modules/NAME/                 the application's package NAME
+#   ROOT/.bot_modules/NAME/.bot_modules/D/  package NAME's own package D
+#
+# The installed directory structure is the whole of it: no manifest, no
+# version, no registry. A package instance is identified by its place in
+# the program's logical dependency tree (Instance): the application's
+# package NAME is the instance NAME, that package's package D the instance
+# NAME/D, and so on -- never by an absolute path, a version or a load order,
+# so equivalent builds give it the same identity, wherever the application
+# lives.
+#
+# A namespace NAME an import of a file in scope S names is, by its first
+# segment HEAD and nothing else (no search, no fallback, no precedence):
 #
 #   * std::NAME: the standard namespace -- $::core::libraryDir/NAME.bot (or
 #     its architecture-specific files, ModuleFile below), or compiler
-#     intrinsics of std::NAME -- for every file alike. An application file
-#     ROOT/std/NAME.bot is never one: importing std::NAME from an
-#     application that has it is RESERVED-NAMESPACE, never a silent choice
-#     of either file;
+#     intrinsics of std::NAME -- for every file alike. S's own file
+#     DIR/std/NAME.bot is never one, nor is an installed DIR/.bot_modules/std:
+#     either makes the import RESERVED-NAMESPACE;
 #   * std itself: no namespace (the root of the standard library);
-#   * any other NAME, imported by an application file: the application
-#     module ROOT/NAME.bot (nested: ROOT/a/b.bot for a::b), one namespace like
-#     any module, loaded once; else no namespace (UNKNOWN-NAMESPACE, which
-#     names the standard namespace std::NAME when there is one: the hint of a
-#     missing `std::`, never a fallback to it).
+#   * HEAD the name of a package installed in S (S's DIR/.bot_modules/HEAD is
+#     a directory): that package's module PKG/NAME.bot (PKG/HEAD.bot for
+#     HEAD itself, PKG/HEAD/a.bot for HEAD::a). The package claims its whole
+#     root namespace in S: when S has a file of its own that would be NAME,
+#     the import is MODULE-COLLISION, naming both, never a silent choice;
+#   * otherwise, in the application: the application module ROOT/NAME.bot
+#     (nested: ROOT/a/b.bot for a::b), one namespace like any module, loaded
+#     once; else no namespace (UNKNOWN-NAMESPACE, which names the standard
+#     namespace std::NAME when there is one: the hint of a missing `std::`,
+#     never a fallback to it);
+#   * otherwise, in a package instance whose directory's name is ROOTNAME:
+#     its own module PKG/NAME.bot when HEAD is ROOTNAME (a package's own
+#     modules are its root namespace's: ROOTNAME and ROOTNAME::...), else no
+#     namespace. A package never sees its consumer's modules or packages, a
+#     sibling's or an ancestor's: nothing is looked up above S.
 #
 # A standard-library module, and program text with no application root,
 # imports standard namespaces only. The entry file itself is not a module
 # (importing it is SELF-IMPORT, or CYCLE from a module). A namespace outside
 # std with compiler intrinsics exists only in a test process that registers
-# one (core::cabi::installTestFixture's ffi_fixture, a test's cbtest): an
-# application file of its name beside it is MODULE-COLLISION. Nothing reads
-# the shell's working directory, an environment variable or a parent
-# directory, and nothing searches: each path has one candidate file.
+# one (core::cabi::installTestFixture's ffi_fixture, a test's cbtest): a
+# module file of its name beside it is MODULE-COLLISION. Nothing reads the
+# shell's working directory, an environment variable or a parent directory,
+# and nothing searches: each path has one candidate file.
+#
+# Identity (BOT-MODULES-MILESTONE-1.md, "Semantic identity"). A module's
+# canonical identity -- the one every later stage keys it by (its section,
+# its types, structs, enums, errors, traits, layouts and contexts, its
+# bindings' qualified names, privacy and directness) -- is its namespace for
+# the application's and the standard library's modules, and for a package
+# instance's module the instance followed by its namespace below the root
+# (Identity): the application's package sdl3's module sdl3::video is
+# sdl3::video, as written, and package physics's own package geometry's
+# module geometry::shapes is physics/geometry::shapes -- which no source
+# can spell, and which never meets rendering/geometry::shapes. The loader
+# names a file's own namespace and the namespaces it imports by their
+# identities in everything it hands on (the import environment, and every
+# qualified spelling of the file: RewriteQualified), so no stage after it
+# ever sees a spelling.
 
-# 1 if the file of module KEY ("" for the entry program) is an application
-# file of STATE's program.
-proc surface::modules::IsApplicationFile {state key} {
-    return [expr {[dict get $state root] ne ""
-        && ($key eq "" || [dict exists $state application $key])}]
+# The owning scope of the file of module KEY ("" for the entry program) of
+# STATE's program: "" (the application), #std (the standard library), #text
+# (program text with no application root) or a package instance.
+proc surface::modules::Scope {state key} {
+    if {$key eq ""} {
+        return [expr {[dict get $state root] eq "" ? "#text" : ""}]
+    }
+    return [dict get $state scopeOf $key]
 }
 
-# The file ROOT/NAME.bot under STATE's application root, if there is one
-# outside the standard library's directory (an application root inside
-# stdlib/ never makes a standard module an application's), else "".
-proc surface::modules::RootFile {state name} {
-    if {[dict get $state root] eq ""} {
-        return ""
+# 1 if SCOPE is a package instance's.
+proc surface::modules::IsPackageScope {scope} {
+    return [expr {$scope ni {"" #std #text}}]
+}
+
+# 1 if SCOPE has a module tree and packages of its own: the application's
+# and every package instance's.
+proc surface::modules::HasOwnTree {scope} {
+    return [expr {$scope ni {#std #text}}]
+}
+
+# The directory of SCOPE (one with a module tree) in STATE's program: the
+# application root, or the package instance's directory.
+proc surface::modules::ScopeDir {state scope} {
+    if {$scope eq ""} {
+        return [dict get $state root]
     }
-    set path [NamespaceFile [dict get $state root] $name]
-    if {![surface::source::exists $path] || [InStandardLibrary $path]} {
+    return [dict get $state packages $scope dir]
+}
+
+# The root namespace of package instance SCOPE: its directory's name, the
+# instance's last segment.
+proc surface::modules::PackageName {scope} {
+    return [lindex [split $scope /] end]
+}
+
+# The first segment of the namespace NAME.
+proc surface::modules::Head {name} {
+    set cut [string first :: $name]
+    if {$cut < 0} {
+        return $name
+    }
+    return [string range $name 0 [expr {$cut - 1}]]
+}
+
+# The canonical identity of the module whose namespace in its own scope
+# SCOPE is NAME (header, "Identity"): NAME itself for the application's,
+# the standard library's and program text's, and for a package instance's
+# the instance followed by NAME below its root segment (sdl3/helper::util for
+# helper::util of the instance sdl3/helper; helper's root module is
+# sdl3/helper).
+proc surface::modules::Identity {scope name} {
+    if {![IsPackageScope $scope]} {
+        return $name
+    }
+    return $scope[string range $name [string length [Head $name]] end]
+}
+
+# A description of SCOPE for a message.
+proc surface::modules::ScopeText {state scope} {
+    switch -- $scope {
+        ""    { return "the application ([dict get $state root])" }
+        #std  { return "the standard library" }
+        #text { return "program text with no application root" }
+    }
+    return "package [PackageName $scope] (instance $scope, at [ScopeDir $state $scope])"
+}
+
+# The probes the loader made since the last compileProgramFile began: PATH ->
+# file or directory. The front-end cache keeps them as the entry's
+# dependencies (surface/cache.tcl): resolution is a function of what they
+# answered, so a file or a package directory appearing or disappearing at
+# one of them changes what a build would do.
+namespace eval surface::modules {
+    variable probes [dict create]
+}
+
+# The source provider's answer for PATH (surface/source.tcl): 1 if a source
+# file (KIND file) or a directory (KIND directory) is there; recorded in
+# `probes`.
+proc surface::modules::Probe {kind path} {
+    variable probes
+    dict set probes $path $kind
+    if {$kind eq "directory"} {
+        return [surface::source::directory $path]
+    }
+    return [surface::source::exists $path]
+}
+
+# The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME).
+proc surface::modules::PackageDir {state scope name} {
+    return [file join [ScopeDir $state $scope] .bot_modules $name]
+}
+
+# 1 if a package NAME is installed in SCOPE (one with a module tree): its
+# directory exists.
+proc surface::modules::Installed {state scope name} {
+    return [Probe directory [PackageDir $state $scope $name]]
+}
+
+# The package instance NAME installed in SCOPE, recorded in STATE's
+# `packages` (instance -> {name NAME parent SCOPE dir DIR}) the first time it
+# is named. Its identity is SCOPE/NAME, or NAME in the application.
+proc surface::modules::Instance {stateVar scope name} {
+    upvar 1 $stateVar state
+    # (Never expr's ?: over a name: `nan` and `inf` read as numbers there.)
+    if {$scope eq ""} {
+        set instance $name
+    } else {
+        set instance $scope/$name
+    }
+    if {![dict exists $state packages $instance]} {
+        dict set state packages $instance [dict create name $name parent $scope \
+            dir [file normalize [PackageDir $state $scope $name]]]
+    }
+    return $instance
+}
+
+# The file DIR/NAME.bot (nested: DIR/a/b.bot) of SCOPE's own module tree
+# when there is one outside the standard library's directory (a tree inside
+# stdlib/ never makes a standard module another scope's), else "".
+proc surface::modules::OwnFile {state scope name} {
+    set path [NamespaceFile [ScopeDir $state $scope] $name]
+    if {![Probe file $path] || [InStandardLibrary $path]} {
         return ""
     }
     return $path
 }
 
-# The application module file of namespace NAME in STATE's program (RootFile),
-# never one of a reserved namespace, else "".
-proc surface::modules::ApplicationFile {state name} {
-    if {[ReservedNamespace $name]} {
-        return ""
-    }
-    return [RootFile $state $name]
-}
-
-# The module file the namespace NAME (canonical), imported at SPAN by the
-# file of module KEY, denotes: its standard-library file, an application
-# module file, or "" for a namespace with no file (intrinsics only, or none
-# at all). Raises RESERVED-NAMESPACE, MODULE-COLLISION, SELF-IMPORT and CYCLE
-# as the rules above say.
-proc surface::modules::ResolveModule {stateVar key name span} {
+# Where the namespace NAME (canonical, as written), imported by the file of
+# module KEY, is, without raising: a dict
+#
+#   path       its module file, or "" (intrinsics only, or none at all)
+#   identity   the module's canonical identity (NAME when there is no file)
+#   scope      the module's owning scope ("" when there is no file)
+#   problem    "" or {KIND MESSAGE}: why the import is an error
+#
+# by the rules of the header (Locate is the rule; ResolveModule raises its
+# problem, NamespaceExistsFor asks whether it names anything). A package
+# instance named for the first time is recorded in STATE.
+proc surface::modules::Locate {stateVar key name} {
     upvar 1 $stateVar state
     variable standardRoot
-    if {$name eq $standardRoot} {
-        Error UNKNOWN-NAMESPACE $span "\"$standardRoot\" is the root of the standard library, not a namespace: it has no module and no members; import one of the standard namespaces under it (`import ${standardRoot}::list`; `-help stdlib` lists them)"
-    }
+    set scope [Scope $state $key]
+    set result [dict create path "" identity $name scope "" problem ""]
     if {[StandardNamespace $name]} {
-        if {[IsApplicationFile $state $key]} {
-            set shadow [RootFile $state $name]
+        if {$scope eq ""} {
+            # (A package's own modules are its root namespace's, which is
+            # never std: its DIR/std/NAME.bot is no module of anything.)
+            set shadow [OwnFile $state $scope $name]
             if {$shadow ne ""} {
                 if {[NamespaceExists $name]} {
                     set standard "it names the standard library's [StandardFiles $name]"
                 } else {
                     set standard "the standard library has no such namespace"
                 }
-                Error RESERVED-NAMESPACE $span "application file $shadow would be the namespace \"$name\", but $standardRoot and every namespace under it belong to the standard library: an application module is never a standard namespace, and `import $name` never chooses between the two ($standard); move or rename the application file out of the application's $standardRoot/ directory"
+                dict set result problem [list RESERVED-NAMESPACE "application file $shadow would be the namespace \"$name\", but $standardRoot and every namespace under it belong to the standard library: an application module is never a standard namespace, and `import $name` never chooses between the two ($standard); move or rename the application file out of the application's $standardRoot/ directory"]
+                return $result
             }
         }
+        if {[HasOwnTree $scope]} {
+            if {[Installed $state $scope $standardRoot]} {
+                dict set result problem [list RESERVED-NAMESPACE "[ScopeText $state $scope] has an installed package directory [PackageDir $state $scope $standardRoot], but $standardRoot and every namespace under it belong to the standard library: no package is ever named $standardRoot, and `import $name` never chooses between the two; remove or rename the package directory"]
+                return $result
+            }
+        }
+        dict set result scope #std
+        return $result
+    }
+    if {![HasOwnTree $scope]} {
+        # A standard-library module, or program text with no application
+        # root: there is no module tree to import from.
+        return $result
+    }
+    set head [Head $name]
+    if {[IsPackageScope $scope] && $head eq [PackageName $scope]} {
+        # The package's own module tree: its root namespace.
+        if {[Installed $state $scope $head]} {
+            dict set result problem [list MODULE-COLLISION "namespace \"$name\" is the root namespace of [ScopeText $state $scope] itself, and the package has a package of that name installed too ([PackageDir $state $scope $head]): a package's own modules and a package it installs never share a root namespace, and `import $name` never chooses between them; rename or remove the installed package"]
+            return $result
+        }
+        set owner $scope
+        set path [OwnFile $state $scope $name]
+    } elseif {[Installed $state $scope $head]} {
+        # A package installed in this scope claims its whole root namespace.
+        set owner [Instance state $scope $head]
+        set path [OwnFile $state $owner $name]
+        if {![IsPackageScope $scope]} {
+            set own [OwnFile $state $scope $name]
+            if {$own ne "" && [file normalize $own] ne [dict get $state entry]} {
+                # (The entry file is in no namespace: it is no module, and
+                # competes with none.)
+                if {$path eq ""} {
+                    set theirs "which has no module \"$name\""
+                } else {
+                    set theirs "whose module is $path"
+                }
+                dict set result problem [list MODULE-COLLISION "application file $own would be the namespace \"$name\", but \"$head\" is the root namespace of the package installed at [ScopeDir $state $owner] ($theirs): an installed package claims its root namespace, and `import $name` never chooses between an application module and a package's; rename or move the application file, or remove the package"]
+                return $result
+            }
+        }
+    } elseif {[IsPackageScope $scope]} {
+        # Neither the package's own namespace nor a package it installs.
+        return $result
+    } else {
+        set owner ""
+        set path [OwnFile $state "" $name]
+    }
+    if {$path eq ""} {
+        return $result
+    }
+    if {[IntrinsicMembers $name] ne ""} {
+        if {$owner eq ""} {
+            dict set result problem [list MODULE-COLLISION "application module $path has the name of the intrinsic namespace \"$name\" (compiler intrinsics registered in this process), which `import $name` names: an intrinsic namespace is never replaced by an application file, and never silently chosen over one; rename the application module"]
+        } else {
+            dict set result problem [list MODULE-COLLISION "module $path of [ScopeText $state $owner] has the name of the intrinsic namespace \"$name\" (compiler intrinsics registered in this process), which `import $name` names: an intrinsic namespace is never replaced by a package's module, and never silently chosen over one"]
+        }
+        return $result
+    }
+    dict set result path $path
+    dict set result identity [Identity $owner $name]
+    dict set result scope $owner
+    return $result
+}
+
+# The module file the namespace NAME (canonical), imported at SPAN by the
+# file of module KEY, denotes (Locate): a dict {path P identity ID scope S}
+# -- its standard-library file, an application module file or a package's,
+# or path "" for a namespace with no file (intrinsics only, or none at all).
+# Raises RESERVED-NAMESPACE, MODULE-COLLISION, SELF-IMPORT and CYCLE as the
+# rules above say.
+proc surface::modules::ResolveModule {stateVar key name span} {
+    upvar 1 $stateVar state
+    variable standardRoot
+    if {$name eq $standardRoot} {
+        Error UNKNOWN-NAMESPACE $span "\"$standardRoot\" is the root of the standard library, not a namespace: it has no module and no members; import one of the standard namespaces under it (`import ${standardRoot}::list`; `-help stdlib` lists them)"
+    }
+    set found [Locate state $key $name]
+    if {[dict get $found problem] ne ""} {
+        lassign [dict get $found problem] kind message
+        Error $kind $span $message
+    }
+    if {[StandardNamespace $name]} {
         if {[NamespaceExists $name]} {
             PlatformCheck state $name $span
         }
         if {[HasModule $name]} {
-            return [ModuleFile $name [dict get $state target] $span]
+            dict set found path [ModuleFile $name [dict get $state target] $span]
         }
-        return ""
+        return $found
     }
-    if {![IsApplicationFile $state $key]} {
-        # A standard-library module, or program text with no application
-        # root: there is no application module to import.
-        return ""
-    }
-    set application [ApplicationFile $state $name]
-    if {$application ne "" && [file normalize $application] eq [dict get $state entry]} {
+    set path [dict get $found path]
+    if {$path ne "" && [file normalize $path] eq [dict get $state entry]} {
         if {$key eq ""} {
-            Error SELF-IMPORT $span "\"$name\" names this program's own entry file ($application): an entry program is in no namespace and is not a module, so it cannot be imported"
+            Error SELF-IMPORT $span "\"$name\" names this program's own entry file ($path): an entry program is in no namespace and is not a module, so it cannot be imported"
         }
-        set chain [concat [list "$application (the entry program)"] [dict get $state stack] [list $name]]
+        set chain [concat [list "$path (the entry program)"] [dict get $state stack] [list $name]]
         Error CYCLE $span "module dependency cycle: [join $chain { -> }] (an entry program is not a module and cannot be imported)"
     }
-    if {$application ne "" && [IntrinsicMembers $name] ne ""} {
-        Error MODULE-COLLISION $span "application module $application has the name of the intrinsic namespace \"$name\" (compiler intrinsics registered in this process), which `import $name` names: an intrinsic namespace is never replaced by an application file, and never silently chosen over one; rename the application module"
-    }
-    return $application
+    return $found
 }
 
-# 1 if NS (canonical) names a namespace for the file of module KEY of STATE's
-# program: a standard namespace (NamespaceExists), an intrinsic namespace, or
-# an application module of an application file (above).
-proc surface::modules::NamespaceExistsFor {state key ns} {
+# 1 if NS (canonical, as written) names a namespace for the file of module
+# KEY of STATE's program: a standard namespace (NamespaceExists), an
+# intrinsic namespace, or a module of the file's own tree or of a package
+# installed in its scope (Locate).
+proc surface::modules::NamespaceExistsFor {stateVar key ns} {
+    upvar 1 $stateVar state
     if {[ReservedNamespace $ns]} {
         return [NamespaceExists $ns]
     }
-    return [expr {[NamespaceExists $ns]
-        || ([IsApplicationFile $state $key] && [ApplicationFile $state $ns] ne "")}]
+    if {[NamespaceExists $ns]} {
+        return 1
+    }
+    set found [Locate state $key $ns]
+    return [expr {[dict get $found path] ne "" || [dict get $found problem] ne ""}]
 }
 
 # The UNKNOWN-NAMESPACE explanation of NS (canonical) for the file of module
 # KEY of STATE's program: where it looked, and the standard namespace of that
 # name when NS is missing its std:: (a hint, never a fallback).
-proc surface::modules::NoSuchNamespace {state key ns} {
+proc surface::modules::NoSuchNamespace {stateVar key ns} {
+    upvar 1 $stateVar state
     variable standardRoot
     if {[StandardNamespace $ns]} {
         return "the standard library has no such module file [ModulePath $ns] and no intrinsics of that namespace"
@@ -435,15 +665,32 @@ proc surface::modules::NoSuchNamespace {state key ns} {
     if {[NamespaceExists ${standardRoot}::$ns]} {
         set hint "; the standard library's namespace of that name is ${standardRoot}::$ns (`import ${standardRoot}::$ns`): standard namespaces are named from the root std, and a namespace outside it is never looked up there"
     }
-    if {[IsApplicationFile $state $key]} {
-        set path [NamespaceFile [dict get $state root] $ns]
+    set scope [Scope $state $key]
+    if {[HasOwnTree $scope]} {
+        set head [Head $ns]
+        if {[IsPackageScope $scope] && $head ne [PackageName $scope] && ![Installed $state $scope $head]} {
+            set stray [NamespaceFile [ScopeDir $state $scope] $ns]
+            set note ""
+            if {[surface::source::exists $stray]} {
+                set note "; $stray is in the package's directory, but outside its root namespace \"[PackageName $scope]\", so it is no module"
+            }
+            return "[ScopeText $state $scope] has no package \"$head\" installed (no directory [PackageDir $state $scope $head]), and its own modules are its root namespace's, [PackageName $scope] and [PackageName $scope]::...: a package's modules see its own namespace, its own installed packages and the standard library, never its consumer's modules or packages$note$hint"
+        }
+        if {[Installed $state $scope $head]} {
+            set instance [Instance state $scope $head]
+            return "the package \"$head\" installed at [ScopeDir $state $instance] has no module \"$ns\" (no such module file [NamespaceFile [ScopeDir $state $instance] $ns])$hint"
+        }
+        set path [NamespaceFile [ScopeDir $state $scope] $ns]
         if {[surface::source::exists $path] && [InStandardLibrary $path]} {
-            # An application root inside stdlib/ (RootFile).
+            # An application root inside stdlib/ (OwnFile).
             return "$path is in the standard library's directory, so it is the standard namespace ${standardRoot}::$ns (`import ${standardRoot}::$ns`), never an application module"
+        }
+        if {[IsPackageScope $scope]} {
+            return "[ScopeText $state $scope] has no module file $path$hint"
         }
         return "no such module file $path (an application's own modules are the files beside its entry program)$hint"
     }
-    if {$key ne "" && [StandardNamespace $key]} {
+    if {$key ne "" && $scope eq "#std"} {
         return "a standard-library module imports standard namespaces only (std::...)$hint"
     }
     return "this program has no application root (it was compiled from text, not from a file beside its modules), so it has no application modules$hint"
@@ -623,79 +870,157 @@ proc surface::modules::Error {kind span message {related ""}} {
 }
 
 # {NAMESPACE NAME SPAN KIND ROOTED} of every mod::name reference in AST (a
-# program node, or any node -- used both for a whole file and, recursively,
-# isn't needed below this), in source order. KIND is value (an expression
+# program node, or any node), in source order. KIND is value (an expression
 # `ns::name`), struct (a construction `ns::Name {...}`), type (a qualified
-# type annotation `ns::Name`: a struct or a source-defined `type`) or error
-# (a qualified error `ns::Name` in a `fail`, an `on` handler, an `errors`
-# clause or a function type's `errors` list: ERROR-PAYLOADS.md, "Module-
-# qualified error identity"). NAMESPACE is the canonical path; ROOTED is 1
-# for a value or a construction written from the root (`::std::list::at`),
-# whose qualifier is always a namespace (CheckRef). A type or an error name
-# is a namespace member however it is spelled, and the parser keeps it
-# canonical (STD-NAMESPACE.md): its ROOTED is 0.
+# type annotation `ns::Name`: a struct or a source-defined `type`, wherever a
+# type is written -- a parameter, a result, a context parameter, a variadic
+# parameter, a resume clause, a struct, layout or error payload field, a
+# refinement's carrier, a trait requirement, an extern's C type, an imprint)
+# or error (a qualified error `ns::Name` in a `fail`, an `on` handler, an
+# `errors` clause or a function type's `errors` list: ERROR-PAYLOADS.md,
+# "Module-qualified error identity"). NAMESPACE is the canonical path;
+# ROOTED is 1 for a value or a construction written from the root
+# (`::std::list::at`), whose qualifier is always a namespace (CheckRef). A
+# type or an error name is a namespace member however it is spelled, and
+# the parser keeps it canonical (STD-NAMESPACE.md): its ROOTED is 0.
+#
+# QualifiedRefs and RewriteQualified are one traversal (Walk): the places
+# whose qualified spellings the loader checks are exactly the places whose
+# spellings it rewrites to identities.
 proc surface::modules::QualifiedRefs {ast} {
-    set found {}
-    QualifiedRefsWalk $ast found
-    return $found
+    variable walk
+    set saved $walk
+    set walk [dict create found {} map {} rewriting 0]
+    try {
+        Walk $ast
+        return [dict get $walk found]
+    } finally {
+        set walk $saved
+    }
 }
 
-proc surface::modules::QualifiedRefsWalk {node foundVar} {
-    upvar 1 $foundVar found
+# AST (a node) with every qualified spelling whose namespace MAP (written
+# namespace -> canonical identity: CheckImports' names of the file) maps
+# replaced by its identity: `geometry::area(p)` in a module of package
+# physics, whose installed geometry is the instance physics/geometry, is
+# `physics/geometry::area(p)` (header, "Identity"). A namespace MAP does not
+# name -- one the file may not name, which CheckRef reports -- is left as
+# written; so is a case qualifier `NS::Enum` whose namespace NS MAP names
+# (MapNamespace).
+proc surface::modules::RewriteQualified {ast map} {
+    variable walk
+    set saved $walk
+    set walk [dict create found {} map $map rewriting [expr {[dict size $map] > 0}]]
+    try {
+        return [Walk $ast]
+    } finally {
+        set walk $saved
+    }
+}
+
+namespace eval surface::modules {
+    # The traversal in progress (QualifiedRefs, RewriteQualified): the
+    # references found, the map spellings are rewritten by, and whether it
+    # rewrites anything (a walk that only finds references builds no node).
+    variable walk [dict create found {} map {} rewriting 0]
+}
+
+# The identity MAP gives the written namespace NS: NS's own entry, else, for
+# a case qualifier NS = PREFIX::Enum, PREFIX's entry followed by ::Enum; NS
+# itself when MAP names neither.
+proc surface::modules::MapNamespace {ns map} {
+    if {[dict size $map] == 0} {
+        return $ns
+    }
+    if {[dict exists $map $ns]} {
+        return [dict get $map $ns]
+    }
+    set cut [string last :: $ns]
+    if {$cut > 0} {
+        set prefix [string range $ns 0 [expr {$cut - 1}]]
+        if {[dict exists $map $prefix]} {
+            return [dict get $map $prefix][string range $ns $cut end]
+        }
+    }
+    return $ns
+}
+
+# Records the reference {NS NAME SPAN KIND ROOTED} of the traversal in
+# progress, and returns the namespace NS is written as after it.
+proc surface::modules::Ref {ns name span kind rooted} {
+    variable walk
+    dict lappend walk found [list $ns $name $span $kind $rooted]
+    return [MapNamespace $ns [dict get $walk map]]
+}
+
+# NODE after the traversal in progress: its qualified references recorded,
+# and rewritten, in source order.
+proc surface::modules::Walk {node} {
     if {[dict exists $node imprints]} {
         # A call's explicit imprints (C-ABI-TYPES.md) name types like any
         # annotation.
-        foreach type [dict get $node imprints] span [dict get $node imprintSpans] {
-            TypeRefs $type $span found
-        }
+        Put node imprints [lmap type [dict get $node imprints] span [dict get $node imprintSpans] {
+            TypeRefs $type $span
+        }]
     }
     switch -- [dict get $node kind] {
         qualname {
-            lappend found [list [dict get $node namespace] [dict get $node name] [dict get $node span] value \
+            Put node namespace [Ref [dict get $node namespace] [dict get $node name] [dict get $node span] value \
                 [dict getdef $node rooted 0]]
-            return
+            return $node
         }
         fail {
-            ErrorRef [dict get $node name] [dict get $node nameSpan] found
+            Put node name [ErrorRef [dict get $node name] [dict get $node nameSpan]]
         }
         handledcall {
-            foreach handler [dict get $node handlers] {
-                ErrorRef [dict get $handler name] [dict get $handler nameSpan] found
-            }
+            Put node handlers [lmap handler [dict get $node handlers] {
+                dict set handler name [ErrorRef [dict get $handler name] [dict get $handler nameSpan]]
+            }]
         }
         namedstruct {
             # NAMESPACE::Struct { ... }: a reference to the struct type
             # (STRUCTS.md); its field values may hold more references.
             if {[dict get $node namespace] ne ""} {
-                lappend found [list [dict get $node namespace] [dict get $node name] \
+                Put node namespace [Ref [dict get $node namespace] [dict get $node name] \
                     [dict get $node nameSpan] struct [dict getdef $node rooted 0]]
             }
             if {[dict exists $node typeArg]} {
                 # NAME[TYPE] { ... } (BINARY-LAYOUT.md): `LayoutStruct[geo::
                 # Pair] {...}` names the layout geo::Pair.
-                TypeRefs [dict get $node typeArg] [dict get $node typeArgSpan] found
+                Put node typeArg [TypeRefs [dict get $node typeArg] [dict get $node typeArgSpan]]
             }
             if {[dict exists $node typeArgs]} {
                 # Pair[geo::Point, int] { ... } (TRAIT-CONSTRAINED-IMPRINTED-
                 # TYPES.md): every argument's references.
-                foreach t [dict get $node typeArgs] span [dict get $node typeArgSpans] {
-                    TypeRefs $t $span found
-                }
+                Put node typeArgs [lmap t [dict get $node typeArgs] span [dict get $node typeArgSpans] {
+                    TypeRefs $t $span
+                }]
             }
         }
         function {
             # Qualified struct types in parameter and result annotations,
             # qualified errors in the `errors` clause.
-            foreach pair [dict get $node errors] {
-                ErrorRef {*}$pair found
-            }
-            foreach param [dict get $node params] {
-                TypeRefs [lindex $param 2] [lindex $param 3] found
-            }
-            TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan] found
+            Put node errors [lmap pair [dict get $node errors] {
+                lreplace $pair 0 0 [ErrorRef {*}$pair]
+            }]
+            Put node params [lmap param [dict get $node params] {
+                lreplace $param 2 2 [TypeRefs [lindex $param 2] [lindex $param 3]]
+            }]
+            Put node resultType [TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan]]
             if {[dict exists $node proves]} {
-                foreach clause [dict get $node proves] {
-                    TypeRefs [dict get $clause type] [dict get $clause typeSpan] found
+                Put node proves [lmap clause [dict get $node proves] {
+                    dict set clause type [TypeRefs [dict get $clause type] [dict get $clause typeSpan]]
+                }]
+            }
+            # A context parameter's type (CONTEXTS.md), the variadic
+            # parameter's List type (VARIADICS-VERTICAL-SLICE-1.md) and the
+            # resume clause's message type (COROUTINES.md).
+            Put node contexts [lmap c [dict getdef $node contexts {}] {
+                dict set c type [TypeRefs [dict get $c type] [dict get $c typeSpan]]
+            }]
+            foreach clause {variadic resume} {
+                if {[dict getdef $node $clause ""] ne ""} {
+                    Put node $clause type [TypeRefs [dict get $node $clause type] [dict get $node $clause typeSpan]]
                 }
             }
         }
@@ -703,48 +1028,111 @@ proc surface::modules::QualifiedRefsWalk {node foundVar} {
             # A refinement's carrier (REFINEMENT-VALUES.md) may be a
             # qualified type of another module.
             if {[dict exists $node form] && [dict get $node form] eq "refined"} {
-                TypeRefs [dict get $node carrier] [dict get $node carrierSpan] found
+                Put node carrier [TypeRefs [dict get $node carrier] [dict get $node carrierSpan]]
             }
         }
-        structdecl - layoutdecl {
+        structdecl - layoutdecl - errordecl {
             # A layout field's type (BINARY-LAYOUT.md) is a qualified
             # integer domain or a qualified nested layout like a struct
-            # field's type.
-            foreach field [dict get $node fields] {
-                TypeRefs [dict get $field type] [dict get $field typeSpan] found
+            # field's type, and so is an error's payload field's
+            # (ERROR-PAYLOADS.md).
+            if {[dict exists $node fields]} {
+                Put node fields [lmap field [dict get $node fields] {
+                    dict set field type [TypeRefs [dict get $field type] [dict get $field typeSpan]]
+                }]
             }
             # A type slot's trait (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md) may
             # be another module's: `K satisfies ui::Printable`.
-            foreach slot [dict getdef $node slots {}] {
-                if {[dict get $slot trait] ne ""} {
-                    TypeRefs [dict get $slot trait] [dict get $slot traitSpan] found
-                }
+            if {[dict exists $node slots]} {
+                Put node slots [lmap slot [dict get $node slots] {
+                    if {[dict get $slot trait] ne ""} {
+                        dict set slot trait [TypeRefs [dict get $slot trait] [dict get $slot traitSpan]]
+                    }
+                    set slot
+                }]
             }
         }
         externfn {
             # An extern declaration's C types (C-FFI.md): `std::ffi::c::Ptr[...]`
             # and every qualified pointee name their namespaces.
-            foreach param [dict get $node params] {
-                TypeRefs [dict get $param type] [dict get $param typeSpan] found
-            }
-            TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan] found
+            Put node params [lmap param [dict get $node params] {
+                dict set param type [TypeRefs [dict get $param type] [dict get $param typeSpan]]
+            }]
+            Put node resultType [TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan]]
         }
         traitdecl {
             # A requirement's parameter and result types (TRAITS.md).
-            foreach r [dict get $node requirements] {
-                foreach param [dict get $r params] {
-                    TypeRefs [lindex $param 2] [lindex $param 3] found
-                }
-                TypeRefs [dict get $r resultType] [dict get $r resultTypeSpan] found
-                foreach pair [dict get $r errors] {
-                    ErrorRef {*}$pair found
-                }
-            }
+            Put node requirements [lmap r [dict get $node requirements] {
+                dict set r params [lmap param [dict get $r params] {
+                    lreplace $param 2 2 [TypeRefs [lindex $param 2] [lindex $param 3]]
+                }]
+                dict set r resultType [TypeRefs [dict get $r resultType] [dict get $r resultTypeSpan]]
+                dict set r errors [lmap pair [dict get $r errors] {
+                    lreplace $pair 0 0 [ErrorRef {*}$pair]
+                }]
+            }]
+        }
+        classdecl - dfadecl {
+            # A declared recognizer's qualified classes and callees
+            # (DFA-COROUTINE-MILESTONE-2.md): surface/dfa.tcl checks and
+            # reports them itself, so they are rewritten, never recorded.
+            set node [DfaRewrite $node]
         }
     }
-    foreach child [surface::ast::Children $node] {
-        QualifiedRefsWalk $child found
+    variable walk
+    if {[dict get $walk rewriting]} {
+        return [surface::ast::MapChildren $node surface::modules::Walk]
     }
+    foreach child [surface::ast::Children $node] {
+        Walk $child
+    }
+    return $node
+}
+
+# NODE's KEY ... set to VALUE (`dict set`) when the traversal in progress
+# rewrites (Walk); a walk that only finds references leaves it as it is.
+proc surface::modules::Put {nodeVar args} {
+    variable walk
+    if {[dict get $walk rewriting]} {
+        upvar 1 $nodeVar node
+        dict set node {*}$args
+    }
+}
+
+# The class or recognizer declaration NODE with its qualified class items
+# and callees rewritten by the traversal in progress (Walk).
+proc surface::modules::DfaRewrite {node} {
+    variable walk
+    set map [dict get $walk map]
+    if {[dict size $map] == 0} {
+        return $node
+    }
+    if {[dict get $node kind] eq "classdecl"} {
+        foreach field {items except} {
+            dict set node $field [DfaItemsRewrite [dict get $node $field] $map]
+        }
+        return $node
+    }
+    dict set node classes [lmap c [dict get $node classes] {DfaRewrite $c}]
+    dict set node states [lmap state [dict get $node states] {
+        dict set state transitions [lmap t [dict get $state transitions] {
+            dict set t items [DfaItemsRewrite [dict get $t items] $map]
+            if {[dict exists $t callee] && [lindex [dict get $t callee] 0] ne ""} {
+                dict set t callee [lreplace [dict get $t callee] 0 0 [MapNamespace [lindex [dict get $t callee] 0] $map]]
+            }
+            set t
+        }]
+    }]
+    return $node
+}
+
+proc surface::modules::DfaItemsRewrite {items map} {
+    return [lmap item $items {
+        if {[dict get $item kind] eq "class" && [dict get $item namespace] ne ""} {
+            dict set item namespace [MapNamespace [dict get $item namespace] $map]
+        }
+        set item
+    }]
 }
 
 # The import header (`import NS` lines, one per line, sorted) a program whose
@@ -774,68 +1162,65 @@ proc surface::modules::ImportHeader {source} {
     return [join [lmap ns [lsort $needed] {string cat "import " $ns "\n"}] ""]
 }
 
-# Appends the reference {NAMESPACE NAME SPAN error} of the error spelling
-# SPELLING (located at SPAN) when it is qualified: `ns::Name`, `a::b::Name`.
-proc surface::modules::ErrorRef {spelling span foundVar} {
-    upvar 1 $foundVar found
+# The error spelling SPELLING (located at SPAN) after the traversal in
+# progress: when qualified (`ns::Name`, `a::b::Name`) its reference
+# {NAMESPACE NAME SPAN error} recorded, and its namespace rewritten.
+proc surface::modules::ErrorRef {spelling span} {
     set cut [string last :: $spelling]
     if {$cut > 0} {
-        lappend found [list [string range $spelling 0 [expr {$cut - 1}]] \
-            [string range $spelling [expr {$cut + 2}] end] $span error 0]
+        set name [string range $spelling [expr {$cut + 2}] end]
+        return [Ref [string range $spelling 0 [expr {$cut - 1}]] $name $span error 0]::$name
     }
+    return $spelling
 }
 
-# Appends the qualified type names ("ns::Name") TYPE (a surface::
-# parser::TypeExpr result) mentions, each located at SPAN -- and the
-# qualified errors of a function type's `errors` list.
-proc surface::modules::TypeRefs {type span foundVar} {
-    upvar 1 $foundVar found
+# TYPE (a surface::parser::TypeExpr result) after the traversal in
+# progress: every qualified type name ("ns::Name") it mentions recorded,
+# each located at SPAN, and rewritten -- and the qualified errors of a
+# function type's `errors` list.
+proc surface::modules::TypeRefs {type span} {
     if {$type eq ""} {
-        return
+        return $type
     }
     if {[llength $type] == 1} {
         # Split at the last "::": the namespace may itself be nested
         # ("std::abi::x86_64::Register64" is Register64 of std::abi::x86_64).
         if {[regexp {^((?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$} $type -> namespaceName name]} {
-            lappend found [list $namespaceName $name $span type 0]
+            return [Ref $namespaceName $name $span type 0]::$name
         }
-        return
+        return $type
     }
     if {[llength $type] == 3 && [lindex $type 0] eq "array"} {
         # A fixed array representation (FIXED-LAYOUT-ARRAYS.md): its
         # element's references (the extent is a number).
-        TypeRefs [lindex $type 2] $span found
-        return
+        return [lreplace $type 2 2 [TypeRefs [lindex $type 2] $span]]
     }
     if {[llength $type] in {3 4} && [lindex $type 0] eq "refine"} {
         # A scalar refinement (DECIMAL-ROUNDED-MILESTONE-1.md): the refined
         # name's reference (the parameters are numbers) -- of an applied
         # type, the base's references (LIST-CARDINALITY-REFINEMENTS.md).
         if {[llength $type] == 4} {
-            TypeRefs [lindex $type 3] $span found
-        } else {
-            TypeRefs [lindex $type 1] $span found
+            return [lreplace $type 3 3 [TypeRefs [lindex $type 3] $span]]
         }
-        return
+        return [lreplace $type 1 1 [TypeRefs [lindex $type 1] $span]]
     }
     if {[llength $type] == 3 && [lindex $type 0] eq "apply"} {
         # NAME[A, B, ...] (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): the
         # constructor's reference and every argument's.
-        TypeRefs [lindex $type 1] $span found
-        foreach t [lindex $type 2] { TypeRefs $t $span found }
-        return
+        set head [TypeRefs [lindex $type 1] $span]
+        return [list apply $head [lmap t [lindex $type 2] {TypeRefs $t $span}]]
     }
     lassign $type head arg
     if {$head eq "fn"} {
-        foreach t [dict get $arg args] { TypeRefs $t $span found }
-        TypeRefs [dict get $arg return] $span found
-        foreach error [dict get $arg errors] { ErrorRef $error $span found }
-        return
+        dict set arg args [lmap t [dict get $arg args] {TypeRefs $t $span}]
+        dict set arg return [TypeRefs [dict get $arg return] $span]
+        dict set arg errors [lmap error [dict get $arg errors] {ErrorRef $error $span}]
+        return [list $head $arg]
     }
     # A qualified type constructor (`std::ffi::c::Ptr[...]`, C-ABI-TYPES.md) is a
     # reference to its namespace too.
-    TypeRefs $head $span found
-    TypeRefs $arg $span found
+    set type [lreplace $type 0 0 [TypeRefs $head $span]]
+    return [lreplace $type 1 1 [TypeRefs $arg $span]]
 }
 
 # ORIGIN (an hir/syntax.tcl node's or block-parameter's origin) repointed at
@@ -1016,7 +1401,12 @@ proc surface::modules::RemapFile {node fileId} {
 # loaded (found on STATE's own "stack"). USEDATSPAN is the span of the
 # reference that asked for it, for diagnostics ("" if none -- a
 # non-source-driven load, e.g. the native backend's bridge).
-proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
+#
+# NAME is the module's canonical identity; SCOPE its owning scope and
+# SPELLING its namespace as its own files spell it (ResolveModule's; for a
+# caller that names a namespace directly, the standard library's or the
+# application's by NAME).
+proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope ""} {spelling ""}} {
     upvar 1 $stateVar state
     if {[dict exists $state loaded $name]} {
         return
@@ -1024,6 +1414,12 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     if {$name in [dict get $state stack]} {
         set chain [concat [dict get $state stack] [list $name]]
         Error CYCLE $usedAtSpan "module dependency cycle: [join $chain { -> }]"
+    }
+    if {$scope eq ""} {
+        set scope [expr {[StandardNamespace $name] ? "#std" : ""}]
+    }
+    if {$spelling eq ""} {
+        set spelling $name
     }
     # PATH: the file ResolveModule chose; the standard library's for the
     # compilation target by default (ModuleFile).
@@ -1033,7 +1429,25 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     if {![surface::source::exists $path]} {
         Error UNKNOWN-NAMESPACE $usedAtSpan "unknown namespace \"$name\": no such module file $path"
     }
-    if {![StandardNamespace $name]} {
+    # A package's module is its instance's place in the dependency tree, so
+    # an installation whose directories lead back into themselves (a
+    # symbolic link to an ancestor package) would be an endless chain of
+    # instances: the same module of the same physical package directory
+    # being loaded while it is loaded is a cycle, whatever its instance.
+    set physical ""
+    if {[IsPackageScope $scope]} {
+        set physical [list [RealDirectory [ScopeDir $state $scope]] $spelling]
+        set at [lsearch -exact [dict get $state physical] $physical]
+        if {$at >= 0} {
+            set chain [concat [lrange [dict get $state stack] $at end] [list $name]]
+            Error CYCLE $usedAtSpan "module dependency cycle through package directories: [join $chain { -> }] (the module \"$spelling\" of the package directory [lindex $physical 0] imports itself again through an installation of that directory inside itself, a symbolic link: a package instance is its place in the dependency tree, so such a chain never ends)"
+        }
+    }
+    dict set state scopeOf $name $scope
+    dict set state spellingOf $name $spelling
+    if {$scope ne "#std"} {
+        # An application's or a package's module: never the standard
+        # library's (CheckInternal).
         dict set state application $name 1
     } elseif {$path in [dict values [ArchModuleFiles $name]]} {
         # The target's architecture chose the file (ModuleFile).
@@ -1072,6 +1486,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     }
     CheckNativeMembers $ast $name "module \"$name\" ($path)"
     dict set state stack [concat [dict get $state stack] [list $name]]
+    dict lappend state physical $physical
     set fileId f[dict get $state nextFile]
     dict set state files $fileId $path
     dict incr state nextFile
@@ -1157,6 +1572,13 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""}} {
     dict set state moduleDecls $name [ModuleDecl $ast $fileId]
     dict set state sections [concat [dict get $state sections] [list $section]]
     dict set state stack [lrange [dict get $state stack] 0 end-1]
+    dict set state physical [lrange [dict get $state physical] 0 end-1]
+}
+
+# The directory DIR with every symbolic link in it resolved, its last
+# component's included (file normalize resolves all but the last).
+proc surface::modules::RealDirectory {dir} {
+    return [file dirname [file normalize [file join $dir .bot-real]]]
 }
 
 # Records, in STATE, the FileId of the file AST of module NAME ("" for the
@@ -1184,7 +1606,8 @@ proc surface::modules::DependentReference {state key ref kind} {
     if {[dict exists $state open $key] && [dict get $state open $key header]} {
         return 1
     }
-    set ns [lindex $ref 0]
+    # (The module the reference's namespace denotes, by its identity.)
+    set ns [IdentityOf $state $key [lindex $ref 0]]
     if {$kind eq "UNKNOWN-SYMBOL" && [dict exists $state open $ns]} {
         set open [dict get $state open $ns]
         return [expr {[dict get $open values] || [dict get $open types]}]
@@ -1348,13 +1771,21 @@ proc surface::modules::RelatedImport {ns imported} {
 #   TYPE-IMPORT-COLLISION  a type import's short name is another type import's
 #                        short name, a type this file declares, or a built-in
 # and CYCLE from loading the imported module.
-proc surface::modules::CheckImports {stateVar ast own} {
+proc surface::modules::CheckImports {stateVar ast key} {
     upvar 1 $stateVar state
+    # The file's own namespace as it spells it, and its identity (KEY).
+    set own [OwnSpelling $state $key]
     set namespaces {}
     set nsSpans [dict create]
     set types [dict create]
     set typeSpans [dict create]
     set local [dict create]
+    # What each namespace the file may name -- its own, and each it imports
+    # -- is: its canonical identity (IdentityMap).
+    set names [dict create]
+    if {$own ne ""} {
+        dict set names $own $key
+    }
     foreach statement [dict get $ast body] {
         if {[dict get $statement kind] in {typedecl structdecl enumdecl traitdecl layoutdecl} && ![dict exists $local [dict get $statement name]]} {
             dict set local [dict get $statement name] [dict get $statement nameSpan]
@@ -1370,96 +1801,126 @@ proc surface::modules::CheckImports {stateVar ast own} {
             if {$ns eq $own} {
                 Error SELF-IMPORT $span "a file of namespace \"$ns\" cannot import its own namespace: a module is inside its namespace and needs no import to name its own members"
             }
-            set path [ResolveModule state $own $ns $span]
+            set found [ResolveModule state $key $ns $span]
+            set path [dict get $found path]
             if {$path eq "" && [IntrinsicMembers $ns] eq ""} {
-                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": [NoSuchNamespace $state $own $ns]"
+                Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": [NoSuchNamespace state $key $ns]"
             }
-            CheckInternal $state $own $ns $span
+            set id [dict get $found identity]
+            CheckInternal $state $key $id $span
             if {$path ne ""} {
-                LoadNamespace state $ns $span $path
+                LoadNamespace state $id $span $path [dict get $found scope] $ns
             }
             dict set nsSpans $ns $span
-            lappend namespaces $ns
+            dict set names $ns $id
+            lappend namespaces $id
             continue
         }
         # import type NS::Name
         set name [dict get $import name]
         set nameSpan [dict get $import nameSpan]
-        set canonical "${ns}::$name"
-        if {[dict exists $typeSpans $canonical]} {
-            Error DUPLICATE-IMPORT [dict get $import span] "type \"$canonical\" is already imported (first imported at [surface::ast::location [dict get $typeSpans $canonical]])"
+        set written "${ns}::$name"
+        if {[dict exists $typeSpans $written]} {
+            Error DUPLICATE-IMPORT [dict get $import span] "type \"$written\" is already imported (first imported at [surface::ast::location [dict get $typeSpans $written]])"
         }
         if {$ns eq $own} {
             Error SELF-IMPORT [dict get $import span] "a file of namespace \"$ns\" cannot import a type of its own namespace: its own type \"$name\" is already usable by that name"
         }
-        set path [ResolveModule state $own $ns $span]
+        set found [ResolveModule state $key $ns $span]
+        set path [dict get $found path]
         if {$path eq "" && [IntrinsicMembers $ns] eq ""} {
-            Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": [NoSuchNamespace $state $own $ns] (in \"import type $canonical\")"
+            Error UNKNOWN-NAMESPACE $span "unknown namespace \"$ns\": [NoSuchNamespace state $key $ns] (in \"import type $written\")"
         }
+        set id [dict get $found identity]
+        set canonical "${id}::$name"
         set hasFile [expr {$path ne ""}]
         if {$hasFile} {
-            LoadNamespace state $ns $span $path
+            LoadNamespace state $id $span $path [dict get $found scope] $ns
         }
         if {$hasFile} {
-            set typeNames [concat [dict get $state loadedTypes $ns] [dict get $state loadedTraits $ns] [dict get $state loadedEnums $ns]]
+            set typeNames [concat [dict get $state loadedTypes $id] [dict get $state loadedTraits $id] [dict get $state loadedEnums $id]]
         } else {
             set typeNames {}
         }
-        if {$name ni $typeNames && [dict get $state recover] && [dict exists $state open $ns]
-                && [dict get $state open $ns types]} {
+        if {$name ni $typeNames && [dict get $state recover] && [dict exists $state open $id]
+                && [dict get $state open $id types]} {
             # A type a malformed declaration of the module may be
             # (SYNTAX-RECOVERY-MILESTONE-1.md): not imported, and the file's
             # resolution diagnostics are not known (BuildProgram).
-            dict set state typeKeys $own 1
+            dict set state typeKeys $key 1
             continue
         }
         if {$name ni $typeNames} {
             if {$hasFile} {
-                set functions [dict get $state loaded $ns]
+                set functions [dict get $state loaded $id]
             } else {
                 set functions {}
             }
             if {$hasFile} {
-                set structs [dict get $state loadedStructs $ns]
+                set structs [dict get $state loadedStructs $id]
             } else {
                 set structs {}
             }
             if {$hasFile} {
-                set errors [dict get $state loadedErrors $ns]
+                set errors [dict get $state loadedErrors $id]
             } else {
                 set errors {}
             }
-            if {$name in [hir::cabi::IntrinsicTypeNames $ns]} {
-                Error NOT-A-TYPE $nameSpan "\"$canonical\" is an intrinsic type of namespace \"$ns\", not a source-defined `type`: spell it $canonical after `import $ns`"
+            if {$name in [hir::cabi::IntrinsicTypeNames $id]} {
+                Error NOT-A-TYPE $nameSpan "\"$written\" is an intrinsic type of namespace \"$ns\", not a source-defined `type`: spell it $written after `import $ns`"
             }
-            if {$name in $functions || $name in [IntrinsicMembers $ns]} {
-                Error NOT-A-TYPE $nameSpan "\"$canonical\" exists, but is not a type (it is a function or value of namespace \"$ns\"): `import type` imports source-defined types only; use it as $canonical after `import $ns`"
+            if {$name in $functions || $name in [IntrinsicMembers $id]} {
+                Error NOT-A-TYPE $nameSpan "\"$written\" exists, but is not a type (it is a function or value of namespace \"$ns\"): `import type` imports source-defined types only; use it as $written after `import $ns`"
             }
             if {$name in $structs} {
-                Error NOT-A-TYPE $nameSpan "\"$canonical\" is a struct, not a source-defined `type`: `import type` imports `type` declarations only; spell the struct $canonical after `import $ns`"
+                Error NOT-A-TYPE $nameSpan "\"$written\" is a struct, not a source-defined `type`: `import type` imports `type` declarations only; spell the struct $written after `import $ns`"
             }
-            if {$hasFile && $name in [dict get $state loadedLayouts $ns]} {
-                Error NOT-A-TYPE $nameSpan "\"$canonical\" is a layout, not a type: `import type` imports `type` declarations only; spell the layout $canonical after `import $ns` (its values have the type LayoutStruct\[$canonical\])"
+            if {$hasFile && $name in [dict get $state loadedLayouts $id]} {
+                Error NOT-A-TYPE $nameSpan "\"$written\" is a layout, not a type: `import type` imports `type` declarations only; spell the layout $written after `import $ns` (its values have the type LayoutStruct\[$written\])"
             }
             if {$name in $errors} {
-                Error NOT-A-TYPE $nameSpan "\"$canonical\" is an error declaration, not a type"
+                Error NOT-A-TYPE $nameSpan "\"$written\" is an error declaration, not a type"
             }
             Error UNKNOWN-SYMBOL $nameSpan "namespace \"$ns\" has no type \"$name\" (its types: [if {$typeNames eq ""} {string cat "none"} else {join [lsort $typeNames] {, }}])"
         }
-        CheckPrivate $state $own $ns $name types $nameSpan
+        CheckPrivate $state $key $id $name types $nameSpan
         if {[dict exists $local $name]} {
-            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which this file also declares itself (at [surface::ast::location [dict get $local $name]]); an imported type never shadows or is shadowed by a local one: drop the import and spell the imported type $canonical (after `import $ns`)"
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $written` binds the type name \"$name\", which this file also declares itself (at [surface::ast::location [dict get $local $name]]); an imported type never shadows or is shadowed by a local one: drop the import and spell the imported type $written (after `import $ns`)"
         }
         if {[IsBuiltinTypeName $name]} {
-            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` binds the type name \"$name\", which is a built-in type; spell the imported type $canonical (after `import $ns`) instead"
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $written` binds the type name \"$name\", which is a built-in type; spell the imported type $written (after `import $ns`) instead"
         }
         if {[dict exists $types $name]} {
-            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $canonical` and `import type [dict get $types $name]` (at [surface::ast::location [dict get $typeSpans [dict get $types $name]]]) both bind the type name \"$name\"; there is no precedence and no renaming: import at most one and spell the other fully qualified (after `import $ns`)"
+            set other [dict get $types $name]
+            Error TYPE-IMPORT-COLLISION $nameSpan "`import type $written` and `import type [dict get $typeWritten $other]` (at [surface::ast::location [dict get $typeSpans [dict get $typeWritten $other]]]) both bind the type name \"$name\"; there is no precedence and no renaming: import at most one and spell the other fully qualified (after `import $ns`)"
         }
         dict set types $name $canonical
-        dict set typeSpans $canonical [dict get $import span]
+        dict set typeWritten $canonical $written
+        dict set typeSpans $written [dict get $import span]
     }
+    dict set state names $key $names
     return [dict create namespaces $namespaces types $types]
+}
+
+# The namespace the file of module KEY spells as its own ("" for the entry
+# program): its identity, for the application's and the standard library's
+# modules, and its namespace inside its package for a package's.
+proc surface::modules::OwnSpelling {state key} {
+    if {$key eq ""} {
+        return ""
+    }
+    return [dict get $state spellingOf $key]
+}
+
+# The canonical identity of the namespace SPELLED as the file of module KEY
+# writes it (CheckImports' map: its own namespace and every namespace it
+# imports), or SPELLED itself for any other (one the file may not name, which
+# CheckRef reports, or one whose spelling is its identity).
+proc surface::modules::IdentityOf {state key spelled} {
+    if {[dict exists $state names $key $spelled]} {
+        return [dict get $state names $key $spelled]
+    }
+    return $spelled
 }
 
 # Validates the imports of AST (CheckImports), and that every qualified
@@ -1478,14 +1939,29 @@ proc surface::modules::CheckImports {stateVar ast own} {
 # under KEY, for hir::buildSyntax's -imports and the module's own section.
 proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
     upvar 1 $stateVar state
-    set own $key
-    set env [CheckImports state $ast $own]
+    set own [OwnSpelling $state $key]
+    set env [CheckImports state $ast $key]
     dict set state imports $key $env
-    set imported [dict get $env namespaces]
+    # The namespaces the file imports, as it writes them.
+    set imported [lmap import [dict get $ast imports] {
+        if {[dict get $import kind] ne "import"} continue
+        dict get $import namespace
+    }]
+    # The file as written is what its references are checked in (CheckRef
+    # speaks of the namespaces the file names); everything after the loader
+    # sees its qualified spellings as the identities they denote (header,
+    # "Identity"), rewritten only where one differs from its spelling -- in a
+    # package that installs packages of its own, or in one installed by
+    # another package.
+    set written $ast
+    set map [dict filter [dict get $state names $key] script {spelled id} {expr {$spelled ne $id}}]
+    if {[dict size $map]} {
+        set ast [RewriteQualified $ast $map]
+    }
     # Declared recognizers and symbol classes (DFA-COROUTINE-MILESTONE-2.md):
     # checked once the modules the file imports are loaded, against what
     # they declare, and annotated for lowering (surface/dfa.tcl).
-    set ast [ExpandDfas state $ast $own $imported]
+    set ast [ExpandDfas state $ast $key [dict get $env namespaces]]
     # STATIC-COMPILE.md: a file using a static intrinsic names the error its
     # rejected blocks complete with, std::compiler::CompilerError -- an ordinary
     # namespaced declaration, so the file imports its namespace like any
@@ -1497,14 +1973,17 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
         Error MISSING-IMPORT [dict get $site staticSpan] \
             "namespace \"$compilerNs\" is not imported; add `import $compilerNs` to use `static [dict get $site operation]:` (a block it rejects completes with the error $::hir::static::errorName)"
     }
-    foreach ref [QualifiedRefs $ast] {
+    if {![dict size $map]} {
+        set written $ast
+    }
+    foreach ref [QualifiedRefs $written] {
         set site [StaticSiteOf $sites [lindex $ref 2]]
         if {$site eq ""} {
             # Each reference is checked on its own: every one the file may
             # not make is reported, together, once the whole program is
             # loaded (RaiseReferenceErrors, DIAGNOSTIC-RECOVERY.md).
             try {
-                CheckRef state $ast $own $key $env $imported $ref
+                CheckRef state $written $key $env $imported $ref
             } trap {SURFACE MODULE} {message options} {
                 if {[DependentReference $state $key $ref [lindex [dict get $options -errorcode] 2]]} {
                     # Not known to be wrong (SYNTAX-RECOVERY-MILESTONE-1.md):
@@ -1528,7 +2007,7 @@ proc surface::modules::CollectAndLoad {stateVar ast {key ""}} {
         # loader's own located diagnostics are deferred; anything else is
         # a failure of the compiler and propagates.
         try {
-            CheckRef state $ast $own $key $env $imported $ref
+            CheckRef state $written $key $env $imported $ref
         } trap {SURFACE MODULE} {message options} {
             set span [lindex $ref 2]
             set prefix "[surface::ast::location $span]: "
@@ -1576,18 +2055,34 @@ proc surface::modules::ExpandDfas {stateVar ast own imported} {
     return $ast
 }
 
+# The file of module KEY ("" for the entry program), for a message.
+proc surface::modules::FileText {state key} {
+    if {$key eq ""} {
+        return "the entry program"
+    }
+    set scope [Scope $state $key]
+    if {[IsPackageScope $scope]} {
+        return "the module \"[OwnSpelling $state $key]\" of [ScopeText $state $scope]"
+    }
+    return "the application module \"$key\""
+}
+
 # Checks the qualified reference REF ({NAMESPACE NAME SPAN KIND}, QualifiedRefs)
-# of the file AST of module OWN (KEY as CollectAndLoad's, ENV its import
-# environment, IMPORTED its imported namespaces): Error unless it is
-# authorized and names a real member.
-# INTERNAL-NAMESPACE: code of namespace OWN ("" for the entry program) names
+# of the file AST of module KEY (as CollectAndLoad's: its identity, "" for
+# the entry program; ENV its import environment, IMPORTED the namespaces it
+# imports as it writes them): Error unless it is authorized and names a real
+# member. The reference is checked as written, and its namespace's members
+# looked up by the identity the file's name for it denotes (IdentityOf).
+#
+# INTERNAL-NAMESPACE: code of module OWN ("" for the entry program) names
 # the internal namespace NS (core::native::declareInternalNamespace;
 # HASHABLE-AND-KEYED-HASH.md, "Visibility boundary") -- an import of it or a
 # qualified reference into it -- without being a standard library module.
 # The standard library is the modules of namespaces under std, the files
 # under core::libraryDir that are no application module (LoadNamespace
-# records those); the entry program is never one, and no application module
-# can be a standard namespace (RESERVED-NAMESPACE).
+# and package modules, LoadNamespace records those); the entry program is
+# never one, and no application or package module can be a standard
+# namespace (RESERVED-NAMESPACE).
 proc surface::modules::CheckInternal {state own ns span {member ""}} {
     if {$member ne "" && [hir::iteration::IsOperation $ns $member]
             && ($own eq "" || [dict exists $state application $own])} {
@@ -1595,7 +2090,7 @@ proc surface::modules::CheckInternal {state own ns span {member ""}} {
         # its positions are the representation, which only the standard
         # library may see.
         Error INTERNAL-NAMESPACE $span \
-            "\"${ns}::$member\" is internal to the standard library: it is an operation of the loop protocol of a collection of \"$ns\", which only its modules may name ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one); iterate the collection with a loop instead"
+            "\"${ns}::$member\" is internal to the standard library: it is an operation of the loop protocol of a collection of \"$ns\", which only its modules may name ([FileText $state $own] is not one); iterate the collection with a loop instead"
     }
     if {![core::native::isInternalNamespace $ns]} {
         return
@@ -1604,13 +2099,15 @@ proc surface::modules::CheckInternal {state own ns span {member ""}} {
         return
     }
     Error INTERNAL-NAMESPACE $span \
-        "namespace \"$ns\" is internal to the standard library: only its modules may import it or name its members ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
+        "namespace \"$ns\" is internal to the standard library: only its modules may import it or name its members ([FileText $state $own] is not one)"
 }
 
-proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
+proc surface::modules::CheckRef {stateVar ast key env imported ref} {
     upvar 1 $stateVar state
     variable standardRoot
     lassign $ref namespaceName symbolName span refKind rooted
+    # The file's own namespace as it writes it (OwnSpelling).
+    set own [OwnSpelling $state $key]
     if {$namespaceName eq $standardRoot} {
         # `std::name`: the standard library's root is reserved -- no
         # namespace, no members, and never a type of the file
@@ -1625,9 +2122,9 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         # visible in this file makes the reference a case of it, decided
         # (and the case checked) by HIR resolution -- never a namespace
         # member, and never a reason to load anything.
-        set enum [EnumQualifier state $ast $own $env $namespaceName]
+        set enum [EnumQualifier state $ast $key $env $namespaceName]
         if {$enum ne ""} {
-            if {$namespaceName in $imported || [NamespaceExistsFor $state $key $namespaceName]} {
+            if {$namespaceName in $imported || [NamespaceExistsFor state $key $namespaceName]} {
                 # (Imported or not: `std::list::length` must never mean an
                 # intrinsic in one file and a case in another because
                 # of an enum's name.)
@@ -1635,7 +2132,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
                     "\"${namespaceName}::$symbolName\" is ambiguous: \"$namespaceName\" names both a namespace and the enum type $enum visible in this file (a qualifier is never resolved by precedence; rename the enum)"
             }
             # (A private enum of another module is no case qualifier there.)
-            CheckPrivate $state $own {*}[hir::privacy::Member $enum] types $span
+            CheckPrivate $state $key {*}[hir::privacy::Member $enum] types $span
             return
         }
     }
@@ -1650,34 +2147,34 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         # import (the HIR resolver checks the member is established).
         return
     }
-    if {$refKind eq "struct" && $typeQualifier && [EnumQualifier state $ast $own $env $namespaceName] ne ""} {
+    if {$refKind eq "struct" && $typeQualifier && [EnumQualifier state $ast $key $env $namespaceName] ne ""} {
         # `Enum::Case { ... }` (ENUMS.md): a payload-free case is a
         # value, written without an initializer.
         Error NOT-A-STRUCT $span \
             "\"${namespaceName}::$symbolName\" names a case of the enum $namespaceName, not a struct: a payload-free case is written ${namespaceName}::$symbolName, without braces (payload-bearing cases are not supported)"
     }
-    CheckInternal $state $own $namespaceName $span $symbolName
+    CheckInternal $state $key [IdentityOf $state $key $namespaceName] $span $symbolName
     if {$namespaceName ni $imported} {
-        if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor $state $key $namespaceName]
+        if {$refKind eq "value" && !$rooted && ![NamespaceExistsFor state $key $namespaceName]
                 && ![NamespaceExists ${standardRoot}::$namespaceName]} {
             # `Struct::Case`, `int::Case`: a case qualified by a type that
             # is not an enum (ENUMS.md). Types are not namespaces. (A
             # qualifier that is a standard namespace's name without its
             # std::, `std::list::at`, is reported as the namespace it misses.)
-            set other [OtherTypeQualifier state $ast $own $env $namespaceName]
+            set other [OtherTypeQualifier state $ast $key $env $namespaceName]
             if {$other ne ""} {
                 Error NOT-AN-ENUM $span \
                     "\"$namespaceName\" is $other, not an enum: only an enum type qualifies a case (\"Enum::Case\"), and a type is not a namespace, so \"${namespaceName}::$symbolName\" names nothing"
             }
         }
-        if {![NamespaceExistsFor $state $key $namespaceName]} {
+        if {![NamespaceExistsFor state $key $namespaceName]} {
             set cut [string last :: $namespaceName]
             if {$refKind eq "value" && $cut > 0} {
                 # `ns::Enum::Case` (ENUMS.md) whose module is not
                 # imported: the import is what is missing, as for any
                 # member of that module.
                 set prefix [string range $namespaceName 0 [expr {$cut - 1}]]
-                if {$prefix ni $imported && $prefix ne $own && [NamespaceExistsFor $state $key $prefix]} {
+                if {$prefix ni $imported && $prefix ne $own && [NamespaceExistsFor state $key $prefix]} {
                     Error MISSING-IMPORT $span "namespace \"$prefix\" is not imported; add `import $prefix` to use `${namespaceName}::$symbolName`"
                 }
             }
@@ -1687,7 +2184,7 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             } elseif {$refKind eq "value"} {
                 set note " (nor is \"$namespaceName\" an enum type visible in this file: a case is written Enum::Case)"
             }
-            Error UNKNOWN-NAMESPACE $span "unknown namespace \"$namespaceName\": [NoSuchNamespace $state $key $namespaceName]$note"
+            Error UNKNOWN-NAMESPACE $span "unknown namespace \"$namespaceName\": [NoSuchNamespace state $key $namespaceName]$note"
         }
         set note ""
         set related [RelatedImport $namespaceName $imported]
@@ -1696,15 +2193,17 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         }
         Error MISSING-IMPORT $span "namespace \"$namespaceName\" is not imported; add `import $namespaceName` to use `${namespaceName}::$symbolName`$note"
     }
-    set natives [IntrinsicMembers $namespaceName]
-    if {$refKind eq "value" && [core::native::isQualifiedNative "${namespaceName}::$symbolName"]} {
+    # What the namespace is: its canonical identity (header, "Identity").
+    set id [IdentityOf $state $key $namespaceName]
+    set natives [IntrinsicMembers $id]
+    if {$refKind eq "value" && [core::native::isQualifiedNative "${id}::$symbolName"]} {
         # A root native registered under a qualified name
         # (std::linux::abi::x86_64::syscall, std::str::concat): no module file defines it,
         # so nothing more is loaded (surface/lower.tcl lowers it to a
         # root reference).
         return
     }
-    if {![dict exists $state loaded $namespaceName]} {
+    if {![dict exists $state loaded $id]} {
         # A namespace whose only members are intrinsics (str): there is
         # no module file (the import loaded none), so an unknown member is
         # reported against the intrinsics, not as a missing file.
@@ -1715,15 +2214,15 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
     if {$refKind eq "error"} {
         # A module-qualified error (ERROR-PAYLOADS.md): one the module
         # declares itself, canonically `NAMESPACE::Name`.
-        set errorNames [dict get $state loadedErrors $namespaceName]
+        set errorNames [dict get $state loadedErrors $id]
         if {$symbolName ni $errorNames} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no error \"$symbolName\" (it declares: [if {$errorNames eq ""} {string cat "no errors"} else {join [lsort $errorNames] {, }}])"
         }
-        CheckPrivate $state $own $namespaceName $symbolName errors $span
+        CheckPrivate $state $key $id $symbolName errors $span
         return
     }
-    if {$symbolName in [hir::cabi::IntrinsicTypeNames $namespaceName]} {
+    if {$symbolName in [hir::cabi::IntrinsicTypeNames $id]} {
         # std::ffi::c::Void, std::ffi::c::Ptr, std::ffi::c::FnPtr (C-ABI-TYPES.md) and
         # std::ffi::c::Bool (C _Bool, bool itself): intrinsic types of the
         # namespace, resolved by hir/cabi.tcl -- and nothing else: no value,
@@ -1744,9 +2243,9 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
         }
     }
     if {$refKind in {struct type}} {
-        set structNames [dict get $state loadedStructs $namespaceName]
+        set structNames [dict get $state loadedStructs $id]
         if {$refKind eq "type"} {
-            set typeNames [concat [dict get $state loadedTypes $namespaceName] [dict get $state loadedTraits $namespaceName] [dict get $state loadedEnums $namespaceName] [dict get $state loadedLayouts $namespaceName]]
+            set typeNames [concat [dict get $state loadedTypes $id] [dict get $state loadedTraits $id] [dict get $state loadedEnums $id] [dict get $state loadedLayouts $id]]
         } else {
             set typeNames {}
         }
@@ -1755,24 +2254,24 @@ proc surface::modules::CheckRef {stateVar ast own key env imported ref} {
             Error UNKNOWN-SYMBOL $span \
                 "namespace \"$namespaceName\" has no [expr {$refKind eq "type" ? "type" : "struct"}] \"$symbolName\" (it declares: [if {$declared eq ""} {string cat "no types"} else {join $declared {, }}])"
         }
-        CheckPrivate $state $own $namespaceName $symbolName types $span
+        CheckPrivate $state $key $id $symbolName types $span
         return
     }
-    if {$symbolName in [dict get $state loadedLayouts $namespaceName]} {
+    if {$symbolName in [dict get $state loadedLayouts $id]} {
         # A layout of the module (BINARY-LAYOUT.md), written where a value
         # would be: legal only as a binary operation's layout operand,
         # which HIR resolution decides (LAYOUT-NOT-A-VALUE elsewhere).
-        CheckPrivate $state $own $namespaceName $symbolName types $span
+        CheckPrivate $state $key $id $symbolName types $span
         return
     }
-    set functionNames [dict get $state loaded $namespaceName]
+    set functionNames [dict get $state loaded $id]
     if {$symbolName ni $functionNames} {
         Error UNKNOWN-SYMBOL $span \
             "namespace \"$namespaceName\" has no definition \"$symbolName\" (it defines: [join [lsort [concat $functionNames $natives]] {, }])"
     }
     # The member exists; whether this code may name it is the module's
     # `private` (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md).
-    CheckPrivate $state $own $namespaceName $symbolName values $span
+    CheckPrivate $state $key $id $symbolName values $span
 }
 
 # The static intrinsics of AST (STATIC-COMPILE.md), outermost first in source
@@ -1842,15 +2341,16 @@ proc surface::modules::LowerStatements {state key statements} {
 # any nominal type: a bare name the file declares itself or binds with
 # `import type`, or `NS::Enum` where NS is the file's own namespace or one it
 # imports exactly and NS declares Enum.
-proc surface::modules::EnumQualifier {stateVar ast own env qualifier} {
+proc surface::modules::EnumQualifier {stateVar ast key env qualifier} {
     upvar 1 $stateVar state
+    set own [OwnSpelling $state $key]
     if {[string first :: $qualifier] < 0} {
         foreach statement [dict get $ast body] {
             if {[dict get $statement kind] eq "enumdecl" && [dict get $statement name] eq $qualifier} {
-                if {$own eq ""} {
+                if {$key eq ""} {
                     return $qualifier
                 }
-                return "${own}::$qualifier"
+                return "${key}::$qualifier"
             }
         }
         set types [dict get $env types]
@@ -1876,14 +2376,15 @@ proc surface::modules::EnumQualifier {stateVar ast own env qualifier} {
     if {$ns ne "" && $ns eq $own} {
         foreach statement [dict get $ast body] {
             if {[dict get $statement kind] eq "enumdecl" && [dict get $statement name] eq $name} {
-                return $qualifier
+                return "${key}::$name"
             }
         }
         return ""
     }
-    if {$ns in [dict get $env namespaces] && [dict exists $state loadedEnums $ns]
-            && $name in [dict get $state loadedEnums $ns]} {
-        return $qualifier
+    set id [IdentityOf $state $key $ns]
+    if {$id in [dict get $env namespaces] && [dict exists $state loadedEnums $id]
+            && $name in [dict get $state loadedEnums $id]} {
+        return "${id}::$name"
     }
     return ""
 }
@@ -1893,7 +2394,7 @@ proc surface::modules::EnumQualifier {stateVar ast own env qualifier} {
 # (in the file AST of module OWN with import environment ENV), else "": the
 # qualifier of a `QUALIFIER::NAME` value reference that is a type but cannot
 # qualify a case (NOT-AN-ENUM).
-proc surface::modules::OtherTypeQualifier {stateVar ast own env qualifier} {
+proc surface::modules::OtherTypeQualifier {stateVar ast key env qualifier} {
     upvar 1 $stateVar state
     if {[string first :: $qualifier] < 0} {
         foreach statement [dict get $ast body] {
@@ -1918,10 +2419,11 @@ proc surface::modules::OtherTypeQualifier {stateVar ast own env qualifier} {
     set i [string last :: $qualifier]
     set ns [string range $qualifier 0 [expr {$i - 1}]]
     set name [string range $qualifier [expr {$i + 2}] end]
-    if {$ns in [dict get $env namespaces] && [dict exists $state loadedStructs $ns]} {
-        if {$name in [dict get $state loadedStructs $ns]} { return "a struct" }
-        if {$name in [dict get $state loadedTraits $ns]} { return "a trait" }
-        if {$name in [dict get $state loadedTypes $ns]} { return "a type" }
+    set id [IdentityOf $state $key $ns]
+    if {$id in [dict get $env namespaces] && [dict exists $state loadedStructs $id]} {
+        if {$name in [dict get $state loadedStructs $id]} { return "a struct" }
+        if {$name in [dict get $state loadedTraits $id]} { return "a trait" }
+        if {$name in [dict get $state loadedTypes $id]} { return "a type" }
     }
     return ""
 }
@@ -1934,7 +2436,12 @@ proc surface::modules::OtherTypeQualifier {stateVar ast own env qualifier} {
 # every table -- loaded definitions, loaded struct types, sections and the
 # three kinds of declaration -- without a copy of the list to keep in sync.
 # `imports` is the dependency graph: NAMESPACE (or "" for the entry program)
-# -> that file's import environment (CheckImports).
+# -> that file's import environment (CheckImports). Every module is keyed by
+# its canonical identity (header, "Identity"): `scopeOf` and `spellingOf`
+# give its owning scope and the namespace its own files spell, `names` each
+# file's map from the namespaces it names to their identities, `packages`
+# the package instances named so far (Instance) and `physical` the loading
+# stack's package directories (LoadNamespace's cycle guard).
 proc surface::modules::NewState {files nextFile} {
     return [dict create files $files nextFile $nextFile \
         loaded [dict create] loadedStructs [dict create] loadedTypes [dict create] \
@@ -1944,7 +2451,9 @@ proc surface::modules::NewState {files nextFile} {
         staticDeferred [dict create] \
         target "" targetRead 0 root "" entry "" application [dict create] moduleDecls [dict create] \
         referenceErrors {} recover 0 syntaxEntries {} fileOf [dict create] open [dict create] \
-        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {}]
+        dependentRefs [dict create] typeKeys [dict create] dfaRegistry [dict create] dfaNames {} \
+        scopeOf [dict create] spellingOf [dict create] packages [dict create] names [dict create] \
+        physical {}]
 }
 
 # Raises the qualified references of every file STATE loaded that the file
@@ -2186,7 +2695,9 @@ proc surface::modules::CompileProgramFile {path options} {
         return [surface::cache::Replay $hir $mode $channel]
     }
     variable reads
+    variable probes
     set reads [dict create]
+    set probes [dict create]
     set ast [Parse $path $source]
     set recover [dict get $options -recover-syntax]
     if {[dict get $ast diagnostics] ne ""} {
@@ -2198,7 +2709,7 @@ proc surface::modules::CompileProgramFile {path options} {
     set hir [surface::lower::Finish [BuildProgram $ast $strict $target $root $recover] $strict $mode $channel]
     if {![dict exists $hir syntaxRecovery]} {
         # (A program with syntax errors is never kept: it is no compilation.)
-        surface::cache::store $cache $path $source $mode $strict $hir $reads $target $root
+        surface::cache::store $cache $path $source $mode $strict $hir $reads $target $root $probes
     }
     return $hir
 }

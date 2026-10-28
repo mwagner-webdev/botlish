@@ -532,6 +532,16 @@ proc service::stale {rev} {
     set workspace [Workspace [dict get $revision workspace]]
     surface::source::with [Provider $workspace] {
         dict for {path was} [dict get $revision sources] {
+            if {[dict exists $was directory]} {
+                # A package directory (BOT-MODULES-MILESTONE-1.md): there
+                # or not.
+                surface::source::directory $path
+                set now [dict get [surface::source::observed] $path]
+                if {[dict get $now exists] != [dict get $was exists]} {
+                    dict set changed $path [dict create was $was now $now]
+                }
+                continue
+            }
             set now [dict create exists [surface::source::exists $path]]
             if {[dict exists $was text] && [dict get $now exists]} {
                 dict set now text [surface::source::text $path]

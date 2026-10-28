@@ -2685,8 +2685,8 @@ summary: No standard namespace, application module or set of intrinsics has this
 index: errors
 alias: unknown namespace; no such module; module not found
 keywords: import, namespace, module, application module, standard library, path, file beside, nested namespace
-related: concept.imports concept.modules rule.application-modules error.missing-import error.unknown-symbol error.module-collision error.not-an-enum
-docs: STD-NAMESPACE.md IMPORTS.md STDLIB-NAMESPACES.md
+related: concept.imports concept.modules rule.application-modules rule.package-modules error.missing-import error.unknown-symbol error.module-collision error.not-an-enum
+docs: STD-NAMESPACE.md IMPORTS.md STDLIB-NAMESPACES.md BOT-MODULES-MILESTONE-1.md
 code: SURFACE MODULE UNKNOWN-NAMESPACE
 
 == MEANING
@@ -2696,14 +2696,19 @@ by its first segment, with no search and no fallback:
   1. `std::NAME`: the standard library's module `NAME.bot` (`a/b.bot` for
      `std::a::b`) in stdlib/, or compiler intrinsics of that name
      (`std::str`, `std::char` have no module file);
-  2. any other NAME, for the entry program and its application modules:
+  2. a namespace whose first segment is a package installed in the
+     importing file's scope (SCOPE/.bot_modules/NAME): that package's
+     module (rule.package-modules);
+  3. any other NAME, for the entry program and its application modules:
      the application module `NAME.bot` in the entry file's directory (the
-     application root; `a/b.bot` for `a::b`).
+     application root; `a/b.bot` for `a::b`); for a package's module, its
+     own root namespace's modules only.
 
 Nothing else is searched: not the working directory, not an environment
-variable, not a parent directory, and a name without its std:: is never
-looked up in the standard library. A standard-library module's own
-imports see only the standard library. When the namespace does not exist,
+variable, not a parent directory, not a consumer's, sibling's or
+ancestor's packages, and a name without its std:: is never looked up in
+the standard library. A standard-library module's own imports see only
+the standard library. When the namespace does not exist,
 the message names where it looked, and the standard namespace of the same
 name if there is one:
 
@@ -2730,6 +2735,10 @@ visible in this file: a case is written Enum::Case)".
   * A parent of a namespace imported as if it were one: `import
     std::linux::abi` is not a namespace; `std::linux::abi::x86_64` is.
   * A namespace name with a member appended: `std::list::length::x`.
+  * A package imported from a scope that did not install it: a package's
+    own packages are under its own .bot_modules, never its consumer's, so
+    the application cannot import a package its package installed, and a
+    package cannot import its consumer's modules or a sibling package.
 
 == HOW TO INVESTIGATE
 The message prints both places searched. Check that the module file
@@ -3044,44 +3053,58 @@ merge the two. A module must never import the entry program: move the
 shared code from the entry program into a module.
 
 @topic error.module-collision
-title: MODULE-COLLISION: an application module named like an intrinsic namespace
-summary: An application file imports a namespace that is both a file beside the entry program and a namespace of compiler intrinsics registered outside std; neither is chosen silently.
+title: MODULE-COLLISION: one namespace, two candidate modules
+summary: An import names a namespace two origins claim -- a file of the importing scope and an installed package of that root, or a file and compiler intrinsics -- and neither is chosen silently.
 index: errors
-alias: application module has the name of an intrinsic namespace
-keywords: application module, intrinsic namespace, collision, rename, test fixture, entry file directory
-related: rule.application-modules concept.modules concept.imports concept.standard-library error.unknown-namespace error.reserved-namespace
-docs: STD-NAMESPACE.md IMPORTS.md POST-2048-PRODUCT-FIXES.md
+alias: application module has the name of an intrinsic namespace; application module named like a package; package collision; .bot_modules collision
+keywords: application module, package, .bot_modules, installed package, root namespace, intrinsic namespace, collision, rename, test fixture, entry file directory
+related: rule.application-modules rule.package-modules concept.modules concept.imports concept.standard-library error.unknown-namespace error.reserved-namespace
+docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md POST-2048-PRODUCT-FIXES.md
 code: SURFACE MODULE MODULE-COLLISION
 
 == MEANING
+A namespace path's first segment decides whose it is
+(rule.application-modules, rule.package-modules), and an import never
+chooses between two candidates. Three collisions are left:
+
+  * an installed package claims its whole root namespace in its owner's
+    scope: an application file of a namespace of that tree (ROOT/geo.bot
+    for `geo`, ROOT/geo/extra.bot for `geo::extra`, while
+    ROOT/.bot_modules/geo is installed) is never a module, and importing
+    that namespace names both:
+
+        application file DIR/geo.bot would be the namespace "geo", but
+        "geo" is the root namespace of the package installed at
+        DIR/.bot_modules/geo (whose module is DIR/.bot_modules/geo/geo.bot):
+        an installed package claims its root namespace, and `import geo`
+        never chooses between an application module and a package's; rename
+        or move the application file, or remove the package
+
+  * a package that installs a package of its own root namespace's name
+    (PKG/.bot_modules/PKGNAME): an import of that namespace from the
+    package;
+  * a module file and compiler intrinsics of the same namespace outside std,
+    which only a test process registers (its `ffi_fixture` fixture).
+
 Every standard namespace is under std (concept.standard-library), so an
-application module `list.bot` and the standard `std::list` never collide:
-they are two namespaces. A collision is left only where one name has two
-meanings outside std: an application file NAME.bot and compiler intrinsics
-of the namespace NAME, which only a test process registers (its
-`ffi_fixture` fixture). The import is rejected, naming the file:
-
-    application module DIR/ffi_fixture.bot has the name of the intrinsic
-    namespace "ffi_fixture" (compiler intrinsics registered in this
-    process), which `import ffi_fixture` names: an intrinsic namespace is
-    never replaced by an application file, and never silently chosen over
-    one; rename the application module
-
-An application file that nothing imports collides with nothing. A
-collision needs a second file and a test process, so there is no
-single-file example.
+application module `list.bot` and the standard `std::list` never collide.
+A file that nothing imports collides with nothing, and the entry file,
+which is no module, collides with nothing. A collision needs a second file,
+so there is no single-file example.
 
 == WHAT TO DO
-Rename the application module and its imports.
+Rename or move the application's file (and its imports), or remove the
+package; for a package that installs a package of its own name, rename or
+remove the installed one.
 
 @topic error.reserved-namespace
-title: RESERVED-NAMESPACE: an application file inside std/
-summary: An application file imports std::NAME while the application has a file std/NAME.bot beside its entry program: std belongs to the standard library, so that file is never a module and is never chosen.
+title: RESERVED-NAMESPACE: an application file inside std/, or a package named std
+summary: An import of std::NAME beside an application file std/NAME.bot or a package directory .bot_modules/std: std is the standard library's, so neither is ever a module or chosen.
 index: errors
-alias: application module named std; shadow the standard library; std directory in my project
+alias: application module named std; shadow the standard library; std directory in my project; package named std
 keywords: std, standard library, reserved, shadow, application module, std/ directory, rename
-related: concept.standard-library rule.application-modules concept.modules error.unknown-namespace error.module-collision
-docs: STD-NAMESPACE.md IMPORTS.md
+related: concept.standard-library rule.application-modules rule.package-modules concept.modules error.unknown-namespace error.module-collision
+docs: STD-NAMESPACE.md IMPORTS.md BOT-MODULES-MILESTONE-1.md
 code: SURFACE MODULE RESERVED-NAMESPACE
 
 == MEANING
@@ -3105,9 +3128,15 @@ file under std/ that nothing imports as std::NAME collides with nothing.
 A shadowing attempt needs a second file, so there is no single-file
 example.
 
+An installed package directory named std (ROOT/.bot_modules/std, or a
+package's own PKG/.bot_modules/std) is refused the same way, at an import
+of a standard namespace from that scope: no package is ever named std
+(rule.package-modules).
+
 == WHAT TO DO
 Move the application's module out of its std/ directory (std/util.bot to
-util.bot, imported as `util`) or rename the directory.
+util.bot, imported as `util`) or rename the directory; remove or rename an
+installed package directory named std.
 
 @topic error.rooted-name
 title: ROOTED-NAME: a rooted name with no namespace

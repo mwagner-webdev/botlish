@@ -357,10 +357,16 @@ beyond that and no fallback from one to the other:
    `std`), the target architecture's `NAME.ARCH.bot` there for an
    architecture-specific one (`std::linux::sys`), or compiler intrinsics
    (`std::str`). `std` itself is no namespace.
-2. Any other `NAME`, imported by an *application file* -- the entry program,
+2. A `NAME` whose first segment names a package installed in the
+   importing file's scope -- `ROOT/.bot_modules/NAME` for an application
+   file -- is that package's module (`.bot_modules/NAME/NAME.bot`,
+   `.bot_modules/NAME/NAME/a.bot` for `NAME::a`): the package claims that
+   root namespace, and an application file of it is `MODULE-COLLISION`
+   ([Installed packages](#installed-packages-bot_modules)).
+3. Any other `NAME`, imported by an *application file* -- the entry program,
    or an application module -- is the application module `ROOT/NAME.bot`
    (`ROOT/a/b.bot` for `a::b`).
-3. Else nothing: `UNKNOWN-NAMESPACE`, naming `ROOT/NAME.bot` -- and, when
+4. Else nothing: `UNKNOWN-NAMESPACE`, naming `ROOT/NAME.bot` -- and, when
    the standard library has a namespace `std::NAME`, saying so (the hint of
    a missing `std::`, never a fallback to it).
 
@@ -425,6 +431,43 @@ versions, no lock file, no search through installation directories.
 `tests/application-modules.test`; 2048-ENGINE-WORKLOAD.md's S4 is the
 finding.)
 
+## Installed packages (`.bot_modules`)
+
+A package is an ordinary module tree installed under the immediate
+`.bot_modules` directory of its owner (BOT-MODULES-MILESTONE-1.md):
+
+```
+game/
+    main.bot                       import sdl3::video
+    .bot_modules/
+        sdl3/
+            sdl3.bot               the namespace sdl3
+            sdl3/video.bot         sdl3::video
+            .bot_modules/
+                helper/helper.bot  sdl3's own package helper
+```
+
+Every file has an owning scope: the application, the standard library or
+one package instance. An import is resolved in the importing file's scope
+only, by its first segment: `std::...` is the standard library's; a segment
+that names a package installed in the scope's own `.bot_modules` is that
+package's (the whole root namespace: an own file of it beside the package
+is `MODULE-COLLISION`); otherwise the scope's own tree -- the application's
+files, or a package's own root namespace (`sdl3`, `sdl3::...`). Nothing is
+looked up upward or sideways: a package never sees its consumer's modules
+or packages, a sibling package or an ancestor's, and the application never
+sees a package its package installed. Imports stay exact and
+non-transitive; a leading `::` roots a path but never leaves a scope.
+
+A package instance is its place in the logical dependency tree (`sdl3`;
+`sdl3/helper`, sdl3's own helper), and a module's canonical identity is that
+place and its namespace below the package's root: `sdl3::video` for the
+application's sdl3, `physics/geometry::Point` for a type of physics's own
+geometry. Two installed copies of a package are two instances: their
+types, errors, contexts and functions are distinct on every backend. No
+manifest, version, lock or registry is read; the installed directories are
+the whole of it. `tests/bot-modules.test` holds the tests.
+
 ## Corpus migration
 
 A migrated file is the same program plus a header: `x = std::list::at(xs, i)` is
@@ -440,7 +483,8 @@ that reason alone it was removed.
 
 Import aliases, `as`, namespace aliases, wildcard imports, `using`, selective
 function/value imports, re-exports, public/private imports, export lists,
-private module members, package management,
+private module members, package management (installed packages came later,
+without a package manager: [Installed packages](#installed-packages-bot_modules)),
 subtree imports, implicit imports, import-driven initialization,
 transitive visibility, nested-namespace *creation* or inheritance, overload
 resolution, namespaced `error` declarations.
@@ -472,6 +516,10 @@ spelled qualified.
   a module naming another module's integer domain and refinement qualified
   or type-imported, collisions, non-types, nested namespaces, ABI), cache
   non-leakage, dependency graph, cycles, protected intrinsics.
+* `tests/bot-modules.test`: installed packages (`.bot_modules`), their
+  scopes, collisions and package-instance identity
+  (BOT-MODULES-MILESTONE-1.md); `audit/bot-modules/tools/fuzz.tcl` and
+  `mutate.tcl`.
 * `audit/imports/tools/fuzz.tcl`: random valid programs over `list::`,
   `str::`, `mutable_array::`, `abi::`, `std::abi::x86_64::` and `std::linux::abi::` with
   exactly the imports they need, method and type-import spellings checked

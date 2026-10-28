@@ -2447,8 +2447,8 @@ summary: A module is a source file loaded by `import`, its namespace its path; i
 index: concepts
 alias: module; modules; namespace; module binding; application module; global constant
 keywords: module, namespace, file, stdlib, application root, module binding, MODULE-CONTEXT, MODULE-IMMUTABLE, RESERVED-NAMESPACE, SELF-IMPORT, global, constant
-related: concept.imports concept.standard-library concept.opaque-structs concept.direct-modules concept.contexts rule.module-bindings rule.application-modules principle.explicit-dependencies error.module-context error.module-collision error.unknown-namespace
-docs: IMPORTS.md MODULE-BINDINGS.md NATIVE-MODULES.md POST-2048-PRODUCT-FIXES.md
+related: concept.imports concept.standard-library concept.opaque-structs concept.direct-modules concept.contexts rule.module-bindings rule.application-modules rule.package-modules principle.explicit-dependencies error.module-context error.module-collision error.unknown-namespace
+docs: IMPORTS.md MODULE-BINDINGS.md NATIVE-MODULES.md POST-2048-PRODUCT-FIXES.md BOT-MODULES-MILESTONE-1.md
 
 == WHAT IT IS
 One file is one namespace: `stdlib/abi/bytes.bot` is `std::abi::bytes` (the
@@ -2466,6 +2466,10 @@ and immutable value bindings, each named outside as `game::member`.
     `list.bot` and `std::list` are two modules; an application file
     under std/ is RESERVED-NAMESPACE; importing the entry file is
     SELF-IMPORT.
+  * Installed packages (rule.package-modules): a namespace whose first
+    segment names a package in the importing file's scope
+    (.bot_modules/NAME) is that package's module, and each installed copy
+    is its own instance, with its own types and errors.
   * A module has no top-level statements other than bindings and
     declarations. A value binding runs once, before the entry program,
     and must be context-free (MODULE-CONTEXT) and transitively immutable
