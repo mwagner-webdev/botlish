@@ -17,7 +17,8 @@
 #      stack 12  bcf_stack_tail(...): twelve arguments, the last four on the
 #                stack on AArch64 (six on x86-64), a long long result
 #      stack 20  bcf_pick(19, ...): twenty narrow and wide arguments, twelve
-#                on the stack on AArch64 (fourteen on x86-64)
+#                on the stack on AArch64 (fourteen on x86-64; sixteen on
+#                Win64), its long a 32-bit one under LLP64 (Windows)
 #      read S    bcf_sum(data, 0) of an S-byte Bytes: one read exposure
 #                (bytesaddr, keepalive), C touching no byte -- expected flat
 #                in S (the storage is never copied)
@@ -70,6 +71,9 @@ source [file join $root tests cffi boringssl.tcl]
 set runs 5
 set n 100000
 set sizes {64 65536 1048576}
+# bcf_pick's long argument: the 64-bit value c-ffi.test passes, or its
+# 32-bit one where long is 32 bits (LLP64: Windows).
+set pickLong [expr {$::tcl_platform(platform) eq "windows" ? -1985229329 : -81985529216486895}]
 set shaSizes {64 1024 65536 1048576}
 foreach {option value} $args {
     switch -- $option {
@@ -168,7 +172,7 @@ try {
     puts [format "  %-14s %s" add [perCall {x = 0} {bcf::add(i, 1)} 0]]
     puts [format "  %-14s %s" big [perCall {x = 0} {bcf::echo_ulonglong(18446744073709551615)} 0]]
     puts [format "  %-14s %s" "stack 12" [perCall {x = 0} {bcf::stack_tail(1, 2, 3, 4, 5, 6, 7, 8, 9, -10, -11, -12)} 0]]
-    puts [format "  %-14s %s" "stack 20" [perCall {x = 0} {bcf::pick(19, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, -81985529216486895, 128, -2, 2147483649, -1)} 0]]
+    puts [format "  %-14s %s" "stack 20" [perCall {x = 0} "bcf::pick(19, -2, 253, -1234, 65244, -123456789, 4275878552, 1, -4, 247, -30000, -128, 48879, -2000000000, 127, $pickLong, 128, -2, 2147483649, -1)" 0]]
     foreach s $sizes {
         puts [format "  %-14s %s" "read $s" [perCall "data = std::abi::bytes::from_list(pattern($s))" {bcf::sum(data, 0)} 0]]
     }
