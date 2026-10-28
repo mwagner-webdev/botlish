@@ -1,0 +1,65 @@
+KILLED static-dropped-in-lowering -- a declaration's `static` is lost between the AST and HIR: the library is the linker's choice again
+    tests:  killed (21 failed: nlp-link-log, nlp-linkers-agree, nlp-native-library, nlp-nir-header, nlp-plan-cache, nlp-plan-entries, ...)
+KILLED static-dropped-in-interchange -- HIR interchange writes every library as an ordinary one, without its archive
+    tests:  killed (3 failed: nlp-plan-cache, nlp-plan-interchange, nlp-static-rebuild)
+KILLED archive-path-ignored -- the NIR header drops a declared archive's path: the driver searches for libNAME.a instead
+    tests:  killed (15 failed: nlp-link-log, nlp-linkers-agree, nlp-native-library, nlp-nir-header, nlp-static-at-links, nlp-static-borrowing, ...)
+KILLED imported-path-from-library -- a module's archive path is resolved from the compiler's own library directory (the single executable's ZIP), not the application root
+    tests:  killed (11 failed: nlp-link-log, nlp-linkers-agree, nlp-plan-application-root, nlp-plan-entries, nlp-plan-merge, nlp-static-at-links, ...)
+KILLED cache-key-without-root -- the front-end cache keys a compilation without its application root: one entry path given from two directories is one entry, the first one's root
+    tests:  killed (1 failed: nlp-plan-cache)
+KILLED plan-order-reversed -- the link plan's entries come out in reverse declaration order
+    tests:  killed (5 failed: nlp-link-log, nlp-nir-header, nlp-plan-entries, nlp-plan-interchange, nlp-static-resolution)
+KILLED module-links-dropped -- the loader drops an imported module's link declarations: the program links without its binding's library
+    tests:  killed (14 failed: nlp-link-log, nlp-linkers-agree, nlp-plan-application-root, nlp-plan-conflicts, nlp-plan-entries, nlp-plan-merge, ...)
+KILLED archive-conflict-merged -- two archives of one library merge silently, the first one kept
+    tests:  killed (1 failed: nlp-plan-conflicts)
+KILLED framework-dropped -- the NIR header leaves frameworks out of the plan
+    tests:  killed (1 failed: nlp-nir-header)
+KILLED framework-on-linux -- a framework declaration is accepted for a target whose linker has none
+    tests:  killed (1 failed: nlp-framework-target)
+SKIPPED framework-dir-not-passed: not compiled differently for linux-x86_64
+KILLED archive-base-dropped -- the NIR header gives every archive path an empty root: no relative path resolves
+    tests:  killed (15 failed: nlp-link-log, nlp-linkers-agree, nlp-native-library, nlp-nir-header, nlp-static-at-links, nlp-static-borrowing, ...)
+KILLED library-framework-conflict-merged -- a name declared both a library and a framework is linked both ways
+    tests:  killed (1 failed: nlp-plan-conflicts)
+KILLED path-from-working-directory -- the driver resolves an archive's relative path from its working directory, not the application root
+    tests:  killed (14 failed: nlp-link-log, nlp-linkers-agree, nlp-native-library, nlp-static-at-links, nlp-static-borrowing, nlp-static-dependent-archives, ...)
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_declared_archives_resolve_from_the_application_root)
+KILLED archive-contents-kept -- the driver keeps the first copy of each declared archive it links and links that copy ever after, whatever the file holds now
+    tests:  killed (4 failed: nlp-link-log, nlp-native-library, nlp-static-rebuild, nlp-static-resolution)
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_declared_archives_resolve_from_the_application_root)
+KILLED shared-fallback -- a static library with no archive on the search path is linked as an ordinary one (-lNAME): a shared library of its name, if there is one
+    tests:  killed (1 failed: nlp-static-shared-only)
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_searched_archives_never_take_a_shared_library)
+KILLED framework-as-library -- Apple's ld gets a framework as -lNAME, never -framework NAME
+    tests:  survived
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_static_archives_and_frameworks_lower_per_linker)
+KILLED framework-dir-dropped -- the -F search directories never reach Apple's ld
+    tests:  survived
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_static_archives_and_frameworks_lower_per_linker)
+KILLED archive-path-as-option -- an archive path written with a leading `-` is passed as it is, not resolved from the application root
+    tests:  killed (1 failed: nlp-static-path-security)
+    rust:   survived
+KILLED import-library-accepted -- a Windows import library passes as a static archive: the executable imports the library's DLL
+    tests:  survived
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_archive_facts_refuse_what_is_no_static_archive)
+KILLED rustc-loses-static -- the rustc linker links a static archive as an ordinary library (-lNAME)
+    tests:  killed (10 failed: nlp-linkers-agree, nlp-static-at-links, nlp-static-beats-shared, nlp-static-borrowing, nlp-static-dependent-archives, nlp-static-imported-module-backends, ...)
+    rust:   survived
+KILLED system-loses-static -- the system linker links a static archive as an ordinary library (-lNAME)
+    tests:  killed (1 failed: nlp-linkers-agree)
+    rust:   survived
+KILLED static-only-plan-is-no-c -- a program whose plan holds only static libraries or frameworks counts as one that calls no C: auto links it with the stub
+    tests:  survived
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_header_lines_parse)
+KILLED machine-misclassified -- an AArch64 object in an archive is taken for an x86-64 one (and the reverse is never told apart)
+    tests:  killed (1 failed: nlp-static-wrong-architecture)
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_archive_facts_refuse_what_is_no_static_archive)
+KILLED linker-diagnostics-hidden -- a failed link of a program that calls C says it failed, not what the linker said (the undefined symbol)
+    tests:  killed (1 failed: nlp-static-missing-symbol)
+    rust:   survived
+KILLED shared-library-accepted-as-archive -- a shared library named as a static archive passes the driver's check (the linker then makes the executable depend on it)
+    tests:  killed (1 failed: nlp-static-refusals)
+    rust:   killed (1 failed: codegen::aot::tests::link_plan_archive_facts_refuse_what_is_no_static_archive)
+26 mutants, 25 killed, 0 survived, 1 skipped (another host's)

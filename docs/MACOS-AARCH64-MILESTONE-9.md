@@ -1615,3 +1615,9 @@ shared staging (`single/package.tcl`), the startup script
   you change the code it mutates, keeping it a mutant of the same rule);
 * for a change to the Tcl pin: also the single executable's workflow, and
   the framework's cache key changes by itself.
+
+Follow-up: NATIVE-LINK-PLAN-MILESTONE-1.md links static SDL3 -- its archive
+named by a path from the application root, the Apple frameworks it needs
+declared with `extern c framework` -- through this distribution's compiler
+(macos-arm64.yml's `link-plan-sdl3` job, tests/platform/link-plan-sdl3.sh),
+the executable depending on no SDL3 library.

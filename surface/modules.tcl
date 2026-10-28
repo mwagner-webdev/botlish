@@ -727,6 +727,66 @@ proc surface::modules::PlatformCheck {stateVar name span} {
     dict set state targetRead 1
 }
 
+# DECLS (surface/lower.tcl's LinkDeclOf dicts) of unit NAMESPACE ("" the
+# entry program), checked and placed (NATIVE-LINK-PLAN-MILESTONE-1.md):
+#
+#   * a static archive's path is resolved from the root of the scope that
+#     owns the declaring file: the application root, the entry file's
+#     directory, for the entry program and every application module (an
+#     imported application module's path means what it would in the entry
+#     program), a package instance's own directory for its modules
+#     (ScopeDir: a package's archive is the package's, wherever it is
+#     installed, and it never names a file of its consumer's), and nothing
+#     depends on the working directory. The root is the declaration's
+#     BASE, kept beside the path as written and joined only where the
+#     program is linked (the driver: codegen/aot.rs). A standard-library
+#     module's BASE is "" (its files never see the application, and it
+#     names no archive of the compiler's own), as is every unit's of a
+#     program compiled from text, which has no root;
+#   * a framework is Apple's: UNSUPPORTED-PLATFORM for a target whose linker
+#     has none (core::cabi::linksFrameworks), and a build that declares one
+#     depends on its target (`targetRead`), so its HIR is the macOS
+#     target's.
+proc surface::modules::LinkDecls {stateVar decls namespace} {
+    upvar 1 $stateVar state
+    # An archive path resolves from the root of the scope that owns the
+    # declaring file (BOT-MODULES-MILESTONE-1.md): the application root,
+    # or a package instance's own directory -- a package never reaches into
+    # its consumer's tree -- and nothing for a standard-library module or
+    # program text with no root.
+    set scope [Scope $state $namespace]
+    set base ""
+    if {[HasOwnTree $scope]} {
+        set base [ScopeDir $state $scope]
+    }
+    return [lmap decl $decls {
+        if {[dict get $decl link] eq "framework"} {
+            FrameworkCheck state $decl
+        }
+        if {[dict get $decl path] ne ""} {
+            dict set decl base $base
+        }
+        set decl
+    }]
+}
+
+# Checks that the framework declaration DECL (a LinkDeclOf dict) is one the
+# compilation's target links (LinkDecls).
+proc surface::modules::FrameworkCheck {stateVar decl} {
+    upvar 1 $stateVar state
+    set span [dict get $decl nameSpan]
+    set target [dict get $state target]
+    set name [dict get $decl name]
+    if {$target eq ""} {
+        Error UNKNOWN-TARGET $span "framework \"$name\" is an Apple framework, linked for a macOS target only, and this host ($::tcl_platform(os) $::tcl_platform(machine)) is none of the known targets; compile with -target ([join [core::cabi::targetNames] {, }])"
+    }
+    if {![core::cabi::linksFrameworks $target]} {
+        set meta [core::cabi::target $target]
+        Error UNSUPPORTED-PLATFORM $span "framework \"$name\" (`extern c framework`) is an Apple framework, which only macOS's linker links, and this compilation is for target $target ([core::cabi::systemName [dict get $meta os]] on [dict get $meta arch]): a framework is never mapped to a library or linked for another operating system; compile for a macOS target (-target macos-[dict get $meta arch]) or declare no framework"
+    }
+    dict set state targetRead 1
+}
+
 # The platform root namespace of the operating system OS (core::cabi's
 # `platforms`: std::linux for linux).
 proc surface::modules::PlatformRoot {os} {
@@ -1562,7 +1622,7 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan {path ""} {scope 
     dict set state structDecls [concat [dict get $state structDecls] $structDecls]
     dict set state traitDecls [concat [dict get $state traitDecls] $traitDecls]
     dict set state externDecls [concat [dict get $state externDecls] [RemapDecls $externDecls $fileId]]
-    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls $linkDecls $fileId]]
+    dict set state linkDecls [concat [dict get $state linkDecls] [RemapDecls [LinkDecls state $linkDecls $name] $fileId]]
     set statements [lmap node [LowerStatements $state $name $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin \
@@ -2568,7 +2628,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
         -imports [dict get $state imports] -module-decls $moduleDecls \
         -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls -trait-decls $traitDecls \
         -foreign-decls [concat [dict get $state externDecls] $ownExternDecls] \
-        -link-decls [concat [dict get $state linkDecls] $ownLinkDecls]]
+        -link-decls [concat [dict get $state linkDecls] [LinkDecls state $ownLinkDecls ""]]]
     # The target the HIR was built for, when the build read it (header,
     # "Target dependence"); "" when the HIR is every target's.
     dict set hir target [if {[dict get $state targetRead]} {dict get $state target} else {string cat ""}]

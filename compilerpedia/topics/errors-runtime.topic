@@ -1115,10 +1115,11 @@ title: NATIVE LINK and NATIVE AOT: linking a native executable failed
 summary: NATIVE LINK (a program that calls C) and NATIVE AOT (any other) report a failed link: a missing C library or symbol, no rustc or C compiler, no runtime archive.
 index: errors backends
 alias: link failed; undefined symbol; cannot find library; executable link failed
-keywords: linker, rustc, cc, ld, -l, -L, extern c library, BOTLISH_NATIVE_LINKER, stub, system, auto, libbotlish_native, libbotlish_runtime, BOTLISH_NATIVE_RUNTIME, BOTLISH_NATIVE_SYSTEM_LINKER, BOTLISH_NATIVE_LINK_LOG, TOOLCHAIN, RUNTIME
-docs: C-FFI.md SINGLE-EXECUTABLE.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md
-related: concept.c-ffi backend.native-executable backend.single-executable error.native-aot-not-ready error.native-not-built
+keywords: linker, rustc, cc, ld, -l, -L, -F, extern c library, extern c framework, static, archive, import library, BOTLISH_NATIVE_LINKER, stub, system, auto, libbotlish_native, libbotlish_runtime, BOTLISH_NATIVE_RUNTIME, BOTLISH_NATIVE_SYSTEM_LINKER, BOTLISH_NATIVE_LINK_LOG, TOOLCHAIN, RUNTIME, ARCHIVE
+docs: C-FFI.md SINGLE-EXECUTABLE.md SINGLE-EXECUTABLE-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
+related: concept.c-ffi concept.native-link-plan backend.native-executable backend.single-executable error.native-aot-not-ready error.native-not-built
 code: NATIVE LINK
+code: NATIVE LINK ARCHIVE
 code: NATIVE AOT
 
 == MEANING
@@ -1135,7 +1136,23 @@ NATIVE LINK:
     library is never a front-end error: it fails here, even in a
     program that calls nothing from it.
   * the stub linker (BOTLISH_NATIVE_LINKER=stub) refuses any program that
-    calls C or declares a library.
+    calls C or declares a library or a framework.
+NATIVE LINK ARCHIVE, before any linker runs, for an input of the link plan
+itself (concept.native-link-plan):
+  * "library NAME is declared static, and no static archive libNAME.a is
+    in the library search directories (DIR, ...)", with "-- DIR/libNAME.so
+    is a shared library of that name, which a static declaration never
+    links" when one is there instead;
+  * "the static archive PATH of library NAME (declared at ...) does not
+    exist", "is not a file", "is no static archive: it is an ELF shared
+    library" (a Mach-O dynamic library, a text-based stub, a GNU linker
+    script, a thin archive, a universal file without an arm64 slice),
+    "holds object code for ELF AArch64, and this program is linked for
+    linux-x86_64", "is an import library: N of its members import
+    functions from a DLL" (Windows);
+  * a relative archive path of a program with no application root (one
+    compiled from text, or a standard-library module's declaration);
+  * a framework where the linker is not Apple's.
   The linker's own lines are GNU ld's or lld's on Linux ("undefined
   reference to", "cannot find -lNAME", "unable to find library"), Apple
   ld's on macOS ("Undefined symbols for architecture arm64:" and a
@@ -1187,8 +1204,14 @@ system linker needs a C compiler driver (Debian, Ubuntu: apt install gcc;
 macOS: xcode-select --install; Windows: a Developer Command Prompt) or one
 named by BOTLISH_NATIVE_SYSTEM_LINKER, and the runtime archive built with
 the compiler (the single executable carries its own).
-BOTLISH_NATIVE_LINK_LOG=FILE appends each system link's command line and
-the linker's output to FILE.
+For NATIVE LINK ARCHIVE: build the library's static archive for the
+target (`ar rcs`, `lib.exe`, CMake's static build), name its directory with
+-L DIR or its file with `static at "PATH"`, or declare the library without
+`static` when a shared library is what the program means.
+BOTLISH_NATIVE_LINK_LOG=FILE appends each link's resolved plan (which
+archive each static library is, and why: "link plan: static NAME: PATH
+(declared at ...)"), each system link's command line and the linker's
+output to FILE.
 
 @topic error.native-not-built
 title: NATIVE NOT-BUILT: the native backend has not been built

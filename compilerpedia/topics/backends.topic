@@ -602,7 +602,12 @@ docs: README.md
                       windows-aarch64; default the host's
                       (backend.targets)
     -L DIR            add DIR to the system linker's library search path,
-                      for a program that calls C (concept.c-ffi)
+                      for a program that calls C, and to where a library
+                      declared `static` finds its archive (concept.c-ffi,
+                      concept.native-link-plan)
+    -F DIR            add DIR to Apple's ld's framework search path (macOS),
+                      for a program that declares `extern c framework`
+                      (concept.native-link-plan)
 
 == PROGRAM ARGUMENTS (argv())
     -argv TEXT        append one argument (its UTF-8 bytes); the first one

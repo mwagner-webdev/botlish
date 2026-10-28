@@ -59,14 +59,18 @@
 #                  ordinary name everywhere else. HEX (`0xC2`) is a symbol
 #                  only here. Neither is a `declaration`: "private" before
 #                  one is refused (privateKinds)
-#   externDecl   = "extern" "c" "library" STRING NEWLINE
+#   externDecl   = "extern" "c" "library" STRING [ "static" [ "at" STRING ] ]
+#                  NEWLINE
+#                | "extern" "c" "framework" STRING NEWLINE
 #                | "extern" "c" "fn" IDENT [ "named" STRING ]
 #                  "(" [ externParam { "," externParam } [ "," ] ] ")"
 #                  "->" typeExpr [ "independent" | "alias" IDENT ] NEWLINE
 #   externParam  = IDENT ":" typeExpr { "read" | "write" | "noescape"
 #                  | "proven" "noescape" | "captures" }
-#                  -- C-FFI.md: a C library the program links and a truthful
-#                  C ABI declaration with no body (ExternDecl). "extern" is
+#                  -- C-FFI.md: a C library the program links (statically,
+#                  from a named archive: NATIVE-LINK-PLAN-MILESTONE-1.md), an
+#                  Apple framework it links, and a truthful C ABI
+#                  declaration with no body (ExternDecl). "extern" is
 #                  contextual (directly followed by a name or `fn`), and so
 #                  is every word after it, so each stays an ordinary name
 #                  everywhere else
@@ -1952,7 +1956,7 @@ proc surface::parser::PrivateDecl {pVar} {
     set node [Statement p]
     if {[dict get $node kind] ni $privateKinds} {
         if {[dict get $node kind] eq "externlib"} {
-            Fail $word "\"private\" modifies a named declaration: an `extern c library` line names no member of the module, so nothing about it can be private"
+            Fail $word "\"private\" modifies a named declaration: an `extern c [dict get $node link]` line names no member of the module, so nothing about it can be private"
         }
         Fail $word "\"private\" modifies a declaration (fn, struct, type, error, enum, trait, layout, extern c fn, or a NAME = VALUE module binding), not a [dict get $node kind] statement"
     }
@@ -2028,10 +2032,19 @@ proc surface::parser::AtExternDecl {pVar} {
 
 # An extern declaration (C-FFI.md), at "extern":
 #
-#   "extern" "c" "library" STRING NEWLINE
-#       an `externlib` node {library NAME librarySpan SPAN}: the platform
-#       linker's ordinary library name (-lNAME), never a path, and never
-#       associated with the declarations around it
+#   "extern" "c" "library" STRING [ "static" [ "at" STRING ] ] NEWLINE
+#   "extern" "c" "framework" STRING NEWLINE
+#       an `externlib` node {link library|framework dependency NAME
+#       dependencySpan SPAN linkage default|static linkageSpan SPAN path PATH
+#       pathSpan SPAN} (no `name`: it declares no member of the module)
+#       (NATIVE-LINK-PLAN-MILESTONE-1.md): a native dependency of the
+#       program's link plan, never associated with the declarations around
+#       it. A library's NAME is the platform linker's ordinary library name
+#       (-lNAME), never a path; `static` requires its static archive (never
+#       a shared library), and `at PATH` names that archive's file, relative
+#       to the application root unless absolute ("" when not written). A
+#       framework's NAME is an Apple framework's (-framework NAME). LINKAGE
+#       is `default` for a library without `static` and for a framework.
 #   "extern" "c" "fn" IDENT [ "named" STRING ] "(" [ externParam
 #       { "," externParam } [ "," "variadic" ] [ "," ] ] ")" "->" typeExpr
 #       [ resultFact ] NEWLINE
@@ -2061,30 +2074,16 @@ proc surface::parser::ExternDecl {pVar} {
     }
     if {[dict get $abi text] ne "c"} {
         FailCode [dict get $abi span] EXTERN-SYNTAX \
-            "unknown foreign ABI \"[dict get $abi text]\": the only extern declarations are \"extern c fn\" and \"extern c library\""
+            "unknown foreign ABI \"[dict get $abi text]\": the only extern declarations are \"extern c fn\", \"extern c library\" and \"extern c framework\""
     }
     Advance p
     set what [Peek p]
-    if {[dict get $what kind] eq "IDENT" && [dict get $what text] eq "library"} {
-        Advance p
-        set library [Peek p]
-        if {[dict get $library kind] ne "STRING"} {
-            FailCode [dict get $library span] EXTERN-SYNTAX \
-                "expected the library's name as a string after \"extern c library\", found [Describe $library] (the platform linker's ordinary library name: \"crypto\" is -lcrypto)"
-        }
-        Advance p
-        set name [dict get $library value]
-        if {![regexp {^[A-Za-z0-9_+.][A-Za-z0-9_+.-]*$} $name]} {
-            FailCode [dict get $library span] EXTERN-SYNTAX \
-                "\"$name\" is not a library name: \"extern c library\" names a library the way the platform linker does (\"crypto\" for -lcrypto, \"tcl9.0\" for -ltcl9.0) -- letters, digits, _ + . and -, never a path or a linker option; search directories are the toolchain's (main.tcl -L DIR)"
-        }
-        ExternLineEnd p "the library name"
-        return [surface::ast::node externlib [SpanFrom p $start] library $name \
-            librarySpan [dict get $library span]]
+    if {[dict get $what kind] eq "IDENT" && [dict get $what text] in {library framework}} {
+        return [LinkDecl p $start [dict get $what text]]
     }
     if {[dict get $what kind] ne "fn"} {
         FailCode [dict get $what span] EXTERN-SYNTAX \
-            "expected \"fn\" or \"library\" after \"extern c\", found [Describe $what]"
+            "expected \"fn\", \"library\" or \"framework\" after \"extern c\", found [Describe $what]"
     }
     Advance p
     set name [Expect p IDENT "a function name after \"extern c fn\""]
@@ -2282,6 +2281,88 @@ proc surface::parser::ExternParam {pVar fn} {
 }
 
 # The end of an extern declaration's line, after WHAT.
+# The rest of an `extern c library` or `extern c framework` declaration
+# (ExternDecl; NATIVE-LINK-PLAN-MILESTONE-1.md), at the word LINK (library
+# or framework), START the span of "extern": its `externlib` node. Every
+# word is contextual, and every name and path a string literal: nothing of
+# the declaration is computed, and nothing in it is a linker option.
+proc surface::parser::LinkDecl {pVar start link} {
+    upvar 1 $pVar p
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "STRING"} {
+        if {$link eq "library"} {
+            FailCode [dict get $token span] EXTERN-SYNTAX \
+                "expected the library's name as a string after \"extern c library\", found [Describe $token] (the platform linker's ordinary library name: \"crypto\" is -lcrypto)"
+        }
+        FailCode [dict get $token span] EXTERN-SYNTAX \
+            "expected the framework's name as a string after \"extern c framework\", found [Describe $token] (an Apple framework's name: \"Cocoa\" is -framework Cocoa)"
+    }
+    Advance p
+    set name [dict get $token value]
+    if {![regexp {^[A-Za-z0-9_+.][A-Za-z0-9_+.-]*$} $name]} {
+        if {$link eq "library"} {
+            FailCode [dict get $token span] EXTERN-SYNTAX \
+                "\"$name\" is not a library name: \"extern c library\" names a library the way the platform linker does (\"crypto\" for -lcrypto, \"tcl9.0\" for -ltcl9.0) -- letters, digits, _ + . and -, never a path or a linker option; search directories are the toolchain's (main.tcl -L DIR), and a static archive's file is named after `static at` (extern c library \"SDL3\" static at \"native/libSDL3.a\")"
+        }
+        FailCode [dict get $token span] EXTERN-SYNTAX \
+            "\"$name\" is not a framework name: \"extern c framework\" names an Apple framework the way the platform linker does (\"Cocoa\" for -framework Cocoa) -- letters, digits, _ + . and -, never a path or a linker option; search directories are the toolchain's (main.tcl -F DIR)"
+    }
+    set node [dict create link $link dependency $name dependencySpan [dict get $token span] \
+        linkage default linkageSpan "" path "" pathSpan ""]
+    if {$link eq "library"} {
+        set word [Peek p]
+        if {[dict get $word kind] eq "IDENT" && [dict get $word text] eq "static"} {
+            Advance p
+            dict set node linkage static
+            dict set node linkageSpan [dict get $word span]
+            set word [Peek p]
+            if {[dict get $word kind] eq "IDENT" && [dict get $word text] eq "at"} {
+                Advance p
+                set token [Peek p]
+                if {[dict get $token kind] ne "STRING"} {
+                    FailCode [dict get $token span] EXTERN-SYNTAX \
+                        "expected the static archive's path as a string after \"static at\", found [Describe $token] (a file under the application root: \"native/libSDL3.a\")"
+                }
+                Advance p
+                set problem [ArchivePathProblem [dict get $token value]]
+                if {$problem ne ""} {
+                    FailCode [dict get $token span] EXTERN-SYNTAX $problem
+                }
+                dict set node path [dict get $token value]
+                dict set node pathSpan [dict get $token span]
+            }
+        } elseif {[dict get $word kind] eq "IDENT" && [dict get $word text] eq "at"} {
+            FailCode [dict get $word span] EXTERN-SYNTAX \
+                "an archive path names the file of a static library: write \"extern c library \\\"$name\\\" static at PATH\" (a library without `static` is the linker's to find, shared or static)"
+        }
+        ExternLineEnd p [expr {[dict get $node path] ne "" ? "the archive path" : [dict get $node linkage] eq "static" ? "\"static\" (or its archive, \"static at PATH\")" : "the library name (or \"static\")"}]
+    } else {
+        ExternLineEnd p "the framework name"
+    }
+    return [surface::ast::node externlib [SpanFrom p $start] {*}$node]
+}
+
+# Why the text PATH of `static at PATH` names no archive file, or "": it is
+# a file's path, written with "/" between its components on every host (a
+# "\" would be a separator on one host and a character on another), never
+# empty, a directory (a trailing "/") or one holding a NUL.
+proc surface::parser::ArchivePathProblem {path} {
+    if {$path eq ""} {
+        return "an empty string is no archive path: \"static at\" names the static archive's file (\"native/libSDL3.a\", relative to the application root)"
+    }
+    if {[string first \x00 $path] >= 0} {
+        return "an archive path holds no NUL character"
+    }
+    if {[string first \\ $path] >= 0} {
+        return "\"$path\": write \"/\" between the components of an archive path (every host's separator: \"native/SDL3-static.lib\"), never \"\\\""
+    }
+    if {[string index $path end] eq "/"} {
+        return "\"$path\" names a directory: \"static at\" names the static archive's file (\"native/libSDL3.a\")"
+    }
+    return ""
+}
+
 proc surface::parser::ExternLineEnd {pVar what} {
     upvar 1 $pVar p
     set token [Peek p]

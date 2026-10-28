@@ -44,6 +44,13 @@
 #                                       to a whole number
 #   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
 #   native::targetFacts TRIPLE          how the driver reads a target triple
+#   native::linkPlan HIR ?OPTIONS?      the program's link plan as this host
+#                                         links it, one record per dependency
+#                                         ({library NAME}, {archive NAME PATH
+#                                         declared|searched WHAT}, {framework
+#                                         NAME}), or the driver's NATIVE LINK
+#                                         ARCHIVE error (NATIVE-LINK-PLAN-
+#                                         MILESTONE-1.md); links nothing
 #   native::executable HIR PATH ?OPTIONS?  links a standalone executable: Linux
 #                                         glibc (x86_64; aarch64 with the
 #                                         rustc or system linker), macOS
@@ -127,6 +134,11 @@ namespace eval native {
     # program: the libraries themselves are its `extern c library`
     # declarations.
     variable linkDirs {}
+    # Apple's ld's framework search directories (NATIVE-LINK-PLAN-
+    # MILESTONE-1.md): every link on macOS passes them as -FDIR
+    # (botlish-native's --framework-dir; main.tcl's -F DIR), kept apart from
+    # the library directories; no other linker is given them.
+    variable frameworkDirs {}
 }
 
 # What the native backend does on each host target (core::cabi::hostTarget):
@@ -210,6 +222,23 @@ proc native::withLinkDirs {dirs script} {
     }
 }
 
+# Evaluates SCRIPT in the caller's scope with DIRS the framework search
+# directories (native::frameworkDirs), restored afterwards: as
+# withLinkDirs, for Apple's ld's -F.
+proc native::withFrameworkDirs {dirs script} {
+    variable frameworkDirs
+    if {"" in $dirs} {
+        error "native::withFrameworkDirs: an empty string is no framework directory (pass no directory instead)"
+    }
+    set saved $frameworkDirs
+    set frameworkDirs [lmap dir $dirs {file normalize $dir}]
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set frameworkDirs $saved
+    }
+}
+
 proc native::binary {} {
     variable home
     set path [file join $home target release botlish-native]
@@ -247,6 +276,32 @@ proc native::targetFacts {triple} {
         Outcome [split $output \n]
     }
     return [lrange $output 2 end]
+}
+
+# The link plan of the program-mode HIR program HIR as the driver resolves
+# it for this host's linker with the search directories in force
+# (native::linkDirs, native::frameworkDirs): a list of records, one per
+# dependency in the plan's order -- {library NAME}, {archive NAME PATH
+# declared WRITTEN} or {archive NAME PATH searched DIR} (the static archive
+# a link would be given, absolute), {framework NAME} -- or the driver's
+# error, raised ({NATIVE LINK ARCHIVE}: a static archive missing, of another
+# format or architecture, an import library; a framework off macOS).
+proc native::linkPlan {hir args} {
+    return [LinkPlanOf [nir $hir {*}$args]]
+}
+
+# linkPlan of the NIR text TEXT.
+proc native::LinkPlanOf {text} {
+    set lines [Driver link-plan $text]
+    set plan {}
+    foreach line $lines {
+        if {[catch {lindex $line 0} tag]} continue
+        switch -- $tag {
+            library - archive - framework { lappend plan $line }
+            error { Outcome [list $line] }
+        }
+    }
+    return $plan
 }
 
 # The NIR text of the program-mode HIR program HIR.
@@ -288,9 +343,13 @@ proc native::Driver {command nirText args} {
 proc native::RunDriver {output command nirText arguments} {
     variable runs
     variable linkDirs
+    variable frameworkDirs
     set args $arguments
     foreach dir $linkDirs {
         lappend args --link-dir $dir
+    }
+    foreach dir $frameworkDirs {
+        lappend args --framework-dir $dir
     }
     if {$command in {run bench batch} && $::core::hashing::tableKeyOverride ne ""} {
         # A test harness fixed the private table hash's key

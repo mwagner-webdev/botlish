@@ -151,6 +151,20 @@ proc hir::interchange::decode {text args} {
         throw {HIR INTERCHANGE COMPILER} "HIR interchange text built by another front end ([dict get $body compiler]; this one is [fingerprint])"
     }
     set hir [WithRepresentations [dict get $body hir]]
+    # The link plan is what a native link is made of (NATIVE-LINK-PLAN-
+    # MILESTONE-1.md): an entry this front end cannot have built -- an
+    # unknown kind or linkage, a missing field -- is refused, never
+    # dropped or linked some other way.
+    set plans [list [dict getdef $hir links {}]]
+    if {[dict exists $hir declarations foreign links]} {
+        lappend plans [dict get $hir declarations foreign links]
+    }
+    foreach plan $plans {
+        set problem [hir::foreign::LinkPlanProblem $plan]
+        if {$problem ne ""} {
+            throw {HIR INTERCHANGE FORMAT} "HIR interchange text with a malformed link plan: $problem"
+        }
+    }
     if {$check} {
         set problem [hir::cabi::TargetMismatch $hir [dict get $options -target]]
         if {$problem ne ""} {

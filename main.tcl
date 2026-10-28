@@ -13,6 +13,8 @@
 #   -warnings MODE         default | off | error
 #   -target NAME           the C ABI target of a .bot compilation
 #   -L DIR                 a library directory for a program that calls C
+#   -F DIR                 a framework directory (macOS) for one that links a
+#                          framework
 #   -argv TEXT / -argv-hex HEX / -argv-none    the program's argv()
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
@@ -148,7 +150,11 @@
 # -L DIR adds DIR to the system linker's library search path (-LDIR) for a
 # program that calls C (C-FFI.md: `extern c library` and `extern c fn`), which
 # the native backends and -emit-native-executable link with the libraries it
-# declares; the toolchain's own search path comes first otherwise. Such a
+# declares; the toolchain's own search path comes first otherwise. It is also
+# where a library declared `static` without a path finds its archive, before
+# the toolchain's own directories (NATIVE-LINK-PLAN-MILESTONE-1.md). -F DIR
+# adds DIR to Apple's ld's framework search path (-FDIR), for a program that
+# declares `extern c framework`; it is passed to no other linker. Such a
 # program needs the host's system linker and its libraries; one that calls no
 # C needs neither.
 #
@@ -192,6 +198,7 @@ set cliOptions {
     -warnings MODE run {default (print them), off, error (reject)}
     -target NAME run {the C ABI target (default: the host's)}
     -L DIR run {a library directory, for a program that calls C}
+    -F DIR run {a framework directory (macOS), for a program linking one}
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
@@ -911,6 +918,12 @@ foreach option [dict get $commandLine options] {
                 usageError "-L needs a directory (found an empty one)"
             }
             lappend native::linkDirs [file normalize $value]
+        }
+        -F {
+            if {$value eq ""} {
+                usageError "-F needs a directory (found an empty one)"
+            }
+            lappend native::frameworkDirs [file normalize $value]
         }
         -lsp-scheduler {
             usageError "-lsp-scheduler is an option of -lsp"
