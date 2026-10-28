@@ -86,12 +86,16 @@ report's results in the commits after it.
   block calling `g([1])` beside `fn g(x): x.length()` -- ambiguous outside
   the block -- was rejected with the TYPE the placeholder `bag::length`'s
   parameter contract produced.
-* **Found, not fixed** (section 11): a kind proof decides a call whose
-  receiver's type is inferred from that call's own candidate (an uncalled
-  `fn g(x): x.length()` is decided `bag::length` and accepted; the
-  reference rule rejects it as ambiguous). It is the "kind proofs in a
-  cycle" limitation of milestone 1, section 10.1, now with a reproducer;
-  it is out of this milestone's scope.
+* **Three defects found, not fixed** (section 11.1, each with a
+  reproduction; none caused or changed by this milestone, each the same on
+  the base): D1, syntax recovery loses a struct's syntax error in `-check`,
+  the compiler service and the language server (the syntax-recovery
+  fuzzer's seed 1); D2, the method-filter mutant `wave-limit-ignored`
+  survives (no test pins the waves' bound); D3, a kind proof decides a call
+  whose receiver's type is inferred from that call's own candidate (an
+  uncalled `fn g(x): x.length()` is decided `bag::length` and accepted;
+  the reference rule rejects it as ambiguous) -- milestone 1's "kind
+  proofs in a cycle" (10.1), now with a reproducer.
 
 ## 2. Starting census
 
@@ -529,8 +533,8 @@ r
 * **Before**: round 1 rejected the block with a TYPE -- `g([1])` violated
   the Bag contract the placeholder `bag::length` gave `x` -- and the program
   then compiled and ran to 0: with the block's body gone, the call in the
-  now uncalled `g` was decided `bag::length` by a kind proof (section 11,
-  "found, not fixed"). A placeholder decided a static outcome.
+  now uncalled `g` was decided `bag::length` by a kind proof (defect D3,
+  section 11.1). A placeholder decided a static outcome.
 * **Now**: the block is accepted (its body has no diagnostic of its own:
   `g([1])` reads a value nothing established), and the program is rejected
   by the genuine ambiguity at 7:7 (`mr-diag-static-not-by-a-placeholder`).
@@ -632,7 +636,7 @@ or reads, run on this branch:
 | harness | result |
 |---|---|
 | `audit/static-decisions/tools/mutate.tcl -only` its eight method-call mutants (`stale-method-reuse`, `method-key-alias`, `same-choices-unchecked`, `method-memo-by-index`, `method-final-any-build`, `method-trial-ignored`, `method-memo-initial-only`, `never-reuse-methods`) | 8 killed |
-| `audit/method-filter/tools/mutate.tcl` (the kind proofs) | 21 of 22 killed by the unit tests; `wave-limit-ignored` (the wave limit raised to 1,000) survives the tests and the fuzzer, identically on the base (10.5) |
+| `audit/method-filter/tools/mutate.tcl` (the kind proofs) | 21 of 22 killed by the unit tests; `wave-limit-ignored` (the wave limit raised to 1,000) survives the tests and the fuzzer, identically on the base (defect D2, section 11.1) |
 | `audit/contexts/tools/mutate.tcl -only method-candidate-dropped` | killed |
 | `audit/direct-modules/tools/mutate.tcl -only method-obligation-dropped` | killed (`dm-method-sugar-two-candidates`) |
 | `audit/diagnostic-recovery/tools/mutate.tcl` | 25 of 25 killed |
@@ -643,7 +647,7 @@ or reads, run on this branch:
 | `audit/hir-interchange/tools/roundtrip.tcl -via interchange`, `-via cache` | 12 suites; 108 and 120 artifacts and outcomes compared, 0 differ |
 | `audit/static-decisions/tools/fuzz.tcl -n 10`, seeds 17, 41 and 5 | 240, 304 and 252 sites (116, 184 and 180 rejected), 0 failures |
 | `audit/static-compile/tools/fuzz.tcl`, seeds 1 and 2 | 0 disagreements (110 transparent valid sites each; 66 and 68 exact diagnostics) |
-| `audit/syntax-recovery/tools/fuzz.tcl`, seeds 1, 2 and 3 | seeds 2 and 3: 46 and 52 damaged programs, 0 failures; seed 1: two failures of one case, identical on the base (pre-existing: 10.5) |
+| `audit/syntax-recovery/tools/fuzz.tcl`, seeds 1, 2 and 3 | seeds 2 and 3: 46 and 52 damaged programs, 0 failures; seed 1: two failures of one case, identical on the base (defect D1, section 11.1) |
 | `audit/method-resolution/tools/oracle.tcl`, `audit/method-filter/tools/fuzz.tcl` | section 8.2 |
 
 ## 10. Economics and integration
@@ -750,37 +754,92 @@ application) is tested by its own jobs.
 
 ### 10.5 Pre-existing failures, not this milestone's
 
-Each reproduces identically on the base `b29787c` (a worktree of it, run
-the same way):
+Three of the runs above found defects that are not this milestone's: each
+reproduces identically on the base `b29787c` (a worktree of it, run the same
+way). They are described, with reproductions, in section 11.1:
 
-* **The syntax-recovery fuzzer, seed 1, case 61** (two failures of one
-  case). Deleting the newline after `y: Float64` in
-  `examples/games/icy-tower/tower.bot`'s `struct Player:` (offset 2734)
-  makes the line `    y: Float64    vx: Float64`. A strict parse reports
-  the syntax error at 80:19; the compiler service analyzing
-  `headless.bot` with that text reports outcome `failure`, semantics
-  `none`, and only a TYPE at 106:13 (`unknown or invalid type Player for
-  field "player" of struct "World"`) -- the syntax error is lost, and a
-  field of a type the hole may declare is not treated as dependent
-  (SYNTAX-RECOVERY-MILESTONE-1.md). Seeds 2 and 3 pass. Not touched here.
-* **`wave-limit-ignored`** (`audit/method-filter/tools/mutate.tcl`)
-  survives on the base too: it raises the waves' bound, which decides how
-  a decision is searched, never its outcome (`mf-wave-limit` checks the
-  outcome at a bound of 0); only a test of the wave or build count at the
-  bound would kill it.
-* **The kind proof deciding a self-dependent call** (section 11) is the
-  base's behavior.
-* **Main's Ubuntu 26.04 failures** (`cf-wrong-architecture`,
-  `cb-boringssl-current`; fixed on main by `411ee25`) are in the merge.
+* the syntax-recovery fuzzer's two failures (seed 1, case 61): defect D1;
+* the surviving method-filter mutant `wave-limit-ignored`: defect D2;
+* the kind proof that decides a self-dependent call, found by the census:
+  defect D3.
+
+Main's Ubuntu 26.04 failures (`cf-wrong-architecture`,
+`cb-boringssl-current`) were fixed on main by `411ee25`, which the merge
+brought in; CI found nothing else (10.4).
 
 ## 11. Remaining limitations
 
-* **Found, not fixed: a kind proof decides a self-dependent call.** In
+### 11.1 Known defects (found, not fixed)
+
+None of them is caused or changed by this milestone: each behaves the same
+on the base `b29787c`, and each is outside its scope. They are recorded
+here so they are not lost.
+
+**D1. Syntax recovery loses a struct's syntax error (`-check`, the
+compiler service and the language server).**
+
+* *Reproduce.* Join two field lines of a struct in a copy of the Icy Tower
+  game and check the program:
+
+  ```sh
+  B=$PWD; D=$(mktemp -d)                  # from the repository's root
+  cp examples/games/icy-tower/*.bot "$D" && cd "$D"
+  sed -i '80{N;s/\n/ /}' tower.bot      # struct Player: "    y: Float64     vx: Float64"
+  tclsh9.0 "$B/main.tcl" -check headless.bot
+  tclsh9.0 "$B/main.tcl" headless.bot    # a strict run, for comparison
+  ```
+
+  The syntax-recovery fuzzer found it: `tclsh9.0
+  audit/syntax-recovery/tools/fuzz.tcl -seed 1` reports case 61 (the same
+  newline deleted, offset 2734) with two failures, the outcome and the
+  syntax errors reported; seeds 2 and 3 pass.
+* *Observed.* `-check` reports one error, `tower.bot:106:13: unknown or
+  invalid type Player for field "player" of struct "World" (CORE SEMANTIC
+  TYPE)`; the service's revision has outcome `failure` and semantics `none`.
+* *Expected.* What a strict run reports first -- `tower.bot:80:20: expected
+  end of line after the field declaration, found name "vx" (SURFACE
+  SYNTAX)` -- then the recovered analysis, outcome `syntax`
+  (SYNTAX-RECOVERY-MILESTONE-1.md). A top-level hole may declare a type,
+  so `World`'s field of type `Player` depends on the hole and must not be
+  reported, let alone raised as a failure.
+* *Where the fix belongs.* The recovery of a damaged `struct` declaration
+  (`surface/recover.tcl`'s hole and what it binds) and the struct
+  registration that reports the unknown field type
+  (`hir/sourcetypes.tcl`, `hir/structs.tcl`) before the recovery's
+  dependency model (`hir/recovery.tcl`) can suppress it; a regression test
+  in `tests/syntax-recovery.test`. This milestone changes neither (its one
+  change to `hir/recovery.tcl` is the `notes` of `entries`).
+
+**D2. The method-filter mutant `wave-limit-ignored` survives (a test
+gap).**
+
+* *Reproduce.* `tclsh9.0 audit/method-filter/tools/mutate.tcl 8
+  wave-limit-ignored` reports `SURVIVED` (on the base as here).
+* *What it is.* The mutant replaces the kind waves' bound (`maxWaves`) by
+  1,000. The bound decides how long the waves search, never a decision's
+  outcome -- a decision that needs more waves is certified to the
+  reference rule's outcome, which `mf-wave-limit` checks at a bound of 0 --
+  so no test of an outcome can kill it.
+* *Where the fix belongs.* A test of the economics at the bound in
+  `tests/method-filter.test`: the number of waves, or the builds, of a
+  decision that needs more waves than `maxWaves` allows.
+
+**D3. A kind proof decides a self-dependent call.**
+
+* *Reproduce.*
 
   ```
+  # bag.bot
+  struct Bag:
+      n: int
+
+  fn length(b: Bag) -> int:
+      b.n
+
+  # main.bot
   import std::list
   import std::str
-  import bag          # struct Bag, fn length(b: Bag) -> int
+  import bag
 
   fn g(x):
       x.length()
@@ -788,19 +847,30 @@ the same way):
   0
   ```
 
-  `x.length()` is decided `bag::length` and the program is accepted. All
-  three candidates accept an untyped receiver -- the reference rule
-  (`BOTLISH_METHOD_KIND_PROOFS=0`) reports AMBIGUOUS-METHOD-CALL, and
-  `BOTLISH_METHOD_REFERENCE_AUDIT=1` fails on the difference -- but in the
-  build at `bag::length` the receiver's type is the Bag contract that very
-  candidate gave the parameter, and the kind proof excludes the other two
-  by it. It is METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md's "kind proofs
-  in a cycle" (10.1) with a reproducer; with `g` called (`g([1])`) the
-  contract is demoted and the call is ambiguous, as it should be. Out of
-  this milestone's scope (it explicitly excludes kind-proof soundness in
-  cycles); the fix belongs to the milestone on self-dependent decisions --
-  a kind proof must not read a receiver type the call's own candidate
-  inferred.
+  `tclsh9.0 main.tcl -check main.bot` prints `ok`;
+  `BOTLISH_METHOD_KIND_PROOFS=0` (the reference rule) reports
+  AMBIGUOUS-METHOD-CALL at 6:7 (bag::length, std::list::length,
+  std::str::length); `BOTLISH_METHOD_REFERENCE_AUDIT=1` fails (`the
+  decision's methodDecided differs from the reference rule's`).
+* *Observed.* `x.length()` is decided `bag::length` and the program is
+  accepted.
+* *Expected.* AMBIGUOUS-METHOD-CALL: all three candidates accept an
+  untyped receiver.
+* *Cause.* In the build at `bag::length`, the receiver's type is the Bag
+  contract that very candidate gave the parameter `x`, and the kind proof
+  excludes the other two candidates by it. With `g` called (`g([1])`) the
+  contract is demoted and the call is ambiguous, as it should be. It is
+  METHOD-RESOLUTION-CORRECTNESS-MILESTONE-1.md's "kind proofs in a cycle"
+  (10.1), now with a reproducer.
+* *Where the fix belongs.* The milestone on self-dependent decisions: a
+  kind proof must not read a receiver type that the call's own candidate
+  inferred. This milestone explicitly excludes kind-proof soundness in
+  cycles; before this milestone the program was accepted the same way.
+  Section 8.3's static correction is the one place this defect showed
+  through a placeholder, and that is fixed.
+
+### 11.2 Limitations of this milestone
+
 * **Dependent rejections are judged conservatively.** An ambiguity with an
   operand nobody established is never reported, even when the candidates'
   parameters there are the same (`1.f((5).q)` with two `f(x: int, y: int)`):
