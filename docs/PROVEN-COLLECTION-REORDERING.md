@@ -615,7 +615,62 @@ mutant:
 2. the collection fuzzer against its model;
 3. the proof fuzzer against its model and the runs.
 
-@@MUTANTS@@
+All 46 mutants are killed: 18 of the reorder's semantics, 24 of the proof's
+soundness and 4 of the value semantics it relies on. The value-semantics
+mutants change the seams the collections already use, against the
+reorder's own tests: copies, the loop snapshot, observer arguments, and
+the copy-on-write of the native vector backing. For each mutant, the
+table gives the first detector that killed it and that detector's
+failing tests.
+
+| family | mutant | the bug | killed by |
+|---|---|---|---|
+| semantics | `reorder-value-changed` | reorder gives every entry the first old entry's value (a value is changed) | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-values-misaligned` | a map's values follow the permutation shifted by one position: values paired with other keys | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-drops-key` | the permutation skips its first entry (keys and values alike): a key is dropped | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-duplicates-key` | each odd rank takes the entry of the rank before it (keys and values alike): keys are duplicated, others lost | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-keeps-old-position` | the entry at old position 0 stays first whatever the order says | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-full-hash-collisions` |
+| semantics | `reorder-reverses-order` | the arrangement installs the order reversed | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-bucket-order` | the arrangement walks the collection's index slots (the hidden hash's placement) instead of the order | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| semantics | `reorder-rehashes` | the permutation computes every entry's keyed hash again instead of moving its stored hash | collection-reorder.test: `cr-no-rehash` |
+| semantics | `reorder-index-stale` | the permutation moves the entries but keeps the old index (positions in the slots are stale) | collection-reorder.test: `cr-copy-then-reorder-then-mutate`, `cr-later-operations`, `cr-map-reorder`, ... |
+| semantics | `reorder-shrinks-index` | the permutation sizes the index for the live entries instead of keeping its slot count (a reservation is lost) | ordered-table.test: `ot-reorder-invariants-hidden-keys`, `ot-reorder-invariants-map-int`, `ot-reorder-invariants` |
+| semantics | `reorder-length-changes` | the permutation sets the live count one too high | collection-reorder.test: `cr-full-hash-collisions`, `cr-hidden-key-independent`, `cr-map-reorder`, ... |
+| semantics | `reorder-revives-dead-entry` | an entry is located by a scan from the first position that ignores liveness, and a dead entry found so is moved as live: a key removed and set again comes back with its old value | collection-reorder.test: `cr-current-order`, `cr-map-values-aligned` |
+| semantics | `reorder-incomplete` | the arrangement is not completed: a reorder run despite its REORDER-NOT-PROVEN (a lenient build) drops the entries the order does not name | collection-reorder.test: `cr-unproven-run-keeps-content` |
+| semantics | `complete-reversed` | the entries an order does not name follow in reverse position order | collection-reorder.test: `cr-unproven-run-keeps-content` |
+| semantics | `complete-ignores-named` | the completion appends every live entry, also those the order named (an entry twice, another lost) | collection-reorder.test: `cr-unproven-run-keeps-content` |
+| semantics | `validate-length-only` | validation accepts a candidate of the collection's length whatever its members (equal cardinality taken for equal membership) | collection-reorder.test: `cr-no-rehash`, `cr-validate-changes-nothing`, `cr-validate-mismatch`, ... |
+| semantics | `validate-subset-only` | validation accepts a candidate whose every member is the collection's, whatever its length (a subset taken for equal membership) | collection-reorder.test: `cr-empty-and-singleton`, `cr-validate-changes-nothing`, `cr-validate-mismatch` |
+| semantics | `set-reorder-own-positions` | a set's reorder arranges the order by its own positions and applies them to the set (the set's membership changes when the two tables' layouts differ) | collection-reorder.test: `cr-iteration-snapshot`, `cr-later-operations`, `cr-set-reorder` |
+| proof | `set-preserves-members` | a map's set is taken for an order-only operation: the relation survives it | collection-reorder.test: `cr-proof-copies`, `cr-proof-joins`, `cr-proof-loops`, ... |
+| proof | `remove-preserves-members` | a map's remove is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
+| proof | `clear-preserves-members` | a map's clear is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
+| proof | `order-add-preserves-members` | a set's add (the order's) is taken for an order-only operation | collection-reorder.test: `cr-proof-loops`, `cr-proof-membership-changes` |
+| proof | `order-remove-preserves-members` | a set's remove (the order's) is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
+| proof | `order-clear-preserves-members` | a set's clear (the order's) is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
+| proof | `reorder-loses-relation` | a map's reorder is taken for a membership change: the relation is lost after it | collection-reorder.test: `cr-proof-copies`, `cr-proof-order-only-and-reads-preserve` |
+| proof | `reads-lose-relation` | every argument of a call is taken as changed, reads included | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| proof | `any-order-admitted` | the requirement is met by any order of the right type (the static type taken for the relation) | collection-reorder.test: `cr-proof-copies`, `cr-proof-equal-length-is-not-equal-members`, `cr-proof-function-bou` |
+| proof | `unchanged-values-related` | two values nothing has changed (parameters, unrelated locals) are taken as related | collection-reorder.test: `cr-proof-function-boundary`, `cr-proof-joins`, `cr-proof-loops`, ... |
+| proof | `copies-lose-relation` | a binding never takes its value's members (the relation tied to the variable that was minted, not to the value: a copy carries nothing) | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| proof | `places-conflated` | a place's members token ignores its root binding: two independent maps (or an order taken from one) are related | collection-reorder.test: `cr-proof-function-boundary`, `cr-proof-joins`, `cr-proof-type-is-not-enough` |
+| proof | `join-first-path-wins` | a join keeps the first completing path's values and state: a relation true on one branch only survives the join | collection-reorder.test: `cr-proof-joins` |
+| proof | `join-pairs-one-sided` | a join relates what agreed on the first path only (its tokens keyed by one side): a relation true on one branch survives when the other branch relates the order elsewhere | collection-reorder.test: `cr-proof-joins` |
+| proof | `validator-mints-on-failure` | a handled validation's value is the validator's whatever its handler gives (the relation minted on the failure path too) | collection-reorder.test: `cr-proof-joins` |
+| proof | `validator-relates-candidate` | validate_order's result is related to its candidate argument instead of the collection | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| proof | `copy-change-kills-original` | a membership change of one place changes every place (a copy's change loses the unrelated original's relation) | collection-reorder.test: `cr-proof-copies`, `cr-proof-joins` |
+| proof | `loop-entry-optimistic` | a loop's body is entered with the state before the loop: a change later in the body (an earlier iteration's) is ignored | collection-reorder.test: `cr-proof-loops` |
+| proof | `loop-exit-optimistic` | the state after a loop is the state before it: the body's changes are ignored | collection-reorder.test: `cr-proof-loops` |
+| proof | `context-calls-ignored` | a call that may change the installed context leaves a context member's relation | collection-reorder.test: `cr-proof-membership-changes` |
+| proof | `leaves-shared-across-compilations` | the struct leaves of a type are remembered across compilations (another program's struct of the same name) | collection-reorder.test: `cr-proof-copies` |
+| proof | `struct-fields-untracked` | a struct's collection fields are no places of the relation (a box's map and order are never related) | collection-reorder.test: `cr-proof-copies` |
+| proof | `unreachable-code-walked` | statements the completion analysis proved unreachable are walked as if they ran (a decided condition's dead branch changes the map) | collection-reorder.test: `cr-proof-joins` |
+| proof | `unproven-cascade` | an order of the wrong type is reported unproven too, restating the type error | collection-reorder.test: `cr-proof-no-cascade` |
+| value semantics | `snapshot-follows-reorder` | `b = a` of a collection-bearing local gives b a's own headers: a loop's domain is the collection itself, and a reorder in the body changes what the loop visits | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| value semantics | `observer-overlap-uncopied` | an argument overlapping a place argument of the same call is read out uncopied (the general place-parameter rule: a reorder reads its order before it writes, so its own tests cannot see it) | place-parameters.test: `pp-observer-overlap-copied` |
+| value semantics | `reorder-skips-detach` | natively, clear of a shared vector backing empties it in place: a reorder of a copy (or of a map whose order() shares its table) changes the other | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
+| value semantics | `order-shares-engine-state` | natively, push onto a shared vector backing appends in place: a map and the order() taken from it share their table (a key set later appears in the order) | collection-reorder.test: `cr-order-snapshot` |
 
 **The brief's mutants with no non-equivalent version.** The file's header
 explains each:
