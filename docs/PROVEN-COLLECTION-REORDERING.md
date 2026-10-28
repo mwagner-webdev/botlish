@@ -568,9 +568,17 @@ ordered list. It never hashes, and it models semantics, never the proof.
 * every compiled backend, under two fixed hidden keys;
 * GC stress with `-gc-stress 1`.
 
-| run | programs | operations | observations | result |
-|---|---:|---:|---:|---|
-@@FUZZ@@
+| run | programs | operations | observations | backend runs | failing |
+|---|---:|---:|---:|---:|---:|
+| `-seed 101 -n 16 -reorders 15` | 16 | 2,156 | 12,641 | 150 | 0 |
+| `-seed 202 -n 10 -reorders 15 -gc-stress 1` | 10 | 1,352 | 4,584 | 104 | 0 |
+| `-seed 303 -n 2 -profile large -backends "compile cranelift-generic cranelift" -reorders 15` | 2 | 268 | 6,193 | 18 | 0 |
+| `-seed 404 -n 12 -reorders 15` | 12 | 1,618 | 11,128 | 112 | 0 |
+
+Every backend's observations equal the model's in every run, including
+the runs under both fixed hidden keys. Seed 101 ran before the
+arrangement was made total (`complete`); totality changes nothing for a
+proven order, and the other three seeds ran on the final code.
 
 **The proof fuzzer.** `audit/collection-reorder/tools/proofs.tcl` checks
 the compiler's admission decisions.
