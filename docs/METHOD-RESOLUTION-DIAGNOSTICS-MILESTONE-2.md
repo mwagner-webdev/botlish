@@ -16,10 +16,11 @@ The base of every "before" below is `b29787c` (main when the milestone
 started). The change is on the branch `claude/nice-newton-vfi92x`: the
 implementation, tests, tools and documents in `cf4f5aa`, main merged in
 `fa43b82` (no conflict; the commit CI ran on, section 10.4), and this
-report's results in the commits after it. It reached main through
-`9cc1b12`, a merge of main's package-scoped modules
-(BOT-MODULES-MILESTONE-1.md) on which the whole local suite passed again
-(10.4).
+report's results in the commits after it. It reached main through two
+more merges of main: `9cc1b12` (package-scoped modules,
+BOT-MODULES-MILESTONE-1.md; the whole local suite passed again) and
+`5b4b8a5` (the native link plan, NATIVE-LINK-PLAN-MILESTONE-1.md; a narrowed
+local run passed), section 10.4.
 
 ## Contents
 
@@ -749,7 +750,16 @@ application) is tested by its own jobs.
 (BOT-MODULES-MILESTONE-1.md; both sides change the front end, without a
 conflict), the whole local suite with an empty cache: 235 Tcl test files,
 7,440 passed on interp and 7,435 on compile, 0 failed; 108 golden suites,
-0 failed, on all four backends (3,303 s wall). Main's CI runs on the push.
+0 failed, on all four backends (3,303 s wall). **On `5b4b8a5`**, the merge
+that brought main's native link plan (which changes the parser, the loader
+and `main.tcl` beside this milestone's `note:` lines), `tests/local.tcl`
+narrowed to both milestones' files (method-resolution, method-filter,
+method-sugar, compiler-service, lsp, main-cli, diagnostic-recovery,
+syntax-recovery, imports, static-economics, static-compile, compilerpedia,
+hir-interchange, hir-cache, native-link-plan, system-linker, bot-modules)
+and the 17 golden suites that hold their ports: 746 and 745 tests passed on
+interp and compile, 0 failed; every suite on all four backends. Main's CI
+runs on the push.
 
 **CI**, dispatched on the branch at `fa43b82`:
 
