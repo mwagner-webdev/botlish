@@ -885,7 +885,46 @@ NIR holds any trace of it.
 
 ## Regression and CI
 
-@@REGRESSION@@
+Everything below ran on this branch's final code. The machine was a
+4-core container.
+
+| run | result |
+|---|---|
+| `tclsh9.0 tests/local.tcl -jobs 2` (every Tcl test file on interp and compile, every golden suite on all four backends) | 235 Tcl files, 7,368 tests passed on interp and 7,363 on compile, 109 golden suites passing on every backend (5,257 / 5,257 / 5,165 / 5,267 tests). Four failures on each Tcl backend, all fixed (see below). |
+| `tclsh9.0 tests/local.tcl tests/golden-framework.test tests/compilerpedia.test` after the fixes | passed on both backends |
+| the collection files on cranelift and on cranelift-generic (`CORE_BACKEND`): mutable-map, mutable-set, ordered-table, collection-reorder, collection-iteration, place-parameters | 136 tests, 136 passed on each |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` on cranelift (without place-parameters) | 108 tests, 108 passed |
+| `tclsh9.0 tests/local.tcl tests/golden/collection-reorder.bot` | 77 / 77 on each of the four backends |
+| `audit/golden/tools/perturb.tcl tests/golden/collection-reorder.bot` | 77 inverted, 56 altered and 36 shifted columns: every one failed as required |
+| `tclsh9.0 audit/golden/migration/merge.tcl -check 1` | the manifest is current: 11,522 rows |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 860 topics, 642 examples, 0 problems |
+| `tclsh9.0 audit/refactor/tools/gate.tcl` (the warning gate) | passed: the observed warnings are exactly the manifest's |
+| `python3 -I audit/mutable-map/tools/oracle.py selftest` | passed |
+| the stateful fuzzer, the proof fuzzer and the mutants | above |
+| `bench/mutable-map.tcl -instructions 1` against the base revision's standard library | no hot-path change (Performance) |
+
+**The four failures of the full run** were in two files. Both were
+oversights of this change, not regressions of existing behaviour:
+
+* `tests/golden-framework.test`'s `gf-code-name-complete` pins the number
+  of `std::compiler::DiagnosticCode` cases, and `ReorderNotProven` makes
+  it 114.
+* One line of the `proof.same-members` topic exceeded Compilerpedia's
+  width. That accounts for three `tests/compilerpedia.test` tests:
+  `cp-catalogue-valid`, `cp-check-structure-and-coverage` and
+  `cp-render-fits-80-columns`.
+
+**CI.**
+
+* **The front end changed, so `static-decisions.yml` ran on this
+  branch.** Its batched-against-sequential comparison of
+  `collection-reorder.bot`, `mutable-map.bot`, `mutable-set.bot` and
+  `framework-semantics.bot` must never run locally (AGENTS.md):
+  @@STATIC@@
+* **The rest is CI's on the push to main:** the whole Tcl suite with the
+  golden duplicates, its cranelift coverage, `check.tcl`'s golden shards,
+  the GC-stress run and the arm64 workflow.
+
 
 ## Future representation-independent equality/hash
 
