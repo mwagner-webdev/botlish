@@ -265,6 +265,7 @@ static void accept_some(void) {
         evn_conn *c = &E.conns[id];
         memset(c, 0, sizeof *c);
         c->fd = fd;
+        c->attached = 0;
         c->open = 1;
         /* Registered with no interest until the program attaches it. */
         add_fd(fd, TAG_CONN, id, 0);
@@ -294,6 +295,16 @@ int evn_block(long long deadline) {
         }
     } else {
         drain_posted();
+    }
+    /* Lines already in a connection's buffer are no readiness epoll can
+     * report: a connection paused for credit with complete lines buffered
+     * (its BYE among them) would wait forever once its peer stops sending.
+     * Parse them first, and do not sleep while any remain. */
+    for (int i = 0; i < E.nconns; i++) {
+        evn_conn *c = &E.conns[i];
+        if (c->open && c->attached && c->credit > 0 && c->len > 0 && memchr(c->line, '\n', (size_t)c->len)) {
+            read_conn(c);
+        }
     }
     struct timespec timeout, *tp = NULL;
     if (E.ring.count > 0) {
@@ -504,14 +515,19 @@ static void *client_main(void *p) {
     if (connect(fd, (struct sockaddr *)&a, sizeof a) < 0) { free(c); return NULL; }
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    /* pattern 0: talk; 1: a long path, then talk; 2: flood. */
+    /* A test client never waits for its replies longer than 10 s. */
+    struct timeval rcv = { 10, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof rcv);
+    /* pattern 0: talk; 1: a long path, then talk. */
     if (c->pattern == 1) client_line(fd, 1, 3000);
     for (int i = 0; i < c->lines; i++) {
         if (c->interval_us > 0) {
             struct timespec ts = { c->interval_us / 1000000, (c->interval_us % 1000000) * 1000L };
             nanosleep(&ts, NULL);
         }
-        client_line(fd, 2, c->id * 1000 + i);
+        /* The argument is the send time: the server measures the
+         * network-to-handler latency. */
+        client_line(fd, 2, evn_now());
     }
     client_line(fd, 9, 0);
     /* Read the replies until the server hangs up. */
@@ -536,6 +552,18 @@ int evn_client(int port, int id, int pattern, int lines, int interval_us) {
     if (pthread_create(&client_threads[nclients], NULL, client_main, c) != 0) return -1;
     nclients++;
     return 0;
+}
+
+/* Hang up every connection (the program is done with the network). */
+int evn_hangup_all(void) {
+    int n = 0;
+    for (int i = 0; i < E.nconns; i++) {
+        if (E.conns[i].fd >= 0 && (E.conns[i].open || E.conns[i].attached)) {
+            evn_hangup(i);
+            n++;
+        }
+    }
+    return n;
 }
 
 int evn_clients_join(void) {

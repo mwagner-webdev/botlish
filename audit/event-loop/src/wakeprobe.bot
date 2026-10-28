@@ -68,6 +68,7 @@ fn if_int(b: bool) -> int:
         0
 
 fn idle(us: int, observed: bool, context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound, evloop::LoopReentered:
+    evloop::sync()
     obs = evloop::observer()
     if observed:
         coroutine {step: w, first: wf} = watcher(obs)
@@ -86,6 +87,7 @@ fn idle(us: int, observed: bool, context ev: evloop::Loop, n: evn::Native) -> in
 
 nomethod fn latency(label: str, count: int, interval: int, burst: int, jitter: int, gap: int, context ev: evloop::Loop, n: evn::Native) -> int errors IndexNotFound, evloop::LoopReentered:
     evloop::log(label)
+    evloop::sync()
     src = evloop::source(1, 4096)
     coroutine {step: r, first: rf} = receiver(src, count)
     evloop::adopt(r, rf)

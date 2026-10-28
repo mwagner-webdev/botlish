@@ -33,6 +33,7 @@ extern c fn evn_synth(slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std:
 extern c fn evn_synth_join() -> std::ffi::c::Int
 extern c fn evn_client(port: std::ffi::c::Int, id: std::ffi::c::Int, pattern: std::ffi::c::Int, lines: std::ffi::c::Int, interval: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn evn_clients_join() -> std::ffi::c::Int
+extern c fn evn_hangup_all() -> std::ffi::c::Int
 extern c fn evn_client_replies(id: std::ffi::c::Int) -> std::ffi::c::LongLong
 extern c fn evn_spin(us: std::ffi::c::Int) -> std::ffi::c::Int
 
@@ -140,7 +141,9 @@ fn synth_join(context n: Native) -> int:
 nomethod fn client(port: int, id: int, pattern: int, lines: int, interval: int, context n: Native) -> int:
     ci(port).evn_client(ci(id), ci(pattern), ci(lines), ci(interval))
 
+# Hang up every connection, then wait for every test client to finish.
 fn clients_join(context n: Native) -> int:
+    evn_hangup_all()
     evn_clients_join()
 
 fn client_replies(id: int, context n: Native) -> int:

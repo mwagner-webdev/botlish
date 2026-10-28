@@ -1,0 +1,88 @@
+# b-gameserver.bot -- EVENT-LOOP-EXPLORATION.md, Experiments A and B
+# (native): the game-server workload (gameserver.bot, unchanged) on real
+# TCP sockets in one process, beside an independent flooding source.
+#
+#   client 1  MOVE 3000 (300 pathfinding segments), then 20 TALK lines
+#   client 2  50 TALK lines, 1 ms apart
+#   client 3  50 TALK lines, 1.5 ms apart
+#   client 4  a flood: 3000 TALK lines as fast as TCP takes them
+#   telemetry a producer thread posting 20000 records as fast as it can to a
+#             source an unrelated task drains (another library's input)
+#   world     a 20 ms timer advancing its AI coroutine directly, 15 ticks
+#
+# Each TALK line carries its send time; each session reports the largest
+# network-to-handler latency of its lines. tools/native.tcl checks that every
+# client gets every reply, that the quiet connections stay fast while the
+# flood and the telemetry run, and that the flood is paced by credit
+# (demand-driven reads), not buffered without bound.
+import evloop
+import evn
+import gameserver
+import std::mutable_array
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: evloop::Loop) errors IndexNotFound:
+    evloop::log(evloop::cat(text, n))
+
+fn telemetry(src: evloop::Reg, context ev: evloop::Loop) -> int errors IndexNotFound:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = evloop::wait(src)
+        if e.reason != evloop::woke_event:
+            break
+        total.set(0, total.at(0) + 1)
+        loop:
+            more = evloop::try_take(src)
+            if more.reason != evloop::woke_event:
+                break
+            total.set(0, total.at(0) + 1)
+        if total.at(0) >= 20000:
+            break
+    say("telemetry records ", total.at(0))
+    evloop::revoke(src)
+
+fn main(context ev: evloop::Loop, n: evn::Native) -> List[str] errors IndexNotFound, evloop::LoopReentered:
+    say("adapter status ", evn::status())
+    evloop::sync()
+    listener = evloop::source(1, 64)
+    port = evn::listen(0, listener.slot, listener.gen)
+    outbox = evloop::channel(4096)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 4)
+    evloop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    evloop::adopt(f, ff)
+    coroutine {step: w, first: wf} = gameserver::world(20000, 15)
+    evloop::adopt(w, wf)
+    tel = evloop::source(1, 256)
+    coroutine {step: t, first: tf} = telemetry(tel)
+    evloop::adopt(t, tf)
+    evn::client(port, 1, 1, 20, 2000)
+    evn::client(port, 2, 0, 50, 1000)
+    evn::client(port, 3, 0, 50, 1500)
+    evn::client(port, 4, 0, 3000, 0)
+    evn::synth(tel.slot, tel.gen, 20000, 0, 1, 0, 0)
+    started = evn::clock()
+    turns = evloop::run()
+    say("wall us ", evn::clock() - started)
+    say("turns ", turns)
+    evn::unlisten()
+    evn::clients_join()
+    evn::synth_join()
+    loop c from 1 to 5:
+        say(evloop::cat("client ", c).concat(" replies "), evn::client_replies(c))
+    say("adapter ring max ", evn::stat(evn::st_ring_max))
+    say("adapter post queue max ", evn::stat(evn::st_post_max))
+    say("adapter pauses for credit ", evn::stat(evn::st_paused))
+    say("adapter refused posts ", evn::stat(evn::st_posts_refused))
+    say("adapter lines ", evn::stat(evn::st_lines))
+    say("max ready ", evloop::stat(evloop::s_maxready))
+    say("dispatched ", evloop::stat(evloop::s_dispatched))
+    evloop::trace()
+
+with context evloop::create(64, 0)
+with context evn::create(512, 16, 0)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on evloop::LoopReentered:
+        ["LoopReentered"]

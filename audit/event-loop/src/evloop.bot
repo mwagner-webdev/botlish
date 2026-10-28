@@ -929,6 +929,15 @@ fn next_deadline(context ev: Loop) -> int errors IndexNotFound:
                 best.set(0, d)
     best.at(0)
 
+# Read the driver's clock into the loop's time: the time `after`, `every`
+# and `now` use until the next turn starts (each turn reads it once, at its
+# start). The application calls it before registering timers outside the
+# loop; tasks never need it -- and never hold the driver: only the code that
+# owns the driver can make the loop wait or turn.
+fn sync(context ev: Loop, d: Driver) -> int errors IndexNotFound:
+    set_reg(s_now, d.clock())
+    ev.st.at(s_now)
+
 # Ask run to return after the current turn.
 fn stop(context ev: Loop) errors IndexNotFound:
     set_reg(s_stopping, 1)

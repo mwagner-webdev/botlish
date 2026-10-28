@@ -99,7 +99,10 @@ nomethod fn out(conn: int, value: int, outbox: evloop::Reg, context ev: evloop::
     outbox.post(conn, value)
 
 fn session(conn: int, reg: evloop::Reg, outbox: evloop::Reg, context ev: evloop::Loop, net: Net) -> int errors IndexNotFound:
-    lines = std::mutable_array::create(1, 0)
+    # lines handled, the largest and the total `now - arg` of TALK lines
+    # (native clients send their send time as the argument: the
+    # network-to-handler latency; meaningless on the deterministic driver)
+    lines = std::mutable_array::create(3, 0)
     coroutine {step, first} = dialogue(conn):
         on IndexNotFound:
             Reply {kind: bye_kind, value: -1}
@@ -109,7 +112,13 @@ fn session(conn: int, reg: evloop::Reg, outbox: evloop::Reg, context ev: evloop:
         if e.reason != evloop::woke_event:
             break
         lines.set(0, lines.at(0) + 1)
-        say(evloop::cat("conn ", conn).concat(evloop::cat(" cmd ", e.a)).concat(" in turn "), evloop::stat(evloop::s_turn))
+        if e.a == 2:
+            lag = evloop::now() - e.b
+            if lag > lines.at(1):
+                lines.set(1, lag)
+            lines.set(2, lines.at(2) + lag)
+        if evloop::tracing?():
+            say(evloop::cat("conn ", conn).concat(evloop::cat(" cmd ", e.a)).concat(" in turn "), evloop::stat(evloop::s_turn))
         reply = step(Line {cmd: e.a, arg: e.b}):
             on IndexNotFound:
                 Reply {kind: bye_kind, value: -1}
@@ -130,6 +139,9 @@ fn session(conn: int, reg: evloop::Reg, outbox: evloop::Reg, context ev: evloop:
     net.hangup(conn)
     evloop::revoke(reg)
     say(evloop::cat("conn ", conn).concat(" closed in turn "), evloop::stat(evloop::s_turn))
+    say(evloop::cat("conn ", conn).concat(" lines "), lines.at(0))
+    say(evloop::cat("conn ", conn).concat(" max lag us "), lines.at(1))
+    say(evloop::cat("conn ", conn).concat(" total lag us "), lines.at(2))
     lines.at(0)
 
 fn acceptor(listener: evloop::Reg, outbox: evloop::Reg, max: int, context ev: evloop::Loop, net: Net) -> int errors IndexNotFound:
