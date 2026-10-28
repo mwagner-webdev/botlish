@@ -925,12 +925,18 @@ oversights of this change, not regressions of existing behaviour:
 **CI.**
 
 * **The front end changed, so `static-decisions.yml` ran on this
-  branch.** Its batched-against-sequential comparison of
-  `collection-reorder.bot`, `mutable-map.bot`, `mutable-set.bot` and
-  `framework-semantics.bot` must never run locally (AGENTS.md). It was
-  dispatched on this branch as run 40621722488 and is **pending**: it
-  was still queued behind other branches' runs when this report was
-  written.
+  branch.** Its batched-against-sequential comparison must never run
+  locally (AGENTS.md). Run 40621722488 checked the final front end
+  (commit 3cffddb; only this report changed after it). Every suite's
+  decisions agree under both schedulers: no DISAGREE, no DOES NOT
+  COMPILE.
+
+  | suite | batched: rounds / builds | sequential: rounds / builds |
+  |---|---|---|
+  | `collection-reorder.bot` | 3 / 6 (14.8 s) | 39 / 78 (280.7 s) |
+  | `mutable-map.bot` | 2 / 5 (12.8 s) | 9 / 19 (52.0 s) |
+  | `mutable-set.bot` | 4 / 6 (10.2 s) | 4 / 9 (14.9 s) |
+  | `framework-semantics.bot` | 3 / 6 (5.5 s) | 10 / 25 (26.4 s) |
 * **The rest is CI's on the push to main:** the whole Tcl suite with the
   golden duplicates, its cranelift coverage, `check.tcl`'s golden shards,
   the GC-stress run and the arm64 workflow.
