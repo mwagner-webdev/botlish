@@ -502,12 +502,15 @@ fn arrangement(t: Table[K], c: Table[K]) -> MutableArray[int]:
     } elseif {0} {
 >>>>
 
-@@ decided-condition-ignored an `if` on a decided condition joins its dead branch too
+@@ unreachable-code-walked statements the completion analysis proved unreachable are walked as if they ran (a decided condition's dead branch changes the map)
 ## hir/relations.tcl
 <<<<
-            set known [hir::types::KnownOutcome $hir [dict get $node condition]]
+        if {![dict get $hir exprs $e reachable]} {
+            return never
+        }
+        set value [Eval hir $contracts state $e]
 ====
-            set known ""
+        set value [Eval hir $contracts state $e]
 >>>>
 
 @@ unproven-cascade an order of the wrong type is reported unproven too, restating the type error

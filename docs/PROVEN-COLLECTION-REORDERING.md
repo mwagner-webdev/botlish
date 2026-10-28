@@ -341,9 +341,10 @@ on every completing incoming path, for the same value forms
   `JoinToken`). This is the join of two partitions into equal-members
   classes. It keeps what every path proves, however each path proved it,
   and nothing a path does not prove.
-* **`if`.** Both branches are walked from the state before the `if`. A
-  condition the type checker has decided (`hir::types::KnownOutcome`)
-  walks only its live branch. The cases of `cr-proof-joins`:
+* **`if`.** Both branches are walked from the state before the `if`.
+  When a condition is decided, the completion analysis marks the dead
+  branch's statements unreachable, so that branch never completes and
+  contributes nothing. The cases of `cr-proof-joins`:
 
   | form | verdict |
   |---|---|
@@ -353,7 +354,7 @@ on every completing incoming path, for the same value forms
   | the same with `m.set(5, 5)` before `m.order()` in the first branch | REORDER-NOT-PROVEN: one path relates `o` to `m`, the other to `n` |
   | `o = if b: m.order() else: set_of([1])` | REORDER-NOT-PROVEN |
   | `o = m.order()`, then `if b: m.set(5, 5)` (one branch), or a set in both branches | REORDER-NOT-PROVEN |
-  | `o = m.order()`, then `if false: m.set(5, 5)` | proven: the dead branch is not walked |
+  | `o = m.order()`, then `if false: m.set(5, 5)` | proven: the dead branch's statements are unreachable |
 
 * **Paths that do not complete** contribute nothing: `return`, `fail`,
   `break`, `continue` and unreachable statements. The early-return

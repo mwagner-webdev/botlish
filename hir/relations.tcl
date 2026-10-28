@@ -64,20 +64,20 @@
 # installed context (hir::cardinality::ContextSite). A read-only operation
 # (length, contains, at, a loop over the collection) changes nothing.
 #
-# Control flow: the two branches of an `if` (one, when its condition is
-# decided: hir::types::KnownOutcome) and the handled call and its handlers
-# are walked from the state before them, and joined: two places (or a
-# place and an `if`'s or a handled call's value) share a token after the
-# join exactly when they shared one on every completing path -- the token
-# itself when it is the same on every path, else a fresh one (never one of
-# the incoming ones) shared by exactly the places that agreed. A relation
-# true on one path only is lost. A path that cannot complete (return, fail, break,
-# continue, unreachable code) contributes nothing. A handler is entered
-# with every place the handled call may change already changed. A loop's
-# body is walked once, entered with every place changed anywhere in the
-# loop given a fresh stamp (a value of one iteration never survives into
-# the next but through a place), and the state after the loop gives them
-# fresh stamps again. Nothing is optimistic: a relation is kept only where
+# Control flow: the two branches of an `if` and the handled call and its
+# handlers are walked from the state before them, and joined: two places
+# (or a place and an `if`'s or a handled call's value) share a token after
+# the join exactly when they shared one on every completing path -- the
+# token itself when it is the same on every path, else a fresh one (never
+# one of the incoming ones) shared by exactly the places that agreed. A
+# relation true on one path only is lost. A path that cannot complete
+# (return, fail, break, continue, unreachable code -- a decided condition's
+# dead branch is unreachable code to the completion analysis) contributes
+# nothing. A handler is entered with every place the handled call may
+# change already changed. A loop's body is walked once, entered with every
+# place changed anywhere in the loop given a fresh stamp (a value of one
+# iteration never survives into the next but through a place), and the
+# state after the loop gives them fresh stamps again. Nothing is optimistic: a relation is kept only where
 # it holds on every path, and lost wherever it may not.
 #
 # The relation is compile-time knowledge only: it changes no code, and a
@@ -559,14 +559,11 @@ proc hir::relations::Eval {hirVar contracts stateVar e} {
             if {[Eval hir $contracts state [dict get $node condition]] eq "never"} {
                 return never
             }
-            set known [hir::types::KnownOutcome $hir [dict get $node condition]]
-            set outcomes {}
-            if {$known ne "0"} {
-                lappend outcomes [Outcome hir $contracts $state [dict get $node thenBody]]
-            }
-            if {$known ne "1"} {
-                lappend outcomes [Outcome hir $contracts $state [dict get $node elseBody]]
-            }
+            # (A branch a decided condition rules out holds unreachable
+            # statements only: Seq makes it a path that never completes.)
+            set outcomes [list \
+                [Outcome hir $contracts $state [dict get $node thenBody]] \
+                [Outcome hir $contracts $state [dict get $node elseBody]]]
             return [Complete state [Join $outcomes]]
         }
         handle {
