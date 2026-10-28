@@ -5,7 +5,8 @@
 #                                       ?-verbose 0|1?
 #
 # Each of N programs is a fresh application: a C library of K generated C
-# functions, compiled with the host C compiler into a static archive, a
+# functions, compiled with the host C compiler into a static archive
+# (tests/ctoolchain.tcl: cc and ar, or MSVC's cl and lib on Windows), a
 # Botlish binding module `fz` declaring them, and an entry program calling
 # each once. A function draws, at random:
 #
@@ -71,11 +72,13 @@ proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] 
 proc chance {p} { return [expr {rand() < $p}] }
 proc between {lo hi} { return [expr {$lo + int(rand() * ($hi - $lo + 1))}] }
 
-# The model's C types on the LP64 targets: Botlish name -> {C spelling bits
-# signed}. Plain char is unsigned on Linux AArch64 only: signed on x86-64,
-# and on Apple's AArch64 (its own C ABI, whatever the architecture shares).
+# The model's C types: Botlish name -> {C spelling bits signed}. Plain char
+# is unsigned on Linux AArch64 only: signed on x86-64, and on Apple's
+# AArch64 (its own C ABI, whatever the architecture shares). A long is 64
+# bits on the LP64 targets (Linux, macOS) and 32 on Windows' LLP64.
 set machine $::tcl_platform(machine)
 set charSigned [expr {!($::tcl_platform(os) eq "Linux" && $machine in {aarch64 arm64})}]
+set longBits [expr {$::tcl_platform(platform) eq "windows" ? 32 : 64}]
 set scalars [dict create \
     SChar     {{signed char} 8 1} \
     UChar     {{unsigned char} 8 0} \
@@ -84,8 +87,8 @@ set scalars [dict create \
     UShort    {{unsigned short} 16 0} \
     Int       {int 32 1} \
     UInt      {{unsigned int} 32 0} \
-    Long      {long 64 1} \
-    ULong     {{unsigned long} 64 0} \
+    Long      [list long $longBits 1] \
+    ULong     [list {unsigned long} $longBits 0] \
     LongLong  {{long long} 64 1} \
     ULongLong {{unsigned long long} 64 0} \
     Bool      {_Bool 1 0}]
@@ -573,8 +576,7 @@ for {set p 0} {$p < [dict get $options -n]} {incr p} {
     writeFile [file join $dir main.bot] $main
     set problem ""
     if {[catch {
-        exec cc -c -O2 -fPIC [file join $dir fz.c] -o [file join $dir fz.o]
-        exec ar rcs [file join $dir libbotlish_cffi_fuzz.a] [file join $dir fz.o]
+        ctool::staticLibrary $dir botlish_cffi_fuzz [file join $dir fz.c]
     } message]} {
         set problem "the C library did not build: $message"
     } elseif {[catch {surface::readProgramFile [file join $dir main.bot] -warnings off -cache ""} hir]} {

@@ -6,6 +6,12 @@
 > Apple's v-register padding count it with the doubles (that report's
 > section 11). A trailing argument is still never a float.
 
+> Extended by WINDOWS-X86-64-MILESTONE-6.md: Win64 is a row of the
+> convention table (section 28's "its own row"). Its trailing arguments are
+> placed by position as named ones, and each float or double of a call's
+> first four positions is copied by a stub into the integer register of
+> its position as well (`va_stub`'s second kind, beside System V's `%al`).
+
 > A Botlish variadic parameter is a List the caller does not bracket. A C
 > variadic call is a call whose signature is its own.
 

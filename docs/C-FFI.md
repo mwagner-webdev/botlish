@@ -749,8 +749,13 @@ else linked anyway (LNK4217) and otherwise refuses (LNK2019, NATIVE LINK
 with the driver's explanation). A DLL keeps its own runtime, `/MT` or `/MD`
 (section "The C runtime" of the milestone report). The machine state each call arrives in is checked
 against MSVC-built callees (tests/cffi/fixture.c with
-tests/cffi/fixture-win64.asm's capture). A variadic C call is a codegen
-error on Windows (no Win64 variadic lowering yet). Windows I/O is a binding
+tests/cffi/fixture-win64.asm's capture). Variadic C calls run on Windows
+since WINDOWS-X86-64-MILESTONE-6.md: Win64 passes each float or double of a
+variadic call's first four positions in both its xmm register and its
+position's integer register, which a stub before the jump to C copies
+(`va_stub`); the C runtime's printf family is inline in MSVC's headers, so
+a binding of `snprintf` declares `extern c library
+"legacy_stdio_definitions"`, its out-of-line definitions. Windows I/O is a binding
 of this kind: stdlib/windows.bot declares kernel32's GetStdHandle, WriteFile
 and GetLastError, stdlib/windows/io.bot puts them behind `std::io::IO`.
 
@@ -1346,7 +1351,7 @@ Apple and Linux AArch64 placements.
 | hir/direct.tcl | the retaining call as an authority source |
 | core/native.tcl, core/cabi.tcl | `-extern` metadata, `isExtern`, `displayName`; the provenance in the contract, `ExternImpl` (NATIVE-ONLY) |
 | native/lower.tcl, native/native.tcl, main.tcl | the foreign table, `foreigncall`, link directories, `-L` |
-| native/src/nir.rs, codegen/clif.rs, codegen/roots.rs, codegen/mod.rs | the NIR, the C call and its transport (a variadic call's per-call signature, `c_call_signature`, and x86-64's `%al` stub, `va_stub`), the safepoint, the JIT's unlinked symbols |
+| native/src/nir.rs, codegen/clif.rs, codegen/roots.rs, codegen/mod.rs | the NIR, the C call and its transport (a variadic call's per-call signature, `c_call_signature`, and x86-64's stubs, `va_stub`: System V's `%al`, Win64's copies of the first four positions' floating-point arguments into their integer registers), the safepoint, the JIT's unlinked symbols |
 | native/src/codegen/target.rs | the target's C convention, and which parameters carry an extension attribute (Apple's stack-passed ones do not) |
 | native/src/codegen/aot.rs, native/src/main.rs, native/src/runtime/aot.rs | the link plan's arguments (per `LinkerFlavor`), linker failures, the stub's refusal, the linked run and its driver protocol |
 | native/src/runtime/ffi.rs, runtime/error.rs | the slow paths and the two failures |

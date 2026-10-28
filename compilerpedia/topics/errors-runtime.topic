@@ -941,8 +941,10 @@ Cranelift IR (shown by -emit-clif); when Cranelift's verifier or its code
 generation fails, or its ISA builder rejects the host, the message is
 Cranelift's own, usually naming the function. One refusal is the native
 backend's own: "variadic C call of NAME: no variadic call lowering for the
-windows_fastcall convention" -- a variadic C call (concept.variadics) on
-Windows x86-64, which has none yet.
+CONVENTION convention" -- a variadic C call (concept.variadics) compiled
+for a C convention without a variadic lowering (System V, Apple AArch64
+and Win64 have one; Windows on AArch64, which shares the name
+windows_fastcall, has none).
 
 == WHAT TO DO
 Check that the host is a supported platform (backend.platforms). Otherwise
@@ -1054,8 +1056,8 @@ summary: NATIVE LIMIT STACK stops a native run whose nested calls exhaust a nati
 index: errors backends
 alias: stack overflow; recursion too deep; deep recursion; native stack exhausted
 keywords: recursion, stack, depth, BOTLISH_NATIVE_STACK_BYTES, BOTLISH_NATIVE_COROUTINE_STACK_BYTES, coroutine, too many nested evaluations, limit, tail call
-related: backend.cranelift backend.interp backend.compile backend.performance concept.loops
-docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-4.md COROUTINES.md README.md
+related: backend.cranelift backend.interp backend.compile backend.performance concept.loops backend.native-library
+docs: NATIVE-STACK-OVERFLOW.md MACOS-AARCH64-MILESTONE-4.md WINDOWS-X86-64-MILESTONE-4.md COROUTINES.md NATIVE-LIBRARY-MILESTONE-1.md README.md
 code: NATIVE LIMIT STACK
 code: TCL LIMIT STACK
 
@@ -1074,6 +1076,13 @@ backends stop at different depths:
     {NATIVE LIMIT STACK} {native stack exhausted: ...}` and exits 1.
     (On Windows a coroutine's stack is a fiber of its own, with the same
     8 MiB and the same report.)
+  * a native library's call (backend.native-library): it runs on its
+    caller's stack, which installs no guard of ours; its Botlish functions
+    check their stack pointer instead, keeping an eighth of the stack
+    (64 KiB to 1 MiB) in reserve, so Botlish recursion that would exhaust
+    it fails the call with status RUNTIME and NATIVE LIMIT STACK, and the
+    instance goes on. A C function or the runtime exhausting it still ends
+    the process.
   * interp and compile: Tcl's evaluation limit, raised by the compiler to
     about 14,000 nested Botlish calls on interp and 99,000 on compile,
     stops the run with "too many nested evaluations (infinite loop?)"

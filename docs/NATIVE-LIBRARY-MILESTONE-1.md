@@ -89,10 +89,13 @@ evidence is CI's. `tests-arm64.yml`, dispatched on this branch (run
 * The driver refuses its `library` command on them too (`SUPPORTED`).
 * Mobile cross-compilation was outside the brief.
 
-**Not guaranteed: stack safety.** Botlish code runs on the caller's stack
-with no guard. Exhausting it ends the process (SIGSEGV), and the header,
-the Compilerpedia topic and section 13 say so. No embedding is claimed
-safe for unbounded recursion.
+**Stack safety, for Botlish recursion.** Botlish code runs on the
+caller's stack with no guard, so a library's functions check their stack
+pointer (added after the milestone: section 7, "Stack safety"). Recursion
+that would exhaust the caller's stack, or a coroutine's, fails the call
+with NATIVE LIMIT STACK and the instance goes on. A C function or the
+runtime exhausting the stack still ends the process; the header, the
+Compilerpedia topics and section 13 say so.
 
 Tested platform: Ubuntu 24.04.5 LTS container, Linux 6.18 x86-64, glibc
 2.39; rustc 1.97.0, cranelift-codegen 0.135.2; GNU binutils 2.42 (ld,
@@ -548,6 +551,82 @@ thread.
   A later actor-aware layer can own instances, move the creation onto its
   threads, or replace the check, without changing the C signature.
 
+### Stack safety
+
+Added after the milestone. A library runs on its caller's stack and
+installs no stack guard there: the executable's guard is a process-wide
+signal handler that ends the process, which a library must never do to
+its host. Before this, recursion that exhausted the caller's stack ended
+the process with SIGSEGV (the table in section 13). Now a library's code
+bounds its own recursion.
+
+* **The check.** The driver emits a library's program through
+  `nir::check_stack_limit`. Every function that makes a Botlish call
+  compares its stack pointer with `Vm::stack_limit` in its prologue
+  (`codegen::clif`'s `prologue_stack_limit`, planned by `codegen::roots`'s
+  `stack_check`): one load, one compare and a branch to a cold block that
+  fails with NATIVE LIMIT STACK. The call-effect summaries make those
+  functions fallible, so their callers check for the error, as on the
+  fallback plan. Executables and the driver's JIT are unchanged: their
+  code has no check and their calls stay infallible, bounded by the
+  guard.
+* **The limit** is the running stack's low bound plus a reserve of an
+  eighth of its size, at least 64 KiB and at most 1 MiB
+  (`NativeStack::stack_limit`). The reserve is for what runs below the
+  last checked frame: Botlish functions that make no Botlish call, the
+  runtime's helpers, C functions Botlish code calls, and the failure's
+  way back to the host.
+* **Which stack.** `NAME_create` turns the check on with the creating
+  thread's stack (`Vm::check_stack_limit`). Every call takes the limit of
+  the stack it enters on (`enter`, `Vm::stack_limit_at`): the thread's,
+  or none on a stack the instance did not make (a host's own coroutine
+  or fiber), never another stack's limit. Every coroutine switch
+  publishes the stack it arrives on (`Vm::publish_active_stack`), which
+  now sets the limit too, so a coroutine's body is bounded by its own
+  stack.
+* **After a failure** the call returns `NAME_STATUS_RUNTIME` with the
+  identity `NATIVE LIMIT STACK`, and the instance answers the next call.
+
+Not covered: a C function or a runtime helper that exhausts the reserve
+by itself, and recursion on a stack the instance did not make. Both still
+end the process: there is no guard to catch them. A library-owned stack
+(section 14) would cover them.
+
+Measured with `depth(n)` (n nested Botlish calls), searching for the
+largest n that returns, on a plain C caller's threads (x86-64):
+
+| Caller's stack | Largest depth that returns | First refused (NATIVE LIMIT STACK) | Before (section 13) |
+|---|---|---|---|
+| 512 KiB | 9,434 | 9,435 | 10,000 returned, 20,000 crashed |
+| 1 MiB | 18,992 | 18,993 | 20,000 returned, 30,000 crashed |
+| 8 MiB | 152,794 | 152,795 | 150,000 returned, 200,000 crashed |
+
+After each refusal `depth(1000)` returned on the same instance.
+
+The cost, against the same library built by main's driver without the
+check, on `fib(32)` (2.2 million calls, each a function with a Botlish
+call: the worst case), twelve interleaved runs of the best of seven calls
+each: minimum 26.5 ms against 24.3 ms, median 27.0 ms against 25.2 ms,
+about 8%. The shared library's text grew by 1.4 KB (625,676 bytes against
+624,296). Executables and the JIT emit no check and are unchanged.
+
+The tests are `nl-stack-safety` (the main thread, a 512 KiB and a 1 MiB
+thread), `nl-stack-safety-coroutine` (a coroutine's 8 MiB stack bounds
+recursion that the 512 KiB thread's could not hold, and a fused
+coroutine runs on the thread's) and `nl-stack-safety-foreign-stack` (a
+call on a host-made `ucontext` stack is not checked against the thread's
+limit, and the thread's is back for the next call). All run plainly and
+under GC stress.
+
+**Found on the way: fusion dropped exports.** `codegen::fusion`'s
+`drop_unreferenced` empties every function nothing reaches from the
+program function. A library's exports are reached from C only, so in a
+library with a fused coroutine every export no other function called
+lost its body, and calling it reported `NATIVE BUG: native code reached a
+point HIR proved unreachable`. The walk now starts at the exports too
+(`a_library_export_keeps_its_code_when_a_coroutine_is_fused`, and
+`nl-stack-safety-coroutine`'s `depth`).
+
 ## 8. Multiple-library correctness
 
 ### Symbols
@@ -916,14 +995,19 @@ Sizes, x86-64, for `rnprobe.bot`:
 
 ## 13. Limitations
 
-* **Stack safety: not guaranteed.**
+* **Stack safety: Botlish recursion only.**
   * Botlish code runs on the caller's thread and stack, with no guard: a
     library installs no signal handler and never calls `_exit`, and the
     executable's guard is not used.
-  * Exhausting the stack ends the process with SIGSEGV. There is no status
-    and no recovery.
-  * Measured with `rnprobe_depth` (non-tail recursion) from a plain C
-    caller, with the census's figures unchanged:
+  * Botlish recursion is bounded by a check in its functions (section 7,
+    "Stack safety"): exhausting the stack that way is NATIVE LIMIT STACK,
+    and the instance goes on.
+  * A C function or a runtime helper that exhausts the check's reserve by
+    itself, or recursion on a stack the instance did not make, still ends
+    the process with SIGSEGV. There is no status and no recovery there.
+  * Before the check, measured with `rnprobe_depth` (non-tail recursion)
+    from a plain C caller, with the census's figures unchanged (section 7
+    has the figures with it):
 
     | Caller's stack | Largest depth that returned | First that crashed |
     |---|---|---|
@@ -931,11 +1015,12 @@ Sizes, x86-64, for `rnprobe.bot`:
     | 1 MiB | 20,000 | 30,000 |
     | 8 MiB | 150,000 | 200,000 |
 
-  * The supported contract is the header's: a caller that needs deep
-    recursion gives the call a large stack, as `host_async.cpp` does with
-    a 256 MiB worker that owns its instance.
-  * A recoverable overflow (a library-owned stack or a guard per instance)
-    belongs to the thread/actor milestone.
+  * A caller that needs deep recursion still gives the call a large
+    stack, as `host_async.cpp` does with a 256 MiB worker that owns its
+    instance: the check refuses deep recursion, it does not make room
+    for it.
+  * Recovering from an overflow in C or the runtime (a library-owned
+    stack or a guard per instance) belongs to the thread/actor milestone.
 * **Hosts.** Linux glibc only: x86-64 tested here, AArch64 in CI
   (section 1). No macOS, Windows, musl or mobile libraries.
 * **Values.** Only int, bool, Float64, str and unit cross. No Lists,
@@ -972,8 +1057,9 @@ The minimum for actor-aware embedding:
    signatures need no change: the thread check becomes the owner check.
 2. **A library-owned stack per instance or per owner,** with the overflow
    guard on that stack and an embedded policy: report a status and poison
-   the instance, never `_exit` or abort the host. This makes deep recursion
-   safe on small host threads.
+   the instance, never `_exit` or abort the host. Botlish recursion is
+   bounded already (section 7, "Stack safety"); this gives deep recursion
+   room on small host threads and covers an overflow in C or the runtime.
 3. **Asynchronous calls.** Post a call to the owner, and complete it
    through a callback or a polled completion: what `host_async.cpp`
    hand-builds today.
@@ -993,7 +1079,7 @@ For mobile targets, after that:
 
 ## 15. Validation: tests, probes, mutation results
 
-### New: `tests/native-library.test` (25 tests)
+### New: `tests/native-library.test` (28 tests)
 
 Every behavior test compiles real C with `cc -Wall -Werror` against the
 generated header and archive only, in a directory whose path contains a
@@ -1010,6 +1096,9 @@ the same output (all but `nl-walk-boundary`, below).
   `nl-coroutine-inside`, `nl-walk-boundary` (run plainly only: its
   collections need real heap growth, and GC stress clears the marks before
   any push).
+* **Stack safety** (added after the milestone, section 7).
+  `nl-stack-safety`, `nl-stack-safety-coroutine`,
+  `nl-stack-safety-foreign-stack`.
 * **Composition.** `nl-two-libraries`, `nl-two-instances`,
   `nl-two-libraries-shared`, `nl-nested-libraries`, `nl-symbols` (`nm`).
 * **Front end and tools.**
@@ -1017,7 +1106,8 @@ the same output (all but `nl-walk-boundary`, below).
   * `nl-library-checks`, `nl-library-export-list`, `nl-manifest`,
     `nl-main-cli`.
 
-All 25 pass on Linux x86-64; the whole file takes 13 s.
+All 25 milestone tests passed on Linux x86-64; the whole file took 13 s.
+With the three stack-safety tests, all 28 pass.
 
 ### Existing suites run after the change
 
@@ -1087,7 +1177,8 @@ method filter and the coroutine-fusion constraints) reached main as
 
 ### Mutation results
 
-`audit/native-library/tools/mutate.tcl` holds 20 mutants (`mutants.txt`),
+`audit/native-library/tools/mutate.tcl` holds 26 mutants (`mutants.txt`;
+20 from the milestone, six from stack safety, section 7),
 each a deliberate bug of one rule. Each runs in a private tree with its
 own native build. The detectors are:
 
@@ -1115,6 +1206,12 @@ own native build. The detectors are:
 | reentrant-accepted | a call from inside a call runs | `nl-reentrant` |
 | destroyed-handle-live | a destroyed instance stays registered | `nl-lifecycle` |
 | stack-ceiling-unset | the walk climbs into the host's frames | `nl-walk-boundary` |
+| stack-limit-never-set | an instance checks against a zero limit | `nl-stack-safety`, `-coroutine`, `-foreign-stack` |
+| stack-check-not-emitted | the driver emits no prologue check | the same three |
+| stack-check-callers-unchecked | a call that can fail for the stack is proven infallible | the same three |
+| stack-limit-not-followed | a coroutine is checked against the thread's limit | `nl-stack-safety-coroutine` |
+| stack-limit-foreign-stack | a call on a host-made stack is checked against the thread's limit | `nl-stack-safety-foreign-stack` |
+| export-dropped-by-fusion | fusion empties an export only C calls | `nl-stack-safety-coroutine` |
 | descriptor-errors-dropped | the descriptor's error table read as empty | `program_descriptor_round_trips`, 7 tests |
 | fingerprint-unchecked | a record of another runtime build accepted | `linked_program_refuses_a_foreign_record` |
 
@@ -1143,6 +1240,18 @@ survivors.
 
 The final run, all 20 mutants against the final tests (the table's
 column): 20 killed, 0 survived.
+
+Stack safety (section 7) added the six mutants after `stack-ceiling-unset`
+in the table and moved `stack-ceiling-unset` to the new code of `enter`.
+Run with `-only` against the final tests: 7 killed, 0 survived. The
+milestone's other 19 were not rerun: neither the code they mutate nor the
+tests that killed them changed (the test file only gained three tests),
+and every one still applies. It also
+changed the call-effect summary that two mutants of
+`audit/native-stack/tools/mutants.txt` edit: `effects-fallible-again` and
+`effects-infallible-on-fallback` now mutate the summary with the
+library's term in it, keeping their rules, and were rerun: both killed
+(the `nir::effect_tests`).
 
 The existing harnesses' mutants were checked against the changed files.
 Two no longer applied and were updated to the code they mutate, keeping
@@ -1178,7 +1287,15 @@ The files:
   `library` command;
 * the runtime: `native/src/runtime/program.rs`,
   `native/src/runtime/library.rs`, `Vm::stack_ceiling` and the walk's bound
-  in `native/src/runtime/vm.rs`.
+  in `native/src/runtime/vm.rs`;
+* stack safety (section 7): `nir::check_stack_limit` and the call-effect
+  summary in `native/src/nir.rs`, `codegen::roots`'s `stack_check`,
+  `codegen::clif`'s `prologue_stack_limit`, `NativeStack::stack_limit`,
+  `Vm::stack_limit`, `check_stack_limit`, `stack_limit_at` and
+  `publish_active_stack`, `enter` and `create` in
+  `native/src/runtime/library.rs`;
+* `codegen::fusion`'s `drop_unreferenced` (its roots: the program
+  function and the exports).
 
 What to run:
 
@@ -1190,6 +1307,9 @@ What to run:
   `mutants.txt` must still apply and be killed. Update a mutant's text when
   you change the code it mutates, keeping it a mutant of the same rule.
 * For a change to the startup: `audit/native-aot/tools/mutate.tcl` too.
+* For a change to the call-effect summary: `audit/native-stack/tools/mutate.tcl`
+  (its `effects-*` mutants) too; for one to fusion, what AGENTS.md lists
+  for coroutine fusion.
 * For the probes: `audit/compiler-service/probes/export/run.sh` and
   `audit/react-native/tools/host-spike.tcl` (section 16 of
   REACT-NATIVE-TARGET-CENSUS.md has the latter's prerequisites).
