@@ -1393,10 +1393,17 @@ WINDOWS-TOOLCHAIN-CENSUS.md): the driver and runtime built for
   MSVC-built callees (tests/cffi/fixture.c with fixture-win64.asm's
   register and stack capture; c-ffi.test's `cf-abi-*` Win64 model:
   positional registers, the 32-byte shadow space, 8-byte stack slots,
-  LLP64's 32-bit `long`). A variadic C call has no Win64 lowering and is a
-  codegen error there (`nativeCVariadics`): never lower one without
-  checking Win64's variadic rules (a double in both registers) against
-  real callees first. The tests build their C fixtures with MSVC's cl, lib
+  LLP64's 32-bit `long`). Variadic C calls run on Windows too
+  (WINDOWS-X86-64-MILESTONE-6.md): every argument at its position, and a
+  call of a variadic function passes each float or double of the first
+  four positions -- fixed ones included -- in both its xmm register and
+  its position's integer register, as its own 64 bits (the Win64 stub,
+  Compilation targets below). It is checked against MSVC's own variadic
+  calls (fixture-win64.asm's `bcf_vcapture`, c-ffi.test's `cf-va-abi-*`
+  Win64 model) and MSVC-built `va_arg` callees: never count the positions
+  per kind, convert a double instead of copying its bits, pass a duplicate
+  as an extra argument (it shifts every later position), or apply the rule
+  to a fixed-arity call. The tests build their C fixtures with MSVC's cl, lib
   and ml64 through tests/ctoolchain.tcl, whose vcvars64.bat environment is
   set for those tools' runs alone: Botlish's own links never run in it.
 * A linked run (a program that calls C, run by the native backends) starts
@@ -1622,10 +1629,17 @@ C-BINDGEN-LAYOUTS.md) have equal rows and are two targets. Keep it so:
   exception goes). The registers are counted per kind, as AAPCS64 does:
   the eight that keep it are integer-register parameters, never the first
   eight positions (doubles take v0-v7; `cf-abi-doubles-before-integers`).
-  The one register Botlish places itself is x86-64 System V's `%al` of a
-  variadic call (Cranelift cannot give a value a register at a call): the
-  two-instruction stub `va_stub` (Variadics, below). Never extend it to
-  another register or argument.
+  The registers Botlish places itself are those of a variadic call's stub
+  (`va_stub`, `va_stub_for`; Variadics, below), because Cranelift can give
+  no value a fixed register at a call, nor one value two argument
+  registers: x86-64 System V's `%al` (`mov`), and Win64's copy of each
+  float or double of the first four positions from its xmm register into
+  its position's integer register (`movq`, WINDOWS-X86-64-MILESTONE-6.md),
+  then a jump to the C function. A Win64 call with no floating-point
+  argument there needs no stub. Never extend either to another register or
+  argument, never give a stub a frame or a call, and never add a third
+  without first showing, as that report's experiment does, that no
+  Cranelift signature of the pinned release can state the rule.
 * A test that compiles a Linux program (one importing `linux::*`) compiles
   it for `linuxTarget` (tests/helpers.tcl: the host's own on Linux) and runs
   it on `backendsFor` its HIR's target; the golden runner, the warning
@@ -3005,7 +3019,10 @@ two things with one marker word. Keep both as they are:
   and lowered to a per-call machine signature (`codegen/clif.rs`'s
   `c_call_signature`): x86-64 System V through the `%al` stub, Linux
   AArch64 as AAPCS64, Apple AArch64 with the free x0-x7/v0-v7 padded so
-  every trailing argument is on the stack in an 8-byte slot. Never build
+  every trailing argument is on the stack in an 8-byte slot, Win64
+  (x86-64 only) by position through the stub copying the first four
+  positions' floats and doubles into their integer registers
+  (WINDOWS-X86-64-MILESTONE-6.md). Never build
   a runtime argument list, use libffi, read a format string, infer
   variadicity from a name, a format attribute or a library, give a trailing
   pointer a contract (it is a direct edge, `hir/direct.tcl`), or lower a
@@ -3025,13 +3042,18 @@ the same rule). If you change the C side (ExternDecl's marker,
 `VariadicArgument`, `promoted`/`promotedBool`, the variadic cases of
 hir/borrow.tcl, hir/direct.tcl, hir/foreign.tcl, native/lower.tcl's
 `varargs=`, nir.rs's `VarArg`, `c_call_signature`, `vararg_value`,
-`va_stub`), run `tests/c-ffi.test` (its `cf-va-*`, also under
-`BOTLISH_NATIVE_GC_STRESS=1`), `audit/c-ffi/tools/fuzz.tcl`,
-`audit/c-ffi/tools/mutate.tcl -only va-...` (the `va-*` mutants; the
-AArch64 ones apply on an AArch64 host), `cargo test --release
---manifest-path native/Cargo.toml --bin botlish-native ffi_` (the
-`x86_64_variadic_tests` here; the Apple and Linux AArch64 placements on an
-AArch64 host: CI's arm64 workflow and the macOS smoke job), and the
+`va_stub`, `va_stub_for`, `shadow_positions`), run `tests/c-ffi.test`
+(its `cf-va-*`, also under `BOTLISH_NATIVE_GC_STRESS=1`),
+`audit/c-ffi/tools/fuzz.tcl`, `audit/c-ffi/tools/mutate.tcl -only va-...`
+(the `va-*` mutants; the AArch64 ones apply on an AArch64 host, the Win64
+ones on an x86-64 host, killed by their Rust tests everywhere and by
+c-ffi.test's MSVC captures on Windows: `CI-Tests: c-ffi-mutants=...` in a
+`[ci-full]` push), `cargo test --release --manifest-path native/Cargo.toml
+--bin botlish-native ffi_` (the `x86_64_variadic_tests` and
+`win64_variadic_tests` here -- the latter runs a Win64 call through its
+stub in the JIT on any x86-64 host; the Apple and Linux AArch64 placements
+on an AArch64 host: CI's arm64 workflow and the macOS smoke job), the
+Windows workflow on the branch for a change to Win64's lowering, and the
 binding generator's checks for a change to what it emits (next sections).
 
 ## C header archaeology (a research instrument)
@@ -3526,8 +3548,9 @@ layering:
   same pinned headers on the Windows host and stages it the same way (none
   is committed: C binding generator, above). Never copy a binding into the
   example directory or hand-write a parallel SDL declaration.
-* The game makes no variadic C call: Windows' native backend refuses them
-  (`cVariadics`). SDL's error text is copied out of SDL (`SDL_strlcpy`
+* The game makes no variadic C call (it was written while Windows' native
+  backend refused them; WINDOWS-X86-64-MILESTONE-6.md lowers them now, and
+  the design stays). SDL's error text is copied out of SDL (`SDL_strlcpy`
   into the session's text buffer, read through its layout) and reported by
   `game.bot` through `std::io`, never by `SDL_Log`. An SDL enumeration
   constant's C type is the target's (`unsigned int` on Linux, `int` with

@@ -798,14 +798,17 @@ void *bcf_vaddress(void) { return bcf_vcell; }
 unsigned long long bcf_vaddress_bits(void) { return (unsigned long long)(uintptr_t)bcf_vcell; }
 
 /* What a call of bcf_vcapture (or its alias bcf_vcapture_d) arrived in: the
- * eight integer argument registers (x0-x7; on x86-64 rdi, rsi, rdx, rcx, r8,
- * r9, then two zeros), %rax (x86-64, where a variadic call's %al states how
- * many vector registers it uses; 0 on AArch64), the low 64 bits of the
- * eight floating-point argument registers (v0-v7, xmm0-xmm7) and the first
- * 256 bytes of the caller's stack arguments (Apple's convention puts every
- * trailing argument there: the mixed scenario's eighteen take 144). Assembly
- * saves them before any compiled code can touch them; declared with any
- * prototype, it returns 0. */
+ * eight integer argument registers (x0-x7; on x86-64 System V rdi, rsi, rdx,
+ * rcx, r8, r9, then two zeros; on Win64 rcx, rdx, r8, r9, then four zeros),
+ * %rax (x86-64, where a System V variadic call's %al states how many vector
+ * registers it uses; 0 on AArch64), the low 64 bits of the eight
+ * floating-point argument registers (v0-v7, xmm0-xmm7; on Win64 xmm0-xmm3,
+ * then four zeros) and the first 256 bytes of the caller's stack arguments
+ * (Apple's convention puts every trailing argument there: the mixed
+ * scenario's eighteen take 144; on Win64 they start with the caller's
+ * 32-byte shadow space). Assembly saves them before any compiled code can
+ * touch them (on Windows fixture-win64.asm's); declared with any prototype,
+ * it returns 0. */
 static unsigned long long bcf_vregs[8], bcf_vfregs[8], bcf_vrax;
 static unsigned char bcf_vstack[256];
 static unsigned long long bcf_vref_regs[8], bcf_vref_fregs[8], bcf_vref_rax;
@@ -866,10 +869,6 @@ unsigned int bcf_vreference_al(void) { return (unsigned int)(bcf_vref_rax & 0xff
 unsigned long long bcf_vreference_float(int i) { return bcf_vref_fregs[i & 7]; }
 unsigned char bcf_vreference_stack_byte(int i) { return bcf_vref_stack[i & 255]; }
 
-/* Not on Windows: Botlish lowers no variadic call for the Win64 convention
- * (a codegen error there: c-ffi.test's cf-va-win64-refused), so there is no
- * Win64 capture of one to compare with. */
-#if !defined(_WIN32)
 static void bcf_vkeep_reference(void) {
     memcpy(bcf_vref_regs, bcf_vregs, sizeof bcf_vregs);
     memcpy(bcf_vref_fregs, bcf_vfregs, sizeof bcf_vfregs);
@@ -879,16 +878,21 @@ static void bcf_vkeep_reference(void) {
 
 /* This compiler's own variadic calls of the capture, through a volatile
  * pointer of the variadic prototype (so the call is a variadic call the
- * compiler lowers itself), with c-ffi.test's cf-va-abi-* values:
+ * compiler lowers itself: on Windows MSVC's, which passes each double of
+ * the first four positions in both registers), with c-ffi.test's
+ * cf-va-abi-* values:
  *
  *   none     n = 0 and no trailing argument
  *   small    two trailing arguments, an int and a double: every register
  *            free (Apple: still on the stack)
  *   ints     twelve ints: past the integer registers everywhere
- *   mixed    ints, longs, pointers and doubles interleaved, ten doubles
- *            (past the floating-point registers) and eight integers
+ *   mixed    ints, long longs, pointers and doubles interleaved, ten
+ *            doubles (past the floating-point registers) and eight integers
  *   fixedd   bcf_vcapture_d: a fixed double and a fixed int, then doubles
- *            and ints */
+ *            and ints
+ *   doubles  five doubles: on Win64 the first three at positions 1-3 (both
+ *            registers), the others past them on the stack
+ *   narrow   values narrower than int and a _Bool, each promoted to int */
 typedef int (*bcf_vcapture_fn)(int, ...);
 typedef int (*bcf_vcapture_d_fn)(double, int, ...);
 
@@ -916,7 +920,7 @@ int bcf_vreference_ints(void) {
 
 int bcf_vreference_mixed(void) {
     volatile bcf_vcapture_fn f = bcf_vcapture;
-    int r = f(18, 7, 0.5, -9000000000L, 1.25, (void *)bcf_vcell, -2.0, 4000000000u, 3.5,
+    int r = f(18, 7, 0.5, -9000000000LL, 1.25, (void *)bcf_vcell, -2.0, 4000000000u, 3.5,
               -1, 4.75, 18446744073709551615ULL, 5.0, (void *)0, 6.125, 42, 7.5, 8.25, 9.0);
     bcf_vkeep_reference();
     return r;
@@ -928,4 +932,68 @@ int bcf_vreference_fixedd(void) {
     bcf_vkeep_reference();
     return r;
 }
-#endif
+
+int bcf_vreference_doubles(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(5, 0.5, -1.25, 6.0, -0.375, 1.0e300);
+    bcf_vkeep_reference();
+    return r;
+}
+
+int bcf_vreference_narrow(void) {
+    volatile bcf_vcapture_fn f = bcf_vcapture;
+    int r = f(5, (signed char)-3, (unsigned char)200, (short)-30000, (unsigned short)65535, (bool)true);
+    bcf_vkeep_reference();
+    return r;
+}
+
+/* bcf_vrecord with one fixed parameter, so its trailing arguments start at
+ * the second position (on Win64 the first three in rdx, r8 and r9 -- a
+ * double in xmm1-xmm3 as well -- which an MSVC callee's va_start spills to
+ * its home area and va_arg reads back from there): reads trailing argument
+ * I of the type of nibble I of KINDS (bcf_vrecord's codes) up to the first
+ * zero nibble, at most 15, keeping each for bcf_vseen_bits. Returns how many
+ * it read, or -1 for a code it does not know. */
+int bcf_vrecord1(unsigned long long kinds, ...) {
+    va_list ap;
+    va_start(ap, kinds);
+    int i = 0;
+    for (; i < 15; i++) {
+        unsigned code = (unsigned)((kinds >> (4 * i)) & 15);
+        unsigned long long bits;
+        if (code == 0) {
+            break;
+        }
+        switch (code) {
+        case 1: bits = (unsigned long long)(long long)va_arg(ap, int); break;
+        case 2: bits = va_arg(ap, unsigned int); break;
+        case 3: bits = (unsigned long long)(long long)va_arg(ap, long); break;
+        case 4: bits = va_arg(ap, unsigned long); break;
+        case 5: bits = (unsigned long long)va_arg(ap, long long); break;
+        case 6: bits = va_arg(ap, unsigned long long); break;
+        case 7: {
+            double d = va_arg(ap, double);
+            memcpy(&bits, &d, sizeof bits);
+            break;
+        }
+        case 8: bits = (unsigned long long)(uintptr_t)va_arg(ap, void *); break;
+        default:
+            va_end(ap);
+            return -1;
+        }
+        bcf_vseen[i] = bits;
+    }
+    va_end(ap);
+    return i;
+}
+
+/* A C float, which Botlish holds as the Float64 it exactly widens to
+ * (C-FLOAT-FFI-MILESTONE-1.md): passed as a trailing argument it is a
+ * double, as C's default argument promotion makes a float one. */
+float bcf_vfloat(void) { return 0.1f; }
+
+/* Byte I of DATA, for a test reading what C wrote into exposed storage (a
+ * C runtime's snprintf: c-ffi.test's cf-va-crt-snprintf), and a C string a
+ * format's %s can print. */
+unsigned char bcf_byte_at(const unsigned char *data, int i) { return data[i]; }
+const char *bcf_vword(void) { return "botlish"; }

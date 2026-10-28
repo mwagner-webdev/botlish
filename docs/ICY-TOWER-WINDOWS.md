@@ -114,6 +114,10 @@ the same on both targets but for those types, which it never names.
 
 ## 3. No variadic C call
 
+> Since WINDOWS-X86-64-MILESTONE-6.md Windows' native backend lowers
+> variadic C calls (Win64's doubles in both registers, through a stub). The
+> game keeps the design below: its error text needs no variadic call.
+
 The Linux game logged a failure with `SDL_Log("Icy Tower: CALL failed:
 %s", SDL_GetError())`, a variadic C call. Windows' native backend refuses
 every variadic call (`cVariadics`: Win64's variadic convention, a double in
@@ -397,8 +401,8 @@ runner for the sign job.
   one, and no MSVC binding of the generator's fixture: the fixture's tests
   still skip on Windows (`fixtureHostBinding`). The generator's MSVC target
   is exercised by the Windows build only.
-* **No Win64 variadic C calls**: the game avoids them; the backend still
-  refuses them.
+* **No Win64 variadic C calls**: the game avoids them; the backend
+  refused them until WINDOWS-X86-64-MILESTONE-6.md.
 * **A console window.** Botlish executables are console programs; started
   from Explorer, the game opens a console beside its window (it shows the
   run's summary at the end). No GUI-subsystem option was added.

@@ -148,10 +148,11 @@ pub struct Symbols {
     /// Per foreign function (nir::Program::foreigns, C-FFI.md): its imported
     /// symbol, declared with its C signature, and its declaration.
     pub foreigns: Vec<(ModuleFuncId, nir::ForeignDecl)>,
-    /// The `%al` stubs of the program's variadic C calls on x86-64 System V
-    /// (`va_stub`): (foreign index, vector register count) -> the stub's
-    /// local function.
-    pub va_stubs: HashMap<(u32, u32), ModuleFuncId>,
+    /// The stubs of the program's variadic C calls (`va_stub`): x86-64
+    /// System V's `%al` and Win64's floating-point arguments copied into
+    /// their positions' integer registers: (foreign index, what the stub
+    /// does) -> the stub's local function.
+    pub va_stubs: HashMap<(u32, VaStub), ModuleFuncId>,
 }
 
 /// How many machine words F's direct function returns. Ordinarily
@@ -281,6 +282,18 @@ fn c_signature<M: Module>(module: &M, decl: &nir::ForeignDecl) -> Signature {
 ///     double an F64 in the next floating-point register, then the stack's
 ///     8-byte slots), so it is one more parameter. On x86-64 the caller also
 ///     states how many vector registers it used in %al (`va_stub`).
+///   * Win64 (x86-64 Windows, WINDOWS-X86-64-MILESTONE-6.md): a trailing
+///     argument is passed exactly as a named one of its promoted class too,
+///     at the next position -- the first four in rcx, rdx, r8, r9 or
+///     xmm0-xmm3 by position, the rest in 8-byte stack slots above the
+///     32-byte shadow space, as Cranelift's windows_fastcall places every
+///     parameter -- so it is one more parameter. A call of a variadic
+///     function also has every float or double of the first four positions,
+///     fixed ones included, in the integer register of its position as well
+///     as in its own xmm register ("x64 calling convention", "Varargs"),
+///     which no signature can state: one value in two argument registers.
+///     The call's stub copies them (`va_stub`); a call with none there needs
+///     no stub.
 ///   * AppleAarch64 ("Writing ARM64 code for Apple platforms"): every
 ///     trailing argument is on the stack, in its own 8-byte slot, however
 ///     many registers are free. The integer registers x0-x7 the fixed
@@ -301,7 +314,11 @@ fn c_call_signature<M: Module>(
         return Ok((sig, vec![]));
     }
     let apple = sig.call_conv == CallConv::AppleAarch64;
-    if !apple && sig.call_conv != CallConv::SystemV {
+    // Win64 is x86-64's: Windows on AArch64 shares Cranelift's name for its
+    // C convention, not its variadic rules (every trailing argument in the
+    // integer registers), and has no lowering here.
+    let win64 = sig.call_conv == CallConv::WindowsFastcall && module.isa().name() == "x64";
+    if !apple && !win64 && sig.call_conv != CallConv::SystemV {
         return Err(BackendError::Codegen(format!(
             "variadic C call of {}: no variadic call lowering for the {} convention",
             decl.name, sig.call_conv
@@ -341,47 +358,127 @@ fn vector_registers(sig: &Signature) -> u32 {
     sig.params.iter().filter(|p| p.value_type == types::F64 || p.value_type == types::F32).count().min(8) as u32
 }
 
-/// 1 if a variadic C call needs an `%al` stub on the module's target:
-/// x86-64 System V.
-fn needs_va_stub<M: Module>(module: &M) -> bool {
-    module.isa().name() == "x64" && super::target::c_call_conv(module.isa().triple()) == CallConv::SystemV
+/// The positions among the first four of a Win64 call of signature SIG that
+/// hold a float or a double, as a mask (bit I for position I): the ones a
+/// variadic call also passes in the integer register of their position.
+fn shadow_positions(sig: &Signature) -> u8 {
+    sig.params.iter().take(4).enumerate().filter(|(_, p)| p.value_type.is_float()).fold(0, |mask, (i, _)| mask | 1 << i)
 }
 
-/// Defines the `%al` stub of variadic calls of the foreign function IMPORT
-/// using AL vector registers, as the local function ID: `mov $AL, %eax`,
-/// then a jump to the C function, which returns to the stub's caller. System
-/// V makes the caller of a variadic function state an upper bound of the
-/// vector registers it passed arguments in, in %al (0 to 8), and Cranelift
-/// has no way to give an argument or any value a fixed register at a call:
-/// the stub is the one instruction it cannot place, emitted as machine code
-/// through Cranelift's own `define_function_bytes`. It touches nothing else:
-/// every argument register and the stack (the return address, the stack
-/// arguments) are exactly as the call left them, rax is no argument
-/// register, and r11 (the JIT form's) is the convention's scratch register.
-/// In a PIC object the jump is `jmp SYMBOL@PLT` (R_X86_64_PLT32, as a C
-/// compiler's tail call is); in the JIT, which places code independently of
-/// the symbols it binds, `movabs $SYMBOL, %r11; jmp *%r11`. (The JIT never
-/// runs a C call -- a program that calls C runs linked -- but compiles one
-/// for its code: CLIF listings, sizes.)
-fn va_stub<M: Module>(module: &mut M, id: ModuleFuncId, import: ModuleFuncId, al: u32) -> Result<(), BackendError> {
-    let (bytes, offset, kind, addend) = va_stub_code(al, module.isa().flags().is_pic());
+/// What the stub of a variadic C call (`va_stub`) does before it jumps to
+/// the C function: the registers its convention gives values Cranelift
+/// cannot place at a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum VaStub {
+    /// x86-64 System V: `mov $N, %eax`, the call's vector register count
+    /// (`vector_registers`) in %al.
+    Al(u32),
+    /// Win64: for each position I of the first four whose bit is set (its
+    /// argument a float or a double, `shadow_positions`), `movq %xmmI, R`, R
+    /// the position's integer register (rcx, rdx, r8, r9): all 64 bits,
+    /// the double's own bits (a float's are the low 32, the rest of a
+    /// register holding a narrow argument the ABI's undefined bits).
+    Shadow(u8),
+}
+
+/// The integer register of each of Win64's four argument positions, and
+/// the instruction copying the position's xmm register into it (`movq
+/// %xmmI, R`: 66 REX.W 0F 7E /r, the xmm register in ModRM.reg).
+const SHADOW_COPIES: [(&str, [u8; 5]); 4] = [
+    ("rcx", [0x66, 0x48, 0x0f, 0x7e, 0xc1]),
+    ("rdx", [0x66, 0x48, 0x0f, 0x7e, 0xca]),
+    ("r8", [0x66, 0x49, 0x0f, 0x7e, 0xd0]),
+    ("r9", [0x66, 0x49, 0x0f, 0x7e, 0xd9]),
+];
+
+impl std::fmt::Display for VaStub {
+    /// What the stub sets, as a CLIF listing's legend names it: `%al=2`,
+    /// `rdx=xmm1,r9=xmm3`.
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            VaStub::Al(al) => write!(f, "%al={al}"),
+            VaStub::Shadow(mask) => {
+                let copies: Vec<String> =
+                    (0..4).filter(|i| mask & 1 << i != 0).map(|i| format!("{}=xmm{i}", SHADOW_COPIES[i].0)).collect();
+                write!(f, "{}", copies.join(","))
+            }
+        }
+    }
+}
+
+/// The stub a variadic C call of signature SIG goes through on the module's
+/// target, or None for a direct call of the C function: on x86-64 System V
+/// always (%al), on Win64 when a float or a double is among the first four
+/// arguments (none there: nothing to copy, the call is direct); never under
+/// the AArch64 conventions, whose signatures state everything.
+fn va_stub_for<M: Module>(module: &M, sig: &Signature) -> Option<VaStub> {
+    if module.isa().name() != "x64" {
+        return None;
+    }
+    match sig.call_conv {
+        CallConv::SystemV => Some(VaStub::Al(vector_registers(sig))),
+        CallConv::WindowsFastcall => Some(shadow_positions(sig)).filter(|mask| *mask != 0).map(VaStub::Shadow),
+        _ => None,
+    }
+}
+
+/// Defines the stub KIND of variadic calls of the foreign function IMPORT,
+/// as the local function ID: the register writes Cranelift cannot place,
+/// then a jump to the C function, which returns to the stub's caller.
+/// Cranelift has no way to give an argument or any value a fixed register
+/// at a call, nor one value two argument registers, so each convention's
+/// rule is the stub's machine code, emitted through Cranelift's own
+/// `define_function_bytes`:
+///
+///   * System V makes the caller of a variadic function state an upper
+///     bound of the vector registers it passed arguments in, in %al (0 to
+///     8): `mov $AL, %eax`;
+///   * Win64 makes it pass every float or double of the first four
+///     positions in the integer register of its position too: one `movq`
+///     from the position's xmm register, which the call set, per such
+///     position.
+///
+/// It touches nothing else: every other argument register and the stack
+/// (the return address, the shadow space, the stack arguments) are exactly
+/// as the call left them; rax is no argument register, a copy's integer
+/// register is the one its position leaves unused, and r11 (the JIT form's)
+/// is both conventions' scratch register. It has no frame and no unwind
+/// information (a leaf of no stack effect: Windows' unwinder finds the
+/// return address at the stack pointer, as on entry), and a `jmp`, never a
+/// `call`, so no walk of the stack ever sees it. In a PIC object the jump
+/// is `jmp SYMBOL@PLT` (R_X86_64_PLT32, as a C compiler's tail call is; in
+/// a COFF object IMAGE_REL_AMD64_REL32, as MSVC's `jmp SYMBOL`, which
+/// link.exe resolves to the function or its import thunk); in the JIT,
+/// which places code independently of the symbols it binds, `movabs
+/// $SYMBOL, %r11; jmp *%r11`. (The JIT never runs a C call -- a program
+/// that calls C runs linked -- but compiles one for its code: CLIF
+/// listings, sizes.)
+fn va_stub<M: Module>(module: &mut M, id: ModuleFuncId, import: ModuleFuncId, kind: VaStub) -> Result<(), BackendError> {
+    let (bytes, offset, reloc_kind, addend) = va_stub_code(kind, module.isa().flags().is_pic());
     let target = cranelift_module::ModuleRelocTarget::user(0, import.as_u32());
-    let reloc = cranelift_module::ModuleReloc { offset, kind, name: target, addend };
+    let reloc = cranelift_module::ModuleReloc { offset, kind: reloc_kind, name: target, addend };
     module.define_function_bytes(id, 16, &bytes, &[reloc]).map_err(module_error)
 }
 
-/// The `%al` stub's machine code for AL vector registers, and its one
-/// relocation (its offset in the code, its kind, its addend): the PIC
-/// object's form (PIC) or the JIT's (see `va_stub`).
-fn va_stub_code(al: u32, pic: bool) -> (Vec<u8>, u32, cranelift_codegen::binemit::Reloc, i64) {
-    let mut bytes = vec![0xb8];
-    bytes.extend_from_slice(&al.to_le_bytes());
+/// The machine code of stub KIND, and its one relocation (its offset in the
+/// code, its kind, its addend): the PIC object's form (PIC) or the JIT's
+/// (see `va_stub`).
+fn va_stub_code(kind: VaStub, pic: bool) -> (Vec<u8>, u32, cranelift_codegen::binemit::Reloc, i64) {
+    let mut bytes = match kind {
+        VaStub::Al(al) => {
+            let mut bytes = vec![0xb8];
+            bytes.extend_from_slice(&al.to_le_bytes());
+            bytes
+        }
+        VaStub::Shadow(mask) => (0..4).filter(|i| mask & 1 << i != 0).flat_map(|i| SHADOW_COPIES[i].1).collect(),
+    };
+    let jump = bytes.len() as u32;
     if pic {
         bytes.extend_from_slice(&[0xe9, 0, 0, 0, 0]);
-        (bytes, 6, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4)
+        (bytes, jump + 1, cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4)
     } else {
         bytes.extend_from_slice(&[0x49, 0xbb, 0, 0, 0, 0, 0, 0, 0, 0, 0x41, 0xff, 0xe3]);
-        (bytes, 7, cranelift_codegen::binemit::Reloc::Abs8, 0)
+        (bytes, jump + 2, cranelift_codegen::binemit::Reloc::Abs8, 0)
     }
 }
 
@@ -439,28 +536,29 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, 
         symbols.names.insert(id.as_u32(), format!("{} (C {})", decl.symbol, decl.name));
         symbols.foreigns.push((id, decl.clone()));
     }
-    if needs_va_stub(module) {
-        // The %al stub of each (variadic C function, vector register count)
-        // a call uses (`va_stub`), one local function each.
-        for f in &program.functions {
-            for inst in &f.body {
-                let Inst::ForeignCall { foreign, varargs, .. } = inst else { continue };
-                let (import, decl) = symbols.foreigns[*foreign as usize].clone();
-                if !decl.variadic {
-                    continue;
-                }
-                let al = vector_registers(&c_call_signature(module, &decl, varargs)?.0);
-                if symbols.va_stubs.contains_key(&(*foreign, al)) {
-                    continue;
-                }
-                let name = format!("botlish_va_{foreign}_{al}");
-                let id = module
-                    .declare_function(&name, Linkage::Local, &module.make_signature())
-                    .map_err(module_error)?;
-                va_stub(module, id, import, al)?;
-                symbols.names.insert(id.as_u32(), format!("{name} (%al={al} stub of C {})", decl.name));
-                symbols.va_stubs.insert((*foreign, al), id);
+    // The stub of each (variadic C function, what the stub does) a call
+    // uses (`va_stub_for`, `va_stub`), one local function each.
+    for f in &program.functions {
+        for inst in &f.body {
+            let Inst::ForeignCall { foreign, varargs, .. } = inst else { continue };
+            let (import, decl) = symbols.foreigns[*foreign as usize].clone();
+            if !decl.variadic {
+                continue;
             }
+            let Some(kind) = va_stub_for(module, &c_call_signature(module, &decl, varargs)?.0) else { continue };
+            if symbols.va_stubs.contains_key(&(*foreign, kind)) {
+                continue;
+            }
+            let name = match kind {
+                VaStub::Al(al) => format!("botlish_va_{foreign}_{al}"),
+                VaStub::Shadow(mask) => format!("botlish_va_{foreign}_x{mask}"),
+            };
+            let id = module
+                .declare_function(&name, Linkage::Local, &module.make_signature())
+                .map_err(module_error)?;
+            va_stub(module, id, import, kind)?;
+            symbols.names.insert(id.as_u32(), format!("{name} ({kind} stub of C {})", decl.name));
+            symbols.va_stubs.insert((*foreign, kind), id);
         }
     }
     let linkage = if export && !local { Linkage::Export } else { Linkage::Local };
@@ -1238,7 +1336,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// operands after the fixed ones, each decoded by its own class and
     /// passed as its promoted one (`vararg_value`), with this call's own
     /// signature (`c_call_signature`, its padding zeros between the two) --
-    /// on x86-64 through the `%al` stub of its vector register count.
+    /// on x86-64 through its stub (`va_stub_for`): System V's `%al` of its
+    /// vector register count, Win64's copies of the floats and doubles of
+    /// its first four positions into their integer registers (WINDOWS-X86-
+    /// 64-MILESTONE-6.md; a call with none there calls the C function).
     fn foreign_call(
         &mut self,
         foreign: u32,
@@ -1295,12 +1396,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         }
         let r = if decl.variadic {
             // This call's own signature, the callee the C function itself --
-            // or, on x86-64, its %al stub (`va_stub`).
-            let callee = match self.symbols.va_stubs.get(&(foreign, vector_registers(&signature))) {
-                Some(stub) => *stub,
-                None if needs_va_stub(&*self.module) => {
-                    return Err(BackendError::Bug(format!("no %al stub for the variadic call of {}", decl.name)));
-                }
+            // or, on x86-64, its stub (`va_stub_for`: System V's %al, Win64's
+            // copies of the first four positions' floating-point arguments).
+            let callee = match va_stub_for(&*self.module, &signature) {
+                Some(kind) => *self.symbols.va_stubs.get(&(foreign, kind)).ok_or_else(|| {
+                    BackendError::Bug(format!("no {kind} stub for the variadic call of {}", decl.name))
+                })?,
                 None => id,
             };
             let sig_ref = self.b.func.import_signature(signature);
@@ -3850,6 +3951,35 @@ mod apple_tests {
         assert_eq!(padding, expected);
     }
 
+    /// Windows on AArch64 shares windows_fastcall's name with Win64, not its
+    /// variadic rules (WINDOWS-X86-64-MILESTONE-6.md lowers Win64's only): a
+    /// variadic call compiled for it is a codegen error naming the
+    /// convention, never Win64's lowering on another instruction set.
+    #[test]
+    fn ffi_windows_aarch64_variadic_refused() {
+        let module = cranelift_object::ObjectModule::new(
+            cranelift_object::ObjectBuilder::new(
+                cranelift_codegen::isa::lookup(target_lexicon::Triple::from_str("aarch64-pc-windows-msvc").unwrap())
+                    .unwrap()
+                    .finish(settings::Flags::new(settings::builder()))
+                    .unwrap(),
+                "probe",
+                cranelift_module::default_libcall_names(),
+            )
+            .unwrap(),
+        );
+        let decl = nir::ForeignDecl {
+            symbol: "f".into(),
+            name: "f".into(),
+            params: vec![nir::CAbi::I32],
+            result: nir::CAbi::I32,
+            alias: None,
+            variadic: true,
+        };
+        let error = c_call_signature(&module, &decl, &[DOUBLE]).unwrap_err();
+        assert!(matches!(&error, BackendError::Codegen(m) if m.contains("windows_fastcall")), "{error:?}");
+    }
+
     /// AAPCS64 (Linux AArch64) passes trailing arguments as named ones: the
     /// int in w1, the double in d0, the long in x2 -- nothing on the stack --
     /// never Apple's stack-only rule.
@@ -3914,7 +4044,7 @@ mod x86_64_variadic_tests {
         assert_eq!(vector_registers(&sig), 8);
         let (sig, _) = c_call_signature(&module, &decl, &[]).unwrap();
         assert_eq!(vector_registers(&sig), 1);
-        assert!(needs_va_stub(&module));
+        assert_eq!(va_stub_for(&module, &sig), Some(VaStub::Al(1)));
     }
 
     /// A fixed C float is passed in a vector register too, and %al counts
@@ -3947,7 +4077,7 @@ mod x86_64_variadic_tests {
         let mut module = module();
         let import = module.declare_function("callee", Linkage::Import, &module.make_signature()).unwrap();
         let stub = module.declare_function("stub", Linkage::Export, &module.make_signature()).unwrap();
-        va_stub(&mut module, stub, import, 3).unwrap();
+        va_stub(&mut module, stub, import, VaStub::Al(3)).unwrap();
         let bytes = module.finish().emit().unwrap();
         let needle = [0xb8, 3, 0, 0, 0, 0xe9];
         assert!(bytes.windows(needle.len()).any(|w| w == needle), "no `mov $3, %eax; jmp` in the object");
@@ -3960,16 +4090,309 @@ mod x86_64_variadic_tests {
     /// *%r11), absolute.
     #[test]
     fn ffi_sysv_variadic_stub_relocations() {
-        let (pic, offset, kind, addend) = va_stub_code(5, true);
+        let (pic, offset, kind, addend) = va_stub_code(VaStub::Al(5), true);
         assert_eq!(&pic[..5], &[0xb8, 5, 0, 0, 0]);
         assert_eq!(pic[offset as usize - 1], 0xe9);
         assert_eq!(offset as usize + 4, pic.len());
         assert_eq!((kind, addend), (cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4));
-        let (jit, offset, kind, addend) = va_stub_code(5, false);
+        let (jit, offset, kind, addend) = va_stub_code(VaStub::Al(5), false);
         assert_eq!(&jit[..5], &[0xb8, 5, 0, 0, 0]);
         assert_eq!(&jit[offset as usize - 2..offset as usize], &[0x49, 0xbb]);
         assert_eq!(&jit[offset as usize + 8..], &[0x41, 0xff, 0xe3]);
         assert_eq!((kind, addend), (cranelift_codegen::binemit::Reloc::Abs8, 0));
+    }
+}
+
+/// The variadic call lowering of Win64 (WINDOWS-X86-64-MILESTONE-6.md), on
+/// an x86-64 host, whose Cranelift has the x64 backend: the per-call
+/// signature, which calls need a stub, the stub's bytes and, executed on
+/// any x86-64 host, the machine state a call through it arrives in.
+#[cfg(all(test, target_arch = "x86_64"))]
+mod win64_variadic_tests {
+    use super::*;
+    use cranelift_codegen::settings::{self, Configurable};
+    use std::str::FromStr;
+
+    const WIN64: &str = "x86_64-pc-windows-msvc";
+
+    fn isa(pic: bool) -> cranelift_codegen::isa::OwnedTargetIsa {
+        let mut flags = settings::builder();
+        flags.set("opt_level", "speed").unwrap();
+        flags.set("is_pic", if pic { "true" } else { "false" }).unwrap();
+        cranelift_codegen::isa::lookup(target_lexicon::Triple::from_str(WIN64).unwrap())
+            .unwrap()
+            .finish(settings::Flags::new(flags))
+            .unwrap()
+    }
+
+    fn module() -> cranelift_object::ObjectModule {
+        cranelift_object::ObjectModule::new(
+            cranelift_object::ObjectBuilder::new(isa(true), "probe", cranelift_module::default_libcall_names()).unwrap(),
+        )
+    }
+
+    fn decl(params: &[nir::CAbi]) -> nir::ForeignDecl {
+        nir::ForeignDecl {
+            symbol: "f".into(),
+            name: "f".into(),
+            params: params.to_vec(),
+            result: nir::CAbi::I32,
+            alias: None,
+            variadic: true,
+        }
+    }
+
+    const INT: nir::VarArg = nir::VarArg { class: nir::CAbi::I32, promoted: nir::CAbi::I32 };
+    const UCHAR: nir::VarArg = nir::VarArg { class: nir::CAbi::U8, promoted: nir::CAbi::I32 };
+    const LONGLONG: nir::VarArg = nir::VarArg { class: nir::CAbi::I64, promoted: nir::CAbi::I64 };
+    const DOUBLE: nir::VarArg = nir::VarArg { class: nir::CAbi::F64, promoted: nir::CAbi::F64 };
+
+    /// A trailing argument is one more parameter of its promoted type at the
+    /// next position (an `unsigned char` an I32, a double an F64), no
+    /// padding, the signature windows_fastcall.
+    #[test]
+    fn ffi_win64_variadic_signature() {
+        let module = module();
+        let (sig, padding) = c_call_signature(&module, &decl(&[nir::CAbi::F64, nir::CAbi::I32]), &[UCHAR, DOUBLE, LONGLONG]).unwrap();
+        assert!(padding.is_empty());
+        assert_eq!(sig.call_conv, CallConv::WindowsFastcall);
+        let types: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
+        assert_eq!(types, vec![types::F64, types::I32, types::I32, types::F64, I64]);
+    }
+
+    /// A call needs the stub exactly when a float or a double is among its
+    /// first four arguments, fixed or trailing, and copies those positions
+    /// only: none for an integer-only call or doubles past the fourth
+    /// position, the fixed double at position 0, the trailing ones at 1 and
+    /// 3; a fixed C float counts as a double does.
+    #[test]
+    fn ffi_win64_variadic_stub_positions() {
+        let module = module();
+        let stub = |params: &[nir::CAbi], varargs: &[nir::VarArg]| {
+            va_stub_for(&module, &c_call_signature(&module, &decl(params), varargs).unwrap().0)
+        };
+        let int = [nir::CAbi::I32];
+        assert_eq!(stub(&int, &[]), None);
+        assert_eq!(stub(&int, &[INT, LONGLONG, UCHAR, INT, INT]), None);
+        assert_eq!(stub(&int, &[INT, INT, INT, DOUBLE, DOUBLE]), None);
+        assert_eq!(stub(&[nir::CAbi::F64, nir::CAbi::I32], &[]), Some(VaStub::Shadow(0b0001)));
+        assert_eq!(stub(&int, &[DOUBLE, INT, DOUBLE, DOUBLE]), Some(VaStub::Shadow(0b1010)));
+        assert_eq!(stub(&[nir::CAbi::F64], &[DOUBLE, DOUBLE, DOUBLE, DOUBLE]), Some(VaStub::Shadow(0b1111)));
+        assert_eq!(stub(&[nir::CAbi::Ptr, nir::CAbi::F32, nir::CAbi::F32, nir::CAbi::Ptr], &[INT]), Some(VaStub::Shadow(0b0110)));
+        assert_eq!(VaStub::Shadow(0b1010).to_string(), "rdx=xmm1,r9=xmm3");
+        assert_eq!(VaStub::Al(3).to_string(), "%al=3");
+    }
+
+    /// A fixed-arity call is the declaration's own C signature, whatever its
+    /// floats: no stub, no copy (`c_call_signature` of a non-variadic
+    /// declaration).
+    #[test]
+    fn ffi_win64_fixed_calls_unchanged() {
+        let module = module();
+        let mut fixed = decl(&[nir::CAbi::F64, nir::CAbi::I32, nir::CAbi::F64]);
+        fixed.variadic = false;
+        let (sig, padding) = c_call_signature(&module, &fixed, &[]).unwrap();
+        assert!(padding.is_empty());
+        assert_eq!(sig, c_signature(&module, &fixed));
+    }
+
+    /// The stub is one `movq %xmmI, R` per copied position, in position
+    /// order, then the jump: in a PIC object `jmp rel32` to the C function
+    /// (REL32 in COFF), in the JIT `movabs $SYMBOL, %r11; jmp *%r11`.
+    #[test]
+    fn ffi_win64_variadic_stub_bytes() {
+        let movq = |i: usize| SHADOW_COPIES[i].1.to_vec();
+        let (pic, offset, kind, addend) = va_stub_code(VaStub::Shadow(0b1111), true);
+        assert_eq!(&pic[..20], &[movq(0), movq(1), movq(2), movq(3)].concat()[..]);
+        assert_eq!(&pic[..5], &[0x66, 0x48, 0x0f, 0x7e, 0xc1]);
+        assert_eq!(pic[offset as usize - 1], 0xe9);
+        assert_eq!(offset as usize + 4, pic.len());
+        assert_eq!((kind, addend), (cranelift_codegen::binemit::Reloc::X86CallPLTRel4, -4));
+        let (pic, offset, _, _) = va_stub_code(VaStub::Shadow(0b0100), true);
+        assert_eq!(&pic[..6], &[0x66, 0x49, 0x0f, 0x7e, 0xd0, 0xe9]);
+        assert_eq!(offset, 6);
+        let (jit, offset, kind, addend) = va_stub_code(VaStub::Shadow(0b1010), false);
+        assert_eq!(&jit[..10], &[movq(1), movq(3)].concat()[..]);
+        assert_eq!(&jit[offset as usize - 2..offset as usize], &[0x49, 0xbb]);
+        assert_eq!(&jit[offset as usize + 8..], &[0x41, 0xff, 0xe3]);
+        assert_eq!((kind, addend), (cranelift_codegen::binemit::Reloc::Abs8, 0));
+        // In a COFF object the jump's relocation is IMAGE_REL_AMD64_REL32
+        // against the C function's own symbol, as MSVC's `jmp callee`.
+        let mut module = module();
+        let import = module.declare_function("callee", Linkage::Import, &module.make_signature()).unwrap();
+        let stub = module.declare_function("stub", Linkage::Export, &module.make_signature()).unwrap();
+        va_stub(&mut module, stub, import, VaStub::Shadow(0b0001)).unwrap();
+        let product = module.finish();
+        use cranelift_object::object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
+        let bytes = product.emit().unwrap();
+        let file = cranelift_object::object::File::parse(&*bytes).unwrap();
+        let text = file.section_by_name(".text").unwrap();
+        let relocations: Vec<_> = text.relocations().collect();
+        assert_eq!(relocations.len(), 1);
+        let (at, relocation) = &relocations[0];
+        assert_eq!(*at, 6);
+        assert_eq!(relocation.flags(), cranelift_object::object::RelocationFlags::Coff { typ: cranelift_object::object::pe::IMAGE_REL_AMD64_REL32 });
+        let RelocationTarget::Symbol(symbol) = relocation.target() else { panic!("{relocation:?}") };
+        assert_eq!(file.symbol_by_index(symbol).unwrap().name().unwrap(), "callee");
+    }
+
+    /// What `capture` saw at its entry: rcx, rdx, r8, r9, the low 64 bits of
+    /// xmm0-xmm3, then the four stack words past the caller's shadow space
+    /// (the fifth to eighth arguments).
+    static mut CAPTURED: [u64; 12] = [0; 12];
+
+    /// Records the machine state a Win64 call arrives in before any compiled
+    /// code runs, and returns 0.
+    #[unsafe(naked)]
+    unsafe extern "win64" fn capture() -> i32 {
+        core::arch::naked_asm!(
+            "mov qword ptr [rip + {c}], rcx",
+            "mov qword ptr [rip + {c} + 8], rdx",
+            "mov qword ptr [rip + {c} + 16], r8",
+            "mov qword ptr [rip + {c} + 24], r9",
+            "movsd qword ptr [rip + {c} + 32], xmm0",
+            "movsd qword ptr [rip + {c} + 40], xmm1",
+            "movsd qword ptr [rip + {c} + 48], xmm2",
+            "movsd qword ptr [rip + {c} + 56], xmm3",
+            "mov rax, qword ptr [rsp + 40]",
+            "mov qword ptr [rip + {c} + 64], rax",
+            "mov rax, qword ptr [rsp + 48]",
+            "mov qword ptr [rip + {c} + 72], rax",
+            "mov rax, qword ptr [rsp + 56]",
+            "mov qword ptr [rip + {c} + 80], rax",
+            "mov rax, qword ptr [rsp + 64]",
+            "mov qword ptr [rip + {c} + 88], rax",
+            "xor eax, eax",
+            "ret",
+            c = sym CAPTURED,
+        );
+    }
+
+    /// Calls `capture` as the variadic C function of fixed parameters FIXED
+    /// with the trailing arguments VARARGS, through the per-call signature
+    /// and the stub the lowering chooses, from Win64 code the JIT compiled
+    /// (on any x86-64 host: the convention is the code's, not the host's).
+    /// Argument i's value is WORDS[i], loaded from memory, never a constant
+    /// a register could hold by accident. Returns what `capture` saw.
+    fn run(fixed: &[nir::CAbi], varargs: &[nir::VarArg], words: &[u64]) -> [u64; 12] {
+        use cranelift_jit::{JITBuilder, JITModule};
+        let mut builder = JITBuilder::with_isa(isa(false), cranelift_module::default_libcall_names());
+        builder.symbol("f", capture as *const u8);
+        let mut module = JITModule::new(builder);
+        let decl = decl(fixed);
+        let (signature, padding) = c_call_signature(&module, &decl, varargs).unwrap();
+        assert!(padding.is_empty());
+        let import = module.declare_function("f", Linkage::Import, &c_signature(&module, &decl)).unwrap();
+        let callee = match va_stub_for(&module, &signature) {
+            Some(kind) => {
+                let stub = module.declare_function("stub", Linkage::Local, &module.make_signature()).unwrap();
+                va_stub(&mut module, stub, import, kind).unwrap();
+                stub
+            }
+            None => import,
+        };
+        let mut sig = module.make_signature();
+        sig.params.push(AbiParam::new(I64));
+        sig.returns.push(AbiParam::new(I64));
+        let caller = module.declare_function("caller", Linkage::Local, &sig).unwrap();
+        let mut func = ir::Function::with_name_signature(ir::UserFuncName::user(0, caller.as_u32()), sig);
+        let mut context = FunctionBuilderContext::new();
+        let mut b = FunctionBuilder::new(&mut func, &mut context);
+        let block = b.create_block();
+        b.append_block_params_for_function_params(block);
+        b.switch_to_block(block);
+        let base = b.block_params(block)[0];
+        let types: Vec<ir::Type> = signature.params.iter().map(|p| p.value_type).collect();
+        let args: Vec<ir::Value> =
+            types.iter().enumerate().map(|(i, t)| b.ins().load(*t, MemFlagsData::trusted(), base, 8 * i as i32)).collect();
+        let sig_ref = b.func.import_signature(signature);
+        let name = b.func.declare_imported_user_function(ir::UserExternalName { namespace: 0, index: callee.as_u32() });
+        let f = b.func.import_function(ir::ExtFuncData {
+            name: ir::ExternalName::user(name),
+            signature: sig_ref,
+            colocated: false,
+            patchable: false,
+        });
+        let call = b.ins().call(f, &args);
+        let result = b.inst_results(call)[0];
+        let result = b.ins().sextend(I64, result);
+        b.ins().return_(&[result]);
+        b.seal_all_blocks();
+        b.finalize(module.isa().frontend_config());
+        let mut ctx = cranelift_codegen::Context::for_function(func);
+        module.define_function(caller, &mut ctx).unwrap();
+        module.finalize_definitions().unwrap();
+        let entry: unsafe extern "win64" fn(*const u64) -> i64 = unsafe { std::mem::transmute(module.get_finalized_function(caller)) };
+        unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
+        assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
+        let captured = unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() };
+        unsafe { module.free_memory() };
+        captured
+    }
+
+    /// The Win64 model ("x64 calling convention", independent of the
+    /// lowering): argument i < 4 of TYPES (`d` a double, else an integer of
+    /// the 32 or 64 bits `i`/`l` says) is in position i's register -- a
+    /// double in xmm i *and*, the call being variadic, in the integer
+    /// register of its position, as its own 64 bits -- argument i >= 4 in
+    /// the stack slot 8 * (i - 4) past the shadow space. The mismatches of
+    /// CAPTURED with it.
+    fn mismatches(types: &str, words: &[u64], captured: &[u64; 12]) -> Vec<String> {
+        let mut out = vec![];
+        for (i, (t, w)) in types.chars().zip(words).enumerate() {
+            let mask = if t == 'i' { 0xffff_ffff } else { u64::MAX };
+            let mut check = |what: &str, got: u64| {
+                if got & mask != w & mask {
+                    out.push(format!("argument {i} ({t}) in {what}: {got:#x}, not {w:#x}"));
+                }
+            };
+            if i < 4 {
+                check(SHADOW_COPIES[i].0, captured[i]);
+                if t == 'd' {
+                    check(&format!("xmm{i}"), captured[4 + i]);
+                }
+            } else {
+                check(&format!("stack slot {}", 8 * (i - 4)), captured[8 + i - 4]);
+            }
+        }
+        out
+    }
+
+    const D: [f64; 8] = [0.5, -1.25, 6.0, -0.375, 2.5, 1.0e300, -7.75, 3.0e-300];
+
+    fn bits(d: f64) -> u64 {
+        d.to_bits()
+    }
+
+    /// Executed: every double of the first four positions arrives in its xmm
+    /// register and, as the same 64 bits, in its integer register -- a
+    /// trailing one at positions 1 and 3 among integers, a fixed one at
+    /// position 0, four in a row -- while integers keep their registers and
+    /// arguments past the fourth position their stack slots, doubles and
+    /// integers alike.
+    #[test]
+    fn ffi_win64_variadic_doubles_in_both_registers() {
+        // int f(int, ...): 7, 0.5, -9000000000LL, -1.25, 6.0, 42, -0.375.
+        let words = [7, bits(D[0]), (-9_000_000_000i64) as u64, bits(D[1]), bits(D[2]), 42, bits(D[3])];
+        let captured = run(&[nir::CAbi::I32], &[DOUBLE, LONGLONG, DOUBLE, DOUBLE, INT, DOUBLE], &words);
+        assert_eq!(mismatches("idlddid", &words, &captured), Vec::<String>::new());
+        // int f(double, int, ...): 2.5, 3, 1e300, -6, -7.75.
+        let words = [bits(D[4]), 3, bits(D[5]), (-6i64) as u64, bits(D[6])];
+        let captured = run(&[nir::CAbi::F64, nir::CAbi::I32], &[DOUBLE, INT, DOUBLE], &words);
+        assert_eq!(mismatches("didid", &words, &captured), Vec::<String>::new());
+        // int f(double, ...): four doubles, then three past the registers.
+        let words: Vec<u64> = D[..7].iter().map(|d| bits(*d)).collect();
+        let captured = run(&[nir::CAbi::F64], &[DOUBLE; 6], &words);
+        assert_eq!(mismatches("ddddddd", &words, &captured), Vec::<String>::new());
+    }
+
+    /// Executed: an integer-only variadic call needs no stub and arrives as
+    /// the model says, nothing copied.
+    #[test]
+    fn ffi_win64_variadic_integers_direct() {
+        let words = [3, (-5i64) as u64, 0x1234_5678_9abc_def0, 255, 8, (-9i64) as u64];
+        let captured = run(&[nir::CAbi::I32], &[INT, LONGLONG, UCHAR, INT, INT], &words);
+        assert_eq!(mismatches("iiliii", &words, &captured), Vec::<String>::new());
     }
 }
 
