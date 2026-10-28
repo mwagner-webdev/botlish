@@ -497,12 +497,16 @@ the interchange carries.
 reported 1128 calls with 0 disagreements. `... 200 1 -contexts 1` reported
 1202 calls, 18 of them rejected by an obligation, with 0 disagreements.
 
+**Static decisions, batched against sequential** (CI, never locally:
+AGENTS.md). The `static-decisions` workflow was dispatched on this branch
+at `a55941eb` (run 40742067582). It ran
+`audit/static-decisions/tools/compare.tcl` over every golden suite, as
+mutable-array.bot's job and four shards. All six jobs succeeded: no suite
+reported DISAGREE or DOES NOT COMPILE.
+
 **Not run here.** These need hosts or schedules this environment does not
 have:
 
-* the static-decisions sequential comparison
-  (`audit/static-decisions/tools/compare.tcl`), which AGENTS.md reserves for
-  CI;
 * macOS and Windows, and Linux AArch64;
 * GC stress: the change emits no native code and changes no runtime.
 
