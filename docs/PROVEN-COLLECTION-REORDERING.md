@@ -59,7 +59,7 @@ The evidence:
 * The extended collection oracle and stateful fuzzer, with reorders on by
   default.
 * A relational-proof fuzzer with an independent model of the rules.
-* 45 mutants of reorder semantics, proof soundness and value semantics.
+* 46 mutants of reorder semantics, proof soundness and value semantics.
 * A benchmark at 16 to 262144 keys.
 * The regression and GC-stress runs listed under Regression and CI.
 
@@ -78,8 +78,8 @@ properties. A reorder changes only the order.
 What a reorder does not change:
 
 * **Default behaviour.** It is an explicit operation and changes none of
-  the existing rules (`cr-later-operations`, golden
-  `cr-later-operations-*`):
+  the existing rules (`cr-later-operations`, and its golden port of the
+  same name):
   - A new key is appended after the current last entry.
   - Setting an existing key keeps its place, which is its new place after
     a reorder.
@@ -305,8 +305,8 @@ Facts track value versions, never variable names:
   a capture and a helper's result are unrelated
   (`cr-proof-type-is-not-enough`, `cr-proof-function-boundary`).
 * Overlapping places are invalidated together. Changing `b` kills `b.m`
-  and `b.o`, and changing `b.m` kills `b` as a whole value
-  (`hir::relations::Overlap`: one place's path is a prefix of the
+  and `b.o`. Changing `b.m` kills `b` read as a whole value, but not
+  `b.o` (`hir::relations::Overlap`: one place's path is a prefix of the
   other's).
 * The runtime side of aliasing is the collections' ordinary value
   semantics:
@@ -645,12 +645,12 @@ failing tests.
 | semantics | `reorder-values-misaligned` | a map's values follow the permutation shifted by one position: values paired with other keys | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
 | semantics | `reorder-drops-key` | the permutation skips its first entry (keys and values alike): a key is dropped | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
 | semantics | `reorder-duplicates-key` | each odd rank takes the entry of the rank before it (keys and values alike): keys are duplicated, others lost | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
-| semantics | `reorder-keeps-old-position` | the entry at old position 0 stays first whatever the order says | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-full-hash-collisions` |
+| semantics | `reorder-keeps-old-position` | the entry at old position 0 stays first whatever the order says | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-full-hash-collisions`, ... |
 | semantics | `reorder-reverses-order` | the arrangement installs the order reversed | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
 | semantics | `reorder-bucket-order` | the arrangement walks the collection's index slots (the hidden hash's placement) instead of the order | collection-reorder.test: `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, `cr-current-order`, ... |
 | semantics | `reorder-rehashes` | the permutation computes every entry's keyed hash again instead of moving its stored hash | collection-reorder.test: `cr-no-rehash` |
 | semantics | `reorder-index-stale` | the permutation moves the entries but keeps the old index (positions in the slots are stale) | collection-reorder.test: `cr-copy-then-reorder-then-mutate`, `cr-later-operations`, `cr-map-reorder`, ... |
-| semantics | `reorder-shrinks-index` | the permutation sizes the index for the live entries instead of keeping its slot count (a reservation is lost) | ordered-table.test: `ot-reorder-invariants-hidden-keys`, `ot-reorder-invariants-map-int`, `ot-reorder-invariants` |
+| semantics | `reorder-shrinks-index` | the permutation sizes the index for the live entries instead of keeping its slot count (a reservation is lost) | ordered-table.test: `ot-reorder-invariants-hidden-keys`, `ot-reorder-invariants-map-int`, `ot-reorder-invariants-map-str`, ... |
 | semantics | `reorder-length-changes` | the permutation sets the live count one too high | collection-reorder.test: `cr-full-hash-collisions`, `cr-hidden-key-independent`, `cr-map-reorder`, ... |
 | semantics | `reorder-revives-dead-entry` | an entry is located by a scan from the first position that ignores liveness, and a dead entry found so is moved as live: a key removed and set again comes back with its old value | collection-reorder.test: `cr-current-order`, `cr-map-values-aligned` |
 | semantics | `reorder-incomplete` | the arrangement is not completed: a reorder run despite its REORDER-NOT-PROVEN (a lenient build) drops the entries the order does not name | collection-reorder.test: `cr-unproven-run-keeps-content` |
@@ -666,15 +666,15 @@ failing tests.
 | proof | `order-remove-preserves-members` | a set's remove (the order's) is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
 | proof | `order-clear-preserves-members` | a set's clear (the order's) is taken for an order-only operation | collection-reorder.test: `cr-proof-membership-changes` |
 | proof | `reorder-loses-relation` | a map's reorder is taken for a membership change: the relation is lost after it | collection-reorder.test: `cr-proof-copies`, `cr-proof-order-only-and-reads-preserve` |
-| proof | `reads-lose-relation` | every argument of a call is taken as changed, reads included | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
-| proof | `any-order-admitted` | the requirement is met by any order of the right type (the static type taken for the relation) | collection-reorder.test: `cr-proof-copies`, `cr-proof-equal-length-is-not-equal-members`, `cr-proof-function-bou` |
+| proof | `reads-lose-relation` | every argument of a call is taken as changed, reads included | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, ... |
+| proof | `any-order-admitted` | the requirement is met by any order of the right type (the static type taken for the relation) | collection-reorder.test: `cr-proof-copies`, `cr-proof-equal-length-is-not-equal-members`, `cr-proof-function-boundary`, ... |
 | proof | `unchanged-values-related` | two values nothing has changed (parameters, unrelated locals) are taken as related | collection-reorder.test: `cr-proof-function-boundary`, `cr-proof-joins`, `cr-proof-loops`, ... |
-| proof | `copies-lose-relation` | a binding never takes its value's members (the relation tied to the variable that was minted, not to the value: a copy carries nothing) | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| proof | `copies-lose-relation` | a binding never takes its value's members (the relation tied to the variable that was minted, not to the value: a copy carries nothing) | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, ... |
 | proof | `places-conflated` | a place's members token ignores its root binding: two independent maps (or an order taken from one) are related | collection-reorder.test: `cr-proof-function-boundary`, `cr-proof-joins`, `cr-proof-type-is-not-enough` |
 | proof | `join-first-path-wins` | a join keeps the first completing path's values and state: a relation true on one branch only survives the join | collection-reorder.test: `cr-proof-joins` |
 | proof | `join-pairs-one-sided` | a join relates what agreed on the first path only (its tokens keyed by one side): a relation true on one branch survives when the other branch relates the order elsewhere | collection-reorder.test: `cr-proof-joins` |
 | proof | `validator-mints-on-failure` | a handled validation's value is the validator's whatever its handler gives (the relation minted on the failure path too) | collection-reorder.test: `cr-proof-joins` |
-| proof | `validator-relates-candidate` | validate_order's result is related to its candidate argument instead of the collection | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate` |
+| proof | `validator-relates-candidate` | validate_order's result is related to its candidate argument instead of the collection | collection-reorder.test: `cr-allocations-constant`, `cr-copies-independent`, `cr-copy-then-reorder-then-mutate`, ... |
 | proof | `copy-change-kills-original` | a membership change of one place changes every place (a copy's change loses the unrelated original's relation) | collection-reorder.test: `cr-proof-copies`, `cr-proof-joins` |
 | proof | `loop-entry-optimistic` | a loop's body is entered with the state before the loop: a change later in the body (an earlier iteration's) is ignored | collection-reorder.test: `cr-proof-loops` |
 | proof | `loop-exit-optimistic` | the state after a loop is the state before it: the body's changes are ignored | collection-reorder.test: `cr-proof-loops` |
@@ -713,9 +713,8 @@ explains each:
 * **A handler entered without the handled call's changes.** The handled
   call's own completion carries those changes into every join.
 
-The existing harnesses still kill their mutants. Three of
-`audit/mutable-map/tools/mutants.txt`'s mutants were retargeted to the new
-text, each keeping its rule:
+Three of `audit/mutable-map/tools/mutants.txt`'s mutants were retargeted
+to the new text, each keeping its rule:
 
 * `compaction-stale-index` now mutates `rebuild`'s call of the extracted
   `reindex`.
@@ -775,7 +774,7 @@ The cost is O(n), with no O(n²) path:
   - for a map, the value's move (a set reorder is 10% cheaper).
 
   A reorder costs about one insertion into a presized map per entry
-  (1,480 to 1,520 instructions in the hot-path runs below).
+  (1,477 to 1,502 instructions in the hot-path runs below).
 * **An invalid candidate costs as much as a valid one.** The check counts
   every member before it fails. The difference at 16 entries is the error
   raised and the empty set the handler builds.
@@ -864,7 +863,6 @@ of each kind, and are exact:
   4-core container. Differences of 20% between neighbouring cells are
   noise; the instruction counts above are the exact comparison.
 
-
 **The existing operations did not regress.** `bench/mutable-map.tcl
 -instructions 1` was run twice with the same compiler, once against this
 standard library and once against the base revision's (`-stdlib`, the
@@ -892,7 +890,6 @@ compared function by function:
 
 The relation is compile-time knowledge: no proven or unproven program's
 NIR holds any trace of it.
-
 
 ## Regression and CI
 
@@ -935,7 +932,6 @@ oversights of this change, not regressions of existing behaviour:
 * **The rest is CI's on the push to main:** the whole Tcl suite with the
   golden duplicates, its cranelift coverage, `check.tcl`'s golden shards,
   the GC-stress run and the arm64 workflow.
-
 
 ## Future representation-independent equality/hash
 
@@ -998,10 +994,11 @@ no freeze or thaw.
 * **Validation hashes nothing, but building a candidate does.** A
   MutableSet built by `add` hashes each element once. `validate_order`
   itself probes with the candidate's stored hashes.
-* **A reorder of a map by its own `order()` copies the table's vectors.**
-  The order shares the map's table, so the reorder's first write detaches
-  every vector it rewrites. This is the copy-on-write rule at work, and it
-  is counted in Performance (`reorder-shared`).
+* **A reorder by a map's own `order()` allocates more than a reorder by a
+  separate order.** The order shares the map's table, so the reorder gives
+  every vector it rewrites a backing of its own: 13 managed objects
+  instead of 5. No element is copied (0 detaches), and the time per entry
+  is about the same (Performance, `reorder-shared`, `reorder-dead`).
 * **The O(slots) index refill**, above.
 
 ## What to run
@@ -1029,5 +1026,7 @@ tclsh9.0 bench/collection-reorder.tcl                        # the performance r
 A change to the diagnostic also needs:
 
 * `tests/static-compile.test`, which holds the census of diagnostic kinds;
+* `tests/golden-framework.test`, which counts the `DiagnosticCode` cases
+  that `std::test::code_name` spells;
 * `tests/diagnostic-recovery.test`;
 * `tclsh9.0 tools/compilerpedia.tcl check`.
