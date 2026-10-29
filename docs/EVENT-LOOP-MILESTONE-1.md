@@ -911,6 +911,18 @@ stale-edge test in `traits.tsv`; KEEP-MULTI-PROGRAM for the application-root
 scenarios and native programs, KEEP-INTERNAL for the audits, the allocation
 and feedback checks) and manifest rows (all ACTIVE-TCL-INTERNAL: nothing is
 skipped).
+
+**CI on this branch.** `tests.yml` (dispatched: the whole Tcl suite on interp
+and compile with its cranelift and cranelift-generic coverage, the golden
+shards, the native Rust tests, the stub- and system-linked executables, the
+warning gate, the method-call audit) and `tests-arm64.yml` (Linux arm64)
+passed on `c4cbe3ba`; the macOS (smoke, acceptance tier, system linker,
+Botlish.app), Windows (smoke, root plans, acceptance tier, system linker) and
+Windows Icy Tower workflows passed on `241d67de`, the layout fix above. The
+commits after `c4cbe3ba` change tests, their census and documents only;
+both event-loop test files passed locally on both passes after them. The
+GC-stress job and the static-decisions comparison run on pushes to main
+and did not run here.
 `audit/stdlib-census/after.tsv` is regenerated for the new public surface
 (85 `api` and 229 `private` rows of `std::event_loop`; the regeneration also
 picks up earlier line drift in `core/cabi.tcl` and `stdlib/ordered_table.bot`).
